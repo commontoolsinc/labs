@@ -121,6 +121,30 @@ describe("schema-hash", () => {
           expect(result).toBe(schema);
         });
 
+        it("preserves identity for an already-canonical schema holding NaN", () => {
+          // `NaN` never `===`-equals itself, so an identity-change check
+          // spelled `!==` spuriously reports the untouched leaf as changed
+          // and clones (and re-registers) the whole schema.
+          const schema = toDeepFrozenSchema({
+            default: NaN,
+            title: `schemaHashTestAt${Date.now()}-${Math.random()}`,
+            type: "number",
+          }) as JSONSchemaObj;
+          const result = callIntern(schema);
+          expect(result).toBe(schema);
+        });
+
+        it("preserves identity for an already-canonical schema holding NaN in an array", () => {
+          // As above, via the array (`examples`) canonicalization branch.
+          const schema = toDeepFrozenSchema({
+            examples: [NaN],
+            title: `schemaHashTestAt${Date.now()}-${Math.random()}`,
+            type: "number",
+          }) as JSONSchemaObj;
+          const result = callIntern(schema);
+          expect(result).toBe(schema);
+        });
+
         it("uses a never-before-encountered, already-canonical mutable schema by reference", () => {
           // As above: content-unique, with keys already in canonical order, so
           // it is frozen in place and returned by reference.
