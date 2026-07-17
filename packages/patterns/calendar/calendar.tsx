@@ -56,7 +56,9 @@ export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
   const todayDate = getTodayDate();
 
   const newTitle = new Writable("");
-  const newDate = new Writable(todayDate);
+  // CT-1880: initials are static schema defaults; today's date is written.
+  const newDate = new Writable("");
+  newDate.set(todayDate);
   const newTime = new Writable("");
 
   const eventCount = computed(() => events.get()?.length ?? 0);

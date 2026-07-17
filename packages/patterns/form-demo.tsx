@@ -40,11 +40,11 @@ export interface FormDemoOutput {
   people: Person[];
 }
 
-const createEmptyPerson = (): Person => ({
+const EMPTY_PERSON: Person = {
   name: "",
   email: "",
   role: "user",
-});
+};
 
 // Form submit handler - must be at module scope
 // cf-form flushes buffered values to bound cells before emitting cf-submit,
@@ -203,7 +203,7 @@ const deletePerson = handler<
 
 export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
   const editing = new Writable<{ editing: Person | null }>({ editing: null });
-  const formData = new Writable<Person>(createEmptyPerson());
+  const formData = new Writable<Person>(EMPTY_PERSON);
   const modalOpen = new Writable(false);
 
   // Computed values
@@ -215,7 +215,7 @@ export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
 
   // Open modal in create mode
   const startCreate = action(() => {
-    formData.set(createEmptyPerson());
+    formData.set(EMPTY_PERSON);
     editing.set({ editing: null });
     modalOpen.set(true);
   });

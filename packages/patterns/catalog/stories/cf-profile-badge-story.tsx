@@ -29,13 +29,18 @@ const makeProfile = (
   display: string,
   avatar: string,
   extra: { bio?: string; elements?: Array<{ title: string }> } = {},
-) =>
-  new Writable<ProfileValue>({
+) => {
+  // CT-1880: cell initials are schema defaults and must be compile-time
+  // static; the runtime profile value is written explicitly.
+  const profile = new Writable<ProfileValue>();
+  profile.set({
     [NAME]: display,
     name: display,
     avatar,
     ...extra,
   });
+  return profile;
+};
 
 const sizeItems = [
   { label: "xs", value: "xs" },

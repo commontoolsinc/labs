@@ -16,6 +16,7 @@ import {
   findShipAt,
   type GameState,
   GRID_INDICES,
+  INITIAL_GAME_STATE,
   isShipSunk,
   ROWS,
   SHIP_NAMES,
@@ -59,7 +60,7 @@ export interface Output {
 }
 
 export default pattern<Input, Output>((_input) => {
-  const game = new Writable<GameState>(createInitialState());
+  const game = new Writable<GameState>(INITIAL_GAME_STATE);
 
   // ---------------------------------------------------------------------------
   // Actions

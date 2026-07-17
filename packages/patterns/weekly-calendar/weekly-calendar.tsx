@@ -371,13 +371,18 @@ const WeeklyCalendar = pattern<Input, Output>(
     }).result!;
 
     // Navigation State
-    const startDate = new Cell(getWeekStart(getTodayDate()));
+    // Cell initials are schema defaults and must be compile-time static
+    // (CT-1880); load-time dates are written explicitly, so each load starts
+    // at "today" instead of freezing a creation-time date into a default.
+    const startDate = new Cell("");
+    startDate.set(getWeekStart(getTodayDate()));
     const visibleDays = new Cell(7);
 
     // Create Form State
     const showNewEventPrompt = new Writable<boolean>(false);
     const newEventTitle = new Writable<string>("");
-    const newEventDate = new Writable<string>(getTodayDate());
+    const newEventDate = new Writable<string>("");
+    newEventDate.set(getTodayDate());
     const newEventStartTime = new Writable<string>("09:00");
     const newEventEndTime = new Writable<string>("10:00");
     const newEventColor = new Writable<string>(COLORS[0]);

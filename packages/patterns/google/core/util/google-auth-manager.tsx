@@ -119,18 +119,25 @@ export const GoogleAuthManager = pattern<
       token: "",
     };
 
+    // Cell initials are schema defaults and must be compile-time static
+    // (CT-1880); runtime scope selections are written explicitly.
+    const scopeFlag = (enabled: boolean) => {
+      const flag = new Writable(false);
+      flag.set(enabled);
+      return flag;
+    };
     return navigateTo(
       GoogleAuth(
         {
           selectedScopes: {
-            gmail: new Writable(required.includes("gmail")),
-            gmailSend: new Writable(required.includes("gmailSend")),
-            gmailModify: new Writable(required.includes("gmailModify")),
-            calendar: new Writable(required.includes("calendar")),
-            calendarWrite: new Writable(required.includes("calendarWrite")),
-            drive: new Writable(required.includes("drive")),
-            docs: new Writable(required.includes("docs")),
-            contacts: new Writable(required.includes("contacts")),
+            gmail: scopeFlag(required.includes("gmail")),
+            gmailSend: scopeFlag(required.includes("gmailSend")),
+            gmailModify: scopeFlag(required.includes("gmailModify")),
+            calendar: scopeFlag(required.includes("calendar")),
+            calendarWrite: scopeFlag(required.includes("calendarWrite")),
+            drive: scopeFlag(required.includes("drive")),
+            docs: scopeFlag(required.includes("docs")),
+            contacts: scopeFlag(required.includes("contacts")),
           },
           auth: emptyAuth,
         } as Parameters<typeof GoogleAuth>[0],
