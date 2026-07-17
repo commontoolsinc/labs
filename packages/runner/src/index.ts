@@ -112,11 +112,13 @@ export {
   asPatternIdentityRef,
   extractDefaultValues,
   getPatternIdentityRef,
+  getPatternRepository,
   getPatternSource,
   mergeSchemaDefaults,
   patternIdentityKey,
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
+  setPatternRepository,
   setPatternSource,
 } from "./runner.ts";
 
@@ -247,6 +249,7 @@ export {
 export {
   type FabricRef,
   FabricRefError,
+  formatFabricRef,
   isFabricImportSpecifier,
   parseFabricRef,
 } from "./sandbox/fabric-import-specifier.ts";

@@ -96,8 +96,9 @@ FILESYSTEM LAYOUT:
           input/*.handler
           input/*.tool
           input.json
-          meta.json             # piece ID, entity, pattern name
+          meta.json             # piece ID, entity, running pattern ref
         .index.json             # name-to-entity-ID mapping
+        pieces.json             # discovery manifest with pattern refs
       entities/                 # access cells by entity ID
       space.json                # { did, name }
     .spaces.json                # known space-name -> DID mapping

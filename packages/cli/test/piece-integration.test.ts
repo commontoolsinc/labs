@@ -15,6 +15,8 @@ import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value"
 import {
   callPieceHandler,
   type EntryConfig,
+  inspectPiece,
+  listPieces,
   newPiece,
   type SpaceConfig,
 } from "../lib/piece.ts";
@@ -26,15 +28,18 @@ const REPO_ROOT = resolve(import.meta.dirname!, "../../..");
 const NOTE_PATTERN = `${REPO_ROOT}/packages/patterns/notes/note.tsx`;
 
 const NOTE_CONTENT = "Hello world";
+const REPOSITORY = "https://github.com/commontoolsinc/labs";
 
 const noteEntry: EntryConfig = {
   mainPath: NOTE_PATTERN,
-  rootPath: `${REPO_ROOT}/packages/patterns`,
+  rootPath: REPO_ROOT,
+  repository: REPOSITORY,
 };
 
 let pieceId = "";
 let flags = "";
 let identityPath = "";
+let spaceConfig: SpaceConfig;
 
 // Resolves once the piece's result/content cell holds `expected`. Uses its
 // own controller, so readiness is judged from a fresh client's view of the
@@ -71,7 +76,7 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
     const { identity, path } = await writeTempIdentity();
     identityPath = path;
     const spaceName = `cf-piece-get-test-${Date.now()}`;
-    const spaceConfig: SpaceConfig = {
+    spaceConfig = {
       apiUrl: API_URL!,
       space: spaceName,
       identity: identityPath,
@@ -119,5 +124,21 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
     expect(code).toBe(0);
     const json = JSON.parse(stdout.join(""));
     expect(typeof json).toBe("object");
+  });
+
+  it("list and inspect expose the running pattern reference", async () => {
+    const listed = await listPieces(spaceConfig);
+    const listedPiece = listed.find((piece) => piece.id === pieceId);
+    const identity = listedPiece?.patternRef?.identity;
+    expect(identity).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(listedPiece?.patternRef?.source).toEqual({
+      ref: `cf:pattern:${identity}`,
+      repository: REPOSITORY,
+      entry: "/packages/patterns/notes/note.tsx",
+    });
+
+    const inspected = await inspectPiece({ ...spaceConfig, piece: pieceId });
+    expect(inspected.patternRef).toEqual(listedPiece?.patternRef);
+    expect(inspected.patternRef?.symbol).toBe("default");
   });
 });

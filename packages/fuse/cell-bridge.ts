@@ -45,6 +45,7 @@ import type { JSONSchema } from "@commonfabric/api";
 import type { PieceManager } from "@commonfabric/piece";
 import type {
   PieceController,
+  PiecePatternRef,
   PiecesController,
 } from "@commonfabric/piece/ops";
 
@@ -213,7 +214,10 @@ export interface SpaceState {
   pieceMap: Map<string, string>; // name → entity ID
   pieceInos: Map<string, bigint>; // name → root inode
   pieceControllers: Map<string, PieceController>; // name → controller
-  pieceManifest: Map<string, { summary: string }>;
+  pieceManifest: Map<
+    string,
+    { summary: string; patternRef?: PiecePatternRef }
+  >;
   /** Per-piece subscription cancellers, keyed by piece name. */
   pieceSubs: Map<string, Cancel[]>;
   did: string;
@@ -593,6 +597,7 @@ export class CellBridge {
     piece: PieceController,
   ): Promise<void> {
     let summary = "";
+    let patternRef: PiecePatternRef | undefined;
 
     try {
       const result = await piece.result.get();
@@ -601,19 +606,74 @@ export class CellBridge {
       // Summary is best-effort only.
     }
 
-    this.updatePieceManifest(state, piece.id, { summary });
+    try {
+      patternRef = await piece.getPatternRef();
+    } catch {
+      // Pattern source is best-effort; identity-less pieces remain listable.
+    }
+
+    this.updatePieceManifest(state, piece.id, { summary, patternRef });
+  }
+
+  /** Refresh synthetic pattern metadata after an in-place pattern swap. */
+  private async refreshPiecePatternMetadata(
+    state: SpaceState,
+    piece: PieceController,
+    pieceIno: bigint,
+  ): Promise<void> {
+    let patternRef: PiecePatternRef | undefined;
+    try {
+      patternRef = await piece.getPatternRef();
+    } catch {
+      return;
+    }
+    if (patternRef === undefined) return;
+
+    const manifestChanged = this.updatePieceManifest(state, piece.id, {
+      patternRef,
+    });
+    this.updatePieceMetaPatternRef(pieceIno, patternRef);
+
+    const entityIno = this.tree.lookup(
+      state.entitiesIno,
+      encodeFuseComponent(piece.id),
+    );
+    if (entityIno !== undefined) {
+      this.updatePieceMetaPatternRef(entityIno, patternRef);
+    }
+
+    if (manifestChanged) {
+      this.updatePiecesJson(state);
+    }
+    if (this.onInvalidate) {
+      this.onInvalidate(pieceIno, ["meta.json"]);
+      if (entityIno !== undefined) {
+        this.onInvalidate(entityIno, ["meta.json"]);
+      }
+      if (manifestChanged) {
+        this.onInvalidate(state.piecesIno, ["pieces.json"]);
+      }
+    }
   }
 
   private updatePieceManifest(
     state: SpaceState,
     pieceId: string,
-    updates: Partial<{ summary: string }>,
+    updates: Partial<{ summary: string; patternRef: PiecePatternRef }>,
   ): boolean {
     const current = state.pieceManifest.get(pieceId) ?? { summary: "" };
     const next = {
       summary: updates.summary ?? current.summary,
+      patternRef: updates.patternRef ?? current.patternRef,
     };
-    const changed = next.summary !== current.summary;
+    const changed = next.summary !== current.summary ||
+      next.patternRef?.identity !== current.patternRef?.identity ||
+      next.patternRef?.symbol !== current.patternRef?.symbol ||
+      next.patternRef?.source.ref !== current.patternRef?.source.ref ||
+      next.patternRef?.source.repository !==
+        current.patternRef?.source.repository ||
+      next.patternRef?.source.entry !== current.patternRef?.source.entry ||
+      next.patternRef?.source.origin !== current.patternRef?.source.origin;
     state.pieceManifest.set(pieceId, next);
     return changed;
   }
@@ -623,12 +683,14 @@ export class CellBridge {
     name: string;
     summary: string;
     entityPath: string;
+    patternRef?: PiecePatternRef;
   }> {
     const entries: Array<{
       id: string;
       name: string;
       summary: string;
       entityPath: string;
+      patternRef?: PiecePatternRef;
     }> = [];
 
     for (const [name, id] of state.pieceMap) {
@@ -638,6 +700,9 @@ export class CellBridge {
         name,
         summary: manifest.summary,
         entityPath: `entities/${encodeFuseComponent(id)}`,
+        ...(manifest.patternRef === undefined
+          ? {}
+          : { patternRef: manifest.patternRef }),
       });
     }
 
@@ -1599,6 +1664,11 @@ export class CellBridge {
       state,
       writePath.pieceName,
     );
+    await this.refreshPiecePatternMetadata(
+      state,
+      writePath.piece,
+      pieceIno,
+    );
   }
 
   invalidateHandlerTarget(target: HandlerTarget): void {
@@ -2055,10 +2125,12 @@ export class CellBridge {
     // first access, avoiding doubled subscriptions and startup cost.
     const entityName = encodeFuseComponent(piece.id);
     const entityStubIno = this.tree.addDir(state.entitiesIno, entityName);
+    const patternRef = state.pieceManifest.get(piece.id)?.patternRef;
     const entityMetaObject = {
       id: piece.id,
       entityId: piece.id,
       name: piece.name() || "",
+      ...(patternRef === undefined ? {} : { patternRef }),
     };
     const entityAnnotator = this.makeCfcAnnotator({
       spaceName,
@@ -2308,6 +2380,20 @@ export class CellBridge {
   }
 
   private updatePieceMetaName(parentIno: bigint, name: string): void {
+    this.updatePieceMeta(parentIno, { name });
+  }
+
+  private updatePieceMetaPatternRef(
+    parentIno: bigint,
+    patternRef: PiecePatternRef,
+  ): void {
+    this.updatePieceMeta(parentIno, { patternRef });
+  }
+
+  private updatePieceMeta(
+    parentIno: bigint,
+    updates: Record<string, unknown>,
+  ): void {
     const metaIno = this.tree.lookup(parentIno, "meta.json");
     if (metaIno === undefined) return;
 
@@ -2323,7 +2409,7 @@ export class CellBridge {
       }
       this.tree.updateFile(
         metaIno,
-        JSON.stringify({ ...parsed, name }, null, 2),
+        JSON.stringify({ ...parsed, ...updates }, null, 2),
         "object",
       );
     } catch {
@@ -2868,6 +2954,46 @@ export class CellBridge {
       }
     }
 
+    // Pattern hot-swaps (system roll-forward, CLI setsrc, or FUSE source
+    // edits) and repository annotation changes retain the same piece entity.
+    // Keep the synthetic reference in meta.json and pieces.json aligned with
+    // the currently running artifact and its source locator.
+    const getRootCell = (piece as unknown as {
+      getCell?: () => Cell<unknown>;
+    }).getCell;
+    if (typeof getRootCell === "function") {
+      try {
+        const rootCell = getRootCell.call(piece) as Cell<unknown> & {
+          sinkMeta?: Cell<unknown>["sinkMeta"];
+        };
+        if (typeof rootCell.sinkMeta === "function") {
+          for (
+            const key of ["patternIdentity", "patternRepository"] as const
+          ) {
+            const cancelPatternRef = rootCell.sinkMeta(
+              key,
+              () => {
+                void this.refreshPiecePatternMetadata(
+                  state,
+                  piece,
+                  pieceIno,
+                ).catch((e) => {
+                  console.error(
+                    `[${spaceName}] Could not refresh ${pieceName} pattern reference: ${e}`,
+                  );
+                });
+              },
+            );
+            cancels.push(cancelPatternRef);
+          }
+        }
+      } catch (e) {
+        console.error(
+          `[${spaceName}] Could not subscribe to ${pieceName} pattern reference: ${e}`,
+        );
+      }
+    }
+
     // Subscribe to the result cell to detect [NAME] changes and rename the
     // piece directory in the FUSE tree accordingly.
     // We use the result cell (not the root entity cell) because [NAME] is part
@@ -3107,7 +3233,6 @@ export class CellBridge {
     };
   }
 
-  // deno-lint-ignore require-await
   private async loadPieceTree(
     piece: PieceController,
     parentIno: bigint,
@@ -3119,10 +3244,17 @@ export class CellBridge {
     const pieceIno = existingIno ?? this.tree.addDir(parentIno, name);
 
     // Create meta.json first so it's always present
+    let patternRef: PiecePatternRef | undefined;
+    try {
+      patternRef = await piece.getPatternRef();
+    } catch {
+      // Pattern metadata is best-effort; keep the piece mount available.
+    }
     const metaObject = {
       id: piece.id,
       entityId: piece.id,
       name: piece.name() || "",
+      ...(patternRef === undefined ? {} : { patternRef }),
     };
     const pieceAnnotator = this.makeCfcAnnotator({
       spaceName,

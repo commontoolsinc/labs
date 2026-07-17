@@ -45,6 +45,30 @@ cat "MOUNT/SPACE/pieces/pieces.json"
 4. Verify via `result/summary`
 5. Append wikilink to any source note that motivated the deploy
 
+### Identifying the running pattern
+
+`pieces/pieces.json` and each piece's `meta.json` expose `patternRef`:
+
+```json
+{
+  "identity": "<content-hash>",
+  "symbol": "default",
+  "source": {
+    "ref": "cf:pattern:<content-hash>",
+    "repository": "https://github.com/commontoolsinc/labs",
+    "entry": "/packages/patterns/annotation.tsx"
+  }
+}
+```
+
+The prefix-free `identity` + `symbol` are the authoritative reference to the
+running artifact (`cf:module/<identity>#<symbol>` in display form). `source.ref`
+addresses the immutable source closure; `source.repository` is an optional,
+explicitly supplied repository locator; `source.entry` is its optional authored
+entry path; and `source.origin` is optional update provenance. For pattern-kind
+discovery, match the entry filename and fall back to the origin path when the
+entry is absent; do not infer it from the piece's mutable display name.
+
 ---
 
 ## Lifecycle Gotchas
@@ -260,7 +284,10 @@ cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c "
 import json, sys
 p = json.load(sys.stdin)
 for x in p:
-    if x.get('patternName','') == 'annotation':
+    ref = x.get('patternRef', {})
+    source = ref.get('source', {}) if isinstance(ref, dict) else {}
+    locator = (source.get('entry') or source.get('origin', '')) if isinstance(source, dict) else ''
+    if locator.rsplit('/', 1)[-1] == 'annotation.tsx':
         print(x['name'], '—', x.get('summary','')[:60])
 "
 ```
@@ -345,7 +372,10 @@ cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c "
 import json, sys
 p = json.load(sys.stdin)
 for x in p:
-    if x.get('patternName','') == 'agent':
+    ref = x.get('patternRef', {})
+    source = ref.get('source', {}) if isinstance(ref, dict) else {}
+    locator = (source.get('entry') or source.get('origin', '')) if isinstance(source, dict) else ''
+    if locator.rsplit('/', 1)[-1] == 'agent.tsx':
         print(x['name'], '—', x.get('summary','')[:60])
 "
 ```

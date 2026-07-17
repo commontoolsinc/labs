@@ -37,7 +37,7 @@ is a companion: `pattern-updates.md`.
 
 ## Last Updated
 
-2026-07-08
+2026-07-17
 
 ## Motivation
 
@@ -106,6 +106,51 @@ Because both come up, and only one is the pin:
   (`cf:module/<hash>`, compile cache, `$patternRef`,
   `meta("patternIdentity")`). **This is the pin**, and `cf:pattern:<identity>`
   is its reference spelling.
+
+### Tooling reference for a running piece
+
+Piece tooling exposes the running pattern and its source as deliberately
+separate fields:
+
+```json
+{
+  "identity": "<prefix-free-entry-module-hash>",
+  "symbol": "default",
+  "source": {
+    "ref": "cf:pattern:<prefix-free-entry-module-hash>",
+    "repository": "https://github.com/commontoolsinc/labs",
+    "entry": "/packages/patterns/annotation.tsx",
+    "origin": "cf:/did:key:z6Mk.../annotation"
+  }
+}
+```
+
+- `identity` + `symbol` is the authoritative reference to the executable
+  export (`cf:module/<identity>#<symbol>` in display form).
+- `source.ref` is the immutable, in-fabric reference to the verified source
+  closure that produced the running identity. It uses the same
+  `cf:pattern:<hash>` grammar as imports and is derived from `identity`; it does
+  not depend on how or where the pattern was authored.
+- `source.repository` is the optional repository locator supplied explicitly at
+  deployment. It is descriptive discovery metadata, not proof of which bytes
+  are running; `source.ref` remains authoritative for that. The CLI stores the
+  value exactly as supplied and never derives it from local Git configuration.
+- `source.entry` is the optional authored entry filename recovered from that
+  verified closure. Authored filenames are relative to the compilation root.
+  For a local deployment, passing the repository root as `--root` therefore
+  preserves a path inside that repository rather than only a basename.
+  Absolute paths from the author's machine are never persisted.
+- `source.origin` is the optional `patternSource` update provenance carried by
+  the piece (a `cf:` publication ref or a toolshed system-pattern path). It
+  answers "where should updates be checked?", not "which exact bytes are
+  running?"; `source.ref` answers the latter.
+
+`cf piece new`, `cf piece setsrc`, and custom `cf piece set-home` accept
+`--repository <locator>` alongside `--root`. `new` and custom `set-home` stamp
+the locator on the new piece. `setsrc` replaces it when the flag is present and
+preserves the existing locator when the flag is omitted. `set-home --reset`
+rejects the flag because the system pattern was not deployed from the caller's
+repository. No Git remote or revision is inferred automatically.
 
 ## Specifier syntax
 

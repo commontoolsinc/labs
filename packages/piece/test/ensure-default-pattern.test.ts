@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { NAME, Runtime } from "@commonfabric/runner";
+import { getPatternRepository, NAME, Runtime } from "@commonfabric/runner";
 import type { RuntimeProgram } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
@@ -337,5 +337,22 @@ describe("PiecesController.recreateDefaultPattern", () => {
     } finally {
       runtime.editWithRetry = originalEditWithRetry;
     }
+  });
+
+  it("stores an explicitly supplied repository for a custom root", async () => {
+    const repository = "https://github.com/commontoolsinc/labs";
+    const piece = await controller.recreateDefaultPattern({
+      customProgram: defaultPatternProgram,
+      repository,
+    });
+
+    expect(getPatternRepository(piece.getCell())).toBe(repository);
+    expect((await piece.getPatternRef())?.source.repository).toBe(repository);
+  });
+
+  it("rejects a repository locator without a custom root program", async () => {
+    await expect(controller.recreateDefaultPattern({
+      repository: "https://github.com/commontoolsinc/labs",
+    })).rejects.toThrow(/only be supplied with a custom program/);
   });
 });

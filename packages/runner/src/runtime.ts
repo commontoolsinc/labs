@@ -1802,20 +1802,29 @@ export class Runtime {
     patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
+    options?: { patternRepository?: string },
   ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    options?: { patternRepository?: string },
   ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    options?: { patternRepository?: string },
   ): Promise<Cell<R>> {
-    return this.runner.setup<T, R>(tx, patternOrModule, argument, resultCell);
+    return this.runner.setup<T, R>(
+      tx,
+      patternOrModule,
+      argument,
+      resultCell,
+      options,
+    );
   }
   run<T, R>(
     tx: IExtendedStorageTransaction | undefined,
@@ -1848,6 +1857,7 @@ export class Runtime {
         argumentCell: Cell<unknown>,
         argumentSchema: JSONSchema,
       ) => void;
+      patternRepository?: string;
     },
   ) {
     return this.runner.runSynced(resultCell, pattern, inputs, options);

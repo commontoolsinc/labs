@@ -2,6 +2,7 @@ import { Table } from "@cliffy/table";
 import { Command, ValidationError } from "@cliffy/command";
 import {
   applyPieceInput,
+  type EntryConfig,
   executePieceCallable,
   formatViewTree,
   generateSpaceMap,
@@ -36,6 +37,7 @@ import type { CellScope } from "@commonfabric/api";
 import { parseCellPath } from "@commonfabric/runner";
 import { UI } from "@commonfabric/runner";
 import ports from "@commonfabric/ports" with { type: "json" };
+import type { PiecePatternRef } from "@commonfabric/piece/ops";
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;
@@ -76,6 +78,43 @@ function summarizeForDisplay(value: unknown): unknown {
     else out[k] = "[Object]";
   }
   return out;
+}
+
+export function formatPatternRef(
+  patternRef: PiecePatternRef | undefined,
+): string {
+  if (patternRef === undefined) return "<unknown>";
+  if (patternRef.source.repository !== undefined) {
+    return patternRef.source.entry === undefined
+      ? patternRef.source.repository
+      : `${patternRef.source.repository}#${patternRef.source.entry}`;
+  }
+  return patternRef.source.origin ?? patternRef.source.entry ??
+    patternRef.source.ref;
+}
+
+export function formatPatternIdentity(
+  patternRef: PiecePatternRef | undefined,
+): string {
+  return patternRef === undefined
+    ? "<unknown>"
+    : `cf:module/${patternRef.identity}#${patternRef.symbol}`;
+}
+
+export function localPatternEntry(
+  mainPath: string,
+  options: {
+    mainExport?: string;
+    repository?: string;
+    root?: string;
+  },
+): EntryConfig {
+  return {
+    mainPath: absPath(mainPath),
+    mainExport: options.mainExport,
+    repository: options.repository,
+    rootPath: options.root ? absPath(options.root) : undefined,
+  };
 }
 
 function pieceCallRawArgs(tail: string[], literalArgs: string[]): string[] {
@@ -202,17 +241,19 @@ export const piece = new Command()
         pieces.map((p) => ({
           id: p.id,
           name: p.name ?? null,
+          patternRef: p.patternRef ?? null,
         })),
         { json: true },
       );
       return;
     }
     const piecesData = [
-      ["ID", "NAME"],
+      ["ID", "NAME", "PATTERN"],
       ...(pieces.map(
         (data) => [
           data.id,
           data.error ? `<error: ${data.error}>` : (data.name ?? "<unnamed>"),
+          data.error ? "" : formatPatternRef(data.patternRef),
         ],
       )),
     ];
@@ -249,7 +290,11 @@ export const piece = new Command()
   )
   .option(
     "--root <path:string>",
-    "Root directory for resolving imports. Allows imports from parent directories within this root.",
+    "Root directory for imports and authored source paths. Use a repository root to preserve repository-relative paths.",
+  )
+  .option(
+    "--repository <repository:string>",
+    "Repository locator associated with the authored source (stored exactly as supplied).",
   )
   .option("--slug <slug:string>", "Slug URL/address for this piece.")
   .action(async (options, main) => {
@@ -257,11 +302,7 @@ export const piece = new Command()
     const spaceConfig = parseSpaceOptions(options);
     const pieceId = await newPiece(
       spaceConfig,
-      {
-        mainPath: absPath(main),
-        mainExport: options.mainExport,
-        rootPath: options.root ? absPath(options.root) : undefined,
-      },
+      localPatternEntry(main, options),
       { start: options.start, slug: options.slug },
     );
     render(pieceId);
@@ -373,17 +414,17 @@ export const piece = new Command()
   )
   .option(
     "--root <path:string>",
-    "Root directory for resolving imports. Allows imports from parent directories within this root.",
+    "Root directory for imports and authored source paths. Use a repository root to preserve repository-relative paths.",
+  )
+  .option(
+    "--repository <repository:string>",
+    "Repository locator associated with the authored source (stored exactly as supplied).",
   )
   .arguments("<main:string>")
   .action(async (options, mainPath) => {
     setQuietMode(!!options.quiet);
     const pieceConfig = parsePieceOptions(options);
-    await setPiecePattern(pieceConfig, {
-      mainPath: absPath(mainPath),
-      mainExport: options.mainExport,
-      rootPath: options.root ? absPath(options.root) : undefined,
-    });
+    await setPiecePattern(pieceConfig, localPatternEntry(mainPath, options));
     render(`Updated source for piece ${pieceConfig.piece}`);
     hint(cliText(`NEXT STEPS:
   → Test in browser: ${pieceConfig.apiUrl}/${pieceConfig.space}/${pieceConfig.piece}
@@ -430,6 +471,12 @@ export const piece = new Command()
     let output = `
 === Piece: ${pieceData.id} ===
 Name: ${pieceData.name || "<no name>"}
+Pattern: ${formatPatternRef(pieceData.patternRef)}
+Pattern Ref: ${formatPatternIdentity(pieceData.patternRef)}
+Source Ref: ${pieceData.patternRef?.source.ref ?? "<unknown>"}
+Repository: ${pieceData.patternRef?.source.repository ?? "<unknown>"}
+Source Entry: ${pieceData.patternRef?.source.entry ?? "<unknown>"}
+Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
 
 --- Source (Inputs) ---`;
 
@@ -927,7 +974,11 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
   )
   .option(
     "--root <path:string>",
-    "Root directory for resolving imports.",
+    "Root directory for imports and authored source paths. Use a repository root to preserve repository-relative paths.",
+  )
+  .option(
+    "--repository <repository:string>",
+    "Repository locator associated with the authored source (stored exactly as supplied).",
   )
   .arguments("[main:string]")
   .action(async (options, main?: string) => {
@@ -945,6 +996,12 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
         { exitCode: 1 },
       );
     }
+    if (options.reset && options.repository !== undefined) {
+      throw new ValidationError(
+        "Cannot use --repository with --reset.",
+        { exitCode: 1 },
+      );
+    }
 
     const baseConfig = parseSetHomeOptions(options);
 
@@ -952,11 +1009,7 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
       await resetHomePattern(baseConfig);
       render("Reset home pattern to system default.");
     } else {
-      await setHomePattern(baseConfig, {
-        mainPath: absPath(main!),
-        mainExport: options.mainExport,
-        rootPath: options.root ? absPath(options.root) : undefined,
-      });
+      await setHomePattern(baseConfig, localPatternEntry(main!, options));
       render("Deployed custom home pattern.");
     }
 

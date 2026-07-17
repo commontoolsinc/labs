@@ -756,13 +756,14 @@ export class PieceManager {
     pattern: Pattern | Module,
     inputs?: unknown,
     cause?: unknown,
-    options?: { start?: boolean },
+    options?: { start?: boolean; repository?: string },
   ): Promise<Cell<T>> {
     const start = options?.start ?? true;
     const piece = await this.setupPersistent<T>(
       pattern,
       inputs,
       cause,
+      { repository: options?.repository },
     );
     if (start) {
       await this.startPiece(piece);
@@ -785,6 +786,7 @@ export class PieceManager {
         argumentCell: Cell<unknown>,
         argumentSchema: JSONSchema,
       ) => void;
+      repository?: string;
     },
   ): Promise<Cell<unknown>> {
     const piece = this.runtime.getCellFromEntityId(
@@ -797,13 +799,16 @@ export class PieceManager {
     if (start) {
       currentPiece = await this.runtime.runSynced(piece, pattern, inputs, {
         expectedPatternIdentity: options?.expectedPatternIdentity,
+        patternRepository: options?.repository,
         validateArgumentLinks: options?.validateArgumentLinks,
       });
     } else {
       if (options?.expectedPatternIdentity) {
         throw new Error("atomic pattern updates require starting the piece");
       }
-      await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
+      await this.runtime.setup(undefined, pattern, inputs ?? {}, piece, {
+        patternRepository: options?.repository,
+      });
     }
     await this.syncPattern(currentPiece);
     if (start) {
@@ -821,6 +826,7 @@ export class PieceManager {
     pattern: Pattern | Module,
     inputs?: unknown,
     cause?: unknown,
+    options?: { repository?: string },
   ): Promise<Cell<T>> {
     await timePiecePhase(
       "setupPersistent.runtime.idle",
@@ -839,7 +845,10 @@ export class PieceManager {
     );
     await timePiecePhase(
       "setupPersistent.runtime.setup",
-      () => this.runtime.setup(undefined, pattern, inputs ?? {}, piece),
+      () =>
+        this.runtime.setup(undefined, pattern, inputs ?? {}, piece, {
+          patternRepository: options?.repository,
+        }),
     );
     await timePiecePhase(
       "setupPersistent.syncPattern",

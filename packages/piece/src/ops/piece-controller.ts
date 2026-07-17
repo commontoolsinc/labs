@@ -3,8 +3,11 @@ import {
   type CellPath,
   ContextualFlowControl,
   extractDefaultValues,
+  formatFabricRef,
   getMetaLink,
   getPatternIdentityRef,
+  getPatternRepository,
+  getPatternSource,
   getValueAtPath,
   isCell,
   isLink,
@@ -165,6 +168,32 @@ interface OuterCellLocalization {
 interface StoredCellTopology {
   value: unknown;
   opaqueHandle: boolean;
+}
+
+/** Tooling-facing source locator for a running pattern. */
+export interface PiecePatternSourceRef {
+  /** Immutable in-fabric reference to the verified source closure. */
+  ref: string;
+  /** Optional caller-supplied repository associated with the source tree. */
+  repository?: string;
+  /** Authored entry path within the program's compilation root. */
+  entry?: string;
+  /** Optional mutable/update provenance carried by `patternSource`. */
+  origin?: string;
+}
+
+/**
+ * Tooling-facing reference to the pattern currently running a piece.
+ *
+ * `identity` is the prefix-free module hash stored in `patternIdentity`;
+ * `identity` + `symbol` are the authoritative executable pointer. `source.ref`
+ * names the immutable source closure; optional repository, entry, and origin
+ * fields aid discovery without changing that identity.
+ */
+export interface PiecePatternRef {
+  identity: string;
+  symbol: string;
+  source: PiecePatternSourceRef;
 }
 
 function storedCellTopology(
@@ -2505,6 +2534,37 @@ export class PieceController<T = unknown> {
     return this.#cell;
   }
 
+  /** Return a stable reference to the pattern currently running this piece. */
+  async getPatternRef(): Promise<PiecePatternRef | undefined> {
+    const ref = getPatternIdentityRef(this.#cell);
+    if (!ref) return undefined;
+
+    const source: PiecePatternSourceRef = {
+      ref: formatFabricRef({
+        ref: { kind: "uri", scheme: "pattern", hash: ref.identity },
+      }),
+    };
+    const repository = getPatternRepository(this.#cell);
+    if (repository !== undefined) source.repository = repository;
+    const trackedSource = getPatternSource(this.#cell);
+    if (trackedSource !== undefined) source.origin = trackedSource;
+
+    try {
+      const program = await this.#manager.runtime.patternManager
+        .getPatternSourceProgramByIdentity(
+          ref.identity,
+          this.#manager.getSpace(),
+        );
+      return program?.main === undefined
+        ? { ...ref, source }
+        : { ...ref, source: { ...source, entry: program.main } };
+    } catch {
+      // The content pointer remains useful even if the source closure is
+      // unavailable or unreadable in this space.
+      return { ...ref, source };
+    }
+  }
+
   async setInput(input: object): Promise<void> {
     const mutationVersion = ++this.#mutationVersion;
     await this.#runMutation(mutationVersion, async () => {
@@ -2646,7 +2706,10 @@ export class PieceController<T = unknown> {
     return (await this.getPatternSourceProgram())?.files;
   }
 
-  async setPattern(program: RuntimeProgram): Promise<void> {
+  async setPattern(
+    program: RuntimeProgram,
+    options?: { repository?: string },
+  ): Promise<void> {
     const mutationVersion = ++this.#mutationVersion;
     await this.#runMutation(mutationVersion, async () => {
       const { pattern: previousPattern, ref: previousRef } = await this
@@ -2664,6 +2727,7 @@ export class PieceController<T = unknown> {
             this.#manager,
             { priorArgumentSchema: previousPattern.argumentSchema },
           ),
+        repository: options?.repository,
       }) as Cell<T>;
     });
   }
@@ -2759,6 +2823,7 @@ async function execute(
       argumentCell: Cell<unknown>,
       argumentSchema: JSONSchema,
     ) => void;
+    repository?: string;
   },
 ): Promise<Cell<unknown>> {
   return await manager.runWithPattern(pattern, pieceId, input, options);

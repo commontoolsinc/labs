@@ -5,6 +5,7 @@ import {
   Cell,
   entityIdFrom,
   experimentalOptionsFromEnv,
+  formatFabricRef,
   getPatternIdentityRef,
   isSlugAddress,
   NAME,
@@ -25,7 +26,10 @@ import {
   setSlugLink,
   SlugResolutionError,
 } from "@commonfabric/piece";
-import { PiecesController } from "@commonfabric/piece/ops";
+import {
+  type PiecePatternRef,
+  PiecesController,
+} from "@commonfabric/piece/ops";
 import { dirname, join } from "@std/path";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { setLLMUrl } from "@commonfabric/llm";
@@ -55,6 +59,7 @@ import { deriveDiskHandleId } from "./sqlite-source.ts";
 export interface EntryConfig {
   mainPath: string;
   mainExport?: string;
+  repository?: string;
   rootPath?: string;
 }
 
@@ -100,6 +105,13 @@ export interface PieceResolutionDeps {
     manager: PieceManager,
     token: string,
   ) => Promise<string>;
+}
+
+interface PieceOperationDependencies extends PieceResolutionDeps {
+  loadIdentity?: typeof loadIdentity;
+  getProgramFromFile?: typeof getProgramFromFile;
+  getPinnedProgramFromFile?: typeof getPinnedProgramFromFile;
+  createController?: (manager: PieceManager) => PiecesController;
 }
 
 const CLI_TRACE_TIMINGS = Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
@@ -311,11 +323,13 @@ async function getPinnedProgramFromFile(
 // Returns an array of metadata about pieces to display.
 export async function listPieces(
   config: SpaceConfig,
+  deps: PieceOperationDependencies = {},
 ): Promise<
-  { id: string; name?: string; error?: string }[]
+  { id: string; name?: string; patternRef?: PiecePatternRef; error?: string }[]
 > {
-  const manager = await loadManager(config);
-  const pieces = new PiecesController(manager);
+  const manager = await (deps.loadManager ?? loadManager)(config);
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
   const allPieces = await pieces.getAllPieces();
   return Promise.all(
     allPieces.map(async (piece) => {
@@ -324,9 +338,11 @@ export async function listPieces(
         const name = (await (
           livePiece.getCell().key(NAME) as Cell<unknown>
         ).pull()) as string | undefined;
+        const patternRef = await livePiece.getPatternRef();
         return {
           id: piece.id,
           name,
+          patternRef,
         };
       } catch (err) {
         return {
@@ -393,12 +409,14 @@ export async function newPiece(
   config: SpaceConfig,
   entry: EntryConfig,
   options?: { start?: boolean; slug?: string },
+  deps: PieceOperationDependencies = {},
 ): Promise<string> {
   const manager = await timeCliPhase(
     "newPiece.loadManager",
-    () => loadManager(config),
+    () => (deps.loadManager ?? loadManager)(config),
   );
-  const pieces = new PiecesController(manager);
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
 
   // The default pattern is a hard requirement for this command: even when the
   // user's pattern doesn't use it, registration below (manager.add) sends an
@@ -424,11 +442,18 @@ export async function newPiece(
 
   const program = await timeCliPhase(
     "newPiece.getProgramFromFile",
-    () => getPinnedProgramFromFile(manager, entry),
+    () =>
+      (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
+        manager,
+        entry,
+      ),
   );
   const PIECE_START_TIMEOUT_MS = 60_000;
   const piece = await timeCliPhase("newPiece.create", () => {
-    const createPromise = pieces.create(program, { start: options?.start });
+    const createPromise = pieces.create(program, {
+      repository: entry.repository,
+      start: options?.start,
+    });
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
@@ -515,17 +540,29 @@ export async function setPieceSlug(
 export async function setPiecePattern(
   config: PieceConfig,
   entry: EntryConfig,
+  deps: PieceOperationDependencies = {},
 ): Promise<void> {
-  const manager = await loadManager(config);
-  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
-  const pieces = new PiecesController(manager);
+  const manager = await (deps.loadManager ?? loadManager)(config);
+  const resolvedConfig = await resolvePieceConfigWithManager(
+    config,
+    manager,
+    deps.resolvePieceAddress,
+  );
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
     undefined,
     resolvedConfig.pieceScope,
   );
-  await piece.setPattern(await getPinnedProgramFromFile(manager, entry));
+  await piece.setPattern(
+    await (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
+      manager,
+      entry,
+    ),
+    { repository: entry.repository },
+  );
 }
 
 export async function savePiecePattern(
@@ -1149,18 +1186,26 @@ export async function generateSpaceMap(
   return formatSpaceMap(connections, format);
 }
 
-export async function inspectPiece(config: PieceConfig): Promise<{
+export async function inspectPiece(
+  config: PieceConfig,
+  deps: PieceOperationDependencies = {},
+): Promise<{
   id: string;
   name?: string;
+  patternRef?: PiecePatternRef;
   source?: Readonly<unknown>;
   result: Readonly<unknown>;
   readingFrom: Array<{ id: string; name?: string }>;
   readBy: Array<{ id: string; name?: string }>;
 }> {
-  const manager = await loadManager(config);
+  const manager = await (deps.loadManager ?? loadManager)(config);
   let resolvedConfig: PieceConfig;
   try {
-    resolvedConfig = await resolvePieceConfigWithManager(config, manager);
+    resolvedConfig = await resolvePieceConfigWithManager(
+      config,
+      manager,
+      deps.resolvePieceAddress,
+    );
   } catch (error) {
     if (
       error instanceof SlugResolutionError &&
@@ -1170,7 +1215,8 @@ export async function inspectPiece(config: PieceConfig): Promise<{
     }
     throw error;
   }
-  const pieces = new PiecesController(manager);
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
@@ -1180,6 +1226,7 @@ export async function inspectPiece(config: PieceConfig): Promise<{
 
   const id = piece.id;
   const name = piece.name();
+  const patternRef = await piece.getPatternRef();
   const source = (await piece.input.get()) as Readonly<unknown>;
   const result = (await piece.result.get()) as Readonly<unknown>;
   const readingFrom = (await piece.readingFrom()).map((piece) => ({
@@ -1194,6 +1241,7 @@ export async function inspectPiece(config: PieceConfig): Promise<{
   return {
     id,
     name,
+    patternRef,
     source,
     result,
     readingFrom,
@@ -1207,6 +1255,7 @@ async function inspectSlugTargetCell(
 ): Promise<{
   id: string;
   name?: string;
+  patternRef?: PiecePatternRef;
   source?: Readonly<unknown>;
   result: Readonly<unknown>;
   readingFrom: Array<{ id: string; name?: string }>;
@@ -1218,10 +1267,26 @@ async function inspectSlugTargetCell(
   const name = isRecord(result) && typeof result[NAME] === "string"
     ? result[NAME]
     : undefined;
+  const identityRef = getPatternIdentityRef(target);
+  const patternRef: PiecePatternRef | undefined = identityRef === undefined
+    ? undefined
+    : {
+      ...identityRef,
+      source: {
+        ref: formatFabricRef({
+          ref: {
+            kind: "uri",
+            scheme: "pattern",
+            hash: identityRef.identity,
+          },
+        }),
+      },
+    };
 
   return {
     id: slug,
     name,
+    patternRef,
     result,
     readingFrom: [],
     readBy: [],
@@ -1394,13 +1459,21 @@ function isVNodeLike(value: unknown): value is VNode {
 export async function setHomePattern(
   config: Omit<SpaceConfig, "space">,
   entry: EntryConfig,
+  deps: PieceOperationDependencies = {},
 ): Promise<void> {
-  const identity = await loadIdentity(config.identity);
+  const identity = await (deps.loadIdentity ?? loadIdentity)(config.identity);
   const homeConfig: SpaceConfig = { ...config, space: identity.did() };
-  const manager = await loadManager(homeConfig);
-  const program = await getProgramFromFile(manager, entry);
-  const pieces = new PiecesController(manager);
-  await pieces.recreateDefaultPattern({ customProgram: program });
+  const manager = await (deps.loadManager ?? loadManager)(homeConfig);
+  const program = await (deps.getProgramFromFile ?? getProgramFromFile)(
+    manager,
+    entry,
+  );
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
+  await pieces.recreateDefaultPattern({
+    customProgram: program,
+    repository: entry.repository,
+  });
 }
 
 /**

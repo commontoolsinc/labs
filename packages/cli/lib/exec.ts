@@ -1,5 +1,8 @@
 import type { PieceManager } from "@commonfabric/piece";
-import { PiecesController } from "@commonfabric/piece/ops";
+import {
+  type PiecePatternRef,
+  PiecesController,
+} from "@commonfabric/piece/ops";
 import { basename, dirname, join, relative, resolve } from "@std/path";
 import {
   type MountedCallablePath,
@@ -30,6 +33,7 @@ export interface MountedPieceMeta {
   id: string;
   entityId?: string;
   name?: string;
+  patternRef?: PiecePatternRef;
 }
 
 export interface ResolvedMountedCallableFile {
@@ -110,10 +114,55 @@ async function readMountedPieceMeta(
     throw new Error(`Mounted piece metadata missing id for ${absFilePath}`);
   }
 
+  const rawPatternRef = meta.patternRef;
+  const rawPatternSource = typeof rawPatternRef === "object" &&
+      rawPatternRef !== null && !Array.isArray(rawPatternRef)
+    ? (rawPatternRef as Record<string, unknown>).source
+    : undefined;
+  const patternSource = typeof rawPatternSource === "object" &&
+      rawPatternSource !== null && !Array.isArray(rawPatternSource) &&
+      typeof (rawPatternSource as Record<string, unknown>).ref === "string"
+    ? {
+      ref: (rawPatternSource as Record<string, unknown>).ref as string,
+      ...(typeof (rawPatternSource as Record<string, unknown>).repository ===
+          "string"
+        ? {
+          repository: (rawPatternSource as Record<string, unknown>)
+            .repository as string,
+        }
+        : {}),
+      ...(typeof (rawPatternSource as Record<string, unknown>).entry ===
+          "string"
+        ? {
+          entry: (rawPatternSource as Record<string, unknown>).entry as string,
+        }
+        : {}),
+      ...(typeof (rawPatternSource as Record<string, unknown>).origin ===
+          "string"
+        ? {
+          origin: (rawPatternSource as Record<string, unknown>)
+            .origin as string,
+        }
+        : {}),
+    }
+    : undefined;
+  const patternRef = typeof rawPatternRef === "object" &&
+      rawPatternRef !== null && !Array.isArray(rawPatternRef) &&
+      typeof (rawPatternRef as Record<string, unknown>).identity === "string" &&
+      typeof (rawPatternRef as Record<string, unknown>).symbol === "string" &&
+      patternSource !== undefined
+    ? {
+      identity: (rawPatternRef as Record<string, unknown>).identity as string,
+      symbol: (rawPatternRef as Record<string, unknown>).symbol as string,
+      source: patternSource,
+    }
+    : undefined;
+
   return {
     id: meta.id,
     entityId: typeof meta.entityId === "string" ? meta.entityId : undefined,
     name: typeof meta.name === "string" ? meta.name : undefined,
+    patternRef,
   };
 }
 

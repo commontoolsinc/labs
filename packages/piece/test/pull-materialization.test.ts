@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   getPatternIdentityRef,
+  getPatternRepository,
   isLink,
   type JSONSchema,
   KeepAsCell,
@@ -148,12 +149,13 @@ function namedPattern(name: string, multiplier: number): Pattern {
 function compiledMultiplierProgram(
   version: string,
   multiplier: number,
+  main = "/main.tsx",
 ): RuntimeProgram {
   return {
-    main: "/main.tsx",
+    main,
     files: [
       {
-        name: "/main.tsx",
+        name: main,
         contents: [
           "import { pattern, lift } from 'commonfabric';",
           `const multiply = lift((input: number) => input * ${multiplier});`,
@@ -1328,6 +1330,80 @@ describe("piece pull materialization", () => {
     } finally {
       manager.getPieces = originalGetPieces;
     }
+  });
+
+  it("keeps pattern content refs useful when source programs are unavailable", async () => {
+    const identityless = runtime.getCell(
+      manager.getSpace(),
+      "identityless-piece-" + crypto.randomUUID(),
+      { type: "object", properties: {} },
+    );
+    expect(await new PieceController(manager, identityless).getPatternRef())
+      .toBeUndefined();
+
+    const program = compiledMultiplierProgram("unavailable-source", 2);
+    const piece = await manager.runPersistent(
+      await runtime.patternManager.compilePattern(program, {
+        space: manager.getSpace(),
+      }),
+      { input: 5 },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    const identityRef = getPatternIdentityRef(piece)!;
+    const contentOnlyRef = {
+      ...identityRef,
+      source: { ref: `cf:pattern:${identityRef.identity}` },
+    };
+    const originalLookup = runtime.patternManager
+      .getPatternSourceProgramByIdentity.bind(runtime.patternManager);
+
+    try {
+      runtime.patternManager.getPatternSourceProgramByIdentity = () =>
+        Promise.resolve(undefined);
+      expect(await controller.getPatternRef()).toEqual(contentOnlyRef);
+
+      runtime.patternManager.getPatternSourceProgramByIdentity = () =>
+        Promise.reject(new Error("source unavailable"));
+      expect(await controller.getPatternRef()).toEqual(contentOnlyRef);
+    } finally {
+      runtime.patternManager.getPatternSourceProgramByIdentity = originalLookup;
+    }
+  });
+
+  it("distinguishes absent setup patterns from unknown stored identities", async () => {
+    const emptyPiece = runtime.getCell(
+      manager.getSpace(),
+      "missing-setup-pattern-" + crypto.randomUUID(),
+      { type: "object", properties: {} },
+    );
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args.join(" "));
+    try {
+      await runtime.setup(undefined, undefined, {}, emptyPiece);
+    } finally {
+      console.warn = originalWarn;
+    }
+    expect(warnings).toEqual([
+      "No pattern provided and no pattern found in result metadata. Not running.",
+    ]);
+
+    const unknownPiece = runtime.getCell(
+      manager.getSpace(),
+      "unknown-setup-pattern-" + crypto.randomUUID(),
+      { type: "object", properties: {} },
+    );
+    await runtime.editWithRetry((tx) => {
+      unknownPiece.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: "Z".repeat(43),
+        symbol: "default",
+      });
+    });
+
+    await expect(runtime.setup(undefined, undefined, {}, unknownPiece))
+      .rejects.toThrow(`Unknown pattern: ${"Z".repeat(43)}#default`);
   });
 
   it("pulls before reading result values", async () => {
@@ -4759,7 +4835,27 @@ describe("piece pull materialization", () => {
     expect(manager.getResult(piece).get()).toEqual({ output: 50 });
   });
 
+  it("stores repository metadata when preparing without starting", async () => {
+    const repository = "https://github.com/commontoolsinc/labs";
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, doublePattern()),
+      { input: 5 },
+      undefined,
+      { start: false },
+    );
+
+    await manager.runWithPattern(
+      trustPattern(runtime, tenfoldPattern()),
+      entityRefToString(piece.entityId),
+      { input: 5 },
+      { start: false, repository },
+    );
+
+    expect(getPatternRepository(piece)).toBe(repository);
+  });
+
   it("persists setPattern replacement by identity for fresh runtime reloads", async () => {
+    const repository = "https://github.com/commontoolsinc/labs";
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledMultiplierProgram("v1", 2),
       { space: manager.getSpace() },
@@ -4768,7 +4864,7 @@ describe("piece pull materialization", () => {
       firstPattern,
       { input: 5 },
       "compiled-set-pattern-" + crypto.randomUUID(),
-      { start: true },
+      { start: true, repository },
     );
     const id = entityRefToString(piece.entityId);
     const controller = new PieceController(manager, piece);
@@ -4780,7 +4876,14 @@ describe("piece pull materialization", () => {
       output: 10,
     });
 
-    await controller.setPattern(compiledMultiplierProgram("v2", 10));
+    await controller.setPattern(
+      compiledMultiplierProgram(
+        "v2",
+        10,
+        "/packages/patterns/examples/multiplier.tsx",
+      ),
+      { repository },
+    );
     await manager.runtime.idle();
     await manager.synced();
 
@@ -4818,9 +4921,45 @@ describe("piece pull materialization", () => {
       expect(source?.files.some((file) => file.contents.includes("v2"))).toBe(
         true,
       );
+      expect(await freshPiece.getPatternRef()).toEqual({
+        ...freshRef,
+        source: {
+          ref: `cf:pattern:${freshRef!.identity}`,
+          repository,
+          entry: "/packages/patterns/examples/multiplier.tsx",
+        },
+      });
+      expect(getPatternRepository(freshCell)).toBe(repository);
     } finally {
       await freshRuntime.dispose();
     }
+  });
+
+  it("preserves a repository until a source update explicitly replaces it", async () => {
+    const originalRepository = "https://github.com/commontoolsinc/labs";
+    const replacementRepository = "https://github.com/commontoolsinc/patterns";
+    const firstPattern = await runtime.patternManager.compilePattern(
+      compiledMultiplierProgram("v1", 2),
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      firstPattern,
+      { input: 5 },
+      "repository-update-" + crypto.randomUUID(),
+      { start: true, repository: originalRepository },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await controller.setPattern(compiledMultiplierProgram("v2", 3));
+    expect(getPatternRepository(piece)).toBe(originalRepository);
+
+    await controller.setPattern(compiledMultiplierProgram("v3", 4), {
+      repository: replacementRepository,
+    });
+    expect(getPatternRepository(piece)).toBe(replacementRepository);
+    expect((await controller.getPatternRef())?.source.repository).toBe(
+      replacementRepository,
+    );
   });
 
   it("recovers a durable contract through a scoped redirect link", async () => {
@@ -5274,6 +5413,7 @@ describe("piece pull materialization", () => {
   });
 
   it("preserves conflicting defined values while merging object defaults", async () => {
+    const originalRepository = "https://github.com/commontoolsinc/labs";
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledDefaultedOptionsProgram(1),
       { space: manager.getSpace() },
@@ -5282,7 +5422,7 @@ describe("piece pull materialization", () => {
       firstPattern,
       { value: 4 },
       "defined-object-default-conflict-" + crypto.randomUUID(),
-      { start: true },
+      { start: true, repository: originalRepository },
     );
     const controller = new PieceController(manager, piece);
     const inputCell = await controller.input.getCell();
@@ -5295,10 +5435,13 @@ describe("piece pull materialization", () => {
     const previousRef = getPatternIdentityRef(piece);
 
     await expect(
-      controller.setPattern(compiledDefaultedOptionsProgram(2)),
+      controller.setPattern(compiledDefaultedOptionsProgram(2), {
+        repository: "https://github.com/commontoolsinc/other",
+      }),
     ).rejects.toThrow(/updated arguments do not match the candidate schema/);
 
     expect(getPatternIdentityRef(piece)).toEqual(previousRef);
+    expect(getPatternRepository(piece)).toBe(originalRepository);
     expect(inputCell.getRaw()).toEqual({ value: 4, options: "legacy" });
   });
 

@@ -2,18 +2,27 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { cf, checkStderr, stripAnsi } from "./utils.ts";
 import {
+  inspectPiece,
+  listPieces,
+  newPiece,
   recreateSpaceRootPattern,
   resolveLinkEndpointAddress,
   resolvePieceConfig,
+  setHomePattern,
+  setPiecePattern,
   type SpaceConfig,
   withRuntimeCleanupOnFailure,
 } from "../lib/piece.ts";
 import { SlugResolutionError } from "@commonfabric/piece";
 import {
+  formatPatternIdentity,
+  formatPatternRef,
+  localPatternEntry,
   normalizeApiUrl,
   parseLink,
   parsePieceOptions,
   parseSpaceOptions,
+  piece,
 } from "../commands/piece.ts";
 
 const API_URL = "https://cf.dev";
@@ -24,6 +33,47 @@ const FULL_URL = `${API_URL}/${SPACE}/${PIECE}`;
 const NO_PIECE_FULL_URL = `${API_URL}/${SPACE}`;
 
 describe("cli piece parsing", () => {
+  it("formats structured pattern references for human output", () => {
+    const identity = "A".repeat(43);
+    const patternRef = {
+      identity,
+      symbol: "default",
+      source: {
+        ref: `cf:pattern:${identity}`,
+        entry: "/notes/note.tsx",
+      },
+    };
+    expect(formatPatternRef(patternRef)).toBe("/notes/note.tsx");
+    expect(formatPatternIdentity(patternRef)).toBe(
+      `cf:module/${identity}#default`,
+    );
+    expect(formatPatternRef({
+      identity,
+      symbol: "named",
+      source: { ref: `cf:pattern:${identity}` },
+    })).toBe(`cf:pattern:${identity}`);
+    expect(formatPatternRef({
+      identity,
+      symbol: "named",
+      source: {
+        ref: `cf:pattern:${identity}`,
+        repository: "https://github.com/commontoolsinc/labs",
+        entry: "/packages/patterns/notes/note.tsx",
+      },
+    })).toBe(
+      "https://github.com/commontoolsinc/labs#/packages/patterns/notes/note.tsx",
+    );
+    expect(formatPatternRef({
+      identity,
+      symbol: "named",
+      source: {
+        ref: `cf:pattern:${identity}`,
+        origin: "cf:/did:key:z6Mk/example",
+      },
+    })).toBe("cf:/did:key:z6Mk/example");
+    expect(formatPatternRef(undefined)).toBe("<unknown>");
+  });
+
   it("normalizes API URLs for app route hints", () => {
     expect(normalizeApiUrl(
       "https://rapids.saga-castor.ts.net/",
@@ -397,11 +447,195 @@ describe("cli piece parsing", () => {
     });
   });
 
-  it("shows slug option for piece new", async () => {
-    const { code, stdout, stderr } = await cf("piece new --help");
-    checkStderr(stderr);
-    expect(code).toBe(0);
-    expect(stripAnsi(stdout.join("\n"))).toContain("--slug");
+  it("shows source-location options for every local deployment command", () => {
+    const optionFlags = (command: string) =>
+      piece.getCommand(command)!.getOptions().flatMap((option) => option.flags);
+    const newFlags = optionFlags("new");
+    expect(newFlags).toContain("--slug");
+    expect(newFlags).toContain("--root");
+    expect(newFlags).toContain("--repository");
+
+    for (const command of ["setsrc", "set-home"]) {
+      const flags = optionFlags(command);
+      expect(flags).toContain("--root");
+      expect(flags).toContain("--repository");
+    }
+  });
+
+  it("rejects repository metadata when resetting the home pattern", async () => {
+    const { piece: command } = await import(
+      "../commands/piece.ts?repository-reset-test"
+    );
+    command.throwErrors();
+    await expect(command.parse([
+      "set-home",
+      "--reset",
+      "--repository",
+      "https://github.com/commontoolsinc/labs",
+    ])).rejects.toThrow("Cannot use --repository with --reset");
+  });
+
+  it("builds repository-aware entries from deployment flags", () => {
+    expect(localPatternEntry("/repo/pattern.tsx", {
+      mainExport: "named",
+      repository: "https://github.com/commontoolsinc/labs",
+      root: "/repo",
+    })).toEqual({
+      mainPath: "/repo/pattern.tsx",
+      mainExport: "named",
+      repository: "https://github.com/commontoolsinc/labs",
+      rootPath: "/repo",
+    });
+  });
+
+  it("lists pattern provenance and isolates unreadable pieces", async () => {
+    const patternRef = {
+      identity: "A".repeat(43),
+      symbol: "default",
+      source: {
+        ref: `cf:pattern:${"A".repeat(43)}`,
+        repository: "https://github.com/commontoolsinc/labs",
+        entry: "/notes/note.tsx",
+      },
+    };
+    const controller = {
+      getAllPieces: () =>
+        Promise.resolve([
+          { id: "of:readable" },
+          { id: "of:unreadable" },
+        ]),
+      get: (id: string) =>
+        id === "of:unreadable"
+          ? Promise.reject(new Error("not readable"))
+          : Promise.resolve({
+            getCell: () => ({
+              key: () => ({ pull: () => Promise.resolve("Readable") }),
+            }),
+            getPatternRef: () => Promise.resolve(patternRef),
+          }),
+    };
+
+    const listed = await listPieces({
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+    }, {
+      loadManager: () => Promise.resolve({} as any),
+      createController: () => controller as any,
+    });
+
+    expect(listed).toEqual([
+      { id: "of:readable", name: "Readable", patternRef },
+      { id: "of:unreadable", error: "not readable" },
+    ]);
+  });
+
+  it("forwards repository metadata through piece creation and updates", async () => {
+    const repository = "https://github.com/commontoolsinc/labs";
+    const entry = { mainPath: "/repo/main.tsx", repository };
+    const program = {} as any;
+    const manager = {
+      add: () => Promise.resolve(),
+    };
+    let createOptions: unknown;
+    let setPatternOptions: unknown;
+    const createdPiece = { id: PIECE, getCell: () => ({} as any) };
+
+    const createdId = await newPiece(
+      { apiUrl: API_URL, space: SPACE, identity: ID },
+      entry,
+      { start: false },
+      {
+        loadManager: () => Promise.resolve(manager as any),
+        createController: () => ({
+          ensureDefaultPattern: () => Promise.resolve({}),
+          create: (_program: unknown, options: unknown) => {
+            createOptions = options;
+            return Promise.resolve(createdPiece);
+          },
+        } as any),
+        getPinnedProgramFromFile: () => Promise.resolve(program),
+      },
+    );
+    expect(createdId).toBe(PIECE);
+    expect(createOptions).toEqual({ repository, start: false });
+
+    await setPiecePattern(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: "notes" },
+      entry,
+      {
+        loadManager: () => Promise.resolve(manager as any),
+        resolvePieceAddress: () => Promise.resolve(PIECE),
+        createController: () => ({
+          get: () =>
+            Promise.resolve({
+              setPattern: (_program: unknown, options: unknown) => {
+                setPatternOptions = options;
+                return Promise.resolve();
+              },
+            }),
+        } as any),
+        getPinnedProgramFromFile: () => Promise.resolve(program),
+      },
+    );
+    expect(setPatternOptions).toEqual({ repository });
+  });
+
+  it("returns pattern provenance from piece inspection", async () => {
+    const patternRef = {
+      identity: "B".repeat(43),
+      symbol: "default",
+      source: { ref: `cf:pattern:${"B".repeat(43)}` },
+    };
+    const inspected = await inspectPiece(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: "notes" },
+      {
+        loadManager: () => Promise.resolve({} as any),
+        resolvePieceAddress: () => Promise.resolve(PIECE),
+        createController: () => ({
+          get: () =>
+            Promise.resolve({
+              id: PIECE,
+              name: () => "Notes",
+              getPatternRef: () => Promise.resolve(patternRef),
+              input: { get: () => Promise.resolve({ title: "Input" }) },
+              result: { get: () => Promise.resolve({ title: "Result" }) },
+              readingFrom: () => Promise.resolve([]),
+              readBy: () => Promise.resolve([]),
+            }),
+        } as any),
+      },
+    );
+
+    expect(inspected.patternRef).toEqual(patternRef);
+    expect(inspected.id).toBe(PIECE);
+  });
+
+  it("forwards repository metadata when deploying a home pattern", async () => {
+    const repository = "https://github.com/commontoolsinc/labs";
+    let recreateOptions: unknown;
+
+    await setHomePattern(
+      { apiUrl: API_URL, identity: ID },
+      { mainPath: "/repo/home.tsx", repository },
+      {
+        loadIdentity: () =>
+          Promise.resolve({ did: () => "did:key:home" } as any),
+        loadManager: () => Promise.resolve({} as any),
+        getProgramFromFile: () => Promise.resolve({} as any),
+        createController: () => ({
+          recreateDefaultPattern: (options: unknown) => {
+            recreateOptions = options;
+            return Promise.resolve({ id: PIECE });
+          },
+        } as any),
+      },
+    );
+
+    expect(recreateOptions).toEqual({
+      customProgram: {},
+      repository,
+    });
   });
 
   it("shows set-slug command options", async () => {

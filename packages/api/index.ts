@@ -370,6 +370,7 @@ export type MetaField =
   | "patternIdentity" // content-addressed {identity, symbol} pattern reference
   | "patternSource" // provenance: the source a piece tracks for updates (a
   // toolshed pattern path, or later a `cf:` fabric ref)
+  | "patternRepository" // optional caller-supplied repository locator
   | "internal"
   | "schema"
   | "slug";
