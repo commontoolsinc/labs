@@ -16,6 +16,7 @@ export interface FuseSupervisorOptions {
   cfcXattrNamespace?: string;
   cfcWritebackXattrs?: boolean;
   cfcWritebackState?: string;
+  dangerouslyAllowIncompatibleSchema?: boolean;
   statePath?: string;
   supervisorStatusPath?: string;
   supervisorToken?: string;
@@ -75,6 +76,9 @@ export function buildFuseChildCommand(
     if (options.cfcWritebackState) {
       args.push("--cfc-writeback-state", options.cfcWritebackState);
     }
+    if (options.dangerouslyAllowIncompatibleSchema) {
+      args.push("--dangerously-allow-incompatible-schema");
+    }
     if (options.supervisorStatusPath) {
       args.push("--supervisor-status", options.supervisorStatusPath);
     }
@@ -103,6 +107,8 @@ export function buildFuseChildCommand(
       cfcXattrNamespace: options.cfcXattrNamespace,
       cfcWritebackXattrs: options.cfcWritebackXattrs,
       cfcWritebackState: options.cfcWritebackState,
+      dangerouslyAllowIncompatibleSchema:
+        options.dangerouslyAllowIncompatibleSchema,
       supervisorStatusPath: options.supervisorStatusPath,
       supervisorToken: options.supervisorToken,
     }),
@@ -286,6 +292,9 @@ export function parseSupervisorArgs(
       case "--cfc-writeback-state":
         options.cfcWritebackState = requireValue(rawArgs, ++i, arg);
         break;
+      case "--dangerously-allow-incompatible-schema":
+        options.dangerouslyAllowIncompatibleSchema = true;
+        break;
       case "--state-path":
         options.statePath = requireValue(rawArgs, ++i, arg);
         break;
@@ -339,6 +348,8 @@ Options:
   --cfc-xattr-namespace <ns>      CFC xattr namespace
   --cfc-writeback-xattrs          Enable CFC writeback xattrs
   --cfc-writeback-state <path>    CFC writeback state path
+  --dangerously-allow-incompatible-schema
+                                  Allow incompatible source schema updates
   --state-path <path>             Mount state file to update with child PID
   --supervisor-status <path>      Child readiness and heartbeat status file
   --supervisor-token <token>      Child readiness status correlation token

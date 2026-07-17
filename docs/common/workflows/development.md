@@ -54,4 +54,10 @@ deno task cf piece link ... editor-id/items viewer-id/items
   link must refresh it before writing again so they use the updated schema.
   Concurrent updates are applied atomically; a stale update fails instead of
   overwriting a newer source.
+  If an intentional breaking migration requires replacing the source anyway,
+  pass `--dangerously-allow-incompatible-schema`. This bypasses both the
+  old-to-new pattern schema proof and retained-link contract proof; it does not
+  bypass compilation, normal value validation, or atomic stale-update checks.
+  `piece new` accepts the same flag for deploy-script symmetry, but a fresh
+  piece has no predecessor schema to compare.
 - Test one feature at a time

@@ -277,6 +277,7 @@ export async function main(argv: string[] = Deno.args) {
       "cfc-writeback-xattrs",
       "allow-other",
       "noattrcache",
+      "dangerously-allow-incompatible-schema",
     ],
     collect: ["space"],
     default: {
@@ -296,6 +297,7 @@ export async function main(argv: string[] = Deno.args) {
       "cfc-writeback-xattrs": false,
       "allow-other": false,
       noattrcache: false,
+      "dangerously-allow-incompatible-schema": false,
     },
   });
 
@@ -341,6 +343,9 @@ export async function main(argv: string[] = Deno.args) {
   // The background supervisor doesn't forward --debug to the daemon child,
   // but env vars are inherited, so this is the reliable switch in CI.
   const debug = args.debug || Deno.env.get("CF_FUSE_DEBUG") === "1";
+  const dangerouslyAllowIncompatibleSchema = Boolean(
+    args["dangerously-allow-incompatible-schema"],
+  );
   const requestedCfcMode = String(args["cfc-mode"] ?? "");
   if (requestedCfcMode && !parseCfcMode(requestedCfcMode)) {
     console.warn(
@@ -1592,6 +1597,8 @@ export async function main(argv: string[] = Deno.args) {
             main: baseMain,
             mainExport: baseMainExport,
             files: updatedFiles,
+          }, {
+            dangerouslyAllowIncompatibleSchema,
           });
           // Clear error.log on success
           const errorLogIno = tree.lookup(srcIno, "error.log");

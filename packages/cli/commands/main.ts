@@ -125,6 +125,10 @@ export const main = new Command()
         "--cfc-writeback-state <path:string>",
         "CFC writeback state path.",
       )
+      .option(
+        "--dangerously-allow-incompatible-schema",
+        "Allow incompatible source schema updates.",
+      )
       .option("--state-path <path:string>", "Mount state file to update.")
       .option(
         "--supervisor-status <path:string>",
@@ -154,6 +158,8 @@ export const main = new Command()
           cfcXattrNamespace: options.cfcXattrNamespace,
           cfcWritebackXattrs: options.cfcWritebackXattrs,
           cfcWritebackState: options.cfcWritebackState,
+          dangerouslyAllowIncompatibleSchema:
+            options.dangerouslyAllowIncompatibleSchema,
           statePath: options.statePath,
           supervisorStatusPath: options.supervisorStatus,
           supervisorToken: options.supervisorToken,

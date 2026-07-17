@@ -454,12 +454,16 @@ describe("cli piece parsing", () => {
     expect(newFlags).toContain("--slug");
     expect(newFlags).toContain("--root");
     expect(newFlags).toContain("--repository");
+    expect(newFlags).toContain("--dangerously-allow-incompatible-schema");
 
     for (const command of ["setsrc", "set-home"]) {
       const flags = optionFlags(command);
       expect(flags).toContain("--root");
       expect(flags).toContain("--repository");
     }
+    expect(optionFlags("setsrc")).toContain(
+      "--dangerously-allow-incompatible-schema",
+    );
   });
 
   it("rejects repository metadata when resetting the home pattern", async () => {
@@ -560,25 +564,40 @@ describe("cli piece parsing", () => {
     expect(createdId).toBe(PIECE);
     expect(createOptions).toEqual({ repository, start: false });
 
-    await setPiecePattern(
-      { apiUrl: API_URL, space: SPACE, identity: ID, piece: "notes" },
-      entry,
-      {
-        loadManager: () => Promise.resolve(manager as any),
-        resolvePieceAddress: () => Promise.resolve(PIECE),
-        createController: () => ({
-          get: () =>
-            Promise.resolve({
-              setPattern: (_program: unknown, options: unknown) => {
-                setPatternOptions = options;
-                return Promise.resolve();
-              },
-            }),
-        } as any),
-        getPinnedProgramFromFile: () => Promise.resolve(program),
-      },
-    );
+    const pieceConfig = {
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+      piece: "notes",
+    };
+    const deps = {
+      loadManager: () => Promise.resolve(manager as any),
+      resolvePieceAddress: () => Promise.resolve(PIECE),
+      createController: () => ({
+        get: () =>
+          Promise.resolve({
+            setPattern: (_program: unknown, options: unknown) => {
+              setPatternOptions = options;
+              return Promise.resolve();
+            },
+          }),
+      } as any),
+      getPinnedProgramFromFile: () => Promise.resolve(program),
+    };
+
+    await setPiecePattern(pieceConfig, entry, {}, deps);
     expect(setPatternOptions).toEqual({ repository });
+
+    await setPiecePattern(
+      pieceConfig,
+      entry,
+      { dangerouslyAllowIncompatibleSchema: true },
+      deps,
+    );
+    expect(setPatternOptions).toEqual({
+      repository,
+      dangerouslyAllowIncompatibleSchema: true,
+    });
   });
 
   it("returns pattern provenance from piece inspection", async () => {

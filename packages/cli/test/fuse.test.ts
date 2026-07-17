@@ -985,6 +985,7 @@ describe("buildDenoArgs", () => {
       cfcXattrNamespace: "both",
       cfcWritebackXattrs: true,
       cfcWritebackState: "/tmp/cf-writeback.json",
+      dangerouslyAllowIncompatibleSchema: true,
     });
     expect(args).toContain("--allow-other");
     expect(args).toContain("--cfc-mode");
@@ -995,6 +996,7 @@ describe("buildDenoArgs", () => {
     expect(args).toContain("--cfc-writeback-xattrs");
     expect(args).toContain("--cfc-writeback-state");
     expect(args).toContain("/tmp/cf-writeback.json");
+    expect(args).toContain("--dangerously-allow-incompatible-schema");
   });
 
   it("passes noattrcache through to the daemon", () => {
@@ -1118,6 +1120,7 @@ describe("FUSE supervisor command construction", () => {
       cfcXattrNamespace: "both",
       cfcWritebackXattrs: true,
       cfcWritebackState: "/tmp/cfc.json",
+      dangerouslyAllowIncompatibleSchema: true,
     });
 
     expect(args.slice(0, 2)).toEqual(["run", "--allow-run"]);
@@ -1142,6 +1145,7 @@ describe("FUSE supervisor command construction", () => {
     expect(args).toContain("--supervisor-token");
     expect(args).toContain("token-1");
     expect(args).toContain("--noattrcache");
+    expect(args).toContain("--dangerously-allow-incompatible-schema");
     expect(args.filter((arg) => arg === "--space").length).toBe(2);
   });
 
@@ -1573,6 +1577,7 @@ describe("buildFuseBinaryArgs", () => {
       cfcXattrNamespace: "both",
       cfcWritebackXattrs: true,
       cfcWritebackState: "/tmp/cfc.json",
+      dangerouslyAllowIncompatibleSchema: true,
     });
 
     expect(args).toContain("--allow-other");
@@ -1585,6 +1590,7 @@ describe("buildFuseBinaryArgs", () => {
     expect(args).toContain("--cfc-writeback-xattrs");
     const stateIndex = args.indexOf("--cfc-writeback-state");
     expect(args[stateIndex + 1]).toBe("/tmp/cfc.json");
+    expect(args).toContain("--dangerously-allow-incompatible-schema");
   });
 
   it("forwards an attrcache-timeout of zero", () => {
@@ -1608,6 +1614,7 @@ describe("parseSupervisorArgs", () => {
       "--api-url",
       "http://localhost:8000",
       "--noattrcache",
+      "--dangerously-allow-incompatible-schema",
       "--space",
       "home",
     ]);
@@ -1616,6 +1623,7 @@ describe("parseSupervisorArgs", () => {
     expect(options.mountpoint).toBe("/mnt");
     expect(options.apiUrl).toBe("http://localhost:8000");
     expect(options.noattrcache).toBe(true);
+    expect(options.dangerouslyAllowIncompatibleSchema).toBe(true);
     expect(options.attrcacheTimeout).toBeUndefined();
     expect(options.spaces).toEqual(["home"]);
   });
@@ -1645,6 +1653,9 @@ describe("parseSupervisorArgs", () => {
     expect(parseSupervisorArgs(["--help"]).help).toBe(true);
     expect(supervisorHelp()).toContain("--attrcache-timeout <seconds>");
     expect(supervisorHelp()).toContain("--noattrcache");
+    expect(supervisorHelp()).toContain(
+      "--dangerously-allow-incompatible-schema",
+    );
   });
 });
 
@@ -1671,5 +1682,6 @@ describe("fuse mount option validation", () => {
     expect(help).toContain("--noattrcache");
     expect(help).toContain("--attrcache-timeout");
     expect(help).toContain("Conflicts");
+    expect(help).toContain("--dangerously-allow-incompatible-schema");
   });
 });

@@ -297,13 +297,20 @@ export const piece = new Command()
     "Repository locator associated with the authored source (stored exactly as supplied).",
   )
   .option("--slug <slug:string>", "Slug URL/address for this piece.")
+  .option(
+    "--dangerously-allow-incompatible-schema",
+    "Accepted for deploy-script symmetry; a new piece has no previous schema to compare.",
+  )
   .action(async (options, main) => {
     setQuietMode(!!options.quiet);
     const spaceConfig = parseSpaceOptions(options);
     const pieceId = await newPiece(
       spaceConfig,
       localPatternEntry(main, options),
-      { start: options.start, slug: options.slug },
+      {
+        start: options.start,
+        slug: options.slug,
+      },
     );
     render(pieceId);
     const browserPieceRef = options.slug ?? pieceId;
@@ -420,11 +427,22 @@ export const piece = new Command()
     "--repository <repository:string>",
     "Repository locator associated with the authored source (stored exactly as supplied).",
   )
+  .option(
+    "--dangerously-allow-incompatible-schema",
+    "Replace the source even when pattern or retained-link schema compatibility cannot be proven.",
+  )
   .arguments("<main:string>")
   .action(async (options, mainPath) => {
     setQuietMode(!!options.quiet);
     const pieceConfig = parsePieceOptions(options);
-    await setPiecePattern(pieceConfig, localPatternEntry(mainPath, options));
+    await setPiecePattern(
+      pieceConfig,
+      localPatternEntry(mainPath, options),
+      {
+        dangerouslyAllowIncompatibleSchema:
+          options.dangerouslyAllowIncompatibleSchema,
+      },
+    );
     render(`Updated source for piece ${pieceConfig.piece}`);
     hint(cliText(`NEXT STEPS:
   → Test in browser: ${pieceConfig.apiUrl}/${pieceConfig.space}/${pieceConfig.piece}
