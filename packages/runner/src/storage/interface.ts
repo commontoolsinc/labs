@@ -373,6 +373,22 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   retractDocPullKick?(space: MemorySpace, id: URI, scope?: CellScope): void;
 
   /**
+   * Subscribe to same-step replica evictions (FA4 membership retraction).
+   * Both `shouldPullDoc`'s reservation and the runtime's missing-doc kick
+   * set are manager-lifetime latches justified by "the first pull leaves a
+   * live server-side watch behind" — an invariant a doc-set membership
+   * retraction breaks. The manager clears its own reservation on eviction
+   * and fans the event out here so runtime-side latches for the evicted
+   * `(space, scope, id)` can be cleared in the same step; otherwise the next
+   * read of the evicted doc is deduped away and goes silently stale (FB7).
+   * Returns an unsubscribe function. Optional: managers without lazy remote
+   * replication never evict and simply don't implement it.
+   */
+  subscribeDocEvictions?(
+    callback: (space: MemorySpace, id: URI, scope?: CellScope) => void,
+  ): () => void;
+
+  /**
    * Wait for the currently pending cross-space promises (and any they
    * transitively kick) to settle, WITHOUT waiting for full provider sync the
    * way `synced()` does. Used by `Cell.pull()`'s convergence loop so pulls

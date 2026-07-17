@@ -991,6 +991,18 @@ export class Runtime {
     (this.storageManager as {
       setTelemetry?: (telemetry: RuntimeTelemetry) => void;
     }).setTelemetry?.(this.telemetry);
+    // FA4/FB7: a doc-set membership retraction evicts the doc from the
+    // replica; the same step must clear this runtime's missing-doc kick latch
+    // for it — the latch's "first pull leaves a live watch behind"
+    // justification does not survive the retraction — so the next traversal
+    // read re-kicks instead of being deduped into silent staleness.
+    this.docEvictionUnsubscribe = this.storageManager.subscribeDocEvictions?.(
+      (space, id, scope) => {
+        this.missingDocLoadKicks.delete(
+          `${space}\0${normalizeCellScope(scope)}\0${id}`,
+        );
+      },
+    );
     this.moduleByteCache = options.moduleByteCache;
     // Validated + digested + frozen before the trust-snapshot provider
     // default below, whose `revision` covers the config digest (a trust
@@ -1233,6 +1245,11 @@ export class Runtime {
     // Clear module registry
     this.moduleRegistry.clear();
 
+    // Detach from the storage manager's eviction signal (a sequential
+    // Runtime may reuse the manager; its subscription must not outlive us).
+    this.docEvictionUnsubscribe?.();
+    this.docEvictionUnsubscribe = undefined;
+
     // Cancel all storage operations
     await this.storageManager.close();
 
@@ -1373,7 +1390,12 @@ export class Runtime {
   // subscription, so a later creation of the doc still arrives — one kick per
   // doc suffices. Scope is part of the key: scoped instances (user/session)
   // are distinct docs, and a kick for one scope must not suppress another's.
+  // EXCEPTION (FA4/FB7): a doc-set membership retraction ends exactly that
+  // per-doc subscription, so the storage manager's eviction signal (subscribed
+  // in the constructor) clears the evicted doc's entry — the next traversal
+  // read must re-kick or the reader goes silently stale.
   private missingDocLoadKicks = new Set<string>();
+  private docEvictionUnsubscribe?: () => void;
 
   /**
    * Asynchronously load a link target that a read found absent from the

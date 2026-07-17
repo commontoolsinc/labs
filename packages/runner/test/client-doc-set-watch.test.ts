@@ -17,6 +17,7 @@ import {
   setServerPrimaryExecutionDocSetWatchConfig,
 } from "@commonfabric/memory/v2";
 import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
+import { Runtime } from "../src/runtime.ts";
 import {
   ScriptedSessionTransport,
   type ScriptedTransportMessage,
@@ -192,36 +193,64 @@ class DocSetWatchTransport extends ScriptedSessionTransport {
         return;
       }
       case "transact": {
-        const commit = message.commit as
-          | { operations?: Array<{ op: string; id: URI }> }
-          | undefined;
-        const seq = ++this.#seq;
-        for (const op of commit?.operations ?? []) {
-          if (op.op !== "delete") {
-            this.store.set(op.id, { seq, value: this.store.get(op.id)?.value });
-          }
+        if (this.holdTransacts) {
+          this.heldTransacts.push(message);
+          return;
         }
-        this.respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            seq,
-            branch: "",
-            revisions: (commit?.operations ?? []).map((op, opIndex) => ({
-              id: op.id,
-              branch: "",
-              seq,
-              opIndex,
-              commitSeq: seq,
-              op: op.op,
-            })),
-          },
-        });
+        this.#respondTransactOk(message);
         return;
       }
       default:
         throw new Error(`Unhandled scripted message: ${message.type}`);
     }
+  }
+
+  /** When set, transact requests are parked instead of answered — the test
+   * releases them with `releaseHeldTransacts` to control WHEN a commit
+   * confirms or rejects relative to the membership reconciles around it. */
+  holdTransacts = false;
+  readonly heldTransacts: ScriptedTransportMessage[] = [];
+
+  releaseHeldTransacts(verdict: "confirm" | "reject"): void {
+    for (const held of this.heldTransacts.splice(0)) {
+      if (verdict === "reject") {
+        this.respond({
+          type: "response",
+          requestId: held.requestId!,
+          error: { name: "TransactionError", message: "scripted rejection" },
+        });
+        continue;
+      }
+      this.#respondTransactOk(held);
+    }
+  }
+
+  #respondTransactOk(message: ScriptedTransportMessage): void {
+    const commit = message.commit as
+      | { operations?: Array<{ op: string; id: URI }> }
+      | undefined;
+    const seq = ++this.#seq;
+    for (const op of commit?.operations ?? []) {
+      if (op.op !== "delete") {
+        this.store.set(op.id, { seq, value: this.store.get(op.id)?.value });
+      }
+    }
+    this.respond({
+      type: "response",
+      requestId: message.requestId!,
+      ok: {
+        seq,
+        branch: "",
+        revisions: (commit?.operations ?? []).map((op, opIndex) => ({
+          id: op.id,
+          branch: "",
+          seq,
+          opIndex,
+          commitSeq: seq,
+          op: op.op,
+        })),
+      },
+    });
   }
 
   /** Push an unsolicited server remove for `id` (a graph-diff retraction —
@@ -259,6 +288,7 @@ function setUp(transport: DocSetWatchTransport) {
 const ROOT = "of:doc-set-root" as URI;
 const CHILD = "of:doc-set-child" as URI;
 const INTERMEDIATE = "of:doc-set-intermediate" as URI;
+const LINKED = "of:doc-set-linked-target" as URI;
 
 Deno.test("flag-on: a boot-root graph watch is demoted to doc-set membership covering the held closure", async () => {
   setServerPrimaryExecutionConfig(true);
@@ -414,6 +444,162 @@ Deno.test("flag-on: an unlink retraction evicts the doc in the same step and re-
       2,
       "the re-pull delivers the current value",
     );
+  } finally {
+    await storageManager.close();
+  }
+});
+
+Deno.test("flag-on: eviction hands back the runtime/manager pull latches so the traversal read path re-pulls (FB7)", async () => {
+  // FA4's binding text — "any membership retraction evicts the doc from the
+  // replica in the same step so the next read misses and re-pulls" — must hold
+  // on the PRODUCTION read path (traversal -> reportMissingLinkTarget ->
+  // Runtime.ensureLinkedDocLoaded), not just bare provider.sync. That path is
+  // gated by two manager-lifetime dedup latches (Runtime.missingDocLoadKicks,
+  // StorageManager #docPullKicks) whose justification — "the first pull leaves
+  // a live server-side watch behind" — is exactly the invariant a membership
+  // retraction breaks. If eviction does not hand both back, the re-read is
+  // deduped away and the reader goes silently stale (FA4's forbidden
+  // stale-hit).
+  setServerPrimaryExecutionConfig(true);
+  setServerPrimaryExecutionDocSetWatchConfig(true);
+  const transport = new DocSetWatchTransport();
+  transport.store.set(ROOT, { seq: 1, value: { n: 1 } });
+  transport.store.set(LINKED, { seq: 1, value: { n: 1 } });
+  const { storageManager, provider } = setUp(transport);
+  const rt = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+    experimental: {
+      serverPrimaryExecution: true,
+      serverPrimaryExecutionDocSetWatch: true,
+    },
+  });
+  try {
+    // Engage the doc-set surface: the cold pull demotes to a docs watch.
+    await provider.sync(ROOT, { path: [], schema: false });
+    await waitFor(() => transport.lastDocsWatch() !== undefined);
+    await flush();
+
+    // A traversal read misses LINKED; the missing-link kick pulls it,
+    // populating BOTH lifetime dedup latches on the way.
+    const link = {
+      space,
+      id: LINKED,
+      path: [] as readonly string[],
+    } as Parameters<typeof rt.ensureLinkedDocLoaded>[0];
+    rt.ensureLinkedDocLoaded(link, space);
+    await (storageManager.crossSpaceSettled?.() ?? Promise.resolve());
+    await waitFor(() =>
+      transport.lastDocsWatch()?.docs?.some((d) => d.id === LINKED) === true
+    );
+    await flush();
+    assertEquals(
+      (provider.get(LINKED)?.value as { n?: number })?.n,
+      1,
+      "the kicked pull delivered the target",
+    );
+
+    // A membership retraction evicts LINKED from the replica (FA4 same-step)
+    // and shrinks the export.
+    transport.emitRemove(LINKED);
+    await waitFor(() => provider.get(LINKED) === undefined);
+    await waitFor(() =>
+      transport.lastDocsWatch()?.docs?.some((d) => d.id === LINKED) !== true
+    );
+
+    // Another device re-links LINKED: the doc exists again server-side with a
+    // NEWER value ...
+    transport.store.set(LINKED, { seq: 9, value: { n: 2 } });
+
+    // ... and the reader traverses to it again. The read must miss and
+    // RE-PULL. With either latch still set, no fetch is ever issued: LINKED
+    // is no longer a member and no graph watch survives demotion, so nothing
+    // ever delivers it — the reader renders undefined until runtime restart.
+    const addsBefore = transport.watchAdds.length;
+    rt.ensureLinkedDocLoaded(link, space);
+    await (storageManager.crossSpaceSettled?.() ?? Promise.resolve());
+    assert(
+      transport.watchAdds.length > addsBefore,
+      "the re-linked doc's traversal read issues a fresh pull " +
+        "(no fetch = the reader goes silently stale)",
+    );
+    await flush();
+    assertEquals(
+      (provider.get(LINKED)?.value as { n?: number })?.n,
+      2,
+      "the re-pull delivers the current value",
+    );
+  } finally {
+    await rt.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("flag-on: a doc the replica no longer holds leaves the export — an aged session's member set equals a fresh session's (FB27)", async () => {
+  // FA8's client-side half: exported membership derives from what the replica
+  // HOLDS (FA4 — confirmed AND pending/overlay layers). A record whose every
+  // layer has emptied (here: a rejected commit dropping the only pending
+  // overlay of a written-not-read doc) no longer holds the doc, so it must
+  // leave the export within one reconcile cycle — otherwise an aged session's
+  // member set grows without bound and never equals a fresh session's.
+  setServerPrimaryExecutionConfig(true);
+  setServerPrimaryExecutionDocSetWatchConfig(true);
+  const transport = new DocSetWatchTransport();
+  transport.store.set(ROOT, { seq: 1, value: { n: 1 } });
+  const { storageManager, provider } = setUp(transport);
+  try {
+    await provider.sync(ROOT, { path: [], schema: false });
+    await waitFor(() => transport.lastDocsWatch() !== undefined);
+    await flush();
+
+    // Mount: while its commit is in flight the pending overlay HOLDS the
+    // written-not-read doc, so it is exported (the FA4 speculative-write
+    // membership the fixture above pins — that contract must stay intact).
+    transport.holdTransacts = true;
+    const tx = storageManager.edit();
+    const write = tx.write(
+      { space, id: INTERMEDIATE, type: DOCUMENT_MIME, path: ["value", "n"] },
+      2,
+    );
+    assert(write.ok, "write applies");
+    const commit = tx.commit();
+    await waitFor(() =>
+      transport.lastDocsWatch()?.docs?.some((d) => d.id === INTERMEDIATE) ===
+        true
+    );
+
+    // Release: the commit rejects, dropping the doc's only pending overlay.
+    // The replica now holds nothing for it (no confirmed state, no pending).
+    transport.releaseHeldTransacts("reject");
+    const result = await commit;
+    assert(result.error !== undefined, "the commit was rejected");
+
+    // The released doc leaves the export within one reconcile cycle.
+    await flush();
+    assertEquals(
+      transport.lastDocsWatch()?.docs?.some((d) => d.id === INTERMEDIATE),
+      false,
+      "a doc the replica no longer holds leaves the export",
+    );
+
+    // FA8 acceptance: the aged session's member set equals a fresh session's
+    // for the same held set.
+    const freshTransport = new DocSetWatchTransport();
+    freshTransport.store.set(ROOT, { seq: 1, value: { n: 1 } });
+    const fresh = setUp(freshTransport);
+    try {
+      await fresh.provider.sync(ROOT, { path: [], schema: false });
+      await waitFor(() => freshTransport.lastDocsWatch() !== undefined);
+      const memberIds = (t: DocSetWatchTransport) =>
+        [...new Set(t.lastDocsWatch()?.docs?.map((d) => d.id) ?? [])].sort();
+      assertEquals(
+        memberIds(transport),
+        memberIds(freshTransport),
+        "the aged session's member set equals a fresh session's",
+      );
+    } finally {
+      await fresh.storageManager.close();
+    }
   } finally {
     await storageManager.close();
   }

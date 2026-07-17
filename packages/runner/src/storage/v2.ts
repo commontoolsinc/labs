@@ -976,6 +976,13 @@ export class StorageManager implements IStorageManager {
   // absent targets (dangling links, deleted docs) from churning the
   // cross-space convergence loop on every read.
   #docPullKicks = new Set<string>();
+  // FA4/FB7: layers above the manager (the Runtime's missing-doc kick set)
+  // hold their own lifetime pull-dedup latches keyed by (space, scope, id);
+  // they register here so a membership-retraction eviction clears them in
+  // the same step as the replica record (see subscribeDocEvictions).
+  #docEvictionSubscribers = new Set<
+    (space: MemorySpace, id: URI, scope?: CellScope) => void
+  >();
   // In-flight commits, registered synchronously by the transaction layer at
   // commit() entry (see IStorageManager.trackPendingCommit). This is the
   // write-durability barrier: distinct from #crossSpacePromises, which also
@@ -1241,6 +1248,7 @@ export class StorageManager implements IStorageManager {
               sessionId: this.#sessionId,
             }),
         getTelemetry: () => this.#telemetry,
+        onDocEvicted: (id, scope) => this.handleDocEviction(space, id, scope),
       });
       this.#providers.set(space, provider);
     }
@@ -1490,6 +1498,38 @@ export class StorageManager implements IStorageManager {
 
   retractDocPullKick(space: MemorySpace, id: URI, scope?: CellScope): void {
     this.#docPullKicks.delete(`${space}\0${docKey(id, scope)}`);
+  }
+
+  /** See IStorageManager.subscribeDocEvictions. */
+  subscribeDocEvictions(
+    callback: (space: MemorySpace, id: URI, scope?: CellScope) => void,
+  ): () => void {
+    this.#docEvictionSubscribers.add(callback);
+    return () => this.#docEvictionSubscribers.delete(callback);
+  }
+
+  /**
+   * Same-step latch release on membership retraction (FA4/FB7): a space
+   * replica evicting a held doc reports it here. The pull-kick latches exist
+   * because "the first pull registers a server-side watch that keeps the doc
+   * flowing afterwards" — the retraction just ended that watch coverage, so
+   * both the manager's own reservation and any subscribed runtime-side kick
+   * latch must be handed back or the next read of the doc is deduped into
+   * silent staleness instead of re-pulling.
+   */
+  private handleDocEviction(
+    space: MemorySpace,
+    id: URI,
+    scope?: CellScope,
+  ): void {
+    this.retractDocPullKick(space, id, scope);
+    for (const callback of this.#docEvictionSubscribers) {
+      try {
+        callback(space, id, scope);
+      } catch (error) {
+        console.error("doc-eviction subscriber threw:", error);
+      }
+    }
   }
 
   addCrossSpacePromise(promise: Promise<void>): void {
@@ -1862,6 +1902,11 @@ type ProviderOptions = {
   createSession: () => Promise<ReplicaSessionHandle>;
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
   getTelemetry?: () => TelemetrySink | undefined;
+  /** FA4/FB7: same-step latch release on membership retraction — the manager
+   * clears its lifetime pull-dedup latches (its own shouldPullDoc reservation
+   * plus subscribed runtime-side kick latches) for each doc the replica
+   * evicts, so the next read re-pulls instead of going silently stale. */
+  onDocEvicted?: (id: URI, scope?: CellScope) => void;
 };
 
 /**
@@ -2270,6 +2315,8 @@ class SpaceReplica implements ISpaceReplica {
   #nextLocalSeq = 1;
   #closed = false;
   #getTelemetry: () => TelemetrySink | undefined;
+  /** FA4/FB7 latch release on eviction; see ProviderOptions.onDocEvicted. */
+  readonly #onDocEvicted?: (id: URI, scope?: CellScope) => void;
   #caughtUpLocalSeq = 0;
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
@@ -2293,6 +2340,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#subscription = options.subscription;
     this.#createSession = options.createSession;
     this.#getTelemetry = options.getTelemetry ?? (() => undefined);
+    this.#onDocEvicted = options.onDocEvicted;
     this.#shadowWrites = options.shadowWrites;
     this.#actionTransactionRouter = options.actionTransactionRouter;
     this.#clientExecutionEffectInFlight = options.clientExecutionEffectInFlight;
@@ -3197,10 +3245,31 @@ class SpaceReplica implements ISpaceReplica {
    * latency trade: a written-not-read member must be delivered before/with the
    * sync whose toSeq covers its settlement's acceptedCommitSeq.
    */
+  /**
+   * Whether a record still HOLDS doc state in any layer (FA4's membership
+   * unit): a pending/overlay version (speculative write target, framework
+   * read in flight) or confirmed state. Confirmed "deleted as of seq N"
+   * (seq > 0, value undefined) IS held state — the replica can serve the
+   * absence, matching F3's absent-false member semantics. What does NOT
+   * qualify is a fully emptied record — confirmed reset to (0, undefined)
+   * with no pending versions — e.g. after a rejected commit drops a
+   * written-not-read doc's only overlay, or after a retraction remove
+   * applied outside the engaged doc-set surface. The replica cannot serve
+   * any read from such a husk, so it must not be exported (FB27): otherwise
+   * an aged session's member set grows without bound and never equals a
+   * fresh session's.
+   */
+  private recordHoldsDocState(record: DocumentRecord): boolean {
+    return record.pending.length > 0 ||
+      record.confirmed.seq > 0 ||
+      record.confirmed.value !== undefined;
+  }
+
   private spaceLaneDocSetMembers(): DocReadAddress[] {
     const members: DocReadAddress[] = [];
     for (const record of this.#docs.values()) {
       if (record.address.lane !== "space") continue;
+      if (!this.recordHoldsDocState(record)) continue;
       members.push({
         id: record.address.id,
         // Declared scope only — the wire never carries a resolved scope key
@@ -3212,11 +3281,14 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   /** Membership keys of the space-lane replica doc set (its docKeys), used to
-   * detect whether a reconcile would actually change the served set. */
+   * detect whether a reconcile would actually change the served set. Must
+   * apply the same held-state filter as spaceLaneDocSetMembers, or a released
+   * doc would keep the unchanged-membership guard from ever re-registering. */
   private spaceLaneDocSetKeys(): Set<string> {
     const keys = new Set<string>();
     for (const record of this.#docs.values()) {
       if (record.address.lane !== "space") continue;
+      if (!this.recordHoldsDocState(record)) continue;
       keys.add(docKey(record.address.id, record.address.scope, "space"));
     }
     return keys;
@@ -3331,6 +3403,13 @@ class SpaceReplica implements ISpaceReplica {
       this.#docs.delete(key);
       this.#watchedIds.delete(key);
       removedAny = true;
+      // FB7: hand back the manager/runtime pull-dedup latches in the SAME
+      // step. Those latches encode "the first pull left a live server-side
+      // watch behind, so a re-kick is never needed" — the retraction being
+      // applied here is precisely that watch coverage ending, so without the
+      // release the next runtime-path read (traversal -> ensureLinkedDocLoaded
+      // -> shouldPullDoc) is deduped away and the reader goes silently stale.
+      this.#onDocEvicted?.(id, scope);
       // Clear selector coverage so `sync()` re-fetches instead of treating the
       // evicted doc as already covered by a live watch.
       const baseAddress = {
@@ -4877,6 +4956,7 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private dropPending(localSeq: number): void {
+    let releasedSpaceDoc = false;
     for (const record of this.#docs.values()) {
       const firstPendingIndex = record.pending.findIndex((entry) =>
         entry.localSeq === localSeq
@@ -4888,7 +4968,18 @@ class SpaceReplica implements ISpaceReplica {
         entry.localSeq !== localSeq
       );
       dropMaterializedSuffix(record, firstPendingIndex);
+      if (
+        record.address.lane === "space" && !this.recordHoldsDocState(record)
+      ) {
+        releasedSpaceDoc = true;
+      }
     }
+    // FB27 (FA8's client half): dropping a rejected commit's overlay can empty
+    // a written-not-read doc's record entirely — the replica no longer holds
+    // the doc, so the export must shrink within one reconcile cycle rather
+    // than serve the husk forever. Inert while the doc-set surface is off
+    // (the schedule below is gated on it), keeping flag-off byte-identical.
+    if (releasedSpaceDoc) this.scheduleSpaceDocSetReconcile();
   }
 
   private visibleVersion(id: URI, scope?: CellScope): {
