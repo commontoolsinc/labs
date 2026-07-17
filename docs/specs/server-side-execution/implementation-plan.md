@@ -1783,6 +1783,21 @@ The W0.1 context-key fix is necessary but not sufficient for this phase.
 
 #### C1 — user lanes: work-order decomposition (2026-07-15)
 
+**Status (2026-07-17): the design §7 C1 acceptance criterion is MET.**
+C1.1–C1.9 are implemented and pushed, including three gate-driven
+additions: C1.9b (the §4 output-widening pair admitted at the runner
+servability seam; lane-instance hydration before claimed runs — the gate
+found both) and C1.9c (per-lane serving: lane-keyed candidates and
+(action, contextKey) claims, per-lane recompute). The two-principal
+PerUser gate is green: user-rank claims for both principals, durably
+isolated rows per scope key, zero client derived wire writes, zero
+lease-fence rejects (env-gated pending a documented teardown-hygiene
+flake; default runs deterministic). Remaining C1 bookkeeping: C1.10
+fixtures, C1.11 parent-doc edits. Feed progress alongside: F1 and F2 are
+landed — F2's measured effect on the flag-on default-app run: graph.query
+171,482 → 1,566 DAG traversals per run; total traversal work ~270k →
+~12.2k (~95% reduction).
+
 Mapped against the code with no external blockers, no feed dependency
 (the feed gates C2 only — design §6/§7/OQ4), and no open owner decisions.
 Much substrate already landed with W0.1: the engine resolves user/session
