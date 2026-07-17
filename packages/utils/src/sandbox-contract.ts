@@ -28,8 +28,6 @@ export const TRUSTED_DATA_HELPERS = Object.freeze(
   [
     "schema",
     "__cf_data",
-    "nonPrivateRandom",
-    "safeDateNow",
   ] as const,
 );
 export type TrustedDataHelperName = (typeof TRUSTED_DATA_HELPERS)[number];

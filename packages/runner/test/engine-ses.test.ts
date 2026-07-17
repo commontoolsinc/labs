@@ -226,9 +226,8 @@ describe("Engine in SES mode", () => {
         {
           name: "/main.tsx",
           contents: [
-            'import { safeDateNow } from "commonfabric";',
             "function buildYears() {",
-            "  const currentYear = new Date(safeDateNow()).getFullYear();",
+            "  const currentYear = 2024;",
             "  const years: string[] = [];",
             "  for (let year = currentYear; year >= currentYear - 2; year--) {",
             "    years.push(String(year));",

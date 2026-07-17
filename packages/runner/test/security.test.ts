@@ -581,10 +581,10 @@ describe("SES security regressions", () => {
         {
           name: "/poison.ts",
           contents: [
-            'import { safeDateNow } from "commonfabric";',
+            'import { getPatternEnvironment } from "commonfabric";',
             "export default function poison() {",
             "  try {",
-            "    (safeDateNow as typeof safeDateNow & { poisoned?: number }).poisoned = 123;",
+            "    (getPatternEnvironment as typeof getPatternEnvironment & { poisoned?: number }).poisoned = 123;",
             '    return "allowed";',
             "  } catch (error) {",
             "    return (error as Error).name;",
@@ -600,9 +600,9 @@ describe("SES security regressions", () => {
         {
           name: "/probe.ts",
           contents: [
-            'import { safeDateNow } from "commonfabric";',
+            'import { getPatternEnvironment } from "commonfabric";',
             "export default function probe() {",
-            "  return (safeDateNow as typeof safeDateNow & { poisoned?: number }).poisoned ?? 0;",
+            "  return (getPatternEnvironment as typeof getPatternEnvironment & { poisoned?: number }).poisoned ?? 0;",
             "}",
           ].join("\n"),
         },

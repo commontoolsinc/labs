@@ -93,7 +93,6 @@ import {
   toIndentedDebugString,
 } from "@commonfabric/data-model/value-debug";
 import { freezeVerifiedPlainData } from "../sandbox/plain-data.ts";
-import { nonPrivateRandom, safeDateNow } from "./safe-builtins.ts";
 import {
   registerUnsafeHostTrustedValue,
   type UnsafeHostTrust,
@@ -256,8 +255,6 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
 
     // Environment
     getPatternEnvironment,
-    nonPrivateRandom,
-    safeDateNow,
 
     // Entity utilities
     getEntityId,

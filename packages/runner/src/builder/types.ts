@@ -47,11 +47,9 @@ import type {
   LLMFunction,
   Module,
   NavigateToFunction,
-  NonPrivateRandomFunction,
   Pattern,
   PatternToolFunction,
   Reactive,
-  SafeDateNowFunction,
   schema as schemaFunction,
   SELF as SELFSymbol,
   SqliteCfLinkFunction,
@@ -318,6 +316,14 @@ export type Frame = {
   space?: MemorySpace;
   inHandler?: boolean;
   reactives: Set<Reactive<any>>;
+  /**
+   * Positive marker for the kind of authored pattern code running under this
+   * frame: "handler" for an event handler, "lift" for a reactive computation
+   * (lift/computed/derived/action). Absent for internal runner frames. Unlike
+   * `inHandler`, this lets a guard distinguish a pattern lift from internal code
+   * — both of which lack `inHandler` — without conflating them.
+   */
+  frameKind?: "lift" | "handler";
   unsafe_binding?: UnsafeBinding;
   sourceLocationContext?: SourceLocationContext;
   /**
@@ -392,8 +398,6 @@ export interface BuilderFunctionsAndConstants {
 
   // Environment
   getPatternEnvironment: GetPatternEnvironmentFunction;
-  nonPrivateRandom: NonPrivateRandomFunction;
-  safeDateNow: SafeDateNowFunction;
 
   // Entity utilities
   getEntityId: GetEntityIdFunction;

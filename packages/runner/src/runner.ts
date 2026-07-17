@@ -3582,6 +3582,7 @@ export class Runner {
         tx,
       },
       inHandler,
+      frameKind: inHandler ? "handler" : "lift",
       runtime: this.runtime,
       space: resultCell.space,
       tx,
