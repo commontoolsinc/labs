@@ -1,6 +1,8 @@
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import {
+  type BranchName,
   type CellScope,
+  type EntityId,
   type EntitySnapshot,
   type GraphQuery,
   type SessionSync,
@@ -9,6 +11,34 @@ import {
 } from "../v2.ts";
 
 export type SessionCacheEntry = SessionSyncUpsert & { scope: CellScope };
+
+/**
+ * F3 doc-set membership entry: one exact document a session's doc-set watches
+ * subscribe to. Keyed server-side by the RESOLVED scope key (FA2). Carries the
+ * per-member `lastSentSeq` so a resumed catch-up is an incremental diff rather
+ * than a reseed (FA15), and a `sources` refcount so membership shrink is
+ * correct across multiple contributing watches/observations (FA8): a member
+ * leaves the served set only when its LAST source drops.
+ */
+export interface DocSetMember {
+  branch: BranchName;
+  id: EntityId;
+  /** Declared scope of the address (space | user | session). */
+  scope: CellScope;
+  /** Resolved scope key of the member instance (FA2). */
+  scopeKey: string;
+  /** Highest member seq already delivered to this session (FA15). */
+  lastSentSeq: number;
+  /** Contributing sources (watch ids); a member survives while any remain. */
+  sources: Set<string>;
+}
+
+/** Membership key: the resolved-scopeKey instance identity (FA2). */
+export const docSetMemberKey = (
+  branch: BranchName,
+  id: EntityId,
+  scopeKey: string,
+): string => `${branch}\0${scopeKey}\0${id}`;
 
 const DEFAULT_SCOPE: CellScope = "space";
 
@@ -81,11 +111,25 @@ const compareSyncAddress = (
   (left.scope ?? DEFAULT_SCOPE).localeCompare(right.scope ?? DEFAULT_SCOPE) ||
   left.id.localeCompare(right.id);
 
+/** Type guard: the graph/query watch kinds carry a `query`; the F3 `docs`
+ * kind does not and is handled by the doc-set membership path instead. */
+export const isGraphWatchSpec = (
+  watch: WatchSpec,
+): watch is Exclude<WatchSpec, { kind: "docs" }> => watch.kind !== "docs";
+
+/** Type guard for the F3 doc-set watch kind. */
+export const isDocSetWatchSpec = (
+  watch: WatchSpec,
+): watch is Extract<WatchSpec, { kind: "docs" }> => watch.kind === "docs";
+
 export const groupedQueries = (
   watches: readonly WatchSpec[],
 ): Map<string, GraphQuery> => {
   const grouped = new Map<string, GraphQuery>();
   for (const watch of watches) {
+    // Doc-set watches never enter graph grouping — they are point-read
+    // members, not traversal roots.
+    if (!isGraphWatchSpec(watch)) continue;
     const branch = watch.query.branch ?? "";
     const existing = grouped.get(branch);
     if (existing === undefined) {
@@ -121,13 +165,23 @@ const watchRootIdentity = (root: GraphQuery["roots"][number]): string =>
       : internSchemaAsTaggedHashString(root.selector.schema),
   ]);
 
-const watchQueryIdentity = (watch: WatchSpec): string =>
-  JSON.stringify({
+const watchQueryIdentity = (watch: WatchSpec): string => {
+  if (!isGraphWatchSpec(watch)) {
+    // Doc-set watches have no query; identity is their declared address set.
+    return JSON.stringify({
+      branch: watch.branch ?? "",
+      docs: watch.docs
+        .map((doc) => JSON.stringify([doc.id, doc.scope ?? DEFAULT_SCOPE]))
+        .toSorted(),
+    });
+  }
+  return JSON.stringify({
     branch: watch.query.branch ?? "",
     atSeq: watch.query.atSeq ?? null,
     excludeSent: watch.query.excludeSent === true,
     roots: watch.query.roots.map(watchRootIdentity).toSorted(),
   });
+};
 
 export const sameWatchSpec = (
   left: WatchSpec,

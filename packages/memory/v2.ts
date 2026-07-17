@@ -259,6 +259,16 @@ export interface MemoryProtocolFlags {
    * principal (the amendment-11 cohort gate). Absent parses to false.
    */
   serverPrimaryExecutionContextLatticeClaimsV1: boolean;
+  /**
+   * Subcapability (F3 feed protocol): the peer understands the additive `docs`
+   * WatchSpec kind — server-membership doc-set watches whose members receive
+   * per-wave point-read deltas rather than schema-graph re-traversal. Sessions
+   * without it may never register a `docs` watch (the server rejects the kind).
+   * Absent parses to false; layered above `serverPrimaryExecutionV1` (the base
+   * feed capability). A mixed fleet stays valid — a non-negotiating peer keeps
+   * its graph watches unchanged.
+   */
+  serverPrimaryExecutionDocSetWatchV1: boolean;
   /** Build-inherent support for authenticated scheduler writer lookup. */
   schedulerWriterLookup: boolean;
   commitPreconditions: boolean;
@@ -289,6 +299,7 @@ export type WireMemoryProtocolFlags = {
   serverPrimaryExecutionClaimRoutingV1?: boolean;
   serverPrimaryExecutionBuiltinPassivityV1?: boolean;
   serverPrimaryExecutionContextLatticeClaimsV1?: boolean;
+  serverPrimaryExecutionDocSetWatchV1?: boolean;
   schedulerWriterLookup?: boolean;
   commitPreconditions?: boolean;
   syncSchemaTable?: boolean;
@@ -377,7 +388,29 @@ export interface GraphWatchSpec {
   query: GraphQuery;
 }
 
-export type WatchSpec = QueryWatchSpec | GraphWatchSpec;
+/**
+ * F3 doc-set watch kind (feed protocol): a session subscribes to an EXACT set
+ * of documents addressed by DECLARED scope; the server maintains membership
+ * and fans out per-wave point-read deltas for the members instead of
+ * re-traversing a schema graph every commit wave. Additive beside `query` and
+ * `graph`, negotiated via the absent-false `serverPrimaryExecutionDocSetWatchV1`
+ * subcapability; a peer that never advertised it rejects the kind.
+ *
+ * FA2: membership is keyed server-side by the RESOLVED scope key, resolved at
+ * registration under the session's scope context or the C1.4b-validated acting
+ * lane — the addresses carry declared scope ONLY, exactly like graph-query
+ * roots. A resolved `scopeKey` on a wire address is a protocol error (the wire
+ * never carries resolved keys inbound).
+ */
+export interface DocSetWatchSpec {
+  id: string;
+  kind: "docs";
+  branch?: BranchName;
+  /** Declared-address members (id + declared scope). No resolved scope key. */
+  docs: DocReadAddress[];
+}
+
+export type WatchSpec = QueryWatchSpec | GraphWatchSpec | DocSetWatchSpec;
 
 export interface ActionClaimKey {
   branch: BranchName;
@@ -1201,6 +1234,7 @@ let syncSchemaTableEnabled = true;
 let serverPrimaryExecutionEnabled = false;
 let serverPrimaryExecutionClaimRank: ServerPrimaryExecutionClaimRank = "space";
 let serverPrimaryExecutionContextLatticeClaimsEnabled = false;
+let serverPrimaryExecutionDocSetWatchEnabled = false;
 
 /**
  * Ambient runtime flag for persistent scheduler observations and rehydration.
@@ -1284,6 +1318,27 @@ export function resetServerPrimaryExecutionContextLatticeClaimsConfig(): void {
 }
 
 /**
+ * Ambient runtime flag for the F3 doc-set watch subcapability: whether this
+ * server ADVERTISES the additive `docs` WatchSpec kind. Defaults off; a mixed
+ * fleet stays valid either way — a non-negotiating peer keeps its graph
+ * watches. Registered in docs/development/EXPERIMENTAL_OPTIONS.md as
+ * `serverPrimaryExecutionDocSetWatchV1`.
+ */
+export function setServerPrimaryExecutionDocSetWatchConfig(
+  enabled?: boolean,
+): void {
+  serverPrimaryExecutionDocSetWatchEnabled = enabled ?? false;
+}
+
+export function getServerPrimaryExecutionDocSetWatchConfig(): boolean {
+  return serverPrimaryExecutionDocSetWatchEnabled;
+}
+
+export function resetServerPrimaryExecutionDocSetWatchConfig(): void {
+  serverPrimaryExecutionDocSetWatchEnabled = false;
+}
+
+/**
  * Ambient runtime flag for commit preconditions. The runner owns the feature,
  * but the memory protocol needs the value during client/server handshakes.
  */
@@ -1329,6 +1384,10 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   serverPrimaryExecutionContextLatticeClaimsV1:
     getServerPrimaryExecutionConfig() &&
     getServerPrimaryExecutionContextLatticeClaimsConfig(),
+  // Layered subcapability of the base feed capability: its own dial defaults
+  // off, so enabling server-primary execution alone never turns it on.
+  serverPrimaryExecutionDocSetWatchV1: getServerPrimaryExecutionConfig() &&
+    getServerPrimaryExecutionDocSetWatchConfig(),
   // Build-inherent capability: older servers omit it and clients fail open to
   // piece-root discovery rather than sending an RPC the peer cannot parse.
   schedulerWriterLookup: true,
@@ -1415,6 +1474,15 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const serverPrimaryExecutionDocSetWatchV1 =
+    value.serverPrimaryExecutionDocSetWatchV1;
+  if (
+    serverPrimaryExecutionDocSetWatchV1 !== undefined &&
+    typeof serverPrimaryExecutionDocSetWatchV1 !== "boolean"
+  ) {
+    return null;
+  }
+
   const commitPreconditions = value.commitPreconditions;
   if (
     commitPreconditions !== undefined &&
@@ -1467,6 +1535,10 @@ export const parseMemoryProtocolFlags = (
     // must never be treated as accepting them.
     serverPrimaryExecutionContextLatticeClaimsV1:
       serverPrimaryExecutionContextLatticeClaimsV1 === true,
+    // Absent-false: an older peer that never heard of doc-set watches must
+    // never be treated as accepting the `docs` kind.
+    serverPrimaryExecutionDocSetWatchV1:
+      serverPrimaryExecutionDocSetWatchV1 === true,
     schedulerWriterLookup: schedulerWriterLookup === true,
     commitPreconditions: commitPreconditions === true,
     syncSchemaTable: syncSchemaTable === true,
@@ -1492,6 +1564,8 @@ export const wireMemoryProtocolFlags = (
     flags.serverPrimaryExecutionBuiltinPassivityV1,
   serverPrimaryExecutionContextLatticeClaimsV1:
     flags.serverPrimaryExecutionContextLatticeClaimsV1,
+  serverPrimaryExecutionDocSetWatchV1:
+    flags.serverPrimaryExecutionDocSetWatchV1,
   schedulerWriterLookup: flags.schedulerWriterLookup,
   commitPreconditions: flags.commitPreconditions,
   syncSchemaTable: flags.syncSchemaTable,

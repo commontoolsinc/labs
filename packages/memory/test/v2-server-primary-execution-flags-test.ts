@@ -6,6 +6,8 @@ type ServerPrimaryExecutionFlagApi = {
   resetServerPrimaryExecutionConfig(): void;
   setServerPrimaryExecutionContextLatticeClaimsConfig(enabled?: boolean): void;
   resetServerPrimaryExecutionContextLatticeClaimsConfig(): void;
+  setServerPrimaryExecutionDocSetWatchConfig(enabled?: boolean): void;
+  resetServerPrimaryExecutionDocSetWatchConfig(): void;
   getMemoryProtocolFlags(): Record<string, boolean>;
   parseMemoryProtocolFlags(value: unknown): Record<string, boolean> | null;
   wireMemoryProtocolFlags(
@@ -108,5 +110,60 @@ Deno.test("context-lattice-claims-v1 is a separately dialed subcapability that d
   } finally {
     api.resetServerPrimaryExecutionConfig();
     api.resetServerPrimaryExecutionContextLatticeClaimsConfig();
+  }
+});
+
+Deno.test("doc-set-watch-v1 is a separately dialed subcapability that defaults off", () => {
+  api.resetServerPrimaryExecutionConfig();
+  api.resetServerPrimaryExecutionDocSetWatchConfig();
+  try {
+    // Its own dial defaults off: enabling server-primary execution alone never
+    // advertises the additive docs watch kind.
+    api.setServerPrimaryExecutionConfig(true);
+    assertEquals(
+      api.getMemoryProtocolFlags().serverPrimaryExecutionDocSetWatchV1,
+      false,
+    );
+    api.setServerPrimaryExecutionDocSetWatchConfig(true);
+    assertEquals(
+      api.getMemoryProtocolFlags().serverPrimaryExecutionDocSetWatchV1,
+      true,
+    );
+    // Rides on the base capability: with server-primary execution off the
+    // advertisement stays off no matter the dial.
+    api.resetServerPrimaryExecutionConfig();
+    assertEquals(
+      api.getMemoryProtocolFlags().serverPrimaryExecutionDocSetWatchV1,
+      false,
+    );
+
+    // Wire semantics: absent parses to false (an older peer never accepts the
+    // docs kind), non-boolean rejects, and the flag round-trips.
+    assertEquals(
+      api.parseMemoryProtocolFlags({})?.serverPrimaryExecutionDocSetWatchV1,
+      false,
+    );
+    assertEquals(
+      api.parseMemoryProtocolFlags({
+        serverPrimaryExecutionDocSetWatchV1: true,
+      })?.serverPrimaryExecutionDocSetWatchV1,
+      true,
+    );
+    assertEquals(
+      api.parseMemoryProtocolFlags({
+        serverPrimaryExecutionDocSetWatchV1: "true",
+      }),
+      null,
+    );
+    api.setServerPrimaryExecutionConfig(true);
+    api.setServerPrimaryExecutionDocSetWatchConfig(true);
+    assertEquals(
+      api.wireMemoryProtocolFlags(api.getMemoryProtocolFlags())
+        .serverPrimaryExecutionDocSetWatchV1,
+      true,
+    );
+  } finally {
+    api.resetServerPrimaryExecutionConfig();
+    api.resetServerPrimaryExecutionDocSetWatchConfig();
   }
 });

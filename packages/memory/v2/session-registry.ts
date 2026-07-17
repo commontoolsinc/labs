@@ -8,7 +8,7 @@ import {
   WatchSpec,
 } from "../v2.ts";
 import type { TrackedGraphState } from "./query.ts";
-import type { SessionCacheEntry } from "./server-sync.ts";
+import type { DocSetMember, SessionCacheEntry } from "./server-sync.ts";
 import { trackedIdsFromEntries } from "./server-sync.ts";
 
 export type SessionState = {
@@ -24,6 +24,10 @@ export type SessionState = {
   watchScopePrincipal?: string;
   graphs: Map<string, TrackedGraphState>;
   entities: Map<string, SessionCacheEntry>;
+  /** F3 doc-set membership, keyed by resolved scope key (docSetMemberKey).
+   * Distinct from `entities` (graph-tracked): the per-wave fan-out point-reads
+   * these members and `trackedIds` is the UNION of both surfaces (FA14). */
+  docSetMembers: Map<string, DocSetMember>;
   trackedIds: Set<string>;
   caughtUpLocalSeq: number;
   pendingCaughtUpLocalSeq: number;
@@ -37,6 +41,9 @@ export type SessionState = {
   /** C1.7: recomputed on EVERY attach (new/resume/takeover), so a takeover
    * from a connection without the subcapability downgrades the session. */
   serverPrimaryExecutionContextLatticeClaimsV1: boolean;
+  /** F3: recomputed on every attach, like the other subcapabilities. Gates
+   * whether this session may register the `docs` WatchSpec kind. */
+  serverPrimaryExecutionDocSetWatchV1: boolean;
   executionFeedSeq: number;
   executionFeedAckSeq: number;
   executionEvents: Array<{
@@ -110,6 +117,7 @@ export class SessionRegistry {
       serverPrimaryExecutionClaimRoutingV1?: boolean;
       serverPrimaryExecutionBuiltinPassivityV1?: boolean;
       serverPrimaryExecutionContextLatticeClaimsV1?: boolean;
+      serverPrimaryExecutionDocSetWatchV1?: boolean;
     } = {},
   ): OpenSessionState {
     this.#prune();
@@ -171,6 +179,9 @@ export class SessionRegistry {
       watchScopePrincipal: existing?.watchScopePrincipal,
       graphs: existing?.graphs ?? new Map(),
       entities: existing?.entities ?? new Map(),
+      // FA15: doc-set membership survives reconnect so resumed catch-up diffs
+      // incrementally against per-member lastSentSeq rather than reseeding.
+      docSetMembers: existing?.docSetMembers ?? new Map(),
       trackedIds: existing?.trackedIds ??
         trackedIdsFromEntries(existing?.entities?.values() ?? []),
       caughtUpLocalSeq: existing?.caughtUpLocalSeq ?? 0,
@@ -185,6 +196,8 @@ export class SessionRegistry {
         capabilities.serverPrimaryExecutionBuiltinPassivityV1 === true,
       serverPrimaryExecutionContextLatticeClaimsV1:
         capabilities.serverPrimaryExecutionContextLatticeClaimsV1 === true,
+      serverPrimaryExecutionDocSetWatchV1:
+        capabilities.serverPrimaryExecutionDocSetWatchV1 === true,
       executionFeedSeq,
       executionFeedAckSeq,
       executionEvents,

@@ -1837,13 +1837,24 @@ export class WatchView {
 
     let changedEntities = false;
     for (const [key, entity] of upserts) {
+      // A same-frame remove still wins over its own frame's upsert (a
+      // structural drop the diff resolved), preserving the deterministic batch
+      // contract; only the cross-frame guard below protects newer instances.
       if (!removeKeys.has(key)) {
         this.#entities.set(key, entity);
         changedEntities = true;
       }
     }
 
+    // FA8 monotonic guard, paralleling the upsert seq guard: a remove evicts
+    // only when this frame's watermark is at or past the stored instance's seq
+    // — a stale or reordered remove frame never wipes a newer value. F3
+    // server-side membership shrink emits no removes at all (a document
+    // deletion stays a deleted-upsert), so the removes that reach here are
+    // genuine topology-diff evictions.
     for (const key of removeKeys) {
+      const existing = this.#entities.get(key);
+      if (existing !== undefined && existing.seq > sync.toSeq) continue;
       changedEntities = this.#entities.delete(key) || changedEntities;
     }
 
