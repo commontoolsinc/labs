@@ -243,6 +243,84 @@ type SupervisorStatusState =
   | "exiting"
   | "exited";
 
+export interface SupervisorStatusWriterOptions {
+  statusPath: string;
+  pid: number;
+  mountpoint: string;
+  startedAt: string;
+  now?: () => string;
+  writeTextFile?: (path: string, data: string) => Promise<void>;
+  rename?: (from: string, to: string) => Promise<void>;
+  remove?: (path: string) => Promise<void>;
+}
+
+export type SupervisorStatusWriter = (
+  state: SupervisorStatusState,
+  extra?: Record<string, unknown>,
+) => Promise<void>;
+
+/**
+ * Build the function that writes the daemon's supervisor state to its status
+ * file, the record `cf fuse status` reads.
+ *
+ * The states form a lifecycle, and the calls announcing them come from places
+ * that do not coordinate: the startup path, the readiness report, the heartbeat
+ * and the signal handler. Two properties keep a concurrent reader from ever
+ * seeing a wrong file. Each write replaces the file by writing a scratch file
+ * and renaming it over the target, so a reader woken mid-write sees a complete
+ * document rather than a truncated one. And the writes are serialized through a
+ * queue, so the file ends on the state of the most recent call: renames issued
+ * concurrently could otherwise complete in either order and let a heartbeat
+ * still in flight replace a terminal state, leaving the file claiming a mount
+ * that has already gone.
+ */
+export function createSupervisorStatusWriter(
+  options: SupervisorStatusWriterOptions,
+): SupervisorStatusWriter {
+  const writeTextFile = options.writeTextFile ?? Deno.writeTextFile;
+  const rename = options.rename ?? Deno.rename;
+  const remove = options.remove ?? Deno.remove;
+  const now = options.now ?? (() => new Date().toISOString());
+  let queue: Promise<void> = Promise.resolve();
+  let writes = 0;
+
+  const publish = async (document: string): Promise<void> => {
+    // The scratch name carries the PID and a counter, so a daemon left over
+    // from an earlier mount at this path cannot share it.
+    const pendingPath = `${options.statusPath}.${options.pid}.${writes++}.tmp`;
+    try {
+      await writeTextFile(pendingPath, document);
+      await rename(pendingPath, options.statusPath);
+    } catch (error) {
+      await remove(pendingPath).catch(() => undefined);
+      throw error;
+    }
+  };
+
+  return (state, extra = {}) => {
+    // Built at call time, so `updatedAt` records when the state was reached
+    // rather than when its turn in the queue came up.
+    const document = JSON.stringify(
+      {
+        state,
+        pid: options.pid,
+        mountpoint: options.mountpoint,
+        startedAt: options.startedAt,
+        updatedAt: now(),
+        ...extra,
+      },
+      null,
+      2,
+    );
+    const write = queue.then(() => publish(document));
+    // A failed write must neither stop later states from being published nor
+    // surface through the queue as an unhandled rejection. The caller still
+    // sees the failure through the promise returned here.
+    queue = write.catch(() => undefined);
+    return write;
+  };
+}
+
 export async function writeFailedSupervisorStartupStatus(
   error: unknown,
   writeSupervisorStatus: (
@@ -389,31 +467,17 @@ export async function main(argv: string[] = Deno.args) {
   }
   const supervisorStatusPath = String(args["supervisor-status"] ?? "");
   const supervisorStatusStartedAt = new Date().toISOString();
-  function supervisorStatusPayload(
-    state: SupervisorStatusState,
-    extra: Record<string, unknown>,
-  ): Record<string, unknown> {
-    return {
-      state,
+  // The status file is the record `cf fuse status` reads later. The heartbeat
+  // refreshes it; readers take a snapshot whenever they ask. The writer keeps
+  // those snapshots whole and in order — see createSupervisorStatusWriter.
+  const writeSupervisorStatus: SupervisorStatusWriter = supervisorStatusPath
+    ? createSupervisorStatusWriter({
+      statusPath: supervisorStatusPath,
       pid: Deno.pid,
       mountpoint,
       startedAt: supervisorStatusStartedAt,
-      updatedAt: new Date().toISOString(),
-      ...extra,
-    };
-  }
-  // The status file is the record `cf fuse status` reads later. The heartbeat
-  // refreshes it; readers take a snapshot whenever they ask.
-  async function writeSupervisorStatus(
-    state: SupervisorStatusState,
-    extra: Record<string, unknown> = {},
-  ): Promise<void> {
-    if (!supervisorStatusPath) return;
-    await Deno.writeTextFile(
-      supervisorStatusPath,
-      JSON.stringify(supervisorStatusPayload(state, extra), null, 2),
-    );
-  }
+    })
+    : () => Promise.resolve();
   // A background mount's parent holds the read end of this process's stdout and
   // blocks on it, so one line here wakes it on the transition itself. Only the
   // states a starting mount can settle on are published; the heartbeat stays out
@@ -424,7 +488,16 @@ export async function main(argv: string[] = Deno.args) {
     extra: Record<string, unknown> = {},
   ): Promise<void> {
     if (!supervisorStatusPath) return;
-    const line = `${JSON.stringify(supervisorStatusPayload(state, extra))}\n`;
+    const line = `${
+      JSON.stringify({
+        state,
+        pid: Deno.pid,
+        mountpoint,
+        startedAt: supervisorStatusStartedAt,
+        updatedAt: new Date().toISOString(),
+        ...extra,
+      })
+    }\n`;
     const bytes = new TextEncoder().encode(line);
     try {
       for (let written = 0; written < bytes.length;) {
@@ -3404,19 +3477,6 @@ export async function main(argv: string[] = Deno.args) {
     };
   }
 
-  await reportSupervisorState("mounted").catch((error) => {
-    console.warn(`[FUSE] Unable to write mounted supervisor status: ${error}`);
-  });
-  const supervisorHeartbeat = supervisorStatusPath
-    ? setInterval(() => {
-      if (unmounting) return;
-      writeSupervisorStatus("mounted").catch(() => undefined);
-    }, 1_000)
-    : undefined;
-
-  console.log(`Mounted at ${mountpoint}`);
-  console.log("Press Ctrl+C to unmount");
-
   // Cleanup on signal
   function unmount() {
     if (unmounting) return;
@@ -3434,7 +3494,34 @@ export async function main(argv: string[] = Deno.args) {
   });
 
   // Run FUSE event loop (nonblocking: true → returns Promise)
-  const result = await fuse.symbols.fuse_session_loop(handle.session);
+  const sessionLoop = fuse.symbols.fuse_session_loop(handle.session);
+
+  // Readiness is reported here rather than earlier: the session loop is
+  // dispatched and the signal handlers are installed, so a caller that has seen
+  // `mounted` has a kernel mount that serves requests and unmounts cleanly on
+  // SIGTERM. Because the announcement carries that, the caller needs no timed
+  // confirmation after it. The guard skips the announcement when a signal has
+  // already begun tearing the mount down; a signal that lands during the
+  // announcement itself still publishes it, but that mount then unmounts
+  // through the handler installed above.
+  if (!unmounting) {
+    await reportSupervisorState("mounted").catch((error) => {
+      console.warn(
+        `[FUSE] Unable to write mounted supervisor status: ${error}`,
+      );
+    });
+  }
+  const supervisorHeartbeat = supervisorStatusPath
+    ? setInterval(() => {
+      if (unmounting) return;
+      writeSupervisorStatus("mounted").catch(() => undefined);
+    }, 1_000)
+    : undefined;
+
+  console.log(`Mounted at ${mountpoint}`);
+  console.log("Press Ctrl+C to unmount");
+
+  const result = await sessionLoop;
   console.log(`FUSE loop exited (code ${result})`);
   if (supervisorHeartbeat !== undefined) clearInterval(supervisorHeartbeat);
   await writeSupervisorStatus("exited", { exitCode: result }).catch(() => {

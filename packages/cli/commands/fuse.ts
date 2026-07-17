@@ -136,8 +136,6 @@ async function removeMountStateAndChildStatus(
   }
 }
 
-const CHILD_CONFIRM_MS = 100;
-
 /**
  * Reads readiness lines until the child settles on a state, and returns null
  * once no report can arrive any more.
@@ -180,17 +178,6 @@ async function readSettledChildStatus(
   }
 }
 
-/** Whether `exit` settles within `ms`. */
-function exitsWithin(exit: Promise<unknown>, ms: number): Promise<boolean> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const elapsed = new Promise<boolean>((resolve) => {
-    timer = setTimeout(() => resolve(false), ms);
-  });
-  return Promise.race([exit.then(() => true), elapsed]).finally(() => {
-    if (timer !== undefined) clearTimeout(timer);
-  });
-}
-
 /**
  * Waits for a background mount to report that it is up.
  *
@@ -201,7 +188,10 @@ function exitsWithin(exit: Promise<unknown>, ms: number): Promise<boolean> {
  * the mount state.
  *
  * Returns only once the child has reported `mounted` and both the supervisor and
- * the child are alive. Every other outcome removes the mount state and throws.
+ * the child are alive. There is no deadline: a child that never reports leaves
+ * the command waiting, which is interruptible and honest, rather than turning a
+ * slow startup into a reported failure. Every other outcome removes the mount
+ * state and throws.
  */
 export async function awaitBackgroundMountStartup(
   pid: number,
@@ -212,12 +202,10 @@ export async function awaitBackgroundMountStartup(
     isAlive?: (pid: number) => boolean;
     removeStateFile?: (path: string) => Promise<void>;
     childStatusPath?: string;
-    confirmMs?: number;
   },
 ): Promise<void> {
   const isAliveFn = deps.isAlive ?? isAlive;
   const removeStateFileFn = deps.removeStateFile ?? removeMountStateFile;
-  const confirmMs = deps.confirmMs ?? CHILD_CONFIRM_MS;
   const exitedDuringStartup =
     "Background FUSE process exited during startup. Re-run without --background to inspect startup errors.";
   const fail = async (message: string): Promise<never> => {
@@ -243,19 +231,13 @@ export async function awaitBackgroundMountStartup(
     );
   }
 
-  // The child reports `mounted` just before entering its FUSE session loop, so a
-  // mount that fails in the loop reports mounted and then exits. At the instant
-  // the report arrives the child is still running, and a pid probe says so; what
-  // distinguishes the two is that a dying child takes the supervisor down with
-  // it. Wait for that exit to either arrive or not. This is the one wait here
-  // with a duration in it, because nothing announces that a process intends to
-  // keep running.
-  if (await exitsWithin(deps.supervisorExit, confirmMs)) {
-    return await fail(
-      "Background FUSE mount failed during startup: child exited after reporting mounted.",
-    );
-  }
-
+  // The child announces `mounted` only after its FUSE session loop is dispatched
+  // and its signal handlers are installed, so the report means the kernel mount
+  // exists and a signal will unmount it cleanly. A point-in-time probe rejects a
+  // child or supervisor that has already exited by the time the report is read.
+  // It does not wait to see whether one exits shortly after: that wait was a
+  // fixed grace period paid on every successful mount, and while it ran a slow
+  // but healthy mount was indistinguishable from a stuck one.
   if (typeof status.pid !== "number" || !isAliveFn(status.pid)) {
     return await fail(
       "Background FUSE mount failed during startup: child exited after reporting mounted.",

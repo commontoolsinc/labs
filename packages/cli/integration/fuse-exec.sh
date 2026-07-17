@@ -109,6 +109,33 @@ wait_for_path() {
   error "Timed out waiting for path: $path"
 }
 
+# A mounted JSON document answers lookups from a stub while the daemon hydrates
+# the piece behind it, and rebuilds land on a debounce after that, so the path
+# existing says nothing about the content being final. Poll the document until
+# it renders what is expected, the same way the path probes poll for lookups.
+wait_for_json() {
+  local path="$1"
+  local filter="$2"
+  local message="$3"
+  local timeout_seconds="${4:-20}"
+  local started_at
+  started_at=$(date +%s)
+
+  while true; do
+    if jq -e "$filter" "$path" >/dev/null 2>&1; then
+      return 0
+    fi
+    if [ $(( $(date +%s) - started_at )) -ge "$timeout_seconds" ]; then
+      break
+    fi
+    sleep 0.1
+  done
+
+  local actual
+  actual=$(head -c 400 "$path" 2>/dev/null || true)
+  error "$message. Last content of $(basename "$path"): $actual"
+}
+
 fuse_encode_component() {
   local value="$1"
   value="${value//%/%25}"
@@ -330,12 +357,12 @@ success "Mounted callable entries exist"
 success "Entities namespace exposes matching entry for mounted piece"
 
 assert_not_exists "$RESULT_DIR/search" "Pattern tool internals should not be exposed as a directory."
-jq -e '.recordMessage == {"/handler":"recordMessage"}' "$RESULT_JSON" >/dev/null ||
-  error "result.json should render recordMessage as a handler sigil."
-jq -e '.legacyWrite == {"/handler":"legacyWrite"}' "$RESULT_JSON" >/dev/null ||
-  error "result.json should render legacyWrite as a handler sigil."
-jq -e '.search == {"/tool":"search"}' "$RESULT_JSON" >/dev/null ||
-  error "result.json should render search as a tool sigil."
+wait_for_json "$RESULT_JSON" '.recordMessage == {"/handler":"recordMessage"}' \
+  "result.json should render recordMessage as a handler sigil"
+wait_for_json "$RESULT_JSON" '.legacyWrite == {"/handler":"legacyWrite"}' \
+  "result.json should render legacyWrite as a handler sigil"
+wait_for_json "$RESULT_JSON" '.search == {"/tool":"search"}' \
+  "result.json should render search as a tool sigil"
 success "Mounted JSON surface hides callable internals"
 
 HANDLER_FIRST_LINE=$(head -n 1 "$HANDLER_FILE")

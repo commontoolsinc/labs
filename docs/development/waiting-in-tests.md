@@ -398,12 +398,14 @@ converting it churns code that no run covers.
 ### A shell script observing another process through a kernel mount
 
 `packages/cli/integration/fuse-exec.sh` drives the FUSE daemon as a separate
-process through a real mount, and observes it from bash. Its three poll loops —
-`wait_for_path`, `resolve_entity_dir`, and `wait_for_piece_value` — stay polls.
+process through a real mount, and observes it from bash. Its poll loops —
+`wait_for_path`, `wait_for_json`, `resolve_entity_dir`, and
+`wait_for_piece_value` — stay polls.
 
 There is no event channel to convert them to. The state each loop waits on lives
-in another process: the daemon's tree for the two path loops, and the server's
-cell for the value loop. Bash has no callback to resolve a `defer()` from.
+in another process: the daemon's tree for the path and JSON loops, and the
+server's cell for the value loop. Bash has no callback to resolve a `defer()`
+from.
 
 Watching the filesystem does not substitute for one. A mounted path appears
 because the daemon added a node to its own tree, and that is not a filesystem
@@ -429,11 +431,13 @@ parsed a PID has a daemon that reported mounted. That wait is itself
 event-driven, carried by the pipe that [The FUSE mount
 handshake](#the-fuse-mount-handshake) describes.
 
-The daemon reports that state just before it enters its FUSE session loop, so it
-means the kernel mount exists rather than that any request has been served, and
-mounted paths hydrate lazily besides. Both gaps belong to `wait_for_path`, whose
-probe carries its own kill-timeout and retries for twenty seconds. What is left
-for the script is one check that the daemon survived the handshake.
+The daemon reports that state once its session loop is dispatched, so the mount
+serves requests, but the paths under it still hydrate lazily and the documents at
+those paths settle on a debounce after the path first answers a lookup. A path
+existing is not the same as its content being final. Those gaps belong to
+`wait_for_path` and `wait_for_json`, which poll a lookup and a rendered document
+until each converges, each carrying its own timeout. What is left for the script
+directly is one check that the daemon survived the handshake.
 
 The stale-descriptor assertion — that truncating a path does not let an already
 open descriptor write its old buffer back — waits on `wait_for_piece_value`
@@ -597,36 +601,31 @@ the daemon and so the only one that knows both pids; it writes the file once and
 completely. The command prepares the containing directory and the path, and the
 supervisor holds write access to that one file and no read access.
 
-Two things here are deliberately not events.
+What lets the readiness read stay pure-event is where the daemon announces
+`mounted`. It announces only after it has dispatched its FUSE session loop and
+installed its signal handlers, so a command that has read `mounted` has a mount
+that serves requests and tears down cleanly on a signal. The announcement
+carries that guarantee, so the command trusts it on arrival: it confirms the
+child and the supervisor are alive at that instant — a point-in-time probe, not a
+wait — and returns. An announcement made earlier, before the loop was dispatched,
+would report a mount that might still fail in the loop, and to catch that the
+command would have to wait out a fixed confirmation window on every successful
+mount, a genuine timing bet because nothing announces that a process intends to
+keep running. Moving the announcement behind the loop dispatch retires that wait
+rather than tuning it.
 
-The confirmation that the mount stayed up keeps a window, and the reason is worth
-understanding before anyone tries to collapse it to a point check. The daemon
-reports `mounted` just before entering its FUSE session loop, so a mount that
-fails in the loop reports mounted and then exits. At the instant the report
-arrives the daemon is genuinely still running, and a pid probe says so — the probe
-is not wrong, it is early. A liveness check at that instant therefore reports a
-healthy mount for a daemon already on its way out, and reliably so rather than
-occasionally, because the event-driven read hands control back the moment the
-report lands, ahead of the exit that would reveal the failure.
+The status file the daemon also writes, the record `cf fuse status` reads, is
+written to survive a concurrent reader, because its startup, readiness, heartbeat
+and signal paths all write it without coordinating. Each write lands under a
+scratch name and is renamed into place, so a reader woken mid-write sees a whole
+document rather than a truncated one. And the writes are serialized through a
+queue, so the file ends on the state of the most recent call: without that, two
+renames could complete in either order and let a heartbeat still in flight
+replace a terminal state, leaving the file claiming a mount that has already
+gone.
 
-What distinguishes the two cases is that a dying daemon takes the supervisor down
-with it, and the supervisor's exit is an event. So the confirmation waits for
-that exit to either arrive or not: it fails the moment the supervisor goes, and
-otherwise costs a fixed grace period. The grace is the one duration in this
-handshake, and it is a genuine timing bet, because nothing announces that a
-process intends to keep running. It is not a deadline — a slow mount is not
-capped by it — and it reads no file.
-
-That last point matters more than it sounds. The heartbeat rewrites the status
-file every second through a plain `Deno.writeTextFile`, which truncates and then
-writes rather than replacing the file atomically, so a concurrent reader can
-catch it half-written — looping a reader against such a writer turns up
-unparseable reads at a low but real rate (33 in 4000 measured). The confirmation
-waits on the supervisor's exit rather than on the file, so it is immune to that.
-The one reader that does read the file, `cf fuse status`, degrades to reporting
-`unknown` for a single tick when it loses that race.
-
-`cleanupFuseChild`'s shutdown escalation keeps a timeout. It sends SIGTERM,
+One wait in the handshake keeps a real duration:
+`cleanupFuseChild`'s shutdown escalation. It sends SIGTERM,
 allows the child five seconds to exit, then sends SIGKILL. The wait for the
 child's exit is event-driven — it races the real status promise — and the timeout
 is the escalation policy, not a stand-in for a missing signal. A process ignoring

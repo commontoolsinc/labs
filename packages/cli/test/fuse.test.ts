@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { FakeTime } from "@std/testing/time";
 import { basename, join, resolve, toFileUrl } from "@std/path";
 import {
   awaitBackgroundMountStartup,
@@ -90,16 +91,27 @@ function openReadinessStream(chunks: string[]): ReadableStream<Uint8Array> {
   });
 }
 
+/** An open channel the test pushes readiness lines into on its own schedule. */
+function controllableReadinessStream(): {
+  stream: ReadableStream<Uint8Array>;
+  push: (line: string) => void;
+} {
+  const encoder = new TextEncoder();
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const stream = new ReadableStream<Uint8Array>({
+    start(c) {
+      controller = c;
+    },
+  });
+  return {
+    stream,
+    push: (line: string) => controller.enqueue(encoder.encode(line)),
+  };
+}
+
 /** A supervisor that stays up: its exit never settles. */
 function liveSupervisor(): Promise<Deno.CommandStatus> {
   return new Promise<Deno.CommandStatus>(() => {});
-}
-
-/** A supervisor that exits after `ms`, as one does when its FUSE child dies. */
-function supervisorExitingAfter(ms: number): Promise<Deno.CommandStatus> {
-  return new Promise<Deno.CommandStatus>((resolve) =>
-    setTimeout(() => resolve({ success: false, code: 1, signal: null }), ms)
-  );
 }
 
 function trackRemoval(removed: string[]): (path: string) => Promise<void> {
@@ -516,7 +528,6 @@ describe("mount state operations", () => {
     await expect(
       awaitBackgroundMountStartup(Deno.pid, statePath, {
         supervisorExit: liveSupervisor(),
-        confirmMs: 5,
         readiness: readinessStream([readinessLine("mounted")]),
         isAlive: (pid) => {
           alive.push(pid);
@@ -538,11 +549,39 @@ describe("mount state operations", () => {
     await expect(
       awaitBackgroundMountStartup(Deno.pid, statePath, {
         supervisorExit: liveSupervisor(),
-        confirmMs: 5,
         readiness: openReadinessStream([readinessLine("mounted")]),
         isAlive: () => true,
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it("puts no deadline on readiness, however much time passes", async () => {
+    // Nothing about the readiness wait is time-based, so no count of events can
+    // show the absence of a deadline. A wall clock can: an hour of virtual time
+    // passes with the child still starting, and the wait must survive it and
+    // then settle on the report that finally arrives. A reintroduced deadline
+    // would fire during the tick and fail this test.
+    const statePath = await writeMountState(tmpDir, mountStateFixture());
+    const channel = controllableReadinessStream();
+    const time = new FakeTime();
+
+    try {
+      const startup = awaitBackgroundMountStartup(Deno.pid, statePath, {
+        readiness: channel.stream,
+        supervisorExit: liveSupervisor(),
+        isAlive: () => true,
+      });
+      let ended = false;
+      startup.then(() => ended = true, () => ended = true);
+
+      await time.tickAsync(60 * 60 * 1000);
+      expect(ended).toBe(false);
+
+      channel.push(readinessLine("mounted"));
+      await expect(startup).resolves.toBeUndefined();
+    } finally {
+      time.restore();
+    }
   });
 
   it("reads past a starting report to the mounted report", async () => {
@@ -551,7 +590,6 @@ describe("mount state operations", () => {
     await expect(
       awaitBackgroundMountStartup(Deno.pid, statePath, {
         supervisorExit: liveSupervisor(),
-        confirmMs: 5,
         readiness: readinessStream([
           readinessLine("starting"),
           readinessLine("mounted"),
@@ -568,7 +606,6 @@ describe("mount state operations", () => {
     await expect(
       awaitBackgroundMountStartup(Deno.pid, statePath, {
         supervisorExit: liveSupervisor(),
-        confirmMs: 5,
         readiness: readinessStream([
           line.slice(0, 12),
           line.slice(12, 30),
@@ -599,7 +636,6 @@ describe("mount state operations", () => {
     await expect(
       awaitBackgroundMountStartup(Deno.pid, statePath, {
         supervisorExit: liveSupervisor(),
-        confirmMs: 5,
         readiness: new ReadableStream({
           start(controller) {
             for (const chunk of chunks) controller.enqueue(chunk);
@@ -617,7 +653,6 @@ describe("mount state operations", () => {
     await expect(
       awaitBackgroundMountStartup(Deno.pid, statePath, {
         supervisorExit: liveSupervisor(),
-        confirmMs: 5,
         readiness: readinessStream(["{not-json\n", readinessLine("mounted")]),
         isAlive: () => true,
       }),
@@ -633,7 +668,6 @@ describe("mount state operations", () => {
     await expect(
       awaitBackgroundMountStartup(Deno.pid, statePath, {
         supervisorExit: liveSupervisor(),
-        confirmMs: 5,
         readiness: readinessStream([]),
         childStatusPath,
         isAlive: () => true,
@@ -659,34 +693,12 @@ describe("mount state operations", () => {
         supervisorExit: Promise.resolve(
           { success: false, code: 1, signal: null } as Deno.CommandStatus,
         ),
-        confirmMs: 5,
         isAlive: () => true,
         removeStateFile: trackRemoval(removed),
       }),
     ).rejects.toThrow(/Background FUSE process exited during startup/i);
 
     expect(removed).toEqual([statePath]);
-  });
-
-  it("rejects background mounts whose child dies just after reporting mounted", async () => {
-    const statePath = await writeMountState(tmpDir, mountStateFixture());
-    const childStatusPath = childStatusPathForStatePath(statePath);
-    const removed: string[] = [];
-
-    // The child is still running when its report arrives, so a pid probe says it
-    // is alive; the supervisor's exit moments later is what gives it away.
-    await expect(
-      awaitBackgroundMountStartup(Deno.pid, statePath, {
-        readiness: openReadinessStream([readinessLine("mounted")]),
-        supervisorExit: supervisorExitingAfter(10),
-        confirmMs: 500,
-        childStatusPath,
-        isAlive: () => true,
-        removeStateFile: trackRemoval(removed),
-      }),
-    ).rejects.toThrow(/child exited after reporting mounted/i);
-
-    expect(removed).toEqual([statePath, childStatusPath]);
   });
 
   it("rejects background mounts when the child reports startup failure", async () => {
@@ -697,7 +709,6 @@ describe("mount state operations", () => {
     await expect(
       awaitBackgroundMountStartup(Deno.pid, statePath, {
         supervisorExit: liveSupervisor(),
-        confirmMs: 5,
         readiness: readinessStream([
           readinessLine("failed", { error: "fuse_session_mount failed" }),
         ]),
@@ -718,7 +729,6 @@ describe("mount state operations", () => {
     await expect(
       awaitBackgroundMountStartup(Deno.pid, statePath, {
         supervisorExit: liveSupervisor(),
-        confirmMs: 5,
         readiness: readinessStream([readinessLine("exiting")]),
         isAlive: () => true,
         removeStateFile: trackRemoval(removed),
@@ -737,7 +747,6 @@ describe("mount state operations", () => {
     await expect(
       awaitBackgroundMountStartup(Deno.pid, statePath, {
         supervisorExit: liveSupervisor(),
-        confirmMs: 5,
         readiness: readinessStream([readinessLine("mounted")]),
         childStatusPath,
         isAlive: (pid) => pid !== CHILD_PID,
@@ -755,7 +764,6 @@ describe("mount state operations", () => {
     await expect(
       awaitBackgroundMountStartup(Deno.pid, statePath, {
         supervisorExit: liveSupervisor(),
-        confirmMs: 5,
         readiness: readinessStream([readinessLine("mounted")]),
         isAlive: (pid) => pid !== Deno.pid,
         removeStateFile: trackRemoval(removed),
@@ -772,7 +780,6 @@ describe("mount state operations", () => {
     await expect(
       awaitBackgroundMountStartup(Deno.pid, statePath, {
         supervisorExit: liveSupervisor(),
-        confirmMs: 5,
         readiness: readinessStream([
           `${JSON.stringify({ state: "mounted" })}\n`,
         ]),
