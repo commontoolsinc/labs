@@ -2098,6 +2098,15 @@ export class Runner {
     }
 
     const resolvedPattern = this.resolveToPattern(pattern);
+    const retryStartWhenReady = (
+      error: unknown,
+    ): Promise<boolean> | undefined => {
+      if (!(error instanceof RetryWhenReady)) return undefined;
+      return error.readiness.then(() => {
+        if (!this.isStartAttemptCurrent(attempt)) return false;
+        return this.doStart(rootCell, seenCells, attempt);
+      });
+    };
 
     // Fast path for pieces prepared in the current runtime via setup()/run() or
     // explicitly restarted after stop(). Those writes are already present
@@ -2121,7 +2130,7 @@ export class Runner {
           schedulePatternUpdate: attempt.schedulePatternUpdate,
         });
       } catch (err) {
-        return Promise.reject(err);
+        return retryStartWhenReady(err) ?? Promise.reject(err);
       }
 
       return Promise.resolve(true);
@@ -2178,6 +2187,10 @@ export class Runner {
             true,
           ),
         });
+      } catch (error) {
+        const retry = retryStartWhenReady(error);
+        if (retry !== undefined) return await retry;
+        throw error;
       } finally {
         // Synchronous instantiation cost of the resumed piece (pattern
         // setup, node wiring), distinct from the syncs around it.

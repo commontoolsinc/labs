@@ -65,7 +65,10 @@ type FactoryRef = FactoryStateV1["ref"];
 
 /** A well-formed factory whose trusted artifact is not available locally yet. */
 export class FactoryArtifactUnavailableError extends Error {
-  constructor(readonly ref: FactoryRef) {
+  constructor(
+    readonly ref: FactoryRef,
+    readonly artifactSpace: MemorySpace,
+  ) {
     super(`Factory materialization could not resolve ${refLabel(ref)}`);
     this.name = "FactoryArtifactUnavailableError";
   }
@@ -575,7 +578,7 @@ export function materializeFactory(
     )
     : undefined;
   if (resolved === undefined) {
-    throw new FactoryArtifactUnavailableError(ref);
+    throw new FactoryArtifactUnavailableError(ref, context.artifactSpace);
   }
   return materializeResolved(resolved, carried, context);
 }
@@ -638,7 +641,7 @@ export async function prepareFactory(
   );
   assertCurrentAfterAwait(selection, context.fence);
   if (loaded === undefined) {
-    throw new FactoryArtifactUnavailableError(ref);
+    throw new FactoryArtifactUnavailableError(ref, context.artifactSpace);
   }
   return materializeResolved(loaded, carried, context);
 }

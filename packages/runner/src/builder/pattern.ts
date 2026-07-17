@@ -5,6 +5,7 @@ import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { addRequiredSchemaPaths } from "@commonfabric/data-model/schema-utils";
 import {
+  factoryStateOf,
   isAdmittedFabricFactory,
   registerFabricFactory,
 } from "@commonfabric/data-model/fabric-factory";
@@ -14,8 +15,8 @@ import {
   type FactoryInput,
   type Frame,
   type ICell,
-  isModule,
   type InternalPatternFactory,
+  isModule,
   isReactive,
   JSONObject,
   type JSONSchema,
@@ -1053,6 +1054,14 @@ function assignComputedCellKinds(
   // of its input binding to its outputs (runner.ts,
   // `instantiatePassthroughNode`), with no code that could write elsewhere.
   const writerDisqualifies = (module: NodeRef["module"]): boolean => {
+    // First-class pattern factories replace the legacy `{ type: "pattern" }`
+    // module wrapper on static sub-pattern nodes. Their instantiation is still
+    // a deterministic replay of the factory inputs, so preserve the same
+    // computed-cell classification as the legacy wrapper. Other factory kinds
+    // are not valid static node modules and fail closed here.
+    if (isAdmittedFabricFactory(module)) {
+      return factoryStateOf(module).kind !== "pattern";
+    }
     if (!isModule(module)) return true; // Opaque module value: assume the worst.
     if (module.wrapper === "handler" || module.writableProxy === true) {
       return true;

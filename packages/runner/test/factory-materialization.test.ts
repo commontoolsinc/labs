@@ -23,6 +23,7 @@ import {
 } from "../src/builder/pattern.ts";
 import type { Frame } from "../src/builder/types.ts";
 import {
+  FactoryArtifactUnavailableError,
   type FactoryContract,
   FactoryMaterializationSupersededError,
   materializeFactory,
@@ -504,6 +505,19 @@ describe("runner-owned factory materialization", () => {
     );
 
     warm.clear();
+    let unavailable: unknown;
+    try {
+      materializeFactory(createFactoryShell(patternState), {
+        runtime,
+        artifactSpace,
+      });
+    } catch (error) {
+      unavailable = error;
+    }
+    expect(unavailable).toBeInstanceOf(FactoryArtifactUnavailableError);
+    expect((unavailable as FactoryArtifactUnavailableError).artifactSpace)
+      .toBe(artifactSpace);
+
     await expect(
       prepareFactory(createFactoryShell(patternState), {
         runtime,
