@@ -95,7 +95,7 @@ If your `computed()` has side effects (like setting another cell), they should b
 // ❌ Non-idempotent - appends on every run
 const badComputed = computed(() => {
   const current = logArray.get();
-  logArray.set([...current, { timestamp: safeDateNow() }]); // Grows forever
+  logArray.set([...current, { index: current.length }]); // Grows forever
   return items.length;
 });
 
@@ -104,11 +104,18 @@ const goodComputed = computed(() => {
   const current = cacheMap.get();
   const key = `items-${items.length}`;
   if (!(key in current)) {
-    cacheMap.set({ ...current, [key]: safeDateNow() });
+    cacheMap.set({ ...current, [key]: items.length });
   }
   return items.length;
 });
 ```
+
+Reading the ambient clock or entropy inside a `computed()` — `Date.now()`,
+no-argument `new Date()`, or `Math.random()` — throws a `TimeCapabilityError`:
+those are reactive inputs that would themselves break the idempotency this
+section is about. Capture a timestamp inside a handler (where `Date.now()` is
+allowed, coarsened to one-second resolution), or read the reactive `#now` wish
+for a value that updates on its own.
 
 The scheduler re-runs computations when their dependencies change. If a computation modifies a cell it depends on, it triggers itself. With idempotent operations, the second run produces no change, so the system settles.
 

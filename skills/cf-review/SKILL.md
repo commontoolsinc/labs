@@ -108,8 +108,11 @@ A confirmed bug or regression is Blocking. Watch especially for:
   `.get()` on computed / lift results, `new Writable(reactiveValue)`. Defer to
   `docs/common/ai/pattern-critique-guide.md` for the full ruleset; cite it.
 - **Determinism _(patterns)_** — `Date.now()` / `Math.random()` / authored
-  timers in pattern code; use `safeDateNow()` / `nonPrivateRandom()`, never
-  inside a re-running computation.
+  timers in a lift, computed, or pattern body. These built-ins are gated by the
+  sandbox: allowed only inside a handler (the clock coarsened to one-second
+  resolution) and throwing a `TimeCapabilityError` elsewhere. Reading the clock
+  reactively in a computed is the `#now` wish. A read that survives into a
+  re-running computation is a bug regardless.
 - **Time-based waits _(any code)_** — `sleep` / `setTimeout` used to "wait for"
   a result instead of awaiting the actual event or signal. Almost never
   justified (animations aside) and a prime source of CI flakiness: what takes X

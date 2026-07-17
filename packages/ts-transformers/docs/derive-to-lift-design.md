@@ -416,9 +416,12 @@ A `__cfLift_N` is selfcontained if its callback body:
      part of the sandbox bootstrapping by definition.
    - Ambient globals (`console`, `Math`, `JSON`, `Object`, `Array`, etc. —
      declarations in `lib.*.d.ts`). Non-deterministic globals (`Date.now()`,
-     `Math.random()`, `console.log()`) are **OK** (Berni 2026-05-21) — they
-     resolve to injected scaffolding (`safeDateNow`, `unsecureRandom`, the
-     console hook), so they don't disqualify a body.
+     `Math.random()`, `console.log()`) don't disqualify a body structurally —
+     they are ambient and capture no user-authored variable. (The runtime now
+     capability-gates the clock and entropy: `Date.now()`/`Math.random()` throw
+     inside a lift body rather than routing through the retired
+     `safeDateNow`/`unsecureRandom` helpers; only `console.log` remains
+     scaffolding.)
 
 The detection logic should reuse the building blocks from CT-1585's hoister:
 
@@ -440,7 +443,10 @@ The detection logic should reuse the building blocks from CT-1585's hoister:
 - **Non-deterministic globals in selfcontained bodies.** **Resolved (Berni
   2026-05-21): allowed.** `console.log`, `safeDateNow`, `unsecureRandom` are all
   fine — they're injected, so they count as transformer/sandbox scaffolding, not
-  disqualifying captures.
+  disqualifying captures. **Superseded by the W1/W6 timing gate:**
+  `safeDateNow`/`unsecureRandom` are removed and the clock/entropy intrinsics
+  now throw inside a lift body at runtime (only `console.log` remains
+  scaffolding); they stay structurally non-disqualifying for the transformer.
 - **Selfcontained gate conditions.** Still wants a final confirm from Berni that
   "zero user-authored module-scope variables + zero enclosing-scope captures
   outside the input object + only globals + transformer scaffolding + own
@@ -553,7 +559,9 @@ the relevant phase lands.
   `selfcontained`.
 - **[Phase 3]** Are non-deterministic globals (`Date.now()`, `Math.random()`) OK
   in sandboxable bodies? (Berni.) **Berni 2026-05-21**: yes — `console.log`,
-  `safeDateNow`, `unsecureRandom` all fine; they're injected.
+  `safeDateNow`, `unsecureRandom` all fine; they're injected. **Superseded:**
+  the runtime now throws for the clock/entropy intrinsics inside a lift body
+  (W1/W6 gate), and `safeDateNow`/`unsecureRandom` are removed.
 - **[Phase 3]** Is the module-scope const enough for the "addressable" goal, or
   do we need stable cross-version identity (content hash)? (Berni.) **Berni
   2026-05-21**: `<bundlehash>/<filename>/<symbol>` (or hash of the selfcontained

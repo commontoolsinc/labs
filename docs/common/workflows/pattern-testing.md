@@ -244,9 +244,9 @@ const label = ifElse(ready, "yes", "no");
 Reach for `computed()` for a reactive boolean you intend to read as a value,
 and keep `assert()` for a test step's `assertion`.
 
-Keep assertions deterministic. Do not call `safeDateNow()`,
-`nonPrivateRandom()`, `Date.now()`, or `Math.random()` inside the assertion
-itself. If the pattern stamps a timestamp or random ID, assert that the value
+Keep assertions deterministic. Do not call `Date.now()` or `Math.random()`
+inside the assertion itself (they are gated and throw in a `computed()`
+anyway). If the pattern stamps a timestamp or random ID, assert that the value
 exists or changed in the expected place.
 
 ## Test Organization

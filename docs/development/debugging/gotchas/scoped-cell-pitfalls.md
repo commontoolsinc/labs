@@ -210,24 +210,29 @@ may be at most that narrow, so links at or broader than the cap are silent,
 while a narrower-than-cap link (e.g. a session link in a `PerUser` field)
 still warns.
 
-## 7. `Math.random()` throws under SES
+## 7. `Math.random()` / `Date.now()` throw outside a handler
 
-**Symptom:** `TypeError: secure mode %SharedMath%.random() throws` when a
-handler runs.
+**Symptom:** `TypeError: secure mode %SharedMath%.random() throws` or a
+`TimeCapabilityError` when the code runs.
 
-The pattern sandbox runs under SES, which removes ambient access to
-`Math.random()`. Use `nonPrivateRandom()` from `commonfabric` for
-non-cryptographic randomness inside patterns. This is not scope-specific but
-showed up while wiring up an option-id generator in a scoped poll.
+The pattern sandbox gates the ambient intrinsics `Math.random()`, `Date.now()`,
+and no-argument `new Date()`. They are allowed **inside a handler** (the clock
+coarsened to one-second resolution; entropy passes through) and throw in a
+lift/computed or at pattern-body level. Call the built-ins directly — they are
+not importable helpers. This is not scope-specific but showed up while wiring up
+an option-id generator in a scoped poll, where the generator ran inside a
+handler.
 
 ```typescript
-import { nonPrivateRandom, safeDateNow } from "commonfabric";
-
+// Inside a handler.
 const newId = () =>
-  `o_${safeDateNow().toString(36)}_${
-    Math.floor(nonPrivateRandom() * 1e6).toString(36)
+  `o_${Date.now().toString(36)}_${
+    Math.floor(Math.random() * 1e6).toString(36)
   }`;
 ```
+
+For reactive time in a computed, read the live clock with the `#now` wish rather
+than calling `Date.now()`.
 
 ## See Also
 
