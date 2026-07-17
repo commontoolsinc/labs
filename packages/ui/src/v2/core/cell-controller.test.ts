@@ -184,6 +184,40 @@ describe("CellController", () => {
     expect(setValueChange!.oldVal).toBe("a");
   });
 
+  it("announces a 0 -> -0 delivery as a change", async () => {
+    // `0` and `-0` are distinct values under the system's equality
+    // (`Object.is` semantics); the subscription gate must not swallow the
+    // update.
+    const host = createMockHost();
+    const changes: Array<{ newVal: number; oldVal: number | undefined }> = [];
+    const ctrl = new CellController<number>(host, {
+      timing: { strategy: "immediate" },
+      onChange: (n, o) => changes.push({ newVal: n, oldVal: o }),
+    });
+    const cell = createMockCellHandle(0);
+    ctrl.bind(cell);
+    changes.length = 0;
+
+    await cell.set(-0);
+    expect(changes.length).toBe(1);
+    expect(Object.is(changes[0].newVal, -0)).toBe(true);
+  });
+
+  it("does not re-announce an unchanged NaN delivery", async () => {
+    const host = createMockHost();
+    const changes: Array<{ newVal: number; oldVal: number | undefined }> = [];
+    const ctrl = new CellController<number>(host, {
+      timing: { strategy: "immediate" },
+      onChange: (n, o) => changes.push({ newVal: n, oldVal: o }),
+    });
+    const cell = createMockCellHandle(NaN);
+    ctrl.bind(cell);
+    changes.length = 0;
+
+    await cell.set(NaN);
+    expect(changes.length).toBe(0);
+  });
+
   it("requestUpdate is called when cell subscription fires", async () => {
     let updateCount = 0;
     const host: ReactiveControllerHost = {
@@ -501,6 +535,34 @@ describe("ArrayCellController", () => {
     ctrl.bind(cell);
     ctrl.removeItem("b");
     expect(cell.get()).toEqual(["a", "c"]);
+  });
+
+  it("removeItem removes a NaN element and keeps -0 distinct from 0", () => {
+    // `Object.is` matching: `NaN` is removable; removing `0` must not take a
+    // stored `-0` with it.
+    const host = createMockHost();
+    const ctrl = new ArrayCellController<number>(host);
+    const cell = createMockCellHandle([NaN, -0, 1]);
+    ctrl.bind(cell);
+
+    ctrl.removeItem(NaN);
+    let result = cell.get() as number[];
+    expect(result.length).toBe(2);
+    expect(Object.is(result[0], -0)).toBe(true);
+
+    ctrl.removeItem(0);
+    result = cell.get() as number[];
+    expect(result.length).toBe(2);
+    expect(Object.is(result[0], -0)).toBe(true);
+  });
+
+  it("updateItem finds a NaN element", () => {
+    const host = createMockHost();
+    const ctrl = new ArrayCellController<number>(host);
+    const cell = createMockCellHandle([1, NaN, 3]);
+    ctrl.bind(cell);
+    ctrl.updateItem(NaN, 2);
+    expect(cell.get()).toEqual([1, 2, 3]);
   });
 
   it("updateItem replaces item via cell.key().set() and propagates to parent", () => {
