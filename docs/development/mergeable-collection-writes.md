@@ -3,7 +3,9 @@
 > For how a patch operation is put together across the codebase — the registries
 > that define each op once and how to add a new one — see
 > [patch-operations.md](./patch-operations.md). This note covers *why* the
-> mergeable ops exist.
+> mergeable ops exist. For how to change an existing handler over to them, and
+> the mistakes that make a migration look finished while it is not, see
+> [migrating-collection-writes.md](./migrating-collection-writes.md).
 
 ## The problem
 

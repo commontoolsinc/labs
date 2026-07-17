@@ -86,6 +86,33 @@ landed after the snapshot above:
     `builder-call-hoisting.ts`; no transformer emits it and no fixture expects
     it. See `packages/ts-transformers/docs/derive-to-lift-design.md`.
 
+### Addendum 2 (2026-07-10 phase-4 verification findings)
+
+Unratified language deltas found by adversarial verification of the
+target-language matrix (implementation vs normative spec; each needs a
+ratify-or-revert decision):
+
+- **Top-level eager-read carve-out (#3725, 2026-05-28).** Validation accepts
+  computation-feeding top-level `.get()` reads and auto-wraps the containing
+  expression lift-applied; terminal reads still reject. Golden-pinned
+  (`cell-get-binding-autowrap`, `with-reactive`;
+  `test/validation.test.ts:3179`). Matrix row still says Unsupported
+  unconditionally. Decision open: ratify a terminal-vs-computation-feeding
+  split in the matrix, or revert (breaks two goldens + one test).
+- **Optional-call accepted in JSX and compute callbacks.** `{maybeFn?.(1)}`
+  and `computed(() => maybeFn?.(1))` lower intact while the same shapes error
+  at top level, statement position, and in collection callbacks. Rider: the
+  lowering drops function-typed captures from the lift input schema (function
+  values are not schema-representable or cell-storable), so the accepted form
+  is dead code at runtime — which argues for rejecting it and keeping the
+  matrix row unqualified. Decision open.
+- **Residual pass-through emits runnable-looking output alongside errors.**
+  Both documented bucket-4 forms are alive: `forEach`-in-JSX survives
+  verbatim as plain JS and promise-`.then` gets compute-island-wrapped, in
+  each case *in addition to* the reported error — a consumer that ignores
+  diagnostics inherits residual semantics. Worth deciding whether error
+  programs should emit at all.
+
 ## D-001 Rename Context Terms (`safe` -> `compute` / `pattern`)
 
 **Current term:** `safe context` / `safe wrapper`\
@@ -299,8 +326,9 @@ contract support).
 
 **Implementation:**
 
-- `validateShrinkCoverage()` in `schema-injection.ts` runs after every shrink
-  operation (both `applyShrinkAndWrap` and the `defaults_only` branch).
+- `validateShrinkCoverage()` (`type-shrinking.ts`; called from the
+  schema-injection paths) runs after every shrink operation (both
+  `applyShrinkAndWrap` and the `defaults_only` branch).
 - `TransformationContext` and `fnNode` are threaded through
   `applyCapabilitySummaryToArgument`, `applyCapabilitySummaryToParameter`,
   `collectFunctionSchemaTypeNodes`, and `applyShrinkAndWrap`.
@@ -338,14 +366,10 @@ contract support).
   accesses, or concrete parameter with accessed `unknown`-typed property heads
 - `schema:path-not-in-type` — concrete type missing accessed properties
 
-**Test coverage:** `test/schema-shrink-validation.test.ts` with 14 cases:
-unknown-type error, missing-property error, valid-no-error, interprocedural
-unknown-type access in lift callback, interprocedural path-not-in-type via
-as-any cast in lift callback, wildcard unknown in lift, wildcard any in lift
-(no error), wildcard concrete in lift (no error), wildcard unknown in pattern,
-type-alias parameter in handler (no false positive), `T | undefined` handler
-parameter, multi-member union handler parameter, `TypeAlias | undefined`
-handler parameter, numeric array index access in lift.
+**Test coverage:** `test/schema-shrink-validation.test.ts` — unknown-type and
+missing-property errors, interprocedural lift-callback cases, wildcard
+unknown/any/concrete splits, union and type-alias parameters, numeric array
+index access. (Case counts churn; the file is the inventory.)
 
 **Rationale:**
 
@@ -445,12 +469,14 @@ fields/defaults unless an explicit author opt-in narrowing model is introduced.
 ## Candidate Implementation Touchpoints
 
 - `packages/ts-transformers/src/ast/reactive-context.ts`
-- `packages/ts-transformers/src/ast/type-inference.ts`
-  (`isReactiveArrayMapCall`)
+- `packages/ts-transformers/src/ast/call-kind.ts`
+  (`classifyArrayMethodCallSite` — the former `type-inference.ts`
+  `isReactiveArrayMapCall` no longer exists)
 - `packages/ts-transformers/src/transformers/jsx-expression-site-router.ts`
 - `packages/ts-transformers/src/transformers/expression-rewrite/emitters/binary-expression.ts`
 - `packages/ts-transformers/src/transformers/expression-rewrite/emitters/conditional-expression.ts`
-- `packages/ts-transformers/src/closures/strategies/map-strategy.ts`
+- `packages/ts-transformers/src/closures/strategies/array-method-strategy.ts`
+  (née `map-strategy.ts`; split into strategy/policy/transform/utils)
 - `packages/ts-transformers/src/ast/call-kind.ts`
 - `packages/ts-transformers/src/ast/dataflow.ts` (or successor capability graph)
 - `packages/ts-transformers/src/ast/type-inference.ts`
@@ -664,7 +690,8 @@ diagnostics.
 
 **Status:** Landed
 
-1. Implement `getReactiveContextInfo(node, checker)`.
+1. Implement `getReactiveContextInfo(node, checker)`. (Landed as
+   `classifyReactiveContext`.)
 2. Re-implement old helpers as wrappers over the new classifier to preserve
    compatibility.
 3. Migrate a first consumer (`pattern-context-validation`) to classifier-first
@@ -677,7 +704,8 @@ compatibility shims.
 
 **Status:** Landed
 
-1. Implement `shouldLowerLogicalInJsx`.
+1. Implement `shouldLowerLogicalInJsx`. (Landed as the emitter + policy-module
+   split rather than under this exact name.)
 2. Refactor `emitBinaryExpression` to use policy matrix (remove expensive-RHS
    gating for policy-controlled paths).
 3. Keep semantic equivalence checks via snapshots/fixtures.
@@ -689,9 +717,11 @@ heuristics.
 
 **Status:** Landed (with standalone-function follow-up)
 
-1. Implement `classifyReceiverKind`.
-2. Refactor `shouldTransformMap` in `map-strategy.ts` to policy-driven form:
-   `{contextKind, receiverKind}`.
+1. Implement `classifyReceiverKind`. (Landed as
+   `classifyReactiveReceiverKind`, `src/policy/rewrite-policy.ts`.)
+2. Refactor `shouldTransformMap` to policy-driven form:
+   `{contextKind, receiverKind}`. (Landed as `shouldTransformArrayMethod` in
+   `array-method-strategy.ts`.)
 3. Add nested context fixtures that assert:
    - pattern-context reactive map rewrites
    - compute-context rewrite only for cell-like set
@@ -887,3 +917,8 @@ source-language policy.
 4. Tighten the compute-context interprocedural MVP scope (for example
    same-module direct calls vs broader) while keeping pattern-context legality
    intentionally direct/local.
+5. JSX / render-node schema verbosity: repeated render-node shapes and local
+   `$defs` in emitted output are semantically consistent but noisy; the open
+   question is presentation/canonicalization, not core correctness. (Folded
+   from the retired package-root `ISSUES_TO_FOLLOW_UP.md` queue, 2026-07; its
+   old test pins no longer exist.)

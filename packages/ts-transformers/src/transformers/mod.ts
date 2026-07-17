@@ -1,3 +1,4 @@
+export { AssertDiagnosticsTransformer } from "./assert-diagnostics.ts";
 export { BuilderCallHoistingTransformer } from "./builder-call-hoisting.ts";
 export { CastValidationTransformer } from "./cast-validation.ts";
 export { CellOfStaticInitialValidationTransformer } from "./cell-of-static-initial-validation.ts";

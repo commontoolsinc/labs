@@ -317,7 +317,7 @@ export class PieceManager {
     scope?: CellScope,
   ): Promise<Cell<T>> {
     // Get the piece cell
-    const piece: Cell<unknown> = isCell(id)
+    const addressed: Cell<unknown> = isCell(id)
       ? id
       : this.runtime.getCellFromEntityId(
         this.space,
@@ -328,19 +328,31 @@ export class PieceManager {
         scope,
       );
 
+    // Load the addressed cell. Syncing a value-link "slot" address also loads
+    // its link target — the piece's canonical result cell — together with that
+    // cell's `argument`/`patternIdentity` meta, because the query follows the
+    // top-of-doc value link and returns the target's meta docs. So this one sync
+    // makes both the slot and the canonical cell (with its metadata) local.
+    await timePiecePhase("get.piece.sync", () => addressed.sync());
+
+    // Canonicalize the value-link "slot" to the piece's canonical result cell.
+    // A piece created inside a handler and stored into a list/object (e.g. the
+    // topics board's `addTopic` doing `topics.push(Topic({...}))`) is addressed
+    // by a plain value-link that redirects to the result cell, where setup wrote
+    // `patternIdentity` and the `argument` meta-link. start() needs that identity
+    // and reads need that metadata, so resolving here makes start / read / stop
+    // operate on the real piece rather than the wrapper. The sync above already
+    // made the canonical cell local, so this resolves over local links with no
+    // further sync. Idempotent for a normal top-level piece.
+    const piece = addressed.resolveAsCell();
+
     if (runIt) {
-      // Load persisted result/metadata before start() decides whether this is a
-      // resumed piece that needs dependency sync before scheduler wiring.
-      await timePiecePhase("get.piece.sync", () => piece.sync());
       // start() handles pattern loading and running. It's idempotent - no
       // effect if already running.
       await timePiecePhase(
         "get.runtime.start",
         () => this.runtime.start(piece),
       );
-    } else {
-      // Just sync the cell if not running
-      await timePiecePhase("get.piece.sync", () => piece.sync());
     }
 
     // If caller provided a schema, use it
@@ -766,7 +778,14 @@ export class PieceManager {
     pattern: Pattern | Module,
     pieceId: string,
     inputs?: object,
-    options?: { start?: boolean },
+    options?: {
+      start?: boolean;
+      expectedPatternIdentity?: { identity: string; symbol: string };
+      validateArgumentLinks?: (
+        argumentCell: Cell<unknown>,
+        argumentSchema: JSONSchema,
+      ) => void;
+    },
   ): Promise<Cell<unknown>> {
     const piece = this.runtime.getCellFromEntityId(
       this.space,
@@ -774,17 +793,24 @@ export class PieceManager {
     );
     await piece.sync();
     const start = options?.start ?? true;
+    let currentPiece = piece;
     if (start) {
-      await this.runtime.runSynced(piece, pattern, inputs);
+      currentPiece = await this.runtime.runSynced(piece, pattern, inputs, {
+        expectedPatternIdentity: options?.expectedPatternIdentity,
+        validateArgumentLinks: options?.validateArgumentLinks,
+      });
     } else {
+      if (options?.expectedPatternIdentity) {
+        throw new Error("atomic pattern updates require starting the piece");
+      }
       await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
     }
-    await this.syncPattern(piece);
+    await this.syncPattern(currentPiece);
     if (start) {
-      await this.getResult(piece).pull();
+      await this.getResult(currentPiece).pull();
     }
 
-    return piece;
+    return currentPiece;
   }
 
   /**
@@ -933,7 +959,10 @@ export class PieceManager {
     await linkCell.sync();
     linkCell = linkCell.asSchemaFromLinks(); // Make sure we have the full schema
     linkCell = linkCell.key(...linkPath);
-    linkCell = linkCell.resolveAsCell();
+    // Keep Piece result links anchored at the public result projection. Its
+    // durable, monotonically narrowing result schema is the producer contract;
+    // resolving through an alias here would discard that contract and point at
+    // an untyped internal cell instead.
 
     // Get target cell (piece or arbitrary cell)
     const { cell: targetCell, isPiece: targetIsPiece } =

@@ -948,9 +948,19 @@ export class FabricHash extends FabricPrimitive {
     return this.#fullStringForm;
   }
 
-  /** Parse an instance from its string representation (`<tag>:<base64urlHash>`). */
+  /**
+   * Parse an instance from its string representation
+   * (`<tag>:<base64urlHash>`). Splits at the LAST colon: the hash segment
+   * is base64url and never contains one, while the tag segment may in
+   * principle. Entity KINDS do not ride the tag — they ride a URI scheme
+   * OUTSIDE the tagged-hash string (`computed:fid1:<hash>`), so a kinded
+   * id's hash portion parses here as a plain `fid1` hash. Callers must
+   * strip the URI scheme before parsing; the scheme is part of the entity's
+   * identity and must be carried alongside, never inferred back from the
+   * bare hash.
+   */
   static fromString(source: string): FabricHash {
-    const colonIndex = source.indexOf(":");
+    const colonIndex = source.lastIndexOf(":");
     if (colonIndex === -1) {
       throw new ReferenceError(`Invalid content hash string: ${source}`);
     }
@@ -969,7 +979,9 @@ The hash bytes are private (`#hash`). The public API provides:
 - `.hashString` — the hash as an unpadded base64url string, without the tag.
 - `.copyInto(target)` — copies hash bytes into a caller-provided buffer.
 - `.toString()` — `<tag>:<base64urlHash>`.
-- `FabricHash.fromString(s)` — parse from `<tag>:<base64urlHash>`.
+- `FabricHash.fromString(s)` — parse from `<tag>:<base64urlHash>` (splits at
+  the last colon; entity URI schemes like `of:`/`computed:` are NOT part of
+  this string and must be stripped — and preserved — by the caller).
 
 The `tag` field (formerly `algorithmTag`) is an opaque string identifier.
 Known algorithm tags:

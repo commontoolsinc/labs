@@ -116,6 +116,24 @@ describe("FabricHash", () => {
           "Invalid content hash string",
         );
       });
+
+      it("throws on a source with more than one colon", () => {
+        // A tagged hash has exactly one colon, so a second one lands in the
+        // hash segment, where base64url rejects it. No message is asserted:
+        // the contract is the rejection, not which layer voices it.
+        //
+        // Each tail below is itself valid base64url, so these fail only
+        // because of WHERE the split happens. That is deliberate: a tail like
+        // `c` throws under any split (as an invalid base64 length), and so
+        // would pass whether or not the parser is correct.
+        expect(() => FabricHash.fromString("a:b:AAAA")).toThrow();
+        expect(() => FabricHash.fromString("x::AAAA")).toThrow();
+
+        // A well-formed tagged hash with anything prefixed onto it is, of
+        // course, not a tagged hash.
+        const tagged = new FabricHash(SAMPLE_HASH, "fid1").toString();
+        expect(() => FabricHash.fromString(`extra:${tagged}`)).toThrow();
+      });
     });
 
     describe("[CODEC]", () => {

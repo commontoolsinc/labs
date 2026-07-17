@@ -1,8 +1,81 @@
-import type { CellScope, LinkScope, SchemaScope } from "./builder/types.ts";
+import type {
+  AsCellEntry,
+  CellKind,
+  CellScope,
+  LinkScope,
+  SchemaScope,
+} from "./builder/types.ts";
 
 export const DEFAULT_CELL_SCOPE: CellScope = "space";
 
 export const CELL_SCOPES = ["space", "user", "session"] as const;
+
+export const CELL_KINDS = [
+  "cell",
+  "opaque",
+  "stream",
+  "comparable",
+  "readonly",
+  "writeonly",
+  "sqlite",
+] as const satisfies readonly CellKind[];
+
+// Keep the runtime registry exhaustive when the public CellKind union grows.
+const _allCellKindsAreRegistered: Exclude<
+  CellKind,
+  (typeof CELL_KINDS)[number]
+> extends never ? true : never = true;
+void _allCellKindsAreRegistered;
+
+const cellKinds = new Set<string>(CELL_KINDS);
+
+export function hasOwnEnumerableDataProperty(
+  value: object,
+  key: PropertyKey,
+): boolean {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  return descriptor !== undefined && descriptor.enumerable === true &&
+    "value" in descriptor;
+}
+
+export function isCellKind(value: unknown): value is CellKind {
+  return typeof value === "string" && cellKinds.has(value);
+}
+
+export function isAsCellEntry(value: unknown): value is AsCellEntry {
+  if (isCellKind(value)) return true;
+  if (
+    value === null || typeof value !== "object" || Array.isArray(value)
+  ) {
+    return false;
+  }
+  const entry = value as Record<string, unknown>;
+  if (
+    !hasOwnEnumerableDataProperty(entry, "kind") || !isCellKind(entry.kind)
+  ) {
+    return false;
+  }
+  if ("scope" in entry) {
+    if (!hasOwnEnumerableDataProperty(entry, "scope")) return false;
+    return entry.scope === undefined || isSchemaScope(entry.scope);
+  }
+  return true;
+}
+
+export function isAsCellEntryArray(
+  value: unknown,
+): value is readonly AsCellEntry[] {
+  if (!Array.isArray(value) || value.length === 0) return false;
+  for (let index = 0; index < value.length; index++) {
+    if (
+      !hasOwnEnumerableDataProperty(value, index) ||
+      !isAsCellEntry(value[index])
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
 
 const scopeRankByValue: Record<CellScope, number> = {
   space: 0,

@@ -85,10 +85,26 @@ load. Reads stall during the window.
 ls /tmp/cf-mount/
 
 # Remount:
-cf fuse mount /tmp/cf-mount --background && sleep 3
+cf fuse mount /tmp/cf-mount --background
 ```
 
-Add `sleep 2` before verification reads if you see repeated stalls.
+`--background` waits until the daemon reports it has mounted, so no delay is
+needed after it. It exits non-zero if the child dies during startup, or if the
+child does not report readiness within about 20 seconds.
+
+If reads still stall, read the mount status rather than waiting:
+
+```bash
+cat /tmp/cf-mount/.status
+```
+
+- `connection.disconnected` — the transport is dead. Remount; waiting does not
+  recover it.
+- `rebuilds.pending` — a subtree is still rebuilding. Those reads settle on
+  their own.
+- On macOS/FUSE-T, staleness beyond about a second suggests the mount was
+  created with `--attrcache-timeout 0` or `--noattrcache`; remount with the
+  default of 1. Neither option applies on Linux or macFUSE.
 
 ### Transport disconnection (silent write failures)
 
@@ -315,7 +331,7 @@ AGENT_NAME=$(resolve_agent)
 # Or on error:
 AGENT_NAME=$(resolve_agent)
 "MOUNT/SPACE/pieces/$AGENT_NAME/result/markError.handler" \
-  --summary "FUSE mount unresponsive after 3 retries"
+  --summary "FUSE mount unresponsive: .status reports transport disconnected"
 ```
 
 `markRunning`, `markIdle`, and `markError` automatically log to the Activity Log

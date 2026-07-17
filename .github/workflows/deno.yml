@@ -65,6 +65,9 @@ jobs:
       - name: 🚧 Guard against new polling waitFor in integration tests
         run: deno task check-no-waitfor
 
+      - name: 🔎 Check Deno toolchain pins are aligned
+        run: deno task check-deno-pins
+
       - name: 🔎 Check generated commonfabric/cfc types are up to date
         working-directory: packages/static
         run: deno task check-cfc-types
@@ -501,6 +504,20 @@ jobs:
           mkdir -p ../../test-results
           : > "$CF_CLI_INTEGRATION_TIMINGS_FILE"
           API_URL="http://localhost:${TOOLSHED_PORT}" ./integration/${{ matrix.script }}
+
+      # Deno-based integration tests against the same toolshed. Type checking
+      # of the CLI package is done by `deno task check`, so this run skips it.
+      # The prebuilt `cf` binary is on PATH, so the tests exercise it rather
+      # than the source-tree CLI task.
+      - name: 🧪 Run CLI deno integration tests
+        if: ${{ matrix.suite_name == 'core-piece-values' }}
+        working-directory: packages/cli
+        env:
+          TOOLSHED_PORT: ${{ matrix.toolshed_port }}
+        run: |
+          API_URL="http://localhost:${TOOLSHED_PORT}" deno test --no-check \
+            --allow-net --allow-ffi --allow-read --allow-write --allow-env \
+            --allow-run test/piece-integration.test.ts
 
       - name: 🧪 Run CLI FUSE integration suite
         if: ${{ matrix.suite_name == 'fuse' }}

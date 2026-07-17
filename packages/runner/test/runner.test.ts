@@ -1,11 +1,25 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type Module, NAME, type Pattern } from "../src/builder/types.ts";
+import {
+  type JSONSchema,
+  type Module,
+  NAME,
+  type Pattern,
+} from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
-import { extractDefaultValues, mergeObjects } from "../src/runner.ts";
+import {
+  extractDefaultValues,
+  getPatternIdentityRef,
+  mergeObjects,
+  mergeSchemaDefaults,
+  schemaAcceptsOpaqueCellValue,
+  schemaHasDefaultValue,
+} from "../src/runner.ts";
+import { validateSchemaValue } from "../src/cfc/mod.ts";
 import {
   type ICommitNotification,
   type IExtendedStorageTransaction,
@@ -188,6 +202,49 @@ describe("runPattern", () => {
     const derivedCell = runtime.getCellFromLink(derivedLink!);
     expect(await derivedCell.get()).toBe(5);
     expect(await result.pull()).toEqual({ output: 5 });
+  });
+
+  it("refreshes derived internal manifest schemas during setup updates", async () => {
+    const resultCell = runtime.getCell(
+      space,
+      "refresh derived internal manifest schema",
+    );
+    const pattern = (valueSchema: JSONSchema): Pattern => ({
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {
+        type: "object",
+        properties: { value: valueSchema },
+        required: ["value"],
+      },
+      derivedInternalCells: [{
+        partialCause: "value",
+        schema: valueSchema,
+      }],
+      result: {
+        value: { $alias: { partialCause: "value", path: [] } },
+      },
+      nodes: [],
+    });
+    const wide = {
+      type: ["number", "string"],
+      default: 1,
+    } as const;
+    const narrow = { type: "number", default: 1 } as const;
+
+    await setupTrusted(runtime, undefined, pattern(wide), {}, resultCell);
+    const firstManifest = resultCell.getMetaRaw("internal");
+    const firstLink = Array.isArray(firstManifest)
+      ? parseLink(firstManifest[0].link, resultCell)
+      : undefined;
+    expect(firstLink?.schema).toEqual(wide);
+
+    await setupTrusted(runtime, undefined, pattern(narrow), {}, resultCell);
+    const nextManifest = resultCell.getMetaRaw("internal");
+    const nextLink = Array.isArray(nextManifest)
+      ? parseLink(nextManifest[0].link, resultCell)
+      : undefined;
+    expect(nextLink?.id).toBe(firstLink?.id);
+    expect(nextLink?.schema).toEqual(narrow);
   });
 
   it("sets scoped write-redirect metadata links for argument and internal cells", async () => {
@@ -777,6 +834,41 @@ describe("runPattern", () => {
     );
     const defaultsValue = await resultWithDefaults.pull();
     expect(defaultsValue).toEqual({ result: 84 }); // 42 * 2
+  });
+
+  it("does not persist a union default rejected by the full argument schema", () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        anyOf: [
+          { type: "undefined" },
+          {
+            type: "object",
+            properties: { value: { type: "number", default: 1 } },
+            required: ["value"],
+          },
+        ],
+        oneOf: [
+          { type: "undefined" },
+          { type: "object" },
+          {
+            type: "object",
+            properties: { value: { type: "number" } },
+            required: ["value"],
+          },
+        ],
+      },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    const resultCell = runtime.getCell(
+      space,
+      "invalid full-schema union default",
+    );
+
+    runTrusted(runtime, undefined, pattern, undefined, resultCell);
+
+    expect(resultCell.getArgumentCell()?.getRawUntyped()).toBeUndefined();
   });
 
   it("should handle complex nested schema types", async () => {
@@ -1523,6 +1615,58 @@ describe("setup/start", () => {
     }
   });
 
+  it("runSynced rethrows retry exhaustion when identity is required", async () => {
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    const resultCell = runtime.getCell(
+      space,
+      "runSynced rethrows precondition retry exhaustion",
+    );
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    const failure = new Error("precondition retry exhausted");
+    runtime.editWithRetry = (() => Promise.resolve({ error: failure })) as any;
+
+    try {
+      await expect(runtime.runSynced(
+        resultCell,
+        trustExecutable(runtime, pattern),
+        {},
+        {
+          expectedPatternIdentity: {
+            identity: "of:fid1:expected",
+            symbol: "default",
+          },
+        },
+      )).rejects.toThrow("precondition retry exhausted");
+    } finally {
+      runtime.editWithRetry = originalEditWithRetry;
+    }
+  });
+
+  it("runSynced returns the untyped cell when the pattern has no result schema", async () => {
+    const pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      result: {},
+      nodes: [],
+    } as unknown as Pattern;
+    const resultCell = runtime.getCell(
+      space,
+      "runSynced pattern without result schema",
+    );
+
+    const result = await runtime.runSynced(
+      resultCell,
+      trustExecutable(runtime, pattern),
+      {},
+    );
+
+    expect(result).toBe(resultCell);
+  });
+
   it("setup rethrows callback failures from editWithRetry", async () => {
     const pattern: Pattern = {
       argumentSchema: {
@@ -1583,6 +1727,51 @@ describe("setup/start", () => {
     setupTrusted(runtime, undefined, pattern, { input: 2 }, resultCell);
     cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 2 });
+  });
+
+  it("replays same-pattern opaque Cell arguments without validating payloads", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          myProfile: {
+            type: "object",
+            properties: { name: { type: "string" } },
+            required: ["name"],
+            asCell: ["cell"],
+          },
+        },
+        required: ["myProfile"],
+      },
+      resultSchema: { type: "object", properties: {} },
+      result: {},
+      nodes: [],
+    };
+    const trusted = trustExecutable(runtime, pattern);
+    const profile = runtime.getCell(space, "cold profile");
+    const resultCell = runtime.getCell(space, "opaque replay result");
+
+    await runtime.runSynced(resultCell, trusted, { myProfile: profile });
+    const expectedPatternIdentity = getPatternIdentityRef(resultCell);
+    expect(expectedPatternIdentity).toBeDefined();
+
+    // Both a live same-pattern update and a stopped-piece replay receive the
+    // Cell handle itself. Its absent payload is not the argument value to
+    // validate against the wrapped object schema.
+    await expect(runtime.runSynced(
+      resultCell,
+      trusted,
+      { myProfile: profile },
+      { expectedPatternIdentity: expectedPatternIdentity! },
+    )).resolves.toBeDefined();
+
+    runtime.runner.stop(resultCell);
+    await expect(runtime.runSynced(
+      resultCell,
+      trusted,
+      { myProfile: profile },
+      { expectedPatternIdentity: expectedPatternIdentity! },
+    )).resolves.toBeDefined();
   });
 
   it("start is idempotent when called multiple times", async () => {
@@ -1783,6 +1972,55 @@ describe("setup/start", () => {
     cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 8 });
   });
+
+  it("checks an expected pattern identity on transaction-bound cells", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+      },
+      resultSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+      },
+      result: { input: { $alias: { cell: "argument", path: ["input"] } } },
+      derivedInternalCells: [],
+      nodes: [],
+    };
+    const trusted = trustExecutable(runtime, pattern);
+    const resultCell = runtime.getCell(space, "tx-bound-expected-identity");
+    await runtime.runSynced(resultCell, trusted, { input: 1 });
+    runtime.runner.stop(resultCell);
+    const boundTx = runtime.edit();
+    const currentIdentity = getPatternIdentityRef(resultCell);
+    expect(currentIdentity).toBeDefined();
+
+    try {
+      await expect(runtime.runSynced(
+        resultCell.withTx(boundTx),
+        trusted,
+        { input: 2 },
+        {
+          expectedPatternIdentity: {
+            identity: "of:fid1:stale",
+            symbol: "default",
+          },
+        },
+      )).rejects.toThrow(
+        /pattern changed while the source update was compiling/,
+      );
+
+      await runtime.runSynced(
+        resultCell.withTx(boundTx),
+        trusted,
+        { input: 2 },
+        { expectedPatternIdentity: currentIdentity! },
+      );
+      expect(runtime.runner.cancels.size).toBe(1);
+    } finally {
+      await boundTx.commit();
+    }
+  });
 });
 
 describe("runner utils", () => {
@@ -1805,6 +2043,92 @@ describe("runner utils", () => {
     await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
+  });
+
+  it("accepts opaque cells only for matching schema wrappers", () => {
+    const cell = runtime.getCell(space, "opaque-cell");
+    const stream = runtime.getCell(space, "opaque-stream", {
+      type: "number",
+      asCell: ["stream"],
+    });
+
+    expect(schemaAcceptsOpaqueCellValue(cell, { asCell: ["cell"] })).toBe(
+      true,
+    );
+    expect(schemaAcceptsOpaqueCellValue(stream, { asCell: ["stream"] })).toBe(
+      true,
+    );
+    expect(schemaAcceptsOpaqueCellValue(stream, { asCell: ["cell"] })).toBe(
+      false,
+    );
+    expect(schemaAcceptsOpaqueCellValue(cell, {
+      asCell: [{ kind: "cell", scope: undefined }],
+      scope: undefined,
+    })).toBe(true);
+    expect(schemaAcceptsOpaqueCellValue({}, { asCell: ["cell"] })).toBe(false);
+    const nonEnumerableKind = {};
+    Object.defineProperty(nonEnumerableKind, "kind", { value: "cell" });
+    const nonEnumerableScope = { kind: "cell" };
+    Object.defineProperty(nonEnumerableScope, "scope", { value: "session" });
+    const inheritedAsCell = Object.assign(
+      Object.create({ asCell: ["cell"] }),
+      { type: "number" },
+    );
+    const nonEnumerableAsCell = { type: "number" };
+    Object.defineProperty(nonEnumerableAsCell, "asCell", {
+      value: ["cell"],
+    });
+    const inheritedSchemaScope = Object.assign(
+      Object.create({ scope: "session" }),
+      { type: "number", asCell: ["cell"] },
+    );
+    const nonEnumerableSchemaScope = { type: "number", asCell: ["cell"] };
+    Object.defineProperty(nonEnumerableSchemaScope, "scope", {
+      value: "session",
+    });
+    const observedAccessorKinds: string[] = [];
+    const accessorAsCell = ["stream"];
+    Object.defineProperty(accessorAsCell, 0, {
+      enumerable: true,
+      get: () => {
+        const kind = observedAccessorKinds.length === 0 ? "stream" : "cell";
+        observedAccessorKinds.push(kind);
+        return kind;
+      },
+    });
+    const malformedWrappers = [
+      { type: "number", asCell: [] },
+      { type: "number", asCell: "cell" },
+      { type: "number", asCell: ["bogus"] },
+      { type: "number", asCell: ["cell", "bogus"] },
+      {
+        type: "number",
+        asCell: [{ kind: "cell" }, { kind: "bogus" }],
+      },
+      { type: "number", asCell: [{ kind: "cell", scope: "bogus" }] },
+      { type: "number", asCell: [Object.create({ kind: "cell" })] },
+      {
+        type: "number",
+        asCell: [
+          Object.assign(Object.create({ scope: "session" }), { kind: "cell" }),
+        ],
+      },
+      { type: "number", asCell: [nonEnumerableKind] },
+      { type: "number", asCell: [nonEnumerableScope] },
+      inheritedAsCell,
+      nonEnumerableAsCell,
+      inheritedSchemaScope,
+      nonEnumerableSchemaScope,
+      { type: "number", asCell: accessorAsCell },
+      { type: "number", asCell: ["cell"], scope: "bogus" },
+    ] as unknown as JSONSchema[];
+    for (const schema of malformedWrappers) {
+      expect(schemaAcceptsOpaqueCellValue(cell, schema)).toBe(false);
+      expect(validateSchemaValue(schema, cell, schema, {
+        acceptOpaqueValue: schemaAcceptsOpaqueCellValue,
+      })).toBeDefined();
+    }
+    expect(observedAccessorKinds).toEqual([]);
   });
 
   describe("extractDefaultValues", () => {
@@ -1833,6 +2157,200 @@ describe("runner utils", () => {
           city: "New York",
         },
       });
+    });
+
+    it("resolves defaults behind local refs without recursing forever", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          options: { $ref: "#/$defs/Options" },
+        },
+        $defs: {
+          Options: {
+            type: "object",
+            properties: {
+              attempts: { type: "number", default: 1 },
+              next: { $ref: "#/$defs/Options" },
+            },
+          },
+        },
+      };
+
+      expect(extractDefaultValues(schema)).toEqual({
+        options: { attempts: 1 },
+      });
+    });
+
+    it("returns no defaults for non-object and unresolved schemas", () => {
+      expect(extractDefaultValues(false)).toBeUndefined();
+      expect(extractDefaultValues({ $ref: "#/$defs/Missing" }))
+        .toBeUndefined();
+    });
+
+    it("keeps the owning root while traversing embedded schema refs", () => {
+      const warn = stub(console, "warn", () => {});
+      try {
+        expect(extractDefaultValues({
+          type: "object",
+          properties: {
+            $UI: { $ref: "https://commonfabric.org/schemas/vnode.json" },
+          },
+        })).toBeUndefined();
+        expect(warn.calls).toHaveLength(0);
+      } finally {
+        warn.restore();
+      }
+    });
+
+    it("uses nested child-local definitions for defaults", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          nested: {
+            type: "object",
+            properties: { value: { $ref: "#/$defs/Value" } },
+            $defs: {
+              Value: { type: "string", default: "local" },
+            },
+          },
+        },
+        $defs: {
+          Value: { type: "number", default: 1 },
+        },
+      };
+
+      expect(extractDefaultValues(schema)).toEqual({
+        nested: { value: "local" },
+      });
+    });
+
+    it("extracts defaults from object-containing extended unions", () => {
+      expect(extractDefaultValues({
+        type: ["object", "undefined"],
+        properties: { x: { type: "number", default: 1 } },
+        required: ["x"],
+      })).toEqual({ x: 1 });
+
+      expect(extractDefaultValues({
+        anyOf: [
+          { type: "undefined" },
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 1 } },
+            required: ["x"],
+          },
+        ],
+      })).toEqual({ x: 1 });
+    });
+
+    it("returns no default unless the candidate satisfies the full schema", () => {
+      const duplicateOneOf: JSONSchema = {
+        oneOf: [
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 1 } },
+            required: ["x"],
+          },
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 1 } },
+            required: ["x"],
+          },
+        ],
+      };
+      const baseConflict: JSONSchema = {
+        type: "undefined",
+        anyOf: [{
+          type: "object",
+          properties: { x: { type: "number", default: 1 } },
+          required: ["x"],
+        }],
+      };
+
+      expect(extractDefaultValues(duplicateOneOf)).toBeUndefined();
+      expect(extractDefaultValues(baseConflict)).toBeUndefined();
+    });
+
+    it("combines defaults across simultaneous union families", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        anyOf: [{
+          type: "object",
+          properties: { fromAny: { type: "number", default: 1 } },
+          required: ["fromAny"],
+        }],
+        oneOf: [{
+          type: "object",
+          properties: { fromOne: { type: "number", default: 2 } },
+          required: ["fromOne"],
+        }],
+      };
+
+      expect(extractDefaultValues(schema)).toEqual({
+        fromAny: 1,
+        fromOne: 2,
+      });
+    });
+
+    it("preserves explicit undefined while combining union defaults", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        anyOf: [{
+          type: "object",
+          properties: {
+            x: { type: "undefined", default: undefined },
+          },
+          required: ["x"],
+        }],
+        oneOf: [{
+          type: "object",
+          properties: { y: { type: "number", default: 2 } },
+          required: ["y"],
+        }],
+      };
+
+      const defaults = extractDefaultValues(schema) as
+        | Record<string, unknown>
+        | undefined;
+      expect(schemaHasDefaultValue(schema)).toBe(true);
+      expect(defaults).toBeDefined();
+      expect(Object.hasOwn(defaults!, "x")).toBe(true);
+      expect(defaults!.x).toBeUndefined();
+      expect(defaults!.y).toBe(2);
+      expect(validateSchemaValue(schema, defaults)).toBeUndefined();
+    });
+
+    it("preserves explicit empty, non-object, and undefined defaults", () => {
+      const noDefault: JSONSchema = {
+        type: "object",
+        properties: {},
+      };
+      expect(extractDefaultValues(noDefault)).toBeUndefined();
+      expect(schemaHasDefaultValue(noDefault)).toBe(false);
+      expect(extractDefaultValues({
+        type: "object",
+        properties: {},
+        default: {},
+      })).toEqual({});
+      expect(extractDefaultValues({
+        type: ["object", "null"],
+        properties: {},
+        default: null,
+      })).toBeNull();
+
+      const undefinedDefault: JSONSchema = {
+        type: "undefined",
+        default: undefined,
+      };
+      expect(extractDefaultValues(undefinedDefault)).toBeUndefined();
+      expect(schemaHasDefaultValue(undefinedDefault)).toBe(true);
+      const parentDefaults = extractDefaultValues({
+        type: "object",
+        properties: { value: undefinedDefault },
+        required: ["value"],
+      }) as Record<string, unknown>;
+      expect(Object.hasOwn(parentDefaults, "value")).toBe(true);
+      expect(parentDefaults.value).toBeUndefined();
     });
   });
 
@@ -1888,6 +2406,461 @@ describe("runner utils", () => {
         a: { $alias: { path: [] } },
         b: { c: testCell.getAsLink() },
       });
+    });
+  });
+
+  describe("mergeSchemaDefaults", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        options: { $ref: "#/$defs/Options" },
+        requiredOptions: { $ref: "#/$defs/Options" },
+      },
+      required: ["requiredOptions"],
+      $defs: {
+        Options: {
+          type: "object",
+          properties: {
+            attempts: { type: "number", default: 1 },
+            name: { type: "string" },
+          },
+          required: ["name"],
+        },
+      },
+    };
+    const defaults = {
+      options: { attempts: 1 },
+      requiredOptions: { attempts: 1 },
+    };
+
+    it("skips invalid optional partial objects but retains required defaults", () => {
+      expect(mergeSchemaDefaults<Record<string, unknown>>(
+        {},
+        defaults,
+        schema,
+      )).toEqual({
+        requiredOptions: { attempts: 1 },
+      });
+    });
+
+    it("merges nested defaults when existing values complete the object", () => {
+      expect(mergeSchemaDefaults<Record<string, unknown>>(
+        {
+          options: { name: "safe" },
+          requiredOptions: { name: "required" },
+        },
+        defaults,
+        schema,
+      )).toEqual({
+        options: { name: "safe", attempts: 1 },
+        requiredOptions: { name: "required", attempts: 1 },
+      });
+    });
+
+    it("preserves explicitly present undefined values", () => {
+      const value = mergeSchemaDefaults<Record<string, unknown>>(
+        { value: undefined },
+        { value: "fallback" },
+        {
+          type: "object",
+          properties: {
+            value: { type: ["string", "undefined"] },
+          },
+          required: ["value"],
+        },
+      );
+
+      expect(Object.hasOwn(value, "value")).toBe(true);
+      expect(value.value).toBeUndefined();
+    });
+
+    it("preserves explicitly present undefined values in object type unions", () => {
+      const value = mergeSchemaDefaults<Record<string, unknown>>(
+        { value: undefined },
+        { value: "fallback" },
+        {
+          type: ["object", "undefined"],
+          properties: {
+            value: { type: ["string", "undefined"] },
+          },
+        },
+      );
+
+      expect(Object.hasOwn(value, "value")).toBe(true);
+      expect(value.value).toBeUndefined();
+    });
+
+    it("preserves explicitly present undefined values in anyOf objects", () => {
+      const value = mergeSchemaDefaults<Record<string, unknown>>(
+        { value: undefined },
+        { value: "fallback" },
+        {
+          anyOf: [
+            {
+              type: "object",
+              properties: {
+                value: { type: ["string", "undefined"] },
+              },
+            },
+            { type: "undefined" },
+          ],
+        },
+      );
+
+      expect(Object.hasOwn(value, "value")).toBe(true);
+      expect(value.value).toBeUndefined();
+    });
+
+    it("does not splice a default from another anyOf variant", () => {
+      const schema: JSONSchema = {
+        anyOf: [
+          {
+            type: "object",
+            properties: { kind: { const: "A" } },
+            required: ["kind"],
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            properties: {
+              kind: { const: "B" },
+              x: { type: "number" },
+            },
+            required: ["kind", "x"],
+            additionalProperties: false,
+          },
+        ],
+        default: { kind: "B", x: 1 },
+      };
+      const existing = { kind: "A" };
+      const value = mergeSchemaDefaults<Record<string, unknown>>(
+        existing,
+        { kind: "B", x: 1 },
+        schema,
+      );
+
+      expect(value).toEqual(existing);
+      expect(validateSchemaValue(schema, value)).toBeUndefined();
+    });
+
+    it("hydrates explicit object defaults into present union values", () => {
+      const unionSchema: JSONSchema = {
+        type: "object",
+        default: { kind: "a", x: 1 },
+        anyOf: [
+          {
+            type: "object",
+            properties: {
+              kind: { const: "a" },
+              x: { type: "number" },
+            },
+            required: ["kind", "x"],
+          },
+          {
+            type: "object",
+            properties: { kind: { const: "b" } },
+            required: ["kind"],
+          },
+        ],
+      };
+      const typeArraySchema: JSONSchema = {
+        type: ["object", "undefined"],
+        properties: { x: { type: "number" } },
+        required: ["x"],
+        default: { x: 2 },
+      };
+
+      const unionValue = mergeSchemaDefaults(
+        {},
+        extractDefaultValues(unionSchema),
+        unionSchema,
+      );
+      const typeArrayValue = mergeSchemaDefaults(
+        {},
+        extractDefaultValues(typeArraySchema),
+        typeArraySchema,
+      );
+
+      expect(unionValue).toEqual({ kind: "a", x: 1 });
+      expect(validateSchemaValue(unionSchema, unionValue)).toBeUndefined();
+      expect(typeArrayValue).toEqual({ x: 2 });
+      expect(validateSchemaValue(typeArraySchema, typeArrayValue))
+        .toBeUndefined();
+    });
+
+    it("hydrates defaults from the anyOf branch matching existing state", () => {
+      const schema: JSONSchema = {
+        anyOf: [
+          { type: "undefined" },
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 1 } },
+            required: ["x"],
+          },
+        ],
+      };
+      const value = mergeSchemaDefaults<Record<string, unknown>>(
+        {},
+        extractDefaultValues(schema),
+        schema,
+      );
+
+      expect(value).toEqual({ x: 1 });
+      expect(validateSchemaValue(schema, value)).toBeUndefined();
+    });
+
+    it("combines defaults required by simultaneous anyOf and oneOf", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        anyOf: [{
+          type: "object",
+          properties: { fromAny: { type: "number", default: 1 } },
+          required: ["fromAny"],
+        }],
+        oneOf: [{
+          type: "object",
+          properties: { fromOne: { type: "number", default: 2 } },
+          required: ["fromOne"],
+        }],
+      };
+
+      const value = mergeSchemaDefaults({}, undefined, schema);
+
+      expect(value).toEqual({ fromAny: 1, fromOne: 2 });
+      expect(validateSchemaValue(schema, value)).toBeUndefined();
+    });
+
+    it("hydrates defaults through present arrays and dynamic object fields", () => {
+      const itemSchema: JSONSchema = {
+        anyOf: [
+          {
+            type: "object",
+            properties: { attempts: { type: "number", default: 1 } },
+            required: ["attempts"],
+          },
+          { type: "undefined" },
+        ],
+      };
+      const sparse = [{}, , undefined];
+      const arrayValue = mergeSchemaDefaults(
+        sparse,
+        undefined,
+        { type: "array", items: itemSchema },
+      ) as unknown[];
+
+      expect(arrayValue[0]).toEqual({ attempts: 1 });
+      expect(Object.hasOwn(arrayValue, 1)).toBe(false);
+      expect(Object.hasOwn(arrayValue, 2)).toBe(true);
+      expect(arrayValue[2]).toBeUndefined();
+
+      const unionArrayValue = mergeSchemaDefaults(
+        [{}],
+        undefined,
+        { type: ["array", "undefined"], items: itemSchema },
+      );
+      expect(unionArrayValue).toEqual([{ attempts: 1 }]);
+
+      const dynamicValue = mergeSchemaDefaults(
+        { extra: {}, xPattern: {} },
+        undefined,
+        {
+          type: ["object", "undefined"],
+          patternProperties: { "^x": itemSchema },
+          additionalProperties: itemSchema,
+        },
+      );
+      expect(dynamicValue).toEqual({
+        extra: { attempts: 1 },
+        xPattern: { attempts: 1 },
+      });
+    });
+
+    it("terminates on cyclic values under recursive schemas", () => {
+      const value: { self?: unknown } = {};
+      value.self = value;
+      const schema: JSONSchema = {
+        $ref: "#/$defs/Node",
+        $defs: {
+          Node: {
+            type: "object",
+            properties: { self: { $ref: "#/$defs/Node" } },
+          },
+        },
+      };
+
+      expect(mergeSchemaDefaults(value, undefined, schema)).toBe(value);
+    });
+
+    it("merges shared base defaults before selecting a union branch", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          shared: { type: "number", default: 1 },
+        },
+        anyOf: [
+          {
+            type: "object",
+            properties: { kind: { const: "a" } },
+            required: ["kind"],
+          },
+          {
+            type: "object",
+            properties: { kind: { const: "b" } },
+            required: ["kind"],
+          },
+        ],
+      };
+      const defaults = extractDefaultValues(schema);
+
+      expect(mergeSchemaDefaults({ kind: "a" }, defaults, schema)).toEqual({
+        kind: "a",
+        shared: 1,
+      });
+
+      const invalid = { kind: "other" };
+      expect(mergeSchemaDefaults(invalid, defaults, schema)).toBe(invalid);
+    });
+
+    it("uses full-context acceptance to disambiguate union defaults", () => {
+      const schema: JSONSchema = {
+        anyOf: [
+          {
+            type: "object",
+            properties: { attempts: { type: "number", default: 1 } },
+            required: ["attempts"],
+          },
+          {
+            type: "object",
+            properties: { retries: { type: "number", default: 2 } },
+            required: ["retries"],
+          },
+        ],
+      };
+
+      expect(mergeSchemaDefaults({}, undefined, schema, {
+        acceptUnionCandidate: (candidate) =>
+          Object.hasOwn(candidate as object, "attempts"),
+      })).toEqual({ attempts: 1 });
+    });
+
+    it("compares identical unsupported union candidates defensively", () => {
+      const marker = () => "opaque";
+      const value = { marker };
+      const schema: JSONSchema = {
+        anyOf: [
+          { type: "object" },
+          { type: "object" },
+        ],
+      };
+
+      expect(mergeSchemaDefaults(value, undefined, schema)).toBe(value);
+    });
+
+    it("keeps a non-object type-union default while hydrating present objects", () => {
+      const schema: JSONSchema = {
+        type: ["object", "null"],
+        properties: { x: { type: "number", default: 1 } },
+        required: ["x"],
+        default: null,
+      };
+
+      expect(extractDefaultValues(schema)).toBeNull();
+      expect(mergeSchemaDefaults(undefined, null, schema)).toBeNull();
+      expect(mergeSchemaDefaults<Record<string, unknown>>(
+        {},
+        null,
+        schema,
+      )).toEqual({ x: 1 });
+    });
+
+    it("does not throw while comparing opaque union candidates", () => {
+      class Opaque {
+        self: Opaque = this;
+      }
+      const schema: JSONSchema = {
+        anyOf: [
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 1 } },
+          },
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 1 } },
+          },
+        ],
+      };
+      const value = { opaque: new Opaque() };
+
+      expect(() => mergeSchemaDefaults(value, undefined, schema)).not
+        .toThrow();
+      expect(mergeSchemaDefaults(value, undefined, schema)).toEqual({
+        opaque: value.opaque,
+        x: 1,
+      });
+    });
+
+    it("validates nested defaults against child-local definitions", () => {
+      const value = mergeSchemaDefaults<Record<string, unknown>>(
+        { nested: {} },
+        { nested: { value: "local" } },
+        {
+          type: "object",
+          properties: {
+            nested: {
+              type: "object",
+              properties: { value: { $ref: "#/$defs/Value" } },
+              $defs: { Value: { type: "string" } },
+            },
+          },
+          $defs: { Value: { type: "number" } },
+        },
+      );
+
+      expect(value).toEqual({ nested: { value: "local" } });
+    });
+
+    it("keeps definition-body defaults in their child-local scope", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: { item: { $ref: "#/$defs/Entry" } },
+        $defs: {
+          Entry: {
+            type: "object",
+            properties: { value: { $ref: "#/$defs/Value" } },
+            required: ["value"],
+            $defs: {
+              Value: { type: "string", default: "local" },
+            },
+          },
+          Value: { type: "number", default: 1 },
+        },
+      };
+
+      expect(extractDefaultValues(schema)).toEqual({
+        item: { value: "local" },
+      });
+    });
+
+    it("does not treat inherited names as existing argument values", () => {
+      const value = mergeSchemaDefaults<Record<string, unknown>>(
+        {},
+        { toString: 1 },
+        {
+          type: "object",
+          properties: { toString: { type: "number" as const } },
+        },
+      );
+
+      expect(Object.hasOwn(value, "toString")).toBe(true);
+      expect(value.toString).toBe(1);
+    });
+
+    it("falls back to ordinary object merging for non-object schemas", () => {
+      expect(mergeSchemaDefaults<Record<string, unknown>>(
+        { existing: true },
+        { added: true },
+        true,
+      )).toEqual({ existing: true, added: true });
     });
   });
 

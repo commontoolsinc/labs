@@ -21,6 +21,9 @@ const HASHTAG_PATTERN = /#([\p{L}\p{M}\p{N}_]+)/gu;
  * Unicode letters, combining marks, numbers, and underscores; a hyphen, space,
  * or other punctuation ends it. Returns the tokens lowercased, without the
  * leading `#`, deduplicated, in order of first appearance.
+ *
+ * TODO(danfuzz): This function doesn't really have anything to do with the
+ * data model and should probably move to the `utils` package.
  */
 export function extractHashtags(text: string): string[] {
   const tags: string[] = [];

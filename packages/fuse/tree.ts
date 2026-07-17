@@ -1,4 +1,16 @@
 // tree.ts — In-memory filesystem tree with inode management
+//
+// Reference documentation:
+// - docs/specs/fuse-filesystem/README.md — index of the filesystem spec
+// - docs/specs/fuse-filesystem/4-read-write.md — stat, read and write
+//   semantics, inode assignment, and the cell-error-to-errno mapping
+// - docs/specs/fuse-filesystem/6-reactivity.md — how a cell change rebuilds a
+//   subtree and invalidates kernel caches, and the kernel cache timeouts that
+//   bound how long a client can hold a stale entry
+// - docs/specs/fuse-filesystem/10-cfc-filesystem-api-semantics.md — the errno
+//   decision table
+// - RELIABILITY_DESIGN.md — which module owns which state
+// - README.md — mount options and client-side cache tuning
 
 import type { CallableKind } from "./callables.ts";
 import {
@@ -259,7 +271,16 @@ export class FsTree {
     return childIno;
   }
 
-  /** Unlink a subtree from its parent while keeping its inodes temporarily live. */
+  /**
+   * Unlink a subtree from its parent while keeping its inodes temporarily live.
+   *
+   * A piece-prop rebuild detaches the old subtree and builds a replacement with
+   * fresh inodes. A client can still hold the old inode for as long as its
+   * kernel caches allow, so the detached inodes stay resolvable until they are
+   * cleared: `getNode`, `getPath` and `getNameForIno` all keep answering for
+   * them, which lets a write that arrives on a detached inode resolve to the
+   * same cell as the path it was opened on.
+   */
   detach(ino: bigint): void {
     if (!this.inodes.has(ino)) return;
     this.unlinkFromParent(ino);
@@ -356,7 +377,13 @@ export class FsTree {
     for (const [name, childIno] of parent.children) {
       if (childIno === ino) return name;
     }
-    return undefined;
+    // A detached subtree keeps its inodes and its recorded path until it is
+    // cleared. The parent no longer lists it, so recover the name from the
+    // recorded path.
+    const path = this.inoPaths.get(ino);
+    if (path === undefined) return undefined;
+    const name = path.slice(path.lastIndexOf("/") + 1);
+    return name === "" ? undefined : name;
   }
 
   /** Remove a subtree rooted at `ino`, including the node itself. */

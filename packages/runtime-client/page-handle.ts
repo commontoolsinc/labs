@@ -26,8 +26,17 @@ export class PageHandle<T = PageType> {
     return this._cell;
   }
 
+  /**
+   * The piece-root ROUTING/DISPLAY form of the id: consumers feed shell
+   * URLs, `cf-piece` lookups, menu entries, and equality against
+   * URL-derived bare pieceIds, so `of:` is stripped to match that bare
+   * convention. Piece roots are minted unkinded, so only `of:` ids arrive
+   * here; a `computed:` scheme (which would indicate a bug upstream) stays
+   * visible rather than being laundered into the bare-id world. For
+   * identity, use `cell().id()` — the full schemed URI.
+   */
   id(): string {
-    return this._cell.id();
+    return this._cell.id().replace(/^of:/, "");
   }
 
   name(): string | undefined {

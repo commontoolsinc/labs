@@ -167,6 +167,24 @@ const cfcLabelLogger = getLogger("runtime-client.cfc-label", {
   level: "error",
 });
 
+/**
+ * PageId intake: accepts both the bare tagged hash (`fid1:<hash>`, the
+ * routing form `PageHandle.id()` emits) and the `of:`-schemed URI
+ * (`CellHandle.id()` emits the full schemed id). Without the strip, a
+ * schemed pageId would silently parse as a hash whose TAG is `of:fid1`
+ * and address the nonexistent entity `of:of:fid1:<hash>` — no error,
+ * just a page that never resolves. `computed:` ids are deliberately NOT
+ * accepted: pages are pieces (result cells, always `of:`-schemed), and
+ * the scheme is part of the identity, so stripping `computed:` would
+ * silently alias a different entity.
+ */
+function pageIdForRouting(pageId: string): string {
+  if (pageId.startsWith("computed:")) {
+    throw new Error("Computed ids are not valid page ids.");
+  }
+  return pageId.startsWith("of:") ? pageId.slice("of:".length) : pageId;
+}
+
 function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
   const spaceBaseUrl = new URL(`/${space}/`, apiUrl);
   return new URL(url, spaceBaseUrl).href;
@@ -1169,9 +1187,10 @@ export class RuntimeProcessor {
     request: PageGetRequest,
   ): Promise<PageResponse> {
     const { pieceManager, cc } = this.getSpaceCtx(request.space);
+    const pageId = pageIdForRouting(request.pageId);
     const requestedCell = this.runtime.getCellFromEntityId(
       pieceManager.getSpace(),
-      entityIdFrom(request.pageId),
+      entityIdFrom(pageId),
     );
     await requestedCell.sync();
     const redirect = parseLink(
@@ -1208,7 +1227,7 @@ export class RuntimeProcessor {
     }
 
     const cell = await cc.manager().get(
-      request.pageId,
+      pageId,
       request.runIt ?? false,
     );
 
@@ -1223,7 +1242,7 @@ export class RuntimeProcessor {
     const { pieceManager } = this.getSpaceCtx(request.space);
     const cell = this.runtime.getCellFromEntityId(
       pieceManager.getSpace(),
-      entityIdFrom(request.pageId),
+      entityIdFrom(pageIdForRouting(request.pageId)),
     );
     await cell.sync();
     const slug = cell.getMetaRaw("slug");

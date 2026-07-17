@@ -209,7 +209,14 @@ const fillAndVerify = async (
 };
 
 // Scroll the cf-button behind `selector` into view and tag its inner click
-// target so the test can resolve and click exactly that element.
+// target so the test can resolve and click exactly that element. A click target
+// that is still detached, or not rendered — laid out, and not display:none or
+// visibility:hidden — is left untagged, so a re-check on the next DOM mutation
+// retries the mark once the control renders. The check is viewport-independent:
+// the click scrolls the element into view itself, so a control below the fold
+// is markable. It reads the click target alone because hiding the host or any
+// ancestor reaches the inner button either way: display:none zeroes its box,
+// and visibility:hidden inherits into its computed visibility.
 const markForClick = async (
   probe: ProbeApi,
   selector: string,
@@ -225,7 +232,30 @@ const markForClick = async (
   const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
     | HTMLElement
     | null) ?? target;
+  if (!clickTarget.isConnected || !probe.isRendered(clickTarget)) return false;
   clickTarget.setAttribute(attr, token);
+  return true;
+};
+
+// Scroll the `index`-th element matching `selector` into view and tag it once it
+// is visible. Unlike `markForClick`, the selector here already resolves to the
+// clickable elements, so the match is tagged directly rather than reached
+// through a host's shadow root.
+const markNthForClick = async (
+  probe: ProbeApi,
+  selector: string,
+  index: number,
+  token: string,
+  attr: string,
+): Promise<boolean> => {
+  const target = probe.collect(selector)[index] as HTMLElement | undefined;
+  if (!target) return false;
+  target.scrollIntoView({ block: "center", inline: "center" });
+  await new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  );
+  if (!probe.isVisible(target)) return false;
+  target.setAttribute(attr, token);
   return true;
 };
 
@@ -363,7 +393,7 @@ export async function clickTrustedAction(
       { cause },
     );
   } finally {
-    await clearTrustedActionMark(page, token).catch(() => {});
+    await clearClickMark(page, token).catch(() => {});
   }
 }
 
@@ -606,16 +636,71 @@ export async function clickCfButton(
 ) {
   const token = `cf-button-${crypto.randomUUID()}`;
   try {
-    // Wait until the button exists, then mark its inner click target exactly
-    // once; the mark is the predicate, so the re-check on each DOM mutation
-    // retries finding the button without re-clicking anything.
+    // Wait until the button is rendered, then mark its inner click target
+    // exactly once; the mark is the predicate, so the re-check on each DOM
+    // mutation retries finding the button without re-clicking anything.
     await waitForCondition(page, markForClick, {
       timeout,
       args: [selector, token, CLICK_TARGET_ATTR],
     });
   } catch (cause) {
-    throw new Error(`Unable to mark ${selector} for click`, { cause });
+    // The probe's per-match `rect` and `visible` report whether the control was
+    // absent or present without a layout box.
+    const probe = await readTextProbe(page, selector).catch(() => undefined);
+    // Indented for readable test-log output
+    throw new Error(
+      `Unable to mark ${selector} for click. Last probe: ${
+        toIndentedDebugString(probe)
+      }`,
+      { cause },
+    );
   }
+  await clickMarked(page, token, timeout);
+}
+
+/**
+ * Click the `index`-th element matching `selector`, where the selector already
+ * resolves to the clickable elements themselves (for example `[data-cf-button]`
+ * across a rendered piece) rather than to a host wrapping one.
+ *
+ * The wait is the mark: a `waitForCondition` predicate re-checks on each DOM
+ * mutation until the indexed element is present and visible, then tags it, and
+ * the test dispatches a single trusted click on the tagged element.
+ */
+export async function clickNthCfButton(
+  page: Page,
+  selector: string,
+  index: number,
+  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
+) {
+  const token = `cf-nth-button-${crypto.randomUUID()}`;
+  try {
+    await waitForCondition(page, markNthForClick, {
+      timeout,
+      args: [selector, index, token, CLICK_TARGET_ATTR],
+    });
+  } catch (cause) {
+    const probe = await readTextProbe(page, selector).catch(() => undefined);
+    throw new Error(
+      `Unable to find button #${index} matching "${selector}". Last probe: ${
+        toIndentedDebugString(probe)
+      }`,
+      { cause },
+    );
+  }
+  await clickMarked(page, token, timeout);
+}
+
+/**
+ * Resolve the element tagged with `token` and click it, then clear the tag.
+ * Shared by the click helpers above: each one marks its target through its own
+ * predicate, and the resolve/click/untag tail is the same for all of them.
+ */
+async function clickMarked(
+  page: Page,
+  token: string,
+  timeout: number,
+): Promise<void> {
   try {
     const clickTarget = await page.waitForSelector(
       `[${CLICK_TARGET_ATTR}="${token}"]`,
@@ -626,27 +711,7 @@ export async function clickCfButton(
     );
     await clickTarget.click();
   } finally {
-    await page.evaluate((targetToken, targetAttr) => {
-      function collect(
-        root: Document | ShadowRoot,
-        result: Element[],
-      ): void {
-        for (const element of root.querySelectorAll("*")) {
-          if (element.getAttribute(targetAttr) === targetToken) {
-            result.push(element);
-          }
-          if (element.shadowRoot) {
-            collect(element.shadowRoot, result);
-          }
-        }
-      }
-
-      const matches: Element[] = [];
-      collect(document, matches);
-      for (const element of matches) {
-        element.removeAttribute(targetAttr);
-      }
-    }, { args: [token, CLICK_TARGET_ATTR] }).catch(() => {});
+    await clearClickMark(page, token).catch(() => {});
   }
 }
 
@@ -1605,7 +1670,8 @@ async function readDisabledProbe(
   }, { args: [selector] });
 }
 
-async function clearTrustedActionMark(
+/** Remove the click tag carrying `token` from wherever it landed. */
+async function clearClickMark(
   page: Page,
   token: string,
 ): Promise<void> {

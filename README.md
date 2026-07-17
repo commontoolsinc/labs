@@ -33,11 +33,16 @@ can run their own spaces or use hosted versions.
 
 ## Quick Start (Development)
 
-1. Install [Deno 2](https://docs.deno.com/runtime/getting_started/installation/)
+1. Install [mise](https://mise.jdx.dev/getting-started.html) and activate it in
+   your shell
 2. Clone this repo
-3. Install the Git hooks: `deno task install-hooks` (optional)
-4. Start local dev servers: `./scripts/start-local-dev.sh`
-5. Access the application at <http://localhost:8000>
+3. Run `mise trust && mise install` in the repo to install the pinned Deno
+   version (see
+   [DEVELOPMENT.md](./docs/development/DEVELOPMENT.md#installing-deno) for
+   details, including installing Deno without mise)
+4. Install the Git hooks: `deno task install-hooks` (optional)
+5. Start local dev servers: `./scripts/start-local-dev.sh`
+6. Access the application at <http://localhost:8000>
 
 For Claude Code users, run [`/deps`](.claude/commands/deps.md) to verify
 prerequisites, [`/start-local-dev`](.claude/commands/start-local-dev.md) to
@@ -97,7 +102,14 @@ through `/.agents/skills/`, while Claude compatibility preserves the existing
 **Required**:
 
 - [Deno 2](https://docs.deno.com/runtime/getting_started/installation/) -
-  Runtime for backend and tooling
+  Runtime for backend and tooling. The version is pinned in `mise.toml`.
+
+**Recommended for installing Deno**:
+
+- [mise](https://mise.jdx.dev/) - Installs the pinned version and keeps you on
+  it (run `mise trust && mise install` in the repo). Installing Deno yourself
+  also works: `deno task check` accepts the range in `tasks/check.sh`, and warns
+  when your version is off the pin.
 
 **Recommended Integrations**:
 

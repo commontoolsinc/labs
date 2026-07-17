@@ -51,10 +51,13 @@ const resolved = await subCell.resolveAsCell();
 const stableId = resolved.ref().id; // e.g., "of:fid1:abc123"
 ```
 
-**Important:** `CellHandle.id()` strips the `of:` prefix, while
-`CellHandle.ref().id` preserves it. Use `.ref().id` when building LLM-friendly
-links (`/of:...` format). Use `.id()` when you need the bare CID (e.g., for
-wiki-link format in `cf-code-editor`).
+**Important:** `CellHandle.id()` returns the FULL schemed URI (`of:fid1:...`) —
+the URI scheme is part of the identity (a `computed:` cell is not its `of:`
+sibling), so programmatic surfaces keep it. The bare, `of:`-stripped form is a
+ROUTING/EMBED convenience produced at the edges: `PageHandle.id()` for routing
+pieceIds, and `mentionIdFromCellId` (`src/v2/utils/mention-id.ts`) for wiki-link
+embeds — the latter throws on `computed:` ids, which the bare embed format
+cannot represent.
 
 ## Link Formats
 
@@ -75,8 +78,12 @@ are encoded per RFC 6901 (JSON Pointer): `~` becomes `~0`, `/` becomes `~1`.
 
 ### Wiki-links (`[[Name (id)]]`)
 
-These use bare CIDs without the `of:` prefix. `note-md.tsx` converts them to
-markdown links for display:
+These use bare CIDs without the `of:` prefix — the embed passes through
+`mentionIdFromCellId`, which strips `of:` and REJECTS `computed:` ids (the
+scheme is part of the identity, and the renderer unconditionally re-adds `/of:`,
+so a computed id would silently alias its `of:` sibling; if mentionables ever
+include computed cells, the embed format must carry the scheme). `note-md.tsx`
+converts them to markdown links for display:
 
 ```tsx
 raw.replace(

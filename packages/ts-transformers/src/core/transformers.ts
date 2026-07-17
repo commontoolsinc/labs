@@ -48,7 +48,9 @@ export interface CapabilityParamSummary {
    * Write-exhaustiveness is unverifiable for this parameter — `writePaths`
    * may be incomplete. Set by unrecognized or dynamic method calls on
    * cell-like receivers, and by `set`/`send` calls carrying an onCommit
-   * callback. Treat like `wildcard` and fail closed. Detection is per
+   * callback. Consumers asserting write exhaustiveness
+   * (`completeSchedulerScopeSummary`) must treat this like `wildcard` and
+   * fail closed. Detection is per
    * method-call dispatch: extracted method references
    * (`const f = cell.send; f(x)`) are outside the contract.
    */
@@ -128,6 +130,16 @@ export interface TransformationOptions {
    */
   readonly diagnosticsCollector?: TransformationDiagnostic[];
   readonly patternCoverage?: PatternCoverageOptions;
+  /**
+   * Whether an `assert(...)` body records its operands, so that a failing
+   * pattern-test assertion can report them. Defaults to true.
+   *
+   * This does not control the shape of the value an assertion carries — that
+   * is always an `AssertRecord`, because `assert` declares it returns one.
+   * Setting it false drops only the recording, for a build that wants no
+   * debug rendering in its assertion bodies.
+   */
+  readonly assertDiagnostics?: boolean;
   /** Content identity assigned by the compiler for every authored source. */
   readonly moduleIdentities?: ReadonlyMap<string, string>;
 }

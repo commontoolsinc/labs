@@ -3,6 +3,7 @@ import {
   assertEquals,
   assertExists,
   assertFalse,
+  assertRejects,
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
@@ -31,6 +32,8 @@ import {
   formatMetricValue,
   formatOverrideSuggestion,
   githubGet,
+  githubPatch,
+  githubPost,
   type Job,
   latestNonColdSample,
   newestArtifactsByName,
@@ -1391,7 +1394,7 @@ Deno.test("fetchCurrentPRBody falls back to the event body if the live request f
     assertEquals(result.body, "EVENT BODY");
     assertEquals(result.source, "event-fallback");
     assertEquals(
-      result.errorMessage?.includes("GitHub API 429:"),
+      result.errorMessage?.includes("GitHub API GET 429:"),
       true,
     );
   } finally {
@@ -1451,6 +1454,100 @@ Deno.test("githubGet does not retry non-transient GitHub responses", async () =>
 
     assertEquals(rejected, true);
     assertEquals(calls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("GitHub REST errors include status text and omit response bodies", async (t) => {
+  const responseBody =
+    "upstream request: data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB";
+  const cases: {
+    name: string;
+    status: number;
+    statusText: string;
+    expectedMessage: string;
+    request: () => Promise<unknown>;
+  }[] = [
+    {
+      name: "GET 503",
+      status: 503,
+      statusText: "Service Unavailable",
+      expectedMessage:
+        "GitHub API GET 503 Service Unavailable: /repos/commontoolsinc/labs/actions/runs/123/jobs",
+      request: () =>
+        githubGet("/repos/commontoolsinc/labs/actions/runs/123/jobs"),
+    },
+    {
+      name: "POST 422",
+      status: 422,
+      statusText: "Unprocessable Content",
+      expectedMessage:
+        "GitHub API POST 422 Unprocessable Content: /repos/commontoolsinc/labs/issues/123/comments",
+      request: () =>
+        githubPost("/repos/commontoolsinc/labs/issues/123/comments", {
+          body: "comment",
+        }),
+    },
+    {
+      name: "PATCH 500",
+      status: 500,
+      statusText: "Internal Server Error",
+      expectedMessage:
+        "GitHub API PATCH 500 Internal Server Error: /repos/commontoolsinc/labs/issues/comments/456",
+      request: () =>
+        githubPatch("/repos/commontoolsinc/labs/issues/comments/456", {
+          body: "updated comment",
+        }),
+    },
+  ];
+
+  for (const testCase of cases) {
+    await t.step(testCase.name, async () => {
+      const originalFetch = globalThis.fetch;
+      try {
+        globalThis.fetch = ((_input, _init) =>
+          Promise.resolve(
+            new Response(responseBody, {
+              status: testCase.status,
+              statusText: testCase.statusText,
+              headers: { "retry-after": "0" },
+            }),
+          )) as typeof fetch;
+
+        const error = await assertRejects(testCase.request, Error);
+        assertEquals(error.message, testCase.expectedMessage);
+        assertFalse(error.message.includes(responseBody));
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  }
+});
+
+Deno.test("GitHub REST errors survive response cancellation failures", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = ((_input, _init) =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            cancel() {
+              throw new Error("response cancellation failed");
+            },
+          }),
+          { status: 404, statusText: "Not Found" },
+        ),
+      )) as typeof fetch;
+
+    const error = await assertRejects(
+      () => githubGet("/repos/commontoolsinc/labs/missing"),
+      Error,
+    );
+    assertEquals(
+      error.message,
+      "GitHub API GET 404 Not Found: /repos/commontoolsinc/labs/missing",
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1567,6 +1664,13 @@ Deno.test("downloadAndExtractArtifact retries transient artifact downloads", asy
         warning.includes("attempt 4: GitHub artifact download 410")
       ),
       true,
+    );
+    assertEquals(
+      warnings.some((warning) =>
+        warning.includes("temporary artifact backend error") ||
+        warning.includes("gone")
+      ),
+      false,
     );
   } finally {
     globalThis.fetch = originalFetch;

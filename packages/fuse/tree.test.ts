@@ -142,10 +142,29 @@ Deno.test("detached subtrees stay readable by inode until cleared", () => {
   assertEquals(tree.getPath(dir), "/dir");
   assertEquals(tree.getPath(file), "/dir/nested.txt");
 
+  assertEquals(tree.getNameForIno(dir), "dir");
+  assertEquals(tree.getNameForIno(file), "nested.txt");
+
   tree.clear(dir);
 
   assertEquals(tree.inodes.has(dir), false);
   assertEquals(tree.inodes.has(file), false);
+  assertEquals(tree.getNameForIno(dir), undefined);
+  assertEquals(tree.getNameForIno(file), undefined);
+});
+
+Deno.test("a detached subtree keeps its name after a replacement takes the path", () => {
+  const tree = new FsTree();
+  const oldDir = tree.addDir(tree.rootIno, "dir");
+  const oldFile = tree.addFile(oldDir, "nested.txt", "old", "string");
+
+  tree.detach(oldDir);
+
+  const newDir = tree.addDir(tree.rootIno, "dir");
+  tree.addFile(newDir, "nested.txt", "new", "string");
+
+  assertEquals(tree.getNameForIno(oldDir), "dir");
+  assertEquals(tree.getNameForIno(oldFile), "nested.txt");
 });
 
 Deno.test("clearing a detached subtree does not remove a replacement path mapping", () => {

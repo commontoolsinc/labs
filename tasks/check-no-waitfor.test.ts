@@ -105,6 +105,126 @@ Deno.test("importsPollingWaitFor ignores a commented-out member", () => {
   assertEquals(importsPollingWaitFor(source), false);
 });
 
+// Commenting the import out is the first step of migrating a test off the
+// polling waitFor, so none of these shapes may be flagged.
+
+Deno.test("importsPollingWaitFor ignores an import in a line comment", () => {
+  assertEquals(
+    importsPollingWaitFor(
+      '// import { waitFor } from "@commonfabric/integration";',
+    ),
+    false,
+  );
+});
+
+Deno.test("importsPollingWaitFor ignores an import in a block comment", () => {
+  assertEquals(
+    importsPollingWaitFor(
+      '/* import { waitFor } from "@commonfabric/integration"; */',
+    ),
+    false,
+  );
+});
+
+Deno.test("importsPollingWaitFor ignores an import quoted in JSDoc prose", () => {
+  const source = [
+    "/**",
+    ' * Do not: import { waitFor } from "@commonfabric/integration"',
+    " */",
+    "export const helper = () => {};",
+  ].join("\n");
+  assertEquals(importsPollingWaitFor(source), false);
+});
+
+Deno.test("importsPollingWaitFor ignores an import inside a string", () => {
+  const source =
+    `const banned = 'import { waitFor } from "@commonfabric/integration";';`;
+  assertEquals(importsPollingWaitFor(source), false);
+});
+
+Deno.test("importsPollingWaitFor ignores an import inside a template literal", () => {
+  const source = [
+    "const sample = `",
+    'import { waitFor } from "@commonfabric/integration";',
+    "`;",
+  ].join("\n");
+  assertEquals(importsPollingWaitFor(source), false);
+});
+
+// The blanking of comments and strings must not swallow the code around them.
+
+Deno.test("importsPollingWaitFor detects an import after a comment holding an apostrophe and a brace", () => {
+  const source = [
+    "// Don't use this: it polls { every 50ms }.",
+    'import { waitFor } from "@commonfabric/integration";',
+  ].join("\n");
+  assert(importsPollingWaitFor(source));
+});
+
+Deno.test("importsPollingWaitFor detects an import after a template literal", () => {
+  const source = [
+    "const selector = `#${id} > .row`;",
+    'import { waitFor } from "@commonfabric/integration";',
+  ].join("\n");
+  assert(importsPollingWaitFor(source));
+});
+
+// A template literal ends at its own closing backtick even when it holds a
+// nested one, so what follows is read as code again.
+Deno.test("importsPollingWaitFor detects an import after a nested template literal", () => {
+  const source = [
+    "const label = `a ${`b ${c}`} d`;",
+    'import { waitFor } from "@commonfabric/integration";',
+  ].join("\n");
+  assert(importsPollingWaitFor(source));
+});
+
+// A string may carry a newline through a trailing backslash, so the scan cannot
+// simply stop looking at the end of the line.
+Deno.test("importsPollingWaitFor ignores an import in a line-continued string", () => {
+  const source = 'const sample = "\\\n' +
+    "import { waitFor } from '@commonfabric/integration';\\\n" +
+    '";';
+  assertEquals(importsPollingWaitFor(source), false);
+});
+
+// A relative path reaches the same waitFor without naming the package.
+
+Deno.test("importsPollingWaitFor detects a relative import of the package's utils.ts", () => {
+  assert(
+    importsPollingWaitFor(
+      'import { waitFor } from "../../integration/utils.ts";',
+    ),
+  );
+});
+
+Deno.test("importsPollingWaitFor detects a relative import of the package's index.ts", () => {
+  assert(
+    importsPollingWaitFor(
+      'import { env, waitFor } from "../../../../integration/index.ts";',
+    ),
+  );
+});
+
+Deno.test("importsPollingWaitFor ignores a relative import of a module that lacks waitFor", () => {
+  // shell-utils.ts imports waitFor for its own use but does not re-export it,
+  // so naming waitFor in an import of it would not resolve. The clause has to
+  // name waitFor for this to test the specifier rather than the clause.
+  assertEquals(
+    importsPollingWaitFor(
+      'import { waitFor } from "../../integration/shell-utils.ts";',
+    ),
+    false,
+  );
+});
+
+Deno.test("importsPollingWaitFor ignores a sibling utils.ts outside the package", () => {
+  assertEquals(
+    importsPollingWaitFor('import { waitFor } from "./utils.ts";'),
+    false,
+  );
+});
+
 Deno.test("isIntegrationTestFile scopes to integration test files", () => {
   assert(isIntegrationTestFile("packages/shell/integration/piece.test.ts"));
   assert(

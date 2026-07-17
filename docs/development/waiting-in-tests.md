@@ -1,9 +1,10 @@
 # Test waits: prefer events over polling `waitFor`
 
-A test wait should resolve on a real event, not a poll loop. This note explains
-why, which primitives to reach for instead, the check that keeps new polling
-`waitFor` out of the integration suites, and the specific places where a bounded
-`waitFor` poll is still the right tool.
+A test wait should resolve on a real event, not a poll loop or a fixed delay.
+This note explains why, which primitives to reach for instead, how to wait on
+the two pieces of machinery whose timing is easy to guess wrong, the check that
+keeps new polling `waitFor` out of the integration suites, and the specific
+places where a bounded `waitFor` poll is still the right tool.
 
 ## Why avoid `waitFor`
 
@@ -15,9 +16,9 @@ success: anything slower than the timeout can never be observed, even when it
 would have completed. The fixed delay puts a floor on latency and, in
 performance measurements, quantizes timings to the poll interval.
 
-Reach for a poll only for the cases catalogued under [Where a bounded poll is
-the right tool](#where-a-bounded-poll-is-the-right-tool). Everywhere else, wait
-on an event.
+Reach for a poll only for the cases catalogued under [Where the polling
+`waitFor` stays](#where-the-polling-waitfor-stays). Everywhere else, wait on an
+event.
 
 ## The primitives to use instead
 
@@ -41,10 +42,13 @@ Waits split into two groups with different primitives.
   signal.
 - The higher-level wrappers in
   `packages/patterns/integration/cfc-browser-helpers.ts` — `waitForText`,
-  `waitForTextAbsent`, `fillCfInput`, `clickCfButton`,
+  `waitForTextAbsent`, `fillCfInput`, `clickCfButton`, `clickNthCfButton`,
   `clickCfButtonAndWaitForText`, `waitForRuntimeIdle`, `waitForRuntimeSynced` —
   bundle "settle the view, act once, wait for the effect" on top of the two
-  primitives above.
+  primitives above. `clickCfButton` takes the first match and reaches through a
+  host's shadow root for its inner `[data-cf-button]`; `clickNthCfButton` takes
+  the `index`-th match of a selector that already resolves to the buttons
+  themselves.
 
 To click a control that appears asynchronously, follow the `clickCfButton`
 shape rather than a find-and-click retry loop: a `waitForCondition` predicate
@@ -55,26 +59,155 @@ target to be rendered — laid out, and not `display:none` or `visibility:hidden
 clickable rather than tagged while it has no layout box and then failing to
 click.
 
+Ask `probe.isRendered` for that check rather than hand-rolling it, and note that
+it is deliberately not `probe.isVisible`, which additionally requires the
+element to be on-screen. A click scrolls its element into view before it
+dispatches, so where the element sits at tagging time does not decide whether
+the click lands. Requiring it on-screen only adds ways to wait forever: the
+shell sets `html { scroll-behavior: smooth }`, so a `scrollIntoView()` a
+predicate issues animates over several hundred milliseconds, and a viewport
+check within the same predicate reads a position the scroll has not reached yet.
+
+Check the element the click is dispatched on, not the host that matched the
+selector. Hiding the host or any ancestor reaches the inner control either way:
+`display:none` zeroes the control's layout box, and `visibility:hidden` inherits
+into its computed visibility. So the click target's own check covers the whole
+chain, and checking the host as well buys nothing.
+
+Being rendered is a question about whether a click can be delivered, which is
+why it belongs in the predicate that tags the control. Whether the control is
+`disabled` is a separate question — a disabled control still takes the click and
+declines it. A test that needs a control enabled before clicking says so with
+`waitForDisabled(page, selector, false)`.
+
 **Non-browser and off-page waits** have no page to observe. Resolve a `defer()`
 (from `packages/utils/src/defer.ts`) inside a callback the test already registers
 — a cell `sink`/`subscribe`, a storage subscription's `next`, a scheduler
 `onError`, a telemetry listener, or a counter incremented inside a test-owned
-transport. A read of a cell that a sink already observes belongs here too: record
-the latest value in the sink callback and resolve the waiter when it reaches the
-target. Because the sink fires once on registration and then on every committed
-change, the waiter can resolve immediately when the value is already there and
-otherwise on the next change the sink reports.
+transport. A read of a cell that a sink already observes belongs here too: the
+sink wakes the waiter, and the waiter compares the cell against the target.
+Because the sink fires once on registration and then on every committed change,
+the waiter can resolve immediately when the value is already there and otherwise
+on the next change the sink reports.
+
+That last shape is packaged as `waitForCellValue` in
+`@commonfabric/integration/wait-for-cell-value`, usable from any package's
+tests. It sleeps on the sink and applies its predicate to the cell only after
+`runtime.idle()`, so the wait has neither a poll interval under it nor an
+iteration cap over it. Its predicate takes `T | undefined`, since a cell holds
+no value until its piece writes one.
+
+Some traps are worth knowing before you hand-roll one of these against a
+runtime. They cost real debugging to find, and they are why the helper takes a
+runtime.
+
+Where a runtime is in reach, test the value the cell holds once the scheduler
+is quiescent, not the one the sink handed the callback. A cell passes through
+states that exist only until the scheduler drains, and a predicate can accept
+one that is about to be superseded — a query that has not yet re-run against
+new inputs still holds its previous settled result, so "settled and without
+error" matches the stale value. Waking on the sink but reading after
+`runtime.idle()` keeps those states away from the predicate. The waits above
+that have no runtime to idle, such as the shell's result-cell reads, do compare
+the callback's value, and have to keep their predicates specific enough that no
+passing state is a stale one.
+
+A cell's value is a live view either way, so whatever a wait returns can still
+move afterwards, and a test that accepts a value and then awaits something else
+before reading it can assert against a state the predicate never approved.
+Reading at quiescence narrows that window rather than closing it: there is no
+pending reactive work left to drive the value on, but `runtime.idle()` settles
+reactivity only, not storage sync, so a value arriving from another runtime can
+still land late. Read what a wait hands back before awaiting anything else.
+
+Cancelling the sink is a trap of its own. Resolving from inside the callback
+wakes the waiting code while the action that reported the value is still
+finishing, and finalizing an action resubscribes it, so a cancel issued from
+that continuation is undone and the sink goes on firing afterwards. Await
+`runtime.idle()` before cancelling.
+
+An in-process wait like this needs no timeout backstop. When the value never
+arrives and the runtime goes quiet, Deno's test runner reports `Promise
+resolution is still pending but the event loop has already resolved` and fails
+the test at once, rather than hanging. The message names the test, not the wait
+inside it, so a test holding several waits needs the last step printed without
+an `ok` to place the failure. It still beats a deadline, which reports only that
+time ran out, and reports it later.
+
+That argument covers the in-process waits in this section and nothing else. It
+holds because nothing in these tests keeps the event loop alive by itself: the
+runner's one repeating timer is unref'd and gated behind `CF_TRAVERSE_CAPTURE`,
+and an unsatisfiable wait still fails in seconds in the heaviest setup we have,
+two runtimes over an in-process memory server. It does not carry over to the
+browser waits above, where a live DevTools Protocol connection holds the loop
+open and a waiter that never fires would hang instead. A client talking to a
+live server holds the loop open the same way. A wait against one runs to the
+ambient test or CI limit rather than failing fast. The CLI suite's readiness
+probe is such a client. It disposes its controller once the wait returns, which
+also keeps a finished wait from holding the loop open for the rest of the
+suite.
+
+## Waiting for the scheduler and for the worker reconciler
+
+Two pieces of machinery come up often enough in unit tests, and dispatch
+differently enough from each other, that guessing at their timing is where fixed
+delays tend to creep back in.
+
+The **scheduler** delivers a runtime-backed cell's updates through `queueTask`
+(`packages/runner/src/scheduler/diagnostics.ts`), which is `setTimeout(fn, 0)`.
+That is a macrotask, so yielding to the microtask queue never reaches a change
+made through a real cell, however many times the test yields. Wait for these
+with `runtime.idle()`, which resolves once the scheduler has settled.
+
+The **worker reconciler** (`packages/html/src/worker/reconciler.ts`) is
+synchronous apart from one line. It queues its VDOM ops as it renders and
+flushes them from a `queueMicrotask` callback, which hands the batch to the
+`onOps` callback the test registered. So once the change itself has landed, the
+ops are one microtask away, and a microtask the test queues afterwards runs
+after the flush, because microtasks run in the order they were queued.
+
+The reconciler tests in `packages/html/test/` wait through `opsFlushed` in
+`packages/html/test/reconciler-support.ts`, which covers both, because their
+trees mix synchronous mock cells with runtime-backed ones:
+
+```ts
+// Shown at module scope.
+export function opsFlushed(runtime: Runtime): Promise<void> {
+  return runtime.idle().then(() =>
+    new Promise<void>((resolve) => queueMicrotask(resolve))
+  );
+}
+```
+
+This shape is an ordering guarantee rather than a deadline, so it cannot lose a
+race under load. It also holds for a test asserting that an op is *absent*:
+once it returns, every op the change was going to produce has been delivered, so
+no later batch can falsify the absence. Those tests need it. A wait on the
+`onOps` callback would never return for them, since a change that emits no ops
+produces no batch, and they pass vacuously when nothing has flushed at all —
+their teeth come from the wait being long enough to have seen an unwanted op.
 
 ## Guard against new usage
 
 A check prevents new integration tests from importing the polling `waitFor`.
 `tasks/check-no-waitfor.ts` scans the `.ts` files under any `integration/`
 directory beneath `packages/` (excluding the `@commonfabric/integration` package,
-which defines `waitFor`) and fails when one names `waitFor` in an import from
-`@commonfabric/integration` and is not on the check's allowlist. Run it with
-`deno task check-no-waitfor`; the CI "Check" job runs it on every pull request.
-The error names the offending file and points at `waitForCondition`,
-`awaitViewSettled`, the in-process `defer()` replacement, and this report.
+which defines `waitFor`) and fails when one names `waitFor` in an import of that
+package and is not on the check's allowlist. Two spellings reach it and both
+count: the bare `@commonfabric/integration` specifier, and a relative path ending
+at the package's `utils.ts` or `index.ts`. Commenting the import out clears the
+check, so it stays out of the way while a test is being migrated — text inside a
+comment or a string is not an import. Run it with `deno task check-no-waitfor`;
+the CI "Check" job runs it on every pull request. The error names the offending
+file and points at `waitForCondition`, `awaitViewSettled`, the in-process
+`defer()` replacement, and this report.
+
+The check is a speed bump against reaching for `waitFor` out of habit, not a seal
+against a determined evasion. It reads the import statement and nothing else, so
+a namespace import — `import * as I from "@commonfabric/integration"` followed by
+`I.waitFor(...)` — passes it. Every import of the package in the repository uses
+the named form. Treat a green check as "no new polling `waitFor` was imported the
+usual way", not as proof that a suite polls nowhere.
 
 The allowlist inside `tasks/check-no-waitfor.ts` covers only the exceptions the
 check can see: the integration-test files that import the shared `waitFor` from
@@ -95,11 +228,15 @@ fails the tests until its entry is removed. When a new in-scope usage is genuine
 one of the exception shapes below, add the file to the allowlist with a one-line
 reason and record it here.
 
-## Where a bounded poll is the right tool
+## Where the polling `waitFor` stays
 
-For these a bounded `waitFor` poll is the honest observation; replacing it would
-add coupling or complexity rather than remove flakiness. They are grouped by the
-reason a poll fits.
+These are grouped by the reason the poll stays, and the reasons are not equally
+good. For most of them a bounded `waitFor` is the honest observation, and
+replacing it would add coupling or complexity rather than remove flakiness. Two
+groups are here on weaker grounds: files that nothing automated runs, where a
+conversion would not pay for itself, and a few waits in files that CI does run
+which are simply not converted yet. Those two say so where they appear; do not
+read them as endorsements.
 
 ### No page, and no callback to hang a promise on
 
@@ -111,14 +248,28 @@ boundary the test can await without adding one to production code.
   no completion callback the test can hook, and a fresh `cell.sync()` round-trip
   has no registered subscription. There is no event boundary to resolve a
   deferred from without adding a render hook to the mock purely for the test.
-- `packages/generated-patterns/integration/pattern-harness.ts` pulls a runtime
-  `Cell` value and compares it, headless. No page; polling the pull until it
-  converges is the honest wait.
 - `packages/shell/integration/piece.test.ts` — the one poll that reads a freshly
   reloaded piece (`cc.get(pieceId, true)`) has no registered sink, so it stays a
   bounded poll on its own sync round trip. The other result-cell reads in this
   file, and every such read in `counter.test.ts` and `nested-counter.test.ts`,
   resolve a `defer()` from the existing `resultCell.sink(...)`.
+
+### A pull that drives its own loading
+
+`packages/generated-patterns/integration/pattern-harness.ts` compares a runtime
+`Cell` value, headless. There is no page to attach an in-page waiter to. A
+callback does exist — the harness registers `result.sink(() => {})` to keep the
+result reactive — but that callback is empty and records nothing, so today there
+is no latest value for a waiter to resolve against. It also sits on the root
+`result` cell, while each assertion walks a path of `key()` steps down to a
+nested cell and waits on `targetCell.pull()`.
+
+The pull is not purely an observation, which is what makes it hard to swap for a
+sink. It awaits the scheduler, and when the read reached a link whose target this
+replica had never loaded, it settles those loads and re-reads as each arrival
+reveals the next hop, for a bounded number of rounds. A sink reports committed
+changes; it does not drive that traversal. Polling the pull until it converges is
+the honest wait.
 
 ### Race, backpressure, and convergence tests
 
@@ -174,30 +325,163 @@ joined across two different browser pages (both must show both voters).
 binding, so it cannot express a two-page condition; the cross-browser
 propagation wait stays a poll.
 
-### Instrumentation and profiling one-shots
+### Instrumentation one-shots, and a few unconverted UI waits
 
-In `packages/patterns/integration/default-app.test.ts` and
-`packages/patterns/integration/reload/default-app-notebook.test.ts`, a number of
-`waitFor` calls wrap one-shot instrumentation (arm a trace, reset a logger,
-install a telemetry handler) that returns false only until a runtime API is
-present. These observe runtime API readiness, not a UI condition, and are
-env-gated profiling scaffolding rather than assertions. If converted, await a
-runtime-ready signal directly rather than installing a DOM waiter.
+`packages/patterns/integration/default-app.test.ts` keeps `waitFor` for one-shot
+instrumentation: arm a trace, reset a logger, install a telemetry handler. Each
+such call returns false only until a runtime API is present, so it observes
+runtime API readiness rather than a UI condition, and it is profiling scaffolding
+rather than an assertion. Most of them sit behind a `CF_CAPTURE_*` environment
+gate. If converted, await a runtime-ready signal directly rather than installing
+a DOM waiter.
+
+`packages/patterns/integration/reload/default-app-notebook.test.ts` keeps one
+wait of that shape — it arms the event-invocation telemetry handler, which is the
+one instrumentation wait that runs ungated in both files.
+
+The rest of the waits in these two files are ordinary UI conditions, and a poll
+is not the right tool for them. They are simply not converted yet: both files
+wait for the note modal's "Create Another" button to render, and
+`default-app.test.ts` also retries a piece-link click until the link is found. A
+`waitForCondition` predicate would express each of them. Converting them would
+not take either file off the allowlist, because the instrumentation waits keep
+both files importing `waitFor`.
 
 ### A shared state primitive
 
 `packages/integration/shell-utils.ts`'s `waitForState` compares the shell's
 serialized `AppState` (view plus identity DID), read through
-`globalThis.app.serialize()`. That is application state, not the DOM, and this is
-the shared primitive many suites build on. `waitForCondition`'s probe cannot see
-app state, so converting it would mean re-implementing view/identity comparison
-inside an in-page predicate for no reduction in flakiness.
+`globalThis.app.serialize()`. A handful of test files call it directly, but
+`ShellIntegration.goto()` also calls it internally after every navigation, so
+every suite that navigates through the shell depends on it.
 
-### Disabled tests
+An in-page predicate could reach the state it reads: `globalThis.app` is a page
+global, and a `waitForCondition` predicate runs in the page, so it could call
+`serialize()` for itself. Two other things block the conversion.
 
-`cf-code-editor.test.disabled.ts`, `cf-render.test.disabled.ts`, and
-`cf-checkbox.test.disabled.ts` hold many `waitFor` calls but never run. Leave
-them until they are re-enabled.
+First, the predicate is serialized into the page and closes over nothing from the
+test module, so everything it needs has to be inlined. `waitForState` compares
+views through `isAppViewEqual` from `@commonfabric/shell/shared`, and it compares
+identities by DID — which the serialized state does not carry. `serialize()`
+writes the identity out as a raw key pair, and `deserialize()` recovers the DID by
+importing that private key through `Identity.fromRaw`. An in-page predicate can
+import neither module, so converting means re-implementing both view equality and
+private-key import inside the page, forking logic the shell relies on.
+
+Second, an `AppState` transition does not reliably mutate the DOM, so the
+MutationObserver hub would have nothing to pulse on and the wait would fall back
+to the coarse 500-millisecond in-page backstop. That polls more slowly than the
+50-millisecond loop it would replace.
+
+### A human-in-the-loop flow that no CI lane runs
+
+`packages/patterns/google/core/integration/google-calendar-importer.test.ts`
+drives the Google OAuth consent flow end to end, and a person has to complete
+that flow in a real browser. The test prints instructions to the console and then
+allows two minutes for the account selection and the scope approval. It cannot
+run unattended, and no CI lane runs it: the `patterns` package's `test` task
+ignores `google/core/integration`, and its `integration` tasks run only the
+`integration/` and `integration/reload/` directories. The check still sees the
+file, because the scan walks every `integration/` directory beneath `packages/`,
+so it needs an allowlist entry.
+
+Its waits are ordinary DOM and text conditions that `waitForCondition` would
+express. They stay a poll because nothing automated exercises this file, so
+converting it churns code that no run covers.
+
+### A shell script observing another process through a kernel mount
+
+`packages/cli/integration/fuse-exec.sh` drives the FUSE daemon as a separate
+process through a real mount, and observes it from bash. Its three poll loops —
+`wait_for_path`, `resolve_entity_dir`, and `wait_for_piece_value` — stay polls.
+
+There is no event channel to convert them to. The state each loop waits on lives
+in another process: the daemon's tree for the two path loops, and the server's
+cell for the value loop. Bash has no callback to resolve a `defer()` from.
+
+Watching the filesystem does not substitute for one. A mounted path appears
+because the daemon added a node to its own tree, and that is not a filesystem
+operation passing through the mount, which is what the kernel raises inotify
+events for. The daemon's two notification calls, `notify_inval_entry` and
+`notify_inval_inode`, tell the kernel to drop cache entries; they do not announce
+new state to a watcher.
+
+The two path loops also drive the work they wait for, which is the same shape as
+the pattern harness's `pull()` above. The lookup behind a `test -e` is what makes
+the daemon fetch: for the space root it runs `connectSpace`, and for the piece
+paths beneath it `CellBridge.prepareLookup`, which hydrates the piece property.
+Polling the probe until it converges is the honest wait.
+
+Two waits in this script are not polls, and should not become polls.
+
+Mount readiness needs no timing loop. `cf fuse mount --background` calls
+`awaitBackgroundMountStartup`, which waits for the daemon to report the
+`mounted` supervisor state and confirms both the supervisor and the child are
+alive before the command prints the PID. Every other exit from that function
+throws, and a throw kills the child and fails the command, so a script that has
+parsed a PID has a daemon that reported mounted.
+
+The daemon reports that state just before it enters its FUSE session loop, so it
+means the kernel mount exists rather than that any request has been served, and
+mounted paths hydrate lazily besides. Both gaps belong to `wait_for_path`, whose
+probe carries its own kill-timeout and retries for twenty seconds. What is left
+for the script is one check that the daemon survived the handshake.
+
+The stale-descriptor assertion — that truncating a path does not let an already
+open descriptor write its old buffer back — waits on `wait_for_piece_value`
+alone. This looks like it needs a delay, because it asserts that something does
+not happen. It does not, because a descriptor that could write late is a
+descriptor that has already written.
+
+Both truncate paths — `open` with `O_TRUNC` on Linux, and the handle-less
+`setattr` that FUSE-T issues on macOS — reach `handles.truncateByIno`, which
+empties the buffer of every handle on the inode and clears both `dirty` and
+`truncatePending` on the one that is not the truncating handle. `flushHandle`,
+`flushCb` and `releaseCb` all gate on that pair, so the disarmed descriptor is
+inert. A descriptor that stayed armed instead flushes from the callback the
+kernel sends on `close()`, which the flush callback issues in the same tick when
+the handle is dirty. Its write targets the same cell as the truncate's own write
+and is issued after it, so it lands last and the value settles on the stale
+content rather than `""`.
+
+The deferred flush that every write arms, `scheduleFlush(handle, 500)`, is the
+one path that could fire after the wait, and it cannot resurrect anything.
+`truncateByIno` does not cancel it, so it does fire around half a second later —
+into `flushHandle`'s guard, which the disarm has already closed. In the armed
+case it never gets that far, because the flush callback calls
+`clearScheduledFlush` before flushing.
+
+#### The daemon's `.status` file is not a wait signal
+
+The FUSE daemon keeps write statistics (`writeStats` in `packages/fuse/mod.ts`)
+and publishes them through the `.status` file at the mount root. That file looks
+like a way to wait for the daemon to report a write-path event. It is not. The
+counters it carries lag the events they describe, and reading it around a write
+shows them frozen across the open, the write, the truncate and the release, then
+jumping several counts at once.
+
+The content is a snapshot rather than a live view. `CellBridge.initStatus` bakes
+JSON into a tree node and the read callback serves that node's stored bytes, so
+the numbers a reader sees are the ones the last `updateStatus` call baked.
+
+Refreshes do reach `.status` from the write path, but never carrying the counter
+a waiter wants. A successful flush calls `markExistingFinalized`, which reaches
+`updateStatus` through `CfcWritebackStore.deletePrepared`, `persist` and the
+store's `onChange` hook. That chain runs before `writeStats.flushed++` on every
+flush branch, so the snapshot a flush triggers always reports the count from
+before that flush. Opening and writing move their own counters with no refresh
+attached at all.
+
+Attribute caching sits on top. `.status` is a static inode, so `replyEntry` gives
+it a one-second entry and attribute timeout on Linux, and a macOS mount bounds
+staleness through an NFS attribute-cache option instead, because FUSE-T ignores
+the timeouts a reply carries. `updateStatus` assigns `node.content` and changes
+no size or mtime, so nothing invalidates a cached reader either way.
+
+Waiting on `.status` therefore means waiting for a refresh that reports the state
+before the event, through a cache with no invalidation, at a granularity coarser
+than the wait itself. Making it a real signal means ordering the refresh after
+the counters, regenerating on read, and giving a reader something to notice.
 
 ## Production reconnect backoff
 

@@ -1,4 +1,5 @@
 import {
+  AssertDiagnosticsTransformer,
   BuilderCallHoistingTransformer,
   CastValidationTransformer,
   CellOfStaticInitialValidationTransformer,
@@ -73,6 +74,14 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
   {
     name: "JsxExpressionSiteRouterTransformer",
     create: (options) => new JsxExpressionSiteRouterTransformer(options),
+  },
+  // Runs before lift lowering so it sees the authored expression: the operand
+  // labels it records are the author's own source text, and the lowering that
+  // follows rewrites the operands inside its capture calls as it would any
+  // other reactive expression.
+  {
+    name: "AssertDiagnosticsTransformer",
+    create: (options) => new AssertDiagnosticsTransformer(options),
   },
   {
     name: "LiftLoweringTransformer",

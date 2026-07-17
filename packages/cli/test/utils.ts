@@ -22,6 +22,10 @@ export function isIgnorableDenoWarningLine(line: string): boolean {
     trimmed.startsWith("╭ Warning") ||
     trimmed.startsWith("╰─") ||
     trimmed.startsWith("│") ||
+    // Deno prints one of these per module it fetches whenever the module cache
+    // is cold, which happens on a fresh machine and after any change that
+    // invalidates the cache, such as a Deno version bump.
+    trimmed.startsWith("Download ") ||
     /^[└├]/u.test(trimmed);
 }
 
@@ -36,31 +40,30 @@ export function checkStderr(stderr: string[]) {
   expect(relevant[0]).toMatch(/deno run /);
 }
 
-async function runCliTask(
-  task: "cli-no-pwd-override",
-  command: string,
-  stdin?: string,
-): Promise<{ code: number; stdout: string[]; stderr: string[] }> {
-  // Use a regex to split up spaces outside of quotes.
+export interface CliResult {
+  code: number;
+  stdout: string[];
+  stderr: string[];
+}
+
+// Splits a command string into arguments on spaces outside of double quotes,
+// then strips the quotes.
+function parseCliCommand(command: string): string[] {
   const match = command.match(/(?:[^\s"]+|"[^"]*")+/g);
   if (!match || match.length === 0) {
     throw new Error(`Could not parse command: ${command}.`);
   }
-  // Filter out quotes that are in strings
-  const args = match.map((arg) => arg.replace(/"/g, ""));
+  return match.map((arg) => arg.replace(/"/g, ""));
+}
 
-  const child = new Deno.Command(Deno.execPath(), {
+async function spawnCli(
+  executable: string,
+  args: string[],
+  stdin?: string,
+): Promise<CliResult> {
+  const child = new Deno.Command(executable, {
     cwd: join(import.meta.dirname!, ".."),
-    args: [
-      "task",
-      // Deno tasks run with PWD set to wherever the deno.jsonc manifest is.
-      // The `cli` task in this package overrides that to use the shell's PWD.
-      // As these tests run within a test task, we can't override that PWD.
-      // For tests, use a version of the cli task that does *not* override
-      // user/deno's PWD.
-      task,
-      ...args,
-    ],
+    args,
     // `.output()` requires stdout/stderr to be piped; `.spawn()` would
     // otherwise default them to "inherit".
     stdout: "piped",
@@ -82,14 +85,75 @@ async function runCliTask(
   };
 }
 
+async function runCliTask(
+  task: "cli-no-pwd-override",
+  command: string,
+  stdin?: string,
+): Promise<CliResult> {
+  return await spawnCli(
+    Deno.execPath(),
+    [
+      "task",
+      // Deno tasks run with PWD set to wherever the deno.jsonc manifest is.
+      // The `cli` task in this package overrides that to use the shell's PWD.
+      // As these tests run within a test task, we can't override that PWD.
+      // For tests, use a version of the cli task that does *not* override
+      // user/deno's PWD.
+      task,
+      ...parseCliCommand(command),
+    ],
+    stdin,
+  );
+}
+
 // Executes the `cf` command via CLI
 // `const { stdout, stderr, code } = cf("dev --no-run ./pattern.tsx")`
 // Pass `stdin` to feed the command's standard input.
 export async function cf(
   command: string,
   stdin?: string,
-): Promise<{ code: number; stdout: string[]; stderr: string[] }> {
+): Promise<CliResult> {
   return await runCliTask("cli-no-pwd-override", command, stdin);
+}
+
+let cfBinaryProbe: Promise<boolean> | undefined;
+
+// True when integration tests should run the prebuilt `cf` binary from PATH:
+// CF_CLI_INTEGRATION_USE_LOCAL is unset (the same override integration.sh
+// honors) and a `cf` on PATH answers `id --help`, a subcommand other tools
+// that install a `cf` binary reject. Probed once per process.
+function cfBinaryAvailable(): Promise<boolean> {
+  cfBinaryProbe ??= (async () => {
+    if (Deno.env.get("CF_CLI_INTEGRATION_USE_LOCAL")) {
+      return false;
+    }
+    try {
+      const { success } = await new Deno.Command("cf", {
+        args: ["id", "--help"],
+        stdout: "null",
+        stderr: "null",
+        stdin: "null",
+      }).output();
+      return success;
+    } catch {
+      return false;
+    }
+  })();
+  return cfBinaryProbe;
+}
+
+// Executes the `cf` command for integration tests: the prebuilt `cf` binary
+// from PATH when one is available (as in the CI integration jobs, which put
+// the built binaries on PATH), the source-tree CLI task otherwise. Set
+// CF_CLI_INTEGRATION_USE_LOCAL=1 to force the source-tree CLI.
+export async function integrationCf(
+  command: string,
+  stdin?: string,
+): Promise<CliResult> {
+  if (await cfBinaryAvailable()) {
+    return await spawnCli("cf", parseCliCommand(command), stdin);
+  }
+  return await cf(command, stdin);
 }
 
 export async function withEnv(

@@ -36,7 +36,7 @@
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.7.0",
     "@opentelemetry/exporter-trace-otlp-proto": "npm:@opentelemetry/exporter-trace-otlp-proto@^0.46.0",
     "@opentelemetry/resources": "npm:@opentelemetry/resources@^1.19.0",
-    "@scalar/hono-api-reference": "npm:@scalar/hono-api-reference@^0.5.165",
+    "@scalar/hono-api-reference": "npm:@scalar/hono-api-reference@^0.11.10",
     "@sentry/deno": "npm:@sentry/deno@^9.3.0",
     "jsonschema": "npm:jsonschema@^1.5.0",
     "hono-pino": "npm:hono-pino@^0.7.0",

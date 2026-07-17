@@ -839,11 +839,13 @@ export interface AppliedSchedulerObservationResult {
   schedulerObservationId?: number;
   /** Effective owner-derived context; emitted metadata, never client input. */
   executionContextKey?: SchedulerExecutionContextKey;
-  reason?:
-    | "stale-confirmed-read"
-    | "stale-pending-read"
-    | "pending-read-missing";
+  reason?: CommitReadDropReason;
 }
+
+export type CommitReadDropReason =
+  | "stale-confirmed-read"
+  | "stale-pending-read"
+  | "pending-read-missing";
 
 export interface AppliedCommit {
   seq: number;

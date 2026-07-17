@@ -12,31 +12,20 @@ export async function clickPierce(
   page: Page,
   selector: string,
 ): Promise<void> {
-  // Wait until a visible, enabled click target for `selector` exists, then
-  // click it once. The last visible match across shadow roots wins; if that
+  // Wait until a rendered, enabled click target for `selector` exists, then
+  // click it once. The last rendered match across shadow roots wins; if that
   // host wraps a shadow <button> the button is the target and must be enabled.
   // The waiter re-evaluates on DOM mutations and resolves the moment a target
   // is ready, rather than re-running the scan from the test process on a fixed
   // interval.
-  await waitForCondition(page, (_probe, targetSelector) => {
-    function isVisible(el: HTMLElement): boolean {
-      const rect = el.getBoundingClientRect();
-      const style = globalThis.getComputedStyle(el);
-      return (
-        rect.width > 0 &&
-        rect.height > 0 &&
-        style.display !== "none" &&
-        style.visibility !== "hidden"
-      );
-    }
-
+  await waitForCondition(page, (probe, targetSelector) => {
     function findClickableHost(
       root: Document | ShadowRoot,
     ): HTMLElement | null {
       const matches: HTMLElement[] = [];
 
       for (const match of root.querySelectorAll(targetSelector)) {
-        if (match instanceof HTMLElement && isVisible(match)) {
+        if (match instanceof HTMLElement && probe.isRendered(match)) {
           matches.push(match);
         }
       }
@@ -60,14 +49,14 @@ export async function clickPierce(
 
     const button = host.shadowRoot?.querySelector("button");
     if (button instanceof HTMLButtonElement) {
-      if (button.disabled || !isVisible(button)) {
+      if (button.disabled || !probe.isRendered(button)) {
         return false;
       }
       button.click();
       return true;
     }
 
-    if (!isVisible(host)) {
+    if (!probe.isRendered(host)) {
       return false;
     }
 

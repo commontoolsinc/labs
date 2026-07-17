@@ -16,6 +16,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./shared": "./src/shared.ts",
+    "./entity-kind": "./src/entity-kind.ts",
     "./slugs": "./src/slugs.ts",
     "./schemas": "./src/schemas.ts",
     "./telemetry-otel-bridge": "./src/telemetry-otel-bridge.ts",

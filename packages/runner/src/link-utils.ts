@@ -362,7 +362,39 @@ export function findAndInlineDataURILinks(value: any): any {
   }
 }
 
-// Helper to create data URIs for testing
+/**
+ * Makes a `data:` URI that names a cell whose content is carried in the id
+ * itself. Reading such a cell means decoding its own id; there is no document
+ * in a space to fetch.
+ *
+ * The encoded payload is a storage document of the conventional shape
+ * `{"value": <data>}`, with readers unwrapping `value` before walking a link's
+ * path.
+ *
+ * This is the encode half of a matched set: {@link getJSONFromDataURI} (in
+ * `uri-utils.ts`) is what reads back what this writes. The two are a pair by
+ * construction -- the encoding chosen here dictates what is decodable there --
+ * but nothing mechanically holds them in agreement, so a change to either has
+ * to move the other with it; see the `TODO`s in both bodies.
+ *
+ * Each primitive cell link within `data` is rewritten to a full sigil link,
+ * with relative links resolved against `base`. That rewriting is what makes
+ * the result self-contained: the ids it embeds don't depend on where it was
+ * minted, so the URI denotes the same value wherever it later gets read.
+ *
+ * **Note:** This does not use the standard `data-model` value encoding, and
+ * callers are exposed to two consequences. A `FabricSpecialObject` within
+ * `data` is not represented correctly, and plain-object keys are not
+ * canonicalized -- so two runtimes holding the same value can mint two
+ * different ids for it, which is to say that the content addressing here is
+ * not reliably addressing content. See the `TODO`s in the body.
+ *
+ * @param data The value to encode. Must be acyclic.
+ * @param base Optional base link; relative links within `data` are resolved
+ *   against it.
+ * @returns A `data:application/json` URI naming a cell whose content is `data`.
+ * @throws If `data` contains a reference cycle.
+ */
 export function createDataCellURI(
   data: any,
   base?: Cell | NormalizedLink,
@@ -404,6 +436,12 @@ export function createDataCellURI(
       seen.delete(value);
     }
   }
+  // TODO(danfuzz): This `JSON.stringify()` should be changed to use the
+  // standard `data-model` value encoding, both so that `FabricSpecialObject`s
+  // can be properly represented and so that plain objects get properly
+  // canonicalized. Once this is done, the changes to `schema-hash.ts` made in
+  // PR #4360 should be able to be reverted, as those changes amount to a
+  // workaround for the plain object canonicalization issue.
   const json = JSON.stringify({
     value: traverseAndAddBaseIdToRelativeLinks(data, new Set()),
   });
@@ -761,11 +799,20 @@ export function getDerivedInternalCellLink(
   const parent = resultCell.entityId ?? resultCell;
   return {
     space: resultCellLink.space,
-    id: toURI(createRef({}, {
-      parent,
-      type: "internal",
-      cause: descriptor.partialCause,
-    })),
+    // The kind's ONLY representation is the URI scheme applied here by
+    // toURI; the hash preimage is kind-free, so this mint site is the single
+    // place a computed identity is established.
+    id: toURI(
+      createRef(
+        {},
+        {
+          parent,
+          type: "internal",
+          cause: descriptor.partialCause,
+        },
+      ),
+      descriptor.kind,
+    ),
     path: [],
     scope: descriptor.scope ?? resultCellLink.scope,
     ...(descriptor.schema !== undefined && { schema: descriptor.schema }),

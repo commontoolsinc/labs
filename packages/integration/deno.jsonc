@@ -5,6 +5,8 @@
   },
   "exports": {
     ".": "./index.ts",
-    "./shell-utils": "./shell-utils.ts"
+    "./shell-utils": "./shell-utils.ts",
+    "./temp-identity": "./temp-identity.ts",
+    "./wait-for-cell-value": "./wait-for-cell-value.ts"
   }
 }

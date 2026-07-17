@@ -1,6 +1,8 @@
 import {
+  Cell,
   Cfc,
   computed,
+  CurrentPrincipal,
   Default,
   equals,
   handler,
@@ -9,6 +11,7 @@ import {
   NAME,
   pattern,
   RepresentsCurrentUser,
+  RequiresIntegrity,
   SELF,
   Stream,
   UI,
@@ -19,8 +22,6 @@ import {
 
 export const TRUSTED_PROFILE_HOME_SURFACE = "ProfileHome";
 export const TRUSTED_PROFILE_EDIT_ACTION = "EditProfile";
-
-type CurrentPrincipal = { readonly __ctCurrentPrincipal: true };
 
 type OwnerProtectedProfileWrite<
   T,
@@ -118,6 +119,41 @@ export type MutateExternalProfileLinksEvent = {
   url?: string;
 };
 
+/**
+ * An external account identifier observed by Loom after that connector
+ * successfully authenticated as the profile owner. Stable and human-facing
+ * identifiers are separate assertions (for example `github.node_id` and
+ * `github.login`) so consumers can use either without weakening provenance.
+ *
+ * Keep this tuple deliberately small: the integrity label covers the identity
+ * type, value, and observation time together. Connector/provider metadata that
+ * is not part of the assertion belongs in the writer event, not this record.
+ */
+export type ExternalIdentityAssertion = {
+  type: string;
+  value: string;
+  verifiedAt: string;
+};
+
+export const LOOM_VERIFIED_EXTERNAL_IDENTITY_INTEGRITY =
+  "loom-verified-external-identity" as const;
+
+export type VerifiedExternalIdentity = RequiresIntegrity<
+  ExternalIdentityAssertion,
+  readonly [typeof LOOM_VERIFIED_EXTERNAL_IDENTITY_INTEGRITY]
+>;
+
+export type VerifiedExternalIdentityCell = Cell<VerifiedExternalIdentity>;
+
+type VerifiedIdentityListWrite<Binding> = OwnerProtectedProfileWrite<
+  VerifiedExternalIdentityCell[],
+  Binding
+>;
+
+export type MutateVerifiedIdentitiesEvent = {
+  identities?: readonly VerifiedExternalIdentityCell[];
+};
+
 export type ProfileHomeOutput = {
   [NAME]: string;
   [UI]: unknown;
@@ -142,12 +178,22 @@ export type ProfileHomeOutput = {
     >,
     []
   >;
+  // Connector-observed account identifiers. The list contains the original
+  // assertion cells, each of which must already carry Loom's integrity label.
+  // This pattern only collects those capabilities; it never mints or copies
+  // their integrity-bearing values.
+  verifiedIdentities: Default<
+    VerifiedIdentityListWrite<typeof publishVerifiedIdentities>,
+    []
+  >;
   elements: OwnerProtectedProfileWrite<ProfileElement[], typeof mutateElements>;
   setName: Stream<SetProfileNameEvent>;
   setAvatar: Stream<SetProfileAvatarEvent>;
   setBio: Stream<SetProfileBioEvent>;
   addExternalLink: Stream<MutateExternalProfileLinksEvent>;
   removeExternalLink: Stream<MutateExternalProfileLinksEvent>;
+  publishVerifiedIdentities: Stream<MutateVerifiedIdentitiesEvent>;
+  revokeVerifiedIdentities: Stream<MutateVerifiedIdentitiesEvent>;
   // Both element streams accept the full mutation event (the union shape of
   // the one authorized writer); `AddProfileElementEvent` /
   // `RemoveProfileElementEvent` remain the documented per-stream subsets.
@@ -443,6 +489,90 @@ const mutateExternalProfileLinks = handler<
   state.url?.set("");
 });
 
+function normalizeVerifiedAt(value: string): string | undefined {
+  // Date.parse normalizes impossible dates such as February 31. Validate the
+  // RFC3339 calendar and clock components first, then let Date produce the
+  // canonical UTC representation consumers compare by age.
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/
+      .exec(
+        value,
+      );
+  if (!match) return undefined;
+  const [
+    ,
+    yearText,
+    monthText,
+    dayText,
+    hourText,
+    minuteText,
+    secondText,
+    ,
+    zone,
+  ] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const offset = zone === "Z"
+    ? undefined
+    : zone.slice(1).split(":").map(Number);
+  const daysInMonth = month >= 1 && month <= 12
+    ? new Date(Date.UTC(year, month, 0)).getUTCDate()
+    : 0;
+  if (
+    year < 1 || day < 1 || day > daysInMonth || hour > 23 || minute > 59 ||
+    second > 59 || (offset && (offset[0] > 23 || offset[1] > 59))
+  ) return undefined;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp)
+    ? new Date(timestamp).toISOString()
+    : undefined;
+}
+
+function isCanonicalVerifiedIdentity(
+  identity: ExternalIdentityAssertion,
+): boolean {
+  const type = identity.type;
+  const value = identity.value;
+  const verifiedAt = identity.verifiedAt;
+  return typeof type === "string" && type.length > 0 &&
+    type === type.trim().toLowerCase() &&
+    typeof value === "string" && value.length > 0 && value === value.trim() &&
+    typeof verifiedAt === "string" &&
+    normalizeVerifiedAt(verifiedAt) === verifiedAt;
+}
+
+// The profile is a collector, not the authority that creates these claims.
+// CFC rejects an event before this handler runs unless every incoming cell
+// already bears the required Loom integrity atom. The handler may inspect the
+// value to reject malformed producer output, but stores/removes the exact cell
+// reference so its integrity provenance is preserved end to end.
+const publishVerifiedIdentities = handler<
+  MutateVerifiedIdentitiesEvent,
+  {
+    verifiedIdentities: Writable<VerifiedExternalIdentityCell[]>;
+    mode: "publish" | "revoke";
+  }
+>((event, state) => {
+  const incoming = event.identities ?? [];
+  if (incoming.length === 0) return;
+
+  if (state.mode === "revoke") {
+    incoming.forEach((identity) =>
+      state.verifiedIdentities.removeAll(identity)
+    );
+    return;
+  }
+
+  incoming.forEach((identity) => {
+    if (!isCanonicalVerifiedIdentity(identity.get())) return;
+    state.verifiedIdentities.addUnique(identity);
+  });
+});
+
 // View/edit toggle for the rendered profile view (CT-1748). Plain (un-protected)
 // UI state: visiting a profile shows the read-only presentation; this flips to
 // the edit form. The flag itself is not owner-protected — anyone can flip their
@@ -488,6 +618,9 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
         typeof mutateExternalProfileLinks
       >
     >([]).for("externalLinks");
+    const verifiedIdentities = new Writable<
+      VerifiedIdentityListWrite<typeof publishVerifiedIdentities>
+    >([]).for("verifiedIdentities");
     // Unprotected draft backing the bio textarea; saved into the protected
     // `bio` cell through `setBio` (CT-1648).
     const bioDraft = new Writable("").for("bioDraft");
@@ -567,6 +700,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       avatar,
       bio,
       externalLinks,
+      verifiedIdentities,
       elements,
       setName: setName({ name }),
       setAvatar: setAvatar({ avatar }),
@@ -580,6 +714,14 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       removeExternalLink: mutateExternalProfileLinks({
         externalLinks,
         mode: "remove",
+      }),
+      publishVerifiedIdentities: publishVerifiedIdentities({
+        verifiedIdentities,
+        mode: "publish",
+      }),
+      revokeVerifiedIdentities: publishVerifiedIdentities({
+        verifiedIdentities,
+        mode: "revoke",
       }),
       // Both exported streams are instances of the one authorized writer,
       // pinned to their declared purpose via the bound mode.

@@ -245,9 +245,10 @@ describe("Pattern Runner - Lift", () => {
     expect(patternIdentity).toBeDefined();
     expect(lastError?.patternId).toBe(patternIdentity);
     expect(lastError?.space).toBe(space);
-    expect(lastError?.pieceId).toBe(
-      JSON.parse(JSON.stringify(piece.entityId))["/"],
-    );
+    // Diagnostics carry the FULL schemed sourceURI (see diagnostics.ts:
+    // ids copied from error context paste back into tools without a
+    // bare-id round trip).
+    expect(lastError?.pieceId).toBe(piece.sourceURI);
 
     // Make sure it recovers:
     dividend.withTx(tx).send(2);

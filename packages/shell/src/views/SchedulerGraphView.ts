@@ -1,5 +1,6 @@
 // Note: deno fmt can crash on deeply nested ternaries in html/svg templates - see renderBaselineStats
 import { css, html, LitElement, svg as svgTag, TemplateResult } from "lit";
+import { ENTITY_URI_SCHEMES } from "@commonfabric/runner/entity-kind";
 import { property, query, state } from "lit/decorators.js";
 import dagre from "dagre";
 import type { DebuggerController } from "../lib/debugger-controller.ts";
@@ -9,6 +10,7 @@ import {
   parseActionLocation,
   type SourceViewNode,
 } from "./SchedulerSourceView.ts";
+import { entityUriFromActionId } from "../lib/scheduler-graph-identity.ts";
 
 interface LayoutNode {
   id: string;
@@ -49,6 +51,11 @@ const NODE_HEIGHT = 36;
  * Scheduler Graph visualization component.
  * Shows dependency graph with effects and computations.
  */
+// Entity-scheme parsers derived from the canonical scheme set, so a new
+// entity kind cannot leave a stale `of|computed` alternation here.
+const ENTITY_SCHEME_ALT = ENTITY_URI_SCHEMES.join("|");
+const ENTITY_SCHEME_PART_RE = new RegExp(`^(?:${ENTITY_SCHEME_ALT}):(.*)$`);
+
 export class XSchedulerGraph extends LitElement {
   static override styles = css`
     :host {
@@ -1356,9 +1363,10 @@ export class XSchedulerGraph extends LitElement {
     const prefix = prefixMatch ? prefixMatch[1] + ":" : "";
     const rest = prefix ? label.slice(prefix.length) : label;
 
-    // Look for entity ID pattern (of:xxx or just the entity part after space/)
-    // Common patterns:
+    // Look for entity ID pattern (of:xxx / computed:xxx or just the entity
+    // part after space/). Common patterns:
     // - did:key:z6Mkk.../of:fid1:abc123/path
+    // - did:key:z6Mkk.../computed:fid1:abc123/path
     // - space/entityid/path
 
     // Try to find the last path segment(s) which are most meaningful
@@ -1370,17 +1378,18 @@ export class XSchedulerGraph extends LitElement {
       let entityPart = "";
       let pathParts: string[] = [];
 
-      // Find entity ID - look for "of:" prefix or use second part
+      // Find entity ID - look for an entity URI scheme or use second part
       for (let i = 0; i < parts.length; i++) {
         const part = parts[i];
-        if (part.startsWith("of:")) {
-          entityPart = part.slice(3); // Remove "of:" prefix
+        const schemeMatch = part.match(ENTITY_SCHEME_PART_RE);
+        if (schemeMatch) {
+          entityPart = schemeMatch[1]; // Remove the URI scheme
           pathParts = parts.slice(i + 1).filter((p) => p.length > 0);
           break;
         }
       }
 
-      // If no "of:" found, try to identify entity from structure
+      // If no entity scheme found, try to identify entity from structure
       if (!entityPart && parts.length >= 2) {
         // Assume last non-empty parts are the path, entity is before that
         const nonEmpty = parts.filter((p) => p.length > 0);
@@ -1418,14 +1427,11 @@ export class XSchedulerGraph extends LitElement {
    * Extract the entity ID from an action name.
    * Handles formats like:
    * - sink:did:key:.../of:entityId/path
-   * - action:pattern:did:key:.../of:entityId/path
+   * - action:pattern:did:key:.../computed:entityId/path
    */
   private extractEntityId(actionId: string): string | undefined {
-    // Look for "of:" pattern which precedes the entity ID
-    const ofMatch = actionId.match(/\/of:([^\/]+)/);
-    if (ofMatch) {
-      return ofMatch[1];
-    }
+    const entityUri = entityUriFromActionId(actionId);
+    if (entityUri) return entityUri;
 
     // Fallback: look for entity ID pattern after space identifier
     // Pattern: did:key:.../entityId/...

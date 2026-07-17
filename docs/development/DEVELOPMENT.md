@@ -355,19 +355,60 @@ export const set = (cache: Cache, key: string, value: string) =>
 
 #### Installing Deno
 
-If Deno is not installed, install it using the official installer:
+The repository pins its Deno version in `mise.toml` at the repository root.
+Install [mise](https://mise.jdx.dev/) and let it manage Deno:
 
 ```bash
-curl -fsSL https://deno.land/install.sh | sh
+brew install mise    # or: curl https://mise.run | sh
 ```
 
-This installs Deno to `~/.deno/bin/deno`. Add it to your PATH:
+Activate mise in your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) following
+the [getting-started guide](https://mise.jdx.dev/getting-started.html), for
+example:
 
 ```bash
-export PATH="$HOME/.deno/bin:$PATH"
+eval "$(mise activate zsh)"
 ```
 
-For persistent configuration, add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.).
+Then, from the repository root:
+
+```bash
+mise trust      # approve this repository's mise.toml (first time only)
+mise install    # install the pinned Deno version
+```
+
+While your working directory is inside the repository, `deno` resolves to the
+pinned version. When a commit bumps the pin, run `mise install` again; mise
+warns about the missing version until you do.
+
+Installing Deno directly (for example with the
+[official installer](https://docs.deno.com/runtime/getting_started/installation/))
+also works: `deno task check` accepts versions within the range set in
+`tasks/check.sh`, and prints a warning when the version differs from the pin.
+
+#### Where the Deno version is pinned
+
+`mise.toml` is the canonical pin. Everything else follows it or is checked
+against it:
+
+- `.github/actions/deno-setup` reads `mise.toml` at job time, so CI uses the
+  pinned version.
+- `tasks/check.sh` (run by `deno task check`, the pre-commit hook, and CI)
+  reads the pin for its version warning, and accepts the surrounding range set
+  in its `DENO_VERSION_MIN`/`DENO_VERSION_MAX` variables.
+- `Dockerfile.toolshed` repeats the version in its `FROM` lines, which cannot
+  read another file.
+
+To bump the toolchain: update the version in `mise.toml` and both `FROM` lines
+in `Dockerfile.toolshed`, and move the `tasks/check.sh` range if the new
+version falls outside it.
+
+`deno task check-deno-pins` (also a CI step) catches a bump that misses one of
+those. It checks that every `denoland/deno` tag in `Dockerfile.toolshed` equals
+the pin, that the `tasks/check.sh` range contains the pin, that `check.sh` and
+the `deno-setup` action both still read `mise.toml` rather than a hardcoded
+version, and that the action holds no version literal that disagrees with the
+pin.
 
 #### SSL Certificate Issues
 

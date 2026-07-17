@@ -72,6 +72,7 @@ import { consume } from "@lit/context";
 import { runtimeContext, spaceContext } from "../../runtime-context.ts";
 import type { DID } from "@commonfabric/identity";
 import { type StoredFile, uploadFile } from "../../utils/file-cell-storage.ts";
+import { mentionIdFromCellId } from "../../utils/mention-id.ts";
 import {
   Mentionable,
   MentionableArray,
@@ -736,13 +737,16 @@ export class CFCodeEditor extends BaseElement {
   }
 
   /**
-   * Get the stable piece cell ID for a mentionable item at the given index.
+   * Get the stable piece cell ID for a mentionable item at the given index,
+   * in the BARE embed form wiki-link text persists (see mentionIdFromCellId
+   * — CellHandle.id() is the full schemed URI; renderers add `/of:` back).
    * Returns the pre-resolved ID if available, otherwise falls back to
    * the sub-cell ID (which may be unstable across recomputations).
    */
   private _getPieceId(index: number): string {
-    return this._resolvedPieceIds.get(index) ??
+    const id = this._resolvedPieceIds.get(index) ??
       (this.mentionable?.key(index)?.id() ?? "");
+    return id ? mentionIdFromCellId(id) : id;
   }
 
   /**

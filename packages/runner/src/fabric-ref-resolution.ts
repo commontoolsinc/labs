@@ -2,8 +2,6 @@ import type { Cell } from "./cell.ts";
 import type { Runtime } from "./runtime.ts";
 import type { MemorySpace } from "./storage/interface.ts";
 import type { URI } from "./sigil-types.ts";
-import { fromURI } from "./uri-utils.ts";
-import { entityIdFrom } from "./create-ref.ts";
 import {
   type FabricRef,
   formatFabricRef,
@@ -49,12 +47,13 @@ export async function resolveFabricRefToIdentity(
       throw cause;
     }
   } else {
-    const patternId = `of:fid1:${ref.ref.hash}` as URI;
-    chain.push(`of:${patternId}`);
-    cell = runtime.getCellFromEntityId(
-      refSpace,
-      entityIdFrom(fromURI(patternId)),
-    );
+    // The URI scheme is part of the identity: an of: ref and a computed: ref
+    // with the same hash name different entities, so sync the schemed URI
+    // string as-is — stripping it to a bare hash would rename a computed ref
+    // to its of: sibling.
+    const patternId = `${ref.ref.scheme}:fid1:${ref.ref.hash}` as URI;
+    chain.push(`uri:${patternId}`);
+    cell = runtime.getCellFromEntityId(refSpace, patternId);
     await cell.sync();
   }
 

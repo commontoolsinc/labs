@@ -100,16 +100,35 @@ hashToRef.set(primInterns.undefined.taggedHashString, undefined);
  * matching its already-canonical hash, so every path/runtime converges.
  *
  * - Array order is preserved (arrays are ordered).
- * - Already-interned sub-schemas are returned by reference: they are already
- *   canonical and shared, so the freshly-spread owned top is the only part
- *   rebuilt (see `traverse.ts`'s `schemaAtPathCanonical`).
+ * - Already-interned sub-schemas are returned by reference, so that a freshly
+ *   spread owned top is the only part rebuilt (see `traverse.ts`'s
+ *   `schemaAtPathCanonical`). Note that this is _not_ sound as a
+ *   canonicalization step: `internSchemaReturningSchemaAndHash()` registers the
+ *   non-canonical input object along with the canonical one, so
+ *   `isInternedSchema()` also answers `true` for objects which are not in
+ *   canonical order, and this skip then preserves whatever order they had. The
+ *   stored form is correspondingly not reliably canonical.
  * - An object already in canonical order with unchanged children is returned
  *   unchanged, preserving identity (and `internSchema`'s same-reference contract)
  *   for the common already-canonical case.
+ *
+ * TODO(danfuzz): This entire function is a workaround for a defect elsewhere:
+ * `link-utils.ts`'s `createDataCellURI()` mints ids with a plain
+ * `JSON.stringify()` instead of the standard `data-model` value encoding, which
+ * canonicalizes key order as a matter of spec (see
+ * `docs/specs/space-model-formal-spec/3-json-encoding.md` section 10, and the
+ * `TODO` in that function). Because the id-minting encoder does not
+ * canonicalize, the in-memory key order of every interned schema was made to
+ * carry that weight instead -- which is an invariant this file cannot actually
+ * maintain, per the by-reference note above. Once the ids are minted through a
+ * conforming encoder, in-memory key order stops mattering, and this function
+ * along with its call site should be removed rather than repaired.
  */
 function canonicalizeSchemaKeyOrder(value: unknown): unknown {
   if (value === null || typeof value !== "object") return value;
-  // Already-interned sub-schemas are canonical (and shared); keep them as-is.
+  // Already-interned sub-schemas are kept as-is. Note that this is unsound as
+  // canonicalization -- "interned" does not imply "canonical" -- per the
+  // by-reference note in the doc comment above.
   if (isInternedSchema(value as JSONSchema)) return value;
   if (Array.isArray(value)) {
     let changed = false;
