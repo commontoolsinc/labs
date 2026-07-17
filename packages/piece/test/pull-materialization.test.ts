@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   getPatternIdentityRef,
+  isLink,
   type JSONSchema,
   KeepAsCell,
   NAME,
@@ -159,6 +160,32 @@ function compiledMultiplierProgram(
           "export default pattern<{ input: number }>(({ input }) => ({",
           `  version: ${JSON.stringify(version)},`,
           "  output: multiply(input),",
+          "}));",
+        ].join("\n"),
+      },
+    ],
+  };
+}
+
+function compiledScopedInputProgram(version: string): RuntimeProgram {
+  return {
+    main: "/main.tsx",
+    files: [
+      {
+        name: "/main.tsx",
+        contents: [
+          "import { Default, NAME, pattern, type PerSpace, type PerUser, UI, type VNode } from 'commonfabric';",
+          "interface Item { title: string; }",
+          "interface In {",
+          '  who?: PerUser<string | Default<"">>;',
+          "  options?: PerSpace<Item[] | Default<[]>>;",
+          "}",
+          "interface Out { [NAME]: string; [UI]: VNode; who: string; count: number; }",
+          "export default pattern<In, Out>(({ who, options }) => ({",
+          `  [NAME]: ${JSON.stringify("probe-" + version)},`,
+          "  [UI]: <div>{who}</div>,",
+          "  who,",
+          "  count: options.length,",
           "}));",
         ].join("\n"),
       },
@@ -4794,6 +4821,86 @@ describe("piece pull materialization", () => {
     } finally {
       await freshRuntime.dispose();
     }
+  });
+
+  it("recovers a durable contract through a scoped redirect link", async () => {
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, doublePattern()),
+      { input: 5 },
+      undefined,
+      { start: true },
+    );
+    const argument = manager.getArgument(piece);
+    // Baseline: the producer-owned argument doc has a durable contract at its
+    // own (base) scope.
+    expect(durableSourceContract(argument, manager)?.schemas.length)
+      .toBeGreaterThan(0);
+
+    // A PerUser/PerSession input is a redirect to that same producer-owned
+    // doc, but tagged with a non-base scope. Producer-owned metadata lives
+    // only in the base ("space") partition, so recovery must read there — not
+    // the redirect link's own "user"/"session" partition, which holds only the
+    // scoped value. Regression guard for #4717: reading scope-locally makes
+    // every scoped input permanently reject an in-place setsrc with
+    // "source has no durable schema contract".
+    for (const scope of ["user", "session"] as const) {
+      const scopedSource = runtime.getCellFromLink({
+        ...argument.getAsNormalizedFullLink(),
+        scope,
+      });
+      const contract = durableSourceContract(scopedSource, manager);
+      expect(contract?.schemas.length, `scope=${scope}`).toBeGreaterThan(0);
+    }
+  });
+
+  it("updates a piece whose argument holds scoped and mergeable-element links", async () => {
+    // Mirrors a deployed piece: a `PerUser` input is stored as a scoped
+    // redirect link, and a mergeable push stores the array element as its own
+    // metadata-less document linked from the array. Neither link's contract is
+    // provable from the linked document alone; the first recovers through the
+    // base-scope producer metadata, the second through the prior pattern's
+    // argument contract. Regression guard for the #4717 validation rejecting
+    // both shapes ("source has no durable schema contract") and the optional
+    // destination slot ("a schema alternative accepted previously...").
+    const compiled = await runtime.patternManager.compilePattern(
+      compiledScopedInputProgram("v1"),
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      compiled,
+      {},
+      "scoped-mergeable-update-" + crypto.randomUUID(),
+      { start: true },
+    );
+    await runtime.idle();
+    const controller = new PieceController(manager, piece);
+    const argument = manager.getArgument(piece);
+    const rawWho =
+      (argument.getRawUntyped({ lastNode: "top" }) as Record<string, unknown>)
+        .who;
+    expect(isLink(rawWho)).toBe(true);
+
+    // A version bump forces the full validation path (an identical pattern
+    // identity short-circuits before link validation).
+    await controller.setPattern(compiledScopedInputProgram("v2"));
+    expect(await controller.result.get()).toMatchObject({ count: 0 });
+
+    await runtime.editWithRetry((tx) => {
+      (argument.withTx(tx).key("options") as unknown as {
+        push: (value: unknown) => void;
+      }).push({ title: "Test Cafe" });
+    });
+    await runtime.idle();
+    const rawOptions =
+      (argument.getRawUntyped({ lastNode: "top" }) as Record<string, unknown>)
+        .options;
+    expect(isLink((rawOptions as unknown[])[0])).toBe(true);
+
+    await controller.setPattern(compiledScopedInputProgram("v3"));
+    expect(await controller.result.get()).toMatchObject({ count: 1 });
+    expect(await controller.input.get()).toMatchObject({
+      options: [{ title: "Test Cafe" }],
+    });
   });
 
   it("updates a piece across backward-compatible schema additions", async () => {

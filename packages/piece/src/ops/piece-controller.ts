@@ -21,7 +21,7 @@ import {
   sanitizeSchemaForLinks,
   schemaAcceptsOpaqueCellValue,
 } from "@commonfabric/runner";
-import type { CellKind } from "@commonfabric/api";
+import type { CellKind, LinkScope } from "@commonfabric/api";
 import {
   cfcSchemaChildRoot,
   resolveCfcSchemaRefRoot,
@@ -1119,7 +1119,29 @@ export function durableSourceContract(
   linkedCell: Cell<unknown>,
   manager: PieceManager,
 ): DurableSourceContract | undefined {
-  const sourceLink = linkedCell.getAsNormalizedFullLink();
+  const rawSourceLink = linkedCell.getAsNormalizedFullLink();
+  // Producer-owned metadata (`schema`, and the `result` backlink) is
+  // scope-partitioned. A scoped *result* cell carries its own metadata in its
+  // scope partition, but a scoped *input* redirect (a `PerUser`/`PerSession`
+  // input) points at a base-scoped producer document whose metadata lives only
+  // in the base ("space") partition — the redirect's own partition holds just
+  // the scoped value. Recover at whichever partition actually holds the
+  // metadata: prefer the link's own scope, then fall back to base. Reading only
+  // the redirect's scope makes a scoped input look contract-less, which rejects
+  // even an identical-source `setsrc`; reading only base would strip a scoped
+  // result cell of its legitimate contract.
+  const metaScope = ((): LinkScope | undefined => {
+    if (rawSourceLink.scope === undefined) return undefined;
+    const scopedRoot = manager.runtime.getCellFromLink(
+      { ...rawSourceLink, path: [], schema: undefined },
+      undefined,
+      linkedCell.tx,
+    );
+    const hasScopedMeta = scopedRoot.getMetaRaw("schema") !== undefined ||
+      scopedRoot.getMetaRaw("result") !== undefined;
+    return hasScopedMeta ? rawSourceLink.scope : undefined;
+  })();
+  const sourceLink = { ...rawSourceLink, scope: metaScope };
   const sourceRoot = manager.runtime.getCellFromLink(
     { ...sourceLink, path: [], schema: undefined },
     undefined,
@@ -1159,7 +1181,7 @@ export function durableSourceContract(
     if (
       producerLink.space !== sourceLink.space ||
       producerLink.id !== sourceLink.id ||
-      producerLink.scope !== sourceLink.scope ||
+      (producerLink.scope ?? "space") !== (sourceLink.scope ?? "space") ||
       producerLink.path.length > sourceLink.path.length ||
       producerLink.path.some((segment, index) =>
         segment !== sourceLink.path[index]
@@ -1340,9 +1362,20 @@ function assertContractSubset(
   for (const target of targets) {
     let lastError: unknown;
     const proved = sources.some((source) => {
+      // A source that may hold no value (its schema carries an explicit
+      // `undefined` alternative, added by `includePossibleMissingValue`) is
+      // acceptable to a destination slot that is itself optional: absence is a
+      // state the destination schema already tolerates. Discharge that
+      // alternative here, structurally, rather than injecting an `undefined`
+      // union into the target — a union-with-default target is not stable
+      // under default insertion and would fail closed. A required destination
+      // keeps the alternative, so a possibly-absent source still fails there.
+      const sourceSchema = target.mayBeMissing === true
+        ? withoutUndefinedAlternative(source.schema)
+        : source.schema;
       try {
         assertSchemaSubset(
-          withoutTopLevelScope(source.schema),
+          withoutTopLevelScope(sourceSchema),
           withoutTopLevelScope(target.schema),
           label,
           { sourceRoot: source.root, targetRoot: target.root },
@@ -1355,6 +1388,28 @@ function assertContractSubset(
     });
     if (!proved) throw lastError;
   }
+}
+
+/**
+ * Remove a top-level `{ type: "undefined" }` alternative from a schema union,
+ * collapsing a resulting singleton wrapper to its sole branch. Used when the
+ * destination contract tolerates absence, so the possible-missing alternative
+ * need not be proven against the destination's value schema.
+ */
+function withoutUndefinedAlternative(schema: JSONSchema): JSONSchema {
+  if (typeof schema !== "object" || schema === null) return schema;
+  const alternatives = schema.anyOf;
+  if (!Array.isArray(alternatives)) return schema;
+  const remaining = alternatives.filter((alternative) =>
+    !(typeof alternative === "object" && alternative !== null &&
+      alternative.type === "undefined" &&
+      Object.keys(alternative).length === 1)
+  );
+  if (remaining.length === alternatives.length) return schema;
+  if (remaining.length === 1 && Object.keys(schema).length === 1) {
+    return remaining[0]!;
+  }
+  return { ...schema, anyOf: remaining };
 }
 
 function includePossibleMissingValue(
@@ -1377,6 +1432,18 @@ export function assertSuppliedLinkSchemasCompatible(
     basePath?: readonly (string | number)[];
     destinationIsStream?: boolean;
     destinationRoot?: JSONSchema;
+    /**
+     * The prior pattern's argument schema, supplied only on a pattern update
+     * over existing state. A linked document with no producer-owned metadata —
+     * e.g. a mergeable-push element doc, which is created under the piece's
+     * own write authority and never carries any — is then held to the prior
+     * contract at the link's own path instead of failing closed outright: the
+     * proof becomes prior-contract ⊆ candidate, so a candidate that narrows
+     * away values the piece may already hold is still rejected. Absent this
+     * option (every non-update flow), an unprovable source stays a hard error,
+     * so a fresh link to an arbitrary contract-less document is still refused.
+     */
+    priorArgumentSchema?: JSONSchema;
   } = {},
 ): Set<SuppliedLink> {
   const preservedDirectHandles = new Set<SuppliedLink>();
@@ -1401,9 +1468,14 @@ export function assertSuppliedLinkSchemasCompatible(
           suppliedLink.path,
         );
       } else {
+        // Track destination presence so an optional destination slot records
+        // `mayBeMissing`, mirroring the source-side tracking below: a source
+        // that may hold no value must only be provable against a destination
+        // that also tolerates absence.
         targetContracts = linkPathContracts(
           [{ schema: destinationSchema, root: destinationRoot }],
           fullPath,
+          { trackSourcePresence: true, preserveMissingFlag: true },
         );
       }
     } catch (error) {
@@ -1422,7 +1494,23 @@ export function assertSuppliedLinkSchemasCompatible(
     // A direct Cell view can be narrowed with asSchema() just as easily as a
     // serialized alias can carry a narrowed schema. Neither is a future-value
     // invariant, so every durable link needs producer-owned Piece metadata.
-    const durableSource = durableSourceContract(linkedCell, manager);
+    let durableSource = durableSourceContract(linkedCell, manager);
+    if (
+      durableSource === undefined && options.priorArgumentSchema !== undefined
+    ) {
+      // Pattern update over existing state: hold a metadata-less linked doc to
+      // the prior argument contract at this path (see the option's doc).
+      durableSource = {
+        schemas: [{
+          root: options.priorArgumentSchema,
+          path: [...fullPath],
+          rawBasePath: [],
+          schemaBaseDepth: 0,
+          validationCell: baseCell,
+          validationPath: [...fullPath],
+        }],
+      };
+    }
     if (durableSource === undefined) {
       throw new Error(
         `input link at ${displayPath} schema is not compatible: source has no durable schema contract`,
@@ -2586,6 +2674,7 @@ export class PieceController<T = unknown> {
             argumentSchema,
             argumentCell,
             this.#manager,
+            { priorArgumentSchema: previousPattern.argumentSchema },
           ),
       }) as Cell<T>;
     });
