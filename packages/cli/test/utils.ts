@@ -22,6 +22,10 @@ export function isIgnorableDenoWarningLine(line: string): boolean {
     trimmed.startsWith("╭ Warning") ||
     trimmed.startsWith("╰─") ||
     trimmed.startsWith("│") ||
+    // Deno prints one of these per module it fetches whenever the module cache
+    // is cold, which happens on a fresh machine and after any change that
+    // invalidates the cache, such as a Deno version bump.
+    trimmed.startsWith("Download ") ||
     /^[└├]/u.test(trimmed);
 }
 
