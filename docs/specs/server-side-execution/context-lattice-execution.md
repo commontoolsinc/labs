@@ -521,13 +521,15 @@ that claim is a design bug.
 | R2 | Render/UI effects | effect kind + render surface | D-projector mode, deliberately unscheduled |
 | R3 | Unverified implementations (no verified provenance, so no `impl:` fingerprint) | fingerprint prefix | **defect class, target zero** (owner, 2026-07-15). **Diagnosed 2026-07-15**: the population is raw builtins and nothing else (`map`/`wish`/`ifElse`; `ifElse` is structural — JSX conditionals lower to it); authored code is fully provenance-covered (zero `cf:module/` rejections). Fix: static `cf:builtin/<id>:v1` identity for every canonical-registry builtin, then per-builtin computation descriptors — plan §4.6 W2.11/W2.15 |
 | R4 | Actions without a complete scope summary | summary-presence bit | **defect class, target zero** (same ruling). **Diagnosed 2026-07-15**: five offenders, two causes — the certificate gate rejects opaque/passthrough *reads* that post-C0 no longer need bounding (three read-only computeds), and the direct `lift()`/`derive()` builder form has no certificate path at all (both backlinks lifts). One (`computeIndex`) has a data-dependent write surface and is served as a **materializer** — envelope-granular write bounds derived per-run from resolved inputs, idle-priority scheduling (owner, 2026-07-15; no pattern redesign). Fix: plan §4.6 W2.12–W2.14, W2.16 |
-| R5 | Builtins outside the server-executable registry | static registry lookup | per-builtin broker support as needed |
+| R5 | Builtins outside the server registries | static registry lookup | explicit worklist (owner, 2026-07-17), replacing "as needed": effects lacking a server implementation — `llm`, `sqliteQuery` (broker implementations); computation builtins lacking descriptors — `streamData`, `llmDialog`, `compileAndRun`, `sqliteDatabase`, `navigateTo`, `inspectConfLabel` (W2.15-shape descriptors, priority-ordered by fixture incidence). `wish` is R13 |
 | R6 | Cross-space reads (until C3), cross-space writes (until C4 + coordinated-commit design) | per-address space compare | **C3 is pre-ship** (owner, 2026-07-15): shipping evaluation before C3 uses single-space cases only. Multi-host is a **requirement**, not a gap — §5 defines the cross-engine seam as a protocol whose first transport beyond in-process targets co-hosted, low-latency, reliable hosts |
 | R7 | user/session contexts before their rank enables (C1/C2 staging) | lattice rank | C1/C2 shipping; temporary by construction. Observable pre-C2 as counted `claim-context-mismatch` lease-fence rejects (a space claim whose run's context floor evaluates above space is fenced by design; the client computes fail-open — measured ~1 per few flag-on default-app runs, 2026-07-15). The placement guard tolerates exactly this cause; its return to hard-zero is a named C2 acceptance criterion |
 | R8 | User-lane work while the principal has zero sessions | host lane state | resolved for v1: session-anchored (simplest); the later delegation design restores offline continuation correctly and owns its consent question |
 | R9 | Spaces owned by the legacy background service | host exclusion lock | not in use (owner, 2026-07-15); the exclusion interlock stays as a defensive lock and registry unification is deprioritized |
 | R10 | Client compute for claimed actions (N× speculation) and graph-query subscription serving | — (not a classification; standing machinery cost) | Phase 3 feed + G17 suppression, gated on closure coverage data |
 | R11 | Accepted reconciliation windows: §B.3 prediction, §B.4 scalar basis, §5 vector basis | — (counted divergence, not exclusions) | B.3 closes with Phase 5; basis windows accepted and counted |
+| R12 | Effect builtins at user/session rank (amendment A8's computation-only restriction on scoped lanes) | `actionKind === "effect"` ∧ lane rank above space | **C2 exit gate, pre-ship** (owner, 2026-07-17): plan C2.8 — session lanes and user lanes with a connected anchor perform egress under the lane grant per resolved OQ6; the three sponsor-keyed gates become lane-conditional. Only *offline* egress under standing keys stays excluded, riding OQ1. This row exists because the exclusion previously lived only in a C1.5a parenthetical — a §8 honesty-contract violation |
+| R13 | `wish` (resolver semantics; static identity but no descriptor) | builtin id lookup | plan W2.15b (owner, 2026-07-17) — descriptor shape decided by the resolver contract; measured ×4 in the flagship fixture, so a real coverage hole, not a corner |
 
 Engineering debt riding alongside (no decisions): the owed deterministic
 fixtures (shrink race, shared child, rebase replica test) landed with C1.10;
@@ -578,6 +580,9 @@ feed).
    is confined to the space lane, whose executing identity is an unrelated
    volunteer sponsor. The offline extension (standing keys firing with no
    session open) is consent territory and rides Open question 1.
+   Implementation timing (owner, 2026-07-17): plan C2.8 is a **C2 exit
+   gate, pre-ship** — not a floating follow-on; the exclusion is tracked
+   as register row R12 until it lands.
 7. **Resolved (spec-owner review, 2026-07-15) — narrow-to-wide writes need
    no carve-out.** Lift output widening is a scope-naming self-redirect
    link, identical across lanes by construction (links never encode the

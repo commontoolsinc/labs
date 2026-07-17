@@ -1612,8 +1612,23 @@ descriptor registry accepted as an alternative certificate source in the
    served by the materializer mechanism rather than bespoke static
    descriptors.
 3. `wish` — resolver semantics; stays identity-only until its servability
-   story is designed. This is the phase's one recorded deferral (evaluate
-   a trivial output-only descriptor once the resolver contract is pinned).
+   story is designed. Formerly the phase's one floating deferral; now
+   **W2.15b** (below), with a register row (§8 R13) so the exclusion
+   stays visible.
+
+### W2.15b — Wish resolver servability (named follow-on)
+
+**Depends on:** W2.11. **Status:** not started — slotted alongside the C2
+build waves (owner, 2026-07-17; it shares no seams with the lane WOs, so
+it can run in parallel). `wish` measured ×4 in the flagship fixture's
+unservable verdicts, so it is a real coverage hole, not a corner.
+
+Design question to pin first: whether the resolver's write surface is
+expressible as a trivial output-only descriptor (the W2.15a shape) or
+needs envelope treatment (the W2.16 shape) — the resolver contract
+decides. Acceptance: flag-on default-app shows zero `wish` unservable
+verdicts, or a recorded owner decision that the resolver becomes
+client-permanent with its register row updated to say so and why.
 
 **Success criteria:**
 
@@ -1874,7 +1889,7 @@ equality check and simply starts passing.
 | C1.3 | Lane grants keyed (space, branch, user:did), anchored on a live **connected** principal session, host-internal `laneGeneration` | C1.1 | disconnect drains/revokes only that lane; stale generation fences with a new named cause. Amendments A2 (grant + every renewal require the principal's current WRITE capability), A3 (issuance-time routing-disjointness: reject/supersede chain-compatible live claims, revoke-published-before-issue), A12 (issuance binds a live grant + generation, re-validated after every await; drain fences generation before sweeping claims), A13, A17 |
 | C1.4 | Acting-context seam on commits — with the four-role split of `ApplyCommitOptions.principal`: sponsor stays bound to the lease fence, replay sessionKey, pending-read resolution, and provenance.onBehalfOf; a NEW actingContext feeds scope resolution, effective-context resolution, and CFC label validation | C1.2, C1.3 | user:alice claim commits as alice; forged assertion from an unbound context rejects with a constant-shape fence cause BEFORE any scoped-state validation (preconditions/reads) runs; one commit (incl. observation batches) asserts exactly one lane; the commit fence also resolves WRITE for the acting principal. Amendments A2, A5, A6 |
 | C1.4b | Lane-scoped READ seam (blocker A1): reads/watch/snapshot/writer-lookup from a lease-bound executor session accept a per-request acting context validated against the live lane grant + generation before scope resolution; EntitySnapshot and AcceptedCommitNotice.revisions gain the resolved scopeKey; schedulerApplicableContextKeys derives from open lane grants | C1.3, C1.4 | through one sponsor-bound provider session, a read of alice's user-scoped doc under alice's live grant returns her instance; without a grant it rejects; sync frames attribute per lane |
-| C1.5a | Executor candidate rank from the durable floor; **intra-Worker lane identity** (candidate/claim/wake identity maps + CandidateClaim message) gains contextKey — the pool slot key, lease topology, and one-Worker-per-(space, branch) are explicitly unchanged (A22) | C1.1, C1.4b | PerUser observation → user-rank candidate; space regression green; C1 issues user-rank claims for `computation` only (A8 — effects stay space-lane; lane-grant egress per OQ6 is a named follow-on) |
+| C1.5a | Executor candidate rank from the durable floor; **intra-Worker lane identity** (candidate/claim/wake identity maps + CandidateClaim message) gains contextKey — the pool slot key, lease topology, and one-Worker-per-(space, branch) are explicitly unchanged (A22) | C1.1, C1.4b | PerUser observation → user-rank candidate; space regression green; C1 issues user-rank claims for `computation` only (A8 — effects stay space-lane; lane-grant egress per OQ6 is owned by C2.8, a **C2 exit gate** since the 2026-07-17 owner revision, tracked as register row R12) |
 | C1.5b | Per-lane acting context; shared Worker replica re-keyed by effective scope key (the §7 intra-Worker confidentiality boundary; largest WO) | C1.4, C1.4b, C1.5a | two principals' PerUser derivations isolated in one Worker; overlays/rebase correct per lane. Amendments A16 (a lane's reads see confirmed state + ONLY its own lane's pending versions; other lanes' localSeqs are unresolvable), A23 (amend both executor-IPC identity-invariant comments: lane identity crosses the channel, raw credentials still do not) |
 | C1.6 | Client chain-scoped claim routing — the FULL own chain {space, user:myDid, session:myDid:mySessionId} (A10); no rank comparison; if two chain-matching claims are ever observed: route to neither, fail open, counted (A3) | C1.1, C1.5a (testable with synthetic claims) | own-chain claims → claimed overlay; other-user/session → upstream; space unchanged; the complete client seam list re-keyed by chain key (facade registerExecutionAction, #executionActionsByKey, executionClaimForActionKey, hasLiveExecutionClaimForAction, captureExecutionClaim, revoke-path invalidation) — dormant-action revoke fires exactly one wake (A15); colon-bearing did:key principals end-to-end (A18) |
 | C1.7 | Context-scoped delivery + `context-lattice-claims-v1` subcapability + principal-wide cohort gate; builds `sessionsForPrincipal` (connected-session semantics, A17) with the filter inside `#sessionAcceptsClaim` — the single predicate feeding publish, reconnect snapshots, retained events, and settlement frontiers (A21) | C1.3, C1.6 | user claims delivered only to that principal's negotiating sessions; cohort fence lives inside openSession admission (new/resume/takeover) and fences+revokes the lane BEFORE the snapshot is built and the open response sent (A11 — a raw client transacting immediately after open cannot race the drain); B's reconnect snapshot contains none of A's user claims |
@@ -1947,10 +1962,26 @@ read them before building:**
   sessions cross-read (CA8); C2.5 needs a real session identity source,
   never a DID fabrication (CA9); canonical session-key validation (CA12).
 
-**Standing adopted defaults (2 and 3 survive the panel):** C2 is
-computation-only like C1 (A8; session-lane builtin egress OQ6/C2.8 is a
-named follow-on); no lane budget in C2 (OQ3; parked lanes are correct by
-construction). Defaults 1 and 4 are amended above.
+**Standing adopted defaults after the panel and the owner review (both
+2026-07-17):** default 3 survives as adopted — no lane budget in C2
+(OQ3); parked session lanes are correct by construction; the LRU-park
+cap is a follow-on, revisited if C2.10's latency gate shows pressure.
+Default 2 survives as **build order** — computation-first like C1 (A8):
+lane grants, fencing, and drain prove out before egress rides them,
+because an external call is the one side effect the per-commit firewall
+cannot retro-reject — but its "session-lane builtin egress (OQ6, C2.8)
+is a named follow-on, not a C2 gate" clause is **overridden by the owner
+(2026-07-17, post-panel): C2.8 is a C2 exit gate, pre-ship** with the
+same force as the C3 pre-ship ruling. Rationale: the end state is all
+standing reactive work — computations AND effect builtins — server-side,
+with only handlers (R1, Phase 5) and render (R2) client-executed; a
+follow-on with no phase binding is the permanent-carve-out failure mode
+design §1 argues against, and the exclusion had no residual-register row
+(§8 gains R12/R13 with this revision). C2.8's scope: session lanes and
+user lanes with a connected anchor session (lifting C1's A8
+restriction); only *offline* egress under standing delegated keys stays
+parked with OQ1, where the consent question genuinely lives. Defaults 1
+and 4 are amended above (CA4, CA11).
 
 | WO | Title | Depends on |
 | --- | --- | --- |
@@ -1961,7 +1992,7 @@ construction). Defaults 1 and 4 are amended above.
 | C2.5 | Session-rank executor candidate identity + router widening; **real session identity source, no DID fabrication (CA9); laneScopeKey broader-in-chain collapse, CA3** | C2.2, C2.4 |
 | C2.6 | **Load-bearing (CA4):** narrow session-claim delivery to the named session — kills the quadratic sibling-session rerun, not just fan-out | C2.1, C2.3 |
 | C2.7 | Session-lane demand aggregation, lifecycle, wake widening; **session lane-write-authority fence re-check (CA7)**; parked-skip is emergent (CA13) | C2.3, C2.5, C2.6 |
-| C2.8 | Session-lane builtin egress under the lane grant (OQ6) — computation-gated, **owner-timed follow-on** | C2.4, C2.5 |
+| C2.8 | Scoped-lane builtin egress under the lane grant (OQ6): session lanes + user lanes with a connected anchor (lifts A8's computation-only restriction — the engine admission gate that holds it, `isAdmissibleExecutionClaimContextKey` engine.ts:8259 per CA1's citation, plus the three sponsor-keyed gates become lane-conditional: the `deno-space-executor` pre-claim drop, the `executor-worker` egress-guard identity, and `causalActorMatchesSponsor` consultation, applied only when `claimKey.contextKey === "space"`; per-lane broker acting identity; G11 parity per lane). **C2 exit gate, pre-ship** (owner, 2026-07-17); offline egress under standing keys stays with OQ1 | C2.4, C2.5; build sequenced after C2.9–C2.10 so egress never muddies the latency measurement |
 | C2.9 | PerSession measurement gate + fixture; **push-side confidentiality fixture (CA5); depends on W2.15/W2.16 write-surface completeness (CA10)** | C2.4–C2.7, W2.15/W2.16 re-work |
 | C2.10 | Lunch-poll placement guard: R7 retirement + **split gate — parity bar AND an owner-set latency budget (CA11)** | C2.9 |
 | C2.11 | Owed session-lane fixtures (incl. the session lane-write TOCTOU backstop, CA7) + EXPERIMENTAL_OPTIONS/docs | C2.3, C2.6, C2.9 |
