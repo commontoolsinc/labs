@@ -43,6 +43,7 @@ type PoolCounters = Readonly<{
 
 type ControlCounters = Readonly<{
   claimsIssued: number;
+  claimsIssuedByContextKey: Readonly<Record<string, number>>;
   claimsRevoked: number;
   claimedActionConflicts: number;
   acceptedActionAttempts: number;
@@ -55,16 +56,88 @@ type ControlCounters = Readonly<{
   actionFirewallRejects: number;
 }>;
 
+/**
+ * A13 measurement-guard contract: the by-design lease-fence reject causes a
+ * measured workload may produce, each named, counted, and carrying an
+ * explicit retirement criterion (mirroring register row R7 of
+ * context-lattice-execution.md). EVERY other cause is a defect and stays
+ * hard-zero. Tests assert through {@link unexpectedLeaseFenceRejects} so the
+ * tolerated set has exactly one definition; a cause retires by deleting its
+ * entry, which immediately returns it to the hard-zero set.
+ */
+export type ToleratedLeaseFenceCause = Readonly<{
+  cause: string;
+  /** Why the cause is by-design rather than a defect. */
+  reason: string;
+  /** The named condition under which the cause returns to hard-zero. */
+  retirement: string;
+}>;
+
+export const TOLERATED_LEASE_FENCE_CAUSES: readonly ToleratedLeaseFenceCause[] =
+  [
+    {
+      cause: "claim-context-mismatch",
+      // A space-lane claim on an action whose runtime context floor evaluates
+      // above the claim's context (e.g. a view conditional reading a
+      // session-scoped address during navigation) is fenced BY DESIGN and the
+      // client computes it fail-open — register row R7, temporary by
+      // construction.
+      reason: "space claim fenced when the run's context floor evaluates " +
+        "above its lane (R7); the client computes fail-open",
+      retirement: "C2 session lanes route these runs to their own lane; " +
+        "return to hard-zero is a named C2 acceptance criterion",
+    },
+    {
+      cause: "lane-generation-stale",
+      // C1.3: a host-side lane drain (anchor-session loss, ACL fence, cohort
+      // fence) bumps the lane generation BEFORE sweeping claims, so an
+      // in-flight claimed commit bound to the previous generation fences
+      // instead of landing after its authority ended. The fence is the drain
+      // working as designed, not a defect.
+      reason: "an in-flight claimed commit raced a by-design lane drain " +
+        "(C1.3 generation fence precedes the claim sweep)",
+      retirement: "hard-zero on measurement windows with no lane drain: a " +
+        "fixture that performs no re-anchor, revocation, or cohort fence " +
+        "must assert zero for this cause explicitly",
+    },
+    {
+      cause: "claim-not-live",
+      // C1.3/C1.8: host drains sweep (revoke) lane claims; a claimed run
+      // already committed toward a swept claim settles against a claim that
+      // is no longer live. Same drain design as above, observed on the claim
+      // rather than the generation.
+      reason: "a claimed run settled against a claim swept by a by-design " +
+        "lane drain (C1.8 re-anchor / ACL reconciliation)",
+      retirement: "hard-zero on drain-free measurement windows (same " +
+        "condition as lane-generation-stale); drain-race coverage moves to " +
+        "the owed C1.10 engine-level TOCTOU fixture",
+    },
+  ];
+
+/**
+ * The A13 guard: lease-fence rejects not covered by the tolerated registry.
+ * Measurement gates assert this is zero and report the full cause map on
+ * failure.
+ */
+export function unexpectedLeaseFenceRejects(
+  causes: Readonly<Record<string, number>>,
+): number {
+  return Object.entries(causes).reduce(
+    (total, [cause, count]) =>
+      TOLERATED_LEASE_FENCE_CAUSES.some((entry) => entry.cause === cause)
+        ? total
+        : total + count,
+    0,
+  );
+}
+
 export type ServerExecutionMeasurement = Readonly<{
   label: string;
   enabled: boolean;
   startedAt: number;
   pool: PoolCounters | null;
   control: ControlCounters | null;
-  clientRouting?: Readonly<{
-    query: ExecutionRoutingDiagnosticsQuery;
-    read: ExecutionRoutingProbe;
-  }>;
+  clientRouting?: readonly ServerExecutionRoutingMeasurement[];
 }>;
 
 type ExecutionRoutingProbe = (
@@ -72,6 +145,9 @@ type ExecutionRoutingProbe = (
 ) => Promise<ExecutionRoutingDiagnostics>;
 
 export type ServerExecutionRoutingMeasurement = Readonly<{
+  /** Distinguishes principals in a multi-client measurement; the C1.9 gate
+   * runs one probe per principal. Optional for the single-client callers. */
+  label?: string;
   query: ExecutionRoutingDiagnosticsQuery;
   read: ExecutionRoutingProbe;
 }>;
@@ -100,6 +176,7 @@ type HealthStats = {
   } | null;
   serverExecutionControl?: {
     claimsIssued?: number;
+    claimsIssuedByContextKey?: Record<string, number>;
     claimsRevoked?: number;
     claimedActionConflicts?: number;
     acceptedActionAttempts?: number;
@@ -223,6 +300,9 @@ async function readMeasurement(
     ? undefined
     : {
       claimsIssued: counter(rawControl.claimsIssued, "claims issued"),
+      claimsIssuedByContextKey: {
+        ...(rawControl.claimsIssuedByContextKey ?? {}),
+      },
       claimsRevoked: counter(rawControl.claimsRevoked, "claims revoked"),
       claimedActionConflicts: counter(
         rawControl.claimedActionConflicts,
@@ -288,9 +368,18 @@ async function readMeasurement(
 
 export async function beginServerExecutionMeasurement(
   label: string,
-  clientRouting?: ServerExecutionRoutingMeasurement,
+  clientRouting?:
+    | ServerExecutionRoutingMeasurement
+    | readonly ServerExecutionRoutingMeasurement[],
 ): Promise<ServerExecutionMeasurement | null> {
   if (!MEASUREMENT_REQUIRED) return null;
+  // One probe per measured client runtime; the C1.9 two-principal gate passes
+  // one per principal and every assertion below runs per probe.
+  const routingProbes = clientRouting === undefined
+    ? []
+    : Array.isArray(clientRouting)
+    ? clientRouting as readonly ServerExecutionRoutingMeasurement[]
+    : [clientRouting as ServerExecutionRoutingMeasurement];
   const enabled = experimentalOptionsFromEnv(Deno.env.get)
     .serverPrimaryExecution === true;
   if (enabled) {
@@ -306,17 +395,17 @@ export async function beginServerExecutionMeasurement(
         measurement.control.settlementsCommitted +
               measurement.control.settlementsNoOp > 0;
     });
-    if (clientRouting !== undefined) {
+    for (const probe of routingProbes) {
       try {
         await waitFor(async () =>
-          isRoutingMeasurementBaselineReady(
-            await clientRouting.read(clientRouting.query),
-          )
+          isRoutingMeasurementBaselineReady(await probe.read(probe.query))
         );
       } catch (error) {
-        const diagnostics = await clientRouting.read(clientRouting.query);
+        const diagnostics = await probe.read(probe.query);
         throw new Error(
-          `server execution measurement baseline did not settle: ${
+          `server execution measurement baseline (${
+            probe.label ?? "client"
+          }) did not settle: ${
             JSON.stringify({
               claims: diagnostics.claims.length,
               actions: diagnostics.actions.length,
@@ -328,8 +417,8 @@ export async function beginServerExecutionMeasurement(
           { cause: error },
         );
       }
-      const reset = await clientRouting.read({
-        ...clientRouting.query,
+      const reset = await probe.read({
+        ...probe.query,
         resetCounters: true,
       });
       assert(
@@ -340,7 +429,9 @@ export async function beginServerExecutionMeasurement(
   }
   return {
     ...await readMeasurement(label),
-    ...(enabled && clientRouting !== undefined ? { clientRouting } : {}),
+    ...(enabled && routingProbes.length > 0
+      ? { clientRouting: routingProbes }
+      : {}),
   };
 }
 
@@ -353,23 +444,23 @@ export async function finishServerExecutionMeasurement(
   before: ServerExecutionMeasurement | null,
 ): Promise<void> {
   if (before === null) return;
-  let settledClientRouting: ExecutionRoutingDiagnostics | undefined;
-  if (before.clientRouting !== undefined) {
+  const routingProbes = before.clientRouting ?? [];
+  const settledRouting: ExecutionRoutingDiagnostics[] = [];
+  for (const probe of routingProbes) {
+    let settled: ExecutionRoutingDiagnostics | undefined;
     try {
       await waitFor(async () => {
-        const diagnostics = await before.clientRouting!.read(
-          before.clientRouting!.query,
-        );
+        const diagnostics = await probe.read(probe.query);
         if (!isRoutingMeasurementResultReady(diagnostics)) return false;
-        settledClientRouting = diagnostics;
+        settled = diagnostics;
         return true;
       });
     } catch (error) {
-      const diagnostics = await before.clientRouting.read(
-        before.clientRouting.query,
-      );
+      const diagnostics = await probe.read(probe.query);
       throw new Error(
-        `server execution measurement result did not settle: ${
+        `server execution measurement result (${
+          probe.label ?? "client"
+        }) did not settle: ${
           JSON.stringify({
             claims: diagnostics.claims.length,
             actions: diagnostics.actions.length,
@@ -381,13 +472,9 @@ export async function finishServerExecutionMeasurement(
         { cause: error },
       );
     }
+    settledRouting.push(settled!);
   }
-  const [after, clientRouting] = await Promise.all([
-    readMeasurement(before.label),
-    settledClientRouting === undefined
-      ? before.clientRouting?.read(before.clientRouting.query)
-      : Promise.resolve(settledClientRouting),
-  ]);
+  const after = await readMeasurement(before.label);
   assertEquals(after.enabled, before.enabled, "execution mode changed mid-run");
 
   if (!after.enabled) {
@@ -412,31 +499,31 @@ export async function finishServerExecutionMeasurement(
 
   assert(before.pool !== null && after.pool !== null);
   assert(before.control !== null && after.control !== null);
-  if (clientRouting !== undefined) {
-    assertEquals(clientRouting.snapshotRequired, false);
+  for (const diagnostics of settledRouting) {
+    assertEquals(diagnostics.snapshotRequired, false);
   }
-  const client = clientRouting === undefined ? undefined : {
-    claims: clientRouting.claims.length,
-    actions: clientRouting.actions.length,
-    truncatedActionRecords: clientRouting.truncatedActionRecords,
-    upstreamRoutes: clientRouting.branchTotals.upstreamRoutes,
-    claimedOverlayRoutes: clientRouting.branchTotals.claimedOverlayRoutes,
-    settlements: clientRouting.branchTotals.settlements,
-    basisCoveredOverlayDrops:
-      clientRouting.branchTotals.basisCoveredOverlayDrops,
+  const clients = settledRouting.map((diagnostics, index) => ({
+    label: routingProbes[index].label ?? "client",
+    claims: diagnostics.claims.length,
+    actions: diagnostics.actions.length,
+    truncatedActionRecords: diagnostics.truncatedActionRecords,
+    upstreamRoutes: diagnostics.branchTotals.upstreamRoutes,
+    claimedOverlayRoutes: diagnostics.branchTotals.claimedOverlayRoutes,
+    settlements: diagnostics.branchTotals.settlements,
+    basisCoveredOverlayDrops: diagnostics.branchTotals.basisCoveredOverlayDrops,
     nonAuthoritativeOverlayDrops:
-      clientRouting.branchTotals.nonAuthoritativeOverlayDrops,
-    settlementDiagnostics: clientRouting.branchTotals.settlementDiagnostics,
-    pendingOverlays: clientRouting.actions.reduce(
+      diagnostics.branchTotals.nonAuthoritativeOverlayDrops,
+    settlementDiagnostics: diagnostics.branchTotals.settlementDiagnostics,
+    pendingOverlays: diagnostics.actions.reduce(
       (total, action) => total + action.pendingOverlayCount,
       0,
     ),
-    pendingSettlements: clientRouting.actions.reduce(
+    pendingSettlements: diagnostics.actions.reduce(
       (total, action) => total + action.pendingSettlementCount,
       0,
     ),
-    problemActions: routingMeasurementProblemActions(clientRouting),
-  };
+    problemActions: routingMeasurementProblemActions(diagnostics),
+  }));
   const result = {
     mode: "authoritative-server" as const,
     elapsedMs: after.startedAt - before.startedAt,
@@ -484,6 +571,22 @@ export async function finishServerExecutionMeasurement(
       before.control.claimsIssued,
       "claims issued",
     ),
+    // Issuance per context key (C1.9 gate criterion c): user-rank enablement
+    // must show `user:<did>` keys here for every measured principal, while
+    // space-only runs stay {space: n}.
+    claimsIssuedByContextKey: ((): Record<string, number> => {
+      const grewByKey: Record<string, number> = {};
+      for (
+        const [contextKey, count] of Object.entries(
+          after.control.claimsIssuedByContextKey,
+        )
+      ) {
+        const grew = count -
+          (before.control.claimsIssuedByContextKey[contextKey] ?? 0);
+        if (grew > 0) grewByKey[contextKey] = grew;
+      }
+      return grewByKey;
+    })(),
     claimsRevoked: delta(
       after.control.claimsRevoked,
       before.control.claimsRevoked,
@@ -573,7 +676,11 @@ export async function finishServerExecutionMeasurement(
         "worker crashes",
       ),
     },
-    ...(client === undefined ? {} : { client }),
+    ...(clients.length === 0
+      ? {}
+      : clients.length === 1
+      ? { client: clients[0] }
+      : { clients }),
   };
 
   console.log(
@@ -596,17 +703,11 @@ export async function finishServerExecutionMeasurement(
     "measured workload published no successful server settlement",
   );
   assertEquals(result.control.settlementsFailed, 0);
-  // `claim-context-mismatch` is the one fence cause tolerated pre-C2: a
-  // space-lane claim on an action whose runtime context floor evaluates above
-  // space (e.g. a view conditional reading a session-scoped address during
-  // navigation) is fenced BY DESIGN and the client computes it fail-open —
-  // register row R7 of context-lattice-execution.md, temporary by
-  // construction. Once C2 session lanes route these to the right lane, this
-  // cause returns to the hard-zero set (named C2 acceptance criterion).
-  // Every other cause indicates a defect and stays hard-zero.
+  // A13 guard contract: lease-fence rejects are hard-zero except the causes
+  // named in TOLERATED_LEASE_FENCE_CAUSES, each of which is by-design,
+  // counted, and carries its own retirement criterion back to hard-zero.
   assertEquals(
-    result.control.leaseFenceRejects -
-      (result.control.leaseFenceRejectCauses["claim-context-mismatch"] ?? 0),
+    unexpectedLeaseFenceRejects(result.control.leaseFenceRejectCauses),
     0,
     `unexpected lease fence rejects by cause: ${
       JSON.stringify(result.control.leaseFenceRejectCauses)
@@ -615,8 +716,8 @@ export async function finishServerExecutionMeasurement(
   assertEquals(result.control.actionFirewallRejects, 0);
   assertEquals(result.workerFailures.starts, 0);
   assertEquals(result.workerFailures.crashes, 0);
-  if (client !== undefined) {
-    assert(client.claimedOverlayRoutes > 0);
+  for (const client of clients) {
+    assert(client.claimedOverlayRoutes > 0, `${client.label} routed nothing`);
     assert(client.settlements.committed + client.settlements.noOp > 0);
     assert(client.basisCoveredOverlayDrops > 0);
     assertEquals(client.settlements.failed, 0);
