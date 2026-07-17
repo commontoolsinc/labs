@@ -243,6 +243,83 @@ type SupervisorStatusState =
   | "exiting"
   | "exited";
 
+export interface SupervisorStatusWriterOptions {
+  statusPath: string;
+  pid: number;
+  mountpoint: string;
+  token?: string;
+  startedAt: string;
+  now?: () => string;
+  writeTextFile?: (path: string, data: string) => Promise<void>;
+  rename?: (from: string, to: string) => Promise<void>;
+  remove?: (path: string) => Promise<void>;
+}
+
+export type SupervisorStatusWriter = (
+  state: SupervisorStatusState,
+  extra?: Record<string, unknown>,
+) => Promise<void>;
+
+/**
+ * Build the function that publishes the daemon's supervisor state.
+ *
+ * The states form a lifecycle, and the calls announcing them come from four
+ * places that do not coordinate: the startup path, the readiness report, the
+ * heartbeat and the signal handler. Writes are therefore serialized, so the
+ * file ends on the state of the most recent call. Each write also replaces the
+ * file by rename, so a reader woken by the write sees a complete document.
+ * Renames issued concurrently can complete in either order, which would let a
+ * heartbeat still in flight replace a terminal state and leave the file
+ * claiming a mount that has already gone.
+ */
+export function createSupervisorStatusWriter(
+  options: SupervisorStatusWriterOptions,
+): SupervisorStatusWriter {
+  const writeTextFile = options.writeTextFile ?? Deno.writeTextFile;
+  const rename = options.rename ?? Deno.rename;
+  const remove = options.remove ?? Deno.remove;
+  const now = options.now ?? (() => new Date().toISOString());
+  let queue: Promise<void> = Promise.resolve();
+  let writes = 0;
+
+  const publish = async (document: string): Promise<void> => {
+    // The scratch name carries the PID and a counter, so a daemon left over
+    // from an earlier mount at this path cannot share it.
+    const pendingPath = `${options.statusPath}.${options.pid}.${writes++}.tmp`;
+    try {
+      await writeTextFile(pendingPath, document);
+      await rename(pendingPath, options.statusPath);
+    } catch (error) {
+      await remove(pendingPath).catch(() => undefined);
+      throw error;
+    }
+  };
+
+  return (state, extra = {}) => {
+    // Built at call time, so `updatedAt` records when the state was reached
+    // rather than when its turn in the queue came up.
+    const document = JSON.stringify(
+      {
+        state,
+        pid: options.pid,
+        mountpoint: options.mountpoint,
+        token: options.token || undefined,
+        startedAt: options.startedAt,
+        updatedAt: now(),
+        ...extra,
+      },
+      null,
+      2,
+    );
+    const write = queue.then(() => publish(document));
+    // A failed write must neither stop later states from being published nor
+    // surface through the queue as an unhandled rejection. Callers still see
+    // the failure through the promise returned here.
+    queue = write.catch(() => undefined);
+    return write;
+  };
+}
+
 export async function writeFailedSupervisorStartupStatus(
   error: unknown,
   writeSupervisorStatus: (
@@ -392,42 +469,15 @@ export async function main(argv: string[] = Deno.args) {
   const supervisorStatusPath = String(args["supervisor-status"] ?? "");
   const supervisorToken = String(args["supervisor-token"] ?? "");
   const supervisorStatusStartedAt = new Date().toISOString();
-  let supervisorStatusWrites = 0;
-  // Each write replaces the file by rename, so a reader woken by the write
-  // sees either the previous status or the new one, never a half-written one.
-  // The temp name carries a per-write counter, so overlapping writes — a
-  // heartbeat and a state change in the same tick — cannot share a scratch
-  // file.
-  async function writeSupervisorStatus(
-    state: SupervisorStatusState,
-    extra: Record<string, unknown> = {},
-  ): Promise<void> {
-    if (!supervisorStatusPath) return;
-    const pendingPath =
-      `${supervisorStatusPath}.${Deno.pid}.${supervisorStatusWrites++}.tmp`;
-    try {
-      await Deno.writeTextFile(
-        pendingPath,
-        JSON.stringify(
-          {
-            state,
-            pid: Deno.pid,
-            mountpoint,
-            token: supervisorToken || undefined,
-            startedAt: supervisorStatusStartedAt,
-            updatedAt: new Date().toISOString(),
-            ...extra,
-          },
-          null,
-          2,
-        ),
-      );
-      await Deno.rename(pendingPath, supervisorStatusPath);
-    } catch (error) {
-      await Deno.remove(pendingPath).catch(() => undefined);
-      throw error;
-    }
-  }
+  const writeSupervisorStatus: SupervisorStatusWriter = supervisorStatusPath
+    ? createSupervisorStatusWriter({
+      statusPath: supervisorStatusPath,
+      pid: Deno.pid,
+      mountpoint,
+      token: supervisorToken || undefined,
+      startedAt: supervisorStatusStartedAt,
+    })
+    : () => Promise.resolve();
   try {
     await writeSupervisorStatus("starting");
   } catch (error) {

@@ -1,8 +1,9 @@
-import { assert, assertEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
 import {
   appendDecodedJsonPath,
   bufferForNoHandleTruncate,
   cfcWritebackXattrResultErrno,
+  createSupervisorStatusWriter,
   decodeFuseNamespaceName,
   DEFAULT_CFC_XATTR_NAMESPACE,
   defaultCfcWritebackStatePath,
@@ -577,5 +578,153 @@ Deno.test("platform provider reports the implementation openFuse loaded", () => 
       noattrcache: false,
     }),
     ["fuse_ct"],
+  );
+});
+
+/**
+ * A filesystem whose write latency the test decides, so the ordering of two
+ * status writes is chosen rather than raced.
+ *
+ * Held writes complete newest first. That is the ordering the real filesystem
+ * is free to choose and the one that breaks an unserialized writer: the write
+ * issued first is the one that lands last, so it is the one that wins the
+ * file. A writer that lets only one write be in flight never has a second held
+ * write to reorder against.
+ */
+function fakeStatusFilesystem() {
+  const files = new Map<string, string>();
+  const pending: Array<() => void> = [];
+  let holdWrites = false;
+  return {
+    holdNextWrites: () => holdWrites = true,
+    releaseHeldWrites: () => {
+      holdWrites = false;
+      while (pending.length > 0) pending.pop()!();
+    },
+    published: () => files.get("/state/status"),
+    scratchFilesLeft: () =>
+      [...files.keys()].filter((path) => path.endsWith(".tmp")),
+    writeTextFile: (path: string, data: string) => {
+      if (!holdWrites) {
+        files.set(path, data);
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) =>
+        pending.push(() => {
+          files.set(path, data);
+          resolve();
+        })
+      );
+    },
+    rename: (from: string, to: string) => {
+      files.set(to, files.get(from)!);
+      files.delete(from);
+      return Promise.resolve();
+    },
+    remove: (path: string) => {
+      files.delete(path);
+      return Promise.resolve();
+    },
+  };
+}
+
+function statusWriterOver(fs: ReturnType<typeof fakeStatusFilesystem>) {
+  return createSupervisorStatusWriter({
+    statusPath: "/state/status",
+    pid: 321,
+    mountpoint: "/tmp/m",
+    token: "token-1",
+    startedAt: "2026-03-17T00:00:00.000Z",
+    now: () => "2026-03-17T00:00:01.000Z",
+    writeTextFile: fs.writeTextFile,
+    rename: fs.rename,
+    remove: fs.remove,
+  });
+}
+
+Deno.test("supervisor status does not regress when a slow write is still in flight", async () => {
+  const fs = fakeStatusFilesystem();
+  const write = statusWriterOver(fs);
+
+  // The heartbeat announces `mounted` and its write stalls. The session loop
+  // then ends and announces `exited`. The file must settle on the later call,
+  // not on whichever write the filesystem happens to finish last.
+  fs.holdNextWrites();
+  const heartbeat = write("mounted");
+  const exited = write("exited", { exitCode: 0 });
+  fs.releaseHeldWrites();
+  await Promise.all([heartbeat, exited]);
+
+  assertEquals(JSON.parse(fs.published()!).state, "exited");
+});
+
+Deno.test("supervisor status settles on exiting when it follows a stalled mounted", async () => {
+  const fs = fakeStatusFilesystem();
+  const write = statusWriterOver(fs);
+
+  // The readiness report stalls and a signal arrives while it is in flight.
+  fs.holdNextWrites();
+  const mounted = write("mounted");
+  const exiting = write("exiting");
+  fs.releaseHeldWrites();
+  await Promise.all([mounted, exiting]);
+
+  assertEquals(JSON.parse(fs.published()!).state, "exiting");
+});
+
+Deno.test("supervisor status keeps publishing after a write fails", async () => {
+  const fs = fakeStatusFilesystem();
+  let failNext = true;
+  const write = createSupervisorStatusWriter({
+    statusPath: "/state/status",
+    pid: 321,
+    mountpoint: "/tmp/m",
+    startedAt: "2026-03-17T00:00:00.000Z",
+    writeTextFile: (path, data) => {
+      if (failNext) {
+        failNext = false;
+        return Promise.reject(new Error("disk full"));
+      }
+      return fs.writeTextFile(path, data);
+    },
+    rename: fs.rename,
+    remove: fs.remove,
+  });
+
+  // A failed write is reported to its caller and leaves no scratch file, and
+  // the states after it still reach the file.
+  await assertRejects(() => write("mounted"), Error, "disk full");
+  await write("exited", { exitCode: 0 });
+
+  assertEquals(JSON.parse(fs.published()!).state, "exited");
+  assertEquals(fs.scratchFilesLeft(), []);
+});
+
+Deno.test("supervisor status records when a state was reached, not when it drained", async () => {
+  const fs = fakeStatusFilesystem();
+  let clock = "2026-03-17T00:00:01.000Z";
+  const write = createSupervisorStatusWriter({
+    statusPath: "/state/status",
+    pid: 321,
+    mountpoint: "/tmp/m",
+    startedAt: "2026-03-17T00:00:00.000Z",
+    now: () => clock,
+    writeTextFile: fs.writeTextFile,
+    rename: fs.rename,
+    remove: fs.remove,
+  });
+
+  // Serializing writes means a state can reach the file well after it was
+  // reached. The stamp has to come from the call, so time moves on while the
+  // write is stalled.
+  fs.holdNextWrites();
+  const mounted = write("mounted");
+  clock = "2026-03-17T00:00:09.000Z";
+  fs.releaseHeldWrites();
+  await mounted;
+
+  assertEquals(
+    JSON.parse(fs.published()!).updatedAt,
+    "2026-03-17T00:00:01.000Z",
   );
 });

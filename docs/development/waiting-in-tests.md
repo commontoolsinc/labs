@@ -422,9 +422,15 @@ mount that was about to work. In a test or CI lane the ambient limit is the
 backstop, in place of a per-command ceiling that fails healthy mounts.
 
 Each status write lands by rename, so a read woken by a write sees a complete
-document rather than a half-written one. Unreadable or foreign content reads as
-"not yet reported" rather than as a verdict; the daemon rewrites the file on
-every state change and on its heartbeat.
+document rather than a half-written one. The writes are also serialized, so the
+file settles on the state of the most recent call. The calls come from four
+places that do not coordinate — the startup path, the readiness report, the
+heartbeat and the signal handler — and two renames issued concurrently can
+complete in either order, so without that a heartbeat still in flight could
+replace a terminal state and leave the file reporting a mount that had already
+gone. Unreadable or foreign content reads as "not yet reported" rather than as
+a verdict; the daemon rewrites the file on every state change and on its
+heartbeat.
 
 One bound remains on this path, in a different process. `recordFuseChildPid`
 in `packages/cli/lib/fuse-supervisor.ts` is how the supervisor writes the child
