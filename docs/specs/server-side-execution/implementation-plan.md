@@ -1854,6 +1854,56 @@ computation" means without duplicating unscoped AUTHORITY
 (claims/settlements); per-lane shadow recompute is the accepted §4 cost,
 bounded by the C2 latency gate and measured at C1.9.
 
+#### C2 — session lanes: work-order decomposition (2026-07-17)
+
+Mapped against the landed C1 substrate, which already carries most of the
+hard parts: the client is fully session-ready — `ownChainContextKeys`
+includes `session:myDid:mySessionId`, `laneScopeKey` handles session
+scope, chain routing is live — so **amendment A10's claims-v2 question
+resolves in favor of v1 (no v2 subcapability needed)**; the
+routing-disjointness invariant and the delivery flag-gate are already
+session-aware, and the executor lane maps are contextKey-generic. What is
+new is additive: widen the rank dial and issuance ladder to `session`,
+widen the servability/firewall/router lane rank (the same mechanism that
+meets the pre-existing lunch-poll/group-chat `ifElse`
+dynamic-write-outside-static-surface gap), session-lane grants (the
+session is its own anchor; session-end = lane-end, no re-anchor), and
+narrow session-claim delivery to the named session.
+
+**Adopted defaults for the scout's four open decisions** (precedent-
+following; owner may override — surfaced in the session summary):
+(1) claims-v1 is sufficient, no v2 — code-confirmed. (2) C2 is
+**computation-only** like C1 (amendment A8); session-lane builtin egress
+(OQ6, C2.8) is a **named follow-on**, not a C2 gate. (3) **No lane budget
+in C2** (OQ3) — parked session lanes are correct by construction (the
+client stays authoritative for unclaimed work); the LRU-park cap is a
+follow-on, revisited if C2.10's latency gate shows pressure. (4) The
+≥3-lane latency gate reuses **W2.9's ~zero/parity bar**; the Worker
+topology stays one-Worker-per-(space, branch) (A22) and **C2.10's
+measurement is the input** to any Worker-per-lane-group redesign (OQ5) —
+measure before redesigning.
+
+Full scout map (with each WO's sketch/acceptance) is the builders'
+reference; this table is the frontier. The map goes through the same
+adversarial-panel treatment as C1 and the feed before the build waves.
+
+| WO | Title | Depends on |
+| --- | --- | --- |
+| C2.1 | Engine + dial admit session-rank claims (widen the ladder; `session:did:sessionId` stops being rejected) | — |
+| C2.2 | Servability + firewall: session-lane surface classification and the §4 pair at session rank (meets the `ifElse` gap) | C2.1 |
+| C2.3 | Session lane grants — the session is its own anchor; session-end = lane-end, no re-anchor | C2.1 |
+| C2.4 | Session-lane acting-context read seam + host-provider resolution | C2.3 |
+| C2.5 | Session-rank executor candidate identity + router widening | C2.2, C2.4 |
+| C2.6 | Narrow session-claim delivery to the named session (kill the O(sessions²) fan-out) + per-session negotiation gate | C2.1, C2.3 |
+| C2.7 | Session-lane demand aggregation, lifecycle, accepted-commit wake widening (parked-lane skip) | C2.3, C2.5, C2.6 |
+| C2.8 | Session-lane builtin egress under the lane grant (OQ6) — computation-gated, **owner-timed follow-on** | C2.4, C2.5 |
+| C2.9 | PerSession measurement gate + fixture (design §7 C2 acceptance) | C2.4–C2.7 |
+| C2.10 | Lunch-poll placement guard: R7 retirement (claim-context-mismatch → hard-zero) + ≥3-lane latency gate | C2.9 |
+| C2.11 | Owed session-lane fixtures + EXPERIMENTAL_OPTIONS/docs edits | C2.3, C2.6, C2.9 |
+
+Prerequisite: the feed's session-scoped delivery (F6) lands before C2.6/C2.9
+(design §6). F1–F4 are landed; F5/F6 in flight.
+
 ### Phase 5 — server-directed handler events and enforced authority
 
 Entry requires trusted-event envelope/replay semantics and CFC integration.
