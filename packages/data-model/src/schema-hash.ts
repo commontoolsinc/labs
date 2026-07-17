@@ -134,7 +134,9 @@ function canonicalizeSchemaKeyOrder(value: unknown): unknown {
     let changed = false;
     const mapped = value.map((element) => {
       const canon = canonicalizeSchemaKeyOrder(element);
-      if (canon !== element) changed = true;
+      // `Object.is`, not `===`: an untouched `NaN` leaf comes back as the
+      // same value, and `NaN !== NaN` would falsely count it as a change.
+      if (!Object.is(canon, element)) changed = true;
       return canon;
     });
     return changed ? mapped : value;
@@ -148,7 +150,8 @@ function canonicalizeSchemaKeyOrder(value: unknown): unknown {
     const key = sortedKeys[i];
     if (key !== currentKeys[i]) changed = true;
     const canon = canonicalizeSchemaKeyOrder(obj[key]);
-    if (canon !== obj[key]) changed = true;
+    // `Object.is`, not `===`: see the array case above.
+    if (!Object.is(canon, obj[key])) changed = true;
     out[key] = canon;
   }
   if (!changed) return value;
