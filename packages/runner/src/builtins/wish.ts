@@ -9,6 +9,7 @@ import { h } from "@commonfabric/html";
 import { favoriteListSchema } from "@commonfabric/home-schemas";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { type Cell } from "../cell.ts";
+import type { MemorySpace } from "@commonfabric/memory/interface";
 import { type Action, type ReactivityLog } from "../scheduler.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -102,6 +103,27 @@ class WishError extends Error {
     super(message);
     this.name = "WishError";
   }
+}
+
+// -- Interval #now constants and helpers --
+// Bounds for #now/N intervals, specified in whole seconds. Values outside this
+// range are rejected, not clamped. The 1-second minimum caps the sampling rate
+// at 1Hz; the 24-hour maximum keeps the scheduled delay within the setTimeout
+// range. Both serve as defense-in-depth against timing side-channel attacks once
+// SES sandboxing removes patterns' direct access to Date.now/performance.now.
+const MIN_INTERVAL_SECONDS = 1;
+const MAX_INTERVAL_SECONDS = 24 * 60 * 60;
+const ONE_SHOT_RESOLUTION_MS = 1000;
+
+/**
+ * Quantize timestamp to resolution boundary.
+ *
+ * Defense-in-depth: removes sub-second (or sub-interval) precision so that once
+ * SES sandboxing blocks direct Date.now() access, patterns cannot use this
+ * reactive time source for timing side-channel attacks.
+ */
+function coarsenTimestamp(nowMs: number, resolutionMs: number): number {
+  return Math.floor(nowMs / resolutionMs) * resolutionMs;
 }
 
 export type ParsedWishTarget = {
@@ -219,6 +241,8 @@ type WishContext = {
   scope?: ("~" | "." | "profile" | string)[];
   /** Cached #now cell to avoid non-idempotent re-runs from Date.now() */
   nowCell?: Cell<unknown>;
+  /** The wish node's cause, keying the durable one-shot #now capture cell. */
+  nowCause?: Cell<any>[];
   usedHomeSpace?: boolean;
 };
 
@@ -917,28 +941,290 @@ function resolveHomeSpaceTarget(
 }
 
 /**
+ * A shared interval #now timer: one ticking cell plus the timer that advances
+ * it, reference-counted across the wish instances using it.
+ */
+type IntervalNowTimer = {
+  cell: Cell<number>;
+  timerId: ReturnType<typeof setTimeout> | undefined;
+  // Bumped when the timer is torn down, so in-flight ticks become no-ops.
+  generation: number;
+  refCount: number;
+};
+
+// Per-runtime registry of interval #now timers, keyed by space and interval.
+// All wish instances in one runtime requesting the same interval share a single
+// timer and ticking cell, so re-runs and extra instances do not multiply timers.
+const intervalNowTimers = new WeakMap<
+  Runtime,
+  Map<string, IntervalNowTimer>
+>();
+
+function getRuntimeIntervalNowTimers(
+  runtime: Runtime,
+): Map<string, IntervalNowTimer> {
+  let timers = intervalNowTimers.get(runtime);
+  if (!timers) {
+    timers = new Map();
+    intervalNowTimers.set(runtime, timers);
+  }
+  return timers;
+}
+
+function intervalNowTimerKey(space: MemorySpace, intervalMs: number): string {
+  return `${space} ${intervalMs}`;
+}
+
+// Write the current coarsened timestamp into the shared cell unless it is
+// already current. Runs in its own retrying transaction so that when several
+// tabs tick at once the first commit wins and the rest become no-ops.
+function writeIntervalNowTick(
+  runtime: Runtime,
+  timer: IntervalNowTimer,
+  intervalMs: number,
+): void {
+  const generation = timer.generation;
+  const cell = timer.cell;
+  void runtime.editWithRetry((tx) => {
+    if (generation !== timer.generation) return; // torn down, skip
+    const coarsened = coarsenTimestamp(Date.now(), intervalMs);
+    const current = cell.withTx(tx).get() as number | null | undefined;
+    if (current == null || current !== coarsened) {
+      cell.withTx(tx).set(coarsened);
+    }
+  }).then(({ error }) => {
+    if (error) {
+      console.error("[wish] #now interval tick failed:", error);
+    }
+  });
+}
+
+// Schedule the next tick on a wall-clock-aligned boundary, so patterns cannot
+// choose a phase offset to correlate timing with other operations.
+function scheduleIntervalNowTick(
+  runtime: Runtime,
+  timer: IntervalNowTimer,
+  intervalMs: number,
+): void {
+  const now = Date.now();
+  const nextBoundary = (Math.floor(now / intervalMs) + 1) * intervalMs;
+  const delay = nextBoundary - now;
+  const generation = timer.generation;
+  timer.timerId = setTimeout(() => {
+    if (generation !== timer.generation) return; // torn down
+    writeIntervalNowTick(runtime, timer, intervalMs);
+    scheduleIntervalNowTick(runtime, timer, intervalMs);
+  }, delay);
+}
+
+function acquireIntervalNowTimer(
+  runtime: Runtime,
+  space: MemorySpace,
+  intervalMs: number,
+  tx: IExtendedStorageTransaction,
+): IntervalNowTimer {
+  const timers = getRuntimeIntervalNowTimers(runtime);
+  const key = intervalNowTimerKey(space, intervalMs);
+  let timer = timers.get(key);
+  if (!timer) {
+    // Content-addressed by interval, so all instances in the same space with
+    // the same interval share one cell.
+    const cell = runtime.getCell<number>(
+      space,
+      { wish: { now: true, interval: intervalMs } },
+      undefined,
+      tx,
+    );
+    timer = { cell, timerId: undefined, generation: 0, refCount: 0 };
+    timers.set(key, timer);
+
+    // Initialize the value if the cell is empty or stale (e.g. after reload),
+    // then start the aligned timer. sample() reads without subscribing the
+    // acquiring action, so ticks never re-trigger it.
+    const coarsened = coarsenTimestamp(Date.now(), intervalMs);
+    const existing = cell.withTx(tx).sample() as number | null | undefined;
+    if (existing == null) {
+      cell.withTx(tx).set(coarsened);
+    } else if (existing !== coarsened) {
+      writeIntervalNowTick(runtime, timer, intervalMs);
+    }
+    scheduleIntervalNowTick(runtime, timer, intervalMs);
+  }
+  timer.refCount++;
+  return timer;
+}
+
+function releaseIntervalNowTimer(
+  runtime: Runtime,
+  space: MemorySpace,
+  intervalMs: number,
+): void {
+  const timers = intervalNowTimers.get(runtime);
+  const key = intervalNowTimerKey(space, intervalMs);
+  const timer = timers?.get(key);
+  if (!timer) return;
+
+  timer.refCount--;
+  if (timer.refCount > 0) return;
+
+  // Last user gone: stop the recurring timer and drop the registry entry so an
+  // unused interval no longer consumes resources. Bumping the generation makes
+  // any already-queued tick a no-op. The durable cell (one small value per
+  // distinct interval per space, possibly shared with other tabs) is left in
+  // place; deleting it would race a re-acquire of the same content-addressed
+  // cell and could blank another tab still ticking it.
+  clearTimeout(timer.timerId);
+  timer.generation++;
+  timers!.delete(key);
+}
+
+/** The interval #now timer a wish() instance currently holds. */
+type IntervalNowState = {
+  cell: Cell<number> | undefined;
+  intervalMs: number; // 0 = none held
+  cancelRegistered: boolean;
+};
+
+/**
+ * Handle interval #now — a timer subscription, not a cell resolution.
+ *
+ * Called before the resolution pipeline. Returns true if the target was an
+ * interval #now (and has been fully handled), false otherwise.
+ *
+ * The interval rides in the path slot (#now/N, N a whole number of seconds in
+ * base ten), reusing the convention #favorites already uses for parsed.path[0].
+ * No parser or WishParams changes are needed.
+ */
+function handleIntervalNow(
+  parsed: ParsedWishTarget,
+  state: IntervalNowState,
+  ctx: WishContext,
+  sendResult: (tx: IExtendedStorageTransaction, result: unknown) => void,
+  addCancel: (cancel: () => void) => void,
+): boolean {
+  if (parsed.key !== "#now" || parsed.path.length === 0) {
+    // The wish navigated away from an interval #now (to the one-shot #now or a
+    // different query). Drop the shared interval timer we were holding so it can
+    // stop ticking once no instance wants it, instead of waiting for teardown.
+    if (state.intervalMs !== 0) {
+      releaseIntervalNowTimer(
+        ctx.runtime,
+        ctx.parentCell.space,
+        state.intervalMs,
+      );
+      state.intervalMs = 0;
+      state.cell = undefined;
+    }
+    return false;
+  }
+
+  if (parsed.path.length > 1) {
+    throw new WishError(
+      `Wish now target "${formatTarget(parsed)}" is not recognized.`,
+    );
+  }
+
+  const intervalStr = parsed.path[0];
+  if (!/^[0-9]+$/.test(intervalStr)) {
+    throw new WishError(
+      `Wish now interval "${intervalStr}" must be a whole number of ` +
+        `seconds in base ten.`,
+    );
+  }
+  const seconds = Number.parseInt(intervalStr, 10);
+  if (seconds < MIN_INTERVAL_SECONDS || seconds > MAX_INTERVAL_SECONDS) {
+    throw new WishError(
+      `Wish now interval "${intervalStr}" must be between ` +
+        `${MIN_INTERVAL_SECONDS} and ${MAX_INTERVAL_SECONDS} seconds.`,
+    );
+  }
+  const intervalMs = seconds * 1000;
+
+  // Acquire the shared timer for this (space, interval), releasing the
+  // previously-held one when the interval changes.
+  if (state.intervalMs !== intervalMs) {
+    if (state.intervalMs !== 0) {
+      releaseIntervalNowTimer(
+        ctx.runtime,
+        ctx.parentCell.space,
+        state.intervalMs,
+      );
+    }
+    const timer = acquireIntervalNowTimer(
+      ctx.runtime,
+      ctx.parentCell.space,
+      intervalMs,
+      ctx.tx,
+    );
+    state.cell = timer.cell;
+    state.intervalMs = intervalMs;
+  }
+
+  if (!state.cancelRegistered) {
+    addCancel(() => {
+      if (state.intervalMs !== 0) {
+        releaseIntervalNowTimer(
+          ctx.runtime,
+          ctx.parentCell.space,
+          state.intervalMs,
+        );
+        state.intervalMs = 0;
+        state.cell = undefined;
+      }
+    });
+    state.cancelRegistered = true;
+  }
+
+  // The action does not read the ticking cell — the timer owns it — so ticks
+  // do not re-trigger this action; consumers of the result cell still react.
+  const resultCell = state.cell!;
+  const candidatesCell = ctx.runtime.getImmutableCell(
+    ctx.parentCell.space,
+    [resultCell],
+    undefined,
+    ctx.tx,
+  );
+  sendResult(ctx.tx, {
+    result: resultCell,
+    candidates: candidatesCell,
+  });
+  return true;
+}
+
+/**
  * Resolve well-known targets that map to current space paths.
  */
 function resolveSpaceTarget(
   parsed: ParsedWishTarget,
   ctx: WishContext,
 ): BaseResolution[] | null {
-  // #now is special — not scope-dependent
+  // #now is special — not scope-dependent.
   if (parsed.key === "#now") {
-    if (parsed.path.length > 0) {
-      throw new WishError(
-        `Wish now target "${formatTarget(parsed)}" is not recognized.`,
-      );
-    }
-    // Cache the #now cell per wish instance so that sync re-runs don't
-    // create a new immutable cell each time (Date.now() changes each call).
+    // Interval #now is handled by handleIntervalNow() before resolveBase.
+    if (parsed.path.length > 0) return null;
+
+    // One-shot #now captures the load time ONCE and keeps it, durably. The value
+    // lives in a per-instance content-addressed cell (keyed by the wish node's
+    // cause), written only when the cell is still empty — so re-instantiating the
+    // piece (a stop/start, or a reload in another runtime) reads the first-ever
+    // captured time instead of re-reading the clock and jumping forward. sample()
+    // reads without subscribing the resolving action, so the write does not
+    // re-trigger it. The per-instance closure cache (ctx.nowCell) just avoids
+    // re-fetching the cell on every sync re-run within one instantiation.
     if (!ctx.nowCell) {
-      ctx.nowCell = ctx.runtime.getImmutableCell(
+      const cell = ctx.runtime.getCell(
         ctx.parentCell.space,
-        Date.now(),
+        { wish: { nowOneShot: ctx.nowCause } },
         undefined,
         ctx.tx,
       );
+      const existing = cell.withTx(ctx.tx).sample();
+      if (existing == null) {
+        cell.withTx(ctx.tx).set(
+          coarsenTimestamp(Date.now(), ONE_SHOT_RESOLUTION_MS),
+        );
+      }
+      ctx.nowCell = cell;
     }
     return [{ cell: ctx.nowCell }];
   }
@@ -1491,6 +1777,12 @@ export function wish(
   // Date.now() producing a different value each time the sync action fires.
   let nowCell: Cell<unknown> | undefined;
   let sharedHashtagKey: string | undefined;
+  // Per-instance interval #now state
+  const nowState: IntervalNowState = {
+    cell: undefined,
+    intervalMs: 0,
+    cancelRegistered: false,
+  };
 
   // Per-instance suggestion pattern result cell
   let suggestionPatternInput:
@@ -1952,6 +2244,7 @@ export function wish(
             parentCell,
             scope,
             nowCell,
+            nowCause: cause,
           };
           let parsed: ParsedWishTarget | undefined;
           try {
@@ -1965,6 +2258,21 @@ export function wish(
                 return nextParsed;
               },
             );
+
+            // Interval #now is not a resolution — it's a timer subscription.
+            // Handle it before entering the resolution pipeline.
+            if (
+              handleIntervalNow(
+                activeParsed,
+                nowState,
+                ctx,
+                sendResult,
+                addCancel,
+              )
+            ) {
+              return;
+            }
+
             if (canUseSharedHashtagResult(activeParsed, { headless })) {
               const shared = getCurrentSharedHashtagResolver(ctx, activeParsed);
               usedSharedHashtagResolver = true;
