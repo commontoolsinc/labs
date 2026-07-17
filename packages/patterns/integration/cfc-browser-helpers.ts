@@ -229,6 +229,28 @@ const markForClick = async (
   return true;
 };
 
+// Scroll the `index`-th element matching `selector` into view and tag it once it
+// is visible. Unlike `markForClick`, the selector here already resolves to the
+// clickable elements, so the match is tagged directly rather than reached
+// through a host's shadow root.
+const markNthForClick = async (
+  probe: ProbeApi,
+  selector: string,
+  index: number,
+  token: string,
+  attr: string,
+): Promise<boolean> => {
+  const target = probe.collect(selector)[index] as HTMLElement | undefined;
+  if (!target) return false;
+  target.scrollIntoView({ block: "center", inline: "center" });
+  await new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  );
+  if (!probe.isVisible(target)) return false;
+  target.setAttribute(attr, token);
+  return true;
+};
+
 // Tag the first visible, enabled element carrying `data-ui-action="<action>"`
 // for a single trusted click, and record the next click's provenance so a
 // failure can show whether the dispatch was trusted and where it landed.
@@ -363,7 +385,7 @@ export async function clickTrustedAction(
       { cause },
     );
   } finally {
-    await clearTrustedActionMark(page, token).catch(() => {});
+    await clearClickMark(page, token).catch(() => {});
   }
 }
 
@@ -616,6 +638,52 @@ export async function clickCfButton(
   } catch (cause) {
     throw new Error(`Unable to mark ${selector} for click`, { cause });
   }
+  await clickMarked(page, token, timeout);
+}
+
+/**
+ * Click the `index`-th element matching `selector`, where the selector already
+ * resolves to the clickable elements themselves (for example `[data-cf-button]`
+ * across a rendered piece) rather than to a host wrapping one.
+ *
+ * The wait is the mark: a `waitForCondition` predicate re-checks on each DOM
+ * mutation until the indexed element is present and visible, then tags it, and
+ * the test dispatches a single trusted click on the tagged element.
+ */
+export async function clickNthCfButton(
+  page: Page,
+  selector: string,
+  index: number,
+  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
+) {
+  const token = `cf-nth-button-${crypto.randomUUID()}`;
+  try {
+    await waitForCondition(page, markNthForClick, {
+      timeout,
+      args: [selector, index, token, CLICK_TARGET_ATTR],
+    });
+  } catch (cause) {
+    const probe = await readTextProbe(page, selector).catch(() => undefined);
+    throw new Error(
+      `Unable to find button #${index} matching "${selector}". Last probe: ${
+        toIndentedDebugString(probe)
+      }`,
+      { cause },
+    );
+  }
+  await clickMarked(page, token, timeout);
+}
+
+/**
+ * Resolve the element tagged with `token` and click it, then clear the tag.
+ * Shared by the click helpers above: each one marks its target through its own
+ * predicate, and the resolve/click/untag tail is the same for all of them.
+ */
+async function clickMarked(
+  page: Page,
+  token: string,
+  timeout: number,
+): Promise<void> {
   try {
     const clickTarget = await page.waitForSelector(
       `[${CLICK_TARGET_ATTR}="${token}"]`,
@@ -626,27 +694,7 @@ export async function clickCfButton(
     );
     await clickTarget.click();
   } finally {
-    await page.evaluate((targetToken, targetAttr) => {
-      function collect(
-        root: Document | ShadowRoot,
-        result: Element[],
-      ): void {
-        for (const element of root.querySelectorAll("*")) {
-          if (element.getAttribute(targetAttr) === targetToken) {
-            result.push(element);
-          }
-          if (element.shadowRoot) {
-            collect(element.shadowRoot, result);
-          }
-        }
-      }
-
-      const matches: Element[] = [];
-      collect(document, matches);
-      for (const element of matches) {
-        element.removeAttribute(targetAttr);
-      }
-    }, { args: [token, CLICK_TARGET_ATTR] }).catch(() => {});
+    await clearClickMark(page, token).catch(() => {});
   }
 }
 
@@ -1605,7 +1653,8 @@ async function readDisabledProbe(
   }, { args: [selector] });
 }
 
-async function clearTrustedActionMark(
+/** Remove the click tag carrying `token` from wherever it landed. */
+async function clearClickMark(
   page: Page,
   token: string,
 ): Promise<void> {

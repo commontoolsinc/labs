@@ -6,7 +6,7 @@
  * - noteCount computed from notes array
  * - setTitle stream for renaming
  * - createNote stream for adding notes
- * - createNotes stream for bulk adding (commented out due to multi-push bug)
+ * - createNotes stream for bulk adding
  * - Selection system (selectAll, deselectAll)
  * - Modal state management (showNewNoteModal, cancelNewNote, etc.)
  * - Title editing (startEditTitle, stopEditTitle)
@@ -94,10 +94,7 @@ export default pattern(() => {
     });
   });
 
-  // KNOWN BUG: Multi-push times out due to stale commit promise backlog.
-  // See docs/development/debugging/multi-push-action-timeout.md
-  // Passes with --timeout 30000 but not the default 5s.
-  const _action_create_multiple_notes = action(() => {
+  const action_create_multiple_notes = action(() => {
     notebook.createNotes.send({
       notesData: [
         { title: "Bulk Note 1", content: "First bulk note" },
@@ -225,10 +222,7 @@ export default pattern(() => {
   });
 
   // After createNotes with 2 notes, should have 5 total
-  // KNOWN BUG: see multi-push-action-timeout.md
-  const _assert_note_count_after_bulk = computed(() =>
-    notebook.noteCount === 5
-  );
+  const assert_note_count_after_bulk = computed(() => notebook.noteCount === 5);
 
   // ==========================================================================
   // Assertions - Selection System
@@ -444,19 +438,16 @@ export default pattern(() => {
       { assertion: assert_dup_notes_have_parent },
 
       // === Delete selected (destructive, run last on selectionNotebook) ===
-      // SKIP: action_select_all times out after duplication changes notebook state
-      { action: action_select_all, skip: true },
-      { action: action_delete_selected, skip: true },
-      { assertion: assert_notes_deleted, skip: true },
+      { action: action_select_all },
+      { action: action_delete_selected },
+      { assertion: assert_notes_deleted },
 
       // === Create nested notebook (pushes to allPieces, not notes) ===
-      // SKIP: times out in headless runner
-      { action: action_create_notebook_via_stream, skip: true },
-      { assertion: assert_notebook_count_unchanged, skip: true },
+      { action: action_create_notebook_via_stream },
+      { assertion: assert_notebook_count_unchanged },
       // === Bulk create notes ===
-      // KNOWN BUG: commented out, see multi-push-action-timeout.md
-      // { action: action_create_multiple_notes },
-      // { assertion: assert_note_count_after_bulk },
+      { action: action_create_multiple_notes },
+      { assertion: assert_note_count_after_bulk },
     ],
     notebook,
     emptyNotebook,

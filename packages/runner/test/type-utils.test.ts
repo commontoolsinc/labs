@@ -25,18 +25,14 @@ describe("value type", () => {
     expect(bar).toBe("bar");
   });
 
-  /* TODO: This used to work, i.e. it didn't throw any Typescript errors, and
-   * stopped when we moved this into its own package. Nothing else seems to
-   * break, so let's skip this for now.
-   */
-  /*
-  it.skip("works for arrays as well without TS errors", () => {
-    const [foo, bar]: [Value<string>, Value<number>] = ["foo", 1] as Value<
-      [string, number]
-    >;
+  it("works for arrays as well without TS errors", () => {
+    const [foo, bar]: [FactoryInput<string>, FactoryInput<number>] = [
+      "foo",
+      1,
+    ] as Reactive<[string, number]>;
     expect(foo).toBe("foo");
-    expect(bar).toBe("bar");
-  });*/
+    expect(bar).toBe(1);
+  });
 });
 
 describe("utility functions", () => {

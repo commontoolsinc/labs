@@ -1,4 +1,4 @@
-import { env, Page, waitFor } from "@commonfabric/integration";
+import { env } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -8,6 +8,10 @@ import {
   initializePiecesController,
   PiecesController,
 } from "./pieces-controller.ts";
+import {
+  clickCfButtonAndWaitForText,
+  waitForText,
+} from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -65,64 +69,32 @@ testComponents.forEach(({ name, file }) => {
     });
 
     it("should show disabled content initially", async () => {
-      const page = shell.page();
-      await waitFor(async () => {
-        const statusText = await getFeatureStatus(page);
-        return statusText === "⚠ Feature is disabled";
-      });
+      await waitForText(
+        shell.page(),
+        "#feature-status",
+        "⚠ Feature is disabled",
+      );
     });
 
     it("should toggle to enabled content when checkbox is clicked", async () => {
-      const page = shell.page();
-
-      await clickCtCheckbox(page);
-      await waitFor(async () => {
-        const statusText = await getFeatureStatus(page);
-        return statusText === "✓ Feature is enabled!";
-      });
+      // The first cf-checkbox in the piece is bound to the cell that
+      // #feature-status reflects; the click helper settles the view, clicks
+      // the host element once, and waits for the bound text to update.
+      await clickCfButtonAndWaitForText(
+        shell.page(),
+        "cf-checkbox",
+        "#feature-status",
+        "✓ Feature is enabled!",
+      );
     });
 
     it("should toggle back to disabled content when checkbox is clicked again", async () => {
-      const page = shell.page();
-      await clickCtCheckbox(page);
-      await waitFor(async () => {
-        const statusText = await getFeatureStatus(page);
-        return statusText === "⚠ Feature is disabled";
-      });
+      await clickCfButtonAndWaitForText(
+        shell.page(),
+        "cf-checkbox",
+        "#feature-status",
+        "⚠ Feature is disabled",
+      );
     });
   });
 });
-
-function clickCtCheckbox(page: Page) {
-  return waitFor(async () => {
-    const checkbox = await page.waitForSelector("cf-checkbox", {
-      strategy: "pierce",
-    });
-    // This could throw due to lacking a box model to click on.
-    // Catch in lieu of handling time sensitivity.
-    try {
-      await checkbox.click();
-      return true;
-    } catch (_) {
-      return false;
-    }
-  });
-}
-
-async function getFeatureStatus(
-  page: Page,
-): Promise<string | undefined | null> {
-  const featureStatus = await page.waitForSelector("#feature-status", {
-    strategy: "pierce",
-  });
-  // This could throw due to lacking a box model to click on.
-  // Catch in lieu of handling time sensitivity.
-  try {
-    const statusText = await featureStatus.evaluate((el: HTMLElement) =>
-      el.textContent
-    );
-    return statusText?.trim();
-  } catch (_) {
-    return null;
-  }
-}

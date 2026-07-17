@@ -27,7 +27,7 @@ function processWithType<T>(emails: Reactive<Email[]>, _prompt: string) {
   });
 }
 
-export default pattern<State>("GenericTypeParameter", (state) => {
+export default pattern<State>((state) => {
   const results = processWithType<string>(state.emails, state.prompt);
   return { results };
 });

@@ -42,10 +42,13 @@ Waits split into two groups with different primitives.
   signal.
 - The higher-level wrappers in
   `packages/patterns/integration/cfc-browser-helpers.ts` — `waitForText`,
-  `waitForTextAbsent`, `fillCfInput`, `clickCfButton`,
+  `waitForTextAbsent`, `fillCfInput`, `clickCfButton`, `clickNthCfButton`,
   `clickCfButtonAndWaitForText`, `waitForRuntimeIdle`, `waitForRuntimeSynced` —
   bundle "settle the view, act once, wait for the effect" on top of the two
-  primitives above.
+  primitives above. `clickCfButton` takes the first match and reaches through a
+  host's shadow root for its inner `[data-cf-button]`; `clickNthCfButton` takes
+  the `index`-th match of a selector that already resolves to the buttons
+  themselves.
 
 To click a control that appears asynchronously, follow the `clickCfButton`
 shape rather than a find-and-click retry loop: a `waitForCondition` predicate
@@ -362,9 +365,8 @@ file, because the scan walks every `integration/` directory beneath `packages/`,
 so it needs an allowlist entry.
 
 Its waits are ordinary DOM and text conditions that `waitForCondition` would
-express. They stay a poll for the same reason as the disabled tests below:
-nothing automated exercises this file, so converting it churns code that no run
-covers.
+express. They stay a poll because nothing automated exercises this file, so
+converting it churns code that no run covers.
 
 ### A shell script observing another process through a kernel mount
 
@@ -459,12 +461,6 @@ Waiting on `.status` therefore means waiting for a refresh that reports the stat
 before the event, through a cache with no invalidation, at a granularity coarser
 than the wait itself. Making it a real signal means ordering the refresh after
 the counters, regenerating on read, and giving a reader something to notice.
-
-### Disabled tests
-
-`cf-code-editor.test.disabled.ts`, `cf-render.test.disabled.ts`, and
-`cf-checkbox.test.disabled.ts` hold many `waitFor` calls but never run. Leave
-them until they are re-enabled.
 
 ## Production reconnect backoff
 

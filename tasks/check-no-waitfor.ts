@@ -52,10 +52,6 @@ export const ALLOWLIST: ReadonlySet<string> = new Set([
   // Human-in-the-loop OAuth flow: a person completes the consent step in a real
   // browser, and no CI lane runs the file.
   "packages/patterns/google/core/integration/google-calendar-importer.test.ts",
-  // Disabled tests: never run, so migrating them only churns dead code.
-  "packages/patterns/integration/cf-checkbox.test.disabled.ts",
-  "packages/patterns/integration/cf-code-editor.test.disabled.ts",
-  "packages/patterns/integration/cf-render.test.disabled.ts",
 ]);
 
 // Matches an import of the `@commonfabric/integration` package and captures the
