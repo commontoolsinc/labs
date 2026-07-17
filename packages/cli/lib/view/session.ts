@@ -50,7 +50,12 @@ import { parseDiff } from "./diff.ts";
 import { findCommitMessages } from "./commitmsg.ts";
 import type { Semantics } from "./semantics.ts";
 import { EditBuffer } from "./editbuffer.ts";
-import type { EditableSource, RevertScope } from "./editsource.ts";
+import type {
+  EditableSource,
+  ExpandResult,
+  HunkRoom,
+  RevertScope,
+} from "./editsource.ts";
 import type { Highlighter } from "./parse.ts";
 import type { DirEntry, FileGateway } from "./filegateway.ts";
 
@@ -152,6 +157,19 @@ export class Session {
    * structure, cross-references, and multi-line token colours) is owed. The
    * driver runs it on a short idle, so typing stays responsive. */
   needsReparse = false;
+  /** What the last key revealed (Ctrl-L in pager mode), for the driver to walk
+   * the lines in a few at a time with {@link revealFrame}: the display row they
+   * start at, how many there are, and whether they came from above the hunk (so
+   * the viewport holds still) or below it (so it slides as they land). The next
+   * key clears it. */
+  pendingReveal: { row: number; count: number; up: boolean } | null = null;
+  /** The last key set a message that takes itself away again rather than sitting
+   * in the bar — Ctrl-L pressed where it is not offered, which changed nothing
+   * else. The driver leaves it up for a moment and then calls
+   * {@link expireMessage}; the next key takes it away too. */
+  transientMessage = false;
+  /** How much context each hunk can reveal, cached against the document. */
+  private roomCache?: { doc: Document; room: ReadonlyMap<number, HunkRoom> };
 
   // --- editing ---
   private source?: EditableSource;
@@ -268,6 +286,54 @@ export class Session {
     return this.foldPlan().displayLines.length;
   }
 
+  /** A frame part way through the last reveal: the finished document with only
+   * the first `shown` of the revealed lines in it, and a viewport holding the
+   * same line still as the finished frame will. `shown` of `count` is the
+   * finished frame; 0 is the picture the reveal started from. Null when the last
+   * key revealed nothing. */
+  revealFrame(shown: number): { doc: Document; view: ViewState } | null {
+    const rev = this.pendingReveal;
+    if (!rev) return null;
+    const waiting = rev.count - clamp(shown, 0, rev.count);
+    // The lines still to come are the ones furthest from the hunk, so what is on
+    // screen is always a run of the file that meets the hunk's edge rather than
+    // a jump across the lines that have not arrived.
+    const from = rev.up ? rev.row : rev.row + rev.count - waiting;
+    const to = from + waiting;
+    // Rows past the ones still to come sit `waiting` lower in the finished
+    // document than in this frame; rows before them are in the same place.
+    const back = (n: number) => n >= to ? n - waiting : n;
+    const drop = <T>(xs: readonly T[]) => [
+      ...xs.slice(0, from),
+      ...xs.slice(to),
+    ];
+    const doc = this.displayDoc();
+    const view = this.view();
+    const sel = view.selected;
+    return {
+      doc: { ...doc, lines: drop(doc.lines) },
+      view: {
+        ...view,
+        top: rev.up ? view.top : Math.max(0, view.top - waiting),
+        lineNumbers: view.lineNumbers
+          ? drop(view.lineNumbers)
+          : view.lineNumbers,
+        selected: sel
+          ? {
+            ...sel,
+            startLine: back(sel.startLine),
+            endLine: back(sel.endLine),
+          }
+          : null,
+        // A match on a line that has not landed yet has nowhere to be drawn.
+        matches: view.matches
+          ? view.matches.filter((m) => m.line < from || m.line >= to)
+            .map((m) => ({ ...m, line: back(m.line) }))
+          : null,
+      },
+    };
+  }
+
   /** A document line → its display row (a hidden line maps to its summary row). */
   private toDisplay(docLine: number): number {
     return this.foldPlan().docToDisplay(docLine);
@@ -372,7 +438,7 @@ export class Session {
         ? { line: this.toDisplay(this.buffer.row), col: this.buffer.col }
         : null,
       editHint: this.cursorOn ? this.editHint() : null,
-      canExpand: !this.cursorOn && !!this.source?.expandContext,
+      canExpand: this.canExpand(),
       canEdit: !this.cursorOn && !!this.source?.editable,
       hasNonPrintables: this.hasNonPrintables(),
       notice: null,
@@ -475,6 +541,12 @@ export class Session {
   }
 
   handleKey(key: Key): void {
+    // A reveal is animated by the driver over the frames after the key that
+    // caused it, so the next key ends it whatever it was. A message that takes
+    // itself away goes now rather than waiting out its moment, before this key
+    // has the chance to set one of its own.
+    this.pendingReveal = null;
+    this.expireMessage();
     if (this.mode === "savePrompt") {
       this.handleSavePrompt(key);
       return;
@@ -1789,6 +1861,15 @@ export class Session {
     this.ensureCursorVisible();
   }
 
+  /** Take away a message that was set to go away on its own, once the driver has
+   * left it up for its moment. Does nothing to a message that is not one of
+   * those, so a later one is never cleared out from under itself. */
+  expireMessage(): void {
+    if (!this.transientMessage) return;
+    this.transientMessage = false;
+    this.message = "";
+  }
+
   /** Live re-highlight `text` into rendered lines, or null when the source has
    * no live highlighter (then the caller does a full parse). Prefers the
    * incremental highlighter, created lazily and seeded with the current text so
@@ -2161,33 +2242,70 @@ export class Session {
   }
 
   /** Reveal more of the underlying file around a hunk (Ctrl-L). When the text
-   * cursor is active the hunk is the one it sits in; in pager mode it is the
-   * selected node's hunk, or the first hunk on screen. The extra context is
-   * applied to the baseline too, so it does not count as an unsaved edit. */
+   * cursor is active the hunk is the one it sits in and the view follows the
+   * cursor; in pager mode it is the hunk at the middle of the screen, and the
+   * view holds the far edge of that hunk still so the revealed lines open a gap
+   * in front of the user. The extra context is applied to the baseline too, so
+   * it does not count as an unsaved edit. */
   private performExpand(): void {
     if (!this.source?.expandContext || !this.buffer) {
       this.message = "Expanding context isn't available here.";
       return;
     }
-    const refLine = this.cursorOn ? this.buffer.row : this.expandRefLine();
-    if (refLine === null) {
-      this.message = "Move to a hunk first, then Ctrl-L to expand its context.";
-      return;
+    let refLine: number;
+    let up: boolean | undefined;
+    if (this.cursorOn) {
+      refLine = this.buffer.row; // the cursor names a point, not an edge
+    } else {
+      const offer = this.expandOffer();
+      // Ctrl-L is not offered in any of these, so it changes nothing and there
+      // is nothing to leave the reason standing next to: say why, and take it
+      // away again once it has been read.
+      if (offer === null) {
+        this.message = "Move to a hunk's edge, then Ctrl-L to expand it.";
+        this.transientMessage = true;
+        return;
+      }
+      if ("blocked" in offer) {
+        this.message = offer.blocked === "top"
+          ? "Top of file."
+          : offer.blocked === "bottom"
+          ? "Bottom of file."
+          : "No more context to show.";
+        this.transientMessage = true;
+        return;
+      }
+      refLine = offer.line;
+      up = offer.up;
     }
     const r = this.source.expandContext(
       this.buffer.text(),
       this.buffer.baseline(),
       refLine,
+      up,
     );
     if (!r) {
       this.message = "No more context to show.";
       return;
     }
     // The node the selection denotes, captured before the reparse renumbers the
-    // structure tree under it. The viewport's document anchor is captured too,
-    // before the fold plan (which the reparse invalidates) changes.
+    // structure tree under it. The pinned line's row is captured too, before the
+    // fold plan (which the reparse invalidates) changes.
     const selected = this.cursorOn ? null : this.selectedNode();
-    const anchorDoc = this.toDoc(this.top);
+    // Where a line of the old text lands in the new one.
+    const moved = (n: number) =>
+      n + (n >= r.insertedAt ? r.inserted : 0) -
+      (r.removedAt !== null && n > r.removedAt ? 1 : 0);
+    // The line held still on screen: the one just outside the edge the revealed
+    // lines go in at, so they open a gap on the hunk's side of it. Expanding
+    // upwards holds the hunk's header and pushes the body down; expanding
+    // downwards holds what follows the hunk and lifts the body up. A join takes
+    // that very header away, so what is held is the line the other side of it —
+    // the neighbouring hunk's body, which is what is left to hold on to.
+    const pinDoc = r.removedAt !== null
+      ? (r.up ? r.removedAt - 1 : r.removedAt + 1)
+      : (r.up ? r.insertedAt - 1 : r.insertedAt);
+    const pinRow = this.toDisplay(pinDoc) - this.top;
     const col = this.cursorOn ? this.buffer.col : 0;
     this.buffer.setBaseline(r.baseline);
     this.buffer.setText(r.text, r.cursorLine, col);
@@ -2198,36 +2316,55 @@ export class Session {
       this.seedHighlighter();
       this.clampScroll();
       this.ensureCursorVisible();
-      this.message = "Expanded context.";
+      this.reportReveal(r);
       return;
     }
-    // Pager mode: re-point the selection at the same node (its line shifted),
-    // and hold the viewport on the same content. Only lines at or below the
-    // insertion point moved down, so the top shifts only when it is below it.
-    this.reselectAfterExpand(selected, r.insertedAt, r.inserted);
-    const newAnchorDoc = anchorDoc >= r.insertedAt
-      ? anchorDoc + r.inserted
-      : anchorDoc;
-    this.top = this.toDisplay(newAnchorDoc);
+    // Pager mode: re-point the selection at the same node (its line moved), and
+    // put the pinned line back on the row it was on.
+    this.reselectAfterExpand(selected, moved);
+    this.top = this.toDisplay(moved(pinDoc)) - pinRow;
     this.clampScroll();
-    this.message = "Expanded context.";
+    // The revealed lines fill the gap the insertion point opened, so the driver
+    // can walk them in from the held edge. A join is drawn in one step instead:
+    // its frames would stand the two hunks' bodies next to each other before the
+    // lines that join them had arrived, showing a file that reads nothing like
+    // the one on disk.
+    this.pendingReveal = r.removedAt !== null ? null : {
+      row: this.toDisplay(r.insertedAt),
+      count: r.inserted,
+      up: r.up,
+    };
+    this.reportReveal(r);
+  }
+
+  /** Say what a reveal showed: which way it reached, and which lines of the file
+   * came back with it. Naming the lines is the point — one run of context looks
+   * like any other, and the file's own numbers are what tie them to it. A reveal
+   * that closed the last gap between two hunks says so too, since a header
+   * disappearing is otherwise left to be puzzled over. */
+  private reportReveal(r: ExpandResult): void {
+    const { from, to } = r.revealed;
+    const lines = from === to ? `line ${from}` : `lines ${from}-${to}`;
+    const where = r.up ? "above" : "below";
+    this.message = r.removedAt !== null
+      ? `Showing ${lines} ${where} — the two hunks are now one.`
+      : `Showing ${lines} ${where} the hunk.`;
+    this.transientMessage = true;
   }
 
   /** After a pager-mode expand rebuilds the structure tree, point the selection
-   * back at the same node, whose line shifted down by `inserted` when it sat at
-   * or below the insertion point. Cleared when the node can no longer be found.
-   * A hunk is matched on its line alone — only one hunk starts at a given header
-   * line, and its label (the `@@` counts) changes as the hunk grows; other kinds
-   * keep the label, which is stable and tells apart nodes sharing a start line. */
+   * back at the same node, at wherever `moved` puts its line. Cleared when the
+   * node can no longer be found — a join takes one of the two hunks away, and
+   * there is nothing to point at. A hunk is matched on its line alone: only one
+   * hunk starts at a given header line, and its label (the `@@` counts) changes
+   * as the hunk grows; other kinds keep the label, which is stable and tells
+   * apart nodes sharing a start line. */
   private reselectAfterExpand(
     node: StructureNode | null,
-    insertedAt: number,
-    inserted: number,
+    moved: (line: number) => number,
   ): void {
     if (!node) return;
-    const startLine = node.startLine >= insertedAt
-      ? node.startLine + inserted
-      : node.startLine;
+    const startLine = moved(node.startLine);
     const idx = this.doc.flatStructure.findIndex((n) =>
       n.startLine === startLine && n.kind === node.kind &&
       (node.kind === "hunk" || n.label === node.label)
@@ -2235,38 +2372,127 @@ export class Session {
     this.selectedIndex = idx >= 0 ? idx : null;
   }
 
-  /** The reference line for an expand in pager mode: a line inside the hunk the
-   * user is focused on — the selected node's hunk when a node is selected and on
-   * screen, otherwise the first hunk overlapping the viewport. A node that spans
-   * hunks rather than sitting in one (the file node) resolves to the first hunk
-   * it covers that is on screen. Null when no hunk is in view. */
-  private expandRefLine(): number | null {
-    const rows = this.contentRows();
-    // The viewport is display rows; compare hunk (document) lines against it in
-    // document space.
-    const viewTop = this.toDoc(this.top);
-    const viewEnd = this.toDoc(this.top + rows);
-    const onScreen = (n: StructureNode) =>
-      n.endLine >= viewTop && n.startLine < viewEnd;
-    const hunks = this.doc.flatStructure.filter((n) => n.kind === "hunk");
-    if (hunks.length === 0) return null;
-    const sel = this.selectedNode();
-    if (sel && onScreen(sel)) {
-      // A selection sitting inside a hunk keeps its line, so the up/down bias
-      // follows where the user is.
-      const inHunk = hunks.some((h) =>
-        sel.startLine >= h.startLine && sel.startLine <= h.endLine
-      );
-      if (inHunk) return sel.startLine;
-      // A selection spanning hunks (the file node) expands the first hunk it
-      // covers that is on screen.
-      const covered = hunks.find((h) =>
-        h.startLine >= sel.startLine && onScreen(h)
-      );
-      if (covered) return covered.startLine;
+  /** Whether a node is on screen: its display rows overlap the viewport, and it
+   * is not inside a collapsed file. A collapsed file's inner lines all map to
+   * its summary row, which overlaps the viewport whenever that row is shown, so
+   * the hidden range is excluded by its document extent instead. */
+  private nodeOnScreen(node: StructureNode): boolean {
+    const inHiddenFile = this.foldFiles().some((f) =>
+      this.collapsed.has(f.index) &&
+      node.startLine > f.headerLine && node.startLine <= f.endLine
+    );
+    if (inHiddenFile) return false;
+    return this.toDisplay(node.endLine) >= this.top &&
+      this.toDisplay(node.startLine) < this.top + this.contentRows();
+  }
+
+  /** The middle of the content on screen, as a display row. The rows the
+   * content occupies, rather than the rows the terminal has: a document shorter
+   * than the screen ends part-way down it, and the rows past its end are not
+   * somewhere the user is looking. */
+  private middleRow(): number {
+    const last = Math.min(this.top + this.contentRows(), this.displayCount()) -
+      1;
+    return Math.floor((this.top + last) / 2);
+  }
+
+  /** How much context each hunk can still reveal, keyed by its header line.
+   * Cached against the document, which the source rebuilds on every expand. */
+  private expandRoom(): ReadonlyMap<number, HunkRoom> {
+    if (this.roomCache?.doc !== this.currentDoc) {
+      this.roomCache = {
+        doc: this.currentDoc,
+        room: this.source?.expandRoom?.(this.currentDoc.text) ?? new Map(),
+      };
     }
-    const first = hunks.find(onScreen);
-    return first ? first.startLine : null;
+    return this.roomCache.room;
+  }
+
+  /** Every hunk edge the user can see: the row it sits on, the line to expand
+   * from, which way that grows, and what the file offers there. A hunk with
+   * neither edge on screen offers nothing to aim at — its boundaries are off in
+   * the dark, and growing one would happen where it could not be watched. */
+  private visibleEdges(): {
+    row: number;
+    line: number;
+    up: boolean;
+    room: HunkRoom;
+  }[] {
+    const room = this.expandRoom();
+    const rows = this.contentRows();
+    const onScreen = (row: number) => row >= this.top && row < this.top + rows;
+    const out = [];
+    for (const h of this.doc.flatStructure) {
+      if (h.kind !== "hunk" || !this.nodeOnScreen(h)) continue;
+      const r = room.get(h.startLine);
+      if (!r) continue;
+      // The top edge is the header the revealed lines land under; the bottom is
+      // the last body line they land after.
+      for (
+        const [line, up] of [[h.startLine, true], [h.endLine, false]] as const
+      ) {
+        const row = this.toDisplay(line);
+        if (onScreen(row)) out.push({ row, line, up, room: r });
+      }
+    }
+    return out;
+  }
+
+  /** The hunk edge Ctrl-L acts on in pager mode: the visible one nearest the
+   * middle of the screen, or nearest a selected node when one sits in a hunk.
+   * Null when no edge is on screen. The edge is returned whether or not it has
+   * room, so that the offer of Ctrl-L and what Ctrl-L does agree. */
+  private expandEdge():
+    | { line: number; up: boolean; room: HunkRoom }
+    | null {
+    const edges = this.visibleEdges();
+    if (edges.length === 0) return null;
+    // A selected node sitting in a hunk aims at that hunk, and its own row is
+    // what the edges are measured from: the user picked a place to look.
+    const sel = this.selectedNode();
+    const own = sel && this.nodeOnScreen(sel)
+      ? edges.filter((e) =>
+        this.doc.flatStructure.some((h) =>
+          h.kind === "hunk" && h.startLine <= e.line && e.line <= h.endLine &&
+          sel.startLine >= h.startLine && sel.startLine <= h.endLine
+        )
+      )
+      : [];
+    const from = own.length > 0
+      ? this.toDisplay(sel!.startLine)
+      : this.middleRow();
+    const pool = own.length > 0 ? own : edges;
+    // Distance in display rows: a collapsed file stands on one row, and the
+    // lines it hides are not distance the eye travels.
+    let best = pool[0];
+    for (const e of pool) {
+      if (Math.abs(e.row - from) < Math.abs(best.row - from)) best = e;
+    }
+    return { line: best.line, up: best.up, room: best.room };
+  }
+
+  /** Whether Ctrl-L would reveal anything from where the user is looking, which
+   * is what the status bar offers it on. Edit mode aims with the cursor rather
+   * than the screen, and keeps its own offer. */
+  private canExpand(): boolean {
+    if (this.cursorOn || !this.source?.expandContext) return false;
+    const offer = this.expandOffer();
+    return offer !== null && !("blocked" in offer);
+  }
+
+  /** Whether Ctrl-L would reveal anything, and what stops it when it would not.
+   * Drives both the status bar's offer of Ctrl-L and the key itself. */
+  private expandOffer():
+    | { line: number; up: boolean }
+    | { blocked: "top" | "bottom" | "hunk" }
+    | null {
+    const edge = this.expandEdge();
+    if (!edge) return null;
+    if ((edge.up ? edge.room.up : edge.room.down) > 0) {
+      return { line: edge.line, up: edge.up };
+    }
+    if (edge.up) return { blocked: edge.room.atFileTop ? "top" : "hunk" };
+    return { blocked: edge.room.atFileBottom ? "bottom" : "hunk" };
   }
 
   // --- file picker (C-x C-f) -------------------------------------------------
@@ -2277,6 +2503,10 @@ export class Session {
       return;
     }
     this.cursorOn = false;
+    // Opening the picker drops the text cursor, and cancelling it returns to
+    // navigation, which reads the structure tree. Refresh it here as leaving
+    // edit mode by Esc does, so that return lands on a current tree.
+    this.reparse();
     this.overlay = null;
     this.overlayStack = [];
     this.pickerDir = this.pickerStartDir();
@@ -2566,7 +2796,7 @@ export function helpOverlay(): {
     ["  A / D", "parent / first child"],
     ["  Tab / ⇧Tab", "next / previous node (depth-first)"],
     ["  Z", "centre selected node"],
-    ["  ^L", "diff: reveal more of the file around the hunk in view"],
+    ["  ^L", "diff: reveal more of the file at the middle of the view"],
     ["  Esc", "clear selection / search"],
     ["", ""],
     ["Editing (a file or a diff)", ""],

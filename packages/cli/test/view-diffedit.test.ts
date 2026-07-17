@@ -710,7 +710,8 @@ Deno.test("diffedit: Ctrl-L expands context in pager mode (no text cursor)", () 
 Deno.test("diffedit: in pager mode Ctrl-L expands the selected hunk", () => {
   const root = Deno.makeTempDirSync();
   try {
-    const file = Array.from({ length: 20 }, (_, i) =>
+    // Long enough to back FAR_DIFF's second hunk, which sits at line 30.
+    const file = Array.from({ length: 40 }, (_, i) =>
       `line${i + 1}`).join("\n") +
       "\n";
     Deno.writeTextFileSync(join(root, "m.ts"), file);
@@ -724,8 +725,8 @@ Deno.test("diffedit: in pager mode Ctrl-L expands the selected hunk", () => {
         }
       },
     };
-    const model = parseDiff(MULTI_DIFF)!;
-    const { doc, edit } = buildDiffDocument(MULTI_DIFF, model, ws);
+    const model = parseDiff(FAR_DIFF)!;
+    const { doc, edit } = buildDiffDocument(FAR_DIFF, model, ws);
     const s = new Session(
       doc,
       { color: false, showLineNumbers: false },
@@ -735,6 +736,7 @@ Deno.test("diffedit: in pager mode Ctrl-L expands the selected hunk", () => {
     );
     // Select the second hunk via the structure tree (no text cursor), then
     // expand: the choice of hunk must follow the selection, not a stale buffer.
+    // Left alone the middle of the screen would reach down from the first.
     let guard = 0;
     while ((s.view().selected?.startLine ?? -1) !== 9 && guard++ < 200) {
       s.handleKey({ name: "tab" });
@@ -747,8 +749,8 @@ Deno.test("diffedit: in pager mode Ctrl-L expands the selected hunk", () => {
     assertEquals(s.view().cursor, null, "no text cursor");
     s.handleKey({ name: "ctrl-l" });
     assert(
-      s.doc.text.includes("@@ -7,7 +7,7 @@"),
-      "the selected (second) hunk expanded up",
+      s.doc.text.includes("@@ -20,13 +20,13 @@"),
+      `the selected (second) hunk expanded up: ${s.doc.text}`,
     );
     assert(
       s.doc.text.includes("@@ -4,3 +4,3 @@"),
@@ -759,7 +761,7 @@ Deno.test("diffedit: in pager mode Ctrl-L expands the selected hunk", () => {
     assertEquals(s.view().selected?.kind, "hunk", "still a hunk selected");
     assertEquals(s.view().selected?.startLine, 9, "still the second hunk");
     assert(
-      s.view().selected?.label.startsWith("@@ -7,7 +7,7"),
+      s.view().selected?.label.startsWith("@@ -20,13 +20,13"),
       `selected hunk label: ${s.view().selected?.label}`,
     );
   } finally {
@@ -783,7 +785,7 @@ Deno.test("diffedit: pager Ctrl-L keeps the hunk header in view when expanding u
   }
 });
 
-Deno.test("diffedit: pager Ctrl-L anchors the visible content when scrolled into the hunk body", () => {
+Deno.test("diffedit: pager Ctrl-L fills a short screen from the held edge", () => {
   const root = Deno.makeTempDirSync();
   try {
     const file = Array.from({ length: 40 }, (_, i) =>
@@ -820,15 +822,14 @@ Deno.test("diffedit: pager Ctrl-L anchors the visible content when scrolled into
     );
     // Scroll down so the hunk body is at the top and the header is off screen.
     for (let i = 0; i < 6; i++) s.handleKey({ name: "j" });
-    const topLine = s.doc.text.split("\n")[s.view().top];
-    s.handleKey({ name: "ctrl-l" }); // expand up: lines inserted above the body
-    // Now the top of the viewport IS below the insertion point, so it shifts to
-    // keep the same line on screen rather than letting it scroll away.
-    assertEquals(
-      s.doc.text.split("\n")[s.view().top],
-      topLine,
-      "the same line stays at the top of the screen",
-    );
+    s.handleKey({ name: "ctrl-l" });
+    // The middle of the screen sits in the hunk's lower half, so the lines come
+    // from below it and what follows the hunk is held still. Ten lines land on
+    // a five-row screen, so they fill it from that held edge: the last of them
+    // is on screen and the hunk has been pushed off the top.
+    assert(s.view().message.startsWith("Showing line"), s.view().message);
+    const rows = s.doc.text.split("\n").slice(s.view().top, s.view().top + 5);
+    assert(rows.includes(" line32"), rows.join("|"));
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -837,7 +838,8 @@ Deno.test("diffedit: pager Ctrl-L anchors the visible content when scrolled into
 Deno.test("diffedit: in pager mode Ctrl-L with the whole-file node selected still expands a hunk", () => {
   const root = Deno.makeTempDirSync();
   try {
-    const file = Array.from({ length: 20 }, (_, i) =>
+    // Long enough to back FAR_DIFF's second hunk, which sits at line 30.
+    const file = Array.from({ length: 40 }, (_, i) =>
       `line${i + 1}`).join("\n") +
       "\n";
     Deno.writeTextFileSync(join(root, "m.ts"), file);
@@ -851,8 +853,8 @@ Deno.test("diffedit: in pager mode Ctrl-L with the whole-file node selected stil
         }
       },
     };
-    const model = parseDiff(MULTI_DIFF)!;
-    const { doc, edit } = buildDiffDocument(MULTI_DIFF, model, ws);
+    const model = parseDiff(FAR_DIFF)!;
+    const { doc, edit } = buildDiffDocument(FAR_DIFF, model, ws);
     const s = new Session(
       doc,
       { color: false, showLineNumbers: false },
@@ -864,9 +866,15 @@ Deno.test("diffedit: in pager mode Ctrl-L with the whole-file node selected stil
     // is the "diff --git" header — in no hunk.
     assertEquals(s.view().selected?.label, "▸ m.ts");
     s.handleKey({ name: "ctrl-l" });
-    // It must resolve to the file's first on-screen hunk, not report nothing.
-    assertEquals(s.view().message, "Expanded context.");
-    assert(s.doc.text.includes("@@ -1,"), "the first hunk expanded up");
+    // It must resolve to a hunk, not report nothing. The whole diff is on
+    // screen, so the middle of the content is nearest the first hunk's bottom
+    // edge and that is the one that grows.
+    assert(s.view().message.startsWith("Showing line"), s.view().message);
+    assert(s.doc.text.includes("@@ -4,13 +4,13 @@"), s.doc.text);
+    assert(
+      s.doc.text.includes("@@ -30,3 +30,3 @@"),
+      "the other hunk is untouched",
+    );
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -975,7 +983,23 @@ index 0000000..1111111 100644
  line13
 `;
 
-Deno.test("diffedit: expanding context stops at the adjacent hunk and save stays correct", () => {
+const FAR_DIFF = `diff --git a/m.ts b/m.ts
+index 0000000..1111111 100644
+--- a/m.ts
++++ b/m.ts
+@@ -4,3 +4,3 @@
+ line4
+-OLD5
++line5
+ line6
+@@ -30,3 +30,3 @@
+ line30
+-OLD31
++line31
+ line32
+`;
+
+Deno.test("diffedit: expanding context into the next hunk joins them and save stays correct", () => {
   const root = Deno.makeTempDirSync();
   try {
     const file = Array.from({ length: 20 }, (_, i) =>
@@ -1002,11 +1026,18 @@ Deno.test("diffedit: expanding context stops at the adjacent hunk and save stays
       diffSource(ws, edit),
     );
     toLine(s, 8); // " line6", the bottom of the first hunk
-    s.handleKey({ name: "ctrl-l" }); // expand down — must stop before hunk 2
+    s.handleKey({ name: "ctrl-l" }); // expand down — the four lines to hunk 2
+    // The reveal closes the gap, so the two hunks meet and become one: the
+    // header that sat between line10 and line11 described nothing.
     assertEquals(
       s.doc.text.split("\n")[4],
-      "@@ -4,7 +4,7 @@",
-      "expansion abuts the next hunk (k=4) instead of overlapping it",
+      "@@ -4,10 +4,10 @@",
+      "the two hunks joined into one covering both ranges",
+    );
+    assertEquals(
+      parseDiff(s.doc.text)!.files.flatMap((f) => f.hunks).length,
+      1,
+      "one hunk where there were two",
     );
     // Now edit the SECOND hunk and save: the edit must survive and no line may
     // be dropped or duplicated.
