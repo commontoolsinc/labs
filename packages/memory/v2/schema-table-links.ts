@@ -60,16 +60,36 @@ export const mapLinkSchemas = (
     }
   }
 
-  const mapped: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(mappedValue)) {
+  // Read via entries (own properties only) and defer allocating the copy
+  // until a child actually changes: unchanged records — the overwhelmingly
+  // common case — cost no object build. Plain assignment is safe for every
+  // key except "__proto__", whose assignment would hit the prototype
+  // accessor instead of creating an own property.
+  const entries = Object.entries(mappedValue);
+  const mappedChildren: unknown[] = new Array(entries.length);
+  let childChanged = false;
+  for (let index = 0; index < entries.length; index += 1) {
+    const child = entries[index][1];
     const next = mapLinkSchemas(child, mapSchema, traversal, depth + 1);
-    changed ||= next !== child;
-    Object.defineProperty(mapped, key, {
-      value: next,
-      enumerable: true,
-      configurable: true,
-      writable: true,
-    });
+    mappedChildren[index] = next;
+    childChanged ||= next !== child;
   }
-  return changed ? mapped : value;
+  if (!childChanged) return changed ? mappedValue : value;
+
+  const mapped: Record<string, unknown> = {};
+  for (let index = 0; index < entries.length; index += 1) {
+    const key = entries[index][0];
+    const next = mappedChildren[index];
+    if (key === "__proto__") {
+      Object.defineProperty(mapped, key, {
+        value: next,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    } else {
+      mapped[key] = next;
+    }
+  }
+  return mapped;
 };

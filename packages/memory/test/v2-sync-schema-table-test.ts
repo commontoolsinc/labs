@@ -10,6 +10,7 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchema } from "@commonfabric/api";
 import {
   encodeMemoryBoundary,
+  type EntityDocument,
   getMemoryProtocolFlags,
   type HelloOkMessage,
   MEMORY_PROTOCOL,
@@ -731,4 +732,77 @@ Deno.test("memory server negotiates schema-table v2 sync frames per connection",
   assertExists(await run("v2"));
   assertEquals(await run("legacy"), undefined);
   assertEquals(await run("off"), undefined);
+});
+
+Deno.test("findSyncSchemaRef ignores inherited object properties", () => {
+  // The traversal must only follow own properties: an enumerable prototype
+  // pollution carrying a link-payload shape must not surface as a reserved
+  // reference in an unrelated document.
+  const polluted = {
+    $alias: { id: "of:polluted", path: [], schema: "schema-ref@2:fid1:evil" },
+  };
+  Object.defineProperty(Object.prototype, "polluted", {
+    value: polluted,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+  try {
+    assertEquals(findSyncSchemaRef({ value: { plain: "doc" } }), undefined);
+  } finally {
+    delete (Object.prototype as Record<string, unknown>).polluted;
+  }
+});
+
+Deno.test("sync schema table compression preserves own __proto__ keys", () => {
+  const schema: JSONSchema = { type: "object" };
+  const canonical = internSchema(schema, true);
+  const linkWithSchema = {
+    "/": {
+      [LINK_V1_TAG]: { id: "of:target", path: [], schema },
+    },
+  };
+  // An own "__proto__" data property (constructible via defineProperty or a
+  // hostile codec) must survive the rewrite as an own property — plain
+  // assignment would silently hit the prototype accessor instead.
+  const doc: Record<string, unknown> = { value: { nested: linkWithSchema } };
+  Object.defineProperty(doc.value as object, "__proto__", {
+    value: { alsoHere: linkWithSchema },
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+
+  const sync = {
+    type: "sync" as const,
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [{
+      branch: "",
+      id: "of:example",
+      seq: 1,
+      doc: doc as unknown as EntityDocument,
+    }],
+    removes: [],
+  };
+  const compressed = compressSessionSyncSchemas(sync) as SessionSync & {
+    schemaTable?: Record<string, JSONSchema>;
+  };
+  assertExists(compressed.schemaTable);
+  assertEquals(
+    compressed.schemaTable![canonical.taggedHashString],
+    canonical.schema,
+  );
+
+  const value = compressed.upserts[0].doc?.value as Record<string, unknown>;
+  const protoEntry = Object.getOwnPropertyDescriptor(value, "__proto__");
+  assertExists(protoEntry, "own __proto__ key must remain an own property");
+  assertEquals(Object.getPrototypeOf(value), Object.prototype);
+  const relocated =
+    (protoEntry!.value as Record<string, Record<string, unknown>>)
+      .alsoHere["/"] as Record<string, Record<string, unknown>>;
+  assertEquals(
+    relocated[LINK_V1_TAG].schema,
+    `schema-ref@2:${canonical.taggedHashString}`,
+  );
 });

@@ -271,6 +271,39 @@ Deno.test("memory v2 engine reserves sync schema reference strings", async () =>
       "reserved wire schema reference",
     );
 
+    // A reserved reference that exists only in a mid-commit state — placed by
+    // one patch and cleaned by the next in the same commit — is still stored
+    // history (readable at its seq) and must be rejected.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:reserved-sync-schema-ref",
+          commit: {
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "patch",
+              id,
+              patches: [{
+                op: "replace",
+                path: `/value/ref/~1/${LINK_V1_TAG}/schema`,
+                value: reservedRef,
+              }],
+            }, {
+              op: "patch",
+              id,
+              patches: [{
+                op: "replace",
+                path: `/value/ref/~1/${LINK_V1_TAG}/schema`,
+                value: "opaque-schema-name",
+              }],
+            }],
+          },
+        }),
+      ProtocolError,
+      "reserved wire schema reference",
+    );
+
     assertEquals(
       read(engine, { id }),
       toEntityDocument({

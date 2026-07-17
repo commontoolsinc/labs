@@ -11,6 +11,17 @@ const isReservedSchemaRef = (value: string): boolean =>
   value.startsWith(SYNC_SCHEMA_REF_PREFIX) ||
   value.startsWith(REQUEST_SCHEMA_CAS_REF_PREFIX);
 
+/**
+ * Whether serialized text contains a reserved reference prefix anywhere.
+ * Serializations of documents and patches embed every string value they
+ * carry verbatim, so a negative answer proves the serialized value cannot
+ * introduce a reserved reference — the cheap gate in front of the deep
+ * walks below.
+ */
+export const containsReservedSchemaRefSubstring = (value: string): boolean =>
+  value.includes(SYNC_SCHEMA_REF_PREFIX) ||
+  value.includes(REQUEST_SCHEMA_CAS_REF_PREFIX);
+
 const schemaRefInPayload = (
   payload: Record<string, unknown>,
 ): string | undefined => {
