@@ -1,8 +1,5 @@
 /**
  * Discovery-tag utilities for JSONSchema values.
- *
- * This module is a dependency-free leaf (only the `JSONSchema` type), so that a
- * client-side consumer can share the tag definition with the runtime.
  */
 
 import type { JSONSchema } from "@commonfabric/api";
