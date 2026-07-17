@@ -392,27 +392,41 @@ export async function main(argv: string[] = Deno.args) {
   const supervisorStatusPath = String(args["supervisor-status"] ?? "");
   const supervisorToken = String(args["supervisor-token"] ?? "");
   const supervisorStatusStartedAt = new Date().toISOString();
+  let supervisorStatusWrites = 0;
+  // Each write replaces the file by rename, so a reader woken by the write
+  // sees either the previous status or the new one, never a half-written one.
+  // The temp name carries a per-write counter, so overlapping writes — a
+  // heartbeat and a state change in the same tick — cannot share a scratch
+  // file.
   async function writeSupervisorStatus(
     state: SupervisorStatusState,
     extra: Record<string, unknown> = {},
   ): Promise<void> {
     if (!supervisorStatusPath) return;
-    await Deno.writeTextFile(
-      supervisorStatusPath,
-      JSON.stringify(
-        {
-          state,
-          pid: Deno.pid,
-          mountpoint,
-          token: supervisorToken || undefined,
-          startedAt: supervisorStatusStartedAt,
-          updatedAt: new Date().toISOString(),
-          ...extra,
-        },
-        null,
-        2,
-      ),
-    );
+    const pendingPath =
+      `${supervisorStatusPath}.${Deno.pid}.${supervisorStatusWrites++}.tmp`;
+    try {
+      await Deno.writeTextFile(
+        pendingPath,
+        JSON.stringify(
+          {
+            state,
+            pid: Deno.pid,
+            mountpoint,
+            token: supervisorToken || undefined,
+            startedAt: supervisorStatusStartedAt,
+            updatedAt: new Date().toISOString(),
+            ...extra,
+          },
+          null,
+          2,
+        ),
+      );
+      await Deno.rename(pendingPath, supervisorStatusPath);
+    } catch (error) {
+      await Deno.remove(pendingPath).catch(() => undefined);
+      throw error;
+    }
   }
   try {
     await writeSupervisorStatus("starting");
@@ -3368,19 +3382,6 @@ export async function main(argv: string[] = Deno.args) {
     };
   }
 
-  await writeSupervisorStatus("mounted").catch((error) => {
-    console.warn(`[FUSE] Unable to write mounted supervisor status: ${error}`);
-  });
-  const supervisorHeartbeat = supervisorStatusPath
-    ? setInterval(() => {
-      if (unmounting) return;
-      writeSupervisorStatus("mounted").catch(() => undefined);
-    }, 1_000)
-    : undefined;
-
-  console.log(`Mounted at ${mountpoint}`);
-  console.log("Press Ctrl+C to unmount");
-
   // Cleanup on signal
   function unmount() {
     if (unmounting) return;
@@ -3398,7 +3399,32 @@ export async function main(argv: string[] = Deno.args) {
   });
 
   // Run FUSE event loop (nonblocking: true → returns Promise)
-  const result = await fuse.symbols.fuse_session_loop(handle.session);
+  const sessionLoop = fuse.symbols.fuse_session_loop(handle.session);
+
+  // Readiness is reported here rather than earlier: the session loop is
+  // dispatched and the signal handlers are installed, so a caller that has
+  // seen `mounted` has a mount that serves requests and unmounts cleanly on
+  // SIGTERM. The heartbeat republishes the state so a reader that missed the
+  // first write, or read the file before the child PID was recorded, still
+  // converges.
+  if (!unmounting) {
+    await writeSupervisorStatus("mounted").catch((error) => {
+      console.warn(
+        `[FUSE] Unable to write mounted supervisor status: ${error}`,
+      );
+    });
+  }
+  const supervisorHeartbeat = supervisorStatusPath
+    ? setInterval(() => {
+      if (unmounting) return;
+      writeSupervisorStatus("mounted").catch(() => undefined);
+    }, 1_000)
+    : undefined;
+
+  console.log(`Mounted at ${mountpoint}`);
+  console.log("Press Ctrl+C to unmount");
+
+  const result = await sessionLoop;
   console.log(`FUSE loop exited (code ${result})`);
   if (supervisorHeartbeat !== undefined) clearInterval(supervisorHeartbeat);
   await writeSupervisorStatus("exited", { exitCode: result }).catch(() => {

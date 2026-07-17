@@ -6,6 +6,7 @@ import {
   awaitForegroundMountExit,
   buildMountStatusRows,
   childStatusPathForStatePath,
+  type ChildStatusWatcher,
   formatMountStatusTable,
   fuse,
   isFuseProcessCommand,
@@ -34,7 +35,63 @@ import {
   supervisorHelp,
 } from "../lib/fuse-supervisor.ts";
 import { writeFailedSupervisorStartupStatus } from "../../fuse/mod.ts";
+import { defer, type Deferred } from "@commonfabric/utils/defer";
 import { withEnv } from "./utils.ts";
+
+/**
+ * A stand-in for the spawned supervisor whose exit the test decides.
+ * `awaitBackgroundMountStartup` only ever reads `pid` and `status`.
+ */
+function fakeSupervisor(pid: number = Deno.pid) {
+  const exited = defer<Deno.CommandStatus>();
+  return {
+    process: { pid, status: exited.promise },
+    exit: (code = 1) =>
+      exited.resolve({ success: code === 0, code, signal: null }),
+  };
+}
+
+/**
+ * A stand-in for the state-directory watcher, matching the parts of
+ * `Deno.watchFs` this wait depends on: events are buffered from creation, so a
+ * test can queue one before the wait starts iterating; leaving the event loop
+ * closes the watcher; and closing an already-closed watcher reports a bad
+ * resource.
+ */
+function fakeStatusWatcher(): ChildStatusWatcher & {
+  emit(): void;
+  closed: boolean;
+} {
+  const buffered: unknown[] = [];
+  let wake: Deferred<void> | null = null;
+  const watcher = {
+    closed: false,
+    emit() {
+      buffered.push({ kind: "modify" });
+      wake?.resolve();
+      wake = null;
+    },
+    close() {
+      if (watcher.closed) throw new Deno.errors.BadResource("Bad resource ID");
+      watcher.closed = true;
+      wake?.resolve();
+      wake = null;
+    },
+    async *[Symbol.asyncIterator]() {
+      try {
+        while (true) {
+          while (buffered.length > 0) yield buffered.shift();
+          if (watcher.closed) return;
+          wake = defer<void>();
+          await wake.promise;
+        }
+      } finally {
+        watcher.closed = true;
+      }
+    },
+  };
+  return watcher;
+}
 
 describe("mountpointHash", () => {
   it("returns a 16-char hex string", async () => {
@@ -444,59 +501,38 @@ describe("mount state operations", () => {
       identity: "/tmp/test-identity.pem",
       startedAt: "2026-03-17T00:00:00.000Z",
     });
-
+    const childStatusPath = childStatusPathForStatePath(statePath);
+    const supervisor = fakeSupervisor(1073741824);
+    const watcher = fakeStatusWatcher();
     const removed: string[] = [];
-    await expect(
-      awaitBackgroundMountStartup(
-        1073741824,
-        statePath,
-        {
-          attempts: 1,
-          isAlive: () => false,
-          removeStateFile: async (path: string) => {
-            removed.push(path);
-            await Deno.remove(path);
-          },
-          sleep: () => Promise.resolve(),
-        },
-      ),
-    ).rejects.toThrow(/Background FUSE process exited during startup/i);
 
+    const startup = awaitBackgroundMountStartup(
+      supervisor.process,
+      statePath,
+      {
+        childStatusPath,
+        childStatusToken: "token-1",
+        mountpoint: "/tmp/test-mount",
+        isAlive: () => false,
+        readTextFile: () => Promise.reject(new Deno.errors.NotFound()),
+        watchStatus: () => watcher,
+        removeStateFile: async (path: string) => {
+          removed.push(path);
+          await Deno.remove(path);
+        },
+      },
+    );
+    supervisor.exit(1);
+
+    await expect(startup).rejects.toThrow(
+      /Background FUSE process exited during startup/i,
+    );
     expect(removed).toEqual([statePath]);
+    expect(watcher.closed).toBe(true);
     await expect(Deno.stat(statePath)).rejects.toThrow();
   });
 
-  it("allows background mounts that stay alive through the startup window", async () => {
-    const statePath = await writeMountState(tmpDir, {
-      pid: Deno.pid,
-      childPid: 321,
-      mountpoint: "/tmp/test-mount",
-      apiUrl: "http://localhost:8000",
-      identity: "/tmp/test-identity.pem",
-      startedAt: "2026-03-17T00:00:00.000Z",
-    });
-
-    let checks = 0;
-    await expect(
-      awaitBackgroundMountStartup(
-        Deno.pid,
-        statePath,
-        {
-          attempts: 3,
-          isAlive: () => {
-            checks++;
-            return true;
-          },
-          sleep: () => Promise.resolve(),
-        },
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(checks).toBe(3);
-    await expect(Deno.stat(statePath)).resolves.toBeDefined();
-  });
-
-  it("waits for explicit child mounted status when available", async () => {
+  it("does not report readiness for a child that stays alive without reporting mounted", async () => {
     const statePath = await writeMountState(tmpDir, {
       pid: Deno.pid,
       childPid: 321,
@@ -506,31 +542,177 @@ describe("mount state operations", () => {
       startedAt: "2026-03-17T00:00:00.000Z",
     });
     const childStatusPath = childStatusPathForStatePath(statePath);
+    const supervisor = fakeSupervisor();
+    const watcher = fakeStatusWatcher();
+    const removed: string[] = [];
     let reads = 0;
 
+    // The child is alive and reporting, but never reports mounted. Liveness
+    // alone must not be read as readiness, so the process exiting is the only
+    // way out. Each read arms the next wake-up, so the wait is observed
+    // staying open across several of them before the exit ends it.
+    const startup = awaitBackgroundMountStartup(supervisor.process, statePath, {
+      childStatusPath,
+      childStatusToken: "token-1",
+      mountpoint: "/tmp/test-mount",
+      isAlive: () => true,
+      readTextFile: () => {
+        reads++;
+        if (reads < 3) queueMicrotask(() => watcher.emit());
+        else supervisor.exit(1);
+        return Promise.resolve(JSON.stringify({
+          state: "starting",
+          pid: 321,
+          mountpoint: "/tmp/test-mount",
+          token: "token-1",
+          updatedAt: "2026-03-17T00:00:00.000Z",
+        }));
+      },
+      watchStatus: () => watcher,
+      removeStateFile: async (path: string) => {
+        removed.push(path);
+        await Deno.remove(path);
+      },
+    });
+
+    await expect(startup).rejects.toThrow(
+      /Background FUSE process exited during startup/i,
+    );
+    expect(reads).toBe(3);
+    expect(removed).toEqual([statePath]);
+  });
+
+  it("waits for the child to report mounted, however long that takes", async () => {
+    const statePath = await writeMountState(tmpDir, {
+      pid: Deno.pid,
+      childPid: 321,
+      mountpoint: "/tmp/test-mount",
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/test-identity.pem",
+      startedAt: "2026-03-17T00:00:00.000Z",
+    });
+    const childStatusPath = childStatusPathForStatePath(statePath);
+    const supervisor = fakeSupervisor();
+    const watcher = fakeStatusWatcher();
+    // A slow startup: the child heartbeats far more times than any past
+    // attempt ceiling allowed before it finally reports mounted. Each read
+    // arms the next wake-up, so these are consumed one at a time rather than
+    // collapsing into a single buffered batch.
+    const heartbeatsBeforeMounted = 500;
+    let reads = 0;
+
+    const startup = awaitBackgroundMountStartup(supervisor.process, statePath, {
+      childStatusPath,
+      childStatusToken: "token-1",
+      mountpoint: "/tmp/test-mount",
+      isAlive: () => true,
+      readTextFile: () => {
+        reads++;
+        const ready = reads > heartbeatsBeforeMounted;
+        if (!ready) queueMicrotask(() => watcher.emit());
+        return Promise.resolve(JSON.stringify({
+          state: ready ? "mounted" : "starting",
+          pid: 321,
+          mountpoint: "/tmp/test-mount",
+          token: "token-1",
+          updatedAt: "2026-03-17T00:00:00.000Z",
+        }));
+      },
+      watchStatus: () => watcher,
+    });
+
+    await expect(startup).resolves.toBeUndefined();
+    expect(reads).toBe(heartbeatsBeforeMounted + 1);
+    expect(watcher.closed).toBe(true);
+    await expect(Deno.stat(statePath)).resolves.toBeDefined();
+  });
+
+  it("reports readiness from a mounted status already written before the wait began", async () => {
+    const statePath = await writeMountState(tmpDir, {
+      pid: Deno.pid,
+      childPid: 321,
+      mountpoint: "/tmp/test-mount",
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/test-identity.pem",
+      startedAt: "2026-03-17T00:00:00.000Z",
+    });
+    const childStatusPath = childStatusPathForStatePath(statePath);
+    const watcher = fakeStatusWatcher();
+
+    // The child can win the race and report mounted before the CLI starts
+    // watching; the read that follows the watch has to catch that.
     await expect(
-      awaitBackgroundMountStartup(Deno.pid, statePath, {
-        attempts: 3,
+      awaitBackgroundMountStartup(fakeSupervisor().process, statePath, {
         childStatusPath,
         childStatusToken: "token-1",
         mountpoint: "/tmp/test-mount",
         isAlive: () => true,
-        readTextFile: () => {
-          reads++;
-          return Promise.resolve(JSON.stringify({
-            state: reads === 1 ? "starting" : "mounted",
+        readTextFile: () =>
+          Promise.resolve(JSON.stringify({
+            state: "mounted",
             pid: 321,
             mountpoint: "/tmp/test-mount",
             token: "token-1",
             updatedAt: "2026-03-17T00:00:00.000Z",
-          }));
-        },
-        sleep: () => Promise.resolve(),
+          })),
+        watchStatus: () => watcher,
       }),
     ).resolves.toBeUndefined();
 
-    expect(reads).toBe(3);
+    expect(watcher.closed).toBe(true);
     await expect(Deno.stat(statePath)).resolves.toBeDefined();
+  });
+
+  it("reports readiness from a real filesystem watch of the state directory", async () => {
+    // A fake watcher cannot stand in for `Deno.watchFs` here. The real one
+    // closes itself when the wait leaves its event loop, so this is the only
+    // test that covers what the background mount command actually wires up.
+    const statePath = await writeMountState(tmpDir, {
+      pid: Deno.pid,
+      childPid: Deno.pid,
+      mountpoint: "/tmp/test-mount",
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/test-identity.pem",
+      startedAt: "2026-03-17T00:00:00.000Z",
+    });
+    const childStatusPath = childStatusPathForStatePath(statePath);
+    const firstReadSettled = defer<void>();
+    let reads = 0;
+
+    const startup = awaitBackgroundMountStartup(
+      fakeSupervisor().process,
+      statePath,
+      {
+        childStatusPath,
+        childStatusToken: "token-1",
+        mountpoint: "/tmp/test-mount",
+        readTextFile: async (path: string) => {
+          reads++;
+          try {
+            return await Deno.readTextFile(path);
+          } finally {
+            if (reads === 1) firstReadSettled.resolve();
+          }
+        },
+      },
+    );
+
+    // Let the read that follows the watch miss the file, so readiness can only
+    // arrive as a real filesystem event rather than from that first read.
+    await firstReadSettled.promise;
+    await Deno.writeTextFile(
+      childStatusPath,
+      JSON.stringify({
+        state: "mounted",
+        pid: Deno.pid,
+        mountpoint: "/tmp/test-mount",
+        token: "token-1",
+        updatedAt: "2026-03-17T00:00:00.000Z",
+      }),
+    );
+
+    await expect(startup).resolves.toBeUndefined();
+    expect(reads).toBeGreaterThan(1);
   });
 
   it("rejects background mounts when child exits after reporting mounted", async () => {
@@ -546,8 +728,7 @@ describe("mount state operations", () => {
     const removed: string[] = [];
 
     await expect(
-      awaitBackgroundMountStartup(Deno.pid, statePath, {
-        attempts: 2,
+      awaitBackgroundMountStartup(fakeSupervisor().process, statePath, {
         childStatusPath,
         childStatusToken: "token-1",
         mountpoint: "/tmp/test-mount",
@@ -560,11 +741,11 @@ describe("mount state operations", () => {
             token: "token-1",
             updatedAt: "2026-03-17T00:00:00.000Z",
           })),
+        watchStatus: () => fakeStatusWatcher(),
         removeStateFile: async (path: string) => {
           removed.push(path);
           await Deno.remove(path).catch(() => undefined);
         },
-        sleep: () => Promise.resolve(),
       }),
     ).rejects.toThrow(/child exited after reporting mounted/i);
 
@@ -572,7 +753,7 @@ describe("mount state operations", () => {
     await expect(Deno.stat(statePath)).rejects.toThrow();
   });
 
-  it("rejects background mounts when mounted status is followed by exiting", async () => {
+  it("never reports readiness from a mounted status belonging to another startup attempt", async () => {
     const statePath = await writeMountState(tmpDir, {
       pid: Deno.pid,
       childPid: 321,
@@ -582,78 +763,39 @@ describe("mount state operations", () => {
       startedAt: "2026-03-17T00:00:00.000Z",
     });
     const childStatusPath = childStatusPathForStatePath(statePath);
+    const supervisor = fakeSupervisor();
+    const watcher = fakeStatusWatcher();
     const removed: string[] = [];
-    let reads = 0;
 
-    await expect(
-      awaitBackgroundMountStartup(Deno.pid, statePath, {
-        attempts: 2,
-        childStatusPath,
-        childStatusToken: "token-1",
-        mountpoint: "/tmp/test-mount",
-        isAlive: () => true,
-        readTextFile: () => {
-          reads++;
-          return Promise.resolve(JSON.stringify({
-            state: reads === 1 ? "mounted" : "exiting",
-            pid: 321,
-            mountpoint: "/tmp/test-mount",
-            token: "token-1",
-            updatedAt: "2026-03-17T00:00:00.000Z",
-          }));
-        },
-        removeStateFile: async (path: string) => {
-          removed.push(path);
-          await Deno.remove(path).catch(() => undefined);
-        },
-        sleep: () => Promise.resolve(),
-      }),
-    ).rejects.toThrow(/child reported exiting/i);
-
-    expect(reads).toBe(2);
-    expect(removed).toEqual([statePath, childStatusPath]);
-    await expect(Deno.stat(statePath)).rejects.toThrow();
-  });
-
-  it("ignores mounted child status from a different startup attempt", async () => {
-    const statePath = await writeMountState(tmpDir, {
-      pid: Deno.pid,
-      childPid: 321,
+    const startup = awaitBackgroundMountStartup(supervisor.process, statePath, {
+      childStatusPath,
+      childStatusToken: "token-1",
       mountpoint: "/tmp/test-mount",
-      apiUrl: "http://localhost:8000",
-      identity: "/tmp/test-identity.pem",
-      startedAt: "2026-03-17T00:00:00.000Z",
+      isAlive: () => true,
+      readTextFile: () =>
+        Promise.resolve(JSON.stringify({
+          state: "mounted",
+          pid: 321,
+          mountpoint: "/tmp/test-mount",
+          token: "stale-token",
+          updatedAt: "2026-03-17T00:00:00.000Z",
+        })),
+      watchStatus: () => watcher,
+      removeStateFile: async (path: string) => {
+        removed.push(path);
+        await Deno.remove(path);
+      },
     });
-    const childStatusPath = childStatusPathForStatePath(statePath);
-    const removed: string[] = [];
+    watcher.emit();
+    supervisor.exit(1);
 
-    await expect(
-      awaitBackgroundMountStartup(Deno.pid, statePath, {
-        attempts: 1,
-        childStatusPath,
-        childStatusToken: "token-1",
-        mountpoint: "/tmp/test-mount",
-        isAlive: () => true,
-        readTextFile: () =>
-          Promise.resolve(JSON.stringify({
-            state: "mounted",
-            pid: 321,
-            mountpoint: "/tmp/test-mount",
-            token: "stale-token",
-            updatedAt: "2026-03-17T00:00:00.000Z",
-          })),
-        removeStateFile: async (path: string) => {
-          removed.push(path);
-          await Deno.remove(path);
-        },
-        sleep: () => Promise.resolve(),
-      }),
-    ).rejects.toThrow(/did not report mount readiness/i);
-
+    await expect(startup).rejects.toThrow(
+      /Background FUSE process exited during startup/i,
+    );
     expect(removed).toEqual([statePath]);
   });
 
-  it("cleans up malformed child status sidecars after readiness timeout", async () => {
+  it("keeps waiting through a half-written child status file", async () => {
     const statePath = await writeMountState(tmpDir, {
       pid: Deno.pid,
       childPid: 321,
@@ -663,25 +805,34 @@ describe("mount state operations", () => {
       startedAt: "2026-03-17T00:00:00.000Z",
     });
     const childStatusPath = childStatusPathForStatePath(statePath);
-    const removed: string[] = [];
+    const watcher = fakeStatusWatcher();
+    let text = "{not-json";
 
-    await expect(
-      awaitBackgroundMountStartup(Deno.pid, statePath, {
-        attempts: 1,
+    const startup = awaitBackgroundMountStartup(
+      fakeSupervisor().process,
+      statePath,
+      {
         childStatusPath,
         childStatusToken: "token-1",
         mountpoint: "/tmp/test-mount",
         isAlive: () => true,
-        readTextFile: () => Promise.resolve("{not-json"),
-        removeStateFile: async (path: string) => {
-          removed.push(path);
-          await Deno.remove(path).catch(() => undefined);
-        },
-        sleep: () => Promise.resolve(),
-      }),
-    ).rejects.toThrow(/did not report mount readiness/i);
+        readTextFile: () => Promise.resolve(text),
+        watchStatus: () => watcher,
+      },
+    );
 
-    expect(removed).toEqual([statePath, childStatusPath]);
+    // Unreadable content is "not yet", not a verdict: the next write decides.
+    watcher.emit();
+    text = JSON.stringify({
+      state: "mounted",
+      pid: 321,
+      mountpoint: "/tmp/test-mount",
+      token: "token-1",
+      updatedAt: "2026-03-17T00:00:00.000Z",
+    });
+    watcher.emit();
+
+    await expect(startup).resolves.toBeUndefined();
   });
 
   it("does not read child status sidecars as mount state entries", async () => {
@@ -795,8 +946,7 @@ describe("mount state operations", () => {
     const removed: string[] = [];
 
     await expect(
-      awaitBackgroundMountStartup(Deno.pid, statePath, {
-        attempts: 1,
+      awaitBackgroundMountStartup(fakeSupervisor().process, statePath, {
         childStatusPath,
         childStatusToken: "token-1",
         mountpoint: "/tmp/test-mount",
@@ -810,11 +960,11 @@ describe("mount state operations", () => {
             updatedAt: "2026-03-17T00:00:00.000Z",
             error: "fuse_session_mount failed",
           })),
+        watchStatus: () => fakeStatusWatcher(),
         removeStateFile: async (path: string) => {
           removed.push(path);
           await Deno.remove(path);
         },
-        sleep: () => Promise.resolve(),
       }),
     ).rejects.toThrow(/fuse_session_mount failed/);
 
@@ -835,8 +985,7 @@ describe("mount state operations", () => {
     const removed: string[] = [];
 
     await expect(
-      awaitBackgroundMountStartup(Deno.pid, statePath, {
-        attempts: 1,
+      awaitBackgroundMountStartup(fakeSupervisor().process, statePath, {
         childStatusPath,
         childStatusToken: "token-1",
         mountpoint: "/tmp/test-mount",
@@ -849,52 +998,13 @@ describe("mount state operations", () => {
             token: "token-1",
             updatedAt: "2026-03-17T00:00:00.000Z",
           })),
+        watchStatus: () => fakeStatusWatcher(),
         removeStateFile: async (path: string) => {
           removed.push(path);
           await Deno.remove(path);
         },
-        sleep: () => Promise.resolve(),
       }),
     ).rejects.toThrow(/child reported exiting/);
-
-    expect(removed).toEqual([statePath]);
-    await expect(Deno.stat(statePath)).rejects.toThrow();
-  });
-
-  it("rejects background mounts when child readiness times out", async () => {
-    const statePath = await writeMountState(tmpDir, {
-      pid: Deno.pid,
-      childPid: 321,
-      mountpoint: "/tmp/test-mount",
-      apiUrl: "http://localhost:8000",
-      identity: "/tmp/test-identity.pem",
-      startedAt: "2026-03-17T00:00:00.000Z",
-    });
-    const childStatusPath = childStatusPathForStatePath(statePath);
-    const removed: string[] = [];
-
-    await expect(
-      awaitBackgroundMountStartup(Deno.pid, statePath, {
-        attempts: 1,
-        childStatusPath,
-        childStatusToken: "token-1",
-        mountpoint: "/tmp/test-mount",
-        isAlive: () => true,
-        readTextFile: () =>
-          Promise.resolve(JSON.stringify({
-            state: "starting",
-            pid: 321,
-            mountpoint: "/tmp/test-mount",
-            token: "token-1",
-            updatedAt: "2026-03-17T00:00:00.000Z",
-          })),
-        removeStateFile: async (path: string) => {
-          removed.push(path);
-          await Deno.remove(path);
-        },
-        sleep: () => Promise.resolve(),
-      }),
-    ).rejects.toThrow(/did not report mount readiness/i);
 
     expect(removed).toEqual([statePath]);
     await expect(Deno.stat(statePath)).rejects.toThrow();

@@ -395,16 +395,44 @@ Two waits in this script are not polls, and should not become polls.
 
 Mount readiness needs no timing loop. `cf fuse mount --background` calls
 `awaitBackgroundMountStartup`, which waits for the daemon to report the
-`mounted` supervisor state and confirms both the supervisor and the child are
-alive before the command prints the PID. Every other exit from that function
-throws, and a throw kills the child and fails the command, so a script that has
-parsed a PID has a daemon that reported mounted.
+`mounted` supervisor state and confirms the child is alive before the command
+prints the PID. Every other exit from that function throws, and a throw kills
+the child and fails the command, so a script that has parsed a PID has a daemon
+that reported mounted.
 
-The daemon reports that state just before it enters its FUSE session loop, so it
-means the kernel mount exists rather than that any request has been served, and
-mounted paths hydrate lazily besides. Both gaps belong to `wait_for_path`, whose
-probe carries its own kill-timeout and retries for twenty seconds. What is left
-for the script is one check that the daemon survived the handshake.
+That wait is a race between two real events, with no poll and no deadline under
+it. The supervisor is spawned through `Deno.Command`, so its `status` promise
+reports the exit that means the startup failed. The daemon publishes its state
+to a file beside the mount state file, so a `Deno.watchFs` watch over the
+directory holding both reports every write to either. The directory is the unit
+watched rather than the status file, because neither file need exist when the
+wait starts, and because the wait also depends on the supervisor recording the
+child PID into the mount state file — until it does, no status can be tied to
+this mount. The wait reads once after installing the watch, so a daemon that
+reports before the watch began is still seen, and reads again on every event
+after that.
+
+There is deliberately no deadline on readiness. A deadline can only convert a
+slow startup — a cold cache, a large space, a loaded machine — into a reported
+failure, and startup carries no liveness signal finer than the process itself:
+the daemon's heartbeat only begins once it is already mounted, so nothing
+distinguishes a slow child from a stuck one. A child that never reports leaves
+the command waiting, which is interruptible and visible, rather than killing a
+mount that was about to work. In a test or CI lane the ambient limit is the
+backstop, in place of a per-command ceiling that fails healthy mounts.
+
+Each status write lands by rename, so a read woken by a write sees a complete
+document rather than a half-written one. Unreadable or foreign content reads as
+"not yet reported" rather than as a verdict; the daemon rewrites the file on
+every state change and on its heartbeat.
+
+The daemon reports `mounted` once it has dispatched its FUSE session loop and
+installed the signal handlers that unmount cleanly, so the state means the
+kernel mount exists and a SIGTERM will be handled, rather than that any request
+has been served. Requests that arrive first queue rather than fail. That gap,
+and lazy hydration of mounted paths, belong to `wait_for_path`, whose probe
+carries its own kill-timeout and retries for twenty seconds. What is left for
+the script is one check that the daemon survived the handshake.
 
 The stale-descriptor assertion — that truncating a path does not let an already
 open descriptor write its old buffer back — waits on `wait_for_piece_value`
