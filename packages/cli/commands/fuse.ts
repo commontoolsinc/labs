@@ -11,8 +11,8 @@ import {
   fuseSupervisorMod,
   isAlive,
   isMountStateAlive,
-  mountpointHash,
   type MountStateEntry,
+  prepareMountStatePath,
   readAllMountStates,
   readMountState,
   removeMountStateFile,
@@ -40,15 +40,9 @@ interface FuseChildSupervisorStatus {
   pid?: number;
   mountpoint?: string;
   updatedAt?: string;
-  token?: string;
   error?: string;
   exitCode?: number;
 }
-
-const BACKGROUND_STARTUP_ATTEMPTS = 20;
-const CHILD_STATUS_STARTUP_ATTEMPTS = 200;
-const BACKGROUND_STARTUP_DELAY_MS = 50;
-const CHILD_STATUS_STARTUP_DELAY_MS = 100;
 
 export function childStatusPathForStatePath(statePath: string): string {
   return `${statePath}.child-status`;
@@ -133,177 +127,141 @@ export async function awaitForegroundMountExit(
 
 async function removeMountStateAndChildStatus(
   statePath: string,
-  childStatusPath: string,
+  childStatusPath: string | undefined,
   removeStateFile: (path: string) => Promise<void>,
 ): Promise<void> {
   await removeStateFile(statePath);
-  await removeStateFile(childStatusPath).catch(() => undefined);
+  if (childStatusPath) {
+    await removeStateFile(childStatusPath).catch(() => undefined);
+  }
 }
 
+const CHILD_CONFIRM_MS = 100;
+
+/**
+ * Reads readiness lines until the child settles on a state, and returns null
+ * once no report can arrive any more.
+ *
+ * Two things end the read besides a report. End of stream means every process
+ * holding the write end has exited. The supervisor exiting means the same thing
+ * for a child that cannot report on its own: the FUSE child inherits the write
+ * end, so an orphaned child holds the stream open and end of stream never comes.
+ */
+async function readSettledChildStatus(
+  readiness: ReadableStream<Uint8Array>,
+  supervisorExit: Promise<unknown>,
+): Promise<FuseChildSupervisorStatus | null> {
+  const reader = readiness.getReader();
+  const decoder = new TextDecoder();
+  const supervisorGone = Symbol("supervisorGone");
+  let buffered = "";
+  try {
+    while (true) {
+      const next = await Promise.race<
+        ReadableStreamReadResult<Uint8Array> | typeof supervisorGone
+      >([
+        reader.read(),
+        supervisorExit.then(() => supervisorGone),
+      ]);
+      if (next === supervisorGone) return null;
+      const { value, done } = next;
+      if (done) return null;
+      buffered += decoder.decode(value, { stream: true });
+      let newline = buffered.indexOf("\n");
+      while (newline !== -1) {
+        const status = parseChildSupervisorStatus(buffered.slice(0, newline));
+        buffered = buffered.slice(newline + 1);
+        if (status && status.state !== "starting") return status;
+        newline = buffered.indexOf("\n");
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+}
+
+/** Whether `exit` settles within `ms`. */
+function exitsWithin(exit: Promise<unknown>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const elapsed = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms);
+  });
+  return Promise.race([exit.then(() => true), elapsed]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
+/**
+ * Waits for a background mount to report that it is up.
+ *
+ * The supervisor and its FUSE child write readiness to `deps.readiness`, a pipe
+ * this command holds the read end of, so the read wakes on the child's own
+ * announcement rather than on a clock. The channel is private to this mount, so
+ * a line arriving on it came from this child and needs no correlation against
+ * the mount state.
+ *
+ * Returns only once the child has reported `mounted` and both the supervisor and
+ * the child are alive. Every other outcome removes the mount state and throws.
+ */
 export async function awaitBackgroundMountStartup(
   pid: number,
   statePath: string,
   deps: {
-    attempts?: number;
-    delayMs?: number;
+    readiness: ReadableStream<Uint8Array>;
+    supervisorExit: Promise<unknown>;
     isAlive?: (pid: number) => boolean;
     removeStateFile?: (path: string) => Promise<void>;
-    readTextFile?: (path: string) => Promise<string>;
-    readMountStateFile?: (path: string) => Promise<string>;
     childStatusPath?: string;
-    childStatusToken?: string;
-    mountpoint?: string;
-    sleep?: (ms: number) => Promise<void>;
-  } = {},
+    confirmMs?: number;
+  },
 ): Promise<void> {
-  const attempts = deps.attempts ??
-    (deps.childStatusPath
-      ? CHILD_STATUS_STARTUP_ATTEMPTS
-      : BACKGROUND_STARTUP_ATTEMPTS);
-  const delayMs = deps.delayMs ??
-    (deps.childStatusPath
-      ? CHILD_STATUS_STARTUP_DELAY_MS
-      : BACKGROUND_STARTUP_DELAY_MS);
   const isAliveFn = deps.isAlive ?? isAlive;
   const removeStateFileFn = deps.removeStateFile ?? removeMountStateFile;
-  const readTextFile = deps.readTextFile ?? Deno.readTextFile;
-  const readMountStateFile = deps.readMountStateFile ?? Deno.readTextFile;
-  const sleep = deps.sleep ??
-    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  let invalidChildStatusSeen = false;
+  const confirmMs = deps.confirmMs ?? CHILD_CONFIRM_MS;
+  const exitedDuringStartup =
+    "Background FUSE process exited during startup. Re-run without --background to inspect startup errors.";
+  const fail = async (message: string): Promise<never> => {
+    await removeMountStateAndChildStatus(
+      statePath,
+      deps.childStatusPath,
+      removeStateFileFn,
+    );
+    throw new Error(message);
+  };
 
-  for (let i = 0; i < attempts; i++) {
-    if (!isAliveFn(pid)) {
-      await removeStateFileFn(statePath);
-      throw new Error(
-        "Background FUSE process exited during startup. Re-run without --background to inspect startup errors.",
-      );
-    }
-    if (deps.childStatusPath) {
-      let status: FuseChildSupervisorStatus | null = null;
-      try {
-        status = parseChildSupervisorStatus(
-          await readTextFile(deps.childStatusPath),
-        );
-        if (!status) invalidChildStatusSeen = true;
-      } catch {
-        status = null;
-      }
-      const belongsToThisMount = await childStatusBelongsToMount(
-        status,
-        statePath,
-        {
-          token: deps.childStatusToken,
-          mountpoint: deps.mountpoint,
-          readMountStateFile,
-        },
-      );
-      if (status?.state === "mounted" && belongsToThisMount) {
-        if (!isAliveFn(status.pid!)) {
-          await removeMountStateAndChildStatus(
-            statePath,
-            deps.childStatusPath,
-            removeStateFileFn,
-          );
-          throw new Error(
-            "Background FUSE mount failed during startup: child exited after reporting mounted.",
-          );
-        }
+  const status = await readSettledChildStatus(
+    deps.readiness,
+    deps.supervisorExit,
+  );
 
-        await sleep(delayMs);
-        let confirmedStatus: FuseChildSupervisorStatus | null = null;
-        try {
-          confirmedStatus = parseChildSupervisorStatus(
-            await readTextFile(deps.childStatusPath),
-          );
-        } catch {
-          confirmedStatus = null;
-        }
-        const confirmedBelongsToThisMount = await childStatusBelongsToMount(
-          confirmedStatus,
-          statePath,
-          {
-            token: deps.childStatusToken,
-            mountpoint: deps.mountpoint,
-            readMountStateFile,
-          },
-        );
-        if (
-          confirmedStatus?.state === "mounted" &&
-          confirmedBelongsToThisMount &&
-          isAliveFn(pid) &&
-          isAliveFn(confirmedStatus.pid!)
-        ) {
-          return;
-        }
-        await removeMountStateAndChildStatus(
-          statePath,
-          deps.childStatusPath,
-          removeStateFileFn,
-        );
-        const reason = confirmedBelongsToThisMount && confirmedStatus
-          ? `child reported ${confirmedStatus.state}`
-          : "child did not remain mounted";
-        throw new Error(
-          `Background FUSE mount failed during startup: ${reason}`,
-        );
-      }
-      if (
-        belongsToThisMount &&
-        (status?.state === "failed" || status?.state === "exiting" ||
-          status?.state === "exited")
-      ) {
-        await removeStateFileFn(statePath);
-        throw new Error(
-          `Background FUSE mount failed during startup: ${
-            status.error ?? `child reported ${status.state}`
-          }`,
-        );
-      }
-    }
-    if (i < attempts - 1) {
-      await sleep(delayMs);
-    }
-  }
-
-  if (deps.childStatusPath) {
-    if (invalidChildStatusSeen) {
-      await removeMountStateAndChildStatus(
-        statePath,
-        deps.childStatusPath,
-        removeStateFileFn,
-      );
-    } else {
-      await removeStateFileFn(statePath);
-    }
-    throw new Error(
-      "Background FUSE process did not report mount readiness before startup timeout.",
+  if (!status) return await fail(exitedDuringStartup);
+  if (status.state !== "mounted") {
+    return await fail(
+      `Background FUSE mount failed during startup: ${
+        status.error ?? `child reported ${status.state}`
+      }`,
     );
   }
-}
 
-async function childStatusBelongsToMount(
-  status: FuseChildSupervisorStatus | null,
-  statePath: string,
-  deps: {
-    token?: string;
-    mountpoint?: string;
-    readMountStateFile: (path: string) => Promise<string>;
-  },
-): Promise<boolean> {
-  if (!status) return false;
-  if (deps.token && status.token !== deps.token) return false;
-  if (deps.mountpoint && status.mountpoint !== deps.mountpoint) return false;
-  if (typeof status.pid !== "number") return false;
-
-  try {
-    const state = JSON.parse(await deps.readMountStateFile(statePath)) as {
-      childPid?: unknown;
-    };
-    return state.childPid === status.pid;
-  } catch {
-    return false;
+  // The child reports `mounted` just before entering its FUSE session loop, so a
+  // mount that fails in the loop reports mounted and then exits. At the instant
+  // the report arrives the child is still running, and a pid probe says so; what
+  // distinguishes the two is that a dying child takes the supervisor down with
+  // it. Wait for that exit to either arrive or not. This is the one wait here
+  // with a duration in it, because nothing announces that a process intends to
+  // keep running.
+  if (await exitsWithin(deps.supervisorExit, confirmMs)) {
+    return await fail(
+      "Background FUSE mount failed during startup: child exited after reporting mounted.",
+    );
   }
+
+  if (typeof status.pid !== "number" || !isAliveFn(status.pid)) {
+    return await fail(
+      "Background FUSE mount failed during startup: child exited after reporting mounted.",
+    );
+  }
+  if (!isAliveFn(pid)) return await fail(exitedDuringStartup);
 }
 
 export const fuse = new Command()
@@ -461,12 +419,11 @@ export const fuse = new Command()
       // Derive log file path: /tmp/cf-fuse-<mountname>.log
       const logFile = `/tmp/cf-fuse-${basename(absMountpoint)}.log`;
 
-      const statePath = resolve(
-        stateDir,
-        `${await mountpointHash(absMountpoint)}.json`,
-      );
+      // The supervisor writes the mount state, because it is the process that
+      // spawns the FUSE child and so the only one that knows both PIDs. It holds
+      // write access to that one file, so the directory is prepared here.
+      const statePath = await prepareMountStatePath(stateDir, absMountpoint);
       const childStatusPath = childStatusPathForStatePath(statePath);
-      const childStatusToken = crypto.randomUUID();
       try {
         await Deno.remove(childStatusPath);
       } catch (error) {
@@ -478,7 +435,6 @@ export const fuse = new Command()
         logFile,
         statePath,
         supervisorStatusPath: childStatusPath,
-        supervisorToken: childStatusToken,
       };
       spawnCmd = execPath;
       spawnArgs = isCompiledBinary
@@ -491,32 +447,27 @@ export const fuse = new Command()
           ...supervisorFlags,
         });
 
-      // Detached background process
+      // Detached background process. Its stdout is a pipe the supervisor passes
+      // down to the FUSE child, which writes its readiness into it.
       const cmd = new Deno.Command(spawnCmd, {
         args: spawnArgs,
         stdin: "null",
-        stdout: "null",
+        stdout: "piped",
         stderr: "null",
       });
       const child = cmd.spawn();
-      child.unref();
 
       const pid = child.pid;
       try {
-        await writeMountState(stateDir, {
-          pid,
-          mountpoint: absMountpoint,
-          apiUrl,
-          identity,
-          startedAt: new Date().toISOString(),
-          logFile,
-          childStatusPath,
-        });
         await awaitBackgroundMountStartup(pid, statePath, {
+          readiness: child.stdout,
+          supervisorExit: child.status,
           childStatusPath,
-          childStatusToken,
-          mountpoint: absMountpoint,
         });
+        // The mount is up and outlives this command, so stop holding the process
+        // open for it. Unreferencing any earlier would also stop the readiness
+        // read from holding it, and the command would exit mid-handshake.
+        child.unref();
       } catch (error) {
         try {
           Deno.kill(pid, "SIGTERM");

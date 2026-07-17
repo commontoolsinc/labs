@@ -265,7 +265,6 @@ export async function main(argv: string[] = Deno.args) {
       "exec-cli",
       "log-file",
       "supervisor-status",
-      "supervisor-token",
       "cfc-xattr-namespace",
       "cfc-mode",
       "cfc-writeback-state",
@@ -286,7 +285,6 @@ export async function main(argv: string[] = Deno.args) {
       "exec-cli": "",
       "log-file": "",
       "supervisor-status": "",
-      "supervisor-token": "",
       "cfc-xattr-namespace": DEFAULT_CFC_XATTR_NAMESPACE,
       "cfc-mode": "",
       "cfc-writeback-state": "",
@@ -390,8 +388,22 @@ export async function main(argv: string[] = Deno.args) {
     Deno.exit(1);
   }
   const supervisorStatusPath = String(args["supervisor-status"] ?? "");
-  const supervisorToken = String(args["supervisor-token"] ?? "");
   const supervisorStatusStartedAt = new Date().toISOString();
+  function supervisorStatusPayload(
+    state: SupervisorStatusState,
+    extra: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return {
+      state,
+      pid: Deno.pid,
+      mountpoint,
+      startedAt: supervisorStatusStartedAt,
+      updatedAt: new Date().toISOString(),
+      ...extra,
+    };
+  }
+  // The status file is the record `cf fuse status` reads later. The heartbeat
+  // refreshes it; readers take a snapshot whenever they ask.
   async function writeSupervisorStatus(
     state: SupervisorStatusState,
     extra: Record<string, unknown> = {},
@@ -399,20 +411,37 @@ export async function main(argv: string[] = Deno.args) {
     if (!supervisorStatusPath) return;
     await Deno.writeTextFile(
       supervisorStatusPath,
-      JSON.stringify(
-        {
-          state,
-          pid: Deno.pid,
-          mountpoint,
-          token: supervisorToken || undefined,
-          startedAt: supervisorStatusStartedAt,
-          updatedAt: new Date().toISOString(),
-          ...extra,
-        },
-        null,
-        2,
-      ),
+      JSON.stringify(supervisorStatusPayload(state, extra), null, 2),
     );
+  }
+  // A background mount's parent holds the read end of this process's stdout and
+  // blocks on it, so one line here wakes it on the transition itself. Only the
+  // states a starting mount can settle on are published; the heartbeat stays out
+  // of the channel. A parent that has already exited leaves no reader, which
+  // makes the write fail rather than the mount.
+  async function publishSupervisorState(
+    state: SupervisorStatusState,
+    extra: Record<string, unknown> = {},
+  ): Promise<void> {
+    if (!supervisorStatusPath) return;
+    const line = `${JSON.stringify(supervisorStatusPayload(state, extra))}\n`;
+    const bytes = new TextEncoder().encode(line);
+    try {
+      for (let written = 0; written < bytes.length;) {
+        written += await Deno.stdout.write(bytes.subarray(written));
+      }
+    } catch {
+      // No reader: the mount continues unobserved.
+    }
+  }
+  // Record the state, then announce it, so a parent woken by the announcement
+  // finds the status file already carrying the same state.
+  async function reportSupervisorState(
+    state: SupervisorStatusState,
+    extra: Record<string, unknown> = {},
+  ): Promise<void> {
+    await writeSupervisorStatus(state, extra);
+    await publishSupervisorState(state, extra);
   }
   try {
     await writeSupervisorStatus("starting");
@@ -446,7 +475,7 @@ export async function main(argv: string[] = Deno.args) {
     platform = await getPlatform();
     fuse = platform.openFuse();
   } catch (e) {
-    await writeFailedSupervisorStartupStatus(e, writeSupervisorStatus);
+    await writeFailedSupervisorStartupStatus(e, reportSupervisorState);
     Deno.exit(1);
   }
   const {
@@ -579,7 +608,7 @@ export async function main(argv: string[] = Deno.args) {
       console.log("Static mode: hello.txt");
     }
   } catch (e) {
-    await writeFailedSupervisorStartupStatus(e, writeSupervisorStatus);
+    await writeFailedSupervisorStartupStatus(e, reportSupervisorState);
     Deno.exit(1);
   }
 
@@ -3239,7 +3268,7 @@ export async function main(argv: string[] = Deno.args) {
     );
   } catch (e) {
     console.error(String(e));
-    await writeSupervisorStatus("failed", { error: String(e) }).catch(() => {
+    await reportSupervisorState("failed", { error: String(e) }).catch(() => {
       // Best effort; mount failure is already being reported by process exit.
     });
     Deno.exit(1);
@@ -3368,7 +3397,7 @@ export async function main(argv: string[] = Deno.args) {
     };
   }
 
-  await writeSupervisorStatus("mounted").catch((error) => {
+  await reportSupervisorState("mounted").catch((error) => {
     console.warn(`[FUSE] Unable to write mounted supervisor status: ${error}`);
   });
   const supervisorHeartbeat = supervisorStatusPath
