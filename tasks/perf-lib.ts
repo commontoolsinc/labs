@@ -330,12 +330,22 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function responseBodySnippet(resp: Response): Promise<string> {
+function githubApiError(
+  resp: Response,
+  path: string,
+  method: "GET" | "POST" | "PATCH",
+): Error {
+  const statusText = resp.statusText ? ` ${resp.statusText}` : "";
+  return new Error(
+    `GitHub API ${method} ${resp.status}${statusText}: ${path}`,
+  );
+}
+
+async function cancelResponseBody(resp: Response): Promise<void> {
   try {
-    const body = await resp.text();
-    return body.length > 1_000 ? `${body.slice(0, 1_000)}...` : body;
-  } catch (error) {
-    return `Could not read response body: ${error}`;
+    await resp.body?.cancel();
+  } catch {
+    // The GitHub status error remains the reported failure.
   }
 }
 
@@ -366,11 +376,11 @@ export async function githubGet<T>(path: string): Promise<T> {
       !RETRYABLE_GITHUB_STATUSES.has(resp.status) ||
       attempt === GITHUB_GET_MAX_ATTEMPTS
     ) {
-      const body = await resp.text();
-      throw new Error(`GitHub API ${resp.status}: ${path}\n${body}`);
+      await cancelResponseBody(resp);
+      throw githubApiError(resp, path, "GET");
     }
 
-    await resp.body?.cancel();
+    await cancelResponseBody(resp);
     await sleep(githubRetryDelayMs(resp, attempt));
   }
 
@@ -387,8 +397,8 @@ export async function githubPost<T>(
     body: JSON.stringify(body),
   });
   if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`GitHub API POST ${resp.status}: ${path}\n${text}`);
+    await cancelResponseBody(resp);
+    throw githubApiError(resp, path, "POST");
   }
   return resp.json();
 }
@@ -403,8 +413,8 @@ export async function githubPatch<T>(
     body: JSON.stringify(body),
   });
   if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`GitHub API PATCH ${resp.status}: ${path}\n${text}`);
+    await cancelResponseBody(resp);
+    throw githubApiError(resp, path, "PATCH");
   }
   return resp.json();
 }
@@ -708,10 +718,11 @@ export async function downloadAndExtractArtifact(
     }
 
     if (!resp.ok) {
-      const body = await responseBodySnippet(resp);
+      const statusText = resp.statusText ? ` ${resp.statusText}` : "";
       lastError =
-        `GitHub artifact download ${resp.status} ${resp.statusText}: ${body}`;
+        `GitHub artifact download ${resp.status}${statusText}: ${artifactPath}`;
       attemptErrors.push(`attempt ${attempt}: ${lastError}`);
+      await cancelResponseBody(resp);
       if (
         attempt < GITHUB_GET_MAX_ATTEMPTS &&
         RETRYABLE_ARTIFACT_DOWNLOAD_STATUSES.has(resp.status)

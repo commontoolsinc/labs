@@ -616,7 +616,7 @@ Deno.test("fetchPRForCommitWithError captures lookup errors", async () => {
   );
 
   assertEquals(result.pr, null);
-  assertStringIncludes(String(result.error), "GitHub API 404");
+  assertStringIncludes(String(result.error), "GitHub API GET 404");
 });
 
 Deno.test("newestArtifactNamed filters expired artifacts and keeps newest id", () => {
