@@ -4791,6 +4791,10 @@ describe("piece pull materialization", () => {
       expect(source?.files.some((file) => file.contents.includes("v2"))).toBe(
         true,
       );
+      expect(await freshPiece.getPatternRef()).toEqual({
+        ...freshRef,
+        source: "/main.tsx",
+      });
     } finally {
       await freshRuntime.dispose();
     }

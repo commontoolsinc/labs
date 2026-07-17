@@ -36,6 +36,7 @@ import type { CellScope } from "@commonfabric/api";
 import { parseCellPath } from "@commonfabric/runner";
 import { UI } from "@commonfabric/runner";
 import ports from "@commonfabric/ports" with { type: "json" };
+import type { PiecePatternRef } from "@commonfabric/piece/ops";
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;
@@ -76,6 +77,21 @@ function summarizeForDisplay(value: unknown): unknown {
     else out[k] = "[Object]";
   }
   return out;
+}
+
+export function formatPatternRef(
+  patternRef: PiecePatternRef | undefined,
+): string {
+  if (patternRef === undefined) return "<unknown>";
+  return patternRef.source ?? formatPatternIdentity(patternRef);
+}
+
+export function formatPatternIdentity(
+  patternRef: PiecePatternRef | undefined,
+): string {
+  return patternRef === undefined
+    ? "<unknown>"
+    : `cf:module/${patternRef.identity}#${patternRef.symbol}`;
 }
 
 function pieceCallRawArgs(tail: string[], literalArgs: string[]): string[] {
@@ -202,17 +218,19 @@ export const piece = new Command()
         pieces.map((p) => ({
           id: p.id,
           name: p.name ?? null,
+          patternRef: p.patternRef ?? null,
         })),
         { json: true },
       );
       return;
     }
     const piecesData = [
-      ["ID", "NAME"],
+      ["ID", "NAME", "PATTERN"],
       ...(pieces.map(
         (data) => [
           data.id,
           data.error ? `<error: ${data.error}>` : (data.name ?? "<unnamed>"),
+          data.error ? "" : formatPatternRef(data.patternRef),
         ],
       )),
     ];
@@ -430,6 +448,8 @@ export const piece = new Command()
     let output = `
 === Piece: ${pieceData.id} ===
 Name: ${pieceData.name || "<no name>"}
+Pattern: ${formatPatternRef(pieceData.patternRef)}
+Pattern Ref: ${formatPatternIdentity(pieceData.patternRef)}
 
 --- Source (Inputs) ---`;
 

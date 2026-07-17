@@ -5,6 +5,7 @@ import {
   extractDefaultValues,
   getMetaLink,
   getPatternIdentityRef,
+  getPatternSource,
   getValueAtPath,
   isCell,
   isLink,
@@ -165,6 +166,21 @@ interface OuterCellLocalization {
 interface StoredCellTopology {
   value: unknown;
   opaqueHandle: boolean;
+}
+
+/**
+ * Tooling-facing reference to the pattern currently running a piece.
+ *
+ * `identity` is the prefix-free module hash stored in `patternIdentity`;
+ * `identity` + `symbol` are the authoritative content-addressed pointer.
+ * `source` is a best-effort human/discovery locator: explicit `patternSource`
+ * provenance when the piece tracks one, otherwise the authored entry filename
+ * recovered from the current pattern's verified source closure.
+ */
+export interface PiecePatternRef {
+  identity: string;
+  symbol: string;
+  source?: string;
 }
 
 function storedCellTopology(
@@ -2427,6 +2443,32 @@ export class PieceController<T = unknown> {
 
   getCell(): Cell<T> {
     return this.#cell;
+  }
+
+  /** Return a stable reference to the pattern currently running this piece. */
+  async getPatternRef(): Promise<PiecePatternRef | undefined> {
+    const ref = getPatternIdentityRef(this.#cell);
+    if (!ref) return undefined;
+
+    const trackedSource = getPatternSource(this.#cell);
+    if (trackedSource !== undefined) {
+      return { ...ref, source: trackedSource };
+    }
+
+    try {
+      const program = await this.#manager.runtime.patternManager
+        .getPatternSourceProgramByIdentity(
+          ref.identity,
+          this.#manager.getSpace(),
+        );
+      return program?.main === undefined
+        ? ref
+        : { ...ref, source: program.main };
+    } catch {
+      // The content pointer remains useful even if the source closure is
+      // unavailable or unreadable in this space.
+      return ref;
+    }
   }
 
   async setInput(input: object): Promise<void> {

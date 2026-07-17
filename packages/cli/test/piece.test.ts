@@ -10,6 +10,8 @@ import {
 } from "../lib/piece.ts";
 import { SlugResolutionError } from "@commonfabric/piece";
 import {
+  formatPatternIdentity,
+  formatPatternRef,
   normalizeApiUrl,
   parseLink,
   parsePieceOptions,
@@ -24,6 +26,24 @@ const FULL_URL = `${API_URL}/${SPACE}/${PIECE}`;
 const NO_PIECE_FULL_URL = `${API_URL}/${SPACE}`;
 
 describe("cli piece parsing", () => {
+  it("formats structured pattern references for human output", () => {
+    const identity = "A".repeat(43);
+    const patternRef = {
+      identity,
+      symbol: "default",
+      source: "/notes/note.tsx",
+    };
+    expect(formatPatternRef(patternRef)).toBe("/notes/note.tsx");
+    expect(formatPatternIdentity(patternRef)).toBe(
+      `cf:module/${identity}#default`,
+    );
+    expect(formatPatternRef({
+      identity,
+      symbol: "named",
+    })).toBe(`cf:module/${identity}#named`);
+    expect(formatPatternRef(undefined)).toBe("<unknown>");
+  });
+
   it("normalizes API URLs for app route hints", () => {
     expect(normalizeApiUrl(
       "https://rapids.saga-castor.ts.net/",

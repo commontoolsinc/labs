@@ -1027,6 +1027,11 @@ describe("mounted callable resolution and execution", () => {
     const filePath = await createMountedFile(mountpoint, {
       relativePath: "home/pieces/notes-2/result/search.tool",
       pieceId: "of:canonical-piece",
+      patternRef: {
+        identity: "A".repeat(43),
+        symbol: "default",
+        source: "/notes/note.tsx",
+      },
     });
     const harness = createExecHarness({
       callableKind: "tool",
@@ -1059,6 +1064,11 @@ describe("mounted callable resolution and execution", () => {
     });
 
     expect(resolved.pieceId).toBe("of:canonical-piece");
+    expect(resolved.pieceMeta.patternRef).toEqual({
+      identity: "A".repeat(43),
+      symbol: "default",
+      source: "/notes/note.tsx",
+    });
   });
 
   it("resolves callable paths under both pieces and entities", async () => {
@@ -2167,7 +2177,15 @@ async function writeLiveMountState(
 
 async function createMountedFile(
   mountpoint: string,
-  options: { relativePath: string; pieceId: string },
+  options: {
+    relativePath: string;
+    pieceId: string;
+    patternRef?: {
+      identity: string;
+      symbol: string;
+      source?: string;
+    };
+  },
 ): Promise<string> {
   const absPath = join(mountpoint, options.relativePath);
   await Deno.mkdir(dirname(absPath), { recursive: true });
@@ -2180,6 +2198,9 @@ async function createMountedFile(
       id: options.pieceId,
       entityId: options.pieceId,
       name: "Fixture Piece",
+      ...(options.patternRef === undefined
+        ? {}
+        : { patternRef: options.patternRef }),
     }),
   );
 

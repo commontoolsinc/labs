@@ -58,8 +58,9 @@ cf fuse unmount /tmp/cf
         input/                        # exploded input tree
           submit.handler              # handlers/tools can exist under input too
           search.tool
-        meta.json                     # piece ID, entity, pattern name
+        meta.json                     # piece ID, entity, running pattern ref
       .index.json                     # piece name → entity ID mapping
+      pieces.json                     # discovery manifest with pattern refs
     entities/                         # access cells by entity ID
     space.json                        # { did, name }
   .spaces.json                        # known space name → DID mapping
@@ -109,7 +110,7 @@ xattr -p user.json.type home/pieces/todo-app/result/count
 
 # View piece metadata
 cat home/pieces/todo-app/meta.json
-# => {"id":"of:ba4j...","entityId":"ba4j...","name":"todo-app"}
+# => {"id":"of:ba4j...","entityId":"ba4j...","name":"todo-app","patternRef":{"identity":"<hash>","symbol":"default","source":"/todo-app.tsx"}}
 
 # Mounted callables are executable and start with a cf exec shebang
 head -n1 home/pieces/todo-app/result/addItem.handler
@@ -120,6 +121,14 @@ cat home/pieces/todo-app/result.json | jq '.addItem, .search'
 # => {"/handler":"addItem"}
 # => {"/tool":"search"}
 ```
+
+The prefix-free `patternRef.identity` + `patternRef.symbol` are the
+authoritative reference to the artifact currently running the piece
+(`cf:module/<identity>#<symbol>` in display form). `patternRef.source` is
+best-effort: it is the tracked `patternSource` provenance when present,
+otherwise the authored entry filename recovered from the artifact's verified
+source closure. The same object appears in `pieces/pieces.json` for bulk
+discovery.
 
 ### Writing
 

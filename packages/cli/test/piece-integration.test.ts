@@ -15,6 +15,8 @@ import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value"
 import {
   callPieceHandler,
   type EntryConfig,
+  inspectPiece,
+  listPieces,
   newPiece,
   type SpaceConfig,
 } from "../lib/piece.ts";
@@ -35,6 +37,7 @@ const noteEntry: EntryConfig = {
 let pieceId = "";
 let flags = "";
 let identityPath = "";
+let spaceConfig: SpaceConfig;
 
 // Resolves once the piece's result/content cell holds `expected`. Uses its
 // own controller, so readiness is judged from a fresh client's view of the
@@ -71,7 +74,7 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
     const { identity, path } = await writeTempIdentity();
     identityPath = path;
     const spaceName = `cf-piece-get-test-${Date.now()}`;
-    const spaceConfig: SpaceConfig = {
+    spaceConfig = {
       apiUrl: API_URL!,
       space: spaceName,
       identity: identityPath,
@@ -119,5 +122,16 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
     expect(code).toBe(0);
     const json = JSON.parse(stdout.join(""));
     expect(typeof json).toBe("object");
+  });
+
+  it("list and inspect expose the running pattern reference", async () => {
+    const listed = await listPieces(spaceConfig);
+    const listedPiece = listed.find((piece) => piece.id === pieceId);
+    expect(listedPiece?.patternRef?.source).toBe("/notes/note.tsx");
+
+    const inspected = await inspectPiece({ ...spaceConfig, piece: pieceId });
+    expect(inspected.patternRef).toEqual(listedPiece?.patternRef);
+    expect(inspected.patternRef?.identity).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(inspected.patternRef?.symbol).toBe("default");
   });
 });

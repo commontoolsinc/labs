@@ -1,5 +1,6 @@
 // cell-bridge.test.ts — Integration tests for CellBridge using fake piece objects
 import { assertEquals, assertNotEquals } from "@std/assert";
+import { defer } from "@commonfabric/utils/defer";
 import { FsTree } from "./tree.ts";
 import {
   CellBridge,
@@ -115,6 +116,26 @@ class SinkableCell {
   }
 }
 
+class PatternIdentityCell {
+  #sink: (() => void) | undefined;
+
+  asSchema() {
+    return { sync: () => Promise.resolve() };
+  }
+
+  sinkMeta(key: string, sink: () => void): () => void {
+    assertEquals(key, "patternIdentity");
+    this.#sink = sink;
+    return () => {
+      if (this.#sink === sink) this.#sink = undefined;
+    };
+  }
+
+  emit(): void {
+    this.#sink?.();
+  }
+}
+
 function getFileContent(tree: FsTree, parentIno: bigint, name: string): string {
   const ino = tree.lookup(parentIno, name);
   if (ino === undefined) throw new Error(`File "${name}" not found`);
@@ -227,14 +248,19 @@ type WriteFsFile = (
 // Group 1: loadPieceTree — initial tree structure
 // ---------------------------------------------------------------------------
 
-Deno.test("CellBridge.loadPieceTree creates meta.json with id, name", async () => {
+Deno.test("CellBridge.loadPieceTree creates meta.json with a pattern reference", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/cf-exec");
 
   const piece = {
     id: "of:entity-123",
     name: () => "My Note",
-    getPatternMeta: () => Promise.resolve({}),
+    getPatternRef: () =>
+      Promise.resolve({
+        identity: "A".repeat(43),
+        symbol: "default",
+        source: "/notes/note.tsx",
+      }),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
       get: () => Promise.resolve({}),
@@ -254,6 +280,11 @@ Deno.test("CellBridge.loadPieceTree creates meta.json with id, name", async () =
   const meta = JSON.parse(getFileContent(tree, pieceIno, "meta.json"));
   assertEquals(meta.id, "of:entity-123");
   assertEquals(meta.name, "My Note");
+  assertEquals(meta.patternRef, {
+    identity: "A".repeat(43),
+    symbol: "default",
+    source: "/notes/note.tsx",
+  });
 });
 
 Deno.test("CellBridge.loadPieceTree creates stable input/result stubs without eager hydration", async () => {
@@ -1503,6 +1534,11 @@ Deno.test("CellBridge.updatePiecesJson writes cached manifest data without piece
   state.pieceMap.set("Beta", "of:beta");
   state.pieceManifest.set("of:alpha", {
     summary: "alpha summary",
+    patternRef: {
+      identity: "A".repeat(43),
+      symbol: "default",
+      source: "/alpha.tsx",
+    },
   });
   state.pieceManifest.set("of:beta", {
     summary: "beta summary",
@@ -1520,6 +1556,11 @@ Deno.test("CellBridge.updatePiecesJson writes cached manifest data without piece
       name: "Alpha",
       summary: "alpha summary",
       entityPath: "entities/of%3Aalpha",
+      patternRef: {
+        identity: "A".repeat(43),
+        symbol: "default",
+        source: "/alpha.tsx",
+      },
     },
     {
       id: "of:beta",
@@ -1570,6 +1611,75 @@ Deno.test("CellBridge result hydration updates pieces.json summary from current 
 
   // Cancel subscriptions to avoid timer leaks
   const subs = state.pieceSubs.get("Summary-Piece");
+  if (subs) { for (const cancel of subs) cancel(); }
+});
+
+Deno.test("CellBridge refreshes pattern references after an in-place swap", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+  const rootCell = new PatternIdentityCell();
+  let patternRef = {
+    identity: "A".repeat(43),
+    symbol: "default",
+    source: "/notes/note.tsx",
+  };
+  const piece = {
+    id: "of:swapped-piece",
+    name: () => "Swapped Piece",
+    getCell: () => rootCell,
+    getPatternRef: () => Promise.resolve(patternRef),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({ summary: "current" }),
+    },
+  };
+
+  const projectedName = await (bridge as unknown as {
+    addPieceToSpace: AddPieceToSpace;
+  }).addPieceToSpace(state, piece, "home");
+  (bridge as unknown as { updatePiecesJson: UpdatePiecesJson })
+    .updatePiecesJson(
+      state,
+    );
+
+  patternRef = {
+    identity: "B".repeat(43),
+    symbol: "default",
+    source: "/notes/note.tsx",
+  };
+  const pieceIno = state.pieceInos.get(projectedName)!;
+  const refreshed = defer();
+  bridge.onInvalidate = (parentIno, names) => {
+    if (parentIno === pieceIno && names.includes("meta.json")) {
+      refreshed.resolve();
+    }
+  };
+  rootCell.emit();
+  await refreshed.promise;
+
+  assertEquals(
+    JSON.parse(getFileContent(tree, pieceIno, "meta.json")).patternRef,
+    patternRef,
+  );
+  const entityIno = tree.lookup(
+    state.entitiesIno,
+    encodeFuseComponent(piece.id),
+  )!;
+  assertEquals(
+    JSON.parse(getFileContent(tree, entityIno, "meta.json")).patternRef,
+    patternRef,
+  );
+  const piecesJson = JSON.parse(
+    getFileContent(tree, state.piecesIno, "pieces.json"),
+  );
+  assertEquals(piecesJson[0].patternRef, patternRef);
+
+  const subs = state.pieceSubs.get(projectedName);
   if (subs) { for (const cancel of subs) cancel(); }
 });
 

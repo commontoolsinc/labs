@@ -45,6 +45,25 @@ cat "MOUNT/SPACE/pieces/pieces.json"
 4. Verify via `result/summary`
 5. Append wikilink to any source note that motivated the deploy
 
+### Identifying the running pattern
+
+`pieces/pieces.json` and each piece's `meta.json` expose `patternRef`:
+
+```json
+{
+  "identity": "<content-hash>",
+  "symbol": "default",
+  "source": "/annotation.tsx"
+}
+```
+
+The prefix-free `identity` + `symbol` are the authoritative reference to the
+running artifact (`cf:module/<identity>#<symbol>` in display form). `source` is
+a best-effort discovery locator: tracked `patternSource` provenance when
+present, otherwise the authored entry filename recovered from the current
+artifact. Match the entry filename for pattern-kind discovery; do not infer it
+from the piece's mutable display name.
+
 ---
 
 ## Lifecycle Gotchas
@@ -260,7 +279,9 @@ cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c "
 import json, sys
 p = json.load(sys.stdin)
 for x in p:
-    if x.get('patternName','') == 'annotation':
+    ref = x.get('patternRef', {})
+    source = ref.get('source', '') if isinstance(ref, dict) else ''
+    if source.rsplit('/', 1)[-1] == 'annotation.tsx':
         print(x['name'], '—', x.get('summary','')[:60])
 "
 ```
@@ -345,7 +366,9 @@ cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c "
 import json, sys
 p = json.load(sys.stdin)
 for x in p:
-    if x.get('patternName','') == 'agent':
+    ref = x.get('patternRef', {})
+    source = ref.get('source', '') if isinstance(ref, dict) else ''
+    if source.rsplit('/', 1)[-1] == 'agent.tsx':
         print(x['name'], '—', x.get('summary','')[:60])
 "
 ```
