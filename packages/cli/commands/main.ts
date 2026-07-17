@@ -134,10 +134,6 @@ export const main = new Command()
         "--supervisor-status <path:string>",
         "Child readiness and heartbeat status file.",
       )
-      .option(
-        "--supervisor-token <token:string>",
-        "Child readiness status correlation token.",
-      )
       .option("-s, --space <name:string>", "Space(s) to connect.", {
         collect: true,
       })
@@ -162,7 +158,6 @@ export const main = new Command()
             options.dangerouslyAllowIncompatibleSchema,
           statePath: options.statePath,
           supervisorStatusPath: options.supervisorStatus,
-          supervisorToken: options.supervisorToken,
         });
       }),
   )

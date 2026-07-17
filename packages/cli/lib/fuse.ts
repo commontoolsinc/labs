@@ -39,7 +39,6 @@ export interface FuseChildDenoArgsOptions {
   cfcWritebackState?: string;
   dangerouslyAllowIncompatibleSchema?: boolean;
   supervisorStatusPath?: string;
-  supervisorToken?: string;
 }
 
 export interface BackgroundSupervisorDenoArgsOptions
@@ -142,21 +141,45 @@ export async function mountpointHash(mountpoint: string): Promise<string> {
   );
 }
 
-export async function writeMountState(
+/**
+ * Creates the state directory, drops any state file left at the mountpoint's
+ * previous hash, and returns the path this mountpoint's state file belongs at.
+ * Callers that hold write access to the directory run this before a writer that
+ * only holds write access to the single file.
+ */
+export async function prepareMountStatePath(
   stateDir: string,
-  entry: MountStateEntry,
+  mountpoint: string,
 ): Promise<string> {
   await Deno.mkdir(stateDir, { recursive: true });
-  const normalized = normalizeMountStateEntry(entry);
-  const hash = await mountpointHash(normalized.mountpoint);
-  const path = resolve(stateDir, `${hash}.json`);
-  await Deno.writeTextFile(path, JSON.stringify(normalized, null, 2));
-  const legacyHash = await legacyMountpointHash(normalized.mountpoint);
+  const hash = await mountpointHash(mountpoint);
+  const legacyHash = await legacyMountpointHash(mountpoint);
   if (legacyHash !== hash) {
     await Deno.remove(resolve(stateDir, `${legacyHash}.json`)).catch(() =>
       undefined
     );
   }
+  return resolve(stateDir, `${hash}.json`);
+}
+
+/** Writes an entry to an already-prepared state file path. */
+export async function writeMountStateFile(
+  path: string,
+  entry: MountStateEntry,
+): Promise<void> {
+  await Deno.writeTextFile(
+    path,
+    JSON.stringify(normalizeMountStateEntry(entry), null, 2),
+  );
+}
+
+export async function writeMountState(
+  stateDir: string,
+  entry: MountStateEntry,
+): Promise<string> {
+  const normalized = normalizeMountStateEntry(entry);
+  const path = await prepareMountStatePath(stateDir, normalized.mountpoint);
+  await writeMountStateFile(path, normalized);
   return path;
 }
 
@@ -389,9 +412,6 @@ export function buildFuseChildDenoArgs(
   if (opts.supervisorStatusPath) {
     args.push("--supervisor-status", opts.supervisorStatusPath);
   }
-  if (opts.supervisorToken) {
-    args.push("--supervisor-token", opts.supervisorToken);
-  }
   for (const space of opts.spaces ?? []) args.push("--space", space);
 
   return args;
@@ -430,9 +450,6 @@ export function buildFuseBinaryArgs(opts: FuseBinaryArgsOptions): string[] {
   if (opts.supervisorStatusPath) {
     args.push("--supervisor-status", opts.supervisorStatusPath);
   }
-  if (opts.supervisorToken) {
-    args.push("--supervisor-token", opts.supervisorToken);
-  }
   for (const space of opts.spaces ?? []) args.push("--space", space);
 
   return args;
@@ -450,8 +467,7 @@ export function buildBackgroundSupervisorDenoArgs(
   ];
 
   if (opts.statePath) {
-    args.splice(2, 0, `--allow-read=${opts.statePath}`);
-    args.splice(3, 0, `--allow-write=${opts.statePath}`);
+    args.splice(2, 0, `--allow-write=${opts.statePath}`);
     args.push("--state-path", opts.statePath);
   }
 
@@ -478,9 +494,6 @@ export function buildBackgroundSupervisorDenoArgs(
   }
   if (opts.supervisorStatusPath) {
     args.push("--supervisor-status", opts.supervisorStatusPath);
-  }
-  if (opts.supervisorToken) {
-    args.push("--supervisor-token", opts.supervisorToken);
   }
   for (const space of opts.spaces ?? []) args.push("--space", space);
 

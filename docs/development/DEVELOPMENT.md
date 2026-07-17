@@ -496,6 +496,103 @@ sequence above. It reports whether the committed file still matches what the new
 compiler emits. If it does not, regenerate with `deno task gen-cfc-types` and
 commit the result.
 
+### The esbuild dependency
+
+`packages/felt` is the only package that declares esbuild. Its import map holds
+two entries that have to move in step: `npm:esbuild`, which felt calls directly,
+and `jsr:@deno/esbuild-plugin`, which teaches esbuild to resolve and load
+modules the way Deno does. The plugin is what lets felt bundle a source tree
+full of `jsr:` and `npm:` specifiers.
+
+Callers reach felt two ways, and the difference matters below. `packages/shell`
+owns `packages/shell/felt.config.ts`, the only felt config file in the repo, and
+it is the only caller that minifies. Everything else calls felt's exported
+`build()` and passes its own esbuild options: `packages/deno-web-test`, which is
+the browser test runner and forwards each package's `esbuildConfig`;
+`scripts/bundle.ts`; and one shell integration test.
+
+#### Why the pin stops at 0.25.x
+
+esbuild is held at 0.25.x even though 0.28.1 has been released. The constraint
+comes from the plugin rather than from esbuild.
+
+`@deno/esbuild-plugin` declares `npm:esbuild@^0.25.5`. A caret range on a
+version below 1.0 does not let the minor version move, so that range means
+0.25.5 or newer, and older than 0.26.0. Felt declares the same range today. Both
+resolve to one shared copy, and the lockfile holds a single esbuild.
+
+Raising felt's range to 0.28.1 does not raise the plugin's. The two ranges then
+have no version in common, so the lockfile carries 0.25.12 and 0.28.1 side by
+side. The cost is more than a duplicated entry. esbuild ships its compiler as a
+native binary, in a separate package for each platform, and Deno downloads the
+binary for the platform it is running on. The graph then holds two esbuild
+binaries of roughly ten megabytes each, and only one of them ever runs. CI
+restores and saves the Deno dependency cache on every job, so the second binary
+is weight carried in that cache rather than a download repeated per job. Every
+fresh checkout fetches it once.
+
+The second copy is never executed. The plugin's only mention of esbuild is a
+type-only import, which the compiler erases, so nothing in the plugin loads the
+esbuild that import names. Deno resolves and downloads that package anyway,
+which is the only reason the duplicate exists.
+
+That alone does not make the pairing safe, because the calls run the other way:
+esbuild calls the plugin. The plugin implements esbuild's plugin API. It reads
+the resolve and load arguments esbuild hands it, and returns paths and loader
+names. What has to hold is that API rather than the version number, and none of
+the three releases since 0.25 changed it. 0.26.0 changed nothing at all. 0.27.0
+raised the operating system floors of the released binaries. 0.28.0 added an
+integrity check to a fallback download path. Felt's builder tests exercise the
+pairing.
+
+Upstream is aware and has not acted.
+[denoland/deno-esbuild-plugin#36](https://github.com/denoland/deno-esbuild-plugin/issues/36)
+reports this exact duplicate, and no maintainer has replied. The plugin's
+esbuild range has not changed once across its ten releases, while esbuild
+shipped three new minor versions. A stale range costs the maintainers nothing,
+because the import is type-only, so nothing forces them to notice it.
+
+There are two ways around the plugin, and neither pays for itself. Felt could
+drive `@deno/loader` directly, which is the loader the plugin wraps. The
+plugin's value is absorbing that loader's API changes, and the loader is still
+below 1.0 and moving, so felt would inherit that churn. Felt could instead
+switch to `@luca/esbuild-deno-loader`, which sidesteps the duplicate by
+vendoring its own copy of the esbuild type declarations rather than depending on
+the npm package. That package resolves modules by its own reimplementation
+rather than by the Rust crates Deno itself uses, and it has gone untouched about
+a year longer than the plugin has. Either route would make felt the owner of how
+modules are resolved during a build, inside the tool that builds the shell.
+
+Treat 0.25.x as a holding position. The signal to re-evaluate is
+`@deno/esbuild-plugin` widening its esbuild range, or dropping the dependency in
+favour of vendored type declarations. Vendoring the declarations is the fix that
+suits upstream, since the import is type-only, and `@luca/esbuild-deno-loader`
+already does exactly that. If a future esbuild release carries something this
+repo needs, the duplicate is worth accepting. The pairing is safe, and the price
+is cache size.
+
+#### Keep `using` lowering on while the pin stands
+
+`packages/shell/felt.config.ts` sets `supported: { using: false }`, which asks
+esbuild to lower `using` declarations into explicit disposal calls instead of
+emitting them unchanged. The setting is there for output compatibility. On
+0.25.x it also prevents a miscompilation, so it needs to stay until the pin
+moves.
+
+esbuild 0.25.12's minifier sometimes folds a `using` declaration into the next
+use of the variable, and the disposal is lost. `packages/runner/src/traverse.ts`
+has the shape that triggers it, in five places: it declares
+`using t = ...tracker.include(...)` and reads `t` on the following line.
+Disposal is what releases the entry from the cycle tracker, so losing it leaves
+the entry behind. The consequence differs by call site. Where the code tests `t`
+for null and reports a cycle, a later traversal of the same value and schema
+would be read as a cycle that is not there. Where it falls back to the tracker's
+existing entry, that entry would be a stale value.
+
+Two things keep this off the table today. The fold happens only when minifying,
+and the shell is the only caller that minifies. The shell also lowers `using`,
+and the lowered form is not folded. esbuild fixed the underlying bug in 0.28.1.
+
 ### Running Tests
 
 > **Note:** CI enforces that `main` always type-checks and all tests pass, so
