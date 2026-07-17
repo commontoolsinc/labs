@@ -2615,6 +2615,23 @@ function applyAutoProvidedSandboxId(
 /**
  * Handles the invoke tool call (both pattern and handler execution).
  */
+// Bound tool params: cell-valued bindings materialize as Cells (keeping the
+// target's authored schema per CT-1880); plain JSON values pass through.
+// The members are TRUE-ish schemas (asCell is an internal/flag key), not
+// `{type: "unknown"}`: a true reader combines by adopting the link-carried
+// body — nested properties, ifc tags, defaults — while `type: "unknown"`
+// is a passthrough that would shadow them (and redaction needs the nested
+// ifc structure of context docs to survive this read).
+const EXTRA_PARAMS_READ_SCHEMA = {
+  type: "object",
+  additionalProperties: {
+    anyOf: [
+      { asCell: ["cell"] },
+      true,
+    ],
+  },
+} as const;
+
 async function handleInvoke(
   runtime: Runtime,
   space: MemorySpace,
@@ -2639,7 +2656,16 @@ async function handleInvoke(
     pattern = resolved.toolDef.key("pattern").getRaw() as unknown as
       | Readonly<Pattern>
       | undefined;
-    extraParams = resolved.toolDef.key("extraParams").get() ?? {};
+    // Read bound params through an asCell entry schema so cell-valued
+    // bindings materialize as Cells carrying the target's AUTHORED schema
+    // (default, ifc — recovered from the stored sigil, CT-1880). The
+    // invocation-argument write then embeds that schema (includeSchema), so
+    // the tool piece's reads observe the binding's virtual default. A bare
+    // `.get()` would materialize proxies that re-serialize as schema-less
+    // links.
+    extraParams = resolved.toolDef.key("extraParams").asSchema(
+      EXTRA_PARAMS_READ_SCHEMA,
+    ).get() ?? {};
     handler = resolved.toolDef.key("handler");
     useResultSchemaForObservation = Boolean(
       resolved.toolDef.key("useResultSchemaForObservation").get(),

@@ -122,10 +122,12 @@ const PROGRAM: RuntimeProgram = {
         "  remove: Stream<MutateEvent>;",
         "}",
         "",
-        "export const child = pattern<{ seed?: string }, ChildOutput>(",
-        "  ({ seed }) => {",
+        "export const child = pattern<Record<string, never>, ChildOutput>(",
+        "  () => {",
+        "    // CT-1880: static schema default; the protected list gains",
+        "    // entries only through the authorized `mutate` handler.",
         "    const items = new Writable<OwnerProtected<string[], typeof mutate>>(",
-        "      seed ? [seed] : [],",
+        "      [],",
         "    ).for('items');",
         "    return {",
         "      items,",
@@ -136,12 +138,10 @@ const PROGRAM: RuntimeProgram = {
         ");",
         "",
         "const create = handler<",
-        "  { seed?: string },",
+        "  Record<string, never>,",
         "  { children: Writable<ChildOutput[]> }",
-        ">((event, { children }) => {",
-        `  children.push(child.inSpace("${spaceB}")({`,
-        "    seed: event.seed,",
-        "  }) as ChildOutput);",
+        ">((_event, { children }) => {",
+        `  children.push(child.inSpace("${spaceB}")({}) as ChildOutput);`,
         "});",
         "",
         "export default pattern(() => {",
@@ -219,7 +219,7 @@ describe("inSpace child owner-protected write (profile elements)", () => {
       // Fresh tx for the create event: the ifc-carrying schema makes send()
       // read CFC metadata through the cell's tx, and tx1 is already done.
       const tx2 = rt1.edit();
-      r1.withTx(tx2).key("create").send({ seed: "first" });
+      r1.withTx(tx2).key("create").send({});
       const commit2 = await tx2.commit();
       expect(commit2.error).toBeUndefined();
       await r1.pull();
@@ -246,6 +246,12 @@ describe("inSpace child owner-protected write (profile elements)", () => {
       expect(started).toBe(true);
       await rt2.idle();
 
+      // Before any authorized write, the list reads its static schema
+      // default across the space boundary (CT-1880 virtual-default path).
+      const preWrite = childCell.key("items").asSchema(itemListSchema);
+      await preWrite.sync();
+      expect(preWrite.get()).toEqual([]);
+
       // Send the owner-protected WRITE (the regression site). Before the fix the
       // commit was rejected with "writeAuthorizedBy requires a trusted verified
       // binding identity at /" because the warm-load writer identity downgraded
@@ -262,7 +268,7 @@ describe("inSpace child owner-protected write (profile elements)", () => {
       await itemsCell.sync();
       await itemsCell.pull();
       const items = itemsCell.get() as string[];
-      expect([...items].sort()).toEqual(["first", "second"]);
+      expect(items).toEqual(["second"]);
     } finally {
       await rt2.dispose();
       await rt1.dispose();

@@ -98,7 +98,7 @@ by always running an action before the first assertion. Follow the same
 pattern: structure the test as a sequence of `{ action }, { assertion }` pairs
 and skip the pre-action sanity check.
 
-## 5. `scopedCell.get().map()` in a render computed throws until first sync — guard with `?? []`
+## 5. `scopedCell.get().map()` in a render computed can read `undefined` — declare a static initial, or guard with `?? []`
 
 **Symptom:** On a fresh space/session, a console **storm** of
 `TypeError: Cannot read properties of undefined (reading 'map')` (often 100s,
@@ -106,38 +106,50 @@ re-thrown on every settle wave), and a whole section of UI silently fails to
 render — including controls (Edit/Remove buttons, pickers) that should be there.
 No single clear culprit; the error points at minified runtime frames.
 
-**Cause:** A scoped cell's `.get()` returns `undefined` **until its first sync
-settles** (the render-path counterpart of pitfall #4). A render-path `computed`
-that chains an array method straight off it then throws:
+**Cause:** A scoped cell with no declared initial reads `undefined` until
+something writes it. (Before CT-1880 even a *declared* initial hit this: the
+initial was seeded only into the piece-creating session's partition, so every
+other session read `undefined` permanently — a cross-session semantic that was
+easy to misread as a sync-timing race. Since CT-1880, a declared initial is a
+schema-level default observed at read time in every session, so cells WITH a
+static initial no longer read `undefined`.) A render-path `computed` that
+chains an array method straight off an undefined read then throws:
 
 ```typescript
 // Shown for illustration only.
-// WRONG — throws while pendingVehicles (perSession) / people (perSpace) is
-// still undefined before the first sync; the throw repeats every settle wave.
+// WRONG — pendingVehicles (perSession) / people (perSpace) declared with no
+// initial read undefined until written; the throw repeats every settle wave.
 const rows = computed(() => pendingVehicles.get().map((v) => …));
 const sorted = computed(() => [...people.get()].sort(…));      // "not iterable"
 const active = computed(() => spots.get().filter((s) => s.active)); // "reading filter"
 ```
 
-This bites **perSession** cells hardest (they reliably read `undefined` before
-sync) but also **perSpace** on a cold space. A throwing **per-row** computed
-inside a `.map()` (e.g. `activeSpotOpts = computed(() => spots.get().filter(…))`)
-crashes that row's card, which is why its inline controls never appear.
+A throwing **per-row** computed inside a `.map()` (e.g.
+`activeSpotOpts = computed(() => spots.get().filter(…))`) crashes that row's
+card, which is why its inline controls never appear.
+
+The primary fix is to declare a static initial — it becomes the schema
+`default` and every session's reads observe it:
 
 ```typescript
 // Shown for illustration only.
-// CORRECT — guard every render-path scoped read.
+// CORRECT — the [] default is visible at read time in every session.
+const pendingVehicles = Writable.perSession.of<Vehicle[]>([]);
+const rows = computed(() => pendingVehicles.get().map((v) => …));
+```
+
+For cells you can't (or don't) give an initial, guard every render-path read:
+
+```typescript
+// Shown for illustration only.
 const rows = computed(() => (pendingVehicles.get() ?? []).map((v) => …));
 const sorted = computed(() => [...(people.get() ?? [])].sort(…));
 const active = computed(() => (spots.get() ?? []).filter((s) => s.active));
 ```
 
-Note `Default<[]>` on the input type is **not** sufficient — the default hasn't
-hydrated yet at the moment the computed first runs, so the `?? []` guard is still
-required (this is why pitfall #4's "run an action first" trick works for tests
-but render code can't). Handlers/actions run in a settled context, so the same
-chained reads there are usually safe; the danger is the always-evaluating render
-computeds. Fixed across `packages/patterns/factory-outputs/parking-coordinator/main.tsx`.
+Handlers/actions run in a settled context, so the same chained reads there are
+usually safe; the danger is the always-evaluating render computeds. Fixed
+across `packages/patterns/factory-outputs/parking-coordinator/main.tsx`.
 
 ⚠️ **Don't take this `?? []` recipe into a NESTED `.map()`.** Inside an outer
 `rows.map((row) => …)`, an inner `(cellCall() ?? []).map((el) => …)` whose

@@ -49,18 +49,17 @@ const newSharedServer = () =>
   });
 
 // The profile-create flow in miniature: a handler pushes an `inSpace` child
-// whose pattern seeds an OWNER-PROTECTED field from its input —
-// `new Writable<OwnerProtected<...>>(initialName).for("name")`, exactly
-// profile-home.tsx's `name`. The CTS wraps the derived initializer in a lift,
-// so the seed value only exists at runtime; it must still be persisted to the
-// child space like a static initial value. Regression (found 2026-06-11): the
-// runtime-constructed cell's seed survived only as the link schema `default`
-// — its backing doc was never written — so a fresh session read `name` as
-// undefined, and `name` being required collapsed the whole result (blank
-// profile pages). The fix materializes the seed when the cell is first
-// serialized to a link (data-updating.ts BRANCH_CELL), authorized by the
-// doc-creation hatch in cfc/prepare.ts (`writeCreatesProtectedDoc` —
-// writeAuthorizedBy gates modification, not trusted initialization).
+// whose pattern declares an OWNER-PROTECTED field with a STATIC "" default —
+// exactly profile-home.tsx's `name` under CT-1880. The protected cell holds
+// ONLY values written through the authorized handler: the pre-CT-1880
+// input-derived seed (`new Writable<OwnerProtected<...>>(initialName)`) was
+// an ostensibly authoritative value computed from a publicly writable input,
+// so it was never actually authoritative, and it no longer exists. No doc is
+// written at instantiation; a fresh session reading the field must observe
+// the schema default ("") through the cross-space link — the CT-1880
+// virtual-default read path this test pins. `name` is required, so a read
+// that misses the default would collapse the whole result (the historic
+// blank-profile-pages failure shape).
 const PROGRAM: RuntimeProgram = {
   main: "/main.tsx",
   files: [
@@ -101,8 +100,10 @@ const PROGRAM: RuntimeProgram = {
         "",
         "export const child = pattern<{ initialName?: string }, ChildOutput>(",
         "  ({ initialName }) => {",
+        "    // CT-1880: static schema default; the protected value exists",
+        "    // in storage only once setName writes it.",
         "    const name = new Writable<OwnerProtected<string, typeof setName>>(",
-        "      initialName ?? '',",
+        "      '',",
         "    ).for('name');",
         "    return {",
         "      name,",
@@ -137,7 +138,7 @@ const childLinkListSchema = {
   // deno-lint-ignore no-explicit-any
 } as any;
 
-describe("inSpace child owner-protected seed value (profile name)", () => {
+describe("inSpace child owner-protected default value (profile name)", () => {
   let server: MemoryV2Server.Server;
   let managerA: SharedServerStorageManager;
   let managerB: SharedServerStorageManager;
@@ -154,7 +155,7 @@ describe("inSpace child owner-protected seed value (profile name)", () => {
     await server?.close();
   });
 
-  it("a fresh session reads the seeded owner-protected name", async () => {
+  it("a fresh session reads the owner-protected static default", async () => {
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: managerA,
@@ -204,29 +205,28 @@ describe("inSpace child owner-protected seed value (profile name)", () => {
       const childLink = links[0].getAsNormalizedFullLink();
       expect(childLink.space).toBe(spaceB);
 
-      // The creating session itself sees the seed.
-      expect(links[0].key("name").get()).toBe("hi");
+      // The creating session reads the static schema default: nothing is
+      // written at instantiation.
+      expect(links[0].key("name").get()).toBe("");
 
       await rt1.patternManager.flushCompileCacheWrites();
       await rt1.storageManager.synced();
       await rt1.idle();
       await rt1.storageManager.synced();
 
-      // Session 2 (own replicas): the single-field read resolves the seed
-      // from the PERSISTED terminal doc — before the fix the doc was absent
-      // (only the link schema `default` existed) and this read depended on
-      // the default annotation.
+      // Session 2 (own replicas): the doc is deliberately absent — the
+      // single-field read must observe the schema default carried on the
+      // cross-space link (the CT-1880 virtual-default read path).
       const childCell = rt2.getCellFromLink(childLink);
       await childCell.sync();
       const nameCell = childCell.key("name");
       await nameCell.sync();
       await nameCell.pull();
-      expect(nameCell.get()).toBe("hi");
+      expect(nameCell.get()).toBe("");
 
       // The full result resolves after the piece starts (the shell's piece
       // view always starts; the deferred result doc materializes on run) —
-      // with `name` populated. Before the fix `name` stayed undefined here
-      // even after start, because the lift re-run still never wrote the doc.
+      // with `name` observing its schema default.
       const started = await rt2.start(childCell);
       expect(started).toBe(true);
       await rt2.idle();
@@ -235,7 +235,7 @@ describe("inSpace child owner-protected seed value (profile name)", () => {
         | { name?: string }
         | undefined;
       expect(value).toBeDefined();
-      expect(value?.name).toBe("hi");
+      expect(value?.name).toBe("");
     } finally {
       await rt2.dispose();
       await rt1.dispose();

@@ -1074,24 +1074,28 @@ describe("runPattern", () => {
     );
     await result2.pull();
 
-    // Use getRawUntyped({ frozen: false }) for mutable copies
-    const internalCell1 = getDerivedInternalCell(result1, {
+    const nestedDescriptor = {
       partialCause: "nested",
-    });
-    const internalCell2 = getDerivedInternalCell(result2, {
-      partialCause: "nested",
-    });
-    const nested1 = internalCell1.getRawUntyped({ frozen: false }) as any;
-    const nested2 = internalCell2.getRawUntyped({ frozen: false }) as any;
+      scope: "space",
+      schema: { default: { value: "initial" } },
+    } as const;
+    const internalCell1 = getDerivedInternalCell(result1, nestedDescriptor);
+    const internalCell2 = getDerivedInternalCell(result2, nestedDescriptor);
 
-    // Verify they are different objects
-    expect(nested1).not.toBe(nested2);
+    // No document is written at instantiation (CT-1880): the declared
+    // initial is a schema default, observed at read time.
+    expect(internalCell1.getRawUntyped()).toBeUndefined();
+    expect(internalCell1.get()).toEqual({ value: "initial" });
+    expect(internalCell2.get()).toEqual({ value: "initial" });
 
-    // Modify nested object in first instance's mutable copy
-    nested1.value = "modified";
+    // Writing one instance leaves the other's virtual default untouched —
+    // instances stay independent without per-instance seed copies.
+    const writeTx = localRuntime.edit();
+    internalCell1.withTx(writeTx).set({ value: "modified" });
+    await writeTx.commit();
 
-    // Verify second instance is unaffected
-    expect(nested2.value).toBe("initial");
+    expect(internalCell1.get()).toEqual({ value: "modified" });
+    expect(internalCell2.get()).toEqual({ value: "initial" });
 
     await localRuntime.storageManager.synced();
     await localRuntime.dispose();
@@ -1135,12 +1139,15 @@ describe("runPattern", () => {
 
     expect(await result.key("history").pull()).toEqual([]);
     expect(await result.key("count").pull()).toBe(0);
+    // The default is NOT materialized into storage (CT-1880): it stays a
+    // schema-level default, so raw reads of the unwritten doc see undefined
+    // while schema-governed reads (above) observe it.
     expect(
       getDerivedInternalCell(result, {
         partialCause: "history",
         schema: { type: "array", default: [] },
       }).getRawUntyped(),
-    ).toEqual([]);
+    ).toBeUndefined();
   });
 });
 

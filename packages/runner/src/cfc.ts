@@ -643,7 +643,16 @@ export class ContextualFlowControl {
       if (typeof cursor === "boolean") {
         break;
       } else if (ContextualFlowControl.isTrueSchema(cursor)) {
-        // wildcard schema -- equivalent to true, but we can add ifc tags
+        // wildcard schema -- equivalent to true, but we can add ifc tags.
+        // A wildcard's `default` (cfcSchemaIsTrue counts `default` as an
+        // internal key) describes THIS level; the walk is descending past
+        // it, so rebuild cursor without it — a default applies only at the
+        // location where it is declared (strict semantics, CT-1880). This
+        // keeps the invariant that cursor describes the requested path.
+        if (cursor.default !== undefined) {
+          const { default: _default, ...rest } = cursor;
+          cursor = rest;
+        }
         break;
       } else if (cursor.type === "object") {
         if (cursor.ifc !== undefined) {
@@ -720,12 +729,15 @@ export class ContextualFlowControl {
       ? { ...cursor.ifc, confidentiality: this.lub(joined) }
       : cursor.ifc;
     const selectedDefs = selectReferencedCfcSchemaDefs(cursor, defs);
-    const result = { ...cursor, ...(ifc && { ifc }) } as Record<
-      string,
-      unknown
-    >;
-    delete result.$defs;
-    if (selectedDefs !== undefined) result.$defs = selectedDefs;
+    // Build the result in one spread — `cursor` may be a frozen/interned
+    // schema, so the rebuilt key ($defs) is excluded up front rather than
+    // deleted from a copy afterwards.
+    const { $defs: _cursorDefs, ...cursorRest } = cursor;
+    const result: Record<string, unknown> = {
+      ...cursorRest,
+      ...(ifc && { ifc }),
+      ...(selectedDefs !== undefined && { $defs: selectedDefs }),
+    };
     return result as JSONSchema;
   }
 

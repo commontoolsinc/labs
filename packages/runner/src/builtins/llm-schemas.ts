@@ -148,10 +148,15 @@ export const LLMReducedToolSchema = internSchema(
   },
 );
 
+// Flags-only (true-ish) members, not `{type: "unknown"}`: a true reader
+// adopts the link-carried authored schema — nested properties, ifc tags,
+// defaults — while `type: "unknown"` is a passthrough that would degrade
+// the materialized cell's schema to `{type: "unknown", default}` and lose
+// the ifc structure confidentiality redaction depends on (CT-1880).
 const LLMContextEntrySchema = {
   anyOf: [
-    { type: "unknown", asCell: ["cell"] },
-    { type: "unknown", asCell: ["opaque"] },
+    { asCell: ["cell"] },
+    { asCell: ["opaque"] },
   ],
 } as const;
 

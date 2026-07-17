@@ -171,6 +171,14 @@ export type RawCellReadOptions = IReadOptions & {
    * resolve links on the way to the target, but return a final link as data.
    */
   lastNode?: LastNode;
+  /**
+   * When the raw read yields `undefined`, return the cell schema's declared
+   * `default` instead (CT-1880: a `.of()` initial is never written at
+   * instantiation — it rides the schema, and an absent doc still observes
+   * it). The read is journaled either way, so a later real write re-triggers
+   * subscribers. Defaults to false: a raw read reports storage as-is.
+   */
+  schemaDefault?: boolean;
 };
 
 // Shared factory instances for all cells
@@ -676,7 +684,6 @@ export class CellImpl<T extends FabricValue>
         undefined,
       ),
     };
-
     // Use provided container or create one
     // If link has an id, extract it to the container
     this._causeContainer = causeContainer ?? {
@@ -1245,6 +1252,20 @@ export class CellImpl<T extends FabricValue>
      */
     onCommit?: (tx: IExtendedStorageTransaction) => void,
   ): Cell<T> {
+    // A pattern-body `cell.set(runtimeValue)` — the CT-1880 idiom for
+    // initializing a cell with a runtime value — is an instantiation effect.
+    // Reflective body evaluations (registration/serialization flows that
+    // build the pattern graph without a space frame) cannot address the
+    // write; skip it rather than throw. Every real body run carries a space
+    // and performs the write. This state previously always threw ("Cannot
+    // create cell link - space required"), so no working flow loses a write.
+    if (
+      this._link.space === undefined &&
+      this._causeContainer.space === undefined &&
+      this._frame?.space === undefined
+    ) {
+      return this as unknown as Cell<T>;
+    }
     const resolvedToValueLink = resolveLink(
       this.runtime,
       this.runtime.readTx(this.tx),
@@ -2101,15 +2122,26 @@ export class CellImpl<T extends FabricValue>
   getRawUntyped(
     options?: RawCellReadOptions & { frozen?: boolean },
   ): FabricValue {
-    const { frozen = true, lastNode = "top", ...readOptions } = options ?? {};
+    const {
+      frozen = true,
+      lastNode = "top",
+      schemaDefault = false,
+      ...readOptions
+    } = options ?? {};
     if (!this.synced) this.sync(); // No await, just kicking this off
     const tx = this.runtime.readTx(this.tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final
     // link.
-    const value = tx.readValueOrThrow(
+    let value = tx.readValueOrThrow(
       resolveLink(this.runtime, tx, this.link, lastNode),
       readOptions,
     );
+    if (value === undefined && schemaDefault) {
+      const schema = resolveSchema(this.schema);
+      if (isRecord(schema) && schema.default !== undefined) {
+        value = schema.default as FabricValue;
+      }
+    }
     // Deep-copy with desired frozenness, without native unwrapping — getRaw()
     // and getRawUntyped() return fabric-layer values, not native ("wild
     // west") values.
@@ -2823,6 +2855,14 @@ function maybeConvertArrayPathToDataURILink(
  * and has no circular references. Used by Cell.of() to ensure only serializable
  * static data is passed.
  *
+ * This is the runtime backstop for the CT-1880 contract: a cell initial IS the
+ * schema `default` (no document is written at instantiation), so it must be
+ * plain static data that can live in a hashed schema. The CTS enforces
+ * compile-time staticness up front (CellOfStaticInitialValidationTransformer's
+ * `cell-factory:non-static-initial` diagnostic); this check catches what only
+ * exists at runtime — reactive values and cycles smuggled in through data the
+ * transformer had to accept syntactically.
+ *
  * Note: Shared references (same object at multiple paths) are allowed.
  * Only true cycles (object referencing an ancestor) are rejected.
  *
@@ -2847,7 +2887,7 @@ function validateStaticData(value: unknown): void {
         `Cell.of() only accepts static data, but found a reactive value (Cell) at path '${
           path.join(".")
         }'.\n` +
-          "help: use Cell references as handler parameters or in computed() closures instead of embedding them in Cell.of() values",
+          "help: cell initials are schema-level defaults and must be static; write runtime values with cell.set (e.g. in a handler), and pass Cell references as handler parameters or in computed() closures",
       );
     }
 
@@ -2856,7 +2896,7 @@ function validateStaticData(value: unknown): void {
         `Cell.of() only accepts static data, but found a reactive value (CellResult) at path '${
           path.join(".")
         }'.\n` +
-          "help: use .get() to extract the value first, or pass Cell references as handler parameters",
+          "help: cell initials are schema-level defaults and must be static; write runtime values with cell.set (e.g. in a handler), or pass Cell references as handler parameters",
       );
     }
 
@@ -3309,15 +3349,13 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
       // TODO(danfuzz): native values in a `Cell.of(...)` initial value are NOT
       // normalized to their fabric form (e.g. a `Date` stays a raw `Date`
       // instead of becoming a `FabricEpochNsec`), unlike the `set()` write path
-      // (which runs `recursivelyAddIDIfNeeded`). The raw value flows both into
-      // `setInitialValue()` and into the schema `default` via
-      // `schemaWithDefaultAndScope()` above, and reaches storage/encode from
-      // there -- so a `Cell.of(new Date())` throws under the strict codec.
-      // (Normalizing only the `setInitialValue()` arg is insufficient; the
-      // schema-`default` copy still leaks the raw value, and embedding a
-      // `FabricSpecialObject` in a hashed schema `default` is its own hazard.)
-      // Fixing this cleanly is entangled with the initial-value / schema-default
-      // materialization path; left for that follow-up.
+      // (which runs `recursivelyAddIDIfNeeded`). The raw value becomes the
+      // schema `default` via `schemaWithDefaultAndScope()` below and reaches
+      // storage/encode from there -- so a `Cell.of(new Date())` throws under
+      // the strict codec, and embedding a `FabricSpecialObject` in a hashed
+      // schema `default` is its own hazard. In practice the CTS's static-
+      // initial validation rejects such initials before runtime; this only
+      // bites untransformed callers.
 
       // Convert schema to object form and merge default value if value is defined
       // BUT: Don't embed Cell objects in the schema's default property, as this

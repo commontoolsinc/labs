@@ -1028,18 +1028,35 @@ export class Runner {
         });
         setResultCell(derivedCell, resultCell.asSchema(pattern.resultSchema));
 
-        // Seed the build-time default for the freshly created cell. The
-        // manifest entry and this default are written together in one
+        // A user-declared `.of()` default is NOT written at instantiation
+        // (CT-1880): it lives in the descriptor schema, which the manifest
+        // link above embeds (includeSchema) and which every session's pattern
+        // body re-creates via `.of(value, schema)` — reads observe it via
+        // schema `default` application (combineSchema preserves link
+        // defaults). No document exists until the first explicit `.set()`.
+        // A raw seed write here would also go through the base link, which
+        // for scoped cells landed the value in the space partition —
+        // invisible to scope-realized reads.
+        //
+        // The ONE default still seeded is the stream marker: handler `$event`
+        // cells carry `{ "$stream": true }` as their descriptor default, and
+        // instantiateJavaScriptNode refuses to treat a cell as a stream
+        // unless the marker is durably WRITTEN, not virtual. Seeding any
+        // OTHER default would freeze it at instantiation time — a pattern
+        // update that changes the declared default could never reach
+        // already-instantiated pieces.
+        //
+        // The manifest entry and this marker are written together in one
         // transaction, so a manifest-referenced cell is already durable; on a
         // cold-cache resume its value may simply be unsynced. Reading and
-        // seeding only when there is no manifest entry keeps resume read-mostly:
-        // a probe read of the not-yet-loaded value would otherwise enter the
-        // commit's conflict set and lose to the durable value when it streams
-        // in, reverting the whole instantiation commit.
+        // seeding only when there is no manifest entry keeps resume
+        // read-mostly: a probe read of the not-yet-loaded value would
+        // otherwise enter the commit's conflict set and lose to the durable
+        // value when it streams in, reverting the whole instantiation commit.
         const schemaDefault = isRecord(descriptor.schema)
           ? descriptor.schema.default as JSONValue | undefined
           : undefined;
-        if (schemaDefault !== undefined) {
+        if (isStreamValue(schemaDefault)) {
           const currentValue = derivedCell.getRawUntyped({
             meta: ignoreReadForScheduling,
           });

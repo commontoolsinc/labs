@@ -136,10 +136,11 @@ describe("scoped cell default across sessions (CT-1880)", () => {
       await rt1.idle();
       await sm1.synced();
       await rc1.pull();
-      // The creating session's lift read is ALSO schema-governed: the seed
-      // write is skipped when the schema carries a default (getRawUntyped
-      // observes the default as an existing value), so this assertion pins
-      // the same read-path behavior as session 2, not the seed.
+      // The creating session's lift read is ALSO schema-governed. There is no
+      // instantiation seed write (CT-1880): the old seed wrote through the
+      // base link into the SPACE partition, which scope-realized session
+      // reads never consult — so this assertion pins the same read-path
+      // behavior as session 2.
       expect(rc1.key("view").get()).toEqual(42);
 
       // Session 2 loads the SAME piece cold under a different memory session.

@@ -19,6 +19,8 @@ import {
 } from "@commonfabric/data-model/schema-utils";
 import { createCell, isCell } from "./cell.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
+import { isPrimitiveCellLink } from "./link-types.ts";
+import { parseLink } from "./link-utils.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
@@ -36,6 +38,7 @@ import {
   combineSchema,
   createDefaultTraversalContext,
   IObjectCreator,
+  isUnknownOnlySchema,
   mergeAnyOfMatches,
   mergeSchemaFlags,
   SchemaObjectTraverser,
@@ -1161,6 +1164,13 @@ class TransformObjectCreator
           // This code isn't typically reached, since a cell with an asCell
           // schema will have just removed one level from asCell and returned
           // that instead. However, I include it here for completeness.
+          //
+          // NOTE: like the else branch below, this asSchema() replaces the
+          // branch cell's schema wholesale, so an authored `default` the
+          // branch recovered from its stored sigil (CT-1880) would be
+          // dropped here too. The else branch preserves it; this one does
+          // not, because no known flow reaches it with an authored default.
+          // If one ever does, mirror the branchDefault handling below.
           const unwrappedSchema = unwrapAsCellSchema(schema);
           return cellMatch.asSchema(unwrappedSchema) as any;
         } else {
@@ -1171,23 +1181,59 @@ class TransformObjectCreator
           const asCellValues = ContextualFlowControl.getAsCellValues(
             cellMatch.schema,
           );
-          const cacheKey = isDeepFrozen(schema)
-            ? JSON.stringify(asCellValues)
+          // The branch cell's schema may carry the target's AUTHORED
+          // `default` (recovered from the stored sigil at materialization,
+          // CT-1880); the merged combination schema must not drop it. Skip
+          // the memo in that case — its key is per merged-schema and would
+          // otherwise serve one cell's default to another.
+          const branchDefault = isRecord(cellMatch.schema)
+            ? cellMatch.schema.default
             : undefined;
+          const allOfItems = (schema.allOf ?? []).map(removeAsCellFromSchema);
+          const anyOfItems = (schema.anyOf ?? []).map(removeAsCellFromSchema);
+          // When every stripped branch is a vacuous `unknown` (or true), the
+          // anyOf combination constrains nothing — adopt the branch cell's
+          // schema body instead (CT-1880: it carries the target's AUTHORED
+          // properties, ifc tags, and default, recovered from the stored
+          // sigil at materialization). Parent-level keys still win.
+          const anyOfVacuous = allOfItems.length === 0 &&
+            anyOfItems.length > 0 &&
+            anyOfItems.every((branch) =>
+              branch === true || isUnknownOnlySchema(branch) ||
+              ContextualFlowControl.isTrueSchema(branch)
+            );
+          // The memo key is per merged-schema only; skip it whenever the
+          // result depends on the branch cell's schema.
+          const cacheKey =
+            isDeepFrozen(schema) && branchDefault === undefined &&
+              !anyOfVacuous
+              ? JSON.stringify(asCellValues)
+              : undefined;
           if (cacheKey !== undefined) {
             const cached = combinedCellSchemaCache.get(schema)?.get(cacheKey);
             if (cached !== undefined) return cellMatch.asSchema(cached) as any;
           }
-          const allOfItems = (schema.allOf ?? []).map(removeAsCellFromSchema);
-          const anyOfItems = (schema.anyOf ?? []).map(removeAsCellFromSchema);
           // Intern here so the memo holds the canonical instance and the
           // `asSchema` interning below is an identity cache hit.
-          const combinedSchema = internSchema({
-            ...schema,
-            ...(allOfItems.length > 0) && { allOf: allOfItems },
-            ...(anyOfItems.length > 0) && { anyOf: anyOfItems },
-            ...(asCellValues.length > 0) && { asCell: asCellValues },
-          });
+          let combinedSchema: JSONSchema;
+          if (anyOfVacuous && isRecord(cellMatch.schema)) {
+            const { asCell: _branchAsCell, ...branchBody } = cellMatch.schema;
+            const { anyOf: _anyOf, allOf: _allOf, ...parentRest } = schema;
+            combinedSchema = internSchema({
+              ...branchBody,
+              ...parentRest,
+              ...(asCellValues.length > 0) && { asCell: asCellValues },
+            });
+          } else {
+            combinedSchema = internSchema({
+              ...schema,
+              ...(allOfItems.length > 0) && { allOf: allOfItems },
+              ...(anyOfItems.length > 0) && { anyOf: anyOfItems },
+              ...(asCellValues.length > 0) && { asCell: asCellValues },
+              ...(branchDefault !== undefined && schema.default === undefined &&
+                { default: branchDefault }),
+            });
+          }
           if (cacheKey !== undefined) {
             let byKey = combinedCellSchemaCache.get(schema);
             if (byKey === undefined) {
@@ -1285,11 +1331,28 @@ class TransformObjectCreator
         // storage-resolved scope. The asCell entry scope is honored as a
         // follow cap during link resolution, never copied onto the link here
         // (doing so would re-address the value to a different scoped instance).
+        //
+        // The governing schema alone would discard the target's AUTHORED
+        // schema — which carries the `.of()` default (CT-1880) and ifc tags —
+        // but the stored slot value is already in hand: when it is a sigil
+        // link, its embedded schema is the authored one. Combine (governing
+        // wins on conflicts), mirroring validateAndTransform's top-level
+        // combineSchema(resolvedSchema, resolvedLinkSchema). No transaction
+        // read happens here.
+        const governing = unwrapAsCellSchema(schema as JSONSchemaObj);
+        const authored = isPrimitiveCellLink(value)
+          ? resolveSchema(parseLink(value, link)?.schema)
+          : undefined;
+        const combined = authored !== undefined
+          ? governing !== undefined
+            ? combineSchema(governing, authored)
+            : authored
+          : governing;
         return createCell(
           this.runtime,
           {
             ...link,
-            schema: unwrapAsCellSchema(schema as JSONSchemaObj),
+            schema: combined,
           },
           getTransactionForChildCells(this.tx),
           this.synced,

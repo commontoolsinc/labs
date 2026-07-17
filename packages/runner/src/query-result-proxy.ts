@@ -26,6 +26,29 @@ import {
 // Maximum recursion depth to prevent infinite loops
 const MAX_RECURSION_DEPTH = 100;
 
+/**
+ * The schema-declared `default` visible at `link`, or `undefined`. Child
+ * proxy links keep the ancestor's doc-root schema while the path deepens, so
+ * the root `default` is navigated along `link.path` to this node's slice
+ * (e.g. `default: {total: 0}` at `["total"]` -> `0`). A hop-narrowed schema's
+ * own `default` describes `link.path` exactly; navigating it by that path
+ * misses benignly.
+ */
+function schemaDefaultAtPath(
+  link: NormalizedFullLink,
+  schemaPathBase: number,
+): unknown {
+  const schema = link.schema;
+  if (!isRecord(schema) || schema.default === undefined) return undefined;
+  let current: unknown = schema.default;
+  for (const segment of link.path.slice(schemaPathBase)) {
+    if (!isRecord(current) && !Array.isArray(current)) return undefined;
+    current = (current as Record<string, unknown>)[segment];
+    if (current === undefined) return undefined;
+  }
+  return current;
+}
+
 // Container/shape reads (proxy creation, ownKeys, getOwnPropertyDescriptor, has,
 // array length) are recorded as nonRecursive so the engine applies shallow
 // (shape-only) conflict granularity to them — matching how the scheduler
@@ -151,6 +174,18 @@ export function createQueryResultProxy<T>(
   depth: number = 0,
   writable: boolean = false,
   cfcLabelView?: CfcLabelView,
+  // How many leading `link.path` segments the incoming `link.schema` already
+  // describes. Child proxies spread their parent's schema while deepening the
+  // path, so they pass their parent's base; external callers omit it (the
+  // schema is path-exact). See schemaDefaultAtPath.
+  schemaPathBase?: number,
+  // Whether the parent proxy's own backing value was a substituted virtual
+  // default (its doc/subtree is absent). An ANCESTOR default's slice applies
+  // to this node only in that case — strict semantics: a default fills a
+  // node only when the instance at its declaration point is absent. A
+  // default DECLARED at this node's own path applies whenever the node is
+  // absent, parent presence notwithstanding.
+  parentVirtual: boolean = false,
 ): T {
   // Check recursion depth
   if (depth > MAX_RECURSION_DEPTH) {
@@ -163,7 +198,15 @@ export function createQueryResultProxy<T>(
   const readTx = tx === undefined ? runtime.edit() : runtime.readTx(tx);
   const proxyTx = tx ?? readTx;
   const traceStart = readTx.getCfcState().dereferenceTraces.length;
+  const incomingSchema = link.schema;
+  const incomingBase = schemaPathBase ?? link.path.length;
   link = resolveLink(runtime, readTx, link);
+  // Resolution that swapped in a different schema produced a path-exact one
+  // (hop narrowing / target-link schema adoption); only an identity-preserved
+  // schema keeps its shallower attach point.
+  const effectiveSchemaPathBase = link.schema === incomingSchema
+    ? Math.min(incomingBase, link.path.length)
+    : link.path.length;
   cfcLabelView = mergeCfcLabelViews([
     cloneCfcLabelView(cfcLabelView),
     cfcLabelViewForDereferenceTraces(
@@ -171,7 +214,31 @@ export function createQueryResultProxy<T>(
       readTx.getCfcState().dereferenceTraces.slice(traceStart),
     ),
   ]);
-  const value = readTx.readValueOrThrow(link, SHAPE_READ) as any;
+  let value = readTx.readValueOrThrow(link, SHAPE_READ) as any;
+
+  // An absent doc still observes the schema-declared `default` (CT-1880):
+  // a `.of()` initial is never written at instantiation, it rides the link's
+  // schema, so a raw read of the unwritten doc must surface it here — the
+  // single funnel all proxy reads (root and child-path alike) pass through.
+  // The SHAPE_READ above already subscribed this read to the doc, so a later
+  // real write re-triggers consumers. Writes are unaffected: the set trap
+  // goes through diffAndUpdate against the actual (absent) doc.
+  //
+  // Strictness: a default DECLARED at this node's path (empty walk) applies
+  // whenever the node is absent. An ANCESTOR default's slice (non-empty
+  // walk) applies only when the ancestor itself was absent (parentVirtual) —
+  // a written container's missing members stay undefined.
+  let virtualValue = false;
+  if (value === undefined) {
+    const declaredHere = effectiveSchemaPathBase === link.path.length;
+    if (declaredHere || parentVirtual) {
+      const substituted = schemaDefaultAtPath(link, effectiveSchemaPathBase);
+      if (substituted !== undefined) {
+        value = substituted as any;
+        virtualValue = true;
+      }
+    }
+  }
 
   // The SHAPE_READ above only tracks the container's shape, but the stream
   // check depends on a specific field's VALUE. Register an explicit read of
@@ -253,7 +320,13 @@ export function createQueryResultProxy<T>(
       if (Array.isArray(value) && prop === "length") {
         const readTx = runtime.readTx(tx);
         const current = readTx.readValueOrThrow(link) as typeof value;
-        return Array.isArray(current) ? current.length : 0;
+        // Absent doc: `value` may hold the schema-declared virtual default
+        // (CT-1880) — fall back to it, mirroring the ownKeys/has traps.
+        return Array.isArray(current)
+          ? current.length
+          : Array.isArray(value)
+          ? value.length
+          : 0;
       }
 
       // When encountering a frozen property, we just return the value to
@@ -273,10 +346,17 @@ export function createQueryResultProxy<T>(
             return {
               next() {
                 const readTx = runtime.readTx(tx);
-                const length = readTx.readValueOrThrow({
+                const lengthRead = readTx.readValueOrThrow({
                   ...link,
                   path: [...link.path, "length"],
                 }) as number;
+                // Absent doc: fall back to the captured (possibly virtual
+                // default, CT-1880) array's length.
+                const length = typeof lengthRead === "number"
+                  ? lengthRead
+                  : Array.isArray(value)
+                  ? value.length
+                  : 0;
                 if (index < length) {
                   const result = {
                     value: createQueryResultProxy(
@@ -289,6 +369,8 @@ export function createQueryResultProxy<T>(
                       depth + 1,
                       writable,
                       childLabelView(cfcLabelView, String(index)),
+                      effectiveSchemaPathBase,
+                      virtualValue,
                     ),
                     done: false,
                   };
@@ -303,9 +385,15 @@ export function createQueryResultProxy<T>(
 
         const readTx = runtime.readTx(tx);
         const current = readTx.readValueOrThrow(link) as typeof value;
+        // An absent doc read yields undefined while `value` may hold the
+        // schema-declared virtual default (CT-1880) the proxy was built
+        // around — mirror the ownKeys/has traps and fall back to it.
+        const target = isRecord(current) || Array.isArray(current)
+          ? current
+          : value;
 
-        const returnValue = Reflect.get(current, prop, current);
-        if (typeof returnValue === "function") return returnValue.bind(current);
+        const returnValue = Reflect.get(target, prop, target);
+        if (typeof returnValue === "function") return returnValue.bind(target);
         else return returnValue;
       }
 
@@ -323,18 +411,27 @@ export function createQueryResultProxy<T>(
             // methods implicitly read all elements. TODO: Deal with
             // exceptions like at().
             const readTx = runtime.readTx(tx);
-            const length = readTx.readValueOrThrow({
+            const lengthRead = readTx.readValueOrThrow({
               ...link,
               path: [...link.path, "length"],
             }) as number;
+            const stored = readTx.readValueOrThrow(link) as typeof value;
+            // Absent doc: fall back to the captured (possibly virtual
+            // default, CT-1880) array, mirroring the other traps.
+            const current = Array.isArray(stored)
+              ? stored
+              : Array.isArray(value)
+              ? value
+              : undefined;
+            const length = typeof lengthRead === "number"
+              ? lengthRead
+              : current?.length;
 
-            if (typeof length !== "number") {
+            if (typeof length !== "number" || current === undefined) {
               throw new Error(
                 `Array length is not a number for ${prop} operation`,
               );
             }
-
-            const current = readTx.readValueOrThrow(link) as typeof value;
             const copy = new Array(length);
             for (let i = 0; i < length; i++) {
               if (!(i in current)) {
@@ -347,6 +444,8 @@ export function createQueryResultProxy<T>(
                 depth + 1,
                 writable,
                 childLabelView(cfcLabelView, String(i)),
+                effectiveSchemaPathBase,
+                virtualValue,
               );
             }
 
@@ -491,6 +590,8 @@ export function createQueryResultProxy<T>(
         depth + 1,
         writable,
         childLabelView(cfcLabelView, String(prop)),
+        effectiveSchemaPathBase,
+        virtualValue,
       );
     },
     set: (_, prop, value) => {
@@ -538,7 +639,13 @@ export function createQueryResultProxy<T>(
           configurable: false,
           enumerable: false,
           writable: true,
-          value: Array.isArray(current) ? current.length : 0,
+          // Absent doc: fall back to the captured (possibly virtual default,
+          // CT-1880) array's length, matching the `length` get trap.
+          value: Array.isArray(current)
+            ? current.length
+            : Array.isArray(target)
+            ? target.length
+            : 0,
         };
       }
 
@@ -554,7 +661,17 @@ export function createQueryResultProxy<T>(
       }
       const readTx = runtime.readTx(tx);
       const current = readTx.readValueOrThrow(link, SHAPE_READ) as typeof value;
-      if ((isRecord(current) || Array.isArray(current)) && prop in current) {
+      // Absent doc: fall back to the captured value, which may hold the
+      // schema-declared virtual default (CT-1880) — mirroring ownKeys/has.
+      // Without this, JSON.stringify sees keys from ownKeys but no
+      // descriptors, and serializes a defaulted object as {}.
+      const descriptorSource = isRecord(current) || Array.isArray(current)
+        ? current
+        : value;
+      if (
+        (isRecord(descriptorSource) || Array.isArray(descriptorSource)) &&
+        prop in descriptorSource
+      ) {
         return {
           configurable: true,
           enumerable: true,
@@ -566,6 +683,8 @@ export function createQueryResultProxy<T>(
             depth + 1,
             writable,
             childLabelView(cfcLabelView, String(prop)),
+            effectiveSchemaPathBase,
+            virtualValue,
           ),
         };
       }
