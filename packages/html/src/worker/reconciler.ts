@@ -1506,7 +1506,9 @@ export class WorkerReconciler {
     return isPrimitiveValue &&
       existingState !== undefined &&
       existingState.cell === undefined &&
-      existingState.currentValue === value &&
+      // `Object.is`, not `===`: an unchanged `NaN` prop must still be
+      // skippable, and a `0` -> `-0` change is a real change.
+      Object.is(existingState.currentValue, value) &&
       !this.isTextIntegrityProp(state, key) &&
       !DOM_LIVE_PROPS.has(key);
   }
@@ -3466,7 +3468,8 @@ export class WorkerReconciler {
       // value-identity check: the value is unchanged but the render DECISION
       // may have flipped.
       if (
-        !forced && !isInitialRender && resolvedChild === childState.currentValue
+        !forced && !isInitialRender &&
+        Object.is(resolvedChild, childState.currentValue)
       ) {
         return;
       }
