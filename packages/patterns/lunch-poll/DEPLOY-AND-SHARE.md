@@ -82,19 +82,14 @@ SPACE=team-lunch
 
 ## Option A — update the existing piece in place (recommended)
 
-> **⚠️ Blocked on runtimes built from `main` between 2026-07-15 and the merge of
-> [#4785](https://github.com/commontoolsinc/labs/pull/4785).** #4717 ("validate
-> schema-compatible setsrc updates") added a `setsrc`-time gate whose
-> contract-recovery could not prove scoped inputs (this pattern's `myName`, a
-> `PerUser`) or mergeable-pushed list elements (`options.0` etc.), rejecting
-> even an identical-source update with
-> `input link at <path> schema is not compatible: source has no durable schema
-> contract`.
-> [#4785](https://github.com/commontoolsinc/labs/pull/4785) fixes the recovery
-> (gate intact). On an affected runtime, deploy via **Option B** (or a fresh
-> `cf piece new`), neither of which routes through `setsrc`; prod (`rapids`) may
-> predate #4717 entirely and be unaffected. Delete this caveat once #4785 is
-> merged and deployed.
+> **Note:** servers built from `main` between #4717 (2026-07-15) and #4785
+> reject `setsrc` on any piece with a scoped input (this pattern's `myName`) or
+> a pushed list element, with
+> `input link at <path> schema is not compatible:
+> source has no durable schema contract`.
+> If the server you're deploying to is on such a build, upgrade it or use
+> **Option B** (or a fresh `cf piece new`), neither of which routes through
+> `setsrc`.
 
 To push code changes **and keep all accumulated state**, update the source of
 the existing piece. Do **not** run `cf piece new` — that mints a fresh, empty
