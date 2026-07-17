@@ -68,10 +68,18 @@ export class ClaimedAttemptLifecycle<Action extends object> {
   }
 
   cancelAll(): Array<{ claim: ExecutionClaim; action: Action }> {
-    const cancelled = [...this.#attempts.values()].map(({ claim, action }) => ({
-      claim,
-      action,
-    }));
+    return this.cancelMatching(() => true);
+  }
+
+  /** Cancel exactly the attempts whose claim matches — the C1.8 per-lane
+   * reset needs to fence one closed/re-anchored lane without disturbing the
+   * space lane or sibling user lanes. */
+  cancelMatching(
+    matches: (claim: ExecutionClaim) => boolean,
+  ): Array<{ claim: ExecutionClaim; action: Action }> {
+    const cancelled = [...this.#attempts.values()]
+      .filter(({ claim }) => matches(claim))
+      .map(({ claim, action }) => ({ claim, action }));
     for (const { claim, action } of cancelled) this.finish(claim, action);
     return cancelled;
   }

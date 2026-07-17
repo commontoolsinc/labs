@@ -18,6 +18,7 @@ import type {
   ExecutorExecutionMetricsSnapshot,
   SpaceExecutor,
   SpaceExecutorFactory,
+  SpaceExecutorLaneDemand,
   SpaceExecutorStartOptions,
 } from "./shared-execution-pool.ts";
 import type { ExecutorWriterDiscovery } from "./writer-discovery.ts";
@@ -85,10 +86,21 @@ export interface CandidateClaim {
    * credential, session token, or other actor identity crosses either
    * executor IPC channel. */
   readonly causalActorMatchesSponsor?: boolean;
-  /** Worker-side demand epoch; stale closure candidates are ignored after a
-   * demanded-root shrink rebuilds the runtime graph. */
+  /** Worker-side demand epoch of the CANDIDATE'S LANE (A24): the global
+   * epoch for space candidates, the per-lane epoch once user lanes are
+   * wired. Stale closure candidates are ignored after a demanded-root
+   * shrink or a lane reset rebuilds their portion of the runtime graph. */
   readonly demandGeneration?: number;
 }
+
+/** Executor-channel shape of one lane's demand slice (A24): the pool's
+ * SpaceExecutorLaneDemand plus the host-minted per-lane wire generation. */
+type WireLaneDemand = {
+  contextKey: string;
+  pieces: string[];
+  demandGeneration: number;
+  resetClaims?: boolean;
+};
 
 export interface CandidateClaimDiagnostic {
   readonly diagnosticCode: string;
@@ -299,6 +311,16 @@ class DenoSpaceExecutor implements SpaceExecutor {
   #claimControl = Promise.resolve();
   #requestId = 0;
   #demandGeneration = 0;
+  /** Per-lane wire demand generations (A24). Monotonic for the Worker's
+   * lifetime — a lane closed and later reopened resumes ABOVE its old
+   * generation so stale in-flight candidates can never revalidate. */
+  readonly #laneDemandGenerations = new Map<string, number>();
+  /** Lanes currently wired to the Worker. Distinct from the generation map,
+   * which deliberately retains closed lanes' high-water marks. */
+  #liveLaneContexts = new Set<string>();
+  /** Whether this Worker generation ever received a lane wire; candidates
+   * of unknown user lanes are pre-lane (C1.5a) until then. */
+  #lanesWired = false;
   #executionMetrics: ExecutorExecutionMetricsSnapshot = Object.freeze({
     schedulerRuns: 0,
     asyncRequests: 0,
@@ -375,13 +397,15 @@ class DenoSpaceExecutor implements SpaceExecutor {
     const startup = (async () => {
       await this.#booted.promise;
       options.signal?.throwIfAborted();
-      await this.#serializeCandidateAdmission(() =>
-        this.#request("initialize", {
+      const wired = this.#wireLanes(this.#startOptions.lanes);
+      await this.#serializeCandidateAdmission(async () => {
+        await this.#request("initialize", {
           space: this.#startOptions.space,
           branch: this.#startOptions.branch,
           principal: this.#startOptions.lease.onBehalfOf,
           leaseGeneration: this.#startOptions.lease.leaseGeneration,
           pieces: [...this.#startOptions.pieces],
+          ...(wired !== undefined ? { lanes: wired.wire } : {}),
           port: this.#provider.port,
           builtinBrokerPort: this.#builtinBrokerPort,
           apiUrl: options.apiUrl.href,
@@ -390,8 +414,9 @@ class DenoSpaceExecutor implements SpaceExecutor {
           ...(options.protocolFlags !== undefined
             ? { protocolFlags: options.protocolFlags }
             : {}),
-        }, [this.#provider.port, this.#builtinBrokerPort])
-      );
+        }, [this.#provider.port, this.#builtinBrokerPort]);
+        if (wired !== undefined) this.#commitWiredLanes(wired);
+      });
     })();
     await this.#awaitStartup(startup, options.signal);
   }
@@ -427,7 +452,47 @@ class DenoSpaceExecutor implements SpaceExecutor {
     }
   }
 
-  async setDemand(pieces: readonly string[]): Promise<void> {
+  /** Assign wire generations to a lane partition (A24): a lane new to the
+   * Worker, reopened after removal, or explicitly reset gets a bumped
+   * generation; an unchanged live lane keeps its current one. Call sites
+   * commit the returned state only after the Worker acknowledged the wire. */
+  #wireLanes(
+    lanes: readonly SpaceExecutorLaneDemand[] | undefined,
+  ):
+    | { wire: WireLaneDemand[]; live: Set<string> }
+    | undefined {
+    if (lanes === undefined) return undefined;
+    const live = new Set<string>();
+    const wire = lanes.map((lane) => {
+      const previous = this.#laneDemandGenerations.get(lane.contextKey);
+      const bump = lane.resetClaims === true || previous === undefined ||
+        !this.#liveLaneContexts.has(lane.contextKey);
+      const generation = bump ? (previous ?? 0) + 1 : previous;
+      live.add(lane.contextKey);
+      return {
+        contextKey: lane.contextKey,
+        pieces: [...lane.pieces],
+        demandGeneration: generation,
+        ...(lane.resetClaims === true ? { resetClaims: true } : {}),
+      };
+    });
+    return { wire, live };
+  }
+
+  #commitWiredLanes(
+    wired: { wire: WireLaneDemand[]; live: Set<string> },
+  ): void {
+    for (const lane of wired.wire) {
+      this.#laneDemandGenerations.set(lane.contextKey, lane.demandGeneration);
+    }
+    this.#liveLaneContexts = wired.live;
+    this.#lanesWired = true;
+  }
+
+  async setDemand(
+    pieces: readonly string[],
+    lanes?: readonly SpaceExecutorLaneDemand[],
+  ): Promise<void> {
     const next = new Set(pieces);
     await this.#serializeCandidateAdmission(async () => {
       // A shrink is surgical: the Worker stops only the removed roots, and
@@ -437,10 +502,13 @@ class DenoSpaceExecutor implements SpaceExecutor {
       // navigation no longer resets the lane's authority. A claim landing on
       // an action a concurrent shrink already stopped settles as one
       // claim-scoped release rather than a lane failure.
+      const wired = this.#wireLanes(lanes);
       await this.#request("set-demand", {
         pieces: [...next],
         demandGeneration: this.#demandGeneration,
+        ...(wired !== undefined ? { lanes: wired.wire } : {}),
       });
+      if (wired !== undefined) this.#commitWiredLanes(wired);
       this.#demandedPieces.clear();
       for (const piece of next) this.#demandedPieces.add(piece);
     });
@@ -606,9 +674,27 @@ class DenoSpaceExecutor implements SpaceExecutor {
     pending.resolve(message);
   };
 
+  /** Expected demand generation for a candidate's lane (A24): the space
+   * lane keeps the global generation; once lanes are wired, a user
+   * candidate must match ITS live lane's generation — candidates of closed
+   * or re-anchored lane incarnations never revalidate (-1 matches nothing).
+   * Before any lane is wired, user candidates are C1.5a pre-lane and keep
+   * the space check byte-identical. */
+  #expectedCandidateGeneration(contextKey: string): number {
+    if (contextKey === "space" || !this.#lanesWired) {
+      return this.#demandGeneration;
+    }
+    return this.#liveLaneContexts.has(contextKey)
+      ? this.#laneDemandGenerations.get(contextKey) ?? -1
+      : -1;
+  }
+
   async #handleCandidate(candidate: CandidateClaim): Promise<void> {
     this.#onCandidateClaim?.(candidate);
-    if ((candidate.demandGeneration ?? 0) !== this.#demandGeneration) return;
+    if (
+      (candidate.demandGeneration ?? 0) !==
+        this.#expectedCandidateGeneration(candidate.claimKey.contextKey)
+    ) return;
     const key = candidate.claimKey;
     if (
       key.space !== this.#startOptions.space ||

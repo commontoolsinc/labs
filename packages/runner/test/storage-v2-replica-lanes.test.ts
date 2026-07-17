@@ -566,3 +566,74 @@ Deno.test("FA6: revision→instance matching compares resolved scope keys with d
     false,
   );
 });
+
+Deno.test("C1.8: pruning a closed lane reverts scopeKey attribution to declared keys", async () => {
+  const factory = new LaneSessionFactory();
+  const storage = LaneStorageManager.connect(factory, { shadowWrites: true });
+  try {
+    // Engage, then fully drain the lane. Its #executionLanes registration
+    // must not outlive the close (the C1.5b follow-on lifecycle).
+    storage.runWithExecutionLane(SPACE, LANE_A, () => {});
+    storage.pruneExecutionLane(SPACE, LANE_A);
+
+    seedConfirmed(factory, [
+      { id: SCOPED, scope: "user", scopeKey: LANE_A, value: "alice-doc" },
+    ]);
+    await storage.open(SPACE).sync(SCOPED, undefined, "user");
+
+    // With the lane pruned, the upsert lands on today's declared key — the
+    // pre-lane world — instead of a retired lane instance.
+    assertEquals(docValue(storage, SCOPED, "user"), "alice-doc");
+    storage.runWithExecutionLane(SPACE, LANE_B, () => {
+      assertEquals(docValue(storage, SCOPED, "user"), undefined);
+    });
+  } finally {
+    await storage.close();
+  }
+});
+
+Deno.test("C1.8: a pruned lane's still-pending localSeq stays unresolvable for other lanes", async () => {
+  const factory = new LaneSessionFactory();
+  const actionA = {};
+  const actionB = {};
+  const router: ActionTransactionRouter = (input) =>
+    input.sourceAction === actionA
+      ? { disposition: "local", kind: "executor-shadow" }
+      : { disposition: "upstream" };
+  const storage = LaneStorageManager.connect(factory, {
+    shadowWrites: true,
+    actionTransactionRouter: router,
+    executionLaneForAction: (action) =>
+      action === actionA ? LANE_A : action === actionB ? LANE_B : undefined,
+  });
+  try {
+    seedConfirmed(factory, [{ id: SHARED, value: "base" }]);
+    await storage.open(SPACE).sync(SHARED);
+
+    // Lane A parks an unconfirmed pending version, then its lane closes.
+    await writeDoc(storage, SHARED, "a-pending", { sourceAction: actionA });
+    storage.pruneExecutionLane(SPACE, LANE_A);
+
+    // A16 must keep holding for the straggler: pruning may forget only
+    // SETTLED attributions — a pending localSeq that fell back to "space"
+    // would leak lane A's unconfirmed version into lane B's baseline.
+    await writeDoc(storage, OUT, "b-out", {
+      sourceAction: actionB,
+      readIds: [SHARED],
+    });
+    const upstream = factory.commits.find((commit) =>
+      commit.operations.some((operation) =>
+        operation.op !== "sqlite" && operation.id === OUT
+      )
+    );
+    assert(upstream !== undefined, "lane B's commit reached the host");
+    assertEquals(upstream.reads.pending, []);
+    const sharedRead = upstream.reads.confirmed.find((read) =>
+      read.id === SHARED
+    );
+    assert(sharedRead !== undefined, "lane B's commit read the shared doc");
+    assertEquals(sharedRead.seq, 1);
+  } finally {
+    await storage.close();
+  }
+});

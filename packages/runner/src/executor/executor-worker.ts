@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
 import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { SchedulerExecutionContextKey } from "@commonfabric/memory/v2/engine";
 import {
   type ActionClaimKey,
   actionClaimMapKey,
@@ -78,6 +79,16 @@ type WorkerRequest = {
   claim?: ExecutionClaim;
   demandGeneration?: number;
   resetClaims?: boolean;
+  /** Lane-partitioned user demand (A24). Absent on the pre-lane wire; once
+   * present, the array is the complete set of live user lanes. */
+  lanes?: WireLaneDemand[];
+};
+
+type WireLaneDemand = {
+  contextKey: string;
+  pieces: string[];
+  demandGeneration: number;
+  resetClaims?: boolean;
 };
 
 const worker = globalThis as unknown as DedicatedWorkerGlobalScope;
@@ -101,6 +112,13 @@ let permanentBuiltinFailureByAction = new WeakMap<
 const claimedAttempts = new ClaimedAttemptLifecycle<Action>();
 let claimsByAction = new WeakMap<object, ExecutionClaim>();
 let demandGeneration = 0;
+/** Per-lane demand: the lane principal's aggregated pieces and the lane's
+ * OWN wire demand generation (A24). Candidates of a user lane carry this
+ * generation, never the space one. */
+const laneDemands = new Map<
+  string,
+  { pieces: Set<string>; generation: number }
+>();
 let selectiveWake: SelectiveDemandWakeQueue | null = null;
 let detachOtelBridge: (() => void) | undefined;
 let detachExecutionMetrics: (() => void) | undefined;
@@ -276,11 +294,78 @@ const releaseClaimedAttempt = (
   worker.postMessage({ type, claim, diagnosticCode });
 };
 
-const cancelClaimedAttempts = (): void => {
-  for (const { claim, action } of claimedAttempts.cancelAll()) {
+const cancelClaimedAttempts = (lane?: string): void => {
+  const cancelled = lane === undefined
+    ? claimedAttempts.cancelAll()
+    : claimedAttempts.cancelMatching((claim) => claim.contextKey === lane);
+  for (const { claim, action } of cancelled) {
     deleteExactClaimForAction(claimsByAction, claim, action);
   }
 };
+
+const validateWireLanes = (
+  lanes: unknown,
+): WireLaneDemand[] | undefined => {
+  if (lanes === undefined) return undefined;
+  if (
+    !Array.isArray(lanes) ||
+    !lanes.every((lane) =>
+      typeof lane?.contextKey === "string" && lane.contextKey !== "space" &&
+      Array.isArray(lane.pieces) &&
+      lane.pieces.every((piece: unknown) => typeof piece === "string") &&
+      Number.isSafeInteger(lane.demandGeneration) &&
+      Number(lane.demandGeneration) > 0
+    )
+  ) {
+    throw new Error("executor lane demand is malformed");
+  }
+  return lanes as WireLaneDemand[];
+};
+
+/** Reconcile the complete lane set (A24). Removal is a full lane drain:
+ * cancel exactly that lane's claimed attempts and prune the replica's lane
+ * records (the C1.5b follow-on). A resetClaims or generation bump fences a
+ * re-anchored lane the same way without touching siblings. `undefined`
+ * means the pre-lane wire — state stays untouched, byte-identical. */
+const applyLaneDemands = (lanes: WireLaneDemand[] | undefined): void => {
+  if (lanes === undefined) return;
+  const next = new Set(lanes.map((lane) => lane.contextKey));
+  for (const contextKey of [...laneDemands.keys()]) {
+    if (next.has(contextKey)) continue;
+    cancelClaimedAttempts(contextKey);
+    laneDemands.delete(contextKey);
+    if (space !== null) {
+      storage?.pruneExecutionLane(
+        space,
+        contextKey as SchedulerExecutionContextKey,
+      );
+    }
+  }
+  for (const lane of lanes) {
+    const existing = laneDemands.get(lane.contextKey);
+    if (lane.demandGeneration < (existing?.generation ?? 0)) {
+      throw new Error("executor lane demand generation is malformed");
+    }
+    if (
+      lane.resetClaims === true ||
+      (existing !== undefined && lane.demandGeneration > existing.generation)
+    ) {
+      cancelClaimedAttempts(lane.contextKey);
+    }
+    laneDemands.set(lane.contextKey, {
+      pieces: new Set(lane.pieces),
+      generation: lane.demandGeneration,
+    });
+  }
+};
+
+/** A candidate carries ITS lane's demand generation (A24). User candidates
+ * without a wired lane fall back to the space generation — the C1.5a
+ * pre-lane behavior the host validates them against. */
+const candidateDemandGeneration = (contextKey: string): number =>
+  contextKey === "space"
+    ? demandGeneration
+    : laneDemands.get(contextKey)?.generation ?? demandGeneration;
 
 const unavailableAddress = (cell: Cell<unknown>): UnavailableCellAddress => {
   const link = cell.getAsNormalizedFullLink();
@@ -466,6 +551,9 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       const causalActorMatchesSponsor = candidate.builtinId === undefined
         ? undefined
         : registerCandidateCausalActor(identity, action);
+      const laneGeneration = candidateDemandGeneration(
+        candidate.claimKey.contextKey,
+      );
       worker.postMessage({
         type: "candidate-claim",
         candidate: {
@@ -473,7 +561,7 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
           ...(causalActorMatchesSponsor !== undefined
             ? { causalActorMatchesSponsor }
             : {}),
-          ...(demandGeneration > 0 ? { demandGeneration } : {}),
+          ...(laneGeneration > 0 ? { demandGeneration: laneGeneration } : {}),
         },
       });
     },
@@ -702,6 +790,9 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
   selectiveWake = new SelectiveDemandWakeQueue((pieceIds) =>
     enqueue(() => pullDemand(new Set(pieceIds)))
   );
+  // Lanes live at startup arrive with initialize so the first candidates
+  // already carry their lane's generation (A24).
+  applyLaneDemands(validateWireLanes(request.lanes));
   // Serialize initial activation with commit-feed retries. A piece-creation
   // commit can arrive while its first sync is in flight; the retry must run
   // after this attempt rather than instantiate the same root concurrently.
@@ -867,6 +958,7 @@ const handle = async (request: WorkerRequest): Promise<void> => {
       }
       demandGeneration = Number(request.demandGeneration);
       if (request.resetClaims === true) cancelClaimedAttempts();
+      applyLaneDemands(validateWireLanes(request.lanes));
       await enqueue(() => replaceDemand(request.pieces!, request.resetClaims));
       break;
     case "wake":

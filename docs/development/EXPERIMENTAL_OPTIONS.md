@@ -216,15 +216,21 @@ propagate](#how-flags-propagate).
   (adversarial-review amendment 8), and session rank stays unservable until
   C2. Candidate PRODUCTION is what this flag gates; claim ISSUANCE is
   additionally gated by `serverPrimaryExecutionClaimRank` on the host, so
-  either dial alone keeps user lanes fully inert.
+  either dial alone keeps user lanes fully inert. Since C1.8 the same flag
+  is also the runner-side leg of the pool's user-lane LIFECYCLE
+  (`SharedExecutionPoolOptions.userLaneCandidates`, wired from this option
+  in toolshed): the shared execution pool opens/renews/closes C1.3 lane
+  grants and sends lane-partitioned set-demand only when this flag, the
+  host's claim-rank dial, AND the `context-lattice-claims-v1` subcapability
+  align.
 - **Current default and planned end state.** Off by default: every
   observation classifies exactly as the space-only executor does (space or
   unservable), zero user-rank candidates are produced, and space-lane
   classification is byte-identical. Enabled only inside the C1.9 two-principal
   measurement gate until user lanes graduate.
-- **Status on 2026-07-16.** Implemented (C1.5a). With the flag on, user-rank
-  candidates still perform no isolated per-lane execution until C1.5b lands
-  the per-lane acting contexts and the re-keyed Worker replica.
+- **Status on 2026-07-16.** Implemented (C1.5a); C1.5b landed the per-lane
+  acting contexts and re-keyed Worker replica, and C1.8 wired the pool's
+  user-lane demand aggregation and lifecycle behind the same flag.
 - **Path to removal.** Graduate user-rank candidacy with the rest of the C1
   gates, fold it into `serverPrimaryExecution` alongside the claim-rank dial,
   then delete the option and its Worker plumbing.

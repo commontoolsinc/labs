@@ -985,6 +985,15 @@ export class StorageManager implements IStorageManager {
     this.#telemetry = telemetry;
   }
 
+  /** C1.8 lane lifecycle: prune a closed user lane's replica records
+   * (#executionLanes/#localSeqLanes). No-op for unopened spaces. */
+  pruneExecutionLane(
+    space: MemorySpace,
+    lane: SchedulerExecutionContextKey,
+  ): void {
+    this.#providers.get(space)?.replica.pruneExecutionLane(lane);
+  }
+
   static open(options: Options) {
     const dynamicHosts = new Map<string, string>();
     const manager = new this(
@@ -2266,6 +2275,27 @@ class SpaceReplica implements ISpaceReplica {
 
   private registerExecutionLane(lane: SchedulerExecutionContextKey): void {
     if (lane !== "space") this.#executionLanes.add(lane);
+  }
+
+  /** C1.8 lane lifecycle (the C1.5b follow-on): forget one CLOSED lane's
+   * records. The caller has already cancelled the lane's claimed attempts,
+   * so no new work arrives under it. localSeq attributions whose commits
+   * are still pending on any document are retained — A16's cross-lane
+   * unresolvability must keep holding for those stragglers until they
+   * settle; a later prune (or replica teardown) collects them. */
+  pruneExecutionLane(lane: SchedulerExecutionContextKey): void {
+    if (lane === "space") return;
+    this.#executionLanes.delete(lane);
+    if (this.#localSeqLanes.size === 0) return;
+    const stillPending = new Set<number>();
+    for (const record of this.#docs.values()) {
+      for (const entry of record.pending) stillPending.add(entry.localSeq);
+    }
+    for (const [localSeq, seqLane] of [...this.#localSeqLanes]) {
+      if (seqLane === lane && !stillPending.has(localSeq)) {
+        this.#localSeqLanes.delete(localSeq);
+      }
+    }
   }
 
   /** Owning lane of a commit: the source action's resolved lane when the

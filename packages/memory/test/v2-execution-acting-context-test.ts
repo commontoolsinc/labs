@@ -892,7 +892,7 @@ Deno.test("through a sponsor-bound provider session, a user lane commits as its 
   }
 });
 
-Deno.test("acting-principal WRITE loss fences the provider commit as lane-write-authority", async () => {
+Deno.test("acting-principal WRITE loss drains the lane before a later commit (claim-not-live)", async () => {
   const server = createActingServer("memory-v2-acting-context-write-loss");
   rankDial.resetServerPrimaryExecutionClaimRankConfig();
   const bobClient = await connectActingClient(server);
@@ -946,9 +946,15 @@ Deno.test("acting-principal WRITE loss fences the provider commit as lane-write-
     });
 
     const output = serverAddress("user", "of:acting-write-loss-output");
+    // C1.8: the awaited ACL response has already reconciled — the lane whose
+    // principal lost WRITE is drained (generation fenced, claims revoked)
+    // before any later commit arrives, so the deterministic wire outcome is
+    // claim-not-live, not the commit-time lane-write-authority fence. That
+    // commit-time check remains the TOCTOU backstop for a commit racing the
+    // reconciliation itself; its deterministic coverage is an engine-level
+    // fixture owed with C1.10 (wire ordering cannot force the interleaving).
     const before =
-      server.executionStats.leaseFenceRejectCauses["lane-write-authority"] ??
-        0;
+      server.executionStats.leaseFenceRejectCauses["claim-not-live"] ?? 0;
     await assertRejects(
       () =>
         bobSession.transact({
@@ -965,10 +971,10 @@ Deno.test("acting-principal WRITE loss fences the provider commit as lane-write-
           }),
         }),
       Error,
-      "WRITE",
+      "not live",
     );
     assertEquals(
-      server.executionStats.leaseFenceRejectCauses["lane-write-authority"],
+      server.executionStats.leaseFenceRejectCauses["claim-not-live"],
       before + 1,
     );
   } finally {

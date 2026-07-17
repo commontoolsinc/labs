@@ -42,6 +42,7 @@ const demand = (
   connectionId: `connection:${index}`,
   principal: `did:key:z6Mk-user-${index}`,
   pieces,
+  negotiatesContextLatticeClaims: false,
 });
 
 const acceptedCommit = ({
@@ -656,6 +657,10 @@ Deno.test("shared execution pool unions ten client references into one worker", 
       parkedWakeAttempts: 0,
       parkedWakeStarts: 0,
       demandEmptyHibernations: 0,
+      userLanesOpened: 0,
+      userLanesClosed: 0,
+      userLaneReanchors: 0,
+      activeUserLanes: 0,
     });
 
     await control.emit(2, demands.slice(1));
@@ -703,6 +708,10 @@ Deno.test("shared execution pool unions ten client references into one worker", 
       parkedWakeAttempts: 0,
       parkedWakeStarts: 0,
       demandEmptyHibernations: 1,
+      userLanesOpened: 0,
+      userLanesClosed: 0,
+      userLaneReanchors: 0,
+      activeUserLanes: 0,
     });
     assertEquals(
       getTimingStatsBreakdown()["execution.pool"]?.hibernate?.count,

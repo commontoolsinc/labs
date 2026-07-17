@@ -120,3 +120,29 @@ Deno.test("claimed rejection keeps active retries but releases abandoned attempt
     },
   );
 });
+
+Deno.test("cancelMatching fences exactly one lane's attempts (C1.8 per-lane reset)", async () => {
+  const lifecycle = new ClaimedAttemptLifecycle<object>();
+  const laneKey = "user:did%3Akey%3Az6Mk-lane-alice" as const;
+  const spaceAction = {};
+  const laneAction = {};
+  const spaceClaim = claim(1);
+  const laneClaim: ExecutionClaim = {
+    ...claim(1),
+    actionId: "action:lane-attempt",
+    contextKey: laneKey,
+  };
+  const spaceHandle = lifecycle.start(spaceClaim, spaceAction);
+  const laneHandle = lifecycle.start(laneClaim, laneAction);
+
+  const cancelled = lifecycle.cancelMatching((attempt) =>
+    attempt.contextKey === laneKey
+  );
+  assertEquals(cancelled, [{ claim: laneClaim, action: laneAction }]);
+  assertEquals(await laneHandle.routeReady, "released");
+  await laneHandle.finalSettlement;
+  // The space lane's attempt is untouched and still settles normally.
+  assertEquals(lifecycle.size, 1);
+  assertEquals(lifecycle.finish(spaceClaim, spaceAction), true);
+  await spaceHandle.finalSettlement;
+});

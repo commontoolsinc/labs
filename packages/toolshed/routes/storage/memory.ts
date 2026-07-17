@@ -72,6 +72,11 @@ export function startServerExecutionPool(runtime: Runtime): void {
   ) return;
   executionPool = new SharedExecutionPool({
     control: memoryServer,
+    // C1.8: user-lane lifecycle engages only with the full dial triple —
+    // this runner dial plus the host's issuance rank dial and the
+    // context-lattice subcapability (checked live via the control).
+    userLaneCandidates:
+      runtime.experimental.serverPrimaryExecutionUserRankCandidates === true,
     factory: new DenoSpaceExecutorFactory({
       server: memoryServer,
       apiUrl: new URL(env.API_URL),

@@ -1182,3 +1182,187 @@ Deno.test("a stale-generation release does not revoke a newer incarnation", asyn
     await executor.stop();
   }
 });
+
+// --- C1.8 (A24): lane-partitioned demand wire and per-lane generations ---
+
+const USER_LANE = "user:did%3Akey%3Az6Mk-candidate-alice";
+const USER_CLAIM_KEY: ActionClaimKey = {
+  ...CLAIM_KEY,
+  contextKey: USER_LANE as ActionClaimKey["contextKey"],
+};
+
+type WireSetDemand = {
+  type?: string;
+  pieces?: string[];
+  lanes?: {
+    contextKey: string;
+    pieces: string[];
+    demandGeneration: number;
+    resetClaims?: boolean;
+  }[];
+};
+
+const setDemandMessages = (worker: FakeWorker): WireSetDemand[] =>
+  worker.messages.filter((message) =>
+    (message as WireSetDemand).type === "set-demand"
+  ) as WireSetDemand[];
+
+Deno.test("lane demand wire mints monotonic per-lane generations and keeps the pre-lane shape", async () => {
+  const { worker, crashes, executor } = await startExecutor({ routing: true });
+  try {
+    // Lane-less demand: the wire is byte-identical to the pre-lane shape.
+    await executor.setDemand([CLAIM_KEY.pieceId]);
+    assertEquals("lanes" in setDemandMessages(worker)[0], false);
+
+    // First lane appearance mints generation 1.
+    await executor.setDemand([CLAIM_KEY.pieceId], [{
+      contextKey: USER_LANE,
+      pieces: [CLAIM_KEY.pieceId],
+    }]);
+    assertEquals(setDemandMessages(worker)[1].lanes, [{
+      contextKey: USER_LANE,
+      pieces: [CLAIM_KEY.pieceId],
+      demandGeneration: 1,
+    }]);
+
+    // An unchanged live lane keeps its generation.
+    await executor.setDemand([CLAIM_KEY.pieceId], [{
+      contextKey: USER_LANE,
+      pieces: [CLAIM_KEY.pieceId],
+    }]);
+    assertEquals(setDemandMessages(worker)[2].lanes?.[0].demandGeneration, 1);
+
+    // A pool-signalled reset (re-anchor) bumps and forwards resetClaims.
+    await executor.setDemand([CLAIM_KEY.pieceId], [{
+      contextKey: USER_LANE,
+      pieces: [CLAIM_KEY.pieceId],
+      resetClaims: true,
+    }]);
+    assertEquals(setDemandMessages(worker)[3].lanes, [{
+      contextKey: USER_LANE,
+      pieces: [CLAIM_KEY.pieceId],
+      demandGeneration: 2,
+      resetClaims: true,
+    }]);
+
+    // Close, then reopen: the generation resumes ABOVE its old high-water
+    // mark so stale in-flight candidates can never revalidate.
+    await executor.setDemand([CLAIM_KEY.pieceId], []);
+    assertEquals(setDemandMessages(worker)[4].lanes, []);
+    await executor.setDemand([CLAIM_KEY.pieceId], [{
+      contextKey: USER_LANE,
+      pieces: [CLAIM_KEY.pieceId],
+    }]);
+    assertEquals(setDemandMessages(worker)[5].lanes?.[0].demandGeneration, 3);
+    assertEquals(crashes, []);
+  } finally {
+    await executor.stop();
+  }
+});
+
+Deno.test("startup lanes ride the initialize wire with minted generations", async () => {
+  const worker = new FakeWorker();
+  const server = new ClaimRecordingServer();
+  const channel = new MessageChannel();
+  const factory = new DenoSpaceExecutorFactory({
+    server: server as unknown as Server,
+    apiUrl: new URL("https://toolshed.example/"),
+    protocolFlags: {
+      serverPrimaryExecutionV1: true,
+      serverPrimaryExecutionClaimRoutingV1: true,
+      serverPrimaryExecutionBuiltinPassivityV1: true,
+    },
+    now: () => 0,
+    createWorker: () => {
+      queueMicrotask(() => worker.boot());
+      return worker;
+    },
+    createProvider: () => ({
+      port: channel.port1,
+      dispose: () => {
+        channel.port2.close();
+        return Promise.resolve();
+      },
+    }),
+  });
+  const executor = await factory.start({
+    space: SPACE,
+    branch: BRANCH,
+    lease: LEASE,
+    pieces: [CLAIM_KEY.pieceId],
+    lanes: [{
+      contextKey: USER_LANE,
+      pieces: [CLAIM_KEY.pieceId],
+      resetClaims: true,
+    }],
+    onCrash: () => {},
+  });
+  try {
+    const initialize = worker.messages.find((message) =>
+      (message as { type?: string }).type === "initialize"
+    ) as WireSetDemand;
+    assertEquals(initialize.lanes, [{
+      contextKey: USER_LANE,
+      pieces: [CLAIM_KEY.pieceId],
+      demandGeneration: 1,
+      resetClaims: true,
+    }]);
+  } finally {
+    await executor.stop();
+  }
+});
+
+Deno.test("user candidates validate against their own lane's generation", async () => {
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: true,
+  });
+  try {
+    // Pre-lane (C1.5a) compatibility: before any lane is wired, a user
+    // candidate rides the space generation check byte-identically. A
+    // distinct action keeps its live claim from occluding later candidates.
+    worker.candidate({
+      ...USER_CLAIM_KEY,
+      actionId: "cf:module/abc:compute:pre-lane",
+    });
+    await flushClaimControl();
+    assertEquals(server.claimRequests.length, 1);
+
+    await executor.setDemand([CLAIM_KEY.pieceId], [{
+      contextKey: USER_LANE,
+      pieces: [CLAIM_KEY.pieceId],
+      resetClaims: true,
+    }]);
+
+    // resetClaims wired generation 1; a candidate minted before the reset
+    // (no generation) is stale and never claims.
+    worker.candidate(USER_CLAIM_KEY);
+    await flushClaimControl();
+    assertEquals(server.claimRequests.length, 1);
+
+    // The lane's current generation claims.
+    worker.candidate(USER_CLAIM_KEY, { demandGeneration: 1 });
+    await flushClaimControl();
+    assertEquals(server.claimRequests.length, 2);
+    assertEquals(server.claimRequests[1].claimKey, USER_CLAIM_KEY);
+
+    // A candidate of a lane that is NOT wired is dropped once lanes are
+    // engaged — its server-side grant is gone (routing disjointness).
+    worker.candidate(
+      {
+        ...CLAIM_KEY,
+        contextKey: "user:did%3Akey%3Az6Mk-candidate-bob",
+      } as ActionClaimKey,
+      { demandGeneration: 1 },
+    );
+    await flushClaimControl();
+    assertEquals(server.claimRequests.length, 2);
+
+    // Space candidates stay on the global generation, untouched by lanes.
+    worker.candidate(CLAIM_KEY);
+    await flushClaimControl();
+    assertEquals(server.claimRequests.length, 3);
+    assertEquals(crashes, []);
+  } finally {
+    await executor.stop();
+  }
+});

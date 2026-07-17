@@ -511,6 +511,11 @@ export interface AuthenticatedExecutionDemand {
   readonly connectionId: string;
   readonly principal: string;
   readonly pieces: readonly string[];
+  /** Whether the demanding session negotiated context-lattice-claims-v1 on
+   * its current attach (C1.8/A24). The pool may aggregate a principal's
+   * demand into a user lane only from negotiating sessions; the field is
+   * additive so non-lane consumers observe an unchanged row shape. */
+  readonly negotiatesContextLatticeClaims: boolean;
 }
 
 export interface ExecutionDemandSnapshot {
@@ -2892,6 +2897,8 @@ export class Server {
             connectionId: connection.id,
             principal: session.principal,
             pieces: Object.freeze([...message.pieces]),
+            negotiatesContextLatticeClaims:
+              session.serverPrimaryExecutionContextLatticeClaimsV1,
           }),
         );
       }
@@ -3850,6 +3857,68 @@ export class Server {
     ) ?? null;
   }
 
+  /** Host-side pair of the C1.5a runner dial (C1.8 inertness pin): user
+   * lanes may open only while the issuance rank dial admits user rank AND
+   * this host advertises context-lattice-claims-v1. Mirrors
+   * #executionClaimRankEnabled's user-rank condition — a lane the host could
+   * never issue claims for is pure wake-widening overhead. */
+  executionUserLanesEnabled(): boolean {
+    return getServerPrimaryExecutionClaimRankConfig() === "user" &&
+      this.memoryProtocolFlags().serverPrimaryExecutionContextLatticeClaimsV1;
+  }
+
+  /** Pool-driven full drain (C1.8 lifecycle): close exactly this grant
+   * incarnation when the last demanding session of its principal departs.
+   * Returns false when the incarnation is already gone (a concurrent
+   * disconnect/ACL drain won). */
+  closeUserLaneGrant(grant: UserLaneGrant): boolean {
+    const key = userLaneKey(grant.space, grant.branch, grant.contextKey);
+    if (this.#userLaneGrants.get(key) !== grant) return false;
+    this.#drainUserLane(grant);
+    return true;
+  }
+
+  /** Open lane grants on one (space, branch) — the A4 wake-widening input.
+   * Deterministically ordered so per-lane stale-reader lookups and their
+   * counters replay stably. */
+  #openUserLaneGrantsFor(
+    space: string,
+    branch: BranchName,
+  ): UserLaneGrant[] {
+    return [...this.#userLaneGrants.values()]
+      .filter((grant) => grant.space === space && grant.branch === branch)
+      .sort((left, right) => left.contextKey.localeCompare(right.contextKey));
+  }
+
+  /** A2 third leg (C1.8): after an ACL commit, fence and drain user lanes
+   * whose principal lost WRITE or whose anchor session was removed by the
+   * ACL reconciliation. Synchronous like #drainUserLane — callers await the
+   * demand republish barrier afterwards, exactly the lease-drain
+   * publish-before-response discipline. Returns the touched branches. */
+  #drainIneligibleUserLanes(
+    engine: Engine.Engine,
+    space: string,
+  ): Set<BranchName> {
+    const branches = new Set<BranchName>();
+    for (const grant of [...this.#userLaneGrants.values()]) {
+      if (grant.space !== space) continue;
+      const capability = this.#resolveCapability(
+        engine,
+        space,
+        grant.principal,
+      );
+      if (
+        capability !== null && isCapable(capability, "WRITE") &&
+        this.#laneGrantAnchorConnected(grant)
+      ) {
+        continue;
+      }
+      this.#drainUserLane(grant);
+      branches.add(grant.branch);
+    }
+    return branches;
+  }
+
   /** Drain one lane: fence its generation FIRST (remove the live grant, so
    * every re-validation — racing issuance, renewal, the commit fence —
    * observes the fence), THEN revoke exactly that lane's claims. Sibling
@@ -4487,13 +4556,45 @@ export class Server {
         ),
       ]),
     ].sort((left, right) => left - right));
+    const branchDemands = this.listExecutionDemands(
+      event.space,
+      event.commit.branch,
+    );
     const demandedSchedulerPieceIds = [
       ...new Set(
-        this.listExecutionDemands(event.space, event.commit.branch).flatMap(
+        branchDemands.flatMap(
           (demand) => demand.pieces.map(canonicalSchedulerPieceIdForDemandRoot),
         ),
       ),
     ];
+    // A4 wake widening (C1.8): the lookup runs once per lane — the space
+    // lane against the union of all demand, plus every OPEN lane grant on
+    // this (space, branch) against ONLY that principal's aggregated demand.
+    // A parked principal (rows but no lane grant) gets no lane entry, so its
+    // rows accumulate dirt without waking anything (design §4).
+    const laneLookups: {
+      contextKey: Engine.SchedulerExecutionContextKey;
+      pieces: string[];
+    }[] = [{ contextKey: "space", pieces: demandedSchedulerPieceIds }];
+    for (
+      const grant of this.#openUserLaneGrantsFor(
+        event.space,
+        event.commit.branch,
+      )
+    ) {
+      const pieces = [
+        ...new Set(
+          branchDemands
+            .filter((demand) => demand.principal === grant.principal)
+            .flatMap((demand) =>
+              demand.pieces.map(canonicalSchedulerPieceIdForDemandRoot)
+            ),
+        ),
+      ];
+      if (pieces.length > 0) {
+        laneLookups.push({ contextKey: grant.contextKey, pieces });
+      }
+    }
     const engine = this.#openedEngines.get(event.space);
     const dirtyTargets = event.commit.schedulerDirtiedReaders?.map((reader) =>
       reader.read
@@ -4505,27 +4606,32 @@ export class Server {
       dirtyTargets !== undefined
     ) {
       const lookupStartedAt = performance.now();
-      this.executionStats.acceptedCommitIndexLookups += 1;
-      // schedulerDirtiedReaders is action-derived, so two actions may supply
-      // the same address. Count pre-dedup candidates here rather than claiming
-      // this is the engine's internal unique-probe count.
-      this.executionStats.acceptedCommitIndexTargetCandidates +=
-        dirtyTargets.length;
-      this.executionStats.acceptedCommitIndexDemandedPieces +=
-        demandedSchedulerPieceIds.length;
       try {
-        staleDemandedReaders = Object.freeze(
-          Engine.staleReadersForTargets(engine, {
-            branch: event.commit.branch,
-            ownerSpace: event.space,
-            targets: dirtyTargets,
-            demandedSchedulerPieceIds,
-            // Phase 1 claims only provably shared, space-scoped actions. Scoped
-            // rows remain client-primary until delegated contexts arrive.
-            applicableExecutionContextKeys: ["space"],
-            dirtySeq: event.commit.seq,
-          }).map((reader) => Object.freeze({ ...reader })),
-        );
+        const collected: Engine.SchedulerActionState[] = [];
+        for (const lane of laneLookups) {
+          if (lane.pieces.length === 0) continue;
+          this.executionStats.acceptedCommitIndexLookups += 1;
+          // schedulerDirtiedReaders is action-derived, so two actions may
+          // supply the same address. Count pre-dedup candidates here rather
+          // than claiming this is the engine's internal unique-probe count.
+          this.executionStats.acceptedCommitIndexTargetCandidates +=
+            dirtyTargets.length;
+          this.executionStats.acceptedCommitIndexDemandedPieces +=
+            lane.pieces.length;
+          // Context keys are disjoint across lane lookups, so the collected
+          // rows cannot duplicate across calls.
+          collected.push(
+            ...Engine.staleReadersForTargets(engine, {
+              branch: event.commit.branch,
+              ownerSpace: event.space,
+              targets: dirtyTargets,
+              demandedSchedulerPieceIds: lane.pieces,
+              applicableExecutionContextKeys: [lane.contextKey],
+              dirtySeq: event.commit.seq,
+            }).map((reader) => Object.freeze({ ...reader })),
+          );
+        }
+        staleDemandedReaders = Object.freeze(collected);
         this.executionStats.acceptedCommitIndexMatches +=
           staleDemandedReaders.length;
       } finally {
@@ -5564,6 +5670,18 @@ export class Server {
             );
             for (
               const branch of await this.#drainIneligibleExecutionLeases(
+                engine,
+                message.space,
+              )
+            ) {
+              reconciledExecutionBranches.add(branch);
+            }
+            // A2 third leg (C1.8): user lanes are fenced and their claims
+            // revoked in the same reconciliation — a principal who lost
+            // WRITE, or whose anchor session the revocation step removed,
+            // must not keep an executable lane past the ACL response.
+            for (
+              const branch of this.#drainIneligibleUserLanes(
                 engine,
                 message.space,
               )
