@@ -1595,7 +1595,14 @@ de-claims cleanly without a conflict storm (reuse the W2.7 dedupe).
 ### W2.15 — Per-builtin computation descriptors (the R3→R4 cohort)
 
 **Depends on:** W2.11. **Status:** selectors implemented (2026-07-15);
-the materializer cohort moved to W2.16.
+the materializer cohort moved to W2.16. **Re-opened 2026-07-17 (C2
+panel, CA6/CA10):** the `ifElse` single-output-selector descriptor is
+wrong for the lunch-poll/group-chat shape — an undeclared second
+document write — so `server-execution-product-fixtures.test.ts` is red
+with space-rank `dynamic-write-outside-static-surface` on
+`cf:builtin/ifElse:v1` actions (re-verified by direct run 2026-07-17).
+The default-app measurements below were accurate but too narrow a
+population; C2.9/C2.10 now gate on this closure (CA10).
 
 Mirror the existing effect path — `ServerBuiltinActionDescriptor`
 (`packages/runner/src/builtins/server-execution.ts:40-49`) assembled into
@@ -1639,11 +1646,21 @@ client-permanent with its register row updated to say so and why.
 - [x] Remaining unservable verdicts name only the materializer cohort
       (until W2.16) and the recorded `wish` deferral (measured: `map` ×9,
       `wish` ×4, `computeIndex` ×1 — exactly the W2.16 cohort).
+- [ ] Product fixtures (lunch-poll, group-chat) show zero selector-cohort
+      `dynamic-write-outside-static-surface` verdicts (red 2026-07-17 —
+      the CA6 re-open; the `ifElse` descriptor must declare the second
+      document write or the shape must be envelope-served).
 
 ### W2.16 — Serve the materializer class (envelope-granular write completeness)
 
 **Depends on:** W2.11, W2.13, W2.14. **Status:** implemented (2026-07-15,
-both halves). The transformer derives computeIndex's envelopes outright —
+both halves). **Re-opened 2026-07-17 (C2 panel, CA6/CA10):** the map
+materializer envelope does not cover the lunch-poll/group-chat write
+shape — `server-execution-product-fixtures.test.ts` is red with
+space-rank `dynamic-write-outside-static-surface` on `cf:builtin/map:v1`
+actions with empty `uncoveredReads` (re-verified by direct run
+2026-07-17); the default-app zero-verdict measurement below was accurate
+but too narrow a population. The transformer derives computeIndex's envelopes outright —
 no pattern edit: dynamic-descent writes record a bounded envelope prefix
 (`writeEnvelopePaths` + a fail-closed `wildcardUnbounded` proof); the
 runner gives map/filter/flatMap per-builtin materializer descriptors whose
@@ -1713,6 +1730,10 @@ Work items:
       Watch item: `claimedActionConflicts` 20 with the enlarged claimed
       cohort (benign overlay races; settlement latency unaffected) — keep
       in view at the W2.9 parity measurement.
+- [ ] Product fixtures (lunch-poll, group-chat) pass the dynamic claim
+      firewall with zero map/ifElse
+      `dynamic-write-outside-static-surface` verdicts (red 2026-07-17;
+      the CA6/CA10 re-open — C2.9/C2.10 gate on this).
 
 ---
 
