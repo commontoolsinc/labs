@@ -243,6 +243,7 @@ Deno.test(
       "CfcPolicyAuthoringTransformer",
       "CfcPolicyOfValidationTransformer",
       "JsxExpressionSiteRouterTransformer",
+      "AssertDiagnosticsTransformer",
       "LiftLoweringTransformer",
       "ClosureTransformer",
       "PatternOwnedExpressionSiteLoweringTransformer",

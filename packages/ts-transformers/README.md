@@ -149,13 +149,70 @@ onward), and pinned to the constant by `test/spec-sync.test.ts`.
 
 ### Representative Rewrites
 
-| Input Pattern         | Output                                    | Purpose                   |
-| --------------------- | ----------------------------------------- | ------------------------- |
-| `array.map(fn)`       | `array.mapWithPattern(pattern, captures)` | Explicit closure captures |
-| `expr1 * expr2`       | `lift(schema, schema, fn)(inputs)`        | Data flow boundary        |
-| `onClick={() => ...}` | `handler(eventSchema, stateSchema, fn)`   | Handler with dual schemas |
-| `Cell<T>`             | `{ type: "...", asCell: ["cell"] }`       | Writable reactive ref     |
-| `Reactive<T>`         | structural schema without `asOpaque`      | Read-only reactive ref    |
+| Input Pattern         | Output                                    | Purpose                    |
+| --------------------- | ----------------------------------------- | -------------------------- |
+| `array.map(fn)`       | `array.mapWithPattern(pattern, captures)` | Explicit closure captures  |
+| `expr1 * expr2`       | `lift(schema, schema, fn)(inputs)`        | Data flow boundary         |
+| `onClick={() => ...}` | `handler(eventSchema, stateSchema, fn)`   | Handler with dual schemas  |
+| `assert(() => expr)`  | a `computed` whose body records operands  | Test assertion diagnostics |
+| `Cell<T>`             | `{ type: "...", asCell: ["cell"] }`       | Writable reactive ref      |
+| `Reactive<T>`         | structural schema without `asOpaque`      | Read-only reactive ref     |
+
+### Assertion diagnostics
+
+`AssertDiagnostics` rewrites the body of an `assert(...)` call — the builder
+pattern tests use for assertions — so that a failure can report its operands
+instead of only `false`:
+
+```tsx
+// Input
+assert(() => a + b <= c);
+
+// Output (outline): each operand of the top-level operator is recorded under
+// its authored source text, and `assertCapture` returns it unchanged.
+assert((): { ok: boolean; source: string; parts: ... } => {
+  const __cfAssertParts: { src: string; rendered: string }[] = [];
+  const __cfAssertOk: boolean =
+    __cfHelpers.assertCapture(__cfAssertParts, "a + b", a + b) <=
+    __cfHelpers.assertCapture(__cfAssertParts, "c", c);
+  return { ok: __cfAssertOk, source: "a + b <= c", parts: __cfAssertParts };
+});
+```
+
+Recorded: the operands of a comparison or arithmetic operator, the arguments of
+a call, the operand of `!`, and, for `&&`, `||`, `??` and `?:`, each side along
+with what is inside it. Wrapping an operand in a call that returns it unchanged
+leaves evaluation alone, so short-circuiting still holds and an operand that
+never runs is never recorded. Left alone: literal and function operands, whose
+values say nothing the source text does not — for a call whose arguments are all
+of those, the receiver is recorded instead, since `items.every((i) => i.ok)` is
+really a question about `items`. A spread argument is also left alone: the
+recording call takes the operand as one fixed parameter, so wrapping `f(...xs)`
+would pass `xs[0]` where the whole of it belongs and change the call's arity.
+
+Every `return` in the body is rewritten, not just a trailing one, so a body that
+returns early still produces a record. The two locals go through
+`createUniqueName`, so they carry a counter in the real output and a body that
+already binds one of those names keeps its own.
+
+Three things about the stage are load-bearing:
+
+- It runs **before** `LiftLowering`, so the operand labels are the author's own
+  source text. After lowering the same operand would read `a.get() + b.get()`.
+  The lowering that follows rewrites the operands inside the capture calls as it
+  would any other reactive expression.
+- The callback gets an **explicit return type annotation**, because schema
+  injection uses a callback's annotation directly when it has one. An inferred
+  `unknown` return would give the assertion `{ type: "unknown" }`, and a field
+  with that schema reads back as `undefined`.
+- The record shape is emitted **unconditionally**, since `assert` declares that
+  it returns an `AssertRecord` and the value has to match the declared type.
+  `TransformationOptions.assertDiagnostics: false` drops the recording calls and
+  keeps the shape.
+
+The stage rewrites `assert(...)` calls and nothing else, so output for code that
+does not use `assert` is unchanged. See
+`docs/common/workflows/pattern-testing.md` for the authoring side.
 
 ## Additional Documentation
 

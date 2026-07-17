@@ -46,7 +46,7 @@ import type {
 } from "@commonfabric/runner";
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
-import type { Reactive } from "@commonfabric/api";
+import type { AssertPart, AssertRecord, Reactive } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
@@ -121,6 +121,64 @@ function formatError(error: unknown): string {
     : String(error);
 }
 
+/** Indents every line, so a multi-line failure stays aligned under its step. */
+function indentLines(text: string, indent: string): string {
+  return text
+    .split("\n")
+    .map((line) => `${indent}${line}`)
+    .join("\n");
+}
+
+/**
+ * Recognizes the record an `assert(...)` assertion carries. A `computed(...)`
+ * assertion carries a bare boolean instead, so this is what tells the two
+ * apart at the point the harness reads the value.
+ */
+function asAssertRecord(value: unknown): AssertRecord | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const candidate = value as Partial<AssertRecord>;
+  if (
+    typeof candidate.ok !== "boolean" ||
+    typeof candidate.source !== "string" ||
+    !Array.isArray(candidate.parts)
+  ) {
+    return undefined;
+  }
+  const parts = candidate.parts.filter((part): part is AssertPart =>
+    typeof part === "object" && part !== null &&
+    typeof (part as Partial<AssertPart>).src === "string" &&
+    typeof (part as Partial<AssertPart>).rendered === "string"
+  );
+  return { ok: candidate.ok, source: candidate.source, parts };
+}
+
+/**
+ * Renders a failed `assert(...)` as its authored text followed by the operands
+ * recorded while it ran, for example:
+ *
+ *     a + b <= c
+ *       a + b = 3
+ *       c     = 2
+ *
+ * The operands say the assertion was false, so saying it again adds nothing.
+ * An assertion that recorded none — a bare value, or one whose operands are
+ * all literals — has nothing to explain itself with, so that one still reports
+ * what happened rather than restating the source on its own.
+ */
+function formatAssertRecord(record: AssertRecord): string {
+  if (record.parts.length === 0) {
+    return record.source.length > 0
+      ? `Expected true, got false: ${record.source}`
+      : "Expected true, got false";
+  }
+
+  const width = Math.max(...record.parts.map((part) => part.src.length));
+  const lines = record.parts.map((part) =>
+    `  ${part.src.padEnd(width)} = ${part.rendered}`
+  );
+  return [record.source, ...lines].join("\n");
+}
+
 /**
  * A test step is an object with an 'assertion', 'action', 'render', or 'settle'
  * property.
@@ -140,7 +198,7 @@ function formatError(error: unknown): string {
  * reads an async-builtin result to keep the read deterministic under load.
  */
 export type TestStep =
-  | { assertion: Reactive<boolean>; skip?: boolean }
+  | { assertion: Reactive<boolean> | Reactive<AssertRecord>; skip?: boolean }
   | {
     action: Stream<unknown>;
     event?: unknown;
@@ -1579,6 +1637,14 @@ export async function runTestPattern(
             if (value === true) {
               return { passed: true };
             }
+            // An `assert(...)` assertion carries the operands recorded by the
+            // evaluation that produced this value, so report them.
+            const record = asAssertRecord(value);
+            if (record) {
+              return record.ok
+                ? { passed: true }
+                : { passed: false, error: formatAssertRecord(record) };
+            }
             return {
               passed: false,
               error: `Expected true, got ${toCompactDebugString(value)}`,
@@ -1808,7 +1874,7 @@ export async function runTests(
         const skipLabel = test.skipped ? " (skipped)" : "";
         console.log(`  ${status} ${test.name}${suffix}${skipLabel}`);
         if (!test.passed && !test.skipped && test.error) {
-          console.log(`    ${test.error}`);
+          console.log(indentLines(test.error, "    "));
         }
       }
 
