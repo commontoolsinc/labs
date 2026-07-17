@@ -153,6 +153,9 @@ export const buildFullSync = (
       branch: entry.branch,
       id: entry.id,
       scope: entry.scope,
+      // F2/FA6: removes carry the instance's resolved scope key so they evict
+      // exactly the instance the matching upsert established.
+      ...(entry.scopeKey !== undefined ? { scopeKey: entry.scopeKey } : {}),
     }))
     .sort(compareSyncAddress);
   const upserts = [...next.values()].sort(compareSyncAddress);
@@ -183,6 +186,8 @@ export const buildDiffSync = (
       branch: entry.branch,
       id: entry.id,
       scope: entry.scope,
+      // F2/FA6: instance-exact removes (see buildFullSync).
+      ...(entry.scopeKey !== undefined ? { scopeKey: entry.scopeKey } : {}),
     }))
     .sort(compareSyncAddress);
   return {

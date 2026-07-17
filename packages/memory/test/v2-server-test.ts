@@ -2464,6 +2464,9 @@ Deno.test("memory v2 server watch set replacement emits removes for entities tha
       branch: "",
       id: "of:doc:1",
       scope: "space",
+      // F2: removes carry the resolved scope key so they evict exactly the
+      // instance the matching upsert established.
+      scopeKey: "space",
     }]);
   } finally {
     await server.close();

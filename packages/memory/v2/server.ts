@@ -13,8 +13,11 @@ import {
   type ClientMessage,
   dbNeedsColumnProvenance,
   decodeMemoryBoundary,
+  type DocsReadRequest,
+  type DocsReadResult,
   encodeMemoryBoundary,
   type EntityDocument,
+  type EntitySnapshot,
   type ExecutionClaim,
   executionClaimIncarnationKey,
   type ExecutionControlEvent,
@@ -1054,6 +1057,26 @@ class Connection {
         }
         {
           const response = await this.server.graphQuery(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
+        return;
+      case "docs.read":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        {
+          const response = await this.server.docsRead(parsed);
           this.sendSessionResponse(
             parsed.space,
             parsed.sessionId,
@@ -5898,6 +5921,114 @@ export class Server {
     }
   }
 
+  /** F2 point reads (FA5): exact engine reads for docs the caller already
+   * tracks — replica maintenance without schema/link traversal. Authorization,
+   * acting-context validation (FA6), and per-row scope resolution are the
+   * graph.query path's, byte-identical; only the traverser is skipped. */
+  async docsRead(
+    message: DocsReadRequest,
+  ): Promise<ResponseMessage<DocsReadResult>> {
+    const startedAt = performance.now();
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
+      return respondTypedError<DocsReadResult>(
+        message.requestId,
+        toError("SessionError", "Unknown session for space"),
+      );
+    }
+    const aclEngine = this.#aclMode() === "off"
+      ? undefined
+      : await this.openEngine(message.space);
+    {
+      const deny = aclEngine === undefined
+        ? await this.#authorizeMessage(
+          message.space,
+          session.principal,
+          "READ",
+        )
+        : this.#authorizeCurrentSessionWithEngine(
+          aclEngine,
+          message.space,
+          message.sessionId,
+          session,
+          "READ",
+        );
+      if (deny) {
+        return respondTypedError<DocsReadResult>(message.requestId, deny);
+      }
+    }
+    try {
+      // C1.4b: the acting lane (if any) is validated against the live lane
+      // grant BEFORE any scope key resolves.
+      const scopeResolution = this.#actingReadScopeContext(
+        message.space,
+        session,
+        message.actingContext,
+      );
+      if (scopeResolution.error) {
+        return respondTypedError<DocsReadResult>(
+          message.requestId,
+          scopeResolution.error,
+        );
+      }
+      const engine = aclEngine ?? await this.openEngine(message.space);
+      const { docs, branch, atSeq } = message.query;
+      const entities: EntitySnapshot[] = [];
+      for (const doc of docs) {
+        const state = Engine.readState(engine, {
+          id: doc.id,
+          scope: doc.scope,
+          ...(branch !== undefined ? { branch } : {}),
+          // One sequence bound for the whole batch: a coalesced wave reads
+          // from a single snapshot (absent means head).
+          ...(atSeq !== undefined ? { seq: atSeq } : {}),
+          principal: scopeResolution.ok.principal,
+          sessionId: scopeResolution.ok.sessionId,
+        });
+        // Never-written docs are omitted; deleted docs surface with a null
+        // document so the reader can distinguish tombstone from unknown.
+        if (state === null) continue;
+        entities.push({
+          branch: state.branch,
+          id: state.id,
+          ...(state.scope !== "space" ? { scope: state.scope } : {}),
+          scopeKey: state.scopeKey,
+          seq: state.seq,
+          document: state.document,
+        });
+      }
+      // F1 attribution: point reads are engine reads with zero traversals —
+      // the observable contrast the F2 acceptance counts against graph.query.
+      this.#recordFeedTraversal("docs.read", {
+        managerReads: docs.length,
+        coveredSelectorSkips: 0,
+        schemaTraversals: 0,
+        pointerTraversals: 0,
+        arrayTraversals: 0,
+        objectTraversals: 0,
+        dagTraversals: 0,
+        getDocAtPathCalls: 0,
+        schemaMemoHits: 0,
+      });
+      recordSlowQueryDuration("docs.read", message.space, startedAt, {
+        roots: docs.length,
+      });
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: { serverSeq: Engine.serverSeq(engine), entities },
+      };
+    } catch (error) {
+      return respondTypedError<DocsReadResult>(
+        message.requestId,
+        toError(
+          "QueryError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
   async listSchedulerActionSnapshots(
     message: SchedulerSnapshotListRequest,
   ): Promise<ResponseMessage<SchedulerSnapshotListResult>> {
@@ -7549,6 +7680,24 @@ export const parseClientMessage = (
       sessionId: parsed.sessionId,
       ...parsedActingContext(parsed),
       query: parsed.query as unknown as GraphQueryRequest["query"],
+    };
+  }
+
+  if (
+    parsed.type === "docs.read" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    isRecord(parsed.query) &&
+    Array.isArray(parsed.query.docs)
+  ) {
+    return {
+      type: "docs.read",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      ...parsedActingContext(parsed),
+      query: parsed.query as unknown as DocsReadRequest["query"],
     };
   }
 

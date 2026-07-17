@@ -5,6 +5,8 @@ import {
   type ClientCommit,
   compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
+  type DocsReadQuery,
+  type DocsReadResult,
   encodeMemoryBoundary,
   type EntitySnapshot,
   type ExecutionClaim,
@@ -725,6 +727,29 @@ export class SpaceSession {
     this.#assertOpen();
     const result = await this.client.request<GraphQueryResult>({
       type: "graph.query",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      ...(options?.actingContext !== undefined
+        ? { actingContext: options.actingContext }
+        : {}),
+      query,
+    });
+
+    this.noteResult(result.serverSeq);
+    return result;
+  }
+
+  /** F2 point reads: exact per-doc engine reads with no traversal — the
+   * replica-maintenance read for docs this session already tracks. Accepts
+   * the C1.4b `actingContext` seam from day one (FA6). */
+  async readDocs(
+    query: DocsReadQuery,
+    options?: SessionReadOptions,
+  ): Promise<DocsReadResult> {
+    this.#assertOpen();
+    const result = await this.client.request<DocsReadResult>({
+      type: "docs.read",
       requestId: crypto.randomUUID(),
       space: this.space,
       sessionId: this.#sessionId,
@@ -1782,18 +1807,31 @@ export class WatchView {
   applySync(sync: SessionSync, emit: boolean): void {
     const upserts = new Map<string, EntitySnapshot>();
     for (const upsert of sync.upserts) {
-      upserts.set(watchKey(upsert.branch, upsert.id, upsert.scope), {
-        branch: upsert.branch,
-        id: upsert.id,
-        ...(upsert.scope !== undefined ? { scope: upsert.scope } : {}),
-        seq: upsert.seq,
-        document: upsert.doc ?? null,
-      });
+      // F2/FA6: the RESOLVED scope key (when the frame carries one) is the
+      // instance identity — two lanes' instances of one declared doc must not
+      // collide — and rides the stored snapshot for downstream attribution.
+      upserts.set(
+        watchKey(upsert.branch, upsert.id, upsert.scopeKey ?? upsert.scope),
+        {
+          branch: upsert.branch,
+          id: upsert.id,
+          ...(upsert.scope !== undefined ? { scope: upsert.scope } : {}),
+          ...(upsert.scopeKey !== undefined
+            ? { scopeKey: upsert.scopeKey }
+            : {}),
+          seq: upsert.seq,
+          document: upsert.doc ?? null,
+        },
+      );
     }
 
     const removeKeys = new Set<string>();
     for (const remove of sync.removes) {
-      const key = watchKey(remove.branch, remove.id, remove.scope);
+      const key = watchKey(
+        remove.branch,
+        remove.id,
+        remove.scopeKey ?? remove.scope,
+      );
       removeKeys.add(key);
     }
 

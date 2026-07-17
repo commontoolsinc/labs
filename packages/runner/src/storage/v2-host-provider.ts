@@ -1,7 +1,9 @@
 import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import {
+  type CellScope,
   type ClientCommit,
   encodeMemoryBoundary,
+  type EntityDocument,
   type EntitySnapshot,
   type ExecutionControlEvent,
   type GraphQuery,
@@ -46,6 +48,11 @@ import type {
 import {
   installHostConflictRetryBarrier,
 } from "./v2-host-conflict-readiness.ts";
+import {
+  isPrimitiveCellLink,
+  type NormalizedLink,
+  parseLinkPrimitive,
+} from "../link-types.ts";
 
 export interface AcceptedCommitNotice {
   space: string;
@@ -187,6 +194,11 @@ const pinBranch = (
         commit: { ...message.commit, branch },
       };
     case "graph.query":
+      return {
+        ...message,
+        query: { ...message.query, branch },
+      };
+    case "docs.read":
       return {
         ...message,
         query: { ...message.query, branch },
@@ -616,9 +628,57 @@ export const acceptedRevisionMatchesSnapshot = (
     ? revision.scopeKey === snapshot.scopeKey
     : declaredEntityKey(revision) === declaredEntityKey(snapshot));
 
-// C1.5b/FA6: the resolved scopeKey rides the session-sync upsert so the
-// re-keyed Worker replica can attribute the frame to its owning lane. F2
-// rebuilds these exact lines around point reads; keep the forwarding.
+/**
+ * Same-space link targets of one held document as declared entity keys — the
+ * F2 topology detector. A steady wave must leave every held doc's outbound
+ * link set unchanged relative to its owning watches; anything else
+ * (growth/shrink) re-enters the cold traversal path. Declared keys suffice:
+ * within one watch the whole graph resolved under one acting context, so a
+ * declared address names exactly one instance there.
+ */
+const collectLinkTargetKeys = (
+  document: EntityDocument | null,
+  container: { id: string; scope?: CellScope },
+  space: string,
+): Set<string> => {
+  const targets = new Set<string>();
+  if (document === null) return targets;
+  const base: NormalizedLink = {
+    id: container.id as NormalizedLink["id"],
+    space: space as NormalizedLink["space"],
+    path: [],
+    scope: container.scope ?? "space",
+  };
+  const seen = new Set<unknown>();
+  const visit = (value: unknown): void => {
+    if (value === null || typeof value !== "object" || seen.has(value)) return;
+    seen.add(value);
+    if (isPrimitiveCellLink(value)) {
+      const link = parseLinkPrimitive(value, base);
+      if (
+        link.id !== undefined && !link.id.startsWith("data:") &&
+        (link.space === undefined || link.space === space)
+      ) {
+        // "inherit" resolved against the container's declared scope above.
+        targets.add(`${link.scope ?? "space"}\0${link.id}`);
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    for (const key of Object.keys(value)) {
+      visit((value as Record<string, unknown>)[key]);
+    }
+  };
+  visit(document);
+  return targets;
+};
+
+// C1.5b/FA6: the resolved scopeKey rides the session-sync upsert (and, since
+// F2, the matching remove) so the re-keyed Worker replica can attribute the
+// frame to its owning lane.
 const syncUpsert = (snapshot: EntitySnapshot) => ({
   branch: snapshot.branch,
   id: snapshot.id,
@@ -633,7 +693,11 @@ const syncUpsert = (snapshot: EntitySnapshot) => ({
 /**
  * Worker-side session facade. Authenticated operations still use the ordinary
  * memory session, while graph subscriptions are replaced by host-pushed
- * accepted-commit notices and exact point reads.
+ * accepted-commit notices integrated through exact point reads (F2): a
+ * steady-state wave — every revision names a held instance and no held doc's
+ * link topology changes — runs zero graph traversals; registration pulls,
+ * closure growth/shrink, unresolved roots, and resolution moves stay on the
+ * cold graph-query path.
  */
 class HostReplicaSession implements ReplicaSession {
   #watches = new Map<string, WatchSpec>();
@@ -966,29 +1030,80 @@ class HostReplicaSession implements ReplicaSession {
     // declared-scope comparison; tracked snapshots carry the resolved
     // scopeKey and match instances exactly (FA6).
     const declaredDirty = new Set(revisions.map(declaredEntityKey));
-    const affected: string[] = [];
+
+    // FA5 interest set: every instance this replica holds — the union of the
+    // per-watch entity maps, instance-keyed by resolved scopeKey (the C1.5b
+    // re-keying), where absent-but-tracked docs appear as null-document
+    // snapshots. Point reads are issued ONLY for these entries, so every
+    // delivery has a registered watch behind it (no W2.8
+    // reads-without-a-delivery-source class).
+    const coldWatchIds = new Set<string>();
+    interface PointReadTask {
+      address: { id: string; scope?: CellScope };
+      actingContext?: SchedulerExecutionContextKey;
+      expected: EntitySnapshot;
+      watchIds: string[];
+    }
+    const pointTasks = new Map<string, PointReadTask>();
     for (const [watchId, watch] of this.#watches) {
-      const previous = this.#watchEntities.get(watchId);
-      const rootDirty = watch.query.roots.some((root) =>
-        declaredDirty.has(declaredEntityKey({
-          id: root.id,
-          scope: root.scope,
-        }))
+      const held = this.#watchEntities.get(watchId);
+      const rootDirty = (root: { id: string; scope?: CellScope }) =>
+        declaredDirty.has(declaredEntityKey(root));
+      if (held === undefined) {
+        // Registration never completed a pull; a named root is a cold repull.
+        if (watch.query.roots.some(rootDirty)) coldWatchIds.add(watchId);
+        continue;
+      }
+      const heldDeclared = new Set(
+        [...held.values()].map(declaredEntityKey),
       );
-      const trackedDirty = previous !== undefined &&
-        [...previous.values()].some((snapshot) =>
-          revisions.some((revision) =>
+      if (
+        watch.query.roots.some((root) =>
+          rootDirty(root) &&
+          !heldDeclared.has(declaredEntityKey(root))
+        )
+      ) {
+        // A wave names a root this watch does not track even as an absent
+        // snapshot: only a traversal can (re)establish the closure.
+        coldWatchIds.add(watchId);
+        continue;
+      }
+      for (const snapshot of held.values()) {
+        if (
+          !revisions.some((revision) =>
             acceptedRevisionMatchesSnapshot(revision, snapshot)
           )
-        );
-      if (rootDirty || trackedDirty) affected.push(watchId);
+        ) continue;
+        const key = snapshotKey(snapshot);
+        const task = pointTasks.get(key);
+        const actingContext = this.#watchActingContexts.get(watchId);
+        if (task !== undefined) {
+          task.watchIds.push(watchId);
+          // Prefer the sponsor read for instances a context-free watch also
+          // holds (a space-scoped doc resolves identically under any lane,
+          // and a dead lane grant must not starve the shared read).
+          if (actingContext === undefined) delete task.actingContext;
+          continue;
+        }
+        pointTasks.set(key, {
+          address: {
+            id: snapshot.id,
+            ...(snapshot.scope !== undefined ? { scope: snapshot.scope } : {}),
+          },
+          ...(actingContext !== undefined ? { actingContext } : {}),
+          expected: snapshot,
+          watchIds: [watchId],
+        });
+      }
     }
+
     // #appliedSeq is a global space watermark, not proof that every watch was
     // refreshed through that sequence. An unrelated point read can advance it
     // while this notice still names a changed entity held at an older revision.
-    // Accepted-notice order already deduplicates work, so refresh every affected
-    // watch even when the global watermark has reached this batch's dataSeq.
-    if (affected.length === 0) {
+    // Accepted-notice order already deduplicates work, so integrate every
+    // matched instance even when the global watermark has reached this batch's
+    // dataSeq.
+    if (pointTasks.size === 0 && coldWatchIds.size === 0) {
       this.#acceptedOrder = acceptedOrder;
       this.#appliedSeq = Math.max(this.#appliedSeq, dataSeq);
       if (observations.length > 0) {
@@ -1007,31 +1122,185 @@ class HostReplicaSession implements ReplicaSession {
       return accepted;
     }
 
-    const before = this.allEntities();
-    // Query the last durable data sequence once. Every earlier revision in the
-    // batch is causally included, so this preserves the newest replica state
-    // while avoiding one full graph refresh per burst event.
-    await this.refreshWatches(affected, dataSeq);
+    // Steady-state integration (FA5): one exact engine read per matched held
+    // instance, the whole batch evaluated at the wave's max durable data
+    // sequence — every earlier revision is causally included — grouped by the
+    // acting lane each owning watch registered under (FA6: the read surface
+    // carries actingContext from day one). All reads complete before any map
+    // mutation so a failed wave leaves the replica exactly as it was.
+    const steady: { task: PointReadTask; snapshot: EntitySnapshot }[] = [];
+    if (pointTasks.size > 0) {
+      const byContext = new Map<
+        SchedulerExecutionContextKey | undefined,
+        PointReadTask[]
+      >();
+      for (const task of pointTasks.values()) {
+        const group = byContext.get(task.actingContext);
+        if (group !== undefined) group.push(task);
+        else byContext.set(task.actingContext, [task]);
+      }
+      for (const [actingContext, tasks] of byContext) {
+        const result = await this.session.readDocs({
+          docs: tasks.map((task) => task.address),
+          branch: this.branch,
+          atSeq: dataSeq,
+        }, actingContext !== undefined ? { actingContext } : undefined);
+        for (const task of tasks) {
+          // FA6 on the RESULT too: the returned instance must resolve to the
+          // scope key the interest entry holds; anything else means the
+          // resolution moved under us and only a traversal can re-key it.
+          const snapshot = result.entities.find((entity) =>
+            acceptedRevisionMatchesSnapshot(entity, task.expected)
+          );
+          if (snapshot === undefined) {
+            for (const watchId of task.watchIds) coldWatchIds.add(watchId);
+            continue;
+          }
+          steady.push({ task, snapshot });
+        }
+      }
+    }
+
+    // Topology gate and shrink policy (FA5): a steady wave leaves every held
+    // doc's same-space link-target set unchanged for its owning watches. A
+    // NEW target that is neither held by the watch nor referenced by the
+    // previous version is closure GROWTH — only traversal can admit the new
+    // doc. A disappeared target is closure SHRINK — removes cannot come from
+    // point reads, and today the cold refresh's before/after diff is the only
+    // remove carrier (F3 adds server-side doc-set membership deltas). Both
+    // route the owning watch back through the cold graph path, so between
+    // topology changes the interest set equals the last traversal's closure:
+    // bounded, and unlinked docs stop matching (leave-the-closure fixture).
+    const space = this.session.space;
+    const heldDeclaredByWatch = new Map<string, Set<string>>();
+    const heldDeclaredFor = (watchId: string): Set<string> => {
+      const cached = heldDeclaredByWatch.get(watchId);
+      if (cached !== undefined) return cached;
+      const held = this.#watchEntities.get(watchId);
+      const keys = new Set(
+        held === undefined ? [] : [...held.values()].map(declaredEntityKey),
+      );
+      heldDeclaredByWatch.set(watchId, keys);
+      return keys;
+    };
+    const applicable: { watchIds: string[]; snapshot: EntitySnapshot }[] = [];
+    for (const { task, snapshot } of steady) {
+      const oldTargets = collectLinkTargetKeys(
+        task.expected.document,
+        task.expected,
+        space,
+      );
+      const newTargets = collectLinkTargetKeys(
+        snapshot.document,
+        snapshot,
+        space,
+      );
+      let shrank = false;
+      for (const target of oldTargets) {
+        if (!newTargets.has(target)) {
+          shrank = true;
+          break;
+        }
+      }
+      if (shrank) {
+        for (const watchId of task.watchIds) coldWatchIds.add(watchId);
+        continue;
+      }
+      const steadyWatchIds: string[] = [];
+      for (const watchId of task.watchIds) {
+        const held = heldDeclaredFor(watchId);
+        let grew = false;
+        for (const target of newTargets) {
+          if (!oldTargets.has(target) && !held.has(target)) {
+            grew = true;
+            break;
+          }
+        }
+        if (grew) coldWatchIds.add(watchId);
+        else steadyWatchIds.push(watchId);
+      }
+      if (steadyWatchIds.length > 0) {
+        applicable.push({ watchIds: steadyWatchIds, snapshot });
+      }
+    }
+
+    const applyPointUpdates = () => {
+      for (const { watchIds, snapshot } of applicable) {
+        const key = snapshotKey(snapshot);
+        for (const watchId of watchIds) {
+          const held = this.#watchEntities.get(watchId);
+          if (held === undefined) continue;
+          // Mixed-generation re-key: an entry matched through the declared
+          // fallback may live under a scopeKey-less key; replace it.
+          for (const [heldKey, heldSnapshot] of held) {
+            if (
+              heldKey !== key &&
+              acceptedRevisionMatchesSnapshot(snapshot, heldSnapshot)
+            ) {
+              held.delete(heldKey);
+            }
+          }
+          held.set(key, snapshot);
+        }
+      }
+    };
+
+    if (coldWatchIds.size > 0) {
+      const before = this.allEntities();
+      applyPointUpdates();
+      // Cold path (unchanged semantics): closure growth, shrink, unresolved
+      // roots, and resolution moves re-run the traversal at the same batch
+      // sequence bound; its before/after diff carries the removes.
+      await this.refreshWatches([...coldWatchIds], dataSeq);
+      this.#acceptedOrder = acceptedOrder;
+      this.#appliedSeq = Math.max(this.#appliedSeq, dataSeq);
+      const after = this.allEntities();
+      const sync: SessionSync = {
+        type: "sync",
+        fromSeq,
+        toSeq: this.#appliedSeq,
+        upserts: [...after.values()].map(syncUpsert),
+        removes: [...before.values()]
+          .filter((snapshot) => !after.has(snapshotKey(snapshot)))
+          .map((snapshot) => ({
+            branch: snapshot.branch,
+            id: snapshot.id,
+            ...(snapshot.scope !== undefined ? { scope: snapshot.scope } : {}),
+            // F2/FA6: instance-exact removes, mirroring the upsert identity.
+            ...(snapshot.scopeKey !== undefined
+              ? { scopeKey: snapshot.scopeKey }
+              : {}),
+          })),
+        ...(observations.length > 0 ? { observations } : {}),
+      };
+      this.#view?.applySync(sync, true);
+      // `applySync(..., true)` resolves the replica consumer's pending
+      // iterator; its continuation applies the sync synchronously in the next
+      // microtask.
+      await Promise.resolve();
+      return accepted;
+    }
+
+    // Pure steady-state wave: zero graph traversal; deliver exactly the
+    // point-read snapshots. The old path re-upserted every held doc per wave;
+    // the delta frame drops that redundant re-confirmation (and its
+    // per-wave re-materialization in the Worker replica) — cold frames keep
+    // the full-breadth shape. Observation-after-data same-turn ordering is
+    // preserved in the same frame, as on the cold path.
+    applyPointUpdates();
     this.#acceptedOrder = acceptedOrder;
     this.#appliedSeq = Math.max(this.#appliedSeq, dataSeq);
-    const after = this.allEntities();
     const sync: SessionSync = {
       type: "sync",
       fromSeq,
       toSeq: this.#appliedSeq,
-      upserts: [...after.values()].map(syncUpsert),
-      removes: [...before.values()]
-        .filter((snapshot) => !after.has(snapshotKey(snapshot)))
-        .map((snapshot) => ({
-          branch: snapshot.branch,
-          id: snapshot.id,
-          ...(snapshot.scope !== undefined ? { scope: snapshot.scope } : {}),
-        })),
+      upserts: applicable.map(({ snapshot }) => syncUpsert(snapshot)),
+      removes: [],
       ...(observations.length > 0 ? { observations } : {}),
     };
     this.#view?.applySync(sync, true);
-    // `applySync(..., true)` resolves the replica consumer's pending iterator;
-    // its continuation applies the sync synchronously in the next microtask.
+    // See the cold path: cross the WatchView iterator hand-off before
+    // reporting integration.
     await Promise.resolve();
     return accepted;
   }

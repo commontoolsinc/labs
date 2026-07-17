@@ -28,7 +28,8 @@ rewrite. In particular:
 - route-level `Origin` enforcement remains deferred
 - session resume remains keyed by caller-supplied `(space, sessionId)` rather
   than a server-issued, principal-bound identifier
-- the public one-shot read surface is currently `graph.query`
+- the public one-shot read surfaces are `graph.query` (schema traversal) and
+  `docs.read` (exact per-doc point reads, no traversal)
 - watch-set mutations return inline `sync` payloads, and steady-state topology
   shrink does not yet guarantee automatic `removes`
 - server-primary execution is an optional, default-off capability. Compatible
@@ -289,6 +290,7 @@ interface RequestMessage {
     | "session.open"
     | "transact"
     | "graph.query"
+    | "docs.read"
     | "scheduler.snapshot.list"
     | "scheduler.writer.list"
     | "session.execution.demand.set"
@@ -360,6 +362,10 @@ interface SessionSync {
   upserts: Array<{
     branch: BranchId;
     id: EntityId;
+    scope?: CellScope;
+    // RESOLVED scope key of this instance (C1.4b): per-lane sync-frame
+    // attribution for the re-keyed executor replica.
+    scopeKey?: string;
     seq: number;
     doc?: EntityDocument;
     deleted?: true;
@@ -367,6 +373,10 @@ interface SessionSync {
   removes: Array<{
     branch: BranchId;
     id: EntityId;
+    scope?: CellScope;
+    // RESOLVED scope key (F2, additive): a remove must evict exactly the
+    // per-lane instance its matching upsert established.
+    scopeKey?: string;
   }>;
   execution?: {
     fromFeedSeq: number;
@@ -498,6 +508,46 @@ interface GraphQueryResult {
 The selector path is relative to `document.value`, not the full stored document
 root. The server converts it to a document path by prepending `"value"` before
 running shared traversal.
+
+### 4.3.3b `docs.read` — Exact Point Reads (No Traversal)
+
+`docs.read` reads exact documents by declared address with no schema or link
+traversal — the engine read path only. It exists for replica maintenance of
+docs the caller already tracks through a registered watch surface (the F2
+executor feed): one read per revised held doc, the whole batch evaluated at
+one sequence bound.
+
+```typescript
+interface DocsReadRequest {
+  type: "docs.read";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  // C1.4b lane-scoped read seam, validated against the live lane grant
+  // BEFORE any scope key resolves. Optional; non-lane readers omit it.
+  actingContext?: SchedulerExecutionContextKey;
+  query: {
+    docs: { id: EntityId; scope?: CellScope }[];
+    // One snapshot bound for the whole batch; absent means head.
+    atSeq?: number;
+    branch?: BranchId;
+  };
+}
+
+interface DocsReadResult {
+  serverSeq: number;
+  // One snapshot per addressed doc that has a stored revision (deleted docs
+  // appear with a null document); never-written docs are omitted. Snapshots
+  // carry the RESOLVED scopeKey for per-lane instance attribution.
+  entities: EntitySnapshot[];
+}
+```
+
+Authorization, acting-context validation, and per-row scope resolution are
+identical to `graph.query`; only the traverser is skipped. Callers must not
+point-read docs outside their registered watch/interest surface — a doc
+delivered by point read with no watch behind it has no ongoing delivery
+source (the W2.8 conflict-exhaustion class).
 
 ### 4.3.4 `session.watch.set` — Replace the Session Watch Set
 

@@ -72,11 +72,23 @@ class GatedGraphServer extends WatchCountingServer {
   graphQueryStarted = Promise.withResolvers<void>();
   releaseGraphQuery = Promise.withResolvers<void>();
   #gateNextGraphQuery = false;
+  // F2: steady-state accepted-commit refresh runs through docs.read point
+  // reads, so refresh-ordering fixtures gate that surface instead.
+  docsReadCount = 0;
+  docsReadStarted = Promise.withResolvers<void>();
+  releaseDocsRead = Promise.withResolvers<void>();
+  #gateNextDocsRead = false;
 
   gateNextGraphQuery(): void {
     this.graphQueryStarted = Promise.withResolvers<void>();
     this.releaseGraphQuery = Promise.withResolvers<void>();
     this.#gateNextGraphQuery = true;
+  }
+
+  gateNextDocsRead(): void {
+    this.docsReadStarted = Promise.withResolvers<void>();
+    this.releaseDocsRead = Promise.withResolvers<void>();
+    this.#gateNextDocsRead = true;
   }
 
   override async graphQuery(
@@ -88,6 +100,19 @@ class GatedGraphServer extends WatchCountingServer {
       this.#gateNextGraphQuery = false;
       this.graphQueryStarted.resolve();
       await this.releaseGraphQuery.promise;
+    }
+    return response;
+  }
+
+  override async docsRead(
+    message: Parameters<Server["docsRead"]>[0],
+  ): ReturnType<Server["docsRead"]> {
+    this.docsReadCount++;
+    const response = await super.docsRead(message);
+    if (this.#gateNextDocsRead) {
+      this.#gateNextDocsRead = false;
+      this.docsReadStarted.resolve();
+      await this.releaseDocsRead.promise;
     }
     return response;
   }
@@ -1363,7 +1388,8 @@ Deno.test("executor host provider reports accepted commits only after replica in
     assertEquals(provider.replica.get(address)?.is, {
       value: { integrated: "baseline" },
     });
-    server.gateNextGraphQuery();
+    // F2: the steady-wave refresh is a docs.read point read; gate that.
+    server.gateNextDocsRead();
 
     const commit = writer.transact({
       localSeq: 2,
@@ -1374,10 +1400,10 @@ Deno.test("executor host provider reports accepted commits only after replica in
         value: { value: { integrated: true } },
       }],
     });
-    await server.graphQueryStarted.promise;
+    await server.docsReadStarted.promise;
     assertEquals(callbackRan, false);
 
-    server.releaseGraphQuery.resolve();
+    server.releaseDocsRead.resolve();
     await commit;
     const notice = await integrated.promise;
     assertEquals(notice.dataSeq, 2);
@@ -1385,7 +1411,7 @@ Deno.test("executor host provider reports accepted commits only after replica in
     assertEquals(valueAtCallback, { value: { integrated: true } });
     assertEquals(await storage.acceptedCommitsSettled(), 2);
   } finally {
-    server.releaseGraphQuery.resolve();
+    server.releaseDocsRead.resolve();
     await storage.close();
     await channel.dispose();
     await writerClient.close();
@@ -1459,8 +1485,10 @@ Deno.test("executor host provider coalesces accepted-commit refresh bursts", asy
     assertEquals(await storage.acceptedCommitsSettled(), 1);
     integratedSeqs.length = 0;
     const graphQueriesBeforeBurst = server.graphQueryCount;
+    const docsReadsBeforeBurst = server.docsReadCount;
 
-    server.gateNextGraphQuery();
+    // F2: a steady burst coalesces into docs.read point-read batches.
+    server.gateNextDocsRead();
     const first = writer.transact({
       localSeq: 2,
       reads: { confirmed: [], pending: [] },
@@ -1470,7 +1498,7 @@ Deno.test("executor host provider coalesces accepted-commit refresh bursts", asy
         value: { value: { revision: 2 } },
       }],
     });
-    await server.graphQueryStarted.promise;
+    await server.docsReadStarted.promise;
 
     const burstEvents = 20;
     for (let localSeq = 3; localSeq <= burstEvents + 1; localSeq++) {
@@ -1484,14 +1512,19 @@ Deno.test("executor host provider coalesces accepted-commit refresh bursts", asy
         }],
       });
     }
-    server.releaseGraphQuery.resolve();
+    server.releaseDocsRead.resolve();
     await first;
     assertEquals(await storage.acceptedCommitsSettled(), burstEvents + 1);
 
     assertEquals(
-      server.graphQueryCount - graphQueriesBeforeBurst,
+      server.docsReadCount - docsReadsBeforeBurst,
       2,
       "one in-flight refresh and one final refresh should cover the burst",
+    );
+    assertEquals(
+      server.graphQueryCount - graphQueriesBeforeBurst,
+      0,
+      "a steady burst must not re-run graph traversal (F2)",
     );
     assertEquals(
       integratedSeqs,
@@ -1501,7 +1534,7 @@ Deno.test("executor host provider coalesces accepted-commit refresh bursts", asy
       value: { revision: burstEvents + 1 },
     });
   } finally {
-    server.releaseGraphQuery.resolve();
+    server.releaseDocsRead.resolve();
     await storage.close();
     await channel.dispose();
     await writerClient.close();

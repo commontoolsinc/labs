@@ -628,6 +628,10 @@ export interface SessionSyncRemove {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
+  /** RESOLVED scope key of the removed instance (F2, additive): removes must
+   * address the same per-lane instance identity the upserts established —
+   * a declared-scope remove must not evict another lane's instance. */
+  scopeKey?: string;
 }
 
 export interface SessionSync {
@@ -737,6 +741,43 @@ export interface GraphQueryRequest {
    * never send it. */
   actingContext?: SchedulerExecutionContextKey;
   query: GraphQuery;
+}
+
+/** Address of one exact document for a point read: declared scope only —
+ * resolution to a scope key happens server-side under the request's acting
+ * context, exactly like graph-query roots. */
+export interface DocReadAddress {
+  id: EntityId;
+  scope?: CellScope;
+}
+
+/** F2 point-read batch: exact engine reads with NO schema/link traversal.
+ * `atSeq` evaluates every doc at one sequence bound so a coalesced
+ * accepted-commit wave reads from a single snapshot; absent means head. */
+export interface DocsReadQuery {
+  docs: DocReadAddress[];
+  atSeq?: number;
+  branch?: BranchName;
+}
+
+export interface DocsReadResult {
+  serverSeq: number;
+  /** One snapshot per addressed doc that has a stored revision (deleted docs
+   * appear with `document: null`); never-written docs are omitted. */
+  entities: EntitySnapshot[];
+}
+
+/** F2 executor-feed point reads (FA5): the replica-maintenance read that
+ * replaces per-wave graph re-traversal for docs the reader already holds.
+ * Carries the C1.4b `actingContext` seam from day one (FA6). */
+export interface DocsReadRequest {
+  type: "docs.read";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  /** See {@link GraphQueryRequest.actingContext}. */
+  actingContext?: SchedulerExecutionContextKey;
+  query: DocsReadQuery;
 }
 
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
@@ -1128,6 +1169,7 @@ export type ClientMessage =
   | SessionOpenRequest
   | TransactRequest
   | GraphQueryRequest
+  | DocsReadRequest
   | SqliteQueryRequest
   | SqliteRegisterDiskSourceRequest
   | WatchSetRequest

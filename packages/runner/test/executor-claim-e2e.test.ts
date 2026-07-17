@@ -1494,8 +1494,17 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
     unsubscribeControl = observer.subscribeExecutionControl((event) => {
       events.push(event.type);
       if (event.type === "session.execution.claim.set") claimed.resolve();
+      // Key on the COMMITTED settlement covering the source commit. A
+      // committed settlement's client delivery gates on the session's data
+      // sync reaching its acceptedCommitSeq, while a trailing no-op
+      // follow-up attempt (which carries no data) is not gated — so with the
+      // F2 point-read refresh the Worker can settle that no-op fast enough
+      // to arrive first. Consumers merge settlements per claim
+      // (mergeSuccessfulExecutionSettlements keeps the committed outcome),
+      // so arrival order is not a contract.
       if (
         event.type === "session.execution.settlement" &&
+        event.settlement.outcome === "committed" &&
         event.settlement.inputBasisSeq >= sourceSeq
       ) {
         settled.resolve(event.settlement);

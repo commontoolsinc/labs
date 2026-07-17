@@ -572,3 +572,158 @@ Deno.test("the acting-context read parameter survives the wire parse", () => {
   assert(bare?.type === "graph.query");
   assertEquals(bare.actingContext, undefined);
 });
+
+// --- F2 point reads (FA5/FA6): the docs.read surface carries the same
+// acting-context seam as every other read from day one. ---
+
+const docsReadFor = (
+  harness: LaneReadHarness,
+  actingContext?: SchedulerExecutionContextKey,
+  atSeq?: number,
+) =>
+  harness.server.docsRead({
+    type: "docs.read",
+    requestId: crypto.randomUUID(),
+    space: SPACE,
+    sessionId: harness.bobSession.sessionId,
+    ...(actingContext !== undefined ? { actingContext } : {}),
+    query: {
+      docs: [{ id: SHARED_USER_DOC, scope: "user" }],
+      ...(atSeq !== undefined ? { atSeq } : {}),
+    },
+  });
+
+Deno.test("a lane point read under a live grant returns the lane principal's instance", async () => {
+  const harness = await setupHarness("memory-v2-lane-point-read-instance");
+  try {
+    const acting = await docsReadFor(harness, ALICE_LANE);
+    assertExists(acting.ok);
+    const entity = acting.ok.entities.find(
+      (candidate) => candidate.id === SHARED_USER_DOC,
+    );
+    assertEquals(entity?.document, { value: 11 });
+    // The RESOLVED scope key rides the snapshot (FA6 matching input).
+    assertEquals(entity?.scopeKey, ALICE_LANE);
+
+    // The same point read without an acting context stays sponsor-resolved.
+    const sponsor = await docsReadFor(harness);
+    assertExists(sponsor.ok);
+    assertEquals(
+      sponsor.ok.entities.find((candidate) => candidate.id === SHARED_USER_DOC)
+        ?.document,
+      { value: 22 },
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("a lane point read with an absent or dead grant rejects with the named cause", async () => {
+  const harness = await setupHarness("memory-v2-lane-point-read-fence");
+  try {
+    const absent = await docsReadFor(harness, CAROL_LANE);
+    assertLaneReadRejection(absent.error);
+
+    await harness.aliceClient.close();
+    const dead = await docsReadFor(harness, ALICE_LANE);
+    assertLaneReadRejection(dead.error);
+    assertEquals(dead.error, absent.error);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("a point read acting context requires a lease-bound executor session", async () => {
+  const harness = await setupHarness("memory-v2-lane-point-read-unbound");
+  try {
+    const response = await harness.server.docsRead({
+      type: "docs.read",
+      requestId: crypto.randomUUID(),
+      space: SPACE,
+      sessionId: harness.aliceSession.sessionId,
+      actingContext: ALICE_LANE,
+      query: { docs: [{ id: SHARED_USER_DOC, scope: "user" }] },
+    });
+    assertExists(response.error);
+    assertEquals(response.error.name, "ProtocolError");
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("point reads evaluate at the requested sequence bound and omit never-written docs", async () => {
+  const harness = await setupHarness("memory-v2-lane-point-read-atseq");
+  try {
+    const head = await docsReadFor(harness, ALICE_LANE);
+    assertExists(head.ok);
+    const headSeq = head.ok.entities.find(
+      (candidate) => candidate.id === SHARED_USER_DOC,
+    )?.seq;
+    assertExists(headSeq);
+
+    // Advance alice's instance; a read pinned below the new write must
+    // still see the old value (single-snapshot batch evaluation).
+    await harness.aliceSession.transact({
+      localSeq: 3,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: SHARED_USER_DOC,
+        scope: "user",
+        value: { value: 111 },
+      }],
+    });
+    const pinned = await docsReadFor(harness, ALICE_LANE, headSeq);
+    assertExists(pinned.ok);
+    assertEquals(
+      pinned.ok.entities.find((candidate) => candidate.id === SHARED_USER_DOC)
+        ?.document,
+      { value: 11 },
+    );
+    const current = await docsReadFor(harness, ALICE_LANE);
+    assertExists(current.ok);
+    assertEquals(
+      current.ok.entities.find((candidate) => candidate.id === SHARED_USER_DOC)
+        ?.document,
+      { value: 111 },
+    );
+
+    // Never-written docs are omitted, not surfaced as tombstones.
+    const missing = await harness.server.docsRead({
+      type: "docs.read",
+      requestId: crypto.randomUUID(),
+      space: SPACE,
+      sessionId: harness.bobSession.sessionId,
+      query: { docs: [{ id: "of:lane-read-never-written" }] },
+    });
+    assertExists(missing.ok);
+    assertEquals(missing.ok.entities, []);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("the acting-context point-read parameter survives the wire parse", () => {
+  const parsed = parseClientMessage(encodeMemoryBoundary({
+    type: "docs.read",
+    requestId: "r6",
+    space: SPACE,
+    sessionId: "s1",
+    actingContext: ALICE_LANE,
+    query: { docs: [{ id: SHARED_USER_DOC, scope: "user" }], atSeq: 7 },
+  }));
+  assert(parsed?.type === "docs.read");
+  assertEquals(parsed.actingContext, ALICE_LANE);
+  assertEquals(parsed.query.atSeq, 7);
+  assertEquals(parsed.query.docs, [{ id: SHARED_USER_DOC, scope: "user" }]);
+
+  const bare = parseClientMessage(encodeMemoryBoundary({
+    type: "docs.read",
+    requestId: "r7",
+    space: SPACE,
+    sessionId: "s1",
+    query: { docs: [] },
+  }));
+  assert(bare?.type === "docs.read");
+  assertEquals(bare.actingContext, undefined);
+});

@@ -4211,14 +4211,13 @@ class SpaceReplica implements ISpaceReplica {
       return;
     }
 
-    // C1.5b sync-frame attribution (FA6 consumption half): an upsert belongs
-    // to a lane instance exactly when its host-resolved scopeKey (stamped
-    // since C1.4b) names a REGISTERED lane. Everything else — no scopeKey
-    // (older host), or a scope key no lane owns (e.g. the sponsor's own
-    // scoped instance read through the space lane) — lands on the declared
-    // space-lane key, byte-identical to the pre-lane replica. Removes carry
-    // no scopeKey on the wire and stay space-lane; per-lane shrink is F2's
-    // (FA5) alongside the point-read rebuild.
+    // C1.5b sync-frame attribution (FA6 consumption half): an upsert or
+    // remove belongs to a lane instance exactly when its host-resolved
+    // scopeKey (stamped since C1.4b; on removes since F2) names a REGISTERED
+    // lane. Everything else — no scopeKey (older host), or a scope key no
+    // lane owns (e.g. the sponsor's own scoped instance read through the
+    // space lane) — lands on the declared space-lane key, byte-identical to
+    // the pre-lane replica.
     if (this.#executionLanes.size === 0) {
       this.applyAttributedSessionSync(
         sync.upserts,
@@ -4227,27 +4226,46 @@ class SpaceReplica implements ISpaceReplica {
         "space",
       );
     } else {
+      const laneOf = (scopeKey: string | undefined) =>
+        scopeKey !== undefined && this.#executionLanes.has(scopeKey)
+          ? scopeKey as SchedulerExecutionContextKey
+          : "space";
       const groups = new Map<
         SchedulerExecutionContextKey,
-        SessionSyncUpsert[]
+        { upserts: SessionSyncUpsert[]; removes: SessionSyncRemove[] }
       >();
+      const groupFor = (lane: SchedulerExecutionContextKey) => {
+        const existing = groups.get(lane);
+        if (existing !== undefined) return existing;
+        const created = {
+          upserts: [] as SessionSyncUpsert[],
+          removes: [] as SessionSyncRemove[],
+        };
+        groups.set(lane, created);
+        return created;
+      };
       for (const upsert of sync.upserts) {
-        const lane = upsert.scopeKey !== undefined &&
-            this.#executionLanes.has(upsert.scopeKey)
-          ? upsert.scopeKey as SchedulerExecutionContextKey
-          : "space";
-        const group = groups.get(lane);
-        if (group !== undefined) {
-          group.push(upsert);
-        } else {
-          groups.set(lane, [upsert]);
-        }
+        groupFor(laneOf(upsert.scopeKey)).upserts.push(upsert);
       }
-      const spaceGroup = groups.get("space") ?? [];
+      for (const remove of sync.removes) {
+        groupFor(laneOf(remove.scopeKey)).removes.push(remove);
+      }
+      const spaceGroup = groups.get("space") ??
+        { upserts: [], removes: [] };
       groups.delete("space");
-      this.applyAttributedSessionSync(spaceGroup, sync.removes, type, "space");
-      for (const [lane, upserts] of groups) {
-        this.applyAttributedSessionSync(upserts, [], type, lane);
+      this.applyAttributedSessionSync(
+        spaceGroup.upserts,
+        spaceGroup.removes,
+        type,
+        "space",
+      );
+      for (const [lane, group] of groups) {
+        this.applyAttributedSessionSync(
+          group.upserts,
+          group.removes,
+          type,
+          lane,
+        );
       }
     }
     // Subscription-carried scheduler observations — other clients' committed
