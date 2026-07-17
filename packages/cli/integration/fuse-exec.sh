@@ -246,8 +246,20 @@ cleanup() {
   set +e
   local can_remove_mountpoint=true
   if [ -n "${MOUNTPOINT:-}" ] && [ -d "${MOUNTPOINT:-}" ]; then
-    cf fuse unmount "$MOUNTPOINT" >/dev/null 2>&1
-    if mount_is_active "$MOUNTPOINT"; then
+    local unmount_status=0
+    if command -v timeout >/dev/null 2>&1; then
+      # A wedged kernel mount can block the unmount command indefinitely. Keep
+      # teardown from consuming the job deadline so CI can publish the daemon
+      # log that explains the original failure.
+      timeout --signal=KILL 5 cf fuse unmount "$MOUNTPOINT" >/dev/null 2>&1 ||
+        unmount_status=$?
+    else
+      cf fuse unmount "$MOUNTPOINT" >/dev/null 2>&1 || unmount_status=$?
+    fi
+    if [ "$unmount_status" -ne 0 ]; then
+      >&2 echo "WARN: leaving mounted filesystem at $MOUNTPOINT because unmount failed or hung"
+      can_remove_mountpoint=false
+    elif mount_is_active "$MOUNTPOINT"; then
       >&2 echo "WARN: leaving mounted filesystem at $MOUNTPOINT because unmount failed"
       can_remove_mountpoint=false
     fi
