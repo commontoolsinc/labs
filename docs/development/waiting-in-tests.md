@@ -142,12 +142,13 @@ flushes them from a `queueMicrotask` callback, which hands the batch to the
 ops are one microtask away, and a microtask the test queues afterwards runs
 after the flush, because microtasks run in the order they were queued.
 
-The reconciler tests in `packages/html/test/` wait through a local helper that
-covers both, because their trees mix synchronous mock cells with runtime-backed
-ones:
+The reconciler tests in `packages/html/test/` wait through `opsFlushed` in
+`packages/html/test/reconciler-support.ts`, which covers both, because their
+trees mix synchronous mock cells with runtime-backed ones:
 
 ```ts
-function opsFlushed(runtime: Runtime): Promise<void> {
+// Shown at module scope.
+export function opsFlushed(runtime: Runtime): Promise<void> {
   return runtime.idle().then(() =>
     new Promise<void>((resolve) => queueMicrotask(resolve))
   );
