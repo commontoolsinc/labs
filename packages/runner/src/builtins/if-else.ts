@@ -4,7 +4,11 @@ import { type RawBuiltinResult } from "../module.ts";
 import { type Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { resolveLink } from "../link-resolution.ts";
-import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
+import {
+  resolvedCellScope,
+  scopedCell,
+  selectorBuiltinResultCause,
+} from "./scope-policy.ts";
 import { parseLink } from "../link-utils.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 
@@ -56,7 +60,7 @@ export function ifElse(
     const resultScope = resolvedCellScope(runtime, tx, conditionCell);
     const baseResult = runtime.getCell<any>(
       parentCell.space,
-      { ifElse: cause },
+      selectorBuiltinResultCause("ifElse", cause),
       undefined,
       tx,
     );

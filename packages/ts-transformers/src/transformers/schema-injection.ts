@@ -43,6 +43,7 @@ import {
 import {
   analyzeFunctionCapabilities,
   createDeriveSchedulerOptions,
+  functionWritesCapturedCells,
   hasCompleteSchedulerScopeSummary,
 } from "../policy/mod.ts";
 import {
@@ -1468,6 +1469,16 @@ function schedulerOptionsForComputationBuilder(
   }
   if (!callback) return undefined;
 
+  // W2.13 capture-freeness (FB2): the capability analysis below proves
+  // write-completeness over PARAMETERS only, and — unlike the closure
+  // strategy — this path runs on callbacks whose captures were never reified
+  // into a param. A callback that writes a CAPTURED cell (pattern-scope or
+  // module-scope) would therefore summarize write-free and receive an unsound
+  // certificate. Enforce the gate's stated invariant ("no captured-cell
+  // writes") fail-closed: any detected captured-identifier write withholds
+  // the certificate entirely.
+  if (functionWritesCapturedCells(callback, checker)) return undefined;
+
   // Interprocedural: unlike shrinking, the certificate needs the callback's
   // whole write surface, so it must follow calls into helper functions. A
   // recursive helper (backlinks-index `computeMentionable`) or one that passes a
@@ -2478,13 +2489,30 @@ function prependSchemaArguments(
     // runtime semantics — keeps the no-arg application valid) and no outer
     // input. We deliberately omit the result schema, again matching computed.
     if (isSingleEmptyObjectInput(node.arguments)) {
-      const completeSchedulerScopeSummary = context.factory
-        .createObjectLiteralExpression([
-          context.factory.createPropertyAssignment(
-            "completeSchedulerScopeSummary",
-            context.factory.createTrue(),
-          ),
-        ], false);
+      // W2.13 capture-freeness (FB2): "zero captures reified" is
+      // ClosureTransformer's notion of capture, which excludes module-scope
+      // bindings — a no-input computation can still WRITE a module-scope
+      // cell through a free identifier. Certify only a callback proven
+      // capture-write-free; when the callback cannot be resolved, fail
+      // closed (no certificate) rather than assume.
+      const resolvedInnerCallback = innerCallback && checker !== undefined
+        ? resolveFunctionLikeExpression(
+          innerCallback,
+          checker,
+          context.sourceFile,
+        )
+        : undefined;
+      const certifiable = resolvedInnerCallback !== undefined &&
+        !functionWritesCapturedCells(resolvedInnerCallback, checker);
+      const completeSchedulerScopeSummary = certifiable
+        ? context.factory
+          .createObjectLiteralExpression([
+            context.factory.createPropertyAssignment(
+              "completeSchedulerScopeSummary",
+              context.factory.createTrue(),
+            ),
+          ], false)
+        : context.factory.createIdentifier("undefined");
       const rebuiltInner = context.factory.createCallExpression(
         innerLiftCall.expression,
         innerLiftCall.typeArguments,

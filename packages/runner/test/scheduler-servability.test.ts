@@ -953,3 +953,127 @@ describe("chain-scoped claim keys (C1.6)", () => {
     )).toBe(false);
   });
 });
+
+// W2.12's promised runtime-floor guarantee (FB30): the read-only certificate
+// relaxation is sound only because a session-scoped dynamic read through an
+// opaque param still narrows the RUNTIME context floor — the trusted
+// certificate must never defeat that narrowing. Exercised against the real
+// memory engine (the floor is computed inside `upsertSchedulerObservation`),
+// because the certified-plus-scoped-observed-read combination is exactly what
+// the W2.12 relaxation newly made reachable.
+describe("runtime context floor with a read-only certificate (W2.12/FB30)", () => {
+  const OWNER = "did:key:runtime-floor-owner";
+  const PRINCIPAL = "did:key:runtime-floor-alice";
+  const SESSION_ID = "runtime-floor-session-a";
+
+  const floorAddress = (
+    id: string,
+    scope: "space" | "user" | "session",
+  ) => ({ space: OWNER, id, scope, path: ["value"] });
+
+  // A certified READ-ONLY computation: the complete summary enumerates only
+  // space-scoped surfaces (static floor: space). The observed runtime read
+  // set carries the opaque-param read at its RESOLVED scope.
+  const observationWithRuntimeRead = (
+    runtimeReadScope: "space" | "session",
+  ) => {
+    const summaryRead = floorAddress("of:input", "space");
+    const summaryWrite = floorAddress("of:output", "space");
+    return {
+      version: 2,
+      ownerSpace: OWNER,
+      branch: "",
+      pieceId: "space:piece",
+      processGeneration: 1,
+      actionId: "action:runtime-floor",
+      actionKind: "computation",
+      implementationFingerprint: "impl:runtime-floor-v1",
+      runtimeFingerprint: "runtime:v1",
+      completeActionScopeSummary: {
+        version: 1,
+        complete: true,
+        implementationFingerprint: "impl:runtime-floor-v1",
+        runtimeFingerprint: "runtime:v1",
+        piece: { space: OWNER, id: "piece", scope: "space", path: [] },
+        reads: [summaryRead],
+        writes: [summaryWrite],
+        materializerWriteEnvelopes: [],
+        directOutputs: [summaryWrite],
+      },
+      observedAtSeq: 0,
+      transactionKind: "action-run",
+      reads: [
+        summaryRead,
+        // The opaque-param read at its runtime-resolved scope: the
+        // certificate never enumerated it, and C0 admits it dynamically.
+        floorAddress("of:opaque-param-target", runtimeReadScope),
+      ],
+      shallowReads: [],
+      actualChangedWrites: [],
+      currentKnownWrites: [summaryWrite],
+      materializerWriteEnvelopes: [],
+      ignoredSchedulingWrites: [],
+      actionOptions: {},
+      status: "success",
+    };
+  };
+
+  const withFloorEngine = async (
+    run: (
+      engine: import("../../memory/v2/engine.ts").Engine,
+    ) => void | Promise<void>,
+  ): Promise<void> => {
+    const { open, close } = await import("../../memory/v2/engine.ts");
+    const { toFileUrl } = await import("@std/path");
+    const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+    const engine = await open({ url: toFileUrl(path) });
+    try {
+      await run(engine);
+    } finally {
+      close(engine);
+      await Deno.remove(path);
+    }
+  };
+
+  it("a session-scoped opaque-param read narrows the floor to session rank despite the certificate", async () => {
+    const { upsertSchedulerObservation } = await import(
+      "../../memory/v2/engine.ts"
+    );
+    await withFloorEngine((engine) => {
+      const result = upsertSchedulerObservation(engine, {
+        ownerSpace: OWNER,
+        observedAtSeq: 0,
+        observation: observationWithRuntimeRead(
+          "session",
+        ) as unknown as Parameters<
+          typeof upsertSchedulerObservation
+        >[1]["observation"],
+        scopeContext: { principal: PRINCIPAL, sessionId: SESSION_ID },
+      });
+      // The runtime floor, not the certificate's space-rank static floor,
+      // decides the execution context: session rank for this principal.
+      expect(result.executionContextKey).toBe(
+        sessionExecutionContextKey(PRINCIPAL, SESSION_ID),
+      );
+    });
+  });
+
+  it("control: the same certified action with space-scoped observed reads keeps the space floor", async () => {
+    const { upsertSchedulerObservation } = await import(
+      "../../memory/v2/engine.ts"
+    );
+    await withFloorEngine((engine) => {
+      const result = upsertSchedulerObservation(engine, {
+        ownerSpace: OWNER,
+        observedAtSeq: 0,
+        observation: observationWithRuntimeRead(
+          "space",
+        ) as unknown as Parameters<
+          typeof upsertSchedulerObservation
+        >[1]["observation"],
+        scopeContext: { principal: PRINCIPAL, sessionId: SESSION_ID },
+      });
+      expect(result.executionContextKey).toBe("space");
+    });
+  });
+});

@@ -538,3 +538,105 @@ export const flatten = lift((input: { roots: Cell<Node>[] }) => {
     assertEquals(certifiedLiftCount(root), 0);
   },
 );
+
+Deno.test(
+  "pipeline W2.13: a direct lift writing a PATTERN-scope captured cell does NOT certify (FB2)",
+  async () => {
+    // The gate's own invariant ("every parameter has an empty writePaths and
+    // there are no captured-cell writes", derive-scheduler-options.ts) must be
+    // enforced on the direct-builder path, where captures are never reified
+    // into a parameter: the capability analysis ranges over params only, so a
+    // captured-cell write is invisible to it and MUST fail the certificate
+    // closed instead.
+    const root = await transform(
+      `import { Writable, lift, pattern } from "commonfabric";
+export default pattern(() => {
+  const log = new Writable<string[]>([]);
+  const f = lift((input: { msg: string; important: boolean }) => {
+    if (input.important) log.push(input.msg);
+    return input.msg.length;
+  });
+  return f;
+});`,
+    );
+    assertEquals(certifiedLiftCount(root), 0);
+  },
+);
+
+Deno.test(
+  "pipeline W2.13: a module-scope lift writing a MODULE-scope cell does NOT certify (FB2)",
+  async () => {
+    // CaptureCollector excludes module-scope bindings, so this write can never
+    // be reified into a parameter — the direct-builder gate must detect the
+    // free-identifier mutator call itself.
+    const root = await transform(
+      `import { Writable, lift } from "commonfabric";
+const state = new Writable(0);
+export const f = lift((input: { a: number }) => {
+  state.set(input.a);
+  return input.a;
+});`,
+    );
+    assertEquals(certifiedLiftCount(root), 0);
+  },
+);
+
+Deno.test(
+  "pipeline W2.13 control: a direct lift READING a captured cell still certifies",
+  async () => {
+    // Capture-freeness is a WRITE constraint: captured reads are exactly the
+    // opaque/dynamic reads C0 admits at runtime (they still narrow the
+    // runtime context floor), so a read-only capture must not lose the
+    // certificate the W2.12 relaxation grants it.
+    const root = await transform(
+      `import { Writable, lift, pattern } from "commonfabric";
+export default pattern(() => {
+  const threshold = new Writable(3);
+  const f = lift((input: { a: number }) => input.a + (threshold.get() ?? 0));
+  return f;
+});`,
+    );
+    assertEquals(certifiedLiftCount(root), 1);
+  },
+);
+
+Deno.test(
+  "pipeline W2.16: a raw `[i]` index followed by a dynamic `.key(k)` write stays uncertified (FB21)",
+  async () => {
+    // A raw `items[e]` element access is unbounded dynamism (no keyed-descent
+    // boundary). A subsequent dynamic `.key(k)` must NOT manufacture a
+    // bounded write envelope from the receiver's static path — that would
+    // launder the unbounded access past the `wildcardUnbounded` fail-closed
+    // default the committed raw-index regression test pins for the
+    // static-key variant.
+    const root = await transform(
+      `import { lift, type Cell } from "commonfabric";
+interface Item { [k: string]: unknown[]; }
+export const launder = lift(
+  (input: { items: Cell<Item>[]; e: number; k: string }) => {
+    input.items[input.e].key(input.k).set([]);
+  },
+);`,
+    );
+    assertEquals(certifiedLiftCount(root), 0);
+  },
+);
+
+Deno.test(
+  "pipeline W2.16: a raw `[i]` index laundered through a static-then-dynamic `.key` chain stays uncertified (FB21)",
+  async () => {
+    // The deeper laundering shape: `items[e].key("backlinks").key(k)` — the
+    // static `.key` hop must carry the receiver's UNBOUNDED dynamism forward,
+    // not repackage it under the post-hop path.
+    const root = await transform(
+      `import { lift, type Cell } from "commonfabric";
+interface Item { backlinks: Record<string, unknown[]>; }
+export const launderDeep = lift(
+  (input: { items: Cell<Item>[]; e: number; k: string }) => {
+    input.items[input.e].key("backlinks").key(input.k).set([]);
+  },
+);`,
+    );
+    assertEquals(certifiedLiftCount(root), 0);
+  },
+);

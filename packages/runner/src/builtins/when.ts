@@ -3,7 +3,11 @@ import { type Action } from "../scheduler.ts";
 import { type Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { resolveLink } from "../link-resolution.ts";
-import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
+import {
+  resolvedCellScope,
+  scopedCell,
+  selectorBuiltinResultCause,
+} from "./scope-policy.ts";
 import { parseLink } from "../link-utils.ts";
 
 /**
@@ -23,7 +27,7 @@ export function when(
     const resultScope = resolvedCellScope(runtime, tx, conditionCell);
     const baseResult = runtime.getCell<any>(
       parentCell.space,
-      { when: cause },
+      selectorBuiltinResultCause("when", cause),
       undefined,
       tx,
     );

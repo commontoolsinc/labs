@@ -123,6 +123,7 @@ import {
 import {
   listBuiltinResultContainerCause,
   outputSpotFromBinding,
+  selectorBuiltinResultCause,
 } from "./builtins/scope-policy.ts";
 export {
   extractDefaultValues,
@@ -4969,6 +4970,20 @@ export class Runner {
         module.defaultScope ?? resolvedOutputSpot.scope,
     };
 
+    // The per-node registration cause handed to every raw builtin. Hoisted so
+    // the selector descriptor below can re-derive the minted result document
+    // from the IDENTICAL cause object the builtin keys it on (W2.15a/FB3) —
+    // the same one-source-of-identity contract as
+    // `listBuiltinResultContainerCause` for the list builtins.
+    const builtinCause = {
+      inputs: inputsCell,
+      parents: processCell.entityId,
+      outputSpot: {
+        space: resolvedOutputSpot.space,
+        id: resolvedOutputSpot.id,
+        path: [...resolvedOutputSpot.path],
+      },
+    };
     const builtinFrame = builtinIdentity
       ? pushFrameFromCause(undefined, {
         runtime: this.runtime,
@@ -5012,15 +5027,7 @@ export class Runner {
           );
         },
         addCancel,
-        {
-          inputs: inputsCell,
-          parents: processCell.entityId,
-          outputSpot: {
-            space: resolvedOutputSpot.space,
-            id: resolvedOutputSpot.id,
-            path: [...resolvedOutputSpot.path],
-          },
-        },
+        builtinCause,
         processCell,
         this.runtime,
         outputBinding,
@@ -5144,6 +5151,27 @@ export class Runner {
     const computationBuiltinId = isServerComputationBuiltinId(moduleRefName)
       ? moduleRefName
       : undefined;
+    // W2.15a re-open (FB3): every output-producing ifElse/when/unless run
+    // mints and writes a SECOND document — the `{ <builtin>: cause }` result
+    // cell — whose entity id differs from the output spot (the spot stores
+    // only a link to it). Re-derive that minted document's identity from the
+    // SAME cause the builtin keys it on (`selectorBuiltinResultCause` over
+    // the hoisted `builtinCause`) and fold it into the descriptor's write
+    // surface as an EXACT write: the identity is deterministic per node, so
+    // no envelope is needed. Declared at space scope like the materializer
+    // container — the builtin re-addresses the instance at the resolved
+    // condition's scope, which never forks the entity id, and a scoped
+    // actual write fails closed at the firewall's scope check instead of
+    // being served.
+    const selectorMintedResultWrite =
+      ((): NormalizedFullLink | undefined => {
+        if (computationBuiltinId === undefined) return undefined;
+        const mintedLink = this.runtime.getCell(
+          processCell.space,
+          selectorBuiltinResultCause(computationBuiltinId, builtinCause),
+        ).getAsNormalizedFullLink();
+        return { ...mintedLink, scope: "space", path: [] };
+      })();
     // W2.16: map/filter/flatMap mint a result CONTAINER document (the output
     // collection) distinct from their direct output and write the whole array
     // plus per-slot element links into it. Re-derive that container's identity
@@ -5171,11 +5199,17 @@ export class Runner {
             outputSpot,
           ),
         ).getAsNormalizedFullLink();
-        // Root prefix (`path: []`) at space scope: covers the container's `value`,
-        // per-slot `value[i]` and `result`/`pattern` meta writes in one envelope;
-        // the schema/scope the builtin later applies do not fork the entity id
-        // (see `outputSpotFromBinding`), and a scoped or foreign actual container
-        // fails closed at the firewall rather than being served.
+        // Value-root prefix (link path `[]`) at space scope. As a
+        // NormalizedFullLink this is VALUE-relative, so by itself it covers
+        // only the container's `value` subtree (`["value"]`, per-slot
+        // `value[i]`); the summary assembly
+        // (`serverBuiltinMaterializerScopeSummary`) lifts a value-root
+        // envelope to a document-root prefix so the mint branch's
+        // `["result"]`/`["pattern"]` meta writes and the `["cfc"]` label
+        // envelope on the container are covered too (FB19/CA6). The
+        // schema/scope the builtin later applies do not fork the entity id
+        // (see `outputSpotFromBinding`), and a scoped or foreign actual
+        // container fails closed at the firewall rather than being served.
         return { ...containerLink, scope: "space", path: [] };
       })();
     const materializerWriteEnvelopes = materializerContainerEnvelope
@@ -5197,17 +5231,23 @@ export class Runner {
           },
         }
         : {}),
-      ...(computationBuiltinId !== undefined
+      ...(computationBuiltinId !== undefined &&
+          selectorMintedResultWrite !== undefined
         ? {
           serverBuiltinComputation: {
             version: 1 as const,
             id: computationBuiltinId,
             piece: resultCell.getAsNormalizedFullLink(),
             reads: inputCells,
-            // The registered write surface; its single direct root output is
-            // `outputCells`. Selectors write only that one result cell, so the
-            // fail-closed envelope bounds them exactly.
-            writes: schedulingWrites,
+            // The registered write surface plus the minted `{ <builtin>:
+            // cause }` result document (FB3): a selector writes exactly its
+            // direct root output spot (a stable link to the minted document)
+            // and the minted document itself (the selected branch's
+            // reference), so the fail-closed envelope bounds them exactly.
+            writes: dedupeNormalizedLinks([
+              ...schedulingWrites,
+              selectorMintedResultWrite,
+            ]),
             directOutputs: outputCells,
           },
         }

@@ -2,6 +2,7 @@ import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { type ClientCommit, toDocumentPath } from "@commonfabric/memory/v2";
 import { Runtime } from "../src/runtime.ts";
 import {
   buildSchedulerActionObservation,
@@ -9,7 +10,14 @@ import {
   type SchedulerActionObservation,
 } from "../src/scheduler/persistent-observation.ts";
 import { serverBuiltinComputationScopeSummary } from "../src/scheduler/run.ts";
-import { classifyStaticActionServability } from "../src/scheduler/servability.ts";
+import {
+  classifyStaticActionServability,
+  dynamicActionTransactionUnservableReason,
+} from "../src/scheduler/servability.ts";
+import {
+  createExecutorActionTransactionRouter,
+  type ExecutorCandidateDiagnostic,
+} from "../src/executor/action-transaction-router.ts";
 import {
   builtinImplementationHash,
   isServerComputationBuiltinId,
@@ -20,6 +28,7 @@ import type { Action } from "../src/scheduler/types.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
+import type { ActionTransactionRouteInput } from "../src/storage/v2.ts";
 
 // W2.15a — per-builtin COMPUTATION descriptors for the pure structural
 // selectors ifElse/when/unless. Mirrors the effect descriptor path: a trusted
@@ -27,6 +36,14 @@ import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
 // fingerprint (W2.11) is assembled into a claim-ready summary. The registry is
 // deliberately exact — map/filter/flatMap/wish have no descriptor and stay
 // incomplete-static-surface.
+//
+// The selector write surface is TWO documents (W2.15a re-open, FB3): the
+// direct root output spot (which stores a stable link) plus the minted
+// `{ <builtin>: cause }` result document every output-producing run writes
+// the selected branch's reference into. The descriptor folds the minted
+// document in as an exact write (`selectorBuiltinResultCause`), and the
+// fixtures below model that real runtime write set — not the pre-repair
+// single-output shape that never survived the dynamic firewall.
 
 const SPACE = "did:key:z6Mk-builtin-computation" as const;
 const RUNTIME_FP = "runner:scheduler:v3";
@@ -66,7 +83,10 @@ function descriptor(
     id,
     piece: link("of:piece"),
     reads: [link("of:condition")],
-    writes: [link("of:output")],
+    // The registered surface: the direct output spot plus the minted
+    // `{ <builtin>: cause }` result document (FB3) the runner folds in via
+    // `selectorBuiltinResultCause`.
+    writes: [link("of:output"), link("of:minted-result")],
     directOutputs: [link("of:output")],
     ...overrides,
   };
@@ -90,12 +110,38 @@ function observation(
     transactionLog: {
       reads: [valueAddress("of:condition")],
       shallowReads: [],
-      writes: [valueAddress("of:output")],
+      // The REAL output-producing write set (FB3): the selected branch's
+      // reference lands in the minted result document, not only the spot.
+      writes: [valueAddress("of:output"), valueAddress("of:minted-result")],
     },
     currentKnownWrites: [valueAddress("of:output")],
     materializerWriteEnvelopes: [],
     ...overrides,
   });
+}
+
+function routeInput(
+  observed: SchedulerActionObservation,
+  operations: ClientCommit["operations"],
+): ActionTransactionRouteInput {
+  return {
+    space: SPACE,
+    commit: {
+      localSeq: 1,
+      reads: {
+        confirmed: [{
+          id: "of:condition",
+          scope: "space",
+          path: toDocumentPath(["value"]),
+          seq: 2,
+        }],
+        pending: [],
+      },
+      operations,
+      schedulerObservation: observed,
+    },
+    sourceAction: {},
+  };
 }
 
 describe("per-builtin computation descriptors (W2.15a)", () => {
@@ -122,8 +168,13 @@ describe("per-builtin computation descriptors (W2.15a)", () => {
         `impl:cf:builtin/${id}:v1`,
       );
       expect(summary!.directOutputs).toEqual([valueAddress("of:output")]);
-      // Fail-closed: the envelope is exactly the declared output, no more.
-      expect(summary!.writes).toEqual([valueAddress("of:output")]);
+      // Fail-closed: the envelope is exactly the DECLARED surface — the
+      // output spot plus the minted result document (FB3) — no more, and
+      // never widened by observed runtime writes.
+      expect(summary!.writes).toEqual([
+        valueAddress("of:minted-result"),
+        valueAddress("of:output"),
+      ]);
       expect(summary!.materializerWriteEnvelopes).toEqual([]);
       expect(summary!.piece).toEqual(valueAddress("of:piece"));
 
@@ -133,8 +184,72 @@ describe("per-builtin computation descriptors (W2.15a)", () => {
           SPACE,
         ),
       ).toEqual({ status: "claim-ready", actionKind: "computation" });
+
+      // FB18: the unit contract must survive the DYNAMIC firewall for the
+      // real write set (spot + minted result), not only static preflight.
+      const observed: SchedulerActionObservation = {
+        ...obs,
+        completeActionScopeSummary: summary,
+      };
+      expect(
+        dynamicActionTransactionUnservableReason(
+          routeInput(observed, [
+            { op: "set", id: "of:output", scope: "space", value: { value: 1 } },
+            {
+              op: "set",
+              id: "of:minted-result",
+              scope: "space",
+              value: { value: 2 },
+            },
+          ]),
+          observed,
+          { servedSpace: SPACE, branch: "" },
+        ),
+      ).toBeUndefined();
     });
   }
+
+  it("stays fail-closed: a run writing outside the declared two-document surface is rejected", () => {
+    // The descriptor bounds the surface; an observed write to any OTHER
+    // document (here a hypothetical second mint) must reject the whole
+    // transaction — observed writes are never folded into the envelope.
+    const obs = observation("ifElse", {
+      transactionLog: {
+        reads: [valueAddress("of:condition")],
+        shallowReads: [],
+        writes: [
+          valueAddress("of:output"),
+          valueAddress("of:minted-result"),
+          valueAddress("of:extra"),
+        ],
+      },
+    });
+    // The silent-drop guard (FB16's class): the constructed observation must
+    // actually carry the extra write in `actualChangedWrites`.
+    expect(obs.actualChangedWrites).toEqual([
+      valueAddress("of:output"),
+      valueAddress("of:minted-result"),
+      valueAddress("of:extra"),
+    ]);
+    const summary = serverBuiltinComputationScopeSummary(obs, descriptor("ifElse"));
+    expect(summary).toBeDefined();
+    expect(summary!.writes.some((entry) => entry.id === "of:extra")).toBe(
+      false,
+    );
+    const observed: SchedulerActionObservation = {
+      ...obs,
+      completeActionScopeSummary: summary,
+    };
+    expect(
+      dynamicActionTransactionUnservableReason(
+        routeInput(observed, [
+          { op: "set", id: "of:output", scope: "space", value: { value: 1 } },
+        ]),
+        observed,
+        { servedSpace: SPACE, branch: "" },
+      ),
+    ).toBe("dynamic-write-outside-static-surface");
+  });
 
   it("returns no summary without a descriptor (map stays incomplete-static-surface)", () => {
     // A map candidate carries the v1 fingerprint (W2.11) but no descriptor.
@@ -401,5 +516,158 @@ describe("per-builtin computation descriptors — end to end (W2.15a)", () => {
         actionKind: "computation",
       });
     }
+  });
+
+  // FB18: the W2.15a acceptance is claim-SERVABILITY, not claim-readiness.
+  // Drive the REAL selectors through the executor-router harness (the
+  // server-execution-product-fixtures pattern) and require that every
+  // output-producing run — the cold run AND the condition flip, the two runs
+  // that write the minted `{ <builtin>: cause }` result document — passes the
+  // DYNAMIC claim firewall with zero dynamic-write rejections. Before the FB3
+  // descriptor repair this exact harness rejected 6/6 selector attempts
+  // `dynamic-write-outside-static-surface`.
+  it("selector output-producing runs (cold + condition flip) pass the dynamic claim firewall", async () => {
+    type CapturedAttempt = {
+      readonly input: ActionTransactionRouteInput;
+      readonly observation: SchedulerActionObservation;
+    };
+    const attempts: CapturedAttempt[] = [];
+    const diagnostics: ExecutorCandidateDiagnostic[] = [];
+    const executorRouter = createExecutorActionTransactionRouter({
+      servedSpace: integrationSpace,
+      branch: "",
+      claimForAction: () => undefined,
+      onCandidate: () => {},
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
+    storageManager = StorageManager.emulate({
+      as: integrationSigner,
+      actionTransactionRouter(input) {
+        const route = executorRouter(input);
+        const observation = input.commit.schedulerObservation;
+        if (
+          observation !== undefined &&
+          (observation as { transactionKind?: unknown }).transactionKind ===
+            "action-run"
+        ) {
+          attempts.push({
+            input: {
+              ...input,
+              commit: structuredClone(input.commit) as ClientCommit,
+            },
+            observation: structuredClone(
+              observation,
+            ) as SchedulerActionObservation,
+          });
+        }
+        return route;
+      },
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      experimental: {
+        persistentSchedulerState: true,
+        serverPrimaryExecution: true,
+      },
+    });
+
+    const compiled = await runtime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: [
+          "import { pattern, ifElse, when, unless, Default, Writable } from 'commonfabric';",
+          "export default pattern<{ flag: Writable<boolean | Default<true>> }>(",
+          "  ({ flag }) => {",
+          "    const chosen = ifElse(flag, 'yes', 'no');",
+          "    const gated = when(flag, 'shown');",
+          "    const fallback = unless(flag, 'default');",
+          "    return { chosen, gated, fallback };",
+          "  },",
+          ");",
+        ].join("\n"),
+      }],
+    });
+    const tx = runtime.edit();
+    const flag = runtime.getCell<boolean>(
+      integrationSpace,
+      "selector-firewall-flag",
+      undefined,
+      tx,
+    );
+    flag.set(true);
+    const resultCell = runtime.getCell(
+      integrationSpace,
+      "selector-firewall-e2e",
+      undefined,
+      tx,
+    );
+    const handle = runtime.run(tx, compiled, { flag }, resultCell);
+    await tx.commit();
+    for (let k = 0; k < 4; k++) {
+      await handle.pull();
+      await runtime.idle();
+    }
+    await runtime.settled();
+    const coldAttemptCount = attempts.length;
+
+    // Condition flip: every selector re-runs and rewrites the minted result
+    // document with the newly selected branch's reference.
+    const flipTx = runtime.edit();
+    flag.withTx(flipTx).set(false);
+    await flipTx.commit();
+    for (let k = 0; k < 4; k++) {
+      await handle.pull();
+      await runtime.idle();
+    }
+    await runtime.settled();
+
+    const selectorFingerprints = (["ifElse", "when", "unless"] as const).map(
+      (id) => `impl:${builtinImplementationHash(id)}`,
+    );
+    for (const fingerprint of selectorFingerprints) {
+      const matches = attempts.filter(({ observation }) =>
+        observation.implementationFingerprint === fingerprint
+      );
+      // Cold and post-flip runs were both captured.
+      expect(matches.length).toBeGreaterThan(1);
+      // The harness exercised OUTPUT-PRODUCING runs: at least one attempt
+      // actually wrote the minted result document (an actual changed write to
+      // a doc that is not the direct output spot) — the write class that was
+      // rejected before the FB3 repair.
+      const mintedWrites = matches.filter(({ observation }) => {
+        const summary = observation.completeActionScopeSummary;
+        if (summary === undefined) return false;
+        return observation.actualChangedWrites.some((address) =>
+          !summary.directOutputs.some((output) => output.id === address.id)
+        );
+      });
+      expect(mintedWrites.length).toBeGreaterThan(0);
+      for (const attempt of matches) {
+        expect(
+          classifyStaticActionServability(
+            attempt.observation,
+            integrationSpace,
+          ),
+        ).toEqual({ status: "claim-ready", actionKind: "computation" });
+        expect(
+          dynamicActionTransactionUnservableReason(
+            attempt.input,
+            attempt.observation,
+            { servedSpace: integrationSpace, branch: "" },
+          ),
+        ).toBeUndefined();
+      }
+    }
+    // The flip actually produced additional selector attempts.
+    expect(attempts.length).toBeGreaterThan(coldAttemptCount);
+    // Zero dynamic-write verdicts across the whole run (the router saw every
+    // attempt this test judged, plus any non-selector traffic).
+    expect(
+      diagnostics.filter((diagnostic) =>
+        diagnostic.diagnosticCode === "dynamic-write-outside-static-surface"
+      ),
+    ).toEqual([]);
   });
 });

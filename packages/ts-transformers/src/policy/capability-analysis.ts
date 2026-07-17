@@ -33,6 +33,243 @@ type CapabilityAnalyzableFunction =
   | ts.FunctionDeclaration
   | ts.MethodDeclaration;
 
+// Captured-receiver methods that are pure reads/traversals: a WRITE through
+// them still surfaces as the chain's outer writer call, so treating them as
+// safe intermediates cannot hide a captured-cell write. Everything else on a
+// captured cell-like receiver fails closed — mirroring the param-side rule
+// that an unknown method on a cell-like receiver poisons write-exhaustiveness.
+const SAFE_CAPTURED_CELL_METHODS = new Set(["get", "key"]);
+
+/**
+ * W2.13 capture-freeness (FB2): whether a callback writes through CAPTURED
+ * identifiers. `analyzeFunctionCapabilities` proves write-completeness over
+ * PARAMETERS only — cell mutator calls are tracked only when the receiver
+ * resolves through aliases seeded from `fn.parameters`, so a write through a
+ * free identifier (a pattern-scope or module-scope cell the builder callback
+ * closes over) is invisible to the summary. The closure strategy is sound by
+ * construction because ClosureTransformer reifies captures into the merged
+ * input param BEFORE analysis; the direct-builder certificate path (W2.13)
+ * runs on callbacks whose captures were never reified, so it must enforce the
+ * gate's second invariant ("no captured-cell writes",
+ * `derive-scheduler-options.ts`) itself and withhold the certificate.
+ *
+ * Fail-closed shape detection:
+ * - a recognized cell-writer method (`set`/`push`/`update`/…) called on a
+ *   chain rooted at any captured identifier;
+ * - any OTHER (unknown/dynamic) method on a captured receiver that types
+ *   cell-like — reads (`get`, `.key(...)` descents) stay safe intermediates;
+ * - an assignment/`delete`/`++`/`--` targeting a captured cell-like chain;
+ * - a captured cell-like identifier passed as a call argument (an opaque
+ *   helper can conceal the mutation);
+ * - a direct call of a same-file helper whose body trips any rule above
+ *   (visited-set bounded).
+ *
+ * Deliberately NOT covered (stays with the runtime write firewall backstop):
+ * writes hidden inside imported/cross-file helpers the checker cannot resolve
+ * to a same-file body — the same open-world boundary the interprocedural
+ * analysis itself has.
+ */
+export function functionWritesCapturedCells(
+  fn: CapabilityAnalyzableFunction,
+  checker: ts.TypeChecker | undefined,
+): boolean {
+  const writerNames = new Set<string>([
+    ...WRITER_METHODS,
+    ...ARRAY_IDENTITY_WRITER_METHODS,
+  ]);
+  const visited = new Set<ts.Node>();
+
+  const cellLike = (expression: ts.Expression): boolean => {
+    if (checker === undefined) return true;
+    try {
+      return isCellLikeType(checker.getTypeAtLocation(expression), checker);
+    } catch {
+      // Type resolution failed (e.g. a synthesized node): fail closed.
+      return true;
+    }
+  };
+
+  const scan = (scope: CapabilityAnalyzableFunction): boolean => {
+    if (visited.has(scope)) return false;
+    visited.add(scope);
+    const body = scope.body;
+    if (body === undefined) return false;
+
+    // Locality by DECLARED NAME, never source positions or node identity:
+    // transformer-lowered callbacks mix authored and synthesized nodes, so
+    // positions can be absent (`getStart()` throws) and the checker's symbol
+    // declarations point at ORIGINAL nodes a rebuilt tree no longer
+    // contains. A name-set over the scope's own declarations is the same
+    // shadowing-approximate notion the analysis's name-keyed aliases use: an
+    // identifier is treated captured iff no declaration of that name exists
+    // anywhere inside the scanned callback.
+    const localNames = new Set<string>();
+    const collectName = (name: ts.Node): void => {
+      if (ts.isIdentifier(name)) {
+        localNames.add(name.text);
+        return;
+      }
+      if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+        for (const element of name.elements) {
+          if (ts.isBindingElement(element)) collectName(element.name);
+        }
+      }
+    };
+    const collectDeclarations = (node: ts.Node): void => {
+      if (
+        ts.isParameter(node) ||
+        ts.isVariableDeclaration(node) ||
+        ts.isBindingElement(node)
+      ) {
+        collectName(node.name);
+      } else if (
+        (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) &&
+        node.name !== undefined
+      ) {
+        localNames.add(node.name.text);
+      }
+      ts.forEachChild(node, collectDeclarations);
+    };
+    collectDeclarations(scope);
+
+    /** The chain-root identifier of `expression` when no declaration of its
+     * name exists inside `scope` (a captured binding). */
+    const capturedRootIdentifier = (
+      expression: ts.Expression,
+    ): ts.Identifier | undefined => {
+      let current: ts.Expression = unwrapExpression(expression);
+      while (true) {
+        if (
+          ts.isPropertyAccessExpression(current) ||
+          ts.isElementAccessExpression(current) ||
+          ts.isNonNullExpression(current)
+        ) {
+          current = unwrapExpression(current.expression);
+          continue;
+        }
+        if (ts.isCallExpression(current)) {
+          current = unwrapExpression(current.expression);
+          continue;
+        }
+        break;
+      }
+      if (!ts.isIdentifier(current)) return undefined;
+      return localNames.has(current.text) ? undefined : current;
+    };
+
+    const resolveCalledFunction = (
+      identifier: ts.Identifier,
+    ): CapabilityAnalyzableFunction | undefined => {
+      if (checker === undefined) return undefined;
+      const symbol = checker.getSymbolAtLocation(identifier);
+      const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+      if (declaration === undefined) return undefined;
+      if (ts.isFunctionDeclaration(declaration) && declaration.body) {
+        return declaration;
+      }
+      if (
+        ts.isVariableDeclaration(declaration) &&
+        declaration.initializer !== undefined
+      ) {
+        const initializer = unwrapExpression(declaration.initializer);
+        if (
+          ts.isArrowFunction(initializer) ||
+          ts.isFunctionExpression(initializer)
+        ) {
+          return initializer;
+        }
+      }
+      return undefined;
+    };
+
+    let found = false;
+    const visit = (node: ts.Node): void => {
+      if (found) return;
+      if (ts.isCallExpression(node)) {
+        const callee = unwrapExpression(node.expression);
+        if (
+          ts.isPropertyAccessExpression(callee) ||
+          ts.isElementAccessExpression(callee)
+        ) {
+          const root = capturedRootIdentifier(callee.expression);
+          if (root !== undefined) {
+            const methodName =
+              ts.isPropertyAccessExpression(callee) &&
+                ts.isIdentifier(callee.name)
+                ? callee.name.text
+                : undefined;
+            if (methodName !== undefined && writerNames.has(methodName)) {
+              found = true;
+              return;
+            }
+            if (
+              (methodName === undefined ||
+                !SAFE_CAPTURED_CELL_METHODS.has(methodName)) &&
+              cellLike(callee.expression)
+            ) {
+              found = true;
+              return;
+            }
+          }
+        } else if (ts.isIdentifier(callee)) {
+          const target = resolveCalledFunction(callee);
+          if (
+            target !== undefined && capturedRootIdentifier(callee) !== undefined
+          ) {
+            if (scan(target)) {
+              found = true;
+              return;
+            }
+          }
+        }
+        for (const argument of node.arguments) {
+          const unwrapped = unwrapExpression(argument);
+          if (
+            ts.isIdentifier(unwrapped) &&
+            capturedRootIdentifier(unwrapped) !== undefined &&
+            checker !== undefined &&
+            isCellLikeType(checker.getTypeAtLocation(unwrapped), checker)
+          ) {
+            found = true;
+            return;
+          }
+        }
+      } else if (
+        ts.isBinaryExpression(node) &&
+        ASSIGNMENT_OPERATORS.has(node.operatorToken.kind)
+      ) {
+        const root = capturedRootIdentifier(node.left);
+        if (root !== undefined && cellLike(node.left)) {
+          found = true;
+          return;
+        }
+      } else if (
+        (ts.isPrefixUnaryExpression(node) ||
+          ts.isPostfixUnaryExpression(node)) &&
+        (node.operator === ts.SyntaxKind.PlusPlusToken ||
+          node.operator === ts.SyntaxKind.MinusMinusToken)
+      ) {
+        const root = capturedRootIdentifier(node.operand);
+        if (root !== undefined && cellLike(node.operand)) {
+          found = true;
+          return;
+        }
+      } else if (ts.isDeleteExpression(node)) {
+        const root = capturedRootIdentifier(node.expression);
+        if (root !== undefined && cellLike(node.expression)) {
+          found = true;
+          return;
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(body);
+    return found;
+  };
+
+  return scan(fn);
+}
+
 export interface CapabilityAnalysisOptions {
   readonly checker?: ts.TypeChecker;
   readonly interprocedural?: boolean;
@@ -1908,9 +2145,17 @@ export function analyzeFunctionCapabilities(
                 // (`m.key("backlinks").push(...)`) is bounded to
                 // `allPieces[*].mentioned` rather than lost to an unbounded
                 // wildcard. Keep the FIRST boundary if the receiver was already
-                // dynamic (`c.key(i).key(j)` bounds at `i`, not `j`).
+                // dynamic (`c.key(i).key(j)` bounds at `i`, not `j`). A
+                // boundary is MANUFACTURED only for a static receiver: when
+                // the receiver is already dynamic WITHOUT a boundary (a raw
+                // `arr[i]` element index — not a keyed descent), its dynamism
+                // is unbounded, and fabricating a boundary from the static
+                // path would launder it into a bounded write envelope that
+                // bypasses the `wildcardUnbounded` fail-closed default (FB21).
                 dynamicBoundaryPath: receiverBinding.dynamicBoundaryPath ??
-                  materializeSourceRef(receiverBinding).path,
+                  (receiverBinding.dynamic
+                    ? undefined
+                    : materializeSourceRef(receiverBinding).path),
               };
             }
             return {

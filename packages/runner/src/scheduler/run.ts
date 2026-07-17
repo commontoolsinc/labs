@@ -1236,8 +1236,23 @@ export function serverBuiltinMaterializerScopeSummary(
   if (descriptor.materializerWriteEnvelopes.length === 0) return undefined;
 
   const piece = toMemorySpaceAddress(descriptor.piece);
+  // A value-root envelope (link path `[]`) means "the whole minted container
+  // document", so lift it to a DOCUMENT-root prefix rather than the
+  // `["value"]` prefix `toMemorySpaceAddress` renders (CA6/FB19): the mint
+  // branch also writes the container's `["result"]`/`["pattern"]` meta links
+  // (`setResultCell`/`setPatternCell`) and the CFC label envelope lives at
+  // `["cfc"]` — all document-root siblings of `["value"]` that a
+  // value-relative envelope can never cover, de-claiming every cold
+  // container-minting run. The container is wholly this node's minted output
+  // (identity derived from the registration cause), so the document-root
+  // bound stays exact and fail-closed. Deeper envelope paths keep their
+  // value-relative rendering.
   const materializerWriteEnvelopes = sortAndCompactPaths(
-    descriptor.materializerWriteEnvelopes.map(toMemorySpaceAddress),
+    descriptor.materializerWriteEnvelopes.map((link) =>
+      link.path.length === 0
+        ? { ...toMemorySpaceAddress(link), path: [] }
+        : toMemorySpaceAddress(link)
+    ),
   );
   const writes = sortAndCompactPaths([
     ...descriptor.writes.map(toMemorySpaceAddress),

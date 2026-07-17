@@ -175,15 +175,30 @@ describe("runtime write-empty computation summaries (W2.14)", () => {
     const extra = address("of:extra");
     const observation = baseObservation({
       // Registered surface is still the single direct output, so the summary
-      // is assembled — but this run also dynamically writes `of:extra`.
-      actualChangedWrites: [output, extra],
+      // is assembled — but this run also dynamically writes `of:extra`. The
+      // builder derives `actualChangedWrites` from the transaction log (a
+      // bare `actualChangedWrites` override is silently dropped — FB16), so
+      // the extra write must enter through `transactionLog.writes`.
+      transactionLog: {
+        reads: [address("of:input")],
+        shallowReads: [],
+        writes: [output, extra],
+      },
     });
+    // Guard against the FB16 silent-drop class: the constructed observation
+    // really carries the out-of-envelope write in `actualChangedWrites`.
+    expect(observation.actualChangedWrites).toEqual([output, extra]);
     const summary = runtimeWriteEmptyComputationScopeSummary(observation);
     expect(summary).toBeDefined();
     const observed: SchedulerActionObservation = {
       ...observation,
       completeActionScopeSummary: summary,
     };
+    // The commit OPERATIONS stay entirely inside the declared surface, so the
+    // rejection below can come only from the OBSERVATION-address arm
+    // (`actualChangedWrites` bound checking) — the arm this test names. A
+    // regression that drops `actualChangedWrites` from the checked write set
+    // turns this red instead of being masked by the operations arm.
     const input: ActionTransactionRouteInput = {
       space: SPACE,
       commit: {
@@ -199,7 +214,6 @@ describe("runtime write-empty computation summaries (W2.14)", () => {
         },
         operations: [
           { op: "set", id: "of:output", scope: "space", value: { value: 1 } },
-          { op: "set", id: "of:extra", scope: "space", value: { value: 9 } },
         ],
         schedulerObservation: observed,
       },
@@ -225,13 +239,25 @@ describe("runtime write-empty computation summaries (W2.14)", () => {
 
   it("de-claims once, without repeated verdict spam, when a claimed write-empty action writes", async () => {
     // Assemble the real runtime write-empty summary, then have this run also
-    // write `of:extra` dynamically. The whole transaction must be rejected
-    // fail-closed and reported exactly once across identical reruns (the W2.7
-    // `reportedUnservable` dedupe), leaving the action client-primary.
+    // write `of:extra` dynamically UNDER A LIVE CLAIM (FB17: with no claim
+    // this test exercised only unclaimed candidate suppression). The claimed
+    // route must take the claimed arm — claim assertion attached, `unserved`
+    // disposition, and the claim released exactly once on settlement — and
+    // the post-release reruns fall back client-primary with a single deduped
+    // diagnostic (the W2.7 `reportedUnservable` dedupe).
     const output = address("of:output");
     const extra = address("of:extra");
     const withSummary = () => {
-      const base = baseObservation({ actualChangedWrites: [output, extra] });
+      const base = baseObservation({
+        // Through the transaction log so `actualChangedWrites` really carries
+        // it (a bare `actualChangedWrites` override silently drops — FB16).
+        transactionLog: {
+          reads: [address("of:input")],
+          shallowReads: [],
+          writes: [output, extra],
+        },
+      });
+      expect(base.actualChangedWrites).toEqual([output, extra]);
       const summary = runtimeWriteEmptyComputationScopeSummary(base);
       expect(summary).toBeDefined();
       return { ...base, completeActionScopeSummary: summary };
@@ -254,33 +280,85 @@ describe("runtime write-empty computation summaries (W2.14)", () => {
       schedulerObservation: withSummary(),
     });
 
+    const liveClaim = {
+      branch: "",
+      space: SPACE,
+      contextKey: "space" as const,
+      pieceId: "space:of:piece",
+      actionId:
+        "cf:module/computeMentionable-hash:computeMentionable:instance-1",
+      actionKind: "computation" as const,
+      implementationFingerprint: IMPL,
+      runtimeFingerprint: RUNTIME_FP,
+      leaseGeneration: 1,
+      claimGeneration: 1,
+      expiresAt: Date.now() + 60_000,
+    };
+    let claimHeld = true;
+    const released: string[] = [];
     const diagnostics: ExecutorCandidateDiagnostic[] = [];
     const sourceAction = {};
     const router = createExecutorActionTransactionRouter({
       servedSpace: SPACE,
       branch: "",
-      claimForAction: () => undefined,
+      claimForAction: () => (claimHeld ? liveClaim : undefined),
       onCandidate: () => {
         throw new Error(
           "a write-outside-surface action must not become a candidate",
         );
       },
       onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      onUnserved: (claim, action, diagnosticCode) => {
+        expect(claim).toBe(liveClaim);
+        expect(action).toBe(sourceAction);
+        released.push(diagnosticCode);
+        claimHeld = false;
+      },
     });
 
+    // Claimed run: the claimed arm attaches the claim assertion and routes
+    // the attempt `unserved` (the de-claim release), never local-shadow.
+    const claimedCommit = commit();
     const first = await router({
       space: SPACE,
-      commit: commit(),
+      commit: claimedCommit,
       sourceAction,
     });
-    expect(first).toEqual({ disposition: "local", kind: "executor-shadow" });
+    expect(first.disposition).toBe("unserved");
+    expect(
+      (first as { diagnosticCode?: string }).diagnosticCode,
+    ).toBe("dynamic-write-outside-static-surface");
+    const assertion = (claimedCommit.schedulerObservation as {
+      executionClaimAssertion?: {
+        contextKey?: string;
+        leaseGeneration?: number;
+        claimGeneration?: number;
+      };
+    }).executionClaimAssertion;
+    expect(assertion).toEqual({
+      contextKey: "space",
+      leaseGeneration: 1,
+      claimGeneration: 1,
+    });
+    // Settle the unserved attempt: exactly one claim release (the de-claim).
+    (first as { onSettled?: () => void }).onSettled?.();
+    expect(released).toEqual(["dynamic-write-outside-static-surface"]);
+
+    // Post-release reruns fall back client-primary and report the verdict
+    // exactly once across identical reruns (no verdict spam).
     const second = await router({
       space: SPACE,
       commit: commit(),
       sourceAction,
     });
     expect(second).toEqual({ disposition: "local", kind: "executor-shadow" });
-
+    const third = await router({
+      space: SPACE,
+      commit: commit(),
+      sourceAction,
+    });
+    expect(third).toEqual({ disposition: "local", kind: "executor-shadow" });
+    expect(released).toEqual(["dynamic-write-outside-static-surface"]);
     expect(diagnostics.map((entry) => entry.diagnosticCode)).toEqual([
       "dynamic-write-outside-static-surface",
     ]);

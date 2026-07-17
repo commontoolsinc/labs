@@ -1,4 +1,7 @@
-export { analyzeFunctionCapabilities } from "./capability-analysis.ts";
+export {
+  analyzeFunctionCapabilities,
+  functionWritesCapturedCells,
+} from "./capability-analysis.ts";
 export {
   createDeriveSchedulerOptions,
   hasCompleteSchedulerScopeSummary,

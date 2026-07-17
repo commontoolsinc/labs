@@ -151,12 +151,14 @@ describe("per-builtin materializer descriptors (W2.16)", () => {
         `impl:cf:builtin/${id}:v1`,
       );
       // Direct output + declared surface in `writes`; the container is the
-      // envelope, not an exact write. `toMemorySpaceAddress` renders each
-      // value-root link as a `["value"]` address.
+      // envelope, not an exact write. The container's value-root envelope is
+      // lifted to a DOCUMENT-root prefix (path `[]`, not the `["value"]`
+      // rendering) so the mint branch's `["result"]`/`["pattern"]` meta
+      // writes and the `["cfc"]` label envelope stay covered (CA6/FB19).
       expect(summary!.writes).toEqual([valueAddress("of:output")]);
       expect(summary!.directOutputs).toEqual([valueAddress("of:output")]);
       expect(summary!.materializerWriteEnvelopes).toEqual([
-        valueAddress("of:container"),
+        valueAddress("of:container", { path: [] }),
       ]);
       expect(summary!.piece).toEqual(valueAddress("of:piece"));
 
