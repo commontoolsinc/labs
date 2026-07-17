@@ -10,7 +10,7 @@
     "dev-clusterduck": "deno task clean && API_URL='http://localhost:7001' deno run -A ../felt/cli.ts dev .",
     "integration": "LOG_LEVEL=warn deno test -A $INTEGRATION_TEST_FLAGS ./integration/*.test.ts",
     // --no-check: this package is type-checked by `deno task check` (tasks/check.sh).
-    "test": "deno test --no-check --allow-read --allow-write --allow-run --allow-env test/*.test.ts"
+    "test": "deno test --no-check --allow-net --allow-read --allow-write --allow-run --allow-env test/*.test.ts"
   },
   "exports": {
     "./shared": "./shared/mod.ts"
@@ -19,8 +19,8 @@
     "@lit/context": "npm:@lit/context@^1.1.5",
     "@lit/task": "npm:@lit/task@^1.0.2",
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.7.0",
-    "@opentelemetry/exporter-trace-otlp-http": "npm:@opentelemetry/exporter-trace-otlp-http@^0.46.0",
-    "@opentelemetry/resources": "npm:@opentelemetry/resources@^1.19.0",
-    "@opentelemetry/sdk-trace-web": "npm:@opentelemetry/sdk-trace-web@^1.19.0"
+    "@opentelemetry/exporter-trace-otlp-http": "npm:@opentelemetry/exporter-trace-otlp-http@^0.220.0",
+    "@opentelemetry/resources": "npm:@opentelemetry/resources@^2.9.0",
+    "@opentelemetry/sdk-trace-web": "npm:@opentelemetry/sdk-trace-web@^2.9.0"
   }
 }
