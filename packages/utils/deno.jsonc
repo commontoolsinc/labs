@@ -16,6 +16,7 @@
     "./bigint": "./src/bigint.ts",
     "./cache": "./src/cache.ts",
     "./deep-equal": "./src/deep-equal.ts",
+    "./hashtags": "./src/hashtags.ts",
     "./defer": "./src/defer.ts",
     "./encoding": "./src/encoding.ts",
     "./env": "./src/env.ts",

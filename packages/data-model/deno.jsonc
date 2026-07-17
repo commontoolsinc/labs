@@ -38,7 +38,6 @@
     "./codec-json": "./src/codec-json/index.ts",
     "./native-type-tags": "./src/native-type-tags.ts",
     "./schema-hash": "./src/schema-hash.ts",
-    "./schema-tags": "./src/schema-tags.ts",
     "./schema-utils": "./src/schema-utils.ts",
     "./SchemaAndHash": "./src/SchemaAndHash.ts",
     "./value-debug": "./src/value-debug.ts",
