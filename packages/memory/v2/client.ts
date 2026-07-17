@@ -33,8 +33,17 @@ import type { AppliedCommit } from "./engine.ts";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
 
+/** Per-send transport hints. Optional for implementations: a transport that
+ * ignores them (every scripted test transport) remains correct, just less
+ * conservative about what it compresses. */
+export interface TransportSendHints {
+  /** Never compress this payload — set for auth-bearing frames so credential
+   * material stays out of compression-size side channels (CRIME-class). */
+  noCompress?: boolean;
+}
+
 export interface Transport {
-  send(payload: string): Promise<void>;
+  send(payload: string, hints?: TransportSendHints): Promise<void>;
   close(): Promise<void>;
   setReceiver(receiver: (payload: string) => void): void;
   setCloseReceiver?(receiver: (error?: Error) => void): void;
@@ -175,7 +184,20 @@ export class Client {
     const requestId = message.requestId as string;
     const pending = Promise.withResolvers<unknown>();
     this.#pending.set(requestId, pending);
-    await this.transport.send(encodeMemoryBoundary(message));
+    try {
+      // session.open carries the signed invocation and challenge response:
+      // auth-bearing frames are never compressed.
+      await this.transport.send(
+        encodeMemoryBoundary(message),
+        message.type === "session.open" ? { noCompress: true } : undefined,
+      );
+    } catch (error) {
+      // The request never reached the wire: withdraw the pending entry so a
+      // later connection-close rejection cannot fire on a promise nobody
+      // observes (an unhandled rejection is fatal in Deno processes).
+      this.#pending.delete(requestId);
+      throw error;
+    }
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
@@ -235,14 +257,24 @@ export class Client {
   private async hello(): Promise<void> {
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
-    await this.transport.send(encodeMemoryBoundary({
-      type: "hello",
-      protocol: MEMORY_PROTOCOL,
-      flags: getMemoryProtocolFlags(),
-    }));
     try {
+      await this.transport.send(
+        encodeMemoryBoundary({
+          type: "hello",
+          protocol: MEMORY_PROTOCOL,
+          flags: getMemoryProtocolFlags(),
+        }),
+        // The handshake frame stays uncompressed alongside the other
+        // auth-bearing frames.
+        { noCompress: true },
+      );
       await ack.promise;
       this.#connected = true;
+    } catch (error) {
+      // If the send failed, a concurrent close may still reject the pending
+      // ack; observe it so the rejection cannot become unhandled.
+      ack.promise.catch(() => {});
+      throw error;
     } finally {
       this.#helloPending = null;
     }
@@ -859,11 +891,21 @@ export class SpaceSession {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
         this.#ackScheduled = false;
         this.#ackFlushing = true;
+        let reschedule = true;
         try {
           await this.flushScheduledAcks();
+        } catch (error) {
+          if (!isConnectionError(error) && !isSessionRevokedError(error)) {
+            throw error;
+          }
+          // The connection is turning over: session restore re-acks after
+          // reconnect, so retrying now would only spin against the closed
+          // transport while isConnected() is still stale.
+          reschedule = false;
         } finally {
           this.#ackFlushing = false;
           if (
+            reschedule &&
             this.#pendingAckSeq > this.#ackedSeq &&
             !this.#closed &&
             this.client.isConnected()

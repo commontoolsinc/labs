@@ -16,13 +16,16 @@ import { encodeMemoryBoundary } from "../v2.ts";
 import * as MemoryServer from "./server.ts";
 import { verifySessionOpenAuthorization } from "./session-open-auth.ts";
 import {
-  deflateWirePayload,
-  inflateWirePayload,
+  isAuthBearingWireMessage,
   MEMORY_WS_DEFLATE_MIN_BYTES,
+  MEMORY_WS_SERVER_INFLATE_MAX_BYTES,
   memoryWsDeflateEnabled,
   selectMemoryWsDeflateProtocol,
-  SerialTaskQueue,
 } from "./transport-deflate.ts";
+import {
+  deflateWirePayloadSync,
+  inflateWirePayloadSync,
+} from "./transport-deflate-sync.ts";
 import { Identity } from "@commonfabric/identity";
 
 const standaloneTextEncoder = new TextEncoder();
@@ -91,39 +94,32 @@ export class StandaloneMemoryServer {
       );
       socket.binaryType = "arraybuffer";
       const connectionTag = nextConnectionTag++;
-      const sendQueue =
-        deflateProtocol !== undefined && memoryWsDeflateEnabled()
-          ? new SerialTaskQueue()
-          : null;
+      const deflateOutbound = deflateProtocol !== undefined &&
+        memoryWsDeflateEnabled();
       const connection = memory.connect((message) => {
-        const payload = encodeMemoryBoundary(message);
-        if (sendQueue === null) {
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.send(payload);
-          }
+        if (socket.readyState !== WebSocket.OPEN) {
           return;
         }
-        void sendQueue.enqueue(async () => {
-          if (
-            standaloneTextEncoder.encode(payload).byteLength <
-              MEMORY_WS_DEFLATE_MIN_BYTES
-          ) {
-            if (socket.readyState === WebSocket.OPEN) socket.send(payload);
-            return;
-          }
-          const compressed = await deflateWirePayload(payload);
-          if (socket.readyState === WebSocket.OPEN) socket.send(compressed);
-        }).catch(() => {
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.close(1011, "memory websocket send failure");
-          }
+        const payload = encodeMemoryBoundary(message);
+        // Auth-bearing frames stay uncompressed (see toolshed's
+        // memory.handlers.ts for the side-channel rationale).
+        if (
+          !deflateOutbound ||
+          isAuthBearingWireMessage(message) ||
+          standaloneTextEncoder.encode(payload).byteLength <
+            MEMORY_WS_DEFLATE_MIN_BYTES
+        ) {
+          socket.send(payload);
+          return;
+        }
+        try {
+          socket.send(deflateWirePayloadSync(payload));
+        } catch {
+          socket.close(1011, "memory websocket send failure");
           connection.close();
-        });
+        }
       });
       const debugWrites = Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";
-      const receiveQueue = deflateProtocol !== undefined
-        ? new SerialTaskQueue()
-        : null;
       const handleText = (text: string) => {
         if (debugWrites) {
           logCommitOperations(connectionTag, text);
@@ -138,40 +134,32 @@ export class StandaloneMemoryServer {
       socket.addEventListener("message", (event) => {
         const data: unknown = event.data;
         if (typeof data === "string") {
-          if (receiveQueue === null) {
-            handleText(data);
-            return;
-          }
-          void receiveQueue.enqueue(() => handleText(data)).catch(() => {});
+          handleText(data);
           return;
         }
         if (
-          receiveQueue !== null &&
+          deflateProtocol !== undefined &&
           (data instanceof ArrayBuffer || ArrayBuffer.isView(data))
         ) {
-          void receiveQueue.enqueue(async () => {
-            handleText(await inflateWirePayload(data));
-          }).catch(() => {
-            if (socket.readyState === WebSocket.OPEN) {
-              socket.close(1007, "memory websocket inflate failure");
-            }
+          let text: string;
+          try {
+            text = inflateWirePayloadSync(
+              data,
+              MEMORY_WS_SERVER_INFLATE_MAX_BYTES,
+            );
+          } catch {
+            socket.close(1007, "memory websocket inflate failure");
             connection.close();
-          });
+            return;
+          }
+          handleText(text);
           return;
         }
         socket.close(1003, "memory websocket expects text frames");
         connection.close();
       });
-      const closeAfterPendingFrames = () => {
-        if (receiveQueue === null) {
-          connection.close();
-          return;
-        }
-        // Frames that arrived before the close still deliver first.
-        void receiveQueue.enqueue(() => connection.close()).catch(() => {});
-      };
-      socket.addEventListener("close", closeAfterPendingFrames);
-      socket.addEventListener("error", closeAfterPendingFrames);
+      socket.addEventListener("close", () => connection.close());
+      socket.addEventListener("error", () => connection.close());
       return response;
     });
     return new StandaloneMemoryServer(memory, http);

@@ -12,10 +12,16 @@
  * untouched — this layer sits strictly below `encodeMemoryBoundary`.
  *
  * Compression is stateless per message (no shared sliding window), so
- * reconnects and replays need no transport state. The one obligation this
- * layer adds is ordering: websocket delivery is ordered, but inflate/deflate
- * are async, so each direction of each connection must funnel through a
- * `SerialTaskQueue` to keep dispatch order identical to arrival order.
+ * reconnects and replays need no transport state. Auth-bearing frames
+ * (`hello`, `hello.ok`, `session.open`) are never compressed by either
+ * peer, keeping credential material out of compression-size side channels;
+ * receivers accept any frame either way — the exemption is sender policy.
+ *
+ * Servers use the synchronous codec (transport-deflate-sync.ts) so dispatch
+ * stays inside the message event handler. Browser clients have only the
+ * async streaming codec below, which detaches dispatch from event delivery —
+ * so the client side funnels each direction through a `SerialTaskQueue` to
+ * keep dispatch order identical to arrival order.
  *
  * Rollout caveat (per RFC 6455 §4.1): a client that offers a subprotocol
  * MUST fail the connection when the server selects none, so servers must
@@ -83,12 +89,45 @@ export const memoryWsDeflateSupported = (): boolean => {
 };
 
 /**
- * Cap on compressed bytes a connection may have queued behind the serial
+ * Cap on compressed bytes a client may have queued behind its serial
  * inflate hop. Inflation normally drains faster than frames arrive; the cap
  * exists so a peer cannot grow the queue without bound while the event loop
- * is busy.
+ * is busy. (Servers inflate synchronously and need no such bound.)
  */
 export const MEMORY_WS_MAX_PENDING_INFLATE_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Tighter inflate cap for server-side (inbound) frames. A server inflates
+ * synchronously on the shared event loop, before any session authorization,
+ * so the cap bounds how long one unauthenticated frame can block every
+ * connection on the process. 8 MiB is a few milliseconds of inflation while
+ * comfortably exceeding any legitimate client frame; server-to-client sync
+ * frames may be larger, so clients keep the wider cap above.
+ */
+export const MEMORY_WS_SERVER_INFLATE_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Whether a wire message carries authentication material and must therefore
+ * never be compressed by the sender (see the module doc): `hello`,
+ * `hello.ok`, `session.open`, and any response whose body carries the
+ * session bearer token or the next session-open challenge (the session.open
+ * response). Structural, so both servers and any host embedding the codec
+ * apply the same policy.
+ */
+export const isAuthBearingWireMessage = (message: unknown): boolean => {
+  if (typeof message !== "object" || message === null) return false;
+  const record = message as Record<string, unknown>;
+  if (
+    record.type === "hello" || record.type === "hello.ok" ||
+    record.type === "session.open"
+  ) {
+    return true;
+  }
+  if (record.type !== "response") return false;
+  const ok = record.ok;
+  return typeof ok === "object" && ok !== null &&
+    ("sessionToken" in ok || "sessionOpen" in ok);
+};
 
 /**
  * Picks the deflate subprotocol out of a `Sec-WebSocket-Protocol` offer

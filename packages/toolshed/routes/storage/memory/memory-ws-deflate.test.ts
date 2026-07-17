@@ -1,8 +1,9 @@
 /**
- * SPIKE: real-websocket coverage for the negotiated `fvj1.deflate` memory
- * transport — negotiation via subprotocol, compressed frames both directions,
- * mixed text/binary on one connection, and byte-identical behavior for
- * clients that do not offer the subprotocol.
+ * Real-websocket coverage for the negotiated `fvj1.deflate` memory
+ * transport: negotiation via subprotocol, synchronous server codec both
+ * directions, the auth-frame compression exemption, the env kill switch,
+ * and byte-identical behavior for clients that do not offer the
+ * subprotocol.
  */
 import { assert, assertEquals } from "@std/assert";
 import app from "../../../app.ts";
@@ -15,11 +16,13 @@ import {
   type SessionOpenChallenge,
 } from "@commonfabric/memory/v2";
 import {
-  deflateWirePayload,
-  inflateWirePayload,
   MEMORY_WS_DEFLATE_MIN_BYTES,
   MEMORY_WS_DEFLATE_SUBPROTOCOL,
 } from "@commonfabric/memory/v2/transport-deflate";
+import {
+  deflateWirePayloadSync,
+  inflateWirePayloadSync,
+} from "@commonfabric/memory/v2/transport-deflate-sync";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
@@ -74,7 +77,7 @@ const readWireMessage = async <Message extends FabricValue>(
     return { message: decodeMemoryBoundary<Message>(data), wasBinary: false };
   }
   return {
-    message: decodeMemoryBoundary<Message>(await inflateWirePayload(data)),
+    message: decodeMemoryBoundary<Message>(inflateWirePayloadSync(data)),
     wasBinary: true,
   };
 };
@@ -107,7 +110,149 @@ const createSessionOpenAuth = async (
   };
 };
 
-Deno.test("memory websocket negotiates deflate and speaks compressed frames both directions", async () => {
+/** hello (compressed — servers must accept any framing) → hello.ok →
+ *  session.open (text, matching the real client's auth exemption). */
+const negotiateSession = async (
+  socket: WebSocket,
+  identity: Identity,
+  space: string,
+): Promise<{ sessionId: string; helloWasBinary: boolean }> => {
+  socket.send(deflateWirePayloadSync(encodeMemoryBoundary(HELLO)));
+  const hello = await readWireMessage<HelloOkWithSessionOpen>(socket);
+  assertEquals(hello.message.type, "hello.ok");
+  assertEquals(hello.message.protocol, MEMORY_PROTOCOL);
+
+  const auth = await createSessionOpenAuth(
+    identity,
+    space,
+    hello.message.sessionOpen,
+  );
+  socket.send(encodeMemoryBoundary({
+    type: "session.open",
+    requestId: "open-1",
+    space,
+    session: {},
+    ...auth,
+  }));
+  const opened = await readWireMessage<{
+    type: "response";
+    requestId: string;
+    ok: { sessionId: string };
+  }>(socket);
+  assertEquals(opened.message.type, "response");
+  assert(opened.message.ok.sessionId.length > 0);
+  // The session.open response carries the bearer session token and the next
+  // challenge: auth-bearing frames are never compressed, regardless of size.
+  assertEquals(
+    opened.wasBinary,
+    false,
+    "session.open response must never be compressed (auth exemption)",
+  );
+  return {
+    sessionId: opened.message.ok.sessionId,
+    helloWasBinary: hello.wasBinary,
+  };
+};
+
+/** Writes a document large enough that its watch.add sync response crosses
+ *  the compression threshold, then watches it. Returns the response frame's
+ *  framing plus decoded response. The transact itself is sent COMPRESSED to
+ *  exercise synchronous server-side inflation of a large frame. */
+const transactAndWatchFatDoc = async (
+  socket: WebSocket,
+  space: string,
+  sessionId: string,
+  ownerDid: string,
+): Promise<{ watchWasBinary: boolean; fatValue: string }> => {
+  // Fresh spaces demand an ACL-only genesis commit before ordinary writes.
+  socket.send(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "tx-genesis",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: `of:${space}`,
+        value: { value: { [ownerDid]: "OWNER" } },
+      }],
+    },
+  }));
+  const genesis = await readWireMessage<{
+    type: "response";
+    requestId: string;
+    error?: { name: string; message: string };
+  }>(socket);
+  assertEquals(genesis.message.requestId, "tx-genesis");
+  assertEquals(genesis.message.error, undefined);
+
+  const fatValue = "lunch-".repeat(200);
+  socket.send(deflateWirePayloadSync(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "tx-1",
+    space,
+    sessionId,
+    commit: {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:fat",
+        value: { value: { fat: fatValue } },
+      }],
+    },
+  })));
+  const committed = await readWireMessage<{
+    type: "response";
+    requestId: string;
+    ok?: Record<string, unknown>;
+    error?: { name: string; message: string };
+  }>(socket);
+  assertEquals(committed.message.requestId, "tx-1");
+  assertEquals(committed.message.error, undefined);
+
+  socket.send(encodeMemoryBoundary({
+    type: "session.watch.add",
+    requestId: "watch-1",
+    space,
+    sessionId,
+    watches: [{
+      id: "fat-doc",
+      kind: "graph",
+      query: {
+        roots: [{ id: "of:doc:fat", selector: { path: [], schema: false } }],
+      },
+    }],
+  }));
+  const watched = await readWireMessage<{
+    type: "response";
+    requestId: string;
+    ok?: { sync?: { upserts?: Array<{ doc?: { value?: { fat?: string } } }> } };
+    error?: { name: string; message: string };
+  }>(socket);
+  assertEquals(watched.message.requestId, "watch-1");
+  assertEquals(watched.message.error, undefined);
+  const roundtripped = watched.message.ok?.sync?.upserts?.[0]?.doc?.value?.fat;
+  assertEquals(roundtripped, fatValue);
+  assert(
+    encodeMemoryBoundary(watched.message).length >=
+      MEMORY_WS_DEFLATE_MIN_BYTES,
+    "watch response must cross the compression threshold for this test",
+  );
+  return { watchWasBinary: watched.wasBinary, fatValue };
+};
+
+const closeSocket = async (socket: WebSocket): Promise<void> => {
+  const closed = new Promise<void>((resolve) => {
+    socket.addEventListener("close", () => resolve(), { once: true });
+  });
+  socket.close();
+  await closed;
+};
+
+Deno.test("memory websocket compresses large frames both ways but never auth frames", async () => {
   const identity = await Identity.fromPassphrase("memory-ws-deflate-test");
   const server = Deno.serve({ port: 0 }, app.fetch);
   const address = new URL(
@@ -119,57 +264,34 @@ Deno.test("memory websocket negotiates deflate and speaks compressed frames both
     const socket = await openSocket(address, [MEMORY_WS_DEFLATE_SUBPROTOCOL]);
     assertEquals(socket.protocol, MEMORY_WS_DEFLATE_SUBPROTOCOL);
 
-    // Send the hello COMPRESSED even though it is small: the server must
-    // inflate a binary first frame before protocol sniffing.
-    socket.send(await deflateWirePayload(encodeMemoryBoundary(HELLO)));
-
-    const hello = await readWireMessage<HelloOkWithSessionOpen>(socket);
-    assertEquals(hello.message.type, "hello.ok");
-    assertEquals(hello.message.protocol, MEMORY_PROTOCOL);
-    assertEquals(hello.message.flags, getMemoryProtocolFlags());
-    // hello.ok (flags + audience + challenge) is above the compression
-    // threshold, so a negotiated server ships it as a binary frame.
-    assert(hello.wasBinary, "expected hello.ok as a compressed binary frame");
-
-    // Mixed framing: a plain-text frame is still valid after negotiation.
-    const auth = await createSessionOpenAuth(
+    const { sessionId, helloWasBinary } = await negotiateSession(
+      socket,
       identity,
       space,
-      hello.message.sessionOpen,
     );
-    socket.send(encodeMemoryBoundary({
-      type: "session.open",
-      requestId: "open-1",
-      space,
-      session: {},
-      ...auth,
-    }));
-
-    const opened = await readWireMessage<{
-      type: "response";
-      requestId: string;
-      ok: { sessionId: string; serverSeq: number };
-    }>(socket);
-    assertEquals(opened.message.type, "response");
-    assertEquals(opened.message.requestId, "open-1");
-    assertEquals(opened.message.ok.serverSeq, 0);
-    assert(opened.message.ok.sessionId.length > 0);
-    // Framing must follow the threshold: payloads at or above the minimum
-    // ship compressed, smaller ones stay text.
-    const encodedBytes = new TextEncoder().encode(
-      encodeMemoryBoundary(opened.message),
-    ).byteLength;
+    // hello.ok carries the session-open challenge: auth frames are exempt
+    // from compression even though hello.ok exceeds the size threshold.
     assertEquals(
-      opened.wasBinary,
-      encodedBytes >= MEMORY_WS_DEFLATE_MIN_BYTES,
-      `framing must match threshold for a ${encodedBytes}-byte payload`,
+      helloWasBinary,
+      false,
+      "hello.ok must never be compressed (auth exemption)",
     );
 
-    const closed = new Promise<void>((resolve) => {
-      socket.addEventListener("close", () => resolve(), { once: true });
-    });
-    socket.close();
-    await closed;
+    // Large non-auth traffic compresses in both directions: the transact
+    // goes up compressed, and the watch response comes down compressed.
+    const { watchWasBinary } = await transactAndWatchFatDoc(
+      socket,
+      space,
+      sessionId,
+      identity.did(),
+    );
+    assertEquals(
+      watchWasBinary,
+      true,
+      "large non-auth server frames must be compressed",
+    );
+
+    await closeSocket(socket);
   } finally {
     await server.shutdown();
   }
@@ -194,21 +316,19 @@ Deno.test("memory websocket without the subprotocol stays text-only", async () =
       "non-negotiated connections must never receive binary frames",
     );
 
-    const closed = new Promise<void>((resolve) => {
-      socket.addEventListener("close", () => resolve(), { once: true });
-    });
-    socket.close();
-    await closed;
+    await closeSocket(socket);
   } finally {
     await server.shutdown();
   }
 });
 
 Deno.test("env kill switch keeps negotiation but stops outbound compression", async () => {
+  const identity = await Identity.fromPassphrase("memory-ws-deflate-kill");
   const server = Deno.serve({ port: 0 }, app.fetch);
   const address = new URL(
     `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
   );
+  const space = identity.did();
 
   Deno.env.set("CF_MEMORY_WS_DEFLATE", "0");
   try {
@@ -218,17 +338,21 @@ Deno.test("env kill switch keeps negotiation but stops outbound compression", as
     assertEquals(socket.protocol, MEMORY_WS_DEFLATE_SUBPROTOCOL);
 
     // Compressed inbound frames are still accepted...
-    socket.send(await deflateWirePayload(encodeMemoryBoundary(HELLO)));
-    const hello = await readWireMessage<HelloOkWithSessionOpen>(socket);
-    assertEquals(hello.message.type, "hello.ok");
-    // ...but the server's outbound stays text.
-    assertEquals(hello.wasBinary, false);
+    const { sessionId } = await negotiateSession(socket, identity, space);
+    // ...but even large non-auth outbound stays text.
+    const { watchWasBinary } = await transactAndWatchFatDoc(
+      socket,
+      space,
+      sessionId,
+      identity.did(),
+    );
+    assertEquals(
+      watchWasBinary,
+      false,
+      "kill switch must stop outbound compression",
+    );
 
-    const closed = new Promise<void>((resolve) => {
-      socket.addEventListener("close", () => resolve(), { once: true });
-    });
-    socket.close();
-    await closed;
+    await closeSocket(socket);
   } finally {
     Deno.env.delete("CF_MEMORY_WS_DEFLATE");
     await server.shutdown();
@@ -243,7 +367,7 @@ Deno.test("memory websocket closes on a malformed compressed frame", async () =>
 
   try {
     const socket = await openSocket(address, [MEMORY_WS_DEFLATE_SUBPROTOCOL]);
-    socket.send(await deflateWirePayload(encodeMemoryBoundary(HELLO)));
+    socket.send(deflateWirePayloadSync(encodeMemoryBoundary(HELLO)));
     const hello = await readWireMessage<HelloOkWithSessionOpen>(socket);
     assertEquals(hello.message.type, "hello.ok");
 

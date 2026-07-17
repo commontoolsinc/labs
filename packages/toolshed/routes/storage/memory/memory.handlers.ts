@@ -2,14 +2,16 @@ import type { AppRouteHandler } from "@/lib/types.ts";
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import * as MemoryServer from "@commonfabric/memory/v2/server";
 import {
-  deflateWirePayload,
-  inflateWirePayload,
+  isAuthBearingWireMessage,
   MEMORY_WS_DEFLATE_MIN_BYTES,
-  MEMORY_WS_MAX_PENDING_INFLATE_BYTES,
+  MEMORY_WS_SERVER_INFLATE_MAX_BYTES,
   memoryWsDeflateEnabled,
   selectMemoryWsDeflateProtocol,
-  SerialTaskQueue,
 } from "@commonfabric/memory/v2/transport-deflate";
+import {
+  deflateWirePayloadSync,
+  inflateWirePayloadSync,
+} from "@commonfabric/memory/v2/transport-deflate-sync";
 import type * as Routes from "./memory.routes.ts";
 import { memoryServer } from "../memory.ts";
 import { createSpan } from "@/middlewares/opentelemetry.ts";
@@ -28,14 +30,14 @@ type NegotiatedSocketHandlers = {
 type NegotiationOptions = {
   maxBufferedBytes?: number;
   /**
-   * SPIKE: present only when the connection negotiated `fvj1.deflate`.
-   * Binary frames are inflated with this and every frame (text included)
-   * then flows through one ordered async chain so dispatch order matches
-   * arrival order. Absent, the historical synchronous text-only path is
-   * used unchanged and binary frames stay fatal.
+   * Present only when the connection negotiated `fvj1.deflate`. The codec is
+   * deliberately SYNCHRONOUS: dispatch stays inside the message event
+   * handler, so frame ordering, pre-close delivery, and nothing-after-close
+   * remain event-loop properties rather than queue invariants. Absent, the
+   * historical text-only path is unchanged and binary frames stay fatal.
    */
-  inflateBinary?: (data: ArrayBuffer | ArrayBufferView) => Promise<string>;
-  /** SPIKE diagnostic: per-frame inbound byte accounting. */
+  inflateBinarySync?: (data: ArrayBuffer | ArrayBufferView) => string;
+  /** Diagnostic: per-frame inbound byte accounting. */
   onFrame?: (
     wireBytes: number,
     logicalBytes: number,
@@ -48,15 +50,13 @@ const NEGOTIATION_BUFFER_MAX_BYTES = 1_048_576;
 const TEXT_ENCODER = new TextEncoder();
 
 /** Close codes for transport-level frame errors: 1003 for a frame type the
- * connection does not accept, 1007 for undecodable compressed data, 1009 for
- * an inflate backlog past its bound, 1011 otherwise. */
+ * connection does not accept, 1007 for undecodable compressed data, 1011
+ * otherwise. */
 const closeCodeForSocketError = (error: Error): number =>
   error.message === "Memory websocket expects text frames"
     ? 1003
     : error.message === "Memory websocket inflate failure"
     ? 1007
-    : error.message === "Memory websocket inflate backlog exceeded"
-    ? 1009
     : 1011;
 
 export const bufferTextMessagesUntilNegotiated = (
@@ -133,15 +133,6 @@ export const bufferTextMessagesUntilNegotiated = (
       forwardMessage(text);
     };
 
-    // SPIKE: when the deflate subprotocol is negotiated, every frame goes
-    // through this chain so async inflation cannot reorder dispatch, and the
-    // close notification queues behind it so frames that arrived before the
-    // close are still delivered — matching the synchronous path's semantics.
-    const inflateQueue = options.inflateBinary !== undefined
-      ? new SerialTaskQueue()
-      : null;
-    let pendingInflateBytes = 0;
-
     const onMessage = (event: MessageEvent) => {
       const data: unknown = event.data;
       if (typeof data === "string") {
@@ -149,52 +140,37 @@ export const bufferTextMessagesUntilNegotiated = (
           const bytes = TEXT_ENCODER.encode(data).byteLength;
           options.onFrame(bytes, bytes, false);
         }
-        if (inflateQueue === null) {
-          dispatchText(data);
-          return;
-        }
-        void inflateQueue.enqueue(() => dispatchText(data)).catch(() =>
-          failFrame(new Error("Memory websocket dispatch failure"))
-        );
+        dispatchText(data);
         return;
       }
 
       if (
-        inflateQueue !== null &&
+        options.inflateBinarySync !== undefined &&
         (data instanceof ArrayBuffer || ArrayBuffer.isView(data))
       ) {
-        if (
-          pendingInflateBytes + data.byteLength >
-            MEMORY_WS_MAX_PENDING_INFLATE_BYTES
-        ) {
-          failFrame(new Error("Memory websocket inflate backlog exceeded"));
+        let text: string;
+        try {
+          const started = performance.now();
+          text = options.inflateBinarySync(data);
+          options.onFrame?.(
+            data.byteLength,
+            TEXT_ENCODER.encode(text).byteLength,
+            true,
+            performance.now() - started,
+          );
+        } catch {
+          failFrame(new Error("Memory websocket inflate failure"));
           return;
         }
-        pendingInflateBytes += data.byteLength;
-        void inflateQueue.enqueue(async () => {
-          try {
-            const started = performance.now();
-            const text = await options.inflateBinary!(data);
-            options.onFrame?.(
-              data.byteLength,
-              TEXT_ENCODER.encode(text).byteLength,
-              true,
-              performance.now() - started,
-            );
-            dispatchText(text);
-          } finally {
-            pendingInflateBytes -= data.byteLength;
-          }
-        }).catch(() =>
-          failFrame(new Error("Memory websocket inflate failure"))
-        );
+        dispatchText(text);
         return;
       }
 
       failFrame(new Error("Memory websocket expects text frames"));
     };
 
-    const notifyClose = () => {
+    const onClose = () => {
+      cleanup();
       if (!settled) {
         settled = true;
         resolve(undefined);
@@ -209,16 +185,8 @@ export const bufferTextMessagesUntilNegotiated = (
       closePending = true;
     };
 
-    const onClose = () => {
+    const onError = () => {
       cleanup();
-      if (inflateQueue === null) {
-        notifyClose();
-        return;
-      }
-      void inflateQueue.enqueue(notifyClose).catch(() => {});
-    };
-
-    const notifyError = () => {
       if (!settled) {
         reject(new Error("Memory websocket failed before negotiation"));
         return;
@@ -230,17 +198,6 @@ export const bufferTextMessagesUntilNegotiated = (
       // Settled but not handed off: surface the failure at handoff so the
       // memory connection is still torn down instead of leaking.
       negotiationError = new Error("Memory websocket receive failure");
-    };
-
-    const onError = () => {
-      cleanup();
-      // Abnormal closures fire error-then-close; queue the notification like
-      // onClose so frames already inflating still deliver first.
-      if (inflateQueue === null) {
-        notifyError();
-        return;
-      }
-      void inflateQueue.enqueue(notifyError).catch(() => {});
     };
 
     cleanup = () => {
@@ -309,17 +266,19 @@ const attachMemorySocketPipeline = (
       // Ignore close races with the peer.
     }
   };
-  // SPIKE: on a negotiated connection, sends funnel through a serial queue
-  // because deflate is async and outbound order must match message order.
-  const sendQueue = options.deflateOutbound === true
-    ? new SerialTaskQueue()
-    : null;
   const connection = memoryServer.connect((message) => {
+    if (socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
     const payload = encodeMemoryBoundary(message);
-    if (sendQueue === null) {
-      if (socket.readyState !== WebSocket.OPEN) {
-        return;
-      }
+    // Auth-bearing frames (hello.ok's challenge, the session.open response's
+    // bearer token) are never compressed: credential material stays out of
+    // compression-size side channels (CRIME-class). The codec is
+    // synchronous, so ordering needs no queue.
+    if (
+      options.deflateOutbound !== true ||
+      isAuthBearingWireMessage(message)
+    ) {
       if (options.stats !== undefined) {
         const bytes = TEXT_ENCODER.encode(payload).byteLength;
         options.stats.recordOutbound(bytes, bytes, false);
@@ -327,28 +286,30 @@ const attachMemorySocketPipeline = (
       socket.send(payload);
       return;
     }
-    void sendQueue.enqueue(async () => {
-      const logicalBytes = TEXT_ENCODER.encode(payload).byteLength;
-      if (logicalBytes < MEMORY_WS_DEFLATE_MIN_BYTES) {
-        if (socket.readyState !== WebSocket.OPEN) return;
-        options.stats?.recordOutbound(logicalBytes, logicalBytes, false);
-        socket.send(payload);
-        return;
-      }
+    const payloadBytes = TEXT_ENCODER.encode(payload);
+    if (payloadBytes.byteLength < MEMORY_WS_DEFLATE_MIN_BYTES) {
+      options.stats?.recordOutbound(
+        payloadBytes.byteLength,
+        payloadBytes.byteLength,
+        false,
+      );
+      socket.send(payload);
+      return;
+    }
+    try {
       const started = performance.now();
-      const compressed = await deflateWirePayload(payload);
-      if (socket.readyState !== WebSocket.OPEN) return;
+      const compressed = deflateWirePayloadSync(payloadBytes);
       options.stats?.recordOutbound(
         compressed.byteLength,
-        logicalBytes,
+        payloadBytes.byteLength,
         true,
         performance.now() - started,
       );
       socket.send(compressed);
-    }).catch(() => {
+    } catch {
       safeSocketClose(1011, "Memory websocket send failure");
       connection.close();
-    });
+    }
   });
   const closeConnection = () => {
     connection.close();
@@ -443,7 +404,15 @@ export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
       void createSpan("memory.socket.setup", async (setupSpan) => {
         const negotiation = bufferTextMessagesUntilNegotiated(socket, {
           ...(deflateProtocol !== undefined
-            ? { inflateBinary: inflateWirePayload }
+            ? {
+              // The tighter server cap bounds pre-authorization synchronous
+              // inflation on the shared event loop.
+              inflateBinarySync: (data) =>
+                inflateWirePayloadSync(
+                  data,
+                  MEMORY_WS_SERVER_INFLATE_MAX_BYTES,
+                ),
+            }
             : {}),
           ...(stats !== undefined
             ? {

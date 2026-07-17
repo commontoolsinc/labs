@@ -213,8 +213,9 @@ describe("WebSocketTransport deflate framing", () => {
       await send;
 
       // Drop the socket with a compressed frame still inflating, then close
-      // the transport while the drain is pending. A send parked behind the
-      // drain must reject — never dial a fresh socket that nothing owns.
+      // the transport while the drain is pending. A send in that window must
+      // reject — never dial a fresh socket that nothing owns — and a send
+      // after close() must reject with the closed error.
       socket().dispatchEvent(
         new MessageEvent("message", {
           data: (await deflateWirePayload(LARGE)).buffer,
@@ -223,8 +224,11 @@ describe("WebSocketTransport deflate framing", () => {
       const socketCount = DeflatingWebSocket.instances.length;
       socket().close();
       const parked = transport.send(SMALL);
-      await transport.close();
       await expect(parked).rejects.toThrow(
+        "memory websocket transport reconnected during send",
+      );
+      await transport.close();
+      await expect(transport.send(SMALL)).rejects.toThrow(
         "memory websocket transport is closed",
       );
       expect(DeflatingWebSocket.instances.length).toBe(socketCount);
@@ -250,6 +254,83 @@ describe("WebSocketTransport deflate framing", () => {
       // Give any stray async work a tick before asserting.
       await new Promise((resolve) => setTimeout(resolve, 10));
       expect(received).toEqual([SMALL]);
+    });
+  });
+
+  it("keeps noCompress frames as text in outbound order", async () => {
+    await withTransport(async (transport, socket) => {
+      const warmup = transport.send(SMALL);
+      openSocket(socket());
+      await warmup;
+
+      // A large compressed frame followed by a large auth frame: the auth
+      // frame must stay text AND must not overtake the compressed frame
+      // still in the async deflate hop.
+      const large = transport.send(LARGE);
+      const auth = transport.send(LARGE, { noCompress: true });
+      await Promise.all([large, auth]);
+
+      expect(socket().sent.length).toBe(3);
+      expect(typeof socket().sent[1]).not.toBe("string");
+      expect(socket().sent[2]).toBe(LARGE);
+    });
+  });
+
+  it("rejects a send parked across a reconnect instead of leaking it", async () => {
+    await withTransport(async (transport, socket) => {
+      const warmup = transport.send(SMALL);
+      openSocket(socket());
+      await warmup;
+
+      // Drop the socket with an inflate pending so the drain window is open,
+      // then issue a send inside that window. The payload must not ride the
+      // next socket ahead of the client's fresh handshake — and once the
+      // drain completes, a new send may dial again normally.
+      socket().dispatchEvent(
+        new MessageEvent("message", {
+          data: (await deflateWirePayload(LARGE)).buffer,
+        }),
+      );
+      const socketCount = DeflatingWebSocket.instances.length;
+      const drained = new Promise<void>((resolve) => {
+        transport.setCloseReceiver(() => resolve());
+      });
+      socket().close();
+      const parked = transport.send(SMALL);
+      await expect(parked).rejects.toThrow(
+        "memory websocket transport reconnected during send",
+      );
+      expect(DeflatingWebSocket.instances.length).toBe(socketCount);
+
+      // After the close notification lands (drain cleared), sends dial
+      // fresh — the reconnect path is not blocked.
+      await drained;
+      const redial = transport.send(SMALL);
+      openSocket(socket());
+      await redial;
+      expect(DeflatingWebSocket.instances.length).toBe(socketCount + 1);
+    });
+  });
+
+  it("closes the socket when the inflate backlog exceeds its bound", async () => {
+    await withTransport(async (transport, socket) => {
+      const received: string[] = [];
+      transport.setReceiver((payload) => received.push(payload));
+      const send = transport.send(SMALL);
+      openSocket(socket());
+      await send;
+
+      const closed = new Promise<void>((resolve) => {
+        socket().addEventListener("close", () => resolve(), { once: true });
+      });
+      // Two 9 MiB frames dispatched back-to-back breach the 16 MiB pending
+      // bound before the first inflate task can run.
+      const nineMiB = new ArrayBuffer(9 * 1024 * 1024);
+      socket().dispatchEvent(new MessageEvent("message", { data: nineMiB }));
+      socket().dispatchEvent(new MessageEvent("message", { data: nineMiB }));
+
+      await closed;
+      expect(received).toEqual([]);
     });
   });
 
