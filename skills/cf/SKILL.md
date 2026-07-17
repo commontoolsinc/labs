@@ -137,8 +137,8 @@ compatibility proofs. `new` accepts the same flag for deploy-script symmetry,
 though a fresh piece has no predecessor schema to compare.
 
 Source-file writes through `cf fuse mount` hit the same update gate. Mount with
-`--dangerously-allow-incompatible-schema` when those writes are part of the
-same intentional breaking migration.
+`--dangerously-allow-incompatible-schema` when those writes are part of the same
+intentional breaking migration.
 
 ### Source location metadata
 
