@@ -410,6 +410,38 @@ the `deno-setup` action both still read `mise.toml` rather than a hardcoded
 version, and that the action holds no version literal that disagrees with the
 pin.
 
+#### Packages that must resolve to a single copy
+
+Most packages can be resolved twice without anyone noticing. A few cannot,
+because one copy produces a value that another copy reads back:
+
+- `ai` and `@ai-sdk/provider-utils` produce the telemetry spans that
+  `@arizeai/openinference-vercel` translates into OpenInference attributes.
+- `@arizeai/openinference-semantic-conventions` defines the attribute names
+  that the same package's span processor reads back.
+
+Two copies of any of them breaks the translation, and breaks it quietly: the
+spans are still produced and still exported, they just carry the wrong
+attributes or none. Nothing throws, no test fails, and the traces keep flowing
+in the volume graphs.
+
+`@ai-sdk/otel` depends on `ai` with an exact pin rather than a peer range, so
+it resolves a second copy of `ai` as soon as its pin and the range toolshed
+asks for stop agreeing. Rolling `ai`, any `@ai-sdk/*` provider, or either
+`@arizeai/openinference-*` package on its own is enough to do it, which is why
+they are rolled as one set:
+
+```bash
+deno outdated --update --latest --recursive ai @ai-sdk/groq @ai-sdk/openai \
+  @ai-sdk/anthropic @ai-sdk/google-vertex @ai-sdk/otel \
+  @arizeai/openinference-vercel @arizeai/openinference-semantic-conventions
+```
+
+`deno task check-single-copy-deps` (also a CI step) reads `deno.lock` and fails
+when one of those packages resolves more than once. `tasks/check-single-copy-deps.ts`
+holds the list, each entry with what breaks when it is duplicated; add to it
+when a package starts carrying cross-copy state.
+
 #### SSL Certificate Issues
 
 In some CI/test environments, you may encounter SSL certificate errors when Deno downloads npm packages:

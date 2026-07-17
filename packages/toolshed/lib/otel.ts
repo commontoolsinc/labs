@@ -7,6 +7,8 @@ import {
 } from "@opentelemetry/resources";
 import { AsyncHooksContextManager } from "@opentelemetry/context-async-hooks";
 import env from "@/env.ts";
+import { registerTelemetry } from "ai";
+import { createAiSdkTelemetry } from "@/lib/ai-telemetry.ts";
 import { OpenInferenceBatchSpanProcessor } from "@arizeai/openinference-vercel";
 import { samplerFromEnv } from "@/lib/otel-sampler.ts";
 import { detachRuntimeOtelBridgeIfAttached } from "@/runtime-options.ts";
@@ -54,6 +56,16 @@ export const provider = new BasicTracerProvider({
     }),
   ],
 });
+
+// Register the AI SDK telemetry against the same provider the OpenInference
+// processor runs on, so LLM spans reach the same exporter as everything else.
+// Registration happens at module scope because a generation call anywhere in
+// the process picks up whatever is registered at the time it runs.
+registerTelemetry(
+  createAiSdkTelemetry(
+    provider.getTracer(env.OTEL_SERVICE_NAME || "toolshed-dev"),
+  ),
+);
 
 export function getTracerProvider() {
   return _provider;

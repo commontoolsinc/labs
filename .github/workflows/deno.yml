@@ -68,6 +68,9 @@ jobs:
       - name: 🔎 Check Deno toolchain pins are aligned
         run: deno task check-deno-pins
 
+      - name: 🔎 Check single-copy packages resolve once
+        run: deno task check-single-copy-deps
+
       - name: 🔎 Check generated commonfabric/cfc types are up to date
         working-directory: packages/static
         run: deno task check-cfc-types

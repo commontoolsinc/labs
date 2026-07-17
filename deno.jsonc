@@ -45,6 +45,7 @@
     "check-docs": "deno run --allow-read --allow-write --allow-run --allow-env ./docs/check.ts",
     "check-no-waitfor": "deno run --allow-read ./tasks/check-no-waitfor.ts",
     "check-deno-pins": "deno run --allow-read ./tasks/check-deno-pins.ts",
+    "check-single-copy-deps": "deno run --allow-read ./tasks/check-single-copy-deps.ts",
     "cfcheck": "deno run -A ./tasks/cfcheck.ts",
     "check-skill-facts": "deno run --allow-read --allow-run=git ./tasks/check-skill-facts.ts",
     "cf": "deno run --allow-run --allow-env --allow-read ./packages/cli/launcher.ts",

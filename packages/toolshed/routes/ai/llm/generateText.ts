@@ -1,5 +1,5 @@
 import { jsonSchema, ModelMessage, stepCountIs, streamText, tool } from "ai";
-import { AttributeValue, trace } from "@opentelemetry/api";
+import { trace } from "@opentelemetry/api";
 import {
   type LLMNativeModelToolId,
   type LLMNativeModelToolResult,
@@ -8,8 +8,7 @@ import {
 import { type BuiltInLLMMessage } from "@commonfabric/api";
 import { findModel, type ModelConfig } from "./models.ts";
 import { normalizeSchemaForProvider } from "./schema.ts";
-import { provider as otelProvider } from "@/lib/otel.ts";
-import env from "@/env.ts";
+import { runtimeContextFromMetadata } from "@/lib/ai-telemetry.ts";
 
 // Constants for JSON mode
 const JSON_SYSTEM_PROMPTS = {
@@ -215,7 +214,7 @@ export async function generateText(
     system: params.system,
     stopSequences: params.stop ? [params.stop] : undefined,
     abortSignal: params.abortSignal,
-    experimental_telemetry: { isEnabled: true },
+    telemetry: { isEnabled: true },
     maxOutputTokens: params.maxTokens,
     stopWhen: stepCountIs(8), // TODO(bf): low limit to prevent runaway process
   };
@@ -289,20 +288,12 @@ export async function generateText(
     streamParams.model = modelConfig.model;
   }
 
-  streamParams.experimental_telemetry = {
-    isEnabled: true,
-    metadata: params.metadata
-      ? Object.keys(params.metadata).reduce((out, prop) => {
-        const value = params.metadata![prop];
-        // Only overlap between LLMRequestMetadata values
-        // and AttributeValue are string-type values.
-        if (typeof value !== "string") return out;
-        out[prop] = value;
-        return out;
-      }, {} as Record<string, AttributeValue>)
-      : undefined,
-    tracer: otelProvider.getTracer(env.OTEL_SERVICE_NAME || "toolshed-dev"),
-  };
+  // Per-request metadata reaches the spans as runtime context.
+  const { runtimeContext, includeRuntimeContext } = runtimeContextFromMetadata(
+    params.metadata,
+  );
+  streamParams.runtimeContext = runtimeContext;
+  streamParams.telemetry = { isEnabled: true, includeRuntimeContext };
 
   // This is where the LLM API call is made
   const llmStream = await streamText(streamParams);
