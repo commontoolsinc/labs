@@ -313,13 +313,26 @@ propagate](#how-flags-propagate).
   enabling a space whose sessions are not yet fully doc-set is safe (it costs a
   counted residual, not a delivery gap). The end state is every compatible
   space eligible.
-- **Status on 2026-07-17.** Implemented: the refresh-loop classifier, the
-  per-space dial, the residual/fully-doc-set/eligible counters wired into
-  `/api/health/stats`, and the conflict-liveness and watermark guards. The
-  shipping-critical W2.9 parity gate — the flag-on note-create series reaching
-  flag-off parity within noise versus the archived baseline — is a live
-  measurement the rollout owner runs (see the F5 measurement protocol in the
-  [implementation plan](../specs/server-side-execution/implementation-plan.md)).
+- **Status on 2026-07-17 (corrected same day by the Fable commit review,
+  FB9/FB10 — supersedes the Purpose/rollout description above where they
+  conflict).** The dial currently has **no behavioral authority**: the
+  retire predicate requires zero residual graph watches while the guarded
+  loop iterates exactly those graph watches, so the skip only ever skips
+  a zero-iteration loop. The zero-traversal property is delivered
+  structurally by F3+F4b (docs-kind grouping exclusion plus client
+  demotion), which ride the GLOBAL client-side doc-set env flag per
+  connection — not this per-space dial. Consequences: withholding a space
+  from the dial does NOT hold it on graph behavior (it only zeroes that
+  space's F5 gauges, hiding it from the regression signal), and adding a
+  space changes no delivery or traversal behavior. The dial is also
+  unreachable outside tests — no env, no toolshed hook, zero non-test
+  call sites — so the shipping-critical W2.9 parity gate cannot currently
+  be executed. Real per-watch retirement (FA3), dial wiring, and gate
+  executability are owned by the feed repair wave (plan FW5); FB1's
+  demotion blocker must land first. Implemented and standing: the
+  refresh-loop classifier, the counters wired into `/api/health/stats`
+  (with FB23/FB28 gauge caveats), and the conflict-liveness and watermark
+  guards.
 - **Path to removal.** Once the W2.9 gate is green across the rollout, make the
   retirement unconditional for fully-doc-set surfaces, fold the dial into
   `serverPrimaryExecution`, and delete the config functions and the counters'

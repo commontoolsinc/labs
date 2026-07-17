@@ -532,9 +532,13 @@ that claim is a design bug.
 | R13 | `wish` (resolver semantics; static identity but no descriptor) | builtin id lookup | plan W2.15b (owner, 2026-07-17) — descriptor shape decided by the resolver contract; measured ×4 in the flagship fixture, so a real coverage hole, not a corner |
 
 Engineering debt riding alongside (no decisions): the owed deterministic
-fixtures (shrink race, shared child, rebase replica test) landed with C1.10;
-the stale-confirmed-read conflict retry cost remains (re-measure after the
-feed).
+fixtures landed with C1.10, but the Fable commit review (2026-07-17)
+found two of them non-binding — the shrink-race fixture fakes the race
+behind a FakeWorker and pins a diagnostic code production never emits
+(FB4), and the cross-lane pending-read fixture shadow-routes the foreign
+version so the A16 machinery it names is uncovered (FB5); both are
+repair-wave items (plan FW7). The stale-confirmed-read conflict retry
+cost remains (re-measure after the feed).
 
 ## 9. Open questions
 
