@@ -1,9 +1,10 @@
 # Test waits: prefer events over polling `waitFor`
 
-A test wait should resolve on a real event, not a poll loop. This note explains
-why, which primitives to reach for instead, the check that keeps new polling
-`waitFor` out of the integration suites, and the specific places where a bounded
-`waitFor` poll is still the right tool.
+A test wait should resolve on a real event, not a poll loop or a fixed delay.
+This note explains why, which primitives to reach for instead, how to wait on
+the two pieces of machinery whose timing is easy to guess wrong, the check that
+keeps new polling `waitFor` out of the integration suites, and the specific
+places where a bounded `waitFor` poll is still the right tool.
 
 ## Why avoid `waitFor`
 
@@ -121,6 +122,46 @@ ambient test or CI limit rather than failing fast. The CLI suite's readiness
 probe is such a client. It disposes its controller once the wait returns, which
 also keeps a finished wait from holding the loop open for the rest of the
 suite.
+
+## Waiting for the scheduler and for the worker reconciler
+
+Two pieces of machinery come up often enough in unit tests, and dispatch
+differently enough from each other, that guessing at their timing is where fixed
+delays tend to creep back in.
+
+The **scheduler** delivers a runtime-backed cell's updates through `queueTask`
+(`packages/runner/src/scheduler/diagnostics.ts`), which is `setTimeout(fn, 0)`.
+That is a macrotask, so yielding to the microtask queue never reaches a change
+made through a real cell, however many times the test yields. Wait for these
+with `runtime.idle()`, which resolves once the scheduler has settled.
+
+The **worker reconciler** (`packages/html/src/worker/reconciler.ts`) is
+synchronous apart from one line. It queues its VDOM ops as it renders and
+flushes them from a `queueMicrotask` callback, which hands the batch to the
+`onOps` callback the test registered. So once the change itself has landed, the
+ops are one microtask away, and a microtask the test queues afterwards runs
+after the flush, because microtasks run in the order they were queued.
+
+The reconciler tests in `packages/html/test/` wait through `opsFlushed` in
+`packages/html/test/reconciler-support.ts`, which covers both, because their
+trees mix synchronous mock cells with runtime-backed ones:
+
+```ts
+// Shown at module scope.
+export function opsFlushed(runtime: Runtime): Promise<void> {
+  return runtime.idle().then(() =>
+    new Promise<void>((resolve) => queueMicrotask(resolve))
+  );
+}
+```
+
+This shape is an ordering guarantee rather than a deadline, so it cannot lose a
+race under load. It also holds for a test asserting that an op is *absent*:
+once it returns, every op the change was going to produce has been delivered, so
+no later batch can falsify the absence. Those tests need it. A wait on the
+`onOps` callback would never return for them, since a change that emits no ops
+produces no batch, and they pass vacuously when nothing has flushed at all —
+their teeth come from the wait being long enough to have seen an unwanted op.
 
 ## Guard against new usage
 
