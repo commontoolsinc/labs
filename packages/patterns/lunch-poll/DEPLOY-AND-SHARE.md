@@ -5,12 +5,12 @@ verify it actually worked, and recover it when it breaks. Written for someone
 (human or agent) operating the poll for the first time — read top to bottom
 once.
 
-> **Status (2026-06-22): live-deployable.** The visit history + per-visit vote
-> snapshots live in a plain **`PerSpace<HistoryEntry[]>` array** (`visits`),
-> each entry embedding its own vote snapshot. (History was briefly on the SQLite
-> builtin, #4144/#4145; that's been reverted — see `LUNCH-COORDINATOR-TODO.md`
-> for the history. There is no longer any `sqliteDatabase`, `db.exec`, or
-> `sqliteRev`.)
+> **Status (2026-07-17): live-deployable** (re-verified via a fresh local
+> deploy). The visit history + per-visit vote snapshots live in a plain
+> **`PerSpace<HistoryEntry[]>` array** (`visits`), each entry embedding its own
+> vote snapshot. (History was briefly on the SQLite builtin, #4144/#4145; that's
+> been reverted — see `LUNCH-COORDINATOR-TODO.md` for the history. There is no
+> longer any `sqliteDatabase`, `db.exec`, or `sqliteRev`.)
 
 ## Where the data lives (mental model)
 
@@ -18,10 +18,10 @@ A poll's durable state belongs to **one deployed piece instance in one space**,
 addressed by `(space, causal-cell-id)` — not to "the pattern" in the abstract.
 So "share the state" = "everyone points at the same piece"; "copy the state" =
 "move that piece's values into a new piece." It all lives in **`PerSpace` input
-cells**, shared by everyone in the space: `question`, `city`, `options`,
-`votes`, `users`, `adminName`, `webSearchUrl`, and **`visits`** (the "Recently
-eaten" log + embedded vote snapshots that feed "Lunch stats"). Plus
-**`myName`**, which is **`PerUser`** (keyed by your DID).
+cells**, shared by everyone in the space: `question`, `options`, `votes`,
+`users`, `adminName`, and **`visits`** (the "Recently eaten" log + embedded vote
+snapshots that feed "Lunch stats"). Plus **`myName`**, which is **`PerUser`**
+(keyed by your DID).
 
 All of these survive an in-place `setsrc` (Option A) and — because `visits` is
 now an ordinary `PerSpace` cell — can all be copied to another piece via the CLI
@@ -82,6 +82,15 @@ SPACE=team-lunch
 
 ## Option A — update the existing piece in place (recommended)
 
+> **Note:** servers built from `main` between #4717 (2026-07-15) and #4785
+> reject `setsrc` on any piece with a scoped input (this pattern's `myName`) or
+> a pushed list element, with
+> `input link at <path> schema is not compatible:
+> source has no durable schema contract`.
+> If the server you're deploying to is on such a build, upgrade it or use
+> **Option B** (or a fresh `cf piece new`), neither of which routes through
+> `setsrc`.
+
 To push code changes **and keep all accumulated state**, update the source of
 the existing piece. Do **not** run `cf piece new` — that mints a fresh, empty
 instance.
@@ -116,7 +125,7 @@ MINE=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
 
 # 2. Copy each PerSpace field from the canonical piece into yours.
 #    `--input` reads/writes the input cell where these live.
-for field in question city users options votes adminName webSearchUrl visits; do
+for field in question users options votes adminName visits; do
   deno task cf piece get --piece "$PIECE" -s "$SPACE" "$field" --input -q \
     | deno task cf piece set --piece "$MINE" -s "$SPACE" "$field" --input -q
 done
@@ -166,12 +175,13 @@ deno task cf piece get --piece "$PIECE" -s "$SPACE" visits --input -q
 `myName` is `PerUser` (keyed by your authenticated DID); `adminName` (host) and
 the `users` directory are `PerSpace`. Consequences that bite:
 
-1. **This build joins by free-text name.** Type a name in the join field and
-   click Join — no profile needed; the **first person to join becomes host**.
-   (On `main`, joining instead goes through the shared-profile `wish` flow,
-   which requires a profile in your home space. This `freetext-join` variant
-   removes that gate. The `joinAs` handler still honors an explicit `name`, so
-   CLI/headless joins work either way.)
+1. **Joining is profile-first, with a free-text fallback.** When your shared
+   profile resolves (`#profileName`), the card offers a one-click **Join as
+   \<name\>** — carrying your profile name and avatar — plus a **Use a different
+   name** escape hatch. When no profile resolves, it falls back to a **Your
+   name…** field: type a name and click **Join**. Either way the **first person
+   to join becomes host**. The `joinAs` handler honors an explicit `name`, so
+   CLI/headless joins work regardless of the UI path.
 
 2. **CLI and browser are different identities unless you make them the same.**
    If you join/seed from the `cf` CLI (one DID) then open the piece in a browser
@@ -255,18 +265,21 @@ overwritten`, the space's
 **stored** root pattern is a stale compiled artifact. Fix: open the header menu
 → **Toggle debug mode** (🐛) → click the red **Recreate Root Pattern** button in
 the debugger drawer, then reload. (Console fallback:
-`localStorage.setItem("showDebuggerView","true")` then reload.) The
-free-text-join build of this poll sidesteps the profile requirement entirely.
+`localStorage.setItem("showDebuggerView","true")` then reload.) The poll's
+free-text join fallback lets you in even when your profile / home space won't
+load — you just don't get your profile name and avatar pre-filled.
 
 ## Performance notes
 
-Cold loads of a poll with many options can take **minutes** — this is **not**
-graph/runtime cost (instantiation measures ~linear, ~12ms/option), it's the
-**per-option AI work done host-side on load**: each option triggers an image
-generation, a web search, and a `generateText` homepage-verification call,
-serialized behind a 30s mutex. Results are cached (`option.imageUrl` etc.), so
-warm loads are cheaper; the pain is the first host load of un-cached options.
-See willkelly's perf investigation in
+The poll no longer does any per-option AI work. The generated cuisine-image
+(#4325) and web-search homepage-enrichment (#4326) features were removed on
+2026-06-23, and with them the per-option image generation, web search, and
+`generateText` homepage-verification call — plus the 30s mutex that serialized
+them. That work, not graph/runtime cost, was what made cold loads of a
+many-option poll take **minutes**. What remains is graph/runtime cost, which
+instantiation measured at ~linear, ~12ms/option.
+
+For the deeper aggregate + write-conflict findings that still apply to a poll
+with many options and voters, see willkelly's perf investigation in
 [labs#4141](https://github.com/commontoolsinc/labs/pull/4141) (keyed-collection
-/ runtime-aggregate direction) for the deeper aggregate + write-conflict
-findings.
+/ runtime-aggregate direction).

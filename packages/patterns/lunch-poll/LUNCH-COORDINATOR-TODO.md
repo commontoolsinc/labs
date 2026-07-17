@@ -88,6 +88,33 @@ poll picking a place that's closed when you walk over.
 Completed entries are ordered newest first. Dates use the local merge/commit
 date for the completed work.
 
+### 2026-07-12 — Day-scoped votes (#4661)
+
+Votes now carry a `castAt` stamp; tallies, swatches, top choice, the header
+count, and `logVisit` snapshots show only votes cast on the viewing session's
+current local day. Older votes stay stored but hidden, and a same-color click on
+a stale vote re-casts it rather than toggling off an invisible one. "Today" is
+the pattern-body clock read, refreshed by a `PerSession` cell so a tab that
+crosses midnight snaps forward on the next interaction.
+
+### 2026-07-08 — Profile-first join with free-text fallback (#4597)
+
+The join surface now leads with the viewer's shared profile: when `#profileName`
+resolves it offers a one-click "Join as \<name\>" (carrying the profile name and
+avatar), with "Use a different name" as an escape hatch. The manual "Your name…"
+input is the fallback, shown only when no profile resolves. No change to the
+`joinAs` handler or the pattern's inputs/outputs — purely which control the join
+card offers first.
+
+### 2026-06-23 — Removed generated cuisine-image and web-search homepage (#4325/#4326)
+
+Dropped the per-option generated food thumbnail (`generated-art.tsx`, since
+deleted) and the web-search homepage enrichment, along with the per-option AI
+work they drove: image generation, web search, `generateText` homepage
+verification, and the 30s mutex that serialized them. Cold-load cost of a
+many-option poll is now graph/runtime only. This is why `city` and
+`webSearchUrl` are no longer pattern inputs.
+
 ### 2026-06-16 — Pattern composition refactor and sub-pattern standards
 
 The lunch poll now exercises pattern-to-pattern composition by factoring the
