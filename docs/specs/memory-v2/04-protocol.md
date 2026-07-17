@@ -518,6 +518,14 @@ executor feed): one read per revised held doc, the whole batch evaluated at
 one sequence bound.
 
 ```typescript
+type SpaceId = string;
+type SessionId = string;
+type BranchId = string;
+type EntityId = string;
+type CellScope = string;
+type SchedulerExecutionContextKey = string;
+interface EntitySnapshot {}
+
 interface DocsReadRequest {
   type: "docs.read";
   requestId: string;
