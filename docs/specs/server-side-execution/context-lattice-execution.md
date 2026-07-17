@@ -530,8 +530,9 @@ that claim is a design bug.
 | R11 | Accepted reconciliation windows: §B.3 prediction, §B.4 scalar basis, §5 vector basis | — (counted divergence, not exclusions) | B.3 closes with Phase 5; basis windows accepted and counted |
 
 Engineering debt riding alongside (no decisions): the owed deterministic
-fixtures (shrink race, shared child, rebase replica test) and the
-stale-confirmed-read conflict retry cost (re-measure after the feed).
+fixtures (shrink race, shared child, rebase replica test) landed with C1.10;
+the stale-confirmed-read conflict retry cost remains (re-measure after the
+feed).
 
 ## 9. Open questions
 

@@ -972,6 +972,62 @@ Deno.test("an ordinary demand shrink leaves sibling claims live", async () => {
   }
 });
 
+// C1.10 (owed fixture): the W2.6 shrink-race. A claimed action's activation is
+// in flight when a concurrent demand shrink retires its root. The Worker's
+// activation discovers the action is gone (ClaimedActionGoneError) and posts a
+// claim-scoped release rather than a lane-fatal error; the host turns it into
+// exactly one revoke while the lane stays live. Deterministic here because the
+// held activation IS the race window: the shrink lands while the run is
+// unacknowledged, then the gone-signal settles it.
+Deno.test("a claimed activation raced by a concurrent shrink settles as one claim revoke without a fatal", async () => {
+  const diagnostics: CandidateDiagnostic[] = [];
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: true,
+    acknowledgeClaimedRuns: false,
+    onCandidateDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+  try {
+    // The claim lands and its activation is posted to the Worker, then held
+    // in-flight (unacknowledged) — the race window.
+    worker.candidate(CLAIM_KEY);
+    await flushClaimControl();
+    assertEquals(server.claimRequests.length, 1);
+    assertEquals(worker.pendingClaimedRunIds.length, 1);
+
+    // A concurrent shrink retires the claim's root while its activation is
+    // still in flight. Ordinary shrink neither resets claims nor waits for
+    // settlement (W2.6), so the activation stays held and no claim is revoked
+    // yet.
+    let changed = false;
+    const changing = (async () => {
+      await executor.setDemand(["space:of:other-piece"]);
+      changed = true;
+    })();
+    await flushClaimControl();
+    assertEquals(changed, true);
+    assertEquals(server.revoked, []);
+    assertEquals(worker.terminated, false);
+
+    // The raced activation settles as a claim-scoped release (the action died
+    // in the shrink window — ClaimedActionGoneError → exact release, tolerated
+    // by W2.5), NOT a lane-fatal error.
+    worker.invalidated(CLAIM, "demand-removed");
+    await flushClaimControl();
+    await changing;
+
+    // Exactly one revoke; the lane stays live and no fatal was posted.
+    assertEquals(server.revoked, [CLAIM]);
+    assertEquals(diagnostics, [{
+      claim: CLAIM,
+      diagnosticCode: "demand-removed",
+    }]);
+    assertEquals(crashes, []);
+    assertEquals(worker.terminated, false);
+  } finally {
+    await executor.stop({ abrupt: true });
+  }
+});
+
 Deno.test("ordinary shadow rejection reports a host-local candidate diagnostic", async () => {
   const diagnostics: CandidateDiagnostic[] = [];
   const { worker, server, crashes, executor } = await startExecutor({

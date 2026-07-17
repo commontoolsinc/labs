@@ -612,3 +612,85 @@ Deno.test("broad scope-naming links are byte-identical across two lanes", async 
     await Deno.remove(directory, { recursive: true });
   }
 });
+
+// C1.10 (owed fixture): the shared-child convergence case (OQ7 / §4). Two
+// lanes sharing a broad parent that links to a nested CHILD instance emit the
+// byte-identical scope-naming link at that child address, because the link
+// value is derived purely from the cell path and NEVER encodes the acting
+// principal or session id. Concurrent lanes are therefore convergent identical
+// writers on the shared child, not competing ones. This pins the
+// DID-independence for a nested child position; the sibling test above pins
+// the fixed top-level conformance link.
+const SHARED_CHILD_ID = "of:lane-shared-child";
+const CHILD_LINK_WRITE = address("space", SHARED_CHILD_ID, ["value", "child"]);
+const childLinkOperation = (link: unknown): Operation => ({
+  op: "set",
+  id: SHARED_CHILD_ID,
+  value: { value: { child: link } },
+});
+
+Deno.test("a shared child instance takes the byte-identical scope-naming link across two lanes, independent of principal", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    // The link two DIFFERENT principals' lanes emit for the same child path is
+    // byte-identical by construction: the builder is pure over the path and
+    // carries no DID/session material (the OQ7 soundness argument).
+    const aliceLink = scopeNamingLinkForPath(["child"]);
+    const bobLink = scopeNamingLinkForPath(["child"]);
+    assertEquals(bobLink, aliceLink);
+    const serialized = JSON.stringify(aliceLink);
+    assert(!serialized.includes(PRINCIPAL));
+    assert(!serialized.includes(OTHER_PRINCIPAL));
+
+    // Lane A (alice) writes the shared-child link plus its own scoped instance.
+    const leaseA = acquire(engine, nowMs, PRINCIPAL);
+    const claimA = claimFor(leaseA, USER_CONTEXT_KEY);
+    applyClaimed(engine, leaseA, claimA, {
+      operations: [userInstanceOperation, childLinkOperation(aliceLink)],
+      surfaces: { writes: [USER_OUTPUT, CHILD_LINK_WRITE] },
+      nowMs: nowMs + 1,
+    });
+    const afterA = Engine.read(engine, { id: SHARED_CHILD_ID });
+
+    // Lane B (bob) emits the byte-identical link at the identical child
+    // address: a convergent write onto the shared child, not a competing one.
+    const laterMs = leaseA.expiresAt + 1;
+    const leaseB = acquire(engine, laterMs, OTHER_PRINCIPAL);
+    const claimB = claimFor(leaseB, OTHER_USER_CONTEXT_KEY);
+    const applied = applyClaimed(engine, leaseB, claimB, {
+      principal: OTHER_PRINCIPAL,
+      operations: [
+        { op: "set", id: USER_OUTPUT.id, scope: "user", value: { value: 9 } },
+        childLinkOperation(bobLink),
+      ],
+      surfaces: { writes: [USER_OUTPUT, CHILD_LINK_WRITE] },
+      nowMs: laterMs + 1,
+    });
+    assert(applied.schedulerObservationResults?.[0].status === "kept");
+    const afterB = Engine.read(engine, { id: SHARED_CHILD_ID });
+
+    assertEquals(afterA, { value: { child: aliceLink } });
+    assertEquals(afterB, afterA);
+    // The two principals' scoped child instances stay isolated.
+    assertEquals(
+      Engine.read(engine, {
+        id: USER_OUTPUT.id,
+        scope: "user",
+        principal: PRINCIPAL,
+      }),
+      { value: 7 },
+    );
+    assertEquals(
+      Engine.read(engine, {
+        id: USER_OUTPUT.id,
+        scope: "user",
+        principal: OTHER_PRINCIPAL,
+      }),
+      { value: 9 },
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});

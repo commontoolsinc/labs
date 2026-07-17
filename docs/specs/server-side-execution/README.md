@@ -516,11 +516,12 @@ interface ExecutionClaim {
 
 Claims ride the authenticated session/control feed and are not ordinary
 space documents. Each session retains only a bounded suffix of control
-history; reconnect always installs a complete claim snapshot plus a coalesced
-successful settlement frontier for each exact live claim. A cursor older than
-the suffix therefore resynchronizes both authority and overlay reconciliation
-instead of growing an unbounded queue. Runtime ownership, liveness,
-generations, and exceptions do not belong in mutable user data.
+history; reconnect always installs a complete snapshot of the claims this
+session routes plus a coalesced successful settlement frontier for each exact
+live claim. A cursor older than the suffix therefore resynchronizes both
+authority and overlay reconciliation instead of growing an unbounded queue.
+Runtime ownership, liveness, generations, and exceptions do not belong in
+mutable user data.
 
 The global `serverPrimaryExecution` flag is the sole rollout control. With it
 off, the server starts no execution pool and clients remain primary. With it
@@ -555,11 +556,11 @@ wake and get one fail-open rerun opportunity.
 Connection loss is not proof that a claim ended: another requester may keep the
 shared Worker and claim alive. While disconnected, a client may continue local
 speculation but must not enqueue previously claimed derived writes. Reconnect
-first negotiates the capability and applies a complete claim snapshot for the
-exact branch at a feed-sequence barrier, followed by any missed successful
-settlement frontiers for those exact live incarnations; only then may newly
-unclaimed work flush. Source, handler, and direct UI commits keep their
-existing offline behavior.
+first negotiates the capability and applies a complete snapshot of the claims
+this session routes for the exact branch at a feed-sequence barrier, followed
+by any missed successful settlement frontiers for those exact live
+incarnations; only then may newly unclaimed work flush. Source, handler, and
+direct UI commits keep their existing offline behavior.
 
 Trusted compatible clients cooperate with this split in the first iteration.
 Later server admission and CFC policy can reject commits that conflict with a

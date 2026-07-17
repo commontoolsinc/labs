@@ -637,3 +637,120 @@ Deno.test("C1.8: a pruned lane's still-pending localSeq stays unresolvable for o
     await storage.close();
   }
 });
+
+// C1.10 (owed fixture): the W2.10-era rebase-replica case, in the pre-lane
+// (space-only) world. Executor-shadow versions never receive a host
+// resolution, so a commit naming one would fail apply forever ("pending
+// dependency not resolved"). The replica rebases such reads onto the confirmed
+// base beneath the local version before send, which is what lets the source
+// commit land at all. Both the client replica and the Worker replica share
+// this method; here no lane is engaged, so only the shadow cause is in play.
+Deno.test("rebase-replica: a commit naming an executor-shadow version rebases it onto the confirmed base so it can land", async () => {
+  const factory = new LaneSessionFactory();
+  const shadowAction = {};
+  const upstreamAction = {};
+  // No executionLaneForAction: the space lane only, exercising the pure
+  // shadow-version cause of rebaseUnresolvablePendingReads.
+  const router: ActionTransactionRouter = (input) =>
+    input.sourceAction === shadowAction
+      ? { disposition: "local", kind: "executor-shadow" }
+      : { disposition: "upstream" };
+  const storage = LaneStorageManager.connect(factory, {
+    shadowWrites: true,
+    actionTransactionRouter: router,
+  });
+  try {
+    seedConfirmed(factory, [{ id: SHARED, value: "base" }]);
+    await storage.open(SPACE).sync(SHARED);
+
+    // A discovery run parks an executor-shadow version on the shared doc; the
+    // host never confirms it, so its localSeq is permanently unresolvable.
+    await writeDoc(storage, SHARED, "shadow-pending", {
+      sourceAction: shadowAction,
+    });
+
+    // A later action reads the shared doc and writes upstream. Its pending read
+    // would name the shadow localSeq; the rebase moves it onto the confirmed
+    // base so the commit can reach the host instead of pending forever.
+    await writeDoc(storage, OUT, "landed", {
+      sourceAction: upstreamAction,
+      readIds: [SHARED],
+    });
+
+    const upstream = factory.commits.find((commit) =>
+      commit.operations.some((operation) =>
+        operation.op !== "sqlite" && operation.id === OUT
+      )
+    );
+    assert(upstream !== undefined, "the upstream commit reached the host");
+    assertEquals(upstream.reads.pending, []);
+    const sharedRead = upstream.reads.confirmed.find((read) =>
+      read.id === SHARED
+    );
+    assert(
+      sharedRead !== undefined,
+      "the shared-doc read rebased to confirmed",
+    );
+    assertEquals(sharedRead.seq, 1);
+  } finally {
+    await storage.close();
+  }
+});
+
+// C1.10 (owed fixture): the cross-lane pending-read case (A5/A16). A version
+// created by lane A on a shared broad doc is unresolvable for lane B under
+// C1.5b's per-lane visibility, so lane B's commit naming it rebases to
+// confirmed. This pins the asymmetry that CAUSES the rebase: lane A resolves
+// its own version while lane B never sees it.
+Deno.test("cross-lane pending read: lane A resolves its own shared-doc version while lane B rebases it to confirmed", async () => {
+  const factory = new LaneSessionFactory();
+  const actionA = {};
+  const actionB = {};
+  const router: ActionTransactionRouter = (input) =>
+    input.sourceAction === actionA
+      ? { disposition: "local", kind: "executor-shadow" }
+      : { disposition: "upstream" };
+  const storage = LaneStorageManager.connect(factory, {
+    shadowWrites: true,
+    actionTransactionRouter: router,
+    executionLaneForAction: (action) =>
+      action === actionA ? LANE_A : action === actionB ? LANE_B : undefined,
+  });
+  try {
+    seedConfirmed(factory, [{ id: SHARED, value: "base" }]);
+    await storage.open(SPACE).sync(SHARED);
+
+    // Lane A parks a version on the shared broad doc.
+    await writeDoc(storage, SHARED, "a-pending", { sourceAction: actionA });
+
+    // The asymmetry: lane A resolves its own version, lane B (and the space
+    // lane) see only confirmed state — lane A's localSeq is unresolvable for B.
+    storage.runWithExecutionLane(SPACE, LANE_A, () => {
+      assertEquals(docValue(storage, SHARED), "a-pending");
+    });
+    storage.runWithExecutionLane(SPACE, LANE_B, () => {
+      assertEquals(docValue(storage, SHARED), "base");
+    });
+
+    // Lane B reads the shared doc and writes upstream. Naming lane A's version
+    // is impossible, so the read rebases onto confirmed and the commit lands.
+    await writeDoc(storage, OUT, "b-out", {
+      sourceAction: actionB,
+      readIds: [SHARED],
+    });
+    const upstream = factory.commits.find((commit) =>
+      commit.operations.some((operation) =>
+        operation.op !== "sqlite" && operation.id === OUT
+      )
+    );
+    assert(upstream !== undefined, "lane B's commit reached the host");
+    assertEquals(upstream.reads.pending, []);
+    const sharedRead = upstream.reads.confirmed.find((read) =>
+      read.id === SHARED
+    );
+    assert(sharedRead !== undefined, "lane B's commit read the shared doc");
+    assertEquals(sharedRead.seq, 1);
+  } finally {
+    await storage.close();
+  }
+});

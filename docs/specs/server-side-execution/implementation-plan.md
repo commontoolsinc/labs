@@ -999,7 +999,12 @@ Phase exit:
 
 **Status:** implemented with exact synchronous client routing, replica-ordered
 claim snapshots, local pending-layer overlays, and bounded remote-feed
-speculation coalescing.
+speculation coalescing. **Amended by C1.6:** client claim routing is now
+chain-scoped — an action routes to the client's own context chain {space,
+`user:myDid`, `session:myDid:mySessionId`}, superseding the original
+exact-contextKey equality match in steps 2 and 7 (the branch-qualified
+ActionClaimKey shape is unchanged; a claim outside the own chain routes
+upstream, and two chain-matching claims fail open to neither).
 
 **Steps:**
 
@@ -1296,10 +1301,12 @@ all candidate/claim state. Make shrink surgical:
       the removed root's claims"; host-side
       `executor-candidate-claim.test.ts` "an ordinary demand shrink leaves
       sibling claims live").
-- [ ] A claim landing on an action stopped by a concurrent shrink resolves
-      as one claim revoke; the lane stays live and no fatal is posted.
-      Implemented (`ClaimedActionGoneError` → exact release, tolerated by
-      W2.5); a deterministic fixture for the exact race is still owed.
+- [x] A claim landing on an action stopped by a concurrent shrink resolves
+      as one claim revoke; the lane stays live and no fatal is posted
+      (`ClaimedActionGoneError` → exact release, tolerated by W2.5). The
+      deterministic fixture for the exact race landed with C1.10
+      (`executor-candidate-claim.test.ts` "a claimed activation raced by a
+      concurrent shrink settles as one claim revoke without a fatal").
 - [x] A navigation-shaped sequence (grow, shrink, regrow) issues new claims
       only for roots that actually left and returned
       (`executor-candidate-claim.test.ts` "demand shrink releases stale
@@ -1792,10 +1799,14 @@ found both) and C1.9c (per-lane serving: lane-keyed candidates and
 PerUser gate is green: user-rank claims for both principals, durably
 isolated rows per scope key, zero client derived wire writes, zero
 lease-fence rejects (env-gated pending a documented teardown-hygiene
-flake; default runs deterministic). Remaining C1 bookkeeping: C1.10
-fixtures, C1.11 parent-doc edits. Feed progress alongside: F1 and F2 are
-landed — F2's measured effect on the flag-on default-app run: graph.query
-171,482 → 1,566 DAG traversals per run; total traversal work ~270k →
+flake; default runs deterministic). C1 bookkeeping is now closed: C1.10
+landed the five owed deterministic fixtures (shrink-race, shared-child
+byte-identity, rebase-replica, cross-lane pending-read, and the engine-level
+lane-write-authority TOCTOU backstop) and C1.11 made the §10 parent-doc edits
+(README §B.1 reconnect contract, W2.1 chain-scoped-routing status). Feed
+progress alongside: F1 and F2 are landed — F2's measured effect on the
+flag-on default-app run: graph.query 171,482 → 1,566 DAG traversals per run;
+total traversal work ~270k →
 ~12.2k (~95% reduction).
 
 Mapped against the code with no external blockers, no feed dependency

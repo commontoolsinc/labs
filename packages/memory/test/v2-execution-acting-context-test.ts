@@ -488,6 +488,104 @@ Deno.test("acting-principal WRITE loss at commit time fences lane-write-authorit
   }
 });
 
+// C1.10 (owed fixture): the lane-write-authority TOCTOU backstop. A claimed
+// commit can race the C1.8 ACL reconciliation — the acting principal loses
+// WRITE at the same instant its lane is being drained. Deterministic wire
+// ordering cannot force that interleaving: the server's awaited reconciliation
+// always drains the lane first, so the wire outcome is `claim-not-live` (see
+// "acting-principal WRITE loss drains the lane before a later commit"). The
+// commit-time acting-principal WRITE re-check is the backstop for the residual
+// race — a commit that reaches applyCommit while the lane is STILL LIVE. This
+// drives the injectable fence directly, holding the lane live so only the
+// WRITE re-check can stop the racing write.
+Deno.test("a commit racing the reconciliation fences lane-write-authority while the lane is still live", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const claim = claimFor(lease, LANE_CONTEXT_KEY);
+    // The lane stays live for BOTH commits: laneAuthority is consulted and
+    // returns true, so `lane-generation-stale` never fires and the earlier
+    // liveness gates (`claim-not-live`) are bypassed. The only thing that can
+    // stop the second commit is the acting-principal WRITE re-check.
+    const laneConsulted: string[] = [];
+    const laneLive = (): true => {
+      laneConsulted.push(claim.contextKey);
+      return true;
+    };
+
+    // First commit: the acting principal still holds WRITE — it lands, proving
+    // the lane is live and writes the principal's own instance.
+    const landed = applyClaimed(engine, lease, claim, {
+      operations: [userInstanceOperation],
+      surfaces: { writes: [USER_OUTPUT] },
+      nowMs: nowMs + 1,
+      localSeq: 1,
+      fence: { laneAuthority: laneLive, authorizeActingPrincipal: () => true },
+    });
+    assert(landed.schedulerObservationResults?.[0].status === "kept");
+    assertEquals(
+      Engine.read(engine, {
+        id: USER_OUTPUT.id,
+        scope: "user",
+        principal: LANE_PRINCIPAL,
+      }),
+      { value: 7 },
+    );
+
+    // Second commit: identical live lane, but the ACL reconciliation has
+    // revoked the acting principal's WRITE between the drain-check and this
+    // apply. The lane is NOT yet drained (laneAuthority still true), so the
+    // fence is the WRITE backstop — `lane-write-authority`, not a drain cause.
+    const before = Engine.serverSeq(engine);
+    const otherOutput = address("user", "of:acting-output-racing");
+    const writeChecked: string[] = [];
+    assertFenceCause(
+      () =>
+        applyClaimed(engine, lease, claim, {
+          operations: [{
+            op: "set",
+            id: otherOutput.id,
+            scope: "user",
+            value: { value: 99 },
+          }],
+          surfaces: { writes: [otherOutput] },
+          nowMs: nowMs + 2,
+          localSeq: 2,
+          fence: {
+            laneAuthority: laneLive,
+            authorizeActingPrincipal: (_engine, principal) => {
+              writeChecked.push(principal);
+              return false;
+            },
+          },
+        }),
+      "lane-write-authority",
+    );
+    // The lane was consulted for BOTH commits and stayed live throughout (every
+    // consult reported the live lane) — the race window the drain-based
+    // `claim-not-live` path would otherwise miss. Two commits, so the live lane
+    // is consulted at least twice.
+    assert(laneConsulted.length >= 2);
+    assertEquals([...new Set(laneConsulted)], [LANE_CONTEXT_KEY]);
+    // The re-check decodes the acting principal, never the sponsor.
+    assertEquals(writeChecked, [LANE_PRINCIPAL]);
+    // The racing write never landed and no seq was consumed.
+    assertEquals(Engine.serverSeq(engine), before);
+    assertEquals(
+      Engine.read(engine, {
+        id: otherOutput.id,
+        scope: "user",
+        principal: LANE_PRINCIPAL,
+      }),
+      null,
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
 Deno.test("space-lane commits stay byte-identical under the acting-context seam", async () => {
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;
