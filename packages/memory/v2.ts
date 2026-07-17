@@ -1235,6 +1235,8 @@ let serverPrimaryExecutionEnabled = false;
 let serverPrimaryExecutionClaimRank: ServerPrimaryExecutionClaimRank = "space";
 let serverPrimaryExecutionContextLatticeClaimsEnabled = false;
 let serverPrimaryExecutionDocSetWatchEnabled = false;
+let serverPrimaryExecutionGraphRetirementSpaces: ReadonlySet<string> =
+  new Set();
 
 /**
  * Ambient runtime flag for persistent scheduler observations and rehydration.
@@ -1336,6 +1338,37 @@ export function getServerPrimaryExecutionDocSetWatchConfig(): boolean {
 
 export function resetServerPrimaryExecutionDocSetWatchConfig(): void {
   serverPrimaryExecutionDocSetWatchEnabled = false;
+}
+
+/**
+ * Per-space eligibility dial for F5 graph-refresh retirement (server-side
+ * execution F5 / FA13). Host-internal, never negotiated on the wire — it gates
+ * ELIGIBILITY only: a listed space's fully-doc-set sessions retire their
+ * per-session schema-graph re-evaluation (the refresh loop skips
+ * `refreshTrackedGraph`), while the ACTUAL retirement stays a live per-surface
+ * check (closure source present ∧ doc-set subcapability negotiated) that fails
+ * open to graph behavior and is counted when a surface regresses. The default
+ * is the empty set (absent-false — no space retires), and an operator adds a
+ * space only once F1's per-space coverage evidence clears the OQ4 rollout gate.
+ * Registered in docs/development/EXPERIMENTAL_OPTIONS.md as
+ * `serverPrimaryExecutionGraphRetirement`.
+ */
+export function setServerPrimaryExecutionGraphRetirementConfig(
+  spaces?: Iterable<string>,
+): void {
+  serverPrimaryExecutionGraphRetirementSpaces = spaces === undefined
+    ? new Set()
+    : new Set(spaces);
+}
+
+export function getServerPrimaryExecutionGraphRetirementConfig(): ReadonlySet<
+  string
+> {
+  return serverPrimaryExecutionGraphRetirementSpaces;
+}
+
+export function resetServerPrimaryExecutionGraphRetirementConfig(): void {
+  serverPrimaryExecutionGraphRetirementSpaces = new Set();
 }
 
 /**

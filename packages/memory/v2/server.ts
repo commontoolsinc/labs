@@ -28,6 +28,7 @@ import {
   getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
   getServerPrimaryExecutionClaimRankConfig,
+  getServerPrimaryExecutionGraphRetirementConfig,
   type GraphQuery,
   type GraphQueryRequest,
   type GraphQueryResult,
@@ -1731,6 +1732,21 @@ export class Server {
     /** F3: live doc-set member-set size summed across sessions on the last
      * wave that touched a doc-set surface (FA8 gauge against demand). */
     docSetMembersTracked: 0,
+    /** F5/FA13: touched sessions the per-space eligibility dial admitted to
+     * retirement on a wave (dial-on ∧ doc-set subcapability negotiated ∧ a
+     * closure source present). Eligibility only — the live per-surface check
+     * below decides whether the graph refresh actually retires. */
+    refreshRetirementEligibleSessions: 0,
+    /** F5/FA13: eligible sessions whose ENTIRE watch surface was doc-set on a
+     * wave — zero residual schema-graph watches, so `refreshTrackedGraph` was
+     * skipped. The aggregated form of F5's per-session fully-doc-set boolean. */
+    refreshFullyDocSetSessions: 0,
+    /** F5/FA13: residual subscribed schema-graph watches still re-traversed on
+     * eligible sessions — the surfaces that FAILED OPEN to graph behavior. A
+     * fully-retired space holds this at 0; a non-zero delta is the regression
+     * signal the OQ4 rollout gate watches (a surface that should be doc-set is
+     * still on the traversal path). */
+    refreshResidualGraphWatches: 0,
     /** Traversal work summed per server operation ("session.watch.refresh",
      * executor/client "graph.query", "session.watch.set",
      * "session.watch.add"). */
@@ -6762,6 +6778,15 @@ export class Server {
     return `watch:${watchId}`;
   }
 
+  /** F5/FA13: whether the per-space eligibility dial admits this space to
+   * graph-refresh retirement. Eligibility ONLY — never a delivery decision;
+   * the live per-surface check (fully doc-set) still gates the actual skip,
+   * and a space absent from the dial simply keeps its current graph behavior.
+   * Consumes the OQ4 per-space coverage gate (F1 evidence decides the list). */
+  #graphRetirementEligible(space: string): boolean {
+    return getServerPrimaryExecutionGraphRetirementConfig().has(space);
+  }
+
   /** Admission gate for the additive `docs` WatchSpec kind: a session that
    * never negotiated the subcapability may not register it (clean
    * ProtocolError, not a silent drop), and an inbound address that already
@@ -7103,45 +7128,75 @@ export class Server {
             }
             this.feedStats.refreshSessionsTouched += 1;
 
+            // F5 (FA3/FA13): retire the per-session schema-graph re-evaluation
+            // where the watch surface is doc-set. The per-space eligibility
+            // dial (the OQ4 rollout gate) plus a negotiated doc-set
+            // subcapability and a present closure source (registered members)
+            // admit the session; the LIVE check is whether the surface is
+            // FULLY doc-set — no residual subscribed graph watch remains. A
+            // retired surface SKIPS refreshTrackedGraph entirely (its members
+            // are point-read below, folded into the one emission this session
+            // makes per wave — FA1). A surface that still holds graph watches
+            // FAILS OPEN to graph behavior and is counted as a regression,
+            // never silently dropped. The catch-up emitter (finishCatchUp /
+            // emptyCatchUp) is untouched, so a conflicted commit still receives
+            // its caughtUpLocalSeq release across the retirement (FA7).
+            const retirementEligible =
+              session.serverPrimaryExecutionDocSetWatchV1 &&
+              session.docSetMembers.size > 0 &&
+              this.#graphRetirementEligible(space);
+            const residualGraphWatches = retirementEligible
+              ? session.graphs.size
+              : 0;
+            const retired = retirementEligible && residualGraphWatches === 0;
+            if (retirementEligible) {
+              this.feedStats.refreshRetirementEligibleSessions += 1;
+              this.feedStats.refreshResidualGraphWatches +=
+                residualGraphWatches;
+              if (retired) this.feedStats.refreshFullyDocSetSessions += 1;
+            }
+
             const engine = await this.openEngine(space);
             const fromSeq = session.lastSyncedSeq;
             const updates = new Map<string, SessionCacheEntry>();
 
-            for (const graph of session.graphs.values()) {
-              const refreshed = tracer.startActiveSpan(
-                "memory.watch.refresh",
-                (watchSpan) => {
-                  watchSpan.setAttribute("space.did", space);
-                  try {
-                    return refreshTrackedGraph(
-                      space,
-                      engine,
-                      graph,
-                      dirtyIds,
-                    );
-                  } finally {
-                    watchSpan.end();
-                  }
-                },
-              );
-              if (refreshed === null) {
-                continue;
-              }
-              this.feedStats.refreshGraphsRefreshed += 1;
-              this.#recordFeedTraversal(
-                "session.watch.refresh",
-                refreshed.stats,
-              );
-              for (const entity of refreshed.updates.values()) {
-                const entry = toCacheEntry(entity);
-                updates.set(
-                  cacheKeyForEntity(
-                    entry.branch,
-                    entry.id,
-                    declaredScope(entry.scope),
-                  ),
-                  entry,
+            if (!retired) {
+              for (const graph of session.graphs.values()) {
+                const refreshed = tracer.startActiveSpan(
+                  "memory.watch.refresh",
+                  (watchSpan) => {
+                    watchSpan.setAttribute("space.did", space);
+                    try {
+                      return refreshTrackedGraph(
+                        space,
+                        engine,
+                        graph,
+                        dirtyIds,
+                      );
+                    } finally {
+                      watchSpan.end();
+                    }
+                  },
                 );
+                if (refreshed === null) {
+                  continue;
+                }
+                this.feedStats.refreshGraphsRefreshed += 1;
+                this.#recordFeedTraversal(
+                  "session.watch.refresh",
+                  refreshed.stats,
+                );
+                for (const entity of refreshed.updates.values()) {
+                  const entry = toCacheEntry(entity);
+                  updates.set(
+                    cacheKeyForEntity(
+                      entry.branch,
+                      entry.id,
+                      declaredScope(entry.scope),
+                    ),
+                    entry,
+                  );
+                }
               }
             }
 

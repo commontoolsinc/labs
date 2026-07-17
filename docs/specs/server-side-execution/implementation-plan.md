@@ -1756,7 +1756,7 @@ F7 gains a mechanical pull-in trigger (FA11) and make-before-break (FA10).
 | F2 | **Landed.** Executor Worker replica: revision-driven point reads replace per-wave graph-query refresh, via the new `docs.read` wire read (exact engine reads, no traversal; F1-attributed under its own operation). FA5 satisfied: interest set = the instance-keyed per-watch entity maps (C1.5b re-keying; absent-but-tracked docs are held as null-document snapshots); one point-read batch per acting lane at the wave's max dataSeq; deliveries flow through the existing WatchView/SessionSync pipeline (steady frames are exact deltas; observation-after-data same-turn ordering and appliedSeq semantics preserved). Shrink policy: any held doc's link-topology change (growth to a target the owning watch does not hold, or any target removal/deletion of a linking doc) routes that watch through the cold graph refresh, whose before/after diff carries the removes — so the interest set equals the last traversal's closure between topology changes (leave-the-closure fixture pinned; F3 adds server-side membership deltas so removes stop requiring a traversal). FA6 satisfied: resolved-scopeKey revision matching with declared-scope fallback on classification AND on read results; `actingContext` on `docs.read` from day one; scopeKey forwarded through syncUpsert, WatchView.applySync (instance-keyed), and — new — SessionSyncRemove. Residual: a schema-position move of a link already present in both versions stays steady and defers the newly-selected target to the demand read path (documented at the topology gate) | **C1.5b** (semantic dependency — landed first) | met: steady-state waves (executor-provider-point-reads suite) run zero graph queries with ≤ revisions point reads; cold pulls, closure growth, linked-doc deletion, and leave-the-closure still traverse; no unwatched point reads (reads issue only for held instances) |
 | F3 | Doc-set watch kind: additive WatchSpec, absent-false subcapability, server membership fan-out, ordered delivery. Binding FA1 (the watermark invariant: toSeq advances only when the COMPLETE watch surface — members as of N, served write surfaces, residual graph closures — is proven current through N; one emission point per session per wave), FA2 (membership keyed by RESOLVED scopeKey at registration under the session/lane context; raw scopeKeys on the wire are a protocol error; pre-F6 scoped deltas are per-session point reads or stay on the graph path), FA8 (server-side refcounted shrink; never SessionSync.removes), FA14 (preserved-contract checklist: dirtyOrigins echo suppression, trackedIds union, feed-frame atomicity), FA15 (per-member seq state for resumed catch-up) | F1 | membership deltas exact; watermark invariant fixture; scoped-doc pre-F6 rule pinned by test |
 | F4 | Client closure export. Binding FA4 (membership derives from the replica DOC SET — every held doc across confirmed and pending/overlay layers including speculative write targets and framework reads, never the filtered reactive log; retraction evicts from the replica in the same step; served-closure pre-push vs pull-on-demand is a CORRECTNESS choice for written-not-read docs), FA8 (client re-export removals), FA15 (reconnect: re-register after catch-up, before replay). Plus F4b per FA3: boot-root demotion — one-shot graph evaluation for cold-boot roots, make-before-break replacement, partition rule, cross-kind dedup (one delivery, one frame, one watermark) | F3 | claimed chain-intermediate fixture; disconnect/reconnect fixture; unlink retraction fixture |
-| F5 | Retire per-session graph re-evaluation. Binding FA1 (watermark co-owner), FA3 (per-watch classification + measured residual-traversal budget replaces the binary 'fully doc-set'), FA7 (conflict-liveness: caughtUpLocalSeq release survives retirement, fed by the same stageConflictRefreshDirtyIds staging), FA11 (record the client-side split; if the parity residual attributes to claimed-echo work, F7 enters the critical path), FA13 (dial gates eligibility only; retirement evaluated live per surface, failing open and counted), FA16 (speculative claimed-run under pending local writes fixture) | F2, F3, F4 | **the W2.9 gate**: note-create at flag-off parity vs the FA12 archived baseline; conflict-liveness fixtures green |
+| F5 | Retire per-session graph re-evaluation. Binding FA1 (watermark co-owner), FA3 (per-watch classification + measured residual-traversal budget replaces the binary 'fully doc-set'), FA7 (conflict-liveness: caughtUpLocalSeq release survives retirement, fed by the same stageConflictRefreshDirtyIds staging), FA11 (record the client-side split; if the parity residual attributes to claimed-echo work, F7 enters the critical path), FA13 (dial gates eligibility only; retirement evaluated live per surface, failing open and counted), FA16 (speculative claimed-run under pending local writes fixture) | F2, F3, F4 | **Mechanism landed** (`packages/memory/test/v2-feed-retirement-test.ts`): the refresh loop classifies each touched session and, when the per-space eligibility dial (`serverPrimaryExecutionGraphRetirement`) admits it and the surface is fully doc-set (subcapability negotiated ∧ members present ∧ zero residual graph watches), SKIPS `refreshTrackedGraph` — a note-create SERIES then does zero `session.watch.refresh` traversal (that source was ~94k/run flag-on); a mixed surface fails open and is counted under `refreshResidualGraphWatches` (FA3); one emission per session per wave holds (FA1); the conflicted-commit `caughtUpLocalSeq` release survives for member and non-member conflicts (FA7); counters wired into `/api/health/stats`. **The W2.9 gate itself stays a live measurement** (see F5 measurement protocol below): the flag-on note-create series reaching flag-off parity within noise vs the FA12 archived baseline. FA16's speculative-branch fixture is a runner-side gate item (client still speculates pre-F7) recorded in the protocol |
 | F6 | Lane-correct scoped delivery: cohort filtering. Binding FA9: dependency on C1.7 resolved explicitly (either F6 depends on C1.7, or F6 builds sessionsForPrincipal + the single #sessionAcceptsClaim predicate and C1.7 consumes them — one owner, decided at dispatch); carries the declared-scope agree-set checklist (dirty producers, trackedIds builders, session-entity cache keys, echo map, adoption surface) and the per-address scopeKey derivation rule | F3, C1.7 (per FA9 resolution) | another session's session-scoped commit produces zero B-side work; user-scoped revisions reach only that principal's sessions |
 | F7 | G17 claimed-cold suppression. Binding FA10 (make-before-break between closure sources: the served contribution survives until the replacement export covers the same docs, or the revoke carries a catch-up barrier seq and the rerun defers until member deltas through it apply) and FA11 (pull-in trigger: enters the critical path if F5's parity residual attributes to claimed-echo client work) | F4, F5 | revoke-concurrent-with-commit fixture: the rerun's basis covers the commit; stays-cold adoption fixture |
 
@@ -1765,6 +1765,47 @@ measure-before-fixing rule): closure growth under client-exported closures
 (F4) — accept the +1 RTT pull-on-demand for never-seen linked docs, or
 build §6.4's served-closure pre-push first. F4's fixtures decide;
 escalates to the owner only if both options violate the ~zero W2.9 budget.
+
+#### F5 measurement protocol (the W2.9 gate)
+
+The retirement mechanism is pinned deterministically in
+`packages/memory/test/v2-feed-retirement-test.ts`; the shipping-critical
+acceptance is a wall-time measurement the rollout owner runs — it cannot run
+inside the isolated worktree. The gate:
+
+1. **Enable the dial per space** with `setServerPrimaryExecutionGraphRetirementConfig([space])`
+   for the default-app space under test (eligibility only — retirement stays a
+   live per-surface check). Confirm the client build negotiates
+   `serverPrimaryExecutionDocSetWatch` so the space lane runs as a doc-set
+   surface (F4b demotion complete).
+2. **Run the flag-on / flag-off note-create pair** — the same default-app
+   note-create series as the FA12 archived baseline
+   (`docs/history/development/performance/server-execution-feed-baseline-2026-07-16.md`,
+   the ONLY comparison basis; never the unarchived plan-text numbers). The pass
+   bar: flag-on reaches flag-off **parity within noise** (the pre-F5 residual
+   was +10.6% avg / +3.8% p50).
+3. **Read the F1 counters from `/api/health/stats`** for the flag-on run and
+   confirm the mechanism, not just the wall time:
+   `serverExecutionFeed.traversalByOperation["session.watch.refresh"]` absent or
+   its `dagTraversals` ≈ 0 (that source was ~94k/run flag-on before F5),
+   `refreshResidualGraphWatches` ≈ 0 (a non-zero value names a surface that
+   failed open — a boot-root that never demoted; investigate before trusting
+   the wall time), `refreshFullyDocSetSessions` tracking the touched sessions,
+   and `graph.query` still at its F2 floor (~1,566, not regressed by demand
+   pulls).
+4. **Record the client-side split (FA11)** — `viewConditionMs`,
+   `viewIdleWaitMs`, claimed-echo recompute, and adoption-application time.
+   Post-W2.16 settlements average ~528 ms inside the ~670 ms note window, so if
+   the residual after retirement attributes to **claimed-echo client work**
+   rather than server traversal, **F7 (G17 claimed-cold suppression) enters the
+   critical path** before the gate is re-attempted (the FA11 pull-in trigger).
+5. **FA16 speculative-branch fixture (runner-side).** Because clients still
+   speculate until F7, add a claimed `ifElse` whose branch flips under a pending
+   local write and assert the speculative run resolves entirely from the replica,
+   OR the resulting stall is measured and accepted within the ~zero W2.9 budget.
+   This exercises the client speculation path (runner `v2.ts`), which the
+   memory-server refresh-loop tests here cannot see; it belongs to the live gate
+   run, not the server unit suite.
 
 ### Phase 4 — scoped execution and delegated user keys
 
@@ -1902,7 +1943,10 @@ adversarial-panel treatment as C1 and the feed before the build waves.
 | C2.11 | Owed session-lane fixtures + EXPERIMENTAL_OPTIONS/docs edits | C2.3, C2.6, C2.9 |
 
 Prerequisite: the feed's session-scoped delivery (F6) lands before C2.6/C2.9
-(design §6). F1–F4 are landed; F5/F6 in flight.
+(design §6). F1–F4 are landed; F5's retirement mechanism is landed behind the
+per-space `serverPrimaryExecutionGraphRetirement` dial (its W2.9 wall-time gate
+is a live owner measurement — see the F5 measurement protocol above); F6 in
+flight.
 
 ### Phase 5 — server-directed handler events and enforced authority
 

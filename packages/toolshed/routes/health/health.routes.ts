@@ -48,6 +48,11 @@ export const ServerExecutionPoolMetricsSchema = z.object({
   parkedWakeAttempts: nonNegativeIntegerSchema,
   parkedWakeStarts: nonNegativeIntegerSchema,
   demandEmptyHibernations: nonNegativeIntegerSchema,
+  // C1 shared-pool user-lane gauges (intra-Worker lane identity).
+  userLanesOpened: nonNegativeIntegerSchema,
+  userLanesClosed: nonNegativeIntegerSchema,
+  userLaneReanchors: nonNegativeIntegerSchema,
+  activeUserLanes: nonNegativeIntegerSchema,
 }).strict();
 
 export const ServerExecutionControlMetricsSchema = z.object({
@@ -88,6 +93,13 @@ export const ServerExecutionFeedMetricsSchema = z.object({
   refreshSessionsTouched: nonNegativeIntegerSchema,
   refreshGraphsRefreshed: nonNegativeIntegerSchema,
   refreshUpsertsPushed: nonNegativeIntegerSchema,
+  // F3 doc-set membership fan-out gauges.
+  docSetMemberDeliveries: nonNegativeIntegerSchema,
+  docSetMembersTracked: nonNegativeIntegerSchema,
+  // F5/FA13 graph-refresh retirement gauges (per-wave aggregates).
+  refreshRetirementEligibleSessions: nonNegativeIntegerSchema,
+  refreshFullyDocSetSessions: nonNegativeIntegerSchema,
+  refreshResidualGraphWatches: nonNegativeIntegerSchema,
   traversalByOperation: z.record(
     z.string(),
     z.object({

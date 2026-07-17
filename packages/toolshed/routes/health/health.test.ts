@@ -50,6 +50,10 @@ const poolMetrics = {
   parkedWakeAttempts: 1,
   parkedWakeStarts: 1,
   demandEmptyHibernations: 0,
+  userLanesOpened: 0,
+  userLanesClosed: 0,
+  userLaneReanchors: 0,
+  activeUserLanes: 0,
 };
 
 const controlMetrics = {
@@ -82,6 +86,11 @@ const feedMetrics = {
   refreshSessionsTouched: 4,
   refreshGraphsRefreshed: 3,
   refreshUpsertsPushed: 9,
+  docSetMemberDeliveries: 7,
+  docSetMembersTracked: 5,
+  refreshRetirementEligibleSessions: 2,
+  refreshFullyDocSetSessions: 1,
+  refreshResidualGraphWatches: 1,
   traversalByOperation: {
     "session.watch.refresh": {
       calls: 3,

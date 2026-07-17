@@ -51,6 +51,20 @@ export type ServerExecutionFeedMetrics = Readonly<{
   refreshSessionsTouched: number;
   refreshGraphsRefreshed: number;
   refreshUpsertsPushed: number;
+  /** F3 doc-set membership point-read deliveries (zero traversal). */
+  docSetMemberDeliveries: number;
+  /** F3 live doc-set member-set size gauge (FA8). */
+  docSetMembersTracked: number;
+  /** F5/FA13: touched sessions the per-space eligibility dial admitted to
+   * graph-refresh retirement on a wave. */
+  refreshRetirementEligibleSessions: number;
+  /** F5/FA13: eligible sessions whose entire watch surface was doc-set (the
+   * graph refresh was skipped). */
+  refreshFullyDocSetSessions: number;
+  /** F5/FA13: residual schema-graph watches still traversed on eligible
+   * sessions — the regression signal the OQ4 gate watches (fully-retired
+   * space holds this at 0). */
+  refreshResidualGraphWatches: number;
   traversalByOperation: Readonly<
     Record<string, ServerExecutionFeedTraversalMetrics>
   >;

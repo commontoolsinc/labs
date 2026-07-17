@@ -32,6 +32,7 @@ was last checked against the code.
 | [`serverPrimaryExecution`](#serverprimaryexecution) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (server-primary execution W0.6) | graduate after the phased authority rollout, then delete flag | implemented, off by default |
 | [`serverPrimaryExecutionUserRankCandidates`](#serverprimaryexecutionuserrankcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C1.5a) | fold into `serverPrimaryExecution` once user lanes graduate | implemented, off by default |
 | [`serverPrimaryExecutionDocSetWatch`](#serverprimaryexecutiondocsetwatch) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH` env, or `RuntimeOptions.experimental`; bridges the memory-side `setServerPrimaryExecutionDocSetWatchConfig()` (negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution F3 server / F4 client) | fold into `serverPrimaryExecution` once the feed graduates, then retire the negotiation | implemented, off by default |
+| [`serverPrimaryExecutionGraphRetirement`](#serverprimaryexecutiongraphretirement) | `setServerPrimaryExecutionGraphRetirementConfig(spaces)` (host-internal, per-space, not negotiated) | empty set (absent-false, no space retires) | Bernhard Seefeld (server-side execution F5) | fold into `serverPrimaryExecution` once the feed graduates | implemented, empty by default |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (non-home roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete both auto-update flags | implemented, on in the shell |
@@ -280,6 +281,49 @@ propagate](#how-flags-propagate).
   execution rollout, make the doc-set surface unconditional for negotiated
   peers, fold the dial into `serverPrimaryExecution`, then delete the option,
   its env/build wiring, and the optional-capability negotiation.
+
+### `serverPrimaryExecutionGraphRetirement`
+
+- **Toggle via.** `setServerPrimaryExecutionGraphRetirementConfig(spaces)` in
+  [`packages/memory/v2.ts`](../../packages/memory/v2.ts), taking the set of
+  space DIDs eligible to retire per-session schema-graph re-evaluation.
+  Host-internal and owner-invisible: never negotiated on the wire and with no
+  environment variable; the rollout flips it programmatically per space.
+- **Added by.** Bernhard Seefeld, in server-side execution F5 (retire the
+  per-session graph refresh where the watch surface is doc-set, 2026-07-17).
+- **Purpose.** The per-space rollout dial for F5's retirement, and the
+  consumer of the OQ4 per-space coverage gate. Layered strictly above
+  `serverPrimaryExecutionDocSetWatch`: it gates **eligibility only**. Whether a
+  session's schema-graph refresh actually retires stays a live per-surface
+  check in the subscription refresh loop — the doc-set subcapability must be
+  negotiated, a closure source (registered doc-set members) must be present,
+  and the surface must be **fully doc-set** (no residual subscribed graph
+  watch). A surface that still holds a graph watch **fails open** to graph
+  behavior and is counted under `serverExecutionFeed.refreshResidualGraphWatches`
+  (the regression signal); a fully-doc-set eligible session skips
+  `refreshTrackedGraph` and is counted under `refreshFullyDocSetSessions`. The
+  conflict catch-up emitter is untouched, so a conflicted commit still receives
+  its `caughtUpLocalSeq` release across the retirement (FA7), and the surface
+  still makes one watermark-advancing emission per wave (FA1).
+- **Current default and planned end state.** The empty set by default —
+  byte-identical to the pre-F5 world, since no space is eligible and the graph
+  loop runs exactly as before. An operator adds a space only once F1's
+  per-space coverage counters (`/api/health/stats`) clear the OQ4 gate for it;
+  because the actual retirement is a live per-surface check that fails open,
+  enabling a space whose sessions are not yet fully doc-set is safe (it costs a
+  counted residual, not a delivery gap). The end state is every compatible
+  space eligible.
+- **Status on 2026-07-17.** Implemented: the refresh-loop classifier, the
+  per-space dial, the residual/fully-doc-set/eligible counters wired into
+  `/api/health/stats`, and the conflict-liveness and watermark guards. The
+  shipping-critical W2.9 parity gate — the flag-on note-create series reaching
+  flag-off parity within noise versus the archived baseline — is a live
+  measurement the rollout owner runs (see the F5 measurement protocol in the
+  [implementation plan](../specs/server-side-execution/implementation-plan.md)).
+- **Path to removal.** Once the W2.9 gate is green across the rollout, make the
+  retirement unconditional for fully-doc-set surfaces, fold the dial into
+  `serverPrimaryExecution`, and delete the config functions and the counters'
+  eligibility gate.
 
 ### `commitPreconditions`
 
