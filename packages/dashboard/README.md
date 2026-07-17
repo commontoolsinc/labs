@@ -273,6 +273,7 @@ it.
 | `GCP_SA_KEY` | cloud spend | a service-account key JSON (the whole file, as the value) for local development; in GKE, Workload Identity supplies the token and this is unset. |
 | `GCP_DAILY_BUDGET` | cloud spend | daily USD budget. |
 | `PROD_URL` | production | the production **server**, as an origin — the tile checks `/_health` on it and links to it. Defaults to estuary, the production toolshed. Note `production.commontools.dev` is the shell, a static site in a GCS bucket: it has no health endpoint, and its index page answers 200 whether or not the server behind it is serving, so it cannot see an outage. |
+| `PROD_PROXY` | production | optional proxy used only for the production health check. Use `socks5h://127.0.0.1:1055` with the Tailscale userspace proxy so the tailnet hostname resolves through it. Also accepts `socks5://`, `http://`, and `https://`; invalid values fail closed instead of fetching directly. |
 | `COMMON_TOOLS_URL` | common.tools | override the public-site URL (e.g. the `www` host if the apex redirects). |
 | `DASHBOARD_REPO` | CI tiles | which repo the CI tiles read (default `commontoolsinc/labs`). |
 | `DISCORD_HISTORY_FILE` | discord online | where the team/visitors history is persisted (default: a file in the temp dir). |
@@ -383,6 +384,7 @@ Env knobs for the dev loop:
 - `DASHBOARD_PORT` — run several instances at once (e.g. one per branch) without clashing.
 - `DASHBOARD_REPO` — point the CI tiles at any repo.
 - `PROD_URL` — point the production tile at a local server (`http://localhost:8000/`) instead of prod. It checks `/_health` on that origin.
+- `PROD_PROXY` — route only the production health check through a proxy, for example `socks5h://127.0.0.1:1055` with a local Tailscale userspace proxy.
 - The other credential envs (see **Credentials** above — `SIGNOZ_*`, `GCP_*`, `OPENAI_ADMIN_KEY`/`ANTHROPIC_ADMIN_KEY`/`OPENROUTER_KEY`, `DISCORD_*`) — set one to develop that gated tile against its real backend.
 
 It never crashes on a missing credential: the GitHub tiles need `GH_TOKEN` and
