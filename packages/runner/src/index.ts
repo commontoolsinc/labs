@@ -92,6 +92,8 @@ export {
 export { addCommonIDfromObjectID } from "./data-updating.ts";
 export {
   type BlindStructuralTarget,
+  isRendererInputTx,
+  markRendererInputTx,
   markUiInputBlindWriteTx,
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,

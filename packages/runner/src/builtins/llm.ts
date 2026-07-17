@@ -63,8 +63,14 @@ const client = new LLMClient();
 // TODO(ja): investigate if generateText should be replaced by
 // a fetch builtin with streaming support
 
-/** Batch interval for partial streaming updates (~15fps). */
-const PARTIAL_BATCH_MS = 66;
+// Batch interval for partial streaming updates. Set to one second to coarsen the
+// builtin-progress cadence (timing side-channel mitigation, channel 6, see
+// docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md): an unbatched partial cell
+// streams at ~15 Hz, a sub-second cadence an untrusted pattern can watch to time
+// token arrival, so the write rate is floored to <=1 Hz. The final result is
+// written separately when streaming completes, so this only affects the
+// intermediate cadence. Exported for testing.
+export const PARTIAL_BATCH_MS = 1000;
 
 // Epic D1b (docs/history/plans/cfc-future-work-implementation.md): the llm builtins
 // stamp their model-output writebacks with an explicit `LlmDerived` provenance
@@ -265,8 +271,9 @@ function collectGenerateObjectPromptConfidentiality(
  * while maintaining reactive updates.
  *
  * Updates are batched every PARTIAL_BATCH_MS to avoid creating many small
- * transactions during rapid streaming. Each batch waits for the scheduler
- * to be idle, then commits the latest partial text.
+ * transactions during rapid streaming and to coarsen the progress cadence
+ * (channel 6). Each batch waits for the scheduler to be idle, then commits the
+ * latest partial text.
  *
  * Returns both the callback and a cleanup function that should be called
  * when streaming completes to clear any pending timers.
@@ -280,6 +287,8 @@ function createUpdatePartialCallback(
   let pendingText: string | null = null;
   let batchTimer: ReturnType<typeof setTimeout> | null = null;
   let completed = false;
+
+  const batchMs = PARTIAL_BATCH_MS;
 
   const cleanup = () => {
     completed = true;
@@ -323,7 +332,7 @@ function createUpdatePartialCallback(
         }).catch((e) => {
           console.warn("[LLM] Error writing partial update:", e);
         });
-      }, PARTIAL_BATCH_MS);
+      }, batchMs);
     }
   };
 

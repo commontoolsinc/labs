@@ -7,7 +7,10 @@ import type {
   ErrorWithContext,
   Runtime,
 } from "../runtime.ts";
-import { type NormalizedFullLink } from "../link-utils.ts";
+import {
+  areNormalizedLinksSame,
+  type NormalizedFullLink,
+} from "../link-utils.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -19,6 +22,7 @@ import type {
 import {
   allowMutableTransactionRead,
   ignoreReadForScheduling,
+  isRendererInputTx,
   markReadAsAttemptedWrite,
 } from "../storage/reactivity-log.ts";
 import type {
@@ -58,6 +62,15 @@ import {
   updateDependentEdgesForLog,
 } from "./dependency-graph.ts";
 import { SchedulerMaterializers } from "./materializers.ts";
+import {
+  CELL_GROUP_PREFIX,
+  type DeliverFn,
+  holdShapedCell,
+  holdShapedEvent,
+  shaperInstanceGroupKey,
+  shouldShapeDelivery,
+  WakeShaper,
+} from "./wake-shaping.ts";
 import { type DependencyUpdateState } from "./dependency-updates.ts";
 import { SchedulerWriteIndex } from "./scheduling-writes.ts";
 import { NodeRegistry, type SchedulerNode } from "./node-record.ts";
@@ -294,6 +307,13 @@ type SchedulerRegisterOptions = {
   // from a snapshot: the flag-off resume path, and the flag-on degrade path
   // (snapshot miss/mismatch, or an "always-run" action). See runner.ts.
   awaitSyncBeforeInitialRun?: { space: MemorySpace; timeoutMs?: number };
+  // Tag the action with its owning pattern instance without rehydrating from
+  // storage. Pattern readers then always carry a pieceId, used to group shaped
+  // cell-flip wakes by instance and to distinguish pattern readers from
+  // internal machinery (plan B).
+  observationIdentity?: SchedulerObservationIdentity & {
+    space?: MemorySpace;
+  };
   // "always-run": never rehydrate this action clean on resume — its run has
   // instantiation side effects (starting child runs) that a clean skip would
   // strand. See docs/specs/scheduler-v2/per-doc-rehydration.md §3.3.
@@ -525,6 +545,14 @@ export class Scheduler {
 
   private idlePromises: (() => void)[] = [];
   private backgroundTasks = new Set<Promise<unknown>>();
+  // The single wake-shaping choke point (plan C): holds renderer-originated
+  // input events out of the event queue (W3) and shapable cell-flip wakes out
+  // of the reactive-notification path (plan B), coarsening the cadence a
+  // pattern can observe. Fed via queueEvent's shaping interception and
+  // holdShapedCellNotification() from the invalidation.ts routing of renderer
+  // $value writes and server pushes. See
+  // docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md.
+  private wakeShaper = new WakeShaper();
   // Head event parked on in-flight document loads (CT-1795). Keyed by event
   // id; released by loadsSettled, which either re-queues execution on success
   // or drops the at-most-once event on an explicit load failure.
@@ -659,8 +687,15 @@ export class Scheduler {
     const { rehydrateFromStorage } = options;
     const previousObservationIdentityKey = this
       .observationIdentityKeyForAction(action);
+    // Tag the action with its owning pattern instance. rehydrateFromStorage
+    // carries this only under persistent scheduler state; observationIdentity
+    // is set unconditionally so pattern readers always carry a pieceId (used to
+    // group shaped cell-flip wakes by instance and to distinguish pattern
+    // readers from internal machinery — plan B).
     if (rehydrateFromStorage) {
       this.setActionObservationIdentity(action, rehydrateFromStorage);
+    } else if (options.observationIdentity) {
+      this.setActionObservationIdentity(action, options.observationIdentity);
     }
     const observationIdentityKey = this.observationIdentityKeyForAction(action);
     if (
@@ -1191,6 +1226,13 @@ export class Scheduler {
         // Async scheduler work, such as event-triggered auto-start, is still in
         // flight. Wait for it to settle and then re-check the scheduler state.
         Promise.allSettled([...this.backgroundTasks]).then(recheck);
+      } else if (this.wakeShaper.hasPending()) {
+        // Input events (W3) or cell-flip notifications (plan B) are being held
+        // for wake shaping. Wait for them to release (which re-queues the
+        // events and delivers the notifications) and then re-check. Draining
+        // before the pending-commit branch means idleWithPendingCommits()
+        // releases the held wakes first, then awaits the commits they produce.
+        this.wakeShaper.whenDrained().then(recheck);
       } else if (
         awaitPendingCommits && this.runtime.storageManager.hasPendingCommits()
       ) {
@@ -1263,6 +1305,22 @@ export class Scheduler {
     doNotLoadPieceIfNotRunning: boolean = false,
     opts: { eventId?: string; originTx?: IExtendedStorageTransaction } = {},
   ): void {
+    // Coarsen the delivery cadence of user-input events (W3). The piece-loading
+    // re-queue (doNotLoadPieceIfNotRunning) is an internal retry, not fresh
+    // input, so it is never reshaped.
+    if (!doNotLoadPieceIfNotRunning && shouldShapeDelivery(event)) {
+      holdShapedEvent(
+        this.wakeShaper,
+        this.shapedEventDeliver,
+        this.pieceIdForEventLink(eventLink),
+        eventLink,
+        event,
+        retries,
+        onCommit,
+        { eventId: opts.eventId, originTx: opts.originTx },
+      );
+      return;
+    }
     queueSchedulerEvent(this.eventQueueState, {
       eventLink,
       event,
@@ -1272,6 +1330,94 @@ export class Scheduler {
       eventId: opts.eventId,
       originTx: opts.originTx,
     });
+  }
+
+  // A released shaped event re-enters the ordinary queue path; the shaper reads
+  // eventQueueState at release time, so it stays correct across state re-init.
+  private shapedEventDeliver: DeliverFn = (
+    eventLink,
+    event,
+    retries,
+    onCommit,
+    opts,
+  ) =>
+    queueSchedulerEvent(this.eventQueueState, {
+      eventLink,
+      event,
+      retries,
+      onCommit,
+      doNotLoadPieceIfNotRunning: false,
+      eventId: opts.eventId,
+      originTx: opts.originTx,
+    });
+
+  // The owning pattern instance for an input stream, used to group a pattern's
+  // input across its several streams into one delivery-shaping window (per-pattern
+  // coalescing, W3). The wake shaper's hold() runs before the handler is
+  // resolved, so we find it here from the registered handlers; undefined when none
+  // is registered yet (the shaper then falls back to per-stream grouping). The key
+  // includes the owning space so two instances of one pattern in different spaces
+  // (same content-addressed pieceId) do not share a bucket (see
+  // shaperInstanceGroupKey).
+  private pieceIdForEventLink(
+    eventLink: NormalizedFullLink,
+  ): string | undefined {
+    for (const [link, handler] of this.eventHandlers) {
+      if (areNormalizedLinksSame(link, eventLink)) {
+        return shaperInstanceGroupKey(
+          (handler as {
+            schedulerObservationIdentity?: SchedulerObservationIdentity;
+          }).schedulerObservationIdentity,
+        );
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Plan B seam: hold a shapable cell-flip notification so a watching lift/sink
+   * observes it coalesced and jittered rather than at the instant the cell
+   * changed. `groupKey` must identify the observing pattern instance (so all of
+   * one pattern's shaped cell flips share a release window — the property that
+   * defeats the over-sampling attack); `itemKey` identifies the changed cell
+   * within the group (the coalescing unit); `deliver` performs the already
+   * committed notification (never holds a transaction). Only real-world-timing
+   * notifications may be routed here — never ordinary internal computation, or
+   * all reactivity would stall.
+   *
+   * The shaper is owned and its lifecycle wired (idle-drain, dispose). Its two
+   * high-value sources ARE routed here, at the invalidation.ts per-change
+   * loop via shapableWakeGroupKey: renderer `$value` keystroke writes (a commit
+   * whose transaction carries the renderer-input mark set by markRendererInputTx
+   * in storage/reactivity-log.ts, stamped from runtime-client's blind CellSet)
+   * and server pushes (notification.type "pull"/"integrate"). Each is coalesced
+   * PER CELL (last-wins) so distinct cells are never dropped, and interactive
+   * input and passive pushes use separate per-pattern buckets so background
+   * chatter cannot drain the interactive burst. Only real-world-timing
+   * notifications are routed — never ordinary internal computation.
+   *
+   * Deferred / open sources:
+   * TODO(timing/plan-B/now): channel 4. `#now` ticks (builtins/wish.ts, a
+   *   wall-clock-boundary interval timer) are deliberately NOT routed here — the
+   *   value is already >=1s and grid-aligned and W1 denies the fine clock needed
+   *   to read its phase, so the ~1s latency it would add to every clock read is
+   *   not worth it. To wire it, recognize the `#now` cell link-keys at the
+   *   notification point (its URI is a content hash, so intent is otherwise lost).
+   */
+  holdShapedCellNotification(
+    groupKey: string,
+    itemKey: string,
+    chargeKey: object,
+    deliver: () => void,
+  ): void {
+    holdShapedCell(this.wakeShaper, groupKey, itemKey, chargeKey, deliver);
+  }
+
+  // Whether any shapable cell-flip wake is currently held out of the scheduler
+  // (plan B). Exposed for tests that need to observe that a change was routed
+  // through the wake shaper's cell path before idle() drains it.
+  hasPendingShapedCellNotifications(): boolean {
+    return this.wakeShaper.hasPending(CELL_GROUP_PREFIX);
   }
 
   addEventHandler(
@@ -1634,6 +1780,7 @@ export class Scheduler {
       this.pendingQueueTaskTimer = null;
     }
     this.triggerIndex.clear();
+    this.wakeShaper.dispose();
     // Clean up diagnosis state
     if (this.diagnosisTimeout) {
       clearTimeout(this.diagnosisTimeout);
@@ -1992,6 +2139,10 @@ export class Scheduler {
       isInvalid: (target) => this.isInvalidAction(target),
       materializerIndex: this.materializers,
       queueExecution: () => this.queueExecution(),
+      isRendererInputSource: (source) =>
+        source !== undefined && isRendererInputTx(source),
+      holdShapedNotification: (groupKey, itemKey, chargeKey, deliver) =>
+        this.holdShapedCellNotification(groupKey, itemKey, chargeKey, deliver),
     };
   }
 

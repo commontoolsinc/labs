@@ -27,6 +27,7 @@ import type {
   SchedulerActionInfo,
   SchedulerEventPreflightStats,
 } from "../telemetry.ts";
+import { MAX_EVENT_BACKLOG_PER_STREAM } from "./constants.ts";
 import { createEventPreflightTraceContext } from "./diagnostics.ts";
 import { mintEventId } from "./event-identity.ts";
 import { planEventInvalidDependencyScheduling } from "./execution.ts";
@@ -180,6 +181,49 @@ function readyQueuedEvent(args: {
   };
 }
 
+type OnCommit = NonNullable<QueuedEvent["onCommit"]>;
+
+// A commit callback that runs a flat list of callbacks in order, isolating each
+// throw so one failure neither skips the rest nor propagates to the caller.
+interface ChainedOnCommit extends OnCommit {
+  callbacks: OnCommit[];
+}
+
+function isChainedOnCommit(fn: OnCommit): fn is ChainedOnCommit {
+  return Array.isArray((fn as Partial<ChainedOnCommit>).callbacks);
+}
+
+// Combine two commit callbacks. Chaining APPENDS to a flat list rather than
+// nesting closures: a stream that collapses many times under the W4 backlog cap
+// (all same-origin, so each overflow chains onto the surviving entry) would
+// otherwise build a deeply nested chain that recurses once per collapse when it
+// finally runs, overflowing the stack for a large enough burst. The flat list
+// runs iteratively, so the depth is constant regardless of how many callbacks
+// were chained.
+function chainOnCommit(
+  a: QueuedEvent["onCommit"],
+  b: QueuedEvent["onCommit"],
+): QueuedEvent["onCommit"] {
+  if (!a) return b;
+  if (!b) return a;
+  if (isChainedOnCommit(a)) {
+    a.callbacks.push(b);
+    return a;
+  }
+  const callbacks: OnCommit[] = [a, b];
+  const chained = ((tx) => {
+    for (const callback of callbacks) {
+      try {
+        callback(tx);
+      } catch (error) {
+        logger.error("onCommit-callback-error", () => [error]);
+      }
+    }
+  }) as ChainedOnCommit;
+  chained.callbacks = callbacks;
+  return chained;
+}
+
 export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly eventLink: NormalizedFullLink;
   readonly event: unknown;
@@ -193,6 +237,54 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   const handler = findEventHandler(state.eventHandlers, args.eventLink);
 
   if (handler) {
+    // W4: bound the per-(stream, handler) in-queue backlog. Below the cap,
+    // events queue normally (ordinary delivery is unchanged); at the cap,
+    // collapse the newest into the last pending entry (last-wins) instead of
+    // growing the backlog, so a pattern cannot observe an unbounded post-block
+    // event count.
+    if (
+      // The matching (stream, handler) count can only reach the cap once the
+      // whole queue is at it, so this O(queue) scan runs only after a backlog
+      // has already formed — ordinary enqueue stays O(1).
+      state.eventQueue.length >= MAX_EVENT_BACKLOG_PER_STREAM
+    ) {
+      let pending = 0;
+      let lastSameOrigin: QueuedEvent | undefined;
+      for (const q of state.eventQueue) {
+        if (
+          q.handler === handler &&
+          areNormalizedLinksSame(q.eventLink, args.eventLink)
+        ) {
+          pending++;
+          // Collapse only within the same origin transaction. Coalescing an
+          // event from a different origin would misattribute speculation
+          // lineage: the surviving entry keeps its original originTx, so the
+          // single dispatch-time release would key off the wrong origin.
+          if (q.originTx === args.originTx) lastSameOrigin = q;
+        }
+      }
+      if (
+        pending >= MAX_EVENT_BACKLOG_PER_STREAM &&
+        lastSameOrigin !== undefined
+      ) {
+        // Collapse is silent by design. A per-collapse log here would fire on
+        // every enqueue during an adversarial burst, turning observability
+        // into a log-flood amplifier; any telemetry added later must be
+        // rate-limited.
+        lastSameOrigin.event = args.event;
+        lastSameOrigin.action = (tx) => handler(tx, args.event);
+        lastSameOrigin.onCommit = chainOnCommit(
+          lastSameOrigin.onCommit,
+          args.onCommit,
+        );
+        if (args.originTx !== undefined) {
+          // Same origin as the surviving entry, so this re-record is idempotent.
+          state.recordLineageEvent(args.originTx, lastSameOrigin);
+        }
+        state.queueExecution();
+        return;
+      }
+    }
     const queuedEvent = readyQueuedEvent({ ...args, id, handler });
     state.eventQueue.push(queuedEvent);
     if (args.originTx !== undefined) {

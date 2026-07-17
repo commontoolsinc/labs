@@ -621,6 +621,14 @@ type SchedulerRehydrationSubscriptionOptions = {
       IStorageProviderWithReplica["schedulerHasPendingWriteOverlapping"]
     >;
   };
+  // The owning pattern instance for this reader, set unconditionally (not only
+  // under persistent scheduler state) so the scheduler can group a pattern's
+  // shaped cell-flip wakes by instance (timing side-channel mitigation, plan B)
+  // and tell a pattern reader from internal machinery.
+  observationIdentity?: {
+    pieceId: string;
+    ownerSpace: MemorySpace;
+  };
   // Defer initial action runs until the space finishes syncing, without
   // restoring persisted scheduler state. Set for resumed patterns when
   // persistent scheduler state is disabled, so re-running actions read
@@ -2346,6 +2354,16 @@ export class Runner {
     return `${space}/${scope}/${id}`;
   }
 
+  // The scheduler observation identity (pieceId + owning space) for a piece's
+  // result cell. Pattern readers subscribe with this so the timing shapers can
+  // group and rate-cap a pattern's wakes; without it, cell-flip shaping (plan B)
+  // silently does not apply to the piece. It is derived purely from the result
+  // cell, so it is available even when scheduler state is not rehydrated.
+  private schedulerObservationIdentity(resultCell: Cell<any>) {
+    const { space, id, scope } = resultCell.getAsNormalizedFullLink();
+    return { pieceId: `${scope}:${id}`, ownerSpace: space };
+  }
+
   private schedulerRehydrationOptions(
     resultCell: Cell<any>,
     snapshotsByActionId?: ReadonlyMap<
@@ -2355,11 +2373,15 @@ export class Runner {
     awaitSync?: boolean,
   ): SchedulerRehydrationSubscriptionOptions {
     const { space, id, scope } = resultCell.getAsNormalizedFullLink();
+    const observationIdentity = this.schedulerObservationIdentity(resultCell);
     if (!getPersistentSchedulerStateConfig()) {
       // Persistent scheduler state is off: actions always re-run on resume.
       // When resuming from a synced state, hold the initial run until the space
       // is synced so re-derivations read confirmed-loaded inputs.
-      return awaitSync ? { awaitSyncBeforeInitialRun: { space } } : {};
+      return {
+        observationIdentity,
+        ...(awaitSync ? { awaitSyncBeforeInitialRun: { space } } : {}),
+      };
     }
     // Per-doc restore: a piece started with resume intent (awaitSync) but no
     // explicitly threaded snapshots — a sub-pattern node or a per-element
@@ -2376,6 +2398,7 @@ export class Runner {
     const hasPendingWriteOverlapping = provider
       .schedulerHasPendingWriteOverlapping?.bind(provider);
     return {
+      observationIdentity,
       rehydrateFromStorage: {
         space,
         pieceId,
@@ -4262,11 +4285,20 @@ export class Runner {
       }
       : undefined;
 
+    // Tag the handler with its owning pattern instance so the delivery shaper
+    // can group a pattern's input across its several streams into one shaping
+    // window (per-pattern coalescing, W3). The process cell is stable per
+    // instance, so all of one instance's handlers share this id.
+    const instanceLink = processCell.getAsNormalizedFullLink();
     const wrappedHandler = Object.assign(handler, {
       reads,
       writes,
       module,
       pattern,
+      schedulerObservationIdentity: {
+        pieceId: `${instanceLink.scope ?? "space"}:${instanceLink.id}`,
+        ownerSpace: instanceLink.space,
+      },
       ...(presyncInputs !== undefined && { presyncInputs }),
     });
 
