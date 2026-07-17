@@ -49,6 +49,8 @@ describe("ExperimentalOptions", () => {
         persistentSchedulerState: false,
         commitPreconditions: false,
         serverPrimaryExecution: false,
+        // Env-resolved (F4's doc-set watch flag): false with the env unset.
+        serverPrimaryExecutionDocSetWatch: false,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,
@@ -73,6 +75,7 @@ describe("ExperimentalOptions", () => {
         persistentSchedulerState: true,
         commitPreconditions: true,
         serverPrimaryExecution: true,
+        serverPrimaryExecutionDocSetWatch: false,
         eagerSourceAnnotation: false,
       });
       await runtime.dispose();
@@ -91,6 +94,7 @@ describe("ExperimentalOptions", () => {
         persistentSchedulerState: true,
         commitPreconditions: true,
         serverPrimaryExecution: false,
+        serverPrimaryExecutionDocSetWatch: false,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,
