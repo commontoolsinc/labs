@@ -435,13 +435,20 @@ export async function main(argv: string[] = Deno.args) {
     }
   }
   // Record the state, then announce it, so a parent woken by the announcement
-  // finds the status file already carrying the same state.
+  // finds the status file already carrying the same state. The announcement is
+  // the handshake's channel and the file is a record for `cf fuse status`, so
+  // the announcement goes out even when the record fails: publishing in a
+  // `finally` keeps a failed status write from stranding a parent that is
+  // blocked on the pipe, while the write error still reaches the caller.
   async function reportSupervisorState(
     state: SupervisorStatusState,
     extra: Record<string, unknown> = {},
   ): Promise<void> {
-    await writeSupervisorStatus(state, extra);
-    await publishSupervisorState(state, extra);
+    try {
+      await writeSupervisorStatus(state, extra);
+    } finally {
+      await publishSupervisorState(state, extra);
+    }
   }
   try {
     await writeSupervisorStatus("starting");
