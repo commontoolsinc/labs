@@ -429,3 +429,87 @@ Deno.test("an inbound resolved scope key on a doc-set address is a protocol erro
     await server.close();
   }
 });
+
+// --- FW1 (Fable review FB1): the F4b demotion against the REAL server. A doc
+// that moves from graph tracking to doc-set membership must survive the
+// demoting watch.set — delivered once, in one frame, under one watermark
+// (FA3) — while a doc that genuinely leaves the whole watch surface is still
+// removed. Before the FW1 fix the demoting frame carried removes for the
+// entire previously graph-tracked closure and the client evicted every held
+// doc (the pull → demote → evict livelock).
+
+Deno.test("F4b demotion: graph-tracked docs that become members survive the demoting watch.set; docs leaving the surface are removed (FB1)", async () => {
+  const space = "did:key:z6Mk-docset-demote";
+  const server = createServer("memory-v2-docset-demote");
+  const writerClient = await connectClient(server);
+  const watcherClient = await connectClient(server);
+  try {
+    const writer = await mountAs(writerClient, space, SPONSOR);
+    const watcher = await mountAs(watcherClient, space, SPONSOR);
+
+    await writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [
+        { op: "set", id: "of:root", value: { value: "R1" } },
+        { op: "set", id: "of:child", value: { value: "C1" } },
+      ],
+    });
+
+    // Cold boot: a subscribing graph watch holds the two-doc closure.
+    const view = await watcher.watchSet([
+      {
+        id: "boot",
+        kind: "graph",
+        query: {
+          roots: [
+            { id: "of:root", selector: { path: [], schema: false } },
+            { id: "of:child", selector: { path: [], schema: false } },
+          ],
+        },
+      } as unknown as WatchSpec,
+    ]);
+    assertEquals(
+      view.entities.map(idDoc).toSorted((l, r) => l.id.localeCompare(r.id)),
+      [
+        { id: "of:child", document: { value: "C1" } },
+        { id: "of:root", document: { value: "R1" } },
+      ],
+    );
+
+    // F4b demotion: replace the graph watch with doc-set membership over
+    // PART of the held closure — of:root becomes a member, of:child leaves
+    // the watch surface entirely.
+    const demotion = await watcher.watchSetSync([
+      docsWatch("m", [{ id: "of:root" }]),
+    ]);
+
+    // The member is not removed by its own demotion frame; the departing
+    // doc is (a genuine surface shrink, the control).
+    assertEquals(
+      demotion.sync.removes.map((remove) => remove.id),
+      ["of:child"],
+    );
+    // The held member survives in the client view with its value intact.
+    assertEquals(view.entities.map(idDoc), [
+      { id: "of:root", document: { value: "R1" } },
+    ]);
+
+    // Steady state is reached: the demoted surface still serves — a later
+    // commit reaches the member through membership fan-out, not a re-pull.
+    const next = view.subscribe().next();
+    await writer.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{ op: "set", id: "of:root", value: { value: "R2" } }],
+    });
+    await next;
+    assertEquals(view.entities.map(idDoc), [
+      { id: "of:root", document: { value: "R2" } },
+    ]);
+  } finally {
+    await writerClient.close();
+    await watcherClient.close();
+    await server.close();
+  }
+});

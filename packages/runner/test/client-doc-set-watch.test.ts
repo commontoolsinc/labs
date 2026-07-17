@@ -81,6 +81,13 @@ class DocSetWatchTransport extends ScriptedSessionTransport {
   readonly closures = new Map<URI, URI[]>();
   readonly watchAdds: WireWatch[][] = [];
   readonly watchSets: WireWatch[][] = [];
+  /** Docs currently delivered through graph tracking — the real server's
+   * session.entities surface, the base of the watch.set full-sync diff
+   * (FW2/FB8: the scripted peer must emit the diff removes the real server
+   * emits, or the demotion guards certify nothing). */
+  readonly graphTracked = new Set<URI>();
+  /** Current doc-set members (the real server's session.docSetMembers). */
+  readonly members = new Set<URI>();
   #seq = 100;
 
   constructor() {
@@ -120,12 +127,15 @@ class DocSetWatchTransport extends ScriptedSessionTransport {
         const roots = watches.flatMap((watch) =>
           watch.query?.roots?.map((root) => root.id as URI) ?? []
         );
+        const upserts = this.#closureUpserts(roots);
+        // Additive: the delivered closure joins the graph-tracked surface.
+        for (const entry of upserts) this.graphTracked.add(entry.id as URI);
         this.respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
             serverSeq: ++this.#seq,
-            sync: fullSync(this.#seq, this.#closureUpserts(roots)),
+            sync: fullSync(this.#seq, upserts),
           },
         });
         return;
@@ -133,16 +143,50 @@ class DocSetWatchTransport extends ScriptedSessionTransport {
       case "session.watch.set": {
         const watches = wire.watches ?? [];
         this.watchSets.push(watches);
-        const memberIds = watches.flatMap((watch) =>
-          watch.docs?.map((doc) => doc.id as URI) ??
-            watch.query?.roots?.map((root) => root.id as URI) ?? []
+        // Replace semantics, conforming to the real (FW1-fixed) server: the
+        // next graph surface is the closure of the set's graph watches; docs
+        // watches contribute exact member seeds, never closure expansion.
+        const graphRoots = watches.flatMap((watch) =>
+          watch.kind === "docs"
+            ? []
+            : watch.query?.roots?.map((root) => root.id as URI) ?? []
         );
+        const memberIds = watches.flatMap((watch) =>
+          watch.kind === "docs"
+            ? watch.docs?.map((doc) => doc.id as URI) ?? []
+            : []
+        );
+        const graphUpserts = this.#closureUpserts(graphRoots);
+        const nextGraphIds = new Set(
+          graphUpserts.map((entry) => entry.id as URI),
+        );
+        const nextMembers = new Set(memberIds);
+        // The real server's full-sync diff: previously graph-tracked docs
+        // absent from the next graph surface remove — UNLESS the incoming
+        // set holds them as members (FW1's suppressDocSetMemberRemoves; the
+        // FB1 fix). A doc in neither surface is a genuine shrink remove.
+        const removes: SessionSyncRemove[] = [...this.graphTracked]
+          .filter((id) => !nextGraphIds.has(id) && !nextMembers.has(id))
+          .map((id) => ({ branch: "", id }));
+        const seen = new Set(graphUpserts.map((entry) => entry.id));
+        const memberSeeds: SessionSyncUpsert[] = [];
+        for (const id of nextMembers) {
+          if (seen.has(id)) continue;
+          const held = this.store.get(id);
+          if (held !== undefined) {
+            memberSeeds.push(upsert(id, held.seq, held.value));
+          }
+        }
+        this.graphTracked.clear();
+        for (const id of nextGraphIds) this.graphTracked.add(id);
+        this.members.clear();
+        for (const id of nextMembers) this.members.add(id);
         this.respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
             serverSeq: ++this.#seq,
-            sync: fullSync(this.#seq, this.#closureUpserts(memberIds)),
+            sync: fullSync(this.#seq, [...graphUpserts, ...memberSeeds], removes),
           },
         });
         return;
@@ -180,9 +224,12 @@ class DocSetWatchTransport extends ScriptedSessionTransport {
     }
   }
 
-  /** Push an unsolicited server remove for `id` (a graph-diff retraction). */
+  /** Push an unsolicited server remove for `id` (a graph-diff retraction —
+   * per FW1 the real server only emits these for docs that are NOT current
+   * members, so the scripted push models a genuine surface shrink). */
   emitRemove(id: URI): void {
     this.store.delete(id);
+    this.graphTracked.delete(id);
     this.emitSync(fullSync(++this.#seq, [], [{ branch: "", id }]));
   }
 }
@@ -252,6 +299,34 @@ Deno.test("flag-on: a boot-root graph watch is demoted to doc-set membership cov
         d.scope === undefined || d.scope === "space"
       ),
       "members carry declared scope only",
+    );
+    // FB1's client-side guard, bindable now that the transport emits the real
+    // server's diff removes: the demotion must NOT evict the held closure.
+    await flush();
+    assertEquals(
+      (provider.get(ROOT)?.value as { child?: URI })?.child,
+      CHILD,
+      "the held root survives its own demotion",
+    );
+    assertEquals(
+      (provider.get(CHILD)?.value as { n?: number })?.n,
+      1,
+      "the held child survives its own demotion",
+    );
+    // Steady state, not the pull → demote → evict livelock: once the
+    // demotion settles, no re-pull and no re-demotion churn.
+    const addsAfter = transport.watchAdds.length;
+    const setsAfter = transport.watchSets.length;
+    await flush();
+    assertEquals(
+      transport.watchAdds.length,
+      addsAfter,
+      "no re-pull churn after the demotion settles",
+    );
+    assertEquals(
+      transport.watchSets.length,
+      setsAfter,
+      "no re-demotion churn after the demotion settles",
     );
   } finally {
     await storageManager.close();

@@ -231,6 +231,27 @@ const appendMemberUpserts = (
   );
 };
 
+/** FW1 (FB1, FA3 make-before-break): never emit a remove for a doc that is a
+ * current doc-set member of this session. A doc moving from graph tracking to
+ * membership (the F4b demotion) — or leaving a graph closure while membership
+ * still holds it — is delivered once, in this frame, by the member path; a
+ * remove would evict the exact instance membership keeps serving (the
+ * client's same-frame remove-wins rule makes that destructive). Docs in
+ * neither the next graph surface nor the membership pass through as genuine
+ * surface-shrink removes. Membership shrink itself never emits removes (FA8);
+ * document deletion stays a deleted-upsert. */
+const suppressDocSetMemberRemoves = (
+  sync: SessionSync,
+  members: ReadonlyMap<string, DocSetMember>,
+): void => {
+  if (members.size === 0 || sync.removes.length === 0) return;
+  sync.removes = sync.removes.filter((remove) =>
+    !members.has(
+      docSetMemberKey(remove.branch, remove.id, remove.scopeKey ?? "space"),
+    )
+  );
+};
+
 export interface SlowQuery {
   timestamp: number;
   elapsed: number;
@@ -6407,6 +6428,10 @@ export class Server {
         .map((watch) => Server.#docSetWatchSource(watch.id))
         .filter((source) => !newDocSources.has(source));
       this.#removeDocSetSources(session, droppedSources);
+      // FW1 (FB1): consulted AFTER registration and source drops, so the
+      // demoting frame keeps its members and genuinely dropped docs still
+      // remove.
+      suppressDocSetMemberRemoves(sync, session.docSetMembers);
       session.watches = message.watches;
       // The registration's acting principal is part of the watch set: the
       // full-re-evaluation refresh resolves under it, so a lane watch never
@@ -7319,6 +7344,9 @@ export class Server {
             );
             appendMemberUpserts(sync, memberUpserts);
           }
+          // FW1 (FB1): a resume re-evaluation whose graph closure shrank away
+          // from a doc that membership still holds must not remove it.
+          suppressDocSetMemberRemoves(sync, session.docSetMembers);
           session.lastSyncedSeq = serverSeq;
           if (isEmptySync(sync)) {
             return await emptyCatchUp(sync.fromSeq, sync.toSeq);
