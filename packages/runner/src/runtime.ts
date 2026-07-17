@@ -23,12 +23,15 @@ import {
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   getServerPrimaryExecutionConfig,
+  getServerPrimaryExecutionDocSetWatchConfig,
   resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
   resetServerPrimaryExecutionConfig,
+  resetServerPrimaryExecutionDocSetWatchConfig,
   setCommitPreconditionsConfig,
   setPersistentSchedulerStateConfig,
   setServerPrimaryExecutionConfig,
+  setServerPrimaryExecutionDocSetWatchConfig,
 } from "@commonfabric/memory/v2";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import {
@@ -246,6 +249,20 @@ export interface ExperimentalOptions {
    * the memory-side `serverPrimaryExecutionClaimRank` dial.
    */
   serverPrimaryExecutionUserRankCandidates?: boolean | undefined;
+  /**
+   * The client half of the F3 doc-set watch subcapability (feed protocol):
+   * when on, and the peer advertises `serverPrimaryExecutionDocSetWatchV1`,
+   * the client replica exports its held-doc closure as an additive `docs`
+   * WatchSpec kind (server-membership point-read deltas) and demotes the
+   * steady-state schema-graph watches it would otherwise keep subscribed.
+   * Default off; layered above {@link serverPrimaryExecution} (the base feed
+   * capability) exactly like the server dial — enabling server-primary
+   * execution alone never turns it on. A mixed fleet stays valid: a client
+   * whose peer never advertised the kind keeps its graph watches unchanged,
+   * and the entire client path is byte-identical to the flag-off world.
+   * Registered in docs/development/EXPERIMENTAL_OPTIONS.md.
+   */
+  serverPrimaryExecutionDocSetWatch?: boolean | undefined;
   /**
    * Eagerly resolve the per-primitive debug source annotation (`fn.src`) at
    * module evaluation. Debug-only — identity never reads `.src` — and OFF by
@@ -900,6 +917,15 @@ export class Runtime {
     );
     this.experimental.serverPrimaryExecution =
       getServerPrimaryExecutionConfig();
+    // The F3 doc-set watch subcapability dial. Bridged symmetrically with the
+    // base flag: on a server build it decides advertisement (getMemoryProtocol
+    // Flags folds it with the base capability), on a client build it is the
+    // own-side gate the replica checks against the negotiated peer flag.
+    setServerPrimaryExecutionDocSetWatchConfig(
+      this.experimental.serverPrimaryExecutionDocSetWatch,
+    );
+    this.experimental.serverPrimaryExecutionDocSetWatch =
+      getServerPrimaryExecutionDocSetWatchConfig();
     // Unlike the flags above, only propagate when EXPLICITLY set: the ambient
     // flag is also a test seam (tests toggle `setEagerSourceAnnotation`
     // directly around runtime construction), and an unconditional
@@ -1230,6 +1256,7 @@ export class Runtime {
     resetPersistentSchedulerStateConfig();
     resetCommitPreconditionsConfig();
     resetServerPrimaryExecutionConfig();
+    resetServerPrimaryExecutionDocSetWatchConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

@@ -31,6 +31,7 @@ was last checked against the code.
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | on | Bernhard Seefeld (#3646) | graduate to always-on | implemented, on by default, rollback override retained |
 | [`serverPrimaryExecution`](#serverprimaryexecution) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (server-primary execution W0.6) | graduate after the phased authority rollout, then delete flag | implemented, off by default |
 | [`serverPrimaryExecutionUserRankCandidates`](#serverprimaryexecutionuserrankcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C1.5a) | fold into `serverPrimaryExecution` once user lanes graduate | implemented, off by default |
+| [`serverPrimaryExecutionDocSetWatch`](#serverprimaryexecutiondocsetwatch) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH` env, or `RuntimeOptions.experimental`; bridges the memory-side `setServerPrimaryExecutionDocSetWatchConfig()` (negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution F3 server / F4 client) | fold into `serverPrimaryExecution` once the feed graduates, then retire the negotiation | implemented, off by default |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (non-home roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete both auto-update flags | implemented, on in the shell |
@@ -234,6 +235,51 @@ propagate](#how-flags-propagate).
 - **Path to removal.** Graduate user-rank candidacy with the rest of the C1
   gates, fold it into `serverPrimaryExecution` alongside the claim-rank dial,
   then delete the option and its Worker plumbing.
+
+### `serverPrimaryExecutionDocSetWatch`
+
+- **Toggle via.** `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH`
+  environment variable (through the canonical mapping), or
+  `RuntimeOptions.experimental.serverPrimaryExecutionDocSetWatch`. The ambient
+  control point is `setServerPrimaryExecutionDocSetWatchConfig` in
+  [`packages/memory/v2.ts`](../../packages/memory/v2.ts); the runtime bridges
+  the runner option into it exactly like `serverPrimaryExecution`. On a server
+  build the ambient decides whether `getMemoryProtocolFlags` advertises the
+  `serverPrimaryExecutionDocSetWatchV1` subcapability (folded with the base
+  `serverPrimaryExecutionV1` flag, absent-false); on a client build it is the
+  own-side gate the replica ANDs with the negotiated peer flag before it
+  exports doc-set membership.
+- **Added by.** Bernhard Seefeld, in server-side execution F3 (server-side
+  `docs` WatchSpec kind, 2026-07-17) and F4 (the client replica's closure
+  export / boot-root demotion).
+- **Purpose.** Gates the F3/F4 feed's steady-state watch surface. When both
+  peers negotiate the subcapability and the client dial is on, the client
+  replica registers an additive `docs` WatchSpec kind whose membership is its
+  held-doc closure (every doc across the confirmed and pending/overlay layers,
+  including speculative write targets and framework reads) and demotes the
+  overlapping steady-state schema-graph watches make-before-break, so accepted-
+  commit waves fan out as server-membership point reads instead of per-wave
+  schema-graph re-traversal. Layered strictly above `serverPrimaryExecution`:
+  enabling server-primary execution alone never turns it on.
+- **Current default and planned end state.** Off by default in every runtime,
+  and byte-identical to the flag-off world when off — the entire client export
+  path, membership derivation, and graph-watch demotion are behind the dial,
+  and a peer that never advertised the kind keeps its graph watches unchanged
+  (a mixed fleet stays valid). Both the server process and the client worker
+  must enable it for the doc-set surface to engage. The planned end state is to
+  graduate the feed after the phased rollout and fold this dial into
+  `serverPrimaryExecution`, then retire the negotiation.
+- **Status on 2026-07-17.** F3 (server-side `docs` kind, resolved-scopeKey
+  membership, per-wave fan-out folded into the refresh loop) and F4 (client
+  closure export from the replica doc set, same-step eviction on retraction,
+  reconnect re-registration, and space-lane boot-root demotion) are
+  implemented. Cold-boot roots keep subscribing schema-graph watches until
+  their closure is held; closure growth is covered by transient cold-discovery
+  graph watches that demote to membership.
+- **Path to removal.** Graduate the feed with the rest of the server-side
+  execution rollout, make the doc-set surface unconditional for negotiated
+  peers, fold the dial into `serverPrimaryExecution`, then delete the option,
+  its env/build wiring, and the optional-capability negotiation.
 
 ### `commitPreconditions`
 

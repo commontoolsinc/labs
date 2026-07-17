@@ -217,10 +217,13 @@ const pinBranch = (
     case "session.watch.add":
       return {
         ...message,
-        watches: message.watches.map((watch) => ({
-          ...watch,
-          query: { ...watch.query, branch },
-        })),
+        watches: message.watches.map((watch) =>
+          // The F3 `docs` kind carries its branch at the top level (no query to
+          // stamp); graph/query watches stamp the branch into the query roots.
+          watch.kind === "docs"
+            ? { ...watch, branch }
+            : { ...watch, query: { ...watch.query, branch } }
+        ),
       };
     default:
       return message;
@@ -700,7 +703,11 @@ const syncUpsert = (snapshot: EntitySnapshot) => ({
  * cold graph-query path.
  */
 class HostReplicaSession implements ReplicaSession {
-  #watches = new Map<string, WatchSpec>();
+  // The executor replica maintains graph/query watches only; the F3 `docs`
+  // WatchSpec kind is the CLIENT closure-export surface (F4) and is never
+  // registered here, so the map excludes it and the traversal sites below can
+  // read `.query` without narrowing.
+  #watches = new Map<string, Exclude<WatchSpec, { kind: "docs" }>>();
   /** Acting context each watch registered under (C1.4b/C1.5b): the provider
    * re-queries watches itself, so every refresh must RE-SEND the lane the
    * watch was registered with or a scoped root would silently re-resolve
@@ -943,6 +950,9 @@ class HostReplicaSession implements ReplicaSession {
     this.#mutation = this.#mutation.then(async () => {
       if (this.#closed) throw new Error("executor provider session closed");
       for (const watch of watches) {
+        // Defensive: the executor never issues doc-set watches, but the union
+        // permits them — skip so the graph/query-only invariant above holds.
+        if (watch.kind === "docs") continue;
         this.#watches.set(watch.id, watch);
         if (options?.actingContext !== undefined) {
           this.#watchActingContexts.set(watch.id, options.actingContext);

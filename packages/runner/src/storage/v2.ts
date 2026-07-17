@@ -28,6 +28,8 @@ import {
   type CellScope,
   type ClientCommit,
   type CommitPrecondition,
+  type DocReadAddress,
+  type DocSetWatchSpec,
   type DocumentPath,
   type EntityDocument,
   type ExecutionClaim,
@@ -37,6 +39,7 @@ import {
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   getServerPrimaryExecutionConfig,
+  getServerPrimaryExecutionDocSetWatchConfig,
   type LegacyBackgroundExclusion,
   type LegacyBackgroundExclusionStatus,
   type PatchOp,
@@ -367,6 +370,24 @@ type DocumentRecord = {
   confirmed: ConfirmedVersion;
   pending: PendingVersion[];
   materialized?: PendingMaterializationCache;
+  /**
+   * The DECLARED address this record is held under (F4 doc-set membership).
+   * `#docs` IS the replica doc set, so exported membership derives from these
+   * addresses directly (FA4) rather than from a filtered read log — a doc
+   * written but never read still carries its address here and is a member.
+   * Declared scope only (never a resolved scopeKey); the owning lane selects
+   * the acting context the `docs` watch registers under. Set once at record
+   * creation and invariant for the record's life (the docKey it is keyed by is
+   * a pure function of these three).
+   */
+  readonly address: DocSetMemberAddress;
+};
+
+/** Declared address of a held replica doc: the F4 membership unit (FA4). */
+type DocSetMemberAddress = {
+  id: URI;
+  scope?: CellScope;
+  lane: SchedulerExecutionContextKey;
 };
 
 type PendingPatchLogContext = {
@@ -2190,6 +2211,32 @@ class SpaceReplica implements ISpaceReplica {
   #executionOwnContextKeys: ReadonlySet<string> = new Set(["space"]);
   #executionSnapshotRequired = false;
   #executionWatchHandoffComplete = false;
+  /**
+   * F4 client closure export latch: the server advertises the doc-set watch
+   * subcapability AND this build's own dial is on. Recomputed on every attach
+   * (like the other subcapability latches), so a takeover onto a connection
+   * that lost the capability downgrades the session back to graph watches.
+   * When false the entire export path is inert and byte-identical to flag-off.
+   */
+  #docSetWatchActive = false;
+  /**
+   * Monotone version counter for the space-lane `docs` watch id. Each reconcile
+   * mints a FRESH id: the server's watch.set drops the sources of docs watches
+   * the new set no longer carries (register-new-first, so surviving members
+   * keep their lastSentSeq), so a fresh id is how a SHRUNKEN membership retracts
+   * an evicted doc's source while re-adding every survivor (FA8 make-before-
+   * break). A stable id could only grow the served set.
+   */
+  #docSetWatchIdSeq = 0;
+  /** The space-lane `docs` watch id currently registered on the session, or
+   * undefined while the space lane is still on graph watches. */
+  #docSetWatchId: string | undefined;
+  /** docKeys of the members in the currently-registered space `docs` watch, so
+   * a reconcile can skip a redundant watch.set when membership is unchanged. */
+  #docSetRegisteredKeys: ReadonlySet<string> = new Set();
+  /** Microtask debounce so a burst of same-turn membership changes (closure
+   * growth, speculative writes, retractions) issues a single watch.set. */
+  #docSetReconcileScheduled = false;
   #sessionHandle?: Promise<ReplicaSessionHandle>;
   /** The client of the last RESOLVED session handle — for synchronous
    *  capability reads (`sqliteServerCommitRowLabelEval`). */
@@ -3120,10 +3167,182 @@ class SpaceReplica implements ISpaceReplica {
           });
         this.#updatePromises.add(updates);
       }
+      // F4b boot-root demotion (make-before-break): the graph watch above did
+      // its cold-discovery job — its closure is now HELD in `#docs`, applied by
+      // applySessionSync. Replace the subscribing graph watch with doc-set
+      // membership covering the whole held closure, so accepted-commit waves
+      // fan out as point reads rather than per-wave schema-graph traversal. The
+      // server registers the new members BEFORE dropping the graph watch's
+      // tracked set (watch.set register-first), so no delivery gap opens; F3's
+      // cross-kind folding means a doc briefly covered by both kinds is still
+      // delivered once per wave under one watermark. Debounced so a burst of
+      // per-root pulls collapses into one membership registration.
+      if (lane === "space") this.scheduleSpaceDocSetReconcile();
       return { ok: {} };
     } catch (error) {
       return { error: toConnectionError(error) };
     }
+  }
+
+  /**
+   * Declared-address membership of the space-lane replica doc set (FA4): every
+   * doc `#docs` holds for the space lane, across the confirmed and pending/
+   * overlay layers. Because `#docs` records are created for reads, writes,
+   * speculative overlays and framework/system access alike, this includes
+   * WRITTEN-NOT-READ docs (claimed chain intermediates, cross-doc backlink
+   * write targets) that a read-log or pulled-doc derivation would strand as
+   * permanently stale — and the settlement gate would then clear their overlays
+   * against undelivered bases. Serving the closure pre-emptively rather than
+   * pulling those docs on demand is therefore a CORRECTNESS choice, not a mere
+   * latency trade: a written-not-read member must be delivered before/with the
+   * sync whose toSeq covers its settlement's acceptedCommitSeq.
+   */
+  private spaceLaneDocSetMembers(): DocReadAddress[] {
+    const members: DocReadAddress[] = [];
+    for (const record of this.#docs.values()) {
+      if (record.address.lane !== "space") continue;
+      members.push({
+        id: record.address.id,
+        // Declared scope only — the wire never carries a resolved scope key
+        // (FA2); the server resolves it under the registration acting context.
+        scope: record.address.scope,
+      });
+    }
+    return members;
+  }
+
+  /** Membership keys of the space-lane replica doc set (its docKeys), used to
+   * detect whether a reconcile would actually change the served set. */
+  private spaceLaneDocSetKeys(): Set<string> {
+    const keys = new Set<string>();
+    for (const record of this.#docs.values()) {
+      if (record.address.lane !== "space") continue;
+      keys.add(docKey(record.address.id, record.address.scope, "space"));
+    }
+    return keys;
+  }
+
+  /**
+   * Debounce a space-lane membership reconcile onto a microtask. Scheduled
+   * whenever the replica doc set changes — closure growth delivered by a cold
+   * graph watch, a speculative write target entering the overlay, or a
+   * retraction evicting a member — so a burst of same-turn changes issues a
+   * single watch.set carrying the whole current membership.
+   */
+  private scheduleSpaceDocSetReconcile(): void {
+    if (!this.#docSetWatchActive || this.#docSetReconcileScheduled) return;
+    this.#docSetReconcileScheduled = true;
+    queueMicrotask(() => {
+      this.#docSetReconcileScheduled = false;
+      void this.reconcileSpaceDocSetWatch();
+    });
+  }
+
+  /**
+   * Register (or re-register) the space lane's single `docs` membership watch
+   * to cover exactly the held replica doc set, replacing any subscribing
+   * schema-graph watches make-before-break (F4b boot-root demotion). Space-lane
+   * only: a client SpaceReplica's watch surface is single-acting-context (the
+   * server rejects a watch.add whose acting context differs from the registered
+   * set, and a watch.set re-resolves the whole set under one context), so the
+   * owned-set replace is sound only for the sponsor's own space. Non-space
+   * execution lanes keep the graph-watch path unchanged (byte-identical to
+   * flag-off). A fresh watch id each reconcile is how a SHRUNKEN membership
+   * retracts an evicted doc's server-side source while every survivor is
+   * re-registered first (FA8 make-before-break); an unchanged set is skipped.
+   */
+  private async reconcileSpaceDocSetWatch(): Promise<void> {
+    if (!this.#docSetWatchActive || this.#closed) return;
+    const members = this.spaceLaneDocSetMembers();
+    const memberKeys = this.spaceLaneDocSetKeys();
+    // Nothing to serve and nothing registered: stay on graph watches — dropping
+    // them with an empty docs watch would leave the closure uncovered.
+    if (memberKeys.size === 0 && this.#docSetWatchId === undefined) return;
+    // Membership unchanged since the last registration: no watch.set needed.
+    if (
+      memberKeys.size === this.#docSetRegisteredKeys.size &&
+      [...memberKeys].every((key) => this.#docSetRegisteredKeys.has(key))
+    ) return;
+    let session: ReplicaSessionHandle["session"];
+    try {
+      ({ session } = await this.sessionHandle());
+    } catch {
+      return;
+    }
+    // A session without the replace verb (e.g. an executor host-provider
+    // session) stays on graph watches — sound, just undemoted.
+    if (session.watchSetSync === undefined || this.#closed) return;
+    const docsWatch: DocSetWatchSpec = {
+      id: `docset:space:${++this.#docSetWatchIdSeq}`,
+      kind: "docs",
+      docs: members,
+    };
+    // Engage the surface BEFORE the round-trip so a retraction racing the
+    // in-flight registration still evicts (the id is a sentinel; every reconcile
+    // mints a fresh one regardless). `#docSetRegisteredKeys` is committed only on
+    // success below, so a failed watch.set re-registers on the next reconcile
+    // rather than being masked by the unchanged-membership guard.
+    this.#docSetWatchId = memberKeys.size === 0 ? undefined : docsWatch.id;
+    let view: ReplicaWatchView;
+    let sync: SessionSync;
+    try {
+      ({ view, sync } = await session.watchSetSync([docsWatch]));
+    } catch {
+      return;
+    }
+    this.#docSetRegisteredKeys = memberKeys;
+    if (this.#closed) {
+      view.close();
+      return;
+    }
+    this.#watchView = view;
+    this.applySessionSync(sync, "integrate");
+    if (this.#updatePromises.size === 0) {
+      this.#subscribedWatchView = view;
+      const updates = this.consumeUpdates(view.subscribeSync())
+        .finally(() => {
+          this.#updatePromises.delete(updates);
+          if (this.#subscribedWatchView === view) {
+            this.#subscribedWatchView = null;
+          }
+        });
+      this.#updatePromises.add(updates);
+    }
+  }
+
+  /**
+   * Same-step replica eviction on retraction (FA4/FA8): delete the held
+   * records so the next read misses and re-pulls, and drop watch-coverage
+   * bookkeeping so that pull is not deduped away. Returns whether anything was
+   * actually removed. A record carrying PENDING local writes is never evicted —
+   * a speculative write target stays a member until its commit settles.
+   */
+  private evictHeldSpaceDocsSync(
+    evicted: Iterable<{ id: URI; scope?: CellScope }>,
+  ): boolean {
+    if (!this.#docSetWatchActive || this.#docSetWatchId === undefined) {
+      return false;
+    }
+    let removedAny = false;
+    for (const { id, scope } of evicted) {
+      const key = docKey(id, scope, "space");
+      const record = this.#docs.get(key);
+      if (record === undefined || record.pending.length > 0) continue;
+      this.#docs.delete(key);
+      this.#watchedIds.delete(key);
+      removedAny = true;
+      // Clear selector coverage so `sync()` re-fetches instead of treating the
+      // evicted doc as already covered by a live watch.
+      const baseAddress = {
+        id,
+        type: DOCUMENT_MIME,
+        scope: laneScopeKey(normalizeCellScope(scope), "space") as CellScope,
+      };
+      for (const selector of [...this.#watchSelectorTracker.get(baseAddress)]) {
+        this.#watchSelectorTracker.delete(baseAddress, selector);
+      }
+    }
+    return removedAny;
   }
 
   private enqueueWatchRefresh(
@@ -4305,6 +4524,10 @@ class SpaceReplica implements ISpaceReplica {
     lane: SchedulerExecutionContextKey,
   ): void {
     if (upserts.length === 0 && removes.length === 0) return;
+    // F4/FA8: retractions delivered as graph-diff removes (a doc left the read
+    // closure — e.g. an unlink) evict the held record in the same step so the
+    // next read re-pulls; collected here and re-registered once after the apply.
+    let evictedSpaceDoc = false;
     this.runWithExecutionLane(lane, () => {
       const touched = [
         ...upserts.map((upsert) => ({
@@ -4342,10 +4565,23 @@ class SpaceReplica implements ISpaceReplica {
       }
       for (const remove of removes) {
         const id = remove.id as URI;
+        const key = docKey(id, remove.scope, lane);
+        // Same-step eviction when the space-lane doc-set surface is engaged and
+        // the doc carries no pending local writes (evictHeldSpaceDocsSync's own
+        // guard): drop the record entirely rather than resetting it to absent,
+        // so it also leaves the exported membership on re-registration.
+        if (
+          lane === "space" && this.#docSetWatchActive &&
+          this.#docSetWatchId !== undefined &&
+          this.evictHeldSpaceDocsSync([{ id, scope: remove.scope }])
+        ) {
+          evictedSpaceDoc = true;
+          continue;
+        }
         const record = this.record(id, remove.scope, lane);
         record.confirmed = confirmedVersion(0, undefined);
         record.materialized = undefined;
-        this.#watchedIds.delete(docKey(id, remove.scope, lane));
+        this.#watchedIds.delete(key);
       }
 
       if (before !== undefined) {
@@ -4364,6 +4600,7 @@ class SpaceReplica implements ISpaceReplica {
         this.notifySinksForIds(touched);
       }
     });
+    if (evictedSpaceDoc) this.scheduleSpaceDocSetReconcile();
   }
 
   // Mark every id this conflicted commit touched (reads + writes) stale until
@@ -4531,8 +4768,17 @@ class SpaceReplica implements ISpaceReplica {
         confirmed: confirmedVersion(0, undefined),
         pending: [],
         materialized: undefined,
+        // Capture the declared address so the replica doc set can be re-exported
+        // as `docs` watch membership (FA4) without a parallel bookkeeping map.
+        address: { id, scope, lane },
       };
       this.#docs.set(key, record);
+      // A newly held space-lane doc grows the exported membership: a read-closure
+      // doc, a speculative write target, or a framework read all enter here and
+      // must become members (FA4). Debounced; inert unless the surface is
+      // engaged. A member already covered by the registered set is skipped by
+      // the reconcile's unchanged-membership guard.
+      if (lane === "space") this.scheduleSpaceDocSetReconcile();
     }
     return record;
   }
@@ -4754,11 +5000,20 @@ class SpaceReplica implements ISpaceReplica {
   private initializeClientExecutionControl(
     handle: ReplicaSessionHandle,
   ): void {
+    // Recomputed on every attach so a takeover onto a connection without the
+    // subcapability downgrades the session back to graph watches. Defaults off
+    // and is only raised once the base capability below is confirmed — the F4
+    // doc-set surface is layered strictly above server-primary execution.
+    this.#docSetWatchActive = false;
     const enabled = getServerPrimaryExecutionConfig() &&
       handle.client.serverFlags?.serverPrimaryExecutionV1 === true &&
       handle.client.serverFlags?.serverPrimaryExecutionClaimRoutingV1 === true;
     if (!enabled) return;
     this.#executionClaimRouting = true;
+    // F4 own-side gate ∧ negotiated peer flag. Both must hold; a mixed fleet
+    // where either side lacks the subcapability keeps its graph watches.
+    this.#docSetWatchActive = getServerPrimaryExecutionDocSetWatchConfig() &&
+      handle.client.serverFlags?.serverPrimaryExecutionDocSetWatchV1 === true;
     // The own chain (A10) anchors to the provider signer and the exact live
     // session id — the identities scoped claims would be issued under. Both
     // segments are canonically encoded by the helpers (A18); the session

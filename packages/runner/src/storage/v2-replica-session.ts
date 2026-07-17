@@ -61,6 +61,21 @@ export interface ReplicaSession {
     view: ReplicaWatchView;
     sync: SessionSync;
   }>;
+  /**
+   * Replace the whole session watch set (F4 client closure export). Optional:
+   * executor host-provider sessions never register client doc-set watches, so
+   * they may omit it, and the client replica falls back to graph watches when a
+   * session does not implement it. Replaces `watchAddSync`'s growth-only set,
+   * which is how the space-lane graph watches are demoted make-before-break and
+   * how a shrunken membership retracts an evicted doc's server-side source.
+   */
+  watchSetSync?(
+    watches: WatchSpec[],
+    options?: ReplicaReadOptions,
+  ): Promise<{
+    view: ReplicaWatchView;
+    sync: SessionSync;
+  }>;
   sqliteQuery(
     db: SqliteDbRef,
     sql: string,
