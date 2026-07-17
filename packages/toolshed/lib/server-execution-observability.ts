@@ -55,16 +55,22 @@ export type ServerExecutionFeedMetrics = Readonly<{
   docSetMemberDeliveries: number;
   /** F3 live doc-set member-set size gauge (FA8). */
   docSetMembersTracked: number;
-  /** F5/FA13: touched sessions the per-space eligibility dial admitted to
-   * graph-refresh retirement on a wave. */
+  /** F5/FA13: touched sessions holding a dial-admitted doc-set surface on a
+   * wave. */
   refreshRetirementEligibleSessions: number;
-  /** F5/FA13: eligible sessions whose entire watch surface was doc-set (the
-   * graph refresh was skipped). */
+  /** F5/FA13: eligible sessions whose entire watch surface was doc-set (no
+   * graph refresh had anything to traverse). */
   refreshFullyDocSetSessions: number;
-  /** F5/FA13: residual schema-graph watches still traversed on eligible
-   * sessions — the regression signal the OQ4 gate watches (fully-retired
-   * space holds this at 0). */
+  /** F5/FA3: residual schema-graph watches HELD on eligible sessions this
+   * wave, per watch (surface composition — a fully-demoted space holds this
+   * at 0). */
   refreshResidualGraphWatches: number;
+  /** F5/FB28: residual graph watches whose branch group actually re-traversed
+   * — the traversal regression signal the OQ4 gate watches. */
+  refreshResidualGraphWatchesTraversed: number;
+  /** F5/FB11: residual graph-refresh DAG traversals per space — the
+   * mixed-mode residual-traversal budget numerator of the F5 protocol. */
+  refreshResidualDagTraversalsBySpace: Readonly<Record<string, number>>;
   traversalByOperation: Readonly<
     Record<string, ServerExecutionFeedTraversalMetrics>
   >;

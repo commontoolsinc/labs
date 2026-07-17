@@ -1832,7 +1832,7 @@ F7 gains a mechanical pull-in trigger (FA11) and make-before-break (FA10).
 | F2 | **Landed.** Executor Worker replica: revision-driven point reads replace per-wave graph-query refresh, via the new `docs.read` wire read (exact engine reads, no traversal; F1-attributed under its own operation). FA5 **partially** satisfied (correction 2026-07-17, Fable review FB12: the ordered wave-vs-demand `graph.query` split and the claimed-action closure-growth→revision→rerun fixture are NOT delivered — one undifferentiated bucket at `server.ts:6705`, no matching fixture repo-wide — so the F5 protocol's "graph.query still at its F2 floor" criterion is unevaluable until they land): interest set = the instance-keyed per-watch entity maps (C1.5b re-keying; absent-but-tracked docs are held as null-document snapshots); one point-read batch per acting lane at the wave's max dataSeq; deliveries flow through the existing WatchView/SessionSync pipeline (steady frames are exact deltas; observation-after-data same-turn ordering and appliedSeq semantics preserved). Shrink policy: any held doc's link-topology change (growth to a target the owning watch does not hold, or any target removal/deletion of a linking doc) routes that watch through the cold graph refresh, whose before/after diff carries the removes — so the interest set equals the last traversal's closure between topology changes (leave-the-closure fixture pinned; F3 adds server-side membership deltas so removes stop requiring a traversal). FA6 satisfied: resolved-scopeKey revision matching with declared-scope fallback on classification AND on read results; `actingContext` on `docs.read` from day one; scopeKey forwarded through syncUpsert, WatchView.applySync (instance-keyed), and — new — SessionSyncRemove. Residual: a schema-position move of a link already present in both versions stays steady and defers the newly-selected target to the demand read path (documented at the topology gate). **Open defect (FB13, repair wave):** host sessions have no watch-removal path and lane drain never retires a drained lane's watches, so a wave's point-read group keyed under a dead acting context gets `laneReadRejection` and `refreshAcceptedCommits` drops the ENTIRE spliced-out batch — every watch, permanently — while the principal stays disconnected | **C1.5b** (semantic dependency — landed first) | met: steady-state waves (executor-provider-point-reads suite) run zero graph queries with ≤ revisions point reads; cold pulls, closure growth, linked-doc deletion, and leave-the-closure still traverse; no unwatched point reads (reads issue only for held instances) |
 | F3 | Doc-set watch kind: additive WatchSpec, absent-false subcapability, server membership fan-out, ordered delivery. Binding FA1 (the watermark invariant: toSeq advances only when the COMPLETE watch surface — members as of N, served write surfaces, residual graph closures — is proven current through N; one emission point per session per wave), FA2 (membership keyed by RESOLVED scopeKey at registration under the session/lane context; raw scopeKeys on the wire are a protocol error; pre-F6 scoped deltas are per-session point reads or stay on the graph path), FA8 (server-side refcounted shrink; never SessionSync.removes), FA14 (preserved-contract checklist: dirtyOrigins echo suppression, trackedIds union, feed-frame atomicity), FA15 (per-member seq state for resumed catch-up) | F1 | membership deltas exact; watermark invariant fixture; scoped-doc pre-F6 rule pinned by test. **Corrections (2026-07-17, Fable review):** FA8 shrink is broken for same-id `watch.set` replacement — droppedSources is computed per watch id only and `#registerDocSetMembers` only ever adds, so a narrowed docs watch keeps delivering un-watched members forever (FB6, reproduced live; no shrink fixture exists); the FA1 watermark advances past member deltas silently skipped on the stale-binding fail-open with no next-wave retry (FB15); `docSetMembersTracked` is schema'd into `/api/health/stats` but never assigned (FB23); watchAdd installs the watch before member registration, so an error+retry yields a docs watch that delivers nothing (FB24); FA2(c)'s lane-context fixture is absent (FB25). All owed to the repair wave |
 | F4 | Client closure export. Binding FA4 (membership derives from the replica DOC SET — every held doc across confirmed and pending/overlay layers including speculative write targets and framework reads, never the filtered reactive log; retraction evicts from the replica in the same step; served-closure pre-push vs pull-on-demand is a CORRECTNESS choice for written-not-read docs), FA8 (client re-export removals), FA15 (reconnect: re-register after catch-up, before replay). Plus F4b per FA3: boot-root demotion — one-shot graph evaluation for cold-boot roots, make-before-break replacement, partition rule, cross-kind dedup (one delivery, one frame, one watermark) | F3 | claimed chain-intermediate fixture; disconnect/reconnect fixture; unlink retraction fixture. **BLOCKER correction (2026-07-17, Fable review FB1 — flag-on F4b is nonfunctional against the real server):** the demoting `watch.set` response is a full-sync diff in which a docs-only watch set contributes zero entities, so the frame carries removes for the whole held closure; the client's same-frame remove-wins rule suppresses the seeded member upserts, the runner evicts every held doc, membership shrinks on the next reconcile, and the surface enters a permanent pull → demote → evict livelock (reproduced live ×3; violates FA3/F4b's one-delivery/one-frame/one-watermark text; makes the F5 W2.9 gate structurally unpassable). The suite stayed green because the scripted test transport omits the removes the real server emits — all five "red-first guards" certify a contract the real integration breaks (FB8); FA4's delivery-side acceptance is asserted nowhere and the chain-intermediate fixture binds membership export only (FB26). Also: eviction clears replica coverage but not the runtime/manager pull-dedup latches, so an evicted doc's re-pull is deduped away and the reader goes silently stale — FA4's forbidden stale-hit loop (FB7); nothing ever removes an unmounted doc from the client export, so an aged session's member set grows without bound (FB27). **FB1 and FB8 are FIXED (FW1/FW2, landed 2026-07-17, red-first with a real-server fixture and a discrimination-checked conformant transport); FB7/FB26/FB27 remain open (FW2 residual, FW4)** |
-| F5 | Retire per-session graph re-evaluation. Binding FA1 (watermark co-owner), FA3 (per-watch classification + measured residual-traversal budget replaces the binary 'fully doc-set'), FA7 (conflict-liveness: caughtUpLocalSeq release survives retirement, fed by the same stageConflictRefreshDirtyIds staging), FA11 (record the client-side split; if the parity residual attributes to claimed-echo work, F7 enters the critical path), FA13 (dial gates eligibility only; retirement evaluated live per surface, failing open and counted), FA16 (speculative claimed-run under pending local writes fixture) | F2, F3, F4 | **Corrected status (2026-07-17, Fable review FB9/FB10/FB11 — supersedes the earlier "Mechanism landed"):** the landed switch is behaviorally inert — `retired` requires `session.graphs.size === 0` while the guarded loop iterates `session.graphs`, so the skip can only ever skip a zero-iteration loop; the zero-traversal property is delivered *structurally* by F3 (docs kind excluded from graph grouping) + F4b (client demotion), and the per-space dial governs **counters only** — it cannot hold a space on graph behavior, so the OQ4 per-space rollout story in EXPERIMENTAL_OPTIONS has no behavioral authority (FB9). The W2.9 gate is not executable at tip: `setServerPrimaryExecutionGraphRetirementConfig` has zero non-test call sites, no env, and no toolshed hook, and the harness never sets the client doc-set flag — the one live run (archived 2026-07-17) confirms the path never engaged (FB10). FB1's demotion blocker must land first regardless: engaging the flags currently destroys the replica. FA3's binding gate items were dropped, not narrowed: no cold-deep-navigation measurement exists anywhere, no mixed-mode residual-traversal budget is defined, and the binary "fully doc-set" decision FA3 ordered replaced is exactly what shipped (FB11). FA7's conflict-liveness coverage and the counters themselves stand (though `refreshResidualGraphWatches` counts branch-grouped graph states, not watches — FB28). Real retirement per FA3 (per-watch classification + budget), dial wiring, and the executable gate are repair-wave items; FA16's speculative-branch fixture remains a runner-side gate item recorded in the protocol |
+| F5 | Retire per-session graph re-evaluation. Binding FA1 (watermark co-owner), FA3 (per-watch classification + measured residual-traversal budget replaces the binary 'fully doc-set'), FA7 (conflict-liveness: caughtUpLocalSeq release survives retirement, fed by the same stageConflictRefreshDirtyIds staging), FA11 (record the client-side split; if the parity residual attributes to claimed-echo work, F7 enters the critical path), FA13 (dial gates eligibility only; retirement evaluated live per surface, failing open and counted), FA16 (speculative claimed-run under pending local writes fixture) | F2, F3, F4 | **Corrected status (2026-07-17, Fable review FB9/FB10/FB11 — supersedes the earlier "Mechanism landed"):** the landed switch is behaviorally inert — `retired` requires `session.graphs.size === 0` while the guarded loop iterates `session.graphs`, so the skip can only ever skip a zero-iteration loop; the zero-traversal property is delivered *structurally* by F3 (docs kind excluded from graph grouping) + F4b (client demotion), and the per-space dial governs **counters only** — it cannot hold a space on graph behavior, so the OQ4 per-space rollout story in EXPERIMENTAL_OPTIONS has no behavioral authority (FB9). The W2.9 gate is not executable at tip: `setServerPrimaryExecutionGraphRetirementConfig` has zero non-test call sites, no env, and no toolshed hook, and the harness never sets the client doc-set flag — the one live run (archived 2026-07-17) confirms the path never engaged (FB10). FB1's demotion blocker must land first regardless: engaging the flags currently destroys the replica. FA3's binding gate items were dropped, not narrowed: no cold-deep-navigation measurement exists anywhere, no mixed-mode residual-traversal budget is defined, and the binary "fully doc-set" decision FA3 ordered replaced is exactly what shipped (FB11). FA7's conflict-liveness coverage and the counters themselves stand (though `refreshResidualGraphWatches` counts branch-grouped graph states, not watches — FB28). Real retirement per FA3 (per-watch classification + budget), dial wiring, and the executable gate are repair-wave items; FA16's speculative-branch fixture remains a runner-side gate item recorded in the protocol. **FW5 landed (2026-07-17):** the dial design chosen is per-space **doc-set admission** (design (a)) — the dial rejects `docs` watches for unadmitted spaces with the non-negotiating ProtocolError shape, restoring the OQ4 hold; per-watch residual classification, the FB28 held/traversed counter split, the FB11 per-space budget, env wiring (`EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES`), and the rewritten executable protocol (budget math + cold-deep-navigation steps) are in — see the FW5 row; FB9/FB11(gate math)/FB28 closed, FB10's server side closed (the wall-time gate itself remains the live measurement) |
 | F6 | Lane-correct scoped delivery: cohort filtering. Binding FA9: dependency on C1.7 resolved explicitly (either F6 depends on C1.7, or F6 builds sessionsForPrincipal + the single #sessionAcceptsClaim predicate and C1.7 consumes them — one owner, decided at dispatch); carries the declared-scope agree-set checklist (dirty producers, trackedIds builders, session-entity cache keys, echo map, adoption surface) and the per-address scopeKey derivation rule | F3, C1.7 (per FA9 resolution) | another session's session-scoped commit produces zero B-side work; user-scoped revisions reach only that principal's sessions |
 | F7 | G17 claimed-cold suppression. Binding FA10 (make-before-break between closure sources: the served contribution survives until the replacement export covers the same docs, or the revoke carries a catch-up barrier seq and the rerun defers until member deltas through it apply) and FA11 (pull-in trigger: enters the critical path if F5's parity residual attributes to claimed-echo client work) | F4, F5 | revoke-concurrent-with-commit fixture: the rerun's basis covers the commit; stays-cold adoption fixture |
 
@@ -1844,16 +1844,34 @@ escalates to the owner only if both options violate the ~zero W2.9 budget.
 
 #### F5 measurement protocol (the W2.9 gate)
 
-The retirement mechanism is pinned deterministically in
+Rewritten by FW5 (2026-07-17) so every step is executable against the code at
+tip (FB10) and the FA3 gate items — mixed-mode budget math and the
+cold-deep-navigation measurement — are named steps (FB11). The retirement
+mechanism, the dial's admission authority, and every counter this protocol
+consults are pinned deterministically in
 `packages/memory/test/v2-feed-retirement-test.ts`; the shipping-critical
 acceptance is a wall-time measurement the rollout owner runs — it cannot run
 inside the isolated worktree. The gate:
 
-1. **Enable the dial per space** with `setServerPrimaryExecutionGraphRetirementConfig([space])`
-   for the default-app space under test (eligibility only — retirement stays a
-   live per-surface check). Confirm the client build negotiates
-   `serverPrimaryExecutionDocSetWatch` so the space lane runs as a doc-set
-   surface (F4b demotion complete).
+1. **Configure the deployment (both env legs).** On the toolshed host set
+   `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=true`,
+   `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH=true` (one env, two
+   effects: the server advertises the `docs` subcapability and the host's own
+   runner clients negotiate it; the browser client's flag arrives via the
+   shell host's `InitializationData`), and
+   `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES=<space DID>`
+   (or `*`) to admit the default-app space under test — the dial's admission
+   authority is what lets F4b demotion proceed on that space; a withheld
+   space's `docs` watches are rejected and it stays on graph behavior (the
+   OQ4 hold). The flag-off leg unsets
+   `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH` (leaving the dial
+   set is then inert — nothing sends `docs` watches). Confirm engagement
+   before measuring: after driving the app once,
+   `serverExecutionFeed.docSetMembersTracked > 0` and
+   `refreshRetirementEligibleSessions` advancing on
+   `/api/health/stats` mean the surface demoted; both flat at 0 mean the
+   client flag or the dial leg is miswired (the 2026-07-17 run's failure
+   mode).
 2. **Run the flag-on / flag-off note-create pair** — the same default-app
    note-create series as the FA12 archived baseline
    (`docs/history/development/performance/server-execution-feed-baseline-2026-07-16.md`,
@@ -1862,20 +1880,62 @@ inside the isolated worktree. The gate:
    was +10.6% avg / +3.8% p50).
 3. **Read the F1 counters from `/api/health/stats`** for the flag-on run and
    confirm the mechanism, not just the wall time:
-   `serverExecutionFeed.traversalByOperation["session.watch.refresh"]` absent or
-   its `dagTraversals` ≈ 0 (that source was ~94k/run flag-on before F5),
-   `refreshResidualGraphWatches` ≈ 0 (a non-zero value names a surface that
-   failed open — a boot-root that never demoted; investigate before trusting
-   the wall time), `refreshFullyDocSetSessions` tracking the touched sessions,
-   and `graph.query` still at its F2 floor (~1,566, not regressed by demand
-   pulls).
-4. **Record the client-side split (FA11)** — `viewConditionMs`,
+   `serverExecutionFeed.traversalByOperation["session.watch.refresh"]` absent
+   or its `dagTraversals` ≈ 0 (that source was ~94k/run flag-on before F5);
+   `refreshFullyDocSetSessions` tracking the touched sessions
+   (≈ `refreshSessionsTouched` for the app session's waves);
+   `refreshResidualGraphWatches` naming surfaces that failed open (held
+   composition — e.g. a boot root that never demoted) with
+   `refreshResidualGraphWatchesTraversed` distinguishing whether they
+   actually forced traversal this run (an idle residual watch accrues held
+   counts only — FB28; chase the *traversed* counter, corroborated by
+   `traversalByOperation["session.watch.refresh"]`, not the held gauge);
+   `docSetMemberDeliveries > 0` with
+   `traversalByOperation["session.docset.read"].dagTraversals = 0` (members
+   flow as zero-traversal point reads); and `graph.query` still at its F2
+   floor (~1,566, not regressed by demand pulls; caveat FB12 — the
+   wave-vs-demand split of that bucket is still owed, so until it lands this
+   criterion reads the undifferentiated bucket).
+4. **Evaluate the mixed-mode residual-traversal budget (FA3/FB11 gate
+   math).** Let `W` = note-create waves driven against admitted space `S`
+   and `T` = the run's delta of
+   `serverExecutionFeed.refreshResidualDagTraversalsBySpace[S]` (residual
+   graph-refresh DAG traversals only — member point reads and demand pulls
+   never land in this bucket). The gate: **`T / W ≤ B`**, where `B` is the
+   per-wave residual recorded from this baseline run (for the fully-demoted
+   default app, record `B = 0`). **Fully-doc-set sessions must read 0** by
+   construction: if every touched wave retired
+   (`refreshFullyDocSetSessions` delta = `refreshRetirementEligibleSessions`
+   delta), then `T` must be exactly 0 — any non-zero `T` names a mixed
+   surface, quantified per watch by the held/traversed pair from step 3. A
+   later run over the same workload fails the gate when its `T / W` exceeds
+   the recorded `B`: that is the defined mixed-mode regression, replacing
+   the unfalsifiable "≈ 0, investigate" prompt.
+5. **Cold-deep-navigation measurement (FA3).** From the demoted steady state
+   (after step 2's series, same session), drive the two flows FA3 names as
+   F5's regression class, and measure each against the flag-off leg of the
+   identical navigation: **(a) unvisited-subtree open** — navigate to a
+   piece/document never rendered this session (e.g. open a note from a list
+   link that was never opened since boot, one whose closure is outside the
+   held doc set); **(b) handler read of a never-rendered doc** — trigger an
+   action whose handler reads a doc outside the held closure. Pass bar:
+   open/action latency parity within noise vs flag-off. Mechanism
+   confirmation distinguishing demand pulls from graph refresh: the closure
+   arrives via the cold/demand path — deltas in
+   `traversalByOperation["graph.query"]` (and `"session.watch.set"` /
+   `"session.watch.add"` for the transient cold-discovery watch and its
+   demotion re-registration) — while
+   `traversalByOperation["session.watch.refresh"]` and
+   `refreshResidualDagTraversalsBySpace[S]` stay flat (no graph-refresh
+   traversal woke up), and `docSetMembersTracked` grows as the new closure
+   demotes into membership on the next reconcile.
+6. **Record the client-side split (FA11)** — `viewConditionMs`,
    `viewIdleWaitMs`, claimed-echo recompute, and adoption-application time.
    Post-W2.16 settlements average ~528 ms inside the ~670 ms note window, so if
    the residual after retirement attributes to **claimed-echo client work**
    rather than server traversal, **F7 (G17 claimed-cold suppression) enters the
    critical path** before the gate is re-attempted (the FA11 pull-in trigger).
-5. **FA16 speculative-branch fixture (runner-side).** Because clients still
+7. **FA16 speculative-branch fixture (runner-side).** Because clients still
    speculate until F7, add a claimed `ifElse` whose branch flips under a pending
    local write and assert the speculative run resolves entirely from the replica,
    OR the resulting stall is measured and accepted within the ~zero W2.9 budget.
@@ -1900,7 +1960,7 @@ against tip before its fix lands.
 | FW2 | F4 suite conformance (FB8, FB26): the scripted `DocSetWatchTransport` emits the real server's demotion diff shape (removes included); the five behavioral guards re-run against the conforming peer; FA4's delivery-side acceptance gets asserted (a written-not-read member is delivered before/with the sync whose toSeq covers its settlement). **Landed 2026-07-17 except the FA4 delivery-side assertion (still owed):** the transport tracks the graph-delivered surface + members and computes the fixed server's diff removes; the demotion guard now binds replica survival and steady-state (no re-pull/re-demotion churn), discrimination-checked — modeling the unfixed server turns the suite red | FW1 |
 | FW3 | FA8 membership shrink (FB6): same-id `watch.set` replacement evicts dropped members (per-member source refcounting, not per-watch-id droppedSources); shrink fixture pins "an aged session's member set equals a fresh session's for the same UI"; non-atomic watchAdd registration fixed (FB24); `docSetMembersTracked` gauge assigned (FB23); FA1 stale-binding skip gets its next-wave retry (FB15); FA2(c) lane-context fixture (FB25) | — |
 | FW4 | FA4 read-path re-pull (FB7, FB27): eviction clears the runtime `missingDocLoadKicks` and manager `#docPullKicks` latches for evicted docs so the next read actually re-pulls; client-export shrink removes unmounted docs so the export cannot grow without bound | FW1 |
-| FW5 | F5 real retirement + executable gate (FB9, FB10, FB11, FB28): per-watch classification with a defined mixed-mode residual-traversal budget replaces the binary `graphs.size === 0` predicate (FA3 as written); the dial gains behavioral authority and a wiring path (env or toolshed hook) so the W2.9 protocol is executable end-to-end; cold-deep-navigation measurement added to the protocol; `refreshResidualGraphWatches` counts what its name says | FW1, FW2 |
+| FW5 | F5 real retirement + executable gate (FB9, FB10, FB11, FB28): per-watch classification with a defined mixed-mode residual-traversal budget replaces the binary `graphs.size === 0` predicate (FA3 as written); the dial gains behavioral authority and a wiring path (env or toolshed hook) so the W2.9 protocol is executable end-to-end; cold-deep-navigation measurement added to the protocol; `refreshResidualGraphWatches` counts what its name says. **Landed 2026-07-17:** the dial's authority moved to **doc-set admission** (design (a)) — a space absent from `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES` (comma-separated DIDs or `*`; applied at construction by toolshed `routes/storage/memory.ts` and the standalone server) has its `docs` watches rejected with the non-negotiating ProtocolError shape, and the runner reconcile's existing catch keeps its graph watches (`packages/runner/src/storage/v2.ts` `reconcileSpaceDocSetWatch` — verified read-only: registered-keys commit only on success, so it retries and never errors), so withholding a space is a real OQ4 hold; red-first dial-authority fixture (withheld space rejects demotion + keeps traversing; dial flip admits it and the next wave is zero-traversal) in `v2-feed-retirement-test.ts`. The provably-dead `retired` skip branch was deleted (zero traversal is structural: F3 grouping exclusion + F4b demotion; a mixed surface MUST traverse — FA13 fail-open forbids any server-side skip with authority, which is why admission is the only real per-space lever). Refresh-loop classification is per watch (FA3): `refreshResidualGraphWatches` = held residual watches (two watches on one branch count 2), new `refreshResidualGraphWatchesTraversed` = watches whose branch group actually re-traversed (FB28 red-first fixture: member-only wave counts held 2 / traversed 0), new `refreshResidualDagTraversalsBySpace` = the FB11 budget numerator (schema-compatible additions; consumers updated: toolshed observability type, health stats schema + fixture). The protocol above is rewritten executable end-to-end with the budget gate math (step 4) and the named cold-deep-navigation step (step 5). Eligibility gauges no longer re-consult the dial, so shrinking it cannot hide a live surface (FB9(c)); dial shrink takes effect for new registrations only. The W2.9 wall-time gate itself remains a live measurement | FW1, FW2 |
 | FW6 | F2 FA5 completion + wave-drop fix (FB12, FB13): wave-vs-demand `graph.query` split with per-cold-event bounds; the claimed-action closure-growth → revision → rerun fixture; lane drain retires (or re-keys) the drained lane's watches and a rejected point-read group no longer discards the whole spliced-out batch — re-queue or context-free fallback, fixture-pinned | — |
 | FW7 | C1 acceptance re-binding (FB14, FB4, FB5): the two-principal gate runs in an automatically-executed lane (wire `CF_RUN_USER_LANE_GATE` into CI or drop the env gate; de-flake the documented teardown flake); the A2 WRITE-revocation fixture asserts on default runs; the shrink-race fixture goes through the real Worker `ClaimedActionGoneError` seam; the cross-lane pending-read fixture routes lane A upstream so the A16 lane machinery is discriminating | — |
 | FW8 | W2.x certificate repairs (FB3, FB18, FB2, FB16, FB17, FB30, FB21, FB19, FB29 + CA6's map half): selector descriptors cover the minted result document (the `listBuiltinResultContainerCause` precedent) with a firewall-exercising cold+flip fixture; map's product-fixture write-surface completeness (the CA6/CA10 re-open); W2.13 gains the capture-freeness check its gate doc promises; W2.14's two vacuous tests bind their arms; W2.12's runtime-floor test; the `arr[i]` laundering corner; the runner.ts:5174 comment; a deterministic zero-verdict pin | — |

@@ -96,10 +96,18 @@ export const ServerExecutionFeedMetricsSchema = z.object({
   // F3 doc-set membership fan-out gauges.
   docSetMemberDeliveries: nonNegativeIntegerSchema,
   docSetMembersTracked: nonNegativeIntegerSchema,
-  // F5/FA13 graph-refresh retirement gauges (per-wave aggregates).
+  // F5/FA13 graph-refresh retirement gauges (per-wave aggregates). The
+  // residual pair splits surface composition (watches HELD, per watch) from
+  // actual work (watches whose branch group re-traversed — FB28); the
+  // per-space record is the FB11 mixed-mode residual-traversal budget input.
   refreshRetirementEligibleSessions: nonNegativeIntegerSchema,
   refreshFullyDocSetSessions: nonNegativeIntegerSchema,
   refreshResidualGraphWatches: nonNegativeIntegerSchema,
+  refreshResidualGraphWatchesTraversed: nonNegativeIntegerSchema,
+  refreshResidualDagTraversalsBySpace: z.record(
+    z.string(),
+    nonNegativeIntegerSchema,
+  ),
   traversalByOperation: z.record(
     z.string(),
     z.object({

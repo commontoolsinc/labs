@@ -2,10 +2,21 @@ import { assert, assertEquals, assertExists } from "@std/assert";
 import * as MemoryClient from "../v2/client.ts";
 import * as Engine from "../v2/engine.ts";
 import { Server } from "../v2/server.ts";
-import type { EntitySnapshot, WatchSpec } from "../v2.ts";
+import {
+  type EntitySnapshot,
+  setServerPrimaryExecutionGraphRetirementConfig,
+  type WatchSpec,
+} from "../v2.ts";
 
 // --- F3 doc-set watch kind: additive WatchSpec, absent-false subcapability,
 // server membership fan-out via per-wave point reads. ---
+
+// FW5 (FB9): the F5 rollout dial gates doc-set ADMISSION per space. This
+// suite exercises F3/F4 semantics that are orthogonal to the dial, so admit
+// every space via the wildcard for the whole file (module state is
+// per-test-file). Dial authority itself is pinned in
+// v2-feed-retirement-test.ts.
+setServerPrimaryExecutionGraphRetirementConfig(["*"]);
 
 const AUDIENCE = "did:key:z6Mk-docset-audience";
 const SPONSOR = "did:key:z6Mk-docset-sponsor";
@@ -612,7 +623,9 @@ Deno.test("FA8 shrink: a narrowed same-id watch.set stops delivering dropped mem
     // so its delivery is the barrier proving the aged session's connection
     // was already served for the same wave.
     const canary = await mountAs(canaryClient, space, SPONSOR);
-    const canaryView = await canary.watchSet([docsWatch("c", [{ id: "of:y" }])]);
+    const canaryView = await canary.watchSet([
+      docsWatch("c", [{ id: "of:y" }]),
+    ]);
     const canaryNext = canaryView.subscribe().next();
 
     const deliveriesBefore = server.feedStats.docSetMemberDeliveries;

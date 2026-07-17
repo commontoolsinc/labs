@@ -1341,16 +1341,31 @@ export function resetServerPrimaryExecutionDocSetWatchConfig(): void {
 }
 
 /**
- * Per-space eligibility dial for F5 graph-refresh retirement (server-side
- * execution F5 / FA13). Host-internal, never negotiated on the wire — it gates
- * ELIGIBILITY only: a listed space's fully-doc-set sessions retire their
- * per-session schema-graph re-evaluation (the refresh loop skips
- * `refreshTrackedGraph`), while the ACTUAL retirement stays a live per-surface
- * check (closure source present ∧ doc-set subcapability negotiated) that fails
- * open to graph behavior and is counted when a surface regresses. The default
- * is the empty set (absent-false — no space retires), and an operator adds a
- * space only once F1's per-space coverage evidence clears the OQ4 rollout gate.
- * Registered in docs/development/EXPERIMENTAL_OPTIONS.md as
+ * Per-space rollout dial for F5 graph-refresh retirement (server-side
+ * execution F5 / FA13, redesigned by the feed repair wave FW5 after FB9).
+ * Host-internal, never negotiated on the wire.
+ *
+ * Its behavioral authority is DOC-SET ADMISSION: a `docs`-kind watch is
+ * accepted only for spaces this dial names (`"*"` admits every space), and a
+ * withheld space's registration is rejected with the same clean ProtocolError
+ * a non-negotiating server gives — the runner's reconcile catches it, keeps
+ * its subscribing schema-graph watches, and the space genuinely stays on
+ * graph behavior (the OQ4 per-space rollout property). The retirement itself
+ * stays a live per-surface check in the refresh loop (doc-set subcapability
+ * negotiated ∧ admitted members present ∧ zero residual graph watches),
+ * failing open to graph traversal and counted per watch when a surface
+ * regresses; the dial is deliberately NOT re-consulted there, so shrinking it
+ * never hides an already-admitted surface from the regression gauges.
+ * Shrinking the dial takes effect for NEW registrations only — a live demoted
+ * session keeps its admitted surface until it re-registers.
+ *
+ * The default is the empty set (absent-false — no space is admitted, so no
+ * space demotes and none retires), and an operator adds a space only once
+ * F1's per-space coverage evidence clears the OQ4 rollout gate. Deployments
+ * flip it via `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES`
+ * (comma-separated space DIDs, or `*`), applied at server construction via
+ * {@link applyServerPrimaryExecutionGraphRetirementEnvConfig}. Registered in
+ * docs/development/EXPERIMENTAL_OPTIONS.md as
  * `serverPrimaryExecutionGraphRetirement`.
  */
 export function setServerPrimaryExecutionGraphRetirementConfig(
@@ -1369,6 +1384,43 @@ export function getServerPrimaryExecutionGraphRetirementConfig(): ReadonlySet<
 
 export function resetServerPrimaryExecutionGraphRetirementConfig(): void {
   serverPrimaryExecutionGraphRetirementSpaces = new Set();
+}
+
+/** Whether the F5 rollout dial admits `space` to the doc-set watch surface.
+ * `"*"` is the operator wildcard for "every space". */
+export function serverPrimaryExecutionGraphRetirementAdmits(
+  space: string,
+): boolean {
+  return serverPrimaryExecutionGraphRetirementSpaces.has("*") ||
+    serverPrimaryExecutionGraphRetirementSpaces.has(space);
+}
+
+/** Environment variable consulted by
+ * {@link applyServerPrimaryExecutionGraphRetirementEnvConfig}: comma-separated
+ * space DIDs, or `*` for every space. Unset leaves the dial at its current
+ * (default: empty) value. */
+export const SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES_ENV =
+  "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES";
+
+/**
+ * Apply the F5 rollout dial from the environment (FW5, FB10): hosts that
+ * construct a memory server (toolshed, the standalone server) call this at
+ * construction so the W2.9 measurement protocol is executable against a real
+ * deployment instead of requiring an in-process call site. The parser lives
+ * here — next to the dial it feeds — so every host wires the same one line
+ * and the parse rules cannot drift between hosts.
+ */
+export function applyServerPrimaryExecutionGraphRetirementEnvConfig(
+  readEnv: (name: string) => string | undefined,
+): void {
+  const raw = readEnv(SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES_ENV);
+  if (raw === undefined) return;
+  setServerPrimaryExecutionGraphRetirementConfig(
+    raw
+      .split(",")
+      .map((space) => space.trim())
+      .filter((space) => space.length > 0),
+  );
 }
 
 /**

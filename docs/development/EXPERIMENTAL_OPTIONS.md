@@ -32,7 +32,7 @@ was last checked against the code.
 | [`serverPrimaryExecution`](#serverprimaryexecution) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (server-primary execution W0.6) | graduate after the phased authority rollout, then delete flag | implemented, off by default |
 | [`serverPrimaryExecutionUserRankCandidates`](#serverprimaryexecutionuserrankcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C1.5a) | fold into `serverPrimaryExecution` once user lanes graduate | implemented, off by default |
 | [`serverPrimaryExecutionDocSetWatch`](#serverprimaryexecutiondocsetwatch) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH` env, or `RuntimeOptions.experimental`; bridges the memory-side `setServerPrimaryExecutionDocSetWatchConfig()` (negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution F3 server / F4 client) | fold into `serverPrimaryExecution` once the feed graduates, then retire the negotiation | implemented, off by default |
-| [`serverPrimaryExecutionGraphRetirement`](#serverprimaryexecutiongraphretirement) | `setServerPrimaryExecutionGraphRetirementConfig(spaces)` (host-internal, per-space, not negotiated) | empty set (absent-false, no space retires) | Bernhard Seefeld (server-side execution F5) | fold into `serverPrimaryExecution` once the feed graduates | implemented, empty by default |
+| [`serverPrimaryExecutionGraphRetirement`](#serverprimaryexecutiongraphretirement) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES` env (comma-separated space DIDs or `*`), applied at server construction; ambient `setServerPrimaryExecutionGraphRetirementConfig(spaces)` (host-internal, per-space, not negotiated) | empty set (absent-false: no space admitted to the doc-set surface) | Bernhard Seefeld (server-side execution F5; FW5 admission redesign) | fold into `serverPrimaryExecution` once the feed graduates | implemented, empty by default |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (non-home roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete both auto-update flags | implemented, on in the shell |
@@ -267,7 +267,11 @@ propagate](#how-flags-propagate).
   path, membership derivation, and graph-watch demotion are behind the dial,
   and a peer that never advertised the kind keeps its graph watches unchanged
   (a mixed fleet stays valid). Both the server process and the client worker
-  must enable it for the doc-set surface to engage. The planned end state is to
+  must enable it for the doc-set surface to engage — and, since FW5, the
+  space must also be admitted by the per-space
+  [`serverPrimaryExecutionGraphRetirement`](#serverprimaryexecutiongraphretirement)
+  dial (the server rejects `docs` watches for unadmitted spaces, and the
+  client cleanly stays on graph watches). The planned end state is to
   graduate the feed after the phased rollout and fold this dial into
   `serverPrimaryExecution`, then retire the negotiation.
 - **Status on 2026-07-17.** F3 (server-side `docs` kind, resolved-scopeKey
@@ -284,59 +288,80 @@ propagate](#how-flags-propagate).
 
 ### `serverPrimaryExecutionGraphRetirement`
 
-- **Toggle via.** `setServerPrimaryExecutionGraphRetirementConfig(spaces)` in
-  [`packages/memory/v2.ts`](../../packages/memory/v2.ts), taking the set of
-  space DIDs eligible to retire per-session schema-graph re-evaluation.
-  Host-internal and owner-invisible: never negotiated on the wire and with no
-  environment variable; the rollout flips it programmatically per space.
-- **Added by.** Bernhard Seefeld, in server-side execution F5 (retire the
-  per-session graph refresh where the watch surface is doc-set, 2026-07-17).
-- **Purpose.** The per-space rollout dial for F5's retirement, and the
-  consumer of the OQ4 per-space coverage gate. Layered strictly above
-  `serverPrimaryExecutionDocSetWatch`: it gates **eligibility only**. Whether a
-  session's schema-graph refresh actually retires stays a live per-surface
-  check in the subscription refresh loop — the doc-set subcapability must be
-  negotiated, a closure source (registered doc-set members) must be present,
-  and the surface must be **fully doc-set** (no residual subscribed graph
-  watch). A surface that still holds a graph watch **fails open** to graph
-  behavior and is counted under `serverExecutionFeed.refreshResidualGraphWatches`
-  (the regression signal); a fully-doc-set eligible session skips
-  `refreshTrackedGraph` and is counted under `refreshFullyDocSetSessions`. The
-  conflict catch-up emitter is untouched, so a conflicted commit still receives
-  its `caughtUpLocalSeq` release across the retirement (FA7), and the surface
-  still makes one watermark-advancing emission per wave (FA1).
-- **Current default and planned end state.** The empty set by default —
-  byte-identical to the pre-F5 world, since no space is eligible and the graph
-  loop runs exactly as before. An operator adds a space only once F1's
-  per-space coverage counters (`/api/health/stats`) clear the OQ4 gate for it;
-  because the actual retirement is a live per-surface check that fails open,
-  enabling a space whose sessions are not yet fully doc-set is safe (it costs a
-  counted residual, not a delivery gap). The end state is every compatible
-  space eligible.
-- **Status on 2026-07-17 (corrected same day by the Fable commit review,
-  FB9/FB10 — supersedes the Purpose/rollout description above where they
-  conflict).** The dial currently has **no behavioral authority**: the
-  retire predicate requires zero residual graph watches while the guarded
-  loop iterates exactly those graph watches, so the skip only ever skips
-  a zero-iteration loop. The zero-traversal property is delivered
-  structurally by F3+F4b (docs-kind grouping exclusion plus client
-  demotion), which ride the GLOBAL client-side doc-set env flag per
-  connection — not this per-space dial. Consequences: withholding a space
-  from the dial does NOT hold it on graph behavior (it only zeroes that
-  space's F5 gauges, hiding it from the regression signal), and adding a
-  space changes no delivery or traversal behavior. The dial is also
-  unreachable outside tests — no env, no toolshed hook, zero non-test
-  call sites — so the shipping-critical W2.9 parity gate cannot currently
-  be executed. Real per-watch retirement (FA3), dial wiring, and gate
-  executability are owned by the feed repair wave (plan FW5); FB1's
-  demotion blocker must land first. Implemented and standing: the
-  refresh-loop classifier, the counters wired into `/api/health/stats`
-  (with FB23/FB28 gauge caveats), and the conflict-liveness and watermark
-  guards.
-- **Path to removal.** Once the W2.9 gate is green across the rollout, make the
-  retirement unconditional for fully-doc-set surfaces, fold the dial into
-  `serverPrimaryExecution`, and delete the config functions and the counters'
-  eligibility gate.
+- **Toggle via.** `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES`
+  environment variable — comma-separated space DIDs, or `*` for every space —
+  applied at memory-server construction (toolshed's
+  `routes/storage/memory.ts` and the standalone server both call
+  `applyServerPrimaryExecutionGraphRetirementEnvConfig`; the parser lives in
+  [`packages/memory/v2.ts`](../../packages/memory/v2.ts) next to the dial so
+  host wirings cannot drift). The ambient control point is
+  `setServerPrimaryExecutionGraphRetirementConfig(spaces)`. It is a per-space
+  string set, so it does not ride the boolean `EXPERIMENTAL_ENV_VARS`
+  registry; it is host-internal and never negotiated on the wire. The
+  original F5 design declared "no environment variable; the rollout flips it
+  programmatically" — that design is **superseded** (FW5): no programmatic
+  flipper ever existed, so the dial was unreachable in any deployment and the
+  shipping-critical W2.9 gate could not be executed (Fable review FB10). A
+  rollout lever must be reachable from deployment configuration.
+- **Added by.** Bernhard Seefeld, in server-side execution F5 (2026-07-17);
+  redesigned same day by the feed repair wave FW5 after Fable review FB9.
+- **Purpose.** The per-space rollout dial for F5's graph-refresh retirement
+  and the consumer of the OQ4 per-space coverage gate. Layered strictly above
+  `serverPrimaryExecutionDocSetWatch`. Its behavioral authority is **doc-set
+  admission**: the server accepts a `docs`-kind watch only for spaces the
+  dial names, and rejects a withheld space's registration with the same clean
+  `ProtocolError` shape a non-negotiating server gives — the runner client's
+  reconcile catches the typed rejection, keeps its subscribing schema-graph
+  watches, and retries on later membership changes, so a withheld space
+  **genuinely stays on graph behavior** and withholding it is a real hold
+  (the OQ4 property FB9 found missing: the pre-FW5 predicate only ever
+  skipped a zero-iteration loop while demotion rode the global client env
+  flag). The retirement itself stays a live per-surface, per-watch check in
+  the refresh loop (FA3/FA13): the doc-set subcapability must be negotiated
+  and admitted members present; a fully-doc-set surface (zero residual graph
+  watches) then does zero `session.watch.refresh` traversal — a property
+  that is *structural* (the docs kind never enters graph grouping, and the
+  demoted client dropped its graph watches), which is why there is no
+  server-side "skip" branch pretending otherwise. A surface still holding
+  graph watches **fails open** to graph behavior (traversal runs — never a
+  delivery gap) and is counted per watch: held surface composition under
+  `serverExecutionFeed.refreshResidualGraphWatches`, actually-forced
+  traversal under `refreshResidualGraphWatchesTraversed` (FB28), per-space
+  DAG work under `refreshResidualDagTraversalsBySpace` (the FB11 mixed-mode
+  budget input), and fully-doc-set sessions under
+  `refreshFullyDocSetSessions`. The refresh loop deliberately does NOT
+  re-consult the dial, so shrinking it never hides an already-admitted
+  surface from the regression gauges; dial shrink takes effect for new
+  registrations only (a live demoted session keeps its surface until it
+  re-registers). The conflict catch-up emitter is untouched, so a conflicted
+  commit still receives its `caughtUpLocalSeq` release across the retirement
+  (FA7), and the surface still makes one watermark-advancing emission per
+  wave (FA1).
+- **Current default and planned end state.** The empty set by default: no
+  space is admitted, `docs` watches are rejected everywhere, clients keep
+  graph watches — byte-identical to the pre-F3/F4 steady state even when the
+  boolean doc-set feature flags are on. Engaging the doc-set surface for a
+  space therefore requires all three: the client-side and server-side
+  `serverPrimaryExecutionDocSetWatch` negotiation AND this dial naming the
+  space (or `*`). An operator adds a space only once F1's per-space coverage
+  counters (`/api/health/stats`) clear the OQ4 gate for it; adding a space
+  whose sessions are not yet fully doc-set is safe (residuals fail open and
+  are counted, never a delivery gap). The end state is `*`.
+- **Status on 2026-07-17 (FW5).** Implemented as described above: admission
+  authority (dial-authority fixture in
+  `packages/memory/test/v2-feed-retirement-test.ts` pins that a withheld
+  space rejects demotion and keeps real graph traversal, and that flipping
+  the dial on changes the very next wave to zero-traversal point reads), env
+  wiring at both memory-server hosts, per-watch residual classification with
+  the FB28 held/traversed split and FB11 per-space budget attribution, and
+  the provably-dead `retired` skip branch deleted. FB9/FB10/FB11(gate
+  math)/FB28 are closed; the W2.9 wall-time gate itself remains a live
+  measurement (see the F5 measurement protocol in
+  `docs/specs/server-side-execution/implementation-plan.md`).
+- **Path to removal.** Once the W2.9 gate is green across the rollout, set the
+  dial to `*`, make doc-set admission unconditional for negotiated peers,
+  fold the dial into `serverPrimaryExecution`, and delete the config
+  functions and the counters' eligibility gate.
 
 ### `commitPreconditions`
 

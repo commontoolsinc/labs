@@ -1,4 +1,5 @@
 import * as MemoryServer from "@commonfabric/memory/v2/server";
+import { applyServerPrimaryExecutionGraphRetirementEnvConfig } from "@commonfabric/memory/v2";
 import { verifySessionOpenAuthorization } from "@commonfabric/memory/v2/session-open-auth";
 import * as FS from "@std/fs";
 import env from "@/env.ts";
@@ -36,6 +37,15 @@ if (env.DB_PATH) {
 
 export { memoryEngineStoreUrl };
 await FS.ensureDir(memoryEngineStoreUrl);
+
+// FW5 (FB10): apply the F5 per-space doc-set admission dial from
+// EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES (comma-
+// separated space DIDs, or `*`) at server construction, so the W2.9
+// measurement protocol is executable against a deployed toolshed. The parser
+// lives in @commonfabric/memory next to the dial; see the
+// `serverPrimaryExecutionGraphRetirement` entry in
+// docs/development/EXPERIMENTAL_OPTIONS.md.
+applyServerPrimaryExecutionGraphRetirementEnvConfig(Deno.env.get);
 
 export const memoryServer = new MemoryServer.Server({
   store: memoryEngineStoreUrl,

@@ -1,15 +1,26 @@
-import { assert, assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists } from "@std/assert";
 import * as MemoryClient from "../v2/client.ts";
 import * as Engine from "../v2/engine.ts";
 import { Server } from "../v2/server.ts";
 import { toDirtyKey } from "../v2/query.ts";
-import type { ExecutionLease, WatchSpec } from "../v2.ts";
+import {
+  type ExecutionLease,
+  setServerPrimaryExecutionGraphRetirementConfig,
+  type WatchSpec,
+} from "../v2.ts";
 import type { SchedulerExecutionContextKey } from "../v2/engine.ts";
 
 // --- FW3: doc-set watches on lease-bound executor sessions — the F4 runner
 // population. Covers FB15 (the FA1 stale-binding fail-open must not lose
 // member deltas) and FB25 (FA2(c): a lane-registered docs watch keeps its
 // acting context, including across a full re-evaluation refresh).
+
+// FW5 (FB9): the F5 rollout dial gates doc-set ADMISSION per space. This
+// suite exercises F3/FW3 semantics that are orthogonal to the dial, so admit
+// every space via the wildcard for the whole file (module state is
+// per-test-file). Dial authority itself is pinned in
+// v2-feed-retirement-test.ts.
+setServerPrimaryExecutionGraphRetirementConfig(["*"]);
 
 const SPACE = "did:key:z6Mk-docset-exec-space";
 const AUDIENCE = "did:key:z6Mk-docset-exec-audience";

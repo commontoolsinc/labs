@@ -1,22 +1,33 @@
-import { assertEquals, assertExists } from "@std/assert";
+import { assert, assertEquals, assertExists } from "@std/assert";
 import {
+  applyServerPrimaryExecutionGraphRetirementEnvConfig,
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
   MEMORY_PROTOCOL,
   resetServerPrimaryExecutionGraphRetirementConfig,
   type ResponseMessage,
+  SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES_ENV,
   type ServerMessage,
+  serverPrimaryExecutionGraphRetirementAdmits,
   type SessionEffectMessage,
   type SessionSync,
   setServerPrimaryExecutionGraphRetirementConfig,
 } from "../v2.ts";
 import { Server } from "../v2/server.ts";
 
-// --- F5: retire per-session schema-graph re-evaluation where the watch
-// surface is doc-set. The refresh loop skips `refreshTrackedGraph` for a
-// fully-doc-set eligible session; residual graph watches fail open and are
-// counted; the per-space dial gates eligibility only (FA3/FA7/FA11/FA13);
-// the watermark stays one emission per session per wave (FA1). ---
+// --- F5 (FW5 redesign after FB9): retire per-session schema-graph
+// re-evaluation where the watch surface is doc-set. The per-space dial's
+// behavioral authority is DOC-SET ADMISSION: a space it does not name
+// rejects `docs`-kind registration with a clean ProtocolError (the runner's
+// reconcile catches it and keeps its graph watches), so a withheld space
+// genuinely stays on graph behavior (OQ4). For admitted spaces the
+// zero-traversal property of a fully-demoted surface is structural (F3
+// grouping exclusion + F4b client demotion); the refresh loop classifies the
+// surface PER WATCH (FA3/FA13): residual graph watches fail open (still
+// traversed — never a delivery gap), counted as held vs actually-traversed
+// (FB28) with per-space DAG attribution (FB11 budget). The watermark stays
+// one emission per session per wave (FA1); conflict catch-up survives
+// retirement (FA7). ---
 
 const TEST_AUDIENCE = "did:key:z6Mk-feed-retirement-audience";
 const SPONSOR = "did:key:z6Mk-feed-retirement-sponsor";
@@ -157,6 +168,7 @@ Deno.test("F5: a fully-doc-set eligible session retires its graph refresh and is
       eligible: server.feedStats.refreshRetirementEligibleSessions,
       fully: server.feedStats.refreshFullyDocSetSessions,
       residual: server.feedStats.refreshResidualGraphWatches,
+      residualTraversed: server.feedStats.refreshResidualGraphWatchesTraversed,
       graphs: server.feedStats.refreshGraphsRefreshed,
     };
 
@@ -191,9 +203,20 @@ Deno.test("F5: a fully-doc-set eligible session retires its graph refresh and is
       server.feedStats.refreshResidualGraphWatches - before.residual,
       0,
     );
+    assertEquals(
+      server.feedStats.refreshResidualGraphWatchesTraversed -
+        before.residualTraversed,
+      0,
+    );
     assertEquals(server.feedStats.refreshGraphsRefreshed - before.graphs, 0);
     assertEquals(
       server.feedStats.traversalByOperation["session.watch.refresh"],
+      undefined,
+    );
+    // FB11 budget: a fully-doc-set surface attributes ZERO residual DAG
+    // traversal to its space.
+    assertEquals(
+      server.feedStats.refreshResidualDagTraversalsBySpace[space],
       undefined,
     );
   } finally {
@@ -204,20 +227,57 @@ Deno.test("F5: a fully-doc-set eligible session retires its graph refresh and is
   }
 });
 
-Deno.test("F5: the per-space dial gates eligibility only — a space not listed never retires (FA13)", async () => {
-  const space = "did:key:z6Mk-feed-retire-disabled";
-  const server = createServer("memory://feed-retire-disabled");
-  // Dial ABSENT for this space (absent-false) — eligibility must stay closed.
+// FB9: the dial's behavioral authority lives at DOC-SET ADMISSION. A space
+// withheld from the dial rejects the F4b demotion `watch.set` with the same
+// clean ProtocolError shape a non-negotiating server gives (the runner's
+// reconcile catches it, keeps its graph watches, and retries later), so the
+// space genuinely STAYS on graph behavior — the OQ4 rollout property the
+// pre-FW5 predicate only pretended to have. The second half is the honesty
+// control: flipping the dial ON admits the same demotion and the very next
+// wave runs zero graph-refresh traversal.
+Deno.test("FB9: a space withheld from the dial rejects doc-set demotion and stays on graph behavior (OQ4)", async () => {
+  const space = "did:key:z6Mk-feed-retire-withheld";
+  const server = createServer("memory://feed-retire-withheld");
+  // Dial ABSENT for this space (absent-false) — admission must stay closed.
   const watcher = await openSession(server, space);
   const writerHarness = await openSession(server, space);
   try {
-    await docsWatchSet(watcher, space, "w", [
-      { id: "docs", kind: "docs", docs: [{ id: "of:member" }] },
+    // The boot surface: a subscribing schema-graph watch over the root.
+    await docsWatchSet(watcher, space, "boot", [
+      {
+        id: "boot",
+        kind: "graph",
+        query: {
+          roots: [{ id: "of:member", selector: { path: [], schema: false } }],
+        },
+      },
     ]);
     while (watcher.messages.length > 0) shiftMessage(watcher.messages);
 
-    const beforeEligible = server.feedStats.refreshRetirementEligibleSessions;
+    // The F4b demotion attempt: replace the graph watch with a docs watch.
+    // The dial does not admit this space, so the server must reject it —
+    // typed, clean, before any watch or member mutation.
+    await docsWatchSet(watcher, space, "demote", [
+      { id: "docs", kind: "docs", docs: [{ id: "of:member" }] },
+    ]);
+    const rejection = shiftMessage(watcher.messages) as ResponseMessage<
+      unknown
+    >;
+    assertEquals(rejection.error?.name, "ProtocolError");
+    assert(
+      String(rejection.error?.message).includes(
+        "serverPrimaryExecutionGraphRetirement",
+      ),
+      "the rejection names the dial so an operator can find the lever",
+    );
 
+    const before = {
+      eligible: server.feedStats.refreshRetirementEligibleSessions,
+      graphs: server.feedStats.refreshGraphsRefreshed,
+    };
+
+    // A wave dirtying the root: the session was HELD on graph behavior, so
+    // delivery arrives via the graph refresh — real traversal, not fan-out.
     await transact(writerHarness, space, "seed", {
       localSeq: 1,
       reads: { confirmed: [], pending: [] },
@@ -228,19 +288,58 @@ Deno.test("F5: the per-space dial gates eligibility only — a space not listed 
     }
     await server.flushSessions([space]);
 
-    // The member delta still delivers (F3 fan-out is not gated by the dial) —
-    // only the retirement ACCOUNTING is gated.
     const effects = drainEffects(watcher.messages);
     assertEquals(effects.length, 1);
     assertEquals(effects[0].effect.upserts.map((u) => u.id), ["of:member"]);
+    assertEquals(server.feedStats.refreshGraphsRefreshed - before.graphs, 1);
+    assertExists(
+      server.feedStats.traversalByOperation["session.watch.refresh"],
+    );
+    // No members were admitted, so the session is not doc-set eligible.
     assertEquals(
-      server.feedStats.refreshRetirementEligibleSessions - beforeEligible,
+      server.feedStats.refreshRetirementEligibleSessions - before.eligible,
       0,
     );
+
+    // Honesty control: ADD the space to the dial — the same demotion is now
+    // admitted, and the next wave delivers as a zero-traversal point read.
+    setServerPrimaryExecutionGraphRetirementConfig([space]);
+    await docsWatchSet(watcher, space, "demote-2", [
+      { id: "docs", kind: "docs", docs: [{ id: "of:member" }] },
+    ]);
+    while (watcher.messages.length > 0) shiftMessage(watcher.messages);
+
+    const dialed = {
+      graphs: server.feedStats.refreshGraphsRefreshed,
+      fully: server.feedStats.refreshFullyDocSetSessions,
+      refresh: server.feedStats.traversalByOperation["session.watch.refresh"]
+        .dagTraversals,
+    };
+    await transact(writerHarness, space, "bump", {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{ op: "set", id: "of:member", value: { value: "v2" } }],
+    });
+    while (writerHarness.messages.length > 0) {
+      shiftMessage(writerHarness.messages);
+    }
+    await server.flushSessions([space]);
+
+    const demoted = drainEffects(watcher.messages);
+    assertEquals(demoted.length, 1);
+    assertEquals(demoted[0].effect.upserts.map((u) => u.id), ["of:member"]);
+    assertEquals(server.feedStats.refreshGraphsRefreshed - dialed.graphs, 0);
+    assertEquals(
+      server.feedStats.traversalByOperation["session.watch.refresh"]
+        .dagTraversals - dialed.refresh,
+      0,
+    );
+    assertEquals(server.feedStats.refreshFullyDocSetSessions - dialed.fully, 1);
   } finally {
     await watcher.connection.close();
     await writerHarness.connection.close();
     await server.close();
+    resetServerPrimaryExecutionGraphRetirementConfig();
   }
 });
 
@@ -268,6 +367,10 @@ Deno.test("F5: a mixed surface fails open — residual graph watch traverses and
       eligible: server.feedStats.refreshRetirementEligibleSessions,
       fully: server.feedStats.refreshFullyDocSetSessions,
       residual: server.feedStats.refreshResidualGraphWatches,
+      residualTraversed: server.feedStats.refreshResidualGraphWatchesTraversed,
+      refreshDag: server.feedStats.traversalByOperation["session.watch.refresh"]
+        ?.dagTraversals ?? 0,
+      bySpace: server.feedStats.refreshResidualDagTraversalsBySpace[space] ?? 0,
     };
 
     // One wave dirties both surfaces.
@@ -293,7 +396,8 @@ Deno.test("F5: a mixed surface fails open — residual graph watch traverses and
     );
 
     // Eligible (has members), but NOT fully doc-set: the residual graph watch
-    // failed open (still traversed) and was counted as a regression.
+    // failed open (still traversed) and was counted as a regression — both as
+    // held surface composition and as actually-forced traversal (FB28).
     assertEquals(
       server.feedStats.refreshRetirementEligibleSessions - before.eligible,
       1,
@@ -303,8 +407,142 @@ Deno.test("F5: a mixed surface fails open — residual graph watch traverses and
       server.feedStats.refreshResidualGraphWatches - before.residual,
       1,
     );
+    assertEquals(
+      server.feedStats.refreshResidualGraphWatchesTraversed -
+        before.residualTraversed,
+      1,
+    );
     assertExists(
       server.feedStats.traversalByOperation["session.watch.refresh"],
+    );
+    // FB11 budget attribution: the residual refresh's DAG work lands on this
+    // space's bucket, and equals the session.watch.refresh operation delta —
+    // per-space, per-cause (member point reads never land here).
+    assertEquals(
+      (server.feedStats.refreshResidualDagTraversalsBySpace[space] ?? 0) -
+        before.bySpace,
+      server.feedStats.traversalByOperation["session.watch.refresh"]
+        .dagTraversals - before.refreshDag,
+    );
+  } finally {
+    await watcher.connection.close();
+    await writerHarness.connection.close();
+    await server.close();
+    resetServerPrimaryExecutionGraphRetirementConfig();
+  }
+});
+
+// FB28: the residual gauge classifies the surface PER WATCH (FA3), not per
+// branch-grouped graph state. Two residual graph watches sharing one branch
+// must count as 2, and a wave that dirties only the doc-set member must not
+// count any residual traversal (the idle graph watch traversed nothing).
+Deno.test("FB28: residual classification is per watch, and traversal is counted only when it happened", async () => {
+  const space = "did:key:z6Mk-feed-retire-perwatch";
+  const server = createServer("memory://feed-retire-perwatch");
+  setServerPrimaryExecutionGraphRetirementConfig([space]);
+  const watcher = await openSession(server, space);
+  const writerHarness = await openSession(server, space);
+  try {
+    // One doc-set member plus TWO graph watches on the SAME (default) branch:
+    // branch-grouping folds them into one graph state, but the surface holds
+    // two residual watches.
+    await docsWatchSet(watcher, space, "w", [
+      { id: "docs", kind: "docs", docs: [{ id: "of:member" }] },
+      {
+        id: "graph-1",
+        kind: "graph",
+        query: {
+          roots: [{ id: "of:g1", selector: { path: [], schema: false } }],
+        },
+      },
+      {
+        id: "graph-2",
+        kind: "graph",
+        query: {
+          roots: [{ id: "of:g2", selector: { path: [], schema: false } }],
+        },
+      },
+    ]);
+    while (watcher.messages.length > 0) shiftMessage(watcher.messages);
+
+    const before = {
+      residual: server.feedStats.refreshResidualGraphWatches,
+      residualTraversed: server.feedStats.refreshResidualGraphWatchesTraversed,
+      bySpace: server.feedStats.refreshResidualDagTraversalsBySpace[space] ?? 0,
+      graphs: server.feedStats.refreshGraphsRefreshed,
+    };
+
+    // Wave A dirties ONLY the member: the graph watches are held (counted as
+    // residual surface) but traverse nothing.
+    await transact(writerHarness, space, "member-only", {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{ op: "set", id: "of:member", value: { value: "m1" } }],
+    });
+    while (writerHarness.messages.length > 0) {
+      shiftMessage(writerHarness.messages);
+    }
+    await server.flushSessions([space]);
+    while (watcher.messages.length > 0) shiftMessage(watcher.messages);
+
+    // Per-watch classification: TWO residual watches held, not one branch
+    // group; the idle wave refreshed no graph, forced no residual traversal,
+    // and attributed no DAG work to the space (FB28 — the old gauge counted
+    // this wave as "still traversed").
+    assertEquals(
+      server.feedStats.refreshResidualGraphWatches - before.residual,
+      2,
+    );
+    assertEquals(
+      server.feedStats.refreshResidualGraphWatchesTraversed -
+        before.residualTraversed,
+      0,
+    );
+    assertEquals(
+      (server.feedStats.refreshResidualDagTraversalsBySpace[space] ?? 0) -
+        before.bySpace,
+      0,
+    );
+    assertEquals(server.feedStats.refreshGraphsRefreshed - before.graphs, 0);
+
+    // Wave B dirties a graph root: the branch group re-traverses, serving
+    // both residual watches.
+    const beforeB = {
+      residual: server.feedStats.refreshResidualGraphWatches,
+      residualTraversed: server.feedStats.refreshResidualGraphWatchesTraversed,
+      bySpace: server.feedStats.refreshResidualDagTraversalsBySpace[space] ?? 0,
+      refreshDag: server.feedStats.traversalByOperation["session.watch.refresh"]
+        ?.dagTraversals ?? 0,
+      graphs: server.feedStats.refreshGraphsRefreshed,
+    };
+    await transact(writerHarness, space, "graph-root", {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{ op: "set", id: "of:g1", value: { value: "g1" } }],
+    });
+    while (writerHarness.messages.length > 0) {
+      shiftMessage(writerHarness.messages);
+    }
+    await server.flushSessions([space]);
+    while (watcher.messages.length > 0) shiftMessage(watcher.messages);
+
+    assertEquals(
+      server.feedStats.refreshResidualGraphWatches - beforeB.residual,
+      2,
+    );
+    // BOTH residual watches were served by the one branch-group traversal.
+    assertEquals(
+      server.feedStats.refreshResidualGraphWatchesTraversed -
+        beforeB.residualTraversed,
+      2,
+    );
+    assertEquals(server.feedStats.refreshGraphsRefreshed - beforeB.graphs, 1);
+    // The wave's residual DAG work is attributed to this space (FB11).
+    assertEquals(
+      (server.feedStats.refreshResidualDagTraversalsBySpace[space] ?? 0) -
+        beforeB.bySpace,
+      server.feedStats.traversalByOperation["session.watch.refresh"]
+        .dagTraversals - beforeB.refreshDag,
     );
   } finally {
     await watcher.connection.close();
@@ -462,6 +700,7 @@ Deno.test("F5 W2.9 gate proxy: a note-create SERIES on a fully-doc-set session d
     const before = {
       fully: server.feedStats.refreshFullyDocSetSessions,
       residual: server.feedStats.refreshResidualGraphWatches,
+      residualTraversed: server.feedStats.refreshResidualGraphWatchesTraversed,
       deliveries: server.feedStats.docSetMemberDeliveries,
     };
 
@@ -484,7 +723,8 @@ Deno.test("F5 W2.9 gate proxy: a note-create SERIES on a fully-doc-set session d
     }
 
     // The gate's core assertion: the retired refresh source did NO traversal
-    // across the whole series.
+    // across the whole series — no residual watches held, none traversed, no
+    // residual DAG work attributed to the space (the FB11 budget reads 0).
     assertEquals(
       server.feedStats.traversalByOperation["session.watch.refresh"],
       undefined,
@@ -492,6 +732,15 @@ Deno.test("F5 W2.9 gate proxy: a note-create SERIES on a fully-doc-set session d
     assertEquals(
       server.feedStats.refreshResidualGraphWatches - before.residual,
       0,
+    );
+    assertEquals(
+      server.feedStats.refreshResidualGraphWatchesTraversed -
+        before.residualTraversed,
+      0,
+    );
+    assertEquals(
+      server.feedStats.refreshResidualDagTraversalsBySpace[space],
+      undefined,
     );
     // Every touched wave retired (fully doc-set), and members flowed as point
     // reads with zero DAG traversal.
@@ -512,6 +761,41 @@ Deno.test("F5 W2.9 gate proxy: a note-create SERIES on a fully-doc-set session d
     await watcher.connection.close();
     await author.connection.close();
     await server.close();
+    resetServerPrimaryExecutionGraphRetirementConfig();
+  }
+});
+
+// FW5 (FB10): the dial is deployment-reachable — hosts apply
+// EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES at server
+// construction (toolshed routes/storage/memory.ts, the standalone server).
+// The parser lives next to the dial so the rules cannot drift between hosts.
+Deno.test("FW5: the dial env applies comma-separated space DIDs or the wildcard (FB10)", () => {
+  try {
+    // Unset leaves the dial untouched (default: empty — nothing admitted).
+    applyServerPrimaryExecutionGraphRetirementEnvConfig(() => undefined);
+    assertEquals(
+      serverPrimaryExecutionGraphRetirementAdmits("did:key:z6Mk-env-a"),
+      false,
+    );
+    // Comma-separated DIDs admit exactly the named spaces (whitespace and
+    // empty segments tolerated).
+    applyServerPrimaryExecutionGraphRetirementEnvConfig((name) =>
+      name === SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES_ENV
+        ? " did:key:z6Mk-env-a, did:key:z6Mk-env-b ,"
+        : undefined
+    );
+    assert(serverPrimaryExecutionGraphRetirementAdmits("did:key:z6Mk-env-a"));
+    assert(serverPrimaryExecutionGraphRetirementAdmits("did:key:z6Mk-env-b"));
+    assertEquals(
+      serverPrimaryExecutionGraphRetirementAdmits("did:key:z6Mk-env-c"),
+      false,
+    );
+    // The wildcard admits every space.
+    applyServerPrimaryExecutionGraphRetirementEnvConfig(() => "*");
+    assert(
+      serverPrimaryExecutionGraphRetirementAdmits("did:key:z6Mk-env-any"),
+    );
+  } finally {
     resetServerPrimaryExecutionGraphRetirementConfig();
   }
 });

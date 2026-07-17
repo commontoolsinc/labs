@@ -29,7 +29,6 @@ import {
   getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
   getServerPrimaryExecutionClaimRankConfig,
-  getServerPrimaryExecutionGraphRetirementConfig,
   type GraphQuery,
   type GraphQueryRequest,
   type GraphQueryResult,
@@ -53,6 +52,7 @@ import {
   type SchedulerWritersForTargetsQuery,
   type SchedulerWritersForTargetsResult,
   type ServerMessage,
+  serverPrimaryExecutionGraphRetirementAdmits,
   type SessionAckRequest,
   type SessionAckResult,
   type SessionEffectMessage,
@@ -124,6 +124,7 @@ import {
   groupedQueries,
   isDocSetWatchSpec,
   isEmptySync,
+  isGraphWatchSpec,
   mergeWatchesById,
   sameSnapshot,
   sameWatchSpec,
@@ -1771,21 +1772,37 @@ export class Server {
     /** F3: live doc-set member-set size summed across sessions on the last
      * wave that touched a doc-set surface (FA8 gauge against demand). */
     docSetMembersTracked: 0,
-    /** F5/FA13: touched sessions the per-space eligibility dial admitted to
-     * retirement on a wave (dial-on ∧ doc-set subcapability negotiated ∧ a
-     * closure source present). Eligibility only — the live per-surface check
-     * below decides whether the graph refresh actually retires. */
+    /** F5/FA13: touched sessions holding a doc-set surface on a wave (doc-set
+     * subcapability negotiated ∧ dial-admitted members present). The dial's
+     * behavioral authority is at ADMISSION (`#docSetWatchGate`); it is NOT
+     * re-consulted here, so shrinking the dial never hides an
+     * already-admitted surface from these gauges (FB9). */
     refreshRetirementEligibleSessions: 0,
     /** F5/FA13: eligible sessions whose ENTIRE watch surface was doc-set on a
-     * wave — zero residual schema-graph watches, so `refreshTrackedGraph` was
-     * skipped. The aggregated form of F5's per-session fully-doc-set boolean. */
+     * wave — zero residual schema-graph watches, so the graph-refresh loop
+     * had nothing to traverse (the zero-traversal property is structural:
+     * F3's grouping exclusion + F4b's client demotion). The aggregated form
+     * of F5's per-session fully-doc-set boolean. */
     refreshFullyDocSetSessions: 0,
-    /** F5/FA13: residual subscribed schema-graph watches still re-traversed on
-     * eligible sessions — the surfaces that FAILED OPEN to graph behavior. A
-     * fully-retired space holds this at 0; a non-zero delta is the regression
-     * signal the OQ4 rollout gate watches (a surface that should be doc-set is
-     * still on the traversal path). */
+    /** F5/FA3/FA13: residual subscribed schema-graph WATCHES held on an
+     * eligible touched session's surface this wave — per-watch classification
+     * (two watches sharing a branch group count as 2, FB28), whether or not
+     * the wave forced them to traverse. Surface composition: a fully-demoted
+     * space holds this at 0; a non-zero delta names surfaces that FAILED OPEN
+     * to graph behavior (e.g. a boot root that never demoted). */
     refreshResidualGraphWatches: 0,
+    /** F5/FB28: the subset of residual graph watches whose branch group
+     * actually re-traversed this wave (`refreshTrackedGraph` did work serving
+     * them). This — not the held count above — is the traversal regression
+     * signal the OQ4 rollout gate watches: an idle residual watch accrues
+     * held counts but never traversed counts. */
+    refreshResidualGraphWatchesTraversed: 0,
+    /** F5/FB11: DAG traversals attributed to residual graph refreshes on
+     * eligible (doc-set-holding) sessions, keyed by space — the numerator of
+     * the mixed-mode residual-traversal budget in the F5 measurement
+     * protocol (per-space, per-cause: member point reads and demand pulls
+     * never land here). Key cardinality is bounded by active spaces. */
+    refreshResidualDagTraversalsBySpace: {} as Record<string, number>,
     /** Traversal work summed per server operation ("session.watch.refresh",
      * executor/client "graph.query", "session.watch.set",
      * "session.watch.add"). */
@@ -6405,7 +6422,11 @@ export class Server {
           scopeResolution.error,
         );
       }
-      const gate = this.#docSetWatchGate(session, message.watches);
+      const gate = this.#docSetWatchGate(
+        message.space,
+        session,
+        message.watches,
+      );
       if (gate.error) {
         return respondTypedError<WatchSetResult>(
           message.requestId,
@@ -6546,7 +6567,11 @@ export class Server {
           ),
         );
       }
-      const gate = this.#docSetWatchGate(session, message.watches);
+      const gate = this.#docSetWatchGate(
+        message.space,
+        session,
+        message.watches,
+      );
       if (gate.error) {
         return respondTypedError<WatchAddResult>(
           message.requestId,
@@ -6827,21 +6852,16 @@ export class Server {
     return `${DOC_SET_WATCH_SOURCE_PREFIX}${watchId}`;
   }
 
-  /** F5/FA13: whether the per-space eligibility dial admits this space to
-   * graph-refresh retirement. Eligibility ONLY — never a delivery decision;
-   * the live per-surface check (fully doc-set) still gates the actual skip,
-   * and a space absent from the dial simply keeps its current graph behavior.
-   * Consumes the OQ4 per-space coverage gate (F1 evidence decides the list). */
-  #graphRetirementEligible(space: string): boolean {
-    return getServerPrimaryExecutionGraphRetirementConfig().has(space);
-  }
-
   /** Admission gate for the additive `docs` WatchSpec kind: a session that
    * never negotiated the subcapability may not register it (clean
-   * ProtocolError, not a silent drop), and an inbound address that already
-   * carries a resolved scope key is a protocol error (FA2 — the wire carries
-   * declared scope only). */
+   * ProtocolError, not a silent drop); a space the F5 rollout dial does not
+   * admit may not register it either (FW5/FB9 — this rejection is the dial's
+   * behavioral authority: the runner's reconcile catches the typed error,
+   * keeps its schema-graph watches, and the space stays on graph behavior);
+   * and an inbound address that already carries a resolved scope key is a
+   * protocol error (FA2 — the wire carries declared scope only). */
   #docSetWatchGate(
+    space: string,
     session: SessionState,
     watches: readonly WatchSpec[],
   ): { error?: V2Error; docsWatches: DocSetWatchSpec[] } {
@@ -6855,6 +6875,17 @@ export class Server {
           "ProtocolError",
           "session did not negotiate serverPrimaryExecutionDocSetWatchV1; " +
             "the docs watch kind is unsupported",
+        ),
+        docsWatches,
+      };
+    }
+    if (!serverPrimaryExecutionGraphRetirementAdmits(space)) {
+      return {
+        error: toError(
+          "ProtocolError",
+          "the serverPrimaryExecutionGraphRetirement dial does not admit " +
+            `space ${space} to the doc-set watch surface; the docs watch ` +
+            "kind is unsupported for this space",
         ),
         docsWatches,
       };
@@ -7258,75 +7289,102 @@ export class Server {
             }
             this.feedStats.refreshSessionsTouched += 1;
 
-            // F5 (FA3/FA13): retire the per-session schema-graph re-evaluation
-            // where the watch surface is doc-set. The per-space eligibility
-            // dial (the OQ4 rollout gate) plus a negotiated doc-set
-            // subcapability and a present closure source (registered members)
-            // admit the session; the LIVE check is whether the surface is
-            // FULLY doc-set — no residual subscribed graph watch remains. A
-            // retired surface SKIPS refreshTrackedGraph entirely (its members
-            // are point-read below, folded into the one emission this session
-            // makes per wave — FA1). A surface that still holds graph watches
-            // FAILS OPEN to graph behavior and is counted as a regression,
-            // never silently dropped. The catch-up emitter (finishCatchUp /
-            // emptyCatchUp) is untouched, so a conflicted commit still receives
-            // its caughtUpLocalSeq release across the retirement (FA7).
-            const retirementEligible =
+            // F5 (FA3/FA13, FW5): classify the touched session's watch
+            // surface PER WATCH. The dial's behavioral authority lives at
+            // doc-set ADMISSION (`#docSetWatchGate` — a withheld space's
+            // demotion is rejected and its clients keep graph watches), so a
+            // session with admitted members here is the rolled-out
+            // population; the dial is deliberately NOT re-consulted, so
+            // shrinking it never hides a live surface from these gauges
+            // (FB9). The zero-traversal property of a fully-doc-set surface
+            // is STRUCTURAL — the docs kind never enters graph grouping (F3)
+            // and the demoted client dropped its graph watches (F4b) — so
+            // the loop below simply has nothing to traverse; members are
+            // point-read below, folded into the one emission this session
+            // makes per wave (FA1). A surface that still holds graph watches
+            // FAILS OPEN to graph behavior — traversal MUST run for them (a
+            // skip would be a delivery gap) — and is counted per watch as a
+            // regression, never silently dropped. The catch-up emitter
+            // (finishCatchUp / emptyCatchUp) is untouched, so a conflicted
+            // commit still receives its caughtUpLocalSeq release across the
+            // retirement (FA7).
+            const docSetEligible =
               session.serverPrimaryExecutionDocSetWatchV1 &&
-              session.docSetMembers.size > 0 &&
-              this.#graphRetirementEligible(space);
-            const residualGraphWatches = retirementEligible
-              ? session.graphs.size
-              : 0;
-            const retired = retirementEligible && residualGraphWatches === 0;
-            if (retirementEligible) {
+              session.docSetMembers.size > 0;
+            // Branch → residual graph-watch count: the traversal loop is
+            // branch-grouped, so attributing "which watches did this refresh
+            // serve" needs the per-branch watch multiplicity (FB28 — two
+            // watches sharing a branch group are two residual watches).
+            const residualWatchesByBranch = new Map<string, number>();
+            let residualGraphWatches = 0;
+            if (docSetEligible) {
+              for (const watch of session.watches) {
+                if (!isGraphWatchSpec(watch)) continue;
+                residualGraphWatches += 1;
+                const branch = watch.query.branch ?? "";
+                residualWatchesByBranch.set(
+                  branch,
+                  (residualWatchesByBranch.get(branch) ?? 0) + 1,
+                );
+              }
               this.feedStats.refreshRetirementEligibleSessions += 1;
               this.feedStats.refreshResidualGraphWatches +=
                 residualGraphWatches;
-              if (retired) this.feedStats.refreshFullyDocSetSessions += 1;
+              if (residualGraphWatches === 0) {
+                this.feedStats.refreshFullyDocSetSessions += 1;
+              }
             }
 
             const engine = await this.openEngine(space);
             const fromSeq = session.lastSyncedSeq;
             const updates = new Map<string, SessionCacheEntry>();
 
-            if (!retired) {
-              for (const graph of session.graphs.values()) {
-                const refreshed = tracer.startActiveSpan(
-                  "memory.watch.refresh",
-                  (watchSpan) => {
-                    watchSpan.setAttribute("space.did", space);
-                    try {
-                      return refreshTrackedGraph(
-                        space,
-                        engine,
-                        graph,
-                        dirtyIds,
-                      );
-                    } finally {
-                      watchSpan.end();
-                    }
-                  },
+            for (const [branch, graph] of session.graphs) {
+              const refreshed = tracer.startActiveSpan(
+                "memory.watch.refresh",
+                (watchSpan) => {
+                  watchSpan.setAttribute("space.did", space);
+                  try {
+                    return refreshTrackedGraph(
+                      space,
+                      engine,
+                      graph,
+                      dirtyIds,
+                    );
+                  } finally {
+                    watchSpan.end();
+                  }
+                },
+              );
+              if (refreshed === null) {
+                continue;
+              }
+              this.feedStats.refreshGraphsRefreshed += 1;
+              this.#recordFeedTraversal(
+                "session.watch.refresh",
+                refreshed.stats,
+              );
+              if (docSetEligible) {
+                // FB28: traversal actually happened for this branch group —
+                // count the residual watches it serves, and attribute the
+                // DAG work to the space for the FB11 mixed-mode budget.
+                this.feedStats.refreshResidualGraphWatchesTraversed +=
+                  residualWatchesByBranch.get(branch) ?? 0;
+                const bySpace =
+                  this.feedStats.refreshResidualDagTraversalsBySpace;
+                bySpace[space] = (bySpace[space] ?? 0) +
+                  refreshed.stats.dagTraversals;
+              }
+              for (const entity of refreshed.updates.values()) {
+                const entry = toCacheEntry(entity);
+                updates.set(
+                  cacheKeyForEntity(
+                    entry.branch,
+                    entry.id,
+                    declaredScope(entry.scope),
+                  ),
+                  entry,
                 );
-                if (refreshed === null) {
-                  continue;
-                }
-                this.feedStats.refreshGraphsRefreshed += 1;
-                this.#recordFeedTraversal(
-                  "session.watch.refresh",
-                  refreshed.stats,
-                );
-                for (const entity of refreshed.updates.values()) {
-                  const entry = toCacheEntry(entity);
-                  updates.set(
-                    cacheKeyForEntity(
-                      entry.branch,
-                      entry.id,
-                      declaredScope(entry.scope),
-                    ),
-                    entry,
-                  );
-                }
               }
             }
 

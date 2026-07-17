@@ -91,6 +91,8 @@ const feedMetrics = {
   refreshRetirementEligibleSessions: 2,
   refreshFullyDocSetSessions: 1,
   refreshResidualGraphWatches: 1,
+  refreshResidualGraphWatchesTraversed: 1,
+  refreshResidualDagTraversalsBySpace: { "did:key:z6Mk-space": 4 },
   traversalByOperation: {
     "session.watch.refresh": {
       calls: 3,
