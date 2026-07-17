@@ -6,6 +6,7 @@ import { type ClientCommit, toDocumentPath } from "@commonfabric/memory/v2";
 import { Runtime } from "../src/runtime.ts";
 import {
   buildSchedulerActionObservation,
+  type BuildSchedulerActionObservationOptions,
   isSchedulerActionObservation,
   type SchedulerActionObservation,
 } from "../src/scheduler/persistent-observation.ts";
@@ -94,7 +95,7 @@ function descriptor(
 
 function observation(
   id: ServerBuiltinComputationDescriptor["id"],
-  overrides: Partial<SchedulerActionObservation> = {},
+  overrides: Partial<BuildSchedulerActionObservationOptions> = {},
 ): SchedulerActionObservation {
   return buildSchedulerActionObservation({
     ownerSpace: SPACE,
@@ -304,11 +305,11 @@ describe("per-builtin computation descriptors (W2.15a)", () => {
 
   it("does not override an existing certificate summary", () => {
     const obs = observation("ifElse", {
+      // Fingerprints omitted: CompleteActionScopeSummaryInput excludes them —
+      // the builder stamps both from the observation's own fingerprints.
       completeActionScopeSummary: {
         version: 1,
         complete: true,
-        implementationFingerprint: "impl:cf:builtin/ifElse:v1",
-        runtimeFingerprint: RUNTIME_FP,
         piece: valueAddress("of:piece"),
         reads: [valueAddress("of:condition")],
         writes: [valueAddress("of:output")],

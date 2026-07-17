@@ -1287,7 +1287,7 @@ all candidate/claim state. Make shrink surgical:
 - Worker: stopping a removed root already unsubscribes its actions through
   the scheduler facade; hook `unregisterExecutionAction` (the storage-manager
   seam the facade already calls) so an unregistered action holding an exact
-  claim posts one `invalidated-claim` release (diagnostic `demand-removed`)
+  claim posts one `invalidated-claim` release (diagnostic `action-unregistered`; the plan previously said `demand-removed`, a code production never emitted — corrected with FW7)
   and drops its candidate-index entries. Still-live pieces keep their claims.
 - Claim activation for a candidate whose action died in the shrink window
   must settle as a claim-scoped release (host revokes that claim), not a
@@ -1301,10 +1301,13 @@ all candidate/claim state. Make shrink surgical:
       the removed root's claims"; host-side
       `executor-candidate-claim.test.ts` "an ordinary demand shrink leaves
       sibling claims live").
-- [ ] A claim landing on an action stopped by a concurrent shrink resolves
+- [x] A claim landing on an action stopped by a concurrent shrink resolves
       as one claim revoke; the lane stays live and no fatal is posted
       (`ClaimedActionGoneError` → exact release, tolerated by W2.5).
-      **Re-opened 2026-07-17 (Fable review FB4):** the C1.10 fixture
+      **Re-opened and re-closed 2026-07-17 (FB4 → FW7):** the fixture now
+      drives the REAL executor-worker seam with the real diagnostic
+      (`action-unregistered`) and reds under the guarded bug.
+      Historical note: the C1.10 fixture
       (`executor-candidate-claim.test.ts` "a claimed activation raced by a
       concurrent shrink…") drives a FakeWorker and pins a diagnostic code
       (`demand-removed`) production never emits — the Worker's actual
@@ -1522,7 +1525,9 @@ supplies descriptors — which is the honest gap (surface, not trust).
 ### W2.12 — Certify read-only computeds despite opaque/passthrough reads (RC-1)
 
 **Depends on:** C0 (landed). **Status:** implemented (2026-07-15); the
-runtime-floor test below is the one open follow-up.
+runtime-floor test landed with FW8 (2026-07-17 — a read-only
+certificate cannot defeat session-rank floor narrowing, driven through
+the real engine; FB30 closed).
 
 `hasCompleteSchedulerScopeSummary`
 (`packages/ts-transformers/src/closures/strategies/lift-applied-strategy.ts:156-172`)
@@ -1551,15 +1556,15 @@ opaque param must still promote the runtime floor — add a runtime test.
 ### W2.13 — Certificate path for direct lift()/derive() builders (RC-2)
 
 **Depends on:** W2.12. **Status:** implemented (2026-07-15).
-**Known defect (2026-07-17, Fable review FB2, repair wave):** the gate
-ranges over parameters only and never checks capture-freeness, so a
-direct builder whose callback writes a *captured* cell (pattern-scope or
-module-scope) is certified write-free — violating the gate's own stated
-invariant ("no captured-cell writes", `derive-scheduler-options.ts:22-23`,
-enforced nowhere on this path). The run-time write firewall backstops it
-(de-claim, not corruption), but the certificate is unsound; the closure
-path is safe only because ClosureTransformer reifies captures before
-analysis. Note: `__cfLift_5` (`?? new Writable()`) turned out to be
+**Defect closed (FB2 → FW8, 2026-07-17):** the gate now checks
+capture-freeness (`functionWritesCapturedCells`, fail-closed on unknown
+methods over captured cell-like receivers) on the direct-builder path
+AND the previously-unconditional no-input lift arm; both review
+examples emit no certificate, a read-only-capture control still
+certifies, and one previously-unsound fixture expectation was
+corrected. Residual (recorded): writes hidden inside imported/cross-file
+helper bodies stay outside the checker's open-world boundary — the
+run-time write firewall remains the backstop for that class. Note: `__cfLift_5` (`?? new Writable()`) turned out to be
 mechanically this work order's case, not RC-1 — the no-free-captures form
 flows through the direct-builder path.
 
@@ -1580,13 +1585,11 @@ capability analysis on the builder callback and emit through the same
 ### W2.14 — Runtime write-empty summaries, fail-closed (RC-3b)
 
 **Depends on:** W2.11, W2.13. **Status:** implemented (2026-07-15).
-**Test-integrity note (2026-07-17, Fable review FB16/FB17, repair
-wave):** two of the fail-closed tests are vacuous — the
-observation-side dynamic-write arm silently drops its
-`actualChangedWrites` override so the arm it names is never
-constructed, and the "de-claims once … when a claimed write-empty
-action writes" test runs with no live claim. The mechanism itself was
-independently re-verified sound; the tests need to actually bind it.
+**Test-integrity note closed (FB16/FB17 → FW8, 2026-07-17):** the
+observation-side arm now constructs its override through
+`transactionLog.writes` with an explicit `actualChangedWrites` guard,
+and the de-claim test holds a real ExecutionClaim through the claimed
+arm; both discriminate (reverting the guarded seams reds them).
 Implementation includes the integration fix that folds this run's
 scheduler-ignored (framework) reads plus `["cfc"]` sibling reads into
 the runtime summary —
@@ -1678,11 +1681,12 @@ client-permanent with its register row updated to say so and why.
 - [x] Remaining unservable verdicts name only the materializer cohort
       (until W2.16) and the recorded `wish` deferral (measured: `map` ×9,
       `wish` ×4, `computeIndex` ×1 — exactly the W2.16 cohort).
-- [ ] Product fixtures (lunch-poll, group-chat) show zero selector-cohort
+- [x] Product fixtures (lunch-poll, group-chat) show zero selector-cohort
       `dynamic-write-outside-static-surface` verdicts, AND a
       firewall-exercising fixture proves a selector's output-producing
-      run (cold + condition flip) settles under a claim (red 2026-07-17
-      — CA6/FB3: the descriptor must cover the minted result document).
+      run (cold + condition flip) settles under a claim (**closed by FW8
+      2026-07-17**: descriptors cover the minted result document via the
+      shared `selectorBuiltinResultCause` helper).
 
 ### W2.16 — Serve the materializer class (envelope-granular write completeness)
 
@@ -1763,17 +1767,18 @@ Work items:
       Watch item: `claimedActionConflicts` 20 with the enlarged claimed
       cohort (benign overlay races; settlement latency unaffected) — keep
       in view at the W2.9 parity measurement.
-- [ ] Product fixtures (lunch-poll, group-chat) pass the dynamic claim
+- [x] Product fixtures (lunch-poll, group-chat) pass the dynamic claim
       firewall with zero map/ifElse
-      `dynamic-write-outside-static-surface` verdicts (red 2026-07-17;
-      the CA6/CA10 re-open — C2.9/C2.10 gate on this).
-- [ ] Fable-review riders (2026-07-17, repair wave): the zero-verdict
-      acceptance gains a deterministic regression pin — it currently
-      exists only as a recorded live measurement (FB29); the
-      `arr[i]`-then-`.key(dynamic)` transformer corner stops laundering
-      unbounded dynamism past `wildcardUnbounded` (FB21); the
-      runner.ts:5174 envelope comment stops claiming coverage of
-      result/pattern meta writes the envelope cannot cover (FB19).
+      `dynamic-write-outside-static-surface` verdicts (**closed by FW8
+      2026-07-17** — the offender was the container's document-level
+      meta write vs the value-root envelope; envelopes lift to
+      document-root at derivation. C2.9/C2.10 unblocked).
+- [x] Fable-review riders (**closed by FW8 2026-07-17**): the product
+      fixtures pin the zero-verdict acceptance deterministically (only
+      the recorded `wish` deferral remains in the static-unservable log,
+      FB29); the `arr[i]` laundering corner fails closed at
+      `wildcardUnbounded` (FB21); the envelope comments state the
+      value-relative reality and the document-root lift (FB19).
 
 ---
 
@@ -1958,16 +1963,24 @@ F6 on C2's critical path. FW8's selector fix independently unblocks
 C2.9/C2.10 (CA10). Red-first throughout: each WO's fixture must fail
 against tip before its fix lands.
 
+Known pre-existing red, NOT owned by this wave (triaged 2026-07-17):
+`packages/runner/test/reload-rehydration-map-children.test.ts` fails
+identically at the pre-wave tip (96bc48b81) and does not exist on main
+— it arrived with the scheduler-v2 refactor era ("resumed map rows run
+fresh across sessions and stay live", assertion expects fresh rows,
+gets 3). Owed a triage of its own; it is excluded from wave
+acceptance sweeps.
+
 | WO | Title | Depends on |
 | --- | --- | --- |
 | FW1 | F4b demotion make-before-break (FB1): the demoting `watch.set` response stops removing docs that are members of the incoming watch set — suppress the full-sync diff removes for current members server-side, keeping genuine closure-shrink removes intact (FA3's "delivered once, in one frame, under one watermark"). **Landed 2026-07-17:** `suppressDocSetMemberRemoves` applied at both remove-producing emission sites (the watchSet handler, post-registration/post-drop, and the resume catch-up) — every other sync site constructs `removes: []`. Red-first fixture against the REAL server ("F4b demotion: graph-tracked docs that become members survive…", `v2-docset-watch-test.ts`): member survives its own demotion with value intact, the departing doc still removes (the honesty control), and a post-demotion commit reaches the member through membership fan-out. Adversarially re-reviewed post-fix (scopeKey fallback, same-frame drop ordering, resume/emptyCatchUp semantics — no defect) | — |
 | FW2 | F4 suite conformance (FB8, FB26): the scripted `DocSetWatchTransport` emits the real server's demotion diff shape (removes included); the five behavioral guards re-run against the conforming peer; FA4's delivery-side acceptance gets asserted (a written-not-read member is delivered before/with the sync whose toSeq covers its settlement). **Landed 2026-07-17 except the FA4 delivery-side assertion (still owed):** the transport tracks the graph-delivered surface + members and computes the fixed server's diff removes; the demotion guard now binds replica survival and steady-state (no re-pull/re-demotion churn), discrimination-checked — modeling the unfixed server turns the suite red | FW1 |
-| FW3 | FA8 membership shrink (FB6): same-id `watch.set` replacement evicts dropped members (per-member source refcounting, not per-watch-id droppedSources); shrink fixture pins "an aged session's member set equals a fresh session's for the same UI"; non-atomic watchAdd registration fixed (FB24); `docSetMembersTracked` gauge assigned (FB23); FA1 stale-binding skip gets its next-wave retry (FB15); FA2(c) lane-context fixture (FB25) | — |
-| FW4 | FA4 read-path re-pull (FB7, FB27): eviction clears the runtime `missingDocLoadKicks` and manager `#docPullKicks` latches for evicted docs so the next read actually re-pulls; client-export shrink removes unmounted docs so the export cannot grow without bound | FW1 |
+| FW3 | FA8 membership shrink (FB6): same-id `watch.set` replacement evicts dropped members (per-member source refcounting, not per-watch-id droppedSources); shrink fixture pins "an aged session's member set equals a fresh session's for the same UI"; non-atomic watchAdd registration fixed (FB24); `docSetMembersTracked` gauge assigned (FB23); FA1 stale-binding skip gets its next-wave retry (FB15); FA2(c) lane-context fixture (FB25). **Landed 2026-07-17** (red-first + discrimination throughout; memory 607/607 at landing). Rider found in passing, still open: the resume path calls `#scopeContextForSession` unguarded, so an in-band re-open of a lease-bound session with watches fails its resume catch-up with a ProtocolError — needs its own small fix + fixture | — |
+| FW4 | FA4 read-path re-pull (FB7, FB27): eviction clears the runtime `missingDocLoadKicks` and manager `#docPullKicks` latches for evicted docs so the next read actually re-pulls; client-export shrink removes released docs so the export cannot serve husks forever. **Landed 2026-07-17** (both latches independently proven necessary; FA4 speculative-write-target guard held). Open residual: disuse/LRU shrink of genuinely-held-but-unshown docs is a policy FA4 does not define | FW1 |
 | FW5 | F5 real retirement + executable gate (FB9, FB10, FB11, FB28): per-watch classification with a defined mixed-mode residual-traversal budget replaces the binary `graphs.size === 0` predicate (FA3 as written); the dial gains behavioral authority and a wiring path (env or toolshed hook) so the W2.9 protocol is executable end-to-end; cold-deep-navigation measurement added to the protocol; `refreshResidualGraphWatches` counts what its name says. **Landed 2026-07-17:** the dial's authority moved to **doc-set admission** (design (a)) — a space absent from `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES` (comma-separated DIDs or `*`; applied at construction by toolshed `routes/storage/memory.ts` and the standalone server) has its `docs` watches rejected with the non-negotiating ProtocolError shape, and the runner reconcile's existing catch keeps its graph watches (`packages/runner/src/storage/v2.ts` `reconcileSpaceDocSetWatch` — verified read-only: registered-keys commit only on success, so it retries and never errors), so withholding a space is a real OQ4 hold; red-first dial-authority fixture (withheld space rejects demotion + keeps traversing; dial flip admits it and the next wave is zero-traversal) in `v2-feed-retirement-test.ts`. The provably-dead `retired` skip branch was deleted (zero traversal is structural: F3 grouping exclusion + F4b demotion; a mixed surface MUST traverse — FA13 fail-open forbids any server-side skip with authority, which is why admission is the only real per-space lever). Refresh-loop classification is per watch (FA3): `refreshResidualGraphWatches` = held residual watches (two watches on one branch count 2), new `refreshResidualGraphWatchesTraversed` = watches whose branch group actually re-traversed (FB28 red-first fixture: member-only wave counts held 2 / traversed 0), new `refreshResidualDagTraversalsBySpace` = the FB11 budget numerator (schema-compatible additions; consumers updated: toolshed observability type, health stats schema + fixture). The protocol above is rewritten executable end-to-end with the budget gate math (step 4) and the named cold-deep-navigation step (step 5). Eligibility gauges no longer re-consult the dial, so shrinking it cannot hide a live surface (FB9(c)); dial shrink takes effect for new registrations only. The W2.9 wall-time gate itself remains a live measurement | FW1, FW2 |
 | FW6 | F2 FA5 completion + wave-drop fix (FB12, FB13): wave-vs-demand `graph.query` split with per-cold-event bounds; the claimed-action closure-growth → revision → rerun fixture; lane drain retires (or re-keys) the drained lane's watches and a rejected point-read group no longer discards the whole spliced-out batch — re-queue or context-free fallback, fixture-pinned. **Landed 2026-07-17:** optional `trigger` wire field on `graph.query` ("wave"/"demand", closed enum at the parser) recorded into additive `graph.query.wave`/`graph.query.demand` sub-buckets beside the untouched aggregate (health-stats consumers need no schema change — `traversalByOperation` is an open record), threaded from the host provider's registration ("demand") and cause-classified cold paths (shrink/re-establish/re-key = "wave", growth/first-pull-retry = "demand", wave wins ties), fixture-pinned per class with the one-query-per-cold-event bound; the FA5 rerun fixture plus its withheld-delivery conflict control landed in the executor-provider-point-reads suite; FB13 fixed as (a) per-group and per-cold-watch failure isolation with a deferred-notice retry queue (retried on the next wave or prune — the (a)-only residual "re-queues forever under a still-keyed dead lane" is fixture-pinned) and (b) `pruneLaneWatches` from the lane-drain reconcile: broad-rooted watches RE-KEY context-free (chosen over retirement because surviving lanes dedupe their hydration onto the first holder's watch and shared coverage — retiring would starve them), scoped-rooted watches RETIRE together with their per-lane selector coverage and any queued dead-lane registration batch, so reconnect re-hydration re-pulls; three staged fixtures pin drop-isolation, cold-path isolation, and scoped retirement/coverage | — |
-| FW7 | C1 acceptance re-binding (FB14, FB4, FB5): the two-principal gate runs in an automatically-executed lane (wire `CF_RUN_USER_LANE_GATE` into CI or drop the env gate; de-flake the documented teardown flake); the A2 WRITE-revocation fixture asserts on default runs; the shrink-race fixture goes through the real Worker `ClaimedActionGoneError` seam; the cross-lane pending-read fixture routes lane A upstream so the A16 lane machinery is discriminating | — |
-| FW8 | W2.x certificate repairs (FB3, FB18, FB2, FB16, FB17, FB30, FB21, FB19, FB29 + CA6's map half): selector descriptors cover the minted result document (the `listBuiltinResultContainerCause` precedent) with a firewall-exercising cold+flip fixture; map's product-fixture write-surface completeness (the CA6/CA10 re-open); W2.13 gains the capture-freeness check its gate doc promises; W2.14's two vacuous tests bind their arms; W2.12's runtime-floor test; the `arr[i]` laundering corner; the runner.ts:5174 comment; a deterministic zero-verdict pin | — |
+| FW7 | C1 acceptance re-binding (FB14, FB4, FB5): the two-principal gate runs in an automatically-executed lane (wire `CF_RUN_USER_LANE_GATE` into CI or drop the env gate; de-flake the documented teardown flake); the A2 WRITE-revocation fixture asserts on default runs; the shrink-race fixture goes through the real Worker `ClaimedActionGoneError` seam; the cross-lane pending-read fixture routes lane A upstream so the A16 lane machinery is discriminating. **Landed 2026-07-17**: the flake was a Deno Worker.terminate()-vs-loop-resolution runtime race, neutralized by a teardown barrier (10/10 pristine); the env gate is DELETED — 6/6 gate tests including A2 assert on every default run; both fixtures carry their FB4/FB5 discrimination contrasts (guarded-bug reintroduction reds the new fixture while the old stayed green) | — |
+| FW8 | W2.x certificate repairs (FB3, FB18, FB2, FB16, FB17, FB30, FB21, FB19, FB29 + CA6's map half): selector descriptors cover the minted result document (the `listBuiltinResultContainerCause` precedent) with a firewall-exercising cold+flip fixture; map's product-fixture write-surface completeness (the CA6/CA10 re-open); W2.13 gains the capture-freeness check its gate doc promises; W2.14's two vacuous tests bind their arms; W2.12's runtime-floor test; the `arr[i]` laundering corner; the runner.ts:5174 comment; a deterministic zero-verdict pin. **Landed 2026-07-17**: server-execution-product-fixtures GREEN (3/0) — the map failures were NOT the designed child de-claim but the container's document-level ["result"] meta write vs a value-root envelope (FB19's mechanism); envelopes now lift to document-root at derivation; ts-transformers 1111/1111 | — |
 
 ### Phase 4 — scoped execution and delegated user keys
 
@@ -1993,28 +2006,24 @@ The W0.1 context-key fix is necessary but not sufficient for this phase.
 
 #### C1 — user lanes: work-order decomposition (2026-07-15)
 
-**Status (2026-07-17, corrected same day by the
-[Fable commit review](../../history/development/design/fable-commit-review-2026-07-17.md)):
-the design §7 C1 acceptance criterion is met only under
-`CF_RUN_USER_LANE_GATE=1`, which no CI or task config sets (FB14).**
+**Status (2026-07-17, corrected by the
+[Fable commit review](../../history/development/design/fable-commit-review-2026-07-17.md)
+and re-bound the same day by the repair wave): the design §7 C1
+acceptance criterion is MET and BINDING — FW7 deleted the
+`CF_RUN_USER_LANE_GATE` env gate after root-causing its flake (a Deno
+Worker-termination runtime race, not a fixture leak), so the
+two-principal gate and the A2 security fixture assert on every default
+integration run (FB14 closed).**
 C1.1–C1.9 are implemented and pushed, including three gate-driven
 additions: C1.9b (the §4 output-widening pair admitted at the runner
 servability seam; lane-instance hydration before claimed runs — the gate
 found both) and C1.9c (per-lane serving: lane-keyed candidates and
-(action, contextKey) claims, per-lane recompute). But the two-principal
-PerUser gate binds nothing on a default run: the gate family is
-env-gated, C1.9c added zero default-run unit tests for per-lane serving,
-and the amendment-A2 mid-run WRITE-revocation *security* fixture returns
-at its first statement when the env is unset — it reports green while
-asserting nothing (FB14). Wiring the gate into an automatically-executed
-lane (and de-flaking the documented teardown flake) is owed by the
-repair wave. C1.10's bookkeeping is also weaker than previously
-recorded: two of the five owed fixtures do not bind the race they name —
-the shrink-race fixture drives a FakeWorker and pins a diagnostic code
-production never emits (FB4), and the cross-lane pending-read fixture
-shadow-routes the foreign version so the A16 lane machinery it is titled
-for can be deleted with the suite staying green (FB5). C1.11's §10
-parent-doc edits stand. Feed progress alongside: F1 and F2 are landed —
+(action, contextKey) claims, per-lane recompute). C1.10's five owed fixtures now all bind
+their named races: FW7 rebuilt the shrink-race fixture through the real
+Worker `ClaimedActionGoneError` seam and made the cross-lane
+pending-read fixture discriminating (upstream-routed foreign version
+under a held confirmation), each proven by guarded-bug reintroduction
+(FB4/FB5 closed). C1.11's §10 parent-doc edits stand. Feed progress alongside: F1 and F2 are landed —
 but treat F2's previously-recorded traverse-collapse numbers
 (graph.query 171,482 → 1,566; ~95% total reduction) as **unmeasured
 pending re-run**: they exist only as unarchived plan text and are

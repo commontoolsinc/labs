@@ -3,6 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 import { type ClientCommit, toDocumentPath } from "@commonfabric/memory/v2";
 import {
   buildSchedulerActionObservation,
+  type BuildSchedulerActionObservationOptions,
   type SchedulerActionObservation,
 } from "../src/scheduler/persistent-observation.ts";
 import { runtimeWriteEmptyComputationScopeSummary } from "../src/scheduler/run.ts";
@@ -42,7 +43,7 @@ function address(
 }
 
 function baseObservation(
-  overrides: Partial<SchedulerActionObservation> = {},
+  overrides: Partial<BuildSchedulerActionObservationOptions> = {},
 ): SchedulerActionObservation {
   const output = address("of:output");
   return buildSchedulerActionObservation({
@@ -102,11 +103,11 @@ describe("runtime write-empty computation summaries (W2.14)", () => {
   it("does not assemble when a transformer certificate already exists", () => {
     const output = address("of:output");
     const observation = baseObservation({
+      // Fingerprints omitted: CompleteActionScopeSummaryInput excludes them —
+      // the builder stamps both from the observation's own fingerprints.
       completeActionScopeSummary: {
         version: 1,
         complete: true,
-        implementationFingerprint: IMPL,
-        runtimeFingerprint: RUNTIME_FP,
         piece: address("of:piece"),
         reads: [address("of:input")],
         writes: [output],
