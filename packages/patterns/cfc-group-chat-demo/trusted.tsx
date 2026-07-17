@@ -422,8 +422,10 @@ export const applyTrustedProfileSave = (
   // earlier `Writable.for("profile")` variant used a constant cause, which
   // collapsed every user onto one shared entity and broke authorship
   // verification.)
+  // No initial: the `.set(nextSnapshot)` below is the write (cell initials
+  // are schema defaults and must be compile-time static, CT-1880).
   const profile = currentProfileCell(myProfile) ??
-    Writable.perSpace.of<TrustedProfile>(nextSnapshot);
+    Writable.perSpace.of<TrustedProfile>();
   profile.set(nextSnapshot);
   myProfile.set({ profile });
   registerProfile(profiles, profile);

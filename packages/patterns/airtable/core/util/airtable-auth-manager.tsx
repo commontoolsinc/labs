@@ -104,29 +104,24 @@ export const AirtableAuthManager = pattern<
       accessToken: "",
     };
 
+    // Cell initials are schema defaults and must be compile-time static
+    // (CT-1880); runtime scope selections are written explicitly.
+    const scopeFlag = (enabled: boolean) => {
+      const flag = new Writable(false);
+      flag.set(enabled);
+      return flag;
+    };
     return navigateTo(
       AirtableAuth(
         {
           selectedScopes: {
-            "data.records:read": new Writable(
-              required.includes("data.records:read"),
-            ),
-            "data.records:write": new Writable(
-              required.includes("data.records:write"),
-            ),
-            "data.recordComments:read": new Writable(
-              required.includes("data.recordComments:read"),
-            ),
-            "data.recordComments:write": new Writable(
-              required.includes("data.recordComments:write"),
-            ),
-            "schema.bases:read": new Writable(
-              required.includes("schema.bases:read"),
-            ),
-            "schema.bases:write": new Writable(
-              required.includes("schema.bases:write"),
-            ),
-            "webhook:manage": new Writable(required.includes("webhook:manage")),
+            "data.records:read": scopeFlag(required.includes("data.records:read")),
+            "data.records:write": scopeFlag(required.includes("data.records:write")),
+            "data.recordComments:read": scopeFlag(required.includes("data.recordComments:read")),
+            "data.recordComments:write": scopeFlag(required.includes("data.recordComments:write")),
+            "schema.bases:read": scopeFlag(required.includes("schema.bases:read")),
+            "schema.bases:write": scopeFlag(required.includes("schema.bases:write")),
+            "webhook:manage": scopeFlag(required.includes("webhook:manage")),
           },
           auth: emptyAuth,
         } as Parameters<typeof AirtableAuth>[0],

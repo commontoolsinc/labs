@@ -65,11 +65,6 @@ describe("combineSchema type handling", () => {
       b: { type: "number" },
     },
     {
-      name: "unknown can overlap another type",
-      a: { type: "unknown" },
-      b: { type: "string" },
-    },
-    {
       name: "a union containing unknown can overlap another type",
       a: { type: ["unknown", "string"] },
       b: { type: "boolean" },
@@ -82,6 +77,29 @@ describe("combineSchema type handling", () => {
       expect(combineSchema(testCase.b, testCase.a)).toEqual(testCase.b);
     });
   }
+
+  it("a bare unknown is a passthrough reader: parent body wins, link default survives", () => {
+    // `type: "unknown"` is NOT treated like a true schema: an unknown-only
+    // parent is a deliberate passthrough reader (e.g. the cf test runner's
+    // step peeks) and must not adopt the link's type — an absent-yet link
+    // target the reader admits would otherwise become a validation failure.
+    // A reader that wants the link body to govern says `true` or a
+    // flags-only schema instead.
+    expect(combineSchema({ type: "unknown" }, { type: "string" }))
+      .toEqual({ type: "unknown" });
+    // An unknown-only link contributes its flags and its `default` (CT-1880)
+    // while the parent body governs.
+    expect(combineSchema({ type: "string" }, { type: "unknown", default: "d" }))
+      .toEqual({ type: "string", default: "d" });
+    // A link-carried default survives an unknown passthrough parent; a
+    // parent default keeps precedence.
+    expect(combineSchema({ type: "unknown" }, { type: "string", default: "d" }))
+      .toEqual({ type: "unknown", default: "d" });
+    expect(combineSchema(
+      { type: "unknown", default: 7 },
+      { type: "string", default: "d" },
+    )).toEqual({ type: "unknown", default: 7 });
+  });
 
   const numberIntegerCases = [
     {

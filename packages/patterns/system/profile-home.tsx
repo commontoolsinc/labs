@@ -587,15 +587,25 @@ const applyInitialName = lift<
   { initialName?: string; name: Writable<string> },
   string
 >(({ initialName, name }) => {
-  return name.get() ?? trimInitialName(initialName);
+  // `||`, not `??`: the protected name's schema default is "" (never set),
+  // and the empty string must fall back to the untrusted initialName for
+  // display. setName refuses to store empty names, so "" reliably means
+  // "the owner never set a name".
+  return name.get() || trimInitialName(initialName);
 });
 
 export default pattern<ProfileHomeInput, ProfileHomeOutput>(
   ({ initialName, [SELF]: self }) => {
-    const initialProfileName = trimInitialName(initialName);
+    // Static "" default (CT-1880: cell initials are schema defaults and
+    // must be compile-time static). The protected cell holds ONLY values
+    // written through setName — the previous input-derived seed was an
+    // ostensibly authoritative value computed from `initialName`, a publicly
+    // writable input, so it was never actually authoritative. Display-side,
+    // applyInitialName falls back to the (untrusted) initialName while the
+    // stored name is empty.
     const name = new Writable<
       OwnerProtectedProfileWrite<string, typeof setName>
-    >(initialProfileName).for("name");
+    >("").for("name");
     const avatar = new Writable<
       OwnerProtectedProfileWrite<string, typeof setAvatar>
     >("").for("avatar");

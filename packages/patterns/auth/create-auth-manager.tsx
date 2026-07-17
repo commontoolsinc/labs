@@ -350,7 +350,10 @@ const AuthManagerBasePattern = pattern<AuthManagerBaseInput, AuthManagerOutput>(
       scope: [".", "~"],
     });
 
-    const now = new Writable(safeDateNow());
+    // Cell initials are schema defaults and must be compile-time static
+    // (CT-1880); the load-time timestamp is written explicitly instead.
+    const now = new Writable<number>(0);
+    now.set(safeDateNow());
     startReactiveClock(now);
 
     // Normalize the wish-provided UI into a local render-node contract so

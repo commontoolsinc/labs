@@ -190,7 +190,9 @@ export default pattern<DailyJournalInput, DailyJournalOutput>(
 
     // UI state
     const showSettings = new Writable(false);
-    const selectedDate = new Writable(getTodayDate());
+    // CT-1880: initials are static schema defaults; today's date is written.
+    const selectedDate = new Writable("");
+    selectedDate.set(getTodayDate());
 
     // Dates that already have a journal entry (for calendar markers)
     const datesWithNotes = computed(() => {

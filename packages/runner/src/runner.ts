@@ -231,6 +231,49 @@ function patternDefaultScope(pattern: Pattern): CellScope | undefined {
   return schemaCellScope(pattern.resultSchema) ?? pattern.defaultScope;
 }
 
+// Does this schema (or any subschema reachable through the structural
+// keywords) carry a CFC `ifc` annotation? A labeled location's default must
+// be durably seeded at instantiation (CT-1880 otherwise leaves it virtual):
+// the write is what persists the labeled-location metadata that CFC's write
+// gate reads to recognize the slot as protected. Without it, an unlabeled
+// write into an empty integrity-protected collection slips through the gate,
+// because the labeled-append enforcement (doc-splitting + source-label
+// resolution in cfc/prepare.ts) keys off the persisted doc, not the schema.
+// Any non-empty `ifc` object marks a location CFC cares about, so we treat
+// its mere presence as label-bearing.
+function schemaCarriesCfcLabel(schema: JSONSchema | undefined): boolean {
+  const seen = new Set<JSONSchema>();
+  const walk = (node: JSONSchema | undefined): boolean => {
+    if (!isRecord(node) || seen.has(node)) return false;
+    seen.add(node);
+    if (isRecord(node.ifc) && Object.keys(node.ifc).length > 0) return true;
+    if (isRecord(node.properties)) {
+      for (const child of Object.values(node.properties)) {
+        if (walk(child as JSONSchema)) return true;
+      }
+    }
+    for (const key of ["items", "additionalProperties"] as const) {
+      const child = node[key];
+      if (isRecord(child) && walk(child as JSONSchema)) return true;
+    }
+    for (const key of ["allOf", "anyOf", "oneOf", "prefixItems"] as const) {
+      const branch = node[key];
+      if (Array.isArray(branch)) {
+        for (const child of branch) {
+          if (walk(child as JSONSchema)) return true;
+        }
+      }
+    }
+    if (isRecord(node.$defs)) {
+      for (const child of Object.values(node.$defs)) {
+        if (walk(child as JSONSchema)) return true;
+      }
+    }
+    return false;
+  };
+  return walk(schema);
+}
+
 const recordOutputSchemaPolicyInputs = (
   tx: IExtendedStorageTransaction,
   runtime: Runtime,
@@ -1130,18 +1173,49 @@ export class Runner {
       });
       setResultCell(derivedCell, resultCell.asSchema(pattern.resultSchema));
       if (manifestMatch === -1) {
-        // Seed the build-time default for the freshly created cell. The
-        // manifest entry and this default are written together in one
+        // A user-declared `.of()` default is NOT written at instantiation
+        // (CT-1880): it lives in the descriptor schema, which the manifest
+        // link above embeds (includeSchema) and which every session's pattern
+        // body re-creates via `.of(value, schema)` — reads observe it via
+        // schema `default` application (combineSchema preserves link
+        // defaults). No document exists until the first explicit `.set()`.
+        // A raw seed write here would also go through the base link, which
+        // for scoped cells landed the value in the space partition —
+        // invisible to scope-realized reads.
+        //
+        // The ONE default still seeded is the stream marker: handler `$event`
+        // cells carry `{ "$stream": true }` as their descriptor default, and
+        // instantiateJavaScriptNode refuses to treat a cell as a stream
+        // unless the marker is durably WRITTEN, not virtual. Seeding any
+        // OTHER default would freeze it at instantiation time — a pattern
+        // update that changes the declared default could never reach
+        // already-instantiated pieces.
+        //
+        // The manifest entry and this marker are written together in one
         // transaction, so a manifest-referenced cell is already durable; on a
         // cold-cache resume its value may simply be unsynced. Reading and
-        // seeding only when there is no manifest entry keeps resume read-mostly:
-        // a probe read of the not-yet-loaded value would otherwise enter the
-        // commit's conflict set and lose to the durable value when it streams
-        // in, reverting the whole instantiation commit.
+        // seeding only when there is no manifest entry keeps resume
+        // read-mostly: a probe read of the not-yet-loaded value would
+        // otherwise enter the commit's conflict set and lose to the durable
+        // value when it streams in, reverting the whole instantiation commit.
         const schemaDefault = isRecord(descriptor.schema)
           ? descriptor.schema.default as JSONValue | undefined
           : undefined;
-        if (schemaDefault !== undefined) {
+        // Seed at instantiation only for the two defaults whose ABSENCE the
+        // runtime cannot reconstruct from the schema at read time:
+        //   1. the `{$stream: true}` marker (instantiateJavaScriptNode needs
+        //      it durably WRITTEN, not virtual), and
+        //   2. a default on a CFC-labeled location — the durable write is
+        //      what persists the labeled-location metadata that the write-
+        //      enforcement gate (cfc/prepare.ts) reads to recognize the slot
+        //      as protected; without it an unlabeled write into an empty
+        //      integrity-protected collection would slip through the gate.
+        // Every OTHER default stays virtual (CT-1880): a pattern update that
+        // changes it must reach already-instantiated pieces, which a frozen
+        // instantiation-time write would prevent.
+        const seedAtInstantiation = isStreamValue(schemaDefault) ||
+          schemaCarriesCfcLabel(descriptor.schema);
+        if (schemaDefault !== undefined && seedAtInstantiation) {
           const currentValue = derivedCell.getRawUntyped({
             meta: ignoreReadForScheduling,
           });

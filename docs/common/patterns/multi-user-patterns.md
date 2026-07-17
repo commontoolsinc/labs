@@ -376,6 +376,15 @@ Plain `new Writable(...)` inherits the containing pattern or factory scope. Use
 the scoped constructors when the local cell must have a specific sharing
 boundary.
 
+An initial value passed to `new Writable(...)` / `.of(...)` must be
+compile-time static: it becomes the cell's schema `default`, observed at read
+time in every session. No document is written at instantiation, so a pattern
+update that changes the default takes effect everywhere (CT-1880). The CTS
+rejects runtime expressions in initials (`cell-factory:non-static-initial`).
+To bring in a runtime value, declare a static default and write the value from
+a handler with `.set()`. Do not initialize with a body-level `.set(...)`: the
+pattern body re-runs, so the write repeats and clobbers later edits.
+
 ## Authorization And Admin Roles
 
 Scopes decide which data instance a user sees. They do not decide who may write

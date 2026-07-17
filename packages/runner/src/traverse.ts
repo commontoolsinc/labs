@@ -2399,11 +2399,11 @@ function combineOptionalSchema(
     return linkSchema;
   } else if (linkSchema === undefined) {
     return parentSchema;
-  } else if (ContextualFlowControl.isTrueSchema(parentSchema)) {
-    return combineSchema(parentSchema, linkSchema);
-  } else if (ContextualFlowControl.isTrueSchema(linkSchema)) {
-    return parentSchema;
   }
+  // Route both true-ish sides through combineSchema rather than returning
+  // the other side directly: a true-ish link schema may still carry a
+  // `default` (a `.of()` manifest link's typeless `{default: ...}` shape,
+  // CT-1880) that combineSchema's true-schema branches now preserve.
   return combineSchema(parentSchema, linkSchema);
 }
 
@@ -2532,6 +2532,21 @@ function narrowNumberIntegerIntersection(
   return types.length === 1 ? types[0] : types;
 }
 
+/**
+ * A schema that imposes no structural constraint: `type: "unknown"` with
+ * only flag-ish keys (asCell/ifc/scope/...), `default`, or `$defs` beside
+ * it (CT-1880: used by `mergeMatches` to detect anyOf branches that became
+ * vacuous after stripping and would otherwise shadow the branch cell's
+ * authored schema).
+ */
+export function isUnknownOnlySchema(schema: JSONSchema): boolean {
+  return isRecord(schema) && schema.type === "unknown" &&
+    Object.keys(schema).every((key) =>
+      key === "type" || key === "default" || key === "$defs" ||
+      ContextualFlowControl.isInternalSchemaKey(key)
+    );
+}
+
 function _combineSchemaUncached(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
@@ -2541,10 +2556,40 @@ function _combineSchemaUncached(
   } else if (ContextualFlowControl.isFalseSchema(linkSchema)) {
     return linkSchema;
   } else if (ContextualFlowControl.isTrueSchema(parentSchema)) {
-    return mergeSchemaFlags(parentSchema, linkSchema);
+    // A true-ish parent imposes nothing: the link body survives, the parent
+    // contributes flags — and its own `default`, which keeps the usual
+    // parent-over-link precedence. (`cfcSchemaIsTrue` counts `default` as an
+    // internal key, so `{default: ...}` schemas land here.)
+    const merged = mergeSchemaFlags(parentSchema, linkSchema);
+    return isRecord(parentSchema) && parentSchema.default !== undefined &&
+        isRecord(merged)
+      ? { ...merged, default: parentSchema.default }
+      : merged;
   } else if (ContextualFlowControl.isTrueSchema(linkSchema)) {
-    return mergeSchemaFlags(linkSchema, parentSchema);
+    // Symmetric: a true-ish link contributes flags and its `default` (when
+    // the parent declares none) — a `.of()` manifest link's typeless
+    // `{default: ...}` schema is exactly this shape (CT-1880); dropping the
+    // default here made typed-object reads of absent docs miss it.
+    const merged = mergeSchemaFlags(linkSchema, parentSchema);
+    return isRecord(linkSchema) && linkSchema.default !== undefined &&
+        isRecord(merged) && merged.default === undefined
+      ? { ...merged, default: linkSchema.default }
+      : merged;
   } else if (isRecord(linkSchema) && isRecord(parentSchema)) {
+    // `type: "unknown"` sides combine like true schemas: the other side's
+    // body survives, this side contributes its flags — and its own
+    // `default`, which keeps the usual precedence (parent over link).
+    // A `type: "unknown"` side needs no special branch here: it can never
+    // enter the object/object, array/array, or disjoint paths (its type is
+    // not "object"/"array" and `schemaTypesAreDisjoint` treats "unknown" as
+    // a wildcard), so every unknown combination lands in the generic branch
+    // below — parent body wins, link flags and a link-carried `default`
+    // survive. Do NOT make it adopt the other side's body like a true
+    // schema: `{type: "unknown"}` is a deliberate passthrough reader (e.g.
+    // the cf test runner's step peeks), and imposing the link's type turned
+    // absent-yet link targets those readers admit into validation failures.
+    // A reader that wants the link's authored body to govern says `true`
+    // (or a flags-only schema), which the true-schema branches above adopt.
     if (
       schemaTypesAreDisjoint(parentSchema.type, linkSchema.type)
     ) return false;
@@ -2697,8 +2742,16 @@ function _combineSchemaUncached(
       // Merge $defs from the two schema, with parent taking priority
       const mergedDefs = { ...linkSchema.$defs, ...parentSchema.$defs };
       // In this case, we use the link for flags, but generally use the parent
-      // since the object types may be different
+      // since the object types may be different.
+      // A link-carried `default` survives unless the parent has its own —
+      // matching the object/object and array/array branches above, whose
+      // `{...linkSchema, ...parentSchema}` spreads already behave this way.
+      // This is what lets a `.of()` cell's declared default (carried on the
+      // manifest link schema) reach reads governed by lowered lift/handler
+      // input schemas, which have no `default` of their own (CT-1880).
       return mergeSchemaFlags(linkSchema, {
+        ...(linkSchema.default !== undefined &&
+          { default: linkSchema.default }),
         ...parentSchema,
         ...(narrowedType !== undefined && { type: narrowedType }),
         ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
@@ -4357,6 +4410,19 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // since we can't follow all the write-redirect links.
         return fail(TRAVERSE_FAILURES.undefinedLink);
       } else {
+        // An absent pointer target still observes the effective schema's
+        // `default` (CT-1880) — mirroring the in-document undefined handling
+        // in _traverseWithSchemaInner. The effective schema here has been
+        // combined with the link-carried schema, so a `.of()` manifest
+        // link's default reaches typed reads of never-written docs.
+        const resolvedTarget = isRecord(redirSelector.schema)
+          ? resolveSchemaRefsCanonical(redirSelector.schema) ??
+            redirSelector.schema
+          : redirSelector.schema;
+        const defaultValue = this.applyDefault(redirDoc, resolvedTarget);
+        if (defaultValue !== undefined) {
+          return { ok: defaultValue };
+        }
         return this.isValidType(redirSelector.schema, "undefined")
           ? { ok: this.traversePrimitive(redirDoc, redirSelector.schema) }
           : fail(TRAVERSE_FAILURES.undefinedLink);

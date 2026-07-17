@@ -179,14 +179,29 @@ export function map(
     // derivation treats them as resolution machinery, not followRef
     // observations (observation classes C1); no element value is loaded at
     // all.
-    const rawList = listCell.withTx(tx).getRaw() as unknown;
     const listBase = listCell.getAsNormalizedFullLink();
+    // schemaDefault: an absent list doc still observes its schema-declared
+    // `default` (CT-1880) — the default supplies the virtual slots (and the
+    // slot count). Virtual slots pass their slice into listElementLink so
+    // element reads observe it; slots of a stored list never do (strict
+    // default semantics).
+    const storedList = listCell.withTx(tx).getRaw() as unknown;
+    const rawList = storedList !== undefined
+      ? storedList
+      : listCell.withTx(tx).getRaw({ schemaDefault: true }) as unknown;
+    const virtualSlots = storedList === undefined && rawList !== undefined;
     const list: Cell<any>[] | undefined = rawList === undefined
       ? undefined
       : !Array.isArray(rawList)
       ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
       : rawList.map((slot, i) => {
-        const slotLink = listElementLink(runtime.cfc, listBase, slot, i);
+        const slotLink = listElementLink(
+          runtime.cfc,
+          listBase,
+          slot,
+          i,
+          virtualSlots,
+        );
         const resolved = resolveLink(runtime, tx, slotLink, "value");
         return runtime.getCellFromLink(resolved, undefined, tx);
       });

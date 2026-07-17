@@ -440,7 +440,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     // User/session UI state
     const selectedPersonName = new Writable.perUser("");
     const adminMode = new Writable.perSession(false);
-    const requestDate = new Writable.perSession(toLocalDateStr(safeDateNow()));
+    // Static default + explicit per-load write (CT-1880): each session
+    // starts at "today" without freezing a creation-time date into a default.
+    const requestDate = new Writable.perSession("");
+    requestDate.set(toLocalDateStr(safeDateNow()));
     const requestResult = new Writable.perSession("");
 
     // Admin form state

@@ -100,14 +100,17 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 //   value * state.multiplier → lift(...)({ value, state: { multiplier } })
 // Context: The map callback captures `state.multiplier` from the outer scope,
 //   which must be threaded through as a mapWithPattern param and re-derived inside.
+//   Cell initials are schema defaults and must be compile-time static
+//   (CT-1880); the pattern-input value arrives via `.set(...)`.
 export default pattern((state) => {
     // Explicitly type as Cell to ensure closure transformation
-    const typedValues: Cell<number[]> = cell(state.key("values"), {
+    const typedValues: Cell<number[]> = cell<number[]>([], {
         type: "array",
         items: {
             type: "number"
         }
     } as const satisfies __cfHelpers.JSONSchema).for("typedValues", true);
+    typedValues.set(state.key("values"));
     return {
         [UI]: (<div>
         {typedValues.mapWithPattern(__cfPattern_1, {
