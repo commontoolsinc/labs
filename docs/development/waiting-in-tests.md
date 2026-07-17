@@ -324,9 +324,8 @@ file, because the scan walks every `integration/` directory beneath `packages/`,
 so it needs an allowlist entry.
 
 Its waits are ordinary DOM and text conditions that `waitForCondition` would
-express. They stay a poll for the same reason as the disabled tests below:
-nothing automated exercises this file, so converting it churns code that no run
-covers.
+express. They stay a poll because nothing automated exercises this file, so
+converting it churns code that no run covers.
 
 ### A shell script observing another process through a kernel mount
 
