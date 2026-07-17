@@ -1569,8 +1569,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       // indistinguishable from "not yet computed" for cross-runtime readers —
       // so every snapshot yields a real, stable value (the shared EMPTY
       // constants keep the fallback idempotent across recomputes). The visit
-      // history is no longer a PerSpace input — it lives in SQLite now and is
-      // surfaced via `recentVisits`/`mostRecentTitle` below.
+      // history lives in the `visits` PerSpace input and is surfaced here via
+      // the derived `recentVisits`/`mostRecentTitle` below, not as a raw cell.
       options: computed(() => options ?? EMPTY_OPTIONS),
       votes: computed(() => votes ?? EMPTY_VOTES),
       users: computed(() => users ?? EMPTY_USERS),
