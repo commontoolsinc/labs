@@ -1900,11 +1900,11 @@ describe("setup/start", () => {
       { input: 10 } as any,
       resultCell,
     );
-    // Not started yet; result still aliases internal and shows previous value
+    // Not started yet; the result still aliases the reused pattern's
+    // internals, so the fresh argument value is already visible through the
+    // alias chain on read.
     const rawValue = resultCell.get();
-    expect(rawValue).toMatchObjectIgnoringSymbols({
-      output: { $alias: { partialCause: "output", path: [] } },
-    });
+    expect(rawValue).toMatchObjectIgnoringSymbols({ output: 10 });
 
     // Verify the pattern identity pointer is present after setup without
     // passing the pattern (it was reused from the stored pointer).

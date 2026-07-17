@@ -212,6 +212,57 @@ describe("toMatchObjectIgnoringSymbols matcher", () => {
     }).toThrow();
   });
 
+  it("should fail when a property value differs", () => {
+    const obj1 = {
+      name: "test1",
+      [testSymbol1]: "ignored",
+    };
+
+    const obj2 = {
+      name: "test2",
+    };
+
+    expect(() => {
+      expect(obj1).toMatchObjectIgnoringSymbols(obj2);
+    }).toThrow();
+  });
+
+  it("should fail when a nested property value differs", () => {
+    const obj1 = {
+      user: {
+        name: "John",
+        [testSymbol1]: "ignored",
+        settings: {
+          theme: "dark",
+        },
+      },
+    };
+
+    const obj2 = {
+      user: {
+        name: "John",
+        settings: {
+          theme: "light",
+        },
+      },
+    };
+
+    expect(() => {
+      expect(obj1).toMatchObjectIgnoringSymbols(obj2);
+    }).toThrow();
+  });
+
+  it("should fail when a number value differs", () => {
+    expect(() => {
+      expect({ value: 1 }).toMatchObjectIgnoringSymbols({ value: 2 });
+    }).toThrow();
+  });
+
+  it("should treat a NaN value as matching NaN", () => {
+    expect({ value: NaN, [testSymbol1]: "ignored" })
+      .toMatchObjectIgnoringSymbols({ value: NaN });
+  });
+
   it("should include custom failure messages for partial matches", () => {
     let message: string | undefined;
     try {
