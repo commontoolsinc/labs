@@ -4903,6 +4903,88 @@ describe("piece pull materialization", () => {
     });
   });
 
+  it("rejects a producer-declared undefined alternative at an optional destination", async () => {
+    // Destination optionality permits *omission*, not a present `undefined`
+    // value: a producer whose contract admits `undefined` as a value must
+    // still be rejected when the destination value schema does not accept it,
+    // even at an optional slot.
+    const sourcePiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            value: { anyOf: [{ type: "string" }, { type: "undefined" }] },
+          },
+          required: ["value"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { value: "present" },
+      undefined,
+      { start: true },
+    );
+    const targetPiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { slot: { type: "string" } },
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await expect(
+      new PieceController(manager, targetPiece).input.set(
+        manager.getArgument(sourcePiece).key("value"),
+        ["slot"],
+      ),
+    ).rejects.toThrow(/not accepted by the candidate/);
+  });
+
+  it("rejects a possibly-missing source at a required destination", async () => {
+    const sourcePiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { maybe: { type: "string" } },
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { maybe: "present" },
+      undefined,
+      { start: true },
+    );
+    const targetPiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { slot: { type: "string" } },
+          required: ["slot"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { slot: "seed" },
+      undefined,
+      { start: true },
+    );
+    await expect(
+      new PieceController(manager, targetPiece).input.set(
+        manager.getArgument(sourcePiece).key("maybe"),
+        ["slot"],
+      ),
+    ).rejects.toThrow(/not accepted by the candidate/);
+  });
+
   it("updates a piece across backward-compatible schema additions", async () => {
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledSchemaEvolutionProgram(1),

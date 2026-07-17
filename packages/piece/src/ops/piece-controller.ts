@@ -1131,7 +1131,7 @@ export function durableSourceContract(
   // even an identical-source `setsrc`; reading only base would strip a scoped
   // result cell of its legitimate contract.
   const metaScope = ((): LinkScope | undefined => {
-    if (rawSourceLink.scope === undefined) return undefined;
+    if (rawSourceLink.scope === "space") return rawSourceLink.scope;
     const scopedRoot = manager.runtime.getCellFromLink(
       { ...rawSourceLink, path: [], schema: undefined },
       undefined,
@@ -1362,16 +1362,21 @@ function assertContractSubset(
   for (const target of targets) {
     let lastError: unknown;
     const proved = sources.some((source) => {
-      // A source that may hold no value (its schema carries an explicit
-      // `undefined` alternative, added by `includePossibleMissingValue`) is
-      // acceptable to a destination slot that is itself optional: absence is a
-      // state the destination schema already tolerates. Discharge that
-      // alternative here, structurally, rather than injecting an `undefined`
-      // union into the target — a union-with-default target is not stable
-      // under default insertion and would fail closed. A required destination
-      // keeps the alternative, so a possibly-absent source still fails there.
-      const sourceSchema = target.mayBeMissing === true
-        ? withoutUndefinedAlternative(source.schema)
+      // A source that may hold no value must prove absence acceptable. When
+      // the destination slot is itself optional, absence is a state the
+      // destination already tolerates, so the value schemas are compared
+      // directly. When the destination is required, absence must be provable
+      // against the destination's value schema, so an explicit `undefined`
+      // alternative is injected into the source side of the proof. Absence is
+      // discharged at the flag level — never by rewriting the source schema —
+      // so a producer schema that itself admits a *present* `undefined` value
+      // keeps that alternative and the destination value schema must accept
+      // it, optional slot or not. (Injecting `undefined` into the target
+      // instead would trip the union-with-default "not stable under default
+      // insertion" fail-close.)
+      const sourceSchema: JSONSchema = source.mayBeMissing === true &&
+          target.mayBeMissing !== true
+        ? { anyOf: [source.schema, { type: "undefined" }] }
         : source.schema;
       try {
         assertSchemaSubset(
@@ -1390,36 +1395,11 @@ function assertContractSubset(
   }
 }
 
-/**
- * Remove a top-level `{ type: "undefined" }` alternative from a schema union,
- * collapsing a resulting singleton wrapper to its sole branch. Used when the
- * destination contract tolerates absence, so the possible-missing alternative
- * need not be proven against the destination's value schema.
- */
-function withoutUndefinedAlternative(schema: JSONSchema): JSONSchema {
-  if (typeof schema !== "object" || schema === null) return schema;
-  const alternatives = schema.anyOf;
-  if (!Array.isArray(alternatives)) return schema;
-  const remaining = alternatives.filter((alternative) =>
-    !(typeof alternative === "object" && alternative !== null &&
-      alternative.type === "undefined" &&
-      Object.keys(alternative).length === 1)
-  );
-  if (remaining.length === alternatives.length) return schema;
-  if (remaining.length === 1 && Object.keys(schema).length === 1) {
-    return remaining[0]!;
-  }
-  return { ...schema, anyOf: remaining };
-}
-
-function includePossibleMissingValue(
-  contract: PathSchemaContract,
+/** Drop the `mayBeMissing` flag for proofs where absence cannot occur. */
+function withoutMissingFlag(
+  { mayBeMissing: _, ...contract }: PathSchemaContract,
 ): PathSchemaContract {
-  if (contract.mayBeMissing !== true) return contract;
-  return {
-    schema: { anyOf: [contract.schema, { type: "undefined" }] },
-    root: contract.root,
-  };
+  return contract;
 }
 
 /** @internal Exported for focused durable-link contract tests. */
@@ -1679,11 +1659,12 @@ export function assertSuppliedLinkSchemasCompatible(
       sourceContracts = localizedSources.map((entry) => entry.contract);
       targetContracts = localizedTargets.map((entry) => entry.contract);
     }
-    sourceContracts = sourceContracts.map(includePossibleMissingValue);
 
     // The source and target contracts are conjunctions. Proving any source
     // conjunct implies each target conjunct is a conservative proof that the
     // complete source intersection is accepted by the target intersection.
+    // Possible absence of a source value rides the contracts' `mayBeMissing`
+    // flags and is resolved per source/target pair inside the proof.
     const label = `input link at ${displayPath}`;
     if (
       !preservesDirectHandle || targetOuter.kind !== "writeonly" &&
@@ -1694,7 +1675,14 @@ export function assertSuppliedLinkSchemasCompatible(
     if (preservesDirectHandle && cellKindCanWrite(targetOuter.kind)) {
       // A writable handle can send values back to the producer, so the
       // destination payload contract must also fit the source payload.
-      assertContractSubset(targetContracts, sourceContracts, label);
+      // Absence never flows through a write-back — the handle writes concrete
+      // values — so slot optionality on either side is irrelevant here and
+      // the `mayBeMissing` flags are dropped from both.
+      assertContractSubset(
+        targetContracts.map(withoutMissingFlag),
+        sourceContracts.map(withoutMissingFlag),
+        label,
+      );
     }
   }
   return preservedDirectHandles;
