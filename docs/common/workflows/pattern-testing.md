@@ -23,7 +23,7 @@ export default pattern<MyInput, MyOutput>(({ count }) => {
 });
 ```
 
-If your pattern uses `pattern<State>()` or doesn't export actions, fix the pattern first. See [Pattern Types](../concepts/pattern.md#always-use-dual-type-parameters).
+If your pattern uses `pattern<State>()`, fix the pattern first. See [Pattern Types](../concepts/pattern.md#always-use-dual-type-parameters). A pattern that doesn't export its actions can still be driven through its UI — see [Firing a handler the pattern does not export](#firing-a-handler-the-pattern-does-not-export).
 
 ## Overview
 
@@ -119,6 +119,41 @@ const action_setup_game = action(() => {
   game.startGame.send();
 });
 ```
+
+### Firing a handler the pattern does not export
+
+A handler bound only in JSX can still be fired, so a pattern that keeps its
+behaviour behind a button does not have to change to be tested. The prop carries
+a stream whether the handler was written inline or bound from module scope. Walk
+the rendered tree to the node, read the prop, and send it an event:
+
+```tsx
+// Shown at module scope.
+import { action, pattern, UI } from "commonfabric";
+import { findElementByText, propsOf } from "../test/vnode-helpers.ts";
+import MapDemo from "./map-demo.tsx";
+
+export default pattern(() => {
+  const subject = MapDemo({ areasOfInterest: [] });
+
+  const action_add_area = action(() => {
+    const button = findElementByText(subject[UI], "cf-button", "+ Add Area");
+    const onClick = propsOf(button)?.onClick;
+    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
+      (onClick as { send: (event: Record<string, never>) => void }).send({});
+    }
+  });
+
+  return { tests: [{ action: action_add_area }], subject };
+});
+```
+
+`packages/patterns/map-demo.test.tsx` drives both an inline arrow and a bound
+handler this way.
+
+Prefer an exported `Stream<T>` when you own the pattern: it states the entry
+point in the output type. Use the tree walk when the handler belongs to the UI
+and exporting it would only serve the test.
 
 ## Writing Assertions
 

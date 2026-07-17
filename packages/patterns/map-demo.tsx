@@ -7,6 +7,7 @@ import {
   NAME,
   pattern,
   UI,
+  type VNode,
 } from "commonfabric";
 
 /**
@@ -56,6 +57,7 @@ interface Input {
 }
 
 export interface Output {
+  [UI]: VNode;
   tripName: string;
   stops: TripStop[];
   areasOfInterest: AreaOfInterest[];
@@ -170,15 +172,16 @@ const addAreaHandler = handler<
   { areas: Cell<AreaOfInterest[]>; center: Cell<LatLng | null> }
 >((_event, { areas, center }) => {
   const colors = ["#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#8b5cf6"];
-  const colorIndex = areas.get().length % colors.length;
+  const currentAreas = areas.get();
+  const colorIndex = currentAreas.length % colors.length;
   const currentCenter = center.get() ?? { lat: 37.6, lng: -122.2 };
-  areas.push({
+  areas.set([...currentAreas, {
     center: currentCenter,
     radius: 2000,
-    title: `Area ${areas.get().length + 1}`,
+    title: `Area ${currentAreas.length + 1}`,
     description: "New area of interest",
     color: colors[colorIndex],
-  });
+  }]);
 });
 
 // Format coordinates for display (handles undefined during reactive updates)
