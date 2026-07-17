@@ -339,7 +339,9 @@ export function findAndInlineDataURILinks(value: any): any {
       const inlined = findAndInlineDataURILinks(current);
       if (next) {
         next[index] = inlined;
-      } else if (inlined !== current) {
+      } else if (!Object.is(inlined, current)) {
+        // `Object.is`: an untouched `NaN` leaf comes back as the same value
+        // and must not force a clone of the whole array.
         next = value.slice();
         next[index] = inlined;
       }
@@ -351,7 +353,8 @@ export function findAndInlineDataURILinks(value: any): any {
       const inlined = findAndInlineDataURILinks(entry);
       if (next) {
         next[key] = inlined;
-      } else if (inlined !== entry) {
+      } else if (!Object.is(inlined, entry)) {
+        // `Object.is`: see the array case above.
         next = { ...value };
         next[key] = inlined;
       }

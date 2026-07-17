@@ -366,7 +366,9 @@ function sendValueToBindingInner<T>(
       }
     }
   } else if (!isRecord(binding) || Object.keys(binding).length !== 0) {
-    if (binding !== value) {
+    // `Object.is`, not `===`: a constant `NaN` binding legitimately matches a
+    // produced `NaN`, and `0` vs `-0` is a genuine mismatch.
+    if (!Object.is(binding, value)) {
       throw new Error(`Got ${value} instead of ${binding}`);
     }
   }
