@@ -110,7 +110,7 @@ xattr -p user.json.type home/pieces/todo-app/result/count
 
 # View piece metadata
 cat home/pieces/todo-app/meta.json
-# => {"id":"of:ba4j...","entityId":"ba4j...","name":"todo-app","patternRef":{"identity":"<hash>","symbol":"default","source":"/todo-app.tsx"}}
+# => {"id":"of:ba4j...","entityId":"ba4j...","name":"todo-app","patternRef":{"identity":"<hash>","symbol":"default","source":{"ref":"cf:pattern:<hash>","entry":"/packages/patterns/todo-app.tsx"}}}
 
 # Mounted callables are executable and start with a cf exec shebang
 head -n1 home/pieces/todo-app/result/addItem.handler
@@ -124,11 +124,11 @@ cat home/pieces/todo-app/result.json | jq '.addItem, .search'
 
 The prefix-free `patternRef.identity` + `patternRef.symbol` are the
 authoritative reference to the artifact currently running the piece
-(`cf:module/<identity>#<symbol>` in display form). `patternRef.source` is
-best-effort: it is the tracked `patternSource` provenance when present,
-otherwise the authored entry filename recovered from the artifact's verified
-source closure. The same object appears in `pieces/pieces.json` for bulk
-discovery.
+(`cf:module/<identity>#<symbol>` in display form). `patternRef.source.ref` is
+the immutable in-fabric source reference. Optional `source.entry` preserves the
+authored path within the compilation root, while `source.origin` carries the
+piece's update provenance. The same object appears in `pieces/pieces.json` for
+bulk discovery.
 
 ### Writing
 

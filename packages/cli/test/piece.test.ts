@@ -31,7 +31,10 @@ describe("cli piece parsing", () => {
     const patternRef = {
       identity,
       symbol: "default",
-      source: "/notes/note.tsx",
+      source: {
+        ref: `cf:pattern:${identity}`,
+        entry: "/notes/note.tsx",
+      },
     };
     expect(formatPatternRef(patternRef)).toBe("/notes/note.tsx");
     expect(formatPatternIdentity(patternRef)).toBe(
@@ -40,7 +43,16 @@ describe("cli piece parsing", () => {
     expect(formatPatternRef({
       identity,
       symbol: "named",
-    })).toBe(`cf:module/${identity}#named`);
+      source: { ref: `cf:pattern:${identity}` },
+    })).toBe(`cf:pattern:${identity}`);
+    expect(formatPatternRef({
+      identity,
+      symbol: "named",
+      source: {
+        ref: `cf:pattern:${identity}`,
+        origin: "cf:/did:key:z6Mk/example",
+      },
+    })).toBe("cf:/did:key:z6Mk/example");
     expect(formatPatternRef(undefined)).toBe("<unknown>");
   });
 

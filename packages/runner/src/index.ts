@@ -247,6 +247,7 @@ export {
 export {
   type FabricRef,
   FabricRefError,
+  formatFabricRef,
   isFabricImportSpecifier,
   parseFabricRef,
 } from "./sandbox/fabric-import-specifier.ts";

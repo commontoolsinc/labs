@@ -53,16 +53,19 @@ cat "MOUNT/SPACE/pieces/pieces.json"
 {
   "identity": "<content-hash>",
   "symbol": "default",
-  "source": "/annotation.tsx"
+  "source": {
+    "ref": "cf:pattern:<content-hash>",
+    "entry": "/packages/patterns/annotation.tsx"
+  }
 }
 ```
 
 The prefix-free `identity` + `symbol` are the authoritative reference to the
-running artifact (`cf:module/<identity>#<symbol>` in display form). `source` is
-a best-effort discovery locator: tracked `patternSource` provenance when
-present, otherwise the authored entry filename recovered from the current
-artifact. Match the entry filename for pattern-kind discovery; do not infer it
-from the piece's mutable display name.
+running artifact (`cf:module/<identity>#<symbol>` in display form). `source.ref`
+addresses the immutable source closure; `source.entry` is its optional authored
+entry path, and `source.origin` is optional update provenance. For pattern-kind
+discovery, match the entry filename and fall back to the origin path when the
+entry is absent; do not infer it from the piece's mutable display name.
 
 ---
 
@@ -280,8 +283,9 @@ import json, sys
 p = json.load(sys.stdin)
 for x in p:
     ref = x.get('patternRef', {})
-    source = ref.get('source', '') if isinstance(ref, dict) else ''
-    if source.rsplit('/', 1)[-1] == 'annotation.tsx':
+    source = ref.get('source', {}) if isinstance(ref, dict) else {}
+    locator = (source.get('entry') or source.get('origin', '')) if isinstance(source, dict) else ''
+    if locator.rsplit('/', 1)[-1] == 'annotation.tsx':
         print(x['name'], '—', x.get('summary','')[:60])
 "
 ```
@@ -367,8 +371,9 @@ import json, sys
 p = json.load(sys.stdin)
 for x in p:
     ref = x.get('patternRef', {})
-    source = ref.get('source', '') if isinstance(ref, dict) else ''
-    if source.rsplit('/', 1)[-1] == 'agent.tsx':
+    source = ref.get('source', {}) if isinstance(ref, dict) else {}
+    locator = (source.get('entry') or source.get('origin', '')) if isinstance(source, dict) else ''
+    if locator.rsplit('/', 1)[-1] == 'agent.tsx':
         print(x['name'], '—', x.get('summary','')[:60])
 "
 ```

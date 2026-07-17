@@ -107,9 +107,13 @@ describe("ensureDefaultPattern stamps patternSource", () => {
     const piece = await controller.ensureDefaultPattern();
     const source = getPatternSource(piece.getCell());
     expect(source).toBe(DEFAULT_APP_PATTERN_URL);
+    const identityRef = getPatternIdentityRef(piece.getCell())!;
     expect(await piece.getPatternRef()).toEqual({
-      ...getPatternIdentityRef(piece.getCell()),
-      source: DEFAULT_APP_PATTERN_URL,
+      ...identityRef,
+      source: {
+        ref: `cf:pattern:${identityRef.identity}`,
+        origin: DEFAULT_APP_PATTERN_URL,
+      },
     });
   });
 });

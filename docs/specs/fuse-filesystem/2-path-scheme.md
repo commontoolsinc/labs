@@ -258,17 +258,23 @@ pieces/.index.json    # {"todo-app": "of:ba4jcbvpq3k5soo...", ...}
 {
   "identity": "<content-hash>",
   "symbol": "default",
-  "source": "/todo-app.tsx"
+  "source": {
+    "ref": "cf:pattern:<content-hash>",
+    "entry": "/packages/patterns/todo-app.tsx"
+  }
 }
 ```
 
 The prefix-free identity and symbol are the authoritative pointer to the
 running artifact (`cf:module/<identity>#<symbol>` in display form).
-`source` is a best-effort discovery locator: explicit `patternSource`
-provenance when present, otherwise the authored entry filename recovered from
-the current pattern's verified source closure. Pattern references update in
-place when the piece rolls forward; they do not participate in directory-name
-selection.
+`source.ref` is the immutable in-fabric source reference from the pattern-import
+grammar. `source.entry` is the optional authored path inside the verified source
+closure; `source.origin` is the optional `patternSource` update provenance.
+For local deployments, `--root` defines the path namespace, so passing a
+repository root preserves a repository-relative entry path without persisting
+an absolute machine path. Pattern references update in place when the piece
+rolls forward; they do not participate in directory-name selection. See
+`docs/specs/pattern-imports/README.md` for the canonical field semantics.
 
 ## Entity Directory
 

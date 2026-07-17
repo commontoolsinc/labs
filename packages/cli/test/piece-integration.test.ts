@@ -31,7 +31,7 @@ const NOTE_CONTENT = "Hello world";
 
 const noteEntry: EntryConfig = {
   mainPath: NOTE_PATTERN,
-  rootPath: `${REPO_ROOT}/packages/patterns`,
+  rootPath: REPO_ROOT,
 };
 
 let pieceId = "";
@@ -127,11 +127,15 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
   it("list and inspect expose the running pattern reference", async () => {
     const listed = await listPieces(spaceConfig);
     const listedPiece = listed.find((piece) => piece.id === pieceId);
-    expect(listedPiece?.patternRef?.source).toBe("/notes/note.tsx");
+    const identity = listedPiece?.patternRef?.identity;
+    expect(identity).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(listedPiece?.patternRef?.source).toEqual({
+      ref: `cf:pattern:${identity}`,
+      entry: "/packages/patterns/notes/note.tsx",
+    });
 
     const inspected = await inspectPiece({ ...spaceConfig, piece: pieceId });
     expect(inspected.patternRef).toEqual(listedPiece?.patternRef);
-    expect(inspected.patternRef?.identity).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(inspected.patternRef?.symbol).toBe("default");
   });
 });

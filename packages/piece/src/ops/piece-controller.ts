@@ -3,6 +3,7 @@ import {
   type CellPath,
   ContextualFlowControl,
   extractDefaultValues,
+  formatFabricRef,
   getMetaLink,
   getPatternIdentityRef,
   getPatternSource,
@@ -168,19 +169,28 @@ interface StoredCellTopology {
   opaqueHandle: boolean;
 }
 
+/** Tooling-facing source locator for a running pattern. */
+export interface PiecePatternSourceRef {
+  /** Immutable in-fabric reference to the verified source closure. */
+  ref: string;
+  /** Authored entry path within the program's compilation root. */
+  entry?: string;
+  /** Optional mutable/update provenance carried by `patternSource`. */
+  origin?: string;
+}
+
 /**
  * Tooling-facing reference to the pattern currently running a piece.
  *
  * `identity` is the prefix-free module hash stored in `patternIdentity`;
- * `identity` + `symbol` are the authoritative content-addressed pointer.
- * `source` is a best-effort human/discovery locator: explicit `patternSource`
- * provenance when the piece tracks one, otherwise the authored entry filename
- * recovered from the current pattern's verified source closure.
+ * `identity` + `symbol` are the authoritative executable pointer. `source.ref`
+ * names the immutable source closure; optional entry and origin fields aid
+ * discovery without changing that identity.
  */
 export interface PiecePatternRef {
   identity: string;
   symbol: string;
-  source?: string;
+  source: PiecePatternSourceRef;
 }
 
 function storedCellTopology(
@@ -2450,9 +2460,14 @@ export class PieceController<T = unknown> {
     const ref = getPatternIdentityRef(this.#cell);
     if (!ref) return undefined;
 
+    const source: PiecePatternSourceRef = {
+      ref: formatFabricRef({
+        ref: { kind: "uri", scheme: "pattern", hash: ref.identity },
+      }),
+    };
     const trackedSource = getPatternSource(this.#cell);
     if (trackedSource !== undefined) {
-      return { ...ref, source: trackedSource };
+      return { ...ref, source: { ...source, origin: trackedSource } };
     }
 
     try {
@@ -2462,12 +2477,12 @@ export class PieceController<T = unknown> {
           this.#manager.getSpace(),
         );
       return program?.main === undefined
-        ? ref
-        : { ...ref, source: program.main };
+        ? { ...ref, source }
+        : { ...ref, source: { ...source, entry: program.main } };
     } catch {
       // The content pointer remains useful even if the source closure is
       // unavailable or unreadable in this space.
-      return ref;
+      return { ...ref, source };
     }
   }
 

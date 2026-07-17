@@ -115,18 +115,39 @@ async function readMountedPieceMeta(
   }
 
   const rawPatternRef = meta.patternRef;
+  const rawPatternSource = typeof rawPatternRef === "object" &&
+      rawPatternRef !== null && !Array.isArray(rawPatternRef)
+    ? (rawPatternRef as Record<string, unknown>).source
+    : undefined;
+  const patternSource = typeof rawPatternSource === "object" &&
+      rawPatternSource !== null && !Array.isArray(rawPatternSource) &&
+      typeof (rawPatternSource as Record<string, unknown>).ref === "string"
+    ? {
+      ref: (rawPatternSource as Record<string, unknown>).ref as string,
+      ...(typeof (rawPatternSource as Record<string, unknown>).entry ===
+          "string"
+        ? {
+          entry: (rawPatternSource as Record<string, unknown>).entry as string,
+        }
+        : {}),
+      ...(typeof (rawPatternSource as Record<string, unknown>).origin ===
+          "string"
+        ? {
+          origin: (rawPatternSource as Record<string, unknown>)
+            .origin as string,
+        }
+        : {}),
+    }
+    : undefined;
   const patternRef = typeof rawPatternRef === "object" &&
       rawPatternRef !== null && !Array.isArray(rawPatternRef) &&
       typeof (rawPatternRef as Record<string, unknown>).identity === "string" &&
-      typeof (rawPatternRef as Record<string, unknown>).symbol === "string"
+      typeof (rawPatternRef as Record<string, unknown>).symbol === "string" &&
+      patternSource !== undefined
     ? {
       identity: (rawPatternRef as Record<string, unknown>).identity as string,
       symbol: (rawPatternRef as Record<string, unknown>).symbol as string,
-      ...(typeof (rawPatternRef as Record<string, unknown>).source === "string"
-        ? {
-          source: (rawPatternRef as Record<string, unknown>).source as string,
-        }
-        : {}),
+      source: patternSource,
     }
     : undefined;
 

@@ -83,7 +83,8 @@ export function formatPatternRef(
   patternRef: PiecePatternRef | undefined,
 ): string {
   if (patternRef === undefined) return "<unknown>";
-  return patternRef.source ?? formatPatternIdentity(patternRef);
+  return patternRef.source.origin ?? patternRef.source.entry ??
+    patternRef.source.ref;
 }
 
 export function formatPatternIdentity(
@@ -267,7 +268,7 @@ export const piece = new Command()
   )
   .option(
     "--root <path:string>",
-    "Root directory for resolving imports. Allows imports from parent directories within this root.",
+    "Root directory for imports and authored source paths. Use a repository root to preserve repository-relative paths.",
   )
   .option("--slug <slug:string>", "Slug URL/address for this piece.")
   .action(async (options, main) => {
@@ -391,7 +392,7 @@ export const piece = new Command()
   )
   .option(
     "--root <path:string>",
-    "Root directory for resolving imports. Allows imports from parent directories within this root.",
+    "Root directory for imports and authored source paths. Use a repository root to preserve repository-relative paths.",
   )
   .arguments("<main:string>")
   .action(async (options, mainPath) => {
@@ -450,6 +451,7 @@ export const piece = new Command()
 Name: ${pieceData.name || "<no name>"}
 Pattern: ${formatPatternRef(pieceData.patternRef)}
 Pattern Ref: ${formatPatternIdentity(pieceData.patternRef)}
+Source Ref: ${pieceData.patternRef?.source.ref ?? "<unknown>"}
 
 --- Source (Inputs) ---`;
 

@@ -669,7 +669,9 @@ export class CellBridge {
     const changed = next.summary !== current.summary ||
       next.patternRef?.identity !== current.patternRef?.identity ||
       next.patternRef?.symbol !== current.patternRef?.symbol ||
-      next.patternRef?.source !== current.patternRef?.source;
+      next.patternRef?.source.ref !== current.patternRef?.source.ref ||
+      next.patternRef?.source.entry !== current.patternRef?.source.entry ||
+      next.patternRef?.source.origin !== current.patternRef?.source.origin;
     state.pieceManifest.set(pieceId, next);
     return changed;
   }

@@ -5,6 +5,7 @@ import {
   Cell,
   entityIdFrom,
   experimentalOptionsFromEnv,
+  formatFabricRef,
   getPatternIdentityRef,
   isSlugAddress,
   NAME,
@@ -1227,7 +1228,21 @@ async function inspectSlugTargetCell(
   const name = isRecord(result) && typeof result[NAME] === "string"
     ? result[NAME]
     : undefined;
-  const patternRef = getPatternIdentityRef(target);
+  const identityRef = getPatternIdentityRef(target);
+  const patternRef: PiecePatternRef | undefined = identityRef === undefined
+    ? undefined
+    : {
+      ...identityRef,
+      source: {
+        ref: formatFabricRef({
+          ref: {
+            kind: "uri",
+            scheme: "pattern",
+            hash: identityRef.identity,
+          },
+        }),
+      },
+    };
 
   return {
     id: slug,

@@ -259,7 +259,10 @@ Deno.test("CellBridge.loadPieceTree creates meta.json with a pattern reference",
       Promise.resolve({
         identity: "A".repeat(43),
         symbol: "default",
-        source: "/notes/note.tsx",
+        source: {
+          ref: `cf:pattern:${"A".repeat(43)}`,
+          entry: "/notes/note.tsx",
+        },
       }),
     input: {
       getCell: () => Promise.resolve(makeCell({}, undefined)),
@@ -283,7 +286,10 @@ Deno.test("CellBridge.loadPieceTree creates meta.json with a pattern reference",
   assertEquals(meta.patternRef, {
     identity: "A".repeat(43),
     symbol: "default",
-    source: "/notes/note.tsx",
+    source: {
+      ref: `cf:pattern:${"A".repeat(43)}`,
+      entry: "/notes/note.tsx",
+    },
   });
 });
 
@@ -1537,7 +1543,10 @@ Deno.test("CellBridge.updatePiecesJson writes cached manifest data without piece
     patternRef: {
       identity: "A".repeat(43),
       symbol: "default",
-      source: "/alpha.tsx",
+      source: {
+        ref: `cf:pattern:${"A".repeat(43)}`,
+        entry: "/alpha.tsx",
+      },
     },
   });
   state.pieceManifest.set("of:beta", {
@@ -1559,7 +1568,10 @@ Deno.test("CellBridge.updatePiecesJson writes cached manifest data without piece
       patternRef: {
         identity: "A".repeat(43),
         symbol: "default",
-        source: "/alpha.tsx",
+        source: {
+          ref: `cf:pattern:${"A".repeat(43)}`,
+          entry: "/alpha.tsx",
+        },
       },
     },
     {
@@ -1622,7 +1634,10 @@ Deno.test("CellBridge refreshes pattern references after an in-place swap", asyn
   let patternRef = {
     identity: "A".repeat(43),
     symbol: "default",
-    source: "/notes/note.tsx",
+    source: {
+      ref: `cf:pattern:${"A".repeat(43)}`,
+      entry: "/notes/note.tsx",
+    },
   };
   const piece = {
     id: "of:swapped-piece",
@@ -1650,7 +1665,10 @@ Deno.test("CellBridge refreshes pattern references after an in-place swap", asyn
   patternRef = {
     identity: "B".repeat(43),
     symbol: "default",
-    source: "/notes/note.tsx",
+    source: {
+      ref: `cf:pattern:${"B".repeat(43)}`,
+      entry: "/notes/note.tsx",
+    },
   };
   const pieceIno = state.pieceInos.get(projectedName)!;
   const refreshed = defer();

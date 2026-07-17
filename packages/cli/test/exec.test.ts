@@ -1030,7 +1030,10 @@ describe("mounted callable resolution and execution", () => {
       patternRef: {
         identity: "A".repeat(43),
         symbol: "default",
-        source: "/notes/note.tsx",
+        source: {
+          ref: `cf:pattern:${"A".repeat(43)}`,
+          entry: "/notes/note.tsx",
+        },
       },
     });
     const harness = createExecHarness({
@@ -1067,7 +1070,10 @@ describe("mounted callable resolution and execution", () => {
     expect(resolved.pieceMeta.patternRef).toEqual({
       identity: "A".repeat(43),
       symbol: "default",
-      source: "/notes/note.tsx",
+      source: {
+        ref: `cf:pattern:${"A".repeat(43)}`,
+        entry: "/notes/note.tsx",
+      },
     });
   });
 
@@ -2183,7 +2189,11 @@ async function createMountedFile(
     patternRef?: {
       identity: string;
       symbol: string;
-      source?: string;
+      source: {
+        ref: string;
+        entry?: string;
+        origin?: string;
+      };
     };
   },
 ): Promise<string> {

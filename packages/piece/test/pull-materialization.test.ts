@@ -147,12 +147,13 @@ function namedPattern(name: string, multiplier: number): Pattern {
 function compiledMultiplierProgram(
   version: string,
   multiplier: number,
+  main = "/main.tsx",
 ): RuntimeProgram {
   return {
-    main: "/main.tsx",
+    main,
     files: [
       {
-        name: "/main.tsx",
+        name: main,
         contents: [
           "import { pattern, lift } from 'commonfabric';",
           `const multiply = lift((input: number) => input * ${multiplier});`,
@@ -4753,7 +4754,11 @@ describe("piece pull materialization", () => {
       output: 10,
     });
 
-    await controller.setPattern(compiledMultiplierProgram("v2", 10));
+    await controller.setPattern(compiledMultiplierProgram(
+      "v2",
+      10,
+      "/packages/patterns/examples/multiplier.tsx",
+    ));
     await manager.runtime.idle();
     await manager.synced();
 
@@ -4793,7 +4798,10 @@ describe("piece pull materialization", () => {
       );
       expect(await freshPiece.getPatternRef()).toEqual({
         ...freshRef,
-        source: "/main.tsx",
+        source: {
+          ref: `cf:pattern:${freshRef!.identity}`,
+          entry: "/packages/patterns/examples/multiplier.tsx",
+        },
       });
     } finally {
       await freshRuntime.dispose();
