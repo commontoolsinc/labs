@@ -22,9 +22,9 @@ import {
   handler,
   NAME,
   pattern,
-  safeDateNow,
   TILE_UI,
   UI,
+  wish,
   Writable,
 } from "commonfabric";
 import GmailExtractor, { type Email } from "../core/gmail-extractor.tsx";
@@ -73,11 +73,10 @@ function cleanContent(content: string): string {
 /**
  * Format date for display (relative dates for recent, otherwise short format)
  */
-function formatDate(dateStr: string): string {
+function formatDate(dateStr: string, nowMs: number): string {
   try {
     const date = new Date(dateStr);
-    const now = new Date(safeDateNow());
-    const diffMs = now.getTime() - date.getTime();
+    const diffMs = nowMs - date.getTime();
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
     if (diffDays === 0) {
@@ -210,6 +209,10 @@ export default pattern<PatternInput, PatternOutput>(() => {
   const hiddenNotes = new Writable<string[]>([]).for("hiddenNotes");
   const processingNotes = new Writable<string[]>([]).for("processingNotes");
   const sortNewestFirst = new Writable(true).for("sortNewestFirst");
+
+  // Reactive clock for relative date labels (Yesterday / weekday / time of day),
+  // ticking every 60 seconds so the displayed labels refresh over time.
+  const nowCell = wish<number>({ query: "#now/60" });
 
   // Use createGoogleAuth for scopes that include gmailModify.
   const {
@@ -512,7 +515,10 @@ export default pattern<PatternInput, PatternOutput>(() => {
                               color: "#9ca3af",
                             }}
                           >
-                            {formatDate(note.date)}
+                            {formatDate(
+                              note.date,
+                              nowCell.result ?? new Date(note.date).getTime(),
+                            )}
                           </span>
                           <div style={{ display: "flex", gap: "8px" }}>
                             {/* Copy button - copies both plain text and HTML for rich pasting */}

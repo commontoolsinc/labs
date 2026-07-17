@@ -8,7 +8,6 @@ import {
   pattern,
   type PerSpace,
   type PerUser,
-  safeDateNow,
   Stream,
   UI,
   type VNode,
@@ -117,7 +116,7 @@ const join = handler<JoinEvent, {
       profile,
       name: trimmed,
       avatar: (avatar ?? "").trim(),
-      joinedAt: safeDateNow(),
+      joinedAt: Date.now(),
     });
   }
   viewer.set({ joined: true, joinedName: trimmed });

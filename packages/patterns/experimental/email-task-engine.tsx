@@ -24,7 +24,6 @@ import {
   handler,
   NAME,
   pattern,
-  safeDateNow,
   schema,
   Stream,
   TILE_UI,
@@ -98,10 +97,14 @@ type NotePiece = {
 /**
  * Format date for display (relative dates for recent, otherwise short format)
  */
-function formatDate(dateStr: string): string {
+function formatDate(dateStr: string, nowMs: number): string {
   try {
     const date = new Date(dateStr);
-    const now = new Date(safeDateNow());
+    if (!Number.isFinite(nowMs)) {
+      // Clock not yet resolved; show the absolute short date.
+      return date.toLocaleDateString([], { month: "short", day: "numeric" });
+    }
+    const now = new Date(nowMs);
     const diffMs = now.getTime() - date.getTime();
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
@@ -463,6 +466,9 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   // Get all pieces for note discovery
   const { allPieces } = wish<{ allPieces: NotePiece[] }>({ query: "#default" })
     .result!;
+
+  // Reactive clock for relative-date display; ticks every 60s so labels refresh.
+  const nowCell = wish<number>({ query: "#now/60" });
 
   // Use createGoogleAuth for scopes that include gmailModify
   const {
@@ -916,7 +922,7 @@ Respond with the most appropriate action.`;
                               }}
                             >
                               {analysis.email.from} •{" "}
-                              {formatDate(analysis.email.date)}
+                              {formatDate(analysis.email.date, nowCell.result!)}
                             </div>
                             <div
                               style={{

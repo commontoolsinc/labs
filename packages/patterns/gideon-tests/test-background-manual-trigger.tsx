@@ -30,15 +30,7 @@
  * - Requires production-style ACL configuration
  * - Code review verification is sufficient for claim validation
  */
-import {
-  Default,
-  handler,
-  NAME,
-  pattern,
-  safeDateNow,
-  UI,
-  Writable,
-} from "commonfabric";
+import { Default, handler, NAME, pattern, UI, Writable } from "commonfabric";
 
 interface Input {
   runCount: number | Default<0>;
@@ -50,7 +42,7 @@ const browserTrigger = handler<
   unknown,
   { runCount: Writable<number>; logs: Writable<string[]> }
 >((_event, state) => {
-  const now = safeDateNow();
+  const now = Date.now();
   const count = state.runCount.get() + 1;
   state.runCount.set(count);
   state.logs.push(`[BROWSER] Run #${count} at ${new Date(now).toISOString()}`);
@@ -73,7 +65,7 @@ const bgUpdateHandler = handler<
   unknown,
   { runCount: Writable<number>; logs: Writable<string[]> }
 >((_event, state) => {
-  const now = safeDateNow();
+  const now = Date.now();
   const count = state.runCount.get() + 1;
   state.runCount.set(count);
   state.logs.push(

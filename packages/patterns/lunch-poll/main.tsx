@@ -45,9 +45,10 @@
  * and the UI (tallies, swatches, per-option highlights, header count, logVisit
  * snapshots) only shows votes cast on the current day. Older votes stay stored
  * but hidden — the (voter, option) vote key means a re-cast overwrites the same
- * entity, so they don't accumulate. "Today" is the pattern-body clock read
- * (`loadedAt`, re-evaluated in every viewing runtime; the SES surface has no
- * timers), overridden by a per-session cell the vote handlers refresh so a tab
+ * entity, so they don't accumulate. "Today" is the one-shot `#now` wish
+ * (`loadedAt`, resolved in every viewing runtime; null — shown as an empty
+ * vote view — until it resolves), overridden by a per-session cell the vote
+ * handlers refresh so a tab
  * left open across midnight snaps forward on the next interaction. The day
  * boundary is the runtime's local timezone (the viewer's, in the browser); two
  * viewers in different timezones can see different vote sets around midnight.
@@ -59,14 +60,13 @@ import {
   Default,
   handler,
   NAME,
-  nonPrivateRandom,
   pattern,
   type PerSpace,
   type PerUser,
-  safeDateNow,
   Stream,
   UI,
   type VNode,
+  wish,
   Writable,
 } from "commonfabric";
 import PollOptionCard from "./poll-option-card.tsx";
@@ -229,8 +229,8 @@ const VOTE_SWATCH: Record<VoteColor, string> = {
 const trimmedName = (n: string | undefined) => (n ?? "").trim();
 
 const newOptionId = () =>
-  `o_${safeDateNow().toString(36)}_${
-    Math.floor(nonPrivateRandom() * 1e6).toString(36)
+  `o_${Date.now().toString(36)}_${
+    Math.floor(Math.random() * 1e6).toString(36)
   }`;
 
 // The deterministic key a vote is addressed by: a voter's vote for one option.
@@ -306,8 +306,8 @@ const dayLabelOf = (ms: number): string => {
 };
 
 const newHistoryId = () =>
-  `h_${safeDateNow().toString(36)}_${
-    Math.floor(nonPrivateRandom() * 1e6).toString(36)
+  `h_${Date.now().toString(36)}_${
+    Math.floor(Math.random() * 1e6).toString(36)
   }`;
 
 // Parse a "YYYY-MM-DD" draft (from the host's date input) into a timestamp,
@@ -315,9 +315,9 @@ const newHistoryId = () =>
 // from a handler, so reading the clock here is fine.
 const parseVisitDate = (draft: string | undefined): number => {
   const s = (draft ?? "").trim();
-  if (!s) return safeDateNow();
+  if (!s) return Date.now();
   const t = new Date(`${s}T00:00:00`).getTime();
-  return Number.isNaN(t) ? safeDateNow() : t;
+  return Number.isNaN(t) ? Date.now() : t;
 };
 
 // Cap the stored visit log at the most-recent MAX_HISTORY entries (by date). A
@@ -395,7 +395,7 @@ const castVote = handler<CastVoteEvent, {
   if (!me) return;
   // Reading the clock is fine here (handler, not computed). Refresh the
   // session's "today" so the current-day filter tracks the interaction.
-  const now = safeDateNow();
+  const now = Date.now();
   today.set(now);
   // My vote for this option has a deterministic address, so this reads and
   // edits just that one vote — never the whole list. Clicking the current
@@ -448,7 +448,7 @@ const clearMyVote = handler<ClearVoteEvent, {
   const me = trimmedName(myName.get());
   if (!me) return;
   // Vote-affecting interaction → refresh the session's current-day filter.
-  today.set(safeDateNow());
+  today.set(Date.now());
   const key = voteKey(me, optionId);
   votes.removeByValue(votes.elementById(key));
   clearVoteEntity(votes, key);
@@ -467,7 +467,7 @@ const logVisit = handler<LogVisitEvent, {
   adminName: NameCell;
   visitDate: NameCell;
   today: TodayCell;
-  loadedAt: number;
+  loadedAt: number | null;
 }>(
   (
     { optionId, title, wentAt },
@@ -509,15 +509,21 @@ const logVisit = handler<LogVisitEvent, {
     // option title (options can be removed later; the title is the record).
     // Only today's votes are "current opinion": stale votes are hidden from
     // the UI, so they stay out of the snapshot too. Same day source as the
-    // UI's `todaysVotes` (`today` override, else this session's load time) —
+    // UI's `todaysVotes` (`today` override, else the `#now` load snapshot) —
     // the snapshot must capture what the host is looking at, not the wall
     // clock's day, or a tab crossing midnight logs an empty new-day snapshot
-    // of a board still showing yesterday's votes.
-    const nowDay = dayKeyOf(today.get() || loadedAt);
+    // of a board still showing yesterday's votes. While `#now` is still
+    // resolving (no override, null `loadedAt`) the board shows no votes, so
+    // the snapshot stays empty for that window too.
+    const nowRef = today.get() || loadedAt;
+    const nowDay = nowRef ? dayKeyOf(nowRef) : null;
     const titleById = new Map(options.get().map((o) => [o.id, o.title]));
     const voteSnapshot: VoteSnapshot[] = [];
     for (const v of votes.get()) {
-      if (typeof v.castAt !== "number" || dayKeyOf(v.castAt) !== nowDay) {
+      if (
+        nowDay === null || typeof v.castAt !== "number" ||
+        dayKeyOf(v.castAt) !== nowDay
+      ) {
         continue; // stale (previous-day or pre-castAt) vote → not current
       }
       const optTitle = trimmedName(titleById.get(v.optionId));
@@ -666,7 +672,8 @@ export interface CozyPollOutput {
   userCount: number;
   optionCount: number;
   voteCount: number;
-  // The session's current local day ("YYYY-MM-DD") that votes are filtered to.
+  // The session's current local day ("YYYY-MM-DD") that votes are filtered
+  // to; "" until the `#now` wish resolves.
   todayDate: string;
   // Votes cast on the current day — the only votes the UI shows and tallies.
   todaysVotes: readonly Vote[];
@@ -723,14 +730,17 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // Host's backdate field for "we went here" — a "YYYY-MM-DD" draft, blank
     // means today. Per-session like the other form drafts.
     const visitDate = Writable.perSession.of<string>("");
-    // "Now" at pattern evaluation — recomputed in EVERY viewing runtime
-    // (pattern bodies run per session; the calendar idiom). This, not the
-    // cell below, is what makes "today" defined for a session that hasn't
+    // "Now" at load — the one-shot `#now` wish, resolved in EVERY viewing
+    // runtime (pattern bodies run per session; the calendar idiom). This, not
+    // the cell below, is what makes "today" defined for a session that hasn't
     // interacted yet: a scoped cell's `.of()` initial is seeded only into the
     // piece-creating session's partition, and every other session reads
     // undefined from it (see docs/development/debugging/gotchas/
-    // scoped-cell-pitfalls.md #5).
-    const loadedAt = safeDateNow();
+    // scoped-cell-pitfalls.md #5). The body cannot read the ambient clock, so
+    // `loadedAt` reads null until the wish resolves; every downstream read
+    // guards that load window (an empty vote view and a placeholder date).
+    const loadedAtWish = wish<number>({ query: "#now" });
+    const loadedAt = computed(() => loadedAtWish.result ?? null);
     // Handler-refreshed override (ms epoch) so a tab left open across
     // midnight snaps forward on the next vote interaction. 0 = "this session
     // hasn't interacted"; every read falls back to `loadedAt`. The initial is
@@ -792,10 +802,17 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // voter's vote entity resolves (same reason `ranked` is computed here,
     // not per-option — see the swatch comment below).
     // `|| loadedAt` (not ??) covers both the unwritten cross-session read
-    // (undefined) and the seeded 0.
-    const todayKey = computed(() => dayKeyOf(today.get() || loadedAt));
+    // (undefined) and the seeded 0. The combined value is null while `#now`
+    // is still resolving; for that window the day key reads "" and the
+    // current-day vote set is empty.
+    const todayKey = computed(() => {
+      const ref = today.get() || loadedAt;
+      return ref ? dayKeyOf(ref) : "";
+    });
     const todaysVotes = computed(() => {
-      const key = dayKeyOf(today.get() || loadedAt);
+      const ref = today.get() || loadedAt;
+      if (!ref) return EMPTY_VOTES;
+      const key = dayKeyOf(ref);
       return votes.filter((v) =>
         typeof v.castAt === "number" && dayKeyOf(v.castAt) === key
       );
@@ -883,7 +900,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     const u = userCount ?? 0;
                     const o = optionCount ?? 0;
                     const v = todayVoteCount ?? 0;
-                    const todayLabel = dayLabelOf(today.get() || loadedAt);
+                    const todayRef = today.get() || loadedAt;
+                    const todayLabel = todayRef ? dayLabelOf(todayRef) : "…";
                     const admin = trimmedName(adminName);
                     const viewer = me;
                     const amAdmin = isAdmin;

@@ -7,7 +7,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/extractor-building-blocks.test.tsx --root packages/patterns/google --verbose
  */
-import { computed, pattern, safeDateNow, Writable } from "commonfabric";
+import { computed, pattern, wish, Writable } from "commonfabric";
 import BillExtractor, { processBills } from "./bill-extractor/index.tsx";
 import { createBillKey } from "./bill-extractor/helpers.ts";
 import GmailExtractor, {
@@ -31,8 +31,8 @@ function emptyAuth() {
   });
 }
 
-function isoDateDaysFromNow(days: number): string {
-  const date = new Date(safeDateNow());
+function isoDateDaysFromNow(nowMs: number, days: number): string {
+  const date = new Date(nowMs);
   date.setDate(date.getDate() + days);
   return date.toISOString().slice(0, 10);
 }
@@ -138,15 +138,19 @@ export default pattern(() => {
       !rendered.includes("abc123");
   });
 
+  const nowCell = wish<number>({ query: "#now" });
+
   const assert_process_bills_applies_payment_rules = computed(() => {
-    const upcomingDueDate = isoDateDaysFromNow(10);
-    const oldDueDate = isoDateDaysFromNow(-60);
-    const manualDueDate = isoDateDaysFromNow(20);
+    const nowMs = nowCell.result;
+    if (nowMs == null) return false;
+    const upcomingDueDate = isoDateDaysFromNow(nowMs, 10);
+    const oldDueDate = isoDateDaysFromNow(nowMs, -60);
+    const manualDueDate = isoDateDaysFromNow(nowMs, 20);
     const bills = processBills(
       [
         {
           emailId: "older-duplicate",
-          emailDate: isoDateDaysFromNow(-2),
+          emailDate: isoDateDaysFromNow(nowMs, -2),
           analysis: {
             result: {
               emailType: "bill_due",
@@ -159,7 +163,7 @@ export default pattern(() => {
         },
         {
           emailId: "newer-bill",
-          emailDate: isoDateDaysFromNow(-1),
+          emailDate: isoDateDaysFromNow(nowMs, -1),
           analysis: {
             result: {
               emailType: "bill_due",
@@ -172,7 +176,7 @@ export default pattern(() => {
         },
         {
           emailId: "manual",
-          emailDate: isoDateDaysFromNow(-1),
+          emailDate: isoDateDaysFromNow(nowMs, -1),
           analysis: {
             result: {
               emailType: "statement_ready",
@@ -185,7 +189,7 @@ export default pattern(() => {
         },
         {
           emailId: "old",
-          emailDate: isoDateDaysFromNow(-70),
+          emailDate: isoDateDaysFromNow(nowMs, -70),
           analysis: {
             result: {
               emailType: "payment_reminder",
@@ -198,7 +202,7 @@ export default pattern(() => {
         },
         {
           emailId: "ignored",
-          emailDate: isoDateDaysFromNow(-1),
+          emailDate: isoDateDaysFromNow(nowMs, -1),
           analysis: {
             result: {
               emailType: "other",
@@ -213,6 +217,7 @@ export default pattern(() => {
       { "1111": [upcomingDueDate] },
       [createBillKey("2222", manualDueDate)],
       false,
+      nowMs,
     );
 
     const paidByEmail = bills.find((bill) => bill.identifier === "1111");

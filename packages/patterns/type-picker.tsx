@@ -21,7 +21,6 @@ import {
   handler,
   NAME,
   pattern,
-  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";
@@ -101,7 +100,7 @@ const applyTemplate = handler<
   if (selfEntry) {
     const trashedSelf: TrashedSubPieceEntry = {
       ...selfEntry,
-      trashedAt: new Date(safeDateNow()).toISOString(),
+      trashedAt: new Date().toISOString(),
     };
     trashedEntries.push(trashedSelf);
   }
@@ -128,7 +127,7 @@ const dismiss = handler<
   // Add to trash
   const trashedSelf: TrashedSubPieceEntry = {
     ...selfEntry,
-    trashedAt: new Date(safeDateNow()).toISOString(),
+    trashedAt: new Date().toISOString(),
   };
   trashedEntries.push(trashedSelf);
 });

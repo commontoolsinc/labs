@@ -7,7 +7,6 @@ import {
   pattern,
   type PerSession,
   type PerUser,
-  safeDateNow,
   Stream,
   UI,
   type VNode,
@@ -98,7 +97,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     if (!trimmed) return;
     const piece = Topic({
       title: trimmed,
-      createdAt: safeDateNow(),
+      createdAt: Date.now(),
       createdByName: (myName.get() ?? "").trim() || "someone",
       myName,
       // The board's own list, so the detail page can derive its connections

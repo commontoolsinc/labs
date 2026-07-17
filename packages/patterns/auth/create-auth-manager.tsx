@@ -20,7 +20,6 @@ import {
   lift,
   navigateTo,
   pattern,
-  safeDateNow,
   type Stream,
   UI,
   type VNode,
@@ -39,10 +38,7 @@ import type {
 import type { AuthManagerDescriptor } from "./auth-manager-descriptor.ts";
 import { STATUS_COLORS, STATUS_MESSAGES } from "./auth-manager-descriptor.ts";
 import { formatTimeRemaining } from "./auth-ui-helpers.tsx";
-import {
-  startReactiveClock,
-  TOKEN_EXPIRY_THRESHOLD_MS,
-} from "./auth-reactive.ts";
+import { TOKEN_EXPIRY_THRESHOLD_MS } from "./auth-reactive.ts";
 
 // Re-export for consumers
 export type {
@@ -146,7 +142,7 @@ const attemptRefresh = handler<
   }
   refreshing.set(true);
   refreshFailed.set(false);
-  refreshStartedAt.set(safeDateNow());
+  refreshStartedAt.set(Date.now());
 
   refreshStream.send({});
 });
@@ -159,7 +155,7 @@ const deriveAuthState = lift<{
   descriptor: AuthManagerDescriptor;
   piece?: AuthPiece | null;
   requiredScopes?: string[];
-  now: number;
+  now?: number;
   debugMode?: boolean;
 }, DerivedAuthState>(({
   descriptor,
@@ -178,7 +174,8 @@ const deriveAuthState = lift<{
   const tokenExpiresAt = typeof authData?.expiresAt === "number"
     ? authData.expiresAt
     : null;
-  const tokenTimeRemaining = tokenExpiresAt === null
+  // Token timing is unknown until the reactive clock materializes.
+  const tokenTimeRemaining = tokenExpiresAt === null || now == null
     ? null
     : tokenExpiresAt - now;
 
@@ -195,7 +192,8 @@ const deriveAuthState = lift<{
     !grantedScopes.includes(descriptor.scopes[key]?.scopeString ?? key)
   );
   const hasRequiredScopes = missingScopes.length === 0;
-  const isTokenExpired = tokenExpiresAt !== null && tokenExpiresAt < now;
+  const isTokenExpired = tokenExpiresAt !== null && now != null &&
+    tokenExpiresAt < now;
 
   let currentState: AuthState;
   if (!auth) {
@@ -350,8 +348,9 @@ const AuthManagerBasePattern = pattern<AuthManagerBaseInput, AuthManagerOutput>(
       scope: [".", "~"],
     });
 
-    const now = new Writable(safeDateNow());
-    startReactiveClock(now);
+    // Ticking #now wish (one-second granularity): drives the live token-expiry
+    // display and the 15-second refresh-failure timeout watcher below.
+    const nowCell = wish<number>({ query: "#now/1" });
 
     // Normalize the wish-provided UI into a local render-node contract so
     // consumers see a stable UI field even when the underlying wish result
@@ -361,7 +360,7 @@ const AuthManagerBasePattern = pattern<AuthManagerBaseInput, AuthManagerOutput>(
       descriptor,
       piece: wishResult.result,
       requiredScopes,
-      now,
+      now: nowCell.result,
       debugMode,
     });
     const auth = authState.auth;
@@ -383,8 +382,10 @@ const AuthManagerBasePattern = pattern<AuthManagerBaseInput, AuthManagerOutput>(
     // Reactive watcher: detect when a refresh succeeds
     computed(() => {
       if (!refreshing.get()) return;
+      const nowMs = nowCell.result;
+      if (nowMs == null) return;
       const expiresAt = authState.tokenExpiresAt ?? 0;
-      if (expiresAt > now.get()) {
+      if (expiresAt > nowMs) {
         refreshing.set(false);
         refreshFailed.set(false);
         refreshStartedAt.set(0);
@@ -394,9 +395,11 @@ const AuthManagerBasePattern = pattern<AuthManagerBaseInput, AuthManagerOutput>(
     // Mark the refresh attempt as failed if no new token arrives in time.
     computed(() => {
       if (!refreshing.get()) return;
+      const nowMs = nowCell.result;
+      if (nowMs == null) return;
       const startedAt = refreshStartedAt.get();
       if (!startedAt) return;
-      if (now.get() - startedAt >= REFRESH_FAILURE_TIMEOUT_MS) {
+      if (nowMs - startedAt >= REFRESH_FAILURE_TIMEOUT_MS) {
         refreshing.set(false);
         refreshFailed.set(true);
         refreshStartedAt.set(0);

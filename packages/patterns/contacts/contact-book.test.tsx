@@ -10,7 +10,7 @@
  *
  * Run: deno task cf test packages/patterns/counter/counter.test.tsx --verbose
  */
-import { action, computed, pattern, safeDateNow } from "commonfabric";
+import { action, computed, pattern } from "commonfabric";
 import { default as ContactBook, matchesSearch } from "./contact-book.tsx";
 import { type Contact } from "./contact-detail.tsx";
 
@@ -26,7 +26,7 @@ const testContact: Contact = {
     "common",
   ],
   phone: "0",
-  createdAt: safeDateNow(),
+  createdAt: 0,
 };
 
 export default pattern(() => {

@@ -14,7 +14,7 @@
  *
  * NOTE: Uses .filter(() => true).length for array lengths per reactivity tracking note.
  */
-import { action, computed, pattern, safeDateNow, UI } from "commonfabric";
+import { action, computed, pattern, UI, wish } from "commonfabric";
 import {
   findNodeById,
   findNodeByProp,
@@ -26,24 +26,35 @@ import type { ParkingSpot, Person, SpotRequest, Vehicle } from "./main.tsx";
 
 const len = <T,>(arr: T[]): number => arr.filter(() => true).length;
 
-const toLocalDateStr = (d: Date): string =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${
+const toLocalDateStr = (timestamp: number): string => {
+  const d = new Date(timestamp);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${
     String(d.getDate()).padStart(2, "0")
   }`;
+};
 
 function addDays(timestamp: number, days: number): string {
   const d = new Date(timestamp);
   d.setDate(d.getDate() + days);
-  return toLocalDateStr(d);
+  return toLocalDateStr(d.getTime());
 }
 
 export default pattern(() => {
-  const now = safeDateNow();
-  // Keep every scenario safely in the future. The pattern's #now wish can
-  // advance while this large test runs (notably across midnight), so using the
-  // construction day's date makes later actions nondeterministically "past".
-  const testDate = addDays(now, 7);
-  const nextTestDate = addDays(now, 8);
+  // Dates derive from the reactive #now clock (one-shot, coarsened to 1s) rather
+  // than reading the ambient wall clock at pattern-body evaluation, which the
+  // time-capability gate blocks outside a handler. Keep every scenario safely in
+  // the future (+7/+8 days): the #now wish can advance while this large test runs
+  // (notably across midnight), so anchoring later actions a week out keeps them
+  // from becoming nondeterministically "past". testDate/nextTestDate are computed
+  // cells; they read as "" until #now resolves, and the runtime re-runs the
+  // dependent actions and assertions once it does.
+  const nowCell = wish<number>({ query: "#now" });
+  const testDate = computed(() =>
+    nowCell.result == null ? "" : addDays(nowCell.result, 7)
+  );
+  const nextTestDate = computed(() =>
+    nowCell.result == null ? "" : addDays(nowCell.result, 8)
+  );
 
   // ============================================================
   // Subject 1: People Management

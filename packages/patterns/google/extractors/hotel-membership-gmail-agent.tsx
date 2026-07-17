@@ -14,8 +14,8 @@ import {
   NAME,
   pattern,
   UI,
+  wish,
   Writable,
-  // wish,  // TEMPORARILY DISABLED - may cause self-referential loop
 } from "commonfabric";
 import GmailAgenticSearch, {
   type SearchProgress,
@@ -161,9 +161,10 @@ const HOTEL_RESULT_SCHEMA = {
 // PATTERN
 // ============================================================================
 
-// Helper to generate date filter for recent mode (last 7 days)
-const getRecentDateFilter = (): string => {
-  const weekAgo = new Date();
+// Helper to generate date filter for recent mode (last 7 days).
+// Takes the current time in milliseconds so the caller supplies the clock.
+const getRecentDateFilter = (nowMs: number): string => {
+  const weekAgo = new Date(nowMs);
   weekAgo.setDate(weekAgo.getDate() - 7);
   // Gmail date format: YYYY/MM/DD
   const year = weekAgo.getFullYear();
@@ -284,6 +285,12 @@ const HotelMembershipExtractorV2 = pattern<
     // ========================================================================
     // AGENT GOAL
     // ========================================================================
+    // Current time sourced from the reactive #now cell (one-shot, coarsened to
+    // 1s). The recent-mode date filter is a relative window baked into the LLM
+    // prompt at scan time, not a live-updating display, so a one-shot stamp is
+    // sufficient.
+    const nowCell = wish<number>({ query: "#now" });
+
     // IMPORTANT: Do NOT derive from memberships! Changing the goal during a scan
     // triggers an infinite loop (goal changes → agent restarts → finds membership
     // → goal changes → agent restarts...). Only derive from scan settings.
@@ -292,7 +299,10 @@ const HotelMembershipExtractorV2 = pattern<
       const scanMode = currentScanMode;
       const isQuickMode = max > 0;
       const isRecentMode = scanMode === "recent";
-      const dateFilter = isRecentMode ? getRecentDateFilter() : "";
+      const nowMs = nowCell.result;
+      const dateFilter = isRecentMode && nowMs != null
+        ? getRecentDateFilter(nowMs)
+        : "";
 
       return `Find hotel loyalty program membership numbers in my Gmail.
 

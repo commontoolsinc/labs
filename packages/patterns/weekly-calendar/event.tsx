@@ -11,9 +11,7 @@ import {
   handler,
   NAME,
   navigateTo,
-  nonPrivateRandom,
   pattern,
-  safeDateNow,
   Stream,
   UI,
   Writable,
@@ -21,9 +19,7 @@ import {
 
 // Simple random ID generator
 const generateId = () =>
-  `${safeDateNow().toString(36)}-${
-    nonPrivateRandom().toString(36).slice(2, 11)
-  }`;
+  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 
 // Available colors for events
 const COLORS: string[] = [

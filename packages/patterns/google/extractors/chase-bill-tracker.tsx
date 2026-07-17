@@ -24,6 +24,7 @@ import {
   pattern,
   TILE_UI,
   UI,
+  wish,
   Writable,
 } from "commonfabric";
 import BillExtractor, {
@@ -123,7 +124,12 @@ export default pattern<PatternInput>(
 
     // Create computed arrays in PATTERN scope (not building block scope)
     // This ensures closures in .map() can access pattern-scope variables like manuallyPaid
+    // Reactive #now (ticks each minute) so due-date/overdue math refreshes,
+    // instead of reading the ambient clock in this lift.
+    const nowCell = wish<number>({ query: "#now/60" });
     const bills = computed(() => {
+      const nowMs = nowCell.result;
+      if (nowMs == null) return [];
       // Use .get() to access Writable values inside computed
       const paidKeys = manuallyPaid?.get() || [];
       const isDemoMode = demoMode?.get() ?? true;
@@ -138,6 +144,7 @@ export default pattern<PatternInput>(
         tracker.paymentConfirmations || {},
         paidKeys,
         isDemoMode,
+        nowMs,
       );
     });
 

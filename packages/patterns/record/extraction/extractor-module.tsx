@@ -24,7 +24,6 @@ import {
   type ImageData,
   NAME,
   pattern,
-  safeDateNow,
   toCompactDebugString,
   UI,
   Writable,
@@ -949,7 +948,7 @@ const dismiss = handler<
   parentSubPieces.set(current.filter((e) => e?.type !== "extractor"));
   parentTrashedSubPieces.push({
     ...selfEntry,
-    trashedAt: new Date(safeDateNow()).toISOString(),
+    trashedAt: new Date().toISOString(),
   });
 });
 
@@ -1633,7 +1632,7 @@ const applySelected = handler<
         if (entry) {
           parentTrashedSubPiecesCell.push({
             ...entry,
-            trashedAt: new Date(safeDateNow()).toISOString(),
+            trashedAt: new Date().toISOString(),
           });
         }
       }
