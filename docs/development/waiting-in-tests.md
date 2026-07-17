@@ -412,7 +412,7 @@ this mount. The wait reads once after installing the watch, so a daemon that
 reports before the watch began is still seen, and reads again on every event
 after that.
 
-There is deliberately no deadline on readiness. A deadline can only convert a
+The wait itself sets no deadline, deliberately. A deadline can only convert a
 slow startup — a cold cache, a large space, a loaded machine — into a reported
 failure, and startup carries no liveness signal finer than the process itself:
 the daemon's heartbeat only begins once it is already mounted, so nothing
@@ -425,6 +425,21 @@ Each status write lands by rename, so a read woken by a write sees a complete
 document rather than a half-written one. Unreadable or foreign content reads as
 "not yet reported" rather than as a verdict; the daemon rewrites the file on
 every state change and on its heartbeat.
+
+One bound remains on this path, in a different process. `recordFuseChildPid`
+in `packages/cli/lib/fuse-supervisor.ts` is how the supervisor writes the child
+PID into the mount state file, and the wait above cannot tie any status to this
+mount until it does. It waits for the file by retrying twenty times at fifty
+milliseconds, then gives up, and giving up exits the supervisor, which the wait
+reports as a mount that died during startup. So a machine loaded enough to
+delay the CLI's own state-file write by a second still turns a healthy mount
+into a reported failure — the same shape as the ceiling removed from the wait
+itself, one layer down. Unlike that ceiling, this bound does some real work: it
+is also what stops a supervisor from waiting forever, holding a mount, when the
+CLI dies before writing the file at all. Removing it honestly means giving the
+supervisor an event for the CLI's death rather than a deadline, which changes
+what the CLI hands the supervisor when it spawns it. Until then this is a known
+bound, recorded here rather than left as a bare constant.
 
 The daemon reports `mounted` once it has dispatched its FUSE session loop and
 installed the signal handlers that unmount cleanly, so the state means the
