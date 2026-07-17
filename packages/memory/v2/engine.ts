@@ -5519,18 +5519,37 @@ function schedulerAddressCoveredBy(
 function schedulerRuntimeWritesExceedSummary(
   observation: SchedulerActionObservation,
   summary: CompleteActionScopeSummary,
+  options?: { admitUserOutputWidening?: boolean },
 ): boolean {
   const writeEnvelopes = [
     ...summary.writes,
     ...summary.materializerWriteEnvelopes,
     ...summary.directOutputs,
   ];
+  // §4 output widening (context-lattice C1.2/C1.9c): a user-context run
+  // writes each broad direct output TWICE — the broad instance as a
+  // scope-naming self-redirect link plus the value at the acting
+  // principal's user instance — while the transformer certificate declares
+  // that output ONCE, at the broad address. For CONTEXT-FLOOR derivation
+  // the user leg of such a pair is the same logical output, not evidence
+  // that the certificate under-declares the action (which would wrongly
+  // narrow the floor to session rank). Claimed-commit validation stays
+  // strict: the executor router presents claimed summaries with the lane
+  // instance added explicitly (A7 lockstep).
+  const covered = (address: SchedulerObservationAddress): boolean =>
+    schedulerAddressCoveredBy(address, writeEnvelopes) ||
+    (options?.admitUserOutputWidening === true &&
+      normalizeSchedulerScope(address.scope) === "user" &&
+      schedulerAddressCoveredBy(
+        { ...address, scope: "space" },
+        writeEnvelopes,
+      ));
   return [
     ...observation.actualChangedWrites,
     ...observation.currentKnownWrites,
     ...(observation.declaredWrites ?? []),
     ...(observation.ignoredSchedulingWrites ?? []),
-  ].some((address) => !schedulerAddressCoveredBy(address, writeEnvelopes)) ||
+  ].some((address) => !covered(address)) ||
     observation.materializerWriteEnvelopes.some((address) =>
       !schedulerAddressCoveredBy(
         address,
@@ -5894,7 +5913,9 @@ function schedulerRuntimeContextFloor(
   if (
     ownerSpace === undefined ||
     (summary !== undefined &&
-      (schedulerRuntimeWritesExceedSummary(observation, summary) ||
+      (schedulerRuntimeWritesExceedSummary(observation, summary, {
+        admitUserOutputWidening: true,
+      }) ||
         [...observation.reads, ...observation.shallowReads].some((address) =>
           normalizeSchedulerAddress(address).space !== ownerSpace &&
           !schedulerAddressCoveredBy(address, summary.reads)

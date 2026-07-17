@@ -547,6 +547,16 @@ class DenoSpaceExecutor implements SpaceExecutor {
       this.#revokeClaims();
       this.#detach();
       this.#worker.terminate();
+      // A graceful stop deliberately proceeds while a claimed action is still
+      // in flight (its `run-claimed-action` request stays in `#pending`), and
+      // a revoked lane's activation may never receive its Worker response.
+      // The Worker is now terminated, so no pending request can ever settle;
+      // reject them all — as the abrupt path already does up front — or their
+      // `withResolvers` promises (each still carrying a live activation-race
+      // reaction) leak a "pending promise, resolved event loop" at teardown.
+      // `#monitorClaimActivation` observes this rejection under `#stopped` and
+      // returns without crashing the lane.
+      this.#rejectPending(new Error("executor Worker stopped"));
       this.#builtinBrokerHost.dispose();
       await this.#provider.dispose();
     }

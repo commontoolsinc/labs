@@ -362,6 +362,16 @@ export interface SchedulerActionRunState {
     error: unknown,
     disposition: ActionCommitRejectionDisposition,
   ) => ActionCommitRejectionDirective;
+  /**
+   * Optional per-run wrapper around one action run's synchronous extent —
+   * transaction creation plus the action body's synchronous invocation
+   * (C1.9c). The executor Worker installs one that resolves the action's
+   * execution lane and runs the body under it as the ambient acting lane, so
+   * every rerun path (host wake, local differential, conflict retry) reads
+   * that lane's document instances. The wrapper MUST call `run` exactly once
+   * and return its result.
+   */
+  readonly wrapActionRun?: <T>(action: Action, run: () => T) => T;
 }
 
 export async function runSchedulerAction(
@@ -383,62 +393,71 @@ export async function runSchedulerAction(
   const runningPromise = state.getRunningPromise();
   if (runningPromise) await runningPromise;
 
-  const tx = state.runtime.edit({
-    changeGroup: state.actionChangeGroups.get(action),
-  });
-  const record = state.nodes.get(action);
-  const invalidCauses = record ? takeInvalidCauses(record) : undefined;
-  if (record) {
-    state.nodes.setStatus(action, "clean");
-  }
-  // §8.9.2 trigger reads: hand the addresses whose changes scheduled this
-  // run to the transaction so flow-label derivation can taint its writes
-  // even when this run's branch never re-reads them. Consumed once; if the
-  // run aborts and is retried (RetryImmediately, commit conflict) the
-  // consumed addresses are restored below so the retry inherits them.
-  if (invalidCauses !== undefined && invalidCauses.length > 0) {
-    tx.addCfcTriggerReads(invalidCauses);
-  }
-  (tx.tx as { debugActionId?: string }).debugActionId = actionId;
-  tx.tx.sourceAction = action;
-  const actionStartTime = performance.now();
+  // The wrapper covers the run's synchronous extent — transaction creation
+  // and the action body's synchronous reads — so an executor-installed lane
+  // wrapper (C1.9c) makes every rerun path read the acting lane's document
+  // instances. The commit itself finalizes in a later microtask; its lane is
+  // re-resolved per source action at the storage commit entry.
+  const wrapActionRun = state.wrapActionRun ??
+    ((_action: Action, run: () => Promise<unknown>) => run());
+  const nextRunningPromise = wrapActionRun(action, () => {
+    const tx = state.runtime.edit({
+      changeGroup: state.actionChangeGroups.get(action),
+    });
+    const record = state.nodes.get(action);
+    const invalidCauses = record ? takeInvalidCauses(record) : undefined;
+    if (record) {
+      state.nodes.setStatus(action, "clean");
+    }
+    // §8.9.2 trigger reads: hand the addresses whose changes scheduled this
+    // run to the transaction so flow-label derivation can taint its writes
+    // even when this run's branch never re-reads them. Consumed once; if the
+    // run aborts and is retried (RetryImmediately, commit conflict) the
+    // consumed addresses are restored below so the retry inherits them.
+    if (invalidCauses !== undefined && invalidCauses.length > 0) {
+      tx.addCfcTriggerReads(invalidCauses);
+    }
+    (tx.tx as { debugActionId?: string }).debugActionId = actionId;
+    tx.tx.sourceAction = action;
+    const actionStartTime = performance.now();
 
-  let result: any;
-  const nextRunningPromise = new Promise((resolve) => {
-    const finalizeAction = (error?: unknown) => {
-      finalizeSchedulerAction(state, {
+    let result: any;
+    return new Promise((resolve) => {
+      const finalizeAction = (error?: unknown) => {
+        finalizeSchedulerAction(state, {
+          action,
+          actionId,
+          tx,
+          actionStartTime,
+          invalidCauses,
+          result,
+          error,
+          resolve,
+        });
+      };
+
+      invokeReactiveAction({
+        runtime: state.runtime,
+        setExecutingAction: state.setExecutingAction,
+        clearExecutingAction: state.clearExecutingAction,
+      }, {
         action,
         actionId,
         tx,
         actionStartTime,
-        invalidCauses,
-        result,
-        error,
-        resolve,
-      });
-    };
-
-    invokeReactiveAction({
-      runtime: state.runtime,
-      setExecutingAction: state.setExecutingAction,
-      clearExecutingAction: state.clearExecutingAction,
-    }, {
-      action,
-      actionId,
-      tx,
-      actionStartTime,
-    })
-      .then((invocation) => {
-        if (invocation.ok) {
-          result = invocation.result;
-          finalizeAction();
-        } else {
-          finalizeAction(invocation.error);
-        }
       })
-      .catch((error) => {
-        finalizeAction(error);
-      });
+        .then((invocation) => {
+          if (invocation.ok) {
+            result = invocation.result;
+            finalizeAction();
+          } else {
+            finalizeAction(invocation.error);
+          }
+        })
+        .catch((error) => {
+          finalizeAction(error);
+        });
+    });
   });
   state.setRunningPromise(nextRunningPromise);
 
@@ -567,17 +586,31 @@ function finalizeReactiveActionCommit(
   // outbox, before the async flush clears it): does this commit have
   // asynchronous post-commit work that `settled()` must wait on?
   let hasPostCommitEffects = false;
-  const commitPromise = startReactiveActionCommit({
-    runtime: state.runtime,
-    tx: args.tx,
-  }, {
-    beforeCommit: () => {
-      log = txToReactivityLog(args.tx);
-      warnOnWriteSurfaceViolations(state, args, log);
-      attachSchedulerActionObservation(state, args, log);
-      hasPostCommitEffects = args.tx.hasPendingPostCommitEffects();
-    },
-  });
+  // The commit kickoff runs under the same wrapper as the action body
+  // (C1.9c): commit-time validation re-reads each document from the replica,
+  // and a lane run's documents only resolve under its lane's ambient acting
+  // context — an unwrapped validate would compare against another lane's
+  // instances and reject the commit as inconsistent.
+  const wrapActionRun = state.wrapActionRun ??
+    ((
+      _action: Action,
+      run: () => ReturnType<typeof startReactiveActionCommit>,
+    ) => run());
+  const commitPromise = wrapActionRun(
+    args.action,
+    () =>
+      startReactiveActionCommit({
+        runtime: state.runtime,
+        tx: args.tx,
+      }, {
+        beforeCommit: () => {
+          log = txToReactivityLog(args.tx);
+          warnOnWriteSurfaceViolations(state, args, log);
+          attachSchedulerActionObservation(state, args, log);
+          hasPostCommitEffects = args.tx.hasPendingPostCommitEffects();
+        },
+      }),
+  );
   if (!log) {
     throw new Error("scheduler action commit did not build a reactivity log");
   }

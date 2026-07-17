@@ -9,6 +9,7 @@ import {
   canonicalSchedulerPieceIdForDemandRoot,
   type ExecutionClaim,
   executionClaimIncarnationKey,
+  userExecutionContextKey,
   type WireMemoryProtocolFlags,
 } from "@commonfabric/memory/v2";
 import {
@@ -29,6 +30,7 @@ import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import {
   createExecutorActionTransactionRouter,
   type ExecutorActionTransactionPlacement,
+  type ExecutorActionTransactionRouter,
 } from "./action-transaction-router.ts";
 import type { ExecutorExecutionMetricsSnapshot } from "./shared-execution-pool.ts";
 import {
@@ -38,7 +40,6 @@ import {
 import {
   ClaimedAttemptLifecycle,
   claimedAttemptRejection,
-  deleteExactClaimForAction,
 } from "./claimed-attempt-lifecycle.ts";
 import { prepareExecutorDemandPiece } from "./writer-discovery.ts";
 import {
@@ -95,9 +96,12 @@ type WireLaneDemand = {
 const worker = globalThis as unknown as DedicatedWorkerGlobalScope;
 let runtime: Runtime | null = null;
 let storage: HostStorageManager | null = null;
+let actionRouter: ExecutorActionTransactionRouter | null = null;
 let builtinBroker: ServerBuiltinBrokerClient | null = null;
 let space: MemorySpace | null = null;
 let branch: BranchName = "";
+/** Canonical `user:<did>` key of the lease sponsor's own lane (C1.9c). */
+let sponsorLaneKey: string | null = null;
 const demanded = new Map<string, Cell<unknown>>();
 const instantiatedDemand = new Set<string>();
 const pendingDemand = new Map<string, UnavailableCellAddress>();
@@ -111,15 +115,39 @@ let permanentBuiltinFailureByAction = new WeakMap<
   { claim: ExecutionClaim; diagnosticCode: string }
 >();
 const claimedAttempts = new ClaimedAttemptLifecycle<Action>();
-let claimsByAction = new WeakMap<object, ExecutionClaim>();
+/** Live claims per action, keyed by the claim's lane contextKey (C1.9c):
+ * one action object holds at most one live claim PER LANE. Two different
+ * lanes' claims for one actionId are disjoint chains (A3 holds per chain —
+ * server issuance rejects chain-compatible duplicates) and must coexist. */
+let claimsByAction = new WeakMap<object, Map<string, ExecutionClaim>>();
+/** Lane pinned by a driver (claimed activation, per-lane host-wake rerun)
+ * for the action's NEXT run. Consumed by the scheduler run wrapper. */
+let laneRunPins = new WeakMap<object, string>();
+/** Lane of the action's latest wrapper-started run. The storage commit
+ * entry resolves a source action's owning lane through this — runs are
+ * globally single-flight, and a run's commit is entered before the next
+ * run of the same action can start, so "latest run" is exact. */
+let laneRunsByAction = new WeakMap<object, string>();
 let demandGeneration = 0;
-/** Per-lane demand: the lane principal's aggregated pieces and the lane's
- * OWN wire demand generation (A24). Candidates of a user lane carry this
+/** Per-lane demand: the lane principal's aggregated pieces (raw demand
+ * roots plus their canonical scheduler piece ids) and the lane's OWN wire
+ * demand generation (A24). Candidates of a user lane carry this
  * generation, never the space one. */
 const laneDemands = new Map<
   string,
-  { pieces: Set<string>; generation: number }
+  { pieces: Set<string>; schedulerPieces: Set<string>; generation: number }
 >();
+/** Lane-independent user-rank candidate templates (C1.9c), keyed by
+ * (pieceId, actionId): when a lane opens (or re-anchors) AFTER discovery
+ * proved an action user-rank servable, the Worker synthesizes that lane's
+ * candidate from the recorded template instead of waiting for the next
+ * rerun of the action. */
+const userCandidateTemplates = new Map<
+  string,
+  { action: Action; claimKey: ActionClaimKey }
+>();
+const userCandidateTemplateKey = (key: ActionClaimKey): string =>
+  `${key.pieceId}\0${key.actionId}`;
 let selectiveWake: SelectiveDemandWakeQueue | null = null;
 let detachOtelBridge: (() => void) | undefined;
 let detachExecutionMetrics: (() => void) | undefined;
@@ -182,6 +210,80 @@ const normalizePieceId = (pieceId: string): string =>
 
 const claimKey = (claim: ActionClaimKey): string => actionClaimMapKey(claim);
 
+const liveClaimForLane = (
+  action: object,
+  lane: string,
+): ExecutionClaim | undefined => claimsByAction.get(action)?.get(lane);
+
+const setLiveClaim = (action: object, claim: ExecutionClaim): void => {
+  let claims = claimsByAction.get(action);
+  if (claims === undefined) {
+    claims = new Map<string, ExecutionClaim>();
+    claimsByAction.set(action, claims);
+  }
+  claims.set(claim.contextKey, claim);
+};
+
+/** Delete lane authority only while the action still names this exact claim
+ * incarnation on the claim's own lane. Returns true once, so late duplicate
+ * callbacks cannot post a second host release (the map-shaped C1.9c twin of
+ * claimed-attempt-lifecycle's deleteExactClaimForAction). */
+const deleteExactLaneClaim = (
+  claim: ExecutionClaim,
+  action: object,
+): boolean => {
+  const claims = claimsByAction.get(action);
+  const current = claims?.get(claim.contextKey);
+  if (
+    claims === undefined || current === undefined ||
+    executionClaimIncarnationKey(current) !==
+      executionClaimIncarnationKey(claim)
+  ) {
+    return false;
+  }
+  claims.delete(claim.contextKey);
+  if (claims.size === 0) claimsByAction.delete(action);
+  return true;
+};
+
+/** The lane an undirected (scheduler-loop) run of `action` serves: its
+ * single live claim's lane, or with several live lanes a deterministic one
+ * — the space claim, else the lease sponsor's lane, else the first-claimed
+ * lane. One run can only read one lane's instances, so it must commit under
+ * exactly that lane; the per-lane host wake (C1.4b attribution) drives one
+ * pinned run per remaining lane. Routing an undirected run of a claimed
+ * action as a shadow instead would re-grow shadow overlays on the shared
+ * broad records the claimed §4 pair also writes — the C1.9b conflict storm
+ * in a new shape. */
+const undirectedRunLane = (action: object): string | undefined => {
+  const claims = claimsByAction.get(action);
+  if (claims === undefined || claims.size === 0) return undefined;
+  if (claims.size === 1) return claims.keys().next().value;
+  if (claims.has("space")) return "space";
+  if (sponsorLaneKey !== null && claims.has(sponsorLaneKey)) {
+    return sponsorLaneKey;
+  }
+  return claims.keys().next().value;
+};
+
+/** The claim governing the action's latest run — for continuation paths
+ * (async builtin effects, commit rejections) that must name the exact claim
+ * their originating run was routed under. */
+const claimForActionRun = (action: object): ExecutionClaim | undefined => {
+  const claims = claimsByAction.get(action);
+  if (claims === undefined || claims.size === 0) return undefined;
+  const lane = laneRunsByAction.get(action);
+  if (lane !== undefined) {
+    const claim = claims.get(lane);
+    if (claim !== undefined) return claim;
+  }
+  if (claims.size === 1) return claims.values().next().value;
+  return claims.get("space");
+};
+
+const hasAnyLiveClaim = (action: object): boolean =>
+  (claimsByAction.get(action)?.size ?? 0) > 0;
+
 const noteAcceptedCommitCausalActors = (
   notice: AcceptedCommitNotice,
 ): void => {
@@ -239,7 +341,7 @@ const recordPermanentBuiltinFailure = (
   error: unknown,
 ): void => {
   if (!(error instanceof ServerBuiltinUnservedError)) return;
-  const live = claimsByAction.get(action);
+  const live = liveClaimForLane(action, claim.contextKey);
   if (
     live === undefined ||
     executionClaimIncarnationKey(live) !== executionClaimIncarnationKey(claim)
@@ -291,7 +393,10 @@ const releaseClaimedAttempt = (
   // whether an activation lifecycle record remains.
   clearPermanentBuiltinFailure(sourceAction, claim);
   finishClaimedAttempt(claim, sourceAction);
-  if (!deleteExactClaimForAction(claimsByAction, claim, sourceAction)) return;
+  if (!deleteExactLaneClaim(claim, sourceAction)) return;
+  // The lane may be re-claimed later: clear the router's candidate dedupe so
+  // the next routed run re-emits this lane's (identical) candidate (C1.9c).
+  actionRouter?.forgetLaneCandidate(sourceAction, claim.contextKey);
   worker.postMessage({ type, claim, diagnosticCode });
 };
 
@@ -300,7 +405,8 @@ const cancelClaimedAttempts = (lane?: string): void => {
     ? claimedAttempts.cancelAll()
     : claimedAttempts.cancelMatching((claim) => claim.contextKey === lane);
   for (const { claim, action } of cancelled) {
-    deleteExactClaimForAction(claimsByAction, claim, action);
+    deleteExactLaneClaim(claim, action);
+    actionRouter?.forgetLaneCandidate(action, claim.contextKey);
   }
 };
 
@@ -357,8 +463,40 @@ const applyLaneDemands = (lanes: WireLaneDemand[] | undefined): void => {
     }
     laneDemands.set(lane.contextKey, {
       pieces: new Set(lane.pieces),
+      schedulerPieces: new Set(
+        lane.pieces.map(canonicalSchedulerPieceIdForDemandRoot),
+      ),
       generation: lane.demandGeneration,
     });
+    // A lane opening (or re-anchoring) AFTER discovery proved actions
+    // user-rank servable never sees those actions rerun on its own: the
+    // shared runtime graph is already clean. Synthesize the lane's
+    // candidates from the recorded templates (C1.9c) so a late-joining
+    // principal's lane produces candidates without a graph rebuild.
+    if (existing === undefined || lane.demandGeneration > existing.generation) {
+      emitTemplateCandidatesForLane(lane.contextKey);
+    }
+  }
+};
+
+/** Emit recorded user-rank candidates for one lane (C1.9c): every template
+ * whose piece the lane's demand slice covers, keyed by the lane's canonical
+ * contextKey and carrying the lane's OWN wire generation (A24). The host
+ * dedupes re-emissions against its live-claim map. */
+const emitTemplateCandidatesForLane = (contextKey: string): void => {
+  const lane = laneDemands.get(contextKey);
+  if (lane === undefined) return;
+  for (const template of userCandidateTemplates.values()) {
+    if (!lane.schedulerPieces.has(template.claimKey.pieceId)) continue;
+    postCandidate(
+      {
+        claimKey: {
+          ...template.claimKey,
+          contextKey: contextKey as SchedulerExecutionContextKey,
+        },
+      },
+      template.action,
+    );
   }
 };
 
@@ -369,6 +507,43 @@ const candidateDemandGeneration = (contextKey: string): number =>
   contextKey === "space"
     ? demandGeneration
     : laneDemands.get(contextKey)?.generation ?? demandGeneration;
+
+/** Register and post one candidate claim (C1.9c: shared by the router's
+ * route-time per-lane emission and the late-lane template emission). */
+const postCandidate = (
+  candidate: { claimKey: ActionClaimKey; builtinId?: string },
+  action: Action,
+): void => {
+  candidateActions.set(claimKey(candidate.claimKey), action);
+  const identity = registerCandidateSchedulerIdentity(candidate, action);
+  const causalActorMatchesSponsor = candidate.builtinId === undefined
+    ? undefined
+    : registerCandidateCausalActor(identity, action);
+  if (
+    candidate.claimKey.contextKey !== "space" &&
+    candidate.builtinId === undefined
+  ) {
+    // Record the lane-independent template so a lane that opens later can
+    // synthesize its own candidate (builtins never classify user-rank).
+    userCandidateTemplates.set(userCandidateTemplateKey(candidate.claimKey), {
+      action,
+      claimKey: candidate.claimKey,
+    });
+  }
+  const laneGeneration = candidateDemandGeneration(
+    candidate.claimKey.contextKey,
+  );
+  worker.postMessage({
+    type: "candidate-claim",
+    candidate: {
+      ...candidate,
+      ...(causalActorMatchesSponsor !== undefined
+        ? { causalActorMatchesSponsor }
+        : {}),
+      ...(laneGeneration > 0 ? { demandGeneration: laneGeneration } : {}),
+    },
+  });
+};
 
 /** The non-space (lane-instanced) documents each routed action touches,
  * reported by the router from real observations (C1.9b). */
@@ -446,6 +621,48 @@ const hydrateExecutionLane = async (
     pending.push(task);
   }
   await Promise.all(pending);
+};
+
+/** Coalescer for per-lane claimed reruns: lanes with a rerun queued but not
+ * yet started. A wake arriving DURING a lane's run enqueues a fresh one —
+ * the host feed is at-least-once and the run must see the newest rows. */
+let pendingLaneRerunsByAction = new WeakMap<object, Set<string>>();
+
+/**
+ * Re-run one claimed action under ONE lane's acting context (C1.9c): the
+ * per-lane recompute of design §7. The host's durable read index attributes
+ * stale readers per lane (C1.4b), so a lane's input change wakes exactly
+ * (action, lane); the run is pinned to that lane — its reads resolve the
+ * lane's document instances (hydrated and watch-kept since C1.9b) and its
+ * commit attaches exactly that lane's claim. A lane-blind scheduler-loop
+ * rerun cannot serve a non-sponsor lane: the space session resolves user
+ * scope as the lease sponsor.
+ */
+const scheduleLaneRerun = (action: Action, lane: string): void => {
+  let lanes = pendingLaneRerunsByAction.get(action);
+  if (lanes === undefined) {
+    lanes = new Set<string>();
+    pendingLaneRerunsByAction.set(action, lanes);
+  }
+  if (lanes.has(lane)) return;
+  lanes.add(lane);
+  void enqueue(async () => {
+    lanes.delete(lane);
+    if (runtime === null || storage === null || space === null) return;
+    const claim = liveClaimForLane(action, lane);
+    if (claim === undefined) return;
+    await hydrateExecutionLane(claim, action);
+    laneRunPins.set(action, lane);
+    try {
+      await storage.runWithExecutionLane(
+        space,
+        claim.contextKey,
+        () => runtime!.scheduler.run(action),
+      );
+    } finally {
+      laneRunPins.delete(action);
+    }
+  }).catch(postFatal);
 };
 
 const unavailableAddress = (cell: Cell<unknown>): UnavailableCellAddress => {
@@ -553,6 +770,7 @@ const replaceDemand = async (
     pendingDemand.clear();
     demandSinks.clear();
     candidateActions.clear();
+    userCandidateTemplates.clear();
     laneHydration.clear();
     actionsBySchedulerIdentity.clear();
     pendingCausalActorMatches.clear();
@@ -561,7 +779,10 @@ const replaceDemand = async (
       object,
       { claim: ExecutionClaim; diagnosticCode: string }
     >();
-    claimsByAction = new WeakMap<object, ExecutionClaim>();
+    claimsByAction = new WeakMap<object, Map<string, ExecutionClaim>>();
+    laneRunPins = new WeakMap<object, string>();
+    laneRunsByAction = new WeakMap<object, string>();
+    pendingLaneRerunsByAction = new WeakMap<object, Set<string>>();
   }
   for (const [pieceId, cell] of demanded) {
     if (nextSet.has(pieceId)) continue;
@@ -611,81 +832,73 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
   }
   space = request.space as MemorySpace;
   branch = request.branch ?? "";
-  const actionTransactionRouter = createExecutorActionTransactionRouter({
-    servedSpace: space,
-    branch,
-    builtinBrokerAvailable: true,
-    // C1.5a: user-rank candidate production stays inert unless the host
-    // passes the experimental option; the Worker's acting principal (the
-    // lease sponsor until C1.5b's per-lane contexts) keys the lane.
-    userRankCandidates: request.experimental
-      ?.serverPrimaryExecutionUserRankCandidates === true,
-    lanePrincipal: request.principal,
-    onLaneSurface: (sourceAction, addresses) => {
-      laneSurfacesByAction.set(sourceAction, [...addresses]);
-    },
-    claimForAction: (action) => claimsByAction.get(action),
-    permanentUnservedReasonForAction,
-    onCandidate: (candidate, sourceAction) => {
-      const action = sourceAction as Action;
-      candidateActions.set(
-        claimKey(candidate.claimKey),
-        action,
-      );
-      const identity = registerCandidateSchedulerIdentity(candidate, action);
-      const causalActorMatchesSponsor = candidate.builtinId === undefined
-        ? undefined
-        : registerCandidateCausalActor(identity, action);
-      const laneGeneration = candidateDemandGeneration(
-        candidate.claimKey.contextKey,
-      );
-      worker.postMessage({
-        type: "candidate-claim",
-        candidate: {
-          ...candidate,
-          ...(causalActorMatchesSponsor !== undefined
-            ? { causalActorMatchesSponsor }
-            : {}),
-          ...(laneGeneration > 0 ? { demandGeneration: laneGeneration } : {}),
-        },
-      });
-    },
-    onDiagnostic: (diagnostic) => {
-      worker.postMessage({ type: "candidate-diagnostic", diagnostic });
-    },
-    onActionTransaction: (
-      placement: ExecutorActionTransactionPlacement,
-    ) => {
-      executionMetrics.actionTransactions[placement] += 1;
-      // Async actions can complete after their originating work item. Publish
-      // independently so the host does not need a later request to see them.
-      scheduleExecutionMetricsPublish();
-    },
-    onUnserved: (claim, sourceAction, diagnosticCode) => {
-      releaseClaimedAttempt(
-        "unserved-claim",
-        claim,
-        sourceAction,
-        diagnosticCode,
-      );
-    },
-    onInvalidated: (claim, sourceAction, diagnosticCode) => {
-      releaseClaimedAttempt(
-        "invalidated-claim",
-        claim,
-        sourceAction,
-        diagnosticCode,
-      );
-    },
-    onAttemptStarted: (claim, sourceAction) => {
-      claimedAttempts.markRouted(claim, sourceAction as Action);
-    },
-    onAttemptSettled: (claim, sourceAction, result) => {
-      if (result.error === undefined) {
-        finishClaimedAttempt(claim, sourceAction);
-      }
-    },
-  });
+  sponsorLaneKey = userExecutionContextKey(request.principal);
+  const actionTransactionRouter = actionRouter =
+    createExecutorActionTransactionRouter({
+      servedSpace: space,
+      branch,
+      builtinBrokerAvailable: true,
+      // C1.5a: user-rank candidate production stays inert unless the host
+      // passes the experimental option; the Worker's acting principal (the
+      // lease sponsor until C1.5b's per-lane contexts) keys the lane.
+      userRankCandidates: request.experimental
+        ?.serverPrimaryExecutionUserRankCandidates === true,
+      lanePrincipal: request.principal,
+      // C1.9c: a user-rank action produces one candidate per OPEN lane whose
+      // demand slice covers its piece. Before any lane is wired the router's
+      // sponsor-lane fallback keeps the C1.5a pre-lane shape.
+      openUserLaneKeys: (pieceId) => {
+        if (laneDemands.size === 0) return undefined;
+        const lanes: string[] = [];
+        for (const [contextKey, lane] of laneDemands) {
+          if (lane.schedulerPieces.has(pieceId)) lanes.push(contextKey);
+        }
+        return lanes;
+      },
+      onLaneSurface: (sourceAction, addresses) => {
+        laneSurfacesByAction.set(sourceAction, [...addresses]);
+      },
+      claimForAction: (action, lane) => liveClaimForLane(action, lane),
+      permanentUnservedReasonForAction,
+      onCandidate: (candidate, sourceAction) => {
+        postCandidate(candidate, sourceAction as Action);
+      },
+      onDiagnostic: (diagnostic) => {
+        worker.postMessage({ type: "candidate-diagnostic", diagnostic });
+      },
+      onActionTransaction: (
+        placement: ExecutorActionTransactionPlacement,
+      ) => {
+        executionMetrics.actionTransactions[placement] += 1;
+        // Async actions can complete after their originating work item. Publish
+        // independently so the host does not need a later request to see them.
+        scheduleExecutionMetricsPublish();
+      },
+      onUnserved: (claim, sourceAction, diagnosticCode) => {
+        releaseClaimedAttempt(
+          "unserved-claim",
+          claim,
+          sourceAction,
+          diagnosticCode,
+        );
+      },
+      onInvalidated: (claim, sourceAction, diagnosticCode) => {
+        releaseClaimedAttempt(
+          "invalidated-claim",
+          claim,
+          sourceAction,
+          diagnosticCode,
+        );
+      },
+      onAttemptStarted: (claim, sourceAction) => {
+        claimedAttempts.markRouted(claim, sourceAction as Action);
+      },
+      onAttemptSettled: (claim, sourceAction, result) => {
+        if (result.error === undefined) {
+          finishClaimedAttempt(claim, sourceAction);
+        }
+      },
+    });
   storage = HostStorageManager.connect({
     port: request.port,
     principal: request.principal as MemorySpace,
@@ -694,11 +907,13 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     protocolFlags: request.protocolFlags,
     shadowWrites: true,
     actionTransactionRouter,
-    // C1.5b per-lane acting context: a claimed action's transactions assert
-    // exactly its claim's lane (A6) and key documents by that lane's
-    // effective scope keys; unclaimed discovery runs stay on the space lane
-    // until C1.8 partitions demand per lane.
-    executionLaneForAction: (action) => claimsByAction.get(action)?.contextKey,
+    // C1.5b per-lane acting context, per-run since C1.9c: a commit's owning
+    // lane is the lane its RUN was started under (the run wrapper records
+    // it), so one action serving several lanes attributes each commit to
+    // exactly the lane whose instances that run read (A6). Runs outside the
+    // wrapper (event handlers) resolve no lane and stay on the space lane.
+    executionLaneForAction: (action) =>
+      laneRunsByAction.get(action) as SchedulerExecutionContextKey | undefined,
     onAcceptedCommitWillIntegrate(notice) {
       noteAcceptedCommitCausalActors(notice);
     },
@@ -710,6 +925,17 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
           ? undefined
           : actionsBySchedulerIdentity.get(identity);
         if (action !== undefined) {
+          // A per-lane stale reader with live authority on that lane reruns
+          // UNDER that lane (C1.9c): the wake identity carries the lane's
+          // contextKey because the claimed run's reads were attributed to it
+          // (C1.4b), and only a lane-pinned run reads the lane's instances.
+          if (
+            reader.executionContextKey !== "space" &&
+            liveClaimForLane(action, reader.executionContextKey) !== undefined
+          ) {
+            scheduleLaneRerun(action, reader.executionContextKey);
+            continue;
+          }
           // A live registered action reruns from its direct invalidation; the
           // changed documents already arrived with this notice's replica
           // sync, so re-pulling its piece's whole closure would only re-run
@@ -749,20 +975,26 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
   // cannot target the dead action.
   storage.setExecutionActionUnregisterHook((unregistered) => {
     if (stopped) return;
-    const claim = claimsByAction.get(unregistered);
-    if (claim !== undefined) {
-      releaseClaimedAttempt(
-        "invalidated-claim",
-        claim,
-        unregistered,
-        "action-unregistered",
-      );
+    const claims = claimsByAction.get(unregistered);
+    if (claims !== undefined) {
+      // Release every lane's claim: the retired action can serve none.
+      for (const claim of [...claims.values()]) {
+        releaseClaimedAttempt(
+          "invalidated-claim",
+          claim,
+          unregistered,
+          "action-unregistered",
+        );
+      }
     }
     for (const [key, action] of candidateActions) {
       if (action === unregistered) candidateActions.delete(key);
     }
     for (const [key, action] of actionsBySchedulerIdentity) {
       if (action === unregistered) actionsBySchedulerIdentity.delete(key);
+    }
+    for (const [key, template] of userCandidateTemplates) {
+      if (template.action === unregistered) userCandidateTemplates.delete(key);
     }
   });
   builtinBroker = createServerBuiltinBrokerClient({
@@ -771,7 +1003,7 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       const sourceAction = getTransactionSourceAction();
       return sourceAction === undefined
         ? undefined
-        : claimsByAction.get(sourceAction);
+        : claimForActionRun(sourceAction);
     },
   });
   runtime = new Runtime(runtimePresets.productionServer({
@@ -785,10 +1017,28 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     },
     fetch: denyExternalBuiltinFetch,
     externalSinkDisposition: (sourceAction) =>
-      sourceAction !== undefined && claimsByAction.has(sourceAction)
+      sourceAction !== undefined && hasAnyLiveClaim(sourceAction)
         ? "allow"
         : "suppress",
   }));
+  // C1.9c: every scheduler-driven run of an action executes under its
+  // resolved lane as the ambient acting context — a driver's explicit pin
+  // first (claimed activation, per-lane host-wake rerun), else the lane of
+  // the action's single live claim (conflict retries and local-differential
+  // reruns of a claimed action re-read ITS lane's instances), else the
+  // space lane. The wrapper records the resolved lane so the commit entry
+  // attributes this run's transaction to exactly that lane (A6).
+  runtime.scheduler.setActionRunWrapper((action, run) => {
+    const lane = laneRunPins.get(action) ?? undirectedRunLane(action) ??
+      "space";
+    laneRunsByAction.set(action, lane);
+    if (lane === "space" || storage === null || space === null) return run();
+    return storage.runWithExecutionLane(
+      space,
+      lane as SchedulerExecutionContextKey,
+      run,
+    );
+  });
   const onRuntimeTelemetry = (event: Event): void => {
     if (
       (event as RuntimeTelemetryEvent).marker.type === "scheduler.run.complete"
@@ -816,7 +1066,7 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     const sourceAction = getTransactionSourceAction();
     const claim = sourceAction === undefined
       ? undefined
-      : claimsByAction.get(sourceAction);
+      : claimForActionRun(sourceAction);
     if (
       sourceAction !== undefined && claim !== undefined &&
       causalActorMatchesByAction.get(sourceAction) !== true
@@ -853,7 +1103,9 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     error,
     disposition,
   ) => {
-    const claim = claimsByAction.get(action);
+    // The rejected commit belongs to the action's latest run; release
+    // exactly that run's lane claim (C1.9c), never a sibling lane's.
+    const claim = claimForActionRun(action);
     if (claim === undefined) return;
     const rejection = claimedAttemptRejection(error, disposition);
     if (!rejection.release) return;
@@ -912,26 +1164,32 @@ const startClaimedAction = async (
     const identity = schedulerIdentityKeyForAction(action, claim);
     pendingCausalActorMatches.delete(identity);
     storage.discardShadowWritesForAction(space, action);
-    claimsByAction.set(action, claim);
+    setLiveClaim(action, claim);
     (action as Action & { prepareClaimedRerun?: () => void })
       .prepareClaimedRerun?.();
     // Scheduler completion means the action transaction has been kicked off,
     // but the storage router can still be selecting its async route. The exact
     // afterRouteSelected callback is the readiness acknowledgement; eventual
     // accepted settlement remains deliberately outside the global work lane.
-    // The run starts under the claim's lane as the ambient acting context
-    // (C1.5b): its synchronous reads resolve that lane's document instances;
-    // commits stay lane-correct across awaits via executionLaneForAction.
-    await storage.runWithExecutionLane(
-      space,
-      claim.contextKey,
-      () => runtime!.scheduler.run(action),
-    );
+    // The run is pinned to the claim's lane (C1.9c): the scheduler run
+    // wrapper makes it the ambient acting context so its synchronous reads
+    // resolve that lane's document instances, and records it so the commit
+    // attributes to exactly this lane across awaits.
+    laneRunPins.set(action, claim.contextKey);
+    try {
+      await storage.runWithExecutionLane(
+        space,
+        claim.contextKey,
+        () => runtime!.scheduler.run(action),
+      );
+    } finally {
+      laneRunPins.delete(action);
+    }
     await attempt.routeReady;
     return { finalSettlement: attempt.finalSettlement };
   } catch (error) {
     finishClaimedAttempt(claim, action);
-    deleteExactClaimForAction(claimsByAction, claim, action);
+    deleteExactLaneClaim(claim, action);
     throw error;
   }
 };
@@ -980,13 +1238,16 @@ const stop = async (): Promise<void> => {
   builtinBroker = null;
   runtime = null;
   storage = null;
+  actionRouter = null;
   space = null;
   branch = "";
+  sponsorLaneKey = null;
   selectiveWake = null;
   demanded.clear();
   instantiatedDemand.clear();
   pendingDemand.clear();
   candidateActions.clear();
+  userCandidateTemplates.clear();
   laneHydration.clear();
   laneDemands.clear();
   actionsBySchedulerIdentity.clear();
@@ -996,6 +1257,10 @@ const stop = async (): Promise<void> => {
     object,
     { claim: ExecutionClaim; diagnosticCode: string }
   >();
+  claimsByAction = new WeakMap<object, Map<string, ExecutionClaim>>();
+  laneRunPins = new WeakMap<object, string>();
+  laneRunsByAction = new WeakMap<object, string>();
+  pendingLaneRerunsByAction = new WeakMap<object, Set<string>>();
   if (shutdownError !== undefined) throw shutdownError;
 };
 

@@ -50,6 +50,17 @@ export type ExecutorActionTransactionPlacement =
   | "shadow"
   | "authoritative";
 
+export type ExecutorActionTransactionRouter = ActionTransactionRouter & {
+  /**
+   * Clear the per-lane candidate dedupe for one (action, lane) after the
+   * WORKER released that lane's claim outside the router's own paths (a
+   * scheduler commit rejection, a lane drain). Without this the next rerun
+   * would suppress the identical candidate and the lane could never be
+   * re-claimed (C1.9c).
+   */
+  forgetLaneCandidate(sourceAction: object, lane: string): void;
+};
+
 export interface ExecutorActionTransactionRouterOptions {
   readonly servedSpace: MemorySpace;
   readonly branch: string;
@@ -66,6 +77,16 @@ export interface ExecutorActionTransactionRouterOptions {
   /** Principal of this Worker's acting context — the canonical `user:<did>`
    * candidate keys are constructed from it (amendment 18 helpers only). */
   readonly lanePrincipal?: string;
+  /**
+   * C1.9c per-lane candidates: canonical `user:<did>` context keys of the
+   * OPEN user lanes whose aggregated demand (C1.8) covers `pieceId`. A
+   * user-rank action produces one candidate per returned lane. An absent
+   * callback or an `undefined` result (the pre-lane wire) falls back to the
+   * lease sponsor's lane — the C1.5a single-lane behavior.
+   */
+  readonly openUserLaneKeys?: (
+    pieceId: string,
+  ) => readonly string[] | undefined;
   /** C1.9b lane hydration feed: the non-space (lane-instanced) documents the
    * routed observation touches, deduped by (scope, id) and path-rooted. The
    * Worker syncs exactly these documents under a lane before that lane's
@@ -75,7 +96,14 @@ export interface ExecutorActionTransactionRouterOptions {
     sourceAction: object,
     addresses: readonly IMemorySpaceAddress[],
   ) => void;
-  readonly claimForAction: (sourceAction: object) => ExecutionClaim | undefined;
+  /** Live claim of `sourceAction` ON THE COMMIT'S OWNING LANE (C1.9c): one
+   * action object can hold one live claim per lane, and only the lane a
+   * commit runs under may attach its claim. Callers ignoring `lane` keep the
+   * single-claim C1.5a shape. */
+  readonly claimForAction: (
+    sourceAction: object,
+    lane: ActionClaimKey["contextKey"],
+  ) => ExecutionClaim | undefined;
   /** Exact-incarnation permanent broker failure captured synchronously by the
    * Worker. Returning a reason converts the continuation into one canonical
    * observation-only unserved attempt. */
@@ -124,8 +152,44 @@ export interface ExecutorActionTransactionRouterOptions {
  */
 export function createExecutorActionTransactionRouter(
   options: ExecutorActionTransactionRouterOptions,
-): ActionTransactionRouter {
-  const reported = new WeakMap<object, string>();
+): ExecutorActionTransactionRouter {
+  // Per-lane candidate dedupe (C1.9c): lane contextKey → encoded claim key
+  // last reported for this action. A claim invalidation clears only its own
+  // lane's entry, so sibling lanes' candidacy is undisturbed.
+  const reported = new WeakMap<object, Map<string, string>>();
+  // Emit candidates for every UNCLAIMED lane in `candidateKeys` (C1.9c).
+  // Called from both local-shadow and authoritative routes: an action
+  // already claimed on one lane keeps vouching for its sibling lanes'
+  // candidacy — a late-opened or released lane re-candidates from the next
+  // routed run instead of starving behind the claimed one.
+  const emitCandidates = (
+    sourceAction: object,
+    candidateKeys: readonly ActionClaimKey[],
+    builtinId: ReturnType<typeof prepareSupportedBuiltinObservation>,
+  ): void => {
+    if (candidateKeys.length === 0) return;
+    let lanes = reported.get(sourceAction);
+    if (lanes === undefined) {
+      lanes = new Map<string, string>();
+      reported.set(sourceAction, lanes);
+    }
+    for (const keyed of candidateKeys) {
+      if (
+        options.claimForAction(sourceAction, keyed.contextKey) !== undefined
+      ) {
+        // The lane already holds live authority for this action; its claim
+        // lifecycle, not candidacy, owns it now.
+        continue;
+      }
+      const encoded = JSON.stringify(keyed);
+      if (lanes.get(keyed.contextKey) === encoded) continue;
+      lanes.set(keyed.contextKey, encoded);
+      options.onCandidate({
+        claimKey: keyed,
+        ...(builtinId !== undefined ? { builtinId } : {}),
+      }, sourceAction);
+    }
+  };
   // An unclaimed unservable verdict is stable per diagnostic code and
   // fingerprints; the same action rerunning to the same verdict is pure
   // host/feed churn. Cleared when the action becomes a candidate or its
@@ -162,11 +226,17 @@ export function createExecutorActionTransactionRouter(
     kind: "executor-shadow",
   } as const satisfies ActionTransactionRoute;
 
-  return (input: ActionTransactionRouteInput) => {
+  const route: ActionTransactionRouter = (
+    input: ActionTransactionRouteInput,
+  ) => {
     const sourceAction = input.sourceAction;
+    // The commit's owning lane (C1.9c): captured by the provider at commit
+    // entry. Only that lane's claim may attach to this transaction — a
+    // sibling lane's claim covers a different instance surface.
+    const commitLane = input.lane ?? "space";
     const liveClaim = sourceAction === undefined
       ? undefined
-      : options.claimForAction(sourceAction);
+      : options.claimForAction(sourceAction, commitLane);
     let observation = input.commit.schedulerObservation;
     let synthesizedContinuation = false;
     if (
@@ -236,18 +306,26 @@ export function createExecutorActionTransactionRouter(
       userLaneEnabled ? { userContext: true } : undefined,
     );
     // The candidate context rank follows the static classification: a
-    // user-rank computation keys its candidate (and every later claim
-    // request) by the canonical user context key of the lane principal.
+    // user-rank computation keys its candidates by the canonical user
+    // context keys of the OPEN lanes with demand for its piece (C1.9c); on
+    // the pre-lane wire the lease sponsor's lane remains the only one.
     const contextRank: "space" | "user" =
       staticDecision.status === "claim-ready" &&
         staticDecision.contextRank === "user"
         ? "user"
         : "space";
+    // This commit's own claim identity: a claimed user-rank commit belongs
+    // to its owning lane; an unclaimed (space-lane) run of a user-rank
+    // action keeps the sponsor-lane key as the representative for
+    // diagnostics and dedupe.
+    const commitContextKey = contextRank === "user"
+      ? (commitLane !== "space"
+        ? commitLane
+        : userExecutionContextKey(options.lanePrincipal!))
+      : "space";
     const claimKey = actionClaimKeyFromObservation(
       routedObservation,
-      contextRank === "user"
-        ? userExecutionContextKey(options.lanePrincipal!)
-        : "space",
+      commitContextKey,
     );
     if (claimKey === undefined) {
       const diagnosticCode = staticDecision.status === "unservable"
@@ -358,6 +436,16 @@ export function createExecutorActionTransactionRouter(
       );
       return local;
     }
+    // One candidate per serving lane (C1.9c): space rank keys the single
+    // space candidate; user rank keys one candidate per open user lane
+    // whose demand covers the piece. Servability is an action-level
+    // property (the certificate names declared scopes, never a principal),
+    // so one proven run vouches for every lane's candidate.
+    const candidateKeys: ActionClaimKey[] = contextRank === "user"
+      ? candidateUserLaneKeys(options, claimKey.pieceId).map((
+        contextKey,
+      ) => ({ ...claimKey, contextKey }))
+      : [claimKey];
     if (liveClaim === undefined) {
       if (routedObservation.transactionKind === "action-run") {
         options.onActionTransaction?.("shadow");
@@ -366,19 +454,13 @@ export function createExecutorActionTransactionRouter(
           { actionId: claimKey.actionId, actionKind: claimKey.actionKind },
         ]);
       }
-      const encoded = JSON.stringify(claimKey);
       return {
         ...local,
         afterLocalApply: () => {
           // The action proved servable; a later unservable regression is new
           // information and must report again.
           reportedUnservable.delete(sourceAction);
-          if (reported.get(sourceAction) === encoded) return;
-          reported.set(sourceAction, encoded);
-          options.onCandidate({
-            claimKey,
-            ...(builtinId !== undefined ? { builtinId } : {}),
-          }, sourceAction);
+          emitCandidates(sourceAction, candidateKeys, builtinId);
         },
       };
     }
@@ -391,14 +473,26 @@ export function createExecutorActionTransactionRouter(
         { actionId: liveClaim.actionId, actionKind: liveClaim.actionKind },
       ]);
     }
+    // A claimed run keeps vouching for its SIBLING lanes (C1.9c): a
+    // still-unclaimed lane's candidate re-emits from this proven run. Only a
+    // user-rank action has siblings — a space-rank claim owns the sole
+    // "space" lane, so its lone candidate is already the claimed one and
+    // `emitCandidates` would no-op. Attach the callback only when it does
+    // real work (sibling vouching or the host's attempt-started hook), so a
+    // fully-claimed space run stays a bare upstream route.
+    const vouchForSiblingLanes = contextRank === "user";
+    const afterRouteSelected =
+      options.onAttemptStarted !== undefined || vouchForSiblingLanes
+        ? () => {
+          options.onAttemptStarted?.(liveClaim, sourceAction);
+          if (vouchForSiblingLanes) {
+            emitCandidates(sourceAction, candidateKeys, builtinId);
+          }
+        }
+        : undefined;
     return {
       disposition: "upstream",
-      ...(options.onAttemptStarted
-        ? {
-          afterRouteSelected: () =>
-            options.onAttemptStarted!(liveClaim, sourceAction),
-        }
-        : {}),
+      ...(afterRouteSelected !== undefined ? { afterRouteSelected } : {}),
       ...(options.onAttemptSettled
         ? {
           onCommitSettled: (result: ActionTransactionCommitResult) =>
@@ -408,7 +502,7 @@ export function createExecutorActionTransactionRouter(
       ...(options.onUnserved
         ? {
           onFirewallRejected: (diagnosticCode: string) => {
-            reported.delete(sourceAction);
+            reported.get(sourceAction)?.delete(liveClaim.contextKey);
             options.onUnserved!(
               liveClaim,
               sourceAction,
@@ -419,6 +513,25 @@ export function createExecutorActionTransactionRouter(
         : {}),
     };
   };
+  return Object.assign(route, {
+    forgetLaneCandidate: (sourceAction: object, lane: string) => {
+      reported.get(sourceAction)?.delete(lane);
+    },
+  });
+}
+
+/** The user lanes a user-rank action's candidates key by (C1.9c): every
+ * open lane whose C1.8 demand slice covers the piece; the sponsor's lane on
+ * the pre-lane wire. Canonical keys only (amendment 18). */
+function candidateUserLaneKeys(
+  options: ExecutorActionTransactionRouterOptions,
+  pieceId: string,
+): readonly ActionClaimKey["contextKey"][] {
+  const laneKeys = options.openUserLaneKeys?.(pieceId);
+  if (laneKeys === undefined) {
+    return [userExecutionContextKey(options.lanePrincipal!)];
+  }
+  return [...new Set(laneKeys)] as ActionClaimKey["contextKey"][];
 }
 
 function prepareSupportedBuiltinObservation(
@@ -858,14 +971,14 @@ function isAddressLike(value: unknown): value is {
 }
 
 function invalidateClaim(
-  reported: WeakMap<object, string>,
+  reported: WeakMap<object, Map<string, string>>,
   options: ExecutorActionTransactionRouterOptions,
   claim: ExecutionClaim,
   sourceAction: object,
   diagnosticCode: string,
   claimKey?: ActionClaimKey,
 ): void {
-  reported.delete(sourceAction);
+  reported.get(sourceAction)?.delete(claim.contextKey);
   if (options.onInvalidated !== undefined) {
     options.onInvalidated(claim, sourceAction, diagnosticCode);
   } else {
@@ -877,7 +990,7 @@ function invalidateClaim(
 }
 
 function unservedRoute(
-  reported: WeakMap<object, string>,
+  reported: WeakMap<object, Map<string, string>>,
   options: ExecutorActionTransactionRouterOptions,
   claim: ExecutionClaim,
   sourceAction: object,
@@ -895,7 +1008,7 @@ function unservedRoute(
     ...(options.onUnserved
       ? {
         onSettled: () => {
-          reported.delete(sourceAction);
+          reported.get(sourceAction)?.delete(claim.contextKey);
           options.onUnserved!(claim, sourceAction, diagnosticCode);
         },
       }

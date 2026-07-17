@@ -677,6 +677,11 @@ export interface ActionTransactionRouteInput {
   readonly commit: ClientCommit;
   /** Exact scheduler action object when this transaction came from a run. */
   readonly sourceAction?: object;
+  /** Owning execution lane of this commit (C1.9c), captured at commit entry
+   * exactly as the replica keys the commit's optimistic structures. A router
+   * serving several lanes uses it to select the claim THIS commit runs
+   * under; absent means the space lane (pre-lane callers). */
+  readonly lane?: SchedulerExecutionContextKey;
 }
 
 export type ActionTransactionCommitResult = Result<
@@ -3419,7 +3424,7 @@ class SpaceReplica implements ISpaceReplica {
       ? (this.#shadowWrites
         ? { disposition: "local", kind: "executor-shadow" } as const
         : this.routeClientActionTransaction(commit, source))
-      : await this.routeActionTransaction(commit, source);
+      : await this.routeActionTransaction(commit, source, lane);
     this.noteExecutionTransactionRoute(commit, route, source?.sourceAction);
     const routedObservation = commit.schedulerObservation;
     if (
@@ -3595,6 +3600,7 @@ class SpaceReplica implements ISpaceReplica {
   private async routeActionTransaction(
     commit: ClientCommit,
     source?: IStorageTransaction,
+    lane?: SchedulerExecutionContextKey,
   ): Promise<ActionTransactionRoute> {
     const fallback: ActionTransactionRoute = this.#shadowWrites
       ? { disposition: "local", kind: "executor-shadow" }
@@ -3607,6 +3613,7 @@ class SpaceReplica implements ISpaceReplica {
         ...(source?.sourceAction !== undefined
           ? { sourceAction: source.sourceAction }
           : {}),
+        ...(lane !== undefined ? { lane } : {}),
       });
       if (route.disposition === "upstream") return route;
       if (

@@ -583,6 +583,7 @@ export class Scheduler {
     disposition: ActionCommitRejectionDisposition,
   ) => ActionCommitRejectionDirective;
   private actionObservationAdoptionGuard?: (action: Action) => boolean;
+  private actionRunWrapper?: <T>(action: Action, run: () => T) => T;
   private consoleHandler: ConsoleHandler;
   private _running: Promise<unknown> | undefined = undefined;
   private scheduled = false;
@@ -659,6 +660,21 @@ export class Scheduler {
       | undefined,
   ): void {
     this.actionCommitRejectionHandler = handler;
+  }
+
+  /**
+   * Host-only per-run wrapper (C1.9c): wraps one action run's synchronous
+   * extent — transaction creation plus the body's synchronous reads. The
+   * executor Worker installs one that resolves the action's execution lane
+   * and runs the body under it as the ambient acting lane, keeping every
+   * rerun path (claimed activation, host wake, local differential, conflict
+   * retry) reading that lane's document instances. The wrapper must invoke
+   * `run` exactly once and return its result.
+   */
+  setActionRunWrapper(
+    wrapper: (<T>(action: Action, run: () => T) => T) | undefined,
+  ): void {
+    this.actionRunWrapper = wrapper;
   }
 
   /** Host-only execution guard. A server shadow must independently run clean
@@ -2537,6 +2553,10 @@ export class Scheduler {
       },
       handleActionCommitRejected: (target, error, disposition) =>
         this.actionCommitRejectionHandler?.(target, error, disposition),
+      wrapActionRun: (target, run) =>
+        this.actionRunWrapper === undefined
+          ? run()
+          : this.actionRunWrapper(target, run),
     };
   }
 
