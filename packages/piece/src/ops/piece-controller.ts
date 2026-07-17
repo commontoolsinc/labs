@@ -2471,9 +2471,7 @@ export class PieceController<T = unknown> {
     const repository = getPatternRepository(this.#cell);
     if (repository !== undefined) source.repository = repository;
     const trackedSource = getPatternSource(this.#cell);
-    if (trackedSource !== undefined) {
-      return { ...ref, source: { ...source, origin: trackedSource } };
-    }
+    if (trackedSource !== undefined) source.origin = trackedSource;
 
     try {
       const program = await this.#manager.runtime.patternManager

@@ -1305,6 +1305,80 @@ describe("piece pull materialization", () => {
     }
   });
 
+  it("keeps pattern content refs useful when source programs are unavailable", async () => {
+    const identityless = runtime.getCell(
+      manager.getSpace(),
+      "identityless-piece-" + crypto.randomUUID(),
+      { type: "object", properties: {} },
+    );
+    expect(await new PieceController(manager, identityless).getPatternRef())
+      .toBeUndefined();
+
+    const program = compiledMultiplierProgram("unavailable-source", 2);
+    const piece = await manager.runPersistent(
+      await runtime.patternManager.compilePattern(program, {
+        space: manager.getSpace(),
+      }),
+      { input: 5 },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    const identityRef = getPatternIdentityRef(piece)!;
+    const contentOnlyRef = {
+      ...identityRef,
+      source: { ref: `cf:pattern:${identityRef.identity}` },
+    };
+    const originalLookup = runtime.patternManager
+      .getPatternSourceProgramByIdentity.bind(runtime.patternManager);
+
+    try {
+      runtime.patternManager.getPatternSourceProgramByIdentity = () =>
+        Promise.resolve(undefined);
+      expect(await controller.getPatternRef()).toEqual(contentOnlyRef);
+
+      runtime.patternManager.getPatternSourceProgramByIdentity = () =>
+        Promise.reject(new Error("source unavailable"));
+      expect(await controller.getPatternRef()).toEqual(contentOnlyRef);
+    } finally {
+      runtime.patternManager.getPatternSourceProgramByIdentity = originalLookup;
+    }
+  });
+
+  it("distinguishes absent setup patterns from unknown stored identities", async () => {
+    const emptyPiece = runtime.getCell(
+      manager.getSpace(),
+      "missing-setup-pattern-" + crypto.randomUUID(),
+      { type: "object", properties: {} },
+    );
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args.join(" "));
+    try {
+      await runtime.setup(undefined, undefined, {}, emptyPiece);
+    } finally {
+      console.warn = originalWarn;
+    }
+    expect(warnings).toEqual([
+      "No pattern provided and no pattern found in result metadata. Not running.",
+    ]);
+
+    const unknownPiece = runtime.getCell(
+      manager.getSpace(),
+      "unknown-setup-pattern-" + crypto.randomUUID(),
+      { type: "object", properties: {} },
+    );
+    await runtime.editWithRetry((tx) => {
+      unknownPiece.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: "Z".repeat(43),
+        symbol: "default",
+      });
+    });
+
+    await expect(runtime.setup(undefined, undefined, {}, unknownPiece))
+      .rejects.toThrow(`Unknown pattern: ${"Z".repeat(43)}#default`);
+  });
+
   it("pulls before reading result values", async () => {
     const piece = await manager.runPersistent(
       trustPattern(runtime, doublePattern()),
@@ -4732,6 +4806,25 @@ describe("piece pull materialization", () => {
     );
 
     expect(manager.getResult(piece).get()).toEqual({ output: 50 });
+  });
+
+  it("stores repository metadata when preparing without starting", async () => {
+    const repository = "https://github.com/commontoolsinc/labs";
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, doublePattern()),
+      { input: 5 },
+      undefined,
+      { start: false },
+    );
+
+    await manager.runWithPattern(
+      trustPattern(runtime, tenfoldPattern()),
+      entityRefToString(piece.entityId),
+      { input: 5 },
+      { start: false, repository },
+    );
+
+    expect(getPatternRepository(piece)).toBe(repository);
   });
 
   it("persists setPattern replacement by identity for fresh runtime reloads", async () => {

@@ -806,7 +806,9 @@ export class PieceManager {
       if (options?.expectedPatternIdentity) {
         throw new Error("atomic pattern updates require starting the piece");
       }
-      await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
+      await this.runtime.setup(undefined, pattern, inputs ?? {}, piece, {
+        patternRepository: options?.repository,
+      });
     }
     await this.syncPattern(currentPiece);
     if (start) {

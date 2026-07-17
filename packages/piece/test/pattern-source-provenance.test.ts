@@ -112,6 +112,7 @@ describe("ensureDefaultPattern stamps patternSource", () => {
       ...identityRef,
       source: {
         ref: `cf:pattern:${identityRef.identity}`,
+        entry: DEFAULT_APP_PATTERN_URL,
         origin: DEFAULT_APP_PATTERN_URL,
       },
     });
