@@ -1,13 +1,25 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertExists } from "@std/assert";
+import { Identity } from "@commonfabric/identity";
+import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import type {
   ActionClaimKey,
+  ActionSettlement,
   BranchName,
   ExecutionClaim,
+  MemoryProtocolFlags,
 } from "@commonfabric/memory/v2";
-import type {
-  ExecutionLeaseHandle,
+import * as MemoryClient from "@commonfabric/memory/v2/client";
+import {
+  type ExecutionLeaseHandle,
   Server,
 } from "@commonfabric/memory/v2/server";
+import { Runtime } from "../src/runtime.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
+import {
+  type Options as StorageOptions,
+  type SessionFactory,
+  StorageManager,
+} from "../src/storage/v2.ts";
 import {
   DenoSpaceExecutorFactory,
   type DenoSpaceExecutorFactoryOptions,
@@ -972,13 +984,16 @@ Deno.test("an ordinary demand shrink leaves sibling claims live", async () => {
   }
 });
 
-// C1.10 (owed fixture): the W2.6 shrink-race. A claimed action's activation is
-// in flight when a concurrent demand shrink retires its root. The Worker's
-// activation discovers the action is gone (ClaimedActionGoneError) and posts a
-// claim-scoped release rather than a lane-fatal error; the host turns it into
-// exactly one revoke while the lane stays live. Deterministic here because the
-// held activation IS the race window: the shrink lands while the run is
-// unacknowledged, then the gone-signal settles it.
+// C1.10: the W2.6 shrink-race, HOST side only. This fixture scripts the
+// Worker's gone-signal by hand, so it pins how the host reacts to an
+// `invalidated-claim` release arriving for a held activation — exactly one
+// revoke, no lane reset — but it does NOT execute the Worker's decision
+// logic (startClaimedAction catching ClaimedActionGoneError). That real seam
+// is bound by "the real Worker settles a claimed activation raced by a
+// concurrent shrink as one claim-scoped release" below (FW7/FB4), which
+// drives the production executor-worker and observes the wire diagnostic
+// `action-unregistered` — the code production actually emits (the previously
+// pinned `demand-removed` appears nowhere in production).
 Deno.test("a claimed activation raced by a concurrent shrink settles as one claim revoke without a fatal", async () => {
   const diagnostics: CandidateDiagnostic[] = [];
   const { worker, server, crashes, executor } = await startExecutor({
@@ -1010,8 +1025,10 @@ Deno.test("a claimed activation raced by a concurrent shrink settles as one clai
 
     // The raced activation settles as a claim-scoped release (the action died
     // in the shrink window — ClaimedActionGoneError → exact release, tolerated
-    // by W2.5), NOT a lane-fatal error.
-    worker.invalidated(CLAIM, "demand-removed");
+    // by W2.5), NOT a lane-fatal error. `action-unregistered` is the release
+    // code the production Worker emits (executor-worker.ts, both release
+    // paths); the real-seam fixture below pins it end-to-end.
+    worker.invalidated(CLAIM, "action-unregistered");
     await flushClaimControl();
     await changing;
 
@@ -1019,7 +1036,7 @@ Deno.test("a claimed activation raced by a concurrent shrink settles as one clai
     assertEquals(server.revoked, [CLAIM]);
     assertEquals(diagnostics, [{
       claim: CLAIM,
-      diagnosticCode: "demand-removed",
+      diagnosticCode: "action-unregistered",
     }]);
     assertEquals(crashes, []);
     assertEquals(worker.terminated, false);
@@ -1420,5 +1437,460 @@ Deno.test("user candidates validate against their own lane's generation", async 
     assertEquals(crashes, []);
   } finally {
     await executor.stop();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// FW7/FB4 — the W2.6 shrink-race through the REAL Worker seam. The fixtures
+// above script the Worker by hand, so none of them execute the production
+// decision logic this race guards: `startClaimedAction` discovering the
+// action died in the shrink window (`ClaimedActionGoneError`) and the
+// request handler converting it into a claim-scoped `invalidated-claim`
+// release (diagnostic `action-unregistered`) instead of a lane fatal
+// (executor-worker.ts). This fixture self-hosts the real production loop —
+// real memory Server, real executor Worker — and makes the race
+// deterministic by holding the claimed activation message at the host/Worker
+// boundary while an ordinary shrink retires the claimed action, then
+// releasing it: the activation is guaranteed to find the action unregistered.
+// ---------------------------------------------------------------------------
+
+const REAL_SEAM_FLAGS = {
+  persistentSchedulerState: true,
+  schedulerWriterLookup: true,
+  serverPrimaryExecutionV1: true,
+  serverPrimaryExecutionClaimRoutingV1: true,
+  serverPrimaryExecutionBuiltinPassivityV1: true,
+} as const satisfies Partial<MemoryProtocolFlags>;
+
+const DOUBLER_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "/// <cts-enable />",
+      "import { pattern, computed } from 'commonfabric';",
+      "export default pattern<{ value: number }>(({ value }) =>",
+      "  computed(() => (value as any) * 2));",
+    ].join("\n"),
+  }],
+};
+
+class LoopbackSessionFactory implements SessionFactory {
+  constructor(
+    private readonly server: Server,
+    private readonly flags: Partial<MemoryProtocolFlags>,
+  ) {}
+
+  async create(
+    space: MemorySpace,
+    signer?: Signer,
+    mountOptions: MemoryClient.MountOptions = {},
+  ) {
+    const client = await MemoryClient.connect({
+      transport: MemoryClient.loopback(this.server),
+      protocolFlags: this.flags,
+    });
+    const session = await client.mount(
+      space,
+      mountOptions,
+      (_space, _session, context) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: { principal: signer?.did() },
+      }),
+    );
+    return { client, session };
+  }
+}
+
+class LoopbackStorageManager extends StorageManager {
+  static connectTo(
+    server: Server,
+    flags: Partial<MemoryProtocolFlags>,
+    options: Omit<StorageOptions, "memoryHost" | "spaceHostMap">,
+  ): LoopbackStorageManager {
+    return new LoopbackStorageManager(
+      { ...options, memoryHost: new URL("memory://executor-shrink-race") },
+      new LoopbackSessionFactory(server, flags),
+    );
+  }
+}
+
+const awaitControlBarrier = async <T>(
+  barrier: Promise<T>,
+  name: string,
+  events: readonly string[],
+): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      barrier,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${name} timed out: ${events.join(" | ")}`)),
+          15_000,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+};
+
+/** The REAL executor Worker behind a message tap: outgoing
+ * `run-claimed-action` requests for one piece are HELD until the test
+ * releases them, which is exactly the shrink-race window (claim issued,
+ * activation in flight, demand shrink lands first). Everything else passes
+ * through byte-identical, and every Worker->host event is re-dispatched
+ * unchanged. */
+class HoldingRealWorker extends EventTarget implements ExecutorWorkerLike {
+  readonly #inner: Worker;
+  readonly held: Array<{ message: unknown; transfer: Transferable[] }> = [];
+  readonly fatals: string[] = [];
+  #holdClaimedRunsFor: string | null = null;
+
+  constructor() {
+    super();
+    this.#inner = new Worker(
+      new URL("../src/executor/executor-worker.ts", import.meta.url).href,
+      { type: "module" },
+    );
+    for (const type of ["message", "error", "messageerror"] as const) {
+      this.#inner.addEventListener(type, (event: Event) => {
+        if (type === "message") {
+          const data = (event as MessageEvent<unknown>).data;
+          const shape = data as { type?: string; message?: string };
+          if (shape.type === "fatal") {
+            this.fatals.push(shape.message ?? "unknown fatal");
+          }
+          this.dispatchEvent(new MessageEvent("message", { data }));
+          return;
+        }
+        this.dispatchEvent(new Event(type));
+      });
+    }
+  }
+
+  holdClaimedRunsFor(pieceId: string): void {
+    this.#holdClaimedRunsFor = pieceId;
+  }
+
+  releaseHeld(): void {
+    for (const { message, transfer } of this.held.splice(0)) {
+      this.#inner.postMessage(message, transfer);
+    }
+  }
+
+  postMessage(message: unknown, transfer: Transferable[] = []): void {
+    const request = message as {
+      type?: string;
+      claim?: { pieceId?: string };
+    };
+    if (
+      request.type === "run-claimed-action" &&
+      this.#holdClaimedRunsFor !== null &&
+      request.claim?.pieceId === this.#holdClaimedRunsFor
+    ) {
+      this.held.push({ message, transfer });
+      return;
+    }
+    this.#inner.postMessage(message, transfer);
+  }
+
+  terminate(): void {
+    this.#inner.terminate();
+  }
+}
+
+Deno.test("the real Worker settles a claimed activation raced by a concurrent shrink as one claim-scoped release", async () => {
+  // Deterministic teardown barrier: terminating a real Worker can race the
+  // Deno event loop's resolution check and kill the run at the test's final
+  // awaits ("Promise resolution is still pending but the event loop has
+  // already resolved"); a pending no-op timer held across the test keeps the
+  // loop refed through that window (same mitigation as the patterns
+  // user-lane gate suite).
+  const keepAlive = setInterval(() => {}, 60_000);
+  try {
+    const principal = await Identity.fromPassphrase(
+      `executor shrink race real seam ${crypto.randomUUID()}`,
+    );
+    const space = principal.did();
+    const server = new Server({
+      authorizeSessionOpen(message) {
+        const value = (message.authorization as { principal?: unknown })
+          ?.principal;
+        return typeof value === "string" ? value : undefined;
+      },
+      sessionOpenAuth: { audience: "did:key:z6Mk-shrink-race-real-seam" },
+      protocolFlags: REAL_SEAM_FLAGS,
+      acl: { mode: "off", serviceDids: [space] },
+    });
+    const seedStorage = LoopbackStorageManager.connectTo(
+      server,
+      REAL_SEAM_FLAGS,
+      { as: principal },
+    );
+    const seedRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: seedStorage,
+      experimental: {
+        persistentSchedulerState: true,
+        serverPrimaryExecution: true,
+      },
+    });
+    let executor:
+      | Awaited<ReturnType<DenoSpaceExecutorFactory["start"]>>
+      | null = null;
+    let observerClient: MemoryClient.Client | null = null;
+    let unsubscribeControl = () => {};
+    const events: string[] = [];
+    try {
+      const compiled = await seedRuntime.patternManager.compilePattern(
+        DOUBLER_PROGRAM,
+        { space },
+      );
+      const seed = async (name: string, value: number) => {
+        const tx = seedRuntime.edit();
+        const input = seedRuntime.getCell<number>(
+          space,
+          `shrink-race-input-${name}`,
+          undefined,
+          tx,
+        );
+        input.set(value);
+        const result = seedRuntime.getCell<number>(
+          space,
+          `shrink-race-result-${name}`,
+          undefined,
+          tx,
+        );
+        const handle = seedRuntime.run(tx, compiled, { value: input }, result);
+        assertEquals((await tx.commit()).error, undefined);
+        assertEquals(await handle.pull(), value * 2);
+        return { input, result };
+      };
+      const pieceA = await seed("a", 5);
+      const pieceB = await seed("b", 6);
+      await seedRuntime.settled();
+      await seedRuntime.storageManager.synced();
+      await seedRuntime.dispose();
+
+      observerClient = await MemoryClient.connect({
+        transport: MemoryClient.loopback(server),
+        protocolFlags: REAL_SEAM_FLAGS,
+      });
+      const observer = await observerClient.mount(
+        space,
+        {},
+        (_space, _session, context) => ({
+          invocation: {
+            aud: context.audience,
+            challenge: context.challenge.value,
+          },
+          authorization: { principal: space },
+        }),
+      );
+      await observer.setExecutionDemand("", [
+        pieceA.result.sourceURI,
+        pieceB.result.sourceURI,
+      ]);
+      // Settlements are ordered against the session's data feed; watch both
+      // roots so the control events can deliver.
+      await observer.watchSet([{
+        id: "shrink-race-a",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: pieceA.result.sourceURI,
+            selector: { path: [], schema: true },
+          }],
+        },
+      }, {
+        id: "shrink-race-b",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: pieceB.result.sourceURI,
+            selector: { path: [], schema: true },
+          }],
+        },
+      }]);
+      const lease = await server.acquireExecutionLease(space, "");
+      assertExists(lease);
+
+      const pieceIdA = `space:${pieceA.result.sourceURI}`;
+      const pieceIdB = `space:${pieceB.result.sourceURI}`;
+      const claims = new Map<string, ExecutionClaim>();
+      const revokes: Array<{ pieceId: string; claimGeneration: number }> = [];
+      const settlements: ActionSettlement[] = [];
+      const bothClaimed = Promise.withResolvers<void>();
+      const revokedB = Promise.withResolvers<void>();
+      unsubscribeControl = observer.subscribeExecutionControl((event) => {
+        events.push(event.type);
+        if (event.type === "session.execution.claim.set") {
+          claims.set(event.claim.pieceId, event.claim);
+          if (claims.has(pieceIdA) && claims.has(pieceIdB)) {
+            bothClaimed.resolve();
+          }
+        }
+        if (event.type === "session.execution.claim.revoke") {
+          revokes.push({
+            pieceId: event.claim.pieceId,
+            claimGeneration: event.claimGeneration,
+          });
+          if (event.claim.pieceId === pieceIdB) revokedB.resolve();
+        }
+        if (event.type === "session.execution.settlement") {
+          settlements.push(event.settlement);
+        }
+      });
+
+      const releaseDiagnostics: Array<{
+        pieceId: string | undefined;
+        diagnosticCode: string;
+      }> = [];
+      const holdingWorker = new HoldingRealWorker();
+      holdingWorker.holdClaimedRunsFor(pieceIdB);
+      const factory = new DenoSpaceExecutorFactory({
+        server,
+        apiUrl: new URL("https://toolshed.example/"),
+        patternApiUrl: new URL("https://toolshed.example/"),
+        experimental: {
+          persistentSchedulerState: true,
+          serverPrimaryExecution: true,
+        },
+        createWorker: () => holdingWorker,
+        onCandidateDiagnostic: (diagnostic) =>
+          releaseDiagnostics.push({
+            pieceId: diagnostic.claim?.pieceId ?? diagnostic.claimKey?.pieceId,
+            diagnosticCode: diagnostic.diagnosticCode,
+          }),
+      } as CandidateAwareFactoryOptions);
+      executor = await factory.start({
+        space,
+        branch: "",
+        lease,
+        pieces: [pieceA.result.sourceURI, pieceB.result.sourceURI],
+        onCrash(error) {
+          events.push(`crash:${error}`);
+        },
+      });
+      // One source invalidation per piece drives discovery to exact claims.
+      await observer.transact({
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: pieceA.input.sourceURI,
+          value: { value: 7 },
+        }],
+      });
+      await observer.transact({
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: pieceB.input.sourceURI,
+          value: { value: 8 },
+        }],
+      });
+      await awaitControlBarrier(
+        bothClaimed.promise,
+        "both pieces claimed",
+        events,
+      );
+      const claimA = claims.get(pieceIdA)!;
+      const claimB = claims.get(pieceIdB)!;
+      // B's claim is issued and its activation request is HELD in flight at
+      // the host/Worker boundary: the race window is open.
+      assertEquals(holdingWorker.held.length, 1);
+
+      // An ordinary demand shrink retires B while its activation is in
+      // flight. The Worker unregisters B's action; B was never live in the
+      // Worker, so the shrink itself releases nothing — the held activation
+      // is now doomed to find the action gone.
+      await executor.setDemand([pieceA.result.sourceURI]);
+      await executor.settle();
+      assertEquals(revokes, []);
+      assertEquals(server.listExecutionClaims(space).length, 2);
+      assertEquals(holdingWorker.fatals, []);
+
+      // Release the held activation: the REAL startClaimedAction hits
+      // ClaimedActionGoneError and the Worker posts a claim-scoped release
+      // with the production diagnostic — not a lane fatal.
+      holdingWorker.releaseHeld();
+      await awaitControlBarrier(
+        revokedB.promise,
+        "claim-scoped release of B",
+        events,
+      );
+
+      // Exactly one revoke, for B's exact incarnation; A is untouched.
+      assertEquals(revokes, [{
+        pieceId: pieceIdB,
+        claimGeneration: claimB.claimGeneration,
+      }]);
+      // The REAL wire diagnostic code, observed at the host release seam.
+      assertEquals(
+        releaseDiagnostics.filter((entry) => entry.pieceId === pieceIdB),
+        [{ pieceId: pieceIdB, diagnosticCode: "action-unregistered" }],
+      );
+      // No lane fatal: the Worker posted no fatal message and the host saw
+      // no crash; A's claim survives server-side.
+      assertEquals(holdingWorker.fatals, []);
+      assertEquals(events.filter((event) => event.startsWith("crash:")), []);
+      assertEquals(server.listExecutionClaims(space), [claimA]);
+
+      // The lane stays LIVE: the next source invalidation of A settles under
+      // A's original claim incarnation, no reclaim.
+      const settledA = Promise.withResolvers<ActionSettlement>();
+      let sourceSeqA = Number.POSITIVE_INFINITY;
+      const unsubscribeSettled = observer.subscribeExecutionControl(
+        (event) => {
+          if (
+            event.type === "session.execution.settlement" &&
+            event.settlement.claim.pieceId === pieceIdA &&
+            event.settlement.inputBasisSeq >= sourceSeqA
+          ) {
+            settledA.resolve(event.settlement);
+          }
+        },
+      );
+      try {
+        const source = await observer.transact({
+          localSeq: 4,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: pieceA.input.sourceURI,
+            value: { value: 9 },
+          }],
+        });
+        sourceSeqA = source.seq;
+        const settlement = await awaitControlBarrier(
+          settledA.promise,
+          "post-race settlement for A",
+          events,
+        );
+        assertEquals(
+          settlement.outcome === "committed" || settlement.outcome === "no-op",
+          true,
+        );
+        assertEquals(settlement.claim.claimGeneration, claimA.claimGeneration);
+      } finally {
+        unsubscribeSettled();
+      }
+      assertEquals(events.filter((event) => event.startsWith("crash:")), []);
+    } finally {
+      unsubscribeControl();
+      await executor?.stop();
+      await seedStorage.close();
+      await observerClient?.close();
+      await server.close();
+    }
+  } finally {
+    clearInterval(keepAlive);
   }
 });

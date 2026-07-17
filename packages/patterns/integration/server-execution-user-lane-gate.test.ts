@@ -214,6 +214,40 @@ const awaitBarrier = async <T>(
   }
 };
 
+/**
+ * Deterministic teardown barrier for every test that spawns the real Deno
+ * executor Worker (the self-hosted production loop).
+ *
+ * Without it, terminating the executor Worker races the Deno event loop's
+ * own resolution check: after `pool.close()` tears the Worker down, the
+ * test's next lone `await` on a just-completing async op (historically the
+ * final temp-dir `Deno.remove`) can park exactly as the runtime decides the
+ * loop is drained, and the run dies AFTER the suite summary with
+ * `error: Promise resolution is still pending but the event loop has already
+ * resolved` — the in-flight test is silently missing from the summary count.
+ * Measured before the barrier: 2/10 full-file runs failed, 5/10 for the A2
+ * revocation leg alone (its ACL churn hits the window hardest). This is a
+ * runtime-level race with Worker termination, not a fixture resource leak:
+ * a pending no-op timer held across the test keeps the event loop refed
+ * through the window, and the same runs pass with zero timer ticks fired
+ * (the guarded awaits all resolve in well under the interval). The timer is
+ * cleared synchronously at test end, so `--trace-leaks` sanitizers stay
+ * green.
+ */
+const withExecutorTeardownBarrier = async <T>(
+  fn: () => Promise<T>,
+): Promise<T> => {
+  const keepAlive = setInterval(() => {
+    // Never expected to fire (tests finish or time out first); the pending
+    // timer itself is the barrier.
+  }, 60_000);
+  try {
+    return await fn();
+  } finally {
+    clearInterval(keepAlive);
+  }
+};
+
 type GateClient = {
   identity: Identity;
   did: string;
@@ -474,36 +508,33 @@ const readCellNumber = async (
  * zero derived wire writes, per-lane A25 record, sponsor-overlap
  * unclobbered, zero lease-fence rejects).
  *
- * REMAINING (why the heavyweight two-principal loop stays env-gated): the
- * self-hosted loop (real Server + Deno executor Worker + two client
- * Runtimes) has a residual TEARDOWN-timing flake — a fire-and-forget
- * promise can resolve one turn after the process event loop drains, surfacing
- * a "Promise resolution is still pending" at shutdown. The graceful executor
- * stop now settles its abandoned in-flight Worker requests (the largest
- * contributor — see `deno-space-executor.ts` `stop`), which removed most of
- * it; a smaller residual remains under the A2 mid-run-revocation churn. It is
- * a teardown-hygiene issue only — every assertion passes on a clean run — so
- * the loop stays behind CF_RUN_USER_LANE_GATE until the residual is chased
- * down, keeping the default patterns test run deterministic.
+ * RESOLVED (FW7, 2026-07-17) — the teardown flake that kept this family
+ * env-gated (CF_RUN_USER_LANE_GATE, Fable review FB14). The residual
+ * "Promise resolution is still pending but the event loop has already
+ * resolved" at shutdown was root-caused to a runtime-level race between
+ * executor `Worker.terminate()` and the Deno event loop's resolution check
+ * (not a fixture leak): the test's final await could park on a
+ * just-completing op exactly as the loop declared itself drained. Every
+ * Worker-spawning test now runs inside `withExecutorTeardownBarrier` (see
+ * its doc comment for the measured failure rates and evidence), and the
+ * whole family — including the A2 security fixture — runs and asserts on
+ * every automatic integration run, with no env gate.
  */
-const GATE_BLOCKED = Deno.env.get("CF_RUN_USER_LANE_GATE") !== "1";
 
 Deno.test({
   name:
     "C1.9 gate: PerUser derivation served for two principals with isolated rows and zero client derived wire writes",
-  // GREEN under CF_RUN_USER_LANE_GATE=1 (C1.9c per-lane serving). Kept
-  // env-gated only for the residual self-hosted-loop teardown flake noted
-  // above; the sponsor-lane leg is pinned default-run by "C1.9b sponsor-lane".
-  ignore: GATE_BLOCKED,
   async fn() {
-    setServerPrimaryExecutionClaimRankConfig("user");
-    const storeDir = await Deno.makeTempDir({ prefix: "user-lane-gate-" });
-    try {
-      await runTwoPrincipalGate(storeDir);
-    } finally {
-      resetServerPrimaryExecutionClaimRankConfig();
-      await Deno.remove(storeDir, { recursive: true }).catch(() => undefined);
-    }
+    await withExecutorTeardownBarrier(async () => {
+      setServerPrimaryExecutionClaimRankConfig("user");
+      const storeDir = await Deno.makeTempDir({ prefix: "user-lane-gate-" });
+      try {
+        await runTwoPrincipalGate(storeDir);
+      } finally {
+        resetServerPrimaryExecutionClaimRankConfig();
+        await Deno.remove(storeDir, { recursive: true }).catch(() => undefined);
+      }
+    });
   },
 });
 
@@ -988,150 +1019,153 @@ Deno.test(
 // REAL production loop for the one lane the Worker can serve today (the
 // demand sponsor's). A user-rank claim is issued, the claimed lane run
 // settles, the derived row lands durably under the principal's user scope
-// key, and the broad instance stays a scope-naming link. Default-run: this
-// is the outcome the full two-principal gate extends once non-sponsor lanes
-// are served (see the REMAINING note above).
+// key, and the broad instance stays a scope-naming link. This is the outcome
+// the full two-principal gate above extends to non-sponsor lanes.
 // ---------------------------------------------------------------------------
 
-Deno.test("C1.9b sponsor-lane: the PerUser derivation is served end-to-end for the demand sponsor's user lane", async () => {
-  setServerPrimaryExecutionClaimRankConfig("user");
-  const storeDir = await Deno.makeTempDir({ prefix: "user-lane-sponsor-" });
-  const spaceIdentity = await Identity.generate({ implementation: "noble" });
-  const space = spaceIdentity.did() as MemorySpace;
-  const server = new Server({
-    store: new URL(`file://${storeDir}/`),
-    authorizeSessionOpen(message) {
-      const value = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof value === "string" ? value : undefined;
-    },
-    sessionOpenAuth: { audience: "did:key:z6Mk-user-lane-sponsor" },
-    protocolFlags: FLAGS,
-    acl: { mode: "off", serviceDids: [space] },
-  });
-  let alice: GateClient | null = null;
-  let pool: SharedExecutionPool | null = null;
-  let fixture:
-    | (FixtureResult & { resultLink: ReturnType<typeof linkOf> })
-    | null = null;
-  let unsubscribeAccepted = () => {};
-  const events: string[] = [];
-  try {
-    alice = await openClient(server, FLAGS, true);
-    fixture = await seedFixture(alice, space);
-    const settled = Promise.withResolvers<void>();
-    unsubscribeAccepted = server.subscribeAcceptedCommits(space, (event) => {
-      for (const revision of event.revisions) {
-        const scopeKey = (revision as { scopeKey?: string }).scopeKey ??
-          "space";
-        events.push(`accepted:${revision.id}@${scopeKey}`);
-        if (
-          revision.id === fixture!.doubledId && scopeKey === alice!.laneKey
-        ) {
-          settled.resolve();
-        }
-      }
-    });
-    const factory = new DenoSpaceExecutorFactory({
-      server,
-      apiUrl: new URL("https://toolshed.example/"),
-      patternApiUrl: new URL("https://toolshed.example/"),
-      experimental: {
-        persistentSchedulerState: true,
-        serverPrimaryExecution: true,
-        serverPrimaryExecutionUserRankCandidates: true,
+Deno.test("C1.9b sponsor-lane: the PerUser derivation is served end-to-end for the demand sponsor's user lane", () =>
+  withExecutorTeardownBarrier(async () => {
+    setServerPrimaryExecutionClaimRankConfig("user");
+    const storeDir = await Deno.makeTempDir({ prefix: "user-lane-sponsor-" });
+    const spaceIdentity = await Identity.generate({ implementation: "noble" });
+    const space = spaceIdentity.did() as MemorySpace;
+    const server = new Server({
+      store: new URL(`file://${storeDir}/`),
+      authorizeSessionOpen(message) {
+        const value = (message.authorization as { principal?: unknown })
+          ?.principal;
+        return typeof value === "string" ? value : undefined;
       },
-      onCandidateClaim: (candidate) =>
-        events.push(
-          `candidate:${candidate.claimKey.contextKey}:${candidate.claimKey.actionId}`,
-        ),
-      onCandidateDiagnostic: (diagnostic) =>
-        events.push(
-          `diagnostic:${diagnostic.diagnosticCode}:${
-            diagnostic.claimKey?.actionId ?? "?"
-          }`,
-        ),
+      sessionOpenAuth: { audience: "did:key:z6Mk-user-lane-sponsor" },
+      protocolFlags: FLAGS,
+      acl: { mode: "off", serviceDids: [space] },
     });
-    pool = new SharedExecutionPool({
-      control: server,
-      factory,
-      settleTimeoutMs: 10_000,
-      userLaneCandidates: true,
-    });
-    pool.start();
-    const root = alice.runtime.getCellFromLink(
-      // deno-lint-ignore no-explicit-any
-      fixture.resultLink as any,
-    );
-    assertEquals(await alice.runtime.start(root), true);
-    await waitForCondition(
-      "sponsor demand",
-      () => server.listExecutionDemands(space, "").length > 0,
-    );
-    await pool.idle();
-    await waitForCondition(
-      "user-rank claim for the sponsor lane",
-      () =>
-        (server.executionStats.claimsIssuedByContextKey[alice!.laneKey] ?? 0) >
-          0,
-      () => ({
-        byKey: server.executionStats.claimsIssuedByContextKey,
-        laneKey: alice!.laneKey,
-        events: events.slice(-25),
-      }),
-    );
+    let alice: GateClient | null = null;
+    let pool: SharedExecutionPool | null = null;
+    let fixture:
+      | (FixtureResult & { resultLink: ReturnType<typeof linkOf> })
+      | null = null;
+    let unsubscribeAccepted = () => {};
+    const events: string[] = [];
+    try {
+      alice = await openClient(server, FLAGS, true);
+      fixture = await seedFixture(alice, space);
+      const settled = Promise.withResolvers<void>();
+      unsubscribeAccepted = server.subscribeAcceptedCommits(space, (event) => {
+        for (const revision of event.revisions) {
+          const scopeKey = (revision as { scopeKey?: string }).scopeKey ??
+            "space";
+          events.push(`accepted:${revision.id}@${scopeKey}`);
+          if (
+            revision.id === fixture!.doubledId && scopeKey === alice!.laneKey
+          ) {
+            settled.resolve();
+          }
+        }
+      });
+      const factory = new DenoSpaceExecutorFactory({
+        server,
+        apiUrl: new URL("https://toolshed.example/"),
+        patternApiUrl: new URL("https://toolshed.example/"),
+        experimental: {
+          persistentSchedulerState: true,
+          serverPrimaryExecution: true,
+          serverPrimaryExecutionUserRankCandidates: true,
+        },
+        onCandidateClaim: (candidate) =>
+          events.push(
+            `candidate:${candidate.claimKey.contextKey}:${candidate.claimKey.actionId}`,
+          ),
+        onCandidateDiagnostic: (diagnostic) =>
+          events.push(
+            `diagnostic:${diagnostic.diagnosticCode}:${
+              diagnostic.claimKey?.actionId ?? "?"
+            }`,
+          ),
+      });
+      pool = new SharedExecutionPool({
+        control: server,
+        factory,
+        settleTimeoutMs: 10_000,
+        userLaneCandidates: true,
+      });
+      pool.start();
+      const root = alice.runtime.getCellFromLink(
+        // deno-lint-ignore no-explicit-any
+        fixture.resultLink as any,
+      );
+      assertEquals(await alice.runtime.start(root), true);
+      await waitForCondition(
+        "sponsor demand",
+        () => server.listExecutionDemands(space, "").length > 0,
+      );
+      await pool.idle();
+      await waitForCondition(
+        "user-rank claim for the sponsor lane",
+        () =>
+          (server.executionStats.claimsIssuedByContextKey[alice!.laneKey] ??
+            0) >
+            0,
+        () => ({
+          byKey: server.executionStats.claimsIssuedByContextKey,
+          laneKey: alice!.laneKey,
+          events: events.slice(-25),
+        }),
+      );
 
-    await setMyScore(alice, fixture.resultLink, 3);
-    await awaitBarrier(
-      settled.promise,
-      "sponsor user-lane settlement",
-      () => ({
-        events: events.slice(-25),
-        stats: server.executionStats,
-        pool: pool!.metrics(),
-      }),
-    );
-    await waitForCondition(
-      "sponsor client convergence",
-      async () =>
-        await readCellNumber(alice!, fixture!.resultLink, "doubled") === 6,
-      () => ({ events: events.slice(-10) }),
-    );
-    assertEquals(
-      unexpectedLeaseFenceRejects(server.executionStats.leaseFenceRejectCauses),
-      0,
-      JSON.stringify(server.executionStats.leaseFenceRejectCauses),
-    );
-  } finally {
-    unsubscribeAccepted();
-    await pool?.close();
-    await alice?.runtime.dispose().catch(() => undefined);
-    await alice?.storage.close().catch(() => undefined);
-    await server.close();
-    resetServerPrimaryExecutionClaimRankConfig();
-  }
+      await setMyScore(alice, fixture.resultLink, 3);
+      await awaitBarrier(
+        settled.promise,
+        "sponsor user-lane settlement",
+        () => ({
+          events: events.slice(-25),
+          stats: server.executionStats,
+          pool: pool!.metrics(),
+        }),
+      );
+      await waitForCondition(
+        "sponsor client convergence",
+        async () =>
+          await readCellNumber(alice!, fixture!.resultLink, "doubled") === 6,
+        () => ({ events: events.slice(-10) }),
+      );
+      assertEquals(
+        unexpectedLeaseFenceRejects(
+          server.executionStats.leaseFenceRejectCauses,
+        ),
+        0,
+        JSON.stringify(server.executionStats.leaseFenceRejectCauses),
+      );
+    } finally {
+      unsubscribeAccepted();
+      await pool?.close();
+      await alice?.runtime.dispose().catch(() => undefined);
+      await alice?.storage.close().catch(() => undefined);
+      await server.close();
+      resetServerPrimaryExecutionClaimRankConfig();
+    }
 
-  try {
-    // Durable §4 shape: the value under the sponsor's user scope key, the
-    // broad instance a scope-naming link (an object envelope), never a
-    // principal's value.
-    const databasePath = fromFileUrl(
-      resolveSpaceStoreUrl(new URL(`file://${storeDir}/`), space),
-    );
-    const doubledRows = scopeRows(databasePath, fixture!.doubledId);
-    assertEquals(latestScopedValue(doubledRows, alice!.laneKey), 6);
-    const broadValue = latestScopedValue(doubledRows, "space");
-    assert(
-      broadValue === undefined ||
-        (typeof broadValue === "object" && broadValue !== null),
-      `the broad doubled instance must stay a scope-naming link, got: ${
-        JSON.stringify(broadValue)
-      }`,
-    );
-  } finally {
-    await Deno.remove(storeDir, { recursive: true }).catch(() => undefined);
-  }
-});
+    try {
+      // Durable §4 shape: the value under the sponsor's user scope key, the
+      // broad instance a scope-naming link (an object envelope), never a
+      // principal's value.
+      const databasePath = fromFileUrl(
+        resolveSpaceStoreUrl(new URL(`file://${storeDir}/`), space),
+      );
+      const doubledRows = scopeRows(databasePath, fixture!.doubledId);
+      assertEquals(latestScopedValue(doubledRows, alice!.laneKey), 6);
+      const broadValue = latestScopedValue(doubledRows, "space");
+      assert(
+        broadValue === undefined ||
+          (typeof broadValue === "object" && broadValue !== null),
+        `the broad doubled instance must stay a scope-naming link, got: ${
+          JSON.stringify(broadValue)
+        }`,
+      );
+    } finally {
+      await Deno.remove(storeDir, { recursive: true }).catch(() => undefined);
+    }
+  }));
 
 // ---------------------------------------------------------------------------
 // Flag-off parity (§7 gate criterion e): the same fixture with the execution
@@ -1229,213 +1263,214 @@ Deno.test("C1.9 flag-off parity: two principals converge client-primary with iso
 // once the §4 servability blocker is fixed and user claims exist to revoke.
 // ---------------------------------------------------------------------------
 
-Deno.test("A2: revoking alice's WRITE mid-run drains her user lane and lands no post-revocation row under her scope", async () => {
-  // Gated behind the C1.9 gate's flag (CF_RUN_USER_LANE_GATE): the same
-  // heavyweight self-hosted two-principal loop, and its ACL-enforce mid-run
-  // revocation exercises the residual teardown-timing flake most (see the
-  // header). Skipped by default so the patterns run stays deterministic; its
-  // assertions pass on every clean flagged run.
-  if (GATE_BLOCKED) return;
-  setServerPrimaryExecutionClaimRankConfig("user");
-  const storeDir = await Deno.makeTempDir({ prefix: "user-lane-revoke-" });
-  const spaceIdentity = await Identity.generate({ implementation: "noble" });
-  const space = spaceIdentity.did() as MemorySpace;
-  const server = new Server({
-    store: new URL(`file://${storeDir}/`),
-    authorizeSessionOpen(message) {
-      const value = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof value === "string" ? value : undefined;
-    },
-    sessionOpenAuth: { audience: "did:key:z6Mk-user-lane-revoke" },
-    protocolFlags: FLAGS,
-    acl: { mode: "enforce", serviceDids: [space] },
-  });
-  let owner: MemoryClient.Client | null = null;
-  let alice: GateClient | null = null;
-  let bob: GateClient | null = null;
-  let pool: SharedExecutionPool | null = null;
-  let fixture:
-    | (FixtureResult & { resultLink: ReturnType<typeof linkOf> })
-    | null = null;
-  let aclRevocationSeq = 0;
-  let aliceLaneKey = "";
-  try {
-    // ACL genesis by the space identity: alice and bob hold WRITE.
-    owner = await MemoryClient.connect({
-      transport: MemoryClient.loopback(server),
+Deno.test("A2: revoking alice's WRITE mid-run drains her user lane and lands no post-revocation row under her scope", () =>
+  withExecutorTeardownBarrier(async () => {
+    // The same heavyweight self-hosted two-principal loop as the gate above.
+    // Its ACL-enforce mid-run revocation churn hit the executor-Worker
+    // teardown race hardest (5/10 solo runs before the barrier — see
+    // `withExecutorTeardownBarrier`); this SECURITY fixture must assert on
+    // every automatic run, so the barrier, not an env gate, keeps it
+    // deterministic.
+    setServerPrimaryExecutionClaimRankConfig("user");
+    const storeDir = await Deno.makeTempDir({ prefix: "user-lane-revoke-" });
+    const spaceIdentity = await Identity.generate({ implementation: "noble" });
+    const space = spaceIdentity.did() as MemorySpace;
+    const server = new Server({
+      store: new URL(`file://${storeDir}/`),
+      authorizeSessionOpen(message) {
+        const value = (message.authorization as { principal?: unknown })
+          ?.principal;
+        return typeof value === "string" ? value : undefined;
+      },
+      sessionOpenAuth: { audience: "did:key:z6Mk-user-lane-revoke" },
       protocolFlags: FLAGS,
+      acl: { mode: "enforce", serviceDids: [space] },
     });
-    const ownerSession = await owner.mount(space, {}, (
-      _space,
-      _session,
-      context,
-    ) => ({
-      invocation: {
-        aud: context.audience,
-        challenge: context.challenge.value,
-      },
-      authorization: { principal: space },
-    }));
-    alice = await openClient(server, FLAGS, true);
-    bob = await openClient(server, FLAGS, true);
-    aliceLaneKey = alice.laneKey;
-    await ownerSession.transact({
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: `of:${space}`,
-        value: {
-          value: {
-            [space]: "OWNER",
-            [alice.did]: "WRITE",
-            [bob.did]: "WRITE",
-          },
-        },
-      }],
-    });
-
-    fixture = await seedFixture(alice, space);
-    const factory = new DenoSpaceExecutorFactory({
-      server,
-      apiUrl: new URL("https://toolshed.example/"),
-      patternApiUrl: new URL("https://toolshed.example/"),
-      experimental: {
-        persistentSchedulerState: true,
-        serverPrimaryExecution: true,
-        serverPrimaryExecutionUserRankCandidates: true,
-      },
-    });
-    pool = new SharedExecutionPool({
-      control: server,
-      factory,
-      settleTimeoutMs: 10_000,
-      userLaneCandidates: true,
-    });
-    pool.start();
-    const aliceRoot = alice.runtime.getCellFromLink(
-      // deno-lint-ignore no-explicit-any
-      fixture.resultLink as any,
-    );
-    assertEquals(await alice.runtime.start(aliceRoot), true);
-    // deno-lint-ignore no-explicit-any
-    const bobRoot = bob.runtime.getCellFromLink(fixture.resultLink as any);
-    await bobRoot.sync();
-    assertEquals(await bob.runtime.start(bobRoot), true);
-    await waitForCondition(
-      "both user lanes open",
-      () => pool!.metrics().activeUserLanes === 2,
-      () => pool!.metrics(),
-    );
-    await setMyScore(alice, fixture.resultLink, 3);
-    await setMyScore(bob, fixture.resultLink, 5);
-    await waitForCondition(
-      "pre-revocation convergence",
-      async () =>
-        await readCellNumber(alice!, fixture!.resultLink, "doubled") === 6 &&
-        await readCellNumber(bob!, fixture!.resultLink, "doubled") === 10,
-    );
-    await alice.storage.synced();
-    await bob.storage.synced();
-
-    // Mid-run revocation: drop alice to READ-less. The C1.8 aclTouched
-    // reconciliation fences and revokes her lane before this response
-    // resolves; every row committed after aclRevocationSeq must be someone
-    // else's.
-    const revocation = await ownerSession.transact({
-      localSeq: 2,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: `of:${space}`,
-        value: {
-          value: {
-            [space]: "OWNER",
-            [bob.did]: "WRITE",
-          },
-        },
-      }],
-    });
-    aclRevocationSeq = revocation.seq;
-    await waitForCondition(
-      "alice's lane drained",
-      () => pool!.metrics().activeUserLanes <= 1,
-      () => pool!.metrics(),
-    );
-
-    // Alice's client can no longer land writes under her scope.
-    const rejectedTx = alice.runtime.edit();
-    alice.runtime
-      // deno-lint-ignore no-explicit-any
-      .getCellFromLink(fixture.resultLink as any)
-      .withTx(rejectedTx)
-      .key("myScore")
-      .set(9);
-    const rejected = await rejectedTx.commit();
-    assert(
-      rejected.error !== undefined,
-      "a post-revocation write from alice unexpectedly committed",
-    );
-
-    // Bob's authority is untouched: his lane survives and his writes land.
-    await setMyScore(bob, fixture.resultLink, 7);
-    await waitForCondition(
-      "bob still served after the revocation",
-      async () =>
-        await readCellNumber(bob!, fixture!.resultLink, "doubled") === 14,
-    );
-    await bob.storage.synced();
-
-    // Guard contract (A13): the drain-induced causes are the ONLY tolerated
-    // rejects here; anything else is a defect.
-    assertEquals(
-      unexpectedLeaseFenceRejects(
-        server.executionStats.leaseFenceRejectCauses,
-      ),
-      0,
-      JSON.stringify(server.executionStats.leaseFenceRejectCauses),
-    );
-  } finally {
-    await pool?.close();
-    await alice?.runtime.dispose().catch(() => undefined);
-    await bob?.runtime.dispose().catch(() => undefined);
-    await alice?.storage.close().catch(() => undefined);
-    await bob?.storage.close().catch(() => undefined);
-    await owner?.close();
-    await server.close();
-    resetServerPrimaryExecutionClaimRankConfig();
-  }
-
-  try {
-    // Durable outcome: alice's user-scoped rows all precede the revocation
-    // commit; bob's continue past it.
-    const databasePath = fromFileUrl(
-      resolveSpaceStoreUrl(new URL(`file://${storeDir}/`), space),
-    );
-    const database = new DatabaseSync(databasePath, { readOnly: true });
+    let owner: MemoryClient.Client | null = null;
+    let alice: GateClient | null = null;
+    let bob: GateClient | null = null;
+    let pool: SharedExecutionPool | null = null;
+    let fixture:
+      | (FixtureResult & { resultLink: ReturnType<typeof linkOf> })
+      | null = null;
+    let aclRevocationSeq = 0;
+    let aliceLaneKey = "";
     try {
-      const aliceRowsAfter = database.prepare(
-        `SELECT id, seq, commit_seq FROM revision
-         WHERE scope_key = ? AND commit_seq > ?`,
-      ).all(aliceLaneKey, aclRevocationSeq);
-      assertEquals(
-        aliceRowsAfter,
-        [],
-        "a post-revocation row landed under alice's scope",
+      // ACL genesis by the space identity: alice and bob hold WRITE.
+      owner = await MemoryClient.connect({
+        transport: MemoryClient.loopback(server),
+        protocolFlags: FLAGS,
+      });
+      const ownerSession = await owner.mount(space, {}, (
+        _space,
+        _session,
+        context,
+      ) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: { principal: space },
+      }));
+      alice = await openClient(server, FLAGS, true);
+      bob = await openClient(server, FLAGS, true);
+      aliceLaneKey = alice.laneKey;
+      await ownerSession.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: `of:${space}`,
+          value: {
+            value: {
+              [space]: "OWNER",
+              [alice.did]: "WRITE",
+              [bob.did]: "WRITE",
+            },
+          },
+        }],
+      });
+
+      fixture = await seedFixture(alice, space);
+      const factory = new DenoSpaceExecutorFactory({
+        server,
+        apiUrl: new URL("https://toolshed.example/"),
+        patternApiUrl: new URL("https://toolshed.example/"),
+        experimental: {
+          persistentSchedulerState: true,
+          serverPrimaryExecution: true,
+          serverPrimaryExecutionUserRankCandidates: true,
+        },
+      });
+      pool = new SharedExecutionPool({
+        control: server,
+        factory,
+        settleTimeoutMs: 10_000,
+        userLaneCandidates: true,
+      });
+      pool.start();
+      const aliceRoot = alice.runtime.getCellFromLink(
+        // deno-lint-ignore no-explicit-any
+        fixture.resultLink as any,
       );
-      const bobRowsAfter = database.prepare(
-        `SELECT COUNT(*) AS rows FROM revision
-         WHERE scope_key = ? AND commit_seq > ?`,
-      ).get(bob!.laneKey, aclRevocationSeq) as { rows: number };
+      assertEquals(await alice.runtime.start(aliceRoot), true);
+      // deno-lint-ignore no-explicit-any
+      const bobRoot = bob.runtime.getCellFromLink(fixture.resultLink as any);
+      await bobRoot.sync();
+      assertEquals(await bob.runtime.start(bobRoot), true);
+      await waitForCondition(
+        "both user lanes open",
+        () => pool!.metrics().activeUserLanes === 2,
+        () => pool!.metrics(),
+      );
+      await setMyScore(alice, fixture.resultLink, 3);
+      await setMyScore(bob, fixture.resultLink, 5);
+      await waitForCondition(
+        "pre-revocation convergence",
+        async () =>
+          await readCellNumber(alice!, fixture!.resultLink, "doubled") === 6 &&
+          await readCellNumber(bob!, fixture!.resultLink, "doubled") === 10,
+      );
+      await alice.storage.synced();
+      await bob.storage.synced();
+
+      // Mid-run revocation: drop alice to READ-less. The C1.8 aclTouched
+      // reconciliation fences and revokes her lane before this response
+      // resolves; every row committed after aclRevocationSeq must be someone
+      // else's.
+      const revocation = await ownerSession.transact({
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: `of:${space}`,
+          value: {
+            value: {
+              [space]: "OWNER",
+              [bob.did]: "WRITE",
+            },
+          },
+        }],
+      });
+      aclRevocationSeq = revocation.seq;
+      await waitForCondition(
+        "alice's lane drained",
+        () => pool!.metrics().activeUserLanes <= 1,
+        () => pool!.metrics(),
+      );
+
+      // Alice's client can no longer land writes under her scope.
+      const rejectedTx = alice.runtime.edit();
+      alice.runtime
+        // deno-lint-ignore no-explicit-any
+        .getCellFromLink(fixture.resultLink as any)
+        .withTx(rejectedTx)
+        .key("myScore")
+        .set(9);
+      const rejected = await rejectedTx.commit();
       assert(
-        bobRowsAfter.rows > 0,
-        "bob's post-revocation writes left no durable rows",
+        rejected.error !== undefined,
+        "a post-revocation write from alice unexpectedly committed",
+      );
+
+      // Bob's authority is untouched: his lane survives and his writes land.
+      await setMyScore(bob, fixture.resultLink, 7);
+      await waitForCondition(
+        "bob still served after the revocation",
+        async () =>
+          await readCellNumber(bob!, fixture!.resultLink, "doubled") === 14,
+      );
+      await bob.storage.synced();
+
+      // Guard contract (A13): the drain-induced causes are the ONLY tolerated
+      // rejects here; anything else is a defect.
+      assertEquals(
+        unexpectedLeaseFenceRejects(
+          server.executionStats.leaseFenceRejectCauses,
+        ),
+        0,
+        JSON.stringify(server.executionStats.leaseFenceRejectCauses),
       );
     } finally {
-      database.close();
+      await pool?.close();
+      await alice?.runtime.dispose().catch(() => undefined);
+      await bob?.runtime.dispose().catch(() => undefined);
+      await alice?.storage.close().catch(() => undefined);
+      await bob?.storage.close().catch(() => undefined);
+      await owner?.close();
+      await server.close();
+      resetServerPrimaryExecutionClaimRankConfig();
     }
-  } finally {
-    await Deno.remove(storeDir, { recursive: true }).catch(() => undefined);
-  }
-});
+
+    try {
+      // Durable outcome: alice's user-scoped rows all precede the revocation
+      // commit; bob's continue past it.
+      const databasePath = fromFileUrl(
+        resolveSpaceStoreUrl(new URL(`file://${storeDir}/`), space),
+      );
+      const database = new DatabaseSync(databasePath, { readOnly: true });
+      try {
+        const aliceRowsAfter = database.prepare(
+          `SELECT id, seq, commit_seq FROM revision
+         WHERE scope_key = ? AND commit_seq > ?`,
+        ).all(aliceLaneKey, aclRevocationSeq);
+        assertEquals(
+          aliceRowsAfter,
+          [],
+          "a post-revocation row landed under alice's scope",
+        );
+        const bobRowsAfter = database.prepare(
+          `SELECT COUNT(*) AS rows FROM revision
+         WHERE scope_key = ? AND commit_seq > ?`,
+        ).get(bob!.laneKey, aclRevocationSeq) as { rows: number };
+        assert(
+          bobRowsAfter.rows > 0,
+          "bob's post-revocation writes left no durable rows",
+        );
+      } finally {
+        database.close();
+      }
+    } finally {
+      await Deno.remove(storeDir, { recursive: true }).catch(() => undefined);
+    }
+  }));

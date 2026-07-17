@@ -102,6 +102,10 @@ class LaneSessionFactory implements SessionFactory {
   readonly queryGraphOptions: (ReplicaReadOptions | undefined)[] = [];
   readonly view = new LaneView();
   onWatchAdd?: (watches: WatchSpec[]) => SessionSync;
+  /** Confirmation hold: return a promise to delay a commit's host response
+   * (its optimistic version then stays PENDING until the hold releases —
+   * the deterministic cross-lane race window). */
+  holdTransact?: (commit: ClientCommit) => Promise<void> | undefined;
   #seq = 0;
 
   create(
@@ -112,13 +116,14 @@ class LaneSessionFactory implements SessionFactory {
       sessionId: "session:lane-test",
       sessionToken: undefined,
       serverSeq: 0,
-      transact: (commit: ClientCommit): Promise<AppliedCommit> => {
+      transact: async (commit: ClientCommit): Promise<AppliedCommit> => {
         this.commits.push(structuredClone(commit));
-        return Promise.resolve({
+        await this.holdTransact?.(commit);
+        return {
           seq: ++this.#seq,
           branch: "",
           revisions: [],
-        });
+        };
       },
       queryGraph: (_query: GraphQuery, options?: ReplicaReadOptions) => {
         this.queryGraphOptions.push(options);
@@ -697,60 +702,122 @@ Deno.test("rebase-replica: a commit naming an executor-shadow version rebases it
   }
 });
 
-// C1.10 (owed fixture): the cross-lane pending-read case (A5/A16). A version
-// created by lane A on a shared broad doc is unresolvable for lane B under
-// C1.5b's per-lane visibility, so lane B's commit naming it rebases to
-// confirmed. This pins the asymmetry that CAUSES the rebase: lane A resolves
-// its own version while lane B never sees it.
-Deno.test("cross-lane pending read: lane A resolves its own shared-doc version while lane B rebases it to confirmed", async () => {
+// C1.10 (owed fixture, rebuilt by FW7/FB5): the DISCRIMINATING cross-lane
+// pending-read case (A5/A16) — lane B's commit naming a version created by
+// lane A's UPSTREAM-ROUTED commit on the shared broad doc, with lane A's
+// confirmation held open by the session factory's transact hold. The
+// earlier shape of this fixture shadow-routed lane A, and shadow localSeqs
+// are host-unresolvable for EVERY commit via the rebase's shadow cause —
+// lanes or no lanes — so its asserts could not fail for the A16 case it
+// named (that shape survives as the near-twin above and the pre-lane
+// rebase-replica fixture). Here no shadow version exists anywhere: ONLY the
+// A16 lane machinery — buildReads' own-lane pending filter and
+// rebaseUnresolvablePendingReads' cross-lane clause — keeps lane A's
+// unconfirmed version out of lane B's read basis. Delete both (the
+// `pendingVersionLane(version) === lane` conjunct and the rebase's
+// commit-lane clause in storage/v2.ts) and this fixture goes red with lane
+// B's pending read naming lane A's localSeq; each clause alone keeps it
+// green (they are redundant defenses on this path). Note the in-file
+// same-turn technique is NOT enough here: with a transaction router the
+// route decision is async, so a same-turn second write races the first
+// write's optimistic install — the explicit hold makes the window
+// deterministic.
+Deno.test("A16 cross-lane pending read: lane B's commit never names lane A's unconfirmed upstream version of a shared doc", async () => {
   const factory = new LaneSessionFactory();
   const actionA = {};
   const actionB = {};
-  const router: ActionTransactionRouter = (input) =>
-    input.sourceAction === actionA
-      ? { disposition: "local", kind: "executor-shadow" }
-      : { disposition: "upstream" };
+  // BOTH lanes route upstream: no executor-shadow version exists, so the
+  // rebase's lane-independent shadow cause cannot mask the lane machinery.
+  const router: ActionTransactionRouter = () => ({ disposition: "upstream" });
   const storage = LaneStorageManager.connect(factory, {
     shadowWrites: true,
     actionTransactionRouter: router,
     executionLaneForAction: (action) =>
       action === actionA ? LANE_A : action === actionB ? LANE_B : undefined,
   });
+  // Hold the host response for lane A's shared-doc commit: its optimistic
+  // version installs locally and then stays PENDING (unconfirmed) for as
+  // long as the hold is live. Declared outside the try so the finally can
+  // always release it — a failing assertion mid-hold must not leave
+  // storage.close() waiting on the held commit forever.
+  const holdA = Promise.withResolvers<void>();
   try {
     seedConfirmed(factory, [{ id: SHARED, value: "base" }]);
     await storage.open(SPACE).sync(SHARED);
 
-    // Lane A parks a version on the shared broad doc.
-    await writeDoc(storage, SHARED, "a-pending", { sourceAction: actionA });
-
-    // The asymmetry: lane A resolves its own version, lane B (and the space
-    // lane) see only confirmed state — lane A's localSeq is unresolvable for B.
+    factory.holdTransact = (commit) =>
+      commit.operations.some((operation) =>
+          operation.op !== "sqlite" && operation.id === SHARED
+        )
+        ? holdA.promise
+        : undefined;
+    const first = writeDoc(storage, SHARED, "a-pending", {
+      sourceAction: actionA,
+    });
+    // Barrier: lane A's UPSTREAM commit reached the (held) host and its
+    // optimistic pending version is visible to lane A itself.
+    for (let i = 0; i < 200; i++) {
+      let seen: unknown;
+      storage.runWithExecutionLane(SPACE, LANE_A, () => {
+        seen = docValue(storage, SHARED);
+      });
+      if (seen === "a-pending") break;
+      await new Promise((resolve) => setTimeout(resolve));
+    }
+    const upstreamA = factory.commits.find((commit) =>
+      commit.operations.some((operation) =>
+        operation.op !== "sqlite" && operation.id === SHARED
+      )
+    );
+    assert(
+      upstreamA !== undefined,
+      "lane A's upstream commit reached the host",
+    );
+    // The A16 visibility asymmetry, while lane A's version is provably
+    // unconfirmed: lane A resolves its own pending version; lane B and the
+    // space lane see confirmed state only.
     storage.runWithExecutionLane(SPACE, LANE_A, () => {
       assertEquals(docValue(storage, SHARED), "a-pending");
     });
     storage.runWithExecutionLane(SPACE, LANE_B, () => {
       assertEquals(docValue(storage, SHARED), "base");
     });
+    assertEquals(docValue(storage, SHARED), "base");
 
-    // Lane B reads the shared doc and writes upstream. Naming lane A's version
-    // is impossible, so the read rebases onto confirmed and the commit lands.
-    await writeDoc(storage, OUT, "b-out", {
+    // Lane B reads the shared doc and writes its output while lane A's
+    // confirmation is still held.
+    const second = writeDoc(storage, OUT, "b-out", {
       sourceAction: actionB,
       readIds: [SHARED],
     });
-    const upstream = factory.commits.find((commit) =>
-      commit.operations.some((operation) =>
-        operation.op !== "sqlite" && operation.id === OUT
-      )
-    );
-    assert(upstream !== undefined, "lane B's commit reached the host");
-    assertEquals(upstream.reads.pending, []);
-    const sharedRead = upstream.reads.confirmed.find((read) =>
+    const upstreamB = await (async () => {
+      for (let i = 0; i < 200; i++) {
+        const found = factory.commits.find((commit) =>
+          commit.operations.some((operation) =>
+            operation.op !== "sqlite" && operation.id === OUT
+          )
+        );
+        if (found !== undefined) return found;
+        await new Promise((resolve) => setTimeout(resolve));
+      }
+      return undefined;
+    })();
+    assert(upstreamB !== undefined, "lane B's commit reached the host");
+    // A16: lane A's localSeq belongs to another lane's chain, so the host
+    // could never resolve it for lane B. Lane B's shared-doc read must be
+    // baselined/rebased to the CONFIRMED base seq — no pending read may
+    // name lane A's version.
+    assertEquals(upstreamB.reads.pending, []);
+    const sharedRead = upstreamB.reads.confirmed.find((read) =>
       read.id === SHARED
     );
     assert(sharedRead !== undefined, "lane B's commit read the shared doc");
     assertEquals(sharedRead.seq, 1);
+
+    holdA.resolve();
+    await Promise.all([first, second]);
   } finally {
+    holdA.resolve();
     await storage.close();
   }
 });
