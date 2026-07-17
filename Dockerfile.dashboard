@@ -1,0 +1,35 @@
+# Dev/company dashboard image — serves packages/dashboard over HTTP.
+#
+# Build context is the labs repo ROOT: the "/ci" Gantt drill-down shells out to
+# scripts/ci-gantt.ts, so the repo source must be in the image (modeled on
+# Dockerfile.toolshed). Every backend is reached over its REST API — the GitHub
+# tiles with GH_TOKEN, the cloud-spend tile via BigQuery using the workload's own
+# service account (Workload Identity) — so no cloud CLI is installed.
+#
+# The GKE nodes are linux/amd64, so the image is pinned to that platform. Build
+# it on any host — an Apple-Silicon Mac emulates amd64 through QEMU:
+#
+#   docker build --platform=linux/amd64 -f Dockerfile.dashboard \
+#     -t us-central1-docker.pkg.dev/commontools-core/containers/dev-dashboard:$(git rev-parse HEAD) .
+
+FROM --platform=linux/amd64 denoland/deno:2.8.1
+
+WORKDIR /app
+COPY . .
+
+# Pre-fetch the dashboard's and the Gantt drill-down's dependencies, and make the
+# cache writable by the non-root runtime user (Deno and resvg write to it).
+ENV DENO_DIR=/deno-dir
+RUN deno cache packages/dashboard/server.ts scripts/ci-gantt.ts \
+    && chown -R 65532:65532 /deno-dir
+
+# Fail the build if the linux/amd64 resvg native binary the Gantt drill-down
+# loads at runtime is missing from the cache (e.g. a wrong-arch build).
+RUN test -n "$(find /deno-dir -name 'resvgjs.linux-x64-gnu.node')"
+
+USER 65532
+ENV DASHBOARD_PORT=8731
+EXPOSE 8731
+ENTRYPOINT ["deno", "run", \
+  "--allow-net", "--allow-run=deno", "--allow-read", "--allow-write", "--allow-env", \
+  "packages/dashboard/server.ts"]
