@@ -176,6 +176,30 @@ describe("Chronicle write paths", () => {
     expect(Object.is(fact!.is, -0)).toBe(true);
   });
 
+  it("commits a root re-write of the loaded value as a claim, not an assertion", () => {
+    // Identity fast paths: a root write matching the loaded value is elided
+    // (the working copy is returned as-is), and commit claims the loaded
+    // fact instead of asserting a new one.
+    const id = "test:chronicle-identity-root" as const;
+    const replica = {
+      did: () => space,
+      get: () => ({ the: "application/json", of: id, is: 42 }),
+    } as unknown as ISpaceReplica;
+
+    const chronicle = Chronicle.open(replica);
+    const address = { id, type: "application/json" as const, path: [] };
+    const first = chronicle.write(address, 42);
+    expect(first.error).toBeUndefined();
+    const second = chronicle.write(address, 42);
+    expect(second.error).toBeUndefined();
+    expect(second.ok).toBe(first.ok);
+
+    const commitResult = chronicle.commit();
+    expect(commitResult.error).toBeUndefined();
+    expect(commitResult.ok!.facts.length).toBe(0);
+    expect(commitResult.ok!.claims.length).toBe(1);
+  });
+
   it("treats a write of the same value as a no-op (identity returned)", async () => {
     const storage = StorageManager.emulate({ as: signer });
     try {
