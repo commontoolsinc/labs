@@ -30,7 +30,10 @@ import {
   expandSessionSyncSchemas,
   type SchemaTableSessionSync,
 } from "../v2/sync-schema-table.ts";
-import { findSyncSchemaRef } from "../v2/sync-schema-ref.ts";
+import {
+  containsSyncSchemaRefString,
+  findSyncSchemaRef,
+} from "../v2/sync-schema-ref.ts";
 import { testSessionOpenServerOptions } from "./v2-auth-test-helpers.ts";
 
 const textEncoder = new TextEncoder();
@@ -804,5 +807,38 @@ Deno.test("sync schema table compression preserves own __proto__ keys", () => {
   assertEquals(
     relocated[LINK_V1_TAG].schema,
     `schema-ref@2:${canonical.taggedHashString}`,
+  );
+});
+
+Deno.test("findSyncSchemaRef traverses arrays and containsSyncSchemaRefString scans leaves", () => {
+  assertEquals(
+    findSyncSchemaRef([
+      "plain",
+      [{
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "of:in-array",
+            path: [],
+            schema: "schema-ref@2:fid1:inside-array",
+          },
+        },
+      }],
+    ]),
+    "schema-ref@2:fid1:inside-array",
+  );
+
+  assertEquals(
+    containsSyncSchemaRefString({
+      a: 1,
+      b: [null, true, { c: "schema-cas@1:fid1:leaf" }],
+    }),
+    true,
+  );
+  assertEquals(
+    containsSyncSchemaRefString({
+      a: 1,
+      b: [null, true, { c: "an ordinary string" }],
+    }),
+    false,
   );
 });

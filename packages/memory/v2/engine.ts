@@ -5996,12 +5996,8 @@ const validateStoredSyncSchemaRefs = (
     if (revision.op === "set" && commitMayIntroduceRef) {
       rejectStoredSyncSchemaRef(revision.document);
     }
-    if (
-      revision.op !== "set" && revision.op !== "patch" &&
-      revision.op !== "delete"
-    ) {
-      continue;
-    }
+    // Every revision here is set/patch/delete: sqlite operations never enter
+    // the revisions list (see applyCommitTransaction).
     const key = revisionKey(
       branch,
       revision.id,

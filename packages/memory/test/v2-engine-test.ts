@@ -331,6 +331,175 @@ Deno.test("memory v2 engine reserves sync schema reference strings", async () =>
   }
 });
 
+Deno.test("memory v2 engine replays stateful entities across set and delete revisions", async () => {
+  const { engine, path } = await createEngine();
+  const reservedRef = "schema-ref@2:sha256:harmless-position";
+  const id = "entity:stateful-replay";
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:stateful-replay",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id,
+          value: toEntityDocument({ base: true }),
+        }],
+      },
+    });
+
+    // One commit whose replay walks every stateful branch without throwing:
+    // a candidate patch placing a reserved string in a harmless position,
+    // a wholesale set, a follow-up patch, and a tombstoning delete.
+    applyCommit(engine, {
+      sessionId: "session:stateful-replay",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id,
+          patches: [{
+            op: "add",
+            path: "/value/harmless",
+            value: reservedRef,
+          }],
+        }, {
+          op: "set",
+          id,
+          value: toEntityDocument({ replaced: true }),
+        }, {
+          op: "patch",
+          id,
+          patches: [{
+            op: "add",
+            path: "/value/afterSet",
+            value: "clean",
+          }],
+        }, {
+          op: "delete",
+          id,
+        }],
+      },
+    });
+
+    assertEquals(read(engine, { id }), null);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine validates clean moves against snapshot-backed pre-state", async () => {
+  const { engine, path } = await createEngineWithOptions({
+    snapshotInterval: 1,
+  });
+  const reservedRef = "schema-ref@2:sha256:snapshot-resident";
+  const id = "entity:snapshot-move";
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:snapshot-move",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id,
+          value: toEntityDocument({
+            harmless: reservedRef,
+            ref: {
+              "/": {
+                [LINK_V1_TAG]: {
+                  id: "of:target",
+                  path: [],
+                  schema: "opaque-schema-name",
+                },
+              },
+            },
+          }),
+        }],
+      },
+    });
+    // Force a snapshot so the clean-move probe reads the snapshot row rather
+    // than the base set revision.
+    applyCommit(engine, {
+      sessionId: "session:snapshot-move",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id,
+          patches: [{ op: "add", path: "/value/padding", value: "clean" }],
+        }],
+      },
+    });
+
+    // The move commit's own serialization is clean; only the snapshot-backed
+    // pre-state carries the reserved string, and relocating it into a schema
+    // position must still be rejected.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:snapshot-move",
+          invocation: invocationFor(3),
+          authorization,
+          commit: {
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "patch",
+              id,
+              patches: [{
+                op: "move",
+                from: "/value/harmless",
+                path: `/value/ref/~1/${LINK_V1_TAG}/schema`,
+              }],
+            }],
+          },
+        }),
+      ProtocolError,
+      "reserved wire schema reference",
+    );
+
+    // A clean move between harmless positions over the same snapshot-backed
+    // pre-state is allowed.
+    applyCommit(engine, {
+      sessionId: "session:snapshot-move",
+      invocation: invocationFor(3),
+      authorization,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id,
+          patches: [{
+            op: "move",
+            from: "/value/harmless",
+            path: "/value/relocated",
+          }],
+        }],
+      },
+    });
+    const document = read(engine, { id });
+    assertEquals(
+      (document?.value as Record<string, unknown>).relocated,
+      reservedRef,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine reserves request CAS schema reference strings", async () => {
   const { engine, path } = await createEngine();
   const reservedRef = "schema-cas@1:sha256:user-controlled";
