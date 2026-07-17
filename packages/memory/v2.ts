@@ -763,6 +763,16 @@ export interface TransactRequest {
   commit: ClientCommit;
 }
 
+/** F2/FA5 (FB12) trigger attribution for graph.query accounting: `"wave"` =
+ * a refresh forced by an accepted-commit wave (rehydrate/wake — closure
+ * shrink, root re-establishment, resolution moves), `"demand"` = new data
+ * demanded (first-demand cold pull, new-doc closure growth). The server
+ * buckets `#recordFeedTraversal` accordingly, keeping the aggregate
+ * "graph.query" bucket unchanged; the wave bucket is the F5 protocol's
+ * F2-floor regression signal, which one undifferentiated bucket could not
+ * attribute. */
+export type GraphQueryTrigger = "wave" | "demand";
+
 export interface GraphQueryRequest {
   type: "graph.query";
   requestId: string;
@@ -773,6 +783,10 @@ export interface GraphQueryRequest {
    * BEFORE any scope key resolves. Additive/optional — non-lane readers
    * never send it. */
   actingContext?: SchedulerExecutionContextKey;
+  /** Optional trigger attribution (FA5/FB12): accounting only — never
+   * affects evaluation, authorization, or the response shape. Callers that
+   * predate the split omit it and land in the aggregate bucket alone. */
+  trigger?: GraphQueryTrigger;
   query: GraphQuery;
 }
 

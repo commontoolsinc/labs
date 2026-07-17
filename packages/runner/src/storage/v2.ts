@@ -2333,6 +2333,21 @@ class SpaceReplica implements ISpaceReplica {
     SchedulerExecutionContextKey,
     WatchRefreshBatch
   >();
+  /** FB13 lane-drain coverage lifecycle: the (address, selector) pairs a
+   * non-space lane registered under a PER-LANE selector-tracker key (scoped
+   * roots — `laneScopeKey` differs from the declared scope). When the lane
+   * drains, its host-side scoped watches are retired, so this coverage must
+   * go with them or the lane's next hydration would be a covered no-op
+   * against a watch that no longer exists. Broad entries key shared
+   * coverage and are deliberately NOT recorded: their watch is re-keyed
+   * context-free on drain, so the coverage stays valid. */
+  readonly #laneScopedSelectorEntries = new Map<
+    SchedulerExecutionContextKey,
+    {
+      address: { id: URI; type: MIME; scope?: CellScope };
+      selector: SchemaPathSelector;
+    }[]
+  >();
 
   constructor(options: ProviderOptions) {
     this.#space = options.space;
@@ -2386,6 +2401,35 @@ class SpaceReplica implements ISpaceReplica {
   pruneExecutionLane(lane: SchedulerExecutionContextKey): void {
     if (lane === "space") return;
     this.#executionLanes.delete(lane);
+    // FB13 watch lifecycle: a drained lane's grant is gone server-side, so
+    // every read re-sending its acting context rejects forever. Retire (or
+    // re-key onto the sponsor path) the lane's host-side watches…
+    const sessionHandle = this.#sessionHandle;
+    if (sessionHandle !== undefined) {
+      sessionHandle
+        .then(({ session }) => session.pruneLaneWatches?.(lane))
+        .catch(() => {
+          // The session never opened cleanly; there is nothing to prune.
+        });
+    }
+    // …drop the lane's scoped selector coverage so its NEXT hydration
+    // re-pulls instead of no-oping against a retired watch…
+    const scopedEntries = this.#laneScopedSelectorEntries.get(lane);
+    if (scopedEntries !== undefined) {
+      this.#laneScopedSelectorEntries.delete(lane);
+      for (const { address, selector } of scopedEntries) {
+        this.#watchSelectorTracker.delete(address, selector);
+      }
+    }
+    // …and cancel any not-yet-flushed registration batch queued under the
+    // lane: flushing it would register fresh watches under the dead context.
+    const queued = this.#queuedWatchRefreshes.get(lane);
+    if (queued !== undefined) {
+      this.#queuedWatchRefreshes.delete(lane);
+      queued.pending.resolve({
+        error: toConnectionError(new Error("execution lane drained")),
+      });
+    }
     if (this.#localSeqLanes.size === 0) return;
     const stillPending = new Set<number>();
     for (const record of this.#docs.values()) {
@@ -2839,6 +2883,7 @@ class SpaceReplica implements ISpaceReplica {
     await Promise.allSettled([...this.#updatePromises]);
     this.#syncTasks.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
+    this.#laneScopedSelectorEntries.clear();
   }
 
   private resetConflictAdmissionState(): void {
@@ -2917,6 +2962,7 @@ class SpaceReplica implements ISpaceReplica {
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     this.#syncTasks.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
+    this.#laneScopedSelectorEntries.clear();
   }
 
   async load(
@@ -3050,6 +3096,15 @@ class SpaceReplica implements ISpaceReplica {
         selector,
         fetchPromise,
       );
+      // A per-lane-keyed entry (scoped root under a non-space lane) is
+      // recorded for the FB13 lane-drain coverage prune; broad entries stay
+      // shared coverage and survive the drain via the re-keyed watch.
+      if (baseAddress.scope !== normalizeCellScope(address.scope)) {
+        const scopedEntries = this.#laneScopedSelectorEntries.get(lane);
+        const entry = { address: baseAddress, selector };
+        if (scopedEntries !== undefined) scopedEntries.push(entry);
+        else this.#laneScopedSelectorEntries.set(lane, [entry]);
+      }
     }
     this.#syncPromises.add(combinedPromise);
     try {
@@ -3148,6 +3203,7 @@ class SpaceReplica implements ISpaceReplica {
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica reset"));
     this.cancelQueuedWatchRefresh();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
+    this.#laneScopedSelectorEntries.clear();
     this.#subscription.next({
       type: "reset",
       space: this.#space,

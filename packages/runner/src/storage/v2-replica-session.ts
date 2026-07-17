@@ -19,7 +19,10 @@ import type {
   WatchSpec,
 } from "@commonfabric/memory/v2";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
-import type { SchedulerExecutionContextKey } from "@commonfabric/memory/v2";
+import type {
+  GraphQueryTrigger,
+  SchedulerExecutionContextKey,
+} from "@commonfabric/memory/v2";
 
 /** Worker-local view of a replica update stream. */
 export interface ReplicaWatchView {
@@ -35,6 +38,9 @@ export interface ReplicaWatchView {
  */
 export interface ReplicaReadOptions {
   actingContext?: SchedulerExecutionContextKey;
+  /** FA5/FB12 trigger attribution for graph queries (wave-triggered refresh
+   * vs demand-triggered pull). Accounting only; optional. */
+  trigger?: GraphQueryTrigger;
 }
 
 /**
@@ -76,6 +82,16 @@ export interface ReplicaSession {
     view: ReplicaWatchView;
     sync: SessionSync;
   }>;
+  /**
+   * C1.9/FB13 lane-drain watch lifecycle: retire (or re-key onto the
+   * context-free/sponsor read path) every watch this session holds under the
+   * drained lane's acting context, so a dead lane grant stops keying
+   * point-read groups and cold refreshes — a read issued under a drained
+   * lane's context is rejected by the host (`laneReadRejection`) forever.
+   * Optional: only the executor host-provider session maintains lane-keyed
+   * watches; remote/scripted sessions omit it.
+   */
+  pruneLaneWatches?(lane: SchedulerExecutionContextKey): void;
   sqliteQuery(
     db: SqliteDbRef,
     sql: string,

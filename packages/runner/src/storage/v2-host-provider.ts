@@ -8,6 +8,7 @@ import {
   type ExecutionControlEvent,
   type GraphQuery,
   type GraphQueryResult,
+  type GraphQueryTrigger,
   type HelloOkMessage,
   type ResponseMessage,
   type SchedulerActionSnapshotQuery,
@@ -719,6 +720,15 @@ class HostReplicaSession implements ReplicaSession {
   #appliedSeq: number;
   #acceptedOrder = 0;
   #pendingAcceptedCommits: AcceptedCommitNotice[] = [];
+  /** FB13 wave resilience: notices whose integration was blocked by a
+   * rejected point-read group or a failed cold refresh (e.g. a drained
+   * lane's `laneReadRejection`). They are NOT dropped with the spliced-out
+   * batch: they retry on the next flush — a new accepted notice, or a
+   * lane-drain prune that changes the grouping. Growth is bounded by the
+   * write rate to the blocked docs during the outage, and the buffer drains
+   * as soon as the failing group heals (retried notices that no longer match
+   * anything integrate trivially). */
+  #deferredAcceptedCommits: AcceptedCommitNotice[] = [];
   #acceptedCommitDeliveryScheduled = false;
   #schedulerDeliverySeq: number;
   #executionDeliverySeq: number;
@@ -783,10 +793,11 @@ class HostReplicaSession implements ReplicaSession {
     this.scheduleAcceptedCommitDelivery();
   }
 
-  private scheduleAcceptedCommitDelivery(): void {
+  private scheduleAcceptedCommitDelivery(includeDeferred = false): void {
     if (
       this.#closed || this.#acceptedCommitDeliveryScheduled ||
-      this.#pendingAcceptedCommits.length === 0
+      (this.#pendingAcceptedCommits.length === 0 &&
+        !(includeDeferred && this.#deferredAcceptedCommits.length > 0))
     ) return;
     this.#acceptedCommitDeliveryScheduled = true;
     const refresh = this.#mutation.then(
@@ -808,9 +819,20 @@ class HostReplicaSession implements ReplicaSession {
 
   private async flushAcceptedCommits(): Promise<void> {
     try {
-      while (this.#pendingAcceptedCommits.length > 0) {
+      // Deferred notices are re-attempted at most ONCE per flush: a group
+      // that fails again re-defers and waits for the next trigger (a new
+      // notice or a lane prune) instead of spinning this loop hot.
+      let deferredConsumed = false;
+      while (
+        this.#pendingAcceptedCommits.length > 0 ||
+        (!deferredConsumed && this.#deferredAcceptedCommits.length > 0)
+      ) {
+        const deferred = deferredConsumed
+          ? []
+          : this.#deferredAcceptedCommits.splice(0);
+        deferredConsumed = true;
         const batch = this.#pendingAcceptedCommits.splice(0);
-        await this.refreshAndNotifyAcceptedCommits(batch);
+        await this.refreshAndNotifyAcceptedCommits(batch, deferred);
       }
     } finally {
       this.#acceptedCommitDeliveryScheduled = false;
@@ -820,8 +842,9 @@ class HostReplicaSession implements ReplicaSession {
 
   private async refreshAndNotifyAcceptedCommits(
     notices: readonly AcceptedCommitNotice[],
+    deferred: readonly AcceptedCommitNotice[] = [],
   ): Promise<void> {
-    const integrated = await this.refreshAcceptedCommits(notices);
+    const integrated = await this.refreshAcceptedCommits(notices, deferred);
     // Preserve one ordered control-plane callback per accepted commit. A
     // coalesced batch deliberately exposes its newest integrated replica state
     // to every callback instead of rematerializing transient intermediate
@@ -961,7 +984,12 @@ class HostReplicaSession implements ReplicaSession {
         }
       }
       const fromSeq = this.#appliedSeq;
-      await this.refreshWatches(watches.map((watch) => watch.id));
+      // Registration is the first-demand cold pull (FA5/FB12: demand bucket).
+      await this.refreshWatches(
+        watches.map((watch) => watch.id),
+        undefined,
+        "demand",
+      );
       const sync = this.fullSync(fromSeq, this.#appliedSeq);
       if (this.#view === null) {
         this.#view = MemoryClient.WatchView.fromSync(sync);
@@ -977,11 +1005,73 @@ class HostReplicaSession implements ReplicaSession {
     return this.#mutation.then(() => result);
   }
 
+  /**
+   * C1.9/FB13 lane-drain watch lifecycle: called from the Worker's lane-drain
+   * reconcile (executor-worker `applyLaneDemands` → `pruneExecutionLane`).
+   * A drained lane's grant is gone server-side, so every read re-sending its
+   * acting context is rejected forever; without this hook the dead watches
+   * keep keying point-read groups and cold refreshes.
+   *
+   * - A watch whose every root is BROAD (space-declared) is RE-KEYED onto
+   *   the context-free/sponsor read path: broad roots resolve identically
+   *   under any lane, so the shared read keeps flowing ("a dead lane grant
+   *   must not starve the shared read") and surviving lanes whose hydration
+   *   dedup'd onto this watch's coverage stay served. Residual: the watch
+   *   stays context-free after the lane returns (re-hydration is coverage-
+   *   deduped) — for broad closures the maintained bytes are identical, and
+   *   any scoped closure member degrades visibly through the FA6 mismatch →
+   *   cold re-key path rather than silently.
+   * - A watch with a SCOPED root is RETIRED: resolving it under the sponsor
+   *   would address the wrong instance, and re-sending the dead lane rejects
+   *   forever. The SpaceReplica clears the lane's scoped selector coverage in
+   *   the same prune, so the lane's next hydration re-registers it cleanly.
+   *
+   * Deferred notices are re-attempted afterwards: the prune is exactly the
+   * event that changes their grouping.
+   */
+  pruneLaneWatches(lane: SchedulerExecutionContextKey): void {
+    if (lane === "space") return;
+    const prune = () => this.pruneLaneWatchesNow(lane);
+    this.#mutation = this.#mutation.then(prune, prune).then(() => {
+      this.scheduleAcceptedCommitDelivery(true);
+    });
+  }
+
+  private pruneLaneWatchesNow(lane: SchedulerExecutionContextKey): void {
+    if (this.#closed) return;
+    for (const [watchId, watch] of [...this.#watches]) {
+      if (this.#watchActingContexts.get(watchId) !== lane) continue;
+      const broadOnly = watch.query.roots.every((root) =>
+        root.scope === undefined || root.scope === "space"
+      );
+      if (broadOnly) {
+        this.#watchActingContexts.delete(watchId);
+      } else {
+        this.#watches.delete(watchId);
+        this.#watchActingContexts.delete(watchId);
+        this.#watchEntities.delete(watchId);
+      }
+    }
+  }
+
   private async refreshAcceptedCommits(
     notices: readonly AcceptedCommitNotice[],
+    deferred: readonly AcceptedCommitNotice[] = [],
   ): Promise<AcceptedCommitNotice[]> {
     if (this.#closed) return [];
     const accepted: AcceptedCommitNotice[] = [];
+    // FB13 re-queue: deferred notices were accepted (and their order
+    // watermark consumed) on an earlier flush whose point-read group failed —
+    // they BYPASS the order filter, and their pre-integrate observer already
+    // fired once.
+    const deferredOrders = new Set<number>();
+    for (const notice of deferred) {
+      if (
+        notice.space !== this.session.space || notice.branch !== this.branch
+      ) continue;
+      accepted.push(notice);
+      deferredOrders.add(notice.order);
+    }
     let acceptedOrder = this.#acceptedOrder;
     for (const notice of notices) {
       if (
@@ -992,7 +1082,9 @@ class HostReplicaSession implements ReplicaSession {
       acceptedOrder = notice.order;
     }
     if (accepted.length === 0) return [];
+    accepted.sort((left, right) => left.order - right.order);
     for (const notice of accepted) {
+      if (deferredOrders.has(notice.order)) continue;
       try {
         this.onAcceptedCommitWillIntegrate?.(notice);
       } catch (error) {
@@ -1047,7 +1139,17 @@ class HostReplicaSession implements ReplicaSession {
     // snapshots. Point reads are issued ONLY for these entries, so every
     // delivery has a registered watch behind it (no W2.8
     // reads-without-a-delivery-source class).
-    const coldWatchIds = new Set<string>();
+    // Cold watches carry their FA5/FB12 trigger cause: "demand" for new data
+    // entering (first-pull retry, closure growth), "wave" for a refresh the
+    // wave itself forces (shrink, root re-establishment, resolution moves).
+    // "wave" wins when one wave produces both causes for a watch — the F2
+    // floor signal must not be hidden under a coincident growth.
+    const coldWatches = new Map<string, GraphQueryTrigger>();
+    const markCold = (watchId: string, trigger: GraphQueryTrigger) => {
+      if (trigger === "wave" || !coldWatches.has(watchId)) {
+        coldWatches.set(watchId, trigger);
+      }
+    };
     interface PointReadTask {
       address: { id: string; scope?: CellScope };
       actingContext?: SchedulerExecutionContextKey;
@@ -1060,8 +1162,9 @@ class HostReplicaSession implements ReplicaSession {
       const rootDirty = (root: { id: string; scope?: CellScope }) =>
         declaredDirty.has(declaredEntityKey(root));
       if (held === undefined) {
-        // Registration never completed a pull; a named root is a cold repull.
-        if (watch.query.roots.some(rootDirty)) coldWatchIds.add(watchId);
+        // Registration never completed a pull; a named root is a cold repull
+        // — the first-demand pull retrying, so demand-attributed.
+        if (watch.query.roots.some(rootDirty)) markCold(watchId, "demand");
         continue;
       }
       const heldDeclared = new Set(
@@ -1075,7 +1178,7 @@ class HostReplicaSession implements ReplicaSession {
       ) {
         // A wave names a root this watch does not track even as an absent
         // snapshot: only a traversal can (re)establish the closure.
-        coldWatchIds.add(watchId);
+        markCold(watchId, "wave");
         continue;
       }
       for (const snapshot of held.values()) {
@@ -1113,7 +1216,7 @@ class HostReplicaSession implements ReplicaSession {
     // Accepted-notice order already deduplicates work, so integrate every
     // matched instance even when the global watermark has reached this batch's
     // dataSeq.
-    if (pointTasks.size === 0 && coldWatchIds.size === 0) {
+    if (pointTasks.size === 0 && coldWatches.size === 0) {
       this.#acceptedOrder = acceptedOrder;
       this.#appliedSeq = Math.max(this.#appliedSeq, dataSeq);
       if (observations.length > 0) {
@@ -1138,6 +1241,16 @@ class HostReplicaSession implements ReplicaSession {
     // acting lane each owning watch registered under (FA6: the read surface
     // carries actingContext from day one). All reads complete before any map
     // mutation so a failed wave leaves the replica exactly as it was.
+    //
+    // FB13 wave resilience: per-group failures are ISOLATED. A rejected
+    // group (e.g. a drained lane's `laneReadRejection`) must not discard the
+    // whole spliced-out batch — surviving groups deliver, and the failed
+    // group's notices are deferred for retry (never a fabricated "complete"
+    // emission for the failed instances: their snapshots and watermarking
+    // stay exactly as they were, mirroring how the cold path leaves
+    // unrefreshed watches untouched).
+    const failedTasks: PointReadTask[] = [];
+    const failedColdWatchIds = new Set<string>();
     const steady: { task: PointReadTask; snapshot: EntitySnapshot }[] = [];
     if (pointTasks.size > 0) {
       const byContext = new Map<
@@ -1150,11 +1263,27 @@ class HostReplicaSession implements ReplicaSession {
         else byContext.set(task.actingContext, [task]);
       }
       for (const [actingContext, tasks] of byContext) {
-        const result = await this.session.readDocs({
-          docs: tasks.map((task) => task.address),
-          branch: this.branch,
-          atSeq: dataSeq,
-        }, actingContext !== undefined ? { actingContext } : undefined);
+        let result;
+        try {
+          result = await this.session.readDocs({
+            docs: tasks.map((task) => task.address),
+            branch: this.branch,
+            atSeq: dataSeq,
+          }, actingContext !== undefined ? { actingContext } : undefined);
+        } catch (error) {
+          // The whole group shares one acting context; a rejection fails all
+          // of its tasks together. A cold fallback would re-send the SAME
+          // dead context (the registered lane rides every re-query), so the
+          // group defers instead — the lane-drain prune re-keys or retires
+          // its watches and the deferred notices then integrate.
+          failedTasks.push(...tasks);
+          console.warn(
+            "executor accepted-commit point-read group failed; deferring",
+            actingContext,
+            error,
+          );
+          continue;
+        }
         for (const task of tasks) {
           // FA6 on the RESULT too: the returned instance must resolve to the
           // scope key the interest entry holds; anything else means the
@@ -1163,7 +1292,8 @@ class HostReplicaSession implements ReplicaSession {
             acceptedRevisionMatchesSnapshot(entity, task.expected)
           );
           if (snapshot === undefined) {
-            for (const watchId of task.watchIds) coldWatchIds.add(watchId);
+            // Resolution moved under us (FA6): the wave forces the re-key.
+            for (const watchId of task.watchIds) markCold(watchId, "wave");
             continue;
           }
           steady.push({ task, snapshot });
@@ -1213,7 +1343,8 @@ class HostReplicaSession implements ReplicaSession {
         }
       }
       if (shrank) {
-        for (const watchId of task.watchIds) coldWatchIds.add(watchId);
+        // Shrink removes flow only from a traversal: wave-forced (FB12).
+        for (const watchId of task.watchIds) markCold(watchId, "wave");
         continue;
       }
       const steadyWatchIds: string[] = [];
@@ -1226,7 +1357,9 @@ class HostReplicaSession implements ReplicaSession {
             break;
           }
         }
-        if (grew) coldWatchIds.add(watchId);
+        // Growth admits a NEW doc: demand-triggered (FA5's new-doc
+        // closure-growth class), bounded to one query per cold event.
+        if (grew) markCold(watchId, "demand");
         else steadyWatchIds.push(watchId);
       }
       if (steadyWatchIds.length > 0) {
@@ -1255,13 +1388,74 @@ class HostReplicaSession implements ReplicaSession {
       }
     };
 
-    if (coldWatchIds.size > 0) {
+    // FB13: a notice is integrated only when NONE of its revisions was left
+    // behind by a failed point-read group or a failed cold refresh. Blocked
+    // notices are deferred (re-queued), never lost — and never reported to
+    // the integration observer until their retry actually integrates them.
+    // Watermarks (#acceptedOrder/#appliedSeq) still advance: per the
+    // watermark comment above they are not completeness proofs — the
+    // deferred notices themselves carry the retry.
+    const settleBlockedNotices = (): AcceptedCommitNotice[] => {
+      if (failedTasks.length === 0 && failedColdWatchIds.size === 0) {
+        return accepted;
+      }
+      const blockedByFailedWatch = (declared: string): boolean => {
+        for (const watchId of failedColdWatchIds) {
+          const watch = this.#watches.get(watchId);
+          if (
+            watch?.query.roots.some((root) =>
+              declaredEntityKey(root) === declared
+            )
+          ) return true;
+          if (heldDeclaredFor(watchId).has(declared)) return true;
+        }
+        return false;
+      };
+      const blocked = (notice: AcceptedCommitNotice): boolean =>
+        notice.revisions.some((revision) =>
+          failedTasks.some((task) =>
+            acceptedRevisionMatchesSnapshot(revision, task.expected)
+          ) || blockedByFailedWatch(declaredEntityKey(revision))
+        );
+      const integrated: AcceptedCommitNotice[] = [];
+      const known = new Set(
+        this.#deferredAcceptedCommits.map((notice) => notice.order),
+      );
+      for (const notice of accepted) {
+        if (blocked(notice)) {
+          if (!known.has(notice.order)) {
+            this.#deferredAcceptedCommits.push(notice);
+          }
+        } else {
+          integrated.push(notice);
+        }
+      }
+      return integrated;
+    };
+
+    if (coldWatches.size > 0) {
       const before = this.allEntities();
       applyPointUpdates();
       // Cold path (unchanged semantics): closure growth, shrink, unresolved
       // roots, and resolution moves re-run the traversal at the same batch
-      // sequence bound; its before/after diff carries the removes.
-      await this.refreshWatches([...coldWatchIds], dataSeq);
+      // sequence bound; its before/after diff carries the removes. FB13:
+      // per-watch failures (a dead lane's re-sent acting context rejecting)
+      // are isolated — the surviving watches refresh, the failed ones keep
+      // their entities untouched and block their notices into the deferred
+      // queue.
+      await this.refreshWatches(
+        [...coldWatches.keys()],
+        dataSeq,
+        coldWatches,
+        (watchId, error) => {
+          failedColdWatchIds.add(watchId);
+          console.warn(
+            "executor accepted-commit cold refresh failed; deferring",
+            watchId,
+            error,
+          );
+        },
+      );
       this.#acceptedOrder = acceptedOrder;
       this.#appliedSeq = Math.max(this.#appliedSeq, dataSeq);
       const after = this.allEntities();
@@ -1288,7 +1482,7 @@ class HostReplicaSession implements ReplicaSession {
       // iterator; its continuation applies the sync synchronously in the next
       // microtask.
       await Promise.resolve();
-      return accepted;
+      return settleBlockedNotices();
     }
 
     // Pure steady-state wave: zero graph traversal; deliver exactly the
@@ -1312,7 +1506,7 @@ class HostReplicaSession implements ReplicaSession {
     // See the cold path: cross the WatchView iterator hand-off before
     // reporting integration.
     await Promise.resolve();
-    return accepted;
+    return settleBlockedNotices();
   }
 
   /** HostReplicaSession owns a synthetic WatchView, so the underlying memory
@@ -1435,18 +1629,50 @@ class HostReplicaSession implements ReplicaSession {
     return snapshots;
   }
 
+  /**
+   * Cold-path traversal for the named watches. `trigger` is the FA5/FB12
+   * attribution each query carries — a single value (registration pulls are
+   * all "demand") or a per-watch map (an accepted-commit wave classifies each
+   * cold watch by cause). At most one graph query per watch per call: the
+   * per-cold-event bound FA5 orders.
+   *
+   * `onError` (FB13): when provided, a per-watch query failure is reported
+   * and the remaining watches still refresh — the accepted-commit wave path
+   * isolates a dead lane's rejection instead of dropping the whole wave.
+   * Without it (registration), the first failure propagates as before.
+   */
   private async refreshWatches(
     watchIds: readonly string[],
     atSeq?: number,
+    trigger?: GraphQueryTrigger | ReadonlyMap<string, GraphQueryTrigger>,
+    onError?: (watchId: string, error: unknown) => void,
   ): Promise<void> {
     for (const watchId of watchIds) {
       const watch = this.#watches.get(watchId);
       if (watch === undefined) continue;
       const actingContext = this.#watchActingContexts.get(watchId);
-      const result = await this.queryGraph({
-        ...watch.query,
-        ...(atSeq !== undefined ? { atSeq } : {}),
-      }, actingContext !== undefined ? { actingContext } : undefined);
+      const watchTrigger = typeof trigger === "string"
+        ? trigger
+        : trigger?.get(watchId);
+      let result;
+      try {
+        result = await this.queryGraph(
+          {
+            ...watch.query,
+            ...(atSeq !== undefined ? { atSeq } : {}),
+          },
+          actingContext !== undefined || watchTrigger !== undefined
+            ? {
+              ...(actingContext !== undefined ? { actingContext } : {}),
+              ...(watchTrigger !== undefined ? { trigger: watchTrigger } : {}),
+            }
+            : undefined,
+        );
+      } catch (error) {
+        if (onError === undefined) throw error;
+        onError(watchId, error);
+        continue;
+      }
       if (atSeq === undefined) {
         this.#appliedSeq = Math.max(this.#appliedSeq, result.serverSeq);
       }

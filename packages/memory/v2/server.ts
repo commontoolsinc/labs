@@ -32,6 +32,7 @@ import {
   type GraphQuery,
   type GraphQueryRequest,
   type GraphQueryResult,
+  type GraphQueryTrigger,
   type HelloMessage,
   type LegacyBackgroundExclusion,
   type LegacyBackgroundExclusionAcquireRequest,
@@ -6046,6 +6047,7 @@ export class Server {
           aclEngine,
           undefined,
           scopeResolution.ok,
+          message.trigger,
         ),
       };
     } catch (error) {
@@ -6767,6 +6769,7 @@ export class Server {
     engine?: Engine.Engine,
     reuse?: QueryGraphReuseContext,
     scopeContext: { principal?: string; sessionId?: string } = {},
+    trigger?: GraphQueryTrigger,
   ): Promise<GraphQueryResult> {
     const startedAt = performance.now();
     const result = queryGraph(
@@ -6777,6 +6780,14 @@ export class Server {
       scopeContext,
     );
     this.#recordFeedTraversal("graph.query", result.stats);
+    // FA5/FB12 wave-vs-demand split: the aggregate bucket above stays
+    // byte-identical for existing consumers; a trigger-carrying request is
+    // ADDITIONALLY attributed to its sub-bucket. The wave bucket is the F5
+    // protocol's F2-floor regression signal ("graph.query still at its F2
+    // floor, not regressed by demand pulls").
+    if (trigger !== undefined) {
+      this.#recordFeedTraversal(`graph.query.${trigger}`, result.stats);
+    }
     recordSlowQueryDuration("graph.query", space, startedAt, {
       roots: query.roots.length,
     });
@@ -8266,6 +8277,16 @@ const parsedActingContext = (
     ? { actingContext: parsed.actingContext as SchedulerExecutionContextKey }
     : {};
 
+/** FA5/FB12: the optional graph.query trigger attribution. Closed enum —
+ * anything else is dropped (untriggered), so a caller can never mint
+ * arbitrary traversal-bucket keys over the wire. */
+const parsedGraphQueryTrigger = (
+  parsed: Record<string, unknown>,
+): { trigger?: GraphQueryTrigger } =>
+  parsed.trigger === "wave" || parsed.trigger === "demand"
+    ? { trigger: parsed.trigger }
+    : {};
+
 export const parseClientMessage = (
   payload: string,
 ): ClientMessage | null => {
@@ -8354,6 +8375,7 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       ...parsedActingContext(parsed),
+      ...parsedGraphQueryTrigger(parsed),
       query: parsed.query as unknown as GraphQueryRequest["query"],
     };
   }

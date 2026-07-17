@@ -301,3 +301,134 @@ Deno.test("refresh waves and graph queries attribute traversal work by operation
     await server.close();
   }
 });
+
+// FA5/FB12: the graph.query bucket splits by trigger attribution. The wire
+// message carries an OPTIONAL `trigger` ("wave" | "demand"); the server keeps
+// the aggregate "graph.query" bucket byte-identical for existing consumers and
+// ADDITIONALLY records the split under "graph.query.wave" /
+// "graph.query.demand" — additive Record keys, so /api/health/stats consumers
+// (z.record) need no schema change. Untriggered queries land in the aggregate
+// only: the split buckets never guess.
+Deno.test("graph.query trigger attribution splits wave vs demand buckets additively", async () => {
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL("memory://memory-v2-feed-trigger-split"),
+    subscriptionRefreshDelayMs: 0,
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-feed-trigger-split";
+
+  try {
+    await connection.receive(encodeMemoryBoundary(HELLO));
+    const sessionOpen = expectHelloOk(messages);
+    await connection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open",
+      space,
+      session: {},
+      invocation: authInvocation(sessionOpen),
+    }));
+    const open = assertResponse<{ sessionId: string }>(shiftMessage(messages));
+    const sessionId = open.ok!.sessionId;
+
+    await connection.receive(encodeMemoryBoundary({
+      type: "transact",
+      requestId: "tx-1",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:1",
+          value: { value: { hello: "split" } },
+        }],
+      },
+    }));
+    assertExists(assertResponse(shiftMessage(messages)).ok);
+
+    const query = {
+      roots: [{
+        id: "of:doc:1",
+        selector: { path: [], schema: false },
+      }],
+    };
+    const bucket = (operation: string) =>
+      server.feedStats.traversalByOperation[operation];
+    const calls = (operation: string) => bucket(operation)?.calls ?? 0;
+
+    // Demand-triggered (first-demand cold pull / new-doc closure growth).
+    const aggregateBefore = calls("graph.query");
+    await connection.receive(encodeMemoryBoundary({
+      type: "graph.query",
+      requestId: "query-demand",
+      space,
+      sessionId,
+      trigger: "demand",
+      query,
+    }));
+    const demandResponse = assertResponse<GraphQueryResult>(
+      shiftMessage(messages),
+    );
+    assertExists(demandResponse.ok);
+    assertEquals("stats" in demandResponse.ok, false);
+    assertEquals(calls("graph.query"), aggregateBefore + 1);
+    assertEquals(calls("graph.query.demand"), 1);
+    assertEquals(calls("graph.query.wave"), 0);
+    // The split bucket carries the same traversal attribution as the
+    // aggregate, not just a call count.
+    assertEquals(
+      bucket("graph.query.demand")!.managerReads >= 1,
+      true,
+    );
+
+    // Wave-triggered (rehydrate/wake refresh forced by an accepted-commit
+    // wave).
+    await connection.receive(encodeMemoryBoundary({
+      type: "graph.query",
+      requestId: "query-wave",
+      space,
+      sessionId,
+      trigger: "wave",
+      query,
+    }));
+    assertExists(assertResponse<GraphQueryResult>(shiftMessage(messages)).ok);
+    assertEquals(calls("graph.query"), aggregateBefore + 2);
+    assertEquals(calls("graph.query.demand"), 1);
+    assertEquals(calls("graph.query.wave"), 1);
+
+    // Untriggered: aggregate only — compatibility for callers that predate
+    // the split (and honesty: unknown cause is not a bucket).
+    await connection.receive(encodeMemoryBoundary({
+      type: "graph.query",
+      requestId: "query-untriggered",
+      space,
+      sessionId,
+      query,
+    }));
+    assertExists(assertResponse<GraphQueryResult>(shiftMessage(messages)).ok);
+    assertEquals(calls("graph.query"), aggregateBefore + 3);
+    assertEquals(calls("graph.query.demand"), 1);
+    assertEquals(calls("graph.query.wave"), 1);
+
+    // A malformed trigger value is dropped by the parser (treated as
+    // untriggered), never trusted into a bucket key.
+    await connection.receive(encodeMemoryBoundary({
+      type: "graph.query",
+      requestId: "query-malformed",
+      space,
+      sessionId,
+      trigger: "surprise",
+      query,
+    }));
+    assertExists(assertResponse<GraphQueryResult>(shiftMessage(messages)).ok);
+    assertEquals(calls("graph.query"), aggregateBefore + 4);
+    assertEquals(calls("graph.query.demand"), 1);
+    assertEquals(calls("graph.query.wave"), 1);
+    assertEquals(bucket("graph.query.surprise"), undefined);
+  } finally {
+    await server.close();
+  }
+});

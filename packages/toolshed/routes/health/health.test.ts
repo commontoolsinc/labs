@@ -118,6 +118,32 @@ const feedMetrics = {
       getDocAtPathCalls: 1,
       schemaMemoHits: 0,
     },
+    // FW6 (FA5/FB12): the wave-vs-demand sub-buckets of graph.query ride the
+    // same open record — additive keys, no schema change.
+    "graph.query.wave": {
+      calls: 1,
+      managerReads: 3,
+      coveredSelectorSkips: 0,
+      schemaTraversals: 2,
+      pointerTraversals: 1,
+      arrayTraversals: 0,
+      objectTraversals: 1,
+      dagTraversals: 2,
+      getDocAtPathCalls: 1,
+      schemaMemoHits: 0,
+    },
+    "graph.query.demand": {
+      calls: 1,
+      managerReads: 3,
+      coveredSelectorSkips: 0,
+      schemaTraversals: 2,
+      pointerTraversals: 0,
+      arrayTraversals: 0,
+      objectTraversals: 1,
+      dagTraversals: 2,
+      getDocAtPathCalls: 0,
+      schemaMemoHits: 0,
+    },
   },
 };
 

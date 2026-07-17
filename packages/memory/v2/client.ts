@@ -16,6 +16,7 @@ import {
   getPersistentSchedulerStateConfig,
   type GraphQuery,
   type GraphQueryResult,
+  type GraphQueryTrigger,
   type LegacyBackgroundExclusion,
   type LegacyBackgroundExclusionReleaseResult,
   type LegacyBackgroundExclusionStatus,
@@ -96,6 +97,9 @@ export type SessionOpenAuthFactory = (
  */
 export interface SessionReadOptions {
   actingContext?: SchedulerExecutionContextKey;
+  /** FA5/FB12 trigger attribution for graph.query accounting (wave-triggered
+   * refresh vs demand-triggered pull). Accounting only; optional. */
+  trigger?: GraphQueryTrigger;
 }
 
 export interface WatchMutationResult {
@@ -733,6 +737,7 @@ export class SpaceSession {
       ...(options?.actingContext !== undefined
         ? { actingContext: options.actingContext }
         : {}),
+      ...(options?.trigger !== undefined ? { trigger: options.trigger } : {}),
       query,
     });
 
