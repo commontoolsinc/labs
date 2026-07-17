@@ -177,7 +177,9 @@ export const setPropDefault = <T>(target: T, key: string, value: unknown) => {
         target.setAttribute(key, newValue);
       }
     }
-  } else if (target[key as keyof T] !== value) {
+  } else if (!Object.is(target[key as keyof T], value)) {
+    // `Object.is`, not `!==`: a `NaN` prop must not be re-assigned on every
+    // pass (custom elements often re-render on any property set).
     target[key as keyof T] = value as T[keyof T];
   }
 };
