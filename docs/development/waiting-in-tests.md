@@ -6,6 +6,12 @@ the two pieces of machinery whose timing is easy to guess wrong, the check that
 keeps new polling `waitFor` out of the integration suites, and the specific
 places where a bounded `waitFor` poll is still the right tool.
 
+The same principle applies to production code, and the last two sections cover
+it there: [Production reconnect backoff](#production-reconnect-backoff), a
+deliberate exception because nothing announces that a downed server is back, and
+[The FUSE mount handshake](#the-fuse-mount-handshake), a cross-process readiness
+signal carried by a pipe.
+
 ## Why avoid `waitFor`
 
 `waitFor(predicate, { timeout, delay })` (in `packages/integration/utils.ts`)
@@ -392,12 +398,14 @@ converting it churns code that no run covers.
 ### A shell script observing another process through a kernel mount
 
 `packages/cli/integration/fuse-exec.sh` drives the FUSE daemon as a separate
-process through a real mount, and observes it from bash. Its three poll loops —
-`wait_for_path`, `resolve_entity_dir`, and `wait_for_piece_value` — stay polls.
+process through a real mount, and observes it from bash. Its poll loops —
+`wait_for_path`, `wait_for_json`, `resolve_entity_dir`, and
+`wait_for_piece_value` — stay polls.
 
 There is no event channel to convert them to. The state each loop waits on lives
-in another process: the daemon's tree for the two path loops, and the server's
-cell for the value loop. Bash has no callback to resolve a `defer()` from.
+in another process: the daemon's tree for the path and JSON loops, and the
+server's cell for the value loop. Bash has no callback to resolve a `defer()`
+from.
 
 Watching the filesystem does not substitute for one. A mounted path appears
 because the daemon added a node to its own tree, and that is not a filesystem
@@ -419,13 +427,17 @@ Mount readiness needs no timing loop. `cf fuse mount --background` calls
 `mounted` supervisor state and confirms both the supervisor and the child are
 alive before the command prints the PID. Every other exit from that function
 throws, and a throw kills the child and fails the command, so a script that has
-parsed a PID has a daemon that reported mounted.
+parsed a PID has a daemon that reported mounted. That wait is itself
+event-driven, carried by the pipe that [The FUSE mount
+handshake](#the-fuse-mount-handshake) describes.
 
-The daemon reports that state just before it enters its FUSE session loop, so it
-means the kernel mount exists rather than that any request has been served, and
-mounted paths hydrate lazily besides. Both gaps belong to `wait_for_path`, whose
-probe carries its own kill-timeout and retries for twenty seconds. What is left
-for the script is one check that the daemon survived the handshake.
+The daemon reports that state once its session loop is dispatched, so the mount
+serves requests, but the paths under it still hydrate lazily and the documents at
+those paths settle on a debounce after the path first answers a lookup. A path
+existing is not the same as its content being final. Those gaps belong to
+`wait_for_path` and `wait_for_json`, which poll a lookup and a rendered document
+until each converges, each carrying its own timeout. What is left for the script
+directly is one check that the daemon survived the handshake.
 
 The stale-descriptor assertion — that truncating a path does not let an already
 open descriptor write its old buffer back — waits on `wait_for_piece_value`
@@ -519,3 +531,109 @@ Cancelling an in-progress backoff stays event-driven: the pause between attempts
 is a single timer that `close()` cancels directly, so a client closed mid-backoff
 settles at once and nothing wakes on an interval. The backoff delay between
 attempts stays; its cancellation carries no poll.
+
+## The FUSE mount handshake
+
+`cf fuse mount --background` has to find out whether a daemon it did not spawn
+directly came up. It spawns a supervisor, the supervisor spawns the FUSE daemon,
+and the daemon is therefore a grandchild the command holds no handle to. Both
+halves of the handshake wake on an event rather than a poll. The shape is worth
+knowing, because "the processes are detached" reads like an argument that no
+channel is available, and it is not one.
+
+The daemon publishes readiness states — starting, mounted, failed, exiting,
+exited — through a child-status file next to the mount state, refreshed by a
+one-second heartbeat. Those states are the signal `cf fuse status` reads. A file
+cannot wake a reader, though, so readiness for the handshake itself travels over
+a pipe. The command spawns the supervisor with a piped stdout and blocks reading
+it; the supervisor passes that descriptor down to the daemon, so the daemon's
+readiness line arrives at the command directly and the read wakes on the write.
+The status file serves `cf fuse status`, and the heartbeat keeps it fresh; only
+the one-shot startup transitions go through the pipe, so the heartbeat does not
+flood a channel nobody reads once the command has returned.
+
+Detachment does not rule the pipe out, and the reasons are worth stating because
+each one looks like a blocker.
+
+The daemon must outlive the command. It does: the descriptor is inherited at
+spawn, and closing the read end has no effect on the processes holding the write
+end. The command reads one line, cancels the reader and exits, and the mount
+stays up.
+
+A daemon whose parent has gone must not die. It does not. Deno ignores SIGPIPE
+and surfaces a write to a readerless pipe as a catchable `BrokenPipe`, so the
+readiness write catches and the mount continues unobserved. Nothing else reaches
+that descriptor: a background daemon redirects `console.log` and friends into its
+log file, and only tees to stderr when stderr is a terminal, which for a
+background mount it is not.
+
+The supervisor is unreferenced only after the handshake. `unref` keeps the child
+from holding the command's event loop open, which is what the command wants once
+the mount is up and outlives it. Unreferencing before the read would stop the
+readiness read from holding the loop open too, and the command would exit
+mid-handshake with a zero status and no output.
+
+Failure is an event as well, and this is the part a poll cannot match. Two things
+end the read besides a report. End of stream means every process holding the
+write end has exited. The supervisor's exit — which the command already holds,
+because the supervisor is the child it spawned — means no report is coming from a
+daemon that cannot send one. Both fire the moment they happen rather than on the
+next liveness tick, and a daemon that fails during startup publishes its own
+error first, so the command reports the cause rather than only that the process
+went away.
+
+Watching the supervisor's exit is not belt-and-braces on top of end of stream;
+without it the command can hang. The daemon inherits the write end, so a daemon
+orphaned by a dead supervisor holds the stream open on its own and end of stream
+never arrives. A supervisor killed while its daemon sits there silently would
+otherwise leave the read outstanding forever.
+
+The pipe is private to one invocation, which is why the handshake carries no
+correlation. The status file is a shared namespace — a stale file from an earlier
+mount at the same mountpoint sits at the same path — so a reader of that file
+would need a correlation token, a mountpoint check and a cross-check against the
+mount state to tell its own child's report from a leftover. A line on the pipe
+came from this invocation's daemon and nothing else, so the handshake needs none
+of that.
+
+The supervisor owns the mount state file, because it is the process that spawns
+the daemon and so the only one that knows both pids; it writes the file once and
+completely. The command prepares the containing directory and the path, and the
+supervisor holds write access to that one file and no read access.
+
+What lets the readiness read stay pure-event is where the daemon announces
+`mounted`. It announces only after it has dispatched its FUSE session loop and
+installed its signal handlers, so a command that has read `mounted` has a mount
+that serves requests and tears down cleanly on a signal. The announcement
+carries that guarantee, so the command trusts it on arrival: it confirms the
+child and the supervisor are alive at that instant — a point-in-time probe, not a
+wait — and returns. An announcement made earlier, before the loop was dispatched,
+would report a mount that might still fail in the loop, and to catch that the
+command would have to wait out a fixed confirmation window on every successful
+mount, a genuine timing bet because nothing announces that a process intends to
+keep running. Moving the announcement behind the loop dispatch retires that wait
+rather than tuning it.
+
+The status file the daemon also writes, the record `cf fuse status` reads, is
+written to survive a concurrent reader, because its startup, readiness, heartbeat
+and signal paths all write it without coordinating. Each write lands under a
+scratch name and is renamed into place, so a reader woken mid-write sees a whole
+document rather than a truncated one. And the writes are serialized through a
+queue, so the file ends on the state of the most recent call: without that, two
+renames could complete in either order and let a heartbeat still in flight
+replace a terminal state, leaving the file claiming a mount that has already
+gone.
+
+One wait in the handshake keeps a real duration:
+`cleanupFuseChild`'s shutdown escalation. It sends SIGTERM,
+allows the child five seconds to exit, then sends SIGKILL. The wait for the
+child's exit is event-driven — it races the real status promise — and the timeout
+is the escalation policy, not a stand-in for a missing signal. A process ignoring
+SIGTERM never announces that it intends to keep ignoring it.
+
+There is no deadline on the readiness read. A daemon that neither mounts nor
+exits, under a supervisor that is also still there, blocks the command
+indefinitely — which is what a foreground mount does too, and the user interrupts
+it or a CI job limit catches it. Every way the pair can actually fail ends the
+read instead. A ceiling over the read would instead fail a mount that would have
+succeeded on a loaded machine, the ceiling this note warns about throughout.

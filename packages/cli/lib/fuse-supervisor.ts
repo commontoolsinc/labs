@@ -1,5 +1,10 @@
 import { basename } from "@std/path";
-import { buildFuseChildDenoArgs, fuseMod } from "./fuse.ts";
+import {
+  buildFuseChildDenoArgs,
+  fuseMod,
+  type MountStateEntry,
+  writeMountStateFile,
+} from "./fuse.ts";
 
 export interface FuseSupervisorOptions {
   mountpoint: string;
@@ -18,12 +23,14 @@ export interface FuseSupervisorOptions {
   cfcWritebackState?: string;
   statePath?: string;
   supervisorStatusPath?: string;
-  supervisorToken?: string;
   importMetaUrl?: string;
   command?: FuseCommandConstructor;
   execPath?: string;
   childShutdownTimeoutMs?: number;
-  sleep?: (ms: number) => Promise<void>;
+  writeMountStateFile?: (
+    path: string,
+    entry: MountStateEntry,
+  ) => Promise<void>;
   exit?: (code: number) => never | void;
   addSignalListener?: (signal: Deno.Signal, handler: () => void) => void;
   removeSignalListener?: (signal: Deno.Signal, handler: () => void) => void;
@@ -78,9 +85,6 @@ export function buildFuseChildCommand(
     if (options.supervisorStatusPath) {
       args.push("--supervisor-status", options.supervisorStatusPath);
     }
-    if (options.supervisorToken) {
-      args.push("--supervisor-token", options.supervisorToken);
-    }
     for (const space of options.spaces) args.push("--space", space);
     return { command: execPath, args };
   }
@@ -104,7 +108,6 @@ export function buildFuseChildCommand(
       cfcWritebackXattrs: options.cfcWritebackXattrs,
       cfcWritebackState: options.cfcWritebackState,
       supervisorStatusPath: options.supervisorStatusPath,
-      supervisorToken: options.supervisorToken,
     }),
   };
 }
@@ -115,10 +118,13 @@ export async function runFuseSupervisor(
   const childCommand = buildFuseChildCommand(options);
   const CommandCtor = options.command ?? Deno.Command;
   const exit = options.exit ?? Deno.exit;
+  // The child inherits this process's stdout. For a background mount that is the
+  // pipe `cf fuse mount` blocks on, so the child's readiness line reaches the
+  // command directly.
   const child = new CommandCtor(childCommand.command, {
     args: childCommand.args,
     stdin: "null",
-    stdout: "null",
+    stdout: "inherit",
     stderr: "null",
   }).spawn();
 
@@ -152,15 +158,7 @@ export async function runFuseSupervisor(
 
   try {
     if (options.statePath) {
-      const recorded = await recordFuseChildPid({
-        statePath: options.statePath,
-        childPid: child.pid,
-        supervisorPid: options.supervisorPid ?? Deno.pid,
-        sleep: options.sleep,
-      });
-      if (!recorded) {
-        throw new Error("Unable to record FUSE child PID in mount state.");
-      }
+      await recordFuseMountState(options, child.pid);
     }
     const status = await child.status;
     childExited = true;
@@ -292,9 +290,6 @@ export function parseSupervisorArgs(
       case "--supervisor-status":
         options.supervisorStatusPath = requireValue(rawArgs, ++i, arg);
         break;
-      case "--supervisor-token":
-        options.supervisorToken = requireValue(rawArgs, ++i, arg);
-        break;
       case "--space":
       case "-s":
         options.spaces.push(requireValue(rawArgs, ++i, arg));
@@ -341,42 +336,39 @@ Options:
   --cfc-writeback-state <path>    CFC writeback state path
   --state-path <path>             Mount state file to update with child PID
   --supervisor-status <path>      Child readiness and heartbeat status file
-  --supervisor-token <token>      Child readiness status correlation token
   -s, --space <name>              Space(s) to connect
   -h, --help                      Show this help
 `;
 }
 
-export async function recordFuseChildPid(
-  options: {
-    statePath: string;
-    childPid: number;
-    supervisorPid: number;
-    sleep?: (ms: number) => Promise<void>;
-  },
-): Promise<boolean> {
-  const sleep = options.sleep ??
-    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  for (let attempt = 0; attempt < 20; attempt++) {
-    try {
-      const state = JSON.parse(
-        await Deno.readTextFile(options.statePath),
-      ) as Record<string, unknown>;
-      if (state.pid !== options.supervisorPid) {
-        await sleep(50);
-        continue;
-      }
-      state.childPid = options.childPid;
-      await Deno.writeTextFile(
-        options.statePath,
-        JSON.stringify(state, null, 2),
-      );
-      return true;
-    } catch {
-      await sleep(50);
-    }
+/**
+ * Writes the mount state file. This process spawned the FUSE child, so it is the
+ * only one that knows both PIDs, and it writes the file once and completely.
+ * `cf fuse mount` prepares the containing directory and the path, then leaves the
+ * contents to this process.
+ */
+export async function recordFuseMountState(
+  options: FuseSupervisorOptions,
+  childPid: number,
+): Promise<void> {
+  const statePath = options.statePath;
+  if (!statePath) return;
+  const write = options.writeMountStateFile ?? writeMountStateFile;
+  const entry: MountStateEntry = {
+    pid: options.supervisorPid ?? Deno.pid,
+    childPid,
+    mountpoint: options.mountpoint,
+    apiUrl: options.apiUrl,
+    identity: options.identity,
+    startedAt: new Date().toISOString(),
+    childStatusPath: options.supervisorStatusPath,
+    logFile: options.logFile || undefined,
+  };
+  try {
+    await write(statePath, entry);
+  } catch (error) {
+    throw new Error(`Unable to record FUSE mount state: ${error}`);
   }
-  return false;
 }
 
 if (import.meta.main) {
