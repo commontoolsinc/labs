@@ -117,22 +117,21 @@ class SinkableCell {
 }
 
 class PatternIdentityCell {
-  #sink: (() => void) | undefined;
+  #sinks = new Map<string, () => void>();
 
   asSchema() {
     return { sync: () => Promise.resolve() };
   }
 
   sinkMeta(key: string, sink: () => void): () => void {
-    assertEquals(key, "patternIdentity");
-    this.#sink = sink;
+    this.#sinks.set(key, sink);
     return () => {
-      if (this.#sink === sink) this.#sink = undefined;
+      if (this.#sinks.get(key) === sink) this.#sinks.delete(key);
     };
   }
 
-  emit(): void {
-    this.#sink?.();
+  emit(key = "patternIdentity"): void {
+    this.#sinks.get(key)?.();
   }
 }
 
@@ -261,6 +260,7 @@ Deno.test("CellBridge.loadPieceTree creates meta.json with a pattern reference",
         symbol: "default",
         source: {
           ref: `cf:pattern:${"A".repeat(43)}`,
+          repository: "https://github.com/commontoolsinc/labs",
           entry: "/notes/note.tsx",
         },
       }),
@@ -288,6 +288,7 @@ Deno.test("CellBridge.loadPieceTree creates meta.json with a pattern reference",
     symbol: "default",
     source: {
       ref: `cf:pattern:${"A".repeat(43)}`,
+      repository: "https://github.com/commontoolsinc/labs",
       entry: "/notes/note.tsx",
     },
   });
@@ -1636,6 +1637,7 @@ Deno.test("CellBridge refreshes pattern references after an in-place swap", asyn
     symbol: "default",
     source: {
       ref: `cf:pattern:${"A".repeat(43)}`,
+      repository: "https://github.com/commontoolsinc/labs",
       entry: "/notes/note.tsx",
     },
   };
@@ -1667,6 +1669,7 @@ Deno.test("CellBridge refreshes pattern references after an in-place swap", asyn
     symbol: "default",
     source: {
       ref: `cf:pattern:${"B".repeat(43)}`,
+      repository: "https://github.com/commontoolsinc/labs",
       entry: "/notes/note.tsx",
     },
   };
@@ -1696,6 +1699,26 @@ Deno.test("CellBridge refreshes pattern references after an in-place swap", asyn
     getFileContent(tree, state.piecesIno, "pieces.json"),
   );
   assertEquals(piecesJson[0].patternRef, patternRef);
+
+  patternRef = {
+    ...patternRef,
+    source: {
+      ...patternRef.source,
+      repository: "https://github.com/commontoolsinc/another-repo",
+    },
+  };
+  const repositoryRefreshed = defer();
+  bridge.onInvalidate = (parentIno, names) => {
+    if (parentIno === pieceIno && names.includes("meta.json")) {
+      repositoryRefreshed.resolve();
+    }
+  };
+  rootCell.emit("patternRepository");
+  await repositoryRefreshed.promise;
+  assertEquals(
+    JSON.parse(getFileContent(tree, pieceIno, "meta.json")).patternRef,
+    patternRef,
+  );
 
   const subs = state.pieceSubs.get(projectedName);
   if (subs) { for (const cancel of subs) cancel(); }

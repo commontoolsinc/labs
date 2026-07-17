@@ -13,6 +13,7 @@ import {
   runtimePresets,
   RuntimeProgram,
   type Schema,
+  setPatternRepository,
   setPatternSource,
 } from "@commonfabric/runner";
 import type { CellScope } from "@commonfabric/api";
@@ -95,6 +96,7 @@ async function timePiecesPhase<T>(
 
 export interface CreatePieceOptions {
   input?: object;
+  repository?: string;
   start?: boolean;
 }
 
@@ -123,7 +125,7 @@ export class PiecesController<T = unknown> {
       pattern,
       options.input,
       cause,
-      { start },
+      { repository: options.repository, start },
     );
     if (!start) {
       await this.#manager.runtime.idle();
@@ -273,9 +275,16 @@ export class PiecesController<T = unknown> {
    * @returns The newly created default pattern piece
    */
   async recreateDefaultPattern(
-    options?: { customProgram?: RuntimeProgram },
+    options?: { customProgram?: RuntimeProgram; repository?: string },
   ): Promise<PieceController<NameSchema>> {
     this.disposeCheck();
+    if (
+      options?.repository !== undefined && options.customProgram === undefined
+    ) {
+      throw new Error(
+        "A repository locator can only be supplied with a custom program",
+      );
+    }
 
     // Stop and unlink the existing default pattern first (before any operations that might fail)
     // We need to stop it to prevent resource leaks or duplicate behavior from the old pattern
@@ -353,6 +362,10 @@ export class PiecesController<T = unknown> {
 
       // Run pattern setup within same transaction
       this.#manager.runtime.run(tx, pattern, {}, pieceCell);
+
+      if (options?.repository !== undefined) {
+        setPatternRepository(pieceCell, tx, options.repository);
+      }
 
       // Link as default pattern within same transaction
       const spaceCellWithTx = spaceCellContents.withTx(tx);

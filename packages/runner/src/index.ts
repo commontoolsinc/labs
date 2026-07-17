@@ -112,11 +112,13 @@ export {
   asPatternIdentityRef,
   extractDefaultValues,
   getPatternIdentityRef,
+  getPatternRepository,
   getPatternSource,
   mergeSchemaDefaults,
   patternIdentityKey,
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
+  setPatternRepository,
   setPatternSource,
 } from "./runner.ts";
 

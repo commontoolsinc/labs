@@ -59,6 +59,7 @@ import { deriveDiskHandleId } from "./sqlite-source.ts";
 export interface EntryConfig {
   mainPath: string;
   mainExport?: string;
+  repository?: string;
   rootPath?: string;
 }
 
@@ -434,7 +435,10 @@ export async function newPiece(
   );
   const PIECE_START_TIMEOUT_MS = 60_000;
   const piece = await timeCliPhase("newPiece.create", () => {
-    const createPromise = pieces.create(program, { start: options?.start });
+    const createPromise = pieces.create(program, {
+      repository: entry.repository,
+      start: options?.start,
+    });
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
@@ -531,7 +535,9 @@ export async function setPiecePattern(
     undefined,
     resolvedConfig.pieceScope,
   );
-  await piece.setPattern(await getPinnedProgramFromFile(manager, entry));
+  await piece.setPattern(await getPinnedProgramFromFile(manager, entry), {
+    repository: entry.repository,
+  });
 }
 
 export async function savePiecePattern(
@@ -1426,7 +1432,10 @@ export async function setHomePattern(
   const manager = await loadManager(homeConfig);
   const program = await getProgramFromFile(manager, entry);
   const pieces = new PiecesController(manager);
-  await pieces.recreateDefaultPattern({ customProgram: program });
+  await pieces.recreateDefaultPattern({
+    customProgram: program,
+    repository: entry.repository,
+  });
 }
 
 /**

@@ -83,6 +83,11 @@ export function formatPatternRef(
   patternRef: PiecePatternRef | undefined,
 ): string {
   if (patternRef === undefined) return "<unknown>";
+  if (patternRef.source.repository !== undefined) {
+    return patternRef.source.entry === undefined
+      ? patternRef.source.repository
+      : `${patternRef.source.repository}#${patternRef.source.entry}`;
+  }
   return patternRef.source.origin ?? patternRef.source.entry ??
     patternRef.source.ref;
 }
@@ -270,6 +275,10 @@ export const piece = new Command()
     "--root <path:string>",
     "Root directory for imports and authored source paths. Use a repository root to preserve repository-relative paths.",
   )
+  .option(
+    "--repository <repository:string>",
+    "Repository locator associated with the authored source (stored exactly as supplied).",
+  )
   .option("--slug <slug:string>", "Slug URL/address for this piece.")
   .action(async (options, main) => {
     setQuietMode(!!options.quiet);
@@ -279,6 +288,7 @@ export const piece = new Command()
       {
         mainPath: absPath(main),
         mainExport: options.mainExport,
+        repository: options.repository,
         rootPath: options.root ? absPath(options.root) : undefined,
       },
       { start: options.start, slug: options.slug },
@@ -394,6 +404,10 @@ export const piece = new Command()
     "--root <path:string>",
     "Root directory for imports and authored source paths. Use a repository root to preserve repository-relative paths.",
   )
+  .option(
+    "--repository <repository:string>",
+    "Repository locator associated with the authored source (stored exactly as supplied).",
+  )
   .arguments("<main:string>")
   .action(async (options, mainPath) => {
     setQuietMode(!!options.quiet);
@@ -401,6 +415,7 @@ export const piece = new Command()
     await setPiecePattern(pieceConfig, {
       mainPath: absPath(mainPath),
       mainExport: options.mainExport,
+      repository: options.repository,
       rootPath: options.root ? absPath(options.root) : undefined,
     });
     render(`Updated source for piece ${pieceConfig.piece}`);
@@ -452,6 +467,9 @@ Name: ${pieceData.name || "<no name>"}
 Pattern: ${formatPatternRef(pieceData.patternRef)}
 Pattern Ref: ${formatPatternIdentity(pieceData.patternRef)}
 Source Ref: ${pieceData.patternRef?.source.ref ?? "<unknown>"}
+Repository: ${pieceData.patternRef?.source.repository ?? "<unknown>"}
+Source Entry: ${pieceData.patternRef?.source.entry ?? "<unknown>"}
+Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
 
 --- Source (Inputs) ---`;
 
@@ -949,7 +967,11 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
   )
   .option(
     "--root <path:string>",
-    "Root directory for resolving imports.",
+    "Root directory for imports and authored source paths. Use a repository root to preserve repository-relative paths.",
+  )
+  .option(
+    "--repository <repository:string>",
+    "Repository locator associated with the authored source (stored exactly as supplied).",
   )
   .arguments("[main:string]")
   .action(async (options, main?: string) => {
@@ -967,6 +989,12 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
         { exitCode: 1 },
       );
     }
+    if (options.reset && options.repository !== undefined) {
+      throw new ValidationError(
+        "Cannot use --repository with --reset.",
+        { exitCode: 1 },
+      );
+    }
 
     const baseConfig = parseSetHomeOptions(options);
 
@@ -977,6 +1005,7 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
       await setHomePattern(baseConfig, {
         mainPath: absPath(main!),
         mainExport: options.mainExport,
+        repository: options.repository,
         rootPath: options.root ? absPath(options.root) : undefined,
       });
       render("Deployed custom home pattern.");

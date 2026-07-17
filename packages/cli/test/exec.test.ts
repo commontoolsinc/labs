@@ -1032,6 +1032,7 @@ describe("mounted callable resolution and execution", () => {
         symbol: "default",
         source: {
           ref: `cf:pattern:${"A".repeat(43)}`,
+          repository: "https://github.com/commontoolsinc/labs",
           entry: "/notes/note.tsx",
         },
       },
@@ -1072,6 +1073,7 @@ describe("mounted callable resolution and execution", () => {
       symbol: "default",
       source: {
         ref: `cf:pattern:${"A".repeat(43)}`,
+        repository: "https://github.com/commontoolsinc/labs",
         entry: "/notes/note.tsx",
       },
     });
@@ -2191,6 +2193,7 @@ async function createMountedFile(
       symbol: string;
       source: {
         ref: string;
+        repository?: string;
         entry?: string;
         origin?: string;
       };

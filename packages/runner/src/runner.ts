@@ -553,6 +553,8 @@ type SetupValidationOptions = {
     argumentCell: Cell<unknown>,
     argumentSchema: JSONSchema,
   ) => void;
+  /** Optional repository locator written atomically with pattern setup. */
+  patternRepository?: string;
 };
 
 type RunResult<R> = {
@@ -778,21 +780,30 @@ export class Runner {
     patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
+    options?: SetupValidationOptions,
   ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    options?: SetupValidationOptions,
   ): Promise<Cell<R>>;
   setup<T, R = any>(
     providedTx: IExtendedStorageTransaction | undefined,
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    options: SetupValidationOptions = {},
   ): Promise<Cell<R>> {
     if (providedTx) {
-      this.setupInternal(providedTx, patternOrModule, argument, resultCell);
+      this.setupInternal(
+        providedTx,
+        patternOrModule,
+        argument,
+        resultCell,
+        options,
+      );
       return Promise.resolve(resultCell);
     } else {
       // Ignore retry/commit errors after retrying for now, as outside the tx,
@@ -802,7 +813,7 @@ export class Runner {
       // overwritten. Still surface real callback failures from setupInternal so
       // callers don't silently continue after a broken setup.
       return this.runtime.editWithRetry((tx) => {
-        this.setupInternal(tx, patternOrModule, argument, resultCell);
+        this.setupInternal(tx, patternOrModule, argument, resultCell, options);
       }).then(({ error }) => {
         if (error) {
           if (
@@ -1346,6 +1357,14 @@ export class Runner {
     }
 
     this.updateResultSchemaMeta(tx, resultCell, pattern.resultSchema);
+
+    if (validationOptions.patternRepository !== undefined) {
+      setPatternRepository(
+        resultCell,
+        tx,
+        validationOptions.patternRepository,
+      );
+    }
 
     const runningSetup = this.maybeReuseRunningSetup(
       tx,
@@ -2188,6 +2207,7 @@ export class Runner {
     options?: {
       expectedPatternIdentity?: { identity: string; symbol: string };
       validateArgumentLinks?: SetupValidationOptions["validateArgumentLinks"];
+      patternRepository?: string;
     },
   ) {
     await resultCell.sync();
@@ -2232,7 +2252,10 @@ export class Runner {
         pattern,
         inputs,
         resultCell.withTx(givenTx),
-        { validateArgumentLinks: options?.validateArgumentLinks },
+        {
+          patternRepository: options?.patternRepository,
+          validateArgumentLinks: options?.validateArgumentLinks,
+        },
       );
     } else {
       const { error } = await this.runtime.editWithRetry((tx) => {
@@ -2242,7 +2265,10 @@ export class Runner {
           pattern,
           inputs,
           resultCell.withTx(tx),
-          { validateArgumentLinks: options?.validateArgumentLinks },
+          {
+            patternRepository: options?.patternRepository,
+            validateArgumentLinks: options?.validateArgumentLinks,
+          },
         );
       });
       if (error) {
@@ -5416,6 +5442,25 @@ export function setPatternSource(
   url: string,
 ): void {
   resultCell.withTx(tx).setMetaRaw("patternSource", url);
+}
+
+/** Read an explicitly supplied repository locator for a piece's source. */
+export function getPatternRepository(
+  resultCell: Cell<unknown>,
+): string | undefined {
+  const raw = resultCell.getMetaRaw("patternRepository", {
+    meta: ignoreReadForScheduling,
+  });
+  return typeof raw === "string" ? raw : undefined;
+}
+
+/** Stamp an explicitly supplied repository locator with pattern setup. */
+export function setPatternRepository(
+  resultCell: Cell<unknown>,
+  tx: IExtendedStorageTransaction,
+  repository: string,
+): void {
+  resultCell.withTx(tx).setMetaRaw("patternRepository", repository);
 }
 
 /** Narrow a raw meta value to a `{ identity, symbol }` pattern ref, or undefined. */

@@ -50,6 +50,17 @@ describe("cli piece parsing", () => {
       symbol: "named",
       source: {
         ref: `cf:pattern:${identity}`,
+        repository: "https://github.com/commontoolsinc/labs",
+        entry: "/packages/patterns/notes/note.tsx",
+      },
+    })).toBe(
+      "https://github.com/commontoolsinc/labs#/packages/patterns/notes/note.tsx",
+    );
+    expect(formatPatternRef({
+      identity,
+      symbol: "named",
+      source: {
+        ref: `cf:pattern:${identity}`,
         origin: "cf:/did:key:z6Mk/example",
       },
     })).toBe("cf:/did:key:z6Mk/example");
@@ -429,11 +440,33 @@ describe("cli piece parsing", () => {
     });
   });
 
-  it("shows slug option for piece new", async () => {
+  it("shows source-location options for every local deployment command", async () => {
     const { code, stdout, stderr } = await cf("piece new --help");
     checkStderr(stderr);
     expect(code).toBe(0);
-    expect(stripAnsi(stdout.join("\n"))).toContain("--slug");
+    const newHelp = stripAnsi(stdout.join("\n"));
+    expect(newHelp).toContain("--slug");
+    expect(newHelp).toContain("--root");
+    expect(newHelp).toContain("--repository");
+
+    for (const command of ["setsrc", "set-home"]) {
+      const help = await cf(`piece ${command} --help`);
+      checkStderr(help.stderr);
+      expect(help.code).toBe(0);
+      const output = stripAnsi(help.stdout.join("\n"));
+      expect(output).toContain("--root");
+      expect(output).toContain("--repository");
+    }
+  });
+
+  it("rejects repository metadata when resetting the home pattern", async () => {
+    const { code, stderr } = await cf(
+      "piece set-home --reset --repository https://github.com/commontoolsinc/labs",
+    );
+    expect(code).toBe(1);
+    expect(stripAnsi(stderr.join("\n"))).toContain(
+      "Cannot use --repository with --reset",
+    );
   });
 
   it("shows set-slug command options", async () => {

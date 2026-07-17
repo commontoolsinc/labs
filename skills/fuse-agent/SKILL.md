@@ -55,6 +55,7 @@ cat "MOUNT/SPACE/pieces/pieces.json"
   "symbol": "default",
   "source": {
     "ref": "cf:pattern:<content-hash>",
+    "repository": "https://github.com/commontoolsinc/labs",
     "entry": "/packages/patterns/annotation.tsx"
   }
 }
@@ -62,8 +63,9 @@ cat "MOUNT/SPACE/pieces/pieces.json"
 
 The prefix-free `identity` + `symbol` are the authoritative reference to the
 running artifact (`cf:module/<identity>#<symbol>` in display form). `source.ref`
-addresses the immutable source closure; `source.entry` is its optional authored
-entry path, and `source.origin` is optional update provenance. For pattern-kind
+addresses the immutable source closure; `source.repository` is an optional,
+explicitly supplied repository locator; `source.entry` is its optional authored
+entry path; and `source.origin` is optional update provenance. For pattern-kind
 discovery, match the entry filename and fall back to the origin path when the
 entry is absent; do not infer it from the piece's mutable display name.
 

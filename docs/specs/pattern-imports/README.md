@@ -109,8 +109,8 @@ Because both come up, and only one is the pin:
 
 ### Tooling reference for a running piece
 
-Piece tooling exposes the running pattern and its source as three deliberately
-separate facts:
+Piece tooling exposes the running pattern and its source as deliberately
+separate fields:
 
 ```json
 {
@@ -118,6 +118,7 @@ separate facts:
   "symbol": "default",
   "source": {
     "ref": "cf:pattern:<prefix-free-entry-module-hash>",
+    "repository": "https://github.com/commontoolsinc/labs",
     "entry": "/packages/patterns/annotation.tsx",
     "origin": "cf:/did:key:z6Mk.../annotation"
   }
@@ -130,22 +131,26 @@ separate facts:
   closure that produced the running identity. It uses the same
   `cf:pattern:<hash>` grammar as imports and is derived from `identity`; it does
   not depend on how or where the pattern was authored.
+- `source.repository` is the optional repository locator supplied explicitly at
+  deployment. It is descriptive discovery metadata, not proof of which bytes
+  are running; `source.ref` remains authoritative for that. The CLI stores the
+  value exactly as supplied and never derives it from local Git configuration.
 - `source.entry` is the optional authored entry filename recovered from that
   verified closure. Authored filenames are relative to the compilation root.
-  For a local deployment, passing the repository root as `cf piece new
-  --root` / `cf piece setsrc --root` therefore preserves a path inside that
-  repository rather than only a basename. Absolute paths from the author's
-  machine are never persisted.
+  For a local deployment, passing the repository root as `--root` therefore
+  preserves a path inside that repository rather than only a basename.
+  Absolute paths from the author's machine are never persisted.
 - `source.origin` is the optional `patternSource` update provenance carried by
   the piece (a `cf:` publication ref or a toolshed system-pattern path). It
   answers "where should updates be checked?", not "which exact bytes are
   running?"; `source.ref` answers the latter.
 
-No Git remote or revision is inferred automatically. A checkout may be dirty,
-have several remotes, or contain credentials in a remote URL, so inferred VCS
-metadata would be both non-authoritative and potentially sensitive. A future
-explicit repository annotation can add discovery links without changing the
-content-addressed `source.ref` contract.
+`cf piece new`, `cf piece setsrc`, and custom `cf piece set-home` accept
+`--repository <locator>` alongside `--root`. `new` and custom `set-home` stamp
+the locator on the new piece. `setsrc` replaces it when the flag is present and
+preserves the existing locator when the flag is omitted. `set-home --reset`
+rejects the flag because the system pattern was not deployed from the caller's
+repository. No Git remote or revision is inferred automatically.
 
 ## Specifier syntax
 

@@ -260,6 +260,7 @@ pieces/.index.json    # {"todo-app": "of:ba4jcbvpq3k5soo...", ...}
   "symbol": "default",
   "source": {
     "ref": "cf:pattern:<content-hash>",
+    "repository": "https://github.com/commontoolsinc/labs",
     "entry": "/packages/patterns/todo-app.tsx"
   }
 }
@@ -268,12 +269,13 @@ pieces/.index.json    # {"todo-app": "of:ba4jcbvpq3k5soo...", ...}
 The prefix-free identity and symbol are the authoritative pointer to the
 running artifact (`cf:module/<identity>#<symbol>` in display form).
 `source.ref` is the immutable in-fabric source reference from the pattern-import
-grammar. `source.entry` is the optional authored path inside the verified source
-closure; `source.origin` is the optional `patternSource` update provenance.
-For local deployments, `--root` defines the path namespace, so passing a
-repository root preserves a repository-relative entry path without persisting
-an absolute machine path. Pattern references update in place when the piece
-rolls forward; they do not participate in directory-name selection. See
+grammar. `source.repository` is optional, explicitly supplied repository
+discovery metadata. `source.entry` is the optional authored path inside the
+verified source closure; `source.origin` is the optional `patternSource` update
+provenance. For local deployments, `--root` defines the path namespace, while
+`--repository` records which repository that path belongs to without inspecting
+Git configuration. Pattern references update in place when the piece rolls
+forward; they do not participate in directory-name selection. See
 `docs/specs/pattern-imports/README.md` for the canonical field semantics.
 
 ## Entity Directory

@@ -124,6 +124,13 @@ async function readMountedPieceMeta(
       typeof (rawPatternSource as Record<string, unknown>).ref === "string"
     ? {
       ref: (rawPatternSource as Record<string, unknown>).ref as string,
+      ...(typeof (rawPatternSource as Record<string, unknown>).repository ===
+          "string"
+        ? {
+          repository: (rawPatternSource as Record<string, unknown>)
+            .repository as string,
+        }
+        : {}),
       ...(typeof (rawPatternSource as Record<string, unknown>).entry ===
           "string"
         ? {

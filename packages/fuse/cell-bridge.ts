@@ -670,6 +670,8 @@ export class CellBridge {
       next.patternRef?.identity !== current.patternRef?.identity ||
       next.patternRef?.symbol !== current.patternRef?.symbol ||
       next.patternRef?.source.ref !== current.patternRef?.source.ref ||
+      next.patternRef?.source.repository !==
+        current.patternRef?.source.repository ||
       next.patternRef?.source.entry !== current.patternRef?.source.entry ||
       next.patternRef?.source.origin !== current.patternRef?.source.origin;
     state.pieceManifest.set(pieceId, next);
@@ -2953,8 +2955,9 @@ export class CellBridge {
     }
 
     // Pattern hot-swaps (system roll-forward, CLI setsrc, or FUSE source
-    // edits) retain the same piece entity. Keep the synthetic reference in
-    // meta.json and pieces.json aligned with the currently running artifact.
+    // edits) and repository annotation changes retain the same piece entity.
+    // Keep the synthetic reference in meta.json and pieces.json aligned with
+    // the currently running artifact and its source locator.
     const getRootCell = (piece as unknown as {
       getCell?: () => Cell<unknown>;
     }).getCell;
@@ -2964,21 +2967,25 @@ export class CellBridge {
           sinkMeta?: Cell<unknown>["sinkMeta"];
         };
         if (typeof rootCell.sinkMeta === "function") {
-          const cancelPatternRef = rootCell.sinkMeta(
-            "patternIdentity",
-            () => {
-              void this.refreshPiecePatternMetadata(
-                state,
-                piece,
-                pieceIno,
-              ).catch((e) => {
-                console.error(
-                  `[${spaceName}] Could not refresh ${pieceName} pattern reference: ${e}`,
-                );
-              });
-            },
-          );
-          cancels.push(cancelPatternRef);
+          for (
+            const key of ["patternIdentity", "patternRepository"] as const
+          ) {
+            const cancelPatternRef = rootCell.sinkMeta(
+              key,
+              () => {
+                void this.refreshPiecePatternMetadata(
+                  state,
+                  piece,
+                  pieceIno,
+                ).catch((e) => {
+                  console.error(
+                    `[${spaceName}] Could not refresh ${pieceName} pattern reference: ${e}`,
+                  );
+                });
+              },
+            );
+            cancels.push(cancelPatternRef);
+          }
         }
       } catch (e) {
         console.error(

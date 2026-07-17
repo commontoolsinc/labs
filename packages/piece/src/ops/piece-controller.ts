@@ -6,6 +6,7 @@ import {
   formatFabricRef,
   getMetaLink,
   getPatternIdentityRef,
+  getPatternRepository,
   getPatternSource,
   getValueAtPath,
   isCell,
@@ -173,6 +174,8 @@ interface StoredCellTopology {
 export interface PiecePatternSourceRef {
   /** Immutable in-fabric reference to the verified source closure. */
   ref: string;
+  /** Optional caller-supplied repository associated with the source tree. */
+  repository?: string;
   /** Authored entry path within the program's compilation root. */
   entry?: string;
   /** Optional mutable/update provenance carried by `patternSource`. */
@@ -184,8 +187,8 @@ export interface PiecePatternSourceRef {
  *
  * `identity` is the prefix-free module hash stored in `patternIdentity`;
  * `identity` + `symbol` are the authoritative executable pointer. `source.ref`
- * names the immutable source closure; optional entry and origin fields aid
- * discovery without changing that identity.
+ * names the immutable source closure; optional repository, entry, and origin
+ * fields aid discovery without changing that identity.
  */
 export interface PiecePatternRef {
   identity: string;
@@ -2465,6 +2468,8 @@ export class PieceController<T = unknown> {
         ref: { kind: "uri", scheme: "pattern", hash: ref.identity },
       }),
     };
+    const repository = getPatternRepository(this.#cell);
+    if (repository !== undefined) source.repository = repository;
     const trackedSource = getPatternSource(this.#cell);
     if (trackedSource !== undefined) {
       return { ...ref, source: { ...source, origin: trackedSource } };
@@ -2627,7 +2632,10 @@ export class PieceController<T = unknown> {
     return (await this.getPatternSourceProgram())?.files;
   }
 
-  async setPattern(program: RuntimeProgram): Promise<void> {
+  async setPattern(
+    program: RuntimeProgram,
+    options?: { repository?: string },
+  ): Promise<void> {
     const mutationVersion = ++this.#mutationVersion;
     await this.#runMutation(mutationVersion, async () => {
       const { pattern: previousPattern, ref: previousRef } = await this
@@ -2644,6 +2652,7 @@ export class PieceController<T = unknown> {
             argumentCell,
             this.#manager,
           ),
+        repository: options?.repository,
       }) as Cell<T>;
     });
   }
@@ -2739,6 +2748,7 @@ async function execute(
       argumentCell: Cell<unknown>,
       argumentSchema: JSONSchema,
     ) => void;
+    repository?: string;
   },
 ): Promise<Cell<unknown>> {
   return await manager.runWithPattern(pattern, pieceId, input, options);

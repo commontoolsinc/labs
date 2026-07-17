@@ -28,10 +28,12 @@ const REPO_ROOT = resolve(import.meta.dirname!, "../../..");
 const NOTE_PATTERN = `${REPO_ROOT}/packages/patterns/notes/note.tsx`;
 
 const NOTE_CONTENT = "Hello world";
+const REPOSITORY = "https://github.com/commontoolsinc/labs";
 
 const noteEntry: EntryConfig = {
   mainPath: NOTE_PATTERN,
   rootPath: REPO_ROOT,
+  repository: REPOSITORY,
 };
 
 let pieceId = "";
@@ -131,6 +133,7 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
     expect(identity).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(listedPiece?.patternRef?.source).toEqual({
       ref: `cf:pattern:${identity}`,
+      repository: REPOSITORY,
       entry: "/packages/patterns/notes/note.tsx",
     });
 
