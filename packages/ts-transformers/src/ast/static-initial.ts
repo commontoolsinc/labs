@@ -17,14 +17,17 @@
  *   no-substitution template literals, negated static numbers
  * - arithmetic on static numbers (`10 + 20`, `60 * 60`) and `+`-concatenation
  *   of static strings, constant-folded; a fold must produce a finite number
- *   (no `1 / 0`)
+ *   (no `1 / 0`); template literals whose substitutions are static
  * - array literals of static expressions (no spreads or holes)
- * - object literals with identifier / string / numeric keys and static
- *   values (no spreads, computed keys, accessors, or methods)
+ * - object literals with identifier / string / numeric / static-computed keys
+ *   and static values (no spreads, accessors, or methods)
+ * - static member/element access into static values (`CONFIG.max`,
+ *   `PROMPTS[0].id`); a key missing from the static value is rejected
  * - parenthesized / `as` / `satisfies` wrappers around a static expression
- * - identifiers resolving to a `const` variable whose initializer is itself
- *   static (followed transitively, cycle-guarded; `let`/`var` are rejected
- *   because reassignment can change the value observed at the `.of()` site)
+ * - identifiers resolving to a `const` variable — local or imported from
+ *   another module in the program — whose initializer is itself static
+ *   (followed transitively, cycle-guarded; `let`/`var` are rejected because
+ *   reassignment can change the value observed at the `.of()` site)
  *
  * Deliberately rejected: bigint literals. JSON Schema cannot carry a bigint
  * `default`, so under the schema-default contract a bigint initial has no
@@ -157,7 +160,7 @@ function evaluate(
       let name: string | undefined;
       let initializer: ts.Expression;
       if (ts.isPropertyAssignment(property)) {
-        name = staticPropertyName(property.name);
+        name = staticPropertyName(property.name, checker, visiting);
         initializer = property.initializer;
       } else if (ts.isShorthandPropertyAssignment(property)) {
         name = property.name.text;
@@ -184,8 +187,54 @@ function evaluate(
     return { ok: true, value };
   }
 
+  if (ts.isTemplateExpression(expr)) {
+    let text = expr.head.text;
+    for (const span of expr.templateSpans) {
+      const part = evaluate(span.expression, checker, visiting);
+      if (!part.ok) return part;
+      if (
+        typeof part.value !== "string" && typeof part.value !== "number" &&
+        typeof part.value !== "boolean"
+      ) {
+        return {
+          ok: false,
+          expression: span.expression,
+          reason:
+            "template substitutions must be static strings, numbers, or booleans",
+        };
+      }
+      text += String(part.value) + span.literal.text;
+    }
+    return { ok: true, value: text };
+  }
+
   if (ts.isIdentifier(expr)) {
     return evaluateIdentifier(expr, checker, visiting);
+  }
+
+  // Static member access: `CONFIG.max`, `MEANING_PROMPTS[0].id` — the base
+  // must itself be compile-time static, and the key a name or static
+  // string/number. A key missing from the static value is rejected rather
+  // than treated as `undefined`: the spelling almost certainly doesn't mean
+  // "no default".
+  if (ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.name)) {
+    const base = evaluate(expr.expression, checker, visiting);
+    if (!base.ok) return base;
+    return staticMember(expr, base.value, expr.name.text);
+  }
+  if (ts.isElementAccessExpression(expr)) {
+    const base = evaluate(expr.expression, checker, visiting);
+    if (!base.ok) return base;
+    const key = evaluate(expr.argumentExpression, checker, visiting);
+    if (!key.ok) return key;
+    if (typeof key.value !== "string" && typeof key.value !== "number") {
+      return {
+        ok: false,
+        expression: expr.argumentExpression,
+        reason: "element access keys must be static strings or numbers",
+      };
+    }
+    return staticMember(expr, base.value, String(key.value));
   }
 
   return {
@@ -193,6 +242,26 @@ function evaluate(
     expression: expr,
     reason: describeNonStatic(expr),
   };
+}
+
+function staticMember(
+  expr: ts.Expression,
+  base: StaticInitialValue,
+  key: string,
+): StaticInitialResult {
+  const container = base as Record<string, StaticInitialValue> | null;
+  const value =
+    container !== null && (typeof base === "object") && key in container
+      ? container[key]
+      : undefined;
+  if (value === undefined) {
+    return {
+      ok: false,
+      expression: expr,
+      reason: `\`${key}\` is not present on the static value`,
+    };
+  }
+  return { ok: true, value };
 }
 
 /**
@@ -221,7 +290,13 @@ function evaluateIdentifier(
   checker: ts.TypeChecker,
   visiting: Set<ts.Declaration>,
 ): StaticInitialResult {
-  const symbol = checker.getSymbolAtLocation(identifier);
+  let symbol = checker.getSymbolAtLocation(identifier);
+  // Follow import aliases so a `const` exported from another module in the
+  // same program (`import { DEFAULT_SPOTS } from ...`) evaluates like a
+  // local one.
+  if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+    symbol = checker.getAliasedSymbol(symbol);
+  }
   const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
   if (declaration === undefined) {
     return {
@@ -254,6 +329,18 @@ function evaluateIdentifier(
     };
   }
   if (declaration.initializer === undefined) {
+    // Ambient consts (`export declare const NAME: "$NAME"`) carry their value
+    // in the declared literal TYPE.
+    const type = checker.getTypeAtLocation(declaration);
+    if (type.isStringLiteral()) return { ok: true, value: type.value };
+    if (type.isNumberLiteral()) return { ok: true, value: type.value };
+    if (type.flags & ts.TypeFlags.BooleanLiteral) {
+      return {
+        ok: true,
+        value: (type as ts.Type & { intrinsicName?: string })
+          .intrinsicName === "true",
+      };
+    }
     return {
       ok: false,
       expression: identifier,
@@ -333,12 +420,27 @@ function foldBinaryExpression(
   return { ok: true, value: folded };
 }
 
-function staticPropertyName(name: ts.PropertyName): string | undefined {
+function staticPropertyName(
+  name: ts.PropertyName,
+  checker: ts.TypeChecker,
+  visiting: Set<ts.Declaration>,
+): string | undefined {
   if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) {
     return name.text;
   }
   if (ts.isNumericLiteral(name)) {
     return name.text;
+  }
+  // A computed key is fine when the key expression itself is static
+  // (`{ [MENTION_KEY]: ... }`).
+  if (ts.isComputedPropertyName(name)) {
+    const key = evaluate(name.expression, checker, visiting);
+    if (
+      key.ok &&
+      (typeof key.value === "string" || typeof key.value === "number")
+    ) {
+      return String(key.value);
+    }
   }
   return undefined;
 }

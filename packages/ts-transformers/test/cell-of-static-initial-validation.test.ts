@@ -15,7 +15,7 @@ function getStaticInitialErrors(
 
 async function staticInitialErrorsFor(body: string) {
   const source = `
-    import { Cell, cell, pattern, safeDateNow, Writable } from "commonfabric";
+    import { Cell, cell, NAME, pattern, safeDateNow, Writable } from "commonfabric";
     export default pattern(() => {
       ${body}
       return <div />;
@@ -49,6 +49,25 @@ Deno.test("cell-factory static initial validation", async (t) => {
       const b = Cell.of(CONFIG);
     `);
     assertEquals(errors.length, 0);
+  });
+
+  await t.step("accepts static member and element access", async () => {
+    const errors = await staticInitialErrorsFor(`
+      const PROMPTS = [{ id: "p1", label: "One" }, { id: "p2", label: "Two" }];
+      const CONFIG = { retries: 3, labels: ["a", "b"] };
+      const a = Cell.of(PROMPTS[0].id);
+      const b = Cell.of(CONFIG.retries);
+      const c = Cell.of(CONFIG.labels[1]);
+    `);
+    assertEquals(errors.length, 0);
+  });
+
+  await t.step("rejects member access onto runtime values", async () => {
+    const errors = await staticInitialErrorsFor(`
+      const arr = [safeDateNow()];
+      const a = Cell.of(arr[0]);
+    `);
+    assertEquals(errors.length, 1);
   });
 
   await t.step("constant-folds arithmetic and string concat", async () => {
@@ -109,15 +128,28 @@ Deno.test("cell-factory static initial validation", async (t) => {
     assertStringIncludes(errors[0].message, "finite");
   });
 
-  await t.step("rejects spreads and computed keys", async () => {
+  await t.step("rejects spreads and runtime computed keys", async () => {
     const errors = await staticInitialErrorsFor(`
       const base = { a: 1 };
-      const key = "k";
       const a = cell({ ...base });
-      const b = cell({ [key]: 1 });
+      const b = cell({ [String(safeDateNow())]: 1 });
     `);
     assertEquals(errors.length, 2);
   });
+
+  await t.step(
+    "accepts static computed keys and template substitutions",
+    async () => {
+      const errors = await staticInitialErrorsFor(`
+        const KEY = "k";
+        const NAME = "poll";
+        const a = cell({ [KEY]: 1 });
+        const b = cell(\`item-\${KEY}-\${1 + 2}\`);
+        const c = cell({ [NAME]: "display" });
+      `);
+      assertEquals(errors.length, 0);
+    },
+  );
 
   await t.step(
     "names the scoped constructor chain in the message",
