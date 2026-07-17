@@ -430,6 +430,117 @@ Deno.test("an inbound resolved scope key on a doc-set address is a protocol erro
   }
 });
 
+// --- FW3 (Fable review FB24): member registration must be atomic with watch
+// installation. A watchAdd whose docs list fails scope resolution mid-way
+// (user-scoped address on a principal-less session) must leave NO trace: no
+// installed watch, no registered members — so a corrected retry with the same
+// watch id succeeds instead of being rejected as a same-id respec (or, worse,
+// vacuously succeeding against a half-installed watch that delivers nothing).
+
+Deno.test("watchAdd atomicity: a failed docs registration leaves no trace and a corrected same-id retry succeeds (FB24)", async () => {
+  const space = "did:key:z6Mk-docset-atomic";
+  const server = createServer("memory-v2-docset-atomic");
+  const writerClient = await connectClient(server);
+  const watcherClient = await connectClient(server);
+  try {
+    const writer = await mountAs(writerClient, space, SPONSOR);
+    // A principal-less session (authorizeSessionOpen returning undefined is a
+    // supported configuration): a user-scoped member address cannot resolve a
+    // scope key for it, so registration throws after of:x already staged.
+    const watcher = await watcherClient.mount(
+      space,
+      {},
+      (_space, _session, context) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: {},
+      }),
+    );
+
+    let failed: unknown;
+    try {
+      await watcher.watchAdd([
+        docsWatch("a", [{ id: "of:x" }, { id: "of:u", scope: "user" }]),
+      ]);
+    } catch (error) {
+      failed = error;
+    }
+    assertExists(
+      failed,
+      "a user-scoped member on a principal-less session must fail",
+    );
+
+    await setDoc(writer, 1, "of:x", "X1");
+    // No trace: the failed request registered nothing, so a resume finds no
+    // watch surface and no member owing a delta. (Before the fix the watch
+    // was installed and of:x registered, so this resume delivered X1.)
+    const resumed = await server.syncSessionForConnection(
+      space,
+      watcher.sessionId,
+    );
+    assertEquals(
+      resumed,
+      null,
+      "a failed registration must not leave members that deliver",
+    );
+
+    // A corrected retry with the SAME watch id succeeds (before the fix it
+    // was rejected as a same-id respec of the half-installed watch).
+    const view = await watcher.watchAdd([docsWatch("a", [{ id: "of:x" }])]);
+    assertEquals(view.entities.map(idDoc), [
+      { id: "of:x", document: { value: "X1" } },
+    ]);
+
+    // ... and the corrected watch delivers.
+    const next = view.subscribe().next();
+    await setDoc(writer, 2, "of:x", "X2");
+    await next;
+    assertEquals(view.entities.map(idDoc), [
+      { id: "of:x", document: { value: "X2" } },
+    ]);
+  } finally {
+    await writerClient.close();
+    await watcherClient.close();
+    await server.close();
+  }
+});
+
+// --- FW3 (Fable review FB23): the FA8 member-set-size gauge must be live.
+// docSetMembersTracked is exported end-to-end (/api/health/stats reads
+// feedStats verbatim), so a permanently-zero value hides exactly the
+// stale-membership growth the gauge exists to catch.
+
+Deno.test("the docSetMembersTracked gauge tracks live membership across sessions and shrinks with it (FB23)", async () => {
+  const space = "did:key:z6Mk-docset-gauge";
+  const server = createServer("memory-v2-docset-gauge");
+  const aClient = await connectClient(server);
+  const bClient = await connectClient(server);
+  try {
+    const a = await mountAs(aClient, space, SPONSOR);
+    const b = await mountAs(bClient, space, SPONSOR);
+
+    await a.watchSet([docsWatch("a", [{ id: "of:x" }, { id: "of:y" }])]);
+    // Member-set size summed ACROSS sessions: the same doc in two sessions
+    // counts once per session (each session point-reads it independently).
+    await b.watchSet([docsWatch("b", [{ id: "of:y" }])]);
+    assertEquals(server.feedStats.docSetMembersTracked, 3);
+
+    // A same-id shrink drops the gauge with the membership (FA8/FB6).
+    await a.watchSetSync([docsWatch("a", [{ id: "of:x" }])]);
+    assertEquals(server.feedStats.docSetMembersTracked, 2);
+
+    // Replacing a session's watch set with nothing empties its contribution.
+    await b.watchSetSync([]);
+    assertEquals(server.feedStats.docSetMembersTracked, 1);
+  } finally {
+    await aClient.close();
+    await bClient.close();
+    await server.close();
+  }
+});
+
 // --- FW1 (Fable review FB1): the F4b demotion against the REAL server. A doc
 // that moves from graph tracking to doc-set membership must survive the
 // demoting watch.set — delivered once, in one frame, under one watermark
@@ -437,6 +548,119 @@ Deno.test("an inbound resolved scope key on a doc-set address is a protocol erro
 // removed. Before the FW1 fix the demoting frame carried removes for the
 // entire previously graph-tracked closure and the client evicted every held
 // doc (the pull → demote → evict livelock).
+
+// --- FW3 (Fable review FB6): FA8 shrink for a same-id `watch.set`
+// replacement. The protocol directs same-id respec to session.watch.set, so a
+// narrowed docs list under a SURVIVING watch id must drop its member
+// contribution: members absent from the new docs list lose that watch's
+// source, and a member whose last source drops is evicted — while a surviving
+// member keeps its lastSentSeq (FA15: replacement is never a reseed).
+
+Deno.test("FA8 shrink: a narrowed same-id watch.set stops delivering dropped members; survivors keep lastSentSeq (FB6)", async () => {
+  const space = "did:key:z6Mk-docset-shrink";
+  const server = createServer("memory-v2-docset-shrink");
+  const writerClient = await connectClient(server);
+  const agedClient = await connectClient(server);
+  const freshClient = await connectClient(server);
+  const canaryClient = await connectClient(server);
+  try {
+    const writer = await mountAs(writerClient, space, SPONSOR);
+    const aged = await mountAs(agedClient, space, SPONSOR);
+
+    // The aged session watches both docs under ONE watch id.
+    const agedView = await aged.watchSet([
+      docsWatch("a", [{ id: "of:x" }, { id: "of:y" }]),
+    ]);
+    const agedFirst = agedView.subscribe().next();
+    await writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [
+        { op: "set", id: "of:x", value: { value: "X1" } },
+        { op: "set", id: "of:y", value: { value: "Y1" } },
+      ],
+    });
+    await agedFirst;
+    assertEquals(
+      agedView.entities.map(idDoc).toSorted((l, r) => l.id.localeCompare(r.id)),
+      [
+        { id: "of:x", document: { value: "X1" } },
+        { id: "of:y", document: { value: "Y1" } },
+      ],
+    );
+
+    // Same-id narrowing replacement — the exact shape the watchAdd same-id
+    // error directs clients to ("use session.watch.set").
+    const shrunk = await aged.watchSetSync([docsWatch("a", [{ id: "of:x" }])]);
+    // FA15: the surviving member is NOT re-seeded — its lastSentSeq survived
+    // the replace, so the registration frame carries no fresh snapshot.
+    assertEquals(shrunk.sync.upserts, []);
+    // FA8: membership shrink never emits SessionSync.removes.
+    assertEquals(shrunk.sync.removes, []);
+
+    // Fresh twin — the FA8 acceptance comparator ("an aged session's member
+    // set equals a fresh session's for the same UI"): same watch set,
+    // registered from scratch.
+    const fresh = await mountAs(freshClient, space, SPONSOR);
+    const freshView = await fresh.watchSet([docsWatch("a", [{ id: "of:x" }])]);
+    assertEquals(freshView.entities.map(idDoc), [
+      { id: "of:x", document: { value: "X1" } },
+    ]);
+
+    // Canary session watches of:y. Its connection registered AFTER the aged
+    // session's, and wave fan-out walks connections in registration order,
+    // so its delivery is the barrier proving the aged session's connection
+    // was already served for the same wave.
+    const canary = await mountAs(canaryClient, space, SPONSOR);
+    const canaryView = await canary.watchSet([docsWatch("c", [{ id: "of:y" }])]);
+    const canaryNext = canaryView.subscribe().next();
+
+    const deliveriesBefore = server.feedStats.docSetMemberDeliveries;
+    await setDoc(writer, 2, "of:y", "Y2");
+    await canaryNext;
+    // The dropped member produced NO delivery to the aged session: of:y is
+    // gone from its member set. (The client keeps the last value Y1 — F4
+    // owns client-side eviction; the server just stops delivering.)
+    assertEquals(
+      agedView.entities.map(idDoc).toSorted((l, r) => l.id.localeCompare(r.id)),
+      [
+        { id: "of:x", document: { value: "X1" } },
+        { id: "of:y", document: { value: "Y1" } },
+      ],
+    );
+    // Exactly one member delivery crossed the wire for this wave: the
+    // canary's. Before the fix the aged session also received Y2 (+2).
+    assertEquals(server.feedStats.docSetMemberDeliveries, deliveriesBefore + 1);
+
+    // The surviving member still delivers to BOTH the aged session and its
+    // fresh twin — identical deltas (the behavioral aged==fresh acceptance).
+    const agedNext = agedView.subscribe().next();
+    const freshNext = freshView.subscribe().next();
+    await setDoc(writer, 3, "of:x", "X2");
+    await agedNext;
+    await freshNext;
+    assertEquals(
+      agedView.entities.map(idDoc).toSorted((l, r) => l.id.localeCompare(r.id)),
+      [
+        { id: "of:x", document: { value: "X2" } },
+        { id: "of:y", document: { value: "Y1" } },
+      ],
+    );
+    assertEquals(freshView.entities.map(idDoc), [
+      { id: "of:x", document: { value: "X2" } },
+    ]);
+    // FA8 aged==fresh acceptance, structural form: with the member gauge live
+    // (FB23), the server tracks exactly aged{of:x} + fresh{of:x} +
+    // canary{of:y} — the aged session's member set equals its fresh twin's.
+    assertEquals(server.feedStats.docSetMembersTracked, 3);
+  } finally {
+    await writerClient.close();
+    await agedClient.close();
+    await freshClient.close();
+    await canaryClient.close();
+    await server.close();
+  }
+});
 
 Deno.test("F4b demotion: graph-tracked docs that become members survive the demoting watch.set; docs leaving the surface are removed (FB1)", async () => {
   const space = "did:key:z6Mk-docset-demote";

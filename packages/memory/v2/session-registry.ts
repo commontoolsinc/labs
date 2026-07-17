@@ -28,6 +28,12 @@ export type SessionState = {
    * Distinct from `entities` (graph-tracked): the per-wave fan-out point-reads
    * these members and `trackedIds` is the UNION of both surfaces (FA14). */
   docSetMembers: Map<string, DocSetMember>;
+  /** FB15/FA1: member keys whose point read was skipped by the stale-binding
+   * fail-open. The wave that skipped them still advanced the watermark, so
+   * they are re-staged dirty on the NEXT wave (and cleared once a read
+   * completes) — otherwise the skipped delta would be silently lost until an
+   * unrelated write to the same doc or a resume. */
+  docSetMemberRetryKeys: Set<string>;
   trackedIds: Set<string>;
   caughtUpLocalSeq: number;
   pendingCaughtUpLocalSeq: number;
@@ -182,6 +188,7 @@ export class SessionRegistry {
       // FA15: doc-set membership survives reconnect so resumed catch-up diffs
       // incrementally against per-member lastSentSeq rather than reseeding.
       docSetMembers: existing?.docSetMembers ?? new Map(),
+      docSetMemberRetryKeys: existing?.docSetMemberRetryKeys ?? new Set(),
       trackedIds: existing?.trackedIds ??
         trackedIdsFromEntries(existing?.entities?.values() ?? []),
       caughtUpLocalSeq: existing?.caughtUpLocalSeq ?? 0,
@@ -233,6 +240,18 @@ export class SessionRegistry {
       }
     }
     return false;
+  }
+
+  /** FA8 gauge input (FB23): live doc-set member entries summed across every
+   * session — the value /api/health/stats exports as docSetMembersTracked.
+   * Prunes first so an expired session's members stop counting. */
+  totalDocSetMembers(): number {
+    this.#prune();
+    let total = 0;
+    for (const session of this.#sessions.values()) {
+      total += session.docSetMembers.size;
+    }
+    return total;
   }
 
   sessionsForSpace(space: string): SessionState[] {

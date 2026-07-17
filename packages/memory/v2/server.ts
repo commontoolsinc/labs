@@ -18,6 +18,7 @@ import {
   type DocsReadResult,
   encodeMemoryBoundary,
   type EntityDocument,
+  type EntityId,
   type EntitySnapshot,
   type ExecutionClaim,
   executionClaimIncarnationKey,
@@ -189,6 +190,23 @@ const declaredScope = (scope: CellScope | undefined): CellScope =>
   scope ?? "space";
 
 // --- F3 doc-set membership module helpers ---
+
+/** Source-id namespace for watch-sourced membership. The FA8 replace-semantics
+ * sweep (FB6) re-justifies exactly this namespace against a new watch set;
+ * future non-watch sources (served observations) are untouched by it. */
+const DOC_SET_WATCH_SOURCE_PREFIX = "watch:";
+
+/** One resolved doc-set member registration, staged before any session
+ * mutation (FB24): scope resolution can throw, so it runs to completion
+ * BEFORE the watch or any member is installed. */
+type StagedDocSetMember = {
+  source: string;
+  branch: BranchName;
+  id: EntityId;
+  scope: CellScope;
+  scopeKey: string;
+  key: string;
+};
 
 /** Resolve a set of membership keys to their live member records. */
 const seedMembers = (
@@ -6411,23 +6429,18 @@ export class Server {
         serverSeq,
       );
       // F3 doc-set membership (replace semantics): register the new watches'
-      // members, then drop the sources of docs watches the new set no longer
-      // carries. Registering first preserves each surviving member's
+      // members, then re-justify EVERY watch-sourced contribution against the
+      // NEW set (FA8/FB6) — a surviving watch id whose docs list narrowed
+      // drops its source from members it no longer names, and a dropped watch
+      // id keeps nothing. Registering first preserves each surviving member's
       // lastSentSeq (FA15) — a re-registration is not a reseed.
-      const newDocSources = new Set(
-        gate.docsWatches.map((watch) => Server.#docSetWatchSource(watch.id)),
-      );
-      const { memberKeys } = this.#registerDocSetMembers(
+      const { memberKeys, retainedPairs } = this.#registerDocSetMembers(
         session,
         gate.docsWatches,
         scopeResolution.ok,
       );
-      // session.watches still holds the OLD set here (reassigned below).
-      const droppedSources = session.watches
-        .filter(isDocSetWatchSpec)
-        .map((watch) => Server.#docSetWatchSource(watch.id))
-        .filter((source) => !newDocSources.has(source));
-      this.#removeDocSetSources(session, droppedSources);
+      this.#reconcileDocSetWatchSources(session, retainedPairs);
+      this.#updateDocSetMembersGauge();
       // FW1 (FB1): consulted AFTER registration and source drops, so the
       // demoting frame keeps its members and genuinely dropped docs still
       // remove.
@@ -6581,6 +6594,17 @@ export class Server {
       }
 
       const nextWatches = mergeWatchesById(session.watches, newWatches);
+      // FB24: resolve every new docs watch's member addresses BEFORE any
+      // session mutation. Scope resolution can throw (user/session-scoped
+      // address on a principal-less session), and a throw after the watch is
+      // installed would strand a docs watch that delivers nothing while
+      // rejecting the client's corrected retry as a same-id respec. Staging
+      // first makes the failure leave no trace.
+      const newDocsWatches = newWatches.filter(isDocSetWatchSpec);
+      const stagedMembers = Server.#stageDocSetMembers(
+        newDocsWatches,
+        scopeResolution.ok,
+      );
       const graphs = new Map(session.graphs);
 
       const updates = new Map<string, SessionCacheEntry>();
@@ -6667,13 +6691,13 @@ export class Server {
         ),
         removes: [],
       };
-      const newDocsWatches = newWatches.filter(isDocSetWatchSpec);
       if (newDocsWatches.length > 0) {
-        const { memberKeys } = this.#registerDocSetMembers(
+        // Apply the pre-staged registration (FB24 phase 2 — cannot throw).
+        const { memberKeys } = Server.#applyDocSetMembers(
           session,
-          newDocsWatches,
-          scopeResolution.ok,
+          stagedMembers,
         );
+        this.#updateDocSetMembersGauge();
         for (const member of session.docSetMembers.values()) {
           session.trackedIds.add(Server.#docSetMemberTrackedKey(member));
         }
@@ -6800,7 +6824,7 @@ export class Server {
    * survives while ANY source still names it, so one watch's shrink cannot end
    * delivery another watch still holds. */
   static #docSetWatchSource(watchId: string): string {
-    return `watch:${watchId}`;
+    return `${DOC_SET_WATCH_SOURCE_PREFIX}${watchId}`;
   }
 
   /** F5/FA13: whether the per-space eligibility dial admits this space to
@@ -6869,14 +6893,29 @@ export class Server {
   /** FA2: resolve each declared member address to its RESOLVED scope key under
    * the registration scope context and fold it into `session.docSetMembers`
    * (refcounted by source). Returns the affected member keys so the caller can
-   * seed their initial snapshots. A resolved scope key on an inbound address is
-   * a protocol error — the wire carries declared scope only. */
+   * seed their initial snapshots, plus the retained `source\0key` pairs the
+   * replace-semantics sweep (FA8/FB6) re-justifies existing sources against.
+   * A resolved scope key on an inbound address is a protocol error — the wire
+   * carries declared scope only. */
   #registerDocSetMembers(
     session: SessionState,
     watches: readonly DocSetWatchSpec[],
     scopeContext: { principal?: string; sessionId?: string },
-  ): { memberKeys: Set<string> } {
-    const memberKeys = new Set<string>();
+  ): { memberKeys: Set<string>; retainedPairs: Set<string> } {
+    const staged = Server.#stageDocSetMembers(watches, scopeContext);
+    return Server.#applyDocSetMembers(session, staged);
+  }
+
+  /** FB24 phase 1 — resolve WITHOUT mutating: every address of every docs
+   * watch is validated and scope-resolved up front, so a ProtocolError (raw
+   * scope key on the wire, scoped address on a principal-less session) is
+   * thrown BEFORE any watch or member is installed. A failed request leaves
+   * no trace and a corrected same-id retry is not vacuously filtered. */
+  static #stageDocSetMembers(
+    watches: readonly DocSetWatchSpec[],
+    scopeContext: { principal?: string; sessionId?: string },
+  ): StagedDocSetMember[] {
+    const staged: StagedDocSetMember[] = [];
     for (const watch of watches) {
       const source = Server.#docSetWatchSource(watch.id);
       const branch = watch.branch ?? "";
@@ -6892,42 +6931,83 @@ export class Server {
           sessionId: scopeContext.sessionId,
         });
         const scope = declaredScope(address.scope);
-        const key = docSetMemberKey(branch, address.id, scopeKey);
-        const existing = session.docSetMembers.get(key);
-        if (existing === undefined) {
-          session.docSetMembers.set(key, {
-            branch,
-            id: address.id,
-            scope,
-            scopeKey,
-            lastSentSeq: 0,
-            sources: new Set([source]),
-          });
-        } else {
-          existing.sources.add(source);
-        }
-        memberKeys.add(key);
+        staged.push({
+          source,
+          branch,
+          id: address.id,
+          scope,
+          scopeKey,
+          key: docSetMemberKey(branch, address.id, scopeKey),
+        });
       }
     }
-    return { memberKeys };
+    return staged;
   }
 
-  /** FA8 refcounted shrink: drop the named sources from every member and evict
-   * members left with no source. Never emits a SessionSync.remove — a document
-   * deletion stays a deleted-upsert; membership shrink is silent server-side
-   * bookkeeping (the client keeps the last value until F4's replica eviction). */
-  #removeDocSetSources(
+  /** FB24 phase 2 — apply a fully staged registration. Cannot throw, so the
+   * callers may run it after `session.watches` is reassigned without risking
+   * a half-installed watch. */
+  static #applyDocSetMembers(
     session: SessionState,
-    sourceIds: Iterable<string>,
+    staged: readonly StagedDocSetMember[],
+  ): { memberKeys: Set<string>; retainedPairs: Set<string> } {
+    const memberKeys = new Set<string>();
+    const retainedPairs = new Set<string>();
+    for (const entry of staged) {
+      const existing = session.docSetMembers.get(entry.key);
+      if (existing === undefined) {
+        session.docSetMembers.set(entry.key, {
+          branch: entry.branch,
+          id: entry.id,
+          scope: entry.scope,
+          scopeKey: entry.scopeKey,
+          lastSentSeq: 0,
+          sources: new Set([entry.source]),
+        });
+      } else {
+        existing.sources.add(entry.source);
+      }
+      memberKeys.add(entry.key);
+      retainedPairs.add(`${entry.source}\0${entry.key}`);
+    }
+    return { memberKeys, retainedPairs };
+  }
+
+  /** FA8/FB6 replace-semantics shrink: `session.watch.set` replaces the WHOLE
+   * watch set, so every watch-sourced member contribution must be re-justified
+   * against the new set — per (source, member) pair, not per watch id. A
+   * surviving watch id that narrowed its docs list drops its source from the
+   * members it no longer names; a watch id absent from the new set keeps
+   * nothing. Members left with no source are evicted. Never emits a
+   * SessionSync.remove — a document deletion stays a deleted-upsert;
+   * membership shrink is silent server-side bookkeeping (the client keeps the
+   * last value until F4's replica eviction). */
+  #reconcileDocSetWatchSources(
+    session: SessionState,
+    retainedPairs: ReadonlySet<string>,
   ): void {
-    const drop = new Set(sourceIds);
-    if (drop.size === 0) return;
     for (const [key, member] of session.docSetMembers) {
-      for (const source of drop) member.sources.delete(source);
+      for (const source of [...member.sources]) {
+        if (!source.startsWith(DOC_SET_WATCH_SOURCE_PREFIX)) continue;
+        if (!retainedPairs.has(`${source}\0${key}`)) {
+          member.sources.delete(source);
+        }
+      }
       if (member.sources.size === 0) {
         session.docSetMembers.delete(key);
+        // An evicted member owes nothing — drop any staged retry (FB15).
+        session.docSetMemberRetryKeys.delete(key);
       }
     }
+  }
+
+  /** FB23: recompute the FA8 member-set-size gauge (feedStats
+   * .docSetMembersTracked — exported verbatim via /api/health/stats). Called
+   * at every membership mutation (registration, replace-shrink) and on waves
+   * that point-read a doc-set surface, so the exported value tracks live
+   * membership instead of staying a dead 0. */
+  #updateDocSetMembersGauge(): void {
+    this.feedStats.docSetMembersTracked = this.#sessions.totalDocSetMembers();
   }
 
   /** The tracked-id key (declared-scope dirty key) for a member — the union
@@ -6960,18 +7040,32 @@ export class Server {
     members: Iterable<DocSetMember>,
     dirtyOrigins: ReadonlyMap<string, DirtyOrigin> | undefined,
   ): SessionCacheEntry[] {
+    const memberList = [...members];
     // A stale lease binding makes the read context unresolvable. Fail open
-    // (playbook item 12): skip member deltas this wave — members stay tracked
-    // and lastSentSeq unchanged, so the next wave retries — rather than
-    // aborting the whole session sync the way graph refresh never would.
+    // (playbook item 12): skip member deltas this wave rather than aborting
+    // the whole session sync the way graph refresh never would. The wave
+    // still advances the watermark past the skipped deltas (FA1), so every
+    // skipped member is RE-STAGED dirty for the next wave (FB15) — without
+    // this, a steady connected session would never see the delta again
+    // (#dirtyDocSetMembers only matches the wave that dirtied it).
     let readContext: { principal?: string; sessionId: string };
     try {
       readContext = this.#docSetReadContext(space, session);
     } catch {
+      for (const member of memberList) {
+        session.docSetMemberRetryKeys.add(
+          docSetMemberKey(member.branch, member.id, member.scopeKey),
+        );
+      }
       return [];
     }
     const upserts: SessionCacheEntry[] = [];
-    for (const member of members) {
+    for (const member of memberList) {
+      // The read context resolved: whatever this member owed is being read
+      // now, so any staged stale-binding retry is settled by this wave.
+      session.docSetMemberRetryKeys.delete(
+        docSetMemberKey(member.branch, member.id, member.scopeKey),
+      );
       const state = Engine.readState(engine, {
         id: member.id,
         scope: member.scope,
@@ -7036,14 +7130,19 @@ export class Server {
 
   /** Members whose declared-scope dirty key intersects this wave's dirty set —
    * the fan-out match (FA1: matched by branch/id/resolved scope key via the
-   * point read that follows). */
+   * point read that follows) — unioned with members owing a stale-binding
+   * retry (FB15: their delta was skipped under an already-advanced watermark,
+   * so the next wave must re-read them regardless of its own dirty set). */
   #dirtyDocSetMembers(
     session: SessionState,
     dirtyIds: ReadonlySet<string>,
   ): DocSetMember[] {
     const matched: DocSetMember[] = [];
-    for (const member of session.docSetMembers.values()) {
-      if (dirtyIds.has(Server.#docSetMemberTrackedKey(member))) {
+    for (const [key, member] of session.docSetMembers) {
+      if (
+        dirtyIds.has(Server.#docSetMemberTrackedKey(member)) ||
+        session.docSetMemberRetryKeys.has(key)
+      ) {
         matched.push(member);
       }
     }
@@ -7146,6 +7245,12 @@ export class Server {
                 touched = true;
                 break;
               }
+            }
+            // FB15: a member skipped on a stale binding re-touches the
+            // session on the next wave even when that wave's own dirty set
+            // misses it — the skipped delta's watermark already advanced.
+            if (!touched && session.docSetMemberRetryKeys.size > 0) {
+              touched = true;
             }
             span.setAttribute("ct.touched", touched);
             if (!touched) {
@@ -7272,6 +7377,9 @@ export class Server {
                 dirtyOrigins,
               );
               for (const entry of memberUpserts) upserts.push(entry);
+              // FB23: this wave touched a doc-set surface — refresh the FA8
+              // membership gauge against live demand.
+              this.#updateDocSetMembersGauge();
             }
             if (upserts.length === 0) {
               // The watched set was re-evaluated current as of toSeq even though it
