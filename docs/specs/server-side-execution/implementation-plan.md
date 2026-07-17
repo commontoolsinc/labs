@@ -1905,42 +1905,66 @@ resolves in favor of v1 (no v2 subcapability needed)**; the
 routing-disjointness invariant and the delivery flag-gate are already
 session-aware, and the executor lane maps are contextKey-generic. What is
 new is additive: widen the rank dial and issuance ladder to `session`,
-widen the servability/firewall/router lane rank (the same mechanism that
-meets the pre-existing lunch-poll/group-chat `ifElse`
-dynamic-write-outside-static-surface gap), session-lane grants (the
+widen the servability/firewall/router lane rank, session-lane grants (the
 session is its own anchor; session-end = lane-end, no re-anchor), and
 narrow session-claim delivery to the named session.
 
-**Adopted defaults for the scout's four open decisions** (precedent-
-following; owner may override — surfaced in the session summary):
-(1) claims-v1 is sufficient, no v2 — code-confirmed. (2) C2 is
-**computation-only** like C1 (amendment A8); session-lane builtin egress
-(OQ6, C2.8) is a **named follow-on**, not a C2 gate. (3) **No lane budget
-in C2** (OQ3) — parked session lanes are correct by construction (the
-client stays authoritative for unclaimed work); the LRU-park cap is a
-follow-on, revisited if C2.10's latency gate shows pressure. (4) The
-≥3-lane latency gate reuses **W2.9's ~zero/parity bar**; the Worker
-topology stays one-Worker-per-(space, branch) (A22) and **C2.10's
-measurement is the input** to any Worker-per-lane-group redesign (OQ5) —
-measure before redesigning.
+**The adversarial panel (2026-07-17; verdicts archived in
+[the review record](../../history/development/design/c2-adversarial-review-2026-07-17.md),
+amendments CA1–CA14 binding) corrected the scout in load-bearing ways —
+read them before building:**
 
-Full scout map (with each WO's sketch/acceptance) is the builders'
-reference; this table is the frontier. The map goes through the same
-adversarial-panel treatment as C1 and the feed before the build waves.
+- **CA6 (correction to this decomposition's own text):** C2.2 does **NOT**
+  "meet the `ifElse` gap." The red lunch-poll/group-chat product-fixtures
+  failure is a **rank-independent, space-scoped** map/ifElse write-surface
+  defect — `ifElse`'s W2.15 "single-output selector" descriptor is wrong
+  for that shape, and the map materializer envelope (W2.16) is the other
+  half. The real owner is **re-opened W2.15/W2.16**, not session-rank
+  widening. C2.9/C2.10 gain a hard dependency on that write-surface
+  completeness (CA10).
+- **CA4 (correction to adopted default #1):** claims-**v1 routing** is
+  still sufficient, but the session-claim over-broadcast
+  (`#sessionAcceptsClaim` delivers a `session:alice:A` claim to alice's
+  session B) is **quadratic client compute** — sibling sessions fail-open
+  and re-run — not benign "wasted delivery." **C2.6 is load-bearing for
+  the project's core redundancy-elimination value, not optional.**
+- **CA11 (correction to adopted default #4):** reusing W2.9's parity bar
+  alone is structurally blind to the hundreds-of-lanes regime. Split
+  C2.10: keep the parity/correctness bar AND add a **separate latency
+  acceptance with an owner-set ms budget** — this is a genuine owner
+  decision, not a default (open in the session summary).
+- **Five unowned/miscited seams promoted to blockers** (the scout said the
+  engine guards "auto-pass" — they do not): session issuance-binding
+  (`server.ts` `#requiredLaneGrantForClaim` hard-returns null for session),
+  admission, and commit-lane fence are all user-hardcoded → **CA1**;
+  `scope-naming-link.ts` hardcodes `scope:"user"` and is uncited → **CA2**;
+  `laneScopeKey` has no broader-in-chain collapse so a session lane reading
+  a user input phantom-mis-keys it → **CA3**; push-side confidentiality of
+  server-authored session writes is unowned and the plan↔scout contradict
+  on the F6 dependency → **CA5**.
+- Serious: session commit-fence WRITE re-check fails open (CA7); C2.4 must
+  use the **grant's** session id, not `base.sessionId`, or two Alice
+  sessions cross-read (CA8); C2.5 needs a real session identity source,
+  never a DID fabrication (CA9); canonical session-key validation (CA12).
+
+**Standing adopted defaults (2 and 3 survive the panel):** C2 is
+computation-only like C1 (A8; session-lane builtin egress OQ6/C2.8 is a
+named follow-on); no lane budget in C2 (OQ3; parked lanes are correct by
+construction). Defaults 1 and 4 are amended above.
 
 | WO | Title | Depends on |
 | --- | --- | --- |
-| C2.1 | Engine + dial admit session-rank claims (widen the ladder; `session:did:sessionId` stops being rejected) | — |
-| C2.2 | Servability + firewall: session-lane surface classification and the §4 pair at session rank (meets the `ifElse` gap) | C2.1 |
-| C2.3 | Session lane grants — the session is its own anchor; session-end = lane-end, no re-anchor | C2.1 |
-| C2.4 | Session-lane acting-context read seam + host-provider resolution | C2.3 |
-| C2.5 | Session-rank executor candidate identity + router widening | C2.2, C2.4 |
-| C2.6 | Narrow session-claim delivery to the named session (kill the O(sessions²) fan-out) + per-session negotiation gate | C2.1, C2.3 |
-| C2.7 | Session-lane demand aggregation, lifecycle, accepted-commit wake widening (parked-lane skip) | C2.3, C2.5, C2.6 |
+| C2.1 | Engine + dial admit session-rank claims (ladder + **issuance-binding + admission + commit-lane**, CA1; canonical key validation, CA12) | — |
+| C2.2 | Servability + firewall: session-lane surface classification and the §4 pair at session rank (**owns `scope-naming-link.ts` session parameterization, CA2**; does NOT meet the ifElse gap — CA6) | C2.1 |
+| C2.3 | Session lane grants — the session is its own anchor; session-end = lane-end; **issuance-binding path, CA1** | C2.1 |
+| C2.4 | Session-lane acting-context read seam — **substitutes the grant's session id, not base.sessionId (CA8)** | C2.3 |
+| C2.5 | Session-rank executor candidate identity + router widening; **real session identity source, no DID fabrication (CA9); laneScopeKey broader-in-chain collapse, CA3** | C2.2, C2.4 |
+| C2.6 | **Load-bearing (CA4):** narrow session-claim delivery to the named session — kills the quadratic sibling-session rerun, not just fan-out | C2.1, C2.3 |
+| C2.7 | Session-lane demand aggregation, lifecycle, wake widening; **session lane-write-authority fence re-check (CA7)**; parked-skip is emergent (CA13) | C2.3, C2.5, C2.6 |
 | C2.8 | Session-lane builtin egress under the lane grant (OQ6) — computation-gated, **owner-timed follow-on** | C2.4, C2.5 |
-| C2.9 | PerSession measurement gate + fixture (design §7 C2 acceptance) | C2.4–C2.7 |
-| C2.10 | Lunch-poll placement guard: R7 retirement (claim-context-mismatch → hard-zero) + ≥3-lane latency gate | C2.9 |
-| C2.11 | Owed session-lane fixtures + EXPERIMENTAL_OPTIONS/docs edits | C2.3, C2.6, C2.9 |
+| C2.9 | PerSession measurement gate + fixture; **push-side confidentiality fixture (CA5); depends on W2.15/W2.16 write-surface completeness (CA10)** | C2.4–C2.7, W2.15/W2.16 re-work |
+| C2.10 | Lunch-poll placement guard: R7 retirement + **split gate — parity bar AND an owner-set latency budget (CA11)** | C2.9 |
+| C2.11 | Owed session-lane fixtures (incl. the session lane-write TOCTOU backstop, CA7) + EXPERIMENTAL_OPTIONS/docs | C2.3, C2.6, C2.9 |
 
 Prerequisite: the feed's session-scoped delivery (F6) lands before C2.6/C2.9
 (design §6). F1–F4 are landed; F5's retirement mechanism is landed behind the
