@@ -486,7 +486,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
   extraEntries(): IterableIterator<[string, FabricValue]>;
 
   // ([DEEP_FREEZE] / [IS_DEEP_FROZEN] freeze `this` and recurse into
-  // `cause` + the extras-bag values; `shallowUnfrozenClone()` copies the
+  // `cause` + the extras-bag values; `[SHALLOW_UNFROZEN_CLONE]()` copies the
   // slots + bag; `wrappedValue` / `toNativeFrozen()` / `toNativeThawed()`
   // build the native `Error` projection on demand. `deepClone(frozen)`
   // round-trips through the codec: `codec.decode(tag,
@@ -602,7 +602,7 @@ export class FabricMap
   }
 
   // ([DEEP_FREEZE] / [IS_DEEP_FROZEN] freeze `this` and recurse into the
-  // entries; `shallowUnfrozenClone()` copies `map` into a new wrapper;
+  // entries; `[SHALLOW_UNFROZEN_CLONE]()` copies `map` into a new wrapper;
   // `wrappedValue` / `toNativeFrozen()` (-> `FrozenMap`) /
   // `toNativeThawed()` are the native-projection members.)
 
@@ -952,17 +952,18 @@ export class FabricHash extends FabricPrimitive {
 
   /**
    * Parse an instance from its string representation
-   * (`<tag>:<base64urlHash>`). Splits at the LAST colon: the hash segment
-   * is base64url and never contains one, while the tag segment may in
-   * principle. Entity KINDS do not ride the tag — they ride a URI scheme
-   * OUTSIDE the tagged-hash string (`computed:fid1:<hash>`), so a kinded
-   * id's hash portion parses here as a plain `fid1` hash. Callers must
-   * strip the URI scheme before parsing; the scheme is part of the entity's
-   * identity and must be carried alongside, never inferred back from the
-   * bare hash.
+   * (`<tag>:<base64urlHash>`). Splits at the FIRST colon: the tag segment is
+   * a colon-free identifier (e.g. `fid1`) and the hash segment is base64url
+   * (which never contains a colon), so the first colon is the tag/hash
+   * boundary. Entity URI schemes (`of:`, `computed:`) are NOT part of this
+   * string — a caller must strip the scheme before parsing and carry it
+   * alongside, since the scheme is part of the entity's identity. An input
+   * that still carries a scheme leaves a colon in what would be the hash
+   * segment, which is not valid base64url, so parsing fails loudly rather
+   * than silently mis-splitting.
    */
   static fromString(source: string): FabricHash {
-    const colonIndex = source.lastIndexOf(":");
+    const colonIndex = source.indexOf(":");
     if (colonIndex === -1) {
       throw new ReferenceError(`Invalid content hash string: ${source}`);
     }
@@ -982,7 +983,7 @@ The hash bytes are private (`#hash`). The public API provides:
 - `.copyInto(target)` — copies hash bytes into a caller-provided buffer.
 - `.toString()` — `<tag>:<base64urlHash>`.
 - `FabricHash.fromString(s)` — parse from `<tag>:<base64urlHash>` (splits at
-  the last colon; entity URI schemes like `of:`/`computed:` are NOT part of
+  the first colon; entity URI schemes like `of:`/`computed:` are NOT part of
   this string and must be stripped — and preserved — by the caller).
 
 The `tag` field (formerly `algorithmTag`) is an opaque string identifier.
@@ -1251,7 +1252,9 @@ discussion in Section 2.4).
 ### 2.2 Symbols
 
 The serialization symbol lives with the codec vocabulary; the in-process
-lifecycle symbols live in the dependency-free `interface.ts`.
+lifecycle symbols live on the implementation base class `BaseFabricInstance`
+(Section 2.3), kept off the pure-protocol `FabricInstance` interface as
+implementation plumbing.
 
 ```typescript
 // file: packages/data-model/codec-common/interface.ts
@@ -1265,7 +1268,7 @@ export const CODEC: unique symbol = Symbol.for('data-model.codec');
 ```
 
 ```typescript
-// file: packages/data-model/interface.ts
+// file: packages/data-model/fabric-instances/BaseFabricInstance.ts
 
 /**
  * Well-known symbol for deeply freezing a fabric instance in place. The
@@ -1284,6 +1287,17 @@ export const DEEP_FREEZE = Symbol.for('data-model.deepFreeze');
  * See Section 8.6.
  */
 export const IS_DEEP_FROZEN = Symbol.for('data-model.isDeepFrozen');
+
+/**
+ * Well-known symbol for the **internal** shallow-clone hook: a `protected`
+ * template-method member that returns a new unfrozen copy of a fabric
+ * instance. Unlike `[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`, which the generic
+ * freeze utility invokes externally, this member is not part of the external
+ * protocol surface — concrete subclasses implement it, and the
+ * `shallowClone()` template method on `BaseFabricInstance` is its only caller
+ * (Section 2.3).
+ */
+export const SHALLOW_UNFROZEN_CLONE = Symbol.for('data-model.shallowUnfrozenClone');
 
 // Protocol evolution: Symbol.for('data-model.codec@2'), etc.
 ```
@@ -1324,7 +1338,7 @@ class-side `[CODEC]` (Section 2.4).
  *   frozenness.
  * - `shallowClone(frozen)` -- returns a shallow clone with the requested
  *   frozenness. Concrete subclasses normally inherit this from
- *   `BaseFabricInstance` and instead implement `shallowUnfrozenClone()`
+ *   `BaseFabricInstance` and instead implement `[SHALLOW_UNFROZEN_CLONE]()`
  *   (see below).
  *
  * Subclasses that participate in serialization also host a static
@@ -1403,14 +1417,14 @@ export abstract class BaseFabricInstance extends FabricInstance {
    * Returns a new unfrozen copy of this instance with the same data. Called
    * by `shallowClone()` when a new instance is needed.
    */
-  protected abstract shallowUnfrozenClone(): FabricInstance;
+  protected abstract [SHALLOW_UNFROZEN_CLONE](): FabricInstance;
 
   /**
    * Returns a shallow clone of this instance with the requested frozenness.
    *
    * When `frozen` is `true` and this instance is already frozen, returns
    * `this` (identity optimization -- freezing is idempotent). In all other
-   * cases, creates a new instance via `shallowUnfrozenClone()` and freezes
+   * cases, creates a new instance via `[SHALLOW_UNFROZEN_CLONE]()` and freezes
    * it if requested.
    *
    * This effectively-final template method manages the frozenness
@@ -1423,7 +1437,7 @@ export abstract class BaseFabricInstance extends FabricInstance {
    */
   shallowClone(frozen: boolean): FabricInstance {
     if (frozen && Object.isFrozen(this)) return this;
-    const copy = this.shallowUnfrozenClone();
+    const copy = this[SHALLOW_UNFROZEN_CLONE]();
     return frozen ? Object.freeze(copy) as FabricInstance : copy;
   }
 }
@@ -1435,7 +1449,7 @@ export abstract class BaseFabricInstance extends FabricInstance {
 > an effectively-final template method (on `BaseFabricInstance`),
 > encapsulating the frozenness-management contract (clone-if-necessary,
 > freeze-if-requested) in one place. Concrete subclasses implement only
-> `shallowUnfrozenClone()` (the type-specific copy logic) plus the
+> `[SHALLOW_UNFROZEN_CLONE]()` (the type-specific copy logic) plus the
 > deep-freeze pair; serialization lives on the class's `[CODEC]`
 > (Section 2.4). Brand detection uses `instanceof FabricInstance` directly
 > — no type guard function is needed (see Section 2.6).
@@ -1692,7 +1706,7 @@ class Temperature extends BaseFabricInstance {
     super();
   }
 
-  protected shallowUnfrozenClone(): Temperature {
+  protected [SHALLOW_UNFROZEN_CLONE](): Temperature {
     return new Temperature(this.value, this.unit);
   }
 
@@ -1917,7 +1931,7 @@ export class UnknownValue extends ExplicitTagValue {
   }
 
   // ([DEEP_FREEZE] / [IS_DEEP_FROZEN] freeze `this` and recurse into
-  // `state`; `shallowUnfrozenClone()` copies the two fields. Omitted for
+  // `state`; `[SHALLOW_UNFROZEN_CLONE]()` copies the two fields. Omitted for
   // brevity; see §2.3 and §8.6 for the pattern.)
 
   static #codec = Object.freeze(
@@ -2018,7 +2032,7 @@ export class ProblematicValue extends ExplicitTagValue {
   }
 
   // ([DEEP_FREEZE] / [IS_DEEP_FROZEN] freeze `this` and recurse into
-  // `state`; `shallowUnfrozenClone()` copies the three fields. Omitted
+  // `state`; `[SHALLOW_UNFROZEN_CLONE]()` copies the three fields. Omitted
   // for brevity; see §2.3 and §8.6 for the pattern.)
 
   static #codec = Object.freeze(
