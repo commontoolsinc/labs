@@ -31,7 +31,7 @@ was last checked against the code.
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | on | Bernhard Seefeld (#3646) | graduate to always-on | implemented, on by default, rollback override retained |
 | [`serverPrimaryExecution`](#serverprimaryexecution) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (server-primary execution W0.6) | graduate after the phased authority rollout, then delete flag | implemented, off by default |
 | [`serverPrimaryExecutionUserRankCandidates`](#serverprimaryexecutionuserrankcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C1.5a) | fold into `serverPrimaryExecution` once user lanes graduate | implemented, off by default |
-| [`serverPrimaryExecutionSessionRankCandidates`](#serverprimaryexecutionsessionrankcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C2.5) | fold into `serverPrimaryExecution` once session lanes graduate | implemented, off by default (CA4 fixture-only constraint lifted by C2.6) |
+| [`serverPrimaryExecutionSessionRankCandidates`](#serverprimaryexecutionsessionrankcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C2.5) | fold into `serverPrimaryExecution` once session lanes graduate | implemented and gate-bound (C2 complete 2026-07-18), off by default |
 | [`serverPrimaryExecutionDocSetWatch`](#serverprimaryexecutiondocsetwatch) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH` env, or `RuntimeOptions.experimental`; bridges the memory-side `setServerPrimaryExecutionDocSetWatchConfig()` (negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution F3 server / F4 client) | fold into `serverPrimaryExecution` once the feed graduates, then retire the negotiation | implemented, off by default |
 | [`serverPrimaryExecutionGraphRetirement`](#serverprimaryexecutiongraphretirement) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES` env (comma-separated space DIDs or `*`), applied at server construction; ambient `setServerPrimaryExecutionGraphRetirementConfig(spaces)` (host-internal, per-space, not negotiated) | empty set (absent-false: no space admitted to the doc-set surface) | Bernhard Seefeld (server-side execution F5; FW5 admission redesign) | fold into `serverPrimaryExecution` once the feed graduates | implemented, empty by default |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
@@ -48,8 +48,8 @@ was last checked against the code.
 | [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
-| [`serverPrimaryExecutionClaimRank`](#serverprimaryexecutionclaimrank) | `setServerPrimaryExecutionClaimRankConfig()` (host-internal, not negotiated) | `space` (space rank only) | Bernhard Seefeld (server-side execution C1.1b; `session` stage C2.1) | fold into `serverPrimaryExecution` once every context rank graduates | implemented through the session stage, space-only by default |
-| [`serverPrimaryExecutionContextLatticeClaimsV1`](#serverprimaryexecutioncontextlatticeclaimsv1) | `setServerPrimaryExecutionContextLatticeClaimsConfig()` (then negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution C1.7) | fold into `serverPrimaryExecution` once user lanes graduate, then retire the negotiation | implemented, off by default |
+| [`serverPrimaryExecutionClaimRank`](#serverprimaryexecutionclaimrank) | `setServerPrimaryExecutionClaimRankConfig()` (host-internal, not negotiated) | `space` (space rank only) | Bernhard Seefeld (server-side execution C1.1b; `session` stage C2.1) | fold into `serverPrimaryExecution` once every context rank graduates | implemented through the session stage (C2 complete 2026-07-18), space-only by default |
+| [`serverPrimaryExecutionContextLatticeClaimsV1`](#serverprimaryexecutioncontextlatticeclaimsv1) | `setServerPrimaryExecutionContextLatticeClaimsConfig()` (then negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution C1.7) | fold into `serverPrimaryExecution` once the lattice ranks graduate, then retire the negotiation | implemented (user + session delivery), off by default |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
 
@@ -269,7 +269,17 @@ propagate](#how-flags-propagate).
   (`openSessionLaneGrant`, C2.3), threaded to the Worker through the claim's
   validated contextKey, never fabricated locally (CA9). Claim ISSUANCE is
   additionally gated by the host's claim-rank dial `session` stage, so
-  either dial alone keeps session lanes fully inert.
+  either dial alone keeps session lanes fully inert. Since C2.7
+  (2026-07-17) the same flag is also the runner-side leg of the pool's
+  session-lane LIFECYCLE (`SharedExecutionPoolOptions.sessionLaneCandidates`,
+  wired from this option in toolshed): the shared execution pool opens,
+  reconciles, and drains per-session C2.3 lane grants — with session-lane
+  demand derived host-side from the owning session's published demand
+  only — and the pool leg is itself a ladder
+  (`sessionLaneCandidates` engages only alongside `userLaneCandidates`,
+  mirroring the dial layering), so lanes come up only when this flag, the
+  user-rank flag, the host's claim-rank dial `session` stage, AND the
+  per-session `context-lattice-claims-v1` negotiation align.
 - **Current default and planned end state.** Off by default: session-scoped
   surfaces classify exactly as the pre-C2.5 executor does (unservable), and
   space/user classification is byte-identical. The CA4 ordering invariant
@@ -278,16 +288,31 @@ propagate](#how-flags-propagate).
   claim churn a quadratic spurious-rerun source) is **lifted: C2.6 landed
   2026-07-17** (`#sessionAcceptsClaim` routes session-context claims,
   revokes, and settlements only to the session their contextKey names), so
-  the dial may now be enabled wherever the plan's rollout sequencing allows.
-  C2.7 wires the pool-side session-lane demand aggregation to the same flag.
-- **Status on 2026-07-17.** Implemented (C2.5: router widening on both the
-  executor and cooperative-client routers, the CA9 candidate-identity rank
-  filter, and the CA3 replica laneScopeKey broader-in-chain collapse land
-  together); inert in production because nothing wires session-lane demand
-  until C2.7.
-- **Path to removal.** Graduate session-rank candidacy with the C2 gates,
-  fold it into `serverPrimaryExecution` alongside the claim-rank dial, then
-  delete the option and its Worker plumbing.
+  the dial may now be enabled wherever the plan's rollout sequencing allows
+  — for multi-session spaces that sequencing rides the context-lattice §6
+  feed gate, whose structural half landed 2026-07-17 (F1–F6): the doc-set
+  surface is staged per space by
+  [`serverPrimaryExecutionDocSetWatch`](#serverprimaryexecutiondocsetwatch)
+  plus
+  [`serverPrimaryExecutionGraphRetirement`](#serverprimaryexecutiongraphretirement).
+- **Status on 2026-07-18.** Implemented end-to-end and gate-bound (plan C2
+  status, 2026-07-18: COMPLETE): C2.5 landed the router widening on both
+  the executor and cooperative-client routers, the CA9 candidate-identity
+  rank filter, and the CA3 replica laneScopeKey broader-in-chain collapse;
+  C2.7 wired the pool's per-session lane lifecycle and host-derived
+  session-lane demand behind the same flag; C2.8 lifted the
+  computation-only conjunct (scoped-lane builtin egress under the lane
+  grant, OQ6). The C2 acceptance gates that flip this dial run by default
+  (`server-execution-session-lane-gate.test.ts`, the lunch-poll placement
+  gate, and the CA11 latency gate — all 3/3 consecutive). Off in
+  production: enabling session lanes is now a rollout-sequencing decision
+  (context-lattice §6 staged enablement), not missing mechanism.
+- **Path to removal.** The C2 gates are landed and default-run; graduation
+  is now the §6 rollout decision — enable the session stage per the plan's
+  sequencing (the live W2.9-style measurement plus ratification of the
+  provisional latency budget), fold the dial into `serverPrimaryExecution`
+  alongside the claim-rank dial once every rank graduates (the §6 removal
+  path), then delete the option and its Worker/pool plumbing.
 
 ### `serverPrimaryExecutionDocSetWatch`
 
@@ -860,12 +885,16 @@ the per-epic implementation notes).
   session stage may now be enabled wherever the plan's rollout sequencing
   allows. The cross-space ranks are not yet part of the accepted value set
   and arrive with C3+. The end state is every rank enabled.
-- **Status on 2026-07-17.** Implemented through the session stage (C2.1:
-  ladder + canonical `session:<did>:<sessionId>` wire validation per CA12;
-  C2.3: session lane grants — session-anchored, session-end = lane-end, no
-  re-anchor; C2.6: named-session delivery narrowing at the single
-  `#sessionAcceptsClaim` predicate); session-rank issuance is otherwise
-  inert because nothing wires session-lane demand until C2.7.
+- **Status on 2026-07-18.** Implemented through the session stage, which is
+  complete end-to-end (plan C2 status, 2026-07-18): C2.1 landed the ladder
+  + canonical `session:<did>:<sessionId>` wire validation per CA12; C2.3
+  the session lane grants (session-anchored, session-end = lane-end, no
+  re-anchor); C2.6 the named-session delivery narrowing at the single
+  `#sessionAcceptsClaim` predicate; C2.7 the session-lane demand
+  derivation and pool lifecycle that make session-stage issuance live;
+  and C2.8 the scoped-rank effect admission noted above. The C2
+  acceptance gates flip this dial's `session` stage and run by default
+  (plan rows C2.9/C2.10).
 - **Path to removal.** Graduate each rank behind the dial as its C-phase gate
   is accepted (C1.7 folded the user step behind the
   `context-lattice-claims-v1` subcapability), then fold the fully graduated
@@ -886,14 +915,20 @@ the per-epic implementation notes).
   ([design §5](../specs/server-side-execution/context-lattice-execution.md),
   adversarial-review amendments 11/17/21): a session that negotiated it may
   receive context-scoped (`user:`/`session:`) execution claims, filtered by
-  the single delivery predicate (`#sessionAcceptsClaim`) to sessions whose
-  principal is the claim's — live publishes, reconnect snapshots, retained
+  the single delivery predicate (`#sessionAcceptsClaim`) — user-context
+  events to the claim principal's negotiating sessions and, since C2.6
+  (2026-07-17), session-context events to the exact session their
+  contextKey names — live publishes, reconnect snapshots, retained
   events, and settlement frontiers alike. Sessions without it receive space
   claims exactly as before. The subcapability also drives the amendment-11
   principal-wide cohort gate: a user lane may only open (and stay open) while
   EVERY session of the lane principal — TTL-detached ones included — has
   negotiated it, and any non-negotiating attach synchronously fences the
-  principal's live user lanes before its open response is sent. Deliberately
+  principal's live user lanes before its open response is sent. Session
+  lanes deliberately gate per-session instead (C2.3): a session claim only
+  suppresses its named session under own-chain acceptance, and a
+  non-negotiating attach of the same session id is fenced in openSession
+  admission before its response releases. Deliberately
   NOT part of the required-capability check at session admission: a mixed
   fleet is valid, with the fence (not rejection) protecting lane integrity.
   User-rank claim ISSUANCE additionally requires the host's own advertisement
@@ -902,13 +937,16 @@ the per-epic implementation notes).
 - **Current default and planned end state.** Off by default — absent from
   every handshake, zero delivery-path change, no lane fencing (production has
   no user lanes to fence until the C1 gates flip the rank dial). Enabled
-  inside C1 gate fixtures alongside `serverPrimaryExecutionClaimRank: user`.
+  inside the C1/C2 gate fixtures alongside the matching
+  `serverPrimaryExecutionClaimRank` stage.
   The end state is every supported client negotiating it.
-- **Status on 2026-07-16.** Implemented (C1.7): wire flag, connection getter
+- **Status on 2026-07-18.** Implemented (C1.7): wire flag, connection getter
   chain, per-attach session capability, context-scoped
   `#sessionAcceptsClaim`, `sessionsForPrincipal` (the amendment-17
-  connected-or-TTL-detached seam that the F6 feed fan-out will consume), the
-  cohort gate at lane open/renew, and the admission fence.
+  connected-or-TTL-detached seam the F6 feed fan-out consumes, landed
+  2026-07-17), the cohort gate at lane open/renew, and the admission
+  fence. C2.3 added the per-session negotiation gate for session lanes
+  and C2.6 the named-session branch of the delivery predicate.
 - **Path to removal.** Graduate with the C1/C2 lane rollout: once every
   supported client negotiates it, require it whenever
   `serverPrimaryExecution` is on (fold into the required-capability set),

@@ -2077,6 +2077,50 @@ bounded by the C2 latency gate and measured at C1.9.
 
 #### C2 — session lanes: work-order decomposition (2026-07-17)
 
+**C2 status (2026-07-18): COMPLETE.** Every row is landed: C2.1–C2.3
+(wave A, 2026-07-17), C2.4–C2.5 (wave B, 2026-07-17), C2.6
+(2026-07-17), C2.7 (2026-07-17), C2.9 (2026-07-17), C2.10 (built
+2026-07-18; its two found defects fixed at the root the same day),
+C2.8 (2026-07-18 — the C2 exit gate is met, register row R12
+resolved), and C2.11 (2026-07-18 — the owed-fixture audit found every
+promised fixture already landed incrementally; the row records the
+audit). The design §7 C2 gate list is met, each item bound by a
+default-run fixture:
+
+- *a PerSession derivation settles under its own session's lane grant
+  regardless of which principal's commit caused the recompute* — the
+  C2.9 gate (`server-execution-session-lane-gate.test.ts`, 3/3
+  consecutive);
+- *a foreign session's client never matches the claim and its state is
+  never readable from the lane* — the same gate's wire tap +
+  stored-claim sweep + closed-store SQLite isolation, with the CA5
+  push-side half in `v2-feed-cohort-test.ts` ("F6 CA5") and the C2.6
+  delivery fixtures (`v2-execution-session-context-delivery-test.ts`);
+- *the lunch-poll placement guard passes* —
+  `server-execution-lunch-poll-placement-gate.test.ts` (3/3; the
+  strict placement criterion MET per the C2.10 row);
+- *settlement latency with ≥3 concurrent session lanes stays within
+  the agreed budget* — `server-execution-session-lane-latency-gate.test.ts`
+  (3/3; loopback 3-lane p95 36.2 ms under the structural ceiling).
+  The browser-scale ms budget is deliberately evaluated at the live
+  W2.9-style measurement; the owner budget is PROVISIONAL,
+  ratification pending — the one open owner decision C2 carries
+  forward;
+- *`claim-context-mismatch` returns to the placement guard's
+  hard-zero set* — the R7 tolerance retired (C2.10; guard-contract
+  test in the placement gate; lattice §8 R7 updated).
+
+Two named non-blocking residuals carry forward, both recorded and
+fail-closed: (1) the **scoped-lane minted-result instance-coverage
+gap** — non-direct-output minted docs at a scoped lane's instance
+still route unserved (a §4 coverage gap, recorded with the C2.10 fix
+wave); (2) **offline scoped-lane egress under standing keys** — zero
+connected sessions ⇒ no grant ⇒ no claim, pinned negative at three
+layers by C2.8's fixtures; the consent design rides lattice OQ1. C3
+entry: the amended C3 table below is the next frontier — the C2 exit
+gate (C2.8, per the owner's 2026-07-17 ruling) is met, so C3 build
+may start.
+
 Mapped against the landed C1 substrate, which already carries most of the
 hard parts: the client is fully session-ready — `ownChainContextKeys`
 includes `session:myDid:mySessionId`, `laneScopeKey` handles session
@@ -2101,7 +2145,9 @@ read them before building:**
   for that shape, and the map materializer envelope (W2.16) is the other
   half. The real owner is **re-opened W2.15/W2.16**, not session-rank
   widening. C2.9/C2.10 gain a hard dependency on that write-surface
-  completeness (CA10).
+  completeness (CA10). (Closed by FW8, 2026-07-17: the product fixtures
+  went green before C2.9/C2.10 built on them — see the W2.15/W2.16
+  status lines.)
 - **CA4 (correction to adopted default #1):** claims-**v1 routing** is
   still sufficient, but the session-claim over-broadcast
   (`#sessionAcceptsClaim` delivers a `session:alice:A` claim to alice's
@@ -2112,7 +2158,9 @@ read them before building:**
   alone is structurally blind to the hundreds-of-lanes regime. Split
   C2.10: keep the parity/correctness bar AND add a **separate latency
   acceptance with an owner-set ms budget** — this is a genuine owner
-  decision, not a default (open in the session summary).
+  decision, not a default (open in the session summary). (Delivered
+  2026-07-18: C2.10 landed the split gate; the ms budget is recorded
+  PROVISIONAL at the live measurement, owner ratification pending.)
 - **Five unowned/miscited seams promoted to blockers** (the scout said the
   engine guards "auto-pass" — they do not): session issuance-binding
   (`server.ts` `#requiredLaneGrantForClaim` hard-returns null for session),
@@ -2130,22 +2178,26 @@ read them before building:**
 **Standing adopted defaults after the panel and the owner review (both
 2026-07-17):** default 3 survives as adopted — no lane budget in C2
 (OQ3); parked session lanes are correct by construction; the LRU-park
-cap is a follow-on, revisited if C2.10's latency gate shows pressure.
+cap is a follow-on, revisited if C2.10's latency gate shows pressure
+(the gate landed 2026-07-18 and its loopback legs showed none — 3-lane
+p95 36.2 ms, ≈2.4× the single lane; the revisit input is now the live
+measurement's 3/10/30-lane scaling series).
 Default 2 survives as **build order** — computation-first like C1 (A8,
 lifted by C2.8, 2026-07-18): lane grants, fencing, and drain proved out
 before egress rode them,
 because an external call is the one side effect the per-commit firewall
 cannot retro-reject — but its "session-lane builtin egress (OQ6, C2.8)
 is a named follow-on, not a C2 gate" clause is **overridden by the owner
-(2026-07-17, post-panel): C2.8 is a C2 exit gate, pre-ship** with the
-same force as the C3 pre-ship ruling. Rationale: the end state is all
+(2026-07-17, post-panel): C2.8 is a C2 exit gate, pre-ship** (met
+2026-07-18) with the same force as the C3 pre-ship ruling. Rationale: the end state is all
 standing reactive work — computations AND effect builtins — server-side,
 with only handlers (R1, Phase 5) and render (R2) client-executed; a
 follow-on with no phase binding is the permanent-carve-out failure mode
 design §1 argues against, and the exclusion had no residual-register row
 (§8 gains R12/R13 with this revision). C2.8's scope: session lanes and
 user lanes with a connected anchor session (lifting C1's A8
-restriction); only *offline* egress under standing delegated keys stays
+restriction — delivered 2026-07-18, R12 resolved); only *offline*
+egress under standing delegated keys stays
 parked with OQ1, where the consent question genuinely lives. Defaults 1
 and 4 are amended above (CA4, CA11).
 
@@ -2161,7 +2213,7 @@ and 4 are amended above (CA4, CA11).
 | C2.8 | Scoped-lane builtin egress under the lane grant (OQ6): session lanes + user lanes with a connected anchor (lifts A8's computation-only restriction — the engine admission gate that holds it, `isAdmissibleExecutionClaimContextKey` engine.ts:8259 per CA1's citation, plus the three sponsor-keyed gates become lane-conditional: the `deno-space-executor` pre-claim drop, the `executor-worker` egress-guard identity, and `causalActorMatchesSponsor` consultation, applied only when `claimKey.contextKey === "space"`; per-lane broker acting identity; G11 parity per lane). **C2 exit gate, pre-ship** (owner, 2026-07-17); offline egress under standing keys stays with OQ1. **Landed 2026-07-18 — the C2 exit gate is met.** The A8 conjunct lifted red-first at every layer that held it: the servability effect arm (`broker-required` now carries `contextRank`; session/user rank rules identical to computations, chain-read rule included), the engine admission guard, the host issuance rank dial (`#executionClaimRankEnabled`; effects stay gated by the passivity flag at every rank), and the executor candidate wire shape. The three sponsor-keyed gates are lane-conditional exactly as specified; for scoped claims the Worker egress guard validates the LANE identity instead (the run must be pinned to the claim's own lane — the acting context IS the consent). The broker acting identity is host-DERIVED from the validated claim contextKey (`ServerBuiltinActingIdentity`: sponsor for space, principal for user lanes, principal+session for session lanes) under W1.4's A23 discipline. Brokered egress is authorized by the LIVE lane grant: `Server.hasLiveExecutionClaim` — the broker gate — consults `#liveLaneGrantForKey` at the bound generation for scoped claims (the commit fence's own consult), so a drained lane's in-flight builtin cannot egress. G11 verified identity-independent and pinned per lane (serving-origin + blocked-destination parity legs, `server-builtin-channel.test.ts`). Fixtures: THE OQ6 e2e (`executor-scoped-egress-e2e.test.ts`, real Worker, session AND user legs — foreign-caused recompute egresses under the lane grant with zero causal-origin consultation; in-flight lane drain → no post-fence egress, claim revoked, no re-claim), host halves in `memory/test/v2-execution-scoped-egress-test.ts` (issuance lift, dial-off regression, drain gate, and the fixture-(e) offline pin: zero connected sessions ⇒ no grant ⇒ no claim — OQ1 stays unbuilt), router/classifier legs (`executor-action-router.test.ts`, `scheduler-servability.test.ts`: per-lane builtin candidates, CA9 rank filter for effects, dial-off byte-identical), lane-conditional host drop (`executor-candidate-claim.test.ts`, space drop byte-identical beside the scoped no-drop). Discrimination by mutation: re-enabling the sponsor gate for scoped lanes reds the e2e; dropping the lane-grant validation at the broker gate reds the drain fixtures. Space-lane egress byte-identical (the causal-mismatch permanent-failure e2e leg green unchanged); llm/sqliteQuery pinned outside the registry (R5) | C2.4, C2.5; build sequenced after C2.9–C2.10 so egress never muddies the latency measurement |
 | C2.9 | PerSession measurement gate + fixture; **push-side confidentiality fixture (CA5); depends on W2.15/W2.16 write-surface completeness (CA10)**. **Landed 2026-07-17** (`server-execution-session-lane-gate.test.ts`, default-run, 3/3 consecutive): the §7 gates bind — foreign-caused recomputes settle under their OWN session lane; foreign clients never match/read (wire tap + stored-claim sweep + closed-store SQLite isolation); per-lane schedulerRuns recorded rank-generically (A25). CA5 bound at both planes (red-verified). Closed C2.7's owed real-Worker session e2e; template-rank guard mutation-verified. **Found and fixed a session-lane liveness wedge in the landed mechanism** (conflicted claimed lane commit finalized by a lane-blind revert; onAttemptSettled now schedules a lane-pinned rerun on ConflictError for non-space lanes — user lanes had the same latent hole). R7 observed hard-zero in-fixture; c210Inputs logged for the C2.10 builder | C2.4–C2.7, W2.15/W2.16 re-work |
 | C2.10 | Lunch-poll placement guard: R7 retirement + **split gate — parity bar AND an owner-set latency budget (CA11)**. **Built 2026-07-18; all four legs GREEN (fix wave landed same day): the placement acceptance harness found two real defects, both fixed at the root — the C2 §7 gate-list item "the lunch-poll placement guard passes" is SATISFIED (placement criterion MET; harness default-run, 3/3 consecutive).** (1) **R7 retired to hard-zero** (the named C2 acceptance criterion): the `claim-context-mismatch` entry deleted from `TOLERATED_LEASE_FENCE_CAUSES` per the registry's own retirement contract, pinned red-first by the guard-contract test in `server-execution-lunch-poll-placement-gate.test.ts` (tolerated set now exactly the two drain causes); hard-zero observed in every C2.10 harness run and re-asserted inside the latency window. (2) **CA11 latency gate** (`server-execution-session-lane-latency-gate.test.ts`, default-run, 3/3 consecutive): 3 session lanes + space on one Worker, foreign-caused settlement rounds via a never-started driver client; **measured (loopback, 12 rounds/leg): single-lane full-settlement p50 15.1 ms / p95 29.8 ms; 3-lane full p50 23.7 ms / p95 36.2 ms; space-lane p95 36.2 ms** (the CA11 space-lane starvation leg is asserted specifically). In-process the gate asserts a GENEROUS structural ceiling only — 3-lane p95 ≤ max(10× own single-lane p50, 1500 ms) — because a loopback harness cannot honestly measure the browser-workload budget. **The ms budget is evaluated at the live W2.9-style measurement (the F5 protocol's machinery), owner budget PROVISIONAL, ratification pending (proposed by the C2.10 build session): settlement p50 ≤ 878 ms (flag-on baseline avg 764 ms + 15%) and p95 ≤ 2170 ms (2× flag-off baseline p95 1085 ms), against the 2026-07-16 feed-baseline note-create pair; the CA11 3/10/30-lane scaling series lives there too.** These measured numbers are the OQ5 topology-decision input. (3) **Placement, classification half** (runner `server-execution-product-fixtures.test.ts`): the real lunch-poll vote workload classifies claim-ready at session rank keyed by the OPEN session lane only (CA9), with a dial-off self-control pinning zero scoped candidates — the §1 collapse's classification reversal. (4) **Placement acceptance harness** (worker-realm multi-runtime clients over a gate-hosted WS server + real pool/Worker; harness-local `MULTI_RUNTIME_CONTEXT_LATTICE_CLAIMS` seam added to `multi-runtime-worker.ts` since the client lattice-claims dial is programmatic-only): built BLOCKED-RED as the red-first fixture for two found defects; **both fixed 2026-07-18, env gate removed — default-run, 3/3 consecutive green.** (a) **Second-voter merge staleness** (was: the second concurrent voter's replica permanently kept the pre-merge `voteCount`): root cause is the own-commit confirmation path — the engine merge-rebases the concurrent voter's mergeable patch onto a head the origin replica never saw, the client's `confirmPending` promoted its pre-merge LOCAL replay at the accepted seq, and the divergence is permanent because FA14 echo suppression correctly withholds a session's own committed seq while the other writer's older upsert is refused by the monotonic-confirmed guard. Fixed at the root: the engine marks merge-rebased patch revisions with the authoritative post-apply `document` (engine.ts `writeOperation` patch case, pre-apply-head author check; replays fail toward authority) and `confirmPending` adopts it in place of the local replay with an integrate-shaped notification (storage/v2.ts). Deterministic mechanism fixtures: `v2-engine-revision-test.ts` (merge-rebased revisions carry the document; same-session heads stay slim) and `array-push-mergeable.test.ts` ("the second concurrent appender's own replica adopts the merged list"). (b) **Session-rank read-fold churn** (claimed `ifElse`/`when`/lift runs over entity-link reads rejecting `unobserved-read`): the commit carries a whole-`["value"]` confirmed read of the link doc at the acting lane's SCOPED instance while the summaries folded framework reads at space scope only (W2.14's fold), and the transformer-certificate path folded none. Fixed by applying the fold uniformly at every summary source — certificate (`transformerCertificateScopeSummaryInput`), selector descriptor, materializer descriptor, runtime materializer, write-empty — via `sameSpaceLaneInstanceReads` (any lane-instance scope, same-space, READS only; malformed scopes stay excluded fail-closed); unit-pinned per source in the scheduler summary/descriptor test files. Discrimination: reverting either fix reds the harness with its original signature (fold revert → nonzero `actionFirewallRejects`; adoption revert → `aliceVoteCount: 1` divergence timeout). Green strict-run measurement: session lanes claimed 11+11, 33 session-rank candidates, accepted-commit index **138 matches / 325 lookups** (the §1 evidence measured 434 of 438 notices matching nothing), server-lane-authored session-scoped rows nonzero, committed settlements nonzero, zero claim-context-mismatch, zero firewall rejects; full memory suite (670) and runner scheduler-*/executor suites green | C2.9 |
-| C2.11 | Owed session-lane fixtures (incl. the session lane-write TOCTOU backstop, CA7) + EXPERIMENTAL_OPTIONS/docs | C2.3, C2.6, C2.9 |
+| C2.11 | Owed session-lane fixtures (incl. the session lane-write TOCTOU backstop, CA7) + EXPERIMENTAL_OPTIONS/docs. **Landed 2026-07-18 as the closure audit + docs sweep — the CA-by-CA audit found zero genuinely-missing fixtures; every promised fixture landed incrementally with its mechanism WO.** The headline CA7 TOCTOU backstop landed with C2.7 (`memory/test/v2-execution-session-claim-context-test.ts`: the WRITE-loss fence leg and "a session commit racing the ACL-drain reconciliation fences lane-write-authority while the lane is still live", C1.10 injection technique, mutation-verified). The Finding-8 owed set landed with waves A/B + C2.7: drain-on-disconnect and routing-disjointness in `v2-execution-session-lane-grant-test.ts`, cross-session pending isolation in `runner/test/storage-v2-replica-lanes.test.ts` (CA3/A16) plus the CA8 discriminating pair in `v2-execution-session-lane-read-test.ts`, and the CA13 drain/no-wake/catch-up fixture in `v2-execution-session-lane-lifecycle-test.ts`. CA12's wire shapes are complete (five malformed forms incl. `session:a:b:c` and `session::` at the single wire validator, `v2-execution-session-lane-grant-test.ts`, plus the engine fence leg and colon-safe round-trip in the claim-context file). CA2's conformance is bound on both sides (runner emit pin in `pattern-binding.test.ts`, engine accept in `v2-execution-lane-firewall-test.ts`, the shared `v2-scope-naming-link-test.ts` suite). The C2.7-flagged unpinned Worker template-rank guard was closed by the C2.9 gate (late-lane template synthesis legs, mutation-verified), and CA5 is bound at both planes (C2.9). CA4's client-notification half is bound by composition: the delivery fixtures assert zero sibling wire delivery red-first at the single predicate where the fix lives, with the client invalidation chain documented by code refs in both docblocks — a separate client-side zero-invalidation fixture would re-assert the same delivery seam through a heavier stack. The balance of the WO is the docs closure: the status paragraph above, this section's stale-by-events sweep, EXPERIMENTAL_OPTIONS session-dial coherence, and lattice §6/§8 dated notes | C2.3, C2.6, C2.9 |
 
 Prerequisite: the feed's session-scoped delivery (F6) lands before C2.6/C2.9
 (design §6). Feed status, corrected 2026-07-17 (Fable review): F1–F4 are
@@ -2172,9 +2224,13 @@ the C2 prerequisite is met).** CA5 note for C2.9: F6's fixtures prove the
 cohort against client-authored scoped commits and lane-held watch surfaces;
 the commit-side derivation reads `AppliedCommit.revisions[].scopeKey`, which
 the engine stamps for claimed lane commits too, so a server-session-lane
-write source inherits the same filter — but C2.9 still owes the explicit
+write source inherits the same filter — but C2.9 still owed the explicit
 push-side fixture driving a REAL server-session-lane-authored session-scoped
-write against a foreign session's watch (CA5's named plane).
+write against a foreign session's watch (CA5's named plane). **Delivered
+with C2.9 (2026-07-17):** the "F6 CA5" fixture in `v2-feed-cohort-test.ts`
+drives exactly that write source through transact — delivered to the owning
+session only, siblings and foreign watchers at zero work — red-verified by
+dropping the cohort metadata.
 
 #### C3 — cross-space reads: work-order decomposition (2026-07-17)
 
