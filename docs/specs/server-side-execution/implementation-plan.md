@@ -2175,6 +2175,152 @@ write source inherits the same filter — but C2.9 still owes the explicit
 push-side fixture driving a REAL server-session-lane-authored session-scoped
 write against a foreign session's watch (CA5's named plane).
 
+#### C3 — cross-space reads: work-order decomposition (2026-07-17)
+
+Mapped against the landed substrate, which carries more than §5's wording
+admits: cross-space read **indexing already exists** —
+`scheduler_read_index` rows carry a `read_space` distinct from
+`owner_space`, and a client observation that reads foreign spaces is
+mirrored into each read space's engine
+(`mirrorSchedulerObservation` → `upsertMirroredSchedulerObservation`) —
+and cross-space **dirty propagation is already durable**: the committing
+engine's mirrored foreign-owner reader rows drive
+`propagateSchedulerDirtyToOwnerSpaces`, which marks the home engine's
+actions direct-dirty. What does not exist: the demand join and executor
+wake (a commit in B never wakes A's Worker), foreign point reads (the
+Worker cannot even mount a foreign replica), authorization epochs, and
+the vector basis. The panel's blocker corrections re-drew that map
+before any of it can be built: both existing mechanisms are **in-process
+accidents** — direct writes into the peer engine through an **ungated
+`openEngine`** that silently creates a shadow engine for any space name,
+with **no protocol carriage** for mirror upserts or dirt (C3A1) — and
+the scout's "three reject sites" undercounts: a **fourth, engine-side
+reject** (`foreign-space-surface` in `assertLaneScopedAddress`, in force
+on both accept paths) blocks every foreign read address and no scout WO
+relaxed it, making C3.5's own acceptance unbuildable as written (C3A2).
+C2-skew rule: every line anchor was re-verified by the panel against the
+C2-waves-A/B tree (`f95d53f22` + the C2.6 diff) and MUST be re-pinned
+again at dispatch — C2.7+ is landing on the same surfaces (C3A17
+carries the re-pin instruction).
+
+**The adversarial panel (2026-07-17; 24 verdicts — 2 blockers, 15
+serious, none refuted — archived in
+[the review record](../../history/development/design/c3-adversarial-review-2026-07-17.md),
+amendments C3A1–C3A24 binding) corrected the scout in load-bearing ways
+— read them before building:**
+
+- **C3A1 (blocker):** C3.1's vocabulary had no carriage for the mirror
+  upsert or the durable dirt, so a split deployment silently sheds wake
+  and dirt into shadow engines. Owned by new row **C3.1b**
+  (`ForeignObservationMirror` upsert + removal, durable-dirt carriage,
+  the `openEngine` hosted-space gate).
+- **C3A2 (blocker):** the fourth reject site — engine-side
+  `foreign-space-surface` — relaxes for space-scoped default-branch
+  foreign READs **with C3.5** (that placement is what keeps
+  C3.5-before-C3.6 self-contained, V24).
+- **Authority holes (C3A3–C3A6):** the epoch bump rule under-covered ACL
+  validity-state transitions — implicit-capability holders are
+  enumerable in no ACL (C3A3); no read-time authority liveness existed,
+  so sponsor rotation / lane drain left in-flight attempts able to issue
+  foreign point reads (C3A4); the executor mirror path exists but gates
+  on the wrong principal's open session, and fixing it without a B-side
+  ACL check is a write-bypass into B — split out as **C3.3b** with the
+  acting-principal READ rule and denial fixtures (C3A5); post-revocation
+  cleanup of mirrored rows and subscriptions was unowned (C3A6).
+- **Wake/fence soundness (C3A7–C3A12):** the co-hosted TOCTOU ruling is
+  a forced binary (epoch-hold handshake vs receive-order fence) recorded
+  in the table, not deferred to build — a synchronous epoch RPC does NOT
+  close the window (C3A7); the C3.8↔C3.10 acceptance circularity breaks
+  via the **C3.10a/C3.10b** split (C3A8); three distinct missed-wake
+  windows — read-to-mirror, ack-overtakes-propagation, and the pool's
+  home-seq suppression gates plus the missed running-Worker provider
+  notice leg — each get an owning fixture (C3A9–C3A11); reconnect/replay
+  is a named contract, not an afterthought (C3A12).
+- **Vector-basis completeness (C3A13–C3A16):** peer-stamp trust is ruled
+  now — link-authoritative hosts only, Worker/client stamps stripped,
+  per-stamp signatures deferred to a gap-register row (C3A13); three
+  fresh-literal settlement carriers would silently drop an additive
+  vector (C3A14); missing-component coverage is defined once, vacuously,
+  at all three compare/merge sites (C3A15); the mirror upsert's cause
+  consumption crosses seq domains until the vector's read-space
+  component lands (C3A16).
+- **C2-skew (C3A17):** the scout's named build-note collisions
+  (C2.1–C2.5) landed — satisfied-and-stale; the live collisions are
+  **C2.7** (session-lane wake widening on `#publishAcceptedCommit` — not
+  C2.6, whose landed row explicitly leaves wake paths untouched) and
+  **C2.8** (`classifyStaticActionServability`, where C3.6 lands).
+
+**Standing scout defaults after the panel (2026-07-17) — all six are
+owner-ratifiable defaults following the C2 precedent (adopted for the
+build, surfaced in the session; the owner may override):** #1 (protocol
+seam at the host↔host boundary — Server↔Server, engines passive)
+**adopted**; code-verified that engines are passive substrate and every
+cross-space touch lives in `Server`; the promised §5 wording edit is now
+owned by C3.11 (C3A21). #2 (epoch granularity/bump rule) **adopted as
+amended by C3A3** — the scout's old∪new+ANYONE rule rested on false
+support: effective capability is not a function of ACL entries
+(missing-ACL grants implicit READ/WRITE to unenumerable principals;
+invalid-ACL fails everyone closed), so every ACL validity-state
+transition bumps the space-wide epoch floor, bound epochs revalidate by
+EQUALITY, and unknown epochs fail closed. #3 (foreign reads
+space-scoped-only in v1) **adopted**, restated against the landed
+LaneRank machinery per C3A17. #4 (default-branch pairing only)
+**adopted**. #5 (client compat gating) **adopted as amended** — the
+direction is sound but the blanket (space, branch)-demanding cohort
+predates C2.3's deliberate per-cohort refinement, and no row owned the
+mechanism: new row **C3.6b** owns `cross-space-claims-v1` with
+per-delivery-cohort gating (C3A18). #6 (foreign wake lane symmetry)
+**adopted as amended** — a literal mirror of "the A4 shape" would ship
+the scoped-lane starvation the decision itself warns against, since the
+landed lookup enumerates user grants only; the subscription definition
+includes the session-grant arm once C2.7 lands (C3A17).
+
+| WO | Title | Depends on | Acceptance sketch |
+| --- | --- | --- | --- |
+| C3.1 | Cross-engine protocol substrate at the HOST boundary (Server↔Server, engines passive — decision #1): message vocabulary (`ForeignReadersSubscribe/Unsubscribe`, `ForeignStaleReaders` notice, `ForeignPointRead` request/response carrying resolved seq + authorization-epoch stamp, `ForeignAuthorizationEpochBump`, and the epoch query as a wire message per C3A12) + a `CrossSpaceTransport` interface, with the in-process transport (two endpoints inside one `Server`, FIFO per link) as first implementation; carries the single-multiplexed-link topology ruling if C3A7's receive-order arm is chosen | — | codec round-trip conformance for every message; two spaces in one Server exchange subscribe→notice→point-read over the transport object, never via direct method calls (module-boundary test); transport-parameterized harness reused by every later WO. C3A7, C3A12 |
+| C3.1b | Mirror/dirt protocol carriage (blocker C3A1): `ForeignObservationMirror` — upsert AND removal (the `previousReadSpaces` drop path); durable-dirt carriage — either `ForeignStaleReaders` carries the dirtied foreign-owner reader rows (home host applies `markSchedulerActionsDirectDirty` on receipt) plus a subscribe-response dirt snapshot from the read host's `scheduler_action_state` (`owner_space` = home, `direct_dirty_seq` > cursor) covering parked/un-demanded accumulation, or a standalone `ForeignDirtyMark` with a durable per-link cursor; `mirrorSchedulerObservation` / `propagateSchedulerDirtyToOwnerSpaces` route via the transport; `openEngine` gains the hosted-space gate (fail loudly) | C3.1 | mirror upsert/removal and dirt round-trip over the in-process transport with zero direct peer-engine writes; no engine is ever opened for a non-hosted space. C3A1 |
+| C3.2 | Foreign authorization epochs: per-(space, principal) generation table bumped transactionally with the ACL apply; bump rule per C3A3 — per-principal old∪new + ANYONE-entry changes + a space-wide epoch-floor bump on EVERY ACL validity-state transition (missing→valid genesis, valid→invalid retraction/malform, invalid→valid repair); comparison discipline pinned: bound epochs revalidate by EQUALITY and an unknown (space, principal) epoch fails closed (a host-restart reset over-revokes, never under-revokes); epoch query + `ForeignAuthorizationEpochBump` published over C3.1 | C3.1 | ACL mutation bumps exactly the affected principals (floor for wildcard AND validity transitions); genesis on a populated ACL-less space revokes a claim bound under implicit access; idempotent apply does not double-bump; bump observed over the transport in commit order. C3A3, C3A12 |
+| C3.3a | Foreign wake pipeline (client-mirrored rows only): demand-joined `ForeignReadersSubscribe` registration — per-lane pairs for the space lane plus every OPEN lane grant of either rank (user AND session, the post-C2.7 shape), re-registering on lane-grant open/drain events as well as demand change (C3A17); committing host computes per-foreign-owner lane lookups against its mirrored rows and emits `ForeignStaleReaders`; wake routing per C3A11 — a distinct foreign-wake entry on the pool slot that bypasses the home-seq suppression gates entirely (spurious wakes safe, missed ones not; foreign seqs never merge into `pendingWakeSeq`/`lastSettledSeq`) AND the provider-channel notice leg so a running Worker hears its foreign inputs changed; two-part re-register barrier per C3A10 (subscribe ack emitted after the read host drains post-commit side effects for previously accepted commits; home host completes a post-ack direct-dirty-∩-demand scan with pool wake); closes the read-to-mirror missed-wake window per C3A9 — point-read stamps ride into the mirrored observation with a transactional stamp-vs-current-seq compare in the upsert, or a provisional read-time reader row (C3.4 hook) | C3.1, C3.1b; sequences after C2.7 or coordinates on `#publishAcceptedCommit` (one builder) | B-commit wakes A's demanded stale reader exactly once (barrier-driven, no sleeps); wake fires while A's slot `lastSettledSeq` numerically exceeds B's seq AND while A's executor is mid-run; "B accepts commit K against the stale subscription; the ack races K's queued propagation" bound via injectable barrier on the side-effect queue; B committing strictly between the stamped point read and the mirror upsert still wakes; a session lane grant opened after initial registration still wakes on a subsequent B commit, and a session lane's demanded foreign-read action wakes on a B commit; parked home space accumulates dirt without wake (§4 parity). C3A9, C3A10, C3A11, C3A17 |
+| C3.3b | Executor-authored observation mirroring: mirror admitted iff the attempt's ACTING principal (lease sponsor for the space lane; lane principal for user/session lanes) holds READ on the read space via the same `#capabilityFor` resolution as C3.4's point read — replacing the open-session gate for executor commits, which passes on the sponsor's session but checks the wrong principal for scoped lanes and is never true for a headless sponsor (the cold-start wake hole); defines the writer key and cleanup lifecycle for executor-authored rows | C3.1b, C3.2 (epoch stamp on the row) | executor-authored observation mirrors and subsequently wakes; an acting principal without B READ produces ZERO mirror rows and ZERO wake (asserted by direct engine inspection); a scoped-lane mirror gates on the LANE principal's access, not the sponsor's. C3A5 |
+| C3.4 | Executor foreign point reads under the acting context: relax the provider space guard for reads only; stop `pinBranch` stamping the home branch onto foreign `docs.read`; forward over C3.1 to the read space's host, where the ACL check runs for the ACTING principal; response stamped (seq, epoch); read-time authority liveness per C3A4 — before forwarding, the home host resolves the acting principal from the LIVE authority (space lane: the current owned lease at the claim's bound `leaseGeneration` with the claim still present; user/session lanes: the live lane grant at the bound `laneGeneration`) and rejects in the constant C1.3 fence-cause shape when any is dead, drained, or superseded — the read-side mirror of `claim-not-live`/`lane-generation-stale`; Worker side: read-only foreign mount keyed by (space, id, scopeKey) via per-space replica mounting — never a space-blind cache (`docKey` has no space dimension) | C3.1, C3.2 | read of a B-space doc through A's lease-bound channel returns the instance with seq+epoch stamp when the acting principal holds READ on B; rejects (constant shape) without it; write/transact naming B still rejects at the same guard; branch is B's default branch; a foreign point read after lease release/rotation rejects; a foreign point read after the owning lane's drain (session disconnect) rejects. C3A4, C3A9 (hook) |
+| C3.5 | Vector input basis + the engine-side read relax (blocker C3A2 rides here — what makes C3.5-before-C3.6 self-contained, V24): `assertLaneScopedAddress` admits space-scoped, default-branch foreign READ addresses (summary + observation reads only; write/piece/owner surfaces keep `foreign-space-surface` byte-identical); additive `inputBasis?: readonly {space, seq}[]` beside the scalar (scalar stays ≡ home component, engine-authored as today) on EVERY settlement carrier — `ActionSettlement`/`ActionExecutionProvenance`/`ExecutionSettlementFrontier`, BOTH coalescers (the session-registry frontier updater and runner `mergeSuccessfulExecutionSettlements`), and `actionSettlementFromFrontier` (C3A14); foreign components admissible ONLY when received by the home HOST over the authenticated C3.1 link from the host authoritative for that space — Worker/client-supplied vector components stripped exactly like the scalar, peer-impersonation components discarded, the trust extension stated with its blast radius, per-stamp signatures deferred to a gap-register row (C3A13); missing-component coverage defined once — an absent component vacuously covers, a present-but-older component never does — required identically at all three compare/merge sites (C3A15); mirror cause consumption via the vector's READ-SPACE component (interim, pre-vector: the mirror call passes an explicit `causeCoverageSeq` — C3A16) | C3.4 | settlement for a two-space-read attempt carries home scalar + B component equal to the stamped read seq; foreign WRITE surfaces still reject `foreign-space-surface` (engine-level red-green); a fabricated Worker-asserted vector is stripped; a component for B arriving on a non-B-authoritative link is discarded; frontier merge takes per-component maxima under the vacuous rule; a B-space cause row newer than the home scalar's numeric value survives a mirrored upsert; scalar-only settlements byte-identical to today. C3A2, C3A13, C3A14, C3A15, C3A16 |
+| C3.6 | Servability + issuance admission behind the dial's `cross-space-read` stage, specified against the landed LaneRank machinery (C3A17): relax `foreign-read-space` and `dynamic-foreign-read-space` on the LaneRank classifier for space-scoped, default-branch foreign read addresses only (decisions #3/#4; foreign-read admission is rank-independent); new unservable codes (`foreign-read-access-denied`; a named code for scoped foreign reads) registered beside the existing set; `foreign-owner/piece/write-space`, `dynamic-foreign-write-space`, `dynamic-foreign-space` byte-identical; issuance preflight binds the acting principal's foreign READ per read space, naming BOTH `UserLaneGrant` and `SessionLaneGrant` (space lane: current lease sponsor — the rotation "flip" lives here); the dial stage lands as the fourth ORDER entry (`space → user → session → cross-space-read`, implying session per §6); runner-side experimental option (e.g. `serverPrimaryExecutionCrossSpaceReadCandidates`) gating the relax, registered in EXPERIMENTAL_OPTIONS.md with the `experimental-options.test.ts` expected-set update (C3A20) | C3.4, C3.5; sequences after C2.8 or freezes the `classifyStaticActionServability` merge with its builder | foreign-read computation claim-ready at dial ≥ cross-space-read, unservable below; foreign WRITE still rejects at every layer (explicit regression assertions); sponsor without B access ⇒ `foreign-read-access-denied`; after rotation to a B-capable sponsor the action becomes claim-ready (and vice-versa); a session-lane claim gates on the LANE principal's B access, not the sponsor's. C3A4, C3A17, C3A20 |
+| C3.6b | `cross-space-claims-v1` subcapability + per-delivery-cohort gating (decision #5 as amended): negotiation with cohort gating mirroring `#sessionAcceptsClaim` — space-lane cross-space claims gate on the (space, branch) routing-negotiating session cohort; user-lane claims on the lane principal's session cohort; session-lane claims on the owning session's own negotiation only (the C2.3 pattern); fence-and-revoke on non-negotiating attach before the open response (A11 shape) | C3.6 | mixed-version fixture: a non-negotiating attach fences cross-space claims before its open response releases; an unrelated principal's non-negotiating session does NOT fence session-lane claims it can never receive. C3A18 |
+| C3.7 | Claims bind foreign authorization generations; idle revocation + cleanup: issuance records the bound {(space, principal, epoch)} set keyed to the shared `#executionClaimLaneBindings` map both grant kinds populate (C3A17); an `ForeignAuthorizationEpochBump` (or floor bump) covering a bound entry revokes the claim through the existing revoke path — the §7 "revocation while idle" gate — AND unsubscribes the affected demand pairs + tombstones the corresponding mirrored foreign-reader rows, or carries an explicit recorded owner ruling that residual rows/notices are host-trust-level metadata, counted B.4-style (C3A6); re-issuance re-runs the C3.6 preflight under the new epoch (equality compare, unknown fails closed — C3A3) | C3.2, C3.6 | ACL change on B revoking the sponsor's READ revokes the idle cross-space claim (client observes the revoke and fails open); an unrelated principal's ACL change does not; a scoped-lane claim revokes on the LANE principal's B-access loss, not the sponsor's; after the last authorized reader loses access, B emits no further `ForeignStaleReaders` for that demand. C3A3, C3A4, C3A6, C3A17 |
+| C3.8 | Home-apply epoch revalidation (the TOCTOU fence), in-process transport only (C3A8): the accept transaction for a claimed attempt with foreign components revalidates every bound epoch by equality before applying — stale ⇒ the WHOLE attempt settles canonically unserved with a new constant fence cause (`foreign-authorization-stale`), no partial apply, like the engine fence-error family; carries C3A7's forced-binary ruling recorded in this row, not deferred to build: (i) epoch-hold handshake — the apply-time consult is validate-and-pin(attempt, bound epochs) with a bounded TTL, and B's ACL-bump completion awaits release/expiry of covering pins, making §7's "identically over both transports" literally true; or (ii) receive-order fence — a counted divergence metric for post-apply bump arrivals, C3.11 restates §5/§7 as receive-order-relative, and C3.1 carries the single-multiplexed-link ruling; the co-hosted half of the chosen ruling is owned by C3.10b | C3.5, C3.7 | injectable-barrier fixture (C1.10 TOCTOU-backstop pattern — wire ordering cannot force this interleaving) lands the ACL bump between the stamped foreign read and the home apply ⇒ attempt settles `unserved`/`foreign-authorization-stale`, no partial apply, client reruns fail-open; the acceptance states which C3A7 arm it is green under. C3A7, C3A8 |
+| C3.9 | Client vector overlay basis + cross-replica confirmation correlation: overlay basis becomes a per-space vector — home component as today; foreign components captured at overlay creation from the foreign `SpaceReplica`s' confirmed state for the run's foreign read set (plumbed via `StorageManager`); drop rule generalizes per component under the C3A15 coverage relation (absent settlement component vacuously covers; present-but-older never); accepted-data gate stays home-space — the §5 vector divergence window is accepted and COUNTED via a computable comparand: settlement.component(S) > overlay.component(S) at drop time, surfaced as a routeDiagnostics code (C3A19); scalar-only settlements against vector overlays keep today's behavior byte-identically | C3.5 (testable with synthetic settlements, like C1.6) | overlay held while the settlement's B component lags the overlay's B basis, drops when all components cover; both delivery orders (home-data-first, settlement-first) drop exactly once; an overlay held across a reconnect snapshot (frontier-reconstructed settlement) drops exactly once, and settlement-before-claim (early-settlement cache) with a foreign component drops exactly once after merge (C3A14); an authoritative rerun that dropped the foreign read (settlement without the B component) against an overlay holding a B component drops under the vacuous rule (C3A15); divergence counter increments when the revealed value reflects B-state newer than the local B replica; no-foreign-read actions unchanged. C3A14, C3A15, C3A19 |
+| C3.10a | Co-hosted link substrate (the genuinely parallelizable part — C3A8): the C3.1 protocol over a link between two `Server` instances, reusing the hello/session-open machinery with a space→host routing table that gates `openEngine` (fail loudly for a non-hosted space — C3A1) and binds link identity to the routing table so host X may only ever stamp spaces routed to X (C3A13); FIFO per link asserted; explicit low-latency/reliable-link assumptions recorded | C3.1, C3.1b | the C3.1 codec/ordering conformance harness green over the link; no engine is ever opened for a non-hosted space; a stamp for a space not routed to the emitting host is rejected. C3A1, C3A8, C3A13 |
+| C3.10b | Transport parity + reconnect contract: the wake (C3.3a), point-read (C3.4), and fence (C3.8) fixtures parameterized over the link with identical outcomes — owns the co-hosted half of C3A7's ruling, binding the bump-after-consult-answer interleaving explicitly; reconnect per C3A12 — on re-establishment the home host (a) re-registers all subscriptions from current demand under the C3A10 barrier, (b) pulls a dirt resync from the read host (`owner_space` rows with `direct_dirty_seq` > the durable per-link cursor), (c) resyncs the epoch table before any claim re-issuance; the read host drops subscription state for dead link incarnations; loss detection and unilateral home-side revocation of every claim with a bound epoch on the dead link is the home host's named job | C3.3a, C3.4, C3.8, C3.10a | wake/point-read/fence fixtures green over the link under the chosen C3A7 arm; link loss or consult timeout during the fence fails closed (attempt unserved, claims revoke, never partial); kill link → B commits + B bumps an epoch during the outage → reconnect → the stale reader wakes exactly once and re-issuance under the bumped epoch is refused. C3A7, C3A8, C3A11, C3A12 |
+| C3.11 | Two-space gate + parent-doc edits: the §7 C3 gate as a default-run patterns fixture (NOT env-gated — the FB14 lesson), transport-parameterized over the concrete co-hosted harness — in-test second Server linked via C3.10a, client wired through the existing `spaceHostMap` resolver — with an explicit CI-budget clause (own patterns-integration shard or a named runtime ceiling — C3A23); the gate covers BOTH C3.3 halves (C3A5) and C3.6b's mixed-version case (C3A18); the write-path regression list includes the engine's `foreign-space-surface` (C3A2). Docs: README §6.8 replaced by the protocol contract incl. the C3A13 trust statement and co-hosted assumptions; gap-register rows for the geo-distributed transport AND per-stamp signatures; R6 row updated; EXPERIMENTAL_OPTIONS doc-registry follow-through (C3A20); the §5 seam-wording amendment decision #1 promises (host↔host, engines passive) and the §7 sketch-table servability row — the two grep-verified "until C3" sites (C3A21); the C3A19 metadata-channel ruling recorded explicitly (declare-and-count the vector settlement's foreign space-id+seq exposure via a routeDiagnostics counter, or strip foreign components for sessions whose principal lacks READ on that space — owner decision, not shipped silently); doc edits verified in review, and any code blocks added to the spec pass `deno task check-docs` (C3A22 — the scout's "docs-structure CI" does not exist in this repo) | C3.3a/C3.3b, C3.6–C3.10b | the patterns gate green in default CI on both transports: a two-space read chain settles with a vector basis and the client drops the overlay exactly once; idle foreign ACL revocation revokes; read-vs-apply revocation settles unserved; cross-space writes still client-authoritative end-to-end; the mixed-version session fenced. C3A2, C3A5, C3A18, C3A19, C3A21, C3A22, C3A23 |
+
+Build notes (rewritten per C3A17): the scout's named C2 collisions
+(C2.1/C2.2/C2.3/C2.5) all landed — satisfied-and-stale. The live ones:
+**C3.3a sequences after C2.7** or coordinates on `#publishAcceptedCommit`
+(one builder) — C2.7, not C2.6, owns the session-lane wake widening;
+**C3.6 sequences after C2.8** (itself sequenced after C2.9–C2.10) or
+freezes the `classifyStaticActionServability` merge with its builder.
+C3.3a + C3.5 share the `server.ts` publish path — one builder,
+sequential patches, C1-style; C3.2 + C3.7 share the ACL/claims surfaces.
+Before ANY C3 WO enters build, re-emit the table's
+`server.ts`/`engine.ts`/`v2.ts`/`servability.ts` citations against the
+then-current tree and carry the re-pin table as a scout-report appendix
+so build prompts inherit correct lines (C3A17). One line for future
+drift-guarding: `ForeignStaleReaders` is an executor-plane message with
+no session-delivery leg — F6 cohort metadata is deliberately out of
+scope for the foreign wake (C3A24).
+
+Amendment references (C3A1–C3A24) are the adversarial-review amendments,
+archived in full in
+[the review record](../../history/development/design/c3-adversarial-review-2026-07-17.md);
+build prompts must carry the full amendment text for their work orders.
+
+Prerequisite: C3 build starts after the **C2 exit gate** — C2.8, per the
+owner's 2026-07-17 ruling (itself sequenced after C2.9–C2.10). The two
+blockers' protocol-carriage work (C3.1/C3.1b) may prototype earlier — it
+touches no contended C2 surface — but nothing enables outside fixtures:
+every WO lands dark behind the dial's `cross-space-read` stage until
+C3.6, and nothing ships before C3.11's gate.
+
 ### Phase 5 — server-directed handler events and enforced authority
 
 Entry requires trusted-event envelope/replay semantics and CFC integration.
