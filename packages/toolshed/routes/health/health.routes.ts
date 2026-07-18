@@ -53,6 +53,11 @@ export const ServerExecutionPoolMetricsSchema = z.object({
   userLanesClosed: nonNegativeIntegerSchema,
   userLaneReanchors: nonNegativeIntegerSchema,
   activeUserLanes: nonNegativeIntegerSchema,
+  // C2.7 shared-pool session-lane gauges (session-end = lane-end).
+  sessionLanesOpened: nonNegativeIntegerSchema,
+  sessionLanesClosed: nonNegativeIntegerSchema,
+  sessionLaneReopens: nonNegativeIntegerSchema,
+  activeSessionLanes: nonNegativeIntegerSchema,
 }).strict();
 
 export const ServerExecutionControlMetricsSchema = z.object({

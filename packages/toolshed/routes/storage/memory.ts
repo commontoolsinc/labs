@@ -87,6 +87,12 @@ export function startServerExecutionPool(runtime: Runtime): void {
     // context-lattice subcapability (checked live via the control).
     userLaneCandidates:
       runtime.experimental.serverPrimaryExecutionUserRankCandidates === true,
+    // C2.7: session-lane lifecycle layers on the user leg (the C2.5 rank
+    // ladder) plus the host's session-stage dial, checked live via the
+    // control (`executionSessionLanesEnabled`).
+    sessionLaneCandidates:
+      runtime.experimental.serverPrimaryExecutionSessionRankCandidates ===
+        true,
     factory: new DenoSpaceExecutorFactory({
       server: memoryServer,
       apiUrl: new URL(env.API_URL),

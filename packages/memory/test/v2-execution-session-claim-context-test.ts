@@ -445,6 +445,134 @@ Deno.test("session acting-principal WRITE loss at commit time fences lane-write-
   }
 });
 
+// C2.7 (owed fixture, CA7): the SESSION analog of C1.10's lane-write-
+// authority TOCTOU backstop. A claimed session commit can race the ACL
+// reconciliation's lane drain (#drainIneligibleLanes) — the acting
+// principal loses WRITE at the same instant her session lane is being
+// drained. Deterministic wire ordering cannot force that interleaving: the
+// server's awaited reconciliation always drains the lane first, so the wire
+// outcome is `claim-not-live` (pinned in v2-execution-session-lane-grant-
+// test's "acting-principal WRITE loss drains the session lane before a
+// later commit"). The commit-time acting-principal WRITE re-check — which
+// wave A extended to decode the principal from the CANONICAL session key
+// (engine.ts, CA7: without it the re-check fails OPEN for session lanes) —
+// is the backstop for the residual race: a commit that reaches applyCommit
+// while the lane is STILL LIVE. This drives the injectable fence directly
+// at the engine seam (the C1.10 injection technique), holding the lane live
+// so only the WRITE re-check can stop the racing write.
+Deno.test("a session commit racing the ACL-drain reconciliation fences lane-write-authority while the lane is still live (CA7 TOCTOU backstop)", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const claim = claimFor(lease, SESSION_CONTEXT_KEY);
+    // The lane stays live for BOTH commits: laneAuthority is consulted and
+    // returns true, so `lane-generation-stale` never fires and the earlier
+    // liveness gates (`claim-not-live`) are bypassed. The only thing that
+    // can stop the second commit is the acting-principal WRITE re-check.
+    const laneConsulted: string[] = [];
+    const laneLive = (): true => {
+      laneConsulted.push(claim.contextKey);
+      return true;
+    };
+
+    // First commit: the acting principal still holds WRITE — it lands,
+    // proving the lane is live, and writes the LANE session's own instance
+    // (never the sponsor's: applyClaimed binds principal/sessionId to the
+    // sponsor throughout).
+    const landed = applyClaimed(engine, lease, claim, {
+      operations: [sessionInstanceOperation],
+      surfaces: { writes: [SESSION_OUTPUT] },
+      nowMs: nowMs + 1,
+      localSeq: 1,
+      fence: { laneAuthority: laneLive, authorizeActingPrincipal: () => true },
+    });
+    assert(landed.schedulerObservationResults?.[0].status === "kept");
+    assertEquals(
+      Engine.read(engine, {
+        id: SESSION_OUTPUT.id,
+        scope: "session",
+        principal: PRINCIPAL,
+        sessionId: LANE_SESSION_ID,
+      }),
+      { value: 7 },
+    );
+
+    // Second commit: identical live lane, but the ACL reconciliation has
+    // revoked the acting principal's WRITE between the drain-check and this
+    // apply. The lane is NOT yet drained (laneAuthority still true), so the
+    // fence is the WRITE backstop — `lane-write-authority`, not a drain
+    // cause — and no row lands under the draining session's scope.
+    const before = Engine.serverSeq(engine);
+    const racingOutput = address("session", "of:session-claim-output-racing");
+    const writeChecked: string[] = [];
+    assertFenceCause(
+      () =>
+        applyClaimed(engine, lease, claim, {
+          operations: [{
+            op: "set",
+            id: racingOutput.id,
+            scope: "session",
+            value: { value: 99 },
+          }],
+          surfaces: { writes: [racingOutput] },
+          nowMs: nowMs + 2,
+          localSeq: 2,
+          fence: {
+            laneAuthority: laneLive,
+            authorizeActingPrincipal: (_engine, principal) => {
+              writeChecked.push(principal);
+              return false;
+            },
+          },
+        }),
+      "lane-write-authority",
+    );
+    // The lane was consulted for BOTH commits and stayed live throughout —
+    // the race window the drain-based `claim-not-live` path would miss.
+    assert(laneConsulted.length >= 2);
+    assertEquals([...new Set(laneConsulted)], [SESSION_CONTEXT_KEY]);
+    // The re-check decodes the acting principal from the CANONICAL session
+    // key — never the sponsor (a fail-open build never consults at all; a
+    // sponsor-threading build reports SPONSOR here).
+    assertEquals(writeChecked, [PRINCIPAL]);
+    // The racing write never landed and no seq was consumed…
+    assertEquals(Engine.serverSeq(engine), before);
+    assertEquals(
+      Engine.read(engine, {
+        id: racingOutput.id,
+        scope: "session",
+        principal: PRINCIPAL,
+        sessionId: LANE_SESSION_ID,
+      }),
+      null,
+    );
+    // …under ANY of the reachable session scopes: not the sponsor's
+    // executor session, not the sibling.
+    assertEquals(
+      Engine.read(engine, {
+        id: racingOutput.id,
+        scope: "session",
+        principal: SPONSOR,
+        sessionId: EXECUTOR_SESSION_ID,
+      }),
+      null,
+    );
+    assertEquals(
+      Engine.read(engine, {
+        id: racingOutput.id,
+        scope: "session",
+        principal: PRINCIPAL,
+        sessionId: SIBLING_SESSION_ID,
+      }),
+      null,
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
 Deno.test("exact session observation replays stay idempotent after a lane drain (mid-settle)", async () => {
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;

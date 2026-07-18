@@ -661,6 +661,10 @@ Deno.test("shared execution pool unions ten client references into one worker", 
       userLanesClosed: 0,
       userLaneReanchors: 0,
       activeUserLanes: 0,
+      sessionLanesOpened: 0,
+      sessionLanesClosed: 0,
+      sessionLaneReopens: 0,
+      activeSessionLanes: 0,
     });
 
     await control.emit(2, demands.slice(1));
@@ -712,6 +716,10 @@ Deno.test("shared execution pool unions ten client references into one worker", 
       userLanesClosed: 0,
       userLaneReanchors: 0,
       activeUserLanes: 0,
+      sessionLanesOpened: 0,
+      sessionLanesClosed: 0,
+      sessionLaneReopens: 0,
+      activeSessionLanes: 0,
     });
     assertEquals(
       getTimingStatsBreakdown()["execution.pool"]?.hibernate?.count,

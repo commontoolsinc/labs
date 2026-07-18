@@ -34,6 +34,7 @@ import {
   type DenoSpaceExecutorFactoryOptions,
   type ExecutorWorkerLike,
 } from "../src/executor/deno-space-executor.ts";
+import { SharedExecutionPool } from "../src/executor/shared-execution-pool.ts";
 
 const SPACE = "did:key:z6Mk-executor-candidate";
 const BRANCH = "feature" as BranchName;
@@ -2209,6 +2210,390 @@ Deno.test("a session-rank candidate claims end-to-end under a live session lane 
     unsubscribeControl();
     if (executor !== null) await executor.stop();
     if (workerStorage !== null) await workerStorage.close();
+    if (client !== null) await client.close();
+    resetServerPrimaryExecutionClaimRankConfig();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// C2.7 — DEMAND-driven session-lane end-to-end against the REAL server and
+// the REAL pool. Extends the C2.5 e2e above: nothing opens the grant or
+// wires the lane by hand — the SharedExecutionPool derives the session lane
+// from the session's PUBLISHED demand (design §2: "a session's demand
+// implies demand for its own session-context lane; no new demand message is
+// required — the host derives lane demand from the session that published
+// it"), opens the grant on the real server, and delivers the lane on the
+// contextKey-generic wire. Then the design's Bob-votes-Alice's-tally case:
+// a FOREIGN principal's space commit invalidating the session-scoped
+// derivation produces the A4 wake pair for the session lane — [space] +
+// open user lanes + open SESSION lanes, the session lane paired with its
+// OWNING session's demanded pieces — which reaches the Worker's replica
+// half as an accepted-commit notice naming the session-context stale
+// reader; the recompute commits under the lane and settles again to the
+// owning session.
+// ---------------------------------------------------------------------------
+
+Deno.test("published session demand drives the pool to open the session lane; a foreign invalidating commit wakes it and the recompute settles", async () => {
+  const principal = await Identity.fromPassphrase(
+    `executor session demand e2e ${crypto.randomUUID()}`,
+  );
+  const space = principal.did();
+  const FOREIGN_BOB = "did:key:z6Mk-session-demand-bob";
+  const SESSION_PIECE = "space:of:session-demand-piece";
+  const SESSION_ACTION_ID = "action:session-demand-derive";
+  const SOURCE = {
+    space,
+    scope: "space" as const,
+    id: "of:session-demand-source",
+    path: ["value"],
+  };
+  const server = new Server({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: { audience: "did:key:z6Mk-session-demand-e2e" },
+    protocolFlags: {
+      ...REAL_SEAM_FLAGS,
+      serverPrimaryExecutionContextLatticeClaimsV1: true,
+    },
+    acl: { mode: "off", serviceDids: [space] },
+  });
+  setServerPrimaryExecutionClaimRankConfig("session");
+  setPersistentSchedulerStateConfig(true);
+  const events: string[] = [];
+  let client: MemoryClient.Client | null = null;
+  let bobClient: MemoryClient.Client | null = null;
+  let workerStorage: HostStorageManager | null = null;
+  let pool: SharedExecutionPool | null = null;
+  let unsubscribeControl = () => {};
+  try {
+    client = await MemoryClient.connect({
+      transport: MemoryClient.loopback(server),
+      protocolFlags: {
+        ...REAL_SEAM_FLAGS,
+        serverPrimaryExecutionContextLatticeClaimsV1: true,
+      },
+    });
+    const session = await client.mount(
+      space,
+      {},
+      (_space, _session, context) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: { principal: space },
+      }),
+    ) as MemoryClient.SpaceSession & {
+      sessionId: string;
+      transact(commit: unknown): Promise<{ seq: number }>;
+      setExecutionDemand(
+        branch: string,
+        pieces: readonly string[],
+      ): Promise<boolean>;
+      watchSet(watches: unknown[]): Promise<unknown>;
+      subscribeExecutionControl(
+        listener: (event: {
+          type: string;
+          claim?: { contextKey?: string };
+          settlement?: { outcome?: string; claim?: { contextKey?: string } };
+        }) => void,
+      ): () => void;
+    };
+    // First commit flips the pre-launch compatibility capability to WRITE,
+    // which grant creation and the lease demand.
+    await session.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: SOURCE.id,
+        value: { value: "seed" },
+      }],
+    });
+    await session.watchSet([{
+      id: "session-demand-watch",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "of:session-demand-output",
+          scope: "session",
+          selector: { path: [], schema: false },
+        }],
+      },
+    }]);
+    const sessionLane = sessionExecutionContextKey(space, session.sessionId);
+
+    const claimed = Promise.withResolvers<void>();
+    const settlements: string[] = [];
+    let settlementBarrier = Promise.withResolvers<string>();
+    unsubscribeControl = session.subscribeExecutionControl((event) => {
+      events.push(event.type);
+      if (
+        event.type === "session.execution.claim.set" &&
+        event.claim?.contextKey === sessionLane
+      ) {
+        claimed.resolve();
+      }
+      if (
+        event.type === "session.execution.settlement" &&
+        event.settlement?.claim?.contextKey === sessionLane
+      ) {
+        settlements.push(event.settlement?.outcome ?? "unknown");
+        settlementBarrier.resolve(event.settlement?.outcome ?? "unknown");
+      }
+    });
+
+    // The REAL pool over the REAL control surface: session-lane lifecycle
+    // engages through the published-demand snapshot alone.
+    const worker = new FakeWorker();
+    const diagnostics: CandidateDiagnostic[] = [];
+    const factory = new DenoSpaceExecutorFactory({
+      server,
+      apiUrl: new URL("https://toolshed.example/"),
+      protocolFlags: {
+        serverPrimaryExecutionV1: true,
+        serverPrimaryExecutionClaimRoutingV1: true,
+        serverPrimaryExecutionBuiltinPassivityV1: true,
+      },
+      onCandidateDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      createWorker: () => {
+        queueMicrotask(() => worker.boot());
+        return worker;
+      },
+    });
+    pool = new SharedExecutionPool({
+      control: server,
+      factory,
+      userLaneCandidates: true,
+      sessionLaneCandidates: true,
+    });
+    pool.start();
+
+    // Publishing demand is the ONLY driver: the pool acquires the lease,
+    // opens the session (and user) lane grants, and starts the Worker with
+    // the lane partition.
+    await session.setExecutionDemand("", [SESSION_PIECE]);
+    await pool.idle();
+    const grant = (server as unknown as {
+      sessionLaneGrant(
+        space: string,
+        branch: string,
+        principal: string,
+        sessionId: string,
+      ): { contextKey: string } | null;
+    }).sessionLaneGrant(space, "", space, session.sessionId);
+    assertExists(grant, "the pool opened the session lane grant from demand");
+    assertEquals(grant.contextKey, sessionLane);
+    const initialize = worker.messages.find((message) =>
+      (message as { type?: string }).type === "initialize"
+    ) as {
+      port: MessagePort;
+      protocolFlags?: Partial<MemoryProtocolFlags>;
+      lanes?: {
+        contextKey: string;
+        pieces: string[];
+        demandGeneration: number;
+      }[];
+    } | undefined;
+    assertExists(initialize);
+    const wiredSessionLane = initialize.lanes?.find((lane) =>
+      lane.contextKey === sessionLane
+    );
+    assertExists(wiredSessionLane, "the session lane rode the startup wire");
+    assertEquals(wiredSessionLane.pieces, [SESSION_PIECE]);
+
+    // Worker half: emit the session candidate; the host claims it against
+    // the REAL issuance seam (live session lane grant required).
+    const sessionClaimKey: ActionClaimKey = {
+      branch: "",
+      space,
+      contextKey: sessionLane as ActionClaimKey["contextKey"],
+      pieceId: SESSION_PIECE,
+      actionId: SESSION_ACTION_ID,
+      actionKind: "computation",
+      implementationFingerprint: "impl:session-demand",
+      runtimeFingerprint: "runtime:session-demand",
+    };
+    worker.candidate(sessionClaimKey, {
+      demandGeneration: wiredSessionLane.demandGeneration,
+    });
+    await awaitControlBarrier(claimed.promise, "session claim", events);
+    assertEquals(diagnostics, []);
+    const activation = worker.messages.find((message) =>
+      (message as { type?: string }).type === "run-claimed-action"
+    ) as { claim: ExecutionClaim } | undefined;
+    assertExists(activation);
+    assertEquals(activation.claim.contextKey, sessionLane);
+
+    // The Worker's replica half over the REAL provider channel, watching
+    // for the accepted-commit notice that names the session-context stale
+    // reader (the A4 wake pair reaching the Worker).
+    const woke = Promise.withResolvers<void>();
+    const sourceAction = {};
+    const router = createExecutorActionTransactionRouter({
+      servedSpace: space as MemorySpace,
+      branch: "",
+      userRankCandidates: true,
+      sessionRankCandidates: true,
+      lanePrincipal: space,
+      openUserLaneKeys: () => [sessionLane],
+      claimForAction: (_action, lane) =>
+        lane === sessionLane ? activation.claim : undefined,
+      onCandidate: () => {},
+    });
+    workerStorage = HostStorageManager.connect({
+      port: initialize.port,
+      principal: space as MemorySpace,
+      space: space as MemorySpace,
+      branch: "",
+      protocolFlags: initialize.protocolFlags as never,
+      shadowWrites: true,
+      actionTransactionRouter: router,
+      executionLaneForAction: (action) =>
+        action === sourceAction ? sessionLane as never : undefined,
+      onAcceptedCommitIntegrated(notice) {
+        if (
+          notice.staleDemandedReaders.some((reader) =>
+            reader.executionContextKey === sessionLane &&
+            reader.actionId === SESSION_ACTION_ID
+          )
+        ) {
+          woke.resolve();
+        }
+      },
+    });
+    const sessionOut = {
+      space,
+      scope: "session" as const,
+      id: "of:session-demand-output",
+      path: ["value"],
+    };
+    const observationFor = () => ({
+      version: 2 as const,
+      ownerSpace: space,
+      branch: "",
+      pieceId: SESSION_PIECE,
+      processGeneration: 1,
+      actionId: SESSION_ACTION_ID,
+      actionKind: "computation" as const,
+      implementationFingerprint: "impl:session-demand",
+      runtimeFingerprint: "runtime:session-demand",
+      observedAtSeq: 0,
+      transactionKind: "action-run" as const,
+      reads: [SOURCE],
+      shallowReads: [],
+      actualChangedWrites: [sessionOut],
+      currentKnownWrites: [sessionOut],
+      materializerWriteEnvelopes: [],
+      completeActionScopeSummary: {
+        version: 1 as const,
+        complete: true as const,
+        implementationFingerprint: "impl:session-demand",
+        runtimeFingerprint: "runtime:session-demand",
+        piece: {
+          space,
+          scope: "space" as const,
+          id: SESSION_PIECE.slice("space:".length),
+          path: ["value"],
+        },
+        reads: [SOURCE],
+        writes: [sessionOut],
+        materializerWriteEnvelopes: [],
+        directOutputs: [sessionOut],
+      },
+      status: "success" as const,
+    });
+    const provider = workerStorage.open(space as MemorySpace);
+    const commitUnderLane = async (value: number) => {
+      const committed = await workerStorage!.runWithExecutionLane(
+        space as MemorySpace,
+        sessionLane as never,
+        () =>
+          provider.replica.commitNative!(
+            {
+              operations: [{
+                op: "set",
+                id: "of:session-demand-output" as never,
+                type: "application/json",
+                scope: "session",
+                value: { value },
+              }],
+              preconditions: [],
+              schedulerObservation: observationFor(),
+            } as never,
+            { sourceAction, getReadActivities: () => [] } as never,
+          ),
+      );
+      assertEquals(committed.error, undefined);
+    };
+    // First claimed run: session-context observation on the demanded piece
+    // reading the shared source — claim, commit, settlement, delivered to
+    // the owning session.
+    await commitUnderLane(42);
+    assertEquals(
+      await awaitControlBarrier(
+        settlementBarrier.promise,
+        "first session settlement",
+        events,
+      ),
+      "committed",
+    );
+
+    // Bob votes in Alice's tally: a FOREIGN principal's space commit to the
+    // read source invalidates the session-scoped derivation. The A4 wake
+    // pair for the session lane forms server-side and reaches the Worker's
+    // replica half as the session-context stale reader.
+    settlementBarrier = Promise.withResolvers<string>();
+    bobClient = await MemoryClient.connect({
+      transport: MemoryClient.loopback(server),
+      protocolFlags: {
+        ...REAL_SEAM_FLAGS,
+        serverPrimaryExecutionContextLatticeClaimsV1: true,
+      },
+    });
+    const bob = await bobClient.mount(
+      space,
+      {},
+      (_space, _session, context) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: { principal: FOREIGN_BOB },
+      }),
+    ) as typeof session;
+    await bob.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: SOURCE.id,
+        value: { value: "bob-voted" },
+      }],
+    });
+    await awaitControlBarrier(woke.promise, "session lane wake", events);
+
+    // The recompute: the woken lane re-runs and its commit settles again to
+    // the owning session.
+    await commitUnderLane(43);
+    assertEquals(
+      await awaitControlBarrier(
+        settlementBarrier.promise,
+        "recompute settlement",
+        events,
+      ),
+      "committed",
+    );
+    assertEquals(settlements, ["committed", "committed"]);
+  } finally {
+    unsubscribeControl();
+    if (pool !== null) await pool.close();
+    if (workerStorage !== null) await workerStorage.close();
+    if (bobClient !== null) await bobClient.close();
     if (client !== null) await client.close();
     resetServerPrimaryExecutionClaimRankConfig();
     resetPersistentSchedulerStateConfig();

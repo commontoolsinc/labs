@@ -5,6 +5,7 @@ import type {
   ExecutionDemandListener,
   ExecutionDemandSnapshot,
   ExecutionLeaseHandle,
+  SessionLaneGrant,
   UserLaneGrant,
 } from "@commonfabric/memory/v2/server";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -51,16 +52,36 @@ export interface ExecutionPoolControl {
   ): Promise<UserLaneGrant>;
   renewUserLaneGrant?(grant: UserLaneGrant): Promise<UserLaneGrant | null>;
   closeUserLaneGrant?(grant: UserLaneGrant): boolean;
+  /** C2.7 session-lane lifecycle surface (the C2.3 wire). Optional like the
+   * user surface: absence — or host session dials off — keeps the pool's
+   * session-lane paths inert. There is deliberately NO session analog of
+   * the cohort predicate: a session lane is gated only on ITS OWN session's
+   * negotiation (C2.3 — a session claim never suppresses a sibling), and
+   * the host's grant admission enforces it. */
+  executionSessionLanesEnabled?(): boolean;
+  openSessionLaneGrant?(
+    space: string,
+    branch: BranchName,
+    principal: string,
+    sessionId: string,
+  ): Promise<SessionLaneGrant>;
+  renewSessionLaneGrant?(
+    grant: SessionLaneGrant,
+  ): Promise<SessionLaneGrant | null>;
+  closeSessionLaneGrant?(grant: SessionLaneGrant): boolean;
 }
 
-/** One user lane's slice of the lane-partitioned demand wire (A24). The
- * server-side `laneGeneration` stays host-internal; the executor host mints
- * the per-lane wire demand generation itself. */
+/** One lane's slice of the lane-partitioned demand wire (A24, session
+ * lanes since C2.7). The server-side `laneGeneration` stays host-internal;
+ * the executor host mints the per-lane wire demand generation itself. */
 export interface SpaceExecutorLaneDemand {
-  /** Canonical lane context key (`user:<percent-encoded-did>`). */
+  /** Canonical lane context key (`user:<percent-encoded-did>` or
+   * `session:<percent-encoded-did>:<percent-encoded-session-id>`) — always
+   * the GRANT's key; the pool never fabricates one (CA9). */
   readonly contextKey: string;
-  /** The lane principal's demand aggregated across ALL of that principal's
-   * sessions (design §2) — never the space union. */
+  /** The lane's demand slice — for a USER lane the principal's demand
+   * aggregated across ALL of that principal's sessions; for a SESSION lane
+   * ONLY the owning session's demand (design §2). Never the space union. */
   readonly pieces: readonly string[];
   /** One-shot: the lane re-anchored under a new laneGeneration, so the
    * Worker must cancel this lane's claimed attempts and fence in-flight
@@ -136,6 +157,11 @@ export interface SharedExecutionPoolOptions {
    * issuance rank dial, and the context-lattice subcapability align;
    * default off keeps every lane path inert. */
   userLaneCandidates?: boolean;
+  /** Runner-side leg of the C2 session dial (serverPrimaryExecution-
+   * SessionRankCandidates). Ladder semantics like the router (C2.5):
+   * session lanes additionally require the user leg above, plus the host's
+   * session-stage dial (`executionSessionLanesEnabled`). Default off. */
+  sessionLaneCandidates?: boolean;
   /** Mandatory Phase-1 interlock. Errors fail closed. */
   legacyBackgroundActive?: (
     space: string,
@@ -214,6 +240,17 @@ export interface ExecutionPoolMetricsSnapshot {
   readonly userLaneReanchors: number;
   /** User lanes currently open across all slots. */
   readonly activeUserLanes: number;
+  /** Session lane grants opened by this pool (C2.7 lifecycle). */
+  readonly sessionLanesOpened: number;
+  /** Session lanes fully drained: the owning session departed (session-end
+   * = lane-end), authority loss, or pool shutdown. */
+  readonly sessionLanesClosed: number;
+  /** Session lanes reopened under a NEW laneGeneration after a host-side
+   * drain with the SAME session's surviving demand (reconnect catch-up —
+   * session lanes have no re-anchor path, so this is never an adoption). */
+  readonly sessionLaneReopens: number;
+  /** Session lanes currently open across all slots. */
+  readonly activeSessionLanes: number;
 }
 
 /** Pool-side record of one open user lane. `resetPending` is the one-shot
@@ -221,6 +258,15 @@ export interface ExecutionPoolMetricsSnapshot {
  * executor. */
 type SlotUserLane = {
   grant: UserLaneGrant;
+  pieces: string[];
+  resetPending: boolean;
+};
+
+/** Pool-side record of one open session lane (C2.7), keyed by the owning
+ * session's id — the one identity the authenticated demand row carries.
+ * The canonical contextKey lives on the GRANT only (CA9). */
+type SlotSessionLane = {
+  grant: SessionLaneGrant;
   pieces: string[];
   resetPending: boolean;
 };
@@ -252,6 +298,9 @@ type Slot = {
   /** Open user lanes keyed by lane principal (C1.8). Grants survive Worker
    * generation replacement; the wire re-delivers them at startup. */
   userLanes: Map<string, SlotUserLane>;
+  /** Open session lanes keyed by owning session id (C2.7). Same
+   * generation-replacement survival as user lanes. */
+  sessionLanes: Map<string, SlotSessionLane>;
   /** Whether the CURRENT Worker generation has ever been sent a lane wire.
    * Until then, lane-less demand stays byte-identical to the pre-lane
    * shape (`lanes` omitted, never `[]`). */
@@ -282,6 +331,7 @@ export class SharedExecutionPool {
   readonly #control: ExecutionPoolControl;
   readonly #factory: SpaceExecutorFactory;
   readonly #userLaneCandidates: boolean;
+  readonly #sessionLaneCandidates: boolean;
   readonly #legacyBackgroundActive: NonNullable<
     SharedExecutionPoolOptions["legacyBackgroundActive"]
   >;
@@ -320,6 +370,9 @@ export class SharedExecutionPool {
     userLanesOpened: 0,
     userLanesClosed: 0,
     userLaneReanchors: 0,
+    sessionLanesOpened: 0,
+    sessionLanesClosed: 0,
+    sessionLaneReopens: 0,
   };
   #unsubscribe: (() => void) | null = null;
   #closed = false;
@@ -328,6 +381,7 @@ export class SharedExecutionPool {
     this.#control = options.control;
     this.#factory = options.factory;
     this.#userLaneCandidates = options.userLaneCandidates === true;
+    this.#sessionLaneCandidates = options.sessionLaneCandidates === true;
     const legacyBackgroundActive = options.legacyBackgroundActive ??
       options.control.legacyBackgroundActive?.bind(options.control);
     this.#legacyBackgroundActive = legacyBackgroundActive ?? (() => true);
@@ -384,6 +438,7 @@ export class SharedExecutionPool {
     let activeWorkers = 0;
     let activeDemands = 0;
     let activeUserLanes = 0;
+    let activeSessionLanes = 0;
     let schedulerRuns = this.#retiredExecutionPlacement.schedulerRuns;
     let asyncRequests = this.#retiredExecutionPlacement.asyncRequests;
     let shadowActionTransactions = this.#retiredExecutionPlacement
@@ -394,6 +449,7 @@ export class SharedExecutionPool {
       states[slot.state]++;
       activeDemands += slot.demands.length;
       activeUserLanes += slot.userLanes.size;
+      activeSessionLanes += slot.sessionLanes.size;
       if (slot.executor !== null) {
         activeWorkers++;
         const placement = this.#readExecutionMetrics(slot.executor);
@@ -409,6 +465,7 @@ export class SharedExecutionPool {
       activeWorkers,
       activeDemands,
       activeUserLanes,
+      activeSessionLanes,
       states: Object.freeze(states),
       executionPlacement: Object.freeze({
         schedulerRuns,
@@ -477,6 +534,7 @@ export class SharedExecutionPool {
         await this.#shutdown(slot, false);
         // Pool teardown is a full drain for every lane it opened.
         this.#closeAllUserLanes(slot);
+        this.#closeAllSessionLanes(slot);
       })
     );
     await Promise.allSettled(stops);
@@ -511,6 +569,7 @@ export class SharedExecutionPool {
         pendingWakeStartedAt: null,
         acceptedWakeQueued: false,
         userLanes: new Map(),
+        sessionLanes: new Map(),
         lanesWired: false,
         tail: Promise.resolve(),
       };
@@ -655,6 +714,29 @@ export class SharedExecutionPool {
     }
   }
 
+  /** The session legs of the lane-inertness pin (C2.7): the session runner
+   * dial layered on the user runner dial (C2.5's rank ladder), the session
+   * control surface, and the host's own session-stage dial. Any leg missing
+   * keeps session-lane state empty and the wire unchanged. */
+  #sessionLanesEnabled(): boolean {
+    if (!this.#sessionLaneCandidates || !this.#userLaneCandidates) {
+      return false;
+    }
+    const control = this.#control;
+    if (
+      control.openSessionLaneGrant === undefined ||
+      control.renewSessionLaneGrant === undefined
+    ) {
+      return false;
+    }
+    try {
+      return control.executionSessionLanesEnabled?.() === true;
+    } catch (error) {
+      console.warn("session-lane enablement probe failed", error);
+      return false;
+    }
+  }
+
   /** Design §2 aggregation: one desired lane per principal that has >= 1
    * negotiating demand row, pieces unioned across ALL of that principal's
    * sessions, admitted only when C1.7's principal-wide cohort predicate
@@ -689,6 +771,48 @@ export class SharedExecutionPool {
     return desired;
   }
 
+  /** Design §2 at session rank (C2.7): one desired lane per session that
+   * published demand on a claims-v1-negotiating attach, pieces scoped to
+   * ONLY that session's own rows — this is the demand-plane mirror of
+   * C2.6's delivery narrowing (session-lane demand routes only where it
+   * belongs; sibling sessions and the principal aggregate never stand in).
+   * Deliberately NO cohort gate: the host admits a session lane on the
+   * owning session's own negotiation (C2.3). Keys are the authenticated
+   * rows' sessionIds — the pool never fabricates a context key (CA9). */
+  #desiredSessionLanes(
+    slot: Slot,
+  ): Map<string, { principal: string; pieces: string[] }> {
+    const desired = new Map<string, { principal: string; pieces: string[] }>();
+    if (!this.#sessionLanesEnabled()) return desired;
+    const bySession = new Map<
+      string,
+      { principal: string; pieces: Set<string> }
+    >();
+    for (const demand of slot.demands) {
+      if (!demand.negotiatesContextLatticeClaims) continue;
+      if (demand.pieces.length === 0) continue;
+      const entry = bySession.get(demand.sessionId);
+      if (entry === undefined) {
+        bySession.set(demand.sessionId, {
+          principal: demand.principal,
+          pieces: new Set(demand.pieces),
+        });
+        continue;
+      }
+      // A session is bound to one principal for its lifetime; a row naming
+      // another principal under the same sessionId is stale — skip it.
+      if (entry.principal !== demand.principal) continue;
+      for (const piece of demand.pieces) entry.pieces.add(piece);
+    }
+    for (const [sessionId, entry] of bySession) {
+      desired.set(sessionId, {
+        principal: entry.principal,
+        pieces: [...entry.pieces].sort(),
+      });
+    }
+    return desired;
+  }
+
   #closeUserLane(slot: Slot, principal: string, lane: SlotUserLane): void {
     slot.userLanes.delete(principal);
     this.#metrics.userLanesClosed++;
@@ -702,6 +826,22 @@ export class SharedExecutionPool {
   #closeAllUserLanes(slot: Slot): void {
     for (const [principal, lane] of [...slot.userLanes]) {
       this.#closeUserLane(slot, principal, lane);
+    }
+  }
+
+  #closeSessionLane(slot: Slot, sessionId: string, lane: SlotSessionLane): void {
+    slot.sessionLanes.delete(sessionId);
+    this.#metrics.sessionLanesClosed++;
+    try {
+      this.#control.closeSessionLaneGrant?.(lane.grant);
+    } catch (error) {
+      console.warn("session lane close failed", error);
+    }
+  }
+
+  #closeAllSessionLanes(slot: Slot): void {
+    for (const [sessionId, lane] of [...slot.sessionLanes]) {
+      this.#closeSessionLane(slot, sessionId, lane);
     }
   }
 
@@ -768,16 +908,103 @@ export class SharedExecutionPool {
     return changed;
   }
 
-  /** Lane wire for the next setDemand/start. `undefined` until the current
-   * Worker generation has seen a lane, so dial-off and no-lane paths stay
-   * byte-identical to the pre-lane protocol. */
-  #userLaneWire(
+  /** Drive slot session-lane state toward the desired set (C2.7, the
+   * session mirror of #reconcileUserLanes): close departed sessions' lanes
+   * (session-end = lane-end — a full drain), renew surviving grants, and
+   * reopen a lane whose grant the host drained while the SAME session's
+   * demand survives — the reopen lands a NEW laneGeneration (reconnect
+   * catch-up; session lanes have no re-anchor, so this is never a sibling
+   * adoption) and its next wire carries the one-shot resetClaims. Returns
+   * whether the lane wire must be re-sent. */
+  async #reconcileSessionLanes(slot: Slot): Promise<boolean> {
+    const desired = this.#desiredSessionLanes(slot);
+    let changed = false;
+    for (const [sessionId, lane] of [...slot.sessionLanes]) {
+      if (!desired.has(sessionId)) {
+        this.#closeSessionLane(slot, sessionId, lane);
+        changed = true;
+      }
+    }
+    for (const [sessionId, { principal, pieces }] of desired) {
+      const existing = slot.sessionLanes.get(sessionId);
+      if (existing !== undefined) {
+        let live: SessionLaneGrant | null = null;
+        try {
+          live = await this.#control.renewSessionLaneGrant!(existing.grant);
+        } catch (error) {
+          console.warn("session lane renewal failed", error);
+        }
+        if (live !== null) {
+          if (!sameStrings(existing.pieces, pieces)) {
+            existing.pieces = pieces;
+            changed = true;
+          }
+          continue;
+        }
+        // The host drained this incarnation (disconnect, WRITE loss, or a
+        // non-negotiating re-attach). Surviving demand reopens below.
+        slot.sessionLanes.delete(sessionId);
+        changed = true;
+      }
+      let grant: SessionLaneGrant;
+      try {
+        grant = await this.#control.openSessionLaneGrant!(
+          slot.space,
+          slot.branch,
+          principal,
+          sessionId,
+        );
+      } catch (error) {
+        // The session is no longer live-connected, lost WRITE, or stopped
+        // negotiating: the lane stays parked until a later snapshot
+        // retries (CA13: no grant means no wake pair — dirt accumulates
+        // durably until the session resumes).
+        logger.debug?.("session lane open declined", { sessionId, error });
+        continue;
+      }
+      this.#metrics.sessionLanesOpened++;
+      if (existing !== undefined) this.#metrics.sessionLaneReopens++;
+      slot.sessionLanes.set(sessionId, {
+        grant,
+        pieces,
+        // A lane re-entering the SAME Worker generation may leave stale
+        // claimed attempts and in-flight candidates from its previous
+        // incarnation; fence them. A fresh Worker resets trivially.
+        resetPending: true,
+      });
+      changed = true;
+    }
+    return changed;
+  }
+
+  /** Reconcile every lane rank the dials admit. Both reconciliations must
+   * run (no short-circuit): each owns its own grants. */
+  async #reconcileLanes(slot: Slot): Promise<boolean> {
+    const userChanged = await this.#reconcileUserLanes(slot);
+    const sessionChanged = await this.#reconcileSessionLanes(slot);
+    return userChanged || sessionChanged;
+  }
+
+  /** Lane wire for the next setDemand/start — user AND session lanes on
+   * the one contextKey-generic wire (C2.7; the Worker's lane machinery is
+   * rank-blind). `undefined` until the current Worker generation has seen
+   * a lane, so dial-off and no-lane paths stay byte-identical to the
+   * pre-lane protocol. */
+  #laneWire(
     slot: Slot,
   ): readonly SpaceExecutorLaneDemand[] | undefined {
-    if (slot.userLanes.size === 0 && !slot.lanesWired) return undefined;
-    return [...slot.userLanes.values()]
+    if (
+      slot.userLanes.size === 0 && slot.sessionLanes.size === 0 &&
+      !slot.lanesWired
+    ) {
+      return undefined;
+    }
+    return [
+      ...slot.userLanes.values(),
+      ...slot.sessionLanes.values(),
+    ]
       .map((lane) => ({
-        contextKey: lane.grant.contextKey,
+        contextKey: lane.grant.contextKey as string,
         pieces: [...lane.pieces],
         ...(lane.resetPending ? { resetClaims: true } : {}),
       }))
@@ -785,8 +1012,9 @@ export class SharedExecutionPool {
   }
 
   /** The one-shot resetClaims flags were delivered on a successful wire. */
-  #clearUserLaneResets(slot: Slot): void {
+  #clearLaneResets(slot: Slot): void {
     for (const lane of slot.userLanes.values()) lane.resetPending = false;
+    for (const lane of slot.sessionLanes.values()) lane.resetPending = false;
   }
 
   async #reconcile(slot: Slot): Promise<void> {
@@ -797,10 +1025,12 @@ export class SharedExecutionPool {
       const hibernateStartedAt = performance.now();
       this.#cancelBackoff(slot);
       const shutdown = await this.#shutdown(slot, false);
-      // Full drain (C1.8 lifecycle): the last demanding session departed (or
-      // the pool is closing). The bounded settle above drained lane work;
-      // now the grants close so no host-side lane authority outlives demand.
+      // Full drain (C1.8 lifecycle, session lanes since C2.7): the last
+      // demanding session departed (or the pool is closing). The bounded
+      // settle above drained lane work; now the grants close so no
+      // host-side lane authority outlives demand.
       this.#closeAllUserLanes(slot);
+      this.#closeAllSessionLanes(slot);
       if (shutdown.graceful && slot.demands.length === 0) {
         this.#metrics.demandEmptyHibernations++;
         // Fixed-key duration from demand-empty reconciliation through the
@@ -862,10 +1092,10 @@ export class SharedExecutionPool {
         await this.#shutdown(slot, true);
       } else {
         slot.lease = renewed;
-        const lanesChanged = await this.#reconcileUserLanes(slot);
+        const lanesChanged = await this.#reconcileLanes(slot);
         if (!sameStrings(slot.pieces, nextPieces) || lanesChanged) {
           const demandStartedAt = performance.now();
-          const lanes = this.#userLaneWire(slot);
+          const lanes = this.#laneWire(slot);
           try {
             await slot.executor.setDemand(nextPieces, lanes);
           } finally {
@@ -873,7 +1103,7 @@ export class SharedExecutionPool {
           }
           slot.pieces = nextPieces;
           if (lanes !== undefined) slot.lanesWired = true;
-          this.#clearUserLaneResets(slot);
+          this.#clearLaneResets(slot);
         }
         slot.state = "live";
         return;
@@ -917,8 +1147,8 @@ export class SharedExecutionPool {
     // the fresh lease and the new Worker generation receives the current
     // lane partition at startup. A fresh generation has no stale lane
     // claims, so pending resets are consumed by the start options.
-    await this.#reconcileUserLanes(slot);
-    const startLanes = this.#userLaneWire(slot);
+    await this.#reconcileLanes(slot);
+    const startLanes = this.#laneWire(slot);
     const token = {};
     slot.generationToken = token;
     slot.crashToken = null;
@@ -980,7 +1210,7 @@ export class SharedExecutionPool {
       slot.executor = executor;
       slot.pieces = nextPieces;
       slot.lanesWired = startLanes !== undefined;
-      this.#clearUserLaneResets(slot);
+      this.#clearLaneResets(slot);
       slot.state = "live";
       startOutcome = "live";
       this.#metrics.workersStarted++;

@@ -4373,6 +4373,18 @@ export class Server {
       .sort((left, right) => left.contextKey.localeCompare(right.contextKey));
   }
 
+  /** Open SESSION lane grants on one (space, branch) — the C2.7 leg of the
+   * A4 wake-widening input, ordered like the user grants. Each grant pairs
+   * with ONLY its owning session's demand in the wake lookup. */
+  #openSessionLaneGrantsFor(
+    space: string,
+    branch: BranchName,
+  ): SessionLaneGrant[] {
+    return [...this.#sessionLaneGrants.values()]
+      .filter((grant) => grant.space === space && grant.branch === branch)
+      .sort((left, right) => left.contextKey.localeCompare(right.contextKey));
+  }
+
   /** A2 third leg (C1.8, extended over session lanes by C2.3): after an ACL
    * commit, fence and drain user AND session lanes whose principal lost
    * WRITE or whose anchor session was removed by the ACL reconciliation.
@@ -5119,11 +5131,17 @@ export class Server {
         ),
       ),
     ];
-    // A4 wake widening (C1.8): the lookup runs once per lane — the space
-    // lane against the union of all demand, plus every OPEN lane grant on
-    // this (space, branch) against ONLY that principal's aggregated demand.
-    // A parked principal (rows but no lane grant) gets no lane entry, so its
-    // rows accumulate dirt without waking anything (design §4).
+    // A4 wake widening (C1.8, session lanes since C2.7): the lookup runs
+    // once per lane — the space lane against the union of all demand, plus
+    // every OPEN lane grant on this (space, branch) against its own demand
+    // slice: a USER lane against ONLY that principal's aggregated demand, a
+    // SESSION lane against ONLY its owning session's demand (design §2 — a
+    // session's demand implies demand for its own lane; sibling sessions
+    // and the principal's aggregate never stand in). A parked principal or
+    // disconnected session (rows but no lane grant) gets no lane entry, so
+    // its rows accumulate dirt without waking anything — the CA13 parked
+    // skip is EMERGENT from session-end = lane-end (C2.3) plus this
+    // grant-keyed pairing; there is no parked-lane state to consult.
     const laneLookups: {
       contextKey: Engine.SchedulerExecutionContextKey;
       pieces: string[];
@@ -5138,6 +5156,28 @@ export class Server {
         ...new Set(
           branchDemands
             .filter((demand) => demand.principal === grant.principal)
+            .flatMap((demand) =>
+              demand.pieces.map(canonicalSchedulerPieceIdForDemandRoot)
+            ),
+        ),
+      ];
+      if (pieces.length > 0) {
+        laneLookups.push({ contextKey: grant.contextKey, pieces });
+      }
+    }
+    for (
+      const grant of this.#openSessionLaneGrantsFor(
+        event.space,
+        event.commit.branch,
+      )
+    ) {
+      const pieces = [
+        ...new Set(
+          branchDemands
+            .filter((demand) =>
+              demand.sessionId === grant.sessionId &&
+              demand.principal === grant.principal
+            )
             .flatMap((demand) =>
               demand.pieces.map(canonicalSchedulerPieceIdForDemandRoot)
             ),

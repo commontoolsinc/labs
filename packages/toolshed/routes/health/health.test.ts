@@ -54,6 +54,10 @@ const poolMetrics = {
   userLanesClosed: 0,
   userLaneReanchors: 0,
   activeUserLanes: 0,
+  sessionLanesOpened: 0,
+  sessionLanesClosed: 0,
+  sessionLaneReopens: 0,
+  activeSessionLanes: 0,
 };
 
 const controlMetrics = {

@@ -9,6 +9,8 @@ import {
   canonicalSchedulerPieceIdForDemandRoot,
   type ExecutionClaim,
   executionClaimIncarnationKey,
+  parseSessionExecutionContextKey,
+  principalOfUserContextKey,
   userExecutionContextKey,
   type WireMemoryProtocolFlags,
 } from "@commonfabric/memory/v2";
@@ -137,11 +139,13 @@ const laneDemands = new Map<
   string,
   { pieces: Set<string>; schedulerPieces: Set<string>; generation: number }
 >();
-/** Lane-independent user-rank candidate templates (C1.9c), keyed by
- * (pieceId, actionId): when a lane opens (or re-anchors) AFTER discovery
- * proved an action user-rank servable, the Worker synthesizes that lane's
- * candidate from the recorded template instead of waiting for the next
- * rerun of the action. */
+/** Lane-independent scoped-rank candidate templates (C1.9c; session rank
+ * rides the same map since C2.7), keyed by (pieceId, actionId): when a lane
+ * opens (or re-anchors) AFTER discovery proved an action scoped-rank
+ * servable, the Worker synthesizes that lane's candidate from the recorded
+ * template instead of waiting for the next rerun of the action. The
+ * template's contextKey records the rank the action classified at; the
+ * late-lane emission only synthesizes onto lanes of that SAME rank (CA9). */
 const userCandidateTemplates = new Map<
   string,
   { action: Action; claimKey: ActionClaimKey }
@@ -479,14 +483,32 @@ const applyLaneDemands = (lanes: WireLaneDemand[] | undefined): void => {
   }
 };
 
-/** Emit recorded user-rank candidates for one lane (C1.9c): every template
- * whose piece the lane's demand slice covers, keyed by the lane's canonical
- * contextKey and carrying the lane's OWN wire generation (A24). The host
- * dedupes re-emissions against its live-claim map. */
+/** Canonical rank of one lane context key — the Worker-side twin of the
+ * router's laneKeyRank (CA9: candidate lanes ⊆ action rank). */
+const laneContextRank = (key: string): "user" | "session" | undefined => {
+  if (principalOfUserContextKey(key) !== undefined) return "user";
+  if (parseSessionExecutionContextKey(key) !== undefined) return "session";
+  return undefined;
+};
+
+/** Emit recorded scoped-rank candidates for one lane (C1.9c, session lanes
+ * since C2.7): every template of the LANE'S OWN RANK whose piece the lane's
+ * demand slice covers, keyed by the lane's canonical contextKey and
+ * carrying the lane's OWN wire generation (A24). The rank guard is
+ * load-bearing once user and session lanes share this wire (C2.7): a
+ * template records the rank its action CLASSIFIED at, and synthesizing it
+ * onto a lane of another rank would pair a user-rank action with a session
+ * lane (or vice versa) — the CA9 mixed-rank pairing the router's
+ * candidateLaneKeys filter exists to prevent; the host would reject the
+ * claim against chain-compatible issuance and churn. The host dedupes
+ * re-emissions against its live-claim map. */
 const emitTemplateCandidatesForLane = (contextKey: string): void => {
   const lane = laneDemands.get(contextKey);
   if (lane === undefined) return;
+  const laneRank = laneContextRank(contextKey);
+  if (laneRank === undefined) return;
   for (const template of userCandidateTemplates.values()) {
+    if (laneContextRank(template.claimKey.contextKey) !== laneRank) continue;
     if (!lane.schedulerPieces.has(template.claimKey.pieceId)) continue;
     postCandidate(
       {
