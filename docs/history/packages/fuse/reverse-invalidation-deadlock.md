@@ -162,10 +162,16 @@ running inline. Only the reverse-invalidation calls, which take a lock that a
 request can hold, needed to move off the isolate thread.
 
 One lifetime detail: because an invalidation can now still be running on an FFI
-thread when the daemon shuts down, `main()` awaits the last flush before it
-destroys the session, so a notify call cannot dereference freed session memory.
-By shutdown the session has been unmounted, which releases any blocked notify,
-so the wait resolves promptly.
+thread when the daemon shuts down, a notify call must not touch the session
+after `fuse_session_destroy` frees it. Before destroying the session, `main()`
+closes the queue, cancels any pending flush timer, and awaits the flush still
+running. Closing refuses new invalidations and stops an in-flight flush after
+its current call. It does not rely on the session already being unmounted: only
+the SIGINT/SIGTERM handler unmounts, yet the session loop can also exit on an
+external unmount or a kernel abort with no signal, so the queue is closed on the
+shutdown path itself rather than through that handler. The one notify still in
+flight is released by the torn-down connection that made the loop exit, so the
+await resolves without blocking.
 
 `packages/fuse/platform.test.ts` guards the invariant: the reverse-invalidation
 symbols must be nonblocking and the reply functions must not be, so a later edit
