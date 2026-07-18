@@ -4,7 +4,7 @@
     "check": "deno check .",
     "just-test": {
       "description": "Run unit tests",
-      "command": "deno test --allow-read --allow-write --allow-net --allow-ffi --allow-env"
+      "command": "deno test --allow-read --allow-write --allow-net --allow-ffi --allow-env --allow-run"
     },
     "test": {
       "description": "Type check & run tests",
