@@ -198,6 +198,11 @@ One line per archived document; each document's header carries the fuller
   — root cause of the FUSE daemon hang that flaked the CLI FUSE integration
   suite: synchronous reverse invalidation deadlocking the request thread,
   July 2026.
+- [2026-07-fuse-t-integration-flake-accumulated-nfs-state.md](packages/fuse/2026-07-fuse-t-integration-flake-accumulated-nfs-state.md)
+  — a FUSE-T integration-suite failure that looked like a #4811 daemon
+  regression but was accumulated stale kernel NFS mounts from SIGKILL churn;
+  directory visibility works via mtime plus the NFS attribute-cache bound, not
+  `notify_inval_entry`, July 2026.
 - [settle-wave-2026-03-findings.md](development/debugging/settle-wave-2026-03-findings.md)
   — March 2026 settle-wave measurements.
 - [2026-07-cf-profile-capture-exit-130.md](development/debugging/2026-07-cf-profile-capture-exit-130.md)

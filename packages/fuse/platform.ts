@@ -126,8 +126,9 @@ export const COMMON_SYMBOLS = {
   // that thread inside the kernel behind a lookup only that thread can complete,
   // and the mount would stop serving. Running the notify off the isolate thread
   // keeps the request path free to answer the lookup, which releases the read
-  // lock and lets the invalidation proceed. FUSE-T on macOS returns success
-  // from both without acting, so the thread choice is immaterial there.
+  // lock and lets the invalidation proceed. FUSE-T on macOS acts on neither
+  // call, whether it returns success or an ENOTCONN error, so the thread
+  // choice is immaterial there.
   fuse_lowlevel_notify_inval_entry: {
     parameters: ["pointer", "u64", "buffer", "usize"],
     result: "i32",
