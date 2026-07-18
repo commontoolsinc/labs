@@ -196,6 +196,8 @@ One line per archived document; each document's header carries the fuller
 
 - [settle-wave-2026-03-findings.md](development/debugging/settle-wave-2026-03-findings.md)
   — March 2026 settle-wave measurements.
+- [2026-07-cf-profile-capture-exit-130.md](development/debugging/2026-07-cf-profile-capture-exit-130.md)
+  — root cause of the cf-profile capture exit-130 CI flake, July 2026.
 - [2026-07-group-chat-idempotency-false-positive.md](development/debugging/2026-07-group-chat-idempotency-false-positive.md)
   — root cause of the group-chat idempotency false-positive CI flake, July 2026.
 - [default-app-note-create.md](development/performance/default-app-note-create.md),

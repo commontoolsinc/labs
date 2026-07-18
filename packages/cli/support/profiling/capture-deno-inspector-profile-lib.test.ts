@@ -2,7 +2,9 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import {
+  CAPTURE_STOP_SIGNAL,
   captureDenoInspectorProfile,
+  guardCaptureStopSignal,
   markProfilerStarted,
   markProfileStoppedOnce,
   parseArg,
@@ -1459,5 +1461,30 @@ describe("capture-deno-inspector-profile helpers", () => {
       new TextDecoder().decode(result.stderr),
       "--output is required",
     );
+  });
+
+  it("guards only the capture stop signal, leaving SIGINT for Ctrl-C", () => {
+    const registered: Array<[Deno.Signal, () => void]> = [];
+    guardCaptureStopSignal((signal, handler) => {
+      registered.push([signal, handler]);
+    });
+
+    // Only the stop signal is guarded — SIGINT stays at its default disposition
+    // so an interactive Ctrl-C can still terminate the process.
+    assertEquals(registered.map(([signal]) => signal), [CAPTURE_STOP_SIGNAL]);
+    assertEquals(CAPTURE_STOP_SIGNAL, "SIGTERM");
+    // The guard handler is a no-op: it neither throws nor exits, so a stop
+    // signal arriving after the capture removed its own handlers cannot
+    // terminate the process.
+    for (const [, handler] of registered) {
+      handler();
+    }
+  });
+
+  it("tolerates platforms where signal listeners cannot be registered", () => {
+    // A throwing addSignalListener (signals unsupported) must not propagate.
+    guardCaptureStopSignal(() => {
+      throw new Error("signals unavailable");
+    });
   });
 });

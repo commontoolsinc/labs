@@ -1,4 +1,5 @@
 import { dirname, fromFileUrl, join, resolve } from "@std/path";
+import { CAPTURE_STOP_SIGNAL } from "./capture-deno-inspector-profile-lib.ts";
 import {
   DEBUGGER_WAITING_MESSAGE,
   DEFAULT_SUMMARY_PATTERN,
@@ -84,7 +85,10 @@ let inspectorUrlFound = false;
 const captureRef: { current?: Deno.ChildProcess } = {};
 const stopCapture = () => {
   if (captureRef.current) {
-    stopCaptureOnce(captureStopState, captureRef.current);
+    // SIGTERM, not SIGINT, so an interactive Ctrl-C stays available to the user;
+    // the capture handles both identically, and its exit-time guard covers this
+    // signal (see guardCaptureStopSignal).
+    stopCaptureOnce(captureStopState, captureRef.current, CAPTURE_STOP_SIGNAL);
   }
 };
 

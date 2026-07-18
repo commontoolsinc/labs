@@ -351,6 +351,40 @@ export async function writeProfileCaptureFiles(
   }
 }
 
+/**
+ * The signal cf-profile sends to stop this one-shot capture once the profiled
+ * command finishes. SIGTERM rather than SIGINT, so an interactive Ctrl-C
+ * (SIGINT) is left at its default disposition and can still terminate the
+ * process if it hangs after the capture has removed its own signal handlers.
+ */
+export const CAPTURE_STOP_SIGNAL: Deno.Signal = "SIGTERM";
+
+/**
+ * Install a no-op listener for CAPTURE_STOP_SIGNAL that stays for the whole
+ * process lifetime, so a late stop signal never terminates this process with
+ * 128+signal.
+ *
+ * captureDenoInspectorProfile installs and then removes its own stop-signal
+ * handlers as it runs, which leaves a window between that removal and the
+ * process reaching Deno.exit. The parent (cf-profile) sends CAPTURE_STOP_SIGNAL
+ * to stop this capture once the profiled command finishes; a signal landing in
+ * that window would exit with 128+signal and report a failure even though the
+ * profile was already written. This listener keeps the default terminate
+ * disposition disabled for that one signal across the whole run, and fires
+ * alongside the capture's own handler, so graceful stop is unaffected. SIGINT
+ * stays unguarded, so an interactive Ctrl-C can still terminate the process
+ * after its own handlers are gone.
+ */
+export function guardCaptureStopSignal(
+  addSignalListener: (signal: Deno.Signal, handler: () => void) => void,
+): void {
+  try {
+    addSignalListener(CAPTURE_STOP_SIGNAL, () => {});
+  } catch {
+    // Signals are unavailable on some platforms; nothing to guard.
+  }
+}
+
 export async function captureDenoInspectorProfile(
   args: string[],
   runtime: ProfileCaptureRuntime,
