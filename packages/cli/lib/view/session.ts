@@ -1047,6 +1047,13 @@ export class Session {
       case "q":
         this.closeOverlay();
         break;
+      case "Q":
+        this.requestQuit();
+        break;
+      case "t":
+        this.mode = "deflookup";
+        this.input = overlay.node?.name ?? this.selectedNode()?.name ?? "";
+        break;
       case "enter":
         // Follow the selected reference, pushing this card so Esc returns to it:
         // open the referenced node's card, or — when the definition lives in
@@ -1069,7 +1076,8 @@ export class Session {
           this.closeOverlay();
         }
         break;
-      case "z": {
+      case "z":
+      case "Z": {
         // Reveal the target: an external file opens in place; an in-blob target
         // closes the card and centres the main view on it. A "… N more" line has
         // no destination to reveal.
@@ -1093,11 +1101,13 @@ export class Session {
         break;
       case "down":
       case "j":
+      case "J":
         if (hasTargets) this.moveCardSelection(1);
         else this.overlayScroll = clamp(this.overlayScroll + 1, 0, maxScroll);
         break;
       case "up":
       case "k":
+      case "K":
         if (hasTargets) this.moveCardSelection(-1);
         else this.overlayScroll = clamp(this.overlayScroll - 1, 0, maxScroll);
         break;
@@ -1105,6 +1115,8 @@ export class Session {
       case "space":
         this.overlayScroll = clamp(this.overlayScroll + 10, 0, maxScroll);
         break;
+      case "b":
+      case "B":
       case "pageup":
         this.overlayScroll = clamp(this.overlayScroll - 10, 0, maxScroll);
         break;
@@ -1142,6 +1154,7 @@ export class Session {
     const lastTop = maxTop(this.displayCount(), this.height);
     switch (key.name) {
       case "q":
+      case "Q":
       case "ctrl-c":
         this.requestQuit();
         return;
@@ -1169,15 +1182,19 @@ export class Session {
         this.stepMatch(false);
         return;
       case "j":
+      case "J":
         this.top = clamp(this.top + 1, 0, lastTop);
         return;
       case "k":
+      case "K":
         this.top = clamp(this.top - 1, 0, lastTop);
         return;
       case "h":
+      case "H":
         this.left = clamp(this.left - HORIZONTAL_STEP, 0, this.maxLineLen);
         return;
       case "l":
+      case "L":
         this.left = clamp(this.left + HORIZONTAL_STEP, 0, this.maxLineLen);
         return;
       case "space":
@@ -1186,6 +1203,7 @@ export class Session {
         this.top = clamp(this.top + rows - 1, 0, lastTop);
         return;
       case "b":
+      case "B":
       case "pageup":
       case "ctrl-b":
         this.top = clamp(this.top - rows + 1, 0, lastTop);
@@ -1209,15 +1227,19 @@ export class Session {
         this.performExpand();
         return;
       case "w":
+      case "W":
         this.navigateTree(treePrevSibling);
         return;
       case "s":
+      case "S":
         this.navigateTree(treeNextSibling);
         return;
       case "a":
+      case "A":
         this.navigateTree(treeParent);
         return;
       case "d":
+      case "D":
         this.navigateTree(treeChild);
         return;
       case "tab":
@@ -1235,7 +1257,8 @@ export class Session {
         }
         return;
       }
-      case "z": {
+      case "z":
+      case "Z": {
         const node = this.selectedNode();
         if (node) {
           this.top = frameTop(
@@ -1251,6 +1274,7 @@ export class Session {
         this.cycleLineNumbers();
         return;
       case "c":
+      case "C":
         this.cycleDisplayMode();
         return;
       case "f":
@@ -1424,9 +1448,11 @@ export class Session {
     if (key.alt) {
       switch (key.name) {
         case "f":
+        case "F":
           b.moveWordForward();
           return this.afterMove();
         case "b":
+        case "B":
           b.moveWordBackward();
           return this.afterMove();
         case "v":
@@ -1451,18 +1477,21 @@ export class Session {
           b.yankPop();
           return this.afterEdit();
         case "l":
+        case "L":
           if (this.allowEdit(false)) {
             b.lowercaseWord();
             this.afterEdit();
           }
           return;
         case "u":
+        case "U":
           if (this.allowEdit(false)) {
             b.uppercaseWord();
             this.afterEdit();
           }
           return;
         case "c":
+        case "C":
           if (this.allowEdit(false)) {
             b.capitalizeWord();
             this.afterEdit();
