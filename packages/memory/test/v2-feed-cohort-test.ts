@@ -346,7 +346,11 @@ Deno.test("F6 session-scoped member: exact delta to the named session, zero work
         undefined,
         wave,
       );
-      assertEquals(otherWave, null, "no frame for a session outside the cohort");
+      assertEquals(
+        otherWave,
+        null,
+        "no frame for a session outside the cohort",
+      );
     }
     assertEquals(
       counterDelta(before, feedCounters(server)),
@@ -433,7 +437,11 @@ Deno.test("F6 user-scoped member: both principal sessions and the lane-held watc
           doc: upsert.doc,
           scopeKey: upsert.scopeKey,
         })),
-        [{ id: "of:u", doc: { value: "ALICE-1" }, scopeKey: userScopeKey(ALICE) }],
+        [{
+          id: "of:u",
+          doc: { value: "ALICE-1" },
+          scopeKey: userScopeKey(ALICE),
+        }],
       );
     }
     // The lane-held watch on the worker session delivers the SAME revision —
@@ -451,7 +459,11 @@ Deno.test("F6 user-scoped member: both principal sessions and the lane-held watc
         doc: upsert.doc,
         scopeKey: upsert.scopeKey,
       })),
-      [{ id: "of:u", doc: { value: "ALICE-1" }, scopeKey: userScopeKey(ALICE) }],
+      [{
+        id: "of:u",
+        doc: { value: "ALICE-1" },
+        scopeKey: userScopeKey(ALICE),
+      }],
     );
     // Bob does zero work.
     const bobWave = await server.syncSessionForConnection(
@@ -740,6 +752,283 @@ Deno.test("F6 fail-open: waves without cohort metadata keep broadcast behavior f
   } finally {
     await alice1Client.close();
     await alice2Client.close();
+    await server.close();
+  }
+});
+
+// (g) CA5 (C2.9's push-side confidentiality fixture; adversarial review
+// 2026-07-17, blocker finding 6): the F6 cohort proven against the NEW write
+// source C2 introduces — a REAL server-session-lane-authored session-scoped
+// write. The fixtures above drive CLIENT-authored scoped commits; this one
+// drives the full server-lane path: live session lane grant → session-rank
+// claim issued against it → the lease-bound executor session commits the
+// claimed session-scoped write through the server's transact path. The
+// engine stamps the applied revision's resolved scope key under the CLAIM's
+// context (the commit-side derivation the plan's C2 prerequisite note
+// records), and the REAL dirty pipeline (transact → markSpaceDirty →
+// flushSessions) must deliver it to ONLY the owning session: the sibling
+// session and a foreign principal's watcher observe ZERO deliveries AND
+// ZERO touch-work (the F6 counters — cohortSuppressed, never touched).
+Deno.test("F6 CA5: a server-session-lane-authored session-scoped write delivers only to the owning session; siblings and foreign watchers do zero work", async () => {
+  const OUTPUT = "of:ca5-server-lane-output";
+  const PIECE = "space:of:ca5-server-lane-piece";
+  const ACTION_ID = "action:ca5-server-lane-derive";
+  const server = createServer("memory-v2-feed-cohort-ca5") as
+    & ExecutionServer
+    & {
+      openSessionLaneGrant(
+        space: string,
+        branch: string,
+        principal: string,
+        sessionId: string,
+      ): Promise<{
+        contextKey: `session:${string}:${string}`;
+        laneGeneration: number;
+      }>;
+      setExecutionClaim(
+        lease: ExecutionLeaseHandle,
+        claim: Record<string, unknown>,
+      ): Promise<
+        {
+          contextKey: string;
+          leaseGeneration: number;
+          claimGeneration: number;
+        }
+      >;
+    };
+  const rankDial = await import("../v2.ts") as unknown as {
+    setServerPrimaryExecutionClaimRankConfig(
+      rank?: "space" | "user" | "session",
+    ): void;
+    resetServerPrimaryExecutionClaimRankConfig(): void;
+  };
+  const alice1Client = await connectClient(server);
+  const alice2Client = await connectClient(server);
+  const bobClient = await connectClient(server);
+  const executorClient = await connectClient(server);
+  let unsubscribeAccepted = () => {};
+  try {
+    const alice1 = await mountAs(alice1Client, ALICE);
+    const alice2 = await mountAs(alice2Client, ALICE);
+    const bob = await mountAs(bobClient, BOB);
+    const executor = await mountAs(executorClient, SPONSOR) as
+      & ExecutionSession
+      & {
+        transact(commit: unknown): Promise<{ seq: number }>;
+      };
+
+    // Seed commit (flips the pre-launch compatibility capability to WRITE,
+    // which the lane grant and the CA7 acting-principal re-check need).
+    await setDoc(alice1, 1, "of:ca5-seed", "seed");
+
+    // Every candidate observer watches the same declared session-scoped
+    // address; each member resolves that observer's OWN instance.
+    for (const session of [alice1, alice2, bob]) {
+      await session.watchSet([
+        docsWatch("ca5", [{ id: OUTPUT, scope: "session" }]),
+      ]);
+    }
+
+    // The server lane: lease-bound executor session, live session lane grant
+    // anchored on alice1, session-rank claim issued against it (CA9: the
+    // grant is the only session identity source).
+    await executor.setExecutionDemand("", [PIECE]);
+    const lease = await server.acquireExecutionLease(SPACE, "");
+    assertExists(lease);
+    server.bindExecutionSession(SPACE, executor.sessionId, lease);
+    rankDial.setServerPrimaryExecutionClaimRankConfig("session");
+    const grant = await server.openSessionLaneGrant(
+      SPACE,
+      "",
+      ALICE,
+      alice1.sessionId,
+    );
+    const s1Key = sessionScopeKey(ALICE, alice1.sessionId);
+    assertEquals(grant.contextKey, s1Key);
+    const claim = await server.setExecutionClaim(lease, {
+      branch: "",
+      space: SPACE,
+      contextKey: grant.contextKey,
+      pieceId: PIECE,
+      actionId: ACTION_ID,
+      actionKind: "computation",
+      implementationFingerprint: "impl:ca5-server-lane",
+      runtimeFingerprint: "runtime:ca5-server-lane",
+    });
+    assertEquals(claim.contextKey, s1Key);
+
+    // Drain outstanding dirt (seed + watch registration) so the bracketed
+    // counters below measure exactly the claimed lane commit's wave.
+    await server.flushSessions();
+
+    // The engine must stamp the applied revision's resolved scope key under
+    // the CLAIM's session context — the commit-side derivation the F6 filter
+    // consumes for server-lane writes.
+    const stampedScopeKeys: string[] = [];
+    unsubscribeAccepted = server.subscribeAcceptedCommits(SPACE, (event) => {
+      for (
+        const revision of (event as {
+          revisions: ReadonlyArray<{ id: string; scopeKey?: string }>;
+        }).revisions
+      ) {
+        if (revision.id === OUTPUT) {
+          stampedScopeKeys.push(revision.scopeKey ?? "space");
+        }
+      }
+    });
+
+    // The server-session-lane-authored write: a claimed session-context
+    // action commit from the lease-bound executor session — the (a)-flow
+    // write source of the C2.9 gate, at the memory seam.
+    const write = {
+      space: SPACE,
+      scope: "session" as const,
+      id: OUTPUT,
+      path: ["value"],
+    };
+    await executor.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: OUTPUT,
+        scope: "session",
+        value: { value: 41 },
+      }],
+      schedulerObservation: {
+        version: 2,
+        ownerSpace: SPACE,
+        branch: "",
+        pieceId: PIECE,
+        processGeneration: 1,
+        actionId: ACTION_ID,
+        actionKind: "computation",
+        implementationFingerprint: "impl:ca5-server-lane",
+        runtimeFingerprint: "runtime:ca5-server-lane",
+        executionClaimAssertion: {
+          contextKey: claim.contextKey,
+          leaseGeneration: claim.leaseGeneration,
+          claimGeneration: claim.claimGeneration,
+        },
+        observedAtSeq: 0,
+        transactionKind: "action-run",
+        reads: [],
+        shallowReads: [],
+        actualChangedWrites: [write],
+        currentKnownWrites: [write],
+        materializerWriteEnvelopes: [],
+        completeActionScopeSummary: {
+          version: 1,
+          complete: true,
+          implementationFingerprint: "impl:ca5-server-lane",
+          runtimeFingerprint: "runtime:ca5-server-lane",
+          piece: {
+            space: SPACE,
+            scope: "space",
+            id: PIECE.slice("space:".length),
+            path: [],
+          },
+          reads: [],
+          writes: [write],
+          materializerWriteEnvelopes: [],
+          directOutputs: [write],
+        },
+        status: "success",
+      },
+    });
+    assertEquals(
+      stampedScopeKeys,
+      [s1Key],
+      "the engine must stamp the claimed lane commit's resolved scope key",
+    );
+
+    // THE REAL PIPELINE: the claimed commit's own markSpaceDirty wave, with
+    // the cohort derived from the engine-stamped revision scope key, flushed
+    // to every connected session. Only the owning session does any work.
+    const before = feedCounters(server);
+    await server.flushSessions();
+    assertEquals(
+      counterDelta(before, feedCounters(server)),
+      {
+        touched: 1, // alice1 only — the owning session (writer is the
+        // executor session, so this is a genuine delivery, not an echo)
+        memberDeliveries: 1,
+        upsertsPushed: 1,
+        cohortSuppressed: 2, // alice2 + bob: never touched at all
+      },
+      "a server-session-lane-authored write must deliver to exactly the owning session",
+    );
+
+    // alice1 genuinely received the write during the flush: an identical
+    // follow-up wave owes nothing (per-member lastSentSeq advanced, FA15).
+    const repeat = await server.syncSessionForConnection(
+      SPACE,
+      alice1.sessionId,
+      new Set([toDirtyKey(OUTPUT, "session")]),
+      undefined,
+      {
+        dirtyScopeKeys: scopedWave([[toDirtyKey(OUTPUT, "session"), [s1Key]]]),
+      },
+    );
+    assertEquals(
+      effectUpserts(repeat),
+      [],
+      "the server-lane write must already have been delivered to the owning session",
+    );
+
+    // The sibling and the foreign watcher: a wave scoped to the server-lane
+    // write's cohort must not even touch them (zero B-side WORK, the CA5
+    // acceptance — not merely empty frames).
+    for (const other of [alice2, bob]) {
+      const otherWave = await server.syncSessionForConnection(
+        SPACE,
+        other.sessionId,
+        new Set([toDirtyKey(OUTPUT, "session")]),
+        undefined,
+        {
+          dirtyScopeKeys: scopedWave([[toDirtyKey(OUTPUT, "session"), [
+            s1Key,
+          ]]]),
+        },
+      );
+      assertEquals(
+        otherWave,
+        null,
+        "a session outside the cohort must not be touched by the server-lane write",
+      );
+    }
+
+    // Read-plane corroboration: the write landed at alice1's instance and
+    // nowhere else — the sibling's and the foreign principal's own reads
+    // resolve THEIR instances, which were never written.
+    const readInstance = async (sessionId: string) => {
+      const response = await server.docsRead(
+        {
+          type: "docs.read",
+          requestId: crypto.randomUUID(),
+          space: SPACE,
+          sessionId,
+          query: { docs: [{ id: OUTPUT, scope: "session" }] },
+        } as Parameters<typeof server.docsRead>[0],
+      );
+      assertExists(response.ok);
+      const entity = response.ok.entities.find((candidate) =>
+        candidate.id === OUTPUT
+      );
+      return entity?.document ?? null;
+    };
+    assertEquals(await readInstance(alice1.sessionId), { value: 41 });
+    assertEquals(await readInstance(alice2.sessionId), null);
+    assertEquals(await readInstance(bob.sessionId), null);
+  } finally {
+    unsubscribeAccepted();
+    (await import("../v2.ts") as unknown as {
+      resetServerPrimaryExecutionClaimRankConfig(): void;
+    }).resetServerPrimaryExecutionClaimRankConfig();
+    await alice1Client.close();
+    await alice2Client.close();
+    await bobClient.close();
+    await executorClient.close();
     await server.close();
   }
 });

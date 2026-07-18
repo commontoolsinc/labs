@@ -924,6 +924,31 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       onAttemptSettled: (claim, sourceAction, result) => {
         if (result.error === undefined) {
           finishClaimedAttempt(claim, sourceAction);
+          return;
+        }
+        // A conflicted claimed LANE commit must retry under ITS OWN lane
+        // (C2.9). A conflict is a wait-for-catch-up, not a failure
+        // (storage/rejection.ts): the client path recovers by re-queuing the
+        // action, but here the storage revert only marks the ACTION invalid
+        // — lane-blind — so the follow-up undirected dispatch serves a
+        // DIFFERENT lane (`undirectedRunLane` prefers space / the sponsor /
+        // the first-claimed lane) and this lane's rejected value is never
+        // recomputed. If no later input change arrives to wake the lane, its
+        // durable claimed row stays stale forever while the owning session's
+        // client stays claim-suppressed — a permanent liveness wedge, found
+        // by the C2.9 session-lane gate (bob's session lane: input write
+        // raced the lane hydration, the conflict retry consumed the last
+        // input change, and nothing ever re-ran the lane). The re-queue is
+        // ordered AFTER the rejection's finalize (this callback fires once
+        // the revert dropped the optimistic pending write), re-validates the
+        // live claim, re-hydrates, and re-reads refreshed rows; the
+        // conflict-admission floor paces repeated conflicts against catch-up
+        // progress, so this converges rather than spinning.
+        if (
+          claim.contextKey !== "space" &&
+          (result.error as { name?: string }).name === "ConflictError"
+        ) {
+          scheduleLaneRerun(sourceAction as Action, claim.contextKey);
         }
       },
     });
