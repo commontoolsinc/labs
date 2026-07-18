@@ -65,6 +65,9 @@ jobs:
       - name: 🚧 Guard against new polling waitFor in integration tests
         run: deno task check-no-waitfor
 
+      - name: 🔎 Check for unused import map dependencies
+        run: deno task check-unused-deps
+
       - name: 🔎 Check Deno toolchain pins are aligned
         run: deno task check-deno-pins
 
