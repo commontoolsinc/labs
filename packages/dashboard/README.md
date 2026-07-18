@@ -1,8 +1,8 @@
 # Fabric wall — modular dev/company dashboard
 
 A small Deno server that renders a dark, glanceable wall of status tiles and
-refreshes browsers over Server-Sent Events. Every tile is one file with a fixed
-interface; a single file registers them.
+updates their markup in place over Server-Sent Events. Every tile is one file
+with a fixed interface; a single file registers them.
 
 ## Run
 
@@ -35,11 +35,17 @@ dashboard/
 
 `server.ts` knows nothing about individual tiles. It runs a single ticker,
 collects each tile that is due (respecting its `intervalMs`), renders the
-results uniformly, mounts any drill-down routes a tile declares, and pushes an
-SSE reload when anything changes. A tile whose `collect()` throws is desaturated
-to a gray "unknown" — it keeps its last-known value and shows a short reason
-(e.g. "source unreachable"), with the full error in the server log — so one
-unreachable source never blanks or breaks the board.
+results uniformly, mounts any drill-down routes a tile declares, and pushes the
+new tile markup when anything changes. A tile whose `collect()` throws is
+desaturated to a gray "unknown" — it keeps its last-known value and shows a
+short reason (e.g. "source unreachable"), with the full error in the server log
+— so one unreachable source never blanks or breaks the board.
+
+Each event connection receives the current tile snapshot before it waits for
+new collections. The browser reconciles that snapshot by tile ID, leaving
+unchanged elements, focus, and scroll positions in place. Routine data updates
+never navigate the page. A changed shell version reloads once so an unattended
+display picks up new CSS or client code after a dashboard deployment.
 
 ## Add a tile
 

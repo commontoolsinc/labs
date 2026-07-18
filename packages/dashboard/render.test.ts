@@ -2,7 +2,7 @@
 // in the page. Pure string work — no server, no network, no subprocess.
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Status, TileView } from "./types.ts";
-import { renderTile, shell } from "./render.ts";
+import { renderTile, shell, SHELL_VERSION } from "./render.ts";
 import { humanSpan } from "./lib.ts";
 import { REPO } from "./config.ts";
 
@@ -26,6 +26,14 @@ Deno.test("renderTile: no href -> a plain div, not a link", () => {
   assert(html.endsWith("</div>"));
   assert(!html.includes("<a "), "nothing to drill into, so no anchor");
   assert(!html.includes(" link"), "the link class is only for tiles that link");
+});
+
+Deno.test("renderTile: a server-supplied id becomes the stable update key", () => {
+  assertStringIncludes(renderTile(view(), "labs-ci"), `data-tile-id="labs-ci"`);
+  assertStringIncludes(
+    renderTile(view({ href: "/ci" }), "labs-ci-duration"),
+    `data-tile-id="labs-ci-duration"`,
+  );
 });
 
 Deno.test("renderTile: an http href is an anchor that opens a new tab; a local one stays in place", () => {
@@ -114,8 +122,15 @@ Deno.test("renderTile: the body order is label, headline, sub, chart", () => {
 });
 
 Deno.test("shell: the grid and the wide tiles land in their own slots", () => {
-  const html = shell(`<div class="tile good">g</div>`, `<div class="tile bad wide">w</div>`, 3, 30_000);
-  assertStringIncludes(html, `<div class="grid"><div class="tile good">g</div></div>`);
+  const html = shell(
+    `<div class="tile good">g</div>`,
+    `<div class="tile bad wide">w</div>`,
+    3,
+    30_000,
+    SHELL_VERSION,
+  );
+  assertStringIncludes(html, `<div class="grid" id="dashboard-grid"><div class="tile good">g</div></div>`);
+  assertStringIncludes(html, `<div id="dashboard-wide"><div class="tile bad wide">w</div></div>`);
   // Wide tiles sit after the grid, not inside it.
   assert(html.indexOf(`class="grid"`) < html.indexOf(`tile bad wide`));
   assert(html.startsWith("<!doctype html>"), "a whole page, not a fragment");
@@ -124,14 +139,31 @@ Deno.test("shell: the grid and the wide tiles land in their own slots", () => {
 });
 
 Deno.test("shell: the freshness age and the refresh interval reach both the text and the script", () => {
-  const html = shell("", "", 7, 45_000);
+  const html = shell("", "", 7, 45_000, SHELL_VERSION);
   assertStringIncludes(html, `<span id="agotext">updated 7s ago</span>`);
   assertStringIncludes(html, "const REFRESH = 45000;");
-  assertStringIncludes(html, "const base = 7;");
-  // The client re-reads the stream rather than polling the page.
+  assertStringIncludes(html, `const SHELL_VERSION = ${SHELL_VERSION};`);
+  assertStringIncludes(html, "let base = 7;");
   assertStringIncludes(html, `new EventSource('/events')`);
+  assertStringIncludes(
+    html,
+    `es.onmessage = (e) => { if (e.data === 'reload') location.reload(); };`,
+  );
+  assertStringIncludes(html, `es.addEventListener('update'`);
+  assertStringIncludes(html, `reconcileTiles(grid, update.gridHtml)`);
+  assertStringIncludes(html, `reconcileTiles(wide, update.wideHtml)`);
+  assertStringIncludes(
+    html,
+    `if (update.shellVersion !== SHELL_VERSION) { location.reload(); return; }`,
+  );
+  assertEquals(html.match(/location\.reload\(\)/g)?.length, 2);
+  assertStringIncludes(html, `if (current.outerHTML === next.outerHTML) return current;`);
+  assertStringIncludes(html, `nextScroller.scrollTop = scrollTop`);
 });
 
 Deno.test("shell: the repo name in the header is escaped", () => {
-  assertStringIncludes(shell("", "", 0, 1000), `<span>${REPO.replace(/&/g, "&amp;")}</span>`);
+  assertStringIncludes(
+    shell("", "", 0, 1000, SHELL_VERSION),
+    `<span>${REPO.replace(/&/g, "&amp;")}</span>`,
+  );
 });

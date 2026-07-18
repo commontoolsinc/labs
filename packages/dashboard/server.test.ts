@@ -23,6 +23,18 @@ async function chunk(r: ReadableStreamDefaultReader<Uint8Array>): Promise<string
   return dec.decode(value);
 }
 
+interface TestUpdate {
+  gridHtml: string;
+  wideHtml: string;
+  ageSeconds: number;
+  shellVersion: number;
+}
+
+function updateFromEvent(event: string): TestUpdate {
+  assertStringIncludes(event, "event: update\n");
+  return JSON.parse(event.match(/^data: (.*)$/m)?.[1] ?? "") as TestUpdate;
+}
+
 // The rendered markup for one tile, keyed off its header label. The returned
 // string starts with the tile's status classes.
 function tileHtml(label: string): string {
@@ -45,7 +57,7 @@ Deno.test("a tile that has never succeeded falls back to a gray tile labelled wi
     throw new Error("HTTP 404: Not Found");
   })]);
   const html = tileHtml("labs-ci"); // no view to keep, so the id stands in for the label
-  assertStringIncludes(html, `unknown">`); // gray, never a color it hasn't earned
+  assert(html.startsWith(`unknown" data-tile-id="labs-ci">`)); // gray, never a color it hasn't earned
   assertStringIncludes(html, `<p class="big unknown">—</p>`);
   assertStringIncludes(html, `<p class="sub">not found</p>`); // the short reason, not the raw error
 });
@@ -53,13 +65,13 @@ Deno.test("a tile that has never succeeded falls back to a gray tile labelled wi
 Deno.test("a tile whose collect throws keeps its last good view, desaturated to gray", async () => {
   const good: TileView = { label: "recent main runs", status: "good", value: "passing", sub: "10 runs", wide: true };
   await tick([fake("recent-runs", () => good)]);
-  assertStringIncludes(tileHtml("recent main runs"), `good wide">`);
+  assert(tileHtml("recent main runs").startsWith(`good wide" data-tile-id="recent-runs">`));
 
   await tick([fake("recent-runs", () => {
     throw new Error("error sending request for url");
   })]);
   const html = tileHtml("recent main runs");
-  assertStringIncludes(html, `unknown wide">`); // gray, and still full-width
+  assert(html.startsWith(`unknown wide" data-tile-id="recent-runs">`)); // gray, and still full-width
   assertStringIncludes(html, `<p class="big unknown">passing</p>`); // the last-known value stays on the wall
   assertStringIncludes(html, `<p class="sub">source unreachable</p>`); // and says why it can't tell
 });
@@ -95,16 +107,23 @@ Deno.test("a tick that is still running makes the next tick a no-op", async () =
   await slow;
 });
 
-Deno.test("sse: /events opens a stream, tick pushes a reload, disconnect drops the client", async () => {
+Deno.test("sse: /events opens a stream, tick pushes new tile markup, disconnect drops the client", async () => {
   const res = await handle(req("/events"));
   assertEquals(res.headers.get("content-type"), "text/event-stream");
   assertEquals(res.headers.get("cache-control"), "no-cache");
   const reader = res.body!.getReader();
   assertEquals(await chunk(reader), ": connected\n\n");
   assertEquals(clients.size, 1);
+  const initial = updateFromEvent(await chunk(reader));
+  assert(initial.shellVersion > 0);
+  assert(initial.ageSeconds >= 0);
 
-  await tick([fake("labs-ci", () => ({ label: "labs ci", status: "good", value: "passing" }))]);
-  assertEquals(await chunk(reader), "data: reload\n\n");
+  await tick([fake("labs-ci", () => ({ label: "labs ci", status: "good", value: "live update" }))]);
+  const update = updateFromEvent(await chunk(reader));
+  assertStringIncludes(update.gridHtml, `data-tile-id="labs-ci"`);
+  assertStringIncludes(update.gridHtml, "live update");
+  assert(update.ageSeconds >= 0);
+  assertEquals(update.shellVersion, initial.shellVersion);
 
   await reader.cancel();
   assertEquals(clients.size, 0, "a disconnected browser is not kept as a client");
@@ -115,7 +134,7 @@ Deno.test("broadcast: a client whose stream is gone is dropped rather than throw
   const dead = [...clients].at(-1)!;
   await res.body!.cancel(); // closes the stream, so enqueueing to it now throws
   clients.add(dead); // back in the set, standing for a disconnect that went unnoticed
-  broadcast("reload");
+  broadcast({ gridHtml: "", wideHtml: "", ageSeconds: 0, shellVersion: 1 });
   assertEquals(clients.size, 0);
 });
 
