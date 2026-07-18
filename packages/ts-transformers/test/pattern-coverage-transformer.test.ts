@@ -105,10 +105,11 @@ function transformWithDirectCall(source: string): string {
   return printResult(result);
 }
 
-// Every emitted `(globalThis.__cfPatternCoverage?.hit)(file, id)` call, with its
-// arguments evaluated to their JS values. The callee is a parenthesized
-// optional-chain member access, so it is matched by unwrapping the parens and
-// checking the `.hit` member name rather than by a simple call-name lookup.
+// Every emitted `globalThis.__cfPatternCoverage?.hit(file, id)` call, with its
+// arguments evaluated to their JS values. The callee is an optional-chain member
+// access, so it is matched by checking the `.hit` member name rather than by a
+// simple call-name lookup. Parens are unwrapped first so a callee printed in
+// either form is matched.
 function hitCallArgs(root: ts.Node): unknown[][] {
   return collect(root, ts.isCallExpression)
     .filter((call) => {
@@ -145,6 +146,39 @@ function expectNoSpanContaining(
     false,
   );
 }
+
+Deno.test("instrumented code runs without a collector installed", () => {
+  // The probe has to be part of the optional chain. Emitted as a plain call
+  // around a chained callee it prints `(globalThis.__cfPatternCoverage?.hit)(…)`,
+  // whose parens end the chain: the short-circuit yields `undefined` and calling
+  // it throws. Every runtime that evaluates an instrumented body without
+  // installing the collector would then fail, so this pins the behavior rather
+  // than the printed shape — a regex on the emit cannot tell the two apart at a
+  // glance, and the throwing form looks correct.
+  const { output: emitted } = transformWithCoverage(
+    ["const top = 1;", "function run() {", "  return top + 1;", "}"].join("\n"),
+  );
+  assert(emitted.includes("__cfPatternCoverage?.hit"));
+
+  const globals = globalThis as Record<string, unknown>;
+  assertEquals(globals.__cfPatternCoverage, undefined);
+  // Runs the module body's probes, then the function body's via run().
+  const run = new Function(`${emitted}\nreturn run;`)();
+  run();
+
+  // With a collector installed the same code reports its hits.
+  const hits: [string, number][] = [];
+  globals.__cfPatternCoverage = {
+    hit: (file: string, id: number) => hits.push([file, id]),
+  };
+  try {
+    new Function(`${emitted}\nreturn run;`)()();
+    assert(hits.length > 0);
+    assert(hits.every(([file]) => file === "/pattern.tsx"));
+  } finally {
+    delete globals.__cfPatternCoverage;
+  }
+});
 
 Deno.test("PatternCoverageTransformer skips files when coverage is disabled", () => {
   const source = "const value = 1;";
@@ -317,27 +351,27 @@ export {};
   assertEquals(flag.type?.kind, ts.SyntaxKind.BooleanKeyword);
   assertMatch(
     output,
-    /function declaredFunction\(flag: boolean\) \{\s+\(globalThis\.__cfPatternCoverage\?\.hit\)/,
+    /function declaredFunction\(flag: boolean\) \{\s+globalThis\.__cfPatternCoverage\?\.hit/,
   );
   assertMatch(
     output,
-    /const arrowExpression = \(value: number\) => \{\s+\(globalThis\.__cfPatternCoverage\?\.hit\)[\s\S]+return value \+ topLevel;/,
+    /const arrowExpression = \(value: number\) => \{\s+globalThis\.__cfPatternCoverage\?\.hit[\s\S]+return value \+ topLevel;/,
   );
   assertMatch(
     output,
-    /constructor\(\) \{\s+\(globalThis\.__cfPatternCoverage\?\.hit\)/,
+    /constructor\(\) \{\s+globalThis\.__cfPatternCoverage\?\.hit/,
   );
   assertMatch(
     output,
-    /get count\(\) \{\s+\(globalThis\.__cfPatternCoverage\?\.hit\)/,
+    /get count\(\) \{\s+globalThis\.__cfPatternCoverage\?\.hit/,
   );
   assertMatch(
     output,
-    /set count\(value: number\) \{\s+\(globalThis\.__cfPatternCoverage\?\.hit\)/,
+    /set count\(value: number\) \{\s+globalThis\.__cfPatternCoverage\?\.hit/,
   );
   assertMatch(
     output,
-    /method\(\) \{\s+\(globalThis\.__cfPatternCoverage\?\.hit\)/,
+    /method\(\) \{\s+globalThis\.__cfPatternCoverage\?\.hit/,
   );
 });
 
@@ -404,11 +438,11 @@ function run() {
   expectSpanContaining(spans, source, "const value = 1;");
   assertMatch(
     output,
-    /^"use strict";\s+\(globalThis\.__cfPatternCoverage\?\.hit\)[\s\S]+const top = 1;/,
+    /^"use strict";\s+globalThis\.__cfPatternCoverage\?\.hit[\s\S]+const top = 1;/,
   );
   assertMatch(
     output,
-    /function run\(\) \{\s+"use strict";\s+\(globalThis\.__cfPatternCoverage\?\.hit\)/,
+    /function run\(\) \{\s+"use strict";\s+globalThis\.__cfPatternCoverage\?\.hit/,
   );
 });
 
@@ -538,10 +572,10 @@ for (let i = 0; i < 0; i++) doFor();
   // The bare statements are lifted into blocks carrying a hit call.
   assertMatch(
     output,
-    /if \(flag > 0\)\s*\{\s+\(globalThis\.__cfPatternCoverage\?\.hit\)[\s\S]+doThen\(\);/,
+    /if \(flag > 0\)\s*\{\s+globalThis\.__cfPatternCoverage\?\.hit[\s\S]+doThen\(\);/,
   );
   assertMatch(
     output,
-    /while \(flag < 0\)\s*\{\s+\(globalThis\.__cfPatternCoverage\?\.hit\)[\s\S]+doWhile\(\);/,
+    /while \(flag < 0\)\s*\{\s+globalThis\.__cfPatternCoverage\?\.hit[\s\S]+doWhile\(\);/,
   );
 });

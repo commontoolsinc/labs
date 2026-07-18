@@ -1,6 +1,7 @@
 import type ts from "typescript";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Source, SourceMap } from "@commonfabric/js-compiler";
+import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
 import { resolveImportSpecifier } from "@commonfabric/js-compiler/specifier";
 import { compilerStack } from "../harness/deferred-compiler-stack.ts";
 import {
@@ -834,6 +835,13 @@ export interface CachedCompiledModule {
   exportNames?: readonly string[];
   starTargetSpecs?: readonly string[];
   importSpecs?: readonly string[];
+  /**
+   * Authored-line spans for the coverage probes baked into `code`, carried from
+   * the cached document. The engine registers them with the collector it
+   * installs for the evaluation, which is what lets a probe's `(fileName, id)`
+   * resolve to source lines. Absent whenever `code` is uninstrumented.
+   */
+  patternCoverageSpans?: readonly PatternCoverageSpan[];
 }
 
 /**

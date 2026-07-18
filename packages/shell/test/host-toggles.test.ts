@@ -80,6 +80,7 @@ describe("runtimeHostFlags", () => {
       expect(runtimeHostFlags()).toEqual({
         forwardWorkerConsole: false,
         cfcRenderCeiling: false,
+        patternCoverage: false,
       });
     } finally {
       h.restore();
@@ -93,11 +94,19 @@ describe("runtimeHostFlags", () => {
       expect(runtimeHostFlags()).toEqual({
         forwardWorkerConsole: true,
         cfcRenderCeiling: false,
+        patternCoverage: false,
       });
       h.storage.map.set("cfcRenderCeiling", "true");
       expect(runtimeHostFlags()).toEqual({
         forwardWorkerConsole: true,
         cfcRenderCeiling: true,
+        patternCoverage: false,
+      });
+      h.storage.map.set("patternCoverage", "true");
+      expect(runtimeHostFlags()).toEqual({
+        forwardWorkerConsole: true,
+        cfcRenderCeiling: true,
+        patternCoverage: true,
       });
     } finally {
       h.restore();

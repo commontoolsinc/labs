@@ -4,6 +4,7 @@ import type {
   Source,
 } from "@commonfabric/js-compiler";
 import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
+import type { PatternCoverageCollector } from "../pattern-coverage.ts";
 import type { MemorySpace } from "../runtime.ts";
 import type {
   CachedCompiledModule,
@@ -173,7 +174,11 @@ export interface Harness extends EventTarget {
   evaluateCachedModules(
     modules: readonly CachedCompiledModule[],
     entryIdentity: string,
-    options?: { sourceFiles?: Source[]; trustedBodies?: boolean },
+    options?: {
+      sourceFiles?: Source[];
+      trustedBodies?: boolean;
+      patternCoverage?: PatternCoverageCollector;
+    },
   ): Promise<EvaluateResult>;
 
   // Cold recovery: recompile cacheable modules from the stored (already-resolved,
@@ -181,7 +186,10 @@ export interface Harness extends EventTarget {
   compileResolvedToRecordGraph(
     resolvedFiles: Source[],
     entryFilename: string,
-    options?: { fabricImports?: FabricImportOptions },
+    options?: {
+      fabricImports?: FabricImportOptions;
+      patternCoverage?: PatternCoverageCollector;
+    },
   ): Promise<{ modules: CacheableModule[]; entryIdentity: string }>;
 
   // Resolves a `ProgramResolver` into a `Program` using the engine's

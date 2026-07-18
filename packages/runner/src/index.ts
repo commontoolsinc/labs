@@ -79,7 +79,10 @@ export {
   type TypeScriptHarnessProcessOptions,
 } from "./harness/index.ts";
 export {
+  PATTERN_COVERAGE_INTEGRATION_TEST_NAME,
+  PATTERN_COVERAGE_TEST_NAME,
   PatternCoverageCollector,
+  type PatternCoverageData,
   type PatternCoverageFileReport,
   type PatternCoverageKind,
   patternCoverageOutputPath,

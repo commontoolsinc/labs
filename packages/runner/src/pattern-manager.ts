@@ -13,6 +13,7 @@ import {
   setPatternProgram,
 } from "./builder/pattern-metadata.ts";
 import type { MemorySpace, Runtime } from "./runtime.ts";
+import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import { createRef } from "./create-ref.ts";
 import type {
   CacheableModule,
@@ -357,7 +358,13 @@ export class PatternManager {
     // write-backs first. (Their own set, not flushCompileCacheWrites: this
     // replication promise is tracked there and would await itself.)
     await Promise.allSettled([...this.pendingCacheWriteBacks]);
-    const runtimeVersion = await getCompileCacheRuntimeVersion();
+    // Replicate the same cached variant the compile path uses — the coverage
+    // suffix keeps an instrumented closure from being served under an ordinary
+    // key (and vice versa).
+    const runtimeVersion = moduleByteCacheRuntimeVersion(
+      await getCompileCacheRuntimeVersion(),
+      { patternCoverage: this.runtime.patternCoverage !== undefined },
+    );
     const readTx = this.runtime.edit();
     let sourceDocs;
     let compiledDocs;
@@ -479,10 +486,14 @@ export class PatternManager {
     if (cacheCtx && this.runtime.cfcEnforcementMode !== "disabled") {
       return await this.compileViaCellCache(program, cacheCtx);
     }
+    const patternCoverage = this.patternCoverageFor();
     const { id, graph, mainSpecifier, entryIdentity } = await this.runtime
       .harness.compileToRecordGraph(
         program,
-        cacheCtx ? { fabricImports: { space: cacheCtx.space } } : {},
+        {
+          ...(cacheCtx ? { fabricImports: { space: cacheCtx.space } } : {}),
+          ...(patternCoverage ? { patternCoverage } : {}),
+        },
       );
     cacheCtx?.onEntryIdentity?.(entryIdentity);
     // evaluateRecordGraph is a single synchronous SES stretch; in the browser
@@ -517,21 +528,37 @@ export class PatternManager {
    * `Engine.compileAndEvaluateModules` only to inspect serialized/verified output
    * *without running* (engine unit tests), where stamping entry refs is unwanted.
    */
+  /**
+   * The pattern-coverage collector to instrument a compile with: a per-call
+   * option wins, else the runtime-level default (`RuntimeOptions.patternCoverage`).
+   * Undefined leaves the compile uninstrumented.
+   */
+  private patternCoverageFor(
+    options?: TypeScriptHarnessProcessOptions,
+  ): PatternCoverageCollector | undefined {
+    return options?.patternCoverage ?? this.runtime.patternCoverage;
+  }
+
   async compileAndRegisterModules(
     program: RuntimeProgram,
     options?: TypeScriptHarnessProcessOptions,
   ): Promise<EvaluateResult> {
+    const patternCoverage = this.patternCoverageFor(options);
+    const effectiveOptions: TypeScriptHarnessProcessOptions = {
+      ...options,
+      patternCoverage,
+    };
     const byteCache = this.runtime.moduleByteCache;
     const runtimeVersion = byteCache === undefined
       ? undefined
       : moduleByteCacheRuntimeVersion(
         await getCompileCacheRuntimeVersion(),
-        { patternCoverage: options?.patternCoverage !== undefined },
+        { patternCoverage: patternCoverage !== undefined },
       );
     if (byteCache === undefined || runtimeVersion === undefined) {
       const result = await this.runtime.harness.compileAndEvaluateModules(
         program,
-        options,
+        effectiveOptions,
       );
       this.registerEvaluatedModules(result);
       return result;
@@ -539,7 +566,7 @@ export class PatternManager {
 
     const { id, graph, mainSpecifier, modules } = await this.runtime.harness
       .compileToRecordGraph(program, {
-        ...options,
+        ...effectiveOptions,
         precompiledModulesFor: ({ identities }) =>
           Promise.resolve(byteCache.getCompleteSet(runtimeVersion, identities)),
       });
@@ -574,12 +601,25 @@ export class PatternManager {
   ): Promise<Pattern> {
     const harness = this.runtime.harness;
     const { space } = cacheCtx;
-    const runtimeVersion = await getCompileCacheRuntimeVersion();
+    const patternCoverage = this.patternCoverageFor();
+    // The instrumented compile is a distinct cached variant: the coverage suffix
+    // keeps its compiled bytes from colliding with an ordinary compile of the
+    // same source under one key, and makes a coverage-on runtime miss (and
+    // recompile-with-coverage) rather than reuse uninstrumented bytes. Source
+    // docs are keyed by content identity, not by this version, so they stay
+    // shared — a coverage run reuses the persisted source and only recompiles.
+    const runtimeVersion = moduleByteCacheRuntimeVersion(
+      await getCompileCacheRuntimeVersion(),
+      { patternCoverage: patternCoverage !== undefined },
+    );
     if (runtimeVersion === undefined) {
       const { id, graph, mainSpecifier, entryIdentity, modules } = await harness
         .compileToRecordGraph(
           program,
-          { fabricImports: { space } },
+          {
+            fabricImports: { space },
+            ...(patternCoverage ? { patternCoverage } : {}),
+          },
         );
       await this.persistSourceCacheTracked(space, modules, entryIdentity);
       cacheCtx.onEntryIdentity?.(entryIdentity);
@@ -636,6 +676,11 @@ export class PatternManager {
     try {
       compiled = await harness.compileToRecordGraph(program, {
         fabricImports: { space },
+        // A miss below falls through to a fresh compile; instrument it when
+        // coverage is on so the recompiled bytes carry the hit calls. A warm hit
+        // reuses bytes a prior coverage compile already instrumented (the coverage
+        // suffix on `runtimeVersion` keeps the two variants apart).
+        ...(patternCoverage ? { patternCoverage } : {}),
         // The bodies returned below come either from the process byte cache or
         // from `loadCompiledClosure`, an integrity-gated (`requiredIntegrity`,
         // fail-closed) read of the compiled set. On a full hit the byte cache's
@@ -762,6 +807,9 @@ export class PatternManager {
     program: RuntimeProgram,
   ): Promise<Pattern | undefined> {
     const harness = this.runtime.harness;
+    // `cacheOpts.runtimeVersion` already selects the coverage variant, so the
+    // bodies read below carry probes exactly when this is set.
+    const patternCoverage = this.patternCoverageFor();
     const readTx = this.runtime.edit();
     let closure;
     try {
@@ -798,6 +846,10 @@ export class PatternManager {
         ...(doc.importSpecs !== undefined
           ? { importSpecs: doc.importSpecs }
           : {}),
+        // The spans naming the lines this body's coverage probes stand for.
+        ...(doc.patternCoverageSpans !== undefined
+          ? { patternCoverageSpans: doc.patternCoverageSpans }
+          : {}),
         // Drop the synthetic entry→root links (cfc.ts etc.); only real
         // require/export-* edges resolve module records.
         imports: doc.imports
@@ -813,7 +865,11 @@ export class PatternManager {
         // Bodies came from the integrity-gated compiled-set read
         // (`loadCompiledClosure`, `requiredIntegrity`), so the CFC label is the
         // security boundary — skip redundant SES body re-verification.
-        { sourceFiles: program.files, trustedBodies: true },
+        {
+          sourceFiles: program.files,
+          trustedBodies: true,
+          ...(patternCoverage ? { patternCoverage } : {}),
+        },
       );
       return this.patternFromEvaluation(result, program, entryIdentity);
     } catch (error) {
@@ -903,7 +959,14 @@ export class PatternManager {
     space: MemorySpace,
   ): Promise<Pattern | undefined> {
     const harness = this.runtime.harness;
-    const runtimeVersion = await getCompileCacheRuntimeVersion();
+    const patternCoverage = this.patternCoverageFor();
+    // Select the same cached variant the compile path wrote. A coverage-on
+    // runtime resumes from the instrumented closure; reading the ordinary key
+    // here would serve uninstrumented bodies for an instrumented run.
+    const runtimeVersion = moduleByteCacheRuntimeVersion(
+      await getCompileCacheRuntimeVersion(),
+      { patternCoverage: patternCoverage !== undefined },
+    );
     if (runtimeVersion === undefined) {
       return await this.tryColdLoadByIdentity(entryIdentity, symbol, space);
     }
@@ -951,6 +1014,10 @@ export class PatternManager {
         ...(doc.importSpecs !== undefined
           ? { importSpecs: doc.importSpecs }
           : {}),
+        // The spans naming the lines this body's coverage probes stand for.
+        ...(doc.patternCoverageSpans !== undefined
+          ? { patternCoverageSpans: doc.patternCoverageSpans }
+          : {}),
         imports: doc.imports
           .filter((i) => !i.specifier.startsWith(ROOT_LINK_SPECIFIER))
           .map((i) => ({ specifier: i.specifier, targetIdentity: i.identity })),
@@ -965,7 +1032,10 @@ export class PatternManager {
       const result = await harness.evaluateCachedModules(
         cachedModules,
         entryIdentity,
-        { trustedBodies: true },
+        {
+          trustedBodies: true,
+          ...(patternCoverage ? { patternCoverage } : {}),
+        },
       );
       const pattern = this.patternFromMain(result, symbol, entryIdentity);
       this.esmCacheStats.byIdentityHits++;
@@ -1018,11 +1088,15 @@ export class PatternManager {
       contents: doc.code,
     }));
 
+    const patternCoverage = this.patternCoverageFor();
     try {
       const compiled = await harness.compileResolvedToRecordGraph(
         sourceFiles,
         entry.filename,
-        { fabricImports: { space } },
+        {
+          fabricImports: { space },
+          ...(patternCoverage ? { patternCoverage } : {}),
+        },
       );
       if (compiled.entryIdentity !== entryIdentity) {
         throw new Error(
@@ -1037,13 +1111,20 @@ export class PatternManager {
           ...(module.sourceMap !== undefined
             ? { sourceMap: module.sourceMap as never }
             : {}),
+          // The spans naming the lines this body's coverage probes stand for.
+          ...(module.patternCoverageSpans !== undefined
+            ? { patternCoverageSpans: module.patternCoverageSpans }
+            : {}),
           imports: module.imports,
         }),
       );
       const result = await harness.evaluateCachedModules(
         cachedModules,
         entryIdentity,
-        { sourceFiles },
+        {
+          sourceFiles,
+          ...(patternCoverage ? { patternCoverage } : {}),
+        },
       );
       const pattern = this.patternFromMain(result, symbol, entryIdentity);
       if (cacheOpts !== undefined) {

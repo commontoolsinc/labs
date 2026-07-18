@@ -1101,6 +1101,11 @@ async function extractCoverageDebtSamples(
       ? await readCombinedLcov(lcovDir)
       : await lcovFromCoverageProfile(profileDir);
 
+    // Every coverage stream feeds the gate: V8 runtime coverage, unit pattern
+    // coverage (TN:pattern-runtime), and integration pattern coverage
+    // (TN:pattern-runtime-integration) all join here, and a line covered by any
+    // of them counts covered. So a pattern line an end-to-end flow exercises
+    // that the unit suite does not lowers the gated debt.
     const coverageMetrics = await collectCoverageDebtMetricsFromLcov({
       rootDir: Deno.cwd(),
       lcov,
