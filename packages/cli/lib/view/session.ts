@@ -2141,11 +2141,11 @@ export class Session {
    * activate the focused button; Esc activates the cancel button; a button's
    * shortcut letter activates it directly. Any other key leaves the prompt up. */
   private handleDialogKey(key: Key): void {
-    const dialog = this.promptDialog();
-    if (!dialog) return;
+    // Reached only from the prompt modes, each of which builds a dialog with at
+    // least two buttons, so the dialog is present and its row is non-empty.
+    const dialog = this.promptDialog()!;
     const buttons = dialog.buttons;
     const n = buttons.length;
-    if (n === 0) return;
 
     // Tab moves the ring forward, Shift-Tab back, both wrapping around. From no
     // focus (-1) Tab lands on the first button and Shift-Tab on the last.
@@ -2172,20 +2172,21 @@ export class Session {
       index = buttons.findIndex((b) => b.hotkey.toLowerCase() === k);
     }
     if (index < 0 || index >= n) return; // an unbound key leaves the prompt up
-    this.activateButton(index);
+    this.activateButton(dialog, index);
   }
 
   /** Run a prompt button's action, first capturing the frame that shows it
    * pushed so the driver can play the press before the result appears. The
-   * activated button also takes the focus ring, so a shortcut-key press draws
-   * the pressed button highlighted rather than leaving the highlight behind. */
-  private activateButton(index: number): void {
+   * pressed button is drawn focused as well, so a shortcut-key press shows it
+   * highlighted rather than leaving the highlight on whatever Tab last chose. */
+  private activateButton(dialog: DialogState, index: number): void {
     this.dialogFocus = index;
-    const dialog = this.promptDialog();
-    if (!dialog) return;
     this.pendingPush = {
       doc: this.displayDoc(),
-      view: { ...this.view(), dialog: { ...dialog, pushed: index } },
+      view: {
+        ...this.view(),
+        dialog: { ...dialog, focus: index, pushed: index },
+      },
     };
     const button = dialog.buttons[index];
     if (this.mode === "savePrompt") this.applySaveButton(button);
