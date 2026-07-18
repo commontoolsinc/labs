@@ -325,8 +325,8 @@ well-known symbols:
 ```typescript
 // Shown inside a pattern body.
 const CODEC = Symbol.for('data-model.codec');
-const DEEP_FREEZE = Symbol.for('common.deepFreeze');
-const IS_DEEP_FROZEN = Symbol.for('common.isDeepFrozen');
+const DEEP_FREEZE = Symbol.for('data-model.deepFreeze');
+const IS_DEEP_FROZEN = Symbol.for('data-model.isDeepFrozen');
 // If protocol evolution is needed: Symbol.for('data-model.codec@2')
 
 // Instance protocol: "here's how to freeze me deeply, and here's how to

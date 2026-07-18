@@ -10,7 +10,7 @@ import { FabricInstance, type FabricValue } from "@/interface.ts";
  * Distinct from `deepClone()`: `[DEEP_FREEZE]` freezes the existing instance
  * in place; `deepClone()` constructs a new instance.
  */
-export const DEEP_FREEZE: unique symbol = Symbol.for("common.deepFreeze");
+export const DEEP_FREEZE: unique symbol = Symbol.for("data-model.deepFreeze");
 
 /**
  * Well-known symbol for checking whether a fabric instance is already deeply
@@ -29,7 +29,7 @@ export const DEEP_FREEZE: unique symbol = Symbol.for("common.deepFreeze");
  * a malformed internal slot; a status check must not.)
  */
 export const IS_DEEP_FROZEN: unique symbol = Symbol.for(
-  "common.isDeepFrozen",
+  "data-model.isDeepFrozen",
 );
 
 /**

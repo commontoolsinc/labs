@@ -1273,7 +1273,7 @@ export const CODEC: unique symbol = Symbol.for('data-model.codec');
  * into any nested `FabricValue`s via a `subFreeze` callback supplied by the
  * generic `deepFreeze()` utility. See Section 8.6.
  */
-export const DEEP_FREEZE = Symbol.for('common.deepFreeze');
+export const DEEP_FREEZE = Symbol.for('data-model.deepFreeze');
 
 /**
  * Well-known symbol for checking whether a fabric instance is already
@@ -1283,7 +1283,7 @@ export const DEEP_FREEZE = Symbol.for('common.deepFreeze');
  * via a `subIsDeepFrozen` callback, returning the boolean conjunction.
  * See Section 8.6.
  */
-export const IS_DEEP_FROZEN = Symbol.for('common.isDeepFrozen');
+export const IS_DEEP_FROZEN = Symbol.for('data-model.isDeepFrozen');
 
 // Protocol evolution: Symbol.for('data-model.codec@2'), etc.
 ```
