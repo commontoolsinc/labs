@@ -119,9 +119,18 @@ export const ModelInfoSchema = z.object({
 
 export const ModelsResponseSchema = z.record(ModelInfoSchema);
 
-const StreamResponse = z.object({
-  type: z.literal("stream"),
-  body: z.instanceof(ReadableStream),
+// The streamed branch of this route writes one JSON event per line straight to
+// the response body, with no envelope around the sequence. The events are
+// `text-delta`, `tool-call`, `tool-result`, `finish` and `error`, each tagged by
+// its own `type` field. The body is UTF-8 text, so it is a plain string; the
+// line-delimited structure inside it is beyond what JSON Schema can state, and
+// the description carries it.
+const StreamResponse = z.string().openapi({
+  description:
+    'Newline-delimited JSON events, one per line, each tagged by a "type" ' +
+    'field: "text-delta" carries the next piece of text in "textDelta", ' +
+    '"tool-call" and "tool-result" report tool activity, "finish" ends a ' +
+    'complete response, and "error" reports a failure mid-stream.',
 });
 
 const JsonResponse = z.object({
@@ -230,7 +239,7 @@ export const generateText = createRoute({
         },
       },
       description:
-        "Generated text response. NOTE: If you make a request with `stream: true`, the server response will just be a stream of newline separated strings returned from the LLM, without a structured message object.",
+        "Generated text response. NOTE: If you make a request with `stream: true`, the server answers with a `text/event-stream` of newline-delimited JSON events instead of a single message object; the message is assembled from the `text-delta` events as they arrive.",
     },
     [HttpStatusCodes.BAD_REQUEST]: {
       content: {
