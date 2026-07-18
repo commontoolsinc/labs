@@ -22,6 +22,11 @@ export abstract class BaseFabricPrimitive extends FabricPrimitive {
    * but not a `BaseFabricPrimitive` indicates a broken subclass. Mirrors
    * `BaseFabricInstance.isInstance()`.
    *
+   * Like its counterpart, this uses "death before confusion" on the mismatch:
+   * it throws rather than quietly answering `false`, so a broken subclass is
+   * surfaced at the point of use. The throw is intentional despite the
+   * predicate-style name.
+   *
    * @throws If `value` is a `FabricPrimitive` that is not a
    *   `BaseFabricPrimitive` -- the "shouldn't happen" invariant violation.
    */

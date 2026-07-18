@@ -60,6 +60,12 @@ export abstract class BaseFabricInstance extends FabricInstance {
    * declared here (e.g. the generic freeze machinery), so the invariant is
    * actively enforced rather than silently skipped.
    *
+   * This uses "death before confusion" on the mismatch: rather than quietly
+   * answer `false` for a direct `FabricInstance` subclass (which would let it
+   * bypass its freeze protocol and be cached as deep-frozen while only
+   * shallow-frozen), it throws, surfacing the broken subclass at the point of
+   * use. The throw is intentional despite the predicate-style name.
+   *
    * @throws If `value` is a `FabricInstance` that is not a `BaseFabricInstance`
    *   -- the "shouldn't happen" invariant violation.
    */
