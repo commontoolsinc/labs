@@ -228,6 +228,9 @@ export async function runPager(
     stopExpiry();
     session.resize(s.width, s.height);
     draw();
+    // A message that takes itself away is still up after the redraw, so start
+    // its clock again — the one just cancelled would have left it there for good.
+    startExpiry();
   };
   const terminate = (code: number) => {
     cleanup();

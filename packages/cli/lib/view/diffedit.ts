@@ -511,13 +511,24 @@ function expandContext(
   const moved = (n: number) =>
     n + (n >= insertedAt ? k : 0) -
     (removedAt !== null && n > removedAt ? 1 : 0);
+  // A cursor can rest on a hunk's header. When an upward reveal met the hunk
+  // above and the two joined, that header is the one the join removed, so
+  // `moved` would leave the cursor on its old line number — now the first
+  // revealed line. Send it to the surviving header of the merged hunk instead,
+  // the header of the hunk above, which the join kept.
+  const mergedHeader = removedAt !== null && up
+    ? model.files.flatMap((f) => f.hunks)[index - 1]?.headerLine
+    : undefined;
+  const cursorAfter = mergedHeader !== undefined && cursorLine === removedAt
+    ? mergedHeader
+    : moved(cursorLine);
   return {
     text: joined?.text ?? text,
     baseline: joined?.baseline ?? newBaseline,
     // The cursor stays on its own line. Revealing upwards puts the lines below
     // the hunk's header, so a cursor resting on that header does not move while
     // one in the body rides down ahead of them.
-    cursorLine: moved(cursorLine),
+    cursorLine: cursorAfter,
     insertedAt,
     inserted: k,
     up,
@@ -526,16 +537,11 @@ function expandContext(
   };
 }
 
-/** Insert `ctx` context lines at the top (`up`) or just before `bodyEnd` (the
- * line after the hunk's last body line) of the `index`-th hunk in `text`,
- * growing that hunk header's counts by `k`. Null when the hunk or its header
- * cannot be found. */
-const HUNK_HEADER_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
-
 /** Take the `@@` header off the second of two hunks and give its counts to the
  * first, leaving one hunk where there were two. Null when the text does not hold
  * them back to back — anything between the first's last line and the second's
- * header would land inside the joined body. */
+ * header would land inside the joined body. The counts come from the parsed
+ * hunks rather than a re-read of the header line, which the parse already read. */
 function dropHeaderBetween(
   text: string,
   first: number,
@@ -546,17 +552,13 @@ function dropHeaderBetween(
   const a = all[first];
   const b = all[first + 1];
   if (!a || !b || b.headerLine !== a.endLine + 1) return null;
-  const lines = text.split("\n");
-  const ma = lines[a.headerLine]?.match(HUNK_HEADER_RE);
-  const mb = lines[b.headerLine]?.match(HUNK_HEADER_RE);
-  if (!ma || !mb) return null;
-  const count = (m: RegExpMatchArray, i: number) =>
-    m[i] !== undefined ? parseInt(m[i], 10) : 1;
   // The joined hunk starts where the first did and runs to the end of the
   // second, which is both counts together — they meet with nothing in between.
-  const header = `@@ -${ma[1]},${count(ma, 2) + count(mb, 2)} +${ma[3]},${
-    count(ma, 4) + count(mb, 4)
-  } @@${ma[5] ?? ""}`;
+  // The first hunk's trailing context (its enclosing function) carries over.
+  const header = `@@ -${a.oldStart},${a.oldCount + b.oldCount} +${a.newStart},${
+    a.newCount + b.newCount
+  } @@${a.context ? ` ${a.context}` : ""}`;
+  const lines = text.split("\n");
   const out = [
     ...lines.slice(0, a.headerLine),
     header,
@@ -593,6 +595,10 @@ function joinAdjacent(
   return { text: joined.text, baseline: joinedBase.text };
 }
 
+/** Insert `ctx` context lines at the top (`up`) or just before `bodyEnd` (the
+ * line after the hunk's last body line) of the `index`-th hunk in `text`,
+ * growing that hunk header's counts by `k`. Null when the hunk or its header
+ * cannot be found. */
 function applyExpansion(
   text: string,
   index: number,
@@ -799,7 +805,13 @@ function isMarkdownDiffLine(rawLines: string[], lineIdx: number): boolean {
   return false;
 }
 
-export const _internal = { editableStart, pendingAmend, amendCommit };
+export const _internal = {
+  editableStart,
+  pendingAmend,
+  amendCommit,
+  dropHeaderBetween,
+  joinAdjacent,
+};
 
 function reparse(
   ws: DiffWorkspace,

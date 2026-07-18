@@ -563,3 +563,31 @@ Deno.test("pager: what a reveal says takes itself away once the lines have lande
     done();
   }
 });
+
+Deno.test("pager: a resize does not strand the reason Ctrl-L put up", async () => {
+  const { doc, source, done } = atBottomFixture();
+  try {
+    const { deps, writes } = makeFake({
+      consoleSize: { columns: 80, rows: 6 },
+      steps: [
+        { bytes: enc("G") },
+        { bytes: enc("\x0c") }, // Ctrl-L: "Bottom of file."
+        { fire: "SIGWINCH" }, // a resize redraws and would cancel the clock
+        { fireTimers: true }, // the clock the resize restarted runs out
+        { bytes: enc("q") },
+      ],
+    });
+    await runPager(doc, OPTS, undefined, source, deps);
+    // Without restarting expiry after the resize, the message would sit in the
+    // bar for good; here a later frame is drawn without it.
+    const said = writes.findIndex((w) => w.includes("Bottom of file"));
+    assert(said >= 0, "the reason was drawn");
+    const last = writes.filter((w) => w.includes("line20")).at(-1)!;
+    assert(
+      !last.includes("Bottom of file"),
+      "the resize left the reason free to expire",
+    );
+  } finally {
+    done();
+  }
+});

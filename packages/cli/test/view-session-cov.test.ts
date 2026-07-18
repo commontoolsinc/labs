@@ -3032,3 +3032,173 @@ index 0000000..1111111 100644
     Deno.removeSync(root, { recursive: true });
   }
 });
+
+// --- reveal-frame remapping and room-less hunks -----------------------------
+
+Deno.test("diffcov: a reveal frame carries a selected node to its shifted place", () => {
+  const { s, done } = tallSession(13);
+  try {
+    // Select the hunk, then reveal: the animation frames redraw the structure,
+    // so revealFrame remaps the selection to where the reveal will leave it.
+    selectByLabel(s, "@@");
+    press(s, "ctrl-l");
+    assert(s.pendingReveal !== null, "a reveal is pending");
+    const frame = s.revealFrame(1)!;
+    assert(frame.view.selected !== null, "the frame keeps the selection");
+    assertEquals(frame.view.selected!.kind, "hunk");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: a reveal frame carries surviving search matches to their shifted rows", () => {
+  const { s, done } = tallSession(13);
+  try {
+    // A search on a line low in the hunk leaves a match below the revealed
+    // range. Revealing upward walks lines in above it; a mid-reveal frame keeps
+    // that match, remapped to the row it will end on.
+    press(s, "/");
+    type(s, "L43");
+    press(s, "enter");
+    press(s, "g"); // back to the top so the hunk's top edge is in view
+    assertEquals(s.view().matches?.length, 1, "the search found the line");
+    press(s, "ctrl-l");
+    assert(s.pendingReveal !== null, "a reveal is pending");
+    const frame = s.revealFrame(1)!;
+    assertEquals(
+      frame.view.matches?.length,
+      1,
+      "the surviving match is carried into the frame",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffcov: a hunk backing no file offers no edge to expand", () => {
+  // A deleted file's hunk has no workspace file, so expandRoom records nothing
+  // for it; visibleEdges must skip it rather than read a missing room. The
+  // second file's hunk still offers its edges.
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(
+      join(root, "keep.ts"),
+      `${
+        Array.from(
+          { length: 10 },
+          (_, i) => `K${String(i + 1).padStart(2, "0")}`,
+        )
+          .join("\n")
+      }\n`,
+    );
+    const ws: DiffWorkspace = {
+      resolve: (p) => join(root, p),
+      read: (a) => {
+        try {
+          return Deno.readTextFileSync(a);
+        } catch {
+          return null;
+        }
+      },
+    };
+    const diff = `diff --git a/gone.ts b/gone.ts
+deleted file mode 100644
+--- a/gone.ts
++++ /dev/null
+@@ -1,2 +0,0 @@
+-old1
+-old2
+diff --git a/keep.ts b/keep.ts
+--- a/keep.ts
++++ b/keep.ts
+@@ -3,3 +3,3 @@
+ K03
+-old K04
++K04
+ K05
+`;
+    const model = parseDiff(diff)!;
+    const { doc, edit } = buildDiffDocument(diff, model, ws);
+    const s = new Session(
+      doc,
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 24 },
+      undefined,
+      diffSource(ws, edit),
+    );
+    // Evaluating the offer walks every visible hunk, including the deletion's,
+    // and must not stumble on the one with no room. The kept file's hunk still
+    // has edges, so Ctrl-L is offered and reveals from it.
+    assertEquals(s.view().canExpand, true, "the kept file's hunk can expand");
+    press(s, "ctrl-l");
+    assert(s.view().message.startsWith("Showing line"), s.view().message);
+    assert(s.doc.text.includes(" K02"), "the kept file's hunk grew");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffcov: a cursor on a header that a join removes moves to the merged header", () => {
+  // Two hunks close enough that revealing the second one upward closes the gap
+  // and joins them. The cursor rests on the second hunk's header — the header
+  // the join removes — so it must land on the surviving merged header rather
+  // than on the revealed content that slid up into its old line.
+  const lines = Array.from(
+    { length: 30 },
+    (_, i) => `L${String(i + 1).padStart(2, "0")}`,
+  );
+  const diff = `diff --git a/m.ts b/m.ts
+index 0000000..1111111 100644
+--- a/m.ts
++++ b/m.ts
+@@ -4,3 +4,3 @@
+ L04
+-old L05
++L05
+ L06
+@@ -12,3 +12,3 @@
+ L12
+-old L13
++L13
+ L14
+`;
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "m.ts"), `${lines.join("\n")}\n`);
+    const ws: DiffWorkspace = {
+      resolve: (p) => join(root, p),
+      read: (a) => {
+        try {
+          return Deno.readTextFileSync(a);
+        } catch {
+          return null;
+        }
+      },
+    };
+    const model = parseDiff(diff)!;
+    const { doc, edit } = buildDiffDocument(diff, model, ws);
+    const s = new Session(
+      doc,
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 24 },
+      undefined,
+      diffSource(ws, edit),
+    );
+    press(s, "e");
+    for (let i = 0; i < 20; i++) {
+      if (s.doc.text.split("\n")[s.view().cursor!.line].startsWith("@@ -12")) {
+        break;
+      }
+      press(s, "down");
+    }
+    press(s, "ctrl-l");
+    assert(s.doc.text.includes("@@ -4,11 +4,11 @@"), "the hunks joined");
+    assertEquals(
+      s.doc.text.split("\n")[s.view().cursor!.line],
+      "@@ -4,11 +4,11 @@",
+      "the cursor is on the surviving merged header",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
