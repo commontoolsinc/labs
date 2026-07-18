@@ -4,8 +4,13 @@ import type { TileView } from "./types.ts";
 import { durationTag, escapeHtml, STATUS_DOT } from "./lib.ts";
 import { REPO } from "./config.ts";
 
-export function renderTile(v: TileView): string {
+// Open dashboards reload when this changes. Increment it with shell markup,
+// styles, client code, or the update payload shape.
+export const SHELL_VERSION = 2;
+
+export function renderTile(v: TileView, id?: string): string {
   const cls = `tile ${v.status}${v.href ? " link" : ""}${v.wide ? " wide" : ""}`;
+  const key = id ? ` data-tile-id="${escapeHtml(id)}"` : "";
   const dot = `<span class="dot ${STATUS_DOT[v.status]}"></span>`;
   const hint = v.hint ? `<span class="drill">${escapeHtml(v.hint)}</span>` : "";
   const header = `<p class="lbl">${dot} ${escapeHtml(v.label)}<span class="spacer"></span>${v.aside ?? ""}${hint}</p>`;
@@ -21,12 +26,18 @@ export function renderTile(v: TileView): string {
     ? `<div style="position:relative">${v.extra}${durationTag(v.duration)}</div>`
     : (v.extra ?? "");
   const inner = `${header}${big}${sub}${body}`;
-  if (!v.href) return `<div class="${cls}">${inner}</div>`;
+  if (!v.href) return `<div class="${cls}"${key}>${inner}</div>`;
   const tgt = /^https?:/.test(v.href) ? ` target="_blank" rel="noopener"` : "";
-  return `<a class="${cls}" href="${escapeHtml(v.href)}"${tgt}>${inner}</a>`;
+  return `<a class="${cls}"${key} href="${escapeHtml(v.href)}"${tgt}>${inner}</a>`;
 }
 
-export function shell(gridHtml: string, wideHtml: string, ago: number, refreshMs: number): string {
+export function shell(
+  gridHtml: string,
+  wideHtml: string,
+  ago: number,
+  refreshMs: number,
+  shellVersion: number,
+): string {
   return `<!doctype html><html><head><meta charset="utf-8"><title>Fabric wall — LIVE</title>
 <style>
   body{margin:0;background:#0d0e11;color:#e7e9ee;font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:18px 20px 26px;max-width:1100px;margin:0 auto}
@@ -73,19 +84,19 @@ export function shell(gridHtml: string, wideHtml: string, ago: number, refreshMs
     <div class="brand"><b>Fabric wall</b><span class="badge" id="livebadge">● LIVE</span><span>${escapeHtml(REPO)}</span></div>
     <div class="live"><span class="dot green" id="freshdot"></span> <span id="agotext">updated ${ago}s ago</span></div>
   </div>
-  <div class="grid">${gridHtml}</div>
-  ${wideHtml}
+  <div class="grid" id="dashboard-grid">${gridHtml}</div>
+  <div id="dashboard-wide">${wideHtml}</div>
 <script>
   const REFRESH = ${refreshMs};
+  const SHELL_VERSION = ${shellVersion};
   const COL = { green: '#43c574', amber: '#e0a852', red: '#e2504a' };
   const badge = document.getElementById('livebadge');
   const dot = document.getElementById('freshdot');
   const agotext = document.getElementById('agotext');
-  let last = Date.now();
-  const es = new EventSource('/events');
-  es.onmessage = (e) => { last = Date.now(); if (e.data === 'reload') location.reload(); };
-  const base = ${ago};
-  const t0 = Date.now();
+  const grid = document.getElementById('dashboard-grid');
+  const wide = document.getElementById('dashboard-wide');
+  let base = ${ago};
+  let t0 = Date.now();
   function paint() {
     const ago = base + Math.floor((Date.now() - t0) / 1000);
     agotext.textContent = 'updated ' + ago + 's ago';
@@ -99,8 +110,47 @@ export function shell(gridHtml: string, wideHtml: string, ago: number, refreshMs
     if (state !== 'green') { badge.style.borderColor = COL[state]; badge.style.color = '#7c828c'; }
     else if (anyGray) { badge.style.borderColor = '#7c828c'; badge.style.color = '#7c828c'; }
     else { badge.style.borderColor = '#62d18d'; badge.style.color = '#62d18d'; }
-    if (Date.now() - last > 70000) location.reload();
   }
+  function reconcileTiles(container, html) {
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    const currentById = new Map(Array.from(container.children).map((tile) => [tile.dataset.tileId, tile]));
+    const desired = Array.from(template.content.children).map((next) => {
+      const current = currentById.get(next.dataset.tileId);
+      if (!current) return next;
+      currentById.delete(next.dataset.tileId);
+      if (current.outerHTML === next.outerHTML) return current;
+
+      const scrollTop = current.querySelector('.evscroll')?.scrollTop;
+      const active = document.activeElement;
+      const rootFocused = active === current;
+      const focusedHref = current.contains(active) && active instanceof HTMLAnchorElement ? active.href : null;
+      current.replaceWith(next);
+      const nextScroller = next.querySelector('.evscroll');
+      if (scrollTop !== undefined && nextScroller) nextScroller.scrollTop = scrollTop;
+      if (rootFocused) next.focus({ preventScroll: true });
+      else if (focusedHref) {
+        Array.from(next.querySelectorAll('a')).find((link) => link.href === focusedHref)?.focus({ preventScroll: true });
+      }
+      return next;
+    });
+    for (const obsolete of currentById.values()) obsolete.remove();
+    desired.forEach((tile, index) => {
+      const atIndex = container.children[index];
+      if (atIndex !== tile) container.insertBefore(tile, atIndex ?? null);
+    });
+  }
+  const es = new EventSource('/events');
+  es.onmessage = (e) => { if (e.data === 'reload') location.reload(); };
+  es.addEventListener('update', (e) => {
+    const update = JSON.parse(e.data);
+    if (update.shellVersion !== SHELL_VERSION) { location.reload(); return; }
+    reconcileTiles(grid, update.gridHtml);
+    reconcileTiles(wide, update.wideHtml);
+    base = update.ageSeconds;
+    t0 = Date.now();
+    paint();
+  });
   paint();
   setInterval(paint, 1000);
 </script></body></html>`;

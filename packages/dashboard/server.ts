@@ -3,7 +3,7 @@
 //
 // Each tile lives in tiles/ and is registered once in registry.ts. This file is
 // generic: it schedules every tile's collect() on its own interval, renders the
-// results uniformly, serves the page, pushes SSE reloads, and mounts any
+// results uniformly, serves the page, pushes SSE updates, and mounts any
 // drill-down routes a tile declares. It knows nothing about individual tiles.
 //
 //   cd <repo root>
@@ -21,7 +21,7 @@ import { PORT } from "./config.ts";
 import { TILES } from "./registry.ts";
 import { makeCtx } from "./ctx.ts";
 import { friendlyError } from "./lib.ts";
-import { renderTile, shell } from "./render.ts";
+import { renderTile, shell, SHELL_VERSION } from "./render.ts";
 import type { Tile, TileView } from "./types.ts";
 
 const ctx = makeCtx();
@@ -29,12 +29,41 @@ const views = new Map<string, TileView>();
 const lastRun = new Map<string, number>();
 let lastChange = 0;
 
+interface DashboardUpdate {
+  gridHtml: string;
+  wideHtml: string;
+  ageSeconds: number;
+  shellVersion: number;
+}
+
+function dashboardUpdate(): DashboardUpdate {
+  const grid: string[] = [];
+  const wide: string[] = [];
+  for (const t of TILES) {
+    const v = views.get(t.id);
+    if (!v) continue;
+    (v.wide ? wide : grid).push(renderTile(v, t.id));
+  }
+  const ageSeconds = lastChange
+    ? Math.max(0, Math.floor((Date.now() - lastChange) / 1000))
+    : 0;
+  return {
+    gridHtml: grid.join(""),
+    wideHtml: wide.join(""),
+    ageSeconds,
+    shellVersion: SHELL_VERSION,
+  };
+}
+
 export const clients = new Set<ReadableStreamDefaultController<Uint8Array>>();
 const enc = new TextEncoder();
-export const broadcast = (kind: string) => {
+const encodeUpdate = (update: DashboardUpdate) =>
+  enc.encode(`event: update\ndata: ${JSON.stringify(update)}\n\n`);
+export const broadcast = (update: DashboardUpdate) => {
+  const event = encodeUpdate(update);
   for (const c of clients) {
     try {
-      c.enqueue(enc.encode(`data: ${kind}\n\n`));
+      c.enqueue(event);
     } catch {
       clients.delete(c); // drop a dead controller so the set can't grow forever
     }
@@ -72,7 +101,7 @@ export async function tick(tiles: Tile[] = TILES) {
       lastRun.set(t.id, Date.now());
     }));
     lastChange = Date.now();
-    broadcast("reload");
+    broadcast(dashboardUpdate());
   } finally {
     ticking = false;
   }
@@ -81,24 +110,23 @@ export async function tick(tiles: Tile[] = TILES) {
 // Collect drill-down routes declared by tiles.
 const routes = TILES.flatMap((t) => t.routes ?? []);
 
-// How often the page actually reloads, which the client colors the "updated"
-// indicator against (fresh up to this, then stale). The server re-broadcasts a
-// reload when a tile is due, but the 15s ticker only notices a tile is due on the
-// tick after its interval elapses (and collection latency pushes that to the tick
-// after that), so the real cadence for the fastest tile is its interval plus a
-// tick, not the bare interval.
+// How often the page actually updates, which the client colors the "updated"
+// indicator against (fresh up to this, then stale). The server broadcasts when a
+// tile is due, but the 15s ticker only notices a tile is due on the tick after its
+// interval elapses (and collection latency pushes that to the tick after that), so
+// the real cadence for the fastest tile is its interval plus a tick, not the bare
+// interval.
 const REFRESH_MS = Math.min(...TILES.map((t) => t.intervalMs)) + TICK_MS;
 
 export function page(): string {
-  const ago = Math.floor((Date.now() - (lastChange || Date.now())) / 1000);
-  const grid: string[] = [];
-  const wide: string[] = [];
-  for (const t of TILES) {
-    const v = views.get(t.id);
-    if (!v) continue;
-    (v.wide ? wide : grid).push(renderTile(v));
-  }
-  return shell(grid.join(""), wide.join(""), ago, REFRESH_MS);
+  const update = dashboardUpdate();
+  return shell(
+    update.gridHtml,
+    update.wideHtml,
+    update.ageSeconds,
+    REFRESH_MS,
+    update.shellVersion,
+  );
 }
 
 export async function handle(req: Request): Promise<Response> {
@@ -110,6 +138,7 @@ export async function handle(req: Request): Promise<Response> {
         controller = c;
         clients.add(c);
         c.enqueue(enc.encode(": connected\n\n"));
+        c.enqueue(encodeUpdate(dashboardUpdate()));
       },
       cancel() {
         if (controller) clients.delete(controller);
