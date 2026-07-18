@@ -47,6 +47,9 @@ export const ServerExecutionPoolMetricsSchema = z.object({
   suppressedUnrelatedCommits: nonNegativeIntegerSchema,
   parkedWakeAttempts: nonNegativeIntegerSchema,
   parkedWakeStarts: nonNegativeIntegerSchema,
+  // C3.3a shared-pool foreign-wake counters (the C3A11 gate-bypass entry).
+  foreignWakeNotifications: nonNegativeIntegerSchema,
+  foreignWakeAttempts: nonNegativeIntegerSchema,
   demandEmptyHibernations: nonNegativeIntegerSchema,
   // C1 shared-pool user-lane gauges (intra-Worker lane identity).
   userLanesOpened: nonNegativeIntegerSchema,

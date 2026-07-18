@@ -5,6 +5,8 @@ import type {
   ExecutionDemandListener,
   ExecutionDemandSnapshot,
   ExecutionLeaseHandle,
+  ForeignWakeEvent,
+  ForeignWakeListener,
   SessionLaneGrant,
   UserLaneGrant,
 } from "@commonfabric/memory/v2/server";
@@ -17,6 +19,13 @@ export interface ExecutionPoolControl {
   subscribeAcceptedCommits(
     space: string,
     listener: AcceptedCommitListener,
+  ): () => void;
+  /** C3.3a foreign wakes (C3A11). Optional: a control without it keeps
+   * the pool single-space byte-identical — foreign wakes simply never
+   * arrive (fails closed, like the lane surfaces). */
+  subscribeForeignWakes?(
+    space: string,
+    listener: ForeignWakeListener,
   ): () => void;
   /** Durable legacy owner query. Missing support must fail closed. */
   legacyBackgroundActive?(
@@ -227,6 +236,13 @@ export interface ExecutionPoolMetricsSnapshot {
   /** Worker generations made live after cold acquisition began with a pending
    * indexed-relevant commit wake. */
   readonly parkedWakeStarts: number;
+  /** C3.3a: foreign-wake callbacks received while the lane remains mapped,
+   * including ones later dropped by branch/state filters (C3A11). */
+  readonly foreignWakeNotifications: number;
+  /** C3.3a: coalesced reconciliation passes queued by foreign wakes for
+   * executor-null/draining lanes. NEVER counted against home seq gates —
+   * a foreign wake has no home-domain seq to gate on. */
+  readonly foreignWakeAttempts: number;
   /** Demand-empty drains that remained empty and gracefully settled, stopped,
    * and released their lease. */
   readonly demandEmptyHibernations: number;
@@ -290,11 +306,16 @@ type Slot = {
   lastLeaseGeneration?: number;
   lastSponsor?: string;
   unsubscribeAcceptedCommits: (() => void) | null;
+  unsubscribeForeignWakes: (() => void) | null;
   lastSettledSeq: number;
   pendingWakeSeq: number | null;
   pendingWakeStartedAt: number | null;
   preferredOriginSessionId?: string;
   acceptedWakeQueued: boolean;
+  /** Coalescing bit for the C3A11 foreign-wake entry — deliberately
+   * SEPARATE from the home wake's seq bookkeeping: foreign wakes carry
+   * read-space seqs and never touch `pendingWakeSeq`/`lastSettledSeq`. */
+  foreignWakeQueued: boolean;
   /** Open user lanes keyed by lane principal (C1.8). Grants survive Worker
    * generation replacement; the wire re-delivers them at startup. */
   userLanes: Map<string, SlotUserLane>;
@@ -366,6 +387,8 @@ export class SharedExecutionPool {
     suppressedUnrelatedCommits: 0,
     parkedWakeAttempts: 0,
     parkedWakeStarts: 0,
+    foreignWakeNotifications: 0,
+    foreignWakeAttempts: 0,
     demandEmptyHibernations: 0,
     userLanesOpened: 0,
     userLanesClosed: 0,
@@ -564,10 +587,12 @@ export class SharedExecutionPool {
         backoffTimer: null,
         crashAttempts: 0,
         unsubscribeAcceptedCommits: null,
+        unsubscribeForeignWakes: null,
         lastSettledSeq: 0,
         pendingWakeSeq: null,
         pendingWakeStartedAt: null,
         acceptedWakeQueued: false,
+        foreignWakeQueued: false,
         userLanes: new Map(),
         sessionLanes: new Map(),
         lanesWired: false,
@@ -581,7 +606,16 @@ export class SharedExecutionPool {
             created.space,
             (event) => this.#acceptAcceptedCommit(created, event),
           );
+        // C3.3a: the foreign-wake leg rides its own subscription — absent
+        // control support keeps the pool byte-identical (no foreign wakes
+        // ever arrive).
+        created.unsubscribeForeignWakes = this.#control
+          .subscribeForeignWakes?.(
+            created.space,
+            (event) => this.#acceptForeignWake(created, event),
+          ) ?? null;
       } catch (error) {
+        this.#unsubscribeAcceptedCommits(created);
         this.#slots.delete(key);
         throw error;
       }
@@ -662,6 +696,65 @@ export class SharedExecutionPool {
     });
   }
 
+  /**
+   * C3.3a foreign-wake entry (C3A11): a DISTINCT path beside
+   * `#acceptAcceptedCommit` that bypasses every home-seq suppression gate
+   * — no `dataSeq <= lastSettledSeq` drop, no `pendingWakeSeq` max-merge,
+   * no home-domain recheck in the queued job. `event.readSeq` is another
+   * space's clock: numerically comparing it against home watermarks (or
+   * fabricating a home seq from it) is exactly the liveness bug this
+   * entry exists to avoid. Spurious wakes are safe — the reconcile
+   * settles and re-parks; missed ones are not.
+   *
+   * What remains deliberately shared with the home path:
+   * - the space/branch identity filter (a wake for another lane is not
+   *   this slot's),
+   * - the running-executor skip — a LIVE Worker hears foreign dirt via
+   *   the provider-channel notice leg (C3A11's second half), not a pool
+   *   restart,
+   * - the empty-demand skip in the queued job — a parked home space
+   *   accumulates dirt without wake (§4 parity, the CA13-shaped emergent
+   *   skip: dirt is durable in the home engine; the next demand's
+   *   post-ack scan replays it).
+   */
+  #acceptForeignWake(
+    slot: Slot,
+    event: ForeignWakeEvent,
+  ): Promise<void> {
+    if (this.#closed || this.#slots.get(slot.key) !== slot) {
+      return Promise.resolve();
+    }
+    this.#metrics.foreignWakeNotifications++;
+    if (event.space !== slot.space || event.branch !== slot.branch) {
+      return Promise.resolve();
+    }
+    if (event.staleForeignReaders.length === 0) {
+      return Promise.resolve();
+    }
+    if (slot.executor !== null && slot.state !== "draining") {
+      return Promise.resolve();
+    }
+    if (slot.foreignWakeQueued) return slot.tail;
+    slot.foreignWakeQueued = true;
+    this.#metrics.foreignWakeAttempts++;
+    return this.#enqueue(slot, async () => {
+      try {
+        if (this.#closed || this.#slots.get(slot.key) !== slot) return;
+        if (slot.executor !== null && slot.state !== "draining") return;
+        if (
+          slot.demands.length === 0 || unionPieces(slot.demands).length === 0
+        ) {
+          // Parked home space: no demand, no start — the dirt stays
+          // durable engine-side and wakes on the next demand join.
+          return;
+        }
+        await this.#reconcile(slot);
+      } finally {
+        slot.foreignWakeQueued = false;
+      }
+    });
+  }
+
   #clearPendingWake(slot: Slot): void {
     slot.pendingWakeSeq = null;
     slot.pendingWakeStartedAt = null;
@@ -672,6 +765,9 @@ export class SharedExecutionPool {
     const unsubscribe = slot.unsubscribeAcceptedCommits;
     slot.unsubscribeAcceptedCommits = null;
     unsubscribe?.();
+    const unsubscribeForeign = slot.unsubscribeForeignWakes;
+    slot.unsubscribeForeignWakes = null;
+    unsubscribeForeign?.();
   }
 
   #removeSlot(slot: Slot): void {
@@ -829,7 +925,11 @@ export class SharedExecutionPool {
     }
   }
 
-  #closeSessionLane(slot: Slot, sessionId: string, lane: SlotSessionLane): void {
+  #closeSessionLane(
+    slot: Slot,
+    sessionId: string,
+    lane: SlotSessionLane,
+  ): void {
     slot.sessionLanes.delete(sessionId);
     this.#metrics.sessionLanesClosed++;
     try {

@@ -4091,6 +4091,41 @@ export interface UpsertSchedulerObservationResult {
   commitSeq: number | null;
   executionContextKey: SchedulerExecutionContextKey;
   invalidatedExecutionContextKeys: SchedulerExecutionContextKey[];
+  /** C3.3a/C3A9: present (as the applied mark seq) when this MIRROR
+   * upsert changed the action's read rows against the mirror-hosting
+   * space and conservatively marked the action direct-dirty at the
+   * hosting space's then-current seq — see the `readToMirrorWindow`
+   * option on {@link upsertMirroredSchedulerObservation}. */
+  readToMirrorWindowDirtySeq?: number;
+}
+
+/**
+ * C3.3a (C3A9) — the read-to-mirror missed-wake window, closed in the
+ * upsert transaction. A mirror describes reads a HOME-side run performed
+ * strictly before this upsert lands here in the READ space's engine; a
+ * read-space commit in that window consulted mirror rows that did not
+ * exist yet, so it dirtied nothing and no notice was emitted. The client
+ * scalar carries no read-space basis (that is C3.5's vector), so the
+ * window's extent in this engine's seq domain is unknowable — the sound
+ * conservative closure: whenever the reconcile CHANGES the action's read
+ * rows naming `readSpace` (creation or re-target; pure retraction is
+ * exempt — nothing left to wake), mark the action direct-dirty at
+ * `windowDirtySeq` (the hosting engine's serverSeq captured at apply
+ * time). Transactionality does the rest: this engine's commits serialize
+ * against the upsert, so a commit lands either before it (seq ≤
+ * `windowDirtySeq`, covered by this mark) or after it (rows now present,
+ * covered by the ordinary dirtying path). Identical re-mirrors skip the
+ * reconcile entirely, so a wake-driven rerun that re-observes the same
+ * payload cannot re-mark — the closure cannot loop.
+ */
+export interface MirroredReadToMirrorWindowOptions {
+  /** The mirror-hosting (read) space — rows with this `read_space` are
+   * the window's subject. The engine has no own-space notion; the server
+   * supplies it. */
+  readSpace: string;
+  /** The hosting engine's serverSeq at apply time; 0 (no commits yet —
+   * no window to miss) suppresses the mark. */
+  windowDirtySeq: number;
 }
 
 export const upsertSchedulerObservation = (
@@ -4113,6 +4148,7 @@ export const upsertMirroredSchedulerObservation = (
   engine: Engine,
   options: UpsertSchedulerObservationOptions & {
     originExecutionContextKey: SchedulerExecutionContextKey;
+    readToMirrorWindow?: MirroredReadToMirrorWindowOptions;
   },
 ): UpsertSchedulerObservationResult =>
   engine.database.transaction(upsertSchedulerObservationTransaction).immediate(
@@ -4124,7 +4160,10 @@ const upsertSchedulerObservationTransaction = (
   engine: Engine,
   options:
     & HostSchedulerObservationOptions
-    & { originExecutionContextKey?: SchedulerExecutionContextKey },
+    & {
+      originExecutionContextKey?: SchedulerExecutionContextKey;
+      readToMirrorWindow?: MirroredReadToMirrorWindowOptions;
+    },
 ): UpsertSchedulerObservationResult => {
   const branch = options.branch ?? options.observation.branch ?? DEFAULT_BRANCH;
   ensureActiveBranch(engine, branch);
@@ -4242,6 +4281,51 @@ const upsertSchedulerObservationTransaction = (
     });
   }
 
+  // C3A9 window closure (mirror path only): snapshot the action's read
+  // rows naming the mirror-hosting space before/after the reconcile —
+  // a CHANGE in that restricted set is the window predicate (see
+  // MirroredReadToMirrorWindowOptions).
+  const windowOptions = options.readToMirrorWindow;
+  const windowActive = windowOptions !== undefined &&
+    windowOptions.windowDirtySeq >= 1 &&
+    options.originExecutionContextKey !== undefined && payloadChanged;
+  const windowReadRowKeys = (): string[] =>
+    !windowActive ? [] : (engine.database.prepare(`
+        SELECT read_id, read_scope, read_scope_key, read_path, read_kind
+        FROM scheduler_read_index
+        WHERE branch = :branch
+          AND COALESCE(owner_space, '') = :owner_space
+          AND piece_id = :piece_id
+          AND process_generation = :process_generation
+          AND action_id = :action_id
+          AND execution_context_key = :execution_context_key
+          AND read_space = :read_space
+      `).all({
+      branch,
+      owner_space: normalizeSchedulerOwnerSpace(observation.ownerSpace),
+      piece_id: observation.pieceId,
+      process_generation: observation.processGeneration,
+      action_id: observation.actionId,
+      execution_context_key: executionContextKey,
+      read_space: windowOptions!.readSpace,
+    }) as {
+      read_id: string;
+      read_scope: string;
+      read_scope_key: string;
+      read_path: string;
+      read_kind: string;
+    }[])
+      .map((row) =>
+        [
+          row.read_id,
+          row.read_scope,
+          row.read_scope_key,
+          row.read_path,
+          row.read_kind,
+        ].join("\0")
+      )
+      .sort();
+  const windowRowsBefore = windowReadRowKeys();
   if (payloadChanged) {
     reconcileSchedulerReadRows(engine, {
       branch,
@@ -4258,6 +4342,10 @@ const upsertSchedulerObservationTransaction = (
       scopeContext: options.scopeContext,
     });
   }
+  const windowRowsAfter = windowReadRowKeys();
+  const windowDirtied = windowActive && windowRowsAfter.length > 0 &&
+    (windowRowsBefore.length !== windowRowsAfter.length ||
+      windowRowsBefore.some((key, index) => key !== windowRowsAfter[index]));
   upsertSchedulerSnapshot(engine, {
     branch,
     observationId,
@@ -4280,6 +4368,27 @@ const upsertSchedulerObservationTransaction = (
     latestObservationId: observationId,
     coveredThroughSeq,
   });
+  // C3A9: the conservative window mark — strictly AFTER the action-state
+  // upsert, whose covered-through clearing must not erase it, and inside
+  // this same transaction, so no hosting-space commit can interleave
+  // between the row reconcile above and the mark.
+  if (windowDirtied) {
+    markSchedulerActionsDirectDirty(engine, {
+      branch,
+      ownerSpace: observation.ownerSpace,
+      dirtySeq: windowOptions!.windowDirtySeq,
+      actions: [
+        {
+          branch,
+          ownerSpace: observation.ownerSpace,
+          pieceId: observation.pieceId,
+          processGeneration: observation.processGeneration,
+          actionId: observation.actionId,
+          executionContextKey,
+        } as SchedulerReaderIndexEntry,
+      ],
+    });
+  }
   pruneSchedulerSessionExecutionContexts(engine, {
     branch,
     ownerSpace: observation.ownerSpace,
@@ -4308,6 +4417,9 @@ const upsertSchedulerObservationTransaction = (
     commitSeq: options.commitSeq ?? null,
     executionContextKey,
     invalidatedExecutionContextKeys,
+    ...(windowDirtied
+      ? { readToMirrorWindowDirtySeq: windowOptions!.windowDirtySeq }
+      : {}),
   };
 };
 
@@ -4770,6 +4882,152 @@ export const staleReadersForTargets = (
   }) as SchedulerActionStateRow[];
 
   return rows.map(schedulerActionStateFromRow);
+};
+
+/**
+ * C3.3a (C3A10): the post-ack direct-dirty-∩-demand scan. Returns every
+ * demanded action in the owner partition with UNSETTLED durable dirt —
+ * `direct_dirty_seq`/`stale_seq` present or provenance unknown —
+ * regardless of when the dirt landed. Unlike
+ * {@link staleReadersForTargets} there is no changed-target gate and no
+ * seq floor: the scan runs at (re)subscribe time, when the caller cannot
+ * know which read-space commits its dirt corresponds to (the marks were
+ * applied via C3.1b's `ForeignDirtyMark`, whose seqs live in the READ
+ * space's domain). Spurious matches are safe (a wake reconciles to a
+ * no-op); missed ones are not.
+ */
+export const dirtyDemandedSchedulerActions = (
+  engine: Engine,
+  options: {
+    branch?: BranchName;
+    ownerSpace?: string;
+    demandedSchedulerPieceIds: readonly string[];
+    applicableExecutionContextKeys?: readonly SchedulerExecutionContextKey[];
+  },
+): SchedulerActionState[] => {
+  if (options.demandedSchedulerPieceIds.length === 0) return [];
+  const branch = options.branch ?? DEFAULT_BRANCH;
+  const ownerSpace = normalizeSchedulerOwnerSpace(options.ownerSpace);
+  const demandedSchedulerPieceIds = [
+    ...new Set(options.demandedSchedulerPieceIds),
+  ];
+  const applicableContextKeys =
+    options.applicableExecutionContextKeys === undefined
+      ? undefined
+      : [...new Set(options.applicableExecutionContextKeys)];
+  if (applicableContextKeys?.length === 0) return [];
+
+  const pieceParams = Object.fromEntries(
+    demandedSchedulerPieceIds.map((pieceId, index) => [
+      `demanded_piece_${index}`,
+      pieceId,
+    ]),
+  );
+  const pieceFilter = demandedSchedulerPieceIds
+    .map((_, index) => `:demanded_piece_${index}`)
+    .join(", ");
+  const contextParams = Object.fromEntries(
+    applicableContextKeys?.map((key, index) => [
+      `execution_context_${index}`,
+      key,
+    ]) ?? [],
+  );
+  const contextFilter = applicableContextKeys === undefined
+    ? ""
+    : `AND execution_context_key IN (${
+      applicableContextKeys.map((_, index) => `:execution_context_${index}`)
+        .join(", ")
+    })`;
+
+  const rows = engine.database.prepare(`
+    SELECT
+      branch,
+      owner_space,
+      piece_id,
+      process_generation,
+      action_id,
+      execution_context_key,
+      latest_observation_id,
+      direct_dirty_seq,
+      stale_seq,
+      unknown_reason
+    FROM scheduler_action_state
+    WHERE branch = :branch
+      AND owner_space = :owner_space
+      AND piece_id IN (${pieceFilter})
+      ${contextFilter}
+      AND (
+        direct_dirty_seq IS NOT NULL OR
+        stale_seq IS NOT NULL OR
+        unknown_reason IS NOT NULL
+      )
+    ORDER BY
+      piece_id,
+      process_generation,
+      action_id,
+      execution_context_key
+  `).all({
+    branch,
+    owner_space: ownerSpace,
+    ...pieceParams,
+    ...contextParams,
+  }) as SchedulerActionStateRow[];
+
+  return rows.map(schedulerActionStateFromRow);
+};
+
+/**
+ * C3.3a subscription source: which foreign spaces do the demanded pieces'
+ * indexed reads name? Consults the owner partition of the durable
+ * read-index — the same rows client observations reconcile transactionally
+ * on accept — so the answer is exactly the current accepted read surface,
+ * with no dependence on mirror fan-out timing or a peer engine. Returns
+ * read space → the demanded piece ids reading it (foreign spaces only:
+ * `read_space` different from the owner partition's own space name).
+ */
+export const schedulerForeignReadSpacesForPieces = (
+  engine: Engine,
+  options: {
+    branch?: BranchName;
+    ownerSpace: string;
+    demandedSchedulerPieceIds: readonly string[];
+  },
+): Map<string, string[]> => {
+  const byReadSpace = new Map<string, string[]>();
+  if (options.demandedSchedulerPieceIds.length === 0) return byReadSpace;
+  const branch = options.branch ?? DEFAULT_BRANCH;
+  const demandedSchedulerPieceIds = [
+    ...new Set(options.demandedSchedulerPieceIds),
+  ];
+  const pieceParams = Object.fromEntries(
+    demandedSchedulerPieceIds.map((pieceId, index) => [
+      `demanded_piece_${index}`,
+      pieceId,
+    ]),
+  );
+  const pieceFilter = demandedSchedulerPieceIds
+    .map((_, index) => `:demanded_piece_${index}`)
+    .join(", ");
+  const rows = engine.database.prepare(`
+    SELECT DISTINCT read_space, piece_id
+    FROM scheduler_read_index
+    WHERE branch = :branch
+      AND COALESCE(owner_space, '') = :owner_space
+      AND read_space <> :own_space
+      AND piece_id IN (${pieceFilter})
+    ORDER BY read_space, piece_id
+  `).all({
+    branch,
+    owner_space: normalizeSchedulerOwnerSpace(options.ownerSpace),
+    own_space: options.ownerSpace,
+    ...pieceParams,
+  }) as { read_space: string; piece_id: string }[];
+  for (const row of rows) {
+    const pieces = byReadSpace.get(row.read_space);
+    if (pieces === undefined) byReadSpace.set(row.read_space, [row.piece_id]);
+    else pieces.push(row.piece_id);
+  }
+  return byReadSpace;
 };
 
 /**

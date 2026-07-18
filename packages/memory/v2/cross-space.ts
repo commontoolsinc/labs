@@ -200,6 +200,26 @@ export interface ForeignReadersUnsubscribe extends CrossSpaceEnvelope {
 }
 
 /**
+ * Read host → home host: the C3A10 ack — `branch`'s subscription at
+ * `subscriptionGeneration` is APPLIED on the read host, and every
+ * post-commit side effect for commits the read host had accepted before
+ * applying it has drained (in-process: the read space's side-effect
+ * chain; co-hosted: the corresponding dirt/notice frames precede this
+ * ack on the same FIFO link). C3.3a chose a DEDICATED ack message
+ * (2026-07-18) over "the first notice at gen N+1" because a notice
+ * carries no generation, only exists when a commit matches (a quiet
+ * read space would never ack), and delivery-does-not-await-handlers
+ * means only an application-emitted message can order behind the drain.
+ * The home host completes its direct-dirty-∩-demand scan with pool wake
+ * only after processing this message (the barrier's second half).
+ */
+export interface ForeignReadersSubscribeApplied extends CrossSpaceEnvelope {
+  type: "foreign-readers.subscribe-applied";
+  branch: BranchName;
+  subscriptionGeneration: number;
+}
+
+/**
  * Identity of one matched foreign reader — a mirrored reader row in the
  * committing (read) space whose owner is the home space. `branch` is the
  * mirrored row's branch (today the home branch stamped at mirror time),
@@ -467,6 +487,7 @@ export interface ForeignAuthorizationEpochQueryResult
 export type CrossSpaceMessage =
   | ForeignReadersSubscribe
   | ForeignReadersUnsubscribe
+  | ForeignReadersSubscribeApplied
   | ForeignStaleReaders
   | ForeignObservationMirror
   | ForeignDirtyMark
@@ -879,6 +900,22 @@ const PAYLOAD_READERS: Record<CrossSpaceMessageType, PayloadReader> = {
     };
   },
   "foreign-readers.unsubscribe": (raw) => {
+    if (!isBranchName(raw.branch)) {
+      return { detail: "branch must be a string" };
+    }
+    if (!isPositiveSafeInteger(raw.subscriptionGeneration)) {
+      return {
+        detail: "subscriptionGeneration must be a positive integer",
+      };
+    }
+    return {
+      fields: {
+        branch: raw.branch,
+        subscriptionGeneration: raw.subscriptionGeneration,
+      },
+    };
+  },
+  "foreign-readers.subscribe-applied": (raw) => {
     if (!isBranchName(raw.branch)) {
       return { detail: "branch must be a string" };
     }

@@ -1027,6 +1027,40 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
         }
       }
     },
+    // C3.3a (C3A11's provider leg): an in-flight Worker hears that its
+    // foreign inputs changed. Same stale-reader consumption as a home
+    // accepted-commit notice — matched live registration reruns (lane-
+    // pinned when a live lane claim owns the row), unmatched identities
+    // fall back to the selective closure pull — but with NO document
+    // wave: the changed documents live in the READ space, which this
+    // Worker cannot mount until C3.4 (`docKey` has no space dimension).
+    // Pinned pre-C3.4 posture: the rerun re-reads home replicas only,
+    // the action's foreign read keeps it unservable
+    // (`foreign-read-space`), the attempt settles canonically unserved,
+    // and clients fail open to their own replicas. C3.4's point reads +
+    // C3.5's vector basis turn this same wake into a served rerun.
+    onForeignWake(notice) {
+      const stalePieceIds = new Set<string>();
+      for (const reader of notice.staleForeignReaders) {
+        const identity = schedulerIdentityKeyForStaleReader(reader);
+        const action = identity === undefined
+          ? undefined
+          : actionsBySchedulerIdentity.get(identity);
+        if (action !== undefined) {
+          if (
+            reader.executionContextKey !== "space" &&
+            liveClaimForLane(action, reader.executionContextKey) !== undefined
+          ) {
+            scheduleLaneRerun(action, reader.executionContextKey);
+            continue;
+          }
+          runtime?.scheduler.invalidateActionForHostWake(action);
+        } else {
+          stalePieceIds.add(reader.pieceId);
+        }
+      }
+      selectiveWake?.push([...stalePieceIds]);
+    },
   });
   // A demand shrink stops removed roots; the scheduler unregisters exactly
   // the actions those roots no longer keep live (an action shared with a

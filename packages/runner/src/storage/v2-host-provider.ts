@@ -31,6 +31,7 @@ import * as MemoryClient from "@commonfabric/memory/v2/client";
 import {
   type AcceptedCommitEvent,
   type ExecutionLeaseHandle,
+  type ForeignWakeEvent,
   parseClientMessage,
   type Server,
 } from "@commonfabric/memory/v2/server";
@@ -81,10 +82,46 @@ export interface AcceptedCommitNotice {
   staleDemandedReaders: AcceptedCommitEvent["staleDemandedReaders"];
 }
 
+/**
+ * C3.3a (C3A11's provider leg): the running-Worker foreign-wake notice —
+ * a read-space commit (or window/scan closure) made this home space's
+ * mirrored-foreign-read actions stale. `readSeq` lives in the READ
+ * space's seq domain and is diagnostic only; the notice deliberately
+ * carries NO revisions/schedulerUpdateIds (there is no home commit to
+ * integrate) so it can never be mistaken for an accepted-commit wave.
+ * Reader identities carry `ownerSpace` = the home space, matching the
+ * stale-reader identity shape the Worker's wake consumption keys on.
+ *
+ * Pre-C3.4 posture (pinned): the Worker CANNOT read the foreign data —
+ * `docKey` has no space dimension and no foreign point read exists — so
+ * this notice only marks/schedules: the matched action re-runs against
+ * its home replica, its foreign read keeps it unservable
+ * (`foreign-read-space`), and the attempt settles canonically unserved —
+ * clients fall back and re-run with their own foreign replicas. C3.4
+ * adds the read-side mount + point reads; C3.5's vector basis then lets
+ * the rerun settle served with a foreign component.
+ */
+export interface ForeignWakeNotice {
+  space: string;
+  branch: BranchName;
+  readSpace: string;
+  readSeq: number;
+  origin: ForeignWakeEvent["origin"];
+  staleForeignReaders: {
+    branch: BranchName;
+    ownerSpace: string;
+    pieceId: string;
+    processGeneration: number;
+    actionId: string;
+    executionContextKey: SchedulerExecutionContextKey;
+  }[];
+}
+
 type ProviderPortMessage =
   | { type: "memory"; payload: string }
   | { type: "accepted-commit"; notice: AcceptedCommitNotice }
   | { type: "accepted-commit-barrier"; barrierId: number }
+  | { type: "foreign-wake"; notice: ForeignWakeNotice }
   | { type: "close"; message?: string };
 
 interface HostProviderChannelBaseOptions {
@@ -249,6 +286,7 @@ export function createHostProviderChannel(
   let disposed = false;
   let receiving = Promise.resolve();
   let unsubscribeAcceptedCommits = () => {};
+  let unsubscribeForeignWakes = () => {};
 
   const connection = options.server.connect((message) => {
     if (disposed) return;
@@ -273,6 +311,7 @@ export function createHostProviderChannel(
     if (disposed) return;
     disposed = true;
     unsubscribeAcceptedCommits();
+    unsubscribeForeignWakes();
     connection.close();
     try {
       hostPort.postMessage(
@@ -459,6 +498,38 @@ export function createHostProviderChannel(
       );
     },
   );
+  // C3.3a (C3A11): the running-Worker leg — foreign wakes reach the live
+  // Worker over the same ordered port. The server dispatches them only
+  // after the corresponding foreign dirt applied to the home engine, so
+  // by the time the Worker reacts the staleness is durable host-side.
+  unsubscribeForeignWakes = options.server.subscribeForeignWakes(
+    options.space,
+    (event) => {
+      if (disposed || event.branch !== branch) return;
+      hostPort.postMessage(
+        {
+          type: "foreign-wake",
+          notice: {
+            space: event.space,
+            branch: event.branch,
+            readSpace: event.readSpace,
+            readSeq: event.readSeq,
+            origin: event.origin,
+            staleForeignReaders: event.staleForeignReaders.map((reader) => ({
+              branch: reader.branch,
+              // The wake's readers are HOME actions; stamp the owner so
+              // the Worker-side identity key matches its registrations.
+              ownerSpace: event.space,
+              pieceId: reader.pieceId,
+              processGeneration: reader.processGeneration,
+              actionId: reader.actionId,
+              executionContextKey: reader.executionContextKey,
+            })),
+          },
+        } satisfies ProviderPortMessage,
+      );
+    },
+  );
 
   return {
     port: channel.port2,
@@ -481,6 +552,8 @@ class MessagePortTransport implements MemoryClient.Transport {
   #acceptedCommitReceiver: ((notice: AcceptedCommitNotice) => void) | null =
     null;
   #bufferedAcceptedCommits: AcceptedCommitNotice[] = [];
+  #foreignWakeReceiver: ((notice: ForeignWakeNotice) => void) | null = null;
+  #bufferedForeignWakes: ForeignWakeNotice[] = [];
   #acceptedCommitBarrierId = 0;
   #acceptedCommitBarriers = new Map<number, PromiseWithResolvers<void>>();
 
@@ -508,6 +581,14 @@ class MessagePortTransport implements MemoryClient.Transport {
         }
         this.#acceptedCommitBarriers.delete(message.barrierId!);
         pending.resolve();
+      } else if (
+        message.type === "foreign-wake" && message.notice !== undefined
+      ) {
+        if (this.#foreignWakeReceiver === null) {
+          this.#bufferedForeignWakes.push(message.notice);
+        } else {
+          this.#foreignWakeReceiver(message.notice);
+        }
       } else if (message.type === "close") {
         this.closeFromHost(message.message);
       } else {
@@ -534,6 +615,17 @@ class MessagePortTransport implements MemoryClient.Transport {
     this.#acceptedCommitReceiver = receiver;
     const buffered = this.#bufferedAcceptedCommits;
     this.#bufferedAcceptedCommits = [];
+    for (const notice of buffered) receiver(notice);
+  }
+
+  /** C3.3a: the foreign-wake leg's receiver, buffered like accepted
+   * commits so a wake posted before the replica wires up is not lost. */
+  setForeignWakeReceiver(
+    receiver: (notice: ForeignWakeNotice) => void,
+  ): void {
+    this.#foreignWakeReceiver = receiver;
+    const buffered = this.#bufferedForeignWakes;
+    this.#bufferedForeignWakes = [];
     for (const notice of buffered) receiver(notice);
   }
 
@@ -760,12 +852,33 @@ class HostReplicaSession implements ReplicaSession {
     private readonly onAcceptedCommitIntegrated?: (
       notice: AcceptedCommitNotice,
     ) => void,
+    private readonly onForeignWake?: (notice: ForeignWakeNotice) => void,
   ) {
     this.#appliedSeq = session.serverSeq;
     this.#schedulerDeliverySeq = session.serverSeq;
     this.#executionDeliverySeq = session.executionFeedSeq;
     transport.setAcceptedCommitReceiver((notice) => {
       this.queueAcceptedCommit(notice);
+    });
+    // C3.3a (C3A11 provider leg): a foreign wake carries no home commit
+    // to integrate — no point reads, no watermark movement, no wave. It
+    // rides the SAME mutation chain as accepted-commit refreshes so its
+    // observer never overtakes an in-flight home integration (the wake
+    // consumption keys on action registrations the wave may be
+    // creating). See ForeignWakeNotice for the pinned pre-C3.4 posture.
+    transport.setForeignWakeReceiver((notice) => {
+      if (this.#closed || this.onForeignWake === undefined) return;
+      this.#mutation = this.#mutation.then(
+        () => {
+          if (this.#closed) return;
+          try {
+            this.onForeignWake?.(notice);
+          } catch (error) {
+            console.warn("executor foreign-wake observer failed", error);
+          }
+        },
+        () => {},
+      );
     });
     if (supportsExecutionDemand) {
       this.setExecutionDemand = (branch, pieces) =>
@@ -1726,6 +1839,7 @@ class HostSessionFactory implements SessionFactory {
     private readonly onAcceptedCommitIntegrated?: (
       notice: AcceptedCommitNotice,
     ) => void,
+    private readonly onForeignWake?: (notice: ForeignWakeNotice) => void,
   ) {
     this.supportsExecutionDemand = supportsExecutionDemand;
   }
@@ -1764,6 +1878,7 @@ class HostSessionFactory implements SessionFactory {
       this.supportsExecutionDemand,
       this.onAcceptedCommitWillIntegrate,
       this.onAcceptedCommitIntegrated,
+      this.onForeignWake,
     );
     lifecycle.replica = replica;
     this.#session = replica;
@@ -1827,6 +1942,12 @@ export interface HostStorageManagerOptions {
   /** Runs synchronously after an accepted host commit has been point-refreshed
    * and applied to the Worker replica. */
   onAcceptedCommitIntegrated?: (notice: AcceptedCommitNotice) => void;
+  /** C3.3a (C3A11): a foreign wake reached this Worker — home actions
+   * with mirrored foreign reads went stale in another space's seq domain.
+   * Ordered behind in-flight accepted-commit integrations; carries no
+   * home commit. See {@link ForeignWakeNotice} for the pre-C3.4 fail-
+   * closed posture the consumer must keep. */
+  onForeignWake?: (notice: ForeignWakeNotice) => void;
 }
 
 /** StorageManager construction available inside the executor Worker. */
@@ -1848,6 +1969,7 @@ export class HostStorageManager extends StorageManager {
       options.supportsExecutionDemand === true,
       options.onAcceptedCommitWillIntegrate,
       options.onAcceptedCommitIntegrated,
+      options.onForeignWake,
     );
     return new HostStorageManager(
       {

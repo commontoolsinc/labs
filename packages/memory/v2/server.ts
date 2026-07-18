@@ -4,6 +4,7 @@ import { resolveSpaceStoreUrl } from "./storage-path.ts";
 import {
   type CrossSpaceDeliveryContext,
   CrossSpaceHostRouter,
+  type CrossSpaceLaneDemand,
   type CrossSpaceMessage,
   CrossSpaceProtocolError,
   type ForeignAuthorizationEpochBump,
@@ -11,6 +12,11 @@ import {
   type ForeignAuthorizationEpochQueryResult,
   type ForeignDirtyMark,
   type ForeignObservationMirror,
+  type ForeignReaderIdentity,
+  type ForeignReadersSubscribe,
+  type ForeignReadersSubscribeApplied,
+  type ForeignReadersUnsubscribe,
+  type ForeignStaleReaders,
   InProcessCrossSpaceTransport,
 } from "./cross-space.ts";
 import {
@@ -646,6 +652,47 @@ export interface AcceptedCommitEvent {
 
 export type AcceptedCommitListener = (
   event: AcceptedCommitEvent,
+) => void | Promise<void>;
+
+/**
+ * C3.3a: a FOREIGN wake — a read-space commit (or a C3A9 window closure
+ * at mirror-apply time, or the C3A10 post-ack scan) made home actions
+ * with mirrored foreign reads stale. Deliberately NOT an
+ * {@link AcceptedCommitEvent}: `readSeq` lives in the READ space's seq
+ * domain and must never be compared against, or merged into, any home
+ * watermark (`pendingWakeSeq`/`lastSettledSeq` — C3A11). Spurious
+ * foreign wakes are safe; missed ones are not. Executor-plane only, like
+ * `ForeignStaleReaders` itself (C3A24): no session-delivery leg.
+ */
+export interface ForeignWakeEvent {
+  /** The HOME space whose actions went stale. */
+  readonly space: string;
+  /** The home branch the stale reader rows live under. */
+  readonly branch: BranchName;
+  /** The read (committing) space that caused the staleness. */
+  readonly readSpace: string;
+  /**
+   * READ-space seq domain: the causing commit's seq for a notice-driven
+   * wake; the last APPLIED foreign-dirt seq for a scan-driven one.
+   * Diagnostic only — never a home-domain comparand.
+   */
+  readonly readSeq: number;
+  /** Which leg produced the wake (notice = live path; scan = C3A10
+   * post-ack replay of the durable dirt ledger). */
+  readonly origin: "notice" | "resubscribe-scan";
+  /** Stale home actions at the subscription's lane granularity. Their
+   * owner space is `space`; scalar identities only. */
+  readonly staleForeignReaders: readonly Readonly<{
+    branch: BranchName;
+    pieceId: string;
+    processGeneration: number;
+    actionId: string;
+    executionContextKey: SchedulerExecutionContextKey;
+  }>[];
+}
+
+export type ForeignWakeListener = (
+  event: ForeignWakeEvent,
 ) => void | Promise<void>;
 
 export interface AuthenticatedExecutionDemand {
@@ -1688,6 +1735,58 @@ export class Server {
   // Soft-private (not #-private) so C3.10b's reconnect drill and today's
   // parked-space fixture can observe the advancing value.
   private crossSpaceAppliedDirtCursors = new Map<string, number>();
+  /**
+   * C3.3a — READ-host side of the demand-joined foreign-wake join: the
+   * live `ForeignReadersSubscribe` registrations of remote HOME spaces,
+   * outer-keyed by the read space this host serves, inner-keyed by
+   * `homeSpace\0homeBranch`. One live registration per stream, replaced
+   * only by a strictly higher `subscriptionGeneration` (the C3A10
+   * discrimination); an unsubscribe retires exactly its own generation.
+   * `#publishAcceptedCommit` consults this to emit `ForeignStaleReaders`.
+   *
+   * C3.2/C3.7 seam (C3A6, dated 2026-07-18): an authorization-epoch
+   * revocation that unsubscribes a home space's demand pairs operates on
+   * THIS registry (drop the inner entry) plus the mirrored reader rows —
+   * `dropForeignReaderSubscriptionsForHome` below is the intended entry.
+   * Soft-private for fixtures.
+   */
+  private foreignReaderSubscriptionsByReadSpace = new Map<
+    string,
+    Map<
+      string,
+      { generation: number; laneDemands: readonly CrossSpaceLaneDemand[] }
+    >
+  >();
+  /**
+   * C3.3a — HOME-host side: this host's own outbound subscription state
+   * per `homeSpace\0branch\0readSpace`. `nextGeneration` is the
+   * monotonic per-stream generation counter; `liveGeneration`/
+   * `liveLaneDemandsKey` describe the acked registration; `ackWaiters`
+   * carries the C3A10 barrier resolvers keyed by generation (resolved by
+   * the inbound `foreign-readers.subscribe-applied` arm, or by close —
+   * fail-open teardown, never a hung chain).
+   */
+  private foreignReaderSubscriptionsByHomeSpace = new Map<
+    string,
+    {
+      nextGeneration: number;
+      liveGeneration?: number;
+      liveLaneDemandsKey?: string;
+      ackWaiters: Map<number, () => void>;
+    }
+  >();
+  /** Coalescing per-(homeSpace, branch) reconcile chains for the foreign
+   * subscription registry — at most one in-flight pass per key, with a
+   * rerun bit for triggers arriving mid-pass. */
+  #foreignSubscriptionReconciles = new Map<
+    string,
+    { rerun: boolean; chain: Promise<void> }
+  >();
+  /** Every in-flight piece of C3.3a background work (reconcile passes and
+   * detached subscribe-ack continuations) — the settle barrier's set. */
+  #pendingForeignSubscriptionWork = new Set<Promise<void>>();
+  #foreignSubscriptionsClosed = false;
+  #foreignWakeListeners = new Map<string, Set<ForeignWakeListener>>();
   /**
    * C3.2 (2026-07-18): the receiving-side store for REMOTE authorization
    * epochs — what this host remembers about PEER spaces, fed by inbound
@@ -3073,6 +3172,9 @@ export class Server {
 
   #publishExecutionDemands(space: string, branch: BranchName): void {
     const snapshot = this.#nextExecutionDemandSnapshot(space, branch);
+    // C3.3a: demand churn re-derives the foreign-reader subscriptions
+    // (fire-and-forget; coalesced per (space, branch)).
+    this.scheduleForeignReaderSubscriptionReconcile(space, branch);
     for (const listener of this.#executionDemandListeners) {
       try {
         const result = listener(snapshot);
@@ -3092,6 +3194,9 @@ export class Server {
     branch: BranchName,
   ): Promise<void> {
     const snapshot = this.#nextExecutionDemandSnapshot(space, branch);
+    // C3.3a: same trigger as the fire-and-forget publish — the await
+    // below covers demand listeners only, never the cross-space barrier.
+    this.scheduleForeignReaderSubscriptionReconcile(space, branch);
     await Promise.all(
       [...this.#executionDemandListeners].map((listener) =>
         Promise.resolve().then(() => listener(snapshot))
@@ -4229,6 +4334,10 @@ export class Server {
       anchorSessionToken: anchor.sessionToken,
     });
     this.#userLaneGrants.set(key, grant);
+    // C3A17: a lane-grant open re-registers the foreign-reader
+    // subscription so the new lane's demand slice joins the foreign
+    // lookup (fire-and-forget; the C3A10 barrier lives in the pass).
+    this.scheduleForeignReaderSubscriptionReconcile(space, branch);
     return grant;
   }
 
@@ -4386,6 +4495,10 @@ export class Server {
       anchorSessionToken: anchor.sessionToken,
     });
     this.#sessionLaneGrants.set(key, grant);
+    // C3A17: session-lane churn re-registers like user-lane churn — a
+    // grant opened after initial registration must still receive foreign
+    // wakes for its demanded pieces.
+    this.scheduleForeignReaderSubscriptionReconcile(space, branch);
     return grant;
   }
 
@@ -4527,6 +4640,8 @@ export class Server {
     if (this.#userLaneGrants.get(key) !== grant) return;
     this.#userLaneGrants.delete(key);
     this.#sweepLaneClaims(grant);
+    // C3A17: lane drain narrows the foreign-lookup join — re-register.
+    this.scheduleForeignReaderSubscriptionReconcile(grant.space, grant.branch);
   }
 
   /** Drain one session lane — §B.8's drain semantics at session
@@ -4538,6 +4653,8 @@ export class Server {
     if (this.#sessionLaneGrants.get(key) !== grant) return;
     this.#sessionLaneGrants.delete(key);
     this.#sweepLaneClaims(grant);
+    // C3A17: lane drain narrows the foreign-lookup join — re-register.
+    this.scheduleForeignReaderSubscriptionReconcile(grant.space, grant.branch);
   }
 
   #drainLanesForConnection(connectionId: string): void {
@@ -5160,6 +5277,15 @@ export class Server {
       clearTimeout(this.#executionLeaseExpiryTimer);
       this.#executionLeaseExpiryTimer = null;
     }
+    // C3.3a teardown: stop new reconciles, release every pending C3A10
+    // ack barrier (fail-open — a closing host must not strand a chain),
+    // and drain in-flight subscription work before the engines close.
+    this.#foreignSubscriptionsClosed = true;
+    for (const state of this.foreignReaderSubscriptionsByHomeSpace.values()) {
+      for (const resolve of state.ackWaiters.values()) resolve();
+      state.ackWaiters.clear();
+    }
+    await this.settleForeignReaderSubscriptions().catch(() => {});
     // Drain in-flight cross-space applies before closing the engines they
     // write into (transact awaits them already; this covers crafted or
     // late-arriving frames).
@@ -5171,6 +5297,9 @@ export class Server {
     this.#openedEngines.clear();
     this.#connections.clear();
     this.#acceptedCommitListeners.clear();
+    this.#foreignWakeListeners.clear();
+    this.foreignReaderSubscriptionsByReadSpace.clear();
+    this.foreignReaderSubscriptionsByHomeSpace.clear();
     this.#acceptedCommitOrderBySpace.clear();
     this.#executionDemands.clear();
     this.#executionDemandRegistrationOrder.clear();
@@ -5212,6 +5341,126 @@ export class Server {
     };
   }
 
+  /**
+   * C3.3a: subscribe to FOREIGN wakes for a home space — read-space
+   * commits (and window/scan closures) that made the home space's
+   * mirrored-foreign-read actions stale. The executor pool's foreign-wake
+   * entry and the executor provider's running-Worker notice leg are the
+   * intended consumers (C3A11). Same lifecycle shape as
+   * {@link subscribeAcceptedCommits}.
+   */
+  subscribeForeignWakes(
+    space: string,
+    listener: ForeignWakeListener,
+  ): () => void {
+    let listeners = this.#foreignWakeListeners.get(space);
+    if (listeners === undefined) {
+      listeners = new Set();
+      this.#foreignWakeListeners.set(space, listeners);
+    }
+    listeners.add(listener);
+    let subscribed = true;
+    return () => {
+      if (!subscribed) return;
+      subscribed = false;
+      const current = this.#foreignWakeListeners.get(space);
+      current?.delete(listener);
+      if (current?.size === 0) {
+        this.#foreignWakeListeners.delete(space);
+      }
+    };
+  }
+
+  #dispatchForeignWake(event: ForeignWakeEvent): void {
+    const frozen = Object.freeze({
+      ...event,
+      staleForeignReaders: Object.freeze(
+        event.staleForeignReaders.map((reader) => Object.freeze({ ...reader })),
+      ),
+    });
+    for (const listener of this.#foreignWakeListeners.get(event.space) ?? []) {
+      try {
+        const result = listener(frozen);
+        if (result instanceof Promise) {
+          void result.catch((error) => {
+            console.warn("foreign wake listener failed", error);
+          });
+        }
+      } catch (error) {
+        console.warn("foreign wake listener failed", error);
+      }
+    }
+  }
+
+  /**
+   * A4 wake widening (C1.8, session lanes since C2.7): one lookup pair
+   * per lane — the space lane against the union of all demand (ALWAYS the
+   * first entry, possibly with zero pieces), plus every OPEN lane grant on
+   * this (space, branch) against its own demand slice: a USER lane against
+   * ONLY that principal's aggregated demand, a SESSION lane against ONLY
+   * its owning session's demand (design §2 — a session's demand implies
+   * demand for its own lane; sibling sessions and the principal's
+   * aggregate never stand in). A parked principal or disconnected session
+   * (rows but no lane grant) gets no lane entry, so its rows accumulate
+   * dirt without waking anything — the CA13 parked skip is EMERGENT from
+   * session-end = lane-end (C2.3) plus this grant-keyed pairing; there is
+   * no parked-lane state to consult.
+   *
+   * Shared since C3.3a between `#publishAcceptedCommit`'s home lookup and
+   * the foreign-reader subscription derivation (C3A17's lane symmetry:
+   * user AND session grants join the foreign lookup through this same
+   * shape), so the two joins cannot skew.
+   */
+  #executionWakeLaneDemands(
+    space: string,
+    branch: BranchName,
+  ): { contextKey: Engine.SchedulerExecutionContextKey; pieces: string[] }[] {
+    const branchDemands = this.listExecutionDemands(space, branch);
+    const demandedSchedulerPieceIds = [
+      ...new Set(
+        branchDemands.flatMap(
+          (demand) => demand.pieces.map(canonicalSchedulerPieceIdForDemandRoot),
+        ),
+      ),
+    ];
+    const laneLookups: {
+      contextKey: Engine.SchedulerExecutionContextKey;
+      pieces: string[];
+    }[] = [{ contextKey: "space", pieces: demandedSchedulerPieceIds }];
+    for (const grant of this.#openUserLaneGrantsFor(space, branch)) {
+      const pieces = [
+        ...new Set(
+          branchDemands
+            .filter((demand) => demand.principal === grant.principal)
+            .flatMap((demand) =>
+              demand.pieces.map(canonicalSchedulerPieceIdForDemandRoot)
+            ),
+        ),
+      ];
+      if (pieces.length > 0) {
+        laneLookups.push({ contextKey: grant.contextKey, pieces });
+      }
+    }
+    for (const grant of this.#openSessionLaneGrantsFor(space, branch)) {
+      const pieces = [
+        ...new Set(
+          branchDemands
+            .filter((demand) =>
+              demand.sessionId === grant.sessionId &&
+              demand.principal === grant.principal
+            )
+            .flatMap((demand) =>
+              demand.pieces.map(canonicalSchedulerPieceIdForDemandRoot)
+            ),
+        ),
+      ];
+      if (pieces.length > 0) {
+        laneLookups.push({ contextKey: grant.contextKey, pieces });
+      }
+    }
+    return laneLookups;
+  }
+
   #publishAcceptedCommit(
     event: {
       space: string;
@@ -5248,73 +5497,11 @@ export class Server {
         ),
       ]),
     ].sort((left, right) => left - right));
-    const branchDemands = this.listExecutionDemands(
+    const laneLookups = this.#executionWakeLaneDemands(
       event.space,
       event.commit.branch,
     );
-    const demandedSchedulerPieceIds = [
-      ...new Set(
-        branchDemands.flatMap(
-          (demand) => demand.pieces.map(canonicalSchedulerPieceIdForDemandRoot),
-        ),
-      ),
-    ];
-    // A4 wake widening (C1.8, session lanes since C2.7): the lookup runs
-    // once per lane — the space lane against the union of all demand, plus
-    // every OPEN lane grant on this (space, branch) against its own demand
-    // slice: a USER lane against ONLY that principal's aggregated demand, a
-    // SESSION lane against ONLY its owning session's demand (design §2 — a
-    // session's demand implies demand for its own lane; sibling sessions
-    // and the principal's aggregate never stand in). A parked principal or
-    // disconnected session (rows but no lane grant) gets no lane entry, so
-    // its rows accumulate dirt without waking anything — the CA13 parked
-    // skip is EMERGENT from session-end = lane-end (C2.3) plus this
-    // grant-keyed pairing; there is no parked-lane state to consult.
-    const laneLookups: {
-      contextKey: Engine.SchedulerExecutionContextKey;
-      pieces: string[];
-    }[] = [{ contextKey: "space", pieces: demandedSchedulerPieceIds }];
-    for (
-      const grant of this.#openUserLaneGrantsFor(
-        event.space,
-        event.commit.branch,
-      )
-    ) {
-      const pieces = [
-        ...new Set(
-          branchDemands
-            .filter((demand) => demand.principal === grant.principal)
-            .flatMap((demand) =>
-              demand.pieces.map(canonicalSchedulerPieceIdForDemandRoot)
-            ),
-        ),
-      ];
-      if (pieces.length > 0) {
-        laneLookups.push({ contextKey: grant.contextKey, pieces });
-      }
-    }
-    for (
-      const grant of this.#openSessionLaneGrantsFor(
-        event.space,
-        event.commit.branch,
-      )
-    ) {
-      const pieces = [
-        ...new Set(
-          branchDemands
-            .filter((demand) =>
-              demand.sessionId === grant.sessionId &&
-              demand.principal === grant.principal
-            )
-            .flatMap((demand) =>
-              demand.pieces.map(canonicalSchedulerPieceIdForDemandRoot)
-            ),
-        ),
-      ];
-      if (pieces.length > 0) {
-        laneLookups.push({ contextKey: grant.contextKey, pieces });
-      }
-    }
+    const demandedSchedulerPieceIds = laneLookups[0].pieces;
     const engine = this.#openedEngines.get(event.space);
     const dirtyTargets = event.commit.schedulerDirtiedReaders?.map((reader) =>
       reader.read
@@ -5367,6 +5554,19 @@ export class Server {
       event.commit.seq,
       acceptedAt,
     );
+    // C3.3a: this space is a READ space for any foreign home space with a
+    // live demand-joined subscription — consult the commit's dirtied
+    // MIRRORED rows and emit `ForeignStaleReaders` (the live wake path;
+    // the C3.1b dirt mark that preceded this publish on the same FIFO
+    // link is the durable ledger). No-op without subscriptions.
+    if (engine !== undefined && dirtyTargets !== undefined) {
+      this.#emitForeignStaleReaderNotices(
+        event.space,
+        event.commit,
+        dirtyTargets,
+        engine,
+      );
+    }
     const orderedEvent: AcceptedCommitEvent = Object.freeze({
       order,
       deliverySeq: event.deliverySeq,
@@ -5392,6 +5592,92 @@ export class Server {
         }
       } catch (error) {
         console.warn("accepted commit listener failed", error);
+      }
+    }
+  }
+
+  /**
+   * C3.3a — the committing (read) host's half of the foreign wake: for
+   * every foreign home space holding a live subscription on this space,
+   * run the A4-shaped per-lane stale-reader lookup against THIS engine's
+   * MIRRORED rows (`staleReadersForTargets` with `ownerSpace` = the home
+   * space — the mirror partition) and emit one `ForeignStaleReaders` per
+   * home space that matched. Runs synchronously inside
+   * `#publishAcceptedCommit`, which both call sites reach only AFTER
+   * awaiting the commit's post-commit side effects — so the C3.1b
+   * `ForeignDirtyMark` for this commit was already sent on the same FIFO
+   * link, and the home host applies dirt before it dispatches this
+   * notice's wake (the dirt-before-wake invariant the home arm relies
+   * on).
+   *
+   * Branch note (decision #4, v1): mirrored rows land under the HOME
+   * branch and this lookup runs under the COMMITTING branch — the
+   * default-branch pairing is the only supported v1 shape, where the two
+   * coincide; a non-default commit simply finds no mirrored rows.
+   *
+   * The lookup itself deliberately mirrors the home A4 join (per-lane
+   * `applicableExecutionContextKeys`) rather than filtering
+   * `schedulerDirtiedReaders` directly: the state lookup also surfaces
+   * unknown-provenance rows, staying semantically identical to the home
+   * wake so the two paths cannot drift.
+   */
+  #emitForeignStaleReaderNotices(
+    space: string,
+    commit: Engine.AppliedCommit,
+    dirtyTargets: readonly Engine.SchedulerWriteAddress[],
+    engine: Engine.Engine,
+  ): void {
+    const byHome = this.foreignReaderSubscriptionsByReadSpace.get(space);
+    if (byHome === undefined || byHome.size === 0) return;
+    if (dirtyTargets.length === 0) return;
+    // The commit's own dirtied readers name every foreign owner space it
+    // touched (mirrored-row dirt is written synchronously by applyCommit),
+    // so owners outside this set need no engine consult.
+    const dirtiedOwners = new Set(
+      (commit.schedulerDirtiedReaders ?? []).flatMap((reader) =>
+        reader.ownerSpace !== undefined && reader.ownerSpace !== space
+          ? [reader.ownerSpace]
+          : []
+      ),
+    );
+    if (dirtiedOwners.size === 0) return;
+    for (const [subscriptionKey, subscription] of byHome) {
+      const homeSpace = subscriptionKey.split("\0")[0];
+      if (!dirtiedOwners.has(homeSpace)) continue;
+      const collected: Engine.SchedulerActionState[] = [];
+      for (const lane of subscription.laneDemands) {
+        if (lane.pieces.length === 0) continue;
+        // Context keys are disjoint across lanes (same rule as the home
+        // A4 join), so rows cannot duplicate across lookups.
+        collected.push(
+          ...Engine.staleReadersForTargets(engine, {
+            branch: commit.branch,
+            ownerSpace: homeSpace,
+            targets: [...dirtyTargets],
+            demandedSchedulerPieceIds: [...lane.pieces],
+            applicableExecutionContextKeys: [lane.contextKey],
+            dirtySeq: commit.seq,
+          }),
+        );
+      }
+      if (collected.length === 0) continue;
+      try {
+        this.#crossSpaceRouter.link(space, homeSpace).send({
+          type: "foreign-stale-readers",
+          branch: commit.branch,
+          commitSeq: commit.seq,
+          readers: collected.map((row) => ({
+            branch: row.branch,
+            pieceId: row.pieceId,
+            processGeneration: row.processGeneration,
+            actionId: row.actionId,
+            executionContextKey: row.executionContextKey,
+          })),
+        });
+      } catch (error) {
+        // The commit is durable and the dirt mark already flowed; a
+        // failed notice send degrades to the ledger + scan path.
+        console.warn("foreign stale-readers notice emission failed:", error);
       }
     }
   }
@@ -8839,6 +9125,23 @@ export class Server {
           scopeContext,
         );
       }
+      // C3.3a: an observation that reads (or stopped reading) a foreign
+      // space changes the home read-index the subscription derivation
+      // consults — re-derive. The rows themselves landed synchronously in
+      // applyCommit; this only needs to run after the fact.
+      if (
+        observations.some(({ localSeq, observation }) => {
+          const readSpaces = this.schedulerObservationReadSpaces(observation);
+          readSpaces.delete(ownerSpace);
+          return readSpaces.size > 0 ||
+            (previousReadSpaces.get(localSeq)?.size ?? 0) > 0;
+        })
+      ) {
+        this.scheduleForeignReaderSubscriptionReconcile(
+          ownerSpace,
+          commit.branch,
+        );
+      }
     } catch (error) {
       console.warn(
         "Post-commit scheduler state update failed after semantic commit:",
@@ -9176,6 +9479,35 @@ export class Server {
           () => this.applyForeignDirtyMark(message, context),
         );
         return;
+      // C3.3a (2026-07-18): the foreign-wake pipeline arms. All four ride
+      // the per-space apply chain — subscription mutations so consults
+      // observe them in arrival order, the ack and the notice so they are
+      // processed strictly AFTER any dirt mark that preceded them on the
+      // FIFO link (dirt-before-wake / dirt-before-scan).
+      case "foreign-readers.subscribe":
+        this.queueCrossSpaceInboundApply(
+          context.space,
+          () => this.applyForeignReadersSubscribe(message, context),
+        );
+        return;
+      case "foreign-readers.unsubscribe":
+        this.queueCrossSpaceInboundApply(
+          context.space,
+          () => this.applyForeignReadersUnsubscribe(message, context),
+        );
+        return;
+      case "foreign-readers.subscribe-applied":
+        this.queueCrossSpaceInboundApply(
+          context.space,
+          () => this.applyForeignReadersSubscribeApplied(message, context),
+        );
+        return;
+      case "foreign-stale-readers":
+        this.queueCrossSpaceInboundApply(
+          context.space,
+          () => this.applyForeignStaleReaders(message, context),
+        );
+        return;
       // C3.2 (2026-07-18): the epoch arms. Bump and query-result are
       // synchronous cache merges (no engine, order-insensitive by
       // monotonicity); the query answers from the durable table, so it
@@ -9193,9 +9525,9 @@ export class Server {
         );
         return;
       default:
-        // C3.1 vocabulary without an inbound consumer yet (2026-07-18):
-        // subscribe/unsubscribe + stale-readers land with C3.3a, point
-        // reads (and their results) with C3.4. Dropping here is
+        // C3.1 vocabulary without an inbound consumer yet (2026-07-18,
+        // C3.3a landed the subscribe/notice arms): point reads (and
+        // their results) land with C3.4. Dropping here is
         // side-effect-free by construction.
         console.warn(
           `cross-space message ${message.type} for ${context.space} has ` +
@@ -9263,7 +9595,11 @@ export class Server {
       return;
     }
     const engine = await this.openHostedEngine(context.space);
-    Engine.upsertMirroredSchedulerObservation(engine, {
+    // C3.3a/C3A9: this engine's serverSeq bounds the read-to-mirror
+    // window — captured before the upsert transaction, which serializes
+    // against local commits (see MirroredReadToMirrorWindowOptions).
+    const windowDirtySeq = Engine.serverSeq(engine);
+    const result = Engine.upsertMirroredSchedulerObservation(engine, {
       branch: message.branch,
       // Envelope addressing IS the contract: the home space is the
       // envelope's fromSpace (the codec pinned any payload ownerSpace to
@@ -9281,7 +9617,64 @@ export class Server {
       // `causeCoverageSeq` rides here, so the upsert's cause consumption
       // still crosses seq domains; C3.5's vector (read-space component)
       // owns the fix — do not add an interim value as part of routing.
+      ...(windowDirtySeq >= 1
+        ? {
+          readToMirrorWindow: {
+            readSpace: context.space,
+            windowDirtySeq,
+          },
+        }
+        : {}),
     });
+    // C3A9 fan-out: a window mark applied inside the upsert transaction
+    // flows exactly like a commit-time dirtying — the durable mark to the
+    // home engine (the ledger the subscribe-time scan replays), plus the
+    // live notice when a subscription covers the action's lane. Sends
+    // only — never settle deliveries from inside an inbound apply (the
+    // pending-set barrier would deadlock on this very apply).
+    if (result.readToMirrorWindowDirtySeq !== undefined) {
+      const reader = {
+        branch: message.branch,
+        pieceId: observation.pieceId,
+        processGeneration: observation.processGeneration,
+        actionId: observation.actionId,
+        executionContextKey: result.executionContextKey,
+      };
+      try {
+        const link = this.#crossSpaceRouter.link(
+          context.space,
+          context.fromSpace,
+        );
+        link.send({
+          type: "foreign-dirty-mark",
+          branch: message.branch,
+          dirtySeq: result.readToMirrorWindowDirtySeq,
+          readers: [reader],
+        });
+        const subscription = this.foreignReaderSubscriptionsByReadSpace
+          .get(context.space)
+          ?.get(`${context.fromSpace}\0${message.branch}`);
+        if (
+          subscription !== undefined &&
+          subscription.laneDemands.some((lane) =>
+            lane.contextKey === reader.executionContextKey &&
+            lane.pieces.includes(reader.pieceId)
+          )
+        ) {
+          link.send({
+            type: "foreign-stale-readers",
+            branch: message.branch,
+            commitSeq: result.readToMirrorWindowDirtySeq,
+            readers: [reader],
+          });
+        }
+      } catch (error) {
+        console.warn(
+          "read-to-mirror window dirt fan-out failed:",
+          error,
+        );
+      }
+    }
   }
 
   private async applyForeignDirtyMark(
@@ -9318,6 +9711,476 @@ export class Server {
     if (message.dirtySeq > cursor) {
       this.crossSpaceAppliedDirtCursors.set(cursorKey, message.dirtySeq);
     }
+  }
+
+  /**
+   * C3.3a read-host arm: apply (or supersede) a home space's demand-joined
+   * subscription. The registration becomes consult-visible IMMEDIATELY —
+   * every commit this host accepts after this apply sees it in
+   * `#emitForeignStaleReaderNotices` — while the C3A10 ack is emitted
+   * only after the read space's post-commit side-effect chain, as
+   * captured HERE, drains: every commit accepted before this apply has
+   * its `ForeignDirtyMark` sent (and, in-process, applied) before the
+   * ack, so the home host's post-ack scan cannot run ahead of that dirt.
+   * The continuation is deliberately DETACHED: awaiting the side-effect
+   * chain inside this inbound apply would deadlock — side-effect jobs
+   * await `settleCrossSpaceDeliveries`, which awaits this very apply.
+   *
+   * Stale generations (<= the live one) are dropped WITHOUT an ack: the
+   * home reconciler is serialized per stream, so a stale subscribe is
+   * always a reordering artifact, and acking it could release a barrier
+   * whose drain never covered this host's state.
+   */
+  private applyForeignReadersSubscribe(
+    message: ForeignReadersSubscribe,
+    context: CrossSpaceDeliveryContext,
+  ): Promise<void> {
+    let byHome = this.foreignReaderSubscriptionsByReadSpace.get(context.space);
+    if (byHome === undefined) {
+      byHome = new Map();
+      this.foreignReaderSubscriptionsByReadSpace.set(context.space, byHome);
+    }
+    const subscriptionKey = `${context.fromSpace}\0${message.branch}`;
+    const current = byHome.get(subscriptionKey);
+    if (
+      current !== undefined &&
+      message.subscriptionGeneration <= current.generation
+    ) {
+      return Promise.resolve();
+    }
+    byHome.set(subscriptionKey, {
+      generation: message.subscriptionGeneration,
+      laneDemands: message.laneDemands,
+    });
+    const drained = this.#schedulerSideEffectsByOwnerSpace.get(context.space) ??
+      Promise.resolve();
+    const ack = drained.then(() => {
+      if (this.#foreignSubscriptionsClosed) return;
+      this.#crossSpaceRouter.link(context.space, context.fromSpace).send({
+        type: "foreign-readers.subscribe-applied",
+        branch: message.branch,
+        subscriptionGeneration: message.subscriptionGeneration,
+      });
+    }).catch((error) => {
+      console.warn("foreign-readers subscribe ack failed:", error);
+    });
+    this.trackForeignSubscriptionWork(ack);
+    return Promise.resolve();
+  }
+
+  /**
+   * C3.3a read-host arm: retire EXACTLY the named generation. The two-part
+   * barrier sends this only after the superseding generation was acked, so
+   * on the healthy path the registry already carries a higher generation
+   * and this is a no-op — the generation equality is what discriminates a
+   * reordered/stale unsubscribe from a real teardown (C3A10).
+   */
+  private applyForeignReadersUnsubscribe(
+    message: ForeignReadersUnsubscribe,
+    context: CrossSpaceDeliveryContext,
+  ): Promise<void> {
+    const byHome = this.foreignReaderSubscriptionsByReadSpace.get(
+      context.space,
+    );
+    const subscriptionKey = `${context.fromSpace}\0${message.branch}`;
+    const current = byHome?.get(subscriptionKey);
+    if (
+      current !== undefined &&
+      current.generation === message.subscriptionGeneration
+    ) {
+      byHome!.delete(subscriptionKey);
+      if (byHome!.size === 0) {
+        this.foreignReaderSubscriptionsByReadSpace.delete(context.space);
+      }
+    }
+    return Promise.resolve();
+  }
+
+  /**
+   * C3A6/C3.7 seam (dated 2026-07-18, deliberately NOT wired yet): drop
+   * every live subscription a home space holds on `readSpace` — the
+   * read-host half of revocation cleanup. C3.7's epoch-bump revocation
+   * calls this (plus mirrored-row tombstoning, its own scope) when the
+   * last authorized reader of a demand pair loses access, so the read
+   * host stops emitting `ForeignStaleReaders` toward a home host with no
+   * live authorized reader. Discoverable-by-name on purpose; C3.2's
+   * epoch machinery is not consumed in C3.3a.
+   */
+  private dropForeignReaderSubscriptionsForHome(
+    readSpace: string,
+    homeSpace: string,
+  ): void {
+    const byHome = this.foreignReaderSubscriptionsByReadSpace.get(readSpace);
+    if (byHome === undefined) return;
+    for (const key of [...byHome.keys()]) {
+      if (key.split("\0")[0] === homeSpace) byHome.delete(key);
+    }
+    if (byHome.size === 0) {
+      this.foreignReaderSubscriptionsByReadSpace.delete(readSpace);
+    }
+  }
+
+  /**
+   * C3.3a home-host arm: the C3A10 ack. Rides the home space's inbound
+   * apply chain like every other cross-space apply, so it is processed
+   * strictly AFTER every `ForeignDirtyMark` that preceded it on the FIFO
+   * link — the reconciler's post-ack scan therefore reads an engine that
+   * already carries the pre-subscribe dirt.
+   */
+  private applyForeignReadersSubscribeApplied(
+    message: ForeignReadersSubscribeApplied,
+    context: CrossSpaceDeliveryContext,
+  ): Promise<void> {
+    const state = this.foreignReaderSubscriptionsByHomeSpace.get(
+      `${context.space}\0${message.branch}\0${context.fromSpace}`,
+    );
+    state?.ackWaiters.get(message.subscriptionGeneration)?.();
+    return Promise.resolve();
+  }
+
+  /**
+   * C3.3a home-host arm: an inbound `ForeignStaleReaders` becomes a
+   * FOREIGN wake (replacing the C3.1 warn-drop). Rides the per-space
+   * apply chain so the wake dispatch is ordered after the same commit's
+   * dirt apply (the dirt mark precedes the notice on the FIFO link —
+   * see `#emitForeignStaleReaderNotices`); by dispatch time the dirt is
+   * durable in this engine, so a pool scan or provider rerun triggered
+   * by the wake observes it. Readers group by their HOME branch (the
+   * mirrored rows' branch) — the notice's own `branch` is the COMMITTING
+   * space's and never keys home state.
+   */
+  private applyForeignStaleReaders(
+    message: ForeignStaleReaders,
+    context: CrossSpaceDeliveryContext,
+  ): Promise<void> {
+    if (message.readers.length === 0) return Promise.resolve();
+    const byBranch = new Map<BranchName, ForeignReaderIdentity[]>();
+    for (const reader of message.readers) {
+      const readers = byBranch.get(reader.branch);
+      if (readers === undefined) byBranch.set(reader.branch, [reader]);
+      else readers.push(reader);
+    }
+    for (const [branch, readers] of byBranch) {
+      this.#dispatchForeignWake({
+        space: context.space,
+        branch,
+        readSpace: context.fromSpace,
+        readSeq: message.commitSeq,
+        origin: "notice",
+        staleForeignReaders: readers.map((reader) => ({
+          branch: reader.branch,
+          pieceId: reader.pieceId,
+          processGeneration: reader.processGeneration,
+          actionId: reader.actionId,
+          executionContextKey: reader.executionContextKey,
+        })),
+      });
+    }
+    return Promise.resolve();
+  }
+
+  /** Track one piece of C3.3a background work for the settle barrier. */
+  private trackForeignSubscriptionWork(work: Promise<void>): void {
+    const tracked = work.finally(() => {
+      this.#pendingForeignSubscriptionWork.delete(tracked);
+    });
+    this.#pendingForeignSubscriptionWork.add(tracked);
+  }
+
+  /**
+   * C3.3a trigger fan-in: schedule a foreign-subscription reconcile for
+   * one (home space, branch). Fired on demand publication (set/remove/ACL
+   * drains — every `#publishExecutionDemands` site), on lane-grant open
+   * and drain (C3A17: lane churn re-registers), and after post-commit
+   * side effects for commits whose observations touched foreign read
+   * spaces. Coalescing: at most one in-flight pass per key, a trigger
+   * during a pass sets the rerun bit. Fire-and-forget by design — the
+   * C3A10 barrier lives inside the pass, not at the trigger sites (a
+   * transact must not await a cross-space round trip it did not cause).
+   */
+  private scheduleForeignReaderSubscriptionReconcile(
+    space: string,
+    branch: BranchName,
+  ): void {
+    if (this.#foreignSubscriptionsClosed) return;
+    if (!getPersistentSchedulerStateConfig()) return;
+    const key = `${space}\0${branch}`;
+    const existing = this.#foreignSubscriptionReconciles.get(key);
+    if (existing !== undefined) {
+      existing.rerun = true;
+      return;
+    }
+    const entry = { rerun: false, chain: Promise.resolve() };
+    entry.chain = (async () => {
+      try {
+        do {
+          entry.rerun = false;
+          try {
+            await this.reconcileForeignReaderSubscriptions(space, branch);
+          } catch (error) {
+            console.warn(
+              "foreign-reader subscription reconcile failed:",
+              error,
+            );
+          }
+        } while (entry.rerun && !this.#foreignSubscriptionsClosed);
+      } finally {
+        if (this.#foreignSubscriptionReconciles.get(key) === entry) {
+          this.#foreignSubscriptionReconciles.delete(key);
+        }
+      }
+    })();
+    this.#foreignSubscriptionReconciles.set(key, entry);
+    this.trackForeignSubscriptionWork(entry.chain);
+  }
+
+  /**
+   * C3.3a home-host reconciler — one serialized pass for (space, branch):
+   * derive the DESIRED foreign subscriptions from current demand ∩ the
+   * engine's own read-index (which demanded pieces read which foreign
+   * spaces — the durable client-observed read surface, independent of
+   * mirror fan-out timing), then converge the live registrations under
+   * the C3A10 two-part barrier:
+   *
+   *   subscribe(gen N+1) → application-level ack (the read host emits
+   *   `subscribe-applied` only after draining side effects for commits it
+   *   accepted before applying the subscribe) → post-ack
+   *   direct-dirty-∩-demand scan with pool wake → unsubscribe(gen N).
+   *
+   * The interleaving this closes (V10): a commit accepted by the read
+   * host between the two registrations either (a) lands before the
+   * subscribe applies — its dirt propagation is covered by the ack drain
+   * and surfaces via the post-ack scan, or (b) lands after — the
+   * subscribe is consult-visible at its publish, so the notice fires.
+   * Neither order loses the wake; the fixture drives both.
+   */
+  private async reconcileForeignReaderSubscriptions(
+    space: string,
+    branch: BranchName,
+  ): Promise<void> {
+    if (this.#foreignSubscriptionsClosed) return;
+    const engine = await this.openEngine(space);
+    if (this.#foreignSubscriptionsClosed) return;
+    const laneDemands = this.#executionWakeLaneDemands(space, branch);
+    const demandedSchedulerPieceIds = laneDemands[0].pieces;
+    const foreignReadSpaces = Engine.schedulerForeignReadSpacesForPieces(
+      engine,
+      { branch, ownerSpace: space, demandedSchedulerPieceIds },
+    );
+    const desired = new Map<string, CrossSpaceLaneDemand[]>();
+    for (const [readSpace, piecesReading] of foreignReadSpaces) {
+      const reading = new Set(piecesReading);
+      const lanes: CrossSpaceLaneDemand[] = [];
+      for (const [index, lane] of laneDemands.entries()) {
+        const pieces = lane.pieces.filter((pieceId) => reading.has(pieceId));
+        // The space-lane pair is structurally required first (A4 order);
+        // scoped lanes ride only when their demand slice reads the space.
+        if (index === 0) {
+          lanes.push({ contextKey: lane.contextKey, pieces });
+        } else if (pieces.length > 0) {
+          lanes.push({ contextKey: lane.contextKey, pieces });
+        }
+      }
+      if (lanes.some((lane) => lane.pieces.length > 0)) {
+        desired.set(readSpace, lanes);
+      }
+    }
+
+    // Teardown first: streams whose demand no longer reads the space.
+    const statePrefix = `${space}\0${branch}\0`;
+    for (
+      const [stateKey, state] of [
+        ...this.foreignReaderSubscriptionsByHomeSpace,
+      ]
+    ) {
+      if (!stateKey.startsWith(statePrefix)) continue;
+      const readSpace = stateKey.slice(statePrefix.length);
+      if (desired.has(readSpace)) continue;
+      if (state.liveGeneration !== undefined) {
+        try {
+          this.#crossSpaceRouter.link(space, readSpace).send({
+            type: "foreign-readers.unsubscribe",
+            branch,
+            subscriptionGeneration: state.liveGeneration,
+          });
+        } catch (error) {
+          console.warn("foreign-readers unsubscribe failed:", error);
+        }
+      }
+      this.foreignReaderSubscriptionsByHomeSpace.delete(stateKey);
+    }
+
+    for (const [readSpace, lanes] of desired) {
+      if (this.#foreignSubscriptionsClosed) return;
+      const stateKey = `${statePrefix}${readSpace}`;
+      let state = this.foreignReaderSubscriptionsByHomeSpace.get(stateKey);
+      const laneDemandsKey = JSON.stringify(lanes);
+      if (
+        state?.liveGeneration !== undefined &&
+        state.liveLaneDemandsKey === laneDemandsKey
+      ) {
+        continue;
+      }
+      // In-process stand-in for the peer host's own hosting registration
+      // (see mirrorSchedulerObservation): an unhosted read space cannot
+      // ack; skip rather than hang the chain. C3.10a's routing replaces
+      // this with real space→host resolution.
+      if (!(await this.ensureCrossSpaceHosting(readSpace))) continue;
+      if (state === undefined) {
+        state = { nextGeneration: 0, ackWaiters: new Map() };
+        this.foreignReaderSubscriptionsByHomeSpace.set(stateKey, state);
+      }
+      const generation = ++state.nextGeneration;
+      const previousGeneration = state.liveGeneration;
+      const link = this.#crossSpaceRouter.link(space, readSpace);
+      const acked = new Promise<void>((resolve) => {
+        state!.ackWaiters.set(generation, resolve);
+      });
+      try {
+        link.send({
+          type: "foreign-readers.subscribe",
+          branch,
+          laneDemands: lanes,
+          subscriptionGeneration: generation,
+        });
+      } catch (error) {
+        state.ackWaiters.delete(generation);
+        console.warn("foreign-readers subscribe failed:", error);
+        continue;
+      }
+      // C3A10 part one: the new generation is REGISTERED (and consult-
+      // visible on the read host) before the old one retires — awaiting
+      // the application-level ack here is what makes that true; the
+      // transport's no-await-delivery contract cannot.
+      await acked;
+      state.ackWaiters.delete(generation);
+      if (this.#foreignSubscriptionsClosed) return;
+      state.liveGeneration = generation;
+      state.liveLaneDemandsKey = laneDemandsKey;
+      // C3A10 part two: the post-ack direct-dirty-∩-demand scan. Dirt
+      // that landed while no (or a stale) subscription was live produced
+      // no notice; it IS durable in this engine (C3.1b), so replay it as
+      // a wake now that the registration covers the stream.
+      try {
+        await this.runPostAckForeignDirtScan(space, branch, readSpace, lanes);
+      } catch (error) {
+        console.warn("post-ack foreign dirt scan failed:", error);
+      }
+      if (previousGeneration !== undefined) {
+        try {
+          link.send({
+            type: "foreign-readers.unsubscribe",
+            branch,
+            subscriptionGeneration: previousGeneration,
+          });
+        } catch (error) {
+          console.warn("foreign-readers unsubscribe failed:", error);
+        }
+      }
+    }
+  }
+
+  /**
+   * C3A10's second half: wake every demanded home action carrying
+   * UNSETTLED durable foreign dirt, at the subscription's lane
+   * granularity. Runs strictly after the ack applied on the home inbound
+   * chain, i.e. after every dirt mark that preceded the ack on the FIFO
+   * link. Spurious wakes are safe (the pool reconciles to a no-op);
+   * missed ones are not — hence no seq floor (foreign dirt seqs live in
+   * the read space's domain and admit no home comparison, C3A11).
+   */
+  private async runPostAckForeignDirtScan(
+    space: string,
+    branch: BranchName,
+    readSpace: string,
+    lanes: readonly CrossSpaceLaneDemand[],
+  ): Promise<void> {
+    const engine = await this.openEngine(space);
+    const collected: Engine.SchedulerActionState[] = [];
+    for (const lane of lanes) {
+      if (lane.pieces.length === 0) continue;
+      collected.push(
+        ...Engine.dirtyDemandedSchedulerActions(engine, {
+          branch,
+          ownerSpace: space,
+          demandedSchedulerPieceIds: [...lane.pieces],
+          applicableExecutionContextKeys: [lane.contextKey],
+        }),
+      );
+    }
+    if (collected.length === 0) return;
+    const link = this.#crossSpaceRouter.link(space, readSpace);
+    const cursor = this.crossSpaceAppliedDirtCursors.get(
+      `${link.linkId}\0${readSpace}\0${space}`,
+    ) ?? 0;
+    this.#dispatchForeignWake({
+      space,
+      branch,
+      readSpace,
+      readSeq: cursor,
+      origin: "resubscribe-scan",
+      staleForeignReaders: collected.map((row) => ({
+        branch: row.branch,
+        pieceId: row.pieceId,
+        processGeneration: row.processGeneration,
+        actionId: row.actionId,
+        executionContextKey: row.executionContextKey,
+      })),
+    });
+  }
+
+  /**
+   * C3.3a settle barrier (tests + close): resolve once every reconcile
+   * pass, detached ack continuation, and cross-space delivery in flight
+   * has drained — looping, because each of those can queue more of the
+   * others. Barrier-driven; no timers.
+   */
+  private async settleForeignReaderSubscriptions(): Promise<void> {
+    do {
+      await undefined;
+      await this.settleCrossSpaceDeliveries();
+      const pending = [...this.#pendingForeignSubscriptionWork];
+      if (
+        pending.length === 0 &&
+        this.#pendingCrossSpaceInboundApplies.size === 0
+      ) {
+        return;
+      }
+      await Promise.allSettled(pending);
+    } while (true);
+  }
+
+  /**
+   * TEST SEAM (C3A9/C3A10 fixtures): hold `space`'s post-commit
+   * side-effect chain — the injectable barrier on the side-effect queue
+   * the review's fixtures name. `entered` resolves when the hold reaches
+   * the head of the chain; `release` lets the chain proceed. Production
+   * code never calls this.
+   */
+  private holdPostCommitSchedulerSideEffects(
+    space: string,
+  ): { entered: Promise<void>; release: () => void } {
+    let release!: () => void;
+    let enter!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const run = () => {
+      enter();
+      return gate;
+    };
+    const previous = this.#schedulerSideEffectsByOwnerSpace.get(space);
+    const queued = previous?.then(run, run) ?? run();
+    const tracked = queued.finally(() => {
+      if (this.#schedulerSideEffectsByOwnerSpace.get(space) === tracked) {
+        this.#schedulerSideEffectsByOwnerSpace.delete(space);
+      }
+    });
+    this.#schedulerSideEffectsByOwnerSpace.set(space, tracked);
+    return { entered, release };
   }
 
   /**

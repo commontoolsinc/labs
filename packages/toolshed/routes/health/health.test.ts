@@ -49,6 +49,8 @@ const poolMetrics = {
   suppressedUnrelatedCommits: 2,
   parkedWakeAttempts: 1,
   parkedWakeStarts: 1,
+  foreignWakeNotifications: 0,
+  foreignWakeAttempts: 0,
   demandEmptyHibernations: 0,
   userLanesOpened: 0,
   userLanesClosed: 0,
