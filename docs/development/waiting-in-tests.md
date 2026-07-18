@@ -399,13 +399,13 @@ converting it churns code that no run covers.
 
 `packages/cli/integration/fuse-exec.sh` drives the FUSE daemon as a separate
 process through a real mount, and observes it from bash. Its poll loops —
-`wait_for_path`, `wait_for_json`, `resolve_entity_dir`, and
-`wait_for_piece_value` — stay polls.
+`wait_for_path`, `wait_for_json`, `resolve_entity_dir`, `wait_for_piece_value`,
+`wait_for_trace_line` and `resolve_traced_write_fh` — stay polls.
 
 There is no event channel to convert them to. The state each loop waits on lives
-in another process: the daemon's tree for the path and JSON loops, and the
-server's cell for the value loop. Bash has no callback to resolve a `defer()`
-from.
+in another process: the daemon's tree for the path and JSON loops, the server's
+cell for the value loop, and the daemon's log file for the two trace loops. Bash
+has no callback to resolve a `defer()` from.
 
 Watching the filesystem does not substitute for one. A mounted path appears
 because the daemon added a node to its own tree, and that is not a filesystem
@@ -439,29 +439,114 @@ existing is not the same as its content being final. Those gaps belong to
 until each converges, each carrying its own timeout. What is left for the script
 directly is one check that the daemon survived the handshake.
 
+#### The stale-descriptor assertion reads the daemon's trace, not the cell
+
 The stale-descriptor assertion — that truncating a path does not let an already
-open descriptor write its old buffer back — waits on `wait_for_piece_value`
-alone. This looks like it needs a delay, because it asserts that something does
-not happen. It does not, because a descriptor that could write late is a
-descriptor that has already written.
+open descriptor write its old buffer back — asserts that something does not
+happen. It needs no delay, but the reason is not the one an earlier version of
+this document gave.
 
 Both truncate paths — `open` with `O_TRUNC` on Linux, and the handle-less
 `setattr` that FUSE-T issues on macOS — reach `handles.truncateByIno`, which
-empties the buffer of every handle on the inode and clears both `dirty` and
-`truncatePending` on the one that is not the truncating handle. `flushHandle`,
-`flushCb` and `releaseCb` all gate on that pair, so the disarmed descriptor is
-inert. A descriptor that stayed armed instead flushes from the callback the
-kernel sends on `close()`, which the flush callback issues in the same tick when
-the handle is dirty. Its write targets the same cell as the truncate's own write
-and is issued after it, so it lands last and the value settles on the stale
-content rather than `""`.
+empties the buffer of every handle on the inode and clears `dirty` on all of
+them, leaving `truncatePending` set only on the truncating handle.
+`flushHandle`, `flushCb` and `releaseCb` all gate on `dirty || truncatePending`,
+so a descriptor with both clear is inert. A descriptor that stayed armed instead
+flushes from the callback the kernel sends on `close()`.
 
-The deferred flush that every write arms, `scheduleFlush(handle, 500)`, is the
-one path that could fire after the wait, and it cannot resurrect anything.
-`truncateByIno` does not cancel it, so it does fire around half a second later —
-into `flushHandle`'s guard, which the disarm has already closed. In the armed
-case it never gets that far, because the flush callback calls
-`clearScheduledFlush` before flushing.
+The cell value cannot carry that assertion, for two separate reasons.
+
+The first is that the value cannot see the likeliest regression at all.
+`truncateByIno` empties the buffer of every handle on the inode unconditionally
+and gates only `truncatePending`, so a descriptor left armed holds an empty
+buffer and flushes `""` — byte-identical to what the truncate wanted. Drop the
+`{ pendingFh }` argument at any of the three call sites in `mod.ts` and every
+handle arms; the descriptor then writes back on `close()`, and a check on the
+settled value passes every single time. That regression also passes every test
+in `handles.test.ts`, which calls `truncateByIno` directly and so never
+exercises a call site — and which blesses the argument-less form besides.
+
+The second applies when the buffer does survive to be written. The armed
+descriptor's write and the truncate's write are then two fire-and-forget
+optimistic transactions racing for the same cell: `PieceController.set` calls
+`runtime.editWithRetry`, which applies the write to a transaction synchronously
+and then commits asynchronously, and a commit that loses a conflict re-runs the
+callback and re-applies its own value. The value settles on whichever write
+reaches the server second, and nothing in the daemon orders that. Issue order
+makes the stale write the likely winner, but "likely" is what a test must not
+rest on.
+
+Waiting for the truncate's `""` to land before closing the descriptor does not
+rescue the value check either: it makes the cell hold `""` at the moment of the
+close, so a poll for `""` succeeds before the stale write could arrive. Any
+"the value stays `""`" check needs a barrier proving the stale write has landed
+if it was going to, and the retry-on-conflict behavior above means no later
+write supplies one — a write issued after the stale write can still commit
+before it.
+
+So the assertion observes the disarm where it happens, in the daemon's
+`[write-trace]` log. `releaseCb` traces the handle's `dirty`, `flushing` and
+`pending` fields before it decides anything, so that one line states whether
+`close()` found the descriptor armed. It says so on either truncate path, and
+whichever callback ends up doing the flushing. The script resolves the handle
+number from the `write` line its own `printf` produced, waits for that handle's
+`release` line, and requires it to report `pending=false` — the gate itself —
+and `flushing=false`, since a flush already in flight carries the buffer it
+copied when it started, which the truncate cannot recall.
+
+The write and the truncate have to reach the descriptor's handle with no flush
+between them, or the buffer never survives to the close the assertion is about.
+That is why the script issues both under one redirect of the descriptor's fd
+rather than writing through a transient `>&9`. On Linux the kernel sends a FUSE
+flush on every `close()`, including the `close()` of the duplicate fd a
+transient redirect makes and then drops when it ends — so `printf … >&9` would
+flush the buffered write before the truncate ran, and the release would report a
+handle that was never armed across a truncate at all. Grouping the write and the
+truncate keeps the buffer on the handle until the group ends, after the truncate
+has disarmed it, so every flush of that handle happens post-disarm. macOS
+does not forward the flush on that duplicate close, so the grouping is a no-op
+there and the write stays buffered until the real close either way.
+
+One case escapes that line: a flush that started and finished before `release`
+arrived clears the same fields the disarm clears. So the script also requires no
+`flush-fire` line for the handle. `flushCb` traces `flush-fire` only for a handle
+that got past the gate, which is exactly the case the release line would have
+lost. Neither check subsumes the other. Between them they catch the descriptors
+`flushCb` flushed and the ones `releaseCb` flushed, which is every descriptor
+this sequence can arm.
+
+Waiting for `release` is what makes this an observation rather than a guess.
+`close()` sends `flush` and blocks on its reply before the kernel queues
+`release`, and the daemon runs its callbacks on one thread through
+`fuse_session_loop`, appending trace lines in that order. A `release` line for a
+handle therefore cannot appear before that handle's flush decision has been
+traced. The release check does not depend on `flush` being delivered; only the
+supplementary `flush-fire` check does, and it is the one whose job the release
+line already covers when `flush` is missing.
+
+Both checks do depend on `release` being delivered, and one platform does not
+deliver it: `scheduleFlush(handle, 500)` exists because Docker Desktop's VirtioFS
+does not forward `flush` or `release` through a FUSE-T mount. Run the suite
+there and it fails on the wait for the release line rather than reporting a
+broken disarm. CI runs it on Linux against libfuse3, which delivers both.
+
+That deferred flush is the one path the trace cannot see at all: the timer calls
+`flushHandle` directly, tracing nothing. It cannot resurrect anything, because
+`truncateByIno` has already closed `flushHandle`'s guard by the time it fires —
+half a second after a write the script follows within three syscalls. The window
+where it could pick up a still-armed buffer is not reachable from this sequence,
+so nothing here observes it; it is out of the assertion's reach rather than
+covered by it.
+
+The `flush-fire` check passes by a line being absent, so a reword in `mod.ts`
+would quietly turn it into a no-op that still passes. The other two lines fail
+loudly if reworded — the script cannot resolve the handle, or times out waiting
+for the release line — but they fail far from the cause. `mod.test.ts` pins the
+shape of all three lines, so a reword fails there, naming what it broke.
+
+The value check stays, after the trace checks, as the end-to-end statement that
+the cell really is empty. It is the weaker of the two instruments and is not what
+makes a broken disarm fail.
 
 #### The daemon's `.status` file is not a wait signal
 
