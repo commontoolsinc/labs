@@ -81,6 +81,7 @@ import {
   resolveMountCacheOptions,
 } from "./mount-options.ts";
 import { buildNodeStat, getMountOwnership, nodeMode } from "./stat.ts";
+import { ReverseInvalidationQueue } from "./invalidation.ts";
 
 const encoder = new TextEncoder();
 // Operation ring buffer — last 50 ops for crash diagnostics
@@ -3379,123 +3380,69 @@ export async function main(argv: string[] = Deno.args) {
 
   let unmounting = false;
 
+  // The reverse-invalidation queue, when a bridge is present. It is closed and
+  // its active flush awaited before the session is destroyed, so no notify call
+  // is still running on an FFI thread when the session memory it dereferences is
+  // freed. `cancelInvalidationFlush` drops a pending flush timer during that
+  // shutdown.
+  let invalidationQueue: ReverseInvalidationQueue | undefined;
+  let cancelInvalidationFlush: (() => void) | undefined;
+
   // Wire up kernel cache invalidation for subscriptions.
   //
   // libfuse reverse invalidation can block while the kernel answers the notify
   // request. Some bridge paths run while a FUSE request is still awaiting its
-  // reply (for example, lookup -> connectSpace -> syncPieceList). Calling
-  // notify inline from those paths can deadlock the daemon against the kernel's
-  // pending request. Queue notifications onto a timer and wait for all tracked
-  // async replies to drain before issuing reverse invalidations.
+  // reply (for example, lookup -> connectSpace -> syncPieceList). notify takes
+  // the parent directory's inode lock for write, which a concurrent lookup
+  // holds for read until the daemon answers it; the daemon answers on the
+  // isolate thread, so a notify on that thread would block behind a lookup only
+  // that thread can complete. The queue coalesces notifications, and a timer
+  // gated on tracked async replies drains it off the isolate thread (the notify
+  // FFI symbols are nonblocking) so the request path stays free.
   if (bridge) {
-    let entryNotifySupported = true;
-    let inodeNotifySupported = true;
-    const pendingEntryInvalidations = new Map<
-      string,
-      { parentIno: bigint; names: Set<string> }
-    >();
-    const pendingInodeInvalidations = new Set<bigint>();
     let invalidationTimer: ReturnType<typeof setTimeout> | undefined;
+    const queue = new ReverseInvalidationQueue({
+      invalidateEntry: (parentIno, nameBuf, nameLen) =>
+        fuse.symbols.fuse_lowlevel_notify_inval_entry(
+          handle.notifyTarget,
+          parentIno,
+          nameBuf,
+          nameLen,
+        ),
+      // off=0, len=-1 invalidates all cached data for the inode.
+      invalidateInode: (ino) =>
+        fuse.symbols.fuse_lowlevel_notify_inval_inode(
+          handle.notifyTarget,
+          ino,
+          0n,
+          -1n,
+        ),
+      isUnmounting: () => unmounting,
+      debug,
+    });
+    invalidationQueue = queue;
 
     const scheduleInvalidationFlush = () => {
       if (invalidationTimer !== undefined) return;
       invalidationTimer = setTimeout(() => {
         invalidationTimer = undefined;
         if (pendingFuseReplies > 0) return;
-        flushDeferredInvalidations();
+        queue.flush();
       }, 0);
     };
     onPendingFuseRepliesDrained = scheduleInvalidationFlush;
-
-    const flushDeferredInvalidations = () => {
-      if (unmounting) {
-        pendingEntryInvalidations.clear();
-        pendingInodeInvalidations.clear();
-        return;
+    cancelInvalidationFlush = () => {
+      if (invalidationTimer !== undefined) {
+        clearTimeout(invalidationTimer);
+        invalidationTimer = undefined;
       }
-
-      if (entryNotifySupported) {
-        for (const { parentIno, names } of pendingEntryInvalidations.values()) {
-          for (const name of names) {
-            const nameBuf = encoder.encode(name + "\0");
-            try {
-              const rc = fuse.symbols.fuse_lowlevel_notify_inval_entry(
-                handle.notifyTarget,
-                parentIno,
-                nameBuf,
-                BigInt(nameBuf.length - 1),
-              );
-              if (rc === -38) {
-                // ENOSYS — this libfuse has no entry invalidation. FUSE-T
-                // instead accepts the call and does nothing with it.
-                console.log(
-                  "notify_inval_entry not supported; skipping entry invalidation",
-                );
-                entryNotifySupported = false;
-                break;
-              }
-              if (debug && rc !== 0) {
-                console.log(
-                  `notify_inval_entry(parent=${parentIno}, name=${name}) => ${rc}`,
-                );
-              }
-            } catch (e) {
-              console.warn(`notify_inval_entry failed: ${e}`);
-              entryNotifySupported = false;
-              break;
-            }
-          }
-          if (!entryNotifySupported) break;
-        }
-      }
-      pendingEntryInvalidations.clear();
-
-      if (inodeNotifySupported) {
-        for (const ino of pendingInodeInvalidations) {
-          try {
-            // Invalidate all cached data for this inode (off=0, len=-1 means all)
-            const ret = fuse.symbols.fuse_lowlevel_notify_inval_inode(
-              handle.notifyTarget,
-              ino,
-              0n,
-              -1n,
-            );
-            if (ret === -38) {
-              // ENOSYS — this libfuse has no inode invalidation. FUSE-T
-              // instead accepts the call and does nothing with it.
-              inodeNotifySupported = false;
-              break;
-            }
-            if (debug) {
-              console.log(`notify_inval_inode(ino=${ino}) => ${ret}`);
-            }
-          } catch (e) {
-            console.warn(`notify_inval_inode failed: ${e}`);
-            inodeNotifySupported = false;
-            break;
-          }
-        }
-      }
-      pendingInodeInvalidations.clear();
     };
 
     bridge.onInvalidate = (parentIno: bigint, names: string[]) => {
-      if (!entryNotifySupported || unmounting) return;
-      const key = parentIno.toString();
-      let pending = pendingEntryInvalidations.get(key);
-      if (!pending) {
-        pending = { parentIno, names: new Set<string>() };
-        pendingEntryInvalidations.set(key, pending);
-      }
-      for (const name of names) {
-        pending.names.add(name);
-      }
-      scheduleInvalidationFlush();
+      if (queue.addEntry(parentIno, names)) scheduleInvalidationFlush();
     };
     bridge.onInvalidateInode = (ino: bigint) => {
-      if (!inodeNotifySupported || unmounting) return;
-      pendingInodeInvalidations.add(ino);
-      scheduleInvalidationFlush();
+      if (queue.addInode(ino)) scheduleInvalidationFlush();
     };
   }
 
@@ -3549,6 +3496,19 @@ export async function main(argv: string[] = Deno.args) {
   await writeSupervisorStatus("exited", { exitCode: result }).catch(() => {
     // Best effort during shutdown.
   });
+
+  // Stop the reverse-invalidation queue before the session is destroyed. The
+  // session loop can exit without a signal — an external unmount or a kernel
+  // abort — leaving `unmounting` false, so the queue is closed here rather than
+  // relying on the signal handler. Closing refuses further additions and halts
+  // an in-flight flush; dropping the reschedule hook and any pending timer stops
+  // a new flush from starting; the await lets a flush already on an FFI thread
+  // finish. Together these ensure no notify call runs against the session after
+  // it is destroyed.
+  invalidationQueue?.close();
+  onPendingFuseRepliesDrained = undefined;
+  cancelInvalidationFlush?.();
+  await invalidationQueue?.active().catch(() => {});
 
   // Final cleanup
   platform.cleanup(fuse, handle, mountpointBuf, unmounting);
