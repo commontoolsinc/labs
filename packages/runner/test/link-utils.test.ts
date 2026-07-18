@@ -9,6 +9,7 @@ import {
   createSigilLinkFromParsedLink,
   decodeJsonPointer,
   encodeJsonPointer,
+  findAndInlineDataURILinks,
   isCellLink,
   isLegacyAlias,
   isSigilLink,
@@ -405,6 +406,20 @@ describe("link-utils", () => {
       expect(parseLink("string")).toBeUndefined();
       expect(parseLink(123)).toBeUndefined();
       expect(parseLink({ notLink: "value" })).toBeUndefined();
+    });
+  });
+
+  describe("findAndInlineDataURILinks", () => {
+    it("returns a link-free array holding NaN by reference", () => {
+      // The copy-on-write gate must treat an untouched `NaN` leaf as
+      // unchanged (`Object.is` semantics), not clone the container.
+      const value = [NaN, 1];
+      expect(findAndInlineDataURILinks(value)).toBe(value);
+    });
+
+    it("returns a link-free record holding NaN by reference", () => {
+      const value = { x: NaN };
+      expect(findAndInlineDataURILinks(value)).toBe(value);
     });
   });
 

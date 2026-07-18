@@ -288,6 +288,11 @@ export interface ModuleByteCache {
   ): void;
 }
 
+export type RuntimeFetch = (
+  input: RequestInfo | URL,
+  init?: RequestInit & { client?: Deno.HttpClient },
+) => Promise<Response>;
+
 export interface RuntimeOptions {
   apiUrl: URL;
   /**
@@ -439,7 +444,7 @@ export interface RuntimeOptions {
    * a test harness can inject a deterministic mock without mutating process
    * globals. (LLM calls mock separately, at the `LLMClient` layer.)
    */
-  fetch?: typeof globalThis.fetch;
+  fetch?: RuntimeFetch;
 }
 
 export interface CfcRuntimeStats {
@@ -610,7 +615,7 @@ export class Runtime {
    * the host `globalThis.fetch`; a test harness can inject a mock via
    * `RuntimeOptions.fetch`.
    */
-  readonly fetch: typeof globalThis.fetch;
+  readonly fetch: RuntimeFetch;
   /** Runtime-learned host hints (site table); see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
   readonly userIdentityDID: DID;

@@ -68,7 +68,9 @@ export async function initBrowserOtel(
     const { OTLPTraceExporter } = await import(
       "@opentelemetry/exporter-trace-otlp-http"
     );
-    const { Resource } = await import("@opentelemetry/resources");
+    const { defaultResource, resourceFromAttributes } = await import(
+      "@opentelemetry/resources"
+    );
     const { metrics } = await import("@opentelemetry/api");
     // Reuse the shared marker->OTel translator (interface-only; @opentelemetry/api).
     const { createRuntimeTelemetryOtelBridge } = await import(
@@ -86,14 +88,19 @@ export async function initBrowserOtel(
     // session-stable values belong here; space.did changes on navigation and
     // is stamped per-span by the bridge below instead.
     const provider = new WebTracerProvider({
-      resource: new Resource({
-        "service.name": SERVICE_NAME,
-        "service.version": SERVICE_VERSION,
-        "deployment.environment": options.environment,
-        "user.did": options.userDid,
-      }),
+      // The provider uses this resource as given, so merge it over the default
+      // one to keep the `telemetry.sdk.*` attributes; the attributes below win
+      // on conflict, so `service.name` stays ours rather than the default.
+      resource: defaultResource().merge(
+        resourceFromAttributes({
+          "service.name": SERVICE_NAME,
+          "service.version": SERVICE_VERSION,
+          "deployment.environment": options.environment,
+          "user.did": options.userDid,
+        }),
+      ),
+      spanProcessors: [new BatchSpanProcessor(exporter)],
     });
-    provider.addSpanProcessor(new BatchSpanProcessor(exporter));
     // Register globally so W3C traceparent is available for propagation. The
     // bridge still receives the tracer explicitly below, so exporting does not
     // depend on this registration.

@@ -160,7 +160,10 @@ const fillAndVerify = async (
   await new Promise((resolve) =>
     requestAnimationFrame(() => requestAnimationFrame(resolve))
   );
-  if (!probe.isVisible(input) || input.disabled || input.readOnly) {
+  // Rendered, not on-screen: the fill drives the field through focus and
+  // dispatched events rather than a coordinate click, so its viewport position
+  // never bears on whether the value takes.
+  if (!probe.isRendered(input) || input.disabled || input.readOnly) {
     phase("not-fillable");
     return false;
   }
@@ -238,9 +241,12 @@ const markForClick = async (
 };
 
 // Scroll the `index`-th element matching `selector` into view and tag it once it
-// is visible. Unlike `markForClick`, the selector here already resolves to the
+// is rendered. Unlike `markForClick`, the selector here already resolves to the
 // clickable elements, so the match is tagged directly rather than reached
-// through a host's shadow root.
+// through a host's shadow root. The check is viewport-independent for the same
+// reason as `markForClick`: the click scrolls the element into view itself, so
+// requiring it on-screen at tagging time only invites a wait that never
+// satisfies.
 const markNthForClick = async (
   probe: ProbeApi,
   selector: string,
@@ -254,14 +260,19 @@ const markNthForClick = async (
   await new Promise((resolve) =>
     requestAnimationFrame(() => requestAnimationFrame(resolve))
   );
-  if (!probe.isVisible(target)) return false;
+  if (!target.isConnected || !probe.isRendered(target)) return false;
   target.setAttribute(attr, token);
   return true;
 };
 
-// Tag the first visible, enabled element carrying `data-ui-action="<action>"`
+// Tag the first rendered, enabled element carrying `data-ui-action="<action>"`
 // for a single trusted click, and record the next click's provenance so a
 // failure can show whether the dispatch was trusted and where it landed.
+// Rendered-ness is asked of the resolved click target, which covers the host:
+// hiding the host reaches the inner control either way. It is asked without an
+// on-screen requirement, since the trusted click scrolls the target into view
+// before dispatching. Disabled-ness is asked of both, because a host can carry
+// an `aria-disabled` its inner control does not.
 const markTrustedAction = async (
   probe: ProbeApi,
   action: string,
@@ -282,7 +293,7 @@ const markTrustedAction = async (
       | HTMLElement
       | null) ?? target;
     if (
-      probe.isVisible(target) && probe.isVisible(clickTarget) &&
+      probe.isRendered(clickTarget) &&
       !isDisabled(target) && !isDisabled(clickTarget)
     ) {
       clickTarget.setAttribute(attr, token);

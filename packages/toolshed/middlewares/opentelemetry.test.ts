@@ -10,8 +10,9 @@ import { otelTracing } from "@/middlewares/opentelemetry.ts";
 
 Deno.test("otelTracing tags spans with the low-cardinality route template", async () => {
   const exporter = new InMemorySpanExporter();
-  const provider = new BasicTracerProvider();
-  provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
+  const provider = new BasicTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  });
   // The middleware resolves its tracer from the global provider when
   // getTracerProvider() (lib/otel.ts) is undefined, which it is here.
   trace.setGlobalTracerProvider(provider);

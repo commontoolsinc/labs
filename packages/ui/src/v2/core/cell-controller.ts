@@ -429,7 +429,9 @@ export class CellController<T> implements ReactiveController {
           const typedNewValue = newValue as T | undefined;
           if (!this._subscribeEcho) this._bindingHydrated = true;
           const suppressed = this._classifyDelivery(typedNewValue);
-          if (!suppressed && typedNewValue !== previousValue) {
+          // `Object.is`, not `!==`: an unchanged `NaN` must not re-announce,
+          // and a `0` -> `-0` change is a real change.
+          if (!suppressed && !Object.is(typedNewValue, previousValue)) {
             const oldValue = previousValue;
             previousValue = typedNewValue;
             if (oldValue !== undefined || typedNewValue !== undefined) {
@@ -530,7 +532,7 @@ function sameCellDoc(a: CellRef, b: CellRef): boolean {
  * value (plain JSON-ish data; CellHandles compare by identity only).
  */
 function deepValueEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
+  if (Object.is(a, b)) return true;
   if (a instanceof CellHandle || b instanceof CellHandle) return false;
   if (
     a === null || b === null || typeof a !== "object" || typeof b !== "object"
@@ -642,7 +644,11 @@ export class ArrayCellController<T> extends CellController<T[]> {
    */
   removeItem(itemToRemove: T): void {
     const currentArray = this.getValue();
-    this.setValue(currentArray.filter((item) => item !== itemToRemove));
+    // `Object.is` matching: a `NaN` element is removable, and `0`/`-0` are
+    // distinct.
+    this.setValue(
+      currentArray.filter((item) => !Object.is(item, itemToRemove)),
+    );
   }
 
   /**
@@ -650,7 +656,8 @@ export class ArrayCellController<T> extends CellController<T[]> {
    */
   updateItem(oldItem: T, newItem: T): void {
     const currentArray = this.getValue();
-    const index = currentArray.indexOf(oldItem);
+    // As in `removeItem()`: match by `Object.is`, not `indexOf`'s `===`.
+    const index = currentArray.findIndex((item) => Object.is(item, oldItem));
     if (index !== -1) {
       if (this.hasCell()) {
         const cell = this.getCell()!;

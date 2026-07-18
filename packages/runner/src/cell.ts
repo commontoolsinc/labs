@@ -1735,7 +1735,9 @@ export class CellImpl<T extends FabricValue>
           this.runtime,
         )
       )
-      : array.indexOf(ref as ElemT);
+      // Primitives match by `Object.is` (`NaN` is findable; `0` and `-0` are
+      // distinct), unlike `indexOf`'s `===`.
+      : array.findIndex((item) => Object.is(item, ref));
     if (index === -1) {
       return;
     }
@@ -1767,7 +1769,8 @@ export class CellImpl<T extends FabricValue>
           this.tx,
           this.runtime,
         )
-        : item !== ref
+        // As in `remove()`: primitives match by `Object.is`.
+        : !Object.is(item, ref)
     ) as unknown as T;
     this.set(newArray);
   }

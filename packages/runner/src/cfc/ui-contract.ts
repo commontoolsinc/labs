@@ -519,7 +519,7 @@ const eventEnvelopePayloads = (
   const addPayload = (value: unknown, space?: string) => {
     if (
       !payloads.some((payload) =>
-        payload.value === value && payload.space === space
+        Object.is(payload.value, value) && payload.space === space
       )
     ) {
       payloads.push({ value, ...(space !== undefined ? { space } : {}) });
