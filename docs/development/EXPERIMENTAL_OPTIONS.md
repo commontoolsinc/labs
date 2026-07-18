@@ -31,7 +31,7 @@ was last checked against the code.
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | on | Bernhard Seefeld (#3646) | graduate to always-on | implemented, on by default, rollback override retained |
 | [`serverPrimaryExecution`](#serverprimaryexecution) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (server-primary execution W0.6) | graduate after the phased authority rollout, then delete flag | implemented, off by default |
 | [`serverPrimaryExecutionUserRankCandidates`](#serverprimaryexecutionuserrankcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C1.5a) | fold into `serverPrimaryExecution` once user lanes graduate | implemented, off by default |
-| [`serverPrimaryExecutionSessionRankCandidates`](#serverprimaryexecutionsessionrankcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C2.5) | fold into `serverPrimaryExecution` once session lanes graduate | implemented, off by default, fixture-only until C2.6 (CA4) |
+| [`serverPrimaryExecutionSessionRankCandidates`](#serverprimaryexecutionsessionrankcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C2.5) | fold into `serverPrimaryExecution` once session lanes graduate | implemented, off by default (CA4 fixture-only constraint lifted by C2.6) |
 | [`serverPrimaryExecutionDocSetWatch`](#serverprimaryexecutiondocsetwatch) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH` env, or `RuntimeOptions.experimental`; bridges the memory-side `setServerPrimaryExecutionDocSetWatchConfig()` (negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution F3 server / F4 client) | fold into `serverPrimaryExecution` once the feed graduates, then retire the negotiation | implemented, off by default |
 | [`serverPrimaryExecutionGraphRetirement`](#serverprimaryexecutiongraphretirement) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES` env (comma-separated space DIDs or `*`), applied at server construction; ambient `setServerPrimaryExecutionGraphRetirementConfig(spaces)` (host-internal, per-space, not negotiated) | empty set (absent-false: no space admitted to the doc-set surface) | Bernhard Seefeld (server-side execution F5; FW5 admission redesign) | fold into `serverPrimaryExecution` once the feed graduates | implemented, empty by default |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
@@ -268,12 +268,14 @@ propagate](#how-flags-propagate).
   either dial alone keeps session lanes fully inert.
 - **Current default and planned end state.** Off by default: session-scoped
   surfaces classify exactly as the pre-C2.5 executor does (unservable), and
-  space/user classification is byte-identical. **Fixture-only until C2.6
-  lands (the CA4 ordering invariant):** the pre-C2.6 principal-wide
-  session-claim broadcast makes sibling-session claim churn a quadratic
-  spurious-rerun source, so this dial must never be ambiently enabled while
-  C2.6's named-session delivery narrowing is unlanded. C2.7 wires the
-  pool-side session-lane demand aggregation to the same flag.
+  space/user classification is byte-identical. The CA4 ordering invariant
+  (fixture-only while C2.6's named-session delivery narrowing was unlanded —
+  the pre-C2.6 principal-wide session-claim broadcast made sibling-session
+  claim churn a quadratic spurious-rerun source) is **lifted: C2.6 landed
+  2026-07-17** (`#sessionAcceptsClaim` routes session-context claims,
+  revokes, and settlements only to the session their contextKey names), so
+  the dial may now be enabled wherever the plan's rollout sequencing allows.
+  C2.7 wires the pool-side session-lane demand aggregation to the same flag.
 - **Status on 2026-07-17.** Implemented (C2.5: router widening on both the
   executor and cooperative-client routers, the CA9 candidate-identity rank
   filter, and the CA3 replica laneScopeKey broader-in-chain collapse land
@@ -841,18 +843,21 @@ the per-epic implementation notes).
 - **Current default and planned end state.** `space` by default, which is
   byte-identical to pre-C1 space-only behavior. `user` is enabled only inside
   the C1.9 measurement gate until user lanes graduate; `session` is enabled
-  only inside C2 gate fixtures — **ordering invariant (CA4): the session
+  only inside C2 gate fixtures. The CA4 ordering invariant — the session
   stage must never be enabled outside a fixture while C2.1 has landed but
-  C2.6's named-session delivery narrowing has not**, because the pre-C2.6
-  principal-wide session-claim broadcast makes sibling-session claim churn a
-  quadratic spurious-rerun source. The cross-space ranks are not yet part of
-  the accepted value set and arrive with C3+. The end state is every rank
-  enabled.
+  C2.6's named-session delivery narrowing has not, because the pre-C2.6
+  principal-wide session-claim broadcast made sibling-session claim churn a
+  quadratic spurious-rerun source — is **lifted: C2.6 landed 2026-07-17**
+  (session-context control events route only to the named session), so the
+  session stage may now be enabled wherever the plan's rollout sequencing
+  allows. The cross-space ranks are not yet part of the accepted value set
+  and arrive with C3+. The end state is every rank enabled.
 - **Status on 2026-07-17.** Implemented through the session stage (C2.1:
   ladder + canonical `session:<did>:<sessionId>` wire validation per CA12;
   C2.3: session lane grants — session-anchored, session-end = lane-end, no
-  re-anchor); session-rank issuance is otherwise inert because nothing wires
-  session-lane demand until C2.7.
+  re-anchor; C2.6: named-session delivery narrowing at the single
+  `#sessionAcceptsClaim` predicate); session-rank issuance is otherwise
+  inert because nothing wires session-lane demand until C2.7.
 - **Path to removal.** Graduate each rank behind the dial as its C-phase gate
   is accepted (C1.7 folded the user step behind the
   `context-lattice-claims-v1` subcapability), then fold the fully graduated

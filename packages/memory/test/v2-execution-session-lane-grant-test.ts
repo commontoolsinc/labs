@@ -652,12 +652,10 @@ Deno.test("disconnect drains only that session's lane; siblings survive and noth
       laneClaimKey(sessionKeyOf(ALICE, aliceSibling.sessionId)),
     );
 
-    const revoked: ActionClaimKey[] = [];
-    const unsubscribe = aliceSibling.subscribeExecutionControl((event) => {
-      if (event.type === "session.execution.claim.revoke") {
-        revoked.push(event.claim);
-      }
-    });
+    const siblingObserved: ExecutionControlEvent[] = [];
+    const unsubscribe = aliceSibling.subscribeExecutionControl((event) =>
+      siblingObserved.push(event)
+    );
 
     await aliceClient.close();
 
@@ -672,11 +670,13 @@ Deno.test("disconnect drains only that session's lane; siblings survive and noth
       siblingGrant,
     );
     assertEquals(server.listExecutionClaims(SPACE), [siblingClaim]);
-    assertEquals(revoked.length, 1);
-    assertEquals(
-      revoked[0].contextKey,
-      sessionKeyOf(ALICE, aliceSession.sessionId),
-    );
+    // C2.6 (CA4): the dead session's revoke is addressed to the dead session
+    // alone — the SIBLING observes nothing. Pre-C2.6 this very fixture pinned
+    // the over-broadcast (the sibling received the revoke), which is the CA4
+    // quadratic-rerun mechanism: the client's chain-keyed action index would
+    // turn that delivered sibling revoke into an execution-claim-invalidation
+    // of the sibling's own registration of the same logical action.
+    assertEquals(siblingObserved, []);
     // The swept claim cannot renew, and the drained incarnation can never be
     // renewed back to life.
     assertEquals(await server.renewExecutionClaim(lease, claim), null);

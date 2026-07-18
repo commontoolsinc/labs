@@ -3448,7 +3448,22 @@ export class Server {
    * `session:` claim is accepted only by sessions that negotiated
    * context-lattice-claims-v1 on their current attach AND whose principal is
    * the claim's, compared through the canonical key helpers (amendment 18).
-   * Space claims keep their pre-C1.7 delivery byte-identically.
+   * C2.6 (context-lattice §2, amendment CA4): a `session:` claim is
+   * additionally accepted ONLY by the exact session its contextKey names —
+   * never a sibling session of the same principal. Sibling delivery is not
+   * benign fan-out: the client's registered-action index is CHAIN-keyed
+   * (contextKey stripped), so a delivered-then-revoked sibling claim fires
+   * `execution-claim-invalidation` on the sibling's own registration of the
+   * same logical action — a spurious fail-open rerun on every claim churn,
+   * quadratic in a principal's concurrent sessions. The per-session
+   * negotiation check needs no principal-wide cohort fence at session rank:
+   * a session claim only ever suppresses its named session under the
+   * client's own-chain acceptance, and a non-negotiating attach of the SAME
+   * session id cannot coexist with a live session lane — the session's
+   * negotiation flag is recomputed on every attach and the amendment-11
+   * admission fence (#fenceLanesForNonNegotiatingAttach, session leg since
+   * C2.3) drains the attaching session's own lane before the open response
+   * releases. Space claims keep their pre-C1.7 delivery byte-identically.
    */
   #sessionAcceptsClaim(
     session: SessionState,
@@ -3457,10 +3472,21 @@ export class Server {
     if (!session.serverPrimaryExecutionV1) return false;
     if (claim.contextKey !== "space") {
       if (!session.serverPrimaryExecutionContextLatticeClaimsV1) return false;
-      const principal = Engine.principalOfUserContextKey(claim.contextKey) ??
-        Engine.principalOfSessionKey(claim.contextKey);
-      if (principal === undefined || principal !== session.principal) {
-        return false;
+      const sessionIdentity = Engine.parseSessionExecutionContextKey(
+        claim.contextKey,
+      );
+      if (sessionIdentity !== undefined) {
+        if (
+          sessionIdentity.principal !== session.principal ||
+          sessionIdentity.sessionId !== session.id
+        ) {
+          return false;
+        }
+      } else {
+        const principal = Engine.principalOfUserContextKey(claim.contextKey);
+        if (principal === undefined || principal !== session.principal) {
+          return false;
+        }
       }
     }
     if (claim.actionKind === "computation") {
