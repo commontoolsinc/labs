@@ -1,12 +1,13 @@
 import { isPlainObject } from "@commonfabric/utils/types";
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
 
-import { FabricPrimitive, FabricValue } from "./interface.ts";
+import type { FabricValue } from "./interface.ts";
 import {
   BaseFabricInstance,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
 } from "./fabric-instances/BaseFabricInstance.ts";
+import { BaseFabricPrimitive } from "./fabric-primitives/BaseFabricPrimitive.ts";
 
 /**
  * Cache of confirmed deep-frozen objects.
@@ -121,18 +122,19 @@ export function isDeepFrozen(value: unknown): boolean {
 
     let result = true;
 
-    if (obj instanceof BaseFabricInstance) {
+    if (BaseFabricInstance.isInstance(obj)) {
       // A fabric instance's logical contents are not its enumerable own-props
       // (e.g. a `FabricError` keeps its custom properties in a private extras
       // `Map`), so it answers the deep-frozen question via its
       // `[IS_DEEP_FROZEN]` protocol member -- the side-effect-free sibling of
       // `[DEEP_FREEZE]` -- recursing into each nested `FabricValue` through
-      // `check`, which shares this call's cycle state. Gating on `instanceof`
-      // against `BaseFabricInstance` keeps this generic; the member is abstract
-      // on `BaseFabricInstance`, so every instance implements it. (A
-      // `FabricPrimitive` is necessarily frozen with no outbound references, so
-      // the `Object.values` arm below answers it correctly by accident -- its
-      // empty enumerable props yield `true`.)
+      // `check`, which shares this call's cycle state. Gating via
+      // `BaseFabricInstance.isInstance()` keeps this generic (and enforces the
+      // "every `FabricInstance` is a `BaseFabricInstance`" invariant); the
+      // member is abstract on `BaseFabricInstance`, so every instance implements
+      // it. (A `FabricPrimitive` is necessarily frozen with no outbound
+      // references, so the `Object.values` arm below answers it correctly by
+      // accident -- its empty enumerable props yield `true`.)
       result = obj[IS_DEEP_FROZEN](check);
     } else if (Array.isArray(obj)) {
       for (let i = 0; i < obj.length; i++) {
@@ -171,9 +173,9 @@ export function isDeepFrozen(value: unknown): boolean {
  *    at construction and have no outbound references.
  * 3. Fabric instance: delegate generically to its `[DEEP_FREEZE]` protocol
  *    member, handing recursion through as the `subFreeze` callback. The
- *    dispatch gates on `instanceof` against `BaseFabricInstance` (where the
- *    member is declared) -- it operates generically and does not enumerate
- *    concrete subclasses.
+ *    dispatch gates via `BaseFabricInstance.isInstance()` (where the member is
+ *    declared) -- it operates generically and does not enumerate concrete
+ *    subclasses.
  * 4. Plain object or array: recursively freeze children, then freeze the
  *    container.
  *
@@ -198,7 +200,7 @@ export function deepFreeze<T>(value: T): T {
   // construction) and have no outbound references. Handling arms 1 and 2 here,
   // before allocating the cycle-tracking set or the recursion closure below,
   // keeps primitives and `FabricPrimitive`s off the heavyweight path.
-  if (value instanceof FabricPrimitive) {
+  if (BaseFabricPrimitive.isInstance(value)) {
     return value;
   }
 
@@ -218,7 +220,7 @@ export function deepFreeze<T>(value: T): T {
     if (isNecessarilyOrKnownDeepFrozen(value)) {
       return value;
     }
-    if (value instanceof FabricPrimitive) {
+    if (BaseFabricPrimitive.isInstance(value)) {
       return value;
     }
 
@@ -238,7 +240,7 @@ export function deepFreeze<T>(value: T): T {
     // closes over `inProgress`, so the impl's recursion into nested
     // `FabricValue`s shares cycle state with this call -- the participating
     // instance doesn't need to be `inProgress`-aware in its own signature.
-    if (value instanceof BaseFabricInstance) {
+    if (BaseFabricInstance.isInstance(value)) {
       const result = value[DEEP_FREEZE](freeze) as U;
       // Cache the now-deep-frozen result so subsequent `isDeepFrozen()` checks
       // short-circuit in O(1), mirroring arm 4's cache-write below.
@@ -326,19 +328,16 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
 
     seen.add(item);
 
-    if (item instanceof FabricPrimitive) {
-      // `FabricPrimitive`s are by definition frozen and have no outbound
-      // references.
-      return true;
-    } else if (item instanceof BaseFabricInstance) {
+    if (BaseFabricInstance.isInstance(item)) {
       // Object.freeze() cannot prove that a fabric instance's private logical
       // contents will remain unchanged, so validate it but do not root-cache a
       // graph that reaches one.
       cacheableByIdentity = false;
       // Fabric instances answer the deep-frozen question via their
       // `[IS_DEEP_FROZEN]` protocol member (the side-effect-free sibling of
-      // `[DEEP_FREEZE]`), recursing through `checkValue`. Gating on
-      // `instanceof` against `BaseFabricInstance` keeps this guard generic; the
+      // `[DEEP_FREEZE]`), recursing through `checkValue`. Gating via
+      // `BaseFabricInstance.isInstance()` keeps this guard generic (and enforces
+      // the "every `FabricInstance` is a `BaseFabricInstance`" invariant); the
       // `[IS_DEEP_FROZEN]` member is abstract on `BaseFabricInstance`, so every
       // instance is guaranteed to implement it.
       return item[IS_DEEP_FROZEN](checkValue);
@@ -369,6 +368,14 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
         }
         if (!checkValue(record[key])) return false;
       }
+      return true;
+    } else if (BaseFabricPrimitive.isInstance(item)) {
+      // `FabricPrimitive`s are by definition frozen and have no outbound
+      // references. This arm is checked after the array / plain-object arms
+      // (unlike the primitive-first ordering elsewhere): `BaseFabricPrimitive`'s
+      // instance type has no members, so this guard's negative narrowing would
+      // collapse `item` to `never` for any following branch -- keeping it last
+      // confines that to the unreachable-for-`item` final `else`.
       return true;
     } else {
       // It's an instance of a class that isn't covered by the `FabricValue`

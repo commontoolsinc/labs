@@ -47,6 +47,35 @@ export const IS_DEEP_FROZEN: unique symbol = Symbol.for(
  */
 export abstract class BaseFabricInstance extends FabricInstance {
   //
+  // Static members
+  //
+
+  /**
+   * Type guard for `BaseFabricInstance`, which also enforces the invariant that
+   * every `FabricInstance` is in fact a `BaseFabricInstance`. Concrete
+   * fabric-instance classes are required to extend `BaseFabricInstance` (never
+   * `FabricInstance` directly), so a value that is a `FabricInstance` but not a
+   * `BaseFabricInstance` indicates a broken subclass. Use this in preference to
+   * a bare `instanceof BaseFabricInstance` where dispatch relies on the members
+   * declared here (e.g. the generic freeze machinery), so the invariant is
+   * actively enforced rather than silently skipped.
+   *
+   * @throws If `value` is a `FabricInstance` that is not a `BaseFabricInstance`
+   *   -- the "shouldn't happen" invariant violation.
+   */
+  static isInstance(value: unknown): value is BaseFabricInstance {
+    if (value instanceof BaseFabricInstance) {
+      return true;
+    } else if (value instanceof FabricInstance) {
+      throw new Error(
+        "Shouldn't happen: `FabricInstance` that is not a `BaseFabricInstance`.",
+      );
+    }
+
+    return false;
+  }
+
+  //
   // Instance members
   //
 
