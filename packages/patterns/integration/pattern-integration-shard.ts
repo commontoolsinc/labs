@@ -6,7 +6,7 @@ export interface PatternIntegrationShard {
 export function parsePatternIntegrationShard(
   raw: string | undefined,
 ): PatternIntegrationShard {
-  if (!raw) return { index: 1, total: 1 };
+  if (raw === undefined) return { index: 1, total: 1 };
 
   const match = raw.match(/^([1-9][0-9]*)\/([1-9][0-9]*)$/);
   if (!match) {
@@ -17,6 +17,11 @@ export function parsePatternIntegrationShard(
 
   const index = Number(match[1]);
   const total = Number(match[2]);
+  if (!Number.isSafeInteger(index) || !Number.isSafeInteger(total)) {
+    throw new Error(
+      `Invalid PATTERN_INTEGRATION_SHARD "${raw}"; shard values must be safe integers.`,
+    );
+  }
   if (index > total) {
     throw new Error(`PATTERN_INTEGRATION_SHARD "${raw}" out of range.`);
   }

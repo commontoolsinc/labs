@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import {
   assignPatternIntegrationShards,
   INTERNALLY_SHARDED_PATTERN_INTEGRATION_FILES,
@@ -18,6 +18,10 @@ const INTERNALLY_SHARDED_FILE_NAMES = new Set<string>(
 
 Deno.test("parseShard parses shard notation", () => {
   assertEquals(parseShard("2/4"), { index: 2, total: 4 });
+  assertEquals(parseShard("9007199254740991/9007199254740991"), {
+    index: Number.MAX_SAFE_INTEGER,
+    total: Number.MAX_SAFE_INTEGER,
+  });
 });
 
 Deno.test("parseShard rejects invalid shard notation", () => {
@@ -32,6 +36,20 @@ Deno.test("parseShard rejects invalid shard notation", () => {
   }
 });
 
+Deno.test("parseShard rejects unsafe integer values", () => {
+  const enormous = "9".repeat(400);
+  for (
+    const raw of [
+      "1/9007199254740992",
+      "9007199254740992/9007199254740992",
+      "9007199254740993/9007199254740992",
+      `${enormous}/${enormous}`,
+    ]
+  ) {
+    assertThrows(() => parseShard(raw), Error, "safe integers");
+  }
+});
+
 Deno.test("pattern integration shard defaults local runs to every item", () => {
   const shard = parsePatternIntegrationShard(undefined);
   assertEquals(shard, { index: 1, total: 1 });
@@ -40,6 +58,14 @@ Deno.test("pattern integration shard defaults local runs to every item", () => {
     "b",
     "c",
   ]);
+});
+
+Deno.test("pattern integration shard rejects an explicitly empty setting", () => {
+  assertThrows(
+    () => parsePatternIntegrationShard(""),
+    Error,
+    'Invalid PATTERN_INTEGRATION_SHARD ""',
+  );
 });
 
 Deno.test("pattern integration shard divides items exactly once", () => {
@@ -76,6 +102,31 @@ Deno.test("pattern integration shard rejects invalid notation", () => {
         true,
       );
     }
+  }
+});
+
+Deno.test("pattern integration shard rejects unsafe integer values", () => {
+  assertEquals(
+    parsePatternIntegrationShard("9007199254740991/9007199254740991"),
+    {
+      index: Number.MAX_SAFE_INTEGER,
+      total: Number.MAX_SAFE_INTEGER,
+    },
+  );
+  const enormous = "9".repeat(400);
+  for (
+    const raw of [
+      "1/9007199254740992",
+      "9007199254740992/9007199254740992",
+      "9007199254740993/9007199254740992",
+      `${enormous}/${enormous}`,
+    ]
+  ) {
+    assertThrows(
+      () => parsePatternIntegrationShard(raw),
+      Error,
+      "shard values must be safe integers",
+    );
   }
 });
 
