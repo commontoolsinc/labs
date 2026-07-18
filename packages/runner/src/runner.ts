@@ -3583,6 +3583,11 @@ export class Runner {
       },
       inHandler,
       frameKind: inHandler ? "handler" : "lift",
+      // Freeze the handler's ambient clock to the dispatching event's instant
+      // (see Frame.eventTime / sandboxDateNow). A handler invoked directly rather
+      // than through event dispatch (a test, an internal call) has no dispatched
+      // time, so capture the clock once here; it stays frozen for that run.
+      ...(inHandler ? { eventTime: tx.dispatchedEventTime ?? Date.now() } : {}),
       runtime: this.runtime,
       space: resultCell.space,
       tx,

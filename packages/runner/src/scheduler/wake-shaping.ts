@@ -263,6 +263,7 @@ export class WakeShaper {
 export interface DeliverOpts {
   eventId?: string;
   originTx?: IExtendedStorageTransaction;
+  time?: number;
 }
 
 export type DeliverFn = (
@@ -386,10 +387,18 @@ export function holdShapedEvent(
   if (stripped !== event) propagateRendererTrustedEvent(event, stripped);
   const eventId = opts.eventId;
   const originTx = opts.originTx;
+  // The event's time is captured at the original send and carried through the
+  // hold, so a shaped (delayed) delivery still stamps the instant the user
+  // acted rather than the instant the shaper released it.
+  const time = opts.time;
   shaper.hold({
     groupKey: EVENT_GROUP_PREFIX + (groupKey ?? linkKey(eventLink)),
     deliver: () =>
-      deliver(eventLink, stripped, retries, onCommit, { eventId, originTx }),
+      deliver(eventLink, stripped, retries, onCommit, {
+        eventId,
+        originTx,
+        time,
+      }),
   });
 }
 

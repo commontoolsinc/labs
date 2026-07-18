@@ -27,12 +27,17 @@ function fakeRuntime(): Runtime {
 }
 
 function inFrame<T>(
-  props: { inHandler?: boolean },
+  props: { inHandler?: boolean; eventTime?: number },
   fn: () => T,
 ): T {
   const frame = pushFrame({
     runtime: fakeRuntime(),
-    ...(props.inHandler ? { inHandler: true } : {}),
+    // A handler frame carries the dispatching event's instant; the ambient clock
+    // reads this frozen value, not the live clock. Default to a fixed instant so
+    // a test reads a deterministic coarse time.
+    ...(props.inHandler
+      ? { inHandler: true, eventTime: props.eventTime ?? 1_700_000_123_456 }
+      : {}),
   });
   try {
     return fn();
@@ -49,13 +54,38 @@ describe("time/entropy capability gate", () => {
     });
   });
 
-  it("handler context: clock is coarsened to 1s, entropy passes", () => {
-    inFrame({ inHandler: true }, () => {
+  it("handler context: clock is the event's time coarsened to 1s, entropy passes", () => {
+    inFrame({ inHandler: true, eventTime: 1_700_000_123_456 }, () => {
       const t = sandboxDateNow();
       expect(typeof t).toBe("number");
       expect(t % 1000).toBe(0);
+      // The event's instant floored to the second, not the live wall clock.
+      expect(t).toBe(1_700_000_123_000);
       expect(typeof sandboxRandom()).toBe("number");
     });
+  });
+
+  it("handler context: the clock is frozen — repeated reads never advance", () => {
+    // The load-bearing property: time does not move during a handler's own work,
+    // so a read before and after an await (or any elapsed real time) is identical
+    // and cannot serve as an intra-run clock.
+    inFrame({ inHandler: true, eventTime: 1_700_000_000_500 }, () => {
+      const first = sandboxDateNow();
+      const spinUntil = Date.now() + 5;
+      while (Date.now() < spinUntil) { /* burn real wall-clock time */ }
+      expect(sandboxDateNow()).toBe(first);
+    });
+  });
+
+  it("handler context with no event time recorded: throws (no live-clock fallback)", () => {
+    // A handler frame must carry an event instant; there is no path that reads
+    // the live clock. createPatternFrame always sets one.
+    const frame = pushFrame({ runtime: fakeRuntime(), inHandler: true });
+    try {
+      expect(() => sandboxDateNow()).toThrow("not available in this context");
+    } finally {
+      popFrame(frame);
+    }
   });
 
   it("no frame at all: both throw (ambient time/entropy is never exposed)", () => {

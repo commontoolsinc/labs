@@ -135,6 +135,15 @@ Landing order, smallest and safest first. Each is its own commit/PR.
     `TimeCapabilityError`, mirroring the W1 clock/entropy gate. Request
     *initiation* instants therefore come only from handler runs, whose delivery
     is already shaped (W3/plan B).
+  - **Superseded by the event-frozen handler clock (W1).** Since the handler
+    clock is now the triggering event's frozen instant rather than the live
+    clock, a handler reads the *same* value before issuing a fetch and in the
+    continuation after it settles — there is no advancing clock edge to correlate
+    a round trip against, so the correlation this grid settlement was built to
+    defeat no longer exists. The settlement arithmetic below is retained as
+    redundant defense-in-depth and is expected to be removed together with
+    imperative handler `fetch` (see the follow-on to retire it); it is documented
+    here as-is until then.
   - **Issue-relative grid settlement.** The whole response body is buffered,
     then the promise settles (fulfills or rejects) at a wall-clock grid boundary
     chosen from the request's *issue* instant, not its *arrival* instant:
@@ -224,10 +233,26 @@ Landing order, smallest and safest first. Each is its own commit/PR.
     intrinsics `Date.now()` / no-argument `new Date()` / `Math.random()` route
     through `sandboxDateNow()`/`sandboxRandom()` (`builder/safe-builtins.ts`),
     which consult the active frame via `getTopFrame()`: they throw in a lift/pure
-    context and return a coarse (one-second) clock / pass-through entropy in a
-    handler. The check is dynamic (call-time) because shared helpers are reached
-    from both contexts (e.g. `occurrence-tracker.tsx`).
-    Tested in `packages/runner/test/time-capability.test.ts`. The gate is
+    context, and in a handler pass entropy through and return the clock.
+  - **The handler clock is the event's time, frozen — not the live wall clock.**
+    A handler reads the instant bound to the event that triggered it
+    (`Frame.eventTime`), captured once when that event was created and coarsened
+    to one second at the read, not `Date.now()` sampled live. Time therefore does
+    not advance during a handler's own work: a read before and after an `await`
+    (or any elapsed real time) returns the same value, so a handler has no clock
+    that ticks during a synchronous secret-dependent operation. Events a handler
+    emits carry the same instant forward (captured at the send site in
+    `Scheduler.queueEvent`, threaded through the queued event onto the dispatched
+    handler's `tx.dispatchedEventTime`), so a whole causal chain from one gesture
+    shares one time and no derived handler can read a later clock than its cause.
+    A renderer or root event captures a fresh coarse instant at creation; across
+    separate events time still advances, bounded by how fast events arrive (which
+    the delivery shaper already floors). The check is dynamic (call-time) because
+    shared helpers are reached from both contexts (e.g. `occurrence-tracker.tsx`).
+    Tested in `packages/runner/test/time-capability.test.ts` (frozen across
+    reads) and `packages/patterns/integration/time-capability-intrinsics.test.ts`
+    (a handler reads the event's coarse time; the instant is carried forward to
+    an emitted event so a chained handler reads the same value). The gate is
     breaking: about 297 call sites across about 77 pattern files — handler-context
     uses keep working (just coarser); lift-context "elapsed time" must migrate to
     the reactive `#now` clock (per-pattern judgment; see the migration-triage

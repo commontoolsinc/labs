@@ -8,11 +8,17 @@
  * boundary by reading the lift-vs-handler context from the active frame: a
  * lift/computed (pure) context cannot read a clock or entropy at all (it would be
  * a fine reactive time source and would break idempotency), while a handler gets
- * a coarse, one-second-resolution clock and pass-through entropy. The ambient
- * intrinsics never expose a fine clock or raw entropy to the sandbox: they yield
- * a coarse value only inside a handler, and throw in every other context
- * (lift/pattern-body or no frame). `new Date(arg)` is deterministic and is left
- * untouched at the injection site. See
+ * pass-through entropy and a clock frozen to its triggering event.
+ *
+ * The handler clock is NOT the live wall clock. It is the event's own instant
+ * (Frame.eventTime), captured once when the event was created and carried
+ * forward to every event the handler emits, coarsened to one second here. Time
+ * therefore does not advance during a handler's own work: reading it before and
+ * after an `await` yields the same value, so a handler has no clock that ticks
+ * during a synchronous secret-dependent operation and no fine wall-clock edge to
+ * correlate a network round trip against. Across separate events it still
+ * advances, bounded by how fast events arrive. `new Date(arg)` is deterministic
+ * and is left untouched at the injection site. See
  * docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md (W1/W6).
  */
 
@@ -29,14 +35,16 @@ class TimeCapabilityError extends Error {
 
 export function sandboxDateNow(): number {
   const frame = getTopFrame();
-  if (frame?.inHandler === true) {
-    return Math.floor(Date.now() / ONE_SECOND_MS) * ONE_SECOND_MS;
+  if (frame?.inHandler === true && frame.eventTime !== undefined) {
+    // The dispatching event's frozen instant, coarsened — never the live clock.
+    return Math.floor(frame.eventTime / ONE_SECOND_MS) * ONE_SECOND_MS;
   }
   throw new TimeCapabilityError(
     "The ambient clock (Date.now() / new Date()) is not available in this " +
-      "context. Read it inside a handler (it is coarsened to one second), or " +
-      'for reactive display read the #now clock (wish({ query: "#now" }) or ' +
-      "#now/N). Formatting a known timestamp with new Date(ms) is unaffected.",
+      "context. Read it inside a handler (it reports the triggering event's " +
+      "time, coarsened to one second), or for reactive display read the #now " +
+      'clock (wish({ query: "#now" }) or #now/N). Formatting a known timestamp ' +
+      "with new Date(ms) is unaffected.",
   );
 }
 

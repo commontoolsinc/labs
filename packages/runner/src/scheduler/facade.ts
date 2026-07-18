@@ -1,5 +1,6 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Cancel } from "../cancel.ts";
+import { getTopFrame } from "../builder/pattern.ts";
 import { ConsoleEvent } from "../harness/console.ts";
 import type {
   ConsoleHandler,
@@ -1303,8 +1304,20 @@ export class Scheduler {
     // effects. Use the post-commit outbox for success-only effect release.
     onCommit?: (tx: IExtendedStorageTransaction) => void,
     doNotLoadPieceIfNotRunning: boolean = false,
-    opts: { eventId?: string; originTx?: IExtendedStorageTransaction } = {},
+    opts: {
+      eventId?: string;
+      originTx?: IExtendedStorageTransaction;
+      time?: number;
+    } = {},
   ): void {
+    // Bind the event's wall-clock time at its causal origin: carry the emitting
+    // handler's frozen instant forward when this send happens inside a handler
+    // (so a whole cascade from one gesture shares one time), else read the clock
+    // once here for a renderer/root event. The dispatching handler reads this,
+    // coarsened, instead of the live clock. A pre-supplied time (a shaper
+    // release re-queueing a held event, a piece-load re-queue) is kept as-is so
+    // the instant is captured once at the original send, not at re-delivery.
+    const time = opts.time ?? getTopFrame()?.eventTime ?? Date.now();
     // Coarsen the delivery cadence of user-input events (W3). The piece-loading
     // re-queue (doNotLoadPieceIfNotRunning) is an internal retry, not fresh
     // input, so it is never reshaped.
@@ -1317,7 +1330,7 @@ export class Scheduler {
         event,
         retries,
         onCommit,
-        { eventId: opts.eventId, originTx: opts.originTx },
+        { eventId: opts.eventId, originTx: opts.originTx, time },
       );
       return;
     }
@@ -1329,6 +1342,7 @@ export class Scheduler {
       doNotLoadPieceIfNotRunning,
       eventId: opts.eventId,
       originTx: opts.originTx,
+      time,
     });
   }
 
@@ -1349,6 +1363,7 @@ export class Scheduler {
       doNotLoadPieceIfNotRunning: false,
       eventId: opts.eventId,
       originTx: opts.originTx,
+      time: opts.time,
     });
 
   // The owning pattern instance for an input stream, used to group a pattern's

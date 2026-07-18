@@ -1099,6 +1099,7 @@ export function pushFrameFromCause(
     unsafe_binding?: UnsafeBinding;
     inHandler?: boolean;
     frameKind?: "lift" | "handler";
+    eventTime?: number;
     implementationIdentity?: ImplementationIdentity;
     runtime?: Runtime;
     tx?: IExtendedStorageTransaction;
@@ -1106,7 +1107,15 @@ export function pushFrameFromCause(
   },
 ): Frame {
   const parent = getTopFrame();
-  const { unsafe_binding, inHandler, frameKind, runtime, tx, space } = props;
+  const {
+    unsafe_binding,
+    inHandler,
+    frameKind,
+    eventTime,
+    runtime,
+    tx,
+    space,
+  } = props;
 
   // If no runtime provided, try to inherit from parent (may be undefined during construction)
   const frameRuntime = runtime ?? parent?.runtime;
@@ -1132,6 +1141,7 @@ export function pushFrameFromCause(
     }),
     ...(inHandler && { inHandler: true }),
     ...(frameKind && { frameKind }),
+    ...(eventTime !== undefined && { eventTime }),
     ...(unsafe_binding ? { unsafe_binding } : {}),
   };
   frames.push(frame);

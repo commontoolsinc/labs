@@ -168,9 +168,11 @@ function readyQueuedEvent(args: {
   readonly retries: boolean;
   readonly onCommit?: QueuedEvent["onCommit"];
   readonly originTx?: IExtendedStorageTransaction;
+  readonly time?: number;
 }): QueuedEvent {
   return {
     id: args.id,
+    time: args.time,
     originTx: args.originTx,
     eventLink: args.eventLink,
     action: (tx) => args.handler(tx, args.event),
@@ -232,6 +234,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly doNotLoadPieceIfNotRunning: boolean;
   readonly eventId?: string;
   readonly originTx?: IExtendedStorageTransaction;
+  readonly time?: number;
 }): void {
   const id = args.eventId ?? mintEventId(args.eventLink, args.originTx);
   const handler = findEventHandler(state.eventHandlers, args.eventLink);
@@ -896,6 +899,7 @@ export async function dispatchQueuedEvent(state: {
 
   const tx = state.runtime.edit();
   tx.dispatchedEventId = queuedEvent.id;
+  tx.dispatchedEventTime = queuedEvent.time;
   tx.tx.immediate = true;
   tx.tx.sourceAction = action;
   if (queuedEvent.originTx !== undefined) {
@@ -931,6 +935,7 @@ export async function dispatchQueuedEvent(state: {
   const requeueForNameResolution = () => {
     const requeued: QueuedEvent = {
       id: queuedEvent.id,
+      time: queuedEvent.time,
       originTx: queuedEvent.originTx,
       action,
       eventLink: queuedEvent.eventLink,
@@ -959,6 +964,7 @@ export async function dispatchQueuedEvent(state: {
   ) => {
     const requeued: QueuedEvent = {
       id: queuedEvent.id,
+      time: queuedEvent.time,
       originTx: queuedEvent.originTx,
       action,
       eventLink: queuedEvent.eventLink,

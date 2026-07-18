@@ -129,4 +129,38 @@ describe("W6: gated Date/Math intrinsics", () => {
     expect(roll as number).toBeGreaterThanOrEqual(1);
     expect(roll as number).toBeLessThanOrEqual(6);
   });
+
+  it("a handler's clock is carried forward to the event it emits", async () => {
+    const cc = await gatedController(`w6-carryforward-${crypto.randomUUID()}`);
+    const errors: string[] = [];
+    cc.manager().runtime.scheduler.onError((e) => {
+      if (e?.name === "TimeCapabilityError") errors.push(e.message);
+    });
+    let cancel: (() => void) | undefined;
+    let stampFirst: unknown;
+    let stampSecond: unknown;
+    try {
+      const piece = await instantiate(
+        cc,
+        "integration/fixtures/handler-event-time-carryforward.tsx",
+      );
+      const rc = cc.manager().getResult(piece.getCell());
+      cancel = rc.sink(() => {});
+      await cc.manager().runtime.idle();
+      (rc.key("first") as unknown as { send: (e: unknown) => void }).send({});
+      await cc.manager().runtime.idle();
+      stampFirst = rc.key("stampFirst").get();
+      stampSecond = rc.key("stampSecond").get();
+    } finally {
+      cancel?.();
+      await cc.dispose();
+    }
+    expect(errors).toEqual([]);
+    // The second handler ran later, but read the SAME instant as the first,
+    // because the emitting handler's frozen event time was carried forward onto
+    // the event it sent — a causal chain shares one time, so it cannot tick.
+    expect(typeof stampFirst).toBe("number");
+    expect(stampFirst as number).toBeGreaterThan(0);
+    expect(stampSecond).toBe(stampFirst);
+  });
 });
