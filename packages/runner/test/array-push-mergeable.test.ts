@@ -271,6 +271,71 @@ describe("mergeable array appends", () => {
     }
   });
 
+  // C2.10 defect 1 (the lunch-poll placement harness's second-voter
+  // staleness): the SECOND concurrent appender's OWN replica must converge to
+  // the merged list from its own commit confirmation. The engine rebases the
+  // second append onto the first appender's head — a base the second writer's
+  // replica never contained — so its local confirm-time replay would promote a
+  // pre-merge value at the accepted seq. That divergence is PERMANENT without
+  // the response carrying the truth: the FA14 echo suppression correctly
+  // withholds a session's own committed seq from the dirty feed, and the
+  // first writer's older upsert is refused by the monotonic-confirmed guard.
+  // The fix: the engine marks merge-rebased patch revisions with the
+  // authoritative post-apply document, and confirmPending adopts it instead
+  // of the local replay. This is the deterministic mechanism fixture — the
+  // placement harness is the in-vivo guard.
+  it("the second concurrent appender's own replica adopts the merged list", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      // Seed and let both replicas hold ["seed"] at the same basis.
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
+      await cell2.sync();
+      await cell2.pull();
+      expect(cell2.get()).toEqual(["seed"]);
+
+      // Session 1 appends "A" (accepted first).
+      const txA = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
+      await txA.commit();
+      await rt1.storageManager.synced();
+
+      // Session 2 appends "B" WITHOUT having observed "A" — the engine
+      // merge-rebases its patch onto session 1's head.
+      const txB = rt2.edit();
+      rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB).push("B");
+      await txB.commit();
+      await rt2.storageManager.synced();
+
+      // The convergence assertion is on session 2's OWN replica, with NO
+      // pull: the merged value must arrive through the commit confirmation
+      // itself. Pre-fix this read ["seed", "B"] forever.
+      const replica = [...(cell2.get() ?? [])];
+      expect(replica).toContain("seed");
+      expect(replica).toContain("A");
+      expect(replica).toContain("B");
+      expect(replica.length).toBe(3);
+      // And it matches the durable truth exactly.
+      expect(replica.toSorted()).toEqual(
+        [...await readDurable(server)].toSorted(),
+      );
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
   // A single session appends to a list whose durable head it has not yet
   // observed (the rehydration-race shape): it reads the list as shorter/empty
   // than it durably is, then appends. The append must land at the durable tail,

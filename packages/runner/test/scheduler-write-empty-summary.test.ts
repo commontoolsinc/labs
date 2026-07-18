@@ -6,7 +6,11 @@ import {
   type BuildSchedulerActionObservationOptions,
   type SchedulerActionObservation,
 } from "../src/scheduler/persistent-observation.ts";
-import { runtimeWriteEmptyComputationScopeSummary } from "../src/scheduler/run.ts";
+import {
+  runtimeWriteEmptyComputationScopeSummary,
+  transformerCertificateScopeSummaryInput,
+} from "../src/scheduler/run.ts";
+import type { NormalizedFullLink } from "../src/link-utils.ts";
 import {
   classifyStaticActionServability,
   dynamicActionTransactionUnservableReason,
@@ -40,6 +44,21 @@ function address(
     path: ["value"],
     ...overrides,
   };
+}
+
+/** Certificate-shaped link (normalized cell link — `toMemorySpaceAddress`
+ * renders its path below `["value"]`). */
+function link(
+  id: string,
+  overrides: Partial<NormalizedFullLink> = {},
+): NormalizedFullLink {
+  return {
+    space: SPACE,
+    id: id as NormalizedFullLink["id"],
+    path: [],
+    scope: "space",
+    ...overrides,
+  } as NormalizedFullLink;
 }
 
 function baseObservation(
@@ -395,20 +414,56 @@ describe("claimed-commit admission reads (framework-read folding)", () => {
     expect(summary!.writes).toEqual([address("of:output")]);
   });
 
-  it("keeps foreign-space and scoped ignored reads uncovered (fail closed)", () => {
+  it("folds same-space lane-instance-scoped (user/session) ignored reads (C2.10)", () => {
+    // A claimed run at scoped rank resolves entity links through the acting
+    // lane's SCOPED instances; the commit then carries whole-`["value"]`
+    // confirmed reads of those scoped link documents. A space-only fold left
+    // them uncovered — every such run rejected `unobserved-read` at the
+    // engine's claimed-commit admission (the C2.10 placement-harness churn).
+    const observation = baseObservation();
+    const sessionRead = address("of:link-doc", {
+      scope: "session",
+      path: ["value"],
+    });
+    const userRead = address("of:user-doc", {
+      scope: "user",
+      path: ["value"],
+    });
+    const summary = runtimeWriteEmptyComputationScopeSummary(observation, [
+      sessionRead,
+      userRead,
+    ]);
+    expect(summary).toBeDefined();
+    expect(covered(summary!.reads, sessionRead)).toBe(true);
+    expect(covered(summary!.reads, userRead)).toBe(true);
+    // The scoped folds get their cfc siblings too (certified-path parity).
+    expect(
+      covered(
+        summary!.reads,
+        address("of:link-doc", { scope: "session", path: ["cfc"] }),
+      ),
+    ).toBe(true);
+    // Reads only — the folded reads must never widen the write envelope.
+    expect(summary!.writes).toEqual([address("of:output")]);
+  });
+
+  it("keeps foreign-space and malformed-scope ignored reads uncovered (fail closed)", () => {
     const observation = baseObservation();
     const foreign = address("of:foreign-doc", { space: FOREIGN, path: [] });
-    const scoped = address("of:scoped-doc", {
+    const malformed = address("of:scoped-doc", {
+      // A scope KEY smuggled into the scope slot is not a CellScope — it must
+      // stay excluded rather than teach the summary a shape the engine's
+      // lane checks cannot resolve.
       scope: "session:abc" as IMemorySpaceAddress["scope"],
       path: [],
     });
     const summary = runtimeWriteEmptyComputationScopeSummary(observation, [
       foreign,
-      scoped,
+      malformed,
     ]);
     expect(summary).toBeDefined();
     expect(covered(summary!.reads, foreign)).toBe(false);
-    expect(covered(summary!.reads, scoped)).toBe(false);
+    expect(covered(summary!.reads, malformed)).toBe(false);
   });
 
   it("adds cfc sibling reads for every summary doc (certified-path parity)", () => {
@@ -418,6 +473,85 @@ describe("claimed-commit admission reads (framework-read folding)", () => {
     expect(covered(summary!.reads, address("of:output", { path: ["cfc"] })))
       .toBe(true);
     expect(covered(summary!.reads, address("of:input", { path: ["cfc"] })))
+      .toBe(true);
+  });
+});
+
+// The transformer-certificate summary source folds the same framework reads
+// as every runtime source (C2.10: the certificate path was the residual gap).
+// The harness-measured shape: a certified lift reads an entity link — the
+// reactive log and the certificate carry only the narrow link position
+// (["value","/","link@1"]) while link resolution records a scheduler-ignored
+// whole-["value"] read of the link document (at the acting lane's scoped
+// instance under a scoped claim) that the claimed commit then carries as a
+// confirmed read. Without the fold, path-prefix coverage fails and every such
+// claimed run rejects `unobserved-read` at the engine's claimed-commit
+// admission.
+describe("transformer-certificate summary reads (framework-read folding)", () => {
+  const covered = (
+    reads: readonly IMemorySpaceAddress[],
+    target: IMemorySpaceAddress,
+  ) =>
+    reads.some((entry) =>
+      entry.space === target.space && entry.id === target.id &&
+      (entry.scope ?? "space") === (target.scope ?? "space") &&
+      target.path.join(" ").startsWith(entry.path.join(" "))
+    );
+
+  const linkDocId = "of:link-doc" as IMemorySpaceAddress["id"];
+  const certificate = () => ({
+    complete: true as const,
+    piece: link("of:piece"),
+    // The certificate names only the LINK POSITION of the link document —
+    // the narrow read the transformer can enumerate.
+    reads: [
+      link("of:input"),
+      link(String(linkDocId), {
+        scope: "session",
+        path: ["/", "link@1"],
+      }),
+    ],
+    writes: [link("of:output")],
+    materializerWriteEnvelopes: [],
+    directOutputs: [link("of:output")],
+  });
+  // The link-resolution framework read the commit actually carries: the
+  // whole-value read of the link document at the acting session's instance.
+  const wholeValueLinkRead = address(String(linkDocId), {
+    scope: "session",
+    path: ["value"],
+  });
+
+  it("folds the run's scheduler-ignored link-resolution reads beside the certificate", () => {
+    const summary = transformerCertificateScopeSummaryInput(certificate(), [
+      wholeValueLinkRead,
+    ]);
+    expect(covered(summary.reads, wholeValueLinkRead)).toBe(true);
+    // The folded doc gets its cfc sibling too.
+    expect(
+      covered(
+        summary.reads,
+        address(String(linkDocId), { scope: "session", path: ["cfc"] }),
+      ),
+    ).toBe(true);
+    // Reads only: the certificate's write envelope is never widened.
+    expect(summary.writes).toEqual([address("of:output")]);
+    expect(summary.directOutputs).toEqual([address("of:output")]);
+  });
+
+  it("without the fold the whole-value link read stays uncovered (the C2.10 defect shape)", () => {
+    const summary = transformerCertificateScopeSummaryInput(certificate());
+    // The narrow certificate read does NOT prefix-cover the broader
+    // whole-["value"] commit read — exactly the unobserved-read reject the
+    // placement harness measured; the fold above is what closes it.
+    expect(covered(summary.reads, wholeValueLinkRead)).toBe(false);
+  });
+
+  it("keeps the certificate's own cfc sibling reads", () => {
+    const summary = transformerCertificateScopeSummaryInput(certificate());
+    expect(covered(summary.reads, address("of:input", { path: ["cfc"] })))
+      .toBe(true);
+    expect(covered(summary.reads, address("of:output", { path: ["cfc"] })))
       .toBe(true);
   });
 });

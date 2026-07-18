@@ -731,6 +731,15 @@ WHERE commit_seq = :commit_seq
 ORDER BY op_index ASC
 `;
 
+/** Authoring session of the commit accepted at `seq` — the merge-rebase
+ * detection input for patch writes (C2.10 defect-1 fix, see writeOperation's
+ * patch case). */
+const SELECT_COMMIT_SESSION_BY_SEQ = `
+SELECT session_id
+FROM "commit"
+WHERE seq = :seq
+`;
+
 const SELECT_BRANCH = `
 SELECT name, parent_branch, fork_seq, created_seq, head_seq, status
 FROM branch
@@ -810,6 +819,7 @@ interface PreparedStatements {
   selectBranchHeadSeq: PreparedStatement;
   selectBranchStatus: PreparedStatement;
   selectCommitRevisions: PreparedStatement;
+  selectCommitSessionBySeq: PreparedStatement;
   selectCurrentLocal: PreparedStatement;
   selectExistingCommit: PreparedStatement;
   selectHead: PreparedStatement;
@@ -1581,6 +1591,7 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   selectBranchHeadSeq: database.prepare(SELECT_BRANCH_HEAD_SEQ),
   selectBranchStatus: database.prepare(SELECT_BRANCH_STATUS),
   selectCommitRevisions: database.prepare(SELECT_COMMIT_REVISIONS),
+  selectCommitSessionBySeq: database.prepare(SELECT_COMMIT_SESSION_BY_SEQ),
   selectCurrentLocal: database.prepare(SELECT_CURRENT_LOCAL),
   selectExistingCommit: database.prepare(SELECT_EXISTING_COMMIT),
   selectHead: database.prepare(SELECT_HEAD),
@@ -7871,9 +7882,11 @@ const applyCommitTransaction = (
       opIndex,
       operation,
       ...scopeContext,
+      commitSessionKey: sessionKey,
     });
     revisions.push(revision);
   }
+  ensureMergedPatchDocumentOnLastRevision(engine, branch, revisions);
 
   engine.statements.updateBranchHead.run({ branch, seq });
   materializeSnapshots(engine, branch, revisions);
@@ -8067,6 +8080,12 @@ const writeOperation = (
     operation: Exclude<Operation, SqliteOperation>;
     principal?: string;
     sessionId: SessionId;
+    /** The committing session's canonical commit-table identity
+     * (`resolveCommitSessionKey`) — the merge-rebase detection input for
+     * patch writes. Optional so host-internal writers keep their shape; when
+     * absent every patch is treated as merge-rebased (fail toward carrying
+     * the authoritative document). */
+    commitSessionKey?: string;
   },
 ): AppliedRevision => {
   const { branch, seq, opIndex, operation, principal, sessionId } = options;
@@ -8111,6 +8130,36 @@ const writeOperation = (
       };
     }
     case "patch": {
+      // Merge-rebase detection (C2.10 defect-1 root fix): a patch landing on
+      // a head that ANOTHER session authored is applied by the engine against
+      // a base the origin client may never have seen — its locally
+      // materialized post-commit value (own patch over its own stale base)
+      // then diverges from the accepted head, permanently: the FA14 echo
+      // suppression correctly withholds the origin's own seq from the dirty
+      // feed, and any older interleaved upsert is refused by the client's
+      // monotonic-confirmed guard. So the RESPONSE must carry the truth: read
+      // the pre-apply head's author (before upsertHead moves it) and, when it
+      // is foreign — or unknown, failing toward delivery — materialize the
+      // post-apply document into the revision so the origin's confirmPending
+      // adopts the authoritative merged value instead of its local replay.
+      // Same-session heads skip the materialization: the origin's local chain
+      // replay is byte-equal by induction, keeping the uncontended hot path
+      // slim.
+      const preApplyHead = engine.statements.selectHead.get({
+        branch,
+        id: operation.id,
+        scope_key: scopeKey,
+      }) as { seq: number; op_index: number } | undefined;
+      let mergeRebased = false;
+      if (preApplyHead !== undefined) {
+        const author = options.commitSessionKey === undefined
+          ? undefined
+          : engine.statements.selectCommitSessionBySeq.get({
+            seq: preApplyHead.seq,
+          }) as { session_id: string } | undefined;
+        mergeRebased = author === undefined ||
+          author.session_id !== options.commitSessionKey;
+      }
       engine.statements.insertRevision.run({
         branch,
         id: operation.id,
@@ -8137,6 +8186,17 @@ const writeOperation = (
         commitSeq: seq,
         op: "patch",
         patches: operation.patches,
+        ...(mergeRebased
+          ? {
+            document: reconstructPatchedDocument(engine, {
+              id: operation.id,
+              scopeKey,
+              branch,
+              seq,
+              opIndex,
+            }),
+          }
+          : {}),
       };
     }
     case "delete": {
@@ -9127,13 +9187,63 @@ const selectCommitRevisions = (
       } satisfies AppliedRevision;
     }
     if (row.op === "patch") {
+      // Replays are off the hot path and cannot cheaply re-derive whether the
+      // original apply was merge-rebased, so fail toward authority: always
+      // carry the post-apply document. A retried merge-rebased commit whose
+      // replayed response lacked it would re-open the permanent divergence
+      // this field exists to close (C2.10 defect-1).
       return {
         ...base,
         patches: decodeStoredPatchList(row.data),
+        document: reconstructPatchedDocument(engine, {
+          id: row.id,
+          scopeKey: row.scope_key,
+          branch: row.branch,
+          seq: row.seq,
+          opIndex: row.op_index,
+        }),
       } satisfies AppliedRevision;
     }
     return base as AppliedRevision;
   });
+};
+
+/**
+ * The client adopts a merge-rebased authoritative document from the doc's
+ * LAST revision in the commit (later local patches replay on top of whatever
+ * the last revision left). A multi-op commit that merge-rebased an EARLIER
+ * patch of a doc and then patched the same doc again would otherwise leave
+ * the last revision document-free — materialize it there too so the adoption
+ * rule stays a single "last revision carries the truth" contract. One op per
+ * doc per commit is the norm, so this pass almost never does work.
+ */
+const ensureMergedPatchDocumentOnLastRevision = (
+  engine: Engine,
+  branch: BranchName,
+  revisions: readonly AppliedRevision[],
+): void => {
+  const revisionDocKey = (revision: AppliedRevision): string =>
+    revisionKey(branch, revision.id, revision.scopeKey ?? DEFAULT_SCOPE_KEY);
+  const mergedDocs = new Set<string>();
+  const lastByDoc = new Map<string, AppliedRevision>();
+  for (const revision of revisions) {
+    const key = revisionDocKey(revision);
+    if (revision.op === "patch" && revision.document !== undefined) {
+      mergedDocs.add(key);
+    }
+    lastByDoc.set(key, revision);
+  }
+  for (const key of mergedDocs) {
+    const last = lastByDoc.get(key)!;
+    if (last.op !== "patch" || last.document !== undefined) continue;
+    last.document = reconstructPatchedDocument(engine, {
+      id: last.id,
+      scopeKey: last.scopeKey ?? DEFAULT_SCOPE_KEY,
+      branch,
+      seq: last.seq,
+      opIndex: last.opIndex,
+    });
+  }
 };
 
 const materializeSnapshots = (

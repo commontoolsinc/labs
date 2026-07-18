@@ -2,7 +2,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
 import type { Runtime } from "../runtime.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
-import { normalizeCellScope } from "../scope.ts";
+import { isCellScope, normalizeCellScope } from "../scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -31,6 +31,7 @@ import { toActionRunTraceAddress } from "./diagnostics.ts";
 import {
   buildSchedulerActionObservation,
   type CompleteActionScopeSummary,
+  type CompleteActionScopeSummaryInput,
   type SchedulerActionObservation,
 } from "./persistent-observation.ts";
 import { filterIgnoredAddresses, txToReactivityLog } from "./reactivity.ts";
@@ -759,6 +760,19 @@ function attachSchedulerActionObservation(
   );
   const runtimeFingerprint = schedulerRuntimeFingerprint();
   const completeScopeSummary = annotated.completeSchedulerScopeSummary;
+  // This run's scheduler-ignored (framework-owned) reads — folded into EVERY
+  // trusted summary source so the engine's claimed-commit admission covers the
+  // link-resolution/argument reads the commit actually carries (W2.14's fold,
+  // applied uniformly; the certificate path had the C2.10 residual gap).
+  const ignoredReads = schedulerIgnoredReadAddresses(args.tx);
+  // The certificate's own space bounds the certificate-path fold; reads only,
+  // never writes, so a wrong fold can only fail closed at the firewall.
+  const certificateFoldReads = completeScopeSummary
+    ? sameSpaceLaneInstanceReads(
+      ignoredReads,
+      toMemorySpaceAddress(completeScopeSummary.piece).space,
+    )
+    : [];
   const baseObservation = buildSchedulerActionObservation({
     ...(observationIdentity.ownerSpace !== undefined
       ? { ownerSpace: observationIdentity.ownerSpace }
@@ -789,36 +803,10 @@ function attachSchedulerActionObservation(
     ),
     ...(completeScopeSummary && implementationFingerprint.startsWith("impl:")
       ? {
-        completeActionScopeSummary: {
-          version: 1 as const,
-          complete: true as const,
-          piece: toMemorySpaceAddress(completeScopeSummary.piece),
-          // CFC preparation reads the raw document-level label envelope beside
-          // statically declared value inputs and outputs. Normalized cell links can
-          // only express paths below ["value"], so add these structurally
-          // fixed sibling reads after converting the complete transformer
-          // certificate to raw memory addresses.
-          reads: sortAndCompactPaths([
-            ...completeScopeSummary.reads.map(toMemorySpaceAddress),
-            ...[
-              ...completeScopeSummary.reads,
-              ...completeScopeSummary.writes,
-              ...completeScopeSummary.materializerWriteEnvelopes,
-              ...completeScopeSummary.directOutputs,
-            ].map(toMemorySpaceAddress).map((address) => ({
-              ...address,
-              path: ["cfc"],
-            })),
-          ]),
-          writes: completeScopeSummary.writes.map(toMemorySpaceAddress),
-          materializerWriteEnvelopes: completeScopeSummary
-            .materializerWriteEnvelopes.map(
-              toMemorySpaceAddress,
-            ),
-          directOutputs: completeScopeSummary.directOutputs.map(
-            toMemorySpaceAddress,
-          ),
-        },
+        completeActionScopeSummary: transformerCertificateScopeSummaryInput(
+          completeScopeSummary,
+          certificateFoldReads,
+        ),
       }
       : {}),
     ...(actionOptions ? { actionOptions } : {}),
@@ -888,7 +876,7 @@ function attachSchedulerActionObservation(
       baseObservation,
       annotated.serverBuiltinComputation,
       annotated.serverBuiltinMaterializer,
-      schedulerIgnoredReadAddresses(args.tx),
+      ignoredReads,
     );
 
   try {
@@ -950,6 +938,64 @@ export function schedulerRuntimeFingerprint(): string {
 }
 
 /**
+ * The transformer-certificate summary source (certified lifts): convert the
+ * complete certificate to raw memory addresses, add the structurally fixed
+ * `["cfc"]` sibling reads (CFC preparation reads the raw document-level label
+ * envelope beside statically declared value inputs and outputs — normalized
+ * cell links can only express paths below `["value"]`), and fold
+ * `certificateFoldReads` — this run's scheduler-ignored (framework) reads,
+ * pre-filtered to the certificate's own space (`sameSpaceLaneInstanceReads`).
+ *
+ * The fold is the same one every runtime summary source applies (W2.14):
+ * entity-link resolution records a whole-`["value"]` confirmed read of each
+ * link document (at the acting lane's scoped instance under a scoped claim)
+ * that the certificate only names at the narrower link position, so without
+ * it every claimed run whose reads traverse entity links rejects
+ * `unobserved-read` at the engine's claimed-commit admission (the C2.10
+ * placement-harness defect — the certificate path was the residual gap).
+ * READS only — the certificate's write envelope is never widened, so a wrong
+ * fold can only fail closed at the firewall.
+ *
+ * Fingerprints are deliberately absent (`CompleteActionScopeSummaryInput`):
+ * `buildSchedulerActionObservation` stamps both from the observation's own
+ * fingerprints.
+ */
+export function transformerCertificateScopeSummaryInput(
+  certificate: NonNullable<
+    TelemetryAnnotations["completeSchedulerScopeSummary"]
+  >,
+  certificateFoldReads: readonly IMemorySpaceAddress[] = [],
+): CompleteActionScopeSummaryInput {
+  return {
+    version: 1 as const,
+    complete: true as const,
+    piece: toMemorySpaceAddress(certificate.piece),
+    reads: sortAndCompactPaths([
+      ...certificate.reads.map(toMemorySpaceAddress),
+      ...certificateFoldReads.map(cloneMemoryAddress),
+      ...[
+        ...certificate.reads,
+        ...certificate.writes,
+        ...certificate.materializerWriteEnvelopes,
+        ...certificate.directOutputs,
+      ].map(toMemorySpaceAddress).map((address) => ({
+        ...address,
+        path: ["cfc"],
+      })),
+      ...certificateFoldReads.map((address) => ({
+        ...cloneMemoryAddress(address),
+        path: ["cfc"],
+      })),
+    ]),
+    writes: certificate.writes.map(toMemorySpaceAddress),
+    materializerWriteEnvelopes: certificate.materializerWriteEnvelopes.map(
+      toMemorySpaceAddress,
+    ),
+    directOutputs: certificate.directOutputs.map(toMemorySpaceAddress),
+  };
+}
+
+/**
  * W2.14 (RC-3b): assemble a runtime write-empty `completeActionScopeSummary`
  * for a computation whose registered write surface is empty beyond its single
  * direct root output. This covers trusted `impl:` computations the transformer
@@ -975,11 +1021,12 @@ export function schedulerRuntimeFingerprint(): string {
  * `ignoredReads` is this run's scheduler-ignored (framework-owned) read set —
  * argument/piece/internal resolution reads deliberately excluded from the
  * reactive log. The engine's claimed-commit admission requires every commit
- * read to be covered by observation ∪ summary reads, and the certified path
- * covers these via its exhaustive static certificate; the runtime summary must
- * fold them in the same way or every claimed run rejects `unobserved-read`.
- * Only same-space, space-scoped addresses are folded — anything else stays
- * uncovered and fails closed.
+ * read to be covered by observation ∪ summary reads, so every trusted summary
+ * source folds them in (the certificate path folds them beside its exhaustive
+ * static certificate — C2.10 closed its residual gap) or every claimed run
+ * rejects `unobserved-read`. Only same-space, lane-instance-scoped addresses
+ * are folded (`sameSpaceLaneInstanceReads`) — anything else stays uncovered
+ * and fails closed.
  */
 export function runtimeWriteEmptyComputationScopeSummary(
   observation: SchedulerActionObservation,
@@ -1035,7 +1082,7 @@ export function runtimeWriteEmptyComputationScopeSummary(
       [
         ...observation.reads,
         ...observation.shallowReads,
-        ...sameSpaceSpaceScopedReads(ignoredReads, ownerSpace),
+        ...sameSpaceLaneInstanceReads(ignoredReads, ownerSpace),
       ],
       [directOutput],
     ),
@@ -1113,13 +1160,29 @@ function schedulerIgnoredReadAddresses(
   return reads;
 }
 
-function sameSpaceSpaceScopedReads(
+/**
+ * The same-space framework reads a claimed summary may fold: any lane-instance
+ * scope (the broad space instance, or the acting principal's user/session
+ * instance — the lane's §2 chain). A claimed run at scoped rank resolves
+ * entity links through the acting lane's SCOPED instances, and the commit then
+ * carries whole-`["value"]` confirmed reads of those scoped link documents
+ * (recorded at link-resolution time, scheduler-ignored); a fold that admits
+ * only the space-scoped subset leaves them uncovered, so every such run
+ * rejects `unobserved-read` at the engine's claimed-commit admission — the
+ * C2.10 placement-harness defect (selector/lift runs over entity-link reads).
+ * Folding scoped reads stays fail-closed: READS only, same-space only, and
+ * the engine still lane-checks every summary read against the claim's own
+ * chain (`assertLaneScopedAddress`), so a foreign lane's instance read keeps
+ * rejecting the commit. Malformed scope values (anything outside the
+ * CellScope alphabet) stay excluded and fail closed.
+ */
+function sameSpaceLaneInstanceReads(
   reads: readonly IMemorySpaceAddress[],
   space: string,
 ): IMemorySpaceAddress[] {
   return reads.filter((address) =>
     address.space === space &&
-    normalizeCellScope(address.scope) === "space"
+    isCellScope(normalizeCellScope(address.scope))
   ).map(cloneMemoryAddress);
 }
 
@@ -1188,7 +1251,7 @@ export function serverBuiltinComputationScopeSummary(
         ...descriptor.reads.map(toMemorySpaceAddress),
         ...observation.reads,
         ...observation.shallowReads,
-        ...sameSpaceSpaceScopedReads(ignoredReads, piece.space),
+        ...sameSpaceLaneInstanceReads(ignoredReads, piece.space),
       ],
       writes,
     ),
@@ -1269,7 +1332,7 @@ export function serverBuiltinMaterializerScopeSummary(
         ...descriptor.reads.map(toMemorySpaceAddress),
         ...observation.reads,
         ...observation.shallowReads,
-        ...sameSpaceSpaceScopedReads(ignoredReads, piece.space),
+        ...sameSpaceLaneInstanceReads(ignoredReads, piece.space),
       ],
       [...writes, ...materializerWriteEnvelopes],
     ),
@@ -1376,7 +1439,7 @@ export function runtimeMaterializerComputationScopeSummary(
       [
         ...observation.reads,
         ...observation.shallowReads,
-        ...sameSpaceSpaceScopedReads(ignoredReads, ownerSpace),
+        ...sameSpaceLaneInstanceReads(ignoredReads, ownerSpace),
       ],
       writeEnvelopes,
     ),

@@ -232,7 +232,10 @@ describe("per-builtin computation descriptors (W2.15a)", () => {
       valueAddress("of:minted-result"),
       valueAddress("of:extra"),
     ]);
-    const summary = serverBuiltinComputationScopeSummary(obs, descriptor("ifElse"));
+    const summary = serverBuiltinComputationScopeSummary(
+      obs,
+      descriptor("ifElse"),
+    );
     expect(summary).toBeDefined();
     expect(summary!.writes.some((entry) => entry.id === "of:extra")).toBe(
       false,
@@ -348,6 +351,54 @@ describe("per-builtin computation descriptors (W2.15a)", () => {
     expect(covers(valueAddress("of:output", { path: ["cfc"] }))).toBe(true);
     // Folding must not widen the write envelope.
     expect(summary!.writes.some((entry) => entry.id === frameworkRead.id))
+      .toBe(false);
+  });
+
+  it("folds scoped (session/user) whole-value link-resolution reads (C2.10)", () => {
+    // The C2.10 placement-harness shape: a session-lane claimed selector run
+    // reads an entity link — the reactive log carries only the narrow link
+    // position (["value","/","link@1"]) while link resolution records a
+    // scheduler-ignored whole-["value"] read of the SESSION instance of the
+    // link document, which the claimed commit then carries as a confirmed
+    // read. A space-only fold left it uncovered and the run churned
+    // `unobserved-read` → claim-release → re-candidate at the engine's
+    // claimed-commit admission.
+    const linkDoc = "of:selected-entity";
+    const obs = observation("ifElse", {
+      transactionLog: {
+        reads: [
+          valueAddress("of:condition"),
+          valueAddress(linkDoc, {
+            scope: "session",
+            path: ["value", "/", "link@1"],
+          }),
+        ],
+        shallowReads: [],
+        writes: [valueAddress("of:output"), valueAddress("of:minted-result")],
+      },
+    });
+    const wholeValueLinkRead = valueAddress(linkDoc, {
+      scope: "session",
+      path: ["value"],
+    });
+    const summary = serverBuiltinComputationScopeSummary(
+      obs,
+      descriptor("ifElse"),
+      [wholeValueLinkRead],
+    );
+    expect(summary).toBeDefined();
+    const covers = (target: IMemorySpaceAddress) =>
+      summary!.reads.some((entry) =>
+        entry.space === target.space && entry.id === target.id &&
+        (entry.scope ?? "space") === (target.scope ?? "space") &&
+        target.path.join(" ").startsWith(entry.path.join(" "))
+      );
+    expect(covers(wholeValueLinkRead)).toBe(true);
+    expect(
+      covers(valueAddress(linkDoc, { scope: "session", path: ["cfc"] })),
+    ).toBe(true);
+    // Reads only — no write widening from the fold.
+    expect(summary!.writes.some((entry) => entry.id === wholeValueLinkRead.id))
       .toBe(false);
   });
 });

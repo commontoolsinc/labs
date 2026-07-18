@@ -260,6 +260,39 @@ describe("per-builtin materializer descriptors (W2.16)", () => {
       .toBe(false);
   });
 
+  it("folds scoped (session/user) whole-value link-resolution reads (C2.10)", () => {
+    // Same C2.10 placement-harness shape as the selector fold: a scoped-lane
+    // claimed list run resolves an element entity link — the reactive log
+    // narrows to the link position while link resolution records a
+    // scheduler-ignored whole-["value"] read of the element doc's scoped
+    // instance, carried by the claimed commit as a confirmed read. The fold
+    // must admit any lane-instance scope, not just "space", or the run
+    // rejects `unobserved-read` at the engine's claimed-commit admission.
+    const elementDoc = "of:element-entity";
+    const wholeValueLinkRead = valueAddress(elementDoc, {
+      scope: "session",
+      path: ["value"],
+    });
+    const summary = serverBuiltinMaterializerScopeSummary(
+      observation("map"),
+      descriptor("map"),
+      [wholeValueLinkRead],
+    );
+    expect(summary).toBeDefined();
+    const covers = (target: IMemorySpaceAddress) =>
+      summary!.reads.some((entry) =>
+        entry.space === target.space && entry.id === target.id &&
+        (entry.scope ?? "space") === (target.scope ?? "space") &&
+        target.path.join(" ").startsWith(entry.path.join(" "))
+      );
+    expect(covers(wholeValueLinkRead)).toBe(true);
+    expect(
+      covers(valueAddress(elementDoc, { scope: "session", path: ["cfc"] })),
+    ).toBe(true);
+    expect(summary!.writes.some((entry) => entry.id === wholeValueLinkRead.id))
+      .toBe(false);
+  });
+
   it("bounds the container: a per-slot write inside the envelope is served, a foreign write is not", () => {
     const obs = observation("map");
     const summary = serverBuiltinMaterializerScopeSummary(

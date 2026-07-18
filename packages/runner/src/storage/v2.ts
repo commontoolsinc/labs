@@ -5007,6 +5007,43 @@ class SpaceReplica implements ISpaceReplica {
         { id: operation.id, scope: operation.scope },
       ]),
     );
+    // Merge-rebase adoption (C2.10 defect-1 root fix): when the engine
+    // applied one of this commit's PATCH ops onto a head another session
+    // authored, the local pending materialization below replays the patch
+    // over a base that never contained that head — a value the server does
+    // not hold. The engine marks exactly those revisions by carrying the
+    // authoritative post-apply `document` (the doc's LAST revision in the
+    // commit carries it), and the FA14 echo suppression means no later
+    // delivery will repair a wrong local promotion — the divergence would be
+    // permanent (the C2.10 lunch-poll second-voter staleness). Adopt the
+    // server's document as the confirmed value instead, and notify, since —
+    // unlike the local-replay promotion — adoption can CHANGE the visible
+    // value (the merged base becomes visible beneath this doc's remaining
+    // pending versions).
+    const authoritativeLastRevisionByKey = new Map<
+      string,
+      EntityDocument | undefined
+    >();
+    for (const revision of applied.revisions) {
+      authoritativeLastRevisionByKey.set(
+        docKey(revision.id as URI, revision.scope, lane),
+        revision.op === "patch" ? revision.document : undefined,
+      );
+    }
+    const adoptable = [...keys.entries()].filter(([key]) =>
+      authoritativeLastRevisionByKey.get(key) !== undefined
+    ).map(([, entry]) => entry);
+    const shouldNotifySubscribers = adoptable.length > 0 &&
+      this.hasNotificationSubscribers();
+    const shouldNotifySinks = adoptable.length > 0 &&
+      this.hasSinkSubscribers(adoptable);
+    const before = shouldNotifySubscribers || shouldNotifySinks
+      ? this.runWithExecutionLane(lane, () =>
+        Differential.checkout(
+          this,
+          adoptable.map(({ id, scope }) => snapshotState(this, id, scope)),
+        ))
+      : undefined;
     for (const { id, scope } of keys.values()) {
       const record = this.record(id, scope, lane);
       const pendingIndexes = record.pending.flatMap((entry, index) =>
@@ -5025,8 +5062,17 @@ class SpaceReplica implements ISpaceReplica {
       let promoted: ConfirmedVersion | undefined;
       let reusedSuffix: PendingMaterializedPrefix[] | undefined;
 
+      const authoritativeDocument = authoritativeLastRevisionByKey.get(
+        docKey(id, scope, lane),
+      );
       if (record.confirmed.seq < applied.seq) {
-        if (firstPendingIndex === 0) {
+        if (authoritativeDocument !== undefined) {
+          // The engine merge-rebased this doc's patch: the local replay below
+          // would promote a value the server does not hold. Adopt the
+          // accepted post-apply document (the same shape the subscription
+          // upsert path applies).
+          promoted = confirmedVersion(applied.seq, authoritativeDocument);
+        } else if (firstPendingIndex === 0) {
           const prefix = materializedVersionThroughPending(
             record,
             { space: this.#space, id, scope },
@@ -5071,6 +5117,29 @@ class SpaceReplica implements ISpaceReplica {
       }
 
       dropMaterializedSuffix(record, firstPendingIndex);
+    }
+
+    // Merge-rebase adoption is the one confirmation path whose visible value
+    // can differ from the local pending materialization it replaces — notify
+    // exactly like a server-side integrate delivery would have (the delivery
+    // the echo suppression withholds).
+    if (before !== undefined) {
+      const changes = this.runWithExecutionLane(
+        lane,
+        () => before.compare(this),
+      );
+      if ([...changes].length > 0) {
+        if (shouldNotifySubscribers) {
+          this.#subscription.next({
+            type: "integrate",
+            space: this.#space,
+            changes,
+          } as StorageNotification);
+        }
+        if (shouldNotifySinks) {
+          this.runWithExecutionLane(lane, () => this.notifySinks(changes));
+        }
+      }
     }
   }
 

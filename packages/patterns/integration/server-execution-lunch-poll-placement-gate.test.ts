@@ -65,42 +65,50 @@
  * server-execution-session-lane-latency-gate.test.ts.
  *
  * ---------------------------------------------------------------------------
- * STATUS (2026-07-18, C2.10 build): the guard-contract test is default-run
- * and green. The placement fixture is the ACCEPTANCE HARNESS and is
- * currently BLOCKED-RED on two real defects it found — it runs only under
- * `CF_RUN_C210_LUNCH_POLL_PLACEMENT=1` until they are fixed, and it is the
- * ready-made red-first fixture for both fixes:
+ * STATUS (2026-07-18, C2.10 fix wave): DEFAULT-RUN and green. This harness
+ * was built BLOCKED-RED (env-gated `CF_RUN_C210_LUNCH_POLL_PLACEMENT=1`) as
+ * the red-first fixture for two real defects it found; both are fixed and
+ * the gate now runs like the other three gate files (FW7 executor teardown
+ * barrier discipline via `withExecutorTeardownBarrier`):
  *
- *  1. **Second-voter derived-doc staleness (every strict run).** After the
- *     two concurrent green votes merge server-side, the SECOND voter's
- *     replica keeps the pre-merge value of the space-lane-claimed raw
- *     `voteCount` snapshot forever (`bobVoteCount: 1` while alice reads 2
- *     and BOTH sessions' session-served `todayVoteCount` reach 2). The
- *     browser placement guard cannot see this — it asserts today-chain
- *     text only. Reproduced identically through the production client
- *     stack (this harness) and a raw-Runtime loopback build.
- *  2. **Session-rank read-fold churn (intermittent).** Some runs wedge a
- *     few claimed chains (`ifElse`/`when` selector runs and authored
- *     lifts over entity-link reads) in an unobserved-read /
- *     dynamic-write-outside-static-surface firewall-reject → claim-release
- *     → re-candidate loop. Mechanism, captured at the engine fence: the
- *     claimed commit carries a whole-`["value"]` confirmed read of a link
- *     document (recorded at link-resolution time) while the observation +
- *     certificate fold only the narrower `["value","/","link@1"]`
- *     link-field read for that document, so path-prefix coverage fails
- *     (engine.ts claimed-commit admission, `unobserved-read`). Docs where
- *     BOTH read shapes are folded admit fine — the gap is which reads get
- *     the whole-value fold. W2.14's fold fix covered the runtime
- *     write-empty summary path; the certificate/descriptor paths have this
- *     residual gap.
+ *  1. **Second-voter merge staleness (was: every strict run).** The engine
+ *     merge-rebases a mergeable patch (the concurrent voter's `addUnique`)
+ *     onto a head the origin replica never saw; the origin's confirm-time
+ *     local replay then promoted a pre-merge value at the accepted seq —
+ *     permanently, because FA14 echo suppression correctly withholds a
+ *     session's own committed seq and the other writer's older upsert is
+ *     refused by the monotonic-confirmed guard. Fixed at the root: the
+ *     engine marks merge-rebased patch revisions with the authoritative
+ *     post-apply document (engine.ts `writeOperation` patch case) and the
+ *     client's `confirmPending` adopts it instead of the local replay
+ *     (storage/v2.ts). Deterministic mechanism fixtures:
+ *     memory/test/v2-engine-revision-test.ts (revision marking) and
+ *     runner/test/array-push-mergeable.test.ts ("the second concurrent
+ *     appender's own replica adopts the merged list").
+ *  2. **Session-rank read-fold churn (was: intermittent).** Claimed
+ *     `ifElse`/`when`/lift runs over entity-link reads rejected
+ *     `unobserved-read` at the engine's claimed-commit admission: the
+ *     commit carries a whole-`["value"]` confirmed read of the link doc
+ *     (link-resolution framework read, at the acting lane's SCOPED
+ *     instance) while the observation + summary folded only the narrow
+ *     `["value","/","link@1"]` link position. W2.14's fold covered the
+ *     write-empty path, space-scoped only. Fixed by applying the fold
+ *     uniformly: every summary source — transformer certificate, selector
+ *     descriptor, materializer descriptor, runtime materializer,
+ *     write-empty — folds the run's scheduler-ignored reads at any
+ *     lane-instance scope (`sameSpaceLaneInstanceReads`,
+ *     `transformerCertificateScopeSummaryInput` in scheduler/run.ts; reads
+ *     only, writes never widened). Unit-pinned per source in
+ *     scheduler-write-empty-summary / scheduler-builtin-computation-
+ *     descriptor / scheduler-materializer-descriptor tests.
  *
- * A tolerant diagnostic run (both blockers excluded) proves the §1
- * reversal machinery itself works: session lanes claimed 14+12 times,
- * 37 session-rank candidates, accepted-commit index 165 matches / 360
- * lookups (vs the §1 evidence's 434 of 438 matching NOTHING), 6
- * server-lane-authored session-scoped rows, 11 committed + 39 no-op
- * settlements, ZERO claim-context-mismatch — R7's hard-zero held in every
- * run of every C2.10 harness.
+ * With both fixes the strict gate measures the §1 reversal in vivo (green
+ * run, 2026-07-18): session lanes claimed 11+11, 33 session-rank
+ * candidates, accepted-commit index 138 matches / 325 lookups (vs the §1
+ * evidence's 434 of 438 matching NOTHING), server-lane-authored
+ * session-scoped rows present, committed settlements nonzero, ZERO
+ * claim-context-mismatch, ZERO firewall rejects — R7's hard-zero held in
+ * every run of every C2.10 harness.
  */
 
 import { assert, assertEquals } from "@std/assert";
@@ -166,10 +174,6 @@ const WORKER_REALM_ENV = {
 Deno.test({
   name:
     "C2.10 lunch-poll placement gate: the vote workload places at session rank with zero claim-context-mismatch and nonzero served recomputes",
-  // BLOCKED-RED acceptance harness (see the STATUS block in the header):
-  // red-first fixture for the two named defects; flip to default-run when
-  // they are fixed.
-  ignore: Deno.env.get("CF_RUN_C210_LUNCH_POLL_PLACEMENT") !== "1",
   async fn() {
     await withExecutorTeardownBarrier(async () => {
       setServerPrimaryExecutionClaimRankConfig("session");
@@ -388,9 +392,43 @@ async function runLunchPollPlacementGate(storeDir: string): Promise<void> {
       }),
     );
     await harness.settle(2);
-    // Let in-flight claimed settlements land before reading the counters:
-    // the replicas converged above, so what remains is the server's own
-    // settlement tail. The pool's idle() is the deterministic drain.
+    await pool.idle();
+    // The server's own settlement tail: with both C2.10 defects fixed the
+    // replicas converge almost immediately — long before the server lanes'
+    // wake → claim → run → settle pipeline drains — so a one-shot idle() no
+    // longer bounds the (c) evidence. The counters are monotone, so wait for
+    // the served-recompute evidence with the same bounded discipline as every
+    // other harness wait, then drain once more before the point-in-time
+    // assertions.
+    const sessionLaneSetForTail = new Set(sessionLaneClaims());
+    const clientSessionIdsForTail = new Set(
+      [...sessionLaneSetForTail].map((lane) =>
+        lane.slice(lane.lastIndexOf(":") + 1)
+      ),
+    );
+    await waitForCondition(
+      "server-lane settlement tail (committed settlements and a server-authored session row)",
+      () =>
+        server.executionStats.settlementsCommitted > 0 &&
+        acceptedSessionScoped.some((entry) =>
+          !clientSessionIdsForTail.has(entry.originSessionId)
+        ),
+      () => ({
+        settlements: {
+          committed: server.executionStats.settlementsCommitted,
+          noOp: server.executionStats.settlementsNoOp,
+          unserved: server.executionStats.settlementsUnserved,
+          failed: server.executionStats.settlementsFailed,
+        },
+        acceptedSessionScoped: acceptedSessionScoped.length,
+        writers: [
+          ...new Set(
+            acceptedSessionScoped.map((entry) => entry.originSessionId),
+          ),
+        ],
+        pool: pool!.metrics(),
+      }),
+    );
     await pool.idle();
 
     // ------- (b) Session placement at the named counters. -------
