@@ -47,41 +47,6 @@ export const IS_DEEP_FROZEN: unique symbol = Symbol.for(
  */
 export abstract class BaseFabricInstance extends FabricInstance {
   //
-  // Static members
-  //
-
-  /**
-   * Type guard for `BaseFabricInstance`, which also enforces the invariant that
-   * every `FabricInstance` is in fact a `BaseFabricInstance`. Concrete
-   * fabric-instance classes are required to extend `BaseFabricInstance` (never
-   * `FabricInstance` directly), so a value that is a `FabricInstance` but not a
-   * `BaseFabricInstance` indicates a broken subclass. Use this in preference to
-   * a bare `instanceof BaseFabricInstance` where dispatch relies on the members
-   * declared here (e.g. the generic freeze machinery), so the invariant is
-   * actively enforced rather than silently skipped.
-   *
-   * This uses "death before confusion" on the mismatch: rather than quietly
-   * answer `false` for a direct `FabricInstance` subclass (which would let it
-   * bypass its freeze protocol and be cached as deep-frozen while only
-   * shallow-frozen), it throws, surfacing the broken subclass at the point of
-   * use. The throw is intentional despite the predicate-style name.
-   *
-   * @throws If `value` is a `FabricInstance` that is not a `BaseFabricInstance`
-   *   -- the "shouldn't happen" invariant violation.
-   */
-  static isInstance(value: unknown): value is BaseFabricInstance {
-    if (value instanceof BaseFabricInstance) {
-      return true;
-    } else if (value instanceof FabricInstance) {
-      throw new Error(
-        "Shouldn't happen: `FabricInstance` that is not a `BaseFabricInstance`.",
-      );
-    }
-
-    return false;
-  }
-
-  //
   // Instance members
   //
 
@@ -136,5 +101,40 @@ export abstract class BaseFabricInstance extends FabricInstance {
     // Cast needed: `Object.freeze()` returns `Readonly<T>`, which TS considers
     // incompatible with abstract class types due to protected members.
     return frozen ? Object.freeze(copy) as FabricInstance : copy;
+  }
+
+  //
+  // Static members
+  //
+
+  /**
+   * Type guard for `BaseFabricInstance`, which also enforces the invariant that
+   * every `FabricInstance` is in fact a `BaseFabricInstance`. Concrete
+   * fabric-instance classes are required to extend `BaseFabricInstance` (never
+   * `FabricInstance` directly), so a value that is a `FabricInstance` but not a
+   * `BaseFabricInstance` indicates a broken subclass. Use this in preference to
+   * a bare `instanceof BaseFabricInstance` where dispatch relies on the members
+   * declared here (e.g. the generic freeze machinery), so the invariant is
+   * actively enforced rather than silently skipped.
+   *
+   * This uses "death before confusion" on the mismatch: rather than quietly
+   * answer `false` for a direct `FabricInstance` subclass (which would let it
+   * bypass its freeze protocol and be cached as deep-frozen while only
+   * shallow-frozen), it throws, surfacing the broken subclass at the point of
+   * use. The throw is intentional despite the predicate-style name.
+   *
+   * @throws If `value` is a `FabricInstance` that is not a `BaseFabricInstance`
+   *   -- the "shouldn't happen" invariant violation.
+   */
+  static isInstance(value: unknown): value is BaseFabricInstance {
+    if (value instanceof BaseFabricInstance) {
+      return true;
+    } else if (value instanceof FabricInstance) {
+      throw new Error(
+        "Shouldn't happen: `FabricInstance` that is not a `BaseFabricInstance`.",
+      );
+    }
+
+    return false;
   }
 }

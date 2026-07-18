@@ -28,6 +28,23 @@ export const EXAMPLE_METHOD: unique symbol = Symbol.for(
  */
 export abstract class BaseFabricPrimitive extends FabricPrimitive {
   //
+  // Instance members
+  //
+
+  /**
+   * Placeholder seed member (a throwing stub). Its only purpose today is to
+   * give `BaseFabricPrimitive` a non-empty instance type so `isInstance()`
+   * narrows normally; it has no callers and no real behavior yet, and is the
+   * first of the intended symbol-keyed primitive-plumbing members. Replace it
+   * with a real member once one is identified.
+   *
+   * @throws Always -- it is not implemented.
+   */
+  [EXAMPLE_METHOD](): never {
+    throw new Error("Not implemented: `[EXAMPLE_METHOD]` is a placeholder.");
+  }
+
+  //
   // Static members
   //
 
@@ -57,22 +74,5 @@ export abstract class BaseFabricPrimitive extends FabricPrimitive {
     }
 
     return false;
-  }
-
-  //
-  // Instance members
-  //
-
-  /**
-   * Placeholder seed member (a throwing stub). Its only purpose today is to
-   * give `BaseFabricPrimitive` a non-empty instance type so `isInstance()`
-   * narrows normally; it has no callers and no real behavior yet, and is the
-   * first of the intended symbol-keyed primitive-plumbing members. Replace it
-   * with a real member once one is identified.
-   *
-   * @throws Always -- it is not implemented.
-   */
-  [EXAMPLE_METHOD](): never {
-    throw new Error("Not implemented: `[EXAMPLE_METHOD]` is a placeholder.");
   }
 }
