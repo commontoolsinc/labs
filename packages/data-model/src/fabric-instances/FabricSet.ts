@@ -1,4 +1,5 @@
-import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
+import type { FabricValue } from "@/interface.ts";
+import { DEEP_FREEZE, IS_DEEP_FROZEN } from "./BaseFabricInstance.ts";
 import {
   CODEC,
   type FabricCodec,

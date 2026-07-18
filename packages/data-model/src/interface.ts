@@ -29,38 +29,6 @@ export abstract class FabricSpecialObject {}
 //
 
 /**
- * Well-known symbol for deeply freezing a fabric instance in place. The method
- * freezes the instance's own internal slot(s) and recurses into any nested
- * `FabricValue`s via the provided `subFreeze` callback. This is an abstract
- * member of `FabricInstance`, so the generic `deepFreeze()` operates on any
- * `FabricInstance` by gating on `instanceof` against the abstract base and
- * invoking this member -- it does not enumerate concrete subclasses.
- * Distinct from `deepClone()`: `[DEEP_FREEZE]` freezes the existing instance
- * in place; `deepClone()` constructs a new instance.
- */
-export const DEEP_FREEZE: unique symbol = Symbol.for("common.deepFreeze");
-
-/**
- * Well-known symbol for checking whether a fabric instance is already deeply
- * frozen, without mutating it. The sibling-of-`[DEEP_FREEZE]` *check*: it
- * verifies the instance's own internal slot(s) are in canonical deep-frozen
- * form and recurses into any nested `FabricValue`s via the provided
- * `subIsDeepFrozen` callback, returning the boolean conjunction. This is an
- * abstract member of `FabricInstance`, so the generic deep-frozen type guard
- * operates on any `FabricInstance` by gating on `instanceof` against the
- * abstract base and invoking this member -- it does not enumerate concrete
- * subclasses.
- *
- * Unlike `[DEEP_FREEZE]`, this method is side-effect-free and never throws:
- * a not-in-canonical-deep-frozen-form instance answers `false`, it does not
- * crash. (`[DEEP_FREEZE]` is a mutator and uses "death before confusion" on
- * a malformed internal slot; a status check must not.)
- */
-export const IS_DEEP_FROZEN: unique symbol = Symbol.for(
-  "common.isDeepFrozen",
-);
-
-/**
  * Abstract base class for values that participate in the fabric protocol.
  * See Section 2.3 of the formal spec.
  *
@@ -70,42 +38,13 @@ export const IS_DEEP_FROZEN: unique symbol = Symbol.for(
  * than this class directly; `BaseFabricInstance` is where shared
  * template-method scaffolding (such as `shallowClone()`) lives.
  *
- * Subclasses must implement `[DEEP_FREEZE]()`, `[IS_DEEP_FROZEN]()`,
- * `deepClone()`, and `shallowClone()` (the latter is normally inherited from
- * `BaseFabricInstance`).
+ * Subclasses must implement `deepClone()` and `shallowClone()` (the latter is
+ * normally inherited from `BaseFabricInstance`). The freeze-protocol members
+ * `[DEEP_FREEZE]()` and `[IS_DEEP_FROZEN]()` are declared on
+ * `BaseFabricInstance`, not here: they are implementation plumbing and are kept
+ * off this pure-protocol class.
  */
 export abstract class FabricInstance extends FabricSpecialObject {
-  /**
-   * Deeply freezes this instance in place: freezes this instance's own
-   * internal slot(s) and recurses into each nested `FabricValue` by calling
-   * the provided `subFreeze` callback on it. Implementations must NOT import
-   * or call `deepFreeze()` directly -- recursion is handed through the
-   * callback so that the freeze utility's caching / cycle-detection
-   * bookkeeping is preserved and no import cycle is introduced.
-   *
-   * Returns the (now deeply-frozen) value. Freeze-in-place implementations
-   * return `this`.
-   */
-  abstract [DEEP_FREEZE](
-    subFreeze: (value: FabricValue) => FabricValue,
-  ): FabricValue;
-
-  /**
-   * Indicates whether this instance is already deeply frozen, without
-   * mutating it. Checks this instance's own internal slot(s) are in
-   * canonical deep-frozen form and recurses into each nested `FabricValue`
-   * via the provided `subIsDeepFrozen` callback, returning the boolean
-   * conjunction. Implementations must NOT import or call the deep-frozen
-   * type guard directly -- recursion is handed through the callback,
-   * mirroring `[DEEP_FREEZE]`'s callback shape and avoiding an import cycle.
-   *
-   * Side-effect-free and must not throw: an instance that is not in
-   * canonical deep-frozen form returns `false`.
-   */
-  abstract [IS_DEEP_FROZEN](
-    subIsDeepFrozen: (value: FabricValue) => boolean,
-  ): boolean;
-
   /**
    * Returns a new deep clone of this instance with equivalent data but no
    * shared structure for any unfrozen data in the original. When `frozen ===
