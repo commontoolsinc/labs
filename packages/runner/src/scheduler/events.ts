@@ -276,6 +276,13 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
         // rate-limited.
         lastSameOrigin.event = args.event;
         lastSameOrigin.action = (tx) => handler(tx, args.event);
+        // Last-wins takes the newest event's time too, so the dispatched
+        // handler's clock reflects the event it actually runs. For a same-origin
+        // handler flood every collapsed event already shares one frozen instant,
+        // so this is a no-op there; it matters for origin-less events (bare
+        // `queueEvent` / internal sends, which share the `undefined` origin but
+        // carry distinct fresh instants).
+        lastSameOrigin.time = args.time;
         lastSameOrigin.onCommit = chainOnCommit(
           lastSameOrigin.onCommit,
           args.onCommit,

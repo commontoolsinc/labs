@@ -1310,14 +1310,20 @@ export class Scheduler {
       time?: number;
     } = {},
   ): void {
-    // Bind the event's wall-clock time at its causal origin: carry the emitting
-    // handler's frozen instant forward when this send happens inside a handler
-    // (so a whole cascade from one gesture shares one time), else read the clock
-    // once here for a renderer/root event. The dispatching handler reads this,
-    // coarsened, instead of the live clock. A pre-supplied time (a shaper
-    // release re-queueing a held event, a piece-load re-queue) is kept as-is so
-    // the instant is captured once at the original send, not at re-delivery.
-    const time = opts.time ?? getTopFrame()?.eventTime ?? Date.now();
+    // Bind the event's wall-clock time at its causal origin. A pre-supplied time
+    // (a shaper release re-queueing a held event, a piece-load re-queue) is kept
+    // as-is so the instant is captured once at the original send. A send from
+    // INSIDE a handler carries that handler's frozen instant forward, so a whole
+    // cascade from one gesture shares one time — the handler frame always has an
+    // instant (createPatternFrame sets it), so this branch never falls through
+    // to the clock. Only a root/renderer send, outside any handler frame, reads
+    // the wall clock here to birth a fresh instant. This raw value is never
+    // exposed to a pattern un-coarsened: the dispatching handler reads it only
+    // through sandboxDateNow, which floors it to one second.
+    const frame = getTopFrame();
+    const time = opts.time ??
+      (frame?.inHandler === true ? frame.eventTime : undefined) ??
+      Date.now();
     // Coarsen the delivery cadence of user-input events (W3). The piece-loading
     // re-queue (doNotLoadPieceIfNotRunning) is an internal retry, not fresh
     // input, so it is never reshaped.

@@ -541,4 +541,45 @@ describe("delivery shaping (scheduler integration)", () => {
       await runtime.dispose();
     }
   });
+
+  // The collapse is last-wins for the event TIME as well as the payload: a
+  // dispatched handler must read the instant of the event it actually runs, not
+  // the first event that happened to occupy the collapsed slot. These events are
+  // origin-less (no originTx) with distinct instants — the case where the times
+  // genuinely differ (a same-origin flood shares one frozen instant).
+  it("collapse carries the newest event's time, not the first collapsed one", async () => {
+    const runtime = makeRuntime();
+    try {
+      const tx = runtime.edit();
+      const c = runtime.getCell(space, "w4/collapse-time", undefined, tx);
+      c.set({ events: { $stream: true } });
+      const linkRef = c.asSchema(STREAM_SCHEMA).key("events")
+        .getAsNormalizedFullLink();
+      await tx.commit();
+      const times: (number | undefined)[] = [];
+      const handler: EventHandler = (t: IExtendedStorageTransaction) => {
+        times.push(t.dispatchedEventTime);
+      };
+      runtime.scheduler.addEventHandler(handler, linkRef);
+
+      const BASE = 1_700_000_000_000;
+      const total = MAX_EVENT_BACKLOG_PER_STREAM + 3;
+      for (let i = 1; i <= total; i++) {
+        runtime.scheduler.queueEvent(
+          linkRef,
+          { n: i },
+          true,
+          undefined,
+          false,
+          { time: BASE + i * 1000 },
+        );
+      }
+      await runtime.idle();
+      expect(times.length).toBe(MAX_EVENT_BACKLOG_PER_STREAM);
+      // The surviving collapsed delivery reports the NEWEST event's instant.
+      expect(times[times.length - 1]).toBe(BASE + total * 1000);
+    } finally {
+      await runtime.dispose();
+    }
+  });
 });

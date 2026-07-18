@@ -142,8 +142,8 @@ Landing order, smallest and safest first. Each is its own commit/PR.
     a round trip against, so the correlation this grid settlement was built to
     defeat no longer exists. The settlement arithmetic below is retained as
     redundant defense-in-depth and is expected to be removed together with
-    imperative handler `fetch` (see the follow-on to retire it); it is documented
-    here as-is until then.
+    imperative handler `fetch` (Outstanding work item 8); it is documented here
+    as-is until then.
   - **Issue-relative grid settlement.** The whole response body is buffered,
     then the promise settles (fulfills or rejects) at a wall-clock grid boundary
     chosen from the request's *issue* instant, not its *arrival* instant:
@@ -717,6 +717,31 @@ real users, has now landed. The items are ordered by what unblocks what.
    choke point, which is what made this fold small. Contract tests preserved
    verbatim in `runner/test/delivery-shaping.test.ts` (event path + unified
    engine) and `runner/test/cell-notification-shaping.test.ts` (cell path).
+
+7. **Freeze the handler clock to the triggering event's time. DONE.** The
+   handler clock now reads the event's frozen instant (`Frame.eventTime`),
+   captured once at the event's causal origin and carried forward to emitted
+   events, coarsened to one second at the read (`sandboxDateNow`), rather than
+   the live wall clock. Time no longer advances during a handler's own work — a
+   read before and after an `await` returns the same value — so a handler has no
+   intra-run clock and no fine wall-clock edge to correlate a round trip against.
+   See the W1 "handler clock is the event's time, frozen" bullet for the
+   mechanism and the tests.
+
+8. **Retire imperative handler `fetch()`.** With the handler clock frozen (item
+   7), the gated fetch's issue-relative grid settlement (channel 7 / W2) no
+   longer defends anything: a handler reads the same instant before issuing a
+   fetch and in the continuation after it settles, so there is no advancing clock
+   edge to correlate a round trip against, and the settlement arithmetic is
+   redundant. The intended end state is to remove imperative `fetch()` from the
+   handler surface entirely — it throws in a handler as it already does in a
+   lift/pattern-body — and route reactive data through the `fetchData` builtin,
+   which is observed in reactive context where no clock exists. The roughly two
+   dozen imperative call sites are the OAuth API clients (Google/Gmail/Airtable),
+   which do sequenced requests and mutations from handlers; retiring the surface
+   requires migrating or dropping those, so it is sequenced after this branch.
+   The gated-fetch settlement stays in place as redundant defense-in-depth until
+   then.
 
 ## Relationship to the CFC specification
 
