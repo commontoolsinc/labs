@@ -86,6 +86,23 @@ through the same transaction mechanism, so they participate in the same
 conflict resolution. No special handling needed, but users should be aware
 that concurrent edits may lose data.
 
+### Timestamps (`ctime`, `atime`)
+
+Should `ctime` and `atime` be tracked separately from `mtime`?
+
+They are reported equal to `mtime`. In this filesystem the only metadata that
+changes independently of content is the CFC annotation — mode is derived at
+stat time, and ownership and link counts are fixed — so a separately-tracked
+`ctime` would expose the timing of a node's label and generation changes to
+anyone who can `stat` it. The CFC spec treats that as an information channel:
+metadata field labels default to the content label, and §18.2.3.5 permits
+refining `mtime`/`ctime` "with a specific update event" but forbids labeling a
+field below what its metadata reveals. Reporting `ctime = mtime` exposes no
+channel beyond content-change timing, so the content-label default is exactly
+right. Tracking `ctime` separately would need a threat-model analysis and a
+label refinement for a benefit few tools use (`find -cnewer`, `ls -lc`), so it
+stays collapsed onto `mtime` until a concrete consumer needs it.
+
 ## Implementation
 
 ### macOS vs Linux

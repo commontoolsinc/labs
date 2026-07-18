@@ -17,7 +17,7 @@ import {
   deriveCfcProjectionGeneration,
   joinLabels,
 } from "./annotations.ts";
-import { FsTree } from "./tree.ts";
+import { FsTree, type TransplantChanges } from "./tree.ts";
 import {
   buildCallableScript,
   type CallableKind,
@@ -304,7 +304,6 @@ export class CellBridge {
   /** In-flight hydration promises keyed by `${pieceIno}-${propName}`. */
   private pendingHydrations = new Map<string, Promise<boolean>>();
   private pendingPropRebuildQueues = new Map<string, Promise<void>>();
-  private retainedSubtrees = new Map<bigint, number>();
   /** Monotonic invalidation epoch per hydration key. */
   private hydrationEpochs = new Map<string, number>();
   /**
@@ -828,20 +827,6 @@ export class CellBridge {
     this.hydratedPieceProps.get(pieceIno)?.delete(propName);
   }
 
-  private cleanupRetainedSubtrees(now = Date.now()): void {
-    for (const [ino, expiresAt] of this.retainedSubtrees) {
-      if (expiresAt > now) continue;
-      this.retainedSubtrees.delete(ino);
-      this.tree.clear(ino);
-    }
-  }
-
-  private retainDetachedSubtree(ino: bigint, ttlMs = 1000): void {
-    if (!this.tree.getNode(ino)) return;
-    this.tree.detach(ino);
-    this.retainedSubtrees.set(ino, Date.now() + ttlMs);
-  }
-
   private getPieceInfo(
     pieceIno: bigint,
   ): (PieceRootInfo & { state?: SpaceState }) | null {
@@ -867,7 +852,6 @@ export class CellBridge {
   }
 
   async prepareLookup(parentIno: bigint, name: string): Promise<boolean> {
-    this.cleanupRetainedSubtrees();
     if (this.isEntitiesDir(parentIno)) {
       return await this.resolveEntity(parentIno, name);
     }
@@ -898,7 +882,6 @@ export class CellBridge {
   }
 
   async prepareDirectory(ino: bigint): Promise<boolean> {
-    this.cleanupRetainedSubtrees();
     const pieceInfo = this.getPieceInfo(ino);
     if (pieceInfo) {
       await this.hydratePieceProp(ino, "input");
@@ -1234,6 +1217,121 @@ export class CellBridge {
     this.updateStatus();
   }
 
+  /**
+   * Swap a freshly built staging node into its live position.
+   *
+   * When the live node and the staging node share a kind, their subtrees are
+   * reconciled in place so the live inode survives (see
+   * {@link FsTree.transplantSubtree}); the inodes whose content changed are
+   * appended to `changedInodes` so the caller can drop their kernel data
+   * cache. When the kinds differ, or when there is no live node, the staging
+   * node takes the live name with its freshly allocated inode. When the
+   * replacement produced no staging node, the live node is removed.
+   *
+   * This runs synchronously, so no filesystem request observes a half-swapped
+   * tree.
+   */
+  private swapPending(
+    parentIno: bigint,
+    liveName: string,
+    pendingName: string,
+    oldIno: bigint | undefined,
+    changes: TransplantChanges,
+    annotator?: CfcProjectionAnnotator,
+  ): void {
+    const pendingIno = this.tree.lookup(parentIno, pendingName);
+    if (pendingIno === undefined) {
+      if (oldIno !== undefined) {
+        this.tree.clear(oldIno);
+        this.recordEntryChange(changes, parentIno, liveName);
+      }
+      return;
+    }
+    const pendingNode = this.tree.getNode(pendingIno);
+    const oldNode = oldIno !== undefined
+      ? this.tree.getNode(oldIno)
+      : undefined;
+    if (oldNode && pendingNode && oldNode.kind === pendingNode.kind) {
+      // Same path, same kind: the live inode survives, so its entry under the
+      // parent is unchanged and is left cached.
+      this.mergeTransplantChanges(
+        changes,
+        this.tree.transplantSubtree(oldIno!, pendingIno),
+      );
+      annotator?.annotateEntry(parentIno, liveName, oldIno!);
+    } else {
+      if (oldIno !== undefined) {
+        this.tree.clear(oldIno);
+      }
+      this.tree.rename(parentIno, pendingName, parentIno, liveName);
+      const movedIno = this.tree.lookup(parentIno, liveName);
+      if (movedIno !== undefined) {
+        annotator?.annotateEntry(parentIno, liveName, movedIno);
+      }
+      this.recordEntryChange(changes, parentIno, liveName);
+    }
+  }
+
+  private recordEntryChange(
+    changes: TransplantChanges,
+    parentIno: bigint,
+    name: string,
+  ): void {
+    let names = changes.entryChanges.get(parentIno);
+    if (!names) {
+      names = new Set();
+      changes.entryChanges.set(parentIno, names);
+    }
+    names.add(name);
+  }
+
+  private mergeTransplantChanges(
+    into: TransplantChanges,
+    from: TransplantChanges,
+  ): void {
+    for (const ino of from.changedInodes) {
+      into.changedInodes.add(ino);
+    }
+    for (const [parentIno, names] of from.entryChanges) {
+      for (const name of names) {
+        this.recordEntryChange(into, parentIno, name);
+      }
+    }
+  }
+
+  /**
+   * Drop exactly the kernel caches a rebuild made stale: the changed inodes'
+   * data, and the changed directory entries. Entries and inodes the rebuild
+   * left untouched stay cached, so a client that walked into the piece does
+   * not have its cached dentries invalidated by an unrelated rebuild.
+   */
+  private emitInvalidations(changes: TransplantChanges): void {
+    if (this.onInvalidateInode) {
+      for (const ino of changes.changedInodes) {
+        this.onInvalidateInode(ino);
+      }
+    }
+    if (this.onInvalidate) {
+      for (const [parentIno, names] of changes.entryChanges) {
+        this.onInvalidate(parentIno, [...names]);
+      }
+    }
+  }
+
+  /**
+   * Advance the hydration epoch for a prop so an in-flight hydration that read
+   * a now-superseded value re-reads and rebuilds. Used when a cell change
+   * arrives: the mounted tree is rebuilt in place rather than torn down, so
+   * this is all the reactive path needs to stay consistent.
+   */
+  private bumpHydrationEpoch(
+    rootIno: bigint,
+    propName: "input" | "result",
+  ): void {
+    const key = `${rootIno}-${propName}`;
+    this.hydrationEpochs.set(key, (this.hydrationEpochs.get(key) ?? 0) + 1);
+  }
+
   private async rebuildPieceProp(args: {
     cell: Cell<unknown>;
     newValue: unknown;
@@ -1244,7 +1342,6 @@ export class CellBridge {
     resolveLink: ResolveLink;
     spaceName: string;
   }): Promise<void> {
-    this.cleanupRetainedSubtrees();
     const startedAt = Date.now();
     if (this.tree.getNode(args.pieceIno)?.kind !== "dir") {
       return;
@@ -1288,6 +1385,14 @@ export class CellBridge {
     let callables: Array<
       { key: string; callableKind: CallableKind; schema?: JSONSchema }
     > = [];
+    // The kernel caches that this rebuild made stale: inodes whose content
+    // changed and, per directory, the child names whose entry changed. Only
+    // these are invalidated, so a client keeps every cache entry the rebuild
+    // left untouched.
+    const changes: TransplantChanges = {
+      changedInodes: new Set(),
+      entryChanges: new Map(),
+    };
     if (treeValue !== undefined && treeValue !== null) {
       const {
         callables: discoveredCallables,
@@ -1300,15 +1405,36 @@ export class CellBridge {
         const fsValue = this.readFsValue(cell, treeValue);
         if (fsValue !== null) {
           this.markPiecePropCleared(pieceIno, propName);
+
+          // The projection entries currently at the piece root; a rebuild
+          // adopts the ones that survive with the same kind and removes the
+          // rest.
+          const oldFsNames = new Set<string>(
+            this.fsProjectionEntries.get(pieceIno) ?? [],
+          );
+          oldFsNames.add("index.md");
+          oldFsNames.add("index.json");
+
+          // Switching from a normal result/ tree to an [FS] projection replaces
+          // the result directory and its .json sibling.
           if (existingIno !== undefined) {
             this.tree.clear(existingIno);
+            this.recordEntryChange(changes, pieceIno, propName);
           }
           if (jsonIno !== undefined) {
             this.tree.clear(jsonIno);
+            this.recordEntryChange(changes, pieceIno, `${propName}.json`);
           }
-          this.clearFsProjectionEntries(pieceIno);
-          const indexName = this.buildFsProjectionTree(
-            pieceIno,
+
+          // Build the projection under a staging container, then reconcile it
+          // onto the piece directory so a surviving entry keeps its inode.
+          const staleStage = this.tree.lookup(pieceIno, ".fs.pending");
+          if (staleStage !== undefined) {
+            this.tree.clear(staleStage);
+          }
+          const stageIno = this.tree.addDir(pieceIno, ".fs.pending");
+          this.buildFsProjectionTree(
+            stageIno,
             pieceId,
             fsValue,
             treeValue,
@@ -1318,7 +1444,18 @@ export class CellBridge {
             classifyEntry,
             cfcAnnotator,
           );
+          const newFsNames = this.swapFsProjection(
+            pieceIno,
+            stageIno,
+            oldFsNames,
+            changes,
+            cfcAnnotator,
+          );
+          this.fsProjectionEntries.set(pieceIno, newFsNames);
+
           this.buildHandlersFile(pieceIno, callables, cfcAnnotator);
+          this.recordEntryChange(changes, pieceIno, ".handlers");
+
           const state = this.spaces.get(spaceName);
           if (state) {
             const summaryChanged = this.updatePieceManifest(state, pieceId, {
@@ -1331,9 +1468,7 @@ export class CellBridge {
               }
             }
           }
-          if (this.onInvalidate) {
-            this.onInvalidate(pieceIno, [indexName, ".handlers"]);
-          }
+          this.emitInvalidations(changes);
           this.markPiecePropHydrated(pieceIno, "result");
           this.rebuildStats.completed++;
           this.rebuildStats.lastDurationMs = Date.now() - startedAt;
@@ -1377,59 +1512,62 @@ export class CellBridge {
       }
       if (buildRootName === pendingPropName) {
         this.markPiecePropCleared(pieceIno, propName);
-        if (existingIno !== undefined) {
-          this.retainDetachedSubtree(existingIno);
-        }
-        if (jsonIno !== undefined) {
-          this.retainDetachedSubtree(jsonIno);
-        }
         if (propName === "result") {
           this.clearFsProjectionEntries(pieceIno);
         }
-        this.tree.rename(pieceIno, pendingPropName, pieceIno, propName);
-        const renamedPropIno = this.tree.lookup(pieceIno, propName);
-        if (renamedPropIno !== undefined) {
-          cfcAnnotator?.annotateEntry(pieceIno, propName, renamedPropIno);
+        // Reconcile the freshly built staging subtree onto the existing one,
+        // reusing the existing inodes rather than swapping in fresh ones, so a
+        // path that still exists keeps its inode across the rebuild.
+        this.swapPending(
+          pieceIno,
+          propName,
+          pendingPropName,
+          existingIno,
+          changes,
+          cfcAnnotator,
+        );
+        this.swapPending(
+          pieceIno,
+          `${propName}.json`,
+          pendingJsonName,
+          jsonIno,
+          changes,
+          cfcAnnotator,
+        );
+      } else {
+        if (propName === "result") {
+          this.clearFsProjectionEntries(pieceIno);
         }
-        if (this.tree.lookup(pieceIno, pendingJsonName) !== undefined) {
-          this.tree.rename(
-            pieceIno,
-            pendingJsonName,
-            pieceIno,
-            `${propName}.json`,
-          );
-          const renamedJsonIno = this.tree.lookup(pieceIno, `${propName}.json`);
-          if (renamedJsonIno !== undefined) {
-            cfcAnnotator?.annotateEntry(
-              pieceIno,
-              `${propName}.json`,
-              renamedJsonIno,
-            );
-          }
+        // First hydration: the prop directory and its `.json` sibling are new
+        // to any cache, so their entries under the piece are invalidated.
+        this.recordEntryChange(changes, pieceIno, propName);
+        if (this.tree.lookup(pieceIno, `${propName}.json`) !== undefined) {
+          this.recordEntryChange(changes, pieceIno, `${propName}.json`);
         }
-      } else if (propName === "result") {
-        this.clearFsProjectionEntries(pieceIno);
       }
       this.markPiecePropHydrated(pieceIno, propName);
     } else {
       this.markPiecePropCleared(pieceIno, propName);
       if (existingIno !== undefined) {
-        this.retainDetachedSubtree(existingIno);
+        this.tree.clear(existingIno);
+        this.recordEntryChange(changes, pieceIno, propName);
       }
       if (jsonIno !== undefined) {
-        this.retainDetachedSubtree(jsonIno);
+        this.tree.clear(jsonIno);
+        this.recordEntryChange(changes, pieceIno, `${propName}.json`);
       }
       if (propName === "result") {
         this.clearFsProjectionEntries(pieceIno);
       }
     }
     if (propName === "result") {
+      // `.handlers` is rebuilt on the piece directory, outside the prop
+      // subtree the transplant reconciled, so its entry is invalidated here.
       this.buildHandlersFile(pieceIno, callables, cfcAnnotator);
+      this.recordEntryChange(changes, pieceIno, ".handlers");
     }
 
-    if (this.onInvalidate) {
-      this.onInvalidate(pieceIno, [propName, `${propName}.json`]);
-    }
+    this.emitInvalidations(changes);
 
     if (propName === "result") {
       const state = this.spaces.get(spaceName);
@@ -2421,7 +2559,7 @@ export class CellBridge {
     const entries = this.fsProjectionEntries.get(pieceIno);
     this.fsProjectionEntries.delete(pieceIno);
 
-    for (const name of ["index.md", "index.json"]) {
+    for (const name of ["index.md", "index.json", ".fs.pending"]) {
       const ino = this.tree.lookup(pieceIno, name);
       if (ino !== undefined) this.tree.clear(ino);
     }
@@ -2433,8 +2571,15 @@ export class CellBridge {
     }
   }
 
+  /**
+   * Build a piece's [FS] projection under `parentIno`, which is a staging
+   * container so the finished projection can be reconciled onto the piece
+   * directory without churning inodes. Returns the index file name and the set
+   * of entry names produced, so the caller can swap them into place and record
+   * which piece-root names the projection now owns.
+   */
   private buildFsProjectionTree(
-    pieceIno: bigint,
+    parentIno: bigint,
     pieceId: string,
     fsValue: FsValue,
     treeValue: unknown,
@@ -2445,7 +2590,7 @@ export class CellBridge {
     skipEntry: (value: unknown) => boolean,
     classifyEntry: (key: string, value: unknown) => CallableKind | null,
     annotator?: CfcProjectionAnnotator,
-  ): "index.md" | "index.json" {
+  ): { indexName: "index.md" | "index.json"; entries: Set<string> } {
     const entries = new Set<string>();
     const indexName = fsValue.type === "text/markdown"
       ? "index.md"
@@ -2454,11 +2599,11 @@ export class CellBridge {
 
     const indexIno = buildFsProjection(
       this.tree,
-      pieceIno,
+      parentIno,
       fsValue,
       pieceId,
       (siblingParentIno, name, value) => {
-        if (siblingParentIno === pieceIno) {
+        if (siblingParentIno === parentIno) {
           entries.add(encodeFuseComponent(name, { reserveJsonSuffix: true }));
         }
         this.makeFsSubtreeBuilder(
@@ -2475,11 +2620,11 @@ export class CellBridge {
       indexIno,
       "fs-projection",
       [indexName],
-      { ino: pieceIno, name: indexName },
+      { ino: parentIno, name: indexName },
       projectionLabel,
     );
 
-    this.addVNodeJsonFiles(pieceIno, treeValue, annotator);
+    this.addVNodeJsonFiles(parentIno, treeValue, annotator);
     if (
       typeof treeValue === "object" && treeValue !== null &&
       !Array.isArray(treeValue)
@@ -2489,13 +2634,63 @@ export class CellBridge {
       }
     }
 
-    this.addCallableFiles(pieceIno, callables, "result", annotator);
+    this.addCallableFiles(parentIno, callables, "result", annotator);
     for (const { key, callableKind } of callables) {
       entries.add(`${encodeFuseComponent(key)}.${callableKind}`);
     }
 
-    this.fsProjectionEntries.set(pieceIno, entries);
-    return indexName;
+    return { indexName, entries };
+  }
+
+  /**
+   * Reconcile a staging container's children onto the piece directory, adopting
+   * an existing inode whenever a name survives with the same node kind so [FS]
+   * projection entries keep their inode across a rebuild. Old projection entries
+   * absent from the rebuild are removed. Returns the entry names now present.
+   */
+  private swapFsProjection(
+    pieceIno: bigint,
+    stageIno: bigint,
+    oldNames: Iterable<string>,
+    changes: TransplantChanges,
+    annotator?: CfcProjectionAnnotator,
+  ): Set<string> {
+    const newNames = new Set<string>();
+    for (const [name, stagedIno] of this.tree.getChildren(stageIno)) {
+      newNames.add(name);
+      const oldIno = this.tree.lookup(pieceIno, name);
+      const oldNode = oldIno !== undefined
+        ? this.tree.getNode(oldIno)
+        : undefined;
+      const stagedNode = this.tree.getNode(stagedIno);
+      if (oldNode && stagedNode && oldNode.kind === stagedNode.kind) {
+        this.mergeTransplantChanges(
+          changes,
+          this.tree.transplantSubtree(oldIno!, stagedIno),
+        );
+        annotator?.annotateEntry(pieceIno, name, oldIno!);
+      } else {
+        if (oldIno !== undefined) {
+          this.tree.clear(oldIno);
+        }
+        this.tree.rename(stageIno, name, pieceIno, name);
+        const movedIno = this.tree.lookup(pieceIno, name);
+        if (movedIno !== undefined) {
+          annotator?.annotateEntry(pieceIno, name, movedIno);
+        }
+        this.recordEntryChange(changes, pieceIno, name);
+      }
+    }
+    for (const name of oldNames) {
+      if (newNames.has(name)) continue;
+      const oldIno = this.tree.lookup(pieceIno, name);
+      if (oldIno !== undefined) {
+        this.tree.clear(oldIno);
+        this.recordEntryChange(changes, pieceIno, name);
+      }
+    }
+    this.tree.clear(stageIno);
+    return newNames;
   }
 
   private discoverCallableEntries(
@@ -2922,7 +3117,11 @@ export class CellBridge {
               // the piece getter in that case. If the value is still
               // undefined, keep the current mounted tree intact until a
               // concrete replacement arrives.
-              this.invalidateRootPropCache(pieceIno, propName);
+              //
+              // The rebuild reconciles onto the mounted tree in place, so the
+              // tree is not torn down first; advancing the hydration epoch is
+              // enough to make an in-flight hydration re-read the new value.
+              this.bumpHydrationEpoch(pieceIno, propName);
               await this.enqueuePiecePropRebuild({
                 cell,
                 newValue: rebuildValue,

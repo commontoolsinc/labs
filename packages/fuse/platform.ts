@@ -13,6 +13,8 @@ export interface StatOpts {
   size: number;
   uid?: number;
   gid?: number;
+  /** Modification time in milliseconds since the epoch. */
+  mtime?: number;
 }
 
 export interface EntryParamOpts {
@@ -32,6 +34,19 @@ export interface MountHandle {
   session: Deno.PointerValue;
   /** Channel pointer on macOS (FUSE v2), session pointer on Linux (FUSE v3). */
   notifyTarget: Deno.PointerValue;
+}
+
+/**
+ * Split a millisecond timestamp into the seconds and nanoseconds of a
+ * `struct timespec`. An undefined timestamp maps to the epoch (all zero), which
+ * is what an uninitialized stat buffer already holds.
+ */
+export function msToTimespec(ms?: number): { sec: bigint; nsec: bigint } {
+  if (ms === undefined) return { sec: 0n, nsec: 0n };
+  return {
+    sec: BigInt(Math.floor(ms / 1000)),
+    nsec: BigInt(Math.floor((ms % 1000) * 1_000_000)),
+  };
 }
 
 // --- Common FFI symbols (identical between FUSE v2 and v3) ---
@@ -138,6 +153,8 @@ export interface FusePlatform {
   FUSE_ARGS_STRUCT_SIZE: number;
   /** Byte offset of st_size within struct stat. */
   STAT_ST_SIZE_OFFSET: number;
+  /** Byte offset of st_mtim(espec) within struct stat. */
+  STAT_ST_MTIM_OFFSET: number;
 
   // Struct helpers
   writeStat(buf: ArrayBuffer, opts: StatOpts): void;

@@ -1,5 +1,6 @@
 // cell-bridge.test.ts — Integration tests for CellBridge using fake piece objects
 import { assertEquals, assertNotEquals } from "@std/assert";
+import { FakeTime } from "@std/testing/time";
 import { defer } from "@commonfabric/utils/defer";
 import { FsTree } from "./tree.ts";
 import {
@@ -1008,7 +1009,7 @@ Deno.test("CellBridge.hydratePieceProp returns early when a prop is already hydr
   assertEquals(tree.lookup(pieceIno, "result") !== undefined, true);
 });
 
-Deno.test("CellBridge.rebuildPieceProp keeps replaced callable inodes alive briefly", async () => {
+Deno.test("CellBridge.rebuildPieceProp reuses a callable's inode across a rebuild", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "home", []);
@@ -1111,12 +1112,82 @@ Deno.test("CellBridge.rebuildPieceProp keeps replaced callable inodes alive brie
       spaceName: "home",
     });
 
+  // The result directory and the callable inside it both still exist at the
+  // same path with the same kind, so the rebuild adopts their inodes rather
+  // than allocating new ones.
   const currentResultIno = tree.lookup(pieceIno, "result");
-  assertEquals(currentResultIno !== undefined, true);
+  assertEquals(currentResultIno, initialResultIno);
   const currentToolIno = tree.lookup(currentResultIno!, "search.tool");
-  assertEquals(currentToolIno !== undefined, true);
-  assertEquals(currentToolIno === initialToolIno, false);
-  assertEquals(tree.getNode(initialToolIno!)?.kind, "callable");
+  assertEquals(currentToolIno, initialToolIno);
+  assertEquals(tree.getNode(currentToolIno!)?.kind, "callable");
+});
+
+Deno.test("CellBridge.rebuildPieceProp keeps inodes stable and invalidates only changed values", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+
+  const inputSchema = {
+    type: "object",
+    properties: { title: { type: "string" }, count: { type: "number" } },
+  };
+  const piece = {
+    id: "of:stable-inode-piece",
+    name: () => "Stable Piece",
+    getPatternMeta: () => Promise.resolve({}),
+    input: {
+      getCell: () =>
+        Promise.resolve(makeCell({ title: "before", count: 1 }, inputSchema)),
+      get: () => Promise.resolve({ title: "before", count: 1 }),
+    },
+    result: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+  };
+
+  state.pieceControllers.set(
+    "Stable Piece",
+    piece as unknown as SpaceState["pieceControllers"] extends
+      Map<string, infer T> ? T : never,
+  );
+  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+    .loadPieceTree(piece, state.piecesIno, "Stable Piece", "home");
+  state.pieceMap.set("Stable Piece", piece.id);
+  state.pieceInos.set("Stable Piece", pieceIno);
+
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "input");
+
+  const inputIno = tree.lookup(pieceIno, "input")!;
+  const titleIno = tree.lookup(inputIno, "title")!;
+  const countIno = tree.lookup(inputIno, "count")!;
+
+  const invalidatedInodes: bigint[] = [];
+  bridge.onInvalidateInode = (ino) => invalidatedInodes.push(ino);
+
+  await (bridge as unknown as { rebuildPieceProp: RebuildPieceProp })
+    .rebuildPieceProp.call(bridge, {
+      cell: makeCell({ title: "after", count: 1 }, inputSchema),
+      newValue: { title: "after", count: 1 },
+      pieceId: piece.id,
+      pieceIno,
+      pieceName: "Stable Piece",
+      propName: "input",
+      resolveLink: () => null,
+      spaceName: "home",
+    });
+
+  // Same paths, same kinds: the inodes are reused, not reallocated.
+  assertEquals(tree.lookup(pieceIno, "input"), inputIno);
+  assertEquals(tree.lookup(inputIno, "title"), titleIno);
+  assertEquals(tree.lookup(inputIno, "count"), countIno);
+  assertEquals(getFileContent(tree, inputIno, "title"), "after");
+
+  // Only the changed value's inode cache is dropped; the unchanged sibling is
+  // left cached.
+  assertEquals(invalidatedInodes.includes(titleIno), true);
+  assertEquals(invalidatedInodes.includes(countIno), false);
 });
 
 Deno.test("CellBridge queues piece prop rebuilds for the same prop", async () => {
@@ -1297,6 +1368,76 @@ Deno.test("CellBridge.rebuildPieceProp clears stale FS projection mounts when va
   assertEquals(tree.lookup(pieceIno, "index.md"), undefined);
   assertEquals(tree.lookup(pieceIno, "index.json"), undefined);
   assertEquals(tree.lookup(pieceIno, "meta"), undefined);
+});
+
+Deno.test("CellBridge.rebuildPieceProp keeps the FS projection index inode stable across a rebuild", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+
+  const makeFsResult = (content: string) => ({
+    $FS: { type: "text/markdown", content, frontmatter: { pinned: true } },
+  });
+  const resultCell = new SinkableCell(makeFsResult("Hello"));
+
+  const piece = {
+    id: "of:entity-stable-fs",
+    name: () => "Stable FS Fixture",
+    getPatternMeta: () => Promise.resolve({}),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+      get: () => Promise.resolve(resultCell.get()),
+    },
+  };
+
+  state.pieceControllers.set(
+    "Stable FS Fixture",
+    piece as unknown as SpaceState["pieceControllers"] extends
+      Map<string, infer T> ? T : never,
+  );
+  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+    .loadPieceTree(piece, state.piecesIno, "Stable FS Fixture", "home");
+  state.pieceMap.set("Stable FS Fixture", piece.id);
+  state.pieceInos.set("Stable FS Fixture", pieceIno);
+
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
+
+  const indexIno = tree.lookup(pieceIno, "index.md")!;
+  assertEquals(indexIno !== undefined, true);
+  assertEquals(
+    getFileContent(tree, pieceIno, "index.md").includes("Hello"),
+    true,
+  );
+
+  const invalidatedInodes: bigint[] = [];
+  bridge.onInvalidateInode = (ino) => invalidatedInodes.push(ino);
+
+  resultCell.set(makeFsResult("Goodbye"));
+  await (bridge as unknown as { rebuildPieceProp: RebuildPieceProp })
+    .rebuildPieceProp.call(bridge, {
+      cell: resultCell as unknown as ReturnType<typeof makeCell>,
+      newValue: resultCell.get(),
+      pieceId: piece.id,
+      pieceIno,
+      pieceName: "Stable FS Fixture",
+      propName: "result",
+      resolveLink: () => null,
+      spaceName: "home",
+    });
+
+  // The projection index survives with the same inode and updated content, and
+  // its stale data cache is dropped.
+  assertEquals(tree.lookup(pieceIno, "index.md"), indexIno);
+  assertEquals(
+    getFileContent(tree, pieceIno, "index.md").includes("Goodbye"),
+    true,
+  );
+  assertEquals(invalidatedInodes.includes(indexIno), true);
 });
 
 Deno.test("CellBridge.hydratePieceProp labels void handlers as no-arg callables in .handlers", async () => {
@@ -1631,6 +1772,60 @@ Deno.test("CellBridge result hydration updates pieces.json summary from current 
   // Cancel subscriptions to avoid timer leaks
   const subs = state.pieceSubs.get("Summary-Piece");
   if (subs) { for (const cancel of subs) cancel(); }
+});
+
+Deno.test("CellBridge reactive rebuild keeps inodes stable across a cell change", async () => {
+  const time = new FakeTime();
+  try {
+    const tree = new FsTree();
+    const bridge = new CellBridge(tree, "/tmp/cf-exec");
+    const state = buildTestSpace(bridge, "home", []);
+    const resultCell = new SinkableCell({ title: "before", count: 1 });
+
+    const piece = {
+      id: "of:reactive-stable",
+      name: () => "Reactive Stable",
+      getPatternMeta: () => Promise.resolve({}),
+      input: {
+        getCell: () => Promise.resolve(makeCell({}, undefined)),
+        get: () => Promise.resolve({}),
+      },
+      result: {
+        getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+        get: () => Promise.resolve(resultCell.get()),
+      },
+    };
+
+    const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+      .addPieceToSpace.bind(bridge);
+    await addPiece(state, piece, "home");
+
+    const pieceIno = tree.lookup(state.piecesIno, "Reactive-Stable")!;
+    await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+      .hydratePieceProp.call(bridge, pieceIno, "result");
+
+    const resultIno = tree.lookup(pieceIno, "result")!;
+    const titleIno = tree.lookup(resultIno, "title")!;
+    const countIno = tree.lookup(resultIno, "count")!;
+
+    // An external mutation flows through the cell.sink subscription and is
+    // rebuilt after the debounce.
+    resultCell.set({ title: "after", count: 1 });
+    await time.tickAsync(200);
+    await time.runMicrotasks();
+
+    // The reactive rebuild reconciled the mounted tree in place instead of
+    // tearing it down, so a client that cached these paths keeps their inodes.
+    assertEquals(tree.lookup(pieceIno, "result"), resultIno);
+    assertEquals(tree.lookup(resultIno, "title"), titleIno);
+    assertEquals(tree.lookup(resultIno, "count"), countIno);
+    assertEquals(getFileContent(tree, resultIno, "title"), "after");
+
+    const subs = state.pieceSubs.get("Reactive-Stable");
+    if (subs) { for (const cancel of subs) cancel(); }
+  } finally {
+    time.restore();
+  }
 });
 
 Deno.test("CellBridge refreshes pattern references after an in-place swap", async () => {
@@ -2007,23 +2202,25 @@ Deno.test("CellBridge decodes encoded space directory names for write paths", ()
   assertEquals(writePath?.jsonPath, ["title"]);
 });
 
-Deno.test("CellBridge resolves write paths through a detached prop subtree", () => {
+Deno.test("CellBridge resolves a value file's write path after an in-place rebuild", () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "did:key:zSpace", []);
-  const piece = { id: "of:detached-piece", name: () => "Detached Piece" };
+  const piece = { id: "of:rebuilt-piece", name: () => "Rebuilt Piece" };
   state.pieceControllers.set("notes", piece as never);
 
   const pieceIno = tree.addDir(state.piecesIno, "notes");
-  const inputIno = tree.addDir(pieceIno, "input");
+  const inputIno = tree.addDir(pieceIno, "input", "object");
   const lastMessageIno = tree.addFile(inputIno, "lastMessage", "hi", "string");
 
-  // A prop rebuild detaches the old `input` subtree, retains it so open handles
-  // keep working, and builds a replacement under the same name.
-  (bridge as unknown as { retainDetachedSubtree: (ino: bigint) => void })
-    .retainDetachedSubtree(inputIno);
-  const rebuiltInputIno = tree.addDir(pieceIno, "input");
-  tree.addFile(rebuiltInputIno, "lastMessage", "hi", "string");
+  // A rebuild reconciles a freshly built staging subtree onto the live one, so
+  // the value file survives the rebuild with the same inode. A write that
+  // arrives on that cached inode still resolves to the same cell.
+  const pendingIno = tree.addDir(pieceIno, ".input.pending", "object");
+  tree.addFile(pendingIno, "lastMessage", "hello", "string");
+  tree.transplantSubtree(inputIno, pendingIno);
+
+  assertEquals(tree.lookup(inputIno, "lastMessage"), lastMessageIno);
 
   const writePath = bridge.resolveWritePath(lastMessageIno);
   assertEquals(writePath?.spaceName, "did:key:zSpace");
