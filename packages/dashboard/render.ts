@@ -6,7 +6,26 @@ import { REPO } from "./config.ts";
 
 // Open dashboards reload when this changes. Increment it with shell markup,
 // styles, client code, or the update payload shape.
-export const SHELL_VERSION = 2;
+export const SHELL_VERSION = 3;
+
+type ViewerTimeElement = Pick<HTMLTimeElement, "dateTime" | "textContent">;
+
+/** Replace marked absolute timestamps with the viewer's local wall-clock time. */
+export function formatViewerTimes(
+  times: Iterable<ViewerTimeElement> = document.querySelectorAll<HTMLTimeElement>(
+    "time[data-viewer-time][datetime]",
+  ),
+  formatter: { format(value: number): string } = new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }),
+): void {
+  for (const time of times) {
+    const at = Date.parse(time.dateTime);
+    if (Number.isFinite(at)) time.textContent = formatter.format(at);
+  }
+}
 
 export function renderTile(v: TileView, id?: string): string {
   const cls = `tile ${v.status}${v.href ? " link" : ""}${v.wide ? " wide" : ""}`;
@@ -93,6 +112,8 @@ export function shell(
   const badge = document.getElementById('livebadge');
   const dot = document.getElementById('freshdot');
   const agotext = document.getElementById('agotext');
+  ${formatViewerTimes.toString()}
+  formatViewerTimes();
   const grid = document.getElementById('dashboard-grid');
   const wide = document.getElementById('dashboard-wide');
   let base = ${ago};
@@ -114,6 +135,7 @@ export function shell(
   function reconcileTiles(container, html) {
     const template = document.createElement('template');
     template.innerHTML = html;
+    formatViewerTimes(template.content.querySelectorAll('time[data-viewer-time][datetime]'));
     const currentById = new Map(Array.from(container.children).map((tile) => [tile.dataset.tileId, tile]));
     const desired = Array.from(template.content.children).map((next) => {
       const current = currentById.get(next.dataset.tileId);

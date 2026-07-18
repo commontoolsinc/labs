@@ -124,6 +124,16 @@ Deno.test("recent-runs: wide, failure tip -> bad, rows link to the landing PR", 
   assertStringIncludes(v.extra ?? "", "/pull/42");
 });
 
+Deno.test("recent runs: timestamps have a UTC fallback and a viewer-local marker", async () => {
+  const startedAt = "2024-01-02T17:05:00Z";
+  const runsByRepo = (repo: string) => repo === REPO ? [run({ run_started_at: startedAt })] : [];
+  const v = await recentRuns.collect(ctx([], {}, runsByRepo));
+  assertStringIncludes(
+    v.extra ?? "",
+    `<time class="t" datetime="${startedAt}" data-viewer-time>17:05 UTC</time>`,
+  );
+});
+
 Deno.test("tile labels: the labs/loom ci family is renamed and paired", async () => {
   const one = ctx([run({ conclusion: "success" })]);
   assertEquals((await labsCi.collect(one)).label, "labs ci");

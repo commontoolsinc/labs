@@ -50,11 +50,6 @@ export const STATUS_DOT: Record<Status, string> = { good: "green", warn: "amber"
 export const escapeHtml = (s: string) =>
   s.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]!));
 
-export const hhmm = (iso: string) => {
-  const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-};
-
 // Per-status left edge for a sparkline's fade gradient — a shade just below the
 // tile's own (status-tinted) background, so the line fades up out of the tile.
 export const SPARK_FADE: Record<Status, string> = {
