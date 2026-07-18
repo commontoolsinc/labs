@@ -703,6 +703,79 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     );
   });
 
+  it("round-trips pattern coverage spans and rejects malformed stored spans", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const spans = [{
+      fileName: "/main.tsx",
+      id: 1,
+      kind: "runtime" as const,
+      startLine: 3,
+      endLine: 3,
+      startColumn: 1,
+      endColumn: 20,
+    }];
+    modules[0] = { ...modules[0]!, patternCoverageSpans: spans };
+    const wtx = runtime.edit();
+    writeCompiledDocs(runtime, spaceA, modules, entryIdentity, opts(), wtx);
+    wtx.prepareCfc();
+    await wtx.commit();
+
+    const coldLoad = async () => {
+      const rtx = runtime.edit();
+      const loaded = await loadCompiledClosure(
+        runtime,
+        spaceA,
+        entryIdentity,
+        opts(),
+        rtx,
+      );
+      rtx.abort?.();
+      return loaded;
+    };
+
+    // Valid spans survive the round trip.
+    expect((await coldLoad()).get(entryIdentity)?.patternCoverageSpans)
+      .toEqual(spans);
+
+    // Overwrite the stored doc's spans with malformed values, bypassing the
+    // write path's integrity via the compile-cache implementation identity.
+    const replaceSpans = async (value: unknown) => {
+      const tx = runtime.edit();
+      const previousIdentity = tx.getCfcState().implementationIdentity;
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "compile-cache",
+      });
+      try {
+        const cell = runtime.getCell(
+          spaceA,
+          compiledDocKey(RTVER, entryIdentity),
+          compiledDocWriteSchema(),
+          tx,
+        );
+        cell.set({
+          ...(cell.get() as Record<string, unknown>),
+          patternCoverageSpans: value,
+        });
+      } finally {
+        tx.setCfcImplementationIdentity(previousIdentity);
+      }
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+    };
+
+    // A span whose id is the wrong type is dropped rather than reported against
+    // malformed coordinates.
+    await replaceSpans([{ ...spans[0], id: "not-a-number" }]);
+    expect((await coldLoad()).get(entryIdentity)?.patternCoverageSpans)
+      .toBeUndefined();
+
+    // A non-array spans value is dropped too.
+    await replaceSpans("not-an-array");
+    expect((await coldLoad()).get(entryIdentity)?.patternCoverageSpans)
+      .toBeUndefined();
+  });
+
   it("persists and cold-loads verified policy manifests without module evaluation", async () => {
     const { modules, entryIdentity } = toModules(PROGRAM);
     const artifact = buildCfcPolicyArtifactManifest({

@@ -1,6 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { runtimeHostFlags, setupHostToggles } from "../src/lib/host-toggles.ts";
+import {
+  isPatternCoverageEnabled,
+  runtimeHostFlags,
+  setupHostToggles,
+} from "../src/lib/host-toggles.ts";
 
 class FakeStorage {
   map = new Map<string, string>();
@@ -69,6 +73,33 @@ describe("setupHostToggles", () => {
       expect(typeof cf?.cfcRenderCeiling).toBe("function");
     } finally {
       h.restore();
+    }
+  });
+});
+
+describe("isPatternCoverageEnabled", () => {
+  it("defaults to false when reading localStorage throws", () => {
+    // Accessing localStorage throws in some environments (disabled storage,
+    // sandboxed frames). The toggle must swallow that and default off rather
+    // than break runtime construction at login.
+    const descriptor = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "localStorage",
+    );
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("localStorage is blocked");
+      },
+    });
+    try {
+      expect(isPatternCoverageEnabled()).toBe(false);
+    } finally {
+      if (descriptor) {
+        Object.defineProperty(globalThis, "localStorage", descriptor);
+      } else {
+        delete (globalThis as { localStorage?: unknown }).localStorage;
+      }
     }
   });
 });

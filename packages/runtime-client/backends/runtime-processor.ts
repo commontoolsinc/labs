@@ -1337,10 +1337,6 @@ export class RuntimeProcessor {
     return { counts, metadata, timing, flags };
   }
 
-  getPatternCoverage(_: GetPatternCoverageRequest): PatternCoverageResponse {
-    return { data: this.runtime.patternCoverage?.toData() ?? null };
-  }
-
   #getLoggerMetadata(): LoggerMetadata {
     const global = globalThis as unknown as {
       commonfabric?: { logger?: Record<string, Logger> };
@@ -1489,6 +1485,10 @@ export class RuntimeProcessor {
       request.durationMs,
     );
     return { result };
+  }
+
+  getPatternCoverage(_: GetPatternCoverageRequest): PatternCoverageResponse {
+    return { data: this.runtime.patternCoverage?.toData() ?? null };
   }
 
   getSettleStats(

@@ -1,4 +1,5 @@
 import { assert, assertEquals, assertObjectMatch } from "@std/assert";
+import { join } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import {
   PATTERN_COVERAGE_INTEGRATION_TEST_NAME,
@@ -7,6 +8,7 @@ import {
   patternCoverageReportToLcov,
   Runtime,
   type RuntimeProgram,
+  writePatternCoverageLcov,
 } from "../src/index.ts";
 
 function lineContaining(source: string, text: string): number {
@@ -721,6 +723,71 @@ Deno.test("runtime-level coverage instruments the cell-cache compile path", asyn
   }
 });
 
+Deno.test("runtime-level coverage instruments the direct (no-space) compile path", async () => {
+  const { StorageManager } = await import("../src/storage/cache.deno.ts");
+  const identity = await Identity.fromPassphrase("direct compile coverage");
+  const storageManager = StorageManager.emulate({ as: identity });
+  const coverage = new PatternCoverageCollector();
+  const runtime = new Runtime({
+    storageManager,
+    apiUrl: new URL(import.meta.url),
+    patternCoverage: coverage,
+  });
+  try {
+    const source = [
+      'import { pattern } from "commonfabric";',
+      'const greeting = "hi";',
+      "export default pattern(() => {",
+      "  return { greeting };",
+      "});",
+    ].join("\n");
+    // No target space → compilePattern takes the direct compileToRecordGraph
+    // path rather than compileViaCellCache.
+    await runtime.patternManager.compilePattern(source);
+    assert(coverage.report().totals.coveredRuntimeLines > 0);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("runtime-level coverage instruments the cell-cache path with no resolved compile version", async () => {
+  const { StorageManager } = await import("../src/storage/cache.deno.ts");
+  const { setCompileCacheRuntimeVersionForTesting } = await import(
+    "../src/compilation-cache/cell-cache.ts"
+  );
+  const identity = await Identity.fromPassphrase(
+    "no-version cell-cache coverage",
+  );
+  const storageManager = StorageManager.emulate({ as: identity });
+  const coverage = new PatternCoverageCollector();
+  const runtime = new Runtime({
+    storageManager,
+    apiUrl: new URL(import.meta.url),
+    patternCoverage: coverage,
+  });
+  // Force getCompileCacheRuntimeVersion() to resolve undefined, which routes
+  // compileViaCellCache through its no-cache-version branch.
+  const restore = setCompileCacheRuntimeVersionForTesting(undefined);
+  try {
+    const source = [
+      'import { pattern } from "commonfabric";',
+      'const greeting = "hi";',
+      "export default pattern(() => {",
+      "  return { greeting };",
+      "});",
+    ].join("\n");
+    await runtime.patternManager.compilePattern(source, {
+      space: identity.did(),
+    });
+    assert(coverage.report().totals.coveredRuntimeLines > 0);
+  } finally {
+    restore();
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("toData/ingest round-trips spans and hit counts", () => {
   const source = new PatternCoverageCollector();
   const span = {
@@ -781,6 +848,61 @@ Deno.test("ingest merges hit-only data against another realm's spans", () => {
       "",
     ].join("\n"),
   );
+});
+
+Deno.test("ingest ignores zero-count hits", () => {
+  // A realm that ran the instrumented bytes but never reached a statement
+  // reports it with count 0; merging that must not mark the line covered.
+  const collector = new PatternCoverageCollector();
+  collector.registerSpan({
+    fileName: "/subject.tsx",
+    id: 1,
+    kind: "runtime",
+    startLine: 1,
+    endLine: 1,
+    startColumn: 1,
+    endColumn: 10,
+  });
+  collector.ingest({
+    spans: [],
+    hits: [{ fileName: "/subject.tsx", id: 1, count: 0 }],
+  });
+  assertEquals(collector.report().totals.coveredRuntimeLines, 0);
+});
+
+Deno.test("writePatternCoverageLcov writes the tagged report to a file", async () => {
+  const collector = new PatternCoverageCollector();
+  collector.registerSpan({
+    fileName: "/subject.tsx",
+    id: 1,
+    kind: "runtime",
+    startLine: 1,
+    endLine: 1,
+    startColumn: 1,
+    endColumn: 10,
+  });
+  collector.hit("/subject.tsx", 1);
+
+  const dir = await Deno.makeTempDir({ prefix: "write-pattern-lcov-" });
+  try {
+    // A nested path exercises the mkdir the writer does before writing.
+    const outputPath = join(dir, "nested", "coverage.lcov");
+    await writePatternCoverageLcov(collector, outputPath, {
+      testName: PATTERN_COVERAGE_INTEGRATION_TEST_NAME,
+    });
+
+    const written = await Deno.readTextFile(outputPath);
+    assertEquals(
+      written,
+      patternCoverageReportToLcov(
+        collector.report(),
+        PATTERN_COVERAGE_INTEGRATION_TEST_NAME,
+      ),
+    );
+    assert(written.includes("TN:pattern-runtime-integration"));
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 });
 
 Deno.test("patternCoverageReportToLcov tags the integration stream", () => {
