@@ -427,3 +427,104 @@ Deno.test("client action router leaves the unclaimed commit object untouched", (
     candidate.schedulerObservation,
   );
 });
+
+// --- C2.5: session claims run with the session lane's classification -------
+
+const sessionScopedCommit = (): ClientCommit => {
+  const candidate = commit();
+  const observed = candidate.schedulerObservation as ReturnType<
+    typeof observation
+  >;
+  const sessionRead = {
+    space: SPACE,
+    scope: "session" as const,
+    id: "of:client-action-router-input",
+    path: ["value"],
+  };
+  Object.assign(observed, { reads: [sessionRead] });
+  Object.assign(observed.completeActionScopeSummary, { reads: [sessionRead] });
+  candidate.reads.confirmed[0]!.scope = "session";
+  return candidate;
+};
+
+Deno.test("an own-session claim admits the session lane's scoped surfaces", () => {
+  // C2.5 router widening: the accepted claim's contextKey keys BOTH
+  // classifiers at session rank ({ sessionContext: true }), so a session
+  // lane's scoped surfaces route to the claimed overlay instead of failing
+  // open — the chain rule (session implies the user admissions) included.
+  const live = claim({
+    contextKey: sessionExecutionContextKey(MY_DID, MY_SESSION_ID),
+  });
+  assertEquals(
+    routeClientActionTransaction(
+      { space: SPACE, commit: sessionScopedCommit(), sourceAction },
+      { claims: [live], ownContextKeys: ownChain },
+    ),
+    { disposition: "local", kind: "claimed-overlay", claim: live },
+  );
+
+  // Chain rule: the same session claim also admits USER-scoped surfaces
+  // (broader-in-chain, CA3) — the session lane subsumes the user admissions.
+  const userScoped = commit();
+  const observed = userScoped.schedulerObservation as ReturnType<
+    typeof observation
+  >;
+  const userRead = {
+    space: SPACE,
+    scope: "user" as const,
+    id: "of:client-action-router-input",
+    path: ["value"],
+  };
+  Object.assign(observed, { reads: [userRead] });
+  Object.assign(observed.completeActionScopeSummary, { reads: [userRead] });
+  userScoped.reads.confirmed[0]!.scope = "user";
+  assertEquals(
+    routeClientActionTransaction(
+      { space: SPACE, commit: userScoped, sourceAction },
+      { claims: [live], ownContextKeys: ownChain },
+    ),
+    { disposition: "local", kind: "claimed-overlay", claim: live },
+  );
+});
+
+Deno.test("a user claim keeps session-scoped surfaces failing open (regression)", () => {
+  // Narrower-than-chain stays rejected: a user-context claim never admits
+  // session scope, byte-identical to the pre-C2.5 behavior.
+  const diagnostics: ClientActionRouteDiagnostic[] = [];
+  assertEquals(
+    routeClientActionTransaction(
+      { space: SPACE, commit: sessionScopedCommit(), sourceAction },
+      {
+        claims: [claim({ contextKey: userExecutionContextKey(MY_DID) })],
+        ownContextKeys: ownChain,
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      },
+    ),
+    { disposition: "upstream" },
+  );
+  assertEquals(diagnostics[0]?.diagnosticCode, "non-space-read-scope");
+});
+
+Deno.test("another session's claim upstreams even for session-scoped surfaces", () => {
+  // Chain acceptance is the identity gate: a sibling session's claim is
+  // outside this client's own chain, so the session-scoped transaction
+  // computes locally and commits upstream (fail open) — the classification
+  // widening never runs for a claim that was never accepted.
+  for (
+    const contextKey of [
+      sessionExecutionContextKey(MY_DID, "session:someone-else"),
+      sessionExecutionContextKey(OTHER_DID, MY_SESSION_ID),
+    ]
+  ) {
+    assertEquals(
+      routeClientActionTransaction(
+        { space: SPACE, commit: sessionScopedCommit(), sourceAction },
+        {
+          claims: [claim({ contextKey })],
+          ownContextKeys: ownChain,
+        },
+      ),
+      { disposition: "upstream" },
+    );
+  }
+});

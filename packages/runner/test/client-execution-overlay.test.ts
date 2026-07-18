@@ -2674,3 +2674,77 @@ Deno.test("dual live chain-matching claims disable the scheduling hint and built
     resetServerPrimaryExecutionConfig();
   }
 });
+
+Deno.test("a dormant action's session-context claim revoke fires exactly one invalidation wake", async () => {
+  // Amendment A15 at session rank (C2.5): the registered-action seams are
+  // chain-keyed, so an authority-loss wake for an OWN-SESSION claim reaches
+  // an action registered under the "space" chain representative — exactly
+  // once — while the action is dormant. This is the client half of the
+  // dormant-revoke contract the session lane inherits unchanged from user
+  // rank.
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  factory.claims = [];
+  const storage = OverlayStorageManager.connect(factory);
+  const computationAction = {};
+  const notifications: StorageNotification[] = [];
+  const sessionClaim: ExecutionClaim = {
+    ...claim,
+    contextKey: ownSessionContextKey(),
+  };
+  storage.registerExecutionAction(
+    computationAction,
+    canonicalActionClaimKey(claim),
+  );
+  storage.subscribe({
+    next(notification) {
+      notifications.push(notification);
+      return { done: false };
+    },
+  });
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    await factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{ type: "session.execution.claim.set", claim: sessionClaim }],
+      },
+    }));
+    assertCondition(() =>
+      storage.hasLiveExecutionClaimForAction(computationAction) === true
+    );
+    await factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 2,
+        toFeedSeq: 3,
+        events: [{
+          type: "session.execution.claim.revoke",
+          branch: "",
+          claim: sessionClaim,
+          leaseGeneration: sessionClaim.leaseGeneration,
+          claimGeneration: sessionClaim.claimGeneration,
+        }],
+      },
+    }));
+    const wakes = notifications.filter((notification) =>
+      notification.type === "execution-claim-invalidation" &&
+      notification.sourceAction === computationAction
+    );
+    assertEquals(wakes.length, 1);
+    assertEquals(
+      wakes[0]?.type === "execution-claim-invalidation"
+        ? wakes[0].diagnosticCode
+        : undefined,
+      "claim-revoked",
+    );
+    assertEquals(
+      storage.hasLiveExecutionClaimForAction(computationAction),
+      false,
+    );
+  } finally {
+    storage.unregisterExecutionAction(computationAction);
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});

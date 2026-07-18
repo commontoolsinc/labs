@@ -42,6 +42,7 @@ import {
   getServerPrimaryExecutionDocSetWatchConfig,
   type LegacyBackgroundExclusion,
   type LegacyBackgroundExclusionStatus,
+  parseSessionExecutionContextKey,
   type PatchOp,
   type PendingRead,
   type SchedulerActionSnapshotQuery,
@@ -58,6 +59,7 @@ import {
   type SqliteQueryResult,
   type SqliteRegisterDiskSourceResult,
   toDocumentPath,
+  userExecutionContextKey,
 } from "@commonfabric/memory/v2";
 import { parentPath } from "../../../memory/v2/path.ts";
 import {
@@ -2156,6 +2158,25 @@ type SchedulerObservationBatchEntry = {
   pending: PromiseWithResolvers<Result<Unit, StorageTransactionRejected>>;
 };
 
+/** Memoized user-chain collapse of one session lane key (CA3): the
+ * canonical `user:<principal>` member of the lane's own chain, derived from
+ * the session key's principal segment through the canonical helpers only.
+ * `null` records a non-canonical key so it is parsed once. The map grows by
+ * one tiny entry per distinct session lane key this process ever sees —
+ * bounded by session-lane churn, never by document count. */
+const sessionLaneUserCollapse = new Map<string, string | null>();
+const userChainKeyOfSessionLane = (lane: string): string | undefined => {
+  let collapsed = sessionLaneUserCollapse.get(lane);
+  if (collapsed === undefined) {
+    const parsed = parseSessionExecutionContextKey(lane);
+    collapsed = parsed === undefined
+      ? null
+      : userExecutionContextKey(parsed.principal);
+    sessionLaneUserCollapse.set(lane, collapsed);
+  }
+  return collapsed ?? undefined;
+};
+
 /**
  * Effective replica scope key of one document instance (C1.5b, context-lattice
  * §2/§7): the intra-replica confidentiality boundary between execution lanes.
@@ -2167,20 +2188,34 @@ type SchedulerObservationBatchEntry = {
  *   other lane, and keys scoped instances by the lane's resolved scope key
  *   (the canonical context key — a colon-bearing string no declared scope
  *   can collide with).
- * - A declared scope the lane cannot resolve (e.g. "session" under a user
- *   lane) still gets a collision-free per-lane key; the host rejects such
- *   reads at the C1.4b seam, this only keeps local keying total.
+ * - A BROADER-but-in-chain declared scope collapses to the broadest chain
+ *   member that owns it (C2.5, review CA3): `user` under a
+ *   `session:<p>:<s>` lane keys `user:<p>` — matching the host stamp, which
+ *   resolves user scope principal-wide and ignores the session id — so a
+ *   session lane reading a user input shares ONE instance with the
+ *   principal's user lane instead of minting a phantom session-keyed
+ *   duplicate. (`space` under any lane is the same rule; it collapses
+ *   above.) The collapse changes only WHICH record a lane resolves — the
+ *   A16 pending-visibility boundary is per-version (`PendingVersionLane`)
+ *   and per-localSeq (`#localSeqLanes`), both exact-lane comparisons the
+ *   collapse never touches, so chain siblings sharing a record still never
+ *   see each other's pending versions.
+ * - A declared scope the lane cannot resolve — NARROWER than the lane
+ *   ("session" under a user lane, host-rejected at C1.4b) or under a
+ *   non-canonical lane key — still gets a collision-free per-lane key; this
+ *   only keeps local keying total.
  */
 const laneScopeKey = (
   scope: CellScope,
   lane: SchedulerExecutionContextKey,
 ): string => {
   if (lane === "space" || scope === "space") return scope;
-  if (
-    (scope === "user" && lane.startsWith("user:")) ||
-    (scope === "session" && lane.startsWith("session:"))
-  ) {
-    return lane;
+  if (scope === "user" && lane.startsWith("user:")) return lane;
+  if (lane.startsWith("session:")) {
+    if (scope === "session") return lane;
+    // scope === "user": the broader-in-chain collapse (CA3).
+    const collapsed = userChainKeyOfSessionLane(lane);
+    if (collapsed !== undefined) return collapsed;
   }
   return `${lane}\0${scope}`;
 };
@@ -4575,10 +4610,13 @@ class SpaceReplica implements ISpaceReplica {
     // C1.5b sync-frame attribution (FA6 consumption half): an upsert or
     // remove belongs to a lane instance exactly when its host-resolved
     // scopeKey (stamped since C1.4b; on removes since F2) names a REGISTERED
-    // lane. Everything else — no scopeKey (older host), or a scope key no
-    // lane owns (e.g. the sponsor's own scoped instance read through the
-    // space lane) — lands on the declared space-lane key, byte-identical to
-    // the pre-lane replica.
+    // lane — directly, or through the CA3 broader-in-chain collapse: a
+    // `user:<p>` stamp with no registered user lane still belongs to a
+    // registered session lane of principal `<p>`, whose user-scoped reads
+    // key exactly that collapsed instance (`laneScopeKey`). Everything else
+    // — no scopeKey (older host), or a scope key no lane owns (e.g. the
+    // sponsor's own scoped instance read through the space lane) — lands on
+    // the declared space-lane key, byte-identical to the pre-lane replica.
     if (this.#executionLanes.size === 0) {
       this.applyAttributedSessionSync(
         sync.upserts,
@@ -4587,10 +4625,35 @@ class SpaceReplica implements ISpaceReplica {
         "space",
       );
     } else {
+      // user:<p> -> the (deterministically first) registered session lane
+      // whose chain owns it. Exact lane registrations win below; this map
+      // only catches stamps no exact lane claims.
+      let chainOwners: Map<string, SchedulerExecutionContextKey> | undefined;
+      const chainOwnerOf = (
+        scopeKey: string,
+      ): SchedulerExecutionContextKey | undefined => {
+        if (chainOwners === undefined) {
+          chainOwners = new Map();
+          for (const lane of [...this.#executionLanes].sort()) {
+            const collapsed = lane.startsWith("session:")
+              ? userChainKeyOfSessionLane(lane)
+              : undefined;
+            if (collapsed !== undefined && !chainOwners.has(collapsed)) {
+              chainOwners.set(
+                collapsed,
+                lane as SchedulerExecutionContextKey,
+              );
+            }
+          }
+        }
+        return chainOwners.get(scopeKey);
+      };
       const laneOf = (scopeKey: string | undefined) =>
-        scopeKey !== undefined && this.#executionLanes.has(scopeKey)
+        scopeKey === undefined
+          ? "space"
+          : this.#executionLanes.has(scopeKey)
           ? scopeKey as SchedulerExecutionContextKey
-          : "space";
+          : chainOwnerOf(scopeKey) ?? "space";
       const groups = new Map<
         SchedulerExecutionContextKey,
         { upserts: SessionSyncUpsert[]; removes: SessionSyncRemove[] }

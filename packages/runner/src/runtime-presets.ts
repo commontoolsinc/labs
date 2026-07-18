@@ -189,6 +189,10 @@ export const EXPERIMENTAL_ENV_VARS = {
   // C1 rollout dial: flipped programmatically by the C1.9 measurement
   // fixture alongside the memory-side claim-rank dial; no env exposure.
   serverPrimaryExecutionUserRankCandidates: null,
+  // C2 rollout dial (session rank, C2.5): fixture-only like the user-rank
+  // dial above; the CA4 ordering invariant forbids ambient enablement
+  // before C2.6 lands, so no env exposure.
+  serverPrimaryExecutionSessionRankCandidates: null,
   serverPrimaryExecutionDocSetWatch:
     "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH",
   eagerSourceAnnotation: "EXPERIMENTAL_EAGER_SOURCE_ANNOTATION",

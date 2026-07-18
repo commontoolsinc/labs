@@ -843,6 +843,12 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       // lease sponsor until C1.5b's per-lane contexts) keys the lane.
       userRankCandidates: request.experimental
         ?.serverPrimaryExecutionUserRankCandidates === true,
+      // C2.5: session-rank candidate production, layered on the user dial
+      // (ladder semantics). Candidates key by OPEN session lanes only —
+      // there is no session analog of `lanePrincipal` (review CA9: the
+      // session identity source is the host's lane-grant machinery).
+      sessionRankCandidates: request.experimental
+        ?.serverPrimaryExecutionSessionRankCandidates === true,
       lanePrincipal: request.principal,
       // C1.9c: a user-rank action produces one candidate per OPEN lane whose
       // demand slice covers its piece. Before any lane is wired the router's

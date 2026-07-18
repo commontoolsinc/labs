@@ -8,6 +8,13 @@ import type {
   ExecutionClaim,
   MemoryProtocolFlags,
 } from "@commonfabric/memory/v2";
+import {
+  resetPersistentSchedulerStateConfig,
+  resetServerPrimaryExecutionClaimRankConfig,
+  sessionExecutionContextKey,
+  setPersistentSchedulerStateConfig,
+  setServerPrimaryExecutionClaimRankConfig,
+} from "@commonfabric/memory/v2";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import {
   type ExecutionLeaseHandle,
@@ -20,6 +27,8 @@ import {
   type SessionFactory,
   StorageManager,
 } from "../src/storage/v2.ts";
+import { HostStorageManager } from "../src/storage/v2-host-provider.ts";
+import { createExecutorActionTransactionRouter } from "../src/executor/action-transaction-router.ts";
 import {
   DenoSpaceExecutorFactory,
   type DenoSpaceExecutorFactoryOptions,
@@ -1892,5 +1901,503 @@ Deno.test("the real Worker settles a claimed activation raced by a concurrent sh
     }
   } finally {
     clearInterval(keepAlive);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// C2.5 — session-rank candidate identity end-to-end against the REAL server
+// (the C2 wave-A grant machinery). The FakeWorker plays the Worker's wire
+// half; the test process plays its replica half through the REAL host
+// provider channel (HostStorageManager + the real executor action router),
+// so the full CA9 identity chain is exercised: host session-lane grant ->
+// claim issuance binding -> claim contextKey -> Worker acting lane ->
+// claimed commit -> engine session commit fence -> settlement.
+// ---------------------------------------------------------------------------
+
+Deno.test("a session-rank candidate claims end-to-end under a live session lane grant, commits under the lane, and settles", async () => {
+  const principal = await Identity.fromPassphrase(
+    `executor session lane e2e ${crypto.randomUUID()}`,
+  );
+  const space = principal.did();
+  const SESSION_PIECE = "space:of:session-e2e-piece";
+  const SESSION_ACTION_ID = "action:session-e2e-derive";
+  const server = new Server({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: { audience: "did:key:z6Mk-session-lane-e2e" },
+    protocolFlags: {
+      ...REAL_SEAM_FLAGS,
+      serverPrimaryExecutionContextLatticeClaimsV1: true,
+    },
+    acl: { mode: "off", serviceDids: [space] },
+  });
+  setServerPrimaryExecutionClaimRankConfig("session");
+  setPersistentSchedulerStateConfig(true);
+  const events: string[] = [];
+  let client: MemoryClient.Client | null = null;
+  let workerStorage: HostStorageManager | null = null;
+  let executor: Awaited<ReturnType<DenoSpaceExecutorFactory["start"]>> | null =
+    null;
+  let unsubscribeControl = () => {};
+  try {
+    // The lane session: a REAL connected client session of the lane
+    // principal that negotiated context-lattice-claims-v1 — the one
+    // identity source the session lane may have (CA9).
+    client = await MemoryClient.connect({
+      transport: MemoryClient.loopback(server),
+      protocolFlags: {
+        ...REAL_SEAM_FLAGS,
+        serverPrimaryExecutionContextLatticeClaimsV1: true,
+      },
+    });
+    const session = await client.mount(
+      space,
+      {},
+      (_space, _session, context) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: { principal: space },
+      }),
+    ) as MemoryClient.SpaceSession & {
+      sessionId: string;
+      transact(commit: unknown): Promise<{ seq: number }>;
+      setExecutionDemand(
+        branch: string,
+        pieces: readonly string[],
+      ): Promise<boolean>;
+      watchSet(watches: unknown[]): Promise<unknown>;
+      subscribeExecutionControl(
+        listener: (event: {
+          type: string;
+          claim?: { contextKey?: string };
+          settlement?: { outcome?: string; claim?: { contextKey?: string } };
+        }) => void,
+      ): () => void;
+    };
+    // First commit flips the pre-launch compatibility capability to WRITE,
+    // which grant creation and the lease demand.
+    await session.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:session-e2e-seed",
+        value: { value: "seed" },
+      }],
+    });
+    await session.setExecutionDemand("", [SESSION_PIECE]);
+    // Watch the session-scoped output: committed-settlement delivery gates
+    // on the session's data sync reaching the settlement's accepted commit,
+    // and the F6 cohort filter delivers the server-lane-authored session
+    // row to exactly this owning session.
+    await session.watchSet([{
+      id: "session-e2e-watch",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "of:session-e2e-output",
+          scope: "session",
+          selector: { path: [], schema: false },
+        }],
+      },
+    }]);
+    const lease = await (server as unknown as {
+      acquireExecutionLease(
+        space: string,
+        branch: string,
+      ): Promise<ExecutionLeaseHandle | null>;
+    }).acquireExecutionLease(space, "");
+    assertExists(lease);
+    // The wave-A grant machinery: the session is its own anchor.
+    const grant = await (server as unknown as {
+      openSessionLaneGrant(
+        space: string,
+        branch: string,
+        principal: string,
+        sessionId: string,
+      ): Promise<{ contextKey: `session:${string}:${string}` }>;
+    }).openSessionLaneGrant(space, "", space, session.sessionId);
+    const sessionLane = grant.contextKey;
+    assertEquals(
+      sessionLane,
+      sessionExecutionContextKey(space, session.sessionId),
+    );
+
+    const claimed = Promise.withResolvers<void>();
+    const settled = Promise.withResolvers<string>();
+    unsubscribeControl = session.subscribeExecutionControl((event) => {
+      events.push(event.type);
+      if (
+        event.type === "session.execution.claim.set" &&
+        event.claim?.contextKey === sessionLane
+      ) {
+        claimed.resolve();
+      }
+      if (
+        event.type === "session.execution.settlement" &&
+        event.settlement?.claim?.contextKey === sessionLane
+      ) {
+        settled.resolve(event.settlement?.outcome ?? "unknown");
+      }
+    });
+
+    // The REAL host half: DenoSpaceExecutor with the real provider channel
+    // (no createProvider override), scripted Worker wire.
+    const worker = new FakeWorker();
+    const diagnostics: CandidateDiagnostic[] = [];
+    const factory = new DenoSpaceExecutorFactory({
+      server,
+      apiUrl: new URL("https://toolshed.example/"),
+      protocolFlags: {
+        serverPrimaryExecutionV1: true,
+        serverPrimaryExecutionClaimRoutingV1: true,
+        serverPrimaryExecutionBuiltinPassivityV1: true,
+      },
+      onCandidateDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      createWorker: () => {
+        queueMicrotask(() => worker.boot());
+        return worker;
+      },
+    });
+    executor = await factory.start({
+      space,
+      branch: "",
+      lease: lease as ExecutionLeaseHandle,
+      pieces: [SESSION_PIECE],
+      onCrash: (error) => events.push(`crash:${error}`),
+    });
+    // C2.7 owns pool-side session-lane demand aggregation; the wire itself
+    // is already lane-generic — a session lane rides it like a user lane.
+    await executor.setDemand([SESSION_PIECE], [{
+      contextKey: sessionLane,
+      pieces: [SESSION_PIECE],
+    }]);
+
+    const sessionClaimKey: ActionClaimKey = {
+      branch: "",
+      space,
+      contextKey: sessionLane as ActionClaimKey["contextKey"],
+      pieceId: SESSION_PIECE,
+      actionId: SESSION_ACTION_ID,
+      actionKind: "computation",
+      implementationFingerprint: "impl:session-e2e",
+      runtimeFingerprint: "runtime:session-e2e",
+    };
+    worker.candidate(sessionClaimKey, { demandGeneration: 1 });
+    await awaitControlBarrier(claimed.promise, "session claim", events);
+    assertEquals(diagnostics, []);
+
+    // The claim's ACTIVATION carries the session identity to the Worker:
+    // the acting context is the claim's validated contextKey — parsed from
+    // the grant's canonical key, never assembled from a DID.
+    const activation = worker.messages.find((message) =>
+      (message as { type?: string }).type === "run-claimed-action"
+    ) as { claim: ExecutionClaim } | undefined;
+    assertExists(activation);
+    assertEquals(activation.claim.contextKey, sessionLane);
+
+    // The Worker's replica half: the REAL host provider channel port from
+    // the initialize wire, the REAL executor router serving the session
+    // lane. Commit a claimed session-context action run under the lane.
+    const initialize = worker.messages.find((message) =>
+      (message as { type?: string }).type === "initialize"
+    ) as {
+      port: MessagePort;
+      protocolFlags?: Partial<MemoryProtocolFlags>;
+    } | undefined;
+    assertExists(initialize);
+    const sourceAction = {};
+    const router = createExecutorActionTransactionRouter({
+      servedSpace: space as MemorySpace,
+      branch: "",
+      userRankCandidates: true,
+      sessionRankCandidates: true,
+      lanePrincipal: space,
+      openUserLaneKeys: () => [sessionLane],
+      claimForAction: (_action, lane) =>
+        lane === sessionLane ? activation.claim : undefined,
+      onCandidate: () => {},
+    });
+    workerStorage = HostStorageManager.connect({
+      port: initialize.port,
+      principal: space as MemorySpace,
+      space: space as MemorySpace,
+      branch: "",
+      protocolFlags: initialize.protocolFlags as never,
+      shadowWrites: true,
+      actionTransactionRouter: router,
+      executionLaneForAction: (action) =>
+        action === sourceAction ? sessionLane as never : undefined,
+    });
+    const sessionOut = {
+      space,
+      scope: "session" as const,
+      id: "of:session-e2e-output",
+      path: ["value"],
+    };
+    const observation = {
+      version: 2 as const,
+      ownerSpace: space,
+      branch: "",
+      pieceId: SESSION_PIECE,
+      processGeneration: 1,
+      actionId: SESSION_ACTION_ID,
+      actionKind: "computation" as const,
+      implementationFingerprint: "impl:session-e2e",
+      runtimeFingerprint: "runtime:session-e2e",
+      observedAtSeq: 0,
+      transactionKind: "action-run" as const,
+      reads: [],
+      shallowReads: [],
+      actualChangedWrites: [sessionOut],
+      currentKnownWrites: [sessionOut],
+      materializerWriteEnvelopes: [],
+      completeActionScopeSummary: {
+        version: 1 as const,
+        complete: true as const,
+        implementationFingerprint: "impl:session-e2e",
+        runtimeFingerprint: "runtime:session-e2e",
+        piece: {
+          space,
+          scope: "space" as const,
+          id: SESSION_PIECE.slice("space:".length),
+          path: ["value"],
+        },
+        reads: [],
+        writes: [sessionOut],
+        materializerWriteEnvelopes: [],
+        directOutputs: [sessionOut],
+      },
+      status: "success" as const,
+    };
+    const provider = workerStorage.open(space as MemorySpace);
+    const committed = await workerStorage.runWithExecutionLane(
+      space as MemorySpace,
+      sessionLane as never,
+      () =>
+        provider.replica.commitNative!(
+          {
+            operations: [{
+              op: "set",
+              id: "of:session-e2e-output" as never,
+              type: "application/json",
+              scope: "session",
+              value: { value: 42 },
+            }],
+            preconditions: [],
+            schedulerObservation: observation,
+          } as never,
+          // Minimal IStorageTransaction shape: the router resolves the
+          // commit's lane through sourceAction; the read builder needs the
+          // (empty) read-activity log.
+          { sourceAction, getReadActivities: () => [] } as never,
+        ),
+    );
+    assertEquals(committed.error, undefined);
+    const outcome = await awaitControlBarrier(
+      settled.promise,
+      "session settlement",
+      events,
+    );
+    assertEquals(outcome, "committed");
+  } finally {
+    unsubscribeControl();
+    if (executor !== null) await executor.stop();
+    if (workerStorage !== null) await workerStorage.close();
+    if (client !== null) await client.close();
+    resetServerPrimaryExecutionClaimRankConfig();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("CA9: session claims are refused at issuance without that session's live lane grant", async () => {
+  const principal = await Identity.fromPassphrase(
+    `executor session lane refusal ${crypto.randomUUID()}`,
+  );
+  const space = principal.did();
+  const SESSION_PIECE = "space:of:session-refusal-piece";
+  const server = new Server({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: { audience: "did:key:z6Mk-session-refusal" },
+    protocolFlags: {
+      ...REAL_SEAM_FLAGS,
+      serverPrimaryExecutionContextLatticeClaimsV1: true,
+    },
+    acl: { mode: "off", serviceDids: [space] },
+  });
+  setServerPrimaryExecutionClaimRankConfig("session");
+  const events: string[] = [];
+  let client: MemoryClient.Client | null = null;
+  let executor: Awaited<ReturnType<DenoSpaceExecutorFactory["start"]>> | null =
+    null;
+  try {
+    client = await MemoryClient.connect({
+      transport: MemoryClient.loopback(server),
+      protocolFlags: {
+        ...REAL_SEAM_FLAGS,
+        serverPrimaryExecutionContextLatticeClaimsV1: true,
+      },
+    });
+    const session = await client.mount(
+      space,
+      {},
+      (_space, _session, context) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: { principal: space },
+      }),
+    ) as MemoryClient.SpaceSession & {
+      sessionId: string;
+      transact(commit: unknown): Promise<{ seq: number }>;
+      setExecutionDemand(
+        branch: string,
+        pieces: readonly string[],
+      ): Promise<boolean>;
+    };
+    await session.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:session-refusal-seed",
+        value: { value: "seed" },
+      }],
+    });
+    await session.setExecutionDemand("", [SESSION_PIECE]);
+    const lease = await (server as unknown as {
+      acquireExecutionLease(
+        space: string,
+        branch: string,
+      ): Promise<ExecutionLeaseHandle | null>;
+    }).acquireExecutionLease(space, "");
+    assertExists(lease);
+
+    const worker = new FakeWorker();
+    const diagnostics: CandidateDiagnostic[] = [];
+    const factory = new DenoSpaceExecutorFactory({
+      server,
+      apiUrl: new URL("https://toolshed.example/"),
+      protocolFlags: {
+        serverPrimaryExecutionV1: true,
+        serverPrimaryExecutionClaimRoutingV1: true,
+        serverPrimaryExecutionBuiltinPassivityV1: true,
+      },
+      onCandidateDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      createWorker: () => {
+        queueMicrotask(() => worker.boot());
+        return worker;
+      },
+    });
+    executor = await factory.start({
+      space,
+      branch: "",
+      lease: lease as ExecutionLeaseHandle,
+      pieces: [SESSION_PIECE],
+      onCrash: (error) => events.push(`crash:${error}`),
+    });
+    // A fabricated session id: canonical in SHAPE, but the host holds no
+    // lane grant for it — the one authority a session identity can have.
+    const fabricatedLane = sessionExecutionContextKey(
+      space,
+      "session:never-granted",
+    );
+    await executor.setDemand([SESSION_PIECE], [{
+      contextKey: fabricatedLane,
+      pieces: [SESSION_PIECE],
+    }]);
+    const fabricatedClaimKey: ActionClaimKey = {
+      branch: "",
+      space,
+      contextKey: fabricatedLane as ActionClaimKey["contextKey"],
+      pieceId: SESSION_PIECE,
+      actionId: "action:session-refusal",
+      actionKind: "computation",
+      implementationFingerprint: "impl:session-refusal",
+      runtimeFingerprint: "runtime:session-refusal",
+    };
+    const fabricatedLaneGeneration = setDemandMessages(worker)
+      .at(-1)?.lanes?.find((lane) => lane.contextKey === fabricatedLane)
+      ?.demandGeneration;
+    assertExists(fabricatedLaneGeneration);
+    worker.candidate(fabricatedClaimKey, {
+      demandGeneration: fabricatedLaneGeneration,
+    });
+    const refused = await (async () => {
+      for (let i = 0; i < 400; i++) {
+        if (diagnostics.length > 0) return diagnostics;
+        await new Promise((resolve) => setTimeout(resolve));
+      }
+      return diagnostics;
+    })();
+    assertEquals(refused.map((entry) => entry.diagnosticCode), [
+      "claim-authority-lost",
+    ]);
+    // No activation ever reached the Worker for the fabricated session.
+    assertEquals(
+      worker.messages.some((message) =>
+        (message as { type?: string }).type === "run-claimed-action"
+      ),
+      false,
+    );
+
+    // The same shape WITH a live grant issues — then closing the grant
+    // (session-end = lane-end) refuses again: authority tracks the grant's
+    // lifecycle exactly.
+    const grant = await (server as unknown as {
+      openSessionLaneGrant(
+        space: string,
+        branch: string,
+        principal: string,
+        sessionId: string,
+      ): Promise<{ contextKey: `session:${string}:${string}` }>;
+      closeSessionLaneGrant(grant: unknown): boolean;
+    }).openSessionLaneGrant(space, "", space, session.sessionId);
+    await executor.setDemand([SESSION_PIECE], [{
+      contextKey: grant.contextKey,
+      pieces: [SESSION_PIECE],
+    }]);
+    const grantedClaimKey: ActionClaimKey = {
+      ...fabricatedClaimKey,
+      contextKey: grant.contextKey as ActionClaimKey["contextKey"],
+      actionId: "action:session-refusal-granted",
+    };
+    // The candidate must carry ITS lane's minted wire generation (A24).
+    const grantedLaneGeneration = setDemandMessages(worker)
+      .at(-1)?.lanes?.find((lane) => lane.contextKey === grant.contextKey)
+      ?.demandGeneration;
+    assertExists(grantedLaneGeneration);
+    worker.candidate(grantedClaimKey, {
+      demandGeneration: grantedLaneGeneration,
+    });
+    const activated = await (async () => {
+      for (let i = 0; i < 400; i++) {
+        const found = worker.messages.find((message) =>
+          (message as { type?: string; claim?: { contextKey?: string } })
+              .type === "run-claimed-action" &&
+          (message as { claim?: { contextKey?: string } }).claim
+              ?.contextKey === grant.contextKey
+        );
+        if (found !== undefined) return found;
+        await new Promise((resolve) => setTimeout(resolve));
+      }
+      return undefined;
+    })();
+    assertExists(activated);
+    assertEquals(events.filter((entry) => entry.startsWith("crash")), []);
+  } finally {
+    if (executor !== null) await executor.stop();
+    if (client !== null) await client.close();
+    resetServerPrimaryExecutionClaimRankConfig();
   }
 });

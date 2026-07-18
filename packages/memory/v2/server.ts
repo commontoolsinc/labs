@@ -3550,13 +3550,24 @@ export class Server {
   }
 
   /**
-   * C1.4b lane-scoped READ seam (context-lattice §3, amendment 1): a
-   * lease-bound executor session may name a per-request acting context;
-   * the host validates it against the LIVE lane grant of the binding's
-   * (space, branch) BEFORE any scope key resolves, rejecting in constant
-   * shape with the C1.3 fence-cause vocabulary. Requests without an acting
-   * context — and every non-lease session — keep today's session-derived
-   * scope context byte-identically.
+   * C1.4b lane-scoped READ seam (context-lattice §3, amendment 1; session
+   * lanes since C2.4): a lease-bound executor session may name a per-request
+   * acting context; the host validates it against the LIVE lane grant of the
+   * binding's (space, branch) BEFORE any scope key resolves — the same
+   * live-registry consult the commit fence's laneAuthority makes, so a
+   * drained (stale-generation) incarnation rejects identically — with the
+   * constant-shape C1.3 fence-cause vocabulary. A USER acting context
+   * resolves under (grant.principal, base.sessionId): user scope keys ignore
+   * the session id, so the sponsor's id is inert there. A SESSION acting
+   * context resolves under the GRANT's OWN (principal, sessionId) — NEVER
+   * base.sessionId (amendment CA8): base is the sponsor/executor session, so
+   * threading it into session-scope resolution would resolve a DIFFERENT
+   * session's instances of the same principal — the cross-session
+   * confidentiality trap. A grant for a different session is simply a miss
+   * in the live registry (the canonical context key IS the registry key) and
+   * rejects in the same constant shape as an absent or fenced grant.
+   * Requests without an acting context — and every non-lease session — keep
+   * today's session-derived scope context byte-identically.
    */
   #actingReadScopeContext(
     space: string,
@@ -3581,25 +3592,32 @@ export class Server {
       };
     }
     const principal = Engine.principalOfUserContextKey(actingContext);
-    if (principal === undefined) {
-      // Session acting-context READS are C2.4's seam (CA8: substitute the
-      // GRANT's session id, never base.sessionId). Until it lands, session
-      // acting contexts and malformed keys both reject here.
+    if (principal !== undefined) {
+      const grant = this.#userLaneGrants.get(
+        laneGrantKey(
+          space,
+          binding.lease.branch,
+          actingContext as `user:${string}`,
+        ),
+      );
+      if (grant === undefined) {
+        return { error: laneReadRejection() };
+      }
+      return { ok: { principal: grant.principal, sessionId: base.sessionId } };
+    }
+    if (Engine.parseSessionExecutionContextKey(actingContext) === undefined) {
       return {
         error: toError("ProtocolError", "malformed acting context"),
       };
     }
-    const grant = this.#userLaneGrants.get(
-      laneGrantKey(
-        space,
-        binding.lease.branch,
-        actingContext as `user:${string}`,
-      ),
+    const grant = this.#sessionLaneGrants.get(
+      laneGrantKey(space, binding.lease.branch, actingContext),
     );
     if (grant === undefined) {
       return { error: laneReadRejection() };
     }
-    return { ok: { principal: grant.principal, sessionId: base.sessionId } };
+    // CA8: the GRANT's session id — never the sponsor-derived base's.
+    return { ok: { principal: grant.principal, sessionId: grant.sessionId } };
   }
 
   /**
@@ -3630,6 +3648,14 @@ export class Server {
     }
     const keys: SchedulerExecutionContextKey[] = ["space"];
     for (const grant of this.#userLaneGrants.values()) {
+      if (grant.space === space && grant.branch === binding.lease.branch) {
+        keys.push(grant.contextKey as SchedulerExecutionContextKey);
+      }
+    }
+    // C2.4: open SESSION lane grants contribute their lanes exactly like
+    // user grants — the executor's applicable contexts derive from its open
+    // lanes of either rank, never from the sponsor principal.
+    for (const grant of this.#sessionLaneGrants.values()) {
       if (grant.space === space && grant.branch === binding.lease.branch) {
         keys.push(grant.contextKey as SchedulerExecutionContextKey);
       }
@@ -6797,6 +6823,16 @@ export class Server {
         message.actingContext !== undefined && message.actingContext !== "space"
           ? scopeResolution.ok.principal
           : undefined;
+      // C2.4: a SESSION acting context pins the lane's session id (the
+      // GRANT's, already substituted by #actingReadScopeContext) to the
+      // watch set, so refresh and member fan-out keep resolving the lane's
+      // own session instances (CA8). User lanes leave it undefined — user
+      // scope keys ignore the session id.
+      const actingSessionId = message.actingContext !== undefined &&
+          Engine.parseSessionExecutionContextKey(message.actingContext) !==
+            undefined
+        ? scopeResolution.ok.sessionId
+        : undefined;
       const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
         message.space,
         message.watches,
@@ -6827,11 +6863,12 @@ export class Server {
       // remove.
       suppressDocSetMemberRemoves(sync, session.docSetMembers);
       session.watches = message.watches;
-      // The registration's acting principal is part of the watch set: the
+      // The registration's acting identity is part of the watch set: the
       // full-re-evaluation refresh resolves under it, so a lane watch never
       // silently flips back to the sponsor's instances. Per-lane watch
       // LIFECYCLE (drain clearing lane watches, one set per lane) is C1.5b.
       session.watchScopePrincipal = actingPrincipal;
+      session.watchScopeSessionId = actingSessionId;
       session.graphs = graphs;
       session.entities = entities;
       // FA14 union surface; also folds in the just-registered member ids.
@@ -6918,7 +6955,18 @@ export class Server {
         message.actingContext !== undefined && message.actingContext !== "space"
           ? scopeResolution.ok.principal
           : undefined;
-      if (actingPrincipal !== session.watchScopePrincipal) {
+      const actingSessionId = message.actingContext !== undefined &&
+          Engine.parseSessionExecutionContextKey(message.actingContext) !==
+            undefined
+        ? scopeResolution.ok.sessionId
+        : undefined;
+      // C2.4: the full acting LANE identity must match — same principal is
+      // not enough, or an add under a sibling session's grant would splice
+      // into another lane's watch set (CA8's trap on the add path).
+      if (
+        actingPrincipal !== session.watchScopePrincipal ||
+        actingSessionId !== session.watchScopeSessionId
+      ) {
         return respondTypedError<WatchAddResult>(
           message.requestId,
           toError(
@@ -7276,17 +7324,24 @@ export class Server {
     return { docsWatches };
   }
 
-  /** Doc-set members read under (watchScopePrincipal ?? session.principal,
-   * session.sessionId) — FA2's per-session point-read context. Mirrors the
-   * full-re-evaluation scope exactly so a member's registration-time resolved
-   * scope key equals its fan-out read scope key. */
+  /** Doc-set members read under the watch set's registration context —
+   * (watchScopePrincipal, watchScopeSessionId ?? base session id), falling
+   * back to the session's own scope context — FA2's per-session point-read
+   * context. Mirrors the full-re-evaluation scope exactly so a member's
+   * registration-time resolved scope key equals its fan-out read scope key;
+   * for a SESSION-lane watch set the lane's own session id (C2.4/CA8) is
+   * what keeps that equality — the sponsor's would resolve a phantom
+   * instance and silently drop the member's deltas. */
   #docSetReadContext(
     space: string,
     session: SessionState,
   ): { principal?: string; sessionId: string } {
     const base = this.#scopeContextForSession(space, session);
     return session.watchScopePrincipal !== undefined
-      ? { principal: session.watchScopePrincipal, sessionId: base.sessionId }
+      ? {
+        principal: session.watchScopePrincipal,
+        sessionId: session.watchScopeSessionId ?? base.sessionId,
+      }
       : base;
   }
 
@@ -7993,12 +8048,14 @@ export class Server {
             undefined,
             // C1.4b: a watch set registered under an acting context keeps
             // resolving under it on full re-evaluation (never silently
-            // flipping to the sponsor's instances); C1.5b owns per-lane
-            // watch lifecycle on lane drains.
+            // flipping to the sponsor's instances) — including the LANE's
+            // session id for a session-lane set (C2.4/CA8); C1.5b owns
+            // per-lane watch lifecycle on lane drains.
             session.watchScopePrincipal !== undefined
               ? {
                 principal: session.watchScopePrincipal,
-                sessionId: refreshScope.sessionId,
+                sessionId: session.watchScopeSessionId ??
+                  refreshScope.sessionId,
               }
               : refreshScope,
           );

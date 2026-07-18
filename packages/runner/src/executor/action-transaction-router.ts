@@ -1,6 +1,8 @@
 import {
   type ActionClaimKey,
   type ExecutionClaim,
+  parseSessionExecutionContextKey,
+  principalOfUserContextKey,
   userExecutionContextKey,
 } from "@commonfabric/memory/v2";
 import type { MemorySpace } from "@commonfabric/memory/interface";
@@ -74,15 +76,30 @@ export interface ExecutorActionTransactionRouterOptions {
    * classification either way (amendment 8). Requires `lanePrincipal`.
    */
   readonly userRankCandidates?: boolean;
+  /**
+   * C2.5 session-rank candidates, default OFF and layered on
+   * `userRankCandidates` (the rank ladder: session implies user): when both
+   * are true, a computation whose surfaces include session-scoped addresses
+   * classifies at session rank and produces one candidate per OPEN session
+   * lane. There is deliberately NO pre-lane fallback at session rank — a
+   * bare DID cannot name a session, so with no open session lane the action
+   * simply stays a local shadow with zero candidates (review CA9: the
+   * session identity source is the host's lane-grant machinery, never a key
+   * fabricated from `lanePrincipal`).
+   */
+  readonly sessionRankCandidates?: boolean;
   /** Principal of this Worker's acting context — the canonical `user:<did>`
    * candidate keys are constructed from it (amendment 18 helpers only). */
   readonly lanePrincipal?: string;
   /**
-   * C1.9c per-lane candidates: canonical `user:<did>` context keys of the
-   * OPEN user lanes whose aggregated demand (C1.8) covers `pieceId`. A
-   * user-rank action produces one candidate per returned lane. An absent
-   * callback or an `undefined` result (the pre-lane wire) falls back to the
-   * lease sponsor's lane — the C1.5a single-lane behavior.
+   * C1.9c per-lane candidates: canonical context keys of the OPEN lanes
+   * whose aggregated demand (C1.8/C2.7) covers `pieceId`. An action of
+   * classified rank R produces one candidate per returned lane OF RANK R
+   * (review CA9's rank filter — a user-rank action is never paired with a
+   * session lane, and vice versa); non-canonical keys are dropped. An
+   * absent callback or an `undefined` result (the pre-lane wire) falls back
+   * to the lease sponsor's lane for USER rank only — the C1.5a single-lane
+   * behavior; session rank has no representable pre-lane identity.
    */
   readonly openUserLaneKeys?: (
     pieceId: string,
@@ -294,6 +311,10 @@ export function createExecutorActionTransactionRouter(
     const userLaneEnabled = options.userRankCandidates === true &&
       typeof options.lanePrincipal === "string" &&
       options.lanePrincipal.length > 0;
+    // The rank ladder (C2.5): session candidacy layers on user candidacy,
+    // mirroring the host's ladder-semantic claim-rank dial.
+    const sessionLaneEnabled = userLaneEnabled &&
+      options.sessionRankCandidates === true;
     if (userLaneEnabled && options.onLaneSurface !== undefined) {
       const laneSurface = laneScopedDocumentAddresses(routedObservation);
       if (laneSurface.length > 0) {
@@ -303,26 +324,41 @@ export function createExecutorActionTransactionRouter(
     const staticDecision = classifyStaticActionServability(
       routedObservation,
       options.servedSpace,
-      userLaneEnabled ? { userContext: true } : undefined,
+      sessionLaneEnabled
+        ? { userContext: true, sessionContext: true }
+        : userLaneEnabled
+        ? { userContext: true }
+        : undefined,
     );
-    // The candidate context rank follows the static classification: a
-    // user-rank computation keys its candidates by the canonical user
-    // context keys of the OPEN lanes with demand for its piece (C1.9c); on
-    // the pre-lane wire the lease sponsor's lane remains the only one.
-    const contextRank: "space" | "user" =
-      staticDecision.status === "claim-ready" &&
-        staticDecision.contextRank === "user"
-        ? "user"
+    // The candidate context rank follows the static classification — the
+    // NARROWEST admitted rank (C2.2's claim-ready contextRank): a scoped
+    // computation keys its candidates by the canonical context keys of the
+    // OPEN lanes of that rank with demand for its piece (C1.9c/C2.5); on
+    // the pre-lane wire only user rank has a representable lane (the lease
+    // sponsor's — CA9).
+    const contextRank: "space" | "user" | "session" =
+      staticDecision.status === "claim-ready"
+        ? staticDecision.contextRank ?? "space"
         : "space";
-    // This commit's own claim identity: a claimed user-rank commit belongs
-    // to its owning lane; an unclaimed (space-lane) run of a user-rank
-    // action keeps the sponsor-lane key as the representative for
-    // diagnostics and dedupe.
-    const commitContextKey = contextRank === "user"
-      ? (commitLane !== "space"
+    // This commit's own claim identity. A claimed scoped-rank commit
+    // belongs to its owning lane — but only when that lane's CANONICAL rank
+    // matches the classified rank (the CA9 identity chain: the session id
+    // enters from the claim's validated contextKey, never from any local
+    // string-building). An unclaimed run of a user-rank action keeps the
+    // sponsor-lane key as the representative for diagnostics and dedupe; an
+    // unclaimed session-rank run stays on the space representative — a bare
+    // DID cannot name a session (CA9: unserve-or-stay-space, never
+    // fabricate). A rank-mismatched or non-canonical commit lane falls
+    // through to the same representative, so the claim-key match below
+    // rejects the pairing loudly instead of adopting a fabricated identity.
+    const commitContextKey: ActionClaimKey["contextKey"] =
+      contextRank === "space"
+        ? "space"
+        : commitLane !== "space" && laneKeyRank(commitLane) === contextRank
         ? commitLane
-        : userExecutionContextKey(options.lanePrincipal!))
-      : "space";
+        : contextRank === "user"
+        ? userExecutionContextKey(options.lanePrincipal!)
+        : "space";
     const claimKey = actionClaimKeyFromObservation(
       routedObservation,
       commitContextKey,
@@ -359,12 +395,14 @@ export function createExecutorActionTransactionRouter(
       return local;
     }
     // Engine-emission lockstep for the §4 output-widening pair (A7): a
-    // user-rank claimed commit presents its trusted certificate with the
+    // scoped-rank claimed commit presents its trusted certificate with the
     // acting lane's instance of each broad direct output added to the write
     // envelopes — exactly the pair shape the engine's scope-sensitive
-    // coverage (and its conformance fixtures) accepts.
-    const observationForClaim = contextRank === "user"
-      ? widenUserLaneOutputEnvelopes(routedObservation)
+    // coverage (and its conformance fixtures) accepts. The instance scope
+    // is the acting rank: the principal's user instance at user rank, the
+    // acting session's instance at session rank (C2.2/C2.5).
+    const observationForClaim = contextRank !== "space"
+      ? widenLaneOutputEnvelopes(routedObservation, contextRank)
       : routedObservation;
     const permanentUnservedReason = liveClaim === undefined
       ? undefined
@@ -412,9 +450,10 @@ export function createExecutorActionTransactionRouter(
         servedSpace: options.servedSpace,
         branch: options.branch,
         contextRank,
-        // Executor user-rank commits act on the lane, so the engine's §4
-        // broad scope-naming backstop applies at this seam too.
-        laneActingCommit: contextRank === "user",
+        // Executor scoped-rank commits (user and session alike, C2.5) act
+        // on the lane, so the engine's §4 broad scope-naming backstop
+        // applies at this seam too.
+        laneActingCommit: contextRank !== "space",
       },
     );
     if (dynamicReason !== undefined) {
@@ -436,13 +475,14 @@ export function createExecutorActionTransactionRouter(
       );
       return local;
     }
-    // One candidate per serving lane (C1.9c): space rank keys the single
-    // space candidate; user rank keys one candidate per open user lane
-    // whose demand covers the piece. Servability is an action-level
-    // property (the certificate names declared scopes, never a principal),
-    // so one proven run vouches for every lane's candidate.
-    const candidateKeys: ActionClaimKey[] = contextRank === "user"
-      ? candidateUserLaneKeys(options, claimKey.pieceId).map((
+    // One candidate per serving lane (C1.9c/C2.5): space rank keys the
+    // single space candidate; a scoped rank keys one candidate per open
+    // lane OF THAT RANK whose demand covers the piece (CA9's rank filter).
+    // Servability is an action-level property (the certificate names
+    // declared scopes, never a principal or session id), so one proven run
+    // vouches for every lane's candidate.
+    const candidateKeys: ActionClaimKey[] = contextRank !== "space"
+      ? candidateLaneKeys(options, claimKey.pieceId, contextRank).map((
         contextKey,
       ) => ({ ...claimKey, contextKey }))
       : [claimKey];
@@ -475,12 +515,12 @@ export function createExecutorActionTransactionRouter(
     }
     // A claimed run keeps vouching for its SIBLING lanes (C1.9c): a
     // still-unclaimed lane's candidate re-emits from this proven run. Only a
-    // user-rank action has siblings — a space-rank claim owns the sole
+    // scoped-rank action has siblings — a space-rank claim owns the sole
     // "space" lane, so its lone candidate is already the claimed one and
     // `emitCandidates` would no-op. Attach the callback only when it does
     // real work (sibling vouching or the host's attempt-started hook), so a
     // fully-claimed space run stays a bare upstream route.
-    const vouchForSiblingLanes = contextRank === "user";
+    const vouchForSiblingLanes = contextRank !== "space";
     const afterRouteSelected =
       options.onAttemptStarted !== undefined || vouchForSiblingLanes
         ? () => {
@@ -520,18 +560,45 @@ export function createExecutorActionTransactionRouter(
   });
 }
 
-/** The user lanes a user-rank action's candidates key by (C1.9c): every
- * open lane whose C1.8 demand slice covers the piece; the sponsor's lane on
- * the pre-lane wire. Canonical keys only (amendment 18). */
-function candidateUserLaneKeys(
+/** Canonical rank of one lane context key: "user" for a canonical
+ * `user:<did>` key, "session" for a canonical `session:<did>:<sid>` key,
+ * undefined for anything else — including raw-concatenated keys whose
+ * colon-bearing segments were never percent-encoded (amendment 18). The
+ * undefined arm is load-bearing for CA9: a non-canonical key can only come
+ * from a host bug or a fabricated identity, and must never key a candidate
+ * or be adopted as a commit's identity. */
+function laneKeyRank(key: string): "user" | "session" | undefined {
+  if (principalOfUserContextKey(key) !== undefined) return "user";
+  if (parseSessionExecutionContextKey(key) !== undefined) return "session";
+  return undefined;
+}
+
+/** The lanes a scoped-rank action's candidates key by (C1.9c, session rank
+ * with C2.5): every open lane OF THE ACTION'S RANK whose demand slice
+ * covers the piece — review CA9's "candidate lanes ⊆ action rank" contract,
+ * which keeps a user-rank action from ever pairing with a session lane (and
+ * vice versa; mixed-rank pairing would ping-pong against chain-compatible
+ * issuance). On the pre-lane wire, USER rank falls back to the lease
+ * sponsor's lane (C1.5a); SESSION rank has no representable fallback — a
+ * session identity exists only in the host's lane-grant machinery, so the
+ * action waits for an open session lane instead of fabricating a key from a
+ * DID (CA9). Canonical keys only (amendment 18). */
+function candidateLaneKeys(
   options: ExecutorActionTransactionRouterOptions,
   pieceId: string,
+  rank: "user" | "session",
 ): readonly ActionClaimKey["contextKey"][] {
   const laneKeys = options.openUserLaneKeys?.(pieceId);
   if (laneKeys === undefined) {
-    return [userExecutionContextKey(options.lanePrincipal!)];
+    return rank === "user"
+      ? [userExecutionContextKey(options.lanePrincipal!)]
+      : [];
   }
-  return [...new Set(laneKeys)] as ActionClaimKey["contextKey"][];
+  const keys = new Set<string>();
+  for (const laneKey of laneKeys) {
+    if (laneKeyRank(laneKey) === rank) keys.add(laneKey);
+  }
+  return [...keys] as ActionClaimKey["contextKey"][];
 }
 
 function prepareSupportedBuiltinObservation(
@@ -1054,18 +1121,21 @@ function laneScopedDocumentAddresses(
 
 /**
  * The §4 output-widening pair, presented as the engine admits it
- * (context-lattice C1.2/C1.9): the transformer certificate declares the
- * derived output ONCE at the broad space address, while a user-rank run
- * writes that document twice — the broad scope-naming redirect link plus the
- * value at the ACTING principal's user instance. The engine's write-coverage
- * check is scope-sensitive, so the claimed commit's trusted summary must
- * carry the lane instance explicitly; add `user`-scope twins of the broad
- * direct outputs to the write envelopes (id and path unchanged — never
- * another document, never session scope). This mirrors the shape pinned by
- * the engine's lane-firewall conformance tests.
+ * (context-lattice C1.2/C1.9, session rank with C2.2/C2.5): the transformer
+ * certificate declares the derived output ONCE at the broad space address,
+ * while a scoped-rank run writes that document twice — the broad
+ * scope-naming redirect link plus the value at the ACTING context's
+ * instance (the principal's user instance at user rank; the acting
+ * session's instance at session rank). The engine's write-coverage check is
+ * scope-sensitive, so the claimed commit's trusted summary must carry the
+ * lane instance explicitly; add `laneScope`-scope twins of the broad direct
+ * outputs to the write envelopes (id and path unchanged — never another
+ * document, never a scope outside the acting rank). This mirrors the shape
+ * pinned by the engine's lane-firewall conformance tests.
  */
-function widenUserLaneOutputEnvelopes(
+function widenLaneOutputEnvelopes(
   observation: SchedulerActionObservation,
+  laneScope: "user" | "session",
 ): SchedulerActionObservation {
   const summary = observation.completeActionScopeSummary;
   if (summary === undefined) return observation;
@@ -1073,7 +1143,7 @@ function widenUserLaneOutputEnvelopes(
     .filter((output) => (output.scope ?? "space") === "space")
     .map((output) => ({
       ...output,
-      scope: "user" as const,
+      scope: laneScope,
       path: [...output.path],
     }));
   if (laneInstances.length === 0) return observation;

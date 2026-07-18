@@ -250,6 +250,22 @@ export interface ExperimentalOptions {
    */
   serverPrimaryExecutionUserRankCandidates?: boolean | undefined;
   /**
+   * Let the executor Worker produce SESSION-RANK candidate claims for
+   * computation actions whose surfaces are session-scoped (context-lattice
+   * C2.5). Layered on {@link serverPrimaryExecutionUserRankCandidates} —
+   * the rank ladder, mirroring the memory-side claim-rank dial — so
+   * enabling it alone changes nothing. Candidates key by the canonical
+   * `session:<did>:<sessionId>` context keys of OPEN session lanes only;
+   * with no open session lane a session-rank action produces zero
+   * candidates (review CA9: the session identity source is the host's
+   * lane-grant machinery — never a key fabricated from a DID). Default off:
+   * session-scoped surfaces classify exactly as the pre-C2.5 executor does
+   * (unservable), byte-identical space/user behavior. Programmatic-only,
+   * flipped inside C2 gate fixtures together with the memory-side
+   * `serverPrimaryExecutionClaimRank` dial's `session` stage.
+   */
+  serverPrimaryExecutionSessionRankCandidates?: boolean | undefined;
+  /**
    * The client half of the F3 doc-set watch subcapability (feed protocol):
    * when on, and the peer advertises `serverPrimaryExecutionDocSetWatchV1`,
    * the client replica exports its held-doc closure as an additive `docs`

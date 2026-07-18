@@ -2,6 +2,7 @@ import {
   ActionClaimKey,
   actionClaimMapKey,
   ExecutionClaim,
+  parseSessionExecutionContextKey,
   principalOfUserContextKey,
   type WireMemoryProtocolFlags,
   wireMemoryProtocolFlags,
@@ -255,14 +256,17 @@ const isCandidateClaim = (value: unknown): value is CandidateClaim => {
   if (typeof claim !== "object" || claim === null) return false;
   const key = claim as Record<string, unknown>;
   return typeof key.branch === "string" && typeof key.space === "string" &&
-    // C1.5a widens the intra-Worker lane identity to space plus canonical
-    // user-rank keys; session rank stays rejected until C2. User-rank claims
-    // are computation-only in C1 (amendment 8) — the executor never requests
-    // one for an effect.
+    // C1.5a widened the intra-Worker lane identity to space plus canonical
+    // user-rank keys; C2.5 adds canonical `session:<did>:<sid>` keys — the
+    // exact-shape parse is the wire-boundary half of CA9/CA12 (a fabricated
+    // or raw-concatenated session key never reaches claim issuance).
+    // Scoped-rank claims are computation-only (amendment 8; C2.8 lifts it)
+    // — the executor never requests one for an effect.
     typeof key.contextKey === "string" &&
     (key.contextKey === "space" ||
       (key.actionKind === "computation" &&
-        principalOfUserContextKey(key.contextKey) !== undefined)) &&
+        (principalOfUserContextKey(key.contextKey) !== undefined ||
+          parseSessionExecutionContextKey(key.contextKey) !== undefined))) &&
     typeof key.pieceId === "string" &&
     typeof key.actionId === "string" &&
     (key.actionKind === "computation" || key.actionKind === "effect") &&

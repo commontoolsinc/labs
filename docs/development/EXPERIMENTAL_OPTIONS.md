@@ -31,6 +31,7 @@ was last checked against the code.
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | on | Bernhard Seefeld (#3646) | graduate to always-on | implemented, on by default, rollback override retained |
 | [`serverPrimaryExecution`](#serverprimaryexecution) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (server-primary execution W0.6) | graduate after the phased authority rollout, then delete flag | implemented, off by default |
 | [`serverPrimaryExecutionUserRankCandidates`](#serverprimaryexecutionuserrankcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C1.5a) | fold into `serverPrimaryExecution` once user lanes graduate | implemented, off by default |
+| [`serverPrimaryExecutionSessionRankCandidates`](#serverprimaryexecutionsessionrankcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C2.5) | fold into `serverPrimaryExecution` once session lanes graduate | implemented, off by default, fixture-only until C2.6 (CA4) |
 | [`serverPrimaryExecutionDocSetWatch`](#serverprimaryexecutiondocsetwatch) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH` env, or `RuntimeOptions.experimental`; bridges the memory-side `setServerPrimaryExecutionDocSetWatchConfig()` (negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution F3 server / F4 client) | fold into `serverPrimaryExecution` once the feed graduates, then retire the negotiation | implemented, off by default |
 | [`serverPrimaryExecutionGraphRetirement`](#serverprimaryexecutiongraphretirement) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES` env (comma-separated space DIDs or `*`), applied at server construction; ambient `setServerPrimaryExecutionGraphRetirementConfig(spaces)` (host-internal, per-space, not negotiated) | empty set (absent-false: no space admitted to the doc-set surface) | Bernhard Seefeld (server-side execution F5; FW5 admission redesign) | fold into `serverPrimaryExecution` once the feed graduates | implemented, empty by default |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
@@ -236,6 +237,51 @@ propagate](#how-flags-propagate).
 - **Path to removal.** Graduate user-rank candidacy with the rest of the C1
   gates, fold it into `serverPrimaryExecution` alongside the claim-rank dial,
   then delete the option and its Worker plumbing.
+
+### `serverPrimaryExecutionSessionRankCandidates`
+
+- **Toggle via.**
+  `RuntimeOptions.experimental.serverPrimaryExecutionSessionRankCandidates`
+  only. Mapped to `null` in the canonical `EXPERIMENTAL_ENV_VARS` registry —
+  deliberately programmatic-only, like the user-rank dial it layers on; C2
+  gate fixtures flip it together with the memory-side
+  `serverPrimaryExecutionClaimRank` dial's `session` stage.
+- **Added by.** Bernhard Seefeld, in server-side execution C2.5 (session-rank
+  executor candidate identity, 2026-07-17).
+- **Purpose.** Gates SESSION-RANK candidate production in the executor Worker
+  (context-lattice design §2/§6, C2). Layered on
+  `serverPrimaryExecutionUserRankCandidates` — the rank ladder, mirroring the
+  claim-rank dial — so enabling it alone changes nothing. When both are on, a
+  computation whose observed surfaces include session-scoped addresses
+  classifies at session rank (the classification also admits the lane
+  principal's user-scoped surfaces — the broader-in-chain chain rule, review
+  CA3), and its CandidateClaims carry the canonical
+  `session:<did>:<sessionId>` context keys of the OPEN session lanes whose
+  demand covers the piece — one candidate per lane, session lanes only
+  (review CA9's rank filter). There is deliberately NO pre-lane fallback: a
+  bare DID cannot name a session, so with no open session lane a
+  session-rank action stays a local shadow with zero candidates — the
+  session identity source is the host's lane-grant machinery
+  (`openSessionLaneGrant`, C2.3), threaded to the Worker through the claim's
+  validated contextKey, never fabricated locally (CA9). Claim ISSUANCE is
+  additionally gated by the host's claim-rank dial `session` stage, so
+  either dial alone keeps session lanes fully inert.
+- **Current default and planned end state.** Off by default: session-scoped
+  surfaces classify exactly as the pre-C2.5 executor does (unservable), and
+  space/user classification is byte-identical. **Fixture-only until C2.6
+  lands (the CA4 ordering invariant):** the pre-C2.6 principal-wide
+  session-claim broadcast makes sibling-session claim churn a quadratic
+  spurious-rerun source, so this dial must never be ambiently enabled while
+  C2.6's named-session delivery narrowing is unlanded. C2.7 wires the
+  pool-side session-lane demand aggregation to the same flag.
+- **Status on 2026-07-17.** Implemented (C2.5: router widening on both the
+  executor and cooperative-client routers, the CA9 candidate-identity rank
+  filter, and the CA3 replica laneScopeKey broader-in-chain collapse land
+  together); inert in production because nothing wires session-lane demand
+  until C2.7.
+- **Path to removal.** Graduate session-rank candidacy with the C2 gates,
+  fold it into `serverPrimaryExecution` alongside the claim-rank dial, then
+  delete the option and its Worker plumbing.
 
 ### `serverPrimaryExecutionDocSetWatch`
 

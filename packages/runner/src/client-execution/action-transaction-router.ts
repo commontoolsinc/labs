@@ -84,17 +84,28 @@ export function routeClientActionTransaction(
     return upstream;
   }
   // Both servability firewalls are lane-parameterized by the ACCEPTED
-  // claim's contextKey (amendments A15/A19): a user- or session-context
-  // claim admits the lane principal's user-scoped surfaces. Session rank
-  // maps onto the user parameterization until C2 teaches the classifiers
-  // session scope — session-scoped surfaces keep failing open below, a
-  // conservative subset of the session lane's authority. A space claim
-  // keeps both classifiers byte-identical to the space-only behavior.
-  const claimRank = claim.contextKey === "space" ? "space" : "user";
+  // claim's contextKey (amendments A15/A19; session rank with C2.5). A
+  // session-context claim classifies with the session lane — its chain
+  // includes the principal's user rank, so `sessionContext` implies the
+  // user admissions (CA3's broader-in-chain rule) — a user-context claim
+  // with the user lane, and a space claim keeps both classifiers
+  // byte-identical to the space-only behavior. The accepted claim is
+  // already chain-scoped to the client's OWN session (ownContextKeys
+  // above), so the session parameterization always names this client's
+  // acting session — never a sibling's.
+  const claimRank: "space" | "user" | "session" = claim.contextKey === "space"
+    ? "space"
+    : claim.contextKey.startsWith("session:")
+    ? "session"
+    : "user";
   const staticDecision = classifyStaticActionServability(
     observation,
     input.space,
-    claimRank === "user" ? { userContext: true } : undefined,
+    claimRank === "session"
+      ? { sessionContext: true }
+      : claimRank === "user"
+      ? { userContext: true }
+      : undefined,
   );
   const expectedStaticStatus = claim.actionKind === "effect"
     ? "broker-required"

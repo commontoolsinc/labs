@@ -22,6 +22,12 @@ export type SessionState = {
    * (a lease-bound executor session acting for a lane); undefined = the
    * session's own scope context. Replaced atomically with the watch set. */
   watchScopePrincipal?: string;
+  /** C2.4: the LANE's session id when the current watch set was registered
+   * under a SESSION acting context (the grant's session id, CA8) — the
+   * refresh/fan-out read context must resolve session scope under it, never
+   * under the sponsor session. undefined for user-lane and non-lane watch
+   * sets. Replaced atomically with the watch set. */
+  watchScopeSessionId?: string;
   graphs: Map<string, TrackedGraphState>;
   entities: Map<string, SessionCacheEntry>;
   /** F3 doc-set membership, keyed by resolved scope key (docSetMemberKey).
@@ -183,6 +189,7 @@ export class SessionRegistry {
       lastSyncedSeq: existing?.lastSyncedSeq ?? seenSeq,
       watches: existing?.watches ?? [],
       watchScopePrincipal: existing?.watchScopePrincipal,
+      watchScopeSessionId: existing?.watchScopeSessionId,
       graphs: existing?.graphs ?? new Map(),
       entities: existing?.entities ?? new Map(),
       // FA15: doc-set membership survives reconnect so resumed catch-up diffs

@@ -20,6 +20,7 @@ import {
   type GraphQuery,
   resetPersistentSchedulerStateConfig,
   type SchedulerExecutionContextKey,
+  sessionExecutionContextKey,
   type SessionSync,
   setPersistentSchedulerStateConfig,
   userExecutionContextKey,
@@ -818,6 +819,223 @@ Deno.test("A16 cross-lane pending read: lane B's commit never names lane A's unc
     await Promise.all([first, second]);
   } finally {
     holdA.resolve();
+    await storage.close();
+  }
+});
+
+// --- C2.5 (review CA3): laneScopeKey broader-in-chain collapse --------------
+//
+// A session lane's chain is `space < user:<p> < session:<p>:<s>` — a
+// broader-but-in-chain declared scope read under the session lane collapses
+// to the broadest chain member that OWNS the scope: `user` under
+// `session:<p>:<s>` keys `user:<p>` (matching the host stamp, which resolves
+// user scope principal-wide and ignores the session id), and `space`
+// collapses to the shared space lane as it always has. No phantom
+// session-keyed instances of user docs; no frame dropped to the space lane.
+
+const SESSION_A1 = sessionExecutionContextKey("did:key:lane-a", "s1");
+const SESSION_A2 = sessionExecutionContextKey("did:key:lane-a", "s2");
+const SESSION_B1 = sessionExecutionContextKey("did:key:lane-b", "s1");
+
+Deno.test("CA3: a session lane's user-scoped read resolves the principal's user instance (one shared record)", async () => {
+  const factory = new LaneSessionFactory();
+  const storage = LaneStorageManager.connect(factory, { shadowWrites: true });
+  try {
+    // Register the user lane and both of the principal's session lanes, then
+    // confirm the user instance via the host stamp (scopeKey user:<p>).
+    storage.runWithExecutionLane(SPACE, LANE_A, () => {});
+    storage.runWithExecutionLane(SPACE, SESSION_A1, () => {});
+    storage.runWithExecutionLane(SPACE, SESSION_A2, () => {});
+    storage.runWithExecutionLane(SPACE, SESSION_B1, () => {});
+    seedConfirmed(factory, [
+      { id: SCOPED, scope: "user", scopeKey: LANE_A, value: "alice-doc" },
+    ]);
+    await storage.open(SPACE).sync(SCOPED, undefined, "user");
+
+    // The user lane and BOTH of the principal's session lanes read the same
+    // single instance — the broader-in-chain collapse (no phantom default).
+    storage.runWithExecutionLane(SPACE, LANE_A, () => {
+      assertEquals(docValue(storage, SCOPED, "user"), "alice-doc");
+    });
+    storage.runWithExecutionLane(SPACE, SESSION_A1, () => {
+      assertEquals(docValue(storage, SCOPED, "user"), "alice-doc");
+    });
+    storage.runWithExecutionLane(SPACE, SESSION_A2, () => {
+      assertEquals(docValue(storage, SCOPED, "user"), "alice-doc");
+    });
+    // Another principal's session lane never resolves it…
+    storage.runWithExecutionLane(SPACE, SESSION_B1, () => {
+      assertEquals(docValue(storage, SCOPED, "user"), undefined);
+    });
+    // …and the space lane's declared-key instance stays untouched.
+    assertEquals(docValue(storage, SCOPED, "user"), undefined);
+  } finally {
+    await storage.close();
+  }
+});
+
+Deno.test("CA3: a user-stamped frame reaches the session lane when no user lane is registered", async () => {
+  const factory = new LaneSessionFactory();
+  const storage = LaneStorageManager.connect(factory, { shadowWrites: true });
+  try {
+    // ONLY the session lane is registered (the C2 shape: a session lane
+    // serving a session whose principal has no separate user lane). The
+    // host stamps user-scoped data `user:<p>`; attribution must land it on
+    // the collapsed key the session lane reads, not drop it to the space
+    // lane (the CA3 phantom-read defect).
+    storage.runWithExecutionLane(SPACE, SESSION_A1, () => {});
+    seedConfirmed(factory, [
+      { id: SCOPED, scope: "user", scopeKey: LANE_A, value: "alice-doc" },
+    ]);
+    await storage.open(SPACE).sync(SCOPED, undefined, "user");
+
+    storage.runWithExecutionLane(SPACE, SESSION_A1, () => {
+      assertEquals(docValue(storage, SCOPED, "user"), "alice-doc");
+    });
+    // The declared space-lane key must NOT have swallowed the frame.
+    assertEquals(docValue(storage, SCOPED, "user"), undefined);
+    storage.runWithExecutionLane(SPACE, SESSION_B1, () => {
+      assertEquals(docValue(storage, SCOPED, "user"), undefined);
+    });
+  } finally {
+    await storage.close();
+  }
+});
+
+Deno.test("CA3: session-scoped docs stay distinct per session lane (no collapse within rank)", async () => {
+  const factory = new LaneSessionFactory();
+  const storage = LaneStorageManager.connect(factory, { shadowWrites: true });
+  try {
+    await storage.runWithExecutionLane(
+      SPACE,
+      SESSION_A1,
+      () => writeDoc(storage, SCOPED, "alpha", { scope: "session" }),
+    );
+    storage.runWithExecutionLane(SPACE, SESSION_A1, () => {
+      assertEquals(docValue(storage, SCOPED, "session"), "alpha");
+    });
+    // The sibling session's instance of the same id is a different document
+    // (session scope is OWNED by the session lane — never collapsed).
+    storage.runWithExecutionLane(SPACE, SESSION_A2, () => {
+      assertEquals(docValue(storage, SCOPED, "session"), undefined);
+    });
+    assertEquals(docValue(storage, SCOPED, "session"), undefined);
+  } finally {
+    await storage.close();
+  }
+});
+
+Deno.test("CA3/A16: the collapse shares confirmed state but never a chain sibling's pending versions", async () => {
+  const factory = new LaneSessionFactory();
+  const actionUser = {};
+  const actionSession = {};
+  // Both lanes route upstream (no shadow versions anywhere): only the A16
+  // lane machinery keeps the user lane's unconfirmed version out of the
+  // session lane's basis — ON THE SAME collapsed record.
+  const router: ActionTransactionRouter = () => ({ disposition: "upstream" });
+  const storage = LaneStorageManager.connect(factory, {
+    shadowWrites: true,
+    actionTransactionRouter: router,
+    executionLaneForAction: (action) =>
+      action === actionUser
+        ? LANE_A
+        : action === actionSession
+        ? SESSION_A1
+        : undefined,
+  });
+  const hold = Promise.withResolvers<void>();
+  try {
+    storage.runWithExecutionLane(SPACE, LANE_A, () => {});
+    storage.runWithExecutionLane(SPACE, SESSION_A1, () => {});
+    seedConfirmed(factory, [
+      { id: SCOPED, scope: "user", scopeKey: LANE_A, value: "base" },
+    ]);
+    await storage.open(SPACE).sync(SCOPED, undefined, "user");
+
+    // The user lane parks an unconfirmed upstream version on the SHARED
+    // user instance (host response held open).
+    factory.holdTransact = (commit) =>
+      commit.operations.some((operation) =>
+          operation.op !== "sqlite" && operation.id === SCOPED
+        )
+        ? hold.promise
+        : undefined;
+    const first = writeDoc(storage, SCOPED, "a-pending", {
+      scope: "user",
+      sourceAction: actionUser,
+    });
+    for (let i = 0; i < 200; i++) {
+      let seen: unknown;
+      storage.runWithExecutionLane(SPACE, LANE_A, () => {
+        seen = docValue(storage, SCOPED, "user");
+      });
+      if (seen === "a-pending") break;
+      await new Promise((resolve) => setTimeout(resolve));
+    }
+
+    // A16 through the collapse: the user lane resolves its own pending
+    // version; the SAME principal's session lane shares the record but sees
+    // confirmed state only.
+    storage.runWithExecutionLane(SPACE, LANE_A, () => {
+      assertEquals(docValue(storage, SCOPED, "user"), "a-pending");
+    });
+    storage.runWithExecutionLane(SPACE, SESSION_A1, () => {
+      assertEquals(docValue(storage, SCOPED, "user"), "base");
+    });
+
+    // The session lane's commit reading the shared instance must baseline
+    // against confirmed state — no pending read may name the user lane's
+    // localSeq (host-unresolvable for this commit's chain). The read runs
+    // under the session lane's ambient acting context (C1.5b), which is
+    // what resolves the collapsed record.
+    const second = storage.runWithExecutionLane(SPACE, SESSION_A1, () => {
+      const tx = storage.edit();
+      tx.sourceAction = actionSession;
+      const read = tx.read({
+        space: SPACE,
+        id: SCOPED,
+        type: "application/json",
+        path: ["value"],
+        scope: "user",
+      });
+      if (read.error) throw read.error;
+      const writer = tx.writer(SPACE);
+      if (writer.error) throw writer.error;
+      const written = writer.ok.write({
+        id: OUT,
+        type: "application/json",
+        path: ["value"],
+        scope: "session",
+      }, "session-out" as never);
+      if (written.error) throw written.error;
+      return tx.commit().then((result) => {
+        if (result.error) throw new Error(result.error.message);
+      });
+    });
+    const upstream = await (async () => {
+      for (let i = 0; i < 200; i++) {
+        const found = factory.commits.find((commit) =>
+          commit.operations.some((operation) =>
+            operation.op !== "sqlite" && operation.id === OUT
+          )
+        );
+        if (found !== undefined) return found;
+        await new Promise((resolve) => setTimeout(resolve));
+      }
+      return undefined;
+    })();
+    assert(upstream !== undefined, "the session lane's commit reached the host");
+    assertEquals(upstream.reads.pending, []);
+    const sharedRead = upstream.reads.confirmed.find((read) =>
+      read.id === SCOPED
+    );
+    assert(sharedRead !== undefined, "the shared instance was read confirmed");
+    assertEquals(sharedRead.seq, 1);
+
+    hold.resolve();
+    await Promise.all([first, second]);
+  } finally {
+    hold.resolve();
     await storage.close();
   }
 });

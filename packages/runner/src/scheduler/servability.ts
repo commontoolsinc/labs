@@ -454,7 +454,7 @@ export function dynamicActionTransactionUnservableReason(
   }
   for (const operation of commit.operations) {
     if (operation.op === "sqlite") return "dynamic-sqlite-operation";
-    if (!laneAdmitsScope(operation.scope, laneRank)) {
+    if (!laneAdmitsWriteScope(operation.scope, laneRank)) {
       return "dynamic-non-space-write-scope";
     }
     // §4 backstop, mirroring the engine's broad-instance firewall (memory/v2
@@ -475,7 +475,7 @@ export function dynamicActionTransactionUnservableReason(
   for (const precondition of commit.preconditions ?? []) {
     if (
       precondition.kind === "entity-absent" &&
-      !laneAdmitsScope(precondition.scope, laneRank)
+      !laneAdmitsWriteScope(precondition.scope, laneRank)
     ) {
       return "dynamic-non-space-write-scope";
     }
@@ -654,8 +654,8 @@ function dynamicAddressReason(
   return undefined;
 }
 
-/** A lane admits the scope names of its OWN chain (context-lattice §2:
- * `space < user < session`): a user-rank lane adds the lane principal's
+/** A lane admits READS of the scope names of its OWN chain (context-lattice
+ * §2: `space < user < session`): a user-rank lane adds the lane principal's
  * user-scoped addresses on top of shared space state; a session-rank lane
  * adds session-scoped addresses AND keeps the user admissions — the
  * broader-in-chain rule (C2 review CA3). Scoped addresses name only the
@@ -668,6 +668,23 @@ function laneAdmitsScope(
   if (declared === "space") return true;
   if (declared === "user") return laneRank === "user" || laneRank === "session";
   return declared === "session" && laneRank === "session";
+}
+
+/** Per-ATTEMPT writes stay exact-lane (context-lattice §4, and the engine's
+ * own rule — C2.4 alignment). The STATIC classifier chain-admits scoped
+ * writes and reports the narrowest rank so the C2.5 rank filter can assign
+ * the candidate to the lane that owns its writes; but once a claim's lane is
+ * fixed, a commit writing a broader-in-chain instance (a session-rank
+ * attempt writing the principal's user instance) would only bounce off the
+ * engine's exact-lane write fence — the dynamic firewall agrees with the
+ * engine and unserves it cleanly instead of routing it. */
+function laneAdmitsWriteScope(
+  scope: CellScope | undefined,
+  laneRank: LaneRank,
+): boolean {
+  const declared = scope ?? "space";
+  if (declared === "space") return true;
+  return declared === laneRank;
 }
 
 function covers(

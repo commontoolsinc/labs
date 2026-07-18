@@ -6,10 +6,14 @@ import type {
   ExecutionClaim,
 } from "@commonfabric/memory/v2";
 import {
+  sessionExecutionContextKey,
   toDocumentPath,
   userExecutionContextKey,
 } from "@commonfabric/memory/v2";
-import { SCOPE_NAMING_LINK_CONFORMANCE } from "@commonfabric/memory/v2/scope-naming-link";
+import {
+  SCOPE_NAMING_LINK_CONFORMANCE,
+  SESSION_SCOPE_NAMING_LINK_CONFORMANCE,
+} from "@commonfabric/memory/v2/scope-naming-link";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import {
   createExecutorActionTransactionRouter,
@@ -1301,5 +1305,416 @@ Deno.test("executor router rejects a broad value write in the pair with the engi
   assertEquals(candidates, []);
   assertEquals(diagnostics.map((entry) => entry.diagnosticCode), [
     "broad-lane-value-write",
+  ]);
+});
+
+// --- C2.5: session-rank candidate identity + the CA9 rank filter -----------
+//
+// The session identity source is the host's lane-grant machinery: candidate
+// keys come ONLY from open session lanes (delivered on the wire by the host,
+// canonical `session:<did>:<sid>`), and a claimed commit's identity comes
+// from its claim's contextKey. The router must never fabricate a session key
+// from a DID (review CA9) — the pre-lane fallback for session rank is
+// no-candidate (stay-space), and an action of classified rank R candidates
+// only at open lanes of rank R.
+
+const SESSION_LANE = sessionExecutionContextKey(
+  LANE_PRINCIPAL,
+  "session:router-alpha",
+);
+const OTHER_SESSION_LANE = sessionExecutionContextKey(
+  LANE_PRINCIPAL,
+  "session:router-beta",
+);
+
+const sessionOutput = {
+  space: SPACE,
+  scope: "session" as const,
+  id: "of:action-router-session-output",
+  path: ["value"],
+};
+
+/** PerSession derivation: session-scoped read, session-scoped output. */
+const perSessionObservation = () => {
+  const base = observation();
+  const sessionRead = {
+    space: SPACE,
+    scope: "session" as const,
+    id: "of:action-router-session-input",
+    path: ["value"],
+  };
+  return {
+    ...base,
+    reads: [sessionRead],
+    actualChangedWrites: [sessionOutput],
+    currentKnownWrites: [sessionOutput],
+    completeActionScopeSummary: {
+      ...base.completeActionScopeSummary,
+      reads: [sessionRead],
+      writes: [sessionOutput],
+      directOutputs: [sessionOutput],
+    },
+  };
+};
+
+const perSessionCommit = (): ClientCommit => ({
+  localSeq: 1,
+  reads: {
+    confirmed: [{
+      id: "of:action-router-session-input",
+      scope: "session",
+      path: toDocumentPath(["value"]),
+      seq: 2,
+    }],
+    pending: [],
+  },
+  operations: [{
+    op: "set",
+    id: "of:action-router-session-output",
+    scope: "session",
+    value: { value: 42 },
+  }],
+  schedulerObservation: perSessionObservation(),
+});
+
+const sessionLaneRouter = (
+  candidates: { claimKey: ActionClaimKey; sourceAction: object }[],
+  diagnostics: ExecutorCandidateDiagnostic[],
+  options: {
+    sessionRankCandidates?: boolean;
+    openLaneKeys?: readonly string[];
+    claimForAction?: (
+      sourceAction: object,
+      lane: ActionClaimKey["contextKey"],
+    ) => ExecutionClaim | undefined;
+  } = {},
+) =>
+  createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    userRankCandidates: true,
+    sessionRankCandidates: options.sessionRankCandidates ?? true,
+    lanePrincipal: LANE_PRINCIPAL,
+    ...(options.openLaneKeys !== undefined
+      ? { openUserLaneKeys: () => options.openLaneKeys }
+      : {}),
+    claimForAction: options.claimForAction ?? (() => undefined),
+    onCandidate: (candidate, sourceAction) =>
+      candidates.push({ claimKey: candidate.claimKey, sourceAction }),
+    onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+
+Deno.test("executor router keys a PerSession candidate at session rank for each open session lane", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = sessionLaneRouter(candidates, diagnostics, {
+    openLaneKeys: [SESSION_LANE, OTHER_SESSION_LANE],
+  });
+
+  const sessionAction = {};
+  const route = await router({
+    space: SPACE,
+    commit: perSessionCommit(),
+    sourceAction: sessionAction,
+  });
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
+  assertEquals(diagnostics, []);
+  // One candidate per open SESSION lane, keyed by the canonical session
+  // context key the host's grant machinery delivered — never a key built
+  // from the Worker's own DID.
+  assertEquals(candidates.map((entry) => entry.claimKey.contextKey), [
+    SESSION_LANE,
+    OTHER_SESSION_LANE,
+  ]);
+  assertEquals(candidates[0]!.claimKey, { ...key, contextKey: SESSION_LANE });
+});
+
+Deno.test("CA9: a session-rank action off the lane wire produces zero candidates (no DID fabrication)", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  // No openUserLaneKeys callback at all: the pre-lane wire. A user-rank
+  // action falls back to the sponsor's lane here; a session-rank action has
+  // no representable identity (a bare DID cannot name a session) and must
+  // stay space — no candidate, no fabricated key.
+  const router = sessionLaneRouter(candidates, diagnostics, {});
+
+  const route = await router({
+    space: SPACE,
+    commit: perSessionCommit(),
+    sourceAction: {},
+  });
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
+  assertEquals(candidates, []);
+  assertEquals(diagnostics, []);
+});
+
+Deno.test("CA9: a session-rank action candidates only at session lanes (rank filter)", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  // The demand slice names a USER lane and a session lane. The session-rank
+  // action pairs only with the session lane.
+  const router = sessionLaneRouter(candidates, diagnostics, {
+    openLaneKeys: [userExecutionContextKey(LANE_PRINCIPAL), SESSION_LANE],
+  });
+
+  const route = await router({
+    space: SPACE,
+    commit: perSessionCommit(),
+    sourceAction: {},
+  });
+  if (route.disposition !== "local" || route.kind !== "executor-shadow") {
+    throw new Error("expected shadow route");
+  }
+  route.afterLocalApply?.();
+  assertEquals(candidates.map((entry) => entry.claimKey.contextKey), [
+    SESSION_LANE,
+  ]);
+});
+
+Deno.test("CA9: a user-rank action never candidates at a session lane (rank filter)", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  // Mixed-rank demand (the C2.7 world): a piece demanded by both a user lane
+  // and a session lane. The user-rank action pairs only with the user lane —
+  // a session-lane claim for it would ping-pong against chain-compatible
+  // issuance (CA9's thrash finding).
+  const router = sessionLaneRouter(candidates, diagnostics, {
+    openLaneKeys: [SESSION_LANE, userExecutionContextKey(LANE_PRINCIPAL)],
+  });
+
+  const route = await router({
+    space: SPACE,
+    commit: perUserCommit(),
+    sourceAction: {},
+  });
+  if (route.disposition !== "local" || route.kind !== "executor-shadow") {
+    throw new Error("expected shadow route");
+  }
+  route.afterLocalApply?.();
+  assertEquals(candidates.map((entry) => entry.claimKey.contextKey), [
+    userExecutionContextKey(LANE_PRINCIPAL),
+  ]);
+});
+
+Deno.test("CA9: non-canonical session lane keys never key a candidate", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  // A raw concatenation (colon-bearing DID never percent-encoded) is not a
+  // canonical session key; the host could never have granted it. Drop it.
+  const router = sessionLaneRouter(candidates, diagnostics, {
+    openLaneKeys: [
+      `session:${LANE_PRINCIPAL}:session:router-alpha`,
+      "session::",
+      SESSION_LANE,
+    ],
+  });
+
+  const route = await router({
+    space: SPACE,
+    commit: perSessionCommit(),
+    sourceAction: {},
+  });
+  if (route.disposition !== "local" || route.kind !== "executor-shadow") {
+    throw new Error("expected shadow route");
+  }
+  route.afterLocalApply?.();
+  assertEquals(candidates.map((entry) => entry.claimKey.contextKey), [
+    SESSION_LANE,
+  ]);
+});
+
+Deno.test("executor router keeps session-scoped surfaces unservable with the session option off", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  // Regression leg: user-rank candidacy alone never admits session scope —
+  // byte-identical to the pre-C2.5 classification.
+  const router = sessionLaneRouter(candidates, diagnostics, {
+    sessionRankCandidates: false,
+    openLaneKeys: [SESSION_LANE],
+  });
+
+  const route = await router({
+    space: SPACE,
+    commit: perSessionCommit(),
+    sourceAction: {},
+  });
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
+  assertEquals(candidates, []);
+  assertEquals(diagnostics.map((entry) => entry.diagnosticCode), [
+    "non-space-read-scope",
+  ]);
+});
+
+// The real transformed-PerSession §4 shape: the certificate declares the
+// output ONCE at the broad space address, while the run writes the pair —
+// the broad scope-naming redirect link plus the value at the acting
+// SESSION's instance.
+const sessionWideningPairObservation = () => {
+  const base = observation();
+  const sessionTwin = { ...output, scope: "session" as const };
+  const sessionRead = {
+    space: SPACE,
+    scope: "session" as const,
+    id: "of:action-router-session-input",
+    path: ["value"],
+  };
+  return {
+    ...base,
+    reads: [sessionRead],
+    actualChangedWrites: [output, sessionTwin],
+    currentKnownWrites: [output, sessionTwin],
+    completeActionScopeSummary: {
+      ...base.completeActionScopeSummary,
+      reads: [sessionRead],
+    },
+  };
+};
+
+const sessionWideningPairCommit = (
+  broadDocument: unknown = {
+    value: { value: SESSION_SCOPE_NAMING_LINK_CONFORMANCE.link },
+  },
+): ClientCommit => ({
+  localSeq: 1,
+  reads: {
+    confirmed: [{
+      id: "of:action-router-session-input",
+      scope: "session",
+      path: toDocumentPath(["value"]),
+      seq: 2,
+    }],
+    pending: [],
+  },
+  operations: [
+    {
+      op: "set",
+      id: "of:action-router-output",
+      scope: "space",
+      value: broadDocument as Record<string, never>,
+    },
+    {
+      op: "set",
+      id: "of:action-router-output",
+      scope: "session",
+      value: { value: 42 },
+    },
+  ],
+  schedulerObservation: sessionWideningPairObservation(),
+});
+
+Deno.test("executor router presents the claimed session §4 pair with the session-widened certificate", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const pairAction = {};
+  const claim: ExecutionClaim = {
+    ...key,
+    contextKey: SESSION_LANE,
+    leaseGeneration: 3,
+    claimGeneration: 4,
+    expiresAt: 100_000,
+  };
+  const router = sessionLaneRouter(candidates, diagnostics, {
+    openLaneKeys: [SESSION_LANE],
+    claimForAction: (_action, lane) => lane === SESSION_LANE ? claim : undefined,
+  });
+
+  const claimed = sessionWideningPairCommit();
+  const route = await router({
+    space: SPACE,
+    commit: claimed,
+    sourceAction: pairAction,
+    lane: SESSION_LANE,
+  });
+  assertEquals(diagnostics, []);
+  assertEquals(candidates, []);
+  assertEquals(route.disposition, "upstream");
+  const routed = claimed.schedulerObservation as
+    & ReturnType<typeof sessionWideningPairObservation>
+    & { executionClaimAssertion?: Record<string, unknown> };
+  // The claimed commit asserts exactly the session lane's claim (the CA9
+  // identity chain: grant -> issuance -> claim contextKey -> commit)…
+  assertEquals(routed.executionClaimAssertion, {
+    contextKey: SESSION_LANE,
+    leaseGeneration: claim.leaseGeneration,
+    claimGeneration: claim.claimGeneration,
+  });
+  // …and presents the certificate with the acting SESSION instance of the
+  // broad direct output added to the write envelopes.
+  assertEquals(routed.completeActionScopeSummary.writes, [
+    output,
+    { ...output, scope: "session" },
+  ]);
+  assertEquals(routed.completeActionScopeSummary.directOutputs, [output]);
+});
+
+Deno.test("executor router rejects a broad value write at session rank with the engine's code", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = sessionLaneRouter(candidates, diagnostics, {
+    openLaneKeys: [SESSION_LANE],
+  });
+
+  const route = await router({
+    space: SPACE,
+    // Output-scoping failed: the broad leg carries a plain value. The §4
+    // backstop applies to session-acting commits exactly as to user ones.
+    commit: sessionWideningPairCommit({ value: 42 }),
+    sourceAction: {},
+  });
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
+  assertEquals(candidates, []);
+  assertEquals(diagnostics.map((entry) => entry.diagnosticCode), [
+    "broad-lane-value-write",
+  ]);
+});
+
+Deno.test("CA9: a claim on a non-canonical session lane invalidates as a key mismatch", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const invalidated: { claim: ExecutionClaim; diagnosticCode: string }[] = [];
+  // A raw-concatenated lane key can only exist through a host bug or a
+  // fabricated identity; the router refuses to adopt it as the commit's
+  // identity (it is not the canonical claim-key source), so the claim fails
+  // the key match and is invalidated — observable, never silently served.
+  const rawLane = `session:${LANE_PRINCIPAL}:session:router-alpha`;
+  const claim: ExecutionClaim = {
+    ...key,
+    contextKey: rawLane as ExecutionClaim["contextKey"],
+    leaseGeneration: 3,
+    claimGeneration: 4,
+    expiresAt: 100_000,
+  };
+  const router = createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    userRankCandidates: true,
+    sessionRankCandidates: true,
+    lanePrincipal: LANE_PRINCIPAL,
+    claimForAction: (_action, lane) => lane === rawLane ? claim : undefined,
+    onCandidate: (candidate, sourceAction) =>
+      candidates.push({ claimKey: candidate.claimKey, sourceAction }),
+    onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    onInvalidated: (invalidClaim, _sourceAction, diagnosticCode) =>
+      invalidated.push({ claim: invalidClaim, diagnosticCode }),
+  });
+
+  const route = await router({
+    space: SPACE,
+    commit: perSessionCommit(),
+    sourceAction: {},
+    lane: rawLane,
+  });
+  assertEquals(route.disposition, "local");
+  assertEquals(candidates, []);
+  assertEquals(invalidated.map((entry) => entry.diagnosticCode), [
+    "claim-key-mismatch",
   ]);
 });

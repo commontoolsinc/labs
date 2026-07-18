@@ -5457,26 +5457,54 @@ const narrowerSchedulerContext = (
 ): SchedulerContextScope =>
   schedulerContextRank(left) >= schedulerContextRank(right) ? left : right;
 
-const schedulerSummaryAddresses = (
+/** READ-side summary surface (piece + certified reads). Split from the
+ * write side because the per-address lane firewall admits a lane's §2 READ
+ * chain (CA3) while writes stay exact-lane (§4). */
+const schedulerSummaryReadAddresses = (
   summary: CompleteActionScopeSummary,
 ): SchedulerObservationAddress[] => [
   summary.piece,
   ...summary.reads,
+];
+
+const schedulerSummaryWriteAddresses = (
+  summary: CompleteActionScopeSummary,
+): SchedulerObservationAddress[] => [
   ...summary.writes,
   ...summary.materializerWriteEnvelopes,
   ...summary.directOutputs,
 ];
 
-const schedulerObservationAddresses = (
+const schedulerSummaryAddresses = (
+  summary: CompleteActionScopeSummary,
+): SchedulerObservationAddress[] => [
+  ...schedulerSummaryReadAddresses(summary),
+  ...schedulerSummaryWriteAddresses(summary),
+];
+
+/** READ-side observed surface — see {@link schedulerSummaryReadAddresses}. */
+const schedulerObservationReadAddresses = (
   observation: SchedulerActionObservation,
 ): SchedulerObservationAddress[] => [
   ...observation.reads,
   ...observation.shallowReads,
+];
+
+const schedulerObservationWriteAddresses = (
+  observation: SchedulerActionObservation,
+): SchedulerObservationAddress[] => [
   ...observation.actualChangedWrites,
   ...observation.currentKnownWrites,
   ...(observation.declaredWrites ?? []),
   ...observation.materializerWriteEnvelopes,
   ...(observation.ignoredSchedulingWrites ?? []),
+];
+
+const schedulerObservationAddresses = (
+  observation: SchedulerActionObservation,
+): SchedulerObservationAddress[] => [
+  ...schedulerObservationReadAddresses(observation),
+  ...schedulerObservationWriteAddresses(observation),
 ];
 
 function trustedSchedulerScopeSummary(
@@ -5593,10 +5621,7 @@ const laneScopeKeyForClaimContext = (
   if (principalOfUserContextKey(contextKey) !== undefined) return contextKey;
   // C2.1b: a canonical session claim context doubles as its lane scope key,
   // exactly like the user encoding above (`resolveScopeKey("session", …)`
-  // produces the same canonical `session:<enc>:<enc>` string). Broader-
-  // in-chain reads (a session lane reading a PerUser input) remain rejected
-  // here until C2.2/C2.5 land the laneAdmitsScope/laneScopeKey collapse
-  // (amendment CA3).
+  // produces the same canonical `session:<enc>:<enc>` string).
   if (parseSessionExecutionContextKey(contextKey) !== undefined) {
     return contextKey;
   }
@@ -5606,6 +5631,31 @@ const laneScopeKeyForClaimContext = (
     "non-lane-scope",
     `claim context ${contextKey} has no servable lane`,
   );
+};
+
+/**
+ * CA3 broader-in-chain READ collapse (context-lattice §2, C2 review): the
+ * resolved scope keys a claimed lane may READ. A session lane's chain adds
+ * the LANE principal's user instance beside its own session instance (the
+ * shared space scope is admitted separately as `DEFAULT_SCOPE_KEY`); a user
+ * lane's chain is exactly its own key, and the space lane stays `undefined`
+ * (space-only) — both byte-identical to the pre-CA3 checks. The chain-user
+ * key derives from the LANE key's principal segment, never from the request
+ * scope context, so a mis-threaded context can never widen the chain.
+ * WRITES never widen: the write-side checks keep exact-lane admission (§4 —
+ * the output pair's broad leg is the only second instance, and it must be a
+ * conforming scope-naming link). The client-replica twin of this collapse
+ * (v2.ts `laneScopeKey`/`laneOf`) is C2.5's.
+ */
+const laneChainReadScopeKeys = (
+  laneScopeKey: LaneScopeKey,
+): ReadonlySet<string> | undefined => {
+  if (laneScopeKey === undefined) return undefined;
+  const sessionIdentity = parseSessionExecutionContextKey(laneScopeKey);
+  return sessionIdentity === undefined ? new Set([laneScopeKey]) : new Set([
+    laneScopeKey,
+    userExecutionContextKey(sessionIdentity.principal),
+  ]);
 };
 
 const rejectNonLaneScope = (
@@ -5628,6 +5678,9 @@ const assertLaneScopedAddress = (
   servedSpace: string,
   scopeContext: SchedulerScopeContext,
   laneScopeKey: LaneScopeKey,
+  /** Present on READ-side surfaces only (CA3): the lane's admissible read
+   * chain. Absent = write-side, exact-lane admission (§4). */
+  chainReadScopeKeys?: ReadonlySet<string>,
 ): void => {
   if (address.space !== servedSpace) {
     rejectExecutionAction(
@@ -5637,7 +5690,11 @@ const assertLaneScopedAddress = (
   }
   const resolved = resolveScopeKey(address.scope, scopeContext);
   if (resolved === DEFAULT_SCOPE_KEY) return;
-  if (laneScopeKey === undefined || resolved !== laneScopeKey) {
+  if (
+    chainReadScopeKeys !== undefined
+      ? !chainReadScopeKeys.has(resolved)
+      : laneScopeKey === undefined || resolved !== laneScopeKey
+  ) {
     rejectNonLaneScope(laneScopeKey, "surface", address.id);
   }
 };
@@ -5725,6 +5782,9 @@ const assertExecutionActionTransaction = (
 ): void => {
   const { observation, transaction } = options;
   const laneScopeKey = laneScopeKeyForClaimContext(options.claimContextKey);
+  // CA3: READ surfaces admit the lane's §2 chain (a session lane may read
+  // the lane principal's user instances); WRITE surfaces stay exact-lane.
+  const chainReadScopeKeys = laneChainReadScopeKeys(laneScopeKey);
   if (
     observation.ownerSpace !== options.servedSpace ||
     observation.branch !== options.branch
@@ -5742,7 +5802,16 @@ const assertExecutionActionTransaction = (
     );
   }
 
-  for (const address of schedulerSummaryAddresses(summary)) {
+  for (const address of schedulerSummaryReadAddresses(summary)) {
+    assertLaneScopedAddress(
+      address,
+      options.servedSpace,
+      options.scopeContext,
+      laneScopeKey,
+      chainReadScopeKeys,
+    );
+  }
+  for (const address of schedulerSummaryWriteAddresses(summary)) {
     assertLaneScopedAddress(
       address,
       options.servedSpace,
@@ -5750,7 +5819,16 @@ const assertExecutionActionTransaction = (
       laneScopeKey,
     );
   }
-  for (const address of schedulerObservationAddresses(observation)) {
+  for (const address of schedulerObservationReadAddresses(observation)) {
+    assertLaneScopedAddress(
+      address,
+      options.servedSpace,
+      options.scopeContext,
+      laneScopeKey,
+      chainReadScopeKeys,
+    );
+  }
+  for (const address of schedulerObservationWriteAddresses(observation)) {
     assertLaneScopedAddress(
       address,
       options.servedSpace,
@@ -5802,7 +5880,7 @@ const assertExecutionActionTransaction = (
     const resolved = resolveScopeKey(read.scope, options.scopeContext);
     if (
       resolved !== DEFAULT_SCOPE_KEY &&
-      (laneScopeKey === undefined || resolved !== laneScopeKey)
+      (chainReadScopeKeys === undefined || !chainReadScopeKeys.has(resolved))
     ) {
       rejectNonLaneScope(laneScopeKey, "confirmed read", read.id);
     }
@@ -5823,7 +5901,7 @@ const assertExecutionActionTransaction = (
     const resolved = resolveScopeKey(read.scope, options.scopeContext);
     if (
       resolved !== DEFAULT_SCOPE_KEY &&
-      (laneScopeKey === undefined || resolved !== laneScopeKey)
+      (chainReadScopeKeys === undefined || !chainReadScopeKeys.has(resolved))
     ) {
       rejectNonLaneScope(laneScopeKey, "pending read", read.id);
     }
