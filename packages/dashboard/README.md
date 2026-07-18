@@ -35,11 +35,14 @@ dashboard/
 
 `server.ts` knows nothing about individual tiles. It runs a single ticker,
 collects each tile that is due (respecting its `intervalMs`), renders the
-results uniformly, mounts any drill-down routes a tile declares, and pushes the
-new tile markup when anything changes. A tile whose `collect()` throws is
-desaturated to a gray "unknown" — it keeps its last-known value and shows a
-short reason (e.g. "source unreachable"), with the full error in the server log
-— so one unreachable source never blanks or breaks the board.
+results uniformly, mounts any drill-down routes a tile declares, and pushes new
+tile markup as each collection completes. Every registered tile has a gray
+placeholder labelled with its id in its registered position until its first
+collection completes, so slow collectors do not leave holes in the board. A
+tile whose `collect()` throws is desaturated to a gray "unknown" — it keeps its
+last-known value and shows a short reason (e.g. "source unreachable"), with the
+full error in the server log — so one unreachable source never blanks or breaks
+the board.
 
 Each event connection receives the current tile snapshot before it waits for
 new collections. The browser reconciles that snapshot by tile ID, leaving
@@ -57,6 +60,7 @@ import type { Status, Tile, TileView } from "../types.ts";
 export const myTile: Tile = {
   id: "my-tile",          // unique, stable
   intervalMs: 60_000,     // how often collect() runs
+  // wide: true,           // optional full-width placement
   async collect(ctx): Promise<TileView> {
     // ctx.runs() -> shared CI runs; ctx.env("KEY") -> env var.
     // If a required env var is missing, return a gray "unknown" view — don't throw.
@@ -109,7 +113,6 @@ surveillance tool.
 | `aside` | trusted inline HTML minor header facet (e.g. an MTD or a "running" badge) |
 | `href` | makes the whole tile a link (an `http…` link opens a new tab) |
 | `hint` | small drill affordance, e.g. `"commits ↗"` |
-| `wide` | render full-width below the grid instead of as a grid cell |
 
 ## Tiles
 

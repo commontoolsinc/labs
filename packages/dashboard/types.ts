@@ -17,7 +17,6 @@ export interface TileView {
   aside?: string; // trusted inline html minor header facet (e.g. an MTD or "running" badge)
   href?: string; // if set, the whole tile becomes a link (external opens a new tab)
   hint?: string; // small drill affordance text, e.g. "commits ↗"
-  wide?: boolean; // render full-width below the grid instead of as a grid cell
 }
 
 export interface Route {
@@ -28,6 +27,7 @@ export interface Route {
 export interface Tile {
   id: string; // unique, stable key for this tile's scheduling + latest-view state
   intervalMs: number; // how often collect() runs
+  wide?: boolean; // render full-width below the grid, including before collection
   collect(ctx: Ctx): Promise<TileView>;
   routes?: Route[]; // optional drill-down routes this tile owns
 }

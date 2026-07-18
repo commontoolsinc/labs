@@ -45,8 +45,8 @@ Deno.test("renderTile: an http href is an anchor that opens a new tab; a local o
 });
 
 Deno.test("renderTile: wide adds the class the shell lays out below the grid", () => {
-  assertStringIncludes(renderTile(view({ wide: true })), `class="tile good wide"`);
-  assertStringIncludes(renderTile(view({ wide: true, href: "/x" })), `class="tile good link wide"`);
+  assertStringIncludes(renderTile(view(), undefined, true), `class="tile good wide"`);
+  assertStringIncludes(renderTile(view({ href: "/x" }), undefined, true), `class="tile good link wide"`);
   assert(!renderTile(view()).includes("wide"));
 });
 

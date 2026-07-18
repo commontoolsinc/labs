@@ -119,7 +119,7 @@ Deno.test("ci-duration: only runs that passed end to end count", async () => {
 
 Deno.test("recent-runs: wide, failure tip -> bad, rows link to the landing PR", async () => {
   const v = await recentRuns.collect(ctx([run({ conclusion: "failure", head_commit: { message: "oops (#42)" } })]));
-  assertEquals(v.wide, true);
+  assertEquals(recentRuns.wide, true);
   assertEquals(v.status, "bad");
   assertStringIncludes(v.extra ?? "", "/pull/42");
 });

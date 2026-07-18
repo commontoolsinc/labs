@@ -36,13 +36,15 @@ interface DashboardUpdate {
   shellVersion: number;
 }
 
-function dashboardUpdate(): DashboardUpdate {
+function dashboardUpdate(currentViews: ReadonlyMap<string, TileView> = views): DashboardUpdate {
   const grid: string[] = [];
   const wide: string[] = [];
   for (const t of TILES) {
-    const v = views.get(t.id);
-    if (!v) continue;
-    (v.wide ? wide : grid).push(renderTile(v, t.id));
+    const v = currentViews.get(t.id) ?? {
+      label: t.id,
+      status: "unknown" as const,
+    };
+    (t.wide ? wide : grid).push(renderTile(v, t.id, t.wide));
   }
   const ageSeconds = lastChange
     ? Math.max(0, Math.floor((Date.now() - lastChange) / 1000))
@@ -87,9 +89,8 @@ export async function tick(tiles: Tile[] = TILES) {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.error(`tile ${t.id} failed:`, msg); // full detail to the log
-        // Keep the last good view but desaturate it to gray and show a short
-        // reason, so a blip leaves the last-known values on the wall (and keeps a
-        // wide tile wide) instead of blanking everything to "—".
+        // A failed collection preserves the previous view in gray and shows a
+        // short error.
         const prev = views.get(t.id);
         views.set(
           t.id,
@@ -99,9 +100,9 @@ export async function tick(tiles: Tile[] = TILES) {
         );
       }
       lastRun.set(t.id, Date.now());
+      lastChange = Date.now();
+      broadcast(dashboardUpdate());
     }));
-    lastChange = Date.now();
-    broadcast(dashboardUpdate());
   } finally {
     ticking = false;
   }
@@ -118,8 +119,8 @@ const routes = TILES.flatMap((t) => t.routes ?? []);
 // interval.
 const REFRESH_MS = Math.min(...TILES.map((t) => t.intervalMs)) + TICK_MS;
 
-export function page(): string {
-  const update = dashboardUpdate();
+export function page(currentViews: ReadonlyMap<string, TileView> = views): string {
+  const update = dashboardUpdate(currentViews);
   return shell(
     update.gridHtml,
     update.wideHtml,
