@@ -593,6 +593,36 @@ Two things keep this off the table today. The fold happens only when minifying,
 and the shell is the only caller that minifies. The shell also lowers `using`,
 and the lowered form is not folded. esbuild fixed the underlying bug in 0.28.1.
 
+### The `@types/node` dependency
+
+Nothing here imports `@types/node`, and no import map names it. It reaches the
+dependency tree only because `protobufjs`, pulled in by the OpenTelemetry proto
+exporters, depends on it with a `>=13.7.0` range. An open-ended range resolves
+to the newest release each time the lockfile is regenerated, so this package's
+version moves on its own rather than when someone decides to roll it.
+
+Whether its globals reach a given package's type graph is not something
+`deno info` will tell you. They arrive as a type-only injection rather than
+through the module graph, and which packages they reach shifts with the rest of
+the dependency tree and with the Deno version. At 26.1.1 under Deno 2.8.1 they
+reach several package graphs, and `typeof fetch` there resolves to a type whose
+`init` parameter is the union `global.RequestInit | RequestInit`. Fields such as
+`signal` and `body` are not available on that union, so reading them stops type
+checking. At 24.2.0 the same code checks clean, and so does 26.1.1 under Deno
+2.8.3.
+
+The practical trap is that `typeof fetch` is not a dependable way to name a
+fetch-shaped value. Write the signature out instead. `HarnessFetch` in
+`packages/cf-harness/src/contracts/http-fetch.ts` and `RuntimeFetch` in
+`packages/runner/src/runtime.ts` are the package-level contracts. They hold
+whichever version resolves and whichever compiler checks them.
+
+Two things make this class of breakage easy to miss. `deno task check` does not
+cover every package: `cf-harness` is type checked only by its own test task, so
+its type errors surface in a test shard rather than the Check job. And CI pins
+Deno 2.8.1 while `tasks/check.sh` accepts any 2.8.x, so a local check and CI can
+disagree about what type checks.
+
 ### Running Tests
 
 > **Note:** CI enforces that `main` always type-checks and all tests pass, so

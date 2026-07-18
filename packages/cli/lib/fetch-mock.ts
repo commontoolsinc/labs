@@ -12,6 +12,8 @@
  * (`@commonfabric/llm`).
  */
 
+import type { RuntimeFetch } from "@commonfabric/runner";
+
 /**
  * One declarative fetch mock. The first entry whose `urlIncludes` is a substring
  * of a request URL wins; `base64Body` takes precedence over `body` (for binary
@@ -91,8 +93,8 @@ export function makeMockResponse(entry: FetchMockEntry): Response {
  */
 export function makeMockFetch(
   getEntries: () => FetchMockEntry[] | undefined,
-  realFetch: typeof globalThis.fetch,
-): typeof globalThis.fetch {
+  realFetch: RuntimeFetch,
+): RuntimeFetch {
   return async (input, init) => {
     const entry = matchFetchMock(getEntries(), input);
     if (!entry) return realFetch(input as RequestInfo | URL, init);

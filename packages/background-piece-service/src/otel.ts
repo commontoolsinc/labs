@@ -121,7 +121,9 @@ export async function initOpenTelemetry(cfg: OtelConfig = env): Promise<void> {
     const { OTLPTraceExporter } = await import(
       "@opentelemetry/exporter-trace-otlp-proto"
     );
-    const { Resource } = await import("@opentelemetry/resources");
+    const { defaultResource, resourceFromAttributes } = await import(
+      "@opentelemetry/resources"
+    );
     const { AsyncHooksContextManager } = await import(
       "@opentelemetry/context-async-hooks"
     );
@@ -131,14 +133,19 @@ export async function initOpenTelemetry(cfg: OtelConfig = env): Promise<void> {
       url: `${cfg.OTEL_EXPORTER_OTLP_ENDPOINT.replace(/\/$/, "")}/v1/traces`,
     });
     const provider = new BasicTracerProvider({
-      resource: new Resource({
-        "service.name": cfg.OTEL_SERVICE_NAME,
-        "service.version": "1.0.0",
-        "deployment.environment": cfg.ENV,
-      }),
+      // The provider uses this resource as given, so merge it over the default
+      // one to keep the `telemetry.sdk.*` attributes; the attributes below win
+      // on conflict, so `service.name` stays ours rather than the default.
+      resource: defaultResource().merge(
+        resourceFromAttributes({
+          "service.name": cfg.OTEL_SERVICE_NAME,
+          "service.version": "1.0.0",
+          "deployment.environment": cfg.ENV,
+        }),
+      ),
+      // Export all spans to the local OTLP collector, which forwards to SigNoz.
+      spanProcessors: [new BatchSpanProcessor(exporter)],
     });
-    // Export all spans to the local OTLP collector, which forwards to SigNoz.
-    provider.addSpanProcessor(new BatchSpanProcessor(exporter));
 
     // Prefer Deno's built-in context manager (Deno >= 2.2); fall back to the
     // async-hooks manager otherwise.
@@ -179,17 +186,23 @@ export async function initOpenTelemetry(cfg: OtelConfig = env): Promise<void> {
         temporalityPreference: AggregationTemporality.DELTA,
       });
       const meterProvider = new MeterProvider({
-        resource: new Resource({
-          "service.name": cfg.OTEL_SERVICE_NAME,
-          "service.version": "1.0.0",
-          "deployment.environment": cfg.ENV,
-        }),
+        // The provider uses this resource as given, so merge it over the
+        // default one to keep the `telemetry.sdk.*` attributes; the attributes
+        // below win on conflict, so `service.name` stays ours rather than the
+        // default.
+        resource: defaultResource().merge(
+          resourceFromAttributes({
+            "service.name": cfg.OTEL_SERVICE_NAME,
+            "service.version": "1.0.0",
+            "deployment.environment": cfg.ENV,
+          }),
+        ),
+        // Periodically export metrics to the local OTLP collector, which
+        // forwards to SigNoz.
+        readers: [
+          new PeriodicExportingMetricReader({ exporter: metricExporter }),
+        ],
       });
-      // Periodically export metrics to the local OTLP collector, which forwards
-      // to SigNoz. (This SDK version registers readers post-construction.)
-      meterProvider.addMetricReader(
-        new PeriodicExportingMetricReader({ exporter: metricExporter }),
-      );
 
       metrics.setGlobalMeterProvider(meterProvider);
       _meterProvider = meterProvider;

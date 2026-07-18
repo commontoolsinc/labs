@@ -10,6 +10,7 @@ export * from "./subagent-return.ts";
 export * from "./artifacts.ts";
 export * from "./cli.ts";
 export * from "./gateway/openai-client.ts";
+export * from "./contracts/http-fetch.ts";
 export * from "./contracts/image.ts";
 export * from "./contracts/prompt-slot.ts";
 export * from "./contracts/cfc-invocation-context.ts";

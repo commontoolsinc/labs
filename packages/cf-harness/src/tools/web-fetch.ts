@@ -1,6 +1,7 @@
 import type { JSONSchema } from "@commonfabric/api";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { HarnessToolDefinition } from "./types.ts";
+import type { HarnessFetch } from "../contracts/http-fetch.ts";
 
 export interface WebFetchToolInput {
   url: string;
@@ -73,7 +74,6 @@ export type ResolveHostAddresses = (
   signal?: AbortSignal,
 ) => Promise<readonly string[]>;
 
-type WebFetchHttpFetch = typeof fetch;
 type WebFetchBytes = Uint8Array<ArrayBuffer>;
 
 const DEFAULT_MAX_BYTES = 200_000;
@@ -211,7 +211,7 @@ export const webFetchToolDescriptor: HarnessToolDescriptor = {
 };
 
 export interface CreateWebFetchToolOptions {
-  fetchFn?: WebFetchHttpFetch;
+  fetchFn?: HarnessFetch;
   resolveHostAddresses?: ResolveHostAddresses;
 }
 
@@ -594,7 +594,7 @@ const blockedResolvedAddressReason = (
 
 const createPinnedPublicFetch = (
   resolveHostAddresses: ResolveHostAddresses,
-): WebFetchHttpFetch =>
+): HarnessFetch =>
 async (input, init = {}) => {
   const url = new URL(input instanceof Request ? input.url : String(input));
   const signal = init.signal ?? undefined;
@@ -1324,7 +1324,7 @@ const hasIpv6Prefix = (
 
 interface FetchWithRedirectsOptions {
   url: string;
-  fetchFn: typeof fetch;
+  fetchFn: HarnessFetch;
   resolveHostAddresses: ResolveHostAddresses;
   signal: AbortSignal;
 }

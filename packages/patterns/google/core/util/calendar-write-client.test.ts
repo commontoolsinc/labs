@@ -7,16 +7,15 @@ import {
   createCalendarWriteClient,
 } from "./calendar-write-client.ts";
 
-type FetchInput = Parameters<typeof fetch>[0];
-type FetchInit = Parameters<typeof fetch>[1];
+type FetchInput = RequestInfo | URL;
 type FetchResponder = (
   input: FetchInput,
-  init: FetchInit,
+  init?: RequestInit,
 ) => Response | Promise<Response>;
 
 interface CapturedRequest {
   url: string;
-  init: FetchInit;
+  init?: RequestInit;
 }
 
 interface TestAuthCell {
@@ -78,7 +77,10 @@ function mockFetch(responders: FetchResponder[]): {
   const requests: CapturedRequest[] = [];
   let index = 0;
 
-  globalThis.fetch = ((input, init) => {
+  const replacementFetch = (
+    input: FetchInput,
+    init?: RequestInit,
+  ): Promise<Response> => {
     const responder = responders[index++];
     if (!responder) {
       throw new Error(`Unexpected fetch call ${index}`);
@@ -89,7 +91,8 @@ function mockFetch(responders: FetchResponder[]): {
       init,
     });
     return Promise.resolve(responder(input, init));
-  }) as typeof fetch;
+  };
+  globalThis.fetch = replacementFetch as typeof globalThis.fetch;
 
   return {
     requests,
