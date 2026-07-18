@@ -2035,8 +2035,9 @@ export class WorkerReconciler {
    *
    * - Event props: resolved via .key().resolveAsCell() → stream/handler registration
    * - Binding props: resolved via .key().resolveAsCell() → cell reference
-   * - Object/array props: per-prop sink via .key().asSchema(true) for deep values
-   * - Primitive props: set directly from resolved Cell<Props> value
+   * - Style objects: resolved by the Cell<Props> schema and parent sink
+   * - Other object/array props: per-prop sink via .key().asSchema(true)
+   * - Primitive props: set directly from the resolved Cell<Props> value
    */
   private bindCellProps(
     ctx: ReconcileContext,
@@ -2182,9 +2183,13 @@ export class WorkerReconciler {
             cancel: () => {},
           });
         } else if (
-          value !== null && value !== undefined && typeof value === "object"
+          key !== "style" && value !== null && value !== undefined &&
+          typeof value === "object"
         ) {
-          // Object/array value - needs per-prop sink for deep resolution
+          // Generic object/array values are deliberately capped in
+          // rendererVDOMSchema, so they need a per-prop sink for deep
+          // resolution. Style is excluded: its explicit schema already
+          // traverses the object through the parent props sink.
           const existingState = state.propSubscriptions.get(key);
           if (existingState?.cell) continue; // Already has active per-prop sink
 
@@ -2213,19 +2218,19 @@ export class WorkerReconciler {
             cancel: propSinkCancel,
           });
         } else {
-          // Primitive value - set directly
+          // Schema-resolved style value or primitive value - set directly
           const existingState = state.propSubscriptions.get(key);
 
-          // Cancel per-prop sink if value transitioned from object to primitive
+          // Cancel a generic per-prop sink if its value became direct.
           if (existingState?.cell) {
             existingState.cancel();
           }
 
           // Skip a redundant op for an unchanged primitive, using the same
           // predicate as the inline static-prop path so both honor the same
-          // DOM-live / text-integrity exclusions (CT-1803). Object/cell prop
-          // states have cell !== undefined or no currentValue, so transitions
-          // (e.g. to undefined) still emit.
+          // DOM-live / text-integrity exclusions (CT-1803). Object values are
+          // never skipped by the predicate, and cell prop states have no
+          // currentValue, so transitions (e.g. to undefined) still emit.
           if (
             this.canSkipUnchangedStaticProp(state, key, value, existingState)
           ) {

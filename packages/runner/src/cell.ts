@@ -2636,7 +2636,12 @@ function subscribeToReferencedDocs<T>(
       const schema = link.schema;
       const needsTraversal = schema === undefined ||
         ContextualFlowControl.isTrueSchema(schema);
-      const newValue = validateAndTransform(runtime, wrappedTx, ref);
+      // sink() always kicks off sync before subscribing. Preserve that state
+      // on asCell projections created for the callback, just as get() does, so
+      // nested sinks reuse the root query instead of opening one per cut point.
+      const newValue = validateAndTransform(runtime, wrappedTx, ref, [], {
+        synced: true,
+      });
       if (needsTraversal && newValue !== undefined && newValue !== null) {
         deepTraverse(newValue);
       }

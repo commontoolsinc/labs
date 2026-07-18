@@ -132,6 +132,66 @@ describe("event preflight convergence demand", () => {
     expect([...nonOverlappingDemand]).toEqual([]);
   });
 
+  it("skips a time-gated action until its next eligible iteration", async () => {
+    const nodes = new NodeRegistry();
+    const action: Action = function timeGatedAction() {};
+    nodes.register(action, "computation");
+    nodes.setStatus(action, "invalid");
+    const pending = new Set<Action>([action]);
+    const dependencies = new WeakMap<Action, {
+      reads: IMemorySpaceAddress[];
+      shallowReads: IMemorySpaceAddress[];
+      writes: IMemorySpaceAddress[];
+    }>();
+    const schedulingWrites = new WeakMap<Action, IMemorySpaceAddress[]>();
+    const filterStats = { filtered: 0, executed: 0 };
+    const futureEligibility = performance.now() + 60_000;
+    let eligibilityReads = 0;
+    let runs = 0;
+    const materializerIndex = {
+      materializersByEntity: new Map(),
+      effects: nodes.effects,
+      getMaterializerWriteEnvelopes: () => undefined,
+      isMaterializer: () => false,
+    };
+    const state = {
+      getCollectSettleStats: () => false,
+      effects: nodes.effects,
+      computations: nodes.computations,
+      pending,
+      dependencies,
+      nodes,
+      dependents: new WeakMap<Action, Set<Action>>(),
+      filterStats,
+      materializerIndex,
+      writersByEntity: new Map(),
+      getSchedulingWrites: (candidate: Action) =>
+        schedulingWrites.get(candidate),
+      getSchedulingWritesMap: () => schedulingWrites,
+      collectPullIterationSeeds: () => {},
+      getActionId: (candidate: Action) => candidate.name,
+      isThrottled: () => false,
+      getNextEligibleRunTime: () =>
+        eligibilityReads++ === 0 ? futureEligibility : undefined,
+      isDebouncedComputationWaiting: () => false,
+      clearComputationDebounceState: () => {},
+      isLiveAction: () => true,
+      runAction: () => {
+        runs++;
+        nodes.setStatus(action, "clean");
+        return Promise.resolve();
+      },
+    } satisfies SchedulerSettleLoopState;
+
+    const result = await runPullSchedulerSettleLoop(state, new Set([action]));
+
+    expect(filterStats).toEqual({ filtered: 1, executed: 1 });
+    expect(pending.size).toBe(0);
+    expect(runs).toBe(1);
+    expect(result.iterationsRun).toBe(2);
+    expect(result.settledEarly).toBe(true);
+  });
+
   it("keeps an alternating event-only cycle under one pass's budgets", async () => {
     const nodes = new NodeRegistry();
     const actionA: Action = function eventOnlyCycleA() {};
