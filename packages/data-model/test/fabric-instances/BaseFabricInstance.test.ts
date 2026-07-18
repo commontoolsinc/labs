@@ -6,12 +6,13 @@ import {
   BaseFabricInstance,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
+  SHALLOW_UNFROZEN_CLONE,
 } from "@/fabric-instances/BaseFabricInstance.ts";
 
 /**
  * Minimal `BaseFabricInstance` subclass used to exercise the template-method
  * behavior in isolation, independent of any production concrete subclass.
- * Counts `shallowUnfrozenClone()` invocations via a constructor-supplied
+ * Counts `[SHALLOW_UNFROZEN_CLONE]()` invocations via a constructor-supplied
  * counter (kept off the instance so freezing doesn't block bookkeeping).
  */
 class Probe extends BaseFabricInstance {
@@ -47,7 +48,7 @@ class Probe extends BaseFabricInstance {
     throw new Error("not exercised here");
   }
 
-  protected shallowUnfrozenClone(): Probe {
+  protected [SHALLOW_UNFROZEN_CLONE](): Probe {
     this.counter.calls += 1;
     return new Probe(this.#tag, this.counter);
   }

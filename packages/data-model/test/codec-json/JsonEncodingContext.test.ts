@@ -10,6 +10,7 @@ import {
   BaseFabricInstance,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
+  SHALLOW_UNFROZEN_CLONE,
 } from "@/fabric-instances/BaseFabricInstance.ts";
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
@@ -42,7 +43,7 @@ class UnregisteredInstance extends BaseFabricInstance {
     return "Unregistered@1";
   }
 
-  protected shallowUnfrozenClone(): FabricInstance {
+  protected [SHALLOW_UNFROZEN_CLONE](): FabricInstance {
     return new UnregisteredInstance();
   }
 

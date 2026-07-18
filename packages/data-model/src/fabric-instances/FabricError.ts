@@ -1,5 +1,9 @@
 import type { FabricValue } from "@/interface.ts";
-import { DEEP_FREEZE, IS_DEEP_FROZEN } from "./BaseFabricInstance.ts";
+import {
+  DEEP_FREEZE,
+  IS_DEEP_FROZEN,
+  SHALLOW_UNFROZEN_CLONE,
+} from "./BaseFabricInstance.ts";
 import {
   CODEC,
   type FabricCodec,
@@ -258,7 +262,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
   }
 
   /** @inheritDoc */
-  protected shallowUnfrozenClone(): FabricError {
+  protected [SHALLOW_UNFROZEN_CLONE](): FabricError {
     return new FabricError({
       type: this.type,
       name: this.name,

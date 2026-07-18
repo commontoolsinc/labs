@@ -24,6 +24,7 @@ import {
   BaseFabricInstance,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
+  SHALLOW_UNFROZEN_CLONE,
 } from "@/fabric-instances/BaseFabricInstance.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { DummyReconstructionContext } from "./fabric-instances/fixtures.ts";
@@ -360,7 +361,7 @@ describe("native-conversion", () => {
         deepClone(_frozen: boolean): CustomFabInst {
           return new CustomFabInst();
         }
-        protected shallowUnfrozenClone(): CustomFabInst {
+        protected [SHALLOW_UNFROZEN_CLONE](): CustomFabInst {
           return new CustomFabInst();
         }
       }
