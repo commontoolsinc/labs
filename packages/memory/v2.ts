@@ -1049,6 +1049,38 @@ export const sessionExecutionContextKey = (
 ): `session:${string}:${string}` =>
   `session:${encodeScopeKeyPart(principal)}:${encodeScopeKeyPart(sessionId)}`;
 
+/**
+ * Canonical parse of a `session:<principal>:<sessionId>` execution-context
+ * key (C2.1, adversarial-review amendment CA12): exactly three colon-split
+ * segments — the percent-encoding of both segments is what makes the split
+ * exact for colon-bearing did:key principals — with both segments non-empty,
+ * decodable, and byte-exact under re-encoding through the single construction
+ * site above. Returns `undefined` for anything else (`session:a:b:c`,
+ * `session::`, a naive raw-DID concatenation, non-canonical escapes), so the
+ * wire validator and the engine claim guard reject malformed session keys in
+ * one place instead of surfacing inconsistent downstream errors.
+ */
+export const parseSessionExecutionContextKey = (
+  key: string,
+): { principal: string; sessionId: string } | undefined => {
+  if (!key.startsWith("session:")) return undefined;
+  const parts = key.split(":");
+  if (parts.length !== 3) return undefined;
+  const [, encodedPrincipal, encodedSessionId] = parts;
+  if (encodedPrincipal.length === 0 || encodedSessionId.length === 0) {
+    return undefined;
+  }
+  try {
+    const principal = decodeURIComponent(encodedPrincipal);
+    const sessionId = decodeURIComponent(encodedSessionId);
+    return sessionExecutionContextKey(principal, sessionId) === key
+      ? { principal, sessionId }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 /** Map a client demand root onto the durable scheduler's piece identity. The
  * first server-primary phase accepts raw entity ids and already-qualified ids,
  * but executes only the shared space partition. */
@@ -1290,11 +1322,28 @@ export function resetServerPrimaryExecutionConfig(): void {
  * Highest context rank the host ISSUES execution claims for (context-lattice
  * design §6: one internal dial, staged space → user → session → cross-space).
  * Issuance-side only — never negotiated on the wire; the engine's commit-time
- * guards stay rank-independent. The default admits only the shared space
- * lane; C1 work enables `user` inside its gate fixtures. Registered in
- * docs/development/EXPERIMENTAL_OPTIONS.md as `serverPrimaryExecutionClaimRank`.
+ * guards stay rank-independent. The value is a LADDER, not a set: the
+ * `session` stage admits user-rank claims too (space < user < session — a
+ * host that may issue narrower claims may issue every broader-in-chain rank
+ * beneath them). The default admits only the shared space lane; C1 work
+ * enables `user` inside its gate fixtures, C2 enables `session` inside its
+ * gate fixtures. Registered in docs/development/EXPERIMENTAL_OPTIONS.md as
+ * `serverPrimaryExecutionClaimRank`.
  */
-export type ServerPrimaryExecutionClaimRank = "space" | "user";
+export type ServerPrimaryExecutionClaimRank = "space" | "user" | "session";
+
+const SERVER_PRIMARY_EXECUTION_CLAIM_RANK_ORDER: Record<
+  ServerPrimaryExecutionClaimRank,
+  number
+> = { space: 0, user: 1, session: 2 };
+
+/** Ladder comparison for the rank dial: is the configured stage at least
+ * `rank`? (`session` ⇒ `user` ⇒ `space`, context-lattice §6.) */
+export const serverPrimaryExecutionClaimRankAtLeast = (
+  rank: ServerPrimaryExecutionClaimRank,
+): boolean =>
+  SERVER_PRIMARY_EXECUTION_CLAIM_RANK_ORDER[serverPrimaryExecutionClaimRank] >=
+    SERVER_PRIMARY_EXECUTION_CLAIM_RANK_ORDER[rank];
 
 export function setServerPrimaryExecutionClaimRankConfig(
   rank?: ServerPrimaryExecutionClaimRank,

@@ -9,9 +9,9 @@ import { isInstance, isObject } from "@commonfabric/utils/types";
  * scope** at the broad address — never a value, never the principal or
  * session id — so every lane writes the byte-identical link at the identical
  * address. The execution firewall keeps this contract as the backstop: a
- * user-lane commit may write a broad (space-scoped) document only as a
- * conforming scope-naming link; a broad VALUE write indicates output-scoping
- * failed and is rejected.
+ * scoped-lane commit (user or, with C2.2, session rank) may write a broad
+ * (space-scoped) document only as a conforming scope-naming link; a broad
+ * VALUE write indicates output-scoping failed and is rejected.
  *
  * The wire shape is a spec-level JSON contract shared by the runner emit
  * tests and the engine accept tests through the conformance fixture below
@@ -32,8 +32,13 @@ import { isInstance, isObject } from "@commonfabric/utils/types";
  *   the written document. Documents store the cell tree under their `value`
  *   field, so an envelope at document path `["value", ...p]` must carry
  *   `path === p` (the self-redirect property: only the scope differs).
- * - `scope` (required): `"user"` for C1 user lanes. Session rank arrives
- *   with C2 and stays nonconforming here until then.
+ * - `scope` (required): a scope NAME in the validating lane's own non-space
+ *   chain (context-lattice §2: `space < user < session`) — `"user"` for a
+ *   user lane; `"user"` or `"session"` for a session lane (C2.2/CA2 — the
+ *   broader-in-chain rule: a session lane's chain includes its principal's
+ *   user rank, and a user-named link is byte-identical to what every user
+ *   lane writes). NEVER a resolved scope key, principal, or session id —
+ *   the reading runtime context supplies those.
  * - `overwrite` (required): exactly `"redirect"` — the emission path always
  *   resolves the binding in write-redirect mode with `preserveOverwrite`.
  * - `id` (optional): omitted for the self case (emission is base-relative);
@@ -46,18 +51,29 @@ import { isInstance, isObject } from "@commonfabric/utils/types";
 export const SCOPE_NAMING_LINK_TAG = "link@1";
 
 /**
+ * The scope names a scope-naming link may carry — the non-space ranks of
+ * the context lattice. Also the validator's lane parameter: the validating
+ * lane's OWN rank, which bounds the admissible names to that lane's chain.
+ */
+export type ScopeNamingLinkScope = "user" | "session";
+
+/**
  * Canonical conforming envelope for a cell path. This is the exact value
  * output-scoping emits for a self-scoped broad write at `path`; the runner
- * emit-side conformance test asserts its real emission equals this builder's
+ * emit-side conformance tests assert its real emission equals this builder's
  * output, and the engine accept tests feed the same value to the firewall.
+ * A pure function of (path, scope) — deliberately no principal or session
+ * id input exists, which is what makes the emitted write byte-identical
+ * across lanes (context-lattice §4).
  */
 export const scopeNamingLinkForPath = (
   path: readonly string[],
+  scope: ScopeNamingLinkScope = "user",
 ): FabricValue => ({
   "/": {
     [SCOPE_NAMING_LINK_TAG]: {
       path: [...path],
-      scope: "user",
+      scope,
       overwrite: "redirect",
     },
   },
@@ -73,6 +89,23 @@ export const SCOPE_NAMING_LINK_CONFORMANCE = Object.freeze({
   cellPath: Object.freeze(["value"]),
   documentPath: Object.freeze(["value", "value"]),
   link: scopeNamingLinkForPath(["value"]),
+}) as {
+  readonly cellPath: readonly string[];
+  readonly documentPath: readonly string[];
+  readonly link: FabricValue;
+};
+
+/**
+ * Session variant of {@link SCOPE_NAMING_LINK_CONFORMANCE} (C2.2/CA2): the
+ * broad-instance write output-scoping emits for a `session`-narrowed output
+ * bound at cell path `["value"]`, captured from the real runner emission
+ * (2026-07-17). Identical envelope, scope name `"session"` — still never a
+ * session id.
+ */
+export const SESSION_SCOPE_NAMING_LINK_CONFORMANCE = Object.freeze({
+  cellPath: Object.freeze(["value"]),
+  documentPath: Object.freeze(["value", "value"]),
+  link: scopeNamingLinkForPath(["value"], "session"),
 }) as {
   readonly cellPath: readonly string[];
   readonly documentPath: readonly string[];
@@ -107,10 +140,23 @@ const envelopeBody = (
   return isPlainRecord(body) ? body : undefined;
 };
 
+/**
+ * The scope names a lane of rank `laneScope` accepts in a broad link: the
+ * lane's own non-space chain (context-lattice §2). A user lane's chain
+ * above space is exactly `user`; a session lane's includes `user` (its
+ * principal's broader rank — review CA3) and `session`. Cross-lane names —
+ * `session` under a user lane — reject: that link would redirect readers to
+ * instances the lane's computations can never have written.
+ */
+const admissibleLinkScopes = (
+  laneScope: ScopeNamingLinkScope,
+): readonly string[] => laneScope === "session" ? ["user", "session"] : ["user"];
+
 const payloadViolation = (
   payload: Record<string, FabricValue>,
   documentPath: readonly string[],
   writtenDocId: string,
+  laneScope: ScopeNamingLinkScope,
 ): ScopeNamingLinkViolation | undefined => {
   const malformed = (detail: string): ScopeNamingLinkViolation => ({
     code: "malformed-scope-naming-link",
@@ -128,9 +174,12 @@ const payloadViolation = (
   if (payload.overwrite !== "redirect") {
     return malformed('scope-naming links carry overwrite "redirect"');
   }
-  if (payload.scope !== "user") {
+  const scopes = admissibleLinkScopes(laneScope);
+  if (typeof payload.scope !== "string" || !scopes.includes(payload.scope)) {
     return malformed(
-      'scope-naming links name the lane scope "user" until C2',
+      `scope-naming links under a ${laneScope} lane name a scope in [${
+        scopes.join(", ")
+      }] — never a principal or session id`,
     );
   }
   if (payload.id !== undefined && payload.id !== writtenDocId) {
@@ -160,20 +209,28 @@ const payloadViolation = (
 };
 
 /**
- * Validate one user-lane write payload against a broad (space-scoped)
+ * Validate one scoped-lane write payload against a broad (space-scoped)
  * document position: every leaf must be a conforming scope-naming link at
  * its own document path; any plain value — primitives, class instances,
  * empty containers, malformed envelopes — is a broad value write and
  * violates §4's byte-identity soundness argument. Fail-closed: an unserved
  * rejection here costs a fail-open client recompute, never a wrong write.
+ *
+ * `laneScope` is the validating lane's rank and bounds the scope names a
+ * link may carry to that lane's own chain (C2.2/CA2). It defaults to
+ * `"user"`, keeping every existing caller — the engine firewall included —
+ * byte-identical to the pre-C2 user-only contract until it explicitly
+ * threads the session rank.
  */
 export const scopeNamingLinkWriteViolation = (options: {
   value: FabricValue | undefined;
   /** Document-rooted path at which `value` is being written. */
   documentPath: readonly string[];
   writtenDocId: string;
+  laneScope?: ScopeNamingLinkScope;
 }): ScopeNamingLinkViolation | undefined => {
   const { value, documentPath, writtenDocId } = options;
+  const laneScope = options.laneScope ?? "user";
   const broad = (detail: string): ScopeNamingLinkViolation => ({
     code: "broad-lane-value-write",
     detail,
@@ -200,7 +257,7 @@ export const scopeNamingLinkWriteViolation = (options: {
         detail: "scope-naming link payload must be a record",
       };
     }
-    return payloadViolation(payload, documentPath, writtenDocId);
+    return payloadViolation(payload, documentPath, writtenDocId, laneScope);
   }
   if (Array.isArray(value)) {
     if (value.length === 0) {
@@ -211,6 +268,7 @@ export const scopeNamingLinkWriteViolation = (options: {
         value: value[index],
         documentPath: [...documentPath, String(index)],
         writtenDocId,
+        laneScope,
       });
       if (violation !== undefined) return violation;
     }
@@ -226,6 +284,7 @@ export const scopeNamingLinkWriteViolation = (options: {
         value: entry,
         documentPath: [...documentPath, key],
         writtenDocId,
+        laneScope,
       });
       if (violation !== undefined) return violation;
     }

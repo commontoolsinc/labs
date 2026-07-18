@@ -15,6 +15,7 @@ import type {
 import {
   SCOPE_NAMING_LINK_CONFORMANCE,
   scopeNamingLinkForPath,
+  SESSION_SCOPE_NAMING_LINK_CONFORMANCE,
 } from "../v2/scope-naming-link.ts";
 
 const SPACE = "did:key:z6Mk-lane-firewall-space";
@@ -688,6 +689,128 @@ Deno.test("a shared child instance takes the byte-identical scope-naming link ac
         principal: OTHER_PRINCIPAL,
       }),
       { value: 9 },
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+// --- C2.2 engine-accept side (CA2): the broad scope-naming-link backstop is
+// lane-scope-parameterized — a session lane's admissible link scopes are its
+// non-space chain {user, session}; a user lane's only {user}. These are the
+// engine-side halves of the shared conformance fixtures in
+// scope-naming-link.ts (the runner emit side pins the same JSON).
+
+const SESSION_CONTEXT_KEY = Engine.sessionExecutionContextKey(
+  PRINCIPAL,
+  "s1",
+) as SchedulerExecutionContextKey;
+const SESSION_OUTPUT = address("session", "of:lane-session-output");
+const sessionInstanceOperation: Operation = {
+  op: "set",
+  id: SESSION_OUTPUT.id,
+  scope: "session",
+  value: { value: 7 },
+};
+
+Deno.test("session-lane conforming scope-naming links commit as emitted (session and chain-user scopes)", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const claim = claimFor(lease, SESSION_CONTEXT_KEY);
+    const applied = applyClaimed(engine, lease, claim, {
+      scopeSessionId: "s1",
+      operations: [
+        sessionInstanceOperation,
+        broadLinkOperation(SESSION_SCOPE_NAMING_LINK_CONFORMANCE.link),
+      ],
+      surfaces: { writes: [SESSION_OUTPUT, BROAD_LINK_WRITE] },
+      nowMs: nowMs + 1,
+    });
+    assertExists(applied.schedulerObservationResults);
+    const [result] = applied.schedulerObservationResults;
+    assert(result.status === "kept");
+    assertEquals(result.executionContextKey, SESSION_CONTEXT_KEY);
+    assertEquals(
+      Engine.read(engine, { id: BROAD_LINK_WRITE.id }),
+      { value: { value: SESSION_SCOPE_NAMING_LINK_CONFORMANCE.link } },
+    );
+
+    // Chain naming: the session lane may also write the byte-identical
+    // user-scope link (its chain includes user) — same value every user lane
+    // writes, so concurrent lanes stay convergent identical writers.
+    const chained = applyClaimed(engine, lease, claim, {
+      scopeSessionId: "s1",
+      operations: [
+        sessionInstanceOperation,
+        broadLinkOperation(SCOPE_NAMING_LINK_CONFORMANCE.link),
+      ],
+      surfaces: { writes: [SESSION_OUTPUT, BROAD_LINK_WRITE] },
+      nowMs: nowMs + 2,
+      localSeq: 2,
+    });
+    assertExists(chained.schedulerObservationResults);
+    assert(chained.schedulerObservationResults[0].status === "kept");
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("user-lane writing a session-scope naming link rejects (chain excludes session)", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const claim = claimFor(lease, USER_CONTEXT_KEY);
+    assertFirewallReject(
+      () =>
+        applyClaimed(engine, lease, claim, {
+          operations: [
+            userInstanceOperation,
+            broadLinkOperation(SESSION_SCOPE_NAMING_LINK_CONFORMANCE.link),
+          ],
+          surfaces: { writes: [USER_OUTPUT, BROAD_LINK_WRITE] },
+          nowMs: nowMs + 1,
+        }),
+      "malformed-scope-naming-link",
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("session-lane schema-bearing scope-naming links reject", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const claim = claimFor(lease, SESSION_CONTEXT_KEY);
+    const schemaBearing = {
+      "/": {
+        "link@1": {
+          path: ["value"],
+          scope: "session",
+          overwrite: "redirect",
+          schema: { type: "string", default: "covert per-lane payload" },
+        },
+      },
+    };
+    assertFirewallReject(
+      () =>
+        applyClaimed(engine, lease, claim, {
+          scopeSessionId: "s1",
+          operations: [
+            sessionInstanceOperation,
+            broadLinkOperation(schemaBearing),
+          ],
+          surfaces: { writes: [SESSION_OUTPUT, BROAD_LINK_WRITE] },
+          nowMs: nowMs + 1,
+        }),
+      "malformed-scope-naming-link",
     );
   } finally {
     Engine.close(engine);

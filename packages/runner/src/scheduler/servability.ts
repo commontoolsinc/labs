@@ -66,9 +66,12 @@ export type StaticActionServability =
     status: "claim-ready";
     actionKind: "computation";
     /** Present only when a lane-parameterized classification promoted the
-     * candidate to user rank (context-lattice C1.5a); absent means space
-     * rank, keeping the space-only result shape byte-identical. */
-    contextRank?: "user";
+     * candidate off space rank (context-lattice C1.5a/C2.2): the NARROWEST
+     * scope any admitted surface declares — "session" wins over "user"
+     * (§2's `space < user < session`), so the C2.5 router can rank-filter
+     * candidates (review CA9). Absent means space rank, keeping the
+     * space-only result shape byte-identical. */
+    contextRank?: "user" | "session";
   }
   | {
     status: "broker-required";
@@ -81,23 +84,35 @@ export type StaticActionServability =
 
 /**
  * Lane parameterization for both servability classifiers (context-lattice
- * C1.5a/C1.6). `userContext` admits user-scoped addresses on computation
- * surfaces — the static classifier then reports `contextRank: "user"` and
- * the dynamic firewall accepts the lane principal's user-scoped reads and
- * writes. Absent (or false), both classifiers are byte-identical to the
- * space-only behavior: session-scoped surfaces stay unservable either way,
- * and effects keep space-only checks (amendment 8: user-rank is
- * computation-only in C1).
+ * C1.5a/C1.6, session rank with C2.2). `userContext` admits user-scoped
+ * addresses on computation surfaces — the static classifier then reports
+ * `contextRank: "user"` and the dynamic firewall accepts the lane
+ * principal's user-scoped reads and writes. `sessionContext` classifies for
+ * a session lane, whose admissible scope set is its OWN chain
+ * (context-lattice §2: `space < user:<p> < session:<p>:<s>`): session-scoped
+ * surfaces AND the lane principal's user-scoped surfaces — the
+ * broader-in-chain rule the C2 review mandates (CA3) — so it implies the
+ * user admissions whatever `userContext` says, and the reported rank is the
+ * narrowest scope observed. Scope is a NAME at this seam: addresses carry
+ * no principal or session id (the acting context binds instances at the
+ * host/engine seams), so another principal's or session's instance is
+ * structurally unnameable here. Absent (or false), both classifiers are
+ * byte-identical to the space-only behavior, and effects keep space-only
+ * checks in every lane (amendment 8; C2.8 owns lifting it).
  */
 export interface StaticActionServabilityLane {
   readonly userContext?: boolean;
+  readonly sessionContext?: boolean;
 }
+
+/** Internal lane rank shared by the static and dynamic classifiers. */
+type LaneRank = "space" | "user" | "session";
 
 export interface ActionTransactionServabilityContext {
   readonly servedSpace: MemorySpace;
   readonly branch: string;
   /** Lane rank for the per-attempt firewall; absent means space rank. */
-  readonly contextRank?: "space" | "user";
+  readonly contextRank?: "space" | "user" | "session";
   /** True when the routed commit will carry the lane as its ACTING context —
    * the executor's user-rank commits, which the engine's broad-instance
    * scope-naming backstop (C1.2 §4) applies to. A cooperative client's
@@ -245,10 +260,26 @@ export function classifyStaticActionServability(
   }
   const candidate = value as StaticActionServabilityCandidate;
   const actionKind = candidate.actionKind;
-  // Amendment 8: user-rank promotion applies to computations only; effects
-  // keep space-only checks whatever the lane says.
-  const userLane = lane?.userContext === true && actionKind === "computation";
-  let userScoped = false;
+  // Amendment 8: scoped-rank promotion applies to computations only; effects
+  // keep space-only checks whatever the lane says (C2.8 owns lifting this).
+  // A session lane subsumes the user admissions — its chain includes the
+  // principal's user rank (context-lattice §2, review CA3).
+  const sessionLane = lane?.sessionContext === true &&
+    actionKind === "computation";
+  const userLane = sessionLane ||
+    (lane?.userContext === true && actionKind === "computation");
+  const laneRank: LaneRank = sessionLane
+    ? "session"
+    : userLane
+    ? "user"
+    : "space";
+  // The narrowest scope any admitted surface declares — the claim-ready
+  // contextRank. "session" wins over "user"; undefined means all-space.
+  let scopedRank: "user" | "session" | undefined;
+  const noteScopedSurface = (scope: CellScope): void => {
+    if (scopedRank === "session") return;
+    if (scope === "user" || scope === "session") scopedRank = scope;
+  };
 
   if (actionKind === "event-handler") {
     return unservable("event-handler");
@@ -299,19 +330,20 @@ export function classifyStaticActionServability(
     return unservable("malformed-static-surface");
   }
 
-  // The action declares exactly ONE logical direct output. Under a user-rank
-  // lane the §4 output-widening pair (context-lattice §4, C1.9) declares
-  // that one output as its two instances — the broad space address plus the
-  // ACTING principal's user instance of the same document path — which
-  // collapse to the single logical output; any other plurality stays
-  // malformed.
+  // The action declares exactly ONE logical direct output. Under a scoped
+  // lane the §4 output-widening pair (context-lattice §4, C1.9/C2.2)
+  // declares that one output as its two instances — the broad space address
+  // plus the ACTING context's scoped instance (the principal's user
+  // instance at user rank; the acting session's instance at session rank)
+  // of the same document path — which collapse to the single logical
+  // output; any other plurality stays malformed.
   const directOutput = ((): IMemorySpaceAddress | undefined => {
     const outputs = summary.directOutputs;
     if (outputs.length === 1) return outputs[0];
     if (
-      userLane && outputs.length === 2 &&
+      laneRank !== "space" && outputs.length === 2 &&
       scopeOf(outputs[0]!) !== scopeOf(outputs[1]!) &&
-      laneInstanceAddressesEqual(outputs[0]!, outputs[1]!)
+      laneInstanceAddressesEqual(outputs[0]!, outputs[1]!, laneRank)
     ) {
       return outputs.find((output) => scopeOf(output) === "space");
     }
@@ -324,10 +356,10 @@ export function classifyStaticActionServability(
     return unservable("foreign-piece-space");
   }
   if (scopeOf(summary.piece) !== "space") {
-    if (!userLane || scopeOf(summary.piece) !== "user") {
+    if (!laneAdmitsScope(summary.piece.scope, laneRank)) {
       return unservable("non-space-piece-scope");
     }
-    userScoped = true;
+    noteScopedSurface(scopeOf(summary.piece));
   }
   if (!isRootValueAddress(summary.piece)) {
     return unservable("malformed-static-surface");
@@ -341,10 +373,10 @@ export function classifyStaticActionServability(
       return unservable("foreign-read-space");
     }
     if (scopeOf(read) !== "space") {
-      if (!userLane || scopeOf(read) !== "user") {
+      if (!laneAdmitsScope(read.scope, laneRank)) {
         return unservable("non-space-read-scope");
       }
-      userScoped = true;
+      noteScopedSurface(scopeOf(read));
     }
   }
 
@@ -358,21 +390,21 @@ export function classifyStaticActionServability(
       return unservable("foreign-write-space");
     }
     if (scopeOf(write) !== "space") {
-      if (!userLane || scopeOf(write) !== "user") {
+      if (!laneAdmitsScope(write.scope, laneRank)) {
         return unservable("non-space-write-scope");
       }
-      userScoped = true;
+      noteScopedSurface(scopeOf(write));
     }
   }
 
-  // The declared writes must include the direct output. Under a user-rank
-  // lane the §4 pair makes the broad address and the acting principal's user
+  // The declared writes must include the direct output. Under a scoped lane
+  // the §4 pair makes the broad address and the acting context's scoped
   // instance the same logical output, so the declared write may name either
   // instance of the direct output's document.
   if (
     !summary.writes.some((write) =>
-      userLane
-        ? laneInstanceAddressesEqual(write, directOutput)
+      laneRank !== "space"
+        ? laneInstanceAddressesEqual(write, directOutput, laneRank)
         : addressesEqual(write, directOutput)
     )
   ) {
@@ -382,7 +414,7 @@ export function classifyStaticActionServability(
   return actionKind === "effect" ? { status: "broker-required", actionKind } : {
     status: "claim-ready",
     actionKind,
-    ...(userScoped ? { contextRank: "user" as const } : {}),
+    ...(scopedRank !== undefined ? { contextRank: scopedRank } : {}),
   };
 }
 
@@ -426,17 +458,17 @@ export function dynamicActionTransactionUnservableReason(
       return "dynamic-non-space-write-scope";
     }
     // §4 backstop, mirroring the engine's broad-instance firewall (memory/v2
-    // engine `assertLaneBroadScopeNamingWrite`): a user-rank LANE-ACTING
+    // engine `assertLaneBroadScopeNamingWrite`): a scoped-rank LANE-ACTING
     // commit may write a broad (space-scoped) document only as the
     // conforming scope-naming redirect link of the output-widening pair. A
     // broad VALUE write means output-scoping failed; routing it would only
     // bounce off the engine. Client suppression mirrors keep this off (see
     // ActionTransactionServabilityContext.laneActingCommit).
     if (
-      laneRank === "user" && context.laneActingCommit === true &&
+      laneRank !== "space" && context.laneActingCommit === true &&
       scopeOf(operation) === "space"
     ) {
-      const reason = laneBroadScopeNamingWriteViolation(operation);
+      const reason = laneBroadScopeNamingWriteViolation(operation, laneRank);
       if (reason !== undefined) return reason;
     }
   }
@@ -474,17 +506,19 @@ export function dynamicActionTransactionUnservableReason(
     );
     if (reason !== undefined) return reason;
   }
-  // §4 output-widening pair (context-lattice C1.2/C1.9): under a user-rank
-  // lane, the certificate's broad direct output covers BOTH legs of the pair
-  // — the broad scope-naming redirect link write and the value write at the
-  // ACTING principal's user instance of the SAME document. Coverage widens
-  // across the space/user instance boundary only, only for direct outputs,
-  // and never for session scope (inadmissible until C2). The commit-value
-  // backstop above keeps the broad leg an actual scope-naming link.
+  // §4 output-widening pair (context-lattice C1.2/C1.9, session rank with
+  // C2.2): under a scoped lane, the certificate's broad direct output covers
+  // BOTH legs of the pair — the broad scope-naming redirect link write and
+  // the value write at the ACTING context's scoped instance of the SAME
+  // document. Coverage widens across the lane's own instance boundary only
+  // (space/user at user rank; space/user/session at session rank — the
+  // chain, CA3) and only for direct outputs. The commit-value backstop
+  // above keeps the broad leg an actual scope-naming link.
   const directOutputCovers = (address: IMemorySpaceAddress): boolean =>
-    laneRank === "user" &&
+    laneRank !== "space" &&
     summary.directOutputs.some((envelope) =>
-      laneInstanceScope(envelope) && laneInstanceScope(address) &&
+      laneInstanceScope(envelope, laneRank) &&
+      laneInstanceScope(address, laneRank) &&
       envelope.space === address.space && envelope.id === address.id &&
       envelope.path.length <= address.path.length &&
       envelope.path.every((segment, index) => segment === address.path[index])
@@ -519,9 +553,9 @@ export function dynamicActionTransactionUnservableReason(
         envelope.id === operation.id &&
         scopeOf(envelope) === scopeOf(operation)
       ) &&
-      !(laneRank === "user" && laneInstanceScope(operation) &&
+      !(laneRank !== "space" && laneInstanceScope(operation, laneRank) &&
         summary.directOutputs.some((envelope) =>
-          envelope.id === operation.id && laneInstanceScope(envelope)
+          envelope.id === operation.id && laneInstanceScope(envelope, laneRank)
         ))
     ) {
       return "dynamic-write-outside-static-surface";
@@ -530,34 +564,42 @@ export function dynamicActionTransactionUnservableReason(
   return undefined;
 }
 
-/** The two instances one §4 widening pair may span: the broad space
- * instance and the acting principal's user instance. Session instances stay
- * outside every pair until C2. */
-function laneInstanceScope(address: { scope?: CellScope }): boolean {
+/** The instances one §4 widening pair may span — the lane's own chain of
+ * instance scopes: the broad space instance plus the acting principal's user
+ * instance at user rank, plus the acting session's instance at session rank
+ * (C2.2). A session instance stays outside every USER-lane pair. */
+function laneInstanceScope(
+  address: { scope?: CellScope },
+  laneRank: LaneRank,
+): boolean {
   const scope = scopeOf(address);
-  return scope === "space" || scope === "user";
+  return scope === "space" || scope === "user" ||
+    (laneRank === "session" && scope === "session");
 }
 
-/** §4 pair form of {@link addressesEqual}: under a user-rank lane the broad
- * and user instances of one document path are the same logical output, so
- * equality holds up to the space/user instance boundary. */
+/** §4 pair form of {@link addressesEqual}: under a scoped lane the broad
+ * and acting-instance addresses of one document path are the same logical
+ * output, so equality holds up to the lane's instance boundary. */
 function laneInstanceAddressesEqual(
   left: IMemorySpaceAddress,
   right: IMemorySpaceAddress,
+  laneRank: LaneRank,
 ): boolean {
   return left.space === right.space &&
     left.id === right.id &&
-    laneInstanceScope(left) && laneInstanceScope(right) &&
+    laneInstanceScope(left, laneRank) && laneInstanceScope(right, laneRank) &&
     left.path.length === right.path.length &&
     left.path.every((segment, index) => segment === right.path[index]);
 }
 
 /**
  * Runner-side mirror of the engine's broad-instance scope-naming-link
- * backstop (memory/v2 engine `assertLaneBroadScopeNamingWrite`, C1.2): every
- * broad write a user-rank action commits must be the conforming self-scoping
- * redirect link the output-scoping step emits — validated by the shared wire
- * contract in memory/v2/scope-naming-link.ts. Returns the engine's
+ * backstop (memory/v2 engine `assertLaneBroadScopeNamingWrite`, C1.2/C2.2):
+ * every broad write a scoped-rank action commits must be the conforming
+ * self-scoping redirect link the output-scoping step emits — validated by
+ * the shared wire contract in memory/v2/scope-naming-link.ts, parameterized
+ * by the lane's rank (a session lane admits links naming its own chain,
+ * "user" | "session"; a user lane admits "user" only). Returns the engine's
  * diagnostic code so the two seams reject identically.
  */
 function laneBroadScopeNamingWriteViolation(
@@ -565,6 +607,7 @@ function laneBroadScopeNamingWriteViolation(
     ActionTransactionRouteInput["commit"]["operations"][number],
     { op: "sqlite" }
   >,
+  laneScope: "user" | "session",
 ): string | undefined {
   if (operation.op === "delete") return "broad-lane-value-write";
   if (operation.op === "set") {
@@ -576,6 +619,7 @@ function laneBroadScopeNamingWriteViolation(
       value: document.value as FabricValue | undefined,
       documentPath: ["value"],
       writtenDocId: operation.id,
+      laneScope,
     })?.code;
   }
   // op === "patch": only exact-position writes can prove the self-redirect
@@ -590,6 +634,7 @@ function laneBroadScopeNamingWriteViolation(
       value: patch.value,
       documentPath,
       writtenDocId: operation.id,
+      laneScope,
     });
     if (violation !== undefined) return violation.code;
   }
@@ -600,7 +645,7 @@ function dynamicAddressReason(
   address: IMemorySpaceAddress,
   servedSpace: MemorySpace,
   kind: "read" | "write",
-  laneRank: "space" | "user",
+  laneRank: LaneRank,
 ): string | undefined {
   if (address.space !== servedSpace) return `dynamic-foreign-${kind}-space`;
   if (!laneAdmitsScope(address.scope, laneRank)) {
@@ -609,14 +654,20 @@ function dynamicAddressReason(
   return undefined;
 }
 
-/** A user-rank lane admits the lane principal's user-scoped addresses on top
- * of shared space state; session scope stays inadmissible until C2. */
+/** A lane admits the scope names of its OWN chain (context-lattice §2:
+ * `space < user < session`): a user-rank lane adds the lane principal's
+ * user-scoped addresses on top of shared space state; a session-rank lane
+ * adds session-scoped addresses AND keeps the user admissions — the
+ * broader-in-chain rule (C2 review CA3). Scoped addresses name only the
+ * scope axis, so they always denote the ACTING context's own instances. */
 function laneAdmitsScope(
   scope: CellScope | undefined,
-  laneRank: "space" | "user",
+  laneRank: LaneRank,
 ): boolean {
   const declared = scope ?? "space";
-  return declared === "space" || (laneRank === "user" && declared === "user");
+  if (declared === "space") return true;
+  if (declared === "user") return laneRank === "user" || laneRank === "session";
+  return declared === "session" && laneRank === "session";
 }
 
 function covers(

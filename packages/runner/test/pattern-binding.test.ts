@@ -21,6 +21,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
   SCOPE_NAMING_LINK_CONFORMANCE,
   scopeNamingLinkForPath,
+  SESSION_SCOPE_NAMING_LINK_CONFORMANCE,
 } from "@commonfabric/memory/v2/scope-naming-link";
 import { isCell } from "../src/cell.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
@@ -264,6 +265,76 @@ describe("pattern-binding", () => {
         "path",
         "scope",
       ]);
+    });
+
+    it("emits the session scope-naming-link conformance shape for broad-instance writes", () => {
+      // Emit-side half of the C2.2 wire contract (context-lattice §4, CA2):
+      // a session-narrowed output's broad-instance write must equal the
+      // shared SESSION conformance fixture — the same JSON the session-rank
+      // firewall accepts. Captured from the real emission path exactly like
+      // the user variant above.
+      const output = runtime.getCell<{ value: unknown }>(
+        space,
+        "session scope naming link conformance output",
+        undefined,
+        tx,
+      );
+      output.set({ value: null });
+      const argumentCellLink = getMetaCell(output, "argument", tx)
+        .getAsNormalizedFullLink();
+
+      const source = runtime.getCell<string>(
+        space,
+        "session scope naming link conformance source",
+        undefined,
+        tx,
+      );
+      source.set("per-session secret");
+
+      sendValueToBinding(
+        tx,
+        output,
+        argumentCellLink,
+        output.key("value").getAsWriteRedirectLink(),
+        source,
+        { narrowestReadScope: "session" },
+      );
+
+      const broadRaw = JSON.parse(
+        JSON.stringify(output.key("value").getRaw()),
+      );
+      expect(broadRaw).toEqual(SESSION_SCOPE_NAMING_LINK_CONFORMANCE.link);
+      expect(broadRaw).toEqual(
+        scopeNamingLinkForPath(
+          SESSION_SCOPE_NAMING_LINK_CONFORMANCE.cellPath,
+          "session",
+        ),
+      );
+      // Naming direction of the CA2 contract: the link carries the scope
+      // NAME only — never the session id (or principal). Byte-identity
+      // across lanes depends on it.
+      const payload = broadRaw["/"]["link@1"];
+      expect(Object.keys(payload).sort()).toEqual([
+        "overwrite",
+        "path",
+        "scope",
+      ]);
+      expect(payload.scope).toBe("session");
+
+      // The value itself landed at the session-scoped instance.
+      const scopedValue = runtime.getCellFromLink(
+        { ...output.key("value").getAsNormalizedFullLink(), scope: "session" },
+        undefined,
+        tx,
+      );
+      const scopedRaw = scopedValue.getRaw();
+      expect(isCell(scopedRaw)).toBe(false);
+      expect(
+        areNormalizedLinksSame(parseLink(scopedRaw as any, scopedValue)!, {
+          ...source.getAsNormalizedFullLink(),
+          path: [],
+        }),
+      ).toBe(true);
     });
 
     it("normalizes nested cell values before writing a narrower scoped binding", () => {

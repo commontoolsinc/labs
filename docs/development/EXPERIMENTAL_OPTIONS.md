@@ -47,7 +47,7 @@ was last checked against the code.
 | [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
-| [`serverPrimaryExecutionClaimRank`](#serverprimaryexecutionclaimrank) | `setServerPrimaryExecutionClaimRankConfig()` (host-internal, not negotiated) | `space` (space rank only) | Bernhard Seefeld (server-side execution C1.1b) | fold into `serverPrimaryExecution` once every context rank graduates | implemented, space-only by default |
+| [`serverPrimaryExecutionClaimRank`](#serverprimaryexecutionclaimrank) | `setServerPrimaryExecutionClaimRankConfig()` (host-internal, not negotiated) | `space` (space rank only) | Bernhard Seefeld (server-side execution C1.1b; `session` stage C2.1) | fold into `serverPrimaryExecution` once every context rank graduates | implemented through the session stage, space-only by default |
 | [`serverPrimaryExecutionContextLatticeClaimsV1`](#serverprimaryexecutioncontextlatticeclaimsv1) | `setServerPrimaryExecutionContextLatticeClaimsConfig()` (then negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution C1.7) | fold into `serverPrimaryExecution` once user lanes graduate, then retire the negotiation | implemented, off by default |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
@@ -769,30 +769,44 @@ the per-epic implementation notes).
 
 ### `serverPrimaryExecutionClaimRank`
 
-- **Toggle via.** `setServerPrimaryExecutionClaimRankConfig("space" | "user")`
+- **Toggle via.**
+  `setServerPrimaryExecutionClaimRankConfig("space" | "user" | "session")`
   in [`packages/memory/v2.ts`](../../packages/memory/v2.ts). Host-internal and
   owner-invisible: it is never negotiated on the wire and has no environment
-  variable; C1 flips it programmatically inside its gate fixtures.
+  variable; C1/C2 flip it programmatically inside their gate fixtures.
 - **Added by.** Bernhard Seefeld, in server-side execution C1.1b (the
-  context-lattice rank dial, 2026-07-16).
+  context-lattice rank dial, 2026-07-16); the `session` stage landed with
+  C2.1 (2026-07-17).
 - **Purpose.** The issuance-side rank dial from the
   [context-lattice design §6](../specs/server-side-execution/context-lattice-execution.md):
   the highest context rank the host ISSUES execution claims for, staged
   space → user → session → cross-space as each rank's lane machinery lands.
-  Enforced at claim issuance (`#assertExecutionClaimCapabilityEnabled`) and at
+  The value is a ladder, not a set — the `session` stage admits user-rank
+  claims too. Enforced at claim issuance
+  (`#assertExecutionClaimCapabilityEnabled`) and at
   renewal — disabling a rank revokes its live claims at their next renewal,
   mirroring the `serverPrimaryExecution` flag-off revoke. The engine's
   commit-time claim guards are deliberately rank-independent: an un-enabled
   rank behaves exactly like Phase 2's unclaimed fallback, because fail-open
   clients never classify anything against a claim that was never issued.
+  Scoped-rank claims (user and session alike) stay computation-only
+  (amendment 8); C2.8 — a C2 exit gate — lifts that conjunct for lane-grant
+  builtin egress.
 - **Current default and planned end state.** `space` by default, which is
   byte-identical to pre-C1 space-only behavior. `user` is enabled only inside
-  the C1.9 measurement gate until user lanes graduate; `session` and the
-  cross-space ranks are not yet part of the accepted value set and arrive with
-  C2+. The end state is every rank enabled.
-- **Status on 2026-07-16.** Implemented for the space/user step (C1.1b);
-  user-rank issuance is otherwise inert because no executor requests user-rank
-  claims until C1.5a.
+  the C1.9 measurement gate until user lanes graduate; `session` is enabled
+  only inside C2 gate fixtures — **ordering invariant (CA4): the session
+  stage must never be enabled outside a fixture while C2.1 has landed but
+  C2.6's named-session delivery narrowing has not**, because the pre-C2.6
+  principal-wide session-claim broadcast makes sibling-session claim churn a
+  quadratic spurious-rerun source. The cross-space ranks are not yet part of
+  the accepted value set and arrive with C3+. The end state is every rank
+  enabled.
+- **Status on 2026-07-17.** Implemented through the session stage (C2.1:
+  ladder + canonical `session:<did>:<sessionId>` wire validation per CA12;
+  C2.3: session lane grants — session-anchored, session-end = lane-end, no
+  re-anchor); session-rank issuance is otherwise inert because nothing wires
+  session-lane demand until C2.7.
 - **Path to removal.** Graduate each rank behind the dial as its C-phase gate
   is accepted (C1.7 folded the user step behind the
   `context-lattice-claims-v1` subcapability), then fold the fully graduated

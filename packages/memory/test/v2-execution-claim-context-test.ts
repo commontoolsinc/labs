@@ -325,7 +325,12 @@ Deno.test("user-rank claim on a run resolving space fences claim-context-mismatc
   }
 });
 
-Deno.test("session-rank claims stay rejected as claim-observation-mismatch", async () => {
+// C2.1 updated this pin: the admission guard now admits canonical
+// session-rank computation claims, so an all-space run under a session claim
+// reaches the effective-context fence (claim-context-mismatch) instead of
+// the pre-C2 claim-observation-mismatch admission rejection. The session
+// lane's own coverage lives in v2-execution-session-claim-context-test.ts.
+Deno.test("session-rank claims on space-resolving runs fence claim-context-mismatch", async () => {
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;
   try {
@@ -339,7 +344,7 @@ Deno.test("session-rank claims stay rejected as claim-observation-mismatch", asy
       () => applyClaimedObservationOnly(engine, lease, claim, nowMs + 1),
       Engine.ExecutionLeaseFenceError,
     );
-    assertEquals(error.fenceCause, "claim-observation-mismatch");
+    assertEquals(error.fenceCause, "claim-context-mismatch");
   } finally {
     Engine.close(engine);
     await Deno.remove(directory, { recursive: true });

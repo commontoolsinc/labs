@@ -34,6 +34,7 @@ import {
   type LegacyBackgroundExclusion,
   type LegacyBackgroundExclusionStatus,
   type Operation,
+  parseSessionExecutionContextKey,
   type PatchOp,
   principalOfUserContextKey,
   type Reference,
@@ -53,6 +54,7 @@ export type { SchedulerExecutionContextKey } from "../v2.ts";
 // (browser-safe for runner clients); this module remains an amendment-18
 // import site for engine/server/executor code.
 export {
+  parseSessionExecutionContextKey,
   principalOfUserContextKey,
   sessionExecutionContextKey,
   userExecutionContextKey,
@@ -3716,7 +3718,11 @@ const assertExecutionLeaseFenceTransaction = (
     if (claim.contextKey !== "space") {
       // Amendment 2: the fence resolves WRITE for the ACTING principal in
       // the same transaction-time authorize as the sponsor lease checks.
-      const actingPrincipal = principalOfUserContextKey(claim.contextKey);
+      // C2.1 (amendment CA7): session-rank claims resolve their principal
+      // from the canonical session key — without this the WRITE re-check
+      // would fail OPEN for session lanes.
+      const actingPrincipal = principalOfUserContextKey(claim.contextKey) ??
+        parseSessionExecutionContextKey(claim.contextKey)?.principal;
       if (
         actingPrincipal !== undefined &&
         fence.authorizeActingPrincipal?.(engine, actingPrincipal) === false
@@ -5585,8 +5591,17 @@ const laneScopeKeyForClaimContext = (
 ): LaneScopeKey => {
   if (contextKey === "space") return undefined;
   if (principalOfUserContextKey(contextKey) !== undefined) return contextKey;
-  // Session lanes arrive with C2; claim admission already fences them, so
-  // this is a defensive fail-closed backstop.
+  // C2.1b: a canonical session claim context doubles as its lane scope key,
+  // exactly like the user encoding above (`resolveScopeKey("session", …)`
+  // produces the same canonical `session:<enc>:<enc>` string). Broader-
+  // in-chain reads (a session lane reading a PerUser input) remain rejected
+  // here until C2.2/C2.5 land the laneAdmitsScope/laneScopeKey collapse
+  // (amendment CA3).
+  if (parseSessionExecutionContextKey(contextKey) !== undefined) {
+    return contextKey;
+  }
+  // Malformed scoped keys keep the defensive fail-closed backstop: claim
+  // admission already fences them upstream.
   return rejectExecutionAction(
     "non-lane-scope",
     `claim context ${contextKey} has no servable lane`,
@@ -5636,6 +5651,7 @@ const assertLaneScopedAddress = (
  */
 const assertLaneBroadScopeNamingWrite = (
   operation: Exclude<Operation, SqliteOperation>,
+  laneScope: "user" | "session" = "user",
 ): void => {
   const reject: (code: string, detail: string) => never = (code, detail) =>
     rejectExecutionAction(code, `broad lane write ${operation.id}: ${detail}`);
@@ -5659,6 +5675,7 @@ const assertLaneBroadScopeNamingWrite = (
       value: document.value,
       documentPath: ["value"],
       writtenDocId: operation.id,
+      laneScope,
     });
     if (violation !== undefined) reject(violation.code, violation.detail);
     return;
@@ -5683,6 +5700,7 @@ const assertLaneBroadScopeNamingWrite = (
       value: patch.value,
       documentPath,
       writtenDocId: operation.id,
+      laneScope,
     });
     if (violation !== undefined) reject(violation.code, violation.detail);
   }
@@ -5842,7 +5860,13 @@ const assertExecutionActionTransaction = (
       rejectNonLaneScope(laneScopeKey, "write", operation.id);
     }
     if (laneScopeKey !== undefined && resolvedScope === DEFAULT_SCOPE_KEY) {
-      assertLaneBroadScopeNamingWrite(operation);
+      // CA2 (C2.2): the admissible link scopes are the lane's non-space chain
+      // — a session lane's broad self-scoping link may name "user" or
+      // "session"; a user lane's only "user".
+      assertLaneBroadScopeNamingWrite(
+        operation,
+        laneScopeKey.startsWith("session:") ? "session" : "user",
+      );
     }
     const matchingWrites = observation.actualChangedWrites.filter((write) =>
       write.space === options.servedSpace && write.id === operation.id &&
@@ -7409,10 +7433,14 @@ const commitLaneAssertions = (
  * constant-shape fence cause. One commit — schedulerObservationBatch
  * included — may assert claims of exactly one lane. Space-lane commits
  * pass through byte-identically (their claim checks keep today's later
- * loci and ordering). The returned acting principal feeds ONLY scope
+ * loci and ordering). The returned acting lane identity feeds ONLY scope
  * resolution, effective-context resolution, and CFC label validation; the
  * sponsor `principal` keeps the lease fence, the replay/pending-read
- * sessionKey namespace, and provenance.onBehalfOf. Exact observation
+ * sessionKey namespace, and provenance.onBehalfOf. For a session lane
+ * (C2.1b, amendment CA1) the identity also carries the LANE's sessionId,
+ * parsed from the canonical claim contextKey — never the sponsor's session
+ * — so session-scope resolution and the claim-context-mismatch fence
+ * compare against the lane's own session context. Exact observation
  * replays are exempt from the liveness checks so a lost-response replay
  * stays idempotent after a lane drain, mirroring the replay-before-fence
  * ordering of the per-observation apply paths.
@@ -7427,7 +7455,7 @@ const admitExecutionCommitLanes = (
     executionClaims?: ReadonlyMap<number, ExecutionClaim>;
     executionLeaseFence?: ExecutionLeaseFence;
   },
-): string | undefined => {
+): { principal: string; sessionId?: SessionId } | undefined => {
   const assertions = commitLaneAssertions(options.commit);
   const lanes = new Set(assertions.map((assertion) => assertion.contextKey));
   if (lanes.size > 1) {
@@ -7445,10 +7473,15 @@ const admitExecutionCommitLanes = (
     );
   }
   if (lane === undefined || lane === "space") return undefined;
-  const actingPrincipal = principalOfUserContextKey(lane);
-  // Session lanes arrive with C2; their assertions keep today's
-  // claim-observation-mismatch rejection path unchanged.
-  if (actingPrincipal === undefined) return undefined;
+  const userPrincipal = principalOfUserContextKey(lane);
+  const sessionIdentity = userPrincipal === undefined
+    ? parseSessionExecutionContextKey(lane)
+    : undefined;
+  // Malformed scoped-lane keys keep today's claim-observation-mismatch
+  // rejection path unchanged (the accepted-observation guard fences them).
+  if (userPrincipal === undefined && sessionIdentity === undefined) {
+    return undefined;
+  }
   // With-operations commits already passed commit-table replay detection;
   // observation-shaped commits are replay-checked per asserted item.
   const checked = options.commit.operations.length > 0
@@ -7481,7 +7514,10 @@ const admitExecutionCommitLanes = (
       );
     }
   }
-  return actingPrincipal;
+  return userPrincipal !== undefined ? { principal: userPrincipal } : {
+    principal: sessionIdentity!.principal,
+    sessionId: sessionIdentity!.sessionId,
+  };
 };
 
 const applyCommitTransaction = (
@@ -7573,10 +7609,13 @@ const applyCommitTransaction = (
   // C1.4 lane admission runs BEFORE preconditions and read validation: a
   // scoped lane assertion resolves against its live claim and lane grant
   // first, so scoped-state validation can never leak through a forged or
-  // fenced lane's error shape. The acting principal it yields feeds only
+  // fenced lane's error shape. The acting identity it yields feeds only
   // scope resolution, effective-context resolution, and CFC label
   // validation below; `principal` (the sponsor) keeps every other role.
-  const actingPrincipal = admitExecutionCommitLanes(engine, {
+  // C2.1b: a session lane substitutes ITS OWN sessionId (from the claim
+  // contextKey) for scope resolution — the sponsor's scopeSessionId would
+  // resolve session scope at the executor session, not the served one.
+  const actingLane = admitExecutionCommitLanes(engine, {
     branch,
     sessionKey,
     commit,
@@ -7584,8 +7623,13 @@ const applyCommitTransaction = (
     executionClaims,
     executionLeaseFence,
   });
+  const actingPrincipal = actingLane?.principal;
+  const laneScopeSessionId = actingLane?.sessionId ?? scopeSessionId;
   const scopePrincipal = actingPrincipal ?? principal;
-  const scopeContext = { principal: scopePrincipal, sessionId: scopeSessionId };
+  const scopeContext = {
+    principal: scopePrincipal,
+    sessionId: laneScopeSessionId,
+  };
 
   // Preconditions gate every commit shape, including the observation-only
   // fast paths below — a descendant of an uncommitted origin must not
@@ -7595,7 +7639,7 @@ const applyCommitTransaction = (
   if (commit.operations.length === 0 && hasSchedulerObservationBatch) {
     return applySchedulerObservationBatchCommit(engine, {
       sessionId,
-      scopeSessionId,
+      scopeSessionId: laneScopeSessionId,
       sessionKey,
       space,
       principal,
@@ -7610,7 +7654,7 @@ const applyCommitTransaction = (
   if (commit.operations.length === 0 && schedulerObservation) {
     return applySchedulerObservationOnlyCommit(engine, {
       sessionId,
-      scopeSessionId,
+      scopeSessionId: laneScopeSessionId,
       sessionKey,
       space,
       principal,
@@ -7676,7 +7720,10 @@ const applyCommitTransaction = (
     assertExecutionActionTransaction({
       servedSpace: space!,
       branch,
-      scopeContext: { principal: scopePrincipal!, sessionId: scopeSessionId },
+      scopeContext: {
+        principal: scopePrincipal!,
+        sessionId: laneScopeSessionId,
+      },
       claimContextKey: executionClaim!.contextKey,
       transaction: commit,
       observation: schedulerObservation!,
@@ -7786,7 +7833,10 @@ const applyCommitTransaction = (
       ownerSpace: space ?? acceptedObservation.observation.ownerSpace,
       commitSeq: seq,
       observedAtSeq: seq,
-      scopeContext: { principal: scopePrincipal!, sessionId: scopeSessionId },
+      scopeContext: {
+        principal: scopePrincipal!,
+        sessionId: laneScopeSessionId,
+      },
       writerSessionId: sessionKey,
       localSeq: commit.localSeq,
       ...(acceptedObservation.provenance !== undefined
@@ -8249,20 +8299,24 @@ const resolvedPendingReadsForBasis = (
 };
 
 // Claim-rank admission is shape-only: the shared space lane plus well-formed
-// canonical user-rank keys (`user:<encodeURIComponent(principal)>`, so a
-// colon-bearing DID never appears raw). Session rank arrives with C2 and
-// stays rejected here, as do malformed keys. Effective-context EQUALITY is
-// owned by the claim-context-mismatch fence once the observation's context
-// resolves. User-rank claims are computation-only in C1 (amendment 8):
-// effects stay space-lane until lane-grant egress lands, so the guard and
-// the issuance path both reject a user-rank effect claim.
+// canonical user-rank keys (`user:<encodeURIComponent(principal)>`) and —
+// since C2.1 — canonical session-rank keys
+// (`session:<enc(principal)>:<enc(sessionId)>`), so a colon-bearing DID
+// never appears raw. Malformed keys stay rejected. Effective-context
+// EQUALITY is owned by the claim-context-mismatch fence once the
+// observation's context resolves. Scoped-lane claims are computation-only
+// (amendment 8, extended over session rank by C2.1): effects stay
+// space-lane until scoped-lane builtin egress lands — C2.8 is the named
+// lifter of this conjunct — so the guard and the issuance path both reject
+// a user- or session-rank effect claim.
 const isAdmissibleExecutionClaimContextKey = (
   contextKey: SchedulerExecutionContextKey,
   actionKind: ExecutionClaim["actionKind"],
 ): boolean =>
   contextKey === "space" ||
   (actionKind === "computation" &&
-    principalOfUserContextKey(contextKey) !== undefined);
+    (principalOfUserContextKey(contextKey) !== undefined ||
+      parseSessionExecutionContextKey(contextKey) !== undefined));
 
 const claimKeyFromExecutionClaim = (
   claim: ExecutionClaim,

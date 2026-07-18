@@ -28,7 +28,6 @@ import {
   type ExecutionLease,
   getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
-  getServerPrimaryExecutionClaimRankConfig,
   type GraphQuery,
   type GraphQueryRequest,
   type GraphQueryResult,
@@ -53,6 +52,7 @@ import {
   type SchedulerWritersForTargetsQuery,
   type SchedulerWritersForTargetsResult,
   type ServerMessage,
+  serverPrimaryExecutionClaimRankAtLeast,
   serverPrimaryExecutionGraphRetirementAdmits,
   type SessionAckRequest,
   type SessionAckResult,
@@ -757,7 +757,38 @@ export type UserLaneGrant = {
   readonly anchorSessionToken: SessionToken;
 };
 
-const userLaneKey = (
+/**
+ * Host-derived authority for one session lane (context-lattice §3, C2.3):
+ * keyed (space, branch, session:<did>:<sessionId>), anchored on THAT live
+ * connected session — the session is its OWN anchor, validated with the
+ * bindExecutionSession checks (live session, bound principal, owning
+ * connection). Mirrors UserLaneGrant WITHOUT the re-anchor path: session-end
+ * is lane-end, so `anchorSessionId` is always the lane's own `sessionId` and
+ * a disconnect (or TTL detach) drains the lane instead of migrating it.
+ * Creation and every renewal require the session principal's current WRITE
+ * capability (amendment 2 at session rank). Drain fences the generation
+ * BEFORE the claim sweep (amendment 12), exactly like user lanes.
+ */
+export type SessionLaneGrant = {
+  readonly space: string;
+  readonly branch: BranchName;
+  readonly contextKey: `session:${string}:${string}`;
+  readonly principal: string;
+  readonly sessionId: string;
+  readonly laneGeneration: number;
+  /** Always === sessionId — the session is its own anchor (no re-anchor). */
+  readonly anchorSessionId: string;
+  readonly anchorConnectionId: string;
+  readonly anchorSessionToken: SessionToken;
+};
+
+/** Any live lane-grant incarnation — the shape shared by the issuance
+ * binding (CA1), the commit fence's laneAuthority lookup, and the drains. */
+type ExecutionLaneGrant = UserLaneGrant | SessionLaneGrant;
+
+/** Registry key for one lane of either rank. The canonical contextKey embeds
+ * the rank, so user and session lane keys can never collide. */
+const laneGrantKey = (
   space: string,
   branch: BranchName,
   contextKey: string,
@@ -1560,10 +1591,15 @@ export class Server {
   #boundExecutionSessions = new Map<string, BoundExecutionSession>();
   /** Live user-lane grants keyed by (space, branch, contextKey). */
   #userLaneGrants = new Map<string, UserLaneGrant>();
-  /** Monotonic per-lane generation counters; they survive drains so every
-   * re-opened lane observably supersedes its predecessor. */
-  #userLaneGenerations = new Map<string, number>();
-  /** laneGeneration bound at issuance per live user-rank claim
+  /** Live session-lane grants keyed by (space, branch, contextKey) — the
+   * key space is shared with user lanes (laneGrantKey) but can never
+   * collide, since the canonical contextKey embeds the rank (C2.3). */
+  #sessionLaneGrants = new Map<string, SessionLaneGrant>();
+  /** Monotonic per-lane generation counters (user AND session lanes; keys
+   * are rank-disjoint); they survive drains so every re-opened lane
+   * observably supersedes its predecessor. */
+  #laneGenerations = new Map<string, number>();
+  /** laneGeneration bound at issuance per live scoped-rank claim
    * (actionClaimMapKey), re-validated by renewal and the commit fence. */
   #executionClaimLaneBindings = new Map<
     string,
@@ -1720,23 +1756,32 @@ export class Server {
   }
 
   /** Issuance-side rank dial (context-lattice §6): the host issues claims
-   * only up to the enabled context rank. Space is always issuable; user rank
-   * requires the dial, actionKind `computation` (amendment 8 — effects
-   * stay space-lane in C1; lane-grant egress is a named follow-on), AND the
-   * host's own context-lattice-claims-v1 advertisement (C1.7 folds the dial
-   * behind the subcapability, amendment 9: a host that does not advertise
-   * context-scoped delivery would issue claims deliverable to no session);
-   * session rank stays un-issuable until C2 wires it into the ladder. Rank
-   * enablement gates ISSUANCE and RENEWAL only — the engine's commit-time
-   * claim guards are rank-independent. */
+   * only up to the enabled context rank, a LADDER — the `session` stage
+   * admits user rank too. Space is always issuable; scoped ranks require
+   * the dial stage, actionKind `computation` (amendment 8, extended over
+   * session rank by C2.1 — effects stay space-lane; C2.8 lifts this), AND
+   * the host's own context-lattice-claims-v1 advertisement (C1.7 folds the
+   * dial behind the subcapability, amendment 9: a host that does not
+   * advertise context-scoped delivery would issue claims deliverable to no
+   * session). Session-rank keys must additionally be canonical
+   * (#validateExecutionClaimInput rejects malformed shapes before this
+   * gate, CA12). Rank enablement gates ISSUANCE and RENEWAL only — the
+   * engine's commit-time claim guards are rank-independent. */
   #executionClaimRankEnabled(
     claim: Pick<ExecutionClaimInput, "actionKind" | "contextKey">,
   ): boolean {
     if (claim.contextKey === "space") return true;
-    return claim.actionKind === "computation" &&
-      Engine.principalOfUserContextKey(claim.contextKey) !== undefined &&
-      getServerPrimaryExecutionClaimRankConfig() === "user" &&
-      this.memoryProtocolFlags().serverPrimaryExecutionContextLatticeClaimsV1;
+    if (claim.actionKind !== "computation") return false;
+    if (
+      !this.memoryProtocolFlags().serverPrimaryExecutionContextLatticeClaimsV1
+    ) {
+      return false;
+    }
+    if (Engine.principalOfUserContextKey(claim.contextKey) !== undefined) {
+      return serverPrimaryExecutionClaimRankAtLeast("user");
+    }
+    return Engine.parseSessionExecutionContextKey(claim.contextKey) !==
+        undefined && serverPrimaryExecutionClaimRankAtLeast("session");
   }
 
   sessionOpenAudience(): string {
@@ -2206,10 +2251,13 @@ export class Server {
 
   disconnect(connection: Connection): void {
     this.#connections.delete(connection.id);
-    // C1.3: a dead connection can no longer anchor lane authority. Drain
-    // (fence, then sweep) exactly the lanes it anchored before demand-based
-    // lease drains run, so no lane claim outlives its anchor.
-    this.#drainUserLanesForConnection(connection.id);
+    // C1.3/C2.3: a dead connection can no longer anchor lane authority.
+    // Drain (fence, then sweep) exactly the user and session lanes it
+    // anchored before demand-based lease drains run, so no lane claim
+    // outlives its anchor. For session lanes this IS session-end = lane-end:
+    // there is no re-anchor path, mid-settle included — the host, not the
+    // Worker, is the revoker of record for a dead session's claims.
+    this.#drainLanesForConnection(connection.id);
     this.#removeExecutionDemands({ connectionId: connection.id });
     for (const [key, binding] of this.#boundExecutionSessions) {
       if (binding.connectionId === connection.id) {
@@ -2226,10 +2274,11 @@ export class Server {
     sessionId: string,
     ownerConnectionId: string,
   ): void {
-    // C1.3: detaching the anchor session ends the lane's authority even
-    // though the session row survives to its TTL (connected-session
-    // anchoring, amendment 17).
-    this.#drainUserLanesForSession(space, sessionId, ownerConnectionId);
+    // C1.3/C2.3: detaching the anchor session ends the lane's authority
+    // even though the session row survives to its TTL (connected-session
+    // anchoring, amendment 17). A detached session's later TTL death
+    // therefore never sees a live lane — the drain already ran here.
+    this.#drainLanesForSession(space, sessionId, ownerConnectionId);
     this.#sessions.detach(space, sessionId, ownerConnectionId);
     this.#boundExecutionSessions.delete(sessionKey(space, sessionId));
   }
@@ -3533,13 +3582,15 @@ export class Server {
     }
     const principal = Engine.principalOfUserContextKey(actingContext);
     if (principal === undefined) {
-      // Session lanes arrive with C2; malformed keys are protocol misuse.
+      // Session acting-context READS are C2.4's seam (CA8: substitute the
+      // GRANT's session id, never base.sessionId). Until it lands, session
+      // acting contexts and malformed keys both reject here.
       return {
         error: toError("ProtocolError", "malformed acting context"),
       };
     }
     const grant = this.#userLaneGrants.get(
-      userLaneKey(
+      laneGrantKey(
         space,
         binding.lease.branch,
         actingContext as `user:${string}`,
@@ -3597,15 +3648,17 @@ export class Server {
     return {
       lease,
       nowMs: () => this.#executionNowMs(),
-      // C1.3 commit-side lane fencing: a scoped claim commits only while its
-      // lane grant is live at the generation bound at issuance; the engine
-      // rejects otherwise with the counted cause `lane-generation-stale`.
+      // C1.3 commit-side lane fencing (session lanes since C2.3): a scoped
+      // claim commits only while its lane grant — user or session, resolved
+      // through the shared binding — is live at the generation bound at
+      // issuance; the engine rejects otherwise with the counted cause
+      // `lane-generation-stale`.
       laneAuthority: (claim) => {
         const binding = this.#executionClaimLaneBindings.get(
           actionClaimMapKey(claim),
         );
         return binding !== undefined &&
-          this.#userLaneGrants.get(binding.laneKey)?.laneGeneration ===
+          this.#liveLaneGrantForKey(binding.laneKey)?.laneGeneration ===
             binding.laneGeneration;
       },
       // C1.4 (amendment 2): the same transaction-time authorize also
@@ -3809,11 +3862,14 @@ export class Server {
       claim.runtimeFingerprint.length === 0 ||
       claim.runtimeFingerprint.length > 1024 ||
       (claim.contextKey !== "space" &&
-        // User-rank keys must be canonical (colon-safe encoded principal);
-        // session-rank keys keep prefix-only wire admission until C2 owns
-        // their canonical shape.
+        // Scoped keys must be canonical (colon-safe encoded segments): user
+        // rank per principalOfUserContextKey, session rank per the C2.1
+        // canonical parse (CA12 — exactly `session:<enc>:<enc>`, both
+        // segments non-empty, decodable, and byte-exact under re-encoding;
+        // `session:a:b:c` and `session::` reject here in one place).
         Engine.principalOfUserContextKey(claim.contextKey) === undefined &&
-        !claim.contextKey.startsWith("session:")) ||
+        Engine.parseSessionExecutionContextKey(claim.contextKey) ===
+          undefined) ||
       (claim.actionKind !== "computation" && claim.actionKind !== "effect" &&
         claim.actionKind !== "event-handler")
     ) {
@@ -3929,16 +3985,26 @@ export class Server {
   }
 
   /** Amendment-11 fence: drain every live user lane of `principal` in
-   * `space` (all branches). Synchronous — callers rely on the generation
-   * fence and claim revokes landing before they continue. */
-  #fenceUserLanesForNonNegotiatingAttach(
+   * `space` (all branches), plus — C2.3 — the attaching session's OWN
+   * session lane (a session that stops negotiating context-lattice claims
+   * could no longer receive its lane's claims; sibling sessions' lanes are
+   * untouched, since their per-session negotiation stands). Synchronous —
+   * callers rely on the generation fence and claim revokes landing before
+   * they continue. */
+  #fenceLanesForNonNegotiatingAttach(
     space: string,
     principal: string | undefined,
+    sessionId: string,
   ): void {
     if (principal === undefined || principal === ANYONE_USER) return;
     for (const grant of [...this.#userLaneGrants.values()]) {
       if (grant.space === space && grant.principal === principal) {
         this.#drainUserLane(grant);
+      }
+    }
+    for (const grant of [...this.#sessionLaneGrants.values()]) {
+      if (grant.space === space && grant.sessionId === sessionId) {
+        this.#drainSessionLane(grant);
       }
     }
   }
@@ -3956,7 +4022,7 @@ export class Server {
     return null;
   }
 
-  #laneGrantAnchorConnected(grant: UserLaneGrant): boolean {
+  #laneGrantAnchorConnected(grant: ExecutionLaneGrant): boolean {
     const session = this.#sessions.get(grant.space, grant.anchorSessionId);
     return session !== null && session.principal === grant.principal &&
       session.sessionToken === grant.anchorSessionToken &&
@@ -3981,7 +4047,7 @@ export class Server {
     principal: string,
   ): Promise<UserLaneGrant> {
     const contextKey = Engine.userExecutionContextKey(principal);
-    const key = userLaneKey(space, branch, contextKey);
+    const key = laneGrantKey(space, branch, contextKey);
     const existing = this.#userLaneGrants.get(key);
     if (existing !== undefined) {
       if (this.#laneGrantAnchorConnected(existing)) return existing;
@@ -4015,8 +4081,8 @@ export class Server {
           "negotiate context-lattice-claims-v1",
       );
     }
-    const laneGeneration = (this.#userLaneGenerations.get(key) ?? 0) + 1;
-    this.#userLaneGenerations.set(key, laneGeneration);
+    const laneGeneration = (this.#laneGenerations.get(key) ?? 0) + 1;
+    this.#laneGenerations.set(key, laneGeneration);
     const grant: UserLaneGrant = Object.freeze({
       space,
       branch,
@@ -4038,7 +4104,7 @@ export class Server {
   async renewUserLaneGrant(
     grant: UserLaneGrant,
   ): Promise<UserLaneGrant | null> {
-    const key = userLaneKey(grant.space, grant.branch, grant.contextKey);
+    const key = laneGrantKey(grant.space, grant.branch, grant.contextKey);
     if (this.#userLaneGrants.get(key) !== grant) return null;
     const engine = await this.openEngine(grant.space);
     if (this.#userLaneGrants.get(key) !== grant) return null;
@@ -4068,17 +4134,25 @@ export class Server {
     principal: string,
   ): UserLaneGrant | null {
     return this.#userLaneGrants.get(
-      userLaneKey(space, branch, Engine.userExecutionContextKey(principal)),
+      laneGrantKey(space, branch, Engine.userExecutionContextKey(principal)),
     ) ?? null;
   }
 
   /** Host-side pair of the C1.5a runner dial (C1.8 inertness pin): user
-   * lanes may open only while the issuance rank dial admits user rank AND
-   * this host advertises context-lattice-claims-v1. Mirrors
+   * lanes may open only while the issuance rank dial admits user rank (the
+   * ladder — the `session` stage admits user rank too) AND this host
+   * advertises context-lattice-claims-v1. Mirrors
    * #executionClaimRankEnabled's user-rank condition — a lane the host could
    * never issue claims for is pure wake-widening overhead. */
   executionUserLanesEnabled(): boolean {
-    return getServerPrimaryExecutionClaimRankConfig() === "user" &&
+    return serverPrimaryExecutionClaimRankAtLeast("user") &&
+      this.memoryProtocolFlags().serverPrimaryExecutionContextLatticeClaimsV1;
+  }
+
+  /** C2.3 pair of executionUserLanesEnabled: session lanes may open only at
+   * the `session` dial stage under the same subcapability advertisement. */
+  executionSessionLanesEnabled(): boolean {
+    return serverPrimaryExecutionClaimRankAtLeast("session") &&
       this.memoryProtocolFlags().serverPrimaryExecutionContextLatticeClaimsV1;
   }
 
@@ -4087,9 +4161,151 @@ export class Server {
    * Returns false when the incarnation is already gone (a concurrent
    * disconnect/ACL drain won). */
   closeUserLaneGrant(grant: UserLaneGrant): boolean {
-    const key = userLaneKey(grant.space, grant.branch, grant.contextKey);
+    const key = laneGrantKey(grant.space, grant.branch, grant.contextKey);
     if (this.#userLaneGrants.get(key) !== grant) return false;
     this.#drainUserLane(grant);
+    return true;
+  }
+
+  /**
+   * Open (or return) the live lane grant for one
+   * (space, branch, session:<did>:<sessionId>) lane (context-lattice §3,
+   * C2.3). The session is its OWN anchor: the grant anchors on exactly the
+   * named live connected session, validated with the bindExecutionSession
+   * checks — live session, bound principal, owning connection — plus the
+   * principal's current WRITE capability (amendment 2 at session rank), all
+   * re-sampled after the engine await. Unlike user lanes there is NO cohort
+   * gate and NO re-anchor: chain-scoped routing means a session claim only
+   * ever suppresses its own session, so only the lane-owning session's
+   * current attach must have negotiated context-lattice-claims-v1, and when
+   * that session ends, the lane ends (a sibling session of the same
+   * principal never inherits the grant).
+   *
+   * Host-internal: nothing wires session-lane demand to this until C2.7 —
+   * in production the registry stays empty and every path guarding on it is
+   * dormant.
+   */
+  async openSessionLaneGrant(
+    space: string,
+    branch: BranchName,
+    principal: string,
+    sessionId: string,
+  ): Promise<SessionLaneGrant> {
+    const contextKey = Engine.sessionExecutionContextKey(principal, sessionId);
+    const key = laneGrantKey(space, branch, contextKey);
+    const existing = this.#sessionLaneGrants.get(key);
+    if (existing !== undefined) {
+      if (this.#laneGrantAnchorConnected(existing)) return existing;
+      this.#drainSessionLane(existing);
+    }
+    const engine = await this.openEngine(space);
+    // The engine open is an authority boundary: re-sample the anchor and the
+    // registry after it, exactly like claim issuance re-samples its inputs.
+    if (this.#sessionLaneGrants.get(key) !== undefined) {
+      return await this.openSessionLaneGrant(
+        space,
+        branch,
+        principal,
+        sessionId,
+      );
+    }
+    const anchor = this.#sessions.get(space, sessionId);
+    if (
+      anchor === null || anchor.principal === undefined ||
+      anchor.principal === ANYONE_USER || anchor.principal !== principal ||
+      anchor.ownerConnectionId === null ||
+      !this.#connections.has(anchor.ownerConnectionId)
+    ) {
+      throw new Error(
+        "session lane grant requires that live connected session of the lane principal",
+      );
+    }
+    const capability = this.#resolveCapability(engine, space, principal);
+    if (capability === null || !isCapable(capability, "WRITE")) {
+      throw new Error(
+        "session lane grant requires the lane principal's current WRITE capability",
+      );
+    }
+    // Per-session delivery gate: the lane-owning session's own attach must
+    // have negotiated context-lattice-claims-v1, or the host would issue
+    // claims that #sessionAcceptsClaim can never deliver to it. Deliberately
+    // NOT the user-lane principal-wide cohort gate — a session claim never
+    // suppresses a sibling session under chain-scoped routing.
+    if (!anchor.serverPrimaryExecutionContextLatticeClaimsV1) {
+      throw new Error(
+        "session lane grant requires the lane session to negotiate " +
+          "context-lattice-claims-v1",
+      );
+    }
+    const laneGeneration = (this.#laneGenerations.get(key) ?? 0) + 1;
+    this.#laneGenerations.set(key, laneGeneration);
+    const grant: SessionLaneGrant = Object.freeze({
+      space,
+      branch,
+      contextKey,
+      principal,
+      sessionId,
+      laneGeneration,
+      anchorSessionId: sessionId,
+      anchorConnectionId: anchor.ownerConnectionId,
+      anchorSessionToken: anchor.sessionToken,
+    });
+    this.#sessionLaneGrants.set(key, grant);
+    return grant;
+  }
+
+  /** Re-validate one exact session grant incarnation: live registry
+   * identity, the connected owning session, current WRITE (amendment 2 at
+   * session rank), and the session's own negotiation. Any mismatch drains
+   * the lane — fence, then sweep — and reports null. There is no re-anchor
+   * path: a drained incarnation can never be renewed back to life. */
+  async renewSessionLaneGrant(
+    grant: SessionLaneGrant,
+  ): Promise<SessionLaneGrant | null> {
+    const key = laneGrantKey(grant.space, grant.branch, grant.contextKey);
+    if (this.#sessionLaneGrants.get(key) !== grant) return null;
+    const engine = await this.openEngine(grant.space);
+    if (this.#sessionLaneGrants.get(key) !== grant) return null;
+    const capability = this.#resolveCapability(
+      engine,
+      grant.space,
+      grant.principal,
+    );
+    const anchor = this.#sessions.get(grant.space, grant.anchorSessionId);
+    if (
+      !this.#laneGrantAnchorConnected(grant) ||
+      capability === null || !isCapable(capability, "WRITE") ||
+      anchor === null || !anchor.serverPrimaryExecutionContextLatticeClaimsV1
+    ) {
+      this.#drainSessionLane(grant);
+      return null;
+    }
+    return grant;
+  }
+
+  /** Read-only accessor for the live grant of one session lane, if any. */
+  sessionLaneGrant(
+    space: string,
+    branch: BranchName,
+    principal: string,
+    sessionId: string,
+  ): SessionLaneGrant | null {
+    return this.#sessionLaneGrants.get(
+      laneGrantKey(
+        space,
+        branch,
+        Engine.sessionExecutionContextKey(principal, sessionId),
+      ),
+    ) ?? null;
+  }
+
+  /** Pool-driven full drain (C2.3 lifecycle, mirror of closeUserLaneGrant):
+   * close exactly this grant incarnation. Returns false when the incarnation
+   * is already gone (a concurrent disconnect/ACL drain won). */
+  closeSessionLaneGrant(grant: SessionLaneGrant): boolean {
+    const key = laneGrantKey(grant.space, grant.branch, grant.contextKey);
+    if (this.#sessionLaneGrants.get(key) !== grant) return false;
+    this.#drainSessionLane(grant);
     return true;
   }
 
@@ -4105,43 +4321,43 @@ export class Server {
       .sort((left, right) => left.contextKey.localeCompare(right.contextKey));
   }
 
-  /** A2 third leg (C1.8): after an ACL commit, fence and drain user lanes
-   * whose principal lost WRITE or whose anchor session was removed by the
-   * ACL reconciliation. Synchronous like #drainUserLane — callers await the
-   * demand republish barrier afterwards, exactly the lease-drain
+  /** A2 third leg (C1.8, extended over session lanes by C2.3): after an ACL
+   * commit, fence and drain user AND session lanes whose principal lost
+   * WRITE or whose anchor session was removed by the ACL reconciliation.
+   * Synchronous like the per-lane drains — callers await the demand
+   * republish barrier afterwards, exactly the lease-drain
    * publish-before-response discipline. Returns the touched branches. */
-  #drainIneligibleUserLanes(
+  #drainIneligibleLanes(
     engine: Engine.Engine,
     space: string,
   ): Set<BranchName> {
     const branches = new Set<BranchName>();
-    for (const grant of [...this.#userLaneGrants.values()]) {
-      if (grant.space !== space) continue;
+    const laneEligible = (grant: ExecutionLaneGrant): boolean => {
       const capability = this.#resolveCapability(
         engine,
         space,
         grant.principal,
       );
-      if (
-        capability !== null && isCapable(capability, "WRITE") &&
-        this.#laneGrantAnchorConnected(grant)
-      ) {
-        continue;
-      }
+      return capability !== null && isCapable(capability, "WRITE") &&
+        this.#laneGrantAnchorConnected(grant);
+    };
+    for (const grant of [...this.#userLaneGrants.values()]) {
+      if (grant.space !== space || laneEligible(grant)) continue;
       this.#drainUserLane(grant);
+      branches.add(grant.branch);
+    }
+    for (const grant of [...this.#sessionLaneGrants.values()]) {
+      if (grant.space !== space || laneEligible(grant)) continue;
+      this.#drainSessionLane(grant);
       branches.add(grant.branch);
     }
     return branches;
   }
 
-  /** Drain one lane: fence its generation FIRST (remove the live grant, so
-   * every re-validation — racing issuance, renewal, the commit fence —
-   * observes the fence), THEN revoke exactly that lane's claims. Sibling
+  /** Shared drain tail: with the generation already fenced (the live grant
+   * removed from its registry), revoke exactly that lane's claims. Sibling
    * lanes and the space lane are untouched. */
-  #drainUserLane(grant: UserLaneGrant): void {
-    const key = userLaneKey(grant.space, grant.branch, grant.contextKey);
-    if (this.#userLaneGrants.get(key) !== grant) return;
-    this.#userLaneGrants.delete(key);
+  #sweepLaneClaims(grant: ExecutionLaneGrant): void {
     for (const [claimKey, claim] of this.#executionClaims) {
       if (
         claim.space !== grant.space || claim.branch !== grant.branch ||
@@ -4156,15 +4372,41 @@ export class Server {
     this.#scheduleExecutionClaimExpiry();
   }
 
-  #drainUserLanesForConnection(connectionId: string): void {
+  /** Drain one user lane: fence its generation FIRST (remove the live
+   * grant, so every re-validation — racing issuance, renewal, the commit
+   * fence — observes the fence), THEN revoke exactly that lane's claims. */
+  #drainUserLane(grant: UserLaneGrant): void {
+    const key = laneGrantKey(grant.space, grant.branch, grant.contextKey);
+    if (this.#userLaneGrants.get(key) !== grant) return;
+    this.#userLaneGrants.delete(key);
+    this.#sweepLaneClaims(grant);
+  }
+
+  /** Drain one session lane — §B.8's drain semantics at session
+   * granularity (C2.3): fence the generation FIRST, then revoke exactly
+   * that lane's claims. Sibling session lanes (the same principal's other
+   * sessions included), user lanes, and the space lane are untouched. */
+  #drainSessionLane(grant: SessionLaneGrant): void {
+    const key = laneGrantKey(grant.space, grant.branch, grant.contextKey);
+    if (this.#sessionLaneGrants.get(key) !== grant) return;
+    this.#sessionLaneGrants.delete(key);
+    this.#sweepLaneClaims(grant);
+  }
+
+  #drainLanesForConnection(connectionId: string): void {
     for (const grant of [...this.#userLaneGrants.values()]) {
       if (grant.anchorConnectionId === connectionId) {
         this.#drainUserLane(grant);
       }
     }
+    for (const grant of [...this.#sessionLaneGrants.values()]) {
+      if (grant.anchorConnectionId === connectionId) {
+        this.#drainSessionLane(grant);
+      }
+    }
   }
 
-  #drainUserLanesForSession(
+  #drainLanesForSession(
     space: string,
     sessionId: string,
     ownerConnectionId: string,
@@ -4177,26 +4419,66 @@ export class Server {
         this.#drainUserLane(grant);
       }
     }
+    for (const grant of [...this.#sessionLaneGrants.values()]) {
+      if (
+        grant.space === space && grant.anchorSessionId === sessionId &&
+        grant.anchorConnectionId === ownerConnectionId
+      ) {
+        this.#drainSessionLane(grant);
+      }
+    }
   }
 
-  /** Live lane grant for a user-rank claim input, or null for space rank.
-   * Amendment 12: issuance resolves the grant before its first await and
-   * re-validates the same incarnation after every await. */
+  /** Live lane grant for a scoped-rank claim input, or null for space rank
+   * (the CA1 issuance-binding seam). Amendment 12: issuance resolves the
+   * grant before its first await and re-validates the same incarnation
+   * after every await. */
   #requiredLaneGrantForClaim(
     claimInput: ExecutionClaimInput,
-  ): UserLaneGrant | null {
-    if (Engine.principalOfUserContextKey(claimInput.contextKey) === undefined) {
-      return null;
-    }
-    const grant = this.#userLaneGrants.get(
-      userLaneKey(claimInput.space, claimInput.branch, claimInput.contextKey),
-    );
-    if (grant === undefined) {
-      throw new ExecutionLeaseAuthorityError(
-        "user-rank execution claim requires a live lane grant",
+  ): ExecutionLaneGrant | null {
+    if (Engine.principalOfUserContextKey(claimInput.contextKey) !== undefined) {
+      const grant = this.#userLaneGrants.get(
+        laneGrantKey(
+          claimInput.space,
+          claimInput.branch,
+          claimInput.contextKey,
+        ),
       );
+      if (grant === undefined) {
+        throw new ExecutionLeaseAuthorityError(
+          "user-rank execution claim requires a live lane grant",
+        );
+      }
+      return grant;
     }
-    return grant;
+    if (
+      Engine.parseSessionExecutionContextKey(claimInput.contextKey) !==
+        undefined
+    ) {
+      const grant = this.#sessionLaneGrants.get(
+        laneGrantKey(
+          claimInput.space,
+          claimInput.branch,
+          claimInput.contextKey,
+        ),
+      );
+      if (grant === undefined) {
+        throw new ExecutionLeaseAuthorityError(
+          "session-rank execution claim requires a live lane grant",
+        );
+      }
+      return grant;
+    }
+    return null;
+  }
+
+  /** Live grant incarnation currently registered under a lane key, of
+   * either rank — the one lookup the issuance re-validation, the renewal
+   * binding re-check, and the commit fence's laneAuthority closure share.
+   * The canonical contextKey embedded in the key picks the registry. */
+  #liveLaneGrantForKey(laneKey: string): ExecutionLaneGrant | undefined {
+    return this.#userLaneGrants.get(laneKey) ??
+      this.#sessionLaneGrants.get(laneKey);
   }
 
   /** Amendment 3 issuance guard: reject any claim whose action tuple has a
@@ -4246,19 +4528,21 @@ export class Server {
   ): Promise<ExecutionClaim> {
     this.#validateExecutionClaimInput(claimInput);
     this.#assertExecutionClaimCapabilityEnabled(claimInput);
-    // Amendment 12: bind the live lane grant before the first await; every
+    // Amendment 12 (session lanes since C2.3, CA1): bind the live lane
+    // grant — user or session rank — before the first await; every
     // re-sample below re-validates the same incarnation so a drain fencing
     // the generation mid-issuance declines instead of orphaning a claim.
     const laneGrant = this.#requiredLaneGrantForClaim(claimInput);
     const laneKey = laneGrant === null
       ? undefined
-      : userLaneKey(claimInput.space, claimInput.branch, laneGrant.contextKey);
+      : laneGrantKey(claimInput.space, claimInput.branch, laneGrant.contextKey);
     const assertLaneGrantCurrent = () => {
       if (
-        laneKey !== undefined && this.#userLaneGrants.get(laneKey) !== laneGrant
+        laneKey !== undefined &&
+        this.#liveLaneGrantForKey(laneKey) !== laneGrant
       ) {
         throw new ExecutionLeaseAuthorityError(
-          "user-rank execution claim lane grant was fenced during issuance",
+          "scoped execution claim lane grant was fenced during issuance",
         );
       }
     };
@@ -4438,14 +4722,15 @@ export class Server {
       this.revokeExecutionClaim(live);
       return null;
     }
-    // Amendment 12: renewal re-checks lane-grant liveness at the bound
-    // generation and revokes on mismatch — an executor renewing across a
-    // drain can never keep a departed principal's claim alive.
+    // Amendment 12 (session lanes since C2.3): renewal re-checks
+    // lane-grant liveness at the bound generation and revokes on mismatch —
+    // an executor renewing across a drain can never keep a departed
+    // principal's (or dead session's) claim alive.
     if (live.contextKey !== "space") {
       const binding = this.#executionClaimLaneBindings.get(key);
       if (
         binding === undefined ||
-        this.#userLaneGrants.get(binding.laneKey)?.laneGeneration !==
+        this.#liveLaneGrantForKey(binding.laneKey)?.laneGeneration !==
           binding.laneGeneration
       ) {
         this.revokeExecutionClaim(live);
@@ -5555,13 +5840,18 @@ export class Server {
       // Principal-wide cohort gate, amendment-11 fence locus: every attach —
       // new, resumed, or takeover, capability flags recomputed per attach —
       // that lacks context-lattice-claims-v1 synchronously fences the
-      // principal's live user lanes (generation bump + claim revoke) HERE,
+      // principal's live user lanes AND the attaching session's own session
+      // lane (C2.3) — generation bump + claim revoke — HERE,
       // before the resumed catch-up awaits, before attachExecutionFeed builds
       // this response's snapshot, and before the open response releases. The
       // bounded Worker drain may finish asynchronously; client-side ordering
       // of non-negotiating clients is out of contract.
       if (!connection.serverPrimaryExecutionContextLatticeClaimsV1) {
-        this.#fenceUserLanesForNonNegotiatingAttach(message.space, principal);
+        this.#fenceLanesForNonNegotiatingAttach(
+          message.space,
+          principal,
+          opened.sessionId,
+        );
       }
       const catchup = opened.resumed === true
         ? await this.syncSessionForConnection(
@@ -5900,12 +6190,13 @@ export class Server {
             ) {
               reconciledExecutionBranches.add(branch);
             }
-            // A2 third leg (C1.8): user lanes are fenced and their claims
-            // revoked in the same reconciliation — a principal who lost
-            // WRITE, or whose anchor session the revocation step removed,
-            // must not keep an executable lane past the ACL response.
+            // A2 third leg (C1.8, session lanes since C2.3): user and
+            // session lanes are fenced and their claims revoked in the same
+            // reconciliation — a principal who lost WRITE, or whose anchor
+            // session the revocation step removed, must not keep an
+            // executable lane past the ACL response.
             for (
-              const branch of this.#drainIneligibleUserLanes(
+              const branch of this.#drainIneligibleLanes(
                 engine,
                 message.space,
               )

@@ -6,11 +6,13 @@ import {
   type ClientCommit,
   type ExecutionClaim,
   sessionExecutionContextKey,
+  toDocumentPath,
   userExecutionContextKey,
 } from "@commonfabric/memory/v2";
 import {
   SCOPE_NAMING_LINK_CONFORMANCE,
   scopeNamingLinkForPath,
+  SESSION_SCOPE_NAMING_LINK_CONFORMANCE,
 } from "@commonfabric/memory/v2/scope-naming-link";
 import {
   classifyStaticActionServability,
@@ -841,6 +843,622 @@ describe("§4 output-widening pair servability (C1.9)", () => {
         ),
         observed,
         { servedSpace, branch: "", contextRank: "user" },
+      )).toBeUndefined();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C2.2 — session-lane surface classification and the §4 pair at session
+// rank. The lattice (context-lattice §2: `space < user:<principal> <
+// session:<principal>:<sessionId>`) makes a session lane's admissible scope
+// set its OWN chain: session-scoped surfaces plus the lane principal's
+// user-scoped surfaces — the broader-in-chain rule the C2 adversarial review
+// mandates (CA3: "a session lane's chain includes user/space, and C2.2 must
+// widen laneAdmitsScope to admit it"). Classification reports the NARROWEST
+// admitted scope as the context rank ("session" wins over "user") so the
+// C2.5 router can rank-filter candidates (CA9). Effects stay space-only
+// (A8/C2.8), and the space and user lanes keep byte-identical pre-C2
+// behavior.
+//
+// Scope is a NAME at this seam: addresses carry the scope axis only, never a
+// principal or session id — the acting context binds the instance at the
+// host/engine seams (C1.4/C2.4). Another session's instance is therefore
+// unnameable here by construction, which the scope-keyed-address rejection
+// below pins.
+// ---------------------------------------------------------------------------
+
+describe("session-lane servability (C2.2)", () => {
+  const sessionLane = { sessionContext: true } as const;
+
+  describe("static classification", () => {
+    it("promotes session-scoped computation surfaces to session rank", () => {
+      const cases = [
+        withSummary({ reads: [address("of:input", { scope: "session" })] }),
+        withSummary({
+          writes: [
+            address("of:output"),
+            address("of:side", { scope: "session" }),
+          ],
+        }),
+        withSummary({ piece: address("of:piece", { scope: "session" }) }),
+      ];
+      for (const testCase of cases) {
+        expect(classifyStaticActionServability(
+          testCase,
+          servedSpace,
+          sessionLane,
+        )).toEqual({
+          status: "claim-ready",
+          actionKind: "computation",
+          contextRank: "session",
+        });
+      }
+    });
+
+    it("admits user-scoped surfaces at user rank (broader-in-chain, CA3)", () => {
+      // A session lane's chain includes its principal's user rank, so a
+      // user-scoped surface is admissible — but the reported rank is the
+      // narrowest scope actually observed (user, not session), which is what
+      // lets the CA9 rank filter route the action to a user lane.
+      expect(classifyStaticActionServability(
+        withSummary({ reads: [address("of:input", { scope: "user" })] }),
+        servedSpace,
+        sessionLane,
+      )).toEqual({
+        status: "claim-ready",
+        actionKind: "computation",
+        contextRank: "user",
+      });
+    });
+
+    it("reports session rank when user and session surfaces mix", () => {
+      // Narrowest-of-observed wins regardless of surface order.
+      expect(classifyStaticActionServability(
+        withSummary({
+          reads: [
+            address("of:user-input", { scope: "user" }),
+            address("of:session-input", { scope: "session" }),
+          ],
+        }),
+        servedSpace,
+        sessionLane,
+      )).toEqual({
+        status: "claim-ready",
+        actionKind: "computation",
+        contextRank: "session",
+      });
+      expect(classifyStaticActionServability(
+        withSummary({
+          reads: [
+            address("of:session-input", { scope: "session" }),
+            address("of:user-input", { scope: "user" }),
+          ],
+        }),
+        servedSpace,
+        sessionLane,
+      )).toEqual({
+        status: "claim-ready",
+        actionKind: "computation",
+        contextRank: "session",
+      });
+    });
+
+    it("keeps all-space computations byte-identical under a session lane", () => {
+      // No contextRank field at all — the space-only result shape.
+      expect(classifyStaticActionServability(
+        candidate(),
+        servedSpace,
+        sessionLane,
+      )).toEqual({
+        status: "claim-ready",
+        actionKind: "computation",
+      });
+    });
+
+    it("keeps scoped effects unservable under a session lane (A8)", () => {
+      // The session lane never promotes a non-computation action; C2.8 owns
+      // lifting this, not C2.2.
+      expect(classifyStaticActionServability(
+        {
+          ...candidate({ actionKind: "effect" }),
+          completeActionScopeSummary: {
+            ...candidate().completeActionScopeSummary as Record<
+              string,
+              unknown
+            >,
+            reads: [address("of:input", { scope: "session" })],
+          },
+        },
+        servedSpace,
+        sessionLane,
+      )).toEqual({
+        status: "unservable",
+        reason: "non-space-read-scope",
+      });
+      // An all-space effect keeps its ordinary broker arm.
+      expect(classifyStaticActionServability(
+        candidate({ actionKind: "effect" }),
+        servedSpace,
+        sessionLane,
+      )).toEqual({
+        status: "broker-required",
+        actionKind: "effect",
+      });
+    });
+
+    it("keeps session scope unservable under space and user lanes (regression)", () => {
+      const sessionRead = withSummary({
+        reads: [address("of:input", { scope: "session" })],
+      });
+      for (
+        const lane of [
+          undefined,
+          { userContext: false },
+          { userContext: true },
+          { sessionContext: false },
+          { sessionContext: false, userContext: true },
+        ] as const
+      ) {
+        expect(classifyStaticActionServability(
+          sessionRead,
+          servedSpace,
+          lane,
+        )).toEqual({
+          status: "unservable",
+          reason: "non-space-read-scope",
+        });
+      }
+    });
+
+    it("cannot name another session: a scope-keyed address is malformed", () => {
+      // Addresses carry the scope NAME only; smuggling a resolved scope key
+      // (the only way to name a foreign session at this seam) fails the
+      // address shape check.
+      expect(classifyStaticActionServability(
+        withSummary({
+          reads: [{
+            ...address("of:input", { scope: "session" }),
+            scopeKey: "session:alice:s1",
+          }],
+        }),
+        servedSpace,
+        sessionLane,
+      )).toEqual({
+        status: "unservable",
+        reason: "malformed-static-surface",
+      });
+    });
+  });
+
+  describe("§4 output-widening pair at session rank", () => {
+    const broadOutput = address("of:output");
+    const sessionTwin = address("of:output", { scope: "session" });
+    const userTwin = address("of:output", { scope: "user" });
+
+    it("admits the broad+session pair as the one logical direct output", () => {
+      expect(classifyStaticActionServability(
+        withSummary({
+          writes: [broadOutput, sessionTwin],
+          directOutputs: [broadOutput, sessionTwin],
+        }),
+        servedSpace,
+        sessionLane,
+      )).toEqual({
+        status: "claim-ready",
+        actionKind: "computation",
+        contextRank: "session",
+      });
+      // Pair order is not significant.
+      expect(classifyStaticActionServability(
+        withSummary({
+          writes: [sessionTwin, broadOutput],
+          directOutputs: [sessionTwin, broadOutput],
+        }),
+        servedSpace,
+        sessionLane,
+      )).toEqual({
+        status: "claim-ready",
+        actionKind: "computation",
+        contextRank: "session",
+      });
+    });
+
+    it("lets the declared write name either instance of the §4 output", () => {
+      expect(classifyStaticActionServability(
+        withSummary({ writes: [sessionTwin], directOutputs: [broadOutput] }),
+        servedSpace,
+        sessionLane,
+      )).toEqual({
+        status: "claim-ready",
+        actionKind: "computation",
+        contextRank: "session",
+      });
+    });
+
+    it("still admits the user pair under a session lane at user rank (chain rule)", () => {
+      // A user-rank action's §4 pair (broad + user instance) stays a valid
+      // shape under a session lane — its surfaces are broader-in-chain — and
+      // classifies at USER rank for the CA9 rank filter.
+      expect(classifyStaticActionServability(
+        withSummary({
+          writes: [broadOutput, userTwin],
+          directOutputs: [broadOutput, userTwin],
+        }),
+        servedSpace,
+        sessionLane,
+      )).toEqual({
+        status: "claim-ready",
+        actionKind: "computation",
+        contextRank: "user",
+      });
+    });
+
+    it("never collapses a scoped-scoped pair without the broad leg", () => {
+      expect(classifyStaticActionServability(
+        withSummary({
+          writes: [userTwin, sessionTwin],
+          directOutputs: [userTwin, sessionTwin],
+        }),
+        servedSpace,
+        sessionLane,
+      )).toEqual({
+        status: "unservable",
+        reason: "malformed-output-surface",
+      });
+    });
+
+    it("keeps the session pair malformed under space and user lanes (regression)", () => {
+      for (
+        const lane of [undefined, { userContext: true }] as const
+      ) {
+        expect(classifyStaticActionServability(
+          withSummary({
+            writes: [broadOutput, sessionTwin],
+            directOutputs: [broadOutput, sessionTwin],
+          }),
+          servedSpace,
+          lane,
+        )).toEqual({
+          status: "unservable",
+          reason: "malformed-output-surface",
+        });
+      }
+    });
+
+    it("never pairs across document ids or differing paths at session rank", () => {
+      expect(classifyStaticActionServability(
+        withSummary({
+          writes: [broadOutput, address("of:other", { scope: "session" })],
+          directOutputs: [
+            broadOutput,
+            address("of:other", { scope: "session" }),
+          ],
+        }),
+        servedSpace,
+        sessionLane,
+      )).toEqual({
+        status: "unservable",
+        reason: "malformed-output-surface",
+      });
+      const deepTwin = address("of:output", {
+        scope: "session",
+        path: ["value", "nested"],
+      });
+      expect(classifyStaticActionServability(
+        withSummary({
+          writes: [broadOutput, deepTwin],
+          directOutputs: [broadOutput, deepTwin],
+        }),
+        servedSpace,
+        sessionLane,
+      )).toEqual({
+        status: "unservable",
+        reason: "malformed-output-surface",
+      });
+    });
+
+    it("never collapses three output instances", () => {
+      expect(classifyStaticActionServability(
+        withSummary({
+          writes: [broadOutput, userTwin, sessionTwin],
+          directOutputs: [broadOutput, userTwin, sessionTwin],
+        }),
+        servedSpace,
+        sessionLane,
+      )).toEqual({
+        status: "unservable",
+        reason: "malformed-output-surface",
+      });
+    });
+  });
+
+  describe("dynamic firewall at session rank", () => {
+    const broadOutput = address("of:output");
+    const sessionTwin = address("of:output", { scope: "session" });
+
+    // The wire-conformant broad leg for a session-rank pair: the shared
+    // session conformance link at the fixture's document path (A7 — the
+    // same JSON the runner emit test captures and the engine accept side
+    // consumes).
+    const conformingBroadDocument = {
+      value: { value: SESSION_SCOPE_NAMING_LINK_CONFORMANCE.link },
+    };
+
+    function observation(
+      overrides: Partial<SchedulerActionObservation> = {},
+    ): SchedulerActionObservation {
+      return {
+        version: 2,
+        ownerSpace: servedSpace,
+        branch: "",
+        pieceId: "space:of:piece",
+        processGeneration: 1,
+        actionId: "action-1",
+        actionKind: "computation",
+        implementationFingerprint: "impl:computation-v1",
+        runtimeFingerprint: "runner:scheduler:v3",
+        observedAtSeq: 0,
+        transactionKind: "action-run",
+        reads: [address("of:input")],
+        shallowReads: [],
+        actualChangedWrites: [broadOutput, sessionTwin],
+        currentKnownWrites: [],
+        materializerWriteEnvelopes: [],
+        completeActionScopeSummary: candidate()
+          .completeActionScopeSummary as CompleteActionScopeSummary,
+        status: "success",
+        ...overrides,
+      };
+    }
+
+    function routeInput(
+      operations: ClientCommit["operations"],
+      observed: SchedulerActionObservation,
+    ): ActionTransactionRouteInput {
+      return {
+        space: servedSpace,
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations,
+          schedulerObservation: observed,
+        },
+        sourceAction: {},
+      };
+    }
+
+    const pairOperations = (
+      broadValue: unknown = conformingBroadDocument,
+    ): ClientCommit["operations"] => [
+      {
+        op: "set",
+        id: "of:output",
+        scope: "space",
+        value: broadValue as Record<string, never>,
+      },
+      { op: "set", id: "of:output", scope: "session", value: { value: 6 } },
+    ];
+
+    // The executor seam: session-rank commits act on the lane, so the §4
+    // broad scope-naming backstop applies (engine lockstep).
+    const sessionContext = {
+      servedSpace,
+      branch: "",
+      contextRank: "session",
+      laneActingCommit: true,
+    } as const;
+
+    it("admits the session widening pair under a session-rank lane", () => {
+      const observed = observation();
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput(pairOperations(), observed),
+        observed,
+        sessionContext,
+      )).toBeUndefined();
+    });
+
+    it("admits session- and user-scoped dynamic reads of the lane's own chain", () => {
+      // CA3's broader-in-chain rule at the dynamic seam: both the lane's own
+      // session-scoped reads and its principal's user-scoped reads admit.
+      const observed = observation({
+        reads: [
+          address("of:input"),
+          address("of:session-input", { scope: "session" }),
+          address("of:user-input", { scope: "user" }),
+        ],
+      });
+      const input = routeInput(pairOperations(), observed);
+      input.commit.reads.confirmed.push(
+        {
+          id: "of:session-input",
+          scope: "session",
+          path: toDocumentPath(["value"]),
+          seq: 1,
+        },
+        {
+          id: "of:user-input",
+          scope: "user",
+          path: toDocumentPath(["value"]),
+          seq: 1,
+        },
+      );
+      expect(dynamicActionTransactionUnservableReason(
+        input,
+        observed,
+        sessionContext,
+      )).toBeUndefined();
+    });
+
+    it("rejects a broad VALUE write (§4 backstop at session rank)", () => {
+      const observed = observation();
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput(pairOperations({ value: 6 }), observed),
+        observed,
+        sessionContext,
+      )).toBe("broad-lane-value-write");
+    });
+
+    it("a broad delete is never a scope-naming link", () => {
+      const observed = observation();
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput(
+          [{ op: "delete", id: "of:output", scope: "space" }],
+          observed,
+        ),
+        observed,
+        sessionContext,
+      )).toBe("broad-lane-value-write");
+    });
+
+    it("accepts a broad link naming the user scope (broader-in-chain naming)", () => {
+      // A session lane's chain includes user rank, so a user-rank action's
+      // conforming link is admissible under a session-rank commit — it is
+      // byte-identical to what every user lane writes at that address.
+      const observed = observation();
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput(
+          pairOperations({
+            value: { value: SCOPE_NAMING_LINK_CONFORMANCE.link },
+          }),
+          observed,
+        ),
+        observed,
+        sessionContext,
+      )).toBeUndefined();
+    });
+
+    it("rejects a link naming a session id or carrying one (both directions)", () => {
+      // The link VALUE names only the scope — never a session id. A payload
+      // whose scope smuggles the resolved key, or that carries a sessionId
+      // field, is malformed at the wire contract.
+      const observed = observation();
+      const link = SESSION_SCOPE_NAMING_LINK_CONFORMANCE
+        .link as unknown as { "/": { "link@1": Record<string, unknown> } };
+      const cases: Array<Record<string, unknown>> = [
+        { ...link["/"]["link@1"], scope: "session:alice:s1" },
+        { ...link["/"]["link@1"], sessionId: "s1" },
+        { ...link["/"]["link@1"], scope: "space" },
+        { ...link["/"]["link@1"], schema: { type: "number" } },
+        { ...link["/"]["link@1"], id: "of:other" },
+        { ...link["/"]["link@1"], overwrite: "value" },
+      ];
+      for (const payload of cases) {
+        expect(dynamicActionTransactionUnservableReason(
+          routeInput(
+            pairOperations({
+              value: { value: { "/": { "link@1": payload } } },
+            }),
+            observed,
+          ),
+          observed,
+          sessionContext,
+        )).toBe("malformed-scope-naming-link");
+      }
+    });
+
+    it("widens coverage only to the direct output's own document id", () => {
+      const foreignSessionWrite = address("of:other", { scope: "session" });
+      const observedAddress = observation({
+        actualChangedWrites: [broadOutput, sessionTwin, foreignSessionWrite],
+      });
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput(pairOperations(), observedAddress),
+        observedAddress,
+        sessionContext,
+      )).toBe("dynamic-write-outside-static-surface");
+      const observed = observation();
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput([
+          ...pairOperations(),
+          { op: "set", id: "of:other", scope: "session", value: { value: 1 } },
+        ], observed),
+        observed,
+        sessionContext,
+      )).toBe("dynamic-write-outside-static-surface");
+    });
+
+    it("keeps session scope inadmissible under user and space ranks (regression)", () => {
+      // The session pair rejects in EVERY narrower lane, with the code of
+      // the first check it fails: at space rank the session-instance write
+      // is out of scope; at user rank the broad leg's session-named link is
+      // cross-lane at the backstop (operations run in order, broad first).
+      const observed = observation();
+      for (
+        const [context, reason] of [
+          [{ servedSpace, branch: "" }, "dynamic-non-space-write-scope"],
+          [
+            { servedSpace, branch: "", contextRank: "space" },
+            "dynamic-non-space-write-scope",
+          ],
+          [
+            {
+              servedSpace,
+              branch: "",
+              contextRank: "user",
+              laneActingCommit: true,
+            },
+            "malformed-scope-naming-link",
+          ],
+        ] as const
+      ) {
+        expect(dynamicActionTransactionUnservableReason(
+          routeInput(pairOperations(), observed),
+          observed,
+          context,
+        )).toBe(reason);
+      }
+      // Order-independence of the rejection: session-instance op first
+      // rejects out-of-scope at user rank too.
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput([...pairOperations()].reverse(), observed),
+        observed,
+        {
+          servedSpace,
+          branch: "",
+          contextRank: "user",
+          laneActingCommit: true,
+        },
+      )).toBe("dynamic-non-space-write-scope");
+    });
+
+    it("keeps the broad backstop off a client suppression mirror (A10)", () => {
+      // A cooperative client's mirror checks a commit acting on the CLIENT's
+      // own context (laneActingCommit absent): a broad value write there is
+      // ordinary client-primary output.
+      const observed = observation({ actualChangedWrites: [broadOutput] });
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput(
+          [{ op: "set", id: "of:output", scope: "space", value: { value: 6 } }],
+          observed,
+        ),
+        observed,
+        { servedSpace, branch: "", contextRank: "session" },
+      )).toBeUndefined();
+    });
+
+    it("applies the backstop to EVERY broad write of a session-acting commit", () => {
+      // Engine lockstep: a session-rank lane-acting commit may write a broad
+      // document only as the conforming scope-naming link — a broad VALUE
+      // write means output-scoping failed, exactly as at user rank.
+      const observed = observation({ actualChangedWrites: [broadOutput] });
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput(
+          [{ op: "set", id: "of:output", scope: "space", value: { value: 6 } }],
+          observed,
+        ),
+        observed,
+        sessionContext,
+      )).toBe("broad-lane-value-write");
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput([{
+          op: "set",
+          id: "of:output",
+          scope: "space",
+          value: conformingBroadDocument as unknown as Record<string, never>,
+        }], observed),
+        observed,
+        sessionContext,
       )).toBeUndefined();
     });
   });
