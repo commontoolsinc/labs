@@ -226,7 +226,9 @@ member of `FabricValue`.
 > (`Object.is(result, -0) === true`), and `NaN` / `±Infinity` round-trip
 > through hashing and JSON encoding via the byte-level forms in
 > `2-hash-byte-format.md` Section 4.3 and the `SpecialNumber@1` envelope in
-> `3-json-encoding.md` Section 3.
+> `3-json-encoding.md` Section 3. Value-equality among these values follows
+> `Object.is()` — `-0` is distinct from `+0` while all `NaN`s are equal — as
+> specified in Section 6.7.
 
 > **Interned vs. unique symbols.** The hashing layer (Section 6.4 and
 > `2-hash-byte-format.md` Section 4.6) and the JSON wire format
@@ -2730,6 +2732,48 @@ Hashing is used for:
 Entity IDs remain stable addresses (analogous to IPNS names) pointing to the
 most current version of the data. Hashes are not used as entity addresses.
 
+### 6.7 Value Equality
+
+`FabricValue`s are compared for logical (content) equality by
+`valueEqual(a: FabricValue, b: FabricValue): boolean`. This is the equality
+the reactive system's change-detection and no-op gates depend on, and the
+equality that `Map` / `Set` key behavior over fabric values is expected to
+follow.
+
+**Governing principle.** Value-equality follows `Object.is()` at the primitive
+level, and content-hash equality (Section 6.4) is defined to agree with it —
+equivalently, two `FabricValue`s are value-equal exactly when their content
+hashes are equal. `Object.is()`, not `===`, is the operator the contract
+names, and the two disagree in exactly the two cases the hashing layer already
+distinguishes:
+
+- **`-0` ≠ `+0`.** `Object.is(-0, +0)` is `false`, so `-0` and `+0` are
+  distinct fabric values and hash distinctly (Section 6.4;
+  `2-hash-byte-format.md` Section 4.3). (`===` would conflate them, treating
+  `-0 === +0` as `true`.)
+- **All `NaN`s are value-equal.** `Object.is(NaN, NaN)` is `true`, so every
+  `NaN` is value-equal to every other `NaN` — including bitwise-distinct
+  payloads, which the hashing layer canonicalizes to a single quiet `NaN`
+  (Section 6.4; `2-hash-byte-format.md` Section 4.3) — and all `NaN`s hash
+  identically. (`===` would report `NaN !== NaN`.)
+
+Every other primitive falls through to ordinary same-value equality:
+`+Infinity`, `-Infinity`, and each finite number equals itself and nothing
+else, and likewise for `string`, `boolean`, `bigint`, interned `symbol`,
+`null`, and `undefined`.
+
+**Objects, arrays, and instances.** Non-primitive fabric values are compared
+by canonical content hash: `valueEqual(a, b)` holds exactly when
+`hashStringOf(a) === hashStringOf(b)` (Section 6.4). Because the content hash
+reflects logical content and carries the primitive-leaf distinctions above, a
+`-0`, `NaN`, or any other value nested arbitrarily deep inside a plain object,
+array, `FabricMap`, `FabricSet`, or other `FabricInstance` inherits the same
+equality. Deciding object equality by content hash (rather than by a naive
+property walk) is also what lets structurally distinct values be told apart —
+a sparse array hole vs. a stored `undefined`, a present `undefined` vs. an
+absent key (Section 6.4), and two distinct `FabricInstance`s of the same class
+that carry no enumerable own-properties.
+
 ---
 
 ## 7. Implementation Guidance
@@ -3341,13 +3385,6 @@ values cross from internal serialization machinery to callers:
 
 These questions may need resolution during implementation but do not block the
 spec from being implementable.
-
-- **Comparison semantics for modern types**: Should equality be by identity, by
-  encoded state (or as if by encoded state — an implementation need
-  not actually run a codec), or configurable? This affects both runtime
-  comparisons (e.g., in reactive system change detection) and `Map`/`Set` key
-  behavior. Recommendation: start with identity semantics (the JS default) and
-  revisit if structural equality is needed for specific use cases.
 
 - **Type registry management**: How are serialization contexts configured? Static
   registration? Dynamic discovery? Who owns the registry? The isolation
