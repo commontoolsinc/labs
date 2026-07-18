@@ -1440,6 +1440,165 @@ Deno.test("CellBridge.rebuildPieceProp keeps the FS projection index inode stabl
   assertEquals(invalidatedInodes.includes(indexIno), true);
 });
 
+Deno.test("CellBridge.rebuildPieceProp invalidates the index dentry when an FS projection is removed", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+
+  const resultCell = new SinkableCell({
+    $FS: { type: "text/markdown", content: "Hello", frontmatter: {} },
+  });
+  const piece = {
+    id: "of:entity-fs-removed",
+    name: () => "FS Removed Fixture",
+    getPatternMeta: () => Promise.resolve({}),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+      get: () => Promise.resolve(resultCell.get()),
+    },
+  };
+  state.pieceControllers.set(
+    "FS Removed Fixture",
+    piece as unknown as SpaceState["pieceControllers"] extends
+      Map<string, infer T> ? T : never,
+  );
+  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+    .loadPieceTree(piece, state.piecesIno, "FS Removed Fixture", "home");
+  state.pieceMap.set("FS Removed Fixture", piece.id);
+  state.pieceInos.set("FS Removed Fixture", pieceIno);
+
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
+  assertEquals(tree.lookup(pieceIno, "index.md") !== undefined, true);
+
+  const entryInvalidations: string[] = [];
+  bridge.onInvalidate = (parent, names) => {
+    if (parent === pieceIno) entryInvalidations.push(...names);
+  };
+
+  resultCell.set(null);
+  await (bridge as unknown as { rebuildPieceProp: RebuildPieceProp })
+    .rebuildPieceProp.call(bridge, {
+      cell: resultCell as unknown as ReturnType<typeof makeCell>,
+      newValue: null,
+      pieceId: piece.id,
+      pieceIno,
+      pieceName: "FS Removed Fixture",
+      propName: "result",
+      resolveLink: () => null,
+      spaceName: "home",
+    });
+
+  // The projection is gone from the tree, and its `index.md` dentry is
+  // invalidated so a client drops the entry instead of resolving a freed inode.
+  assertEquals(tree.lookup(pieceIno, "index.md"), undefined);
+  assertEquals(entryInvalidations.includes("index.md"), true);
+});
+
+Deno.test("CellBridge.rebuildPieceProp advances the piece dir mtime only when its entries change", async () => {
+  let clock = 1_000;
+  const tree = new FsTree(() => clock);
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+
+  const resultSchema = {
+    type: "object",
+    properties: { title: { type: "string" }, count: { type: "number" } },
+  };
+  const piece = {
+    id: "of:piece-dir-mtime",
+    name: () => "Dir Mtime Fixture",
+    getPatternMeta: () => Promise.resolve({}),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () =>
+        Promise.resolve(makeCell({ title: "a", count: 1 }, resultSchema)),
+      get: () => Promise.resolve({ title: "a", count: 1 }),
+    },
+  };
+  state.pieceControllers.set(
+    "Dir Mtime Fixture",
+    piece as unknown as SpaceState["pieceControllers"] extends
+      Map<string, infer T> ? T : never,
+  );
+  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+    .loadPieceTree(piece, state.piecesIno, "Dir Mtime Fixture", "home");
+  state.pieceMap.set("Dir Mtime Fixture", piece.id);
+  state.pieceInos.set("Dir Mtime Fixture", pieceIno);
+
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
+  const afterHydrate = tree.getNode(pieceIno)!.mtime;
+
+  // A content-only rebuild leaves the piece directory's entry set unchanged, so
+  // its mtime is preserved.
+  clock = 2_000;
+  await (bridge as unknown as { rebuildPieceProp: RebuildPieceProp })
+    .rebuildPieceProp.call(bridge, {
+      cell: makeCell({ title: "b", count: 1 }, resultSchema),
+      newValue: { title: "b", count: 1 },
+      pieceId: piece.id,
+      pieceIno,
+      pieceName: "Dir Mtime Fixture",
+      propName: "result",
+      resolveLink: () => null,
+      spaceName: "home",
+    });
+  assertEquals(tree.getNode(pieceIno)!.mtime, afterHydrate);
+
+  // Removing the result drops result/, result.json and .handlers from the piece
+  // directory, so its mtime advances.
+  clock = 3_000;
+  await (bridge as unknown as { rebuildPieceProp: RebuildPieceProp })
+    .rebuildPieceProp.call(bridge, {
+      cell: makeCell(null, undefined),
+      newValue: null,
+      pieceId: piece.id,
+      pieceIno,
+      pieceName: "Dir Mtime Fixture",
+      propName: "result",
+      resolveLink: () => null,
+      spaceName: "home",
+    });
+  assertEquals(tree.getNode(pieceIno)!.mtime, 3_000);
+});
+
+Deno.test("CellBridge.addPieceToSpace advances the pieces directory mtime", async () => {
+  let clock = 1_000;
+  const tree = new FsTree(() => clock);
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+  const beforeAdd = tree.getNode(state.piecesIno)!.mtime;
+
+  const piece = {
+    id: "of:added-piece",
+    name: () => "Added Piece",
+    getPatternMeta: () => Promise.resolve({}),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+  };
+  clock = 5_000;
+  await (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    .addPieceToSpace(state, piece, "home");
+
+  // The pieces directory gained an entry, so its mtime advances past its value
+  // at space construction.
+  assertEquals(tree.getNode(state.piecesIno)!.mtime > beforeAdd, true);
+});
+
 Deno.test("CellBridge.hydratePieceProp labels void handlers as no-arg callables in .handlers", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/cf-exec");

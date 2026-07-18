@@ -218,6 +218,17 @@ export class FsTree {
     return this.inodes.get(ino);
   }
 
+  /**
+   * Advance a node's mtime because its directory entries changed through a path
+   * other than a transplant — a piece appearing under a space, or a piece
+   * directory gaining or losing a top-level entry. Content changes and
+   * transplant-reconciled entry changes advance mtime on their own.
+   */
+  touch(ino: bigint): void {
+    const node = this.inodes.get(ino);
+    if (node) this.bumpMtime(node);
+  }
+
   setCfcAnnotation(ino: bigint, annotation: CfcNodeAnnotation): void {
     const node = this.inodes.get(ino);
     if (!node) {

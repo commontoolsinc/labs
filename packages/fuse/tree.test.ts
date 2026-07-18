@@ -546,3 +546,18 @@ Deno.test("mtime advances strictly even when the clock does not move", () => {
   tree.updateFile(ino, "c", "string");
   assertEquals(tree.getNode(ino)?.mtime, 1_002);
 });
+
+Deno.test("touch advances a directory's mtime, clamped strictly upward", () => {
+  const clock = 1_000; // does not advance
+  const tree = new FsTree(() => clock);
+  const dir = tree.addDir(tree.rootIno, "dir");
+  assertEquals(tree.getNode(dir)?.mtime, 1_000);
+
+  tree.touch(dir);
+  assertEquals(tree.getNode(dir)?.mtime, 1_001);
+  tree.touch(dir);
+  assertEquals(tree.getNode(dir)?.mtime, 1_002);
+
+  // Touching a missing inode is a no-op.
+  tree.touch(9_999n);
+});

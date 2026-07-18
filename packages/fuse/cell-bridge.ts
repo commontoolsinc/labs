@@ -1319,6 +1319,25 @@ export class CellBridge {
   }
 
   /**
+   * Advance the piece directory's mtime if its top-level entry set changed
+   * since `namesBefore`. Compares names, not inodes, so a rebuilt `.handlers`
+   * (same name, new inode) does not count while a prop appearing or an
+   * `index.md` replacing the result tree does.
+   */
+  private touchPieceDirIfEntriesChanged(
+    pieceIno: bigint,
+    namesBefore: Set<string>,
+  ): void {
+    const namesAfter = this.tree.getChildren(pieceIno).map(([name]) => name);
+    if (
+      namesAfter.length !== namesBefore.size ||
+      namesAfter.some((name) => !namesBefore.has(name))
+    ) {
+      this.tree.touch(pieceIno);
+    }
+  }
+
+  /**
    * Advance the hydration epoch for a prop so an in-flight hydration that read
    * a now-superseded value re-reads and rebuilds. Used when a cell change
    * arrives: the mounted tree is rebuilt in place rather than torn down, so
@@ -1393,6 +1412,15 @@ export class CellBridge {
       changedInodes: new Set(),
       entryChanges: new Map(),
     };
+    // The piece directory's top-level entries (input, result, index.md,
+    // .handlers, …) can appear or disappear across this rebuild — a prop
+    // hydrating, or a result switching between the normal tree and an [FS]
+    // projection. Its mtime is advanced only if that name set changes; a
+    // content-only rebuild leaves it untouched. Staging containers are transient
+    // within a rebuild, so they are absent from both the before and after names.
+    const pieceNamesBefore = new Set(
+      this.tree.getChildren(pieceIno).map(([name]) => name),
+    );
     if (treeValue !== undefined && treeValue !== null) {
       const {
         callables: discoveredCallables,
@@ -1468,6 +1496,7 @@ export class CellBridge {
               }
             }
           }
+          this.touchPieceDirIfEntriesChanged(pieceIno, pieceNamesBefore);
           this.emitInvalidations(changes);
           this.markPiecePropHydrated(pieceIno, "result");
           this.rebuildStats.completed++;
@@ -1513,7 +1542,7 @@ export class CellBridge {
       if (buildRootName === pendingPropName) {
         this.markPiecePropCleared(pieceIno, propName);
         if (propName === "result") {
-          this.clearFsProjectionEntries(pieceIno);
+          this.clearFsProjectionEntries(pieceIno, changes);
         }
         // Reconcile the freshly built staging subtree onto the existing one,
         // reusing the existing inodes rather than swapping in fresh ones, so a
@@ -1536,7 +1565,7 @@ export class CellBridge {
         );
       } else {
         if (propName === "result") {
-          this.clearFsProjectionEntries(pieceIno);
+          this.clearFsProjectionEntries(pieceIno, changes);
         }
         // First hydration: the prop directory and its `.json` sibling are new
         // to any cache, so their entries under the piece are invalidated.
@@ -1557,7 +1586,7 @@ export class CellBridge {
         this.recordEntryChange(changes, pieceIno, `${propName}.json`);
       }
       if (propName === "result") {
-        this.clearFsProjectionEntries(pieceIno);
+        this.clearFsProjectionEntries(pieceIno, changes);
       }
     }
     if (propName === "result") {
@@ -1567,6 +1596,7 @@ export class CellBridge {
       this.recordEntryChange(changes, pieceIno, ".handlers");
     }
 
+    this.touchPieceDirIfEntriesChanged(pieceIno, pieceNamesBefore);
     this.emitInvalidations(changes);
 
     if (propName === "result") {
@@ -2304,6 +2334,10 @@ export class CellBridge {
       piece,
     });
 
+    // The pieces and entities directories gained an entry.
+    this.tree.touch(state.piecesIno);
+    this.tree.touch(state.entitiesIno);
+
     return name;
   }
 
@@ -2326,7 +2360,9 @@ export class CellBridge {
     }
 
     // Remove tree nodes
-    this.tree.removeChild(state.piecesIno, name);
+    if (this.tree.removeChild(state.piecesIno, name) !== undefined) {
+      this.tree.touch(state.piecesIno);
+    }
 
     // Clean up entity tree
     if (pieceId) {
@@ -2336,7 +2372,9 @@ export class CellBridge {
         this.unregisterPieceRoot(entityIno);
         this.fsProjectionEntries.delete(entityIno);
       }
-      this.tree.removeChild(state.entitiesIno, entityName);
+      if (this.tree.removeChild(state.entitiesIno, entityName) !== undefined) {
+        this.tree.touch(state.entitiesIno);
+      }
     }
 
     state.pieceMap.delete(name);
@@ -2555,19 +2593,39 @@ export class CellBridge {
     }
   }
 
-  private clearFsProjectionEntries(pieceIno: bigint): void {
+  /**
+   * Remove a piece's [FS] projection entries from the tree. When `changes` is
+   * supplied, each removed entry is recorded so its cached directory entry is
+   * invalidated — a projection leaving the piece root (the result becomes null
+   * or switches back to the normal result tree) must drop the client's cached
+   * `index.md` and sibling dentries, or they resolve to freed inodes. The
+   * `.fs.pending` staging container is internal and never has a cached entry,
+   * so it is cleared but not recorded.
+   */
+  private clearFsProjectionEntries(
+    pieceIno: bigint,
+    changes?: TransplantChanges,
+  ): void {
     const entries = this.fsProjectionEntries.get(pieceIno);
     this.fsProjectionEntries.delete(pieceIno);
 
     for (const name of ["index.md", "index.json", ".fs.pending"]) {
       const ino = this.tree.lookup(pieceIno, name);
-      if (ino !== undefined) this.tree.clear(ino);
+      if (ino !== undefined) {
+        this.tree.clear(ino);
+        if (changes && name !== ".fs.pending") {
+          this.recordEntryChange(changes, pieceIno, name);
+        }
+      }
     }
 
     if (!entries) return;
     for (const name of entries) {
       const ino = this.tree.lookup(pieceIno, name);
-      if (ino !== undefined) this.tree.clear(ino);
+      if (ino !== undefined) {
+        this.tree.clear(ino);
+        if (changes) this.recordEntryChange(changes, pieceIno, name);
+      }
     }
   }
 
