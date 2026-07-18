@@ -3380,10 +3380,13 @@ export async function main(argv: string[] = Deno.args) {
 
   let unmounting = false;
 
-  // The reverse-invalidation queue, when a bridge is present. Its active flush
-  // is awaited before the session is destroyed so no notify call is still
-  // running on an FFI thread when the session memory it dereferences is freed.
+  // The reverse-invalidation queue, when a bridge is present. It is closed and
+  // its active flush awaited before the session is destroyed, so no notify call
+  // is still running on an FFI thread when the session memory it dereferences is
+  // freed. `cancelInvalidationFlush` drops a pending flush timer during that
+  // shutdown.
   let invalidationQueue: ReverseInvalidationQueue | undefined;
+  let cancelInvalidationFlush: (() => void) | undefined;
 
   // Wire up kernel cache invalidation for subscriptions.
   //
@@ -3428,6 +3431,12 @@ export async function main(argv: string[] = Deno.args) {
       }, 0);
     };
     onPendingFuseRepliesDrained = scheduleInvalidationFlush;
+    cancelInvalidationFlush = () => {
+      if (invalidationTimer !== undefined) {
+        clearTimeout(invalidationTimer);
+        invalidationTimer = undefined;
+      }
+    };
 
     bridge.onInvalidate = (parentIno: bigint, names: string[]) => {
       if (queue.addEntry(parentIno, names)) scheduleInvalidationFlush();
@@ -3488,10 +3497,17 @@ export async function main(argv: string[] = Deno.args) {
     // Best effort during shutdown.
   });
 
-  // Let any reverse-invalidation flush still running on an FFI thread finish
-  // before the session is destroyed, so a notify call does not dereference
-  // freed session memory. The session is unmounted by now, so a blocked notify
-  // has been released by the torn-down connection and this resolves promptly.
+  // Stop the reverse-invalidation queue before the session is destroyed. The
+  // session loop can exit without a signal — an external unmount or a kernel
+  // abort — leaving `unmounting` false, so the queue is closed here rather than
+  // relying on the signal handler. Closing refuses further additions and halts
+  // an in-flight flush; dropping the reschedule hook and any pending timer stops
+  // a new flush from starting; the await lets a flush already on an FFI thread
+  // finish. Together these ensure no notify call runs against the session after
+  // it is destroyed.
+  invalidationQueue?.close();
+  onPendingFuseRepliesDrained = undefined;
+  cancelInvalidationFlush?.();
   await invalidationQueue?.active().catch(() => {});
 
   // Final cleanup

@@ -48,6 +48,7 @@ export class ReverseInvalidationQueue {
   readonly #encoder = new TextEncoder();
   #entrySupported = true;
   #inodeSupported = true;
+  #closed = false;
   readonly #pendingEntry = new Map<
     string,
     { parentIno: bigint; names: Set<string> }
@@ -76,12 +77,32 @@ export class ReverseInvalidationQueue {
     return this.#pendingInode.size;
   }
 
+  get closed(): boolean {
+    return this.#closed;
+  }
+
+  /**
+   * Permanently stop the queue: refuse further additions and issue no more
+   * notify calls, halting a flush already in progress at its next step.
+   *
+   * The daemon calls this during shutdown before the session is destroyed. The
+   * session loop can exit without going through the unmounting flag (an
+   * external unmount or a kernel abort), so closing here — not only in the
+   * signal handler — is what guarantees no flush scheduled just before the exit
+   * calls the notify FFI symbols against freed session memory.
+   */
+  close(): void {
+    this.#closed = true;
+  }
+
   /**
    * Queue an entry invalidation for `names` under `parentIno`. Returns whether
    * the work was accepted, so the caller can schedule a flush only when it was.
    */
   addEntry(parentIno: bigint, names: string[]): boolean {
-    if (!this.#entrySupported || this.#deps.isUnmounting()) return false;
+    if (this.#closed || !this.#entrySupported || this.#deps.isUnmounting()) {
+      return false;
+    }
     const key = parentIno.toString();
     let pending = this.#pendingEntry.get(key);
     if (!pending) {
@@ -96,7 +117,9 @@ export class ReverseInvalidationQueue {
 
   /** Queue an inode invalidation. Returns whether the work was accepted. */
   addInode(ino: bigint): boolean {
-    if (!this.#inodeSupported || this.#deps.isUnmounting()) return false;
+    if (this.#closed || !this.#inodeSupported || this.#deps.isUnmounting()) {
+      return false;
+    }
     this.#pendingInode.add(ino);
     return true;
   }
@@ -116,10 +139,14 @@ export class ReverseInvalidationQueue {
    * second one; that running flush drains anything queued during its awaits.
    */
   flush(): Promise<void> {
-    if (this.#flushing) return this.#activeFlush;
+    if (this.#closed || this.#flushing) return this.#activeFlush;
     this.#flushing = true;
     this.#activeFlush = this.#run();
     return this.#activeFlush;
+  }
+
+  #shuttingDown(): boolean {
+    return this.#closed || this.#deps.isUnmounting();
   }
 
   async #run(): Promise<void> {
@@ -128,7 +155,7 @@ export class ReverseInvalidationQueue {
       // queued while an await is outstanding are picked up by the next loop
       // iteration rather than lost.
       while (
-        !this.#deps.isUnmounting() &&
+        !this.#shuttingDown() &&
         (this.#pendingEntry.size > 0 || this.#pendingInode.size > 0)
       ) {
         const entryBatch = [...this.#pendingEntry.values()];
@@ -140,7 +167,7 @@ export class ReverseInvalidationQueue {
         if (this.#inodeSupported) await this.#flushInodes(inodeBatch);
       }
 
-      if (this.#deps.isUnmounting()) {
+      if (this.#shuttingDown()) {
         this.#pendingEntry.clear();
         this.#pendingInode.clear();
       }
@@ -155,9 +182,9 @@ export class ReverseInvalidationQueue {
     const log = this.#deps.log ?? console.log;
     const warn = this.#deps.warn ?? console.warn;
     for (const { parentIno, names } of batch) {
-      if (!this.#entrySupported || this.#deps.isUnmounting()) break;
+      if (!this.#entrySupported || this.#shuttingDown()) break;
       for (const name of names) {
-        if (!this.#entrySupported || this.#deps.isUnmounting()) break;
+        if (!this.#entrySupported || this.#shuttingDown()) break;
         const nameBuf = this.#encoder.encode(name + "\0");
         try {
           const rc = await this.#deps.invalidateEntry(
@@ -190,7 +217,7 @@ export class ReverseInvalidationQueue {
     const log = this.#deps.log ?? console.log;
     const warn = this.#deps.warn ?? console.warn;
     for (const ino of batch) {
-      if (!this.#inodeSupported || this.#deps.isUnmounting()) break;
+      if (!this.#inodeSupported || this.#shuttingDown()) break;
       try {
         const ret = await this.#deps.invalidateInode(ino);
         if (ret === NOTIFY_UNSUPPORTED) {

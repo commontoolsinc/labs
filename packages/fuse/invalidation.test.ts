@@ -249,6 +249,51 @@ Deno.test("active() resolves before any flush and tracks the latest flush after"
   await flush;
 });
 
+Deno.test("close refuses further additions and reports closed", () => {
+  const { queue } = setup();
+  assert(!queue.closed);
+  queue.close();
+  assert(queue.closed);
+  assertEquals(queue.addEntry(1n, ["a"]), false);
+  assertEquals(queue.addInode(2n), false);
+});
+
+Deno.test("a flush after close is a no-op that issues nothing", async () => {
+  const { queue, rec } = setup();
+  queue.addEntry(1n, ["a"]);
+  queue.addInode(2n);
+  queue.close();
+  await queue.flush();
+  assertEquals(rec.entryCalls.length, 0);
+  assertEquals(rec.inodeCalls.length, 0);
+});
+
+Deno.test("close during an in-flight flush halts the remaining notifies", async () => {
+  const gate = deferred<number>();
+  let calls = 0;
+  const { queue, rec } = setup({
+    invalidateEntry: (parentIno, nameBuf, nameLen) => {
+      calls++;
+      const name = decoder.decode(nameBuf).replace(/\0$/, "");
+      rec.entryCalls.push({ parentIno, name, nameLen });
+      return calls === 1 ? gate.promise : 0;
+    },
+  });
+  queue.addEntry(1n, ["a", "b"]);
+  queue.addInode(9n);
+  const flush = queue.flush();
+  // Close while the first notify is still outstanding on the FFI thread.
+  queue.close();
+  gate.resolve(0);
+  await flush;
+  // Only the first name went out; "b" and the inode pass are skipped, and the
+  // queue is drained.
+  assertEquals(rec.entryCalls.map((c) => c.name), ["a"]);
+  assertEquals(rec.inodeCalls.length, 0);
+  assertEquals(queue.pendingEntryCount, 0);
+  assertEquals(queue.pendingInodeCount, 0);
+});
+
 Deno.test("both synchronous and asynchronous notify results are drained", async () => {
   const { queue, rec } = setup({
     invalidateEntry: (parentIno, nameBuf, nameLen) => {
