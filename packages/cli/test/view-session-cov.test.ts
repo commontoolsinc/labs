@@ -17,6 +17,7 @@ import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { diffSource } from "../lib/view/diffedit.ts";
 import { overlayBox, type ViewState } from "../lib/view/render.ts";
 import type { Document } from "../lib/view/model.ts";
+import { frameTop } from "../lib/view/actions.ts";
 
 // --- key helpers -----------------------------------------------------------
 
@@ -445,6 +446,77 @@ Deno.test("session: overlay paging keys scroll the card", () => {
   assertEquals(s.view().overlay, null, "q closed the overlay");
 });
 
+Deno.test("session: overlay letter shortcuts match the help text", () => {
+  const s = makeSession(60, 8);
+  press(s, "?");
+  press(s, "J");
+  assert(s.view().overlay!.scroll > 0, "J scrolled the help overlay");
+  press(s, "K");
+  assertEquals(s.view().overlay!.scroll, 0, "K scrolled back");
+  press(s, "q");
+  assertEquals(s.view().overlay, null, "lowercase q closed the overlay");
+
+  press(s, "?");
+  press(s, "Q");
+  assertEquals(s.quit, true, "uppercase Q requested quit");
+
+  for (const pageUp of ["b", "B"]) {
+    const paging = makeSession(60, 8);
+    press(paging, "?", "space");
+    const afterPageDown = paging.view().overlay!.scroll;
+    assert(afterPageDown > 0, "Space paged down");
+    press(paging, pageUp);
+    assert(
+      paging.view().overlay!.scroll < afterPageDown,
+      `${pageUp} paged up`,
+    );
+  }
+});
+
+Deno.test("session: info-card letter shortcuts match the help text", () => {
+  for (const reveal of ["z", "Z"]) {
+    const s = makeSession();
+    selectByLabel(s, "pattern myPattern");
+    const subject = s.view().selected!;
+    const beforeTop = s.view().top;
+    press(s, "enter");
+    assert(s.view().overlay, "the info card opened");
+    press(s, reveal);
+    assertEquals(s.view().overlay, null, `${reveal} revealed the card subject`);
+    const expectedTop = frameTop(
+      subject.startLine,
+      subject.endLine,
+      s.view().height,
+      s.doc.lines.length,
+    );
+    assert(expectedTop !== beforeTop, "the fixture requires reframing");
+    assertEquals(
+      s.view().top,
+      expectedTop,
+      `${reveal} framed the card subject`,
+    );
+    assertEquals(
+      s.view().selected?.startOffset,
+      subject.startOffset,
+      `${reveal} kept the card subject selected`,
+    );
+  }
+
+  const s = makeSession();
+  selectByLabel(s, "pattern myPattern");
+  press(s, "enter", "down", "down", "down", "enter");
+  assert(s.view().overlay?.title.includes("lift __cfLift_1"));
+  assertEquals(s.view().selected?.label, "pattern myPattern");
+  press(s, "t");
+  assertEquals(
+    s.view().inputLine,
+    "definition: __cfLift_1",
+    "t used the active followed card rather than the main-view selection",
+  );
+  press(s, "enter");
+  assert(s.view().overlay?.title.includes("__cfLift_1"));
+});
+
 Deno.test("session: overlay scrolling stops once the last line reaches the bottom", () => {
   const doc = parseDocument(SAMPLE);
   const s = new Session(
@@ -563,6 +635,100 @@ Deno.test("session: paging, half-paging and home/end via the keymap", () => {
   assertEquals(s.view().top, 0);
 });
 
+Deno.test("session: capital keycap shortcuts accept either letter case", () => {
+  const cases: Array<{
+    lower: string;
+    upper: string;
+    setup?: readonly string[];
+  }> = [
+    { lower: "q", upper: "Q" },
+    { lower: "j", upper: "J" },
+    { lower: "k", upper: "K", setup: ["j"] },
+    { lower: "h", upper: "H", setup: ["l"] },
+    { lower: "l", upper: "L" },
+    { lower: "b", upper: "B", setup: ["space"] },
+    { lower: "c", upper: "C" },
+  ];
+  for (const { lower, upper, setup = [] } of cases) {
+    const lowerSession = makeSession(30, 8);
+    const upperSession = makeSession(30, 8);
+    press(lowerSession, ...setup, lower);
+    press(upperSession, ...setup, upper);
+    assertEquals(
+      upperSession.view(),
+      lowerSession.view(),
+      `${upper} matches ${lower}`,
+    );
+    assertEquals(
+      upperSession.quit,
+      lowerSession.quit,
+      `${upper} and ${lower} have the same quit state`,
+    );
+  }
+});
+
+Deno.test("session: capital WASD keycaps navigate to the same tree nodes", () => {
+  const cases = [
+    {
+      lower: "w",
+      upper: "W",
+      from: "pattern myPattern",
+      to: "lift __cfLift_1",
+    },
+    {
+      lower: "s",
+      upper: "S",
+      from: "lift __cfLift_1",
+      to: "pattern myPattern",
+    },
+    { lower: "a", upper: "A", from: "pattern myPattern", to: "▸ /app.ts" },
+    { lower: "d", upper: "D", from: "pattern myPattern", to: "λ(input)" },
+  ];
+  for (const { lower, upper, from, to } of cases) {
+    const lowerSession = makeSession();
+    const upperSession = makeSession();
+    selectByLabel(lowerSession, from);
+    selectByLabel(upperSession, from);
+    press(lowerSession, lower);
+    press(upperSession, upper);
+    assertEquals(
+      lowerSession.view().selected?.label,
+      to,
+      `${lower} reached ${to}`,
+    );
+    assertEquals(
+      upperSession.view(),
+      lowerSession.view(),
+      `${upper} matches ${lower}`,
+    );
+  }
+});
+
+Deno.test("session: capital Z keycap frames the selected node", () => {
+  const height = 8;
+  const lowerSession = makeSession(80, height);
+  const upperSession = makeSession(80, height);
+  selectByLabel(lowerSession, "pattern myPattern");
+  selectByLabel(upperSession, "pattern myPattern");
+  const node = lowerSession.view().selected!;
+  press(lowerSession, "g");
+  press(upperSession, "g");
+  assertEquals(lowerSession.view().top, 0);
+  assertEquals(upperSession.view().top, 0);
+
+  press(lowerSession, "z");
+  press(upperSession, "Z");
+  const expected = frameTop(
+    node.startLine,
+    node.endLine,
+    height,
+    lowerSession.doc.lines.length,
+  );
+  assert(expected > 0, "the fixture requires reframing from the top");
+  assertEquals(lowerSession.view().top, expected, "z framed the node");
+  assertEquals(upperSession.view(), lowerSession.view(), "Z matches z");
+});
+
 Deno.test("session: Enter with no selection prompts to select a node", () => {
   const s = makeSession();
   press(s, "enter");
@@ -572,8 +738,14 @@ Deno.test("session: Enter with no selection prompts to select a node", () => {
 Deno.test("session: 'z' in pager mode frames the selected node", () => {
   const s = makeSession(80, 8);
   selectByLabel(s, "pattern myPattern");
+  press(s, "g");
   press(s, "z");
-  assert(s.view().top >= 0, "z framed the node");
+  const node = s.view().selected!;
+  assertEquals(
+    s.view().top,
+    frameTop(node.startLine, node.endLine, 8, s.doc.lines.length),
+    "z framed the node",
+  );
 });
 
 Deno.test("session: '#' toggles line numbers and escape clears selection & search", () => {
@@ -759,6 +931,39 @@ Deno.test("session: typing, tab, space, kill-line, yank and word-case edits in a
   press(s, "ctrl-a");
   s.handleKey(alt("c")); // capitalize word
   assert(s.doc.lines[0].text.startsWith("Hello"), s.doc.lines[0].text);
+});
+
+Deno.test("session: displayed Alt-letter shortcuts accept either case", () => {
+  const cases: Array<{
+    lower: string;
+    upper: string;
+    text: string;
+    setup?: readonly string[];
+  }> = [
+    { lower: "f", upper: "F", text: "hello world\n" },
+    { lower: "b", upper: "B", text: "hello world\n", setup: ["end"] },
+    { lower: "l", upper: "L", text: "HELLO world\n" },
+    { lower: "u", upper: "U", text: "hello world\n" },
+    { lower: "c", upper: "C", text: "hello world\n" },
+  ];
+  for (const { lower, upper, text, setup = [] } of cases) {
+    const lowerSession = fileSession(text).s;
+    const upperSession = fileSession(text).s;
+    press(lowerSession, "e", ...setup);
+    press(upperSession, "e", ...setup);
+    lowerSession.handleKey(alt(lower));
+    upperSession.handleKey(alt(upper));
+    assertEquals(
+      upperSession.doc.text,
+      lowerSession.doc.text,
+      `Alt-${upper} edits like Alt-${lower}`,
+    );
+    assertEquals(
+      upperSession.view().cursor,
+      lowerSession.view().cursor,
+      `Alt-${upper} moves like Alt-${lower}`,
+    );
+  }
 });
 
 Deno.test("session: delete-forward, backspace, kill-word forward/back, newline and mark/region", () => {

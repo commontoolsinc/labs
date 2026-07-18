@@ -215,6 +215,17 @@ Deno.test("editor: quitting dirty prompts, s saves and quits", () => {
   assertEquals(saved(), "Zabc\n");
 });
 
+Deno.test("editor: dialog shortcut letters accept either case", () => {
+  const { src, saved } = memSource();
+  const s = editSession("abc\n", src);
+  press(s, "e");
+  type(s, "Z");
+  press(s, "escape", "q");
+  press(s, "S");
+  assert(s.quit, "uppercase S activated Save");
+  assertEquals(saved(), "Zabc\n");
+});
+
 Deno.test("editor: the save prompt ignores keys that are not its buttons", () => {
   const { src, saved } = memSource();
   const s = editSession("abc\n", src);
