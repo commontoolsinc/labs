@@ -21,11 +21,14 @@ export type NotifyResult = number | Promise<number>;
 export interface ReverseInvalidationDeps {
   /**
    * Issue notify_inval_entry off the isolate thread. `nameBuf` is the
-   * null-terminated entry name; `nameLen` excludes the terminator.
+   * null-terminated entry name; `nameLen` excludes the terminator. The buffer
+   * is typed as `ArrayBuffer`-backed (not the wider `ArrayBufferLike`) so it
+   * satisfies the FFI buffer parameter, which a nonblocking call pins and so
+   * rejects a possibly-shared buffer.
    */
   invalidateEntry(
     parentIno: bigint,
-    nameBuf: Uint8Array,
+    nameBuf: Uint8Array<ArrayBuffer>,
     nameLen: bigint,
   ): NotifyResult;
   /** Issue notify_inval_inode off the isolate thread (whole inode). */
