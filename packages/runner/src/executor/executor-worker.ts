@@ -140,15 +140,18 @@ const laneDemands = new Map<
   { pieces: Set<string>; schedulerPieces: Set<string>; generation: number }
 >();
 /** Lane-independent scoped-rank candidate templates (C1.9c; session rank
- * rides the same map since C2.7), keyed by (pieceId, actionId): when a lane
- * opens (or re-anchors) AFTER discovery proved an action scoped-rank
- * servable, the Worker synthesizes that lane's candidate from the recorded
- * template instead of waiting for the next rerun of the action. The
- * template's contextKey records the rank the action classified at; the
- * late-lane emission only synthesizes onto lanes of that SAME rank (CA9). */
+ * rides the same map since C2.7; supported-builtin effects since C2.8),
+ * keyed by (pieceId, actionId): when a lane opens (or re-anchors) AFTER
+ * discovery proved an action scoped-rank servable, the Worker synthesizes
+ * that lane's candidate from the recorded template instead of waiting for
+ * the next rerun of the action. The template's contextKey records the rank
+ * the action classified at; the late-lane emission only synthesizes onto
+ * lanes of that SAME rank (CA9). A builtin template carries its builtinId
+ * so the synthesized candidate keeps the identity host passivity routing
+ * requires. */
 const userCandidateTemplates = new Map<
   string,
-  { action: Action; claimKey: ActionClaimKey }
+  { action: Action; claimKey: ActionClaimKey; builtinId?: string }
 >();
 const userCandidateTemplateKey = (key: ActionClaimKey): string =>
   `${key.pieceId}\0${key.actionId}`;
@@ -516,6 +519,9 @@ const emitTemplateCandidatesForLane = (contextKey: string): void => {
           ...template.claimKey,
           contextKey: contextKey as SchedulerExecutionContextKey,
         },
+        ...(template.builtinId !== undefined
+          ? { builtinId: template.builtinId }
+          : {}),
       },
       template.action,
     );
@@ -541,15 +547,17 @@ const postCandidate = (
   const causalActorMatchesSponsor = candidate.builtinId === undefined
     ? undefined
     : registerCandidateCausalActor(identity, action);
-  if (
-    candidate.claimKey.contextKey !== "space" &&
-    candidate.builtinId === undefined
-  ) {
+  if (candidate.claimKey.contextKey !== "space") {
     // Record the lane-independent template so a lane that opens later can
-    // synthesize its own candidate (builtins never classify user-rank).
+    // synthesize its own candidate. Since C2.8, supported builtins classify
+    // at scoped ranks too — their templates carry the builtinId so the
+    // synthesized candidates keep the passivity-routing identity.
     userCandidateTemplates.set(userCandidateTemplateKey(candidate.claimKey), {
       action,
       claimKey: candidate.claimKey,
+      ...(candidate.builtinId !== undefined
+        ? { builtinId: candidate.builtinId }
+        : {}),
     });
   }
   const laneGeneration = candidateDemandGeneration(
@@ -1120,16 +1128,35 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     const claim = sourceAction === undefined
       ? undefined
       : claimForActionRun(sourceAction);
-    if (
-      sourceAction !== undefined && claim !== undefined &&
-      causalActorMatchesByAction.get(sourceAction) !== true
-    ) {
-      const error = new ServerBuiltinUnservedError(
-        "builtin-causal-actor-mismatch",
-        "server builtin causal actor does not match the lease sponsor",
-      );
-      recordPermanentBuiltinFailure(sourceAction, claim, error);
-      return Promise.reject(error);
+    // The egress guard is lane-conditional since C2.8 (context-lattice
+    // §3/OQ6): §B.5's causal-actor/sponsor-match consent applies ONLY to
+    // SPACE-lane claims, whose executing identity is an unrelated volunteer
+    // sponsor. A scoped-lane claim's builtin is the LANE principal's own
+    // standing side effect — the acting context IS the consent — so the
+    // guard validates the LANE identity instead: this run must be pinned to
+    // the claim's own lane (the scheduler run wrapper records it), or the
+    // continuation would egress under another lane's identity. The lane
+    // GRANT's liveness is validated host-side at the brokered-egress
+    // execution point (Server.hasLiveExecutionClaim consults the live lane
+    // grant at the bound generation).
+    if (sourceAction !== undefined && claim !== undefined) {
+      if (claim.contextKey === "space") {
+        if (causalActorMatchesByAction.get(sourceAction) !== true) {
+          const error = new ServerBuiltinUnservedError(
+            "builtin-causal-actor-mismatch",
+            "server builtin causal actor does not match the lease sponsor",
+          );
+          recordPermanentBuiltinFailure(sourceAction, claim, error);
+          return Promise.reject(error);
+        }
+      } else if (laneRunsByAction.get(sourceAction) !== claim.contextKey) {
+        const error = new ServerBuiltinUnservedError(
+          "builtin-lane-identity-mismatch",
+          "server builtin run is not pinned to its claim's lane",
+        );
+        recordPermanentBuiltinFailure(sourceAction, claim, error);
+        return Promise.reject(error);
+      }
     }
     try {
       executionMetrics.asyncRequests += 1;

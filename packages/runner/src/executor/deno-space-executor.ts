@@ -259,12 +259,13 @@ const isCandidateClaim = (value: unknown): value is CandidateClaim => {
     // C1.5a widened the intra-Worker lane identity to space plus canonical
     // user-rank keys; C2.5 adds canonical `session:<did>:<sid>` keys — the
     // exact-shape parse is the wire-boundary half of CA9/CA12 (a fabricated
-    // or raw-concatenated session key never reaches claim issuance).
-    // Scoped-rank claims are computation-only (amendment 8; C2.8 lifts it)
-    // — the executor never requests one for an effect.
+    // or raw-concatenated session key never reaches claim issuance). C2.8
+    // (2026-07-18) lifted amendment 8's computation-only conjunct: scoped
+    // lanes carry effect candidates too (scoped-lane builtin egress under
+    // the lane grant, context-lattice OQ6).
     typeof key.contextKey === "string" &&
     (key.contextKey === "space" ||
-      (key.actionKind === "computation" &&
+      ((key.actionKind === "computation" || key.actionKind === "effect") &&
         (principalOfUserContextKey(key.contextKey) !== undefined ||
           parseSessionExecutionContextKey(key.contextKey) !== undefined))) &&
     typeof key.pieceId === "string" &&
@@ -716,7 +717,15 @@ class DenoSpaceExecutor implements SpaceExecutor {
     ) {
       throw new Error("executor CandidateClaim escaped its bound lane");
     }
+    // §B.5's causal-actor/sponsor-match rule is confined to the SPACE lane,
+    // whose executing identity is an unrelated volunteer sponsor. A scoped
+    // lane's builtin is the LANE principal's own standing side effect
+    // reacting to anyone's data (context-lattice §3/OQ6, C2.8): its
+    // authority is the lane grant, so a foreign-caused recompute is never
+    // dropped here — the sponsor-consent gate applies only when the claim
+    // names the space lane.
     if (
+      key.contextKey === "space" &&
       isServerExecutableBuiltinId(candidate.builtinId) &&
       candidate.causalActorMatchesSponsor !== true
     ) {

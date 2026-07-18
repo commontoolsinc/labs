@@ -487,6 +487,29 @@ Deno.test("an own-session claim admits the session lane's scoped surfaces", () =
   );
 });
 
+Deno.test("an own-session EFFECT claim keeps the client passive for scoped surfaces (C2.8)", () => {
+  // The client half of the OQ6 lift: the lane executes alice's scoped
+  // builtin server-side, and HER OWN session's effect claim routes the
+  // local instance to the claimed overlay (passive) — the lift is one
+  // classifier, so accepting a session-context effect claim needs no new
+  // client seam. Pre-C2.8 this classified unservable
+  // (`non-space-read-scope`) and failed open into duplicate egress.
+  const scoped = sessionScopedCommit();
+  const observed = scoped.schedulerObservation as Record<string, unknown>;
+  observed.actionKind = "effect";
+  const live = claim({
+    contextKey: sessionExecutionContextKey(MY_DID, MY_SESSION_ID),
+    actionKind: "effect",
+  });
+  assertEquals(
+    routeClientActionTransaction(
+      { space: SPACE, commit: scoped, sourceAction },
+      { claims: [live], ownContextKeys: ownChain, builtinPassivity: true },
+    ),
+    { disposition: "local", kind: "claimed-overlay", claim: live },
+  );
+});
+
 Deno.test("a user claim keeps session-scoped surfaces failing open (regression)", () => {
   // Narrower-than-chain stays rejected: a user-context claim never admits
   // session scope, byte-identical to the pre-C2.5 behavior.

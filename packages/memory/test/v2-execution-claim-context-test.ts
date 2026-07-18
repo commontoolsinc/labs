@@ -351,7 +351,12 @@ Deno.test("session-rank claims on space-resolving runs fence claim-context-misma
   }
 });
 
-Deno.test("user-rank effect claims fence claim-observation-mismatch (amendment 8)", async () => {
+Deno.test("scoped-rank effect claims admit and commit under their lane (C2.8 lifts amendment 8)", async () => {
+  // C2.8 (2026-07-18, context-lattice OQ6/R12): the computation-only
+  // conjunct of `isAdmissibleExecutionClaimContextKey` is lifted — a user-
+  // or session-rank EFFECT claim admits exactly like a computation claim.
+  // Pre-C2.8 this exact shape fenced `claim-observation-mismatch` on the
+  // rank × effect combination alone.
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;
   try {
@@ -360,8 +365,75 @@ Deno.test("user-rank effect claims fence claim-observation-mismatch (amendment 8
       ...claimFor(lease, USER_CONTEXT_KEY),
       actionKind: "effect",
     };
-    // Matching effect observation: the guard must reject on the user-rank ×
-    // effect combination itself, not on a claim/observation kind mismatch.
+    // A user-scoped run surface so the effective context resolves to the
+    // claim's own lane: the apply must go all the way through — kept, with
+    // provenance under the user context key.
+    const userRead: SchedulerObservationAddress = {
+      space: SPACE,
+      scope: "user",
+      id: "of:claim-context-effect-input",
+      path: ["value"],
+    };
+    const base = claimedRunObservation(claim, []);
+    const observation: SchedulerActionObservation = {
+      ...base,
+      actionKind: "effect",
+      reads: [userRead],
+      completeActionScopeSummary: {
+        ...base.completeActionScopeSummary!,
+        reads: [userRead],
+      },
+    };
+    const applied = Engine.applyCommit(engine, {
+      sessionId: "executor-session",
+      space: SPACE,
+      principal: PRINCIPAL,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservation: observation,
+      },
+      executionClaims: new Map([[1, claim]]),
+      executionLeaseFence: {
+        lease,
+        nowMs: nowMs + 1,
+        authorize: () => true,
+      },
+    });
+    assertExists(applied.schedulerObservationResults);
+    const [result] = applied.schedulerObservationResults;
+    assert(result.status === "kept");
+    assertEquals(result.executionContextKey, USER_CONTEXT_KEY);
+    assertEquals(
+      result.executionProvenance?.claim.contextKey,
+      USER_CONTEXT_KEY,
+    );
+    assertEquals(result.executionProvenance?.claim.actionKind, "effect");
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("a session-rank effect claim on a space-resolving run reaches the effective-context fence (C2.8)", async () => {
+  // Companion to the session-rank computation case above: post-C2.8 the
+  // rank × effect combination is admissible, so the mismatch this run DOES
+  // have — its surfaces resolve space, the claim names a session lane —
+  // fences `claim-context-mismatch`, never the pre-C2.8 admission
+  // rejection (`claim-observation-mismatch`).
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const sessionKey = Engine.resolveScopeKey("session", {
+      principal: PRINCIPAL,
+      sessionId: "executor-session",
+    }) as SchedulerExecutionContextKey;
+    const claim: ExecutionClaim = {
+      ...claimFor(lease, sessionKey),
+      actionKind: "effect",
+    };
     const observation: SchedulerActionObservation = {
       ...claimedRunObservation(claim, []),
       actionKind: "effect",
@@ -387,7 +459,7 @@ Deno.test("user-rank effect claims fence claim-observation-mismatch (amendment 8
         }),
       Engine.ExecutionLeaseFenceError,
     );
-    assertEquals(error.fenceCause, "claim-observation-mismatch");
+    assertEquals(error.fenceCause, "claim-context-mismatch");
   } finally {
     Engine.close(engine);
     await Deno.remove(directory, { recursive: true });

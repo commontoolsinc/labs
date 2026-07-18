@@ -76,6 +76,14 @@ export type StaticActionServability =
   | {
     status: "broker-required";
     actionKind: "effect";
+    /** Present only when a lane-parameterized classification promoted the
+     * effect off space rank (C2.8, 2026-07-18 — scoped-lane builtin egress
+     * under the lane grant, context-lattice OQ6): same semantics as the
+     * claim-ready arm — the NARROWEST scope any admitted surface declares,
+     * so the CA9 rank filter routes the builtin's candidates to lanes of
+     * exactly that rank. Absent means space rank, keeping the space-only
+     * result shape byte-identical. */
+    contextRank?: "user" | "session";
   }
   | {
     status: "unservable";
@@ -97,8 +105,12 @@ export type StaticActionServability =
  * no principal or session id (the acting context binds instances at the
  * host/engine seams), so another principal's or session's instance is
  * structurally unnameable here. Absent (or false), both classifiers are
- * byte-identical to the space-only behavior, and effects keep space-only
- * checks in every lane (amendment 8; C2.8 owns lifting it).
+ * byte-identical to the space-only behavior. Since C2.8 (2026-07-18) the
+ * lane promotes EFFECTS exactly like computations — amendment 8's
+ * computation-only conjunct is lifted: a scoped-surface effect classifies
+ * `broker-required` at the lane's rank and the broker executes it under
+ * the lane grant (context-lattice §3/OQ6); with no lane, scoped effect
+ * surfaces stay unservable byte-identically.
  */
 export interface StaticActionServabilityLane {
   readonly userContext?: boolean;
@@ -260,14 +272,19 @@ export function classifyStaticActionServability(
   }
   const candidate = value as StaticActionServabilityCandidate;
   const actionKind = candidate.actionKind;
-  // Amendment 8: scoped-rank promotion applies to computations only; effects
-  // keep space-only checks whatever the lane says (C2.8 owns lifting this).
-  // A session lane subsumes the user admissions — its chain includes the
-  // principal's user rank (context-lattice §2, review CA3).
-  const sessionLane = lane?.sessionContext === true &&
-    actionKind === "computation";
+  // C2.8 (2026-07-18) lifted amendment 8's computation-only conjunct:
+  // scoped-rank promotion applies to computations AND effects — an effect
+  // whose surfaces admit under the lane classifies broker-required at the
+  // lane's rank (session/user rank rules identical to computations,
+  // chain-read rule included) and the broker executes it under the lane
+  // grant (context-lattice §3/OQ6). A session lane subsumes the user
+  // admissions — its chain includes the principal's user rank
+  // (context-lattice §2, review CA3).
+  const laneCapableKind = actionKind === "computation" ||
+    actionKind === "effect";
+  const sessionLane = lane?.sessionContext === true && laneCapableKind;
   const userLane = sessionLane ||
-    (lane?.userContext === true && actionKind === "computation");
+    (lane?.userContext === true && laneCapableKind);
   const laneRank: LaneRank = sessionLane
     ? "session"
     : userLane
@@ -411,11 +428,17 @@ export function classifyStaticActionServability(
     return unservable("malformed-output-surface");
   }
 
-  return actionKind === "effect" ? { status: "broker-required", actionKind } : {
-    status: "claim-ready",
-    actionKind,
-    ...(scopedRank !== undefined ? { contextRank: scopedRank } : {}),
-  };
+  return actionKind === "effect"
+    ? {
+      status: "broker-required",
+      actionKind,
+      ...(scopedRank !== undefined ? { contextRank: scopedRank } : {}),
+    }
+    : {
+      status: "claim-ready",
+      actionKind,
+      ...(scopedRank !== undefined ? { contextRank: scopedRank } : {}),
+    };
 }
 
 /**

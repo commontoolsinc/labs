@@ -69,17 +69,20 @@ export interface ExecutorActionTransactionRouterOptions {
   /** The Worker has a narrow host broker for supported builtin effects. */
   readonly builtinBrokerAvailable?: boolean;
   /**
-   * C1.5a candidate context rank, default OFF: when true, a computation
-   * whose surfaces include user-scoped addresses classifies at user rank and
-   * its candidate claim key carries `user:<lanePrincipal>` instead of
-   * unserving. Effects and session-scoped surfaces keep today's space-only
-   * classification either way (amendment 8). Requires `lanePrincipal`.
+   * C1.5a candidate context rank, default OFF: when true, a computation —
+   * or, since C2.8 (2026-07-18) lifted amendment 8, a supported builtin
+   * effect — whose surfaces include user-scoped addresses classifies at
+   * user rank and its candidate claim key carries `user:<lanePrincipal>`
+   * instead of unserving. Session-scoped surfaces stay space-only under
+   * this dial alone (`sessionRankCandidates` owns that rank). Requires
+   * `lanePrincipal`.
    */
   readonly userRankCandidates?: boolean;
   /**
    * C2.5 session-rank candidates, default OFF and layered on
    * `userRankCandidates` (the rank ladder: session implies user): when both
-   * are true, a computation whose surfaces include session-scoped addresses
+   * are true, a computation — or, since C2.8, a supported builtin effect —
+   * whose surfaces include session-scoped addresses
    * classifies at session rank and produces one candidate per OPEN session
    * lane. There is deliberately NO pre-lane fallback at session rank — a
    * bare DID cannot name a session, so with no open session lane the action
@@ -331,13 +334,16 @@ export function createExecutorActionTransactionRouter(
         : undefined,
     );
     // The candidate context rank follows the static classification — the
-    // NARROWEST admitted rank (C2.2's claim-ready contextRank): a scoped
-    // computation keys its candidates by the canonical context keys of the
-    // OPEN lanes of that rank with demand for its piece (C1.9c/C2.5); on
-    // the pre-lane wire only user rank has a representable lane (the lease
-    // sponsor's — CA9).
+    // NARROWEST admitted rank (C2.2's claim-ready contextRank; the
+    // broker-required arm carries the same field since C2.8's scoped-lane
+    // builtin egress lift): a scoped computation OR supported builtin keys
+    // its candidates by the canonical context keys of the OPEN lanes of
+    // that rank with demand for its piece (C1.9c/C2.5); on the pre-lane
+    // wire only user rank has a representable lane (the lease sponsor's —
+    // CA9).
     const contextRank: "space" | "user" | "session" =
-      staticDecision.status === "claim-ready"
+      staticDecision.status === "claim-ready" ||
+        staticDecision.status === "broker-required"
         ? staticDecision.contextRank ?? "space"
         : "space";
     // This commit's own claim identity. A claimed scoped-rank commit

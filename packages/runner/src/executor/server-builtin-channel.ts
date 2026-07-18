@@ -1,4 +1,8 @@
 import type { BranchName, ExecutionClaim } from "@commonfabric/memory/v2";
+import {
+  parseSessionExecutionContextKey,
+  principalOfUserContextKey,
+} from "@commonfabric/memory/v2";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import {
   isServerExecutableBuiltinId,
@@ -34,9 +38,31 @@ export interface ServerBuiltinBrokerContext {
   readonly servingOrigin: URL;
 }
 
+/**
+ * The acting identity a brokered builtin executes under, derived HOST-SIDE
+ * from the validated claim's contextKey (C2.8): the space lane acts as the
+ * lease sponsor (`onBehalfOf`, exactly as W1.4 shipped it); a scoped lane
+ * acts as the LANE — the principal for user lanes, principal + session for
+ * session lanes (context-lattice §3/OQ6: the builtin is the lane
+ * principal's own standing side effect). A23's IPC discipline holds: the
+ * lane identity enters only through the claim's contextKey — the wire
+ * request carries no separate identity field (see AUTHORITY_FIELDS), and
+ * raw credentials never cross the channel in either direction.
+ */
+export type ServerBuiltinActingIdentity =
+  | { readonly lane: "space"; readonly onBehalfOf: string }
+  | { readonly lane: "user"; readonly principal: string }
+  | {
+    readonly lane: "session";
+    readonly principal: string;
+    readonly sessionId: string;
+  };
+
 export interface AuthorizedServerBuiltinRequest {
   readonly builtinId: ServerExecutableBuiltinId;
   readonly claim: ExecutionClaim;
+  /** Host-derived; never read from wire fields beyond the claim key. */
+  readonly actingIdentity: ServerBuiltinActingIdentity;
   readonly fetch: Omit<ServerBuiltinFetchRequest, "signal">;
 }
 
@@ -164,6 +190,10 @@ export function createServerBuiltinBrokerHost(
       const authorized = {
         builtinId: request.builtinId,
         claim: request.claim,
+        actingIdentity: actingIdentityForClaim(
+          request.claim,
+          options.context,
+        ),
         fetch: fetchRequest,
       } satisfies AuthorizedServerBuiltinRequest;
       const authorize = options.authorize;
@@ -391,6 +421,33 @@ function parseFetchWireRequest(value: unknown): FetchWireRequest {
   return request as unknown as FetchWireRequest;
 }
 
+/** Canonical lane shape of a broker claim contextKey: the space lane, or —
+ * since C2.8 — a canonical `user:<enc(did)>` / `session:<enc>:<enc>` lane
+ * key (never a raw-concatenated or empty-segment fabrication, CA12). */
+const isCanonicalBrokerClaimContextKey = (contextKey: string): boolean =>
+  contextKey === "space" ||
+  principalOfUserContextKey(contextKey) !== undefined ||
+  parseSessionExecutionContextKey(contextKey) !== undefined;
+
+/** Host-side derivation of the acting identity from the VALIDATED claim
+ * contextKey (C2.8). Space keeps W1.4's sponsor identity byte-identically. */
+const actingIdentityForClaim = (
+  claim: ExecutionClaim,
+  context: ServerBuiltinBrokerContext,
+): ServerBuiltinActingIdentity => {
+  const session = parseSessionExecutionContextKey(claim.contextKey);
+  if (session !== undefined) {
+    return {
+      lane: "session",
+      principal: session.principal,
+      sessionId: session.sessionId,
+    };
+  }
+  const principal = principalOfUserContextKey(claim.contextKey);
+  if (principal !== undefined) return { lane: "user", principal };
+  return { lane: "space", onBehalfOf: context.onBehalfOf };
+};
+
 function validateClaimForRequest(
   request: FetchWireRequest,
   context: ServerBuiltinBrokerContext,
@@ -398,7 +455,7 @@ function validateClaimForRequest(
   const claim = request.claim;
   if (
     claim.space !== context.space || claim.branch !== context.branch ||
-    claim.contextKey !== "space" || claim.actionKind !== "effect" ||
+    claim.actionKind !== "effect" ||
     claim.leaseGeneration !== context.leaseGeneration ||
     claim.implementationFingerprint !==
       `impl:${serverBuiltinImplementationHash(request.builtinId)}`
@@ -457,7 +514,12 @@ function isExecutionClaim(value: unknown): value is ExecutionClaim {
   if (typeof value !== "object" || value === null) return false;
   const claim = value as Record<string, unknown>;
   return typeof claim.branch === "string" &&
-    typeof claim.space === "string" && claim.contextKey === "space" &&
+    typeof claim.space === "string" &&
+    // Since C2.8, scoped-lane claims cross the broker channel too — but
+    // only canonical lane shapes ever validate (a fabricated key rejects
+    // here, before any host lookup).
+    typeof claim.contextKey === "string" &&
+    isCanonicalBrokerClaimContextKey(claim.contextKey) &&
     typeof claim.pieceId === "string" && typeof claim.actionId === "string" &&
     claim.actionKind === "effect" &&
     typeof claim.implementationFingerprint === "string" &&

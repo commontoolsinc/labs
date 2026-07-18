@@ -286,7 +286,13 @@ Deno.test("a session-rank claim on a run resolving space fences claim-context-mi
   }
 });
 
-Deno.test("session-rank effect claims fence claim-observation-mismatch (amendment 8 holds until C2.8)", async () => {
+Deno.test("session-rank effect claims admit and commit at the lane's session instance (C2.8 lifts amendment 8)", async () => {
+  // C2.8 (2026-07-18, context-lattice OQ6/R12): the session-rank × effect
+  // combination is admissible — the scoped-lane builtin is the lane
+  // session's own standing side effect. The claimed effect commit lands its
+  // session-scoped write at the LANE session's instance exactly like a
+  // session-rank computation; pre-C2.8 this exact shape fenced
+  // `claim-observation-mismatch` at the admission guard.
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;
   try {
@@ -295,15 +301,38 @@ Deno.test("session-rank effect claims fence claim-observation-mismatch (amendmen
       ...claimFor(lease, SESSION_CONTEXT_KEY),
       actionKind: "effect",
     };
-    // Matching effect observation: the guard must reject the session-rank ×
-    // effect combination itself, not a claim/observation kind mismatch.
-    assertFenceCause(
-      () =>
-        applyClaimed(engine, lease, claim, {
-          surfaces: { writes: [SESSION_OUTPUT] },
-          nowMs: nowMs + 1,
-        }),
-      "claim-observation-mismatch",
+    const applied = applyClaimed(engine, lease, claim, {
+      operations: [sessionInstanceOperation],
+      surfaces: { writes: [SESSION_OUTPUT] },
+      nowMs: nowMs + 1,
+    });
+    assertExists(applied.schedulerObservationResults);
+    const [result] = applied.schedulerObservationResults;
+    assert(result.status === "kept");
+    assertEquals(result.executionContextKey, SESSION_CONTEXT_KEY);
+    assertEquals(
+      result.executionProvenance?.claim.contextKey,
+      SESSION_CONTEXT_KEY,
+    );
+    assertEquals(result.executionProvenance?.claim.actionKind, "effect");
+    // The effect's write landed at the lane session's instance, nowhere else.
+    assertEquals(
+      Engine.read(engine, {
+        id: SESSION_OUTPUT.id,
+        scope: "session",
+        principal: PRINCIPAL,
+        sessionId: LANE_SESSION_ID,
+      }),
+      { value: 7 },
+    );
+    assertEquals(
+      Engine.read(engine, {
+        id: SESSION_OUTPUT.id,
+        scope: "session",
+        principal: PRINCIPAL,
+        sessionId: SIBLING_SESSION_ID,
+      }),
+      null,
     );
   } finally {
     Engine.close(engine);

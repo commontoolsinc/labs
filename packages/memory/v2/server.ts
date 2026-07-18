@@ -1758,9 +1758,12 @@ export class Server {
   /** Issuance-side rank dial (context-lattice §6): the host issues claims
    * only up to the enabled context rank, a LADDER — the `session` stage
    * admits user rank too. Space is always issuable; scoped ranks require
-   * the dial stage, actionKind `computation` (amendment 8, extended over
-   * session rank by C2.1 — effects stay space-lane; C2.8 lifts this), AND
-   * the host's own context-lattice-claims-v1 advertisement (C1.7 folds the
+   * the dial stage, actionKind `computation` or `effect` (amendment 8's
+   * computation-only conjunct was LIFTED by C2.8, 2026-07-18 — scoped-lane
+   * builtin egress under the lane grant, context-lattice OQ6/R12; effects
+   * additionally require the passivity flag via
+   * #assertExecutionClaimCapabilityEnabled, every rank alike), AND the
+   * host's own context-lattice-claims-v1 advertisement (C1.7 folds the
    * dial behind the subcapability, amendment 9: a host that does not
    * advertise context-scoped delivery would issue claims deliverable to no
    * session). Session-rank keys must additionally be canonical
@@ -1771,7 +1774,9 @@ export class Server {
     claim: Pick<ExecutionClaimInput, "actionKind" | "contextKey">,
   ): boolean {
     if (claim.contextKey === "space") return true;
-    if (claim.actionKind !== "computation") return false;
+    if (claim.actionKind !== "computation" && claim.actionKind !== "effect") {
+      return false;
+    }
     if (
       !this.memoryProtocolFlags().serverPrimaryExecutionContextLatticeClaimsV1
     ) {
@@ -4873,17 +4878,43 @@ export class Server {
     return true;
   }
 
-  /** Read-only host gate for executor broker work and async continuations. */
+  /** Read-only host gate for executor broker work and async continuations.
+   * For a SCOPED-lane claim this is the brokered-egress authority consult
+   * (C2.8): egress is authorized by the LIVE lane grant at the generation
+   * bound at issuance — the same #liveLaneGrantForKey consult the commit
+   * fence's laneAuthority closure uses — so a drained lane's in-flight
+   * builtin can never egress. The drain already fences the generation and
+   * sweeps the lane's claims in one synchronous section; the explicit
+   * binding re-check here keeps the broker gate correct even if a future
+   * drain path ever separates fence from sweep, and gives egress the exact
+   * authority semantics commits have. Space claims are byte-identical to
+   * the pre-C2.8 check. */
   hasLiveExecutionClaim(claim: ExecutionClaim): boolean {
     if (!this.memoryProtocolFlags().serverPrimaryExecutionV1) {
       this.#revokeExecutionClaimsForSpace(claim.space);
       return false;
     }
     this.expireExecutionClaims();
-    const live = this.#executionClaims.get(actionClaimMapKey(claim));
-    return live !== undefined &&
-      live.leaseGeneration === claim.leaseGeneration &&
-      live.claimGeneration === claim.claimGeneration;
+    const key = actionClaimMapKey(claim);
+    const live = this.#executionClaims.get(key);
+    if (
+      live === undefined ||
+      live.leaseGeneration !== claim.leaseGeneration ||
+      live.claimGeneration !== claim.claimGeneration
+    ) {
+      return false;
+    }
+    if (live.contextKey !== "space") {
+      const binding = this.#executionClaimLaneBindings.get(key);
+      if (
+        binding === undefined ||
+        this.#liveLaneGrantForKey(binding.laneKey)?.laneGeneration !==
+          binding.laneGeneration
+      ) {
+        return false;
+      }
+    }
+    return true;
   }
 
   publishActionSettlement(settlement: ActionSettlement): boolean {

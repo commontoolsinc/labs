@@ -371,10 +371,12 @@ describe("static action servability", () => {
     });
   });
 
-  it("keeps user-scoped effects unservable under a user lane (amendment 8)", () => {
-    // Effects stay space-lane in C1: the lane never promotes a
-    // non-computation action, so a user-scoped effect surface unserves
-    // exactly as it does without the lane.
+  it("classifies user-scoped effects broker-required at user rank (C2.8 lifts amendment 8)", () => {
+    // C2.8 (2026-07-18): the lane promotes effects exactly like
+    // computations — a user-scoped effect surface classifies
+    // broker-required AT USER RANK under a user lane, and the broker
+    // executes it under the lane grant (context-lattice §3/OQ6). The
+    // reported rank drives the same CA9 lane routing as claim-ready.
     expect(classifyStaticActionServability(
       {
         ...candidate({ actionKind: "effect" }),
@@ -386,9 +388,53 @@ describe("static action servability", () => {
       servedSpace,
       { userContext: true },
     )).toEqual({
+      status: "broker-required",
+      actionKind: "effect",
+      contextRank: "user",
+    });
+    // Session scope stays outside a USER lane's chain for effects exactly
+    // as for computations (CA3's chain rule is rank-generic).
+    expect(classifyStaticActionServability(
+      {
+        ...candidate({ actionKind: "effect" }),
+        completeActionScopeSummary: {
+          ...candidate().completeActionScopeSummary as Record<string, unknown>,
+          reads: [address("of:input", { scope: "session" })],
+        },
+      },
+      servedSpace,
+      { userContext: true },
+    )).toEqual({
       status: "unservable",
       reason: "non-space-read-scope",
     });
+  });
+
+  it("keeps scoped effect surfaces unservable without the lane (C2.8 regression)", () => {
+    // No lane argument (and lane-off): byte-identical to the space-only
+    // classifier — a scoped effect surface still unserves. The C2.8 lift is
+    // lane-conditional, never ambient.
+    for (
+      const lane of [undefined, { userContext: false }] as const
+    ) {
+      expect(classifyStaticActionServability(
+        {
+          ...candidate({ actionKind: "effect" }),
+          completeActionScopeSummary: {
+            ...candidate().completeActionScopeSummary as Record<
+              string,
+              unknown
+            >,
+            reads: [address("of:input", { scope: "user" })],
+          },
+        },
+        servedSpace,
+        lane,
+      )).toEqual({
+        status: "unservable",
+        reason: "non-space-read-scope",
+      });
+    }
   });
 
   it("keeps user-scoped surfaces unservable without the lane", () => {
@@ -956,9 +1002,11 @@ describe("session-lane servability (C2.2)", () => {
       });
     });
 
-    it("keeps scoped effects unservable under a session lane (A8)", () => {
-      // The session lane never promotes a non-computation action; C2.8 owns
-      // lifting this, not C2.2.
+    it("classifies scoped effects broker-required at the lane's rank (C2.8 lifts A8)", () => {
+      // C2.8 (2026-07-18): a session lane promotes effects exactly like
+      // computations. A session-scoped effect surface classifies
+      // broker-required AT SESSION RANK — the OQ6 scoped-lane builtin, the
+      // lane principal's own standing side effect (context-lattice §3).
       expect(classifyStaticActionServability(
         {
           ...candidate({ actionKind: "effect" }),
@@ -973,10 +1021,33 @@ describe("session-lane servability (C2.2)", () => {
         servedSpace,
         sessionLane,
       )).toEqual({
-        status: "unservable",
-        reason: "non-space-read-scope",
+        status: "broker-required",
+        actionKind: "effect",
+        contextRank: "session",
       });
-      // An all-space effect keeps its ordinary broker arm.
+      // The chain-read rule is rank-generic (CA3): a session-lane effect
+      // reading the principal's USER-scoped input reports user rank —
+      // narrowest-of-observed, identical to computations.
+      expect(classifyStaticActionServability(
+        {
+          ...candidate({ actionKind: "effect" }),
+          completeActionScopeSummary: {
+            ...candidate().completeActionScopeSummary as Record<
+              string,
+              unknown
+            >,
+            reads: [address("of:input", { scope: "user" })],
+          },
+        },
+        servedSpace,
+        sessionLane,
+      )).toEqual({
+        status: "broker-required",
+        actionKind: "effect",
+        contextRank: "user",
+      });
+      // An all-space effect keeps its ordinary broker arm — no contextRank
+      // field at all, the space-only result shape byte-identical.
       expect(classifyStaticActionServability(
         candidate({ actionKind: "effect" }),
         servedSpace,

@@ -528,7 +528,7 @@ that claim is a design bug.
 | R9 | Spaces owned by the legacy background service | host exclusion lock | not in use (owner, 2026-07-15); the exclusion interlock stays as a defensive lock and registry unification is deprioritized |
 | R10 | Client compute for claimed actions (N× speculation) and graph-query subscription serving | — (not a classification; standing machinery cost) | Phase 3 feed + G17 suppression, gated on closure coverage data |
 | R11 | Accepted reconciliation windows: §B.3 prediction, §B.4 scalar basis, §5 vector basis | — (counted divergence, not exclusions) | B.3 closes with Phase 5; basis windows accepted and counted |
-| R12 | Effect builtins at user/session rank (amendment A8's computation-only restriction on scoped lanes) | `actionKind === "effect"` ∧ lane rank above space | **C2 exit gate, pre-ship** (owner, 2026-07-17): plan C2.8 — session lanes and user lanes with a connected anchor perform egress under the lane grant per resolved OQ6; the three sponsor-keyed gates become lane-conditional. Only *offline* egress under standing keys stays excluded, riding OQ1. This row exists because the exclusion previously lived only in a C1.5a parenthetical — a §8 honesty-contract violation |
+| R12 | Effect builtins at user/session rank (amendment A8's computation-only restriction on scoped lanes) | `actionKind === "effect"` ∧ lane rank above space | **RESOLVED (C2.8 landed, 2026-07-18)**: session lanes and user lanes with a connected anchor perform builtin egress under the lane grant per resolved OQ6 — the A8 conjunct is lifted at the classifier, engine admission, issuance dial, and executor wire; the three sponsor-keyed gates are lane-conditional (space keeps §B.5's causal-actor consent byte-identically); the broker executes under the host-derived LANE acting identity and is authorized by the live lane grant at the bound generation. The only residual is *offline* egress under standing keys — a scoped-lane effect with zero connected sessions never claims (no grant, no claim; pinned) — which rides Open question 1 where the consent question genuinely lives. This row existed because the exclusion previously lived only in a C1.5a parenthetical — a §8 honesty-contract violation |
 | R13 | `wish` (resolver semantics; static identity but no descriptor) | builtin id lookup | plan W2.15b (owner, 2026-07-17) — descriptor shape decided by the resolver contract; measured ×4 in the flagship fixture, so a real coverage hole, not a corner |
 
 Engineering debt riding alongside (no decisions): the owed deterministic
@@ -585,8 +585,9 @@ cost remains (re-measure after the feed).
    volunteer sponsor. The offline extension (standing keys firing with no
    session open) is consent territory and rides Open question 1.
    Implementation timing (owner, 2026-07-17): plan C2.8 is a **C2 exit
-   gate, pre-ship** — not a floating follow-on; the exclusion is tracked
-   as register row R12 until it lands.
+   gate, pre-ship** — not a floating follow-on; the exclusion was tracked
+   as register row R12 until it landed. **Landed 2026-07-18 (plan C2.8;
+   R12 resolved)** — only the offline residual remains, riding OQ1.
 7. **Resolved (spec-owner review, 2026-07-15) — narrow-to-wide writes need
    no carve-out.** Lift output widening is a scope-naming self-redirect
    link, identical across lanes by construction (links never encode the

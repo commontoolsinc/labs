@@ -47,6 +47,7 @@ Deno.test("default builtin authorization fails closed for protected first-party 
       authorizeDefaultServerBuiltinRequest({
         builtinId: "fetchJson",
         claim: {} as never,
+        actingIdentity: { lane: "space", onBehalfOf: "did:key:z6Mk-user" },
         fetch: {
           url: "/api/agent-tools/web-read",
           method: "POST",
@@ -73,6 +74,7 @@ Deno.test("default builtin authorization normalizes methods before classifying p
       authorizeDefaultServerBuiltinRequest({
         builtinId: "fetchJson",
         claim: {} as never,
+        actingIdentity: { lane: "space", onBehalfOf: "did:key:z6Mk-user" },
         fetch: {
           url: "/api/agent-tools/web-read",
           method: " POST ",
@@ -93,6 +95,7 @@ Deno.test("default builtin authorization defers malformed URLs to the egress cla
   authorizeDefaultServerBuiltinRequest({
     builtinId: "fetchJson",
     claim: {} as never,
+    actingIdentity: { lane: "space", onBehalfOf: "did:key:z6Mk-user" },
     fetch: {
       url: "http://[",
       method: "GET",

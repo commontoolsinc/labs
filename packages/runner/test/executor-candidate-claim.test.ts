@@ -547,6 +547,55 @@ Deno.test("supported builtin candidates require a host-derived causal actor matc
   }
 });
 
+Deno.test("C2.8: scoped-lane builtin candidates are never dropped on the causal-actor match", async () => {
+  // The three sponsor-keyed gates are lane-conditional since C2.8: the
+  // host's pre-claim drop applies ONLY when claimKey.contextKey === "space".
+  // A session- or user-lane builtin executes as the LANE principal's own
+  // standing side effect (context-lattice §3/OQ6), so a foreign-caused
+  // recompute — causalActorMatchesSponsor false — still claims.
+  const diagnostics: CandidateDiagnostic[] = [];
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: true,
+    onCandidateDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+  try {
+    const sessionLaneKey = sessionExecutionContextKey(
+      "did:key:z6Mk-candidate-lane-alice",
+      "candidate-lane-session-1",
+    );
+    const sessionBuiltinKey: ActionClaimKey = {
+      ...BUILTIN_CLAIM_KEY,
+      contextKey: sessionLaneKey,
+    };
+    worker.candidate(sessionBuiltinKey, {
+      builtinId: "fetchText",
+      causalActorMatchesSponsor: false,
+    });
+    await flushClaimControl();
+    assertEquals(diagnostics, []);
+    assertEquals(server.claimRequests, [{
+      lease: LEASE,
+      claimKey: sessionBuiltinKey,
+    }]);
+
+    // The SPACE lane keeps the drop byte-identically (the (b) regression
+    // pair of the scoped-lane leg above).
+    worker.candidate(BUILTIN_CLAIM_KEY, {
+      builtinId: "fetchText",
+      causalActorMatchesSponsor: false,
+    });
+    await flushClaimControl();
+    assertEquals(server.claimRequests.length, 1);
+    assertEquals(diagnostics, [{
+      claimKey: BUILTIN_CLAIM_KEY,
+      diagnosticCode: "builtin-causal-actor-mismatch",
+    }]);
+    assertEquals(crashes, []);
+  } finally {
+    await executor.stop();
+  }
+});
+
 Deno.test("executor settlement returns the Worker barrier and abrupt stop skips a second round trip", async () => {
   const { worker, executor } = await startExecutor({ routing: false });
 

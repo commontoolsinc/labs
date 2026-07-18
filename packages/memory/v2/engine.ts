@@ -8442,17 +8442,18 @@ const resolvedPendingReadsForBasis = (
 // (`session:<enc(principal)>:<enc(sessionId)>`), so a colon-bearing DID
 // never appears raw. Malformed keys stay rejected. Effective-context
 // EQUALITY is owned by the claim-context-mismatch fence once the
-// observation's context resolves. Scoped-lane claims are computation-only
-// (amendment 8, extended over session rank by C2.1): effects stay
-// space-lane until scoped-lane builtin egress lands — C2.8 is the named
-// lifter of this conjunct — so the guard and the issuance path both reject
-// a user- or session-rank effect claim.
+// observation's context resolves. Amendment 8's computation-only conjunct
+// was LIFTED by C2.8 (2026-07-18, context-lattice OQ6/R12): scoped ranks
+// admit effect claims too — a scoped-lane builtin is the lane principal's
+// own standing side effect executing under the lane grant, so user- and
+// session-rank claims admit `computation` and `effect` alike
+// (event-handler claims stay rejected at issuance for every rank).
 const isAdmissibleExecutionClaimContextKey = (
   contextKey: SchedulerExecutionContextKey,
   actionKind: ExecutionClaim["actionKind"],
 ): boolean =>
   contextKey === "space" ||
-  (actionKind === "computation" &&
+  ((actionKind === "computation" || actionKind === "effect") &&
     (principalOfUserContextKey(contextKey) !== undefined ||
       parseSessionExecutionContextKey(contextKey) !== undefined));
 

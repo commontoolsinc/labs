@@ -1013,7 +1013,7 @@ Deno.test("the claim-rank dial gates user-rank issuance and revokes on disable",
   }
 });
 
-Deno.test("user-rank claim issuance is computation-only in C1 (amendment 8)", async () => {
+Deno.test("user-rank claim issuance admits effects under the lane grant (C2.8 lifts amendment 8)", async () => {
   const server = createControlServer("memory-v2-execution-claim-rank-kind");
   const client = await connectControlClient(server);
   const session = await mount(client) as ExecutionSession;
@@ -1033,22 +1033,24 @@ Deno.test("user-rank claim issuance is computation-only in C1 (amendment 8)", as
       TEST_SESSION_OPEN_PRINCIPAL,
     ) as `user:${string}`;
 
-    // Effects stay space-lane in C1: a user-rank effect claim is refused at
-    // issuance even with the rank dial on and a live lane grant.
-    await assertRejects(
-      () =>
-        server.setExecutionClaim(lease, {
-          ...claimKey(CONTROL_SPACE, "", "action:user-rank-effect"),
-          actionKind: "effect",
-          contextKey: userContextKey,
-        }),
-      Error,
-      "claim rank",
-    );
-
-    // The computation twin of the same tuple admits under the same grant.
-    const computationClaim = await server.setExecutionClaim(lease, {
+    // C2.8 (2026-07-18): a user-rank EFFECT claim issues under the live
+    // lane grant exactly like a computation — the scoped-lane builtin is
+    // the lane principal's own standing side effect (context-lattice
+    // OQ6/R12). Pre-C2.8 this exact issuance was refused on the rank ×
+    // effect combination.
+    const effectClaim = await server.setExecutionClaim(lease, {
       ...claimKey(CONTROL_SPACE, "", "action:user-rank-effect"),
+      actionKind: "effect",
+      contextKey: userContextKey,
+    });
+    assertEquals(effectClaim.actionKind, "effect");
+    assertEquals(effectClaim.contextKey, userContextKey);
+    assertEquals(server.hasLiveExecutionClaim(effectClaim), true);
+
+    // A computation claim of a DIFFERENT action admits beside it (the
+    // routing-disjointness invariant applies per action tuple).
+    const computationClaim = await server.setExecutionClaim(lease, {
+      ...claimKey(CONTROL_SPACE, "", "action:user-rank-computation"),
       contextKey: userContextKey,
     });
     assertEquals(server.hasLiveExecutionClaim(computationClaim), true);

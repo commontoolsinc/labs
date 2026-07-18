@@ -377,9 +377,15 @@ Deno.test("server executable builtin registry is exact and excludes ambient capa
     ),
     true,
   );
+  // R5 boundary, re-pinned at C2.8: the scoped-lane egress lift changes
+  // WHICH LANES a supported builtin may serve, never WHICH builtins are
+  // supported — `llm` and `sqliteQuery` stay outside the registry (their
+  // broker implementations are the R5 worklist, owner 2026-07-17).
   assertEquals(
-    ["fetch", "generateImage", "llm"].map(isServerExecutableBuiltinId),
-    [false, false, false],
+    ["fetch", "generateImage", "llm", "sqliteQuery"].map(
+      isServerExecutableBuiltinId,
+    ),
+    [false, false, false, false],
   );
 });
 
@@ -1047,7 +1053,7 @@ Deno.test("executor router keys two principals' lanes as distinct candidate iden
   );
 });
 
-Deno.test("executor router keeps a user-floor effect space-classified (amendment 8)", async () => {
+Deno.test("executor router classifies a user-floor effect at user rank but candidates only supported builtins (C2.8 lifts amendment 8)", async () => {
   const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
   const diagnostics: ExecutorCandidateDiagnostic[] = [];
   const router = userLaneRouter(LANE_PRINCIPAL, candidates, diagnostics);
@@ -1064,11 +1070,13 @@ Deno.test("executor router keeps a user-floor effect space-classified (amendment
   assertEquals(route.disposition, "local");
   if (route.disposition !== "local") throw new Error("expected local");
   if (route.kind === "executor-shadow") route.afterLocalApply?.();
-  // Never a user-rank candidate: the effect keeps today's space-only
-  // classification and unserves on its user-scoped surface.
+  // C2.8: the user-scoped effect surface now classifies broker-required at
+  // user rank instead of unserving — but with no serverBuiltin descriptor
+  // (and no broker in this harness) it still never candidates: the R5
+  // registry boundary is untouched by the lane lift.
   assertEquals(candidates, []);
   assertEquals(diagnostics.map((entry) => entry.diagnosticCode), [
-    "non-space-read-scope",
+    "broker-required",
   ]);
 });
 
@@ -1716,5 +1724,165 @@ Deno.test("CA9: a claim on a non-canonical session lane invalidates as a key mis
   assertEquals(candidates, []);
   assertEquals(invalidated.map((entry) => entry.diagnosticCode), [
     "claim-key-mismatch",
+  ]);
+});
+
+// ---------------------------------------------------------------------------
+// C2.8 — scoped-lane builtin egress (context-lattice OQ6): the router
+// classifies a supported builtin over scoped inputs at the LANE's rank
+// (broker-required + contextRank since C2.8) and keys one candidate per open
+// lane of that rank, exactly like scoped computations (CA9's rank filter).
+// The space-lane builtin path stays byte-identical, and the dial-off legs pin
+// that the lift is lane-conditional, never ambient.
+// ---------------------------------------------------------------------------
+
+/** Supported-builtin action whose descriptor reads a SESSION-scoped input
+ * (the OQ6 shape: a fetch-family builtin over session-scoped inputs) and
+ * writes a session-scoped result. */
+const sessionBuiltinAction = () => ({
+  serverBuiltin: {
+    version: 1 as const,
+    id: "fetchText" as const,
+    piece: {
+      space: SPACE,
+      scope: "space" as const,
+      id: "of:action-router-piece",
+      path: [],
+    },
+    reads: [{
+      space: SPACE,
+      scope: "session" as const,
+      id: "of:action-router-session-input",
+      path: [],
+    }],
+    writes: [{ ...sessionOutput, path: [] }],
+    runtimeWrites: [{ ...sessionOutput, path: [] }],
+    directOutputs: [{ ...sessionOutput, path: [] }],
+  },
+});
+
+const sessionBuiltinCommit = (): ClientCommit => {
+  const base = perSessionCommit();
+  const builtinObservation = base.schedulerObservation as Record<
+    string,
+    unknown
+  >;
+  builtinObservation.actionKind = "effect";
+  builtinObservation.implementationFingerprint =
+    "impl:cf:builtin/fetchText:server-v1";
+  delete builtinObservation.completeActionScopeSummary;
+  return base;
+};
+
+Deno.test("C2.8: a session-scoped supported builtin candidates broker-backed at session rank per open session lane", async () => {
+  const candidates: Array<{ builtinId?: string; claimKey: ActionClaimKey }> =
+    [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    builtinBrokerAvailable: true,
+    userRankCandidates: true,
+    sessionRankCandidates: true,
+    lanePrincipal: LANE_PRINCIPAL,
+    openUserLaneKeys: () => [
+      SESSION_LANE,
+      OTHER_SESSION_LANE,
+      userExecutionContextKey(LANE_PRINCIPAL),
+    ],
+    claimForAction: () => undefined,
+    onCandidate: (candidate) => candidates.push(candidate),
+    onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+
+  const route = await router({
+    space: SPACE,
+    commit: sessionBuiltinCommit(),
+    sourceAction: sessionBuiltinAction(),
+  });
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
+  assertEquals(diagnostics, []);
+  // One candidate per open SESSION lane (never the user lane — CA9's rank
+  // filter applies to effects exactly as to computations), each carrying the
+  // builtin id so the host's passivity routing recognizes it.
+  assertEquals(
+    candidates.map((candidate) => candidate.claimKey.contextKey),
+    [SESSION_LANE, OTHER_SESSION_LANE],
+  );
+  assertEquals(
+    candidates.map((candidate) => candidate.builtinId),
+    ["fetchText", "fetchText"],
+  );
+  assertEquals(
+    candidates.every((candidate) =>
+      candidate.claimKey.actionKind === "effect"
+    ),
+    true,
+  );
+});
+
+Deno.test("C2.8 (e): a session-rank builtin with no open session lane produces zero candidates — offline egress does not exist", async () => {
+  // Emergent from C2.3/C2.7, pinned here: with zero connected sessions there
+  // is no open session lane, a bare DID cannot name one (CA9), and the
+  // scoped-lane builtin therefore never candidates — the OQ1 offline-egress
+  // scope stays unbuilt.
+  const candidates: Array<{ claimKey: ActionClaimKey }> = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    builtinBrokerAvailable: true,
+    userRankCandidates: true,
+    sessionRankCandidates: true,
+    lanePrincipal: LANE_PRINCIPAL,
+    // The lane wire is live but names no session lane (only the user lane):
+    // a session-rank builtin has no lane of its rank to key by.
+    openUserLaneKeys: () => [userExecutionContextKey(LANE_PRINCIPAL)],
+    claimForAction: () => undefined,
+    onCandidate: (candidate) => candidates.push(candidate),
+    onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+
+  const route = await router({
+    space: SPACE,
+    commit: sessionBuiltinCommit(),
+    sourceAction: sessionBuiltinAction(),
+  });
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
+  assertEquals(candidates, []);
+  assertEquals(diagnostics, []);
+});
+
+Deno.test("C2.8 regression: scoped builtin surfaces stay unservable with the rank dials off", async () => {
+  // Dial-off self-control: the identical session-scoped builtin through the
+  // identical seam with no lane parameterization classifies exactly as the
+  // pre-C2.8 space-only router — unservable on the scoped read, zero
+  // candidates.
+  const candidates: Array<{ claimKey: ActionClaimKey }> = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    builtinBrokerAvailable: true,
+    claimForAction: () => undefined,
+    onCandidate: (candidate) => candidates.push(candidate),
+    onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+
+  const route = await router({
+    space: SPACE,
+    commit: sessionBuiltinCommit(),
+    sourceAction: sessionBuiltinAction(),
+  });
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
+  assertEquals(candidates, []);
+  assertEquals(diagnostics.map((entry) => entry.diagnosticCode), [
+    "non-space-read-scope",
   ]);
 });

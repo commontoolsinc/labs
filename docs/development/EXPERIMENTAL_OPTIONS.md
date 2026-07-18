@@ -210,14 +210,16 @@ propagate](#how-flags-propagate).
 - **Added by.** Bernhard Seefeld, in server-side execution C1.5a (executor
   candidate context rank, 2026-07-16).
 - **Purpose.** Gates USER-RANK candidate production in the executor Worker
-  (context-lattice design §2/§6). When on, a computation whose observed
-  surfaces include user-scoped addresses classifies at user rank: its
+  (context-lattice design §2/§6). When on, a computation — or, since C2.8
+  (2026-07-18) lifted amendment 8's computation-only conjunct, a supported
+  builtin EFFECT — whose observed surfaces include user-scoped addresses
+  classifies at user rank: its
   CandidateClaim carries the canonical `user:<did>` context key of the
   Worker's acting principal, and the per-attempt transaction firewall admits
-  that lane's user-scoped reads and writes. Effects and session-scoped
-  surfaces are unaffected either way — user rank is computation-only in C1
-  (adversarial-review amendment 8), and session rank stays unservable until
-  C2. Candidate PRODUCTION is what this flag gates; claim ISSUANCE is
+  that lane's user-scoped reads and writes. Session-scoped
+  surfaces stay unservable under this flag alone (the session dial below
+  owns that rank). Candidate PRODUCTION is what this flag gates; claim
+  ISSUANCE is
   additionally gated by `serverPrimaryExecutionClaimRank` on the host, so
   either dial alone keeps user lanes fully inert. Since C1.8 the same flag
   is also the runner-side leg of the pool's user-lane LIFECYCLE
@@ -252,7 +254,9 @@ propagate](#how-flags-propagate).
   (context-lattice design §2/§6, C2). Layered on
   `serverPrimaryExecutionUserRankCandidates` — the rank ladder, mirroring the
   claim-rank dial — so enabling it alone changes nothing. When both are on, a
-  computation whose observed surfaces include session-scoped addresses
+  computation — or, since C2.8 (2026-07-18), a supported builtin EFFECT
+  (scoped-lane egress under the lane grant, context-lattice OQ6) —
+  whose observed surfaces include session-scoped addresses
   classifies at session rank (the classification also admits the lane
   principal's user-scoped surfaces — the broader-in-chain chain rule, review
   CA3), and its CandidateClaims carry the canonical
@@ -837,9 +841,13 @@ the per-epic implementation notes).
   commit-time claim guards are deliberately rank-independent: an un-enabled
   rank behaves exactly like Phase 2's unclaimed fallback, because fail-open
   clients never classify anything against a claim that was never issued.
-  Scoped-rank claims (user and session alike) stay computation-only
-  (amendment 8); C2.8 — a C2 exit gate — lifts that conjunct for lane-grant
-  builtin egress.
+  Scoped-rank claims (user and session alike) admit `computation` AND
+  `effect` since C2.8 (2026-07-18) lifted amendment 8's computation-only
+  conjunct for lane-grant builtin egress; effect claims additionally
+  require `serverPrimaryExecutionBuiltinPassivityV1` at every rank, and a
+  scoped effect claim still needs a live lane grant — with zero connected
+  sessions no grant exists and no scoped claim issues (offline egress
+  stays with the delegation design, context-lattice OQ1).
 - **Current default and planned end state.** `space` by default, which is
   byte-identical to pre-C1 space-only behavior. `user` is enabled only inside
   the C1.9 measurement gate until user lanes graduate; `session` is enabled
