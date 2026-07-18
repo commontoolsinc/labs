@@ -15,6 +15,12 @@ import {
 } from "./path.ts";
 import { scopeNamingLinkWriteViolation } from "./scope-naming-link.ts";
 import {
+  ANYONE_USER,
+  type Capability,
+  hasConcreteOwner,
+  isACL,
+} from "../acl.ts";
+import {
   type AcceptedCommitSeq,
   type ActionExecutionProvenance,
   type BranchName,
@@ -495,6 +501,24 @@ CREATE TABLE IF NOT EXISTS blob_store (
   size          INTEGER NOT NULL
 );
 
+-- C3.2 (2026-07-18): this space's foreign-authorization-epoch table —
+-- per-principal generations plus the space-wide floor (the reserved ''
+-- row). Written ONLY inside applyCommitTransaction, in the same SQLite
+-- transaction as the ACL-document mutation that motivates the bump
+-- (C3A3: the bump must be transactional with the ACL apply — no window,
+-- crash included, where the ACL changed but the epoch did not). Epochs
+-- are monotonic per space: every bump writes 1 + MAX(epoch) over the
+-- whole table, so a floor bump strictly exceeds every per-principal row
+-- and a per-principal bump strictly exceeds the floor. Effective epoch
+-- of a principal = MAX(its row if any, the floor row); a principal with
+-- no row reports floor-only (C3A3's unknown-fails-closed discipline is
+-- the CONSUMER's — C3.7/C3.8 — this table is the authority side).
+CREATE TABLE IF NOT EXISTS authorization_epoch (
+  principal  TEXT    NOT NULL PRIMARY KEY,
+  epoch      INTEGER NOT NULL,
+  CHECK (epoch >= 1)
+);
+
 ${includeSchedulerSchema ? SCHEDULER_SCHEMA : ""}
 
 COMMIT;
@@ -591,6 +615,27 @@ SET head_seq = CASE
   ELSE head_seq
 END
 WHERE name = :branch
+`;
+
+const SELECT_AUTHORIZATION_EPOCH_MAX = `
+SELECT COALESCE(MAX(epoch), 0) AS epoch FROM authorization_epoch
+`;
+
+const SELECT_AUTHORIZATION_EPOCH = `
+SELECT epoch FROM authorization_epoch WHERE principal = :principal
+`;
+
+const SELECT_AUTHORIZATION_EPOCHS = `
+SELECT principal, epoch FROM authorization_epoch ORDER BY principal
+`;
+
+/** MAX() guards monotonicity even under a hypothetical out-of-order
+ * writer; the bump path always writes 1 + table MAX, so in practice the
+ * update value strictly exceeds the existing one. */
+const UPSERT_AUTHORIZATION_EPOCH = `
+INSERT INTO authorization_epoch (principal, epoch)
+VALUES (:principal, :epoch)
+ON CONFLICT (principal) DO UPDATE SET epoch = MAX(epoch, :epoch)
 `;
 
 const SELECT_HEAD = `
@@ -832,6 +877,10 @@ interface PreparedStatements {
   selectPendingResolution: PreparedStatement;
   selectServerSeq: PreparedStatement;
   selectSetDeleteConflict: PreparedStatement;
+  selectAuthorizationEpoch: PreparedStatement;
+  selectAuthorizationEpochMax: PreparedStatement;
+  selectAuthorizationEpochs: PreparedStatement;
+  upsertAuthorizationEpoch: PreparedStatement;
   upsertHead: PreparedStatement;
   updateBranchHead: PreparedStatement;
   deleteBranch: PreparedStatement;
@@ -1160,6 +1209,255 @@ const markAppliedCommitReplay = (commit: AppliedCommit): AppliedCommit => {
 
 export const isAppliedCommitReplay = (commit: AppliedCommit): boolean =>
   replayedAppliedCommits.has(commit);
+
+// ---------------------------------------------------------------------------
+// C3.2 (2026-07-18) — foreign authorization epochs, authority side.
+//
+// The per-(space, principal) generation table plus the space-wide floor
+// live in THIS engine's database (`authorization_epoch`), and the bump is
+// computed and written INSIDE `applyCommitTransaction` — the same SQLite
+// transaction that applies the ACL-document mutation. That placement is
+// the transactionality argument in full: there is no ordering to prove
+// and no crash window to reason about, because a commit either lands with
+// its epoch bumps or rolls back with them (the panel's TOCTOU findings —
+// C3A7 context — make "provably no window" load-bearing for the C3.8
+// fence this table feeds).
+//
+// The bump rule is the C3A3-AMENDED decision #2 — amended because
+// effective capability is NOT a function of ACL entries: a missing ACL
+// grants implicit READ/WRITE to principals enumerable in no list, and an
+// invalid (retracted/malformed/ownerless) ACL fails everyone closed, so
+// bare old∪new under-revokes on exactly the transitions that matter
+// (genesis on a populated implicit-access space revokes principals
+// appearing in neither list). Rule, as implemented by
+// `authorizationEpochBumpPlan` on the AUTHORITY-visible ACL state
+// (default branch, space scope — the same read `#resolveCapability`
+// enforcement uses):
+//
+//   pre-state ≠ post-state kind (ANY validity-state transition:
+//     missing→valid genesis, valid→invalid retraction/malform,
+//     invalid→valid repair, …)          → space-wide FLOOR bump
+//   valid→valid                          → per-principal bump for every
+//     concrete principal in old∪new whose capability changed, plus a
+//     FLOOR bump when the ANYONE ('*') entry changed
+//   equal states, equal effective content → NO bump (equality
+//     revalidation: an identical-content rewrite bumps nothing)
+//   missing→missing / invalid→invalid    → NO bump (the capability
+//     function in those states does not depend on ACL content: missing
+//     grants implicitly by serverSeq — which only ever BROADENS
+//     READ→WRITE, never revokes — and invalid fails everyone closed
+//     except structural owners, who are ACL-independent)
+//   undecidable comparison                → FLOOR bump (fail closed)
+//
+// Consumers (all host-local reads; dated 2026-07-18, none built here):
+// C3.7 claim binding revalidates bound epochs by EQUALITY against
+// `effectiveAuthorizationEpoch`; C3.8's apply fence consults the same
+// lookup; the server answers `foreign-authorization-epoch.query` from
+// `authorizationEpochSnapshot` and publishes the per-commit bumps
+// (`authorizationEpochBumpsOf`) as `foreign-authorization-epoch.bump`.
+// ---------------------------------------------------------------------------
+
+/** Engine doc id of a space's ACL document: the doc whose entity id is
+ *  the space DID itself, as managed by the runner's `ACLManager` /
+ *  `cf acl` (runner `toURI` prefixes bare ids with `of:`). */
+export const aclDocId = (space: string): string => `of:${space}`;
+
+/**
+ * Authority-visible validity state of a space's ACL document. ONE
+ * definition shared by the server's enforcement path (`#aclState`) and
+ * the engine's epoch-bump computation, so the two can never drift — a
+ * bump rule computing validity differently from enforcement would
+ * under-revoke, the exact C3A3 class.
+ */
+export type AclValidityState =
+  | { kind: "missing" }
+  | { kind: "invalid" }
+  | { kind: "valid"; acl: Record<string, Capability | undefined> };
+
+export const aclValidityOfEntityState = (
+  state: EntityState | null,
+): AclValidityState => {
+  if (state === null) return { kind: "missing" };
+  // A retracted ACL is not equivalent to a never-created ACL: treating the
+  // tombstone as public would turn deletion into an authorization bypass.
+  if (state.document === null) return { kind: "invalid" };
+  const acl = state.document.value;
+  if (!isACL(acl)) return { kind: "invalid" };
+  const byPrincipal = acl as Record<string, Capability | undefined>;
+  if (!hasConcreteOwner(byPrincipal)) return { kind: "invalid" };
+  return { kind: "valid", acl: byPrincipal };
+};
+
+/** One applied epoch bump — the space is implicit (this engine's). The
+ *  shape mirrors the `foreign-authorization-epoch.bump` wire payload so
+ *  the server publishes exactly what the transaction recorded. */
+export interface AuthorizationEpochBump {
+  target: { kind: "floor" } | { kind: "principal"; principal: string };
+  epoch: number;
+}
+
+/** The reserved floor row's key. Never a valid principal: DIDs are
+ *  non-empty, and the ANYONE wildcard ('*') deliberately bumps the FLOOR
+ *  rather than a row of its own (a wildcard change affects principals no
+ *  row enumerates). */
+const AUTHORIZATION_EPOCH_FLOOR_PRINCIPAL = "";
+
+/**
+ * Epoch bumps applied by a first-application commit, keyed off the exact
+ * AppliedCommit object — the same process-local pattern as replay status
+ * (deliberately outside AppliedCommit's serialized shape: clients never
+ * see epochs on a transact response, and a REPLAY returns a fresh object
+ * that is never in this map, so the host's publication step is
+ * idempotent by construction — fixture "replay does not double-bump").
+ */
+const appliedCommitAuthorizationEpochBumps = new WeakMap<
+  AppliedCommit,
+  readonly AuthorizationEpochBump[]
+>();
+
+/** Bumps the given first-application commit applied, in bump order
+ *  (floor first, then principals lexicographically); undefined for
+ *  replays and for commits that bumped nothing. */
+export const authorizationEpochBumpsOf = (
+  commit: AppliedCommit,
+): readonly AuthorizationEpochBump[] | undefined =>
+  appliedCommitAuthorizationEpochBumps.get(commit);
+
+export interface AuthorizationEpochSnapshot {
+  /** Space-wide epoch floor; 0 at genesis (never bumped). */
+  floor: number;
+  /** Per-principal rows, principal-sorted. Never includes the floor row.
+   *  A principal absent here has effective epoch = floor. */
+  epochs: readonly { principal: string; epoch: number }[];
+}
+
+/** The durable table, as the epoch query answers it (floor + rows). */
+export const authorizationEpochSnapshot = (
+  engine: Engine,
+): AuthorizationEpochSnapshot => {
+  let floor = 0;
+  const epochs: { principal: string; epoch: number }[] = [];
+  for (
+    const row of engine.statements.selectAuthorizationEpochs.all() as {
+      principal: string;
+      epoch: number;
+    }[]
+  ) {
+    if (row.principal === AUTHORIZATION_EPOCH_FLOOR_PRINCIPAL) {
+      floor = row.epoch;
+    } else {
+      epochs.push({ principal: row.principal, epoch: row.epoch });
+    }
+  }
+  return { floor, epochs };
+};
+
+/**
+ * Effective authorization epoch of a principal on this space:
+ * max(the principal's row if any, the space-wide floor). 0 means "never
+ * bumped since this table existed" — consumers binding epochs (C3.7)
+ * compare by EQUALITY, and treat a (space, principal) they cannot
+ * resolve at all as unknown → fail closed (C3A3).
+ */
+export const effectiveAuthorizationEpoch = (
+  engine: Engine,
+  principal: string,
+): number => {
+  const row = engine.statements.selectAuthorizationEpoch.get({
+    principal,
+  }) as { epoch: number } | undefined;
+  const floor = engine.statements.selectAuthorizationEpoch.get({
+    principal: AUTHORIZATION_EPOCH_FLOOR_PRINCIPAL,
+  }) as { epoch: number } | undefined;
+  return Math.max(row?.epoch ?? 0, floor?.epoch ?? 0);
+};
+
+/** The bump targets an ACL transition demands (pure decision table —
+ *  see the section comment above for the rule and its C3A3 rationale). */
+const authorizationEpochBumpPlan = (
+  pre: AclValidityState,
+  post: AclValidityState,
+): { floor: boolean; principals: readonly string[] } => {
+  if (pre.kind !== post.kind) {
+    return { floor: true, principals: [] };
+  }
+  if (pre.kind !== "valid" || post.kind !== "valid") {
+    return { floor: false, principals: [] };
+  }
+  const changed = new Set<string>();
+  let floor = false;
+  for (
+    const principal of new Set([
+      ...Object.keys(pre.acl),
+      ...Object.keys(post.acl),
+    ])
+  ) {
+    if (pre.acl[principal] === post.acl[principal]) continue;
+    if (principal === ANYONE_USER) {
+      // A wildcard change grants/revokes for principals enumerable in no
+      // list — only the floor can cover them.
+      floor = true;
+    } else {
+      changed.add(principal);
+    }
+  }
+  return { floor, principals: [...changed].sort() };
+};
+
+/**
+ * Compute and apply the epoch bumps for an ACL-document transition,
+ * INSIDE the calling commit's transaction. Every bump in one apply
+ * shares the value 1 + MAX(epoch over the whole table), so a floor bump
+ * strictly exceeds every per-principal row (every principal's effective
+ * epoch moves) and a per-principal bump strictly exceeds the floor (the
+ * principal's effective epoch moves) — the monotonicity that makes
+ * equality revalidation sound. Returns undefined when nothing bumps
+ * (equality revalidation / no authority-visible change).
+ */
+const applyAuthorizationEpochBumps = (
+  engine: Engine,
+  pre: EntityState | null,
+  post: EntityState | null,
+): readonly AuthorizationEpochBump[] | undefined => {
+  let plan: { floor: boolean; principals: readonly string[] };
+  try {
+    plan = authorizationEpochBumpPlan(
+      aclValidityOfEntityState(pre),
+      aclValidityOfEntityState(post),
+    );
+  } catch {
+    // An undecidable comparison fails closed to a floor bump (C3A3):
+    // over-revocation is recoverable, under-revocation is a hole.
+    plan = { floor: true, principals: [] };
+  }
+  if (!plan.floor && plan.principals.length === 0) {
+    return undefined;
+  }
+  const epoch = 1 +
+    (engine.statements.selectAuthorizationEpochMax.get() as { epoch: number })
+      .epoch;
+  const bumps: AuthorizationEpochBump[] = [];
+  if (plan.floor) {
+    engine.statements.upsertAuthorizationEpoch.run({
+      principal: AUTHORIZATION_EPOCH_FLOOR_PRINCIPAL,
+      epoch,
+    });
+    bumps.push({ target: { kind: "floor" }, epoch });
+  }
+  for (const principal of plan.principals) {
+    engine.statements.upsertAuthorizationEpoch.run({ principal, epoch });
+    bumps.push({ target: { kind: "principal", principal }, epoch });
+  }
+  return bumps;
+};
+
+/** The authority-visible ACL read: default branch, space scope — exactly
+ *  the read `#resolveCapability` enforcement performs, so the bump can
+ *  never diverge from what enforcement observes. */
+const readAuthorityAclState = (
+  engine: Engine,
+  space: string,
+): EntityState | null => readState(engine, { id: aclDocId(space) });
 
 export type SchedulerActionKind =
   | "computation"
@@ -1604,6 +1902,12 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   selectPendingResolution: database.prepare(SELECT_PENDING_RESOLUTION),
   selectServerSeq: database.prepare(SELECT_SERVER_SEQ),
   selectSetDeleteConflict: database.prepare(SELECT_SET_DELETE_CONFLICT),
+  selectAuthorizationEpoch: database.prepare(SELECT_AUTHORIZATION_EPOCH),
+  selectAuthorizationEpochMax: database.prepare(
+    SELECT_AUTHORIZATION_EPOCH_MAX,
+  ),
+  selectAuthorizationEpochs: database.prepare(SELECT_AUTHORIZATION_EPOCHS),
+  upsertAuthorizationEpoch: database.prepare(UPSERT_AUTHORIZATION_EPOCH),
   upsertHead: database.prepare(UPSERT_HEAD),
   updateBranchHead: database.prepare(UPDATE_BRANCH_HEAD),
   deleteBranch: database.prepare(DELETE_BRANCH),
@@ -7828,6 +8132,22 @@ const applyCommitTransaction = (
     requireExactClaim: commit.operations.length > 0,
   });
 
+  // C3.2: capture the authority-visible ACL state BEFORE the operations
+  // apply. The predicate matches the server's `commitTouchesAclDoc`
+  // byte-for-byte (any operation naming the ACL doc id), and the read is
+  // the enforcement read (default branch, space scope) — a commit on
+  // another branch or scope that names the id still diffs to "no
+  // authority change" and bumps nothing. `space` is host-supplied on
+  // every server apply path; a space-less direct engine apply cannot
+  // name an ACL doc to diff against and maintains no epochs.
+  const aclTouchedForEpochs = space !== undefined &&
+    commit.operations.some((operation) =>
+      "id" in operation && operation.id === aclDocId(space)
+    );
+  const aclStatePreCommit = aclTouchedForEpochs
+    ? readAuthorityAclState(engine, space!)
+    : null;
+
   const seq = (engine.statements.selectNextSeq.get() as { seq: number }).seq;
   const invocationRef = engine.legacyCommitMetadataRefsRequired
     ? LEGACY_EMPTY_INVOCATION_REF
@@ -7956,7 +8276,21 @@ const applyCommitTransaction = (
     );
   }
 
-  return {
+  // C3.2: the epoch bump, in the SAME transaction as the ACL apply — a
+  // rollback after this point takes the bumps with it, and a commit
+  // lands them atomically with the ACL document (no window, crash
+  // included). This runs on FIRST application only: an exact replay
+  // returned above without re-entering this path, so a replayed ACL
+  // commit never double-bumps.
+  const authorizationEpochBumps = aclTouchedForEpochs
+    ? applyAuthorizationEpochBumps(
+      engine,
+      aclStatePreCommit,
+      readAuthorityAclState(engine, space!),
+    )
+    : undefined;
+
+  const applied: AppliedCommit = {
     seq,
     branch,
     revisions,
@@ -7991,6 +8325,10 @@ const applyCommitTransaction = (
       ? { schedulerDirtiedReaders }
       : {}),
   };
+  if (authorizationEpochBumps !== undefined) {
+    appliedCommitAuthorizationEpochBumps.set(applied, authorizationEpochBumps);
+  }
+  return applied;
 };
 
 /**

@@ -24,6 +24,7 @@ Deno.test("memory v2 engine bootstraps the revision schema", async () => {
       schemaRows.map((row) => row.name),
       [
         "authorization",
+        "authorization_epoch",
         "blob_store",
         "branch",
         "commit",

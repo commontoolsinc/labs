@@ -6,6 +6,9 @@ import {
   CrossSpaceHostRouter,
   type CrossSpaceMessage,
   CrossSpaceProtocolError,
+  type ForeignAuthorizationEpochBump,
+  type ForeignAuthorizationEpochQuery,
+  type ForeignAuthorizationEpochQueryResult,
   type ForeignDirtyMark,
   type ForeignObservationMirror,
   InProcessCrossSpaceTransport,
@@ -458,15 +461,14 @@ const toPreconditionFailedError = (
 
 export type MemoryAclMode = "off" | "observe" | "enforce";
 
-type AclState =
-  | { kind: "missing" }
-  | { kind: "invalid" }
-  | { kind: "valid"; acl: Record<string, Capability | undefined> };
+// C3.2 (2026-07-18): the validity-state type, its classifier, and the
+// ACL doc id moved into the engine — the epoch bump inside
+// `applyCommitTransaction` computes validity transitions with the SAME
+// definition this enforcement path reads, so the two can never drift
+// (drift here would under-revoke, the C3A3 class).
+type AclState = Engine.AclValidityState;
 
-/** Engine doc id of a space's ACL document: the doc whose entity id is the
- *  space DID itself, as managed by the runner's `ACLManager` / `cf acl`
- *  (runner `toURI` prefixes bare ids with `of:`). */
-const aclDocId = (space: string): string => `of:${space}`;
+const aclDocId = Engine.aclDocId;
 
 const commitTouchesAclDoc = (
   operations: readonly Operation[],
@@ -1686,6 +1688,34 @@ export class Server {
   // Soft-private (not #-private) so C3.10b's reconnect drill and today's
   // parked-space fixture can observe the advancing value.
   private crossSpaceAppliedDirtCursors = new Map<string, number>();
+  /**
+   * C3.2 (2026-07-18): the receiving-side store for REMOTE authorization
+   * epochs — what this host remembers about PEER spaces, fed by inbound
+   * `foreign-authorization-epoch.bump` pushes and `.query.result`
+   * responses. Keyed by `linkId\0authoritySpace` (C3A12 keying: the
+   * stable linkId survives reconnects; the authority space is the
+   * envelope's `fromSpace` — the C3A13 structural trust rule, a host
+   * only ever asserts epochs for spaces it speaks for). Every component
+   * max-merges independently (floor and per-principal rows), so
+   * redelivery and reordering never regress a value — the C3.1b
+   * no-ack discipline's idempotence arm.
+   *
+   * In-memory on purpose: losing it on restart only widens the UNKNOWN
+   * set, and C3A3's comparison discipline makes unknown fail closed
+   * (over-revoke, never under-revoke). C3.10b owns persistence questions
+   * and the reconnect resync (the epoch query before claim
+   * re-issuance).
+   *
+   * Consumers (dated 2026-07-18, NOT built here): C3.7 claim binding
+   * revalidates bound {(space, principal, epoch)} sets by EQUALITY via
+   * `effectiveRemoteAuthorizationEpoch` (undefined = unknown = fail
+   * closed); C3.8's apply fence consults the same lookup. This WO builds
+   * the substrate only — nothing is wired to revoke yet.
+   */
+  #remoteAuthorizationEpochs = new Map<
+    string,
+    { floor: number; byPrincipal: Map<string, number> }
+  >();
 
   #recordSchemaEnsured(key: string): void {
     this.#ensuredSchemas.set(key, true);
@@ -2037,16 +2067,11 @@ export class Server {
   }
 
   #aclState(engine: Engine.Engine, space: string): AclState {
-    const state = Engine.readState(engine, { id: aclDocId(space) });
-    if (state === null) return { kind: "missing" };
-    // A retracted ACL is not equivalent to a never-created ACL: treating the
-    // tombstone as public would turn deletion into an authorization bypass.
-    if (state.document === null) return { kind: "invalid" };
-    const acl = state.document.value;
-    if (!isACL(acl)) return { kind: "invalid" };
-    const byPrincipal = acl as Record<string, Capability | undefined>;
-    if (!hasConcreteOwner(byPrincipal)) return { kind: "invalid" };
-    return { kind: "valid", acl: byPrincipal };
+    // Shared classifier (C3.2): the engine's epoch bump diffs the same
+    // states this returns — see `Engine.aclValidityOfEntityState`.
+    return Engine.aclValidityOfEntityState(
+      Engine.readState(engine, { id: aclDocId(space) }),
+    );
   }
 
   #resolveCapability(
@@ -5436,6 +5461,12 @@ export class Server {
         }],
       },
     });
+    // C3.2: a direct write can mutate the ACL doc only in acl-off mode
+    // (guarded above otherwise), but the engine's epoch bump is
+    // mode-independent — publish whatever the transaction recorded.
+    if (this.#publishAuthorizationEpochBumps(space, commit)) {
+      await this.settleCrossSpaceDeliveries();
+    }
     await this.runPostCommitSchedulerSideEffects(
       space,
       commit,
@@ -6359,6 +6390,16 @@ export class Server {
               detachDatabase(engine.database, alias);
             }
           }
+          // C3.2: publish the transaction's epoch bumps SYNCHRONOUSLY —
+          // before any await — so per-space send order over the link is
+          // commit order (a concurrent transact's applyCommit can only
+          // interleave at an await). A replay carries no bumps
+          // (`authorizationEpochBumpsOf` keys the first-application
+          // object), so redelivered ACL commits never republish.
+          const publishedEpochBumps = this.#publishAuthorizationEpochBumps(
+            message.space,
+            commit,
+          );
           const acceptedDeliverySeq = commitPayload.operations.length === 0 &&
               commit.schedulerObservationResults?.some((result) =>
                 result.status === "kept"
@@ -6409,6 +6450,13 @@ export class Server {
               this.#publishExecutionDemandsAndWait(message.space, branch)
             ),
           );
+          if (publishedEpochBumps) {
+            // Same-host application barrier (C3.1b discipline): the ACL
+            // response resolves only after peer-side inboxes merged the
+            // bumps — no ack message exists (idempotence rides epoch
+            // monotonicity); cross-host, C3.10b owns the equivalent.
+            await this.settleCrossSpaceDeliveries();
+          }
           const acceptedSchedulerObservations = this
             .#acceptedSchedulerObservations(
               schedulerObservations,
@@ -9128,10 +9176,26 @@ export class Server {
           () => this.applyForeignDirtyMark(message, context),
         );
         return;
+      // C3.2 (2026-07-18): the epoch arms. Bump and query-result are
+      // synchronous cache merges (no engine, order-insensitive by
+      // monotonicity); the query answers from the durable table, so it
+      // rides the per-space apply chain like the other engine touches.
+      case "foreign-authorization-epoch.bump":
+        this.applyForeignAuthorizationEpochBump(message, context);
+        return;
+      case "foreign-authorization-epoch.query.result":
+        this.applyForeignAuthorizationEpochQueryResult(message, context);
+        return;
+      case "foreign-authorization-epoch.query":
+        this.queueCrossSpaceInboundApply(
+          context.space,
+          () => this.answerForeignAuthorizationEpochQuery(message, context),
+        );
+        return;
       default:
         // C3.1 vocabulary without an inbound consumer yet (2026-07-18):
-        // subscribe/unsubscribe + stale-readers land with C3.3a, epoch
-        // bump/query with C3.2, point reads with C3.4. Dropping here is
+        // subscribe/unsubscribe + stale-readers land with C3.3a, point
+        // reads (and their results) with C3.4. Dropping here is
         // side-effect-free by construction.
         console.warn(
           `cross-space message ${message.type} for ${context.space} has ` +
@@ -9254,6 +9318,246 @@ export class Server {
     if (message.dirtySeq > cursor) {
       this.crossSpaceAppliedDirtCursors.set(cursorKey, message.dirtySeq);
     }
+  }
+
+  /**
+   * C3.2 publication (2026-07-18): fan an accepted commit's
+   * authorization-epoch bumps (recorded transactionally by the engine —
+   * `Engine.authorizationEpochBumpsOf`) out over the cross-space
+   * protocol. Returns whether anything was sent, so the caller can run
+   * the same-host application barrier.
+   *
+   * Addressing, v1: one `foreign-authorization-epoch.bump` per bump per
+   * currently REGISTERED peer space on this host's router — the bump
+   * message has no host-level broadcast address (`toSpace` names exactly
+   * one home space per message), and "every registered link" is the
+   * ruled v1 relationship set. Narrowing the fan-out to SUBSCRIBED home
+   * spaces is C3.3a's (it owns the subscription registry); a peer that
+   * registers later (or another host, once links are real) recovers via
+   * the C3A12 epoch-query resync — the push is an optimization, the
+   * durable table is the truth.
+   *
+   * MUST be called synchronously after `Engine.applyCommit` (before any
+   * await) so per-space send order equals commit order — the in-process
+   * channel is FIFO, so the receiving cache observes bumps in commit
+   * order (and its max-merge makes even a reordered redelivery safe).
+   * The C3.1b no-ack discipline applies: a failed fan-out warns and
+   * never surfaces as a commit failure (the commit is already durable).
+   */
+  #publishAuthorizationEpochBumps(
+    space: string,
+    commit: Engine.AppliedCommit,
+  ): boolean {
+    const bumps = Engine.authorizationEpochBumpsOf(commit);
+    if (bumps === undefined || bumps.length === 0) {
+      return false;
+    }
+    let sent = false;
+    try {
+      this.registerCrossSpaceHostedSpace(space);
+      for (const peer of this.#crossSpaceRouter.hostedSpaces()) {
+        if (peer === space) continue;
+        const link = this.#crossSpaceRouter.link(space, peer);
+        for (const bump of bumps) {
+          link.send({
+            type: "foreign-authorization-epoch.bump",
+            target: bump.target,
+            epoch: bump.epoch,
+          });
+          sent = true;
+        }
+      }
+    } catch (error) {
+      console.warn(
+        "cross-space authorization-epoch bump publication failed:",
+        error,
+      );
+    }
+    return sent;
+  }
+
+  /**
+   * C3.2 (2026-07-18): issue a `foreign-authorization-epoch.query` from
+   * `homeSpace` to `authoritySpace`'s host and settle same-host
+   * delivery, returning the post-merge remote snapshot (undefined when
+   * the authority answered nothing — e.g. unhosted). The inbound
+   * `.query.result` arm max-merges into `#remoteAuthorizationEpochs`
+   * keyed by the answering link, so no request/response correlation
+   * state is needed: an epoch answer is trustworthy per C3A13 because
+   * it arrived on a link speaking for `authoritySpace`, not because we
+   * remember asking. Consumers: C3.7's re-issuance preflight and
+   * C3.10b's reconnect resync (resync the epoch table before ANY claim
+   * re-issuance — C3A12); the same-host settle here is the in-process
+   * stand-in for C3.10b's cross-host response barrier.
+   */
+  async queryForeignAuthorizationEpochs(
+    homeSpace: string,
+    authoritySpace: string,
+    principals?: readonly string[],
+  ): Promise<
+    | { floor: number; epochs: readonly { principal: string; epoch: number }[] }
+    | undefined
+  > {
+    this.registerCrossSpaceHostedSpace(homeSpace);
+    // In-process stand-in for the peer host's own hosting registration
+    // (see mirrorSchedulerObservation): a store-materialized authority
+    // re-registers lazily; a never-hosted name drops at the router.
+    await this.ensureCrossSpaceHosting(authoritySpace);
+    const link = this.#crossSpaceRouter.link(homeSpace, authoritySpace);
+    link.send({
+      type: "foreign-authorization-epoch.query",
+      requestId: `xsp-epoch-query:${crypto.randomUUID()}`,
+      ...(principals !== undefined ? { principals } : {}),
+    });
+    await this.settleCrossSpaceDeliveries();
+    return this.remoteAuthorizationEpochSnapshot(
+      link.linkId,
+      authoritySpace,
+    );
+  }
+
+  /**
+   * Read seam over the remote-epoch cache (see the field docblock):
+   * the max-merged view of `authoritySpace`'s epochs as learned over
+   * `linkId`. Undefined when this host has learned NOTHING about that
+   * (link, space) — the C3A3 unknown state consumers fail closed on.
+   */
+  remoteAuthorizationEpochSnapshot(
+    linkId: string,
+    authoritySpace: string,
+  ):
+    | { floor: number; epochs: readonly { principal: string; epoch: number }[] }
+    | undefined {
+    const entry = this.#remoteAuthorizationEpochs.get(
+      `${linkId}\0${authoritySpace}`,
+    );
+    if (entry === undefined) return undefined;
+    return {
+      floor: entry.floor,
+      epochs: [...entry.byPrincipal.entries()]
+        .map(([principal, epoch]) => ({ principal, epoch }))
+        .sort((left, right) => left.principal < right.principal ? -1 : 1),
+    };
+  }
+
+  /**
+   * Effective REMOTE epoch of a principal on a peer space: max(the
+   * principal's learned row, the learned floor) — the exact lookup C3.7
+   * claim revalidation and C3.8's apply fence will consult (dated
+   * 2026-07-18, neither built here). A principal with no row reports the
+   * floor (floor-only discipline); undefined means the (link, space) is
+   * entirely unknown here — fail closed (C3A3).
+   */
+  effectiveRemoteAuthorizationEpoch(
+    linkId: string,
+    authoritySpace: string,
+    principal: string,
+  ): number | undefined {
+    const entry = this.#remoteAuthorizationEpochs.get(
+      `${linkId}\0${authoritySpace}`,
+    );
+    if (entry === undefined) return undefined;
+    return Math.max(entry.byPrincipal.get(principal) ?? 0, entry.floor);
+  }
+
+  /** Max-merge one learned epoch component into the remote cache. */
+  #mergeRemoteAuthorizationEpoch(
+    linkId: string,
+    authoritySpace: string,
+    target: { kind: "floor" } | { kind: "principal"; principal: string },
+    epoch: number,
+  ): void {
+    const key = `${linkId}\0${authoritySpace}`;
+    let entry = this.#remoteAuthorizationEpochs.get(key);
+    if (entry === undefined) {
+      entry = { floor: 0, byPrincipal: new Map() };
+      this.#remoteAuthorizationEpochs.set(key, entry);
+    }
+    if (target.kind === "floor") {
+      entry.floor = Math.max(entry.floor, epoch);
+    } else {
+      entry.byPrincipal.set(
+        target.principal,
+        Math.max(entry.byPrincipal.get(target.principal) ?? 0, epoch),
+      );
+    }
+  }
+
+  /**
+   * Inbound `foreign-authorization-epoch.bump`: max-merge into the
+   * remote cache. Synchronous — no engine is involved, and monotonic
+   * merge makes application order-insensitive (redelivery/reorder never
+   * regresses), so this needs neither the per-space apply chain nor an
+   * ack.
+   */
+  private applyForeignAuthorizationEpochBump(
+    message: ForeignAuthorizationEpochBump,
+    context: CrossSpaceDeliveryContext,
+  ): void {
+    this.#mergeRemoteAuthorizationEpoch(
+      context.linkId,
+      context.fromSpace,
+      message.target,
+      message.epoch,
+    );
+  }
+
+  /**
+   * Inbound `foreign-authorization-epoch.query.result`: merge the
+   * answered floor and rows exactly like bumps (monotonic, keyed by the
+   * answering link + `fromSpace` — C3A13's structural trust). A
+   * principal ABSENT from the answer merges nothing: the floor the
+   * answer carries is its floor-only report, and the cache never
+   * fabricates per-principal rows.
+   */
+  private applyForeignAuthorizationEpochQueryResult(
+    message: ForeignAuthorizationEpochQueryResult,
+    context: CrossSpaceDeliveryContext,
+  ): void {
+    this.#mergeRemoteAuthorizationEpoch(
+      context.linkId,
+      context.fromSpace,
+      { kind: "floor" },
+      message.epochFloor,
+    );
+    for (const { principal, epoch } of message.epochs) {
+      this.#mergeRemoteAuthorizationEpoch(
+        context.linkId,
+        context.fromSpace,
+        { kind: "principal", principal },
+        epoch,
+      );
+    }
+  }
+
+  /**
+   * Inbound `foreign-authorization-epoch.query`: answer authoritatively
+   * from THIS space's durable table (the same-transaction bump writer
+   * keeps it exact). The answer carries the floor plus per-principal
+   * rows — filtered to the requested set when one was named; a requested
+   * principal with no row is reported floor-only (it is simply absent
+   * from `epochs`, and `epochFloor` is its effective epoch), matching
+   * the codec's fail-closed reading for principals the authority does
+   * not know. Queued on the per-space apply chain: the engine read must
+   * order after any in-flight inbound applies for this space.
+   */
+  private async answerForeignAuthorizationEpochQuery(
+    message: ForeignAuthorizationEpochQuery,
+    context: CrossSpaceDeliveryContext,
+  ): Promise<void> {
+    const engine = await this.openHostedEngine(context.space);
+    const snapshot = Engine.authorizationEpochSnapshot(engine);
+    const requested = message.principals !== undefined
+      ? new Set(message.principals)
+      : undefined;
+    this.#crossSpaceRouter.link(context.space, context.fromSpace).send({
+      type: "foreign-authorization-epoch.query.result",
+      requestId: message.requestId,
+      epochFloor: snapshot.floor,
+      epochs: requested === undefined
+        ? snapshot.epochs
+        : snapshot.epochs.filter((entry) => requested.has(entry.principal)),
+    });
   }
 }
 

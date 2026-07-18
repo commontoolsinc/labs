@@ -23,6 +23,9 @@ export const CORE_TABLE_NAMES: readonly string[] = [
   "legacy_background_exclusion",
   "blob_store",
   "authorization",
+  // C3.2: the foreign-authorization-epoch table — authorization state a
+  // pattern statement must never read or forge.
+  "authorization_epoch",
   "invocation",
   "scheduler_observation",
   "scheduler_observation_replay",
