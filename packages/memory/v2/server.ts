@@ -7,6 +7,7 @@ import {
   type CrossSpaceLaneDemand,
   type CrossSpaceMessage,
   CrossSpaceProtocolError,
+  type CrossSpaceTransport,
   type ForeignAuthorizationEpochBump,
   type ForeignAuthorizationEpochQuery,
   type ForeignAuthorizationEpochQueryResult,
@@ -1708,10 +1709,20 @@ export class Server {
    * effects, and the peer-write apply path (`openHostedEngine`) refuses
    * to mint an engine for an unhosted space name (the C3A1 blocker's
    * fix).
+   *
+   * C3.10a (2026-07-18): the transport is injectable
+   * (`options.crossSpaceTransport`) — a co-hosted deployment passes a
+   * routing transport (cross-space-link.ts) whose space→host table this
+   * server consults at three seams: `openEngine` refuses to materialize
+   * a peer-routed space (the routing table is the authority for "not
+   * mine"), `ensureCrossSpaceHosting` lets sends toward peer-routed
+   * spaces ride the link without local registration, and the C3.2 bump
+   * fan-out includes link-routed spaces. Default stays the in-process
+   * transport — no routing face, byte-identical single-host behavior.
+   * Initialized in the constructor (a field initializer cannot see
+   * `options`).
    */
-  #crossSpaceRouter = new CrossSpaceHostRouter(
-    new InProcessCrossSpaceTransport(),
-  );
+  #crossSpaceRouter: CrossSpaceHostRouter;
   /**
    * In-order application of inbound cross-space messages, one promise
    * chain per target space (mirroring `#schedulerSideEffectsByOwnerSpace`
@@ -1884,12 +1895,36 @@ export class Server {
         leaseTtlMs?: number;
         drainTimeoutMs?: number;
       };
+      /**
+       * C3.10a: the cross-space transport this host's router runs over.
+       * Default: the in-process transport (single host, the C3.1
+       * shape). A co-hosted deployment passes a
+       * `CoHostedCrossSpaceTransport` (cross-space-link.ts) — its
+       * routing table then gates engine materialization (a peer-routed
+       * space is never opened here) and routes cross-space traffic for
+       * peer spaces over the real link.
+       */
+      crossSpaceTransport?: CrossSpaceTransport;
     },
   ) {
     this.#sessions = options.sessions ?? new SessionRegistry();
     this.#store = options.store;
     this.#executionHostId = options.executionControl?.hostId ??
       `host:${crypto.randomUUID()}`;
+    this.#crossSpaceRouter = new CrossSpaceHostRouter(
+      options.crossSpaceTransport ?? new InProcessCrossSpaceTransport(),
+    );
+    // C3.10a: deployment-configured local spaces register eagerly, so a
+    // configured space's protocol inbox exists before its first serve —
+    // inbound mirror/dirt for a configured-but-parked space applies
+    // (register + create on demand) instead of dropping, matching the
+    // single-host store-materialized story.
+    for (
+      const space of options.crossSpaceTransport?.routing
+        ?.configuredLocalSpaces() ?? []
+    ) {
+      this.registerCrossSpaceHostedSpace(space);
+    }
   }
 
   nowSeconds(): number {
@@ -2014,6 +2049,12 @@ export class Server {
     // claim-shrink race reads very differently from a lapsed lease heartbeat.
     leaseFenceRejectCauses: {} as Record<string, number>,
     actionFirewallRejects: 0,
+    // C3.3b (C3A5, 2026-07-18): observation mirrors withheld at the send
+    // gate because the observation's ACTING principal lacked READ on the
+    // read space at send time. Denial is a silent drop of the mirror only
+    // (the home-side observation is untouched), so this counter is the
+    // denial's only footprint — see canMirrorSchedulerObservationToSpace.
+    crossSpaceMirrorsWithheld: 0,
     acceptedCommitIndexLookups: 0,
     acceptedCommitIndexTargetCandidates: 0,
     acceptedCommitIndexDemandedPieces: 0,
@@ -8988,35 +9029,92 @@ export class Server {
     // upsert the pre-C3.1b code did right here. Never write into the
     // peer engine from this send path (the C3A1 in-process accident).
     this.registerCrossSpaceHostedSpace(ownerSpace);
+    // C3.3b (2026-07-18, C3A5): the observation's ACTING identity, derived
+    // from its effective execution context key — the same resolution the
+    // home accept transaction stamped the row under (the engine's acting-
+    // lane admission in `applyCommit`):
+    //   - session-rank key → the key's own {principal, sessionId} (a
+    //     session lane acts as the GRANT's session — CA8 — and the
+    //     crossing context floor parks client and unserved-executor rows
+    //     at session rank);
+    //   - user-rank key    → the lane principal, scope-anchored at the
+    //     committing session (a user lane has no session of its own);
+    //   - "space"          → the writing session's principal: the client
+    //     for client commits, the lease SPONSOR for executor commits
+    //     (`bindExecutionSession` pins session.principal === onBehalfOf).
+    // For client observations every arm collapses to the session's own
+    // scope context (the effective key was resolved FROM it), so client
+    // mirror messages are byte-identical to the pre-C3.3b shape. Both
+    // inputs were captured before the accepted commit — never re-derive
+    // acting identity after an await: disconnect tears down the executor
+    // binding, but cannot change the already-accepted acting scope.
+    const laneSessionIdentity = Engine.parseSessionExecutionContextKey(
+      originExecutionContextKey,
+    );
+    const actingScopeContext = laneSessionIdentity ?? {
+      principal: Engine.principalOfUserContextKey(originExecutionContextKey) ??
+        scopeContext.principal,
+      sessionId: scopeContext.sessionId,
+    };
     let sent = false;
     for (const space of mirrorSpaces) {
-      // The open-session SEND gate is unchanged by C3.1b. Its predicate
-      // checks the wrong principal for scoped lanes and never passes for
-      // a headless sponsor — fixing that (acting-principal READ via
-      // #capabilityFor) is C3.3b's, dated 2026-07-18. Retractions
-      // (previously-read spaces) bypass it deliberately, as before.
-      if (
-        !previousReadSpaces.has(space) &&
-        !this.canMirrorSchedulerObservationToSpace(space, session)
-      ) {
-        continue;
-      }
       // In-process stand-in for the peer host's own store-backed hosting
       // registration (C3.10a replaces this with real space→host routing):
       // a store-materialized space re-registers lazily (e.g. after a
       // restart, before its first serve); a never-hosted name stays
-      // unregistered and the frame drops at the router, side-effect-free.
-      await this.ensureCrossSpaceHosting(space);
+      // unregistered and nothing sends — same outcome as the pre-C3.3b
+      // router drop, and the ACL consult below must never open an engine
+      // for an unhosted name (the C3A1 shadow-engine refusal).
+      if (!(await this.ensureCrossSpaceHosting(space))) {
+        continue;
+      }
+      // SEND gate (C3.3b, replacing C3.1b's open-session predicate): the
+      // mirror is authorized iff the ACTING principal holds READ on the
+      // read space, at send time, against that space's current ACL state.
+      // Retractions (previously-read spaces) bypass it deliberately, as
+      // before: a retraction REMOVES read rows from B via the narrowed
+      // payload, and withholding it would strand stale reader metadata in
+      // a space the action no longer reads.
+      //
+      // C3.10a composition (2026-07-18): the consult is inherently
+      // send-host-LOCAL — it opens the read space's engine, which for a
+      // space the routing table assigns to a PEER host must never happen
+      // (the openEngine routing gate refuses; a peer-routed space is
+      // never locally materialized). In-process, send host == read host,
+      // so the local consult IS the read host's check; over a link the
+      // read space's ACL lives on the peer, so the mirror forwards and
+      // the read-HOST-side capability check is the C3.10b transport-
+      // parity slot (the same host-boundary shape as C3.4's point read,
+      // where the ACL check runs on the read space's host).
+      const peerRouted = this.#crossSpaceRouter.transport.routing
+        ?.peerHostFor(space) !== undefined;
+      if (
+        !peerRouted &&
+        !previousReadSpaces.has(space) &&
+        !this.canMirrorSchedulerObservationToSpace(
+          await this.openEngine(space),
+          space,
+          actingScopeContext.principal,
+        )
+      ) {
+        this.executionStats.crossSpaceMirrorsWithheld += 1;
+        continue;
+      }
       this.#crossSpaceRouter.link(ownerSpace, space).send({
         type: "foreign-observation.mirror",
         branch: commit.branch,
         observedAtSeq: commit.seq,
-        // This context was captured before the accepted commit. Never
-        // re-derive it after an await: disconnect tears down the executor
-        // binding, but cannot change the already-accepted sponsor scope.
+        // The ACTING scope context the home accept resolved the row under
+        // (see the derivation above). The apply side validates the origin
+        // key against exactly this context
+        // (`schedulerContextScopeForCanonicalKey`), so a sponsor-scoped
+        // context under a scoped-lane key would be rejected there — the
+        // pre-C3.3b session-derived context was wrong for every scoped-
+        // lane executor row, which simply never got this far under the
+        // old gate.
         scopeContext: {
-          principal: scopeContext.principal,
-          sessionId: scopeContext.sessionId,
+          principal: actingScopeContext.principal,
+          sessionId: actingScopeContext.sessionId,
         },
         writerSessionId: Engine.resolveCommitSessionKey(
           session.id,
@@ -9216,29 +9314,73 @@ export class Server {
   }
 
   /**
-   * SEND gate for observation mirrors, at the send-decision site. C3.1b
-   * kept the predicate byte-identical while routing the mirror itself
-   * through the transport: it still gates on an open session of the
-   * WRITING session's principal on the read space — wrong principal for
-   * scoped lanes and never true for a headless sponsor (the cold-start
-   * wake hole). Replacing it with the acting principal's READ on the
-   * read space (the same `#capabilityFor` resolution as C3.4's point
-   * read) is C3.3b's, dated 2026-07-18 — do not "fix" it here.
+   * SEND gate for observation mirrors, at the send-decision site (C3.3b,
+   * 2026-07-18 — the C3A5 amended rule, replacing C3.1b's open-session
+   * predicate). A mirror into read space B is authorized iff the
+   * observation's ACTING principal — derived per observation class at the
+   * call site: the session principal for client observations, the lane's
+   * acting principal for claimed/executor observations (lease sponsor for
+   * the space lane; lane principal for user/session lanes) — holds READ
+   * on B under the SAME `#capabilityFor` resolution the enforcement path
+   * uses (`#authorizeMessageWithEngine` — never a second capability
+   * definition; C3.4's point read runs the identical resolution on the
+   * read host), evaluated at SEND time against B's current ACL state.
+   *
+   * The old predicate keyed on an open session of the WRITING session's
+   * principal on B: connection-liveness-blind in exactly the wrong
+   * direction — never true for a headless sponsor (the cold-start wake
+   * hole: a server-first action's discovery row could not mirror, so it
+   * never woke on foreign commits) and the wrong principal entirely for
+   * scoped lanes. Executor- and sponsor-authored observations now mirror
+   * under exactly the acting-principal READ rule; admitting them WITHOUT
+   * the B-side ACL check would have been a write bypass into B (any
+   * principal planting reader rows into any space — the C3A5 hole this
+   * predicate closes). Dial semantics ride the shared authorize path
+   * unchanged: acl "off" admits everything, "observe" warns-and-admits
+   * capability shortfalls (an invalid ACL still fails closed), "enforce"
+   * withholds. Denial is a SILENT drop of the mirror only — the home
+   * observation is untouched — counted in
+   * `executionStats.crossSpaceMirrorsWithheld`.
+   *
+   * NO epoch stamp rides the mirror message, deliberately (the C3.3b plan
+   * row lists "C3.2 (epoch stamp on the row)" as its dep): a mirror is
+   * advisory reader metadata, and its consumers re-validate authority at
+   * their own time — a foreign point read is stamped (seq, epoch) on the
+   * read host at C3.4, and the home apply revalidates every bound epoch
+   * by equality at C3.8's fence. A stamp captured here would assert
+   * send-time authority for a row consulted arbitrarily later, inviting
+   * exactly the stale-authority reliance mirrored rows must not carry.
+   * C3.2 is this gate's dependency as capability-resolution CURRENCY
+   * instead: the ACL apply bumps epochs and invalidates the
+   * `#aclCapabilities` cache in the same transaction, so the send-time
+   * `#capabilityFor` read here is never stale.
+   *
+   * Executor-authored rows (the C3.3b row's writer key + cleanup
+   * lifecycle): the mirror's `writerSessionId` stays the committing
+   * session's canonical commit key (`resolveCommitSessionKey(session.id,
+   * session.principal)` — for an executor commit that is the sponsor-
+   * bound executor session), byte-identical to the home engine's own
+   * `writer_session_id` for the row. Cleanup is the same upsert-only
+   * lifecycle as client rows: a narrowed re-observation retracts B-side
+   * read rows through the ungated `previousReadSpaces` send. Post-
+   * REVOCATION cleanup is deliberately NOT here (C3.7 / C3A6, dated
+   * 2026-07-18): an epoch/floor bump that revokes the last authorized
+   * reader must also unsubscribe the affected demand pairs and tombstone
+   * already-mirrored rows in B — or record the counted host-trust-
+   * metadata ruling. This gate governs NEW sends only; rows already in B
+   * outlive a later revocation until C3.7 lands.
    */
   private canMirrorSchedulerObservationToSpace(
+    readEngine: Engine.Engine,
     readSpace: string,
-    session: SessionState | undefined,
+    actingPrincipal: string,
   ): boolean {
-    if (!this.options.authorizeSessionOpen) {
-      return true;
-    }
-    if (!session) {
-      return false;
-    }
-    return this.#sessions.hasOpenSessionForPrincipal(
+    return this.#authorizeMessageWithEngine(
+      readEngine,
       readSpace,
-      session.principal,
-    );
+      actingPrincipal,
+      "READ",
+    ) === null;
   }
 
   private async propagateSchedulerDirtyToOwnerSpaces(
@@ -9331,6 +9473,27 @@ export class Server {
     const existing = this.#engines.get(space);
     if (existing !== undefined) {
       return existing;
+    }
+    // C3.10a (2026-07-18): the space→host routing table is the authority
+    // for "not mine" — a space routed to a PEER host is never locally
+    // materialized, on ANY path (serve included; traffic for it rides
+    // the link instead). A stale store file for a since-migrated space
+    // does not entitle local serving: the routing table wins, loudly
+    // (C3A1/C3A13). The three-way split: locally-hosted = register +
+    // create (below), peer-routed = refuse here, unknown = the C3.1b
+    // drop/refuse discipline. In-process transports carry no routing
+    // face — single-host behavior unchanged.
+    const routedHost = this.#crossSpaceRouter.transport.routing
+      ?.peerHostFor(space);
+    if (routedHost !== undefined) {
+      return Promise.reject(
+        new CrossSpaceProtocolError(
+          "space-not-hosted",
+          `refusing to open an engine for ${space}: the space→host ` +
+            `routing table routes it to peer host ${routedHost} ` +
+            "(C3.10a — a peer-routed space is never locally materialized)",
+        ),
+      );
     }
     this.registerCrossSpaceHostedSpace(space);
 
@@ -9443,9 +9606,22 @@ export class Server {
    * Returns false — registering nothing — for a space this host does not
    * host; the subsequent send then drops at the router with zero side
    * effects (the C3A1 shadow-engine refusal).
+   *
+   * C3.10a (2026-07-18): a PEER-ROUTED space is deliverable without any
+   * local hosting — the send rides the link — so it returns true while
+   * registering nothing. The routed check precedes the store check on
+   * purpose: a stale store file for a since-migrated space must not
+   * resurrect a local registration (and with it a local inbox +
+   * loopback delivery) for a space the routing table assigns elsewhere.
    */
   private async ensureCrossSpaceHosting(space: string): Promise<boolean> {
     if (this.#crossSpaceRouter.isHosted(space)) {
+      return true;
+    }
+    if (
+      this.#crossSpaceRouter.transport.routing?.peerHostFor(space) !==
+        undefined
+    ) {
       return true;
     }
     if (await this.spaceMaterializedInStore(space)) {
@@ -10218,7 +10394,20 @@ export class Server {
     let sent = false;
     try {
       this.registerCrossSpaceHostedSpace(space);
-      for (const peer of this.#crossSpaceRouter.hostedSpaces()) {
+      // The v1 relationship set is "every registered link" (see the
+      // docblock): locally-registered spaces via the loopback, and —
+      // C3.10a (2026-07-18) — every space the routing table routes over
+      // a live link, so the push crosses to co-hosted peers too. The
+      // routing face enumerates only link-routed spaces; in-process it
+      // is absent and the set is unchanged.
+      const peers = new Set(this.#crossSpaceRouter.hostedSpaces());
+      for (
+        const routed of this.#crossSpaceRouter.transport.routing
+          ?.routedSpaces() ?? []
+      ) {
+        peers.add(routed);
+      }
+      for (const peer of peers) {
         if (peer === space) continue;
         const link = this.#crossSpaceRouter.link(space, peer);
         for (const bump of bumps) {

@@ -1356,17 +1356,64 @@ export interface CrossSpaceChannel {
 }
 
 /**
+ * C3.10a (2026-07-18) — the routing-table face a multi-host transport
+ * exposes. This is the seam the C3.1 transport docblock reserved for
+ * C3.10a ("the space→host routing and the accept-side surfacing of
+ * channels a remote peer dialed"): a transport that maintains real
+ * links to peer hosts declares it, and the two host-side consumers
+ * wire through it —
+ *
+ * - the {@link CrossSpaceHostRouter} consumes `onChannel` (so frames a
+ *   peer sends are dispatched even when this host never initiated a
+ *   send) and notifies `spaceRegistered` (so the transport's hello /
+ *   hosted-spaces declaration tracks the local hosted set);
+ * - the `Server` consults `peerHostFor` (the openEngine gate: a space
+ *   routed to a peer is NEVER locally materialized — C3A1), enumerates
+ *   `routedSpaces` (the C3.2 bump fan-out's link-peer set), and
+ *   eagerly registers `configuredLocalSpaces` (deployment-declared
+ *   hosting, so a configured space's inbox exists before first serve).
+ *
+ * The in-process transport carries no routing face (`routing` absent):
+ * one host, no peers, nothing to route — all consumers are
+ * `?.`-guarded, so single-host behavior is byte-identical.
+ */
+export interface CrossSpaceTransportRouting {
+  /** Peer hostId the routing table routes `space` to; undefined when
+   * `space` is not peer-routed (locally hosted or unknown). */
+  peerHostFor(space: string): string | undefined;
+  /** Every space currently routed to some peer over a live link. */
+  routedSpaces(): readonly string[];
+  /** Deployment-configured locally-hosted spaces (may be empty; the
+   * dynamic arm is `spaceRegistered`). */
+  configuredLocalSpaces(): readonly string[];
+  /**
+   * Accept-side channel surfacing: `handler` fires for every link
+   * channel that reaches the open state — including ones already open
+   * at subscribe time (replayed synchronously), so router and link
+   * construction order is free. Returns an unsubscribe.
+   */
+  onChannel(handler: (channel: CrossSpaceChannel) => void): () => void;
+  /** Router → transport: `space` registered as hosted on this host
+   * (drives the link hello / hosted-spaces update declarations). */
+  spaceRegistered(space: string): void;
+}
+
+/**
  * A transport provides ordered channels to peer hosts and declares its
  * ordering capability. `channelTo` is the send-side resolution seam:
  * the space→host routing (and the accept-side surfacing of channels a
- * remote peer dialed) is C3.10a's; in-process the one loopback channel
- * is both the send and the receive seam.
+ * remote peer dialed) is C3.10a's — carried by the optional
+ * {@link CrossSpaceTransportRouting} face; in-process the one loopback
+ * channel is both the send and the receive seam and `routing` is
+ * absent.
  */
 export interface CrossSpaceTransport {
   readonly kind: string;
   readonly ordering: CrossSpaceOrderingCapability;
   /** The channel carrying messages to the host of the given space. */
   channelTo(space: string): CrossSpaceChannel;
+  /** C3.10a: the routing-table face of a multi-host transport. */
+  readonly routing?: CrossSpaceTransportRouting;
   close(): void;
 }
 
@@ -1561,9 +1608,17 @@ export class CrossSpaceHostRouter {
   #registrations = new Map<string, CrossSpaceInboundHandler>();
   #channels = new Map<string, { channel: CrossSpaceChannel }>();
   #closed = false;
+  #detachRoutingChannels: (() => void) | undefined;
 
   constructor(transport: CrossSpaceTransport) {
     this.#transport = transport;
+    // C3.10a accept side: subscribe dispatch to every link channel the
+    // transport surfaces (a peer may speak first — this host must hear
+    // frames on links it never sent on). In-process: no routing face,
+    // the loopback attaches on first `link()` as before.
+    this.#detachRoutingChannels = transport.routing?.onChannel(
+      (channel) => this.#attachChannel(channel),
+    );
   }
 
   get transport(): CrossSpaceTransport {
@@ -1586,6 +1641,18 @@ export class CrossSpaceHostRouter {
       );
     }
     this.#registrations.set(space, handler);
+    // C3.10a: the transport's routing table tracks the local hosted set
+    // (hello / hosted-spaces update declarations). Failure is contained:
+    // a declaration hiccup must never turn a local registration into a
+    // registration failure.
+    try {
+      this.#transport.routing?.spaceRegistered(space);
+    } catch (error) {
+      console.warn(
+        "cross-space transport spaceRegistered notification failed",
+        error,
+      );
+    }
     return {
       space,
       close: () => {
@@ -1651,11 +1718,16 @@ export class CrossSpaceHostRouter {
 
   #ensureChannel(space: string): CrossSpaceChannel {
     const channel = this.#transport.channelTo(space);
+    this.#attachChannel(channel);
+    return channel;
+  }
+
+  #attachChannel(channel: CrossSpaceChannel): void {
+    if (this.#closed) return;
     if (!this.#channels.has(channel.linkId)) {
       this.#channels.set(channel.linkId, { channel });
       channel.onMessage((wire) => this.#dispatch(channel, wire));
     }
-    return channel;
   }
 
   #dispatch(channel: CrossSpaceChannel, wire: string): void {
@@ -1710,6 +1782,7 @@ export class CrossSpaceHostRouter {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
+    this.#detachRoutingChannels?.();
     this.#registrations.clear();
     this.#channels.clear();
     this.#transport.close();
