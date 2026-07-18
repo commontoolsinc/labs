@@ -23,10 +23,11 @@ The implementation already has several reliability foundations:
 - `cell-bridge.ts` exposes `.status`, marks the mount disconnected/read-only on
   transport errors, and reconnects with capped exponential backoff.
 - `cell-bridge.ts` serializes and coalesces per-piece-property rebuilds, dedupes
-  in-flight hydrations, stages rebuilds under pending roots, and invalidates
-  cache entries after committed cell changes.
+  in-flight hydrations, stages rebuilds under pending roots and reconciles them
+  onto the live subtree in place so inodes stay stable, and invalidates the
+  exact cache entries a rebuild changed.
 - `cfc-writeback.ts` persists prepared CFC writeback records, tracks crash-point
-  states, and reconciles records after inode churn or subtree rebuild.
+  states, and reconciles records after a subtree rebuild.
 
 The main gap is that several mutating paths still acknowledge FUSE success
 before the Common Fabric operation has reached a clear commit or acceptance

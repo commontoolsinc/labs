@@ -9,17 +9,33 @@ runtime itself), the filesystem must reflect the update.
 
 1. The Deno process subscribes to cell changes via the existing subscription
    mechanism (WebSocket to toolshed).
-2. On change notification, rebuild the affected subtree of the in-memory tree.
-3. Invalidate kernel caches for affected inodes via
+2. On change notification, rebuild the affected piece property. The rebuild
+   builds the new subtree under a staging name and reconciles it onto the live
+   subtree in place (`FsTree.transplantSubtree`), so a path that still exists
+   keeps its inode. The whole swap is synchronous, so no filesystem request
+   observes a half-rebuilt tree.
+3. Invalidate the kernel caches the rebuild actually made stale via
    `fuse_lowlevel_notify_inval_inode` / `fuse_lowlevel_notify_inval_entry`.
 
 ### Kernel Cache Invalidation
 
 The FUSE protocol supports `notify_inval_inode` and `notify_inval_entry` to
-tell the kernel that cached data is stale. When a cell changes:
+tell the kernel that cached data is stale. A rebuild reports the exact caches
+it invalidated, and only those are dropped:
 
-- `notify_inval_inode(inode, offset, len)` — invalidates cached file data
-- `notify_inval_entry(parent_inode, name)` — invalidates a directory entry
+- `notify_inval_inode(inode, offset, len)` — invalidates cached file data, for
+  each surviving inode whose file data, symlink target or callable script
+  changed.
+- `notify_inval_entry(parent_inode, name)` — invalidates a directory entry, for
+  each child name that appeared, disappeared, or now points at a different
+  inode.
+
+A path that kept its inode and content is invalidated by neither, so a client
+that walked into a piece keeps its cached lookups when an unrelated rebuild
+runs. A removed subtree needs no per-descendant inode
+invalidation: dropping the parent's directory entry is enough, and because
+inode numbers are only ever allocated upward and never reused, a stale cache
+for a freed inode number can never be observed.
 
 This ensures that subsequent reads from userspace processes get fresh data
 without requiring the process to close and reopen files.

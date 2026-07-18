@@ -371,10 +371,13 @@ independently from libfuse. FUSE callbacks are registered via
 `Deno.UnsafeCallback` with `nonblocking: true` on the session loop, so WebSocket
 subscriptions and FUSE requests run concurrently on Deno's event loop.
 
-Cell data is cached in an in-memory tree (`FsTree`). Subscriptions rebuild
-affected subtrees on cell changes and ask the kernel to drop what it cached for
-them, naming the stale directory entries with `fuse_lowlevel_notify_inval_entry`
-and each stale inode with `fuse_lowlevel_notify_inval_inode`.
+Cell data is cached in an in-memory tree (`FsTree`). On a cell change the
+affected piece property is rebuilt by reconciling a freshly built subtree onto
+the live one in place, so a path that still exists keeps its inode across the
+rebuild. The rebuild then asks the kernel to drop only what actually went stale,
+naming the changed directory entries with `fuse_lowlevel_notify_inval_entry` and
+the inodes whose content changed with `fuse_lowlevel_notify_inval_inode`; caches
+for unchanged paths are left intact.
 
 Those notifications reach the kernel on Linux. FUSE-T returns success for both
 calls but its NFS backend does not act on either, so a rebuilt subtree stays

@@ -22,6 +22,7 @@ int main(void) {
     printf("stat_st_uid=%zu\n", offsetof(struct stat, st_uid));
     printf("stat_st_gid=%zu\n", offsetof(struct stat, st_gid));
     printf("stat_st_size=%zu\n", offsetof(struct stat, st_size));
+    printf("stat_st_mtim=%zu\n", offsetof(struct stat, st_mtim));
 
     // fuse_entry_param
     printf("entry_param_size=%zu\n", sizeof(struct fuse_entry_param));
