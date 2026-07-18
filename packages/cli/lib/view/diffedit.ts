@@ -33,6 +33,7 @@ import type {
   EditableSource,
   EditPolicy,
   ExpandResult,
+  HunkRoom,
   RevertScope,
 } from "./editsource.ts";
 import { shortName } from "./editsource.ts";
@@ -153,8 +154,9 @@ export function diffSource(
     dirtyLabels: (original, current) => dirtyLabels(original, current),
     revert: (original, current, cursorLine, scope) =>
       revert(original, current, cursorLine, scope),
-    expandContext: (current, baseline, cursorLine) =>
-      expandContext(ws, cache, saveHunks, current, baseline, cursorLine),
+    expandContext: (current, baseline, cursorLine, up) =>
+      expandContext(ws, cache, saveHunks, current, baseline, cursorLine, up),
+    expandRoom: (current) => expandRoom(ws, cache, saveHunks, current),
     save: (text) => save(text, edit.fileText, saveHunks),
     pendingAmend: (baseline, current) =>
       pendingAmend(editableMessage, baseline, current),
@@ -318,44 +320,23 @@ function revertMessage(
   };
 }
 
-/**
- * Reveal more of the underlying file around the cursor's hunk, at the hunk
- * boundary nearest the cursor. The extra lines are read from the workspace file
- * just above (or below) the hunk's current new-side range and inserted as
- * context, with the hunk header's counts grown to match. The same expansion is
- * applied to `baseline` and to the save map, so revealing context does not
- * register as an edit (dirtiness still reflects only real changes), a later
- * revert keeps it, and a save still writes the correct file range. Returns the
- * new texts and where the cursor moves, or null when there is no backing file or
- * no more context to show.
- */
-function expandContext(
+/** What a hunk's file offers around it: the workspace file's lines, and how far
+ * the hunk's new-side range could grow each way. Null when the hunk has no
+ * backing file to read. */
+function hunkFooting(
   ws: DiffWorkspace,
   cache: WorkspaceCache | undefined,
   hunks: MutableHunk[],
-  current: string,
-  baseline: string,
-  cursorLine: number,
-  amount = 10,
-): ExpandResult | null {
-  const model = parseDiff(current);
-  if (!model) return null;
-  let index = -1;
-  let target: DiffHunk | undefined;
-  let targetFile: DiffModel["files"][number] | undefined;
-  let gi = 0;
-  for (const f of model.files) {
-    for (const h of f.hunks) {
-      if (cursorLine >= h.headerLine && cursorLine <= h.endLine) {
-        index = gi;
-        target = h;
-        targetFile = f;
-      }
-      gi++;
-    }
-  }
-  if (!target || !targetFile || targetFile.newPath === undefined) return null;
-  const absPath = ws.resolve(targetFile.newPath);
+  file: DiffModel["files"][number],
+  index: number,
+): {
+  fileLines: string[];
+  range: MutableHunk;
+  downFrom: number;
+  room: HunkRoom;
+} | null {
+  if (file.newPath === undefined) return null;
+  const absPath = ws.resolve(file.newPath);
   if (!absPath) return null;
   const content = cache?.get(absPath)?.fileText ?? ws.read(absPath);
   if (content === null) return null;
@@ -372,6 +353,7 @@ function expandContext(
   // hunk's file range — that would make save() splice the two ranges into each
   // other (silently dropping edits or duplicating lines) and malform the diff.
   const range = hunks[index];
+  if (!range) return null;
   const prev = index > 0 && hunks[index - 1].absPath === range.absPath
     ? hunks[index - 1]
     : null;
@@ -380,15 +362,111 @@ function expandContext(
     ? hunks[index + 1]
     : null;
   const prevEnd = prev ? prev.newStart + prev.newCount : 1; // 1-based, free above
-  const upAvail = Math.max(0, range.newStart - prevEnd);
   const downFrom = range.newStart - 1 + range.newCount; // 0-based, below it
   const nextStart = next ? next.newStart : fileLen + 1; // 1-based, blocked below
-  const downAvail = Math.max(0, nextStart - (downFrom + 1));
+  return {
+    fileLines,
+    range,
+    downFrom,
+    room: {
+      up: Math.max(0, range.newStart - prevEnd),
+      down: Math.max(0, nextStart - (downFrom + 1)),
+      // Nothing left is the file running out only where the range reaches its
+      // edge; otherwise it is the neighbouring hunk in the way.
+      atFileTop: range.newStart <= 1,
+      atFileBottom: downFrom >= fileLen,
+    },
+  };
+}
 
-  const mid = (target.headerLine + 1 + target.endLine) / 2;
-  let up = cursorLine <= mid;
-  if (up && upAvail === 0) up = false; // nothing left above
-  if (!up && downAvail === 0) up = true; // nothing left below
+/** The hunk `line` sits in, with its file and its index across the whole diff. */
+function hunkAt(model: DiffModel, line: number): {
+  hunk: DiffHunk;
+  file: DiffModel["files"][number];
+  index: number;
+} | null {
+  let found = null;
+  let gi = 0;
+  for (const f of model.files) {
+    for (const h of f.hunks) {
+      if (line >= h.headerLine && line <= h.endLine) {
+        found = { hunk: h, file: f, index: gi };
+      }
+      gi++;
+    }
+  }
+  return found;
+}
+
+/** How much context each hunk of `current` could still reveal, keyed by the line
+ * its header sits on. */
+function expandRoom(
+  ws: DiffWorkspace,
+  cache: WorkspaceCache | undefined,
+  hunks: MutableHunk[],
+  current: string,
+): ReadonlyMap<number, HunkRoom> {
+  const out = new Map<number, HunkRoom>();
+  const model = parseDiff(current);
+  if (!model) return out;
+  let gi = 0;
+  for (const f of model.files) {
+    for (const h of f.hunks) {
+      const footing = hunkFooting(ws, cache, hunks, f, gi);
+      if (footing) out.set(h.headerLine, footing.room);
+      gi++;
+    }
+  }
+  return out;
+}
+
+/**
+ * Reveal more of the underlying file around the cursor's hunk. The extra lines
+ * are read from the workspace file just above (or below) the hunk's current
+ * new-side range and inserted as context, with the hunk header's counts grown to
+ * match. The same expansion is applied to `baseline` and to the save map, so
+ * revealing context does not register as an edit (dirtiness still reflects only
+ * real changes), a later revert keeps it, and a save still writes the correct
+ * file range.
+ *
+ * Which way to grow comes from `up` when it is given, and the call fails rather
+ * than growing the other way when that side has run out — a caller that names an
+ * edge is naming the one the user is looking at. Without it the boundary nearest
+ * `cursorLine` grows, falling back to the other when that one has run out.
+ *
+ * Returns the new texts and where the cursor moves, or null when there is no
+ * backing file or no more context that way.
+ */
+function expandContext(
+  ws: DiffWorkspace,
+  cache: WorkspaceCache | undefined,
+  hunks: MutableHunk[],
+  current: string,
+  baseline: string,
+  cursorLine: number,
+  upIn?: boolean,
+  amount = 10,
+): ExpandResult | null {
+  const model = parseDiff(current);
+  if (!model) return null;
+  const at = hunkAt(model, cursorLine);
+  if (!at) return null;
+  const footing = hunkFooting(ws, cache, hunks, at.file, at.index);
+  if (!footing) return null;
+  const { fileLines, range, downFrom, room } = footing;
+  const { up: upAvail, down: downAvail } = room;
+  const target = at.hunk;
+  const index = at.index;
+
+  let up: boolean;
+  if (upIn !== undefined) {
+    up = upIn;
+  } else {
+    const mid = (target.headerLine + 1 + target.endLine) / 2;
+    up = cursorLine <= mid;
+    if (up && upAvail === 0) up = false; // nothing left above
+    if (!up && downAvail === 0) up = true; // nothing left below
+  }
   const k = Math.min(amount, up ? upAvail : downAvail);
   if (k <= 0) return null;
 
@@ -396,6 +474,11 @@ function expandContext(
     (up
       ? fileLines.slice(range.newStart - 1 - k, range.newStart - 1)
       : fileLines.slice(downFrom, downFrom + k)).map((l) => ` ${l}`);
+  // Which file lines those are, counting from one, while `range` still holds
+  // where the hunk started — growing it upwards moves that.
+  const revealed = up
+    ? { from: range.newStart - k, to: range.newStart - 1 }
+    : { from: downFrom + 1, to: downFrom + k };
 
   // Insert at the parser's hunk boundary (one past its last body line), not a
   // re-scan, so a blank separator below the hunk (git log -p) is not absorbed.
@@ -417,13 +500,99 @@ function expandContext(
   // The revealed lines land just after the hunk header (up) or just after its
   // last body line (down), both in current-text coordinates.
   const insertedAt = up ? target.headerLine + 1 : target.endLine + 1;
+  // Those lines may have been the last between this hunk and its neighbour, in
+  // which case the two now touch and the header between them describes nothing.
+  // The header that goes is the one at the join: this hunk's own when the lines
+  // came from above it, the next hunk's when they came from below.
+  const joined = joinAdjacent(text, newBaseline, hunks, up ? index - 1 : index);
+  const removedAt = joined ? (up ? insertedAt - 1 : insertedAt) : null;
+  // Where a line of the old text ends up: down by the lines that went in above
+  // it, and back up over a header that is no longer between them.
+  const moved = (n: number) =>
+    n + (n >= insertedAt ? k : 0) -
+    (removedAt !== null && n > removedAt ? 1 : 0);
+  // A cursor can rest on a hunk's header. When an upward reveal met the hunk
+  // above and the two joined, that header is the one the join removed, so
+  // `moved` would leave the cursor on its old line number — now the first
+  // revealed line. Send it to the surviving header of the merged hunk instead,
+  // the header of the hunk above, which the join kept.
+  const mergedHeader = removedAt !== null && up
+    ? model.files.flatMap((f) => f.hunks)[index - 1]?.headerLine
+    : undefined;
+  const cursorAfter = mergedHeader !== undefined && cursorLine === removedAt
+    ? mergedHeader
+    : moved(cursorLine);
   return {
-    text,
-    baseline: newBaseline,
-    cursorLine: cursorLine + (up ? k : 0),
+    text: joined?.text ?? text,
+    baseline: joined?.baseline ?? newBaseline,
+    // The cursor stays on its own line. Revealing upwards puts the lines below
+    // the hunk's header, so a cursor resting on that header does not move while
+    // one in the body rides down ahead of them.
+    cursorLine: cursorAfter,
     insertedAt,
     inserted: k,
+    up,
+    removedAt,
+    revealed,
   };
+}
+
+/** Take the `@@` header off the second of two hunks and give its counts to the
+ * first, leaving one hunk where there were two. Null when the text does not hold
+ * them back to back — anything between the first's last line and the second's
+ * header would land inside the joined body. The counts come from the parsed
+ * hunks rather than a re-read of the header line, which the parse already read. */
+function dropHeaderBetween(
+  text: string,
+  first: number,
+): { text: string; removedAt: number } | null {
+  const model = parseDiff(text);
+  if (!model) return null;
+  const all = model.files.flatMap((f) => f.hunks);
+  const a = all[first];
+  const b = all[first + 1];
+  if (!a || !b || b.headerLine !== a.endLine + 1) return null;
+  // The joined hunk starts where the first did and runs to the end of the
+  // second, which is both counts together — they meet with nothing in between.
+  // The first hunk's trailing context (its enclosing function) carries over.
+  const header = `@@ -${a.oldStart},${a.oldCount + b.oldCount} +${a.newStart},${
+    a.newCount + b.newCount
+  } @@${a.context ? ` ${a.context}` : ""}`;
+  const lines = text.split("\n");
+  const out = [
+    ...lines.slice(0, a.headerLine),
+    header,
+    ...lines.slice(a.headerLine + 1, b.headerLine),
+    ...lines.slice(b.headerLine + 1),
+  ];
+  return { text: out.join("\n"), removedAt: b.headerLine };
+}
+
+/** Join hunk `first` to the one after it when revealing context has left them
+ * touching, in the diff, its baseline and the save map together. Null when they
+ * still have file lines between them, are not the same file, or are not both
+ * known to match it — joining an unverified hunk to a verified one would put
+ * lines of unknown provenance into a range that a save writes, or stop the
+ * verified one from being written at all. */
+function joinAdjacent(
+  text: string,
+  baseline: string,
+  hunks: MutableHunk[],
+  first: number,
+): { text: string; baseline: string } | null {
+  const a = hunks[first];
+  const b = hunks[first + 1];
+  if (!a || !b || a.absPath === null || a.absPath !== b.absPath) return null;
+  if (a.newStart + a.newCount !== b.newStart) return null; // a gap remains
+  if (!a.verified || !b.verified) return null;
+  const joined = dropHeaderBetween(text, first);
+  const joinedBase = dropHeaderBetween(baseline, first);
+  if (!joined || !joinedBase) return null;
+  // save() pairs the text's hunks with this map by position, so it loses an
+  // entry exactly as the text loses a header.
+  a.newCount += b.newCount;
+  hunks.splice(first + 1, 1);
+  return { text: joined.text, baseline: joinedBase.text };
 }
 
 /** Insert `ctx` context lines at the top (`up`) or just before `bodyEnd` (the
@@ -636,7 +805,13 @@ function isMarkdownDiffLine(rawLines: string[], lineIdx: number): boolean {
   return false;
 }
 
-export const _internal = { editableStart, pendingAmend, amendCommit };
+export const _internal = {
+  editableStart,
+  pendingAmend,
+  amendCommit,
+  dropHeaderBetween,
+  joinAdjacent,
+};
 
 function reparse(
   ws: DiffWorkspace,

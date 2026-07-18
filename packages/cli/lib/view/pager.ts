@@ -12,7 +12,7 @@
 import { CSI, term } from "./ansi.ts";
 import type { Document } from "./model.ts";
 import { decodeKeys } from "./keys.ts";
-import { cursorScreenPos, renderFrame } from "./render.ts";
+import { cursorScreenPos, renderFrame, type ViewState } from "./render.ts";
 import { Session, type SessionOptions } from "./session.ts";
 import { ui } from "./theme.ts";
 import { createSemantics, type Semantics } from "./semantics.ts";
@@ -25,6 +25,13 @@ const encoder = new TextEncoder();
 /** Idle gap after the last keystroke before the deferred structure re-parse
  * runs. Highlighting is not deferred — it re-runs on every keystroke. */
 const REPARSE_DEBOUNCE_MS = 150;
+
+/** Gap between frames while the lines a Ctrl-L revealed land, one per frame. */
+const REVEAL_FRAME_MS = 16;
+
+/** How long a status message that takes itself away stands before it goes. Long
+ * enough to read twice over, short enough not to outstay what prompted it. */
+const MESSAGE_LINGER_MS = 2000;
 
 export type PagerOptions = SessionOptions;
 
@@ -112,9 +119,7 @@ export async function runPager(
     realFileGateway(),
   );
 
-  const draw = () => {
-    const view = session.view();
-    const doc = session.displayDoc();
+  const paint = (doc: Document, view: ViewState) => {
     const rows = renderFrame(doc, view);
     // Re-assert the padding background every frame. Some terminals drop the
     // OSC 11 default set at startup after the first repaint, so setting it once
@@ -130,6 +135,60 @@ export async function runPager(
     const cur = cursorScreenPos(doc, view);
     if (cur) out += term.moveTo(cur.row, cur.col) + term.showCursor;
     deps.write(out);
+  };
+
+  const draw = () => paint(session.displayDoc(), session.view());
+
+  // Ctrl-L leaves the session at the finished state; these frames walk the lines
+  // it revealed in one at a time so where they land is visible. Any key, or a
+  // resize, drops the frames left and the draw that follows shows the finish.
+  let cancelReveal: (() => void) | undefined;
+  const stopReveal = () => {
+    if (cancelReveal) {
+      cancelReveal();
+      cancelReveal = undefined;
+    }
+  };
+  const startReveal = (): boolean => {
+    const reveal = session.pendingReveal;
+    if (!reveal || reveal.count < 2) return false; // one line lands on its own
+    let shown = 1;
+    const step = () => {
+      const frame = shown < reveal.count ? session.revealFrame(shown) : null;
+      if (!frame) {
+        cancelReveal = undefined;
+        draw();
+        // What it says stands from when the lines finish landing, not from
+        // before they started.
+        startExpiry();
+        return;
+      }
+      paint(frame.doc, frame.view);
+      shown++;
+      cancelReveal = deps.setTimer(step, REVEAL_FRAME_MS);
+    };
+    cancelReveal = deps.setTimer(step, REVEAL_FRAME_MS);
+    return true;
+  };
+
+  // Ctrl-L pressed where the bar does not offer it says why, and the key changed
+  // nothing else. The reason has served its purpose once it has been read, so it
+  // stands for a moment and then goes rather than sitting in the bar describing
+  // a keypress the user has long since moved on from.
+  let cancelExpiry: (() => void) | undefined;
+  const stopExpiry = () => {
+    if (cancelExpiry) {
+      cancelExpiry();
+      cancelExpiry = undefined;
+    }
+  };
+  const startExpiry = () => {
+    if (!session.transientMessage) return;
+    cancelExpiry = deps.setTimer(() => {
+      cancelExpiry = undefined;
+      session.expireMessage();
+      draw();
+    }, MESSAGE_LINGER_MS);
   };
 
   // The session re-highlights on every keystroke but defers the full parse;
@@ -165,8 +224,13 @@ export async function runPager(
 
   const onResize = () => {
     const s = consoleSize(deps);
+    stopReveal(); // the frames left were laid out for the old size
+    stopExpiry();
     session.resize(s.width, s.height);
     draw();
+    // A message that takes itself away is still up after the redraw, so start
+    // its clock again — the one just cancelled would have left it there for good.
+    startExpiry();
   };
   const terminate = (code: number) => {
     cleanup();
@@ -177,6 +241,8 @@ export async function runPager(
   // unsaved edits; the read loop then handles the y/n/c answer. A second
   // interrupt, or a clean buffer, terminates.
   const onInterrupt = () => {
+    stopReveal();
+    stopExpiry();
     if (session.requestQuitFromSignal()) draw();
     else terminate(130);
   };
@@ -215,11 +281,19 @@ export async function runPager(
         if (session.quit) break;
       }
       if (!session.quit) {
-        draw();
+        stopReveal();
+        stopExpiry();
+        // A reveal draws its own frames, ending on the finished one.
+        if (!startReveal()) {
+          draw();
+          startExpiry(); // starts the clock on the message the draw put up
+        }
         if (session.needsReparse) scheduleReparse();
       }
     }
   } finally {
+    stopReveal();
+    stopExpiry();
     if (cancelReparse) {
       cancelReparse();
     }

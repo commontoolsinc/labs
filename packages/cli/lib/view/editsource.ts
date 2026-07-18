@@ -22,16 +22,42 @@ export type RevertScope = "chunk" | "file" | "message" | "all";
 
 /** The outcome of revealing more context (a diff only): the grown diff and its
  * matching grown baseline, where the cursor moves, and — so the pager can hold
- * its viewport and selection steady across the change — where the revealed lines
- * were inserted (`insertedAt`, a line index into the pre-expansion text) and how
- * many there are (`inserted`). Lines at or below `insertedAt` shift down by
- * `inserted`; lines above it do not move. */
+ * its viewport and selection steady across the change — what moved where.
+ *
+ * `inserted` lines went in at `insertedAt`, a line of the pre-expansion text.
+ * `up` tells which edge of the hunk they went in at: its top when they came from
+ * above the hunk, its bottom when they came from below.
+ *
+ * `removedAt` is the `@@` header a join took out, also a line of the
+ * pre-expansion text, or null when nothing joined. Revealing the last file line
+ * between two hunks leaves them touching, and a header between lines that are
+ * neighbours in the file describes nothing: the two become one hunk.
+ *
+ * So a line `n` of the pre-expansion text is afterwards at
+ * `n + (n >= insertedAt ? inserted : 0) - (removedAt !== null && n > removedAt ?
+ * 1 : 0)`, and the line at `removedAt` is gone. */
 export interface ExpandResult {
   text: string;
   baseline: string;
   cursorLine: number;
   insertedAt: number;
   inserted: number;
+  up: boolean;
+  removedAt: number | null;
+  /** Which lines of the workspace file the reveal showed, as the file numbers
+   * them and counting from one: `from` to `to`, both ends included. */
+  revealed: { from: number; to: number };
+}
+
+/** How much context a hunk can still reveal each way, and what stops it where it
+ * cannot: `atFileTop` / `atFileBottom` say the hunk's range reaches the file's
+ * first or last line, so a zero there is the file running out. A zero without
+ * one is the neighbouring hunk butting against it, with nothing in between. */
+export interface HunkRoom {
+  up: number;
+  down: number;
+  atFileTop: boolean;
+  atFileBottom: boolean;
 }
 
 export interface EditableSource {
@@ -81,15 +107,23 @@ export interface EditableSource {
     cursorLine: number,
     scope: RevertScope,
   ): { text: string; cursorLine: number } | null;
-  /** Reveal more of the underlying file around the cursor's hunk (a diff only).
-   * Returns the grown diff text, the matching grown baseline (so revealing
-   * context is not itself an edit), and where the cursor moves — or null when
-   * there is nothing to expand. */
+  /** Reveal more of the underlying file around the hunk `cursorLine` sits in (a
+   * diff only). Returns the grown diff text, the matching grown baseline (so
+   * revealing context is not itself an edit), and where the cursor moves — or
+   * null when there is nothing to expand. `up` names the edge to grow, and the
+   * call fails rather than growing the other one when that edge has run out;
+   * without it the boundary nearest `cursorLine` grows, falling back to the
+   * other. */
   expandContext?(
     current: string,
     baseline: string,
     cursorLine: number,
+    up?: boolean,
   ): ExpandResult | null;
+  /** How much context each hunk of `current` could still reveal, keyed by the
+   * line its header sits on. The pager offers Ctrl-L only where the edge the
+   * user is looking at has room, and says what stopped it where it has not. */
+  expandRoom?(current: string): ReadonlyMap<number, HunkRoom>;
   /** Constrains where editing may happen. Present only for a diff, whose lines
    * map to fixed file lines: edits stay within a line, past the diff marker. A
    * plain file has no policy and is edited freely. */
