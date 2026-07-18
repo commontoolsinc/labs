@@ -55,7 +55,7 @@ export abstract class FabricInstance extends FabricSpecialObject {
    *
    * TODO(danfuzz): This method should grow a base implementation on
    * `BaseFabricInstance` which defers to a `protected abstract` sibling,
-   * mirroring the `shallowClone()`/`shallowUnfrozenClone()` split.
+   * mirroring the `shallowClone()`/`[SHALLOW_UNFROZEN_CLONE]()` split.
    */
   abstract deepClone(frozen: boolean): FabricInstance;
 

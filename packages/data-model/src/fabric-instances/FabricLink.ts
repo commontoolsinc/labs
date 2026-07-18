@@ -9,6 +9,7 @@ import {
   BaseFabricInstance,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
+  SHALLOW_UNFROZEN_CLONE,
 } from "./BaseFabricInstance.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
@@ -87,7 +88,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
   }
 
   /** @inheritDoc */
-  protected shallowUnfrozenClone(): FabricLink {
+  protected [SHALLOW_UNFROZEN_CLONE](): FabricLink {
     return new FabricLink(this.#payload);
   }
 

@@ -33,6 +33,18 @@ export const IS_DEEP_FROZEN: unique symbol = Symbol.for(
 );
 
 /**
+ * Well-known symbol for producing a new unfrozen copy of a fabric instance with
+ * the same data. This is the `protected` template-method primitive that the
+ * concrete `shallowClone()` calls when it needs a fresh instance; each concrete
+ * subclass implements it. Symbol-keyed as implementation plumbing (matching
+ * `[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`), while `shallowClone()` stays a
+ * regular-named client method.
+ */
+export const SHALLOW_UNFROZEN_CLONE: unique symbol = Symbol.for(
+  "data-model.shallowUnfrozenClone",
+);
+
+/**
  * Abstract base class providing shared scaffolding for `FabricInstance`
  * subclasses. Concrete `FabricInstance` classes extend this, not
  * `FabricInstance` directly: `FabricInstance` is the pure abstract protocol
@@ -42,7 +54,7 @@ export const IS_DEEP_FROZEN: unique symbol = Symbol.for(
  *
  * TODO(danfuzz): `deepClone()` should grow a base implementation here that
  * defers to a sibling `protected abstract` method (mirroring the
- * `shallowClone()`/`shallowUnfrozenClone()` template-method split), at which
+ * `shallowClone()`/`[SHALLOW_UNFROZEN_CLONE]()` template-method split), at which
  * point individual subclasses stop implementing `deepClone()` directly.
  */
 export abstract class BaseFabricInstance extends FabricInstance {
@@ -85,19 +97,19 @@ export abstract class BaseFabricInstance extends FabricInstance {
    * Returns a new unfrozen copy of this instance with the same data. Called
    * by `shallowClone()` when a new instance is needed.
    */
-  protected abstract shallowUnfrozenClone(): FabricInstance;
+  protected abstract [SHALLOW_UNFROZEN_CLONE](): FabricInstance;
 
   /**
    * Returns a shallow clone of this instance with the requested frozenness.
    *
    * When `frozen` is `true` and this instance is already frozen, returns
    * `this` (identity optimization -- freezing is idempotent). In all other
-   * cases, creates a new instance via `shallowUnfrozenClone()` and freezes
+   * cases, creates a new instance via `[SHALLOW_UNFROZEN_CLONE]()` and freezes
    * it if requested.
    */
   shallowClone(frozen: boolean): FabricInstance {
     if (frozen && Object.isFrozen(this)) return this;
-    const copy = this.shallowUnfrozenClone();
+    const copy = this[SHALLOW_UNFROZEN_CLONE]();
     // Cast needed: `Object.freeze()` returns `Readonly<T>`, which TS considers
     // incompatible with abstract class types due to protected members.
     return frozen ? Object.freeze(copy) as FabricInstance : copy;
