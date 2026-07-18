@@ -21,6 +21,7 @@ export interface FuseSupervisorOptions {
   cfcXattrNamespace?: string;
   cfcWritebackXattrs?: boolean;
   cfcWritebackState?: string;
+  dangerouslyAllowIncompatibleSchema?: boolean;
   statePath?: string;
   supervisorStatusPath?: string;
   importMetaUrl?: string;
@@ -35,6 +36,53 @@ export interface FuseSupervisorOptions {
   addSignalListener?: (signal: Deno.Signal, handler: () => void) => void;
   removeSignalListener?: (signal: Deno.Signal, handler: () => void) => void;
   supervisorPid?: number;
+}
+
+/** Parsed hidden-command flags used to launch a FUSE supervisor. */
+export interface FuseSupervisorCliOptions {
+  apiUrl?: string;
+  identity?: string;
+  execCli?: string;
+  logFile?: string;
+  space?: string[];
+  allowOther?: boolean;
+  noattrcache?: boolean;
+  attrcacheTimeout?: string;
+  cfcMode?: string;
+  cfcAnnotations?: boolean;
+  cfcXattrNamespace?: string;
+  cfcWritebackXattrs?: boolean;
+  cfcWritebackState?: string;
+  dangerouslyAllowIncompatibleSchema?: boolean;
+  statePath?: string;
+  supervisorStatus?: string;
+}
+
+/** Convert hidden CLI command options into the supervisor's runtime contract. */
+export function fuseSupervisorOptions(
+  options: FuseSupervisorCliOptions,
+  mountpoint: string,
+): FuseSupervisorOptions {
+  return {
+    mountpoint,
+    apiUrl: options.apiUrl ?? "",
+    identity: options.identity ?? "",
+    execCli: options.execCli ?? "",
+    logFile: options.logFile ?? "",
+    spaces: options.space ?? [],
+    allowOther: options.allowOther,
+    noattrcache: options.noattrcache,
+    attrcacheTimeout: options.attrcacheTimeout,
+    cfcMode: options.cfcMode,
+    cfcAnnotations: options.cfcAnnotations,
+    cfcXattrNamespace: options.cfcXattrNamespace,
+    cfcWritebackXattrs: options.cfcWritebackXattrs,
+    cfcWritebackState: options.cfcWritebackState,
+    dangerouslyAllowIncompatibleSchema:
+      options.dangerouslyAllowIncompatibleSchema,
+    statePath: options.statePath,
+    supervisorStatusPath: options.supervisorStatus,
+  };
 }
 
 export interface FuseCommandConstructor {
@@ -82,6 +130,9 @@ export function buildFuseChildCommand(
     if (options.cfcWritebackState) {
       args.push("--cfc-writeback-state", options.cfcWritebackState);
     }
+    if (options.dangerouslyAllowIncompatibleSchema) {
+      args.push("--dangerously-allow-incompatible-schema");
+    }
     if (options.supervisorStatusPath) {
       args.push("--supervisor-status", options.supervisorStatusPath);
     }
@@ -107,6 +158,8 @@ export function buildFuseChildCommand(
       cfcXattrNamespace: options.cfcXattrNamespace,
       cfcWritebackXattrs: options.cfcWritebackXattrs,
       cfcWritebackState: options.cfcWritebackState,
+      dangerouslyAllowIncompatibleSchema:
+        options.dangerouslyAllowIncompatibleSchema,
       supervisorStatusPath: options.supervisorStatusPath,
     }),
   };
@@ -284,6 +337,9 @@ export function parseSupervisorArgs(
       case "--cfc-writeback-state":
         options.cfcWritebackState = requireValue(rawArgs, ++i, arg);
         break;
+      case "--dangerously-allow-incompatible-schema":
+        options.dangerouslyAllowIncompatibleSchema = true;
+        break;
       case "--state-path":
         options.statePath = requireValue(rawArgs, ++i, arg);
         break;
@@ -334,6 +390,8 @@ Options:
   --cfc-xattr-namespace <ns>      CFC xattr namespace
   --cfc-writeback-xattrs          Enable CFC writeback xattrs
   --cfc-writeback-state <path>    CFC writeback state path
+  --dangerously-allow-incompatible-schema
+                                  Allow incompatible source schema updates
   --state-path <path>             Mount state file to update with child PID
   --supervisor-status <path>      Child readiness and heartbeat status file
   -s, --space <name>              Space(s) to connect

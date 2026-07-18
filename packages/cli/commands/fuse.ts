@@ -299,6 +299,10 @@ export const fuse = new Command()
     "Path for persisted CFC writeback recovery state.",
   )
   .option(
+    "--dangerously-allow-incompatible-schema",
+    "Allow source-file writes that replace a piece with an incompatible schema.",
+  )
+  .option(
     "-s, --space <name:string>",
     "Space(s) to connect (repeatable, default: home).",
     { collect: true },
@@ -379,6 +383,8 @@ export const fuse = new Command()
       cfcXattrNamespace: options.cfcXattrNamespace,
       cfcWritebackXattrs: options.cfcWritebackXattrs,
       cfcWritebackState: options.cfcWritebackState,
+      dangerouslyAllowIncompatibleSchema:
+        options.dangerouslyAllowIncompatibleSchema,
     };
 
     let spawnCmd: string;

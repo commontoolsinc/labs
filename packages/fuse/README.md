@@ -165,6 +165,11 @@ cf exec home/pieces/todo-app/result/search.tool --help
 cf exec home/entities/of:ba4j.../result/search.tool --query "oat milk"
 ```
 
+Source-file writes normally preserve the same schema-compatibility guarantees as
+`cf piece setsrc`. For an intentional breaking migration, mount with
+`--dangerously-allow-incompatible-schema`; source writes through that mount then
+bypass the old-to-new pattern and retained-link compatibility proofs.
+
 ### Creating and Deleting
 
 ```bash

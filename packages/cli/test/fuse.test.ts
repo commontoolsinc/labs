@@ -30,6 +30,7 @@ import {
 import {
   buildFuseChildCommand,
   cleanupFuseChild,
+  fuseSupervisorOptions,
   parseSupervisorArgs,
   recordFuseMountState,
   runFuseSupervisor,
@@ -974,6 +975,7 @@ describe("buildDenoArgs", () => {
       cfcXattrNamespace: "both",
       cfcWritebackXattrs: true,
       cfcWritebackState: "/tmp/cf-writeback.json",
+      dangerouslyAllowIncompatibleSchema: true,
     });
     expect(args).toContain("--allow-other");
     expect(args).toContain("--cfc-mode");
@@ -984,6 +986,7 @@ describe("buildDenoArgs", () => {
     expect(args).toContain("--cfc-writeback-xattrs");
     expect(args).toContain("--cfc-writeback-state");
     expect(args).toContain("/tmp/cf-writeback.json");
+    expect(args).toContain("--dangerously-allow-incompatible-schema");
   });
 
   it("passes noattrcache through to the daemon", () => {
@@ -1086,6 +1089,50 @@ describe("FUSE supervisor command construction", () => {
       state: "failed",
       extra: { error: "Error: connectSpace failed" },
     }]);
+
+    await expect(writeFailedSupervisorStartupStatus(
+      new Error("status path unavailable"),
+      () => Promise.reject(new Error("write failed")),
+    )).resolves.toBeUndefined();
+  });
+
+  it("maps hidden CLI options into the supervisor contract", () => {
+    expect(fuseSupervisorOptions({
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/id.key",
+      execCli: "/tmp/cf-exec",
+      logFile: "/tmp/cf-fuse.log",
+      space: ["home", "work"],
+      allowOther: true,
+      noattrcache: true,
+      attrcacheTimeout: "2",
+      cfcMode: "observe",
+      cfcAnnotations: true,
+      cfcXattrNamespace: "both",
+      cfcWritebackXattrs: true,
+      cfcWritebackState: "/tmp/cfc.json",
+      dangerouslyAllowIncompatibleSchema: true,
+      statePath: "/tmp/state.json",
+      supervisorStatus: "/tmp/status.json",
+    }, "/mnt")).toEqual({
+      mountpoint: "/mnt",
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/id.key",
+      execCli: "/tmp/cf-exec",
+      logFile: "/tmp/cf-fuse.log",
+      spaces: ["home", "work"],
+      allowOther: true,
+      noattrcache: true,
+      attrcacheTimeout: "2",
+      cfcMode: "observe",
+      cfcAnnotations: true,
+      cfcXattrNamespace: "both",
+      cfcWritebackXattrs: true,
+      cfcWritebackState: "/tmp/cfc.json",
+      dangerouslyAllowIncompatibleSchema: true,
+      statePath: "/tmp/state.json",
+      supervisorStatusPath: "/tmp/status.json",
+    });
   });
 
   it("builds a background supervisor invocation that does not load libfuse", () => {
@@ -1106,6 +1153,7 @@ describe("FUSE supervisor command construction", () => {
       cfcXattrNamespace: "both",
       cfcWritebackXattrs: true,
       cfcWritebackState: "/tmp/cfc.json",
+      dangerouslyAllowIncompatibleSchema: true,
     });
 
     expect(args.slice(0, 2)).toEqual(["run", "--allow-run"]);
@@ -1130,6 +1178,7 @@ describe("FUSE supervisor command construction", () => {
     expect(args).toContain("--supervisor-status");
     expect(args).toContain("/tmp/cf-state.json.child-status");
     expect(args).toContain("--noattrcache");
+    expect(args).toContain("--dangerously-allow-incompatible-schema");
     expect(args.filter((arg) => arg === "--space").length).toBe(2);
   });
 
@@ -1198,6 +1247,7 @@ describe("FUSE supervisor command construction", () => {
       execPath: "/usr/local/bin/cf",
       supervisorStatusPath: "/tmp/cf-status",
       attrcacheTimeout: "2",
+      dangerouslyAllowIncompatibleSchema: true,
     });
 
     expect(child.command).toBe("/usr/local/bin/cf");
@@ -1207,6 +1257,7 @@ describe("FUSE supervisor command construction", () => {
     const flagIndex = child.args.indexOf("--attrcache-timeout");
     expect(flagIndex).toBeGreaterThan(-1);
     expect(child.args[flagIndex + 1]).toBe("2");
+    expect(child.args).toContain("--dangerously-allow-incompatible-schema");
   });
 
   it("terminates the spawned FUSE child during supervisor cleanup", async () => {
@@ -1527,6 +1578,7 @@ describe("buildFuseBinaryArgs", () => {
       cfcXattrNamespace: "both",
       cfcWritebackXattrs: true,
       cfcWritebackState: "/tmp/cfc.json",
+      dangerouslyAllowIncompatibleSchema: true,
     });
 
     expect(args).toContain("--allow-other");
@@ -1539,6 +1591,7 @@ describe("buildFuseBinaryArgs", () => {
     expect(args).toContain("--cfc-writeback-xattrs");
     const stateIndex = args.indexOf("--cfc-writeback-state");
     expect(args[stateIndex + 1]).toBe("/tmp/cfc.json");
+    expect(args).toContain("--dangerously-allow-incompatible-schema");
   });
 
   it("forwards an attrcache-timeout of zero", () => {
@@ -1562,6 +1615,7 @@ describe("parseSupervisorArgs", () => {
       "--api-url",
       "http://localhost:8000",
       "--noattrcache",
+      "--dangerously-allow-incompatible-schema",
       "--space",
       "home",
     ]);
@@ -1570,6 +1624,7 @@ describe("parseSupervisorArgs", () => {
     expect(options.mountpoint).toBe("/mnt");
     expect(options.apiUrl).toBe("http://localhost:8000");
     expect(options.noattrcache).toBe(true);
+    expect(options.dangerouslyAllowIncompatibleSchema).toBe(true);
     expect(options.attrcacheTimeout).toBeUndefined();
     expect(options.spaces).toEqual(["home"]);
   });
@@ -1599,6 +1654,9 @@ describe("parseSupervisorArgs", () => {
     expect(parseSupervisorArgs(["--help"]).help).toBe(true);
     expect(supervisorHelp()).toContain("--attrcache-timeout <seconds>");
     expect(supervisorHelp()).toContain("--noattrcache");
+    expect(supervisorHelp()).toContain(
+      "--dangerously-allow-incompatible-schema",
+    );
   });
 });
 
@@ -1625,5 +1683,6 @@ describe("fuse mount option validation", () => {
     expect(help).toContain("--noattrcache");
     expect(help).toContain("--attrcache-timeout");
     expect(help).toContain("Conflicts");
+    expect(help).toContain("--dangerously-allow-incompatible-schema");
   });
 });

@@ -37,6 +37,7 @@ export interface FuseChildDenoArgsOptions {
   cfcXattrNamespace?: string;
   cfcWritebackXattrs?: boolean;
   cfcWritebackState?: string;
+  dangerouslyAllowIncompatibleSchema?: boolean;
   supervisorStatusPath?: string;
 }
 
@@ -405,6 +406,9 @@ export function buildFuseChildDenoArgs(
   if (opts.cfcWritebackState) {
     args.push("--cfc-writeback-state", opts.cfcWritebackState);
   }
+  if (opts.dangerouslyAllowIncompatibleSchema) {
+    args.push("--dangerously-allow-incompatible-schema");
+  }
   if (opts.supervisorStatusPath) {
     args.push("--supervisor-status", opts.supervisorStatusPath);
   }
@@ -436,6 +440,9 @@ export function buildFuseBinaryArgs(opts: FuseBinaryArgsOptions): string[] {
   if (opts.cfcWritebackXattrs) args.push("--cfc-writeback-xattrs");
   if (opts.cfcWritebackState) {
     args.push("--cfc-writeback-state", opts.cfcWritebackState);
+  }
+  if (opts.dangerouslyAllowIncompatibleSchema) {
+    args.push("--dangerously-allow-incompatible-schema");
   }
   if (opts.execCli) args.push("--exec-cli", opts.execCli);
   if (opts.logFile) args.push("--log-file", opts.logFile);
@@ -481,6 +488,9 @@ export function buildBackgroundSupervisorDenoArgs(
   if (opts.cfcWritebackXattrs) args.push("--cfc-writeback-xattrs");
   if (opts.cfcWritebackState) {
     args.push("--cfc-writeback-state", opts.cfcWritebackState);
+  }
+  if (opts.dangerouslyAllowIncompatibleSchema) {
+    args.push("--dangerously-allow-incompatible-schema");
   }
   if (opts.supervisorStatusPath) {
     args.push("--supervisor-status", opts.supervisorStatusPath);

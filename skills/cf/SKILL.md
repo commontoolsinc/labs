@@ -130,6 +130,16 @@ deno task cf piece setsrc pattern.tsx --piece bafyreia... ...
 
 **Why:** `new` creates duplicate pieces. `setsrc` updates in-place.
 
+`setsrc` normally rejects incompatible argument/result schema changes and
+retained links whose durable contracts no longer fit. For an intentional
+breaking migration, `--dangerously-allow-incompatible-schema` bypasses those
+compatibility proofs. `new` accepts the same flag for deploy-script symmetry,
+though a fresh piece has no predecessor schema to compare.
+
+Source-file writes through `cf fuse mount` hit the same update gate. Mount with
+`--dangerously-allow-incompatible-schema` when those writes are part of the same
+intentional breaking migration.
+
 ### Source location metadata
 
 The local-source deployment commands `piece new`, `piece setsrc`, and custom
