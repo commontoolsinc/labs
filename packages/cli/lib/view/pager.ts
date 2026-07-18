@@ -29,6 +29,11 @@ const REPARSE_DEBOUNCE_MS = 150;
 /** Gap between frames while the lines a Ctrl-L revealed land, one per frame. */
 const REVEAL_FRAME_MS = 16;
 
+/** How long a prompt button stays drawn pushed after it is activated, before
+ * its action's result shows. Long enough to register as a press, short enough
+ * not to hold up the answer. */
+const PUSH_FRAME_MS = 90;
+
 /** How long a status message that takes itself away stands before it goes. Long
  * enough to read twice over, short enough not to outstay what prompted it. */
 const MESSAGE_LINGER_MS = 2000;
@@ -56,6 +61,10 @@ export interface PagerDeps {
   exit(code: number): never;
   /** Schedule `handler` after `ms`; returns a function that cancels it. */
   setTimer(handler: () => void, ms: number): () => void;
+  /** Resolve after `ms`. Used to hold a frame on screen for a moment on a path
+   * that then tears the screen down, where a cancellable timer has nothing left
+   * to run in. */
+  delay(ms: number): Promise<void>;
 }
 
 /** The real terminal and process operations. */
@@ -74,6 +83,7 @@ export function realPagerDeps(): PagerDeps {
       const id = setTimeout(handler, ms);
       return () => clearTimeout(id);
     },
+    delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   };
 }
 
@@ -171,6 +181,29 @@ export async function runPager(
     return true;
   };
 
+  // A prompt button press shows the button pushed for a moment before its result
+  // lands. The captured pushed frame is painted now; a timer then draws the real
+  // state (the dialog closed, or the next prompt up). Any key drops the wait.
+  let cancelPush: (() => void) | undefined;
+  const stopPush = () => {
+    if (cancelPush) {
+      cancelPush();
+      cancelPush = undefined;
+    }
+  };
+  const startPush = (): boolean => {
+    const push = session.pendingPush;
+    if (!push) return false;
+    paint(push.doc, push.view);
+    cancelPush = deps.setTimer(() => {
+      cancelPush = undefined;
+      session.pendingPush = null;
+      draw();
+      startExpiry();
+    }, PUSH_FRAME_MS);
+    return true;
+  };
+
   // Ctrl-L pressed where the bar does not offer it says why, and the key changed
   // nothing else. The reason has served its purpose once it has been read, so it
   // stands for a moment and then goes rather than sitting in the bar describing
@@ -226,6 +259,7 @@ export async function runPager(
     const s = consoleSize(deps);
     stopReveal(); // the frames left were laid out for the old size
     stopExpiry();
+    stopPush(); // the captured pushed frame was laid out for the old size
     session.resize(s.width, s.height);
     draw();
     // A message that takes itself away is still up after the redraw, so start
@@ -243,6 +277,7 @@ export async function runPager(
   const onInterrupt = () => {
     stopReveal();
     stopExpiry();
+    stopPush();
     if (session.requestQuitFromSignal()) draw();
     else terminate(130);
   };
@@ -280,20 +315,36 @@ export async function runPager(
         session.handleKey(key);
         if (session.quit) break;
       }
-      if (!session.quit) {
+      if (session.quit) {
         stopReveal();
         stopExpiry();
-        // A reveal draws its own frames, ending on the finished one.
-        if (!startReveal()) {
-          draw();
-          startExpiry(); // starts the clock on the message the draw put up
+        stopPush();
+        // A committing button (Save / Discard, and amend-Yes) sets quit as its
+        // action. Hold its pressed frame on screen for the press moment before
+        // the screen is torn down, so it depresses like any other button rather
+        // than vanishing. A bare `q` has nothing pushed and exits at once.
+        const push = session.pendingPush;
+        if (push) {
+          paint(push.doc, push.view);
+          await deps.delay(PUSH_FRAME_MS);
         }
-        if (session.needsReparse) scheduleReparse();
+        break;
       }
+      stopReveal();
+      stopExpiry();
+      stopPush();
+      // A reveal or a button press draws its own frames, ending on the finished
+      // one; otherwise draw the new state now.
+      if (!startReveal() && !startPush()) {
+        draw();
+        startExpiry(); // starts the clock on the message the draw put up
+      }
+      if (session.needsReparse) scheduleReparse();
     }
   } finally {
     stopReveal();
     stopExpiry();
+    stopPush();
     if (cancelReparse) {
       cancelReparse();
     }

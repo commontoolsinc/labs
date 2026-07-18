@@ -135,9 +135,9 @@ export interface OverlayState {
   readonly sourceView?: boolean;
 }
 
-/** A push-button in a modal dialog. Its {@link kind} decides how Enter and Esc
- * behave (default and cancel), and its first letter matching {@link hotkey} is
- * drawn highlighted. */
+/** A push-button in a modal dialog. Its {@link kind} sets where the Tab focus
+ * starts ("default") and which button Esc activates ("cancel"); its first letter
+ * matching {@link hotkey} is drawn highlighted and activates it directly. */
 export interface DialogButton {
   readonly label: string;
   readonly hotkey: string;
@@ -149,6 +149,12 @@ export interface DialogState {
   readonly title: string;
   readonly body: readonly string[];
   readonly buttons: readonly DialogButton[];
+  /** Index of the focused button — the one Space and Enter activate, drawn
+   * highlighted. When absent, the default button (if any) is highlighted. */
+  readonly focus?: number;
+  /** Index of a button drawn mid-press: shifted one column right with its
+   * shadow hidden, for the brief animation after it is activated. */
+  readonly pushed?: number;
 }
 
 interface Cell {
@@ -654,6 +660,10 @@ function darkenSpan(
 /** Blank columns between adjacent buttons in a dialog's button row. */
 const BUTTON_GAP = 3;
 
+/** Blank columns of margin inside each side border of a dialog, between the
+ * border and the widest line of content. */
+const DIALOG_HMARGIN = 2;
+
 /** The drawn face of a button: its label with one space of padding each side. */
 function faceText(b: DialogButton): string {
   return ` ${b.label} `;
@@ -690,11 +700,14 @@ export function dialogBox(view: ViewState, dialog: DialogState): DialogBox {
   const titleW = cpLen(dialog.title) + 4; // the padding spaces and some fill
   const bodyW = dialog.body.reduce((m, l) => Math.max(m, cpLen(l)), 0);
   const btnW = buttonsWidth(dialog.buttons);
-  // One blank margin column each side, then the two borders.
   const contentW = Math.max(titleW, bodyW, btnW);
+  // The margin columns each side, then the two borders.
   // Inner rows: a blank under the title, the body, a blank, the buttons, and the
   // buttons' shadow.
-  const boxW = Math.max(0, Math.min(contentW + 4, view.width - 2));
+  const boxW = Math.max(
+    0,
+    Math.min(contentW + 2 * DIALOG_HMARGIN + 2, view.width - 2),
+  );
   const boxH = Math.max(0, Math.min(dialog.body.length + 6, view.height - 1));
   return {
     x: Math.max(0, Math.floor((view.width - boxW) / 2)),
@@ -768,6 +781,11 @@ function applyDialog(
   const layout = layoutButtons(dialog.buttons, innerW);
   const buttonRow = innerH - 2;
   const shadowRow = innerH - 1;
+  // The focused button is drawn highlighted; without an explicit focus, the
+  // default button is. A pushed button is drawn mid-press.
+  const focusIdx = dialog.focus ??
+    dialog.buttons.findIndex((b) => b.kind === "default");
+  const pushedIdx = dialog.pushed ?? -1;
   for (let i = 0; i < innerH; i++) {
     const cells: Cell[] = new Array(innerW);
     for (let c = 0; c < innerW; c++) cells[c] = { ch: " ", style: panelBg };
@@ -775,9 +793,9 @@ function applyDialog(
     if (bodyIdx >= 0 && bodyIdx < dialog.body.length) {
       placeCentered(cells, dialog.body[bodyIdx], textStyle);
     } else if (i === buttonRow) {
-      placeButtonFaces(cells, layout, view.color, panelBg);
+      placeButtonFaces(cells, layout, view.color, panelBg, focusIdx, pushedIdx);
     } else if (i === shadowRow && view.color) {
-      placeButtonShadows(cells, layout, panelBg);
+      placeButtonShadows(cells, layout, panelBg, pushedIdx);
     }
     const rowText = paintIf("║", border, view.color) +
       cellsToAnsi(cells, view.color) + paintIf("║", border, view.color);
@@ -803,24 +821,30 @@ function placeButtonFaces(
   layout: ButtonPos[],
   color: boolean,
   panelBg: Style,
+  focus: number,
+  pushed: number,
 ): void {
-  for (const { b, start, faceW } of layout) {
+  layout.forEach(({ b, start, faceW }, idx) => {
     const chars = [...faceText(b)];
     const face = !color
       ? panelBg
-      : b.kind === "default"
+      : idx === focus
       ? ui.buttonDefault
       : ui.button;
     const keyStyle = color ? ui.buttonKey : panelBg;
     const hk = hotkeyFaceIndex(b);
+    // A pressed button slides one column right, into the space its shadow held.
+    const shift = idx === pushed ? 1 : 0;
     for (let j = 0; j < chars.length; j++) {
-      const col = start + j;
+      const col = start + shift + j;
       if (col >= 0 && col < cells.length) {
         cells[col] = { ch: chars[j], style: j === hk ? keyStyle : face };
       }
     }
     const rightShadow = start + faceW;
-    if (color && rightShadow >= 0 && rightShadow < cells.length) {
+    if (
+      color && idx !== pushed && rightShadow >= 0 && rightShadow < cells.length
+    ) {
       // A lower half-block in the column beside the face, matching the band
       // beneath, so the shadow reads as a thin edge along the bottom.
       cells[rightShadow] = {
@@ -828,7 +852,7 @@ function placeButtonFaces(
         style: mergeBg(ui.buttonShadow, panelBg),
       };
     }
-  }
+  });
 }
 
 /** The buttons' drop shadow row: an upper half-block band under each face,
@@ -837,16 +861,18 @@ function placeButtonShadows(
   cells: Cell[],
   layout: ButtonPos[],
   panelBg: Style,
+  pushed: number,
 ): void {
   const style = mergeBg(ui.buttonShadow, panelBg);
-  for (const { start, faceW } of layout) {
+  layout.forEach(({ start, faceW }, idx) => {
+    if (idx === pushed) return; // a pressed button casts no shadow
     for (let k = 0; k < faceW; k++) {
       const col = start + 1 + k;
       if (col >= 0 && col < cells.length) {
         cells[col] = { ch: "▀", style };
       }
     }
-  }
+  });
 }
 
 /** Splice `insert` into `base` starting at visible column `x`. */

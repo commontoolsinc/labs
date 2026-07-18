@@ -117,6 +117,9 @@ function makeFake(opts: FakeOpts = {}) {
       timers.set(id, h);
       return () => timers.delete(id);
     },
+    // Resolve at once: a test drives frames with `fireTimers`, so a real wait
+    // here would only stall the run.
+    delay: () => Promise.resolve(),
   };
   return { deps, writes, signals, removed, timers, exited };
 }
@@ -561,6 +564,64 @@ Deno.test("pager: what a reveal says takes itself away once the lines have lande
     assert(gone, "and it was taken away again");
   } finally {
     done();
+  }
+});
+
+Deno.test("pager: a prompt button's result waits for the press animation to finish", async () => {
+  // Open the revert prompt, then Esc to activate its Cancel button. The press
+  // is drawn at once; its result ("Cancelled") is what the push timer draws, so
+  // without the timer firing the result never reaches the screen.
+  const run = (steps: Step[]) => {
+    const { doc, source, dir } = editableDoc();
+    const { deps, writes } = makeFake({ steps });
+    return runPager(doc, OPTS, undefined, source, deps).then(() => {
+      Deno.removeSync(dir, { recursive: true });
+      return writes;
+    });
+  };
+  const openRevert: Step[] = [
+    { bytes: enc("e") }, // edit mode
+    { bytes: enc("X") }, // dirty the buffer
+    { bytes: enc("\x12") }, // Ctrl-R: open the revert prompt
+    { bytes: enc("\x1b") }, // Esc: activate Cancel — paints the pressed frame
+  ];
+
+  const held = await run([...openRevert, { eof: true }]);
+  assert(
+    held.some((w) => w.includes("Revert all edits?")),
+    "the prompt (and its pressed frame) was drawn",
+  );
+  assert(
+    !held.some((w) => w.includes("Cancelled")),
+    "the result waited for the press timer, so it never drew",
+  );
+
+  const fired = await run([...openRevert, { fireTimers: true }, { eof: true }]);
+  assert(
+    fired.some((w) => w.includes("Cancelled")),
+    "the press timer drew the result",
+  );
+});
+
+Deno.test("pager: a committing button plays its press before the pager quits", async () => {
+  const { doc, source, dir } = editableDoc();
+  try {
+    const { deps, writes } = makeFake({
+      steps: [
+        { bytes: enc("e") }, // edit mode
+        { bytes: enc("X") }, // dirty the buffer
+        { bytes: enc("\x03") }, // Ctrl-C: raise the save-and-quit prompt
+        { bytes: enc("d") }, // Discard: quits, but plays its press first
+      ],
+    });
+    await runPager(doc, OPTS, undefined, source, deps);
+    // The save dialog is drawn once as it opens and once more as the pressed
+    // frame the Discard key paints on its way out. Without the press animation
+    // the quit would tear the screen down after the single opening frame.
+    const dialogFrames = writes.filter((w) => w.includes("Save changes to"));
+    assertEquals(dialogFrames.length, 2, "the press was drawn before quitting");
+  } finally {
+    Deno.removeSync(dir, { recursive: true });
   }
 });
 

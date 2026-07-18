@@ -1940,6 +1940,44 @@ Deno.test("revert: Enter does nothing on a diff revert (no default button)", () 
   }
 });
 
+Deno.test("revert: with no default button, Tab focuses the first scope, Shift-Tab the last", () => {
+  const { ws, done } = tempWorkspace();
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 30, fg.git);
+    toLine(s, 17);
+    press(s, "end");
+    type(s, " X");
+
+    press(s, "ctrl-r");
+    assertEquals(
+      s.view().dialog?.focus,
+      -1,
+      "no button is focused without a default",
+    );
+    const n = s.view().dialog!.buttons.length;
+
+    // From no focus, Tab lands on the first button (a scope).
+    press(s, "tab");
+    assertEquals(s.view().dialog?.focus, 0, "Tab focused the first scope");
+    press(s, "escape"); // close it via Cancel
+
+    // Reopen and go the other way: Shift-Tab from no focus lands on the last,
+    // which is Cancel; Enter then activates it.
+    press(s, "ctrl-r");
+    press(s, "shift-tab");
+    assertEquals(
+      s.view().dialog?.focus,
+      n - 1,
+      "Shift-Tab focused the last button",
+    );
+    press(s, "enter");
+    assertEquals(s.view().message, "Cancelled");
+  } finally {
+    done();
+  }
+});
+
 Deno.test("revert: on a file header offers file but not hunk", () => {
   const { ws, done } = tempWorkspace();
   const fg = fakeGit(SHOW_SHA);
