@@ -105,12 +105,14 @@ import { ensureColumnOriginAvailable } from "./sqlite/column-origin.ts";
 import {
   cloneTrackedGraphState,
   extendTrackedGraph,
+  fromDirtyKey,
   isGraphQueryCoveredByState,
   queryGraph,
   type QueryGraphReuseContext,
   type QueryTraversalStats,
   refreshTrackedGraph,
   toDirtyKey,
+  toDocKey,
   type TrackedGraphState,
   trackGraph,
 } from "./query.ts";
@@ -549,6 +551,45 @@ type SessionHandle = {
 type DirtyOrigin = {
   sessionId: string;
   seq: number;
+};
+
+/**
+ * F6 delivery-cohort metadata for one refresh wave: dirty key → the RESOLVED
+ * scope keys of every revision that dirtied it this wave. The routing layer
+ * derives each key's delivery cohort from this set — `space` fans out to every
+ * session (today's broadcast, and the fail-open for unattributed producers),
+ * `user:<did>` to the principal's interested sessions, `session:<did>:<sid>`
+ * to exactly the named live session. Union semantics under wave coalescing:
+ * a key dirtied by revisions of several instances carries every instance's
+ * scope key, and one unattributed mark widens the key to broadcast — the set
+ * only ever widens, never narrows, so a filter miss costs work, not delivery.
+ */
+type DirtyScopeKeys = ReadonlyMap<string, ReadonlySet<string>>;
+
+/** Broadcast cohort: also the resolved scope key of every space-scoped
+ * revision (`Engine.resolveScopeKey` for declared scope `space`). */
+const BROADCAST_SCOPE_KEY = "space";
+
+/**
+ * F6 per-address scope-key derivation (FA9): the dirty producer derives each
+ * key's cohort from the applied revision's RESOLVED `scopeKey` — stamped by
+ * the engine under the commit's validated scope context (session, or the
+ * C1.4b acting lane for claimed lane commits) — never re-derived from the
+ * session or the row key. Revisions and non-sqlite operations are 1:1
+ * (`sqlite` ops are never stored as revisions), and one commit resolves every
+ * op under a single scope context, so a dirty key maps to one scope key here.
+ */
+const revisionScopeKeys = (
+  commit: Engine.AppliedCommit,
+): Map<string, string> => {
+  const scopeKeys = new Map<string, string>();
+  for (const revision of commit.revisions) {
+    scopeKeys.set(
+      toDirtyKey(revision.id, declaredScope(revision.scope)),
+      revision.scopeKey,
+    );
+  }
+  return scopeKeys;
 };
 
 /**
@@ -1421,6 +1462,7 @@ class Connection {
     space: string,
     dirtyIds?: ReadonlySet<string>,
     dirtyOrigins?: ReadonlyMap<string, DirtyOrigin>,
+    dirtyScopeKeys?: DirtyScopeKeys,
   ): Promise<void> {
     if (this.#closed) {
       return;
@@ -1442,7 +1484,10 @@ class Connection {
         sessionId,
         dirtyIds,
         dirtyOrigins,
-        { adoptionObservations: this.#persistentSchedulerState },
+        {
+          adoptionObservations: this.#persistentSchedulerState,
+          dirtyScopeKeys,
+        },
       );
       if (this.#closed) {
         return;
@@ -1492,6 +1537,10 @@ export class Server {
   #dirtySpaces = new Set<string>();
   #dirtyDocsBySpace = new Map<string, Set<string>>();
   #dirtyOriginsBySpace = new Map<string, Map<string, DirtyOrigin>>();
+  /** F6: per-wave cohort metadata (see DirtyScopeKeys). Kept beside — never
+   * inside — the dirty set so pre-F6 callers of markSpaceDirty stay valid and
+   * fail open to broadcast. */
+  #dirtyScopeKeysBySpace = new Map<string, Map<string, Set<string>>>();
   #refreshTimer: ReturnType<typeof setTimeout> | null = null;
   #refreshing: Promise<void> | null = null;
   // The owner commit is synchronous, but cross-space scheduler fan-out awaits
@@ -1763,6 +1812,12 @@ export class Server {
     refreshWaves: 0,
     /** Sessions whose tracked ids intersected a wave's dirty set. */
     refreshSessionsTouched: 0,
+    /** F6: sessions a wave did NOT touch because every intersecting dirty
+     * key's delivery cohort excluded them (the pre-F6 broadcast would have
+     * counted them touched and empty-delivered). Makes the cohort filter's
+     * silence visible: `touched + cohortSuppressed` per wave equals the
+     * pre-F6 touched population. */
+    refreshCohortSuppressedSessions: 0,
     /** Tracked graphs a wave re-traversed (refreshTrackedGraph did work). */
     refreshGraphsRefreshed: 0,
     /** Upserts delivered to sessions by wave refreshes. */
@@ -4914,7 +4969,14 @@ export class Server {
       deliverySeq: commit.seq,
       commit,
     });
-    this.markSpaceDirty(space, [toDirtyKey(id)]);
+    // Direct writes are space-scoped; the revision-derived cohort keeps the
+    // producer uniform with transact (F6).
+    this.markSpaceDirty(
+      space,
+      [toDirtyKey(id)],
+      undefined,
+      revisionScopeKeys(commit),
+    );
     return commit;
   }
 
@@ -5897,6 +5959,11 @@ export class Server {
               sessionId: message.sessionId,
               seq: commit.seq,
             },
+            // F6: each key's delivery cohort derives from the applied
+            // revision's resolved scope key (FA9's per-address rule) — the
+            // engine stamped it under this commit's validated scope context,
+            // including the C1.4b acting lane for claimed lane commits.
+            revisionScopeKeys(commit),
           );
           span.setAttribute("commit.seq", commit.seq);
           span.setAttribute(
@@ -7174,16 +7241,32 @@ export class Server {
    * the fan-out match (FA1: matched by branch/id/resolved scope key via the
    * point read that follows) — unioned with members owing a stale-binding
    * retry (FB15: their delta was skipped under an already-advanced watermark,
-   * so the next wave must re-read them regardless of its own dirty set). */
+   * so the next wave must re-read them regardless of its own dirty set).
+   *
+   * F6: within a touched session, a member is matched only when the dirty
+   * key's delivery cohort names the member's own resolved scope key (or is
+   * broadcast). Two members of one session sharing a declared address but
+   * keyed to different instances — a lane member beside a sponsor member —
+   * therefore point-read independently, each on its own instance's waves.
+   * Retry-key matches stay cohort-independent (the debt is this session's). */
   #dirtyDocSetMembers(
     session: SessionState,
     dirtyIds: ReadonlySet<string>,
+    dirtyScopeKeys: DirtyScopeKeys | undefined,
   ): DocSetMember[] {
     const matched: DocSetMember[] = [];
     for (const [key, member] of session.docSetMembers) {
+      if (session.docSetMemberRetryKeys.has(key)) {
+        matched.push(member);
+        continue;
+      }
+      const tracked = Server.#docSetMemberTrackedKey(member);
+      if (!dirtyIds.has(tracked)) continue;
+      const cohort = dirtyScopeKeys?.get(tracked);
       if (
-        dirtyIds.has(Server.#docSetMemberTrackedKey(member)) ||
-        session.docSetMemberRetryKeys.has(key)
+        cohort === undefined ||
+        cohort.has(BROADCAST_SCOPE_KEY) ||
+        cohort.has(member.scopeKey)
       ) {
         matched.push(member);
       }
@@ -7191,12 +7274,114 @@ export class Server {
     return matched;
   }
 
+  /**
+   * F6 delivery-cohort derivation at the dirty-routing layer: reduce a wave's
+   * dirty set to the subset this session can possibly be interested in.
+   *
+   * A key stays visible when any producing revision's cohort is broadcast
+   * (`space`, or an unattributed producer — the fail-open), or when any of
+   * the session's interest surfaces owns an instance the cohort names:
+   *
+   *  - MEMBER surface: `member.scopeKey` — the instance identity resolved at
+   *    registration under the session's scope context or the C1.4b-validated
+   *    acting lane. This is what keeps a lane-held docs watch lane-correct
+   *    (FB25): the cohort of a lane member derives from the LANE's acting
+   *    context, never the sponsor session's principal.
+   *  - GRAPH surface: a graph that tracks the doc key re-reads it under the
+   *    graph's own read context (`TrackedGraphState.manager`), so the
+   *    session's instance key is `resolveScopeKey(scope, manager context)`.
+   *    An unresolvable context cannot PROVE disinterest and fails open to
+   *    broadcast — a filter miss costs work, never delivery.
+   *
+   * Scoped-only cohorts exist only for user/session declared keys (a
+   * space-declared revision always resolves to the broadcast key), so the
+   * common all-space wave takes the identity fast path.
+   */
+  #cohortVisibleDirtyIds(
+    space: string,
+    session: SessionState,
+    dirtyIds: ReadonlySet<string>,
+    dirtyScopeKeys: DirtyScopeKeys | undefined,
+  ): ReadonlySet<string> {
+    if (dirtyScopeKeys === undefined || dirtyScopeKeys.size === 0) {
+      return dirtyIds;
+    }
+    let scopedOnly: Map<string, ReadonlySet<string>> | undefined;
+    for (const dirtyId of dirtyIds) {
+      const cohort = dirtyScopeKeys.get(dirtyId);
+      if (cohort === undefined || cohort.has(BROADCAST_SCOPE_KEY)) continue;
+      (scopedOnly ??= new Map()).set(dirtyId, cohort);
+    }
+    if (scopedOnly === undefined) {
+      return dirtyIds;
+    }
+    const excluded = new Set(scopedOnly.keys());
+    if (session.docSetMembers.size > 0) {
+      for (const member of session.docSetMembers.values()) {
+        if (excluded.size === 0) break;
+        const tracked = Server.#docSetMemberTrackedKey(member);
+        if (!excluded.has(tracked)) continue;
+        if (scopedOnly.get(tracked)?.has(member.scopeKey)) {
+          excluded.delete(tracked);
+        }
+      }
+    }
+    if (excluded.size > 0 && session.graphs.size > 0) {
+      for (const dirtyId of [...excluded]) {
+        const cohort = scopedOnly.get(dirtyId);
+        if (cohort === undefined) continue;
+        let scope: CellScope;
+        let id: string;
+        try {
+          ({ id, scope } = fromDirtyKey(dirtyId));
+        } catch {
+          // A malformed dirty key cannot prove anything — fail open.
+          excluded.delete(dirtyId);
+          continue;
+        }
+        const docKey = toDocKey(space, id, scope);
+        for (const graph of session.graphs.values()) {
+          const selectors = graph.tracker.get(docKey);
+          if (selectors === undefined || selectors.size === 0) continue;
+          let instanceScopeKey: string | undefined;
+          try {
+            instanceScopeKey = Engine.resolveScopeKey(scope, {
+              principal: graph.manager.principal,
+              sessionId: graph.manager.sessionId,
+            });
+          } catch {
+            // Unresolvable read context: fail open to broadcast.
+          }
+          if (
+            instanceScopeKey === undefined || cohort.has(instanceScopeKey)
+          ) {
+            excluded.delete(dirtyId);
+            break;
+          }
+        }
+      }
+    }
+    if (excluded.size === 0) {
+      return dirtyIds;
+    }
+    const visible = new Set<string>();
+    for (const dirtyId of dirtyIds) {
+      if (!excluded.has(dirtyId)) visible.add(dirtyId);
+    }
+    return visible;
+  }
+
   syncSessionForConnection(
     space: string,
     sessionId: string,
     dirtyIds?: ReadonlySet<string>,
     dirtyOrigins?: ReadonlyMap<string, DirtyOrigin>,
-    options?: { adoptionObservations?: boolean },
+    options?: {
+      adoptionObservations?: boolean;
+      /** F6: this wave's per-key delivery cohorts (see DirtyScopeKeys).
+       * Absent = the pre-F6 broadcast wave shape (fail-open). */
+      dirtyScopeKeys?: DirtyScopeKeys;
+    },
   ): Promise<SessionEffectMessage | null> {
     const session = this.#sessions.get(space, sessionId);
     if (session === null) {
@@ -7281,8 +7466,22 @@ export class Server {
           }
           if (dirtyIds !== undefined) {
             const startedAt = performance.now();
+            // F6 cohort filter, applied at the dirty-routing layer BEFORE
+            // any work is attributed to this session: a dirty key whose
+            // every producing revision was scoped to instances this session
+            // does not hold (member surface AND graph surface both checked)
+            // is invisible to this session for the whole wave — the touched
+            // test, the graph refresh, and the member fan-out all see the
+            // filtered set. A session left with no visible intersection is
+            // NOT touched: no engine open, no traversal, no point read.
+            const visibleDirtyIds = this.#cohortVisibleDirtyIds(
+              space,
+              session,
+              dirtyIds,
+              options?.dirtyScopeKeys,
+            );
             let touched = false;
-            for (const dirtyId of dirtyIds) {
+            for (const dirtyId of visibleDirtyIds) {
               if (session.trackedIds.has(dirtyId)) {
                 touched = true;
                 break;
@@ -7291,11 +7490,24 @@ export class Server {
             // FB15: a member skipped on a stale binding re-touches the
             // session on the next wave even when that wave's own dirty set
             // misses it — the skipped delta's watermark already advanced.
+            // Deliberately cohort-independent: a staged retry is this
+            // session's own debt.
             if (!touched && session.docSetMemberRetryKeys.size > 0) {
               touched = true;
             }
             span.setAttribute("ct.touched", touched);
             if (!touched) {
+              // F6 observability: this session would have been touched (and
+              // empty-delivered) by the pre-F6 broadcast — count the
+              // suppression so the filter's silence is visible in stats.
+              if (visibleDirtyIds !== dirtyIds) {
+                for (const dirtyId of dirtyIds) {
+                  if (session.trackedIds.has(dirtyId)) {
+                    this.feedStats.refreshCohortSuppressedSessions += 1;
+                    break;
+                  }
+                }
+              }
               return await emptyCatchUp();
             }
             this.feedStats.refreshSessionsTouched += 1;
@@ -7360,7 +7572,10 @@ export class Server {
                       space,
                       engine,
                       graph,
-                      dirtyIds,
+                      // F6: the graph re-traverses only the cohort-visible
+                      // subset — an out-of-cohort scoped revision cannot
+                      // change any value this graph's read context resolves.
+                      visibleDirtyIds,
                     );
                   } finally {
                     watchSpan.end();
@@ -7405,7 +7620,11 @@ export class Server {
             // doc-set surfaces. Matched by the member's declared-scope dirty
             // key here; the point read that follows resolves the instance.
             const dirtyMembers = session.docSetMembers.size > 0
-              ? this.#dirtyDocSetMembers(session, dirtyIds)
+              ? this.#dirtyDocSetMembers(
+                session,
+                visibleDirtyIds,
+                options?.dirtyScopeKeys,
+              )
               : [];
             if (updates.size === 0 && dirtyMembers.length === 0) {
               return await emptyCatchUp();
@@ -7634,6 +7853,7 @@ export class Server {
     space: string,
     dirtyIds?: Iterable<string>,
     origin?: DirtyOrigin,
+    scopeKeys?: ReadonlyMap<string, string>,
   ): void {
     if (dirtyIds !== undefined) {
       let ids = this.#dirtyDocsBySpace.get(space);
@@ -7646,6 +7866,11 @@ export class Server {
         origins = new Map();
         this.#dirtyOriginsBySpace.set(space, origins);
       }
+      let cohorts = this.#dirtyScopeKeysBySpace.get(space);
+      if (cohorts === undefined) {
+        cohorts = new Map();
+        this.#dirtyScopeKeysBySpace.set(space, cohorts);
+      }
       for (const id of dirtyIds) {
         ids.add(id);
         if (origin === undefined) {
@@ -7653,6 +7878,17 @@ export class Server {
         } else {
           origins?.set(id, origin);
         }
+        // F6 cohort accumulation, union semantics: a producer that knows the
+        // revision's resolved scope key contributes it; one that does not
+        // contributes the broadcast cohort. Coalesced waves therefore only
+        // ever WIDEN a key's cohort — an unattributed mark can never be
+        // narrowed away by a later scoped mark for the same key.
+        let cohort = cohorts.get(id);
+        if (cohort === undefined) {
+          cohort = new Set();
+          cohorts.set(id, cohort);
+        }
+        cohort.add(scopeKeys?.get(id) ?? BROADCAST_SCOPE_KEY);
       }
       if (origins?.size === 0) {
         this.#dirtyOriginsBySpace.delete(space);
@@ -7662,6 +7898,13 @@ export class Server {
     this.scheduleRefresh();
   }
 
+  /** F6 note: conflict staging deliberately carries NO cohort metadata — a
+   * rejected commit produced no revisions, so there is no resolved scope key
+   * to derive from (a claimed lane commit's acting context is not recoverable
+   * post-reject), and the staged keys' one job is the conflicted session's
+   * catch-up/caughtUpLocalSeq release (FA7). Broadcast is the cohort-superset
+   * fail-open: it can cost other sessions one empty wave, never a delivery
+   * gap or a lost release. */
   private stageConflictRefreshDirtyIds(
     space: string,
     session: SessionState,
@@ -7773,6 +8016,7 @@ export class Server {
       this.#dirtySpaces.clear();
       this.#dirtyDocsBySpace.clear();
       this.#dirtyOriginsBySpace.clear();
+      this.#dirtyScopeKeysBySpace.clear();
     }
   }
 
@@ -7806,6 +8050,10 @@ export class Server {
         if (dirtyOrigins !== undefined) {
           this.#dirtyOriginsBySpace.delete(space);
         }
+        const dirtyScopeKeys = this.#dirtyScopeKeysBySpace.get(space);
+        if (dirtyScopeKeys !== undefined) {
+          this.#dirtyScopeKeysBySpace.delete(space);
+        }
         // One refresh wave: this space's coalesced dirty set fans out to
         // every connection below.
         this.feedStats.refreshWaves += 1;
@@ -7823,7 +8071,12 @@ export class Server {
             span.setAttribute("dirty.count", dirtyIds?.size ?? 0);
             try {
               for (const connection of this.#connections.values()) {
-                await connection.refreshDirty(space, dirtyIds, dirtyOrigins);
+                await connection.refreshDirty(
+                  space,
+                  dirtyIds,
+                  dirtyOrigins,
+                  dirtyScopeKeys,
+                );
               }
             } finally {
               span.end();
