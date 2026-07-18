@@ -74,6 +74,9 @@ export async function generateObject(
         },
       }),
       maxOutputTokens: params.maxTokens,
+      // Registering a telemetry integration turns span collection on for every
+      // AI SDK call. This route has never emitted AI SDK spans, so it opts out.
+      telemetry: { isEnabled: false },
       ...(params.system && { system: params.system }),
     });
 
