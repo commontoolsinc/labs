@@ -23,27 +23,52 @@ function addContextAttribute(
 }
 
 /**
+ * Converts one metadata value to the attribute value used to record it on a
+ * span, or undefined when the value cannot be recorded. Strings, numbers, and
+ * booleans are recorded as they are; objects (including null and arrays) are
+ * serialized to JSON; undefined and any other type are dropped.
+ *
+ * A request may carry metadata whose values are not strings, and OpenTelemetry
+ * attributes cannot hold an arbitrary object, so the two are reconciled here
+ * once. Everywhere metadata is put on a span goes through this function, so the
+ * spans of a trace record the same value the same way.
+ */
+export function metadataAttributeValue(
+  value: unknown,
+): AttributeValue | undefined {
+  if (
+    typeof value === "string" || typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+  if (typeof value === "object") return JSON.stringify(value);
+  return undefined;
+}
+
+/**
  * Splits per-request metadata into the two values a generation call needs to
  * get that metadata onto its spans: the runtime context to pass, and the list
  * telemetry consults to decide which of its properties may be recorded.
  *
  * Telemetry withholds runtime context unless a property is named in the list,
- * so every property carried is named. Values are limited to strings because
- * that is the only overlap between the metadata a request may carry and the
- * attribute values OpenTelemetry accepts.
+ * so every property carried is named. Each value is reduced to a span attribute
+ * by {@link metadataAttributeValue}, and a property whose value has no attribute
+ * form is left out of both.
  */
 export function runtimeContextFromMetadata(
   metadata: Record<string, unknown> | undefined,
 ): {
-  runtimeContext: Record<string, string> | undefined;
+  runtimeContext: Record<string, AttributeValue> | undefined;
   includeRuntimeContext: Record<string, boolean> | undefined;
 } {
   if (metadata == null) {
     return { runtimeContext: undefined, includeRuntimeContext: undefined };
   }
-  const runtimeContext: Record<string, string> = {};
+  const runtimeContext: Record<string, AttributeValue> = {};
   for (const [key, value] of Object.entries(metadata)) {
-    if (typeof value === "string") runtimeContext[key] = value;
+    const attribute = metadataAttributeValue(value);
+    if (attribute !== undefined) runtimeContext[key] = attribute;
   }
   return {
     runtimeContext,

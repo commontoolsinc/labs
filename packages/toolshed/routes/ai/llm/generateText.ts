@@ -8,7 +8,10 @@ import {
 import { type BuiltInLLMMessage } from "@commonfabric/api";
 import { findModel, type ModelConfig } from "./models.ts";
 import { normalizeSchemaForProvider } from "./schema.ts";
-import { runtimeContextFromMetadata } from "@/lib/ai-telemetry.ts";
+import {
+  metadataAttributeValue,
+  runtimeContextFromMetadata,
+} from "@/lib/ai-telemetry.ts";
 
 // Constants for JSON mode
 const JSON_SYSTEM_PROMPTS = {
@@ -302,26 +305,16 @@ export async function generateText(
   const activeSpan = trace.getActiveSpan();
   const spanId = activeSpan?.spanContext().spanId;
 
-  // Attach metadata directly to the root span
-  if (activeSpan) {
-    // Add the metadata from params if available
-    if (params.metadata) {
-      Object.entries(params.metadata).forEach(([key, value]) => {
-        // Only set attributes with valid values (not undefined)
-        if (value !== undefined) {
-          // Handle different types to ensure we only use valid AttributeValue types
-          if (
-            typeof value === "string" ||
-            typeof value === "number" ||
-            typeof value === "boolean"
-          ) {
-            activeSpan.setAttribute(`metadata.${key}`, value);
-          } else if (typeof value === "object") {
-            // Convert objects to JSON strings
-            activeSpan.setAttribute(`metadata.${key}`, JSON.stringify(value));
-          }
-        }
-      });
+  // Attach the same metadata to the root span. This span is the HTTP request
+  // span rather than one of the AI SDK spans, so it does not receive the runtime
+  // context; recording it here through the same conversion keeps it consistent
+  // with the AI SDK spans.
+  if (activeSpan && params.metadata) {
+    for (const [key, value] of Object.entries(params.metadata)) {
+      const attribute = metadataAttributeValue(value);
+      if (attribute !== undefined) {
+        activeSpan.setAttribute(`metadata.${key}`, attribute);
+      }
     }
   }
 

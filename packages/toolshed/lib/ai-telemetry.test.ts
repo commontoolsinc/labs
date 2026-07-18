@@ -9,6 +9,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import {
   createAiSdkTelemetry,
+  metadataAttributeValue,
   runtimeContextFromMetadata,
 } from "@/lib/ai-telemetry.ts";
 
@@ -189,16 +190,45 @@ Deno.test(
   },
 );
 
-Deno.test("runtimeContextFromMetadata names every property it carries", () => {
+Deno.test("metadataAttributeValue records strings, numbers, and booleans as they are", () => {
+  assertEquals(metadataAttributeValue("req-abc"), "req-abc");
+  assertEquals(metadataAttributeValue(2), 2);
+  assertEquals(metadataAttributeValue(true), true);
+});
+
+Deno.test("metadataAttributeValue serializes objects and arrays to JSON", () => {
+  assertEquals(metadataAttributeValue({ a: 1 }), '{"a":1}');
+  assertEquals(metadataAttributeValue(["a", "b"]), '["a","b"]');
+});
+
+Deno.test("metadataAttributeValue drops values that have no attribute form", () => {
+  assertEquals(metadataAttributeValue(undefined), undefined);
+  assertEquals(metadataAttributeValue(() => {}), undefined);
+});
+
+// A request may carry non-string metadata, and every value it can carry has to
+// reach the spans, not just the string ones.
+Deno.test("runtimeContextFromMetadata carries every value that has an attribute form", () => {
   const { runtimeContext, includeRuntimeContext } = runtimeContextFromMetadata({
     requestId: "req-abc",
-    tenant: "acme",
-    // Not a string, so it cannot be an attribute value.
     attempt: 2,
+    cached: false,
+    labels: { team: "search" },
+    absent: undefined,
   });
 
-  assertEquals(runtimeContext, { requestId: "req-abc", tenant: "acme" });
-  assertEquals(includeRuntimeContext, { requestId: true, tenant: true });
+  assertEquals(runtimeContext, {
+    requestId: "req-abc",
+    attempt: 2,
+    cached: false,
+    labels: '{"team":"search"}',
+  });
+  assertEquals(includeRuntimeContext, {
+    requestId: true,
+    attempt: true,
+    cached: true,
+    labels: true,
+  });
 });
 
 Deno.test("runtimeContextFromMetadata passes nothing on when there is no metadata", () => {
@@ -207,3 +237,32 @@ Deno.test("runtimeContextFromMetadata passes nothing on when there is no metadat
     includeRuntimeContext: undefined,
   });
 });
+
+// The reported gap: object metadata reached the root span as JSON but never any
+// AI SDK span. Routed through runtimeContextFromMetadata it now reaches every
+// span, spelled the same way the root span spells it.
+Deno.test(
+  "object metadata reaches every span as the JSON the root span records",
+  { sanitizeOps: false, sanitizeResources: false },
+  async () => {
+    const { runtimeContext, includeRuntimeContext } =
+      runtimeContextFromMetadata(
+        { labels: { team: "search" }, attempt: 2 },
+      );
+    const spans = await collectSpans(
+      { isEnabled: true, includeRuntimeContext },
+      runtimeContext as Record<string, string>,
+    );
+
+    assertEquals(
+      spans.map((s) => s.attributes["openinference.span.kind"]).includes("LLM"),
+      true,
+    );
+    for (const span of spans) {
+      assertEquals(metadataOf(span), {
+        "metadata.labels": '{"team":"search"}',
+        "metadata.attempt": 2,
+      }, `wrong metadata on ${span.name}`);
+    }
+  },
+);
