@@ -4,7 +4,7 @@
     "check": "deno check .",
     "just-test": {
       "description": "Run unit tests",
-      "command": "deno test --allow-read --allow-write --allow-net --allow-ffi --allow-env"
+      "command": "deno test --allow-read --allow-write --allow-net --allow-ffi --allow-env --allow-run"
     },
     "test": {
       "description": "Type check & run tests",
@@ -47,7 +47,7 @@
   },
   "imports": {
     "@commonfabric/leb128": "jsr:@commonfabric/leb128",
-    "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
+    "@db/sqlite": "jsr:@db/sqlite@0.13.0",
     "@denosaurs/plug": "jsr:@denosaurs/plug@1",
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.0"
   }
