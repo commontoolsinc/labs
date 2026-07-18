@@ -2,6 +2,10 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import { resolveSpaceStoreUrl } from "./storage-path.ts";
 import {
+  CrossSpaceHostRouter,
+  InProcessCrossSpaceTransport,
+} from "./cross-space.ts";
+import {
   type ActionClaimKey,
   actionClaimMapKey,
   type ActionSettlement,
@@ -1633,6 +1637,21 @@ export class Server {
   // re-ensures (additive migration) with no hash-collision risk.
   #ensuredSchemas = new Map<string, true>();
   #ensuredSchemasMax = 4096;
+  /**
+   * C3.1 (2026-07-18): the host-level cross-space seam — the protocol of
+   * context-lattice §5 is between engine HOSTS (Server↔Server, standing
+   * decision #1; engines stay passive), and this router is where a host's
+   * hosted-space knowledge and per-space protocol inboxes live, over the
+   * in-process transport as the protocol's first transport. INERT
+   * plumbing behind the existing flags-off posture: nothing registers or
+   * routes production traffic through it yet. C3.1b routes the first real
+   * traffic (mirror upserts + durable dirt via the transport instead of
+   * direct peer-engine writes) and gates `openEngine` on the router's
+   * hosted-space registry (see the pointer comment there).
+   */
+  #crossSpaceRouter = new CrossSpaceHostRouter(
+    new InProcessCrossSpaceTransport(),
+  );
 
   #recordSchemaEnsured(key: string): void {
     this.#ensuredSchemas.set(key, true);
@@ -5049,6 +5068,15 @@ export class Server {
     );
   }
 
+  /**
+   * The host-level cross-space router (C3.1) — the registration seam for
+   * per-space protocol endpoints and the hosted-space registry C3.1b's
+   * `openEngine` gate consults. Inert until C3.1b routes traffic.
+   */
+  crossSpaceRouter(): CrossSpaceHostRouter {
+    return this.#crossSpaceRouter;
+  }
+
   async close(): Promise<void> {
     this.cancelScheduledRefresh();
     if (this.#executionClaimExpiryTimer !== null) {
@@ -5085,6 +5113,7 @@ export class Server {
     this.#ownedExecutionLeases.clear();
     this.#executionInvalidationStartedAt.clear();
     this.#readPool.close();
+    this.#crossSpaceRouter.close();
   }
 
   /**
@@ -8816,6 +8845,16 @@ export class Server {
   }
 
   private openEngine(space: string): Promise<Engine.Engine> {
+    // C3.1 pointer (2026-07-18): openEngine remains UNGATED — it opens
+    // (and creates storage for) an engine for ANY space name, including
+    // spaces this host does not host, which is what lets today's
+    // in-process mirror/dirt writes silently shed into shadow engines
+    // under a split deployment (blocker C3A1). The hosted-space gate
+    // (fail loudly for a non-hosted space, consulting
+    // `#crossSpaceRouter`'s hosted-space registry) is owned by C3.1b's
+    // row together with routing `mirrorSchedulerObservation` /
+    // `propagateSchedulerDirtyToOwnerSpaces` through the transport — do
+    // NOT add the gate here before that row lands.
     const existing = this.#engines.get(space);
     if (existing !== undefined) {
       return existing;
