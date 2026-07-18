@@ -180,9 +180,14 @@ Deno.test("shell: the browser runs the viewer-time formatter", () => {
   assert(!source.includes("timeZone"), "the default formatter must use the viewer's timezone");
   assertStringIncludes(html, source);
   assertStringIncludes(html, "formatViewerTimes();");
-  assertStringIncludes(
-    html,
+  const localizeUpdate = html.indexOf(
     `formatViewerTimes(template.content.querySelectorAll('time[data-viewer-time][datetime]'));`,
+  );
+  const compareMarkup = html.indexOf("if (current.outerHTML === next.outerHTML)");
+  assert(localizeUpdate >= 0, "live updates localize their timestamps");
+  assert(
+    localizeUpdate < compareMarkup,
+    "live updates are localized before their markup is compared",
   );
 });
 
