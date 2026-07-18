@@ -40,9 +40,9 @@ import { isEntityDocument, principalOfUserContextKey } from "../v2.ts";
  * - Reads are additive-tolerant: unknown fields on a known message type
  *   are ignored (dropped from the parsed value), and an unknown message
  *   type yields a distinguishable non-throwing outcome (`unknown-type`)
- *   so a dispatcher can apply link policy. This is what lets C3.1b's
- *   messages (`ForeignObservationMirror`, dirt carriage) and later fields
- *   slot in additively under v1.
+ *   so a dispatcher can apply link policy. This is what let C3.1b's
+ *   messages ({@link ForeignObservationMirror}, {@link ForeignDirtyMark})
+ *   slot in additively under v1, and what lets later fields do the same.
  * - Writes are strict: serializers validate first (fail loudly at the
  *   send site, never on the peer) and emit exactly the known field set —
  *   tolerated unknown fields never survive a round trip.
@@ -92,10 +92,43 @@ import { isEntityDocument, principalOfUserContextKey } from "../v2.ts";
  * the co-hosted transport (C3.10a/C3.10b) fires it with the bumped
  * incarnation.
  *
- * Nothing routes production traffic through this module yet: C3.1b routes
- * the first real traffic (mirror upserts + durable dirt) and owns the
- * `openEngine` hosted-space gate. The `Server` merely instantiates the
- * router as inert plumbing.
+ * **C3.1b (2026-07-18) — the first production traffic.** The mirror
+ * upsert ({@link ForeignObservationMirror}) and durable dirt
+ * ({@link ForeignDirtyMark}) now ride this protocol: the `Server`'s
+ * `mirrorSchedulerObservation` / `propagateSchedulerDirtyToOwnerSpaces`
+ * send these messages through its {@link CrossSpaceHostRouter} instead of
+ * writing into the peer engine directly, and `openEngine` gained the
+ * hosted-space gate (the C3A1 blocker's fix). Two C3.1b rulings recorded
+ * here because they bind the wire contract:
+ *
+ * - **Durable-dirt carriage: the standalone {@link ForeignDirtyMark}**
+ *   (the C3A1 option-(b) arm), NOT dirt rows on
+ *   {@link ForeignStaleReaders}. `ForeignStaleReaders` is demand-joined —
+ *   it exists only where a subscription does (C3.3a's machinery, unwired
+ *   until then) — so it structurally cannot carry the §4 parked-space
+ *   obligation ("a parked home space accumulates dirt and catches up on
+ *   subscribe"): a home space with no subscription would hear nothing.
+ *   `ForeignDirtyMark` flows per dirtying commit regardless of
+ *   subscription state, exactly like the pre-C3.1b direct write it
+ *   replaces, so the parked obligation stays checkable with the
+ *   in-process transport today. The option-(a) slot (dirtied-rows-on-
+ *   notice + a subscribe-response dirt snapshot) remains open as an
+ *   additive extension if C3.3a wants notice-coupled dirt; the durable
+ *   pull source either way is the read host's `scheduler_action_state`
+ *   (`owner_space` = home, `direct_dirty_seq` > cursor), and the
+ *   per-link cursor (C3A12 keying: stable `linkId`) is advanced by the
+ *   home host on apply — persistence + the reconnect pull are C3.10b's.
+ * - **No negative-ack message.** Delivery to an unhosted `toSpace` drops
+ *   at the router with a warning and zero side effects, and the sender is
+ *   not told. Rationale: mirror/dirt are one-way idempotent state
+ *   carriage whose loss-recovery source is durable on the read host (the
+ *   dirt rows above; mirrors re-upsert on the next accepted observation),
+ *   so a nack would create a new unauthenticated backchannel — who may
+ *   nack whom, and what a sender may do about it — that only C3.10a's
+ *   link-identity/routing-table work could make trustworthy, while no
+ *   C3.1b send site could act on one anyway (the home commit is already
+ *   accepted when the mirror/dirt fans out). Revisit with C3.10a if the
+ *   co-hosted link wants delivery diagnostics.
  */
 
 /**
@@ -185,14 +218,113 @@ export interface ForeignReaderIdentity {
  * the home space's subscribed demand. Carries the read-space commit seq
  * and the matched reader identities. `branch` is the COMMITTING space's
  * branch of that commit. An empty `readers` list is well-formed (a
- * no-match notice is a semantic no-op, and C3.1b's durable-dirt carriage
- * extends this message additively). Executor-plane only: this message has
- * no session-delivery leg (C3A24).
+ * no-match notice is a semantic no-op). Executor-plane only: this message
+ * has no session-delivery leg (C3A24). C3.1b's durable-dirt carriage
+ * deliberately does NOT ride here — see {@link ForeignDirtyMark} and the
+ * module docblock's option-(b) ruling; the option-(a) slot (dirt rows on
+ * this notice) stays open as an additive extension.
  */
 export interface ForeignStaleReaders extends CrossSpaceEnvelope {
   type: "foreign-stale-readers";
   branch: BranchName;
   commitSeq: number;
+  readers: readonly ForeignReaderIdentity[];
+}
+
+/**
+ * The scope context a mirrored observation was accepted under on the home
+ * host — the sponsor principal and scope-anchoring session the home
+ * accept transaction resolved (captured BEFORE the accepted commit; the
+ * emitting host never re-derives it after the fact). The applying host
+ * feeds it verbatim to its engine's mirrored-observation upsert.
+ */
+export interface ForeignObservationScopeContext {
+  principal: string;
+  sessionId: string;
+}
+
+/**
+ * Home (owner) host → read host: upsert the home space's accepted
+ * scheduler observation into the read space's engine as a mirrored
+ * foreign-reader row set (C3.1b — the wire form of what
+ * `upsertMirroredSchedulerObservation` consumes). The home space is the
+ * envelope's `fromSpace`, the read space the envelope's `toSpace` —
+ * payloads carry no home/read space fields.
+ *
+ * Mirrors are UPSERT-ONLY: the pre-C3.1b mechanism has no removal call,
+ * and none is invented here. The `previousReadSpaces` drop path
+ * (retraction after an observation stops reading a space) is carried by
+ * this same message: the narrowed observation's payload no longer names
+ * the read space, so the receiving engine's read-row reconciliation
+ * deletes the stale index rows. A separate removal/tombstone message
+ * would be a C3.3b/C3A6 extension (revocation cleanup), not a C3.1b one.
+ *
+ * - `branch`/`observedAtSeq` are the home commit's branch and seq; the
+ *   seq doubles as the receiving engine's persisted last-writer fence
+ *   against delayed fan-out (an older mirror never overwrites a newer
+ *   one). `observedAtSeq` may be 0: an operations-empty home commit
+ *   carries seq 0.
+ * - `originExecutionContextKey` is the effective execution context the
+ *   home (owner) transaction resolved — trusted server fan-out must not
+ *   re-broaden or re-narrow ownership per mirror, so it rides explicitly
+ *   and never inside the observation payload (see the carve-outs).
+ * - `writerSessionId` is the canonical commit-session key of the writing
+ *   session (replay/echo provenance). C3.1b mirrors are session-authored
+ *   by construction; the executor-authored writer key is C3.3b's to
+ *   define.
+ * - `observation` is the accepted observation as a JSON-clean record. The
+ *   protocol validates its structure only shallowly (this module cannot
+ *   import the engine's validator — module boundary); the applying host
+ *   validates it with the engine's own `schedulerObservationFromValue`
+ *   and drops the message, with zero side effects, if it does not parse.
+ *   Deliberate carve-outs (rejected, not ignored, mirroring the address
+ *   rule): `executionContextKey`/`execution_context_key` (context rides
+ *   `originExecutionContextKey`), `executionClaimAssertion` /
+ *   `executionUnservedAttempt` (transient protocol-boundary fields the
+ *   accepted form has stripped), and `ownerSpace`, when present, must
+ *   equal the envelope's `fromSpace` (a host mirrors only observations of
+ *   the space it speaks for — the C3A13 discipline).
+ */
+export interface ForeignObservationMirror extends CrossSpaceEnvelope {
+  type: "foreign-observation.mirror";
+  branch: BranchName;
+  observedAtSeq: number;
+  originExecutionContextKey: SchedulerExecutionContextKey;
+  scopeContext: ForeignObservationScopeContext;
+  writerSessionId: string;
+  observation: Record<string, unknown>;
+}
+
+/**
+ * Read (committing) host → home host: a commit in the read space dirtied
+ * mirrored reader rows owned by the home space — the C3.1b durable-dirt
+ * carriage (the C3A1 option-(b) standalone message; see the module
+ * docblock for why not dirt-on-notice). The home host applies
+ * `markSchedulerActionsDirectDirty` for the carried reader identities on
+ * receipt. Flows per dirtying commit, independent of any subscription —
+ * that independence is what carries the §4 parked-space obligation.
+ *
+ * - `branch` is the COMMITTING space's branch of the dirtying commit;
+ *   `dirtySeq` its commit seq — a READ-SPACE-domain value, exactly what
+ *   the pre-C3.1b direct write recorded (the cross-seq-domain cause
+ *   consumption this implies is C3A16's, fixed by C3.5's vector; do not
+ *   reinterpret it here).
+ * - `readers` are the dirtied rows' action identities. Their
+ *   `ownerSpace` is the envelope's `toSpace` (payloads carry no space
+ *   fields); the identity fields are exactly what the dirty path consumes
+ *   ({@link ForeignReaderIdentity}). An empty list is a well-formed
+ *   no-op.
+ * - Idempotent and reorder-safe by construction: the receiving engine
+ *   max-merges `direct_dirty_seq`, so redelivery or reordering never
+ *   regresses dirt. The home host advances an in-memory per-link applied-
+ *   dirt cursor (keyed by stable `linkId`, C3A12) as marks apply;
+ *   persisting it and the reconnect resync pull against the read host's
+ *   `scheduler_action_state` rows are C3.10b's.
+ */
+export interface ForeignDirtyMark extends CrossSpaceEnvelope {
+  type: "foreign-dirty-mark";
+  branch: BranchName;
+  dirtySeq: number;
   readers: readonly ForeignReaderIdentity[];
 }
 
@@ -331,11 +463,13 @@ export interface ForeignAuthorizationEpochQueryResult
   epochs: readonly { principal: string; epoch: number }[];
 }
 
-/** Every cross-space wire message (C3.1 vocabulary). */
+/** Every cross-space wire message (C3.1 vocabulary + C3.1b carriage). */
 export type CrossSpaceMessage =
   | ForeignReadersSubscribe
   | ForeignReadersUnsubscribe
   | ForeignStaleReaders
+  | ForeignObservationMirror
+  | ForeignDirtyMark
   | ForeignPointRead
   | ForeignPointReadResult
   | ForeignAuthorizationEpochBump
@@ -641,6 +775,89 @@ const readActingPrincipal = (
   };
 };
 
+/**
+ * Deliberate carve-out keys a mirrored observation payload must not carry
+ * (see {@link ForeignObservationMirror}): the trusted execution context
+ * rides `originExecutionContextKey`, and claim-assertion/unserved markers
+ * are transient protocol-boundary fields the accepted form has stripped —
+ * a payload smuggling any of them is rejected, not silently ignored.
+ */
+const FORBIDDEN_MIRROR_OBSERVATION_KEYS = [
+  "executionContextKey",
+  "execution_context_key",
+  "executionClaimAssertion",
+  "executionUnservedAttempt",
+] as const;
+
+/**
+ * Shallow-validate a mirrored observation payload: the record shape, the
+ * carve-outs, the `ownerSpace`↔`fromSpace` consistency rule, and the row-
+ * keying identity scalars. Everything else stays opaque — full semantic
+ * validation is the APPLYING host's, via the engine's own observation
+ * validator (this module must not import it — module boundary). The
+ * returned value is a JSON round-trip clone: eager wire semantics, and
+ * the encoder never aliases (or deep-freezes) the sender's live object.
+ */
+const readMirrorObservation = (
+  value: unknown,
+  fromSpace: unknown,
+):
+  | { observation: Record<string, unknown> }
+  | { detail: string } => {
+  if (!isRecord(value)) {
+    return { detail: "observation must be a record" };
+  }
+  for (const key of FORBIDDEN_MIRROR_OBSERVATION_KEYS) {
+    if (key in value) {
+      return {
+        detail: `observation must not carry "${key}" — the trusted ` +
+          "context rides originExecutionContextKey and claim-assertion " +
+          "fields never survive acceptance",
+      };
+    }
+  }
+  if (value.ownerSpace !== undefined && value.ownerSpace !== fromSpace) {
+    return {
+      detail: "observation.ownerSpace, when present, must equal the " +
+        "envelope's fromSpace — a host mirrors only observations of the " +
+        "space it speaks for (C3A13)",
+    };
+  }
+  if (!isNonEmptyString(value.pieceId)) {
+    return { detail: "observation.pieceId must be a piece id" };
+  }
+  if (!isNonEmptyString(value.actionId)) {
+    return { detail: "observation.actionId must be an action id" };
+  }
+  if (!isNonNegativeSafeInteger(value.processGeneration)) {
+    return {
+      detail: "observation.processGeneration must be a non-negative integer",
+    };
+  }
+  return {
+    observation: JSON.parse(JSON.stringify(value)) as Record<string, unknown>,
+  };
+};
+
+const readMirrorScopeContext = (
+  value: unknown,
+):
+  | { scopeContext: ForeignObservationScopeContext }
+  | { detail: string } => {
+  if (!isRecord(value)) {
+    return { detail: "scopeContext must be a record" };
+  }
+  if (!isNonEmptyString(value.principal)) {
+    return { detail: "scopeContext.principal must be a principal DID" };
+  }
+  if (!isNonEmptyString(value.sessionId)) {
+    return { detail: "scopeContext.sessionId must be a session id" };
+  }
+  return {
+    scopeContext: { principal: value.principal, sessionId: value.sessionId },
+  };
+};
+
 const PAYLOAD_READERS: Record<CrossSpaceMessageType, PayloadReader> = {
   "foreign-readers.subscribe": (raw) => {
     if (!isBranchName(raw.branch)) {
@@ -690,6 +907,60 @@ const PAYLOAD_READERS: Record<CrossSpaceMessageType, PayloadReader> = {
       fields: {
         branch: raw.branch,
         commitSeq: raw.commitSeq,
+        readers: readers.readers,
+      },
+    };
+  },
+  "foreign-observation.mirror": (raw) => {
+    if (!isBranchName(raw.branch)) {
+      return { detail: "branch must be a string" };
+    }
+    // 0 is legitimate: an operations-empty home commit carries seq 0.
+    if (!isNonNegativeSafeInteger(raw.observedAtSeq)) {
+      return { detail: "observedAtSeq must be a non-negative integer" };
+    }
+    if (!isExecutionContextKey(raw.originExecutionContextKey)) {
+      return {
+        detail: "originExecutionContextKey must be a canonical execution " +
+          "context key",
+      };
+    }
+    const scope = readMirrorScopeContext(raw.scopeContext);
+    if ("detail" in scope) return scope;
+    if (!isNonEmptyString(raw.writerSessionId)) {
+      return {
+        detail: "writerSessionId must be a canonical commit-session key",
+      };
+    }
+    const observation = readMirrorObservation(raw.observation, raw.fromSpace);
+    if ("detail" in observation) return observation;
+    return {
+      fields: {
+        branch: raw.branch,
+        observedAtSeq: raw.observedAtSeq,
+        originExecutionContextKey: raw.originExecutionContextKey,
+        scopeContext: scope.scopeContext,
+        writerSessionId: raw.writerSessionId,
+        observation: observation.observation,
+      },
+    };
+  },
+  "foreign-dirty-mark": (raw) => {
+    if (!isBranchName(raw.branch)) {
+      return { detail: "branch must be a string" };
+    }
+    // The engine's cause recorder requires a positive seq; a dirtying
+    // commit always has one (only operations-empty commits carry 0, and
+    // those dirty nothing).
+    if (!isPositiveSafeInteger(raw.dirtySeq)) {
+      return { detail: "dirtySeq must be a positive integer" };
+    }
+    const readers = readReaderIdentities(raw.readers);
+    if ("detail" in readers) return readers;
+    return {
+      fields: {
+        branch: raw.branch,
+        dirtySeq: raw.dirtySeq,
         readers: readers.readers,
       },
     };
@@ -1230,20 +1501,23 @@ class InProcessCrossSpaceChannel implements CrossSpaceChannel {
  * and inbound frames dispatch on the envelope's `toSpace` uniformly.
  *
  * The hosted-space registry (`isHosted`/`hostedSpaces`) is where a
- * host's authoritative "which spaces live here" knowledge sits: C3.1b's
- * `openEngine` gate consults it (fail loudly for a non-hosted space) and
- * routes `mirrorSchedulerObservation` /
- * `propagateSchedulerDirtyToOwnerSpaces` through the transport when the
- * target space is not hosted here. Nothing populates it in production
- * yet — C3.1 lands it inert; C3.1b wires the authoritative source.
+ * host's authoritative "which spaces live here" knowledge sits. C3.1b
+ * (2026-07-18) wired it: the `Server` registers every space it serves
+ * (each `openEngine` on the serve path registers the space's protocol
+ * inbox here, and re-registers store-materialized spaces lazily after a
+ * restart), its `openEngine` gate consults the registry (a peer-write
+ * apply refuses to open an engine for a space not hosted here), and
+ * `mirrorSchedulerObservation` / `propagateSchedulerDirtyToOwnerSpaces`
+ * route through the transport — the handler on the registered inbox
+ * performs the engine writes the direct calls used to.
  *
  * Send-side integrity: `link(fromSpace, …)` requires `fromSpace` to be
  * registered — a host only ever speaks for spaces it hosts (the
  * structural seed of C3A13's stamp binding; the routing-table half is
  * C3.10a's). Delivery to an unregistered `toSpace` is dropped with a
  * warning and NO side effects — the router never opens an engine or
- * creates state for an unhosted space (whether a negative-ack message is
- * added is C3.1b's call).
+ * creates state for an unhosted space. C3.1b ruled AGAINST a negative-
+ * ack message for that drop (see the module docblock).
  */
 export class CrossSpaceHostRouter {
   #transport: CrossSpaceTransport;

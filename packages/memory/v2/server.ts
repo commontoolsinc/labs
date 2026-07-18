@@ -2,7 +2,12 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import { resolveSpaceStoreUrl } from "./storage-path.ts";
 import {
+  type CrossSpaceDeliveryContext,
   CrossSpaceHostRouter,
+  type CrossSpaceMessage,
+  CrossSpaceProtocolError,
+  type ForeignDirtyMark,
+  type ForeignObservationMirror,
   InProcessCrossSpaceTransport,
 } from "./cross-space.ts";
 import {
@@ -1642,16 +1647,45 @@ export class Server {
    * context-lattice §5 is between engine HOSTS (Server↔Server, standing
    * decision #1; engines stay passive), and this router is where a host's
    * hosted-space knowledge and per-space protocol inboxes live, over the
-   * in-process transport as the protocol's first transport. INERT
-   * plumbing behind the existing flags-off posture: nothing registers or
-   * routes production traffic through it yet. C3.1b routes the first real
-   * traffic (mirror upserts + durable dirt via the transport instead of
-   * direct peer-engine writes) and gates `openEngine` on the router's
-   * hosted-space registry (see the pointer comment there).
+   * in-process transport as the protocol's first transport.
+   *
+   * C3.1b (2026-07-18) routed the first real traffic: every space this
+   * server SERVES registers a protocol inbox here (`openEngine` on the
+   * serve path — see `registerCrossSpaceHostedSpace`), mirror upserts and
+   * durable dirt travel as `foreign-observation.mirror` /
+   * `foreign-dirty-mark` messages through this router instead of direct
+   * peer-engine writes, and the registry is the hosted-space gate: a
+   * message for an unhosted space drops at the router with zero side
+   * effects, and the peer-write apply path (`openHostedEngine`) refuses
+   * to mint an engine for an unhosted space name (the C3A1 blocker's
+   * fix).
    */
   #crossSpaceRouter = new CrossSpaceHostRouter(
     new InProcessCrossSpaceTransport(),
   );
+  /**
+   * In-order application of inbound cross-space messages, one promise
+   * chain per target space (mirroring `#schedulerSideEffectsByOwnerSpace`
+   * so per-space apply order equals per-link arrival order), plus the
+   * flat pending set `settleCrossSpaceDeliveries` drains — the same-host
+   * application barrier that keeps the C3.1b routing topology-transparent
+   * for the in-process transport (a transact that fanned out mirrors/dirt
+   * still resolves only after the peer-space engines applied them, as the
+   * pre-C3.1b direct writes did).
+   */
+  #crossSpaceInboundApplyChains = new Map<string, Promise<void>>();
+  #pendingCrossSpaceInboundApplies = new Set<Promise<void>>();
+  /**
+   * C3.10b slot (C3A12 keying): highest applied foreign-dirt seq per
+   * `linkId\0fromSpace\0toSpace`. Advanced on every applied
+   * `foreign-dirty-mark`; in-process it is never consulted (the link
+   * never drops). C3.10b persists it and drives the reconnect resync
+   * pull (read-host `scheduler_action_state` rows with `owner_space` =
+   * home and `direct_dirty_seq` > cursor) from it.
+   */
+  // Soft-private (not #-private) so C3.10b's reconnect drill and today's
+  // parked-space fixture can observe the advancing value.
+  private crossSpaceAppliedDirtCursors = new Map<string, number>();
 
   #recordSchemaEnsured(key: string): void {
     this.#ensuredSchemas.set(key, true);
@@ -5070,8 +5104,13 @@ export class Server {
 
   /**
    * The host-level cross-space router (C3.1) — the registration seam for
-   * per-space protocol endpoints and the hosted-space registry C3.1b's
-   * `openEngine` gate consults. Inert until C3.1b routes traffic.
+   * per-space protocol endpoints and the hosted-space registry the
+   * C3.1b `openEngine` gate consults. Since C3.1b it carries production
+   * traffic: mirror upserts and durable dirt route through it (see the
+   * `#crossSpaceRouter` field docblock). Exposed for tests and for
+   * C3.10a's link substrate; the transport's loopback channel is the
+   * transcript-observation seam (an `onMessage` tap observes every
+   * routed frame without disturbing dispatch).
    */
   crossSpaceRouter(): CrossSpaceHostRouter {
     return this.#crossSpaceRouter;
@@ -5096,6 +5135,10 @@ export class Server {
       clearTimeout(this.#executionLeaseExpiryTimer);
       this.#executionLeaseExpiryTimer = null;
     }
+    // Drain in-flight cross-space applies before closing the engines they
+    // write into (transact awaits them already; this covers crafted or
+    // late-arriving frames).
+    await this.settleCrossSpaceDeliveries().catch(() => {});
     for (const engine of this.#engines.values()) {
       Engine.close(await engine);
     }
@@ -8601,30 +8644,67 @@ export class Server {
       mirrorSpaces.add(space);
     }
     mirrorSpaces.delete(ownerSpace);
+    if (mirrorSpaces.size === 0) {
+      return;
+    }
 
+    // C3.1b (2026-07-18): mirrors are cross-space PROTOCOL traffic — a
+    // `foreign-observation.mirror` per read space through the host
+    // router; the read space's inbound handler performs the engine
+    // upsert the pre-C3.1b code did right here. Never write into the
+    // peer engine from this send path (the C3A1 in-process accident).
+    this.registerCrossSpaceHostedSpace(ownerSpace);
+    let sent = false;
     for (const space of mirrorSpaces) {
+      // The open-session SEND gate is unchanged by C3.1b. Its predicate
+      // checks the wrong principal for scoped lanes and never passes for
+      // a headless sponsor — fixing that (acting-principal READ via
+      // #capabilityFor) is C3.3b's, dated 2026-07-18. Retractions
+      // (previously-read spaces) bypass it deliberately, as before.
       if (
         !previousReadSpaces.has(space) &&
         !this.canMirrorSchedulerObservationToSpace(space, session)
       ) {
         continue;
       }
-      const engine = await this.openEngine(space);
-      Engine.upsertMirroredSchedulerObservation(engine, {
+      // In-process stand-in for the peer host's own store-backed hosting
+      // registration (C3.10a replaces this with real space→host routing):
+      // a store-materialized space re-registers lazily (e.g. after a
+      // restart, before its first serve); a never-hosted name stays
+      // unregistered and the frame drops at the router, side-effect-free.
+      await this.ensureCrossSpaceHosting(space);
+      this.#crossSpaceRouter.link(ownerSpace, space).send({
+        type: "foreign-observation.mirror",
         branch: commit.branch,
-        ownerSpace,
         observedAtSeq: commit.seq,
         // This context was captured before the accepted commit. Never
         // re-derive it after an await: disconnect tears down the executor
         // binding, but cannot change the already-accepted sponsor scope.
-        scopeContext,
+        scopeContext: {
+          principal: scopeContext.principal,
+          sessionId: scopeContext.sessionId,
+        },
         writerSessionId: Engine.resolveCommitSessionKey(
           session.id,
           session.principal,
         ),
         originExecutionContextKey,
-        observation,
+        // The wire rule pins observation.ownerSpace to the envelope's
+        // fromSpace; stamp it here exactly as the engine upsert would
+        // have (the stored payload is byte-identical either way).
+        observation: {
+          ...observation,
+          ownerSpace,
+        } as unknown as Record<string, unknown>,
       });
+      sent = true;
+    }
+    if (sent) {
+      // Same-host application barrier: today's contract is that this
+      // method resolves only after the mirror rows are durably applied
+      // (transact awaits it before responding). Cross-host, C3.10b owns
+      // the equivalent ack/barrier semantics.
+      await this.settleCrossSpaceDeliveries();
     }
   }
 
@@ -8784,6 +8864,16 @@ export class Server {
     }
   }
 
+  /**
+   * SEND gate for observation mirrors, at the send-decision site. C3.1b
+   * kept the predicate byte-identical while routing the mirror itself
+   * through the transport: it still gates on an open session of the
+   * WRITING session's principal on the read space — wrong principal for
+   * scoped lanes and never true for a headless sponsor (the cold-start
+   * wake hole). Replacing it with the acting principal's READ on the
+   * read space (the same `#capabilityFor` resolution as C3.4's point
+   * read) is C3.3b's, dated 2026-07-18 — do not "fix" it here.
+   */
   private canMirrorSchedulerObservationToSpace(
     readSpace: string,
     session: SessionState | undefined,
@@ -8819,16 +8909,42 @@ export class Server {
       }
       readers.push(reader);
     }
+    if (readersByOwner.size === 0) {
+      return;
+    }
 
+    // C3.1b (2026-07-18): durable dirt is cross-space PROTOCOL traffic —
+    // one `foreign-dirty-mark` per foreign owner space through the host
+    // router (the C3A1 option-(b) carriage; see cross-space.ts for the
+    // ruling); the home space's inbound handler performs the
+    // `markSchedulerActionsDirectDirty` the pre-C3.1b code did right
+    // here. The read host's own `scheduler_action_state` rows for these
+    // readers (owner_space-keyed, written synchronously inside
+    // applyCommit) remain the durable pull source for C3.10b's reconnect
+    // resync — this push is the live carriage, not the ledger.
+    this.registerCrossSpaceHostedSpace(writeSpace);
     for (const [ownerSpace, readers] of readersByOwner) {
-      const engine = await this.openEngine(ownerSpace);
-      Engine.markSchedulerActionsDirectDirty(engine, {
+      // In-process stand-in for the peer host's own store-backed hosting
+      // registration (see mirrorSchedulerObservation): a parked home
+      // space that only exists in the store re-registers lazily so its
+      // accumulated dirt keeps landing; a never-hosted name drops at the
+      // router with zero side effects.
+      await this.ensureCrossSpaceHosting(ownerSpace);
+      this.#crossSpaceRouter.link(writeSpace, ownerSpace).send({
+        type: "foreign-dirty-mark",
         branch: commit.branch,
-        ownerSpace,
         dirtySeq: commit.seq,
-        actions: readers,
+        readers: readers.map((reader) => ({
+          branch: reader.branch,
+          pieceId: reader.pieceId,
+          processGeneration: reader.processGeneration,
+          actionId: reader.actionId,
+          executionContextKey: reader.executionContextKey,
+        })),
       });
     }
+    // Same-host application barrier (see mirrorSchedulerObservation).
+    await this.settleCrossSpaceDeliveries();
   }
 
   private schedulerObservationReadSpaces(
@@ -8844,21 +8960,28 @@ export class Server {
     return spaces;
   }
 
+  /**
+   * Open (creating if needed) the engine for a space this server SERVES.
+   *
+   * C3.1b hosted-space gate (2026-07-18, blocker C3A1): this entry point
+   * is the SERVE side of the gate — every caller reaches it because a
+   * client session, host API, or ACL/lease/lane path legitimately serves
+   * `space`, so serving a brand-new space keeps working, and each served
+   * space registers as hosted on `#crossSpaceRouter` (which wires its
+   * cross-space protocol inbox). The PEER-WRITE side is
+   * `openHostedEngine`: inbound mirror/dirt applies go through it, and it
+   * refuses — loudly, minting nothing — for a space this host does not
+   * host, so a crafted message can no longer shed state into a shadow
+   * engine. "Hosted" = registered this lifetime (served) ∪ materialized
+   * in this host's store (served by a previous lifetime — restart-safe);
+   * see `spaceMaterializedInStore`.
+   */
   private openEngine(space: string): Promise<Engine.Engine> {
-    // C3.1 pointer (2026-07-18): openEngine remains UNGATED — it opens
-    // (and creates storage for) an engine for ANY space name, including
-    // spaces this host does not host, which is what lets today's
-    // in-process mirror/dirt writes silently shed into shadow engines
-    // under a split deployment (blocker C3A1). The hosted-space gate
-    // (fail loudly for a non-hosted space, consulting
-    // `#crossSpaceRouter`'s hosted-space registry) is owned by C3.1b's
-    // row together with routing `mirrorSchedulerObservation` /
-    // `propagateSchedulerDirtyToOwnerSpaces` through the transport — do
-    // NOT add the gate here before that row lands.
     const existing = this.#engines.get(space);
     if (existing !== undefined) {
       return existing;
     }
+    this.registerCrossSpaceHostedSpace(space);
 
     const url = this.#store
       ? resolveSpaceStoreUrl(
@@ -8881,6 +9004,256 @@ export class Server {
     });
     this.#engines.set(space, opened);
     return opened;
+  }
+
+  /**
+   * The peer-write side of the C3.1b hosted-space gate: open the engine
+   * for a space ONLY if this host hosts it — refuse (without creating a
+   * directory, an engine, or a registration) for an unhosted name. Used
+   * by the cross-space inbound apply path; the router already drops
+   * frames for unregistered spaces, so this is the belt-and-braces line
+   * for applies that outlive a registration (and the seam C3.10a's
+   * routing table gates for real links).
+   */
+  private async openHostedEngine(space: string): Promise<Engine.Engine> {
+    if (
+      !this.#crossSpaceRouter.isHosted(space) &&
+      !(await this.spaceMaterializedInStore(space))
+    ) {
+      throw new CrossSpaceProtocolError(
+        "space-not-hosted",
+        `refusing to open an engine for ${space}: this host does not ` +
+          "host it (C3.1b hosted-space gate; a peer write never mints " +
+          "an engine — C3A1)",
+      );
+    }
+    return this.openEngine(space);
+  }
+
+  /**
+   * Register a space this host hosts on the cross-space router, wiring
+   * its protocol inbox. Idempotent; a no-op once the router closed
+   * (server shutdown) so late `openEngine` calls behave as before.
+   */
+  private registerCrossSpaceHostedSpace(space: string): void {
+    if (this.#crossSpaceRouter.isHosted(space)) {
+      return;
+    }
+    try {
+      this.#crossSpaceRouter.register(
+        space,
+        (message, context) => this.acceptCrossSpaceMessage(message, context),
+      );
+    } catch (error) {
+      if (error instanceof CrossSpaceProtocolError) {
+        // router-closed during shutdown, or a lost registration race —
+        // both leave the pre-C3.1b behavior intact.
+        return;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Whether `space` is materialized in this host's store — the durable
+   * half of the C3.1b "hosted" definition (the deployment surface: a
+   * space this host served in ANY lifetime lives in its store; the
+   * single-host world therefore keeps working across restarts — e.g. a
+   * parked home space's dirt keeps landing before its first re-serve).
+   * Memory-backed stores have no durable surface: hosted = registered.
+   */
+  private async spaceMaterializedInStore(space: string): Promise<boolean> {
+    if (this.#engines.has(space)) {
+      return true;
+    }
+    if (this.#store === undefined) {
+      return false;
+    }
+    try {
+      const url = resolveSpaceStoreUrl(
+        this.#store,
+        space as `did:${string}:${string}`,
+      );
+      if (url.protocol !== "file:") {
+        return false;
+      }
+      return await FS.exists(url, { isFile: true });
+    } catch {
+      // Unencodable space names cannot be store-materialized.
+      return false;
+    }
+  }
+
+  /**
+   * Send-side hosting resolution for the in-process transport: register
+   * a store-materialized target space so the router can deliver to it
+   * (the in-process stand-in for the PEER host's own store-backed
+   * registration — C3.10a replaces this with real space→host routing).
+   * Returns false — registering nothing — for a space this host does not
+   * host; the subsequent send then drops at the router with zero side
+   * effects (the C3A1 shadow-engine refusal).
+   */
+  private async ensureCrossSpaceHosting(space: string): Promise<boolean> {
+    if (this.#crossSpaceRouter.isHosted(space)) {
+      return true;
+    }
+    if (await this.spaceMaterializedInStore(space)) {
+      this.registerCrossSpaceHostedSpace(space);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Inbound cross-space dispatch for one hosted space (the handler
+   * `registerCrossSpaceHostedSpace` wires). Delivery does not await
+   * handlers (transport contract), so applies queue onto per-space
+   * chains — apply order per space = arrival order — and the flat
+   * pending set feeds `settleCrossSpaceDeliveries`.
+   */
+  private acceptCrossSpaceMessage(
+    message: CrossSpaceMessage,
+    context: CrossSpaceDeliveryContext,
+  ): void {
+    switch (message.type) {
+      case "foreign-observation.mirror":
+        this.queueCrossSpaceInboundApply(
+          context.space,
+          () => this.applyForeignObservationMirror(message, context),
+        );
+        return;
+      case "foreign-dirty-mark":
+        this.queueCrossSpaceInboundApply(
+          context.space,
+          () => this.applyForeignDirtyMark(message, context),
+        );
+        return;
+      default:
+        // C3.1 vocabulary without an inbound consumer yet (2026-07-18):
+        // subscribe/unsubscribe + stale-readers land with C3.3a, epoch
+        // bump/query with C3.2, point reads with C3.4. Dropping here is
+        // side-effect-free by construction.
+        console.warn(
+          `cross-space message ${message.type} for ${context.space} has ` +
+            "no inbound consumer yet (dropped)",
+        );
+    }
+  }
+
+  private queueCrossSpaceInboundApply(
+    space: string,
+    apply: () => Promise<void>,
+  ): void {
+    const run = () =>
+      apply().catch((error) => {
+        // Same containment as the pre-C3.1b side-effect path: the home
+        // commit is durable; a failed fan-out apply must never look like
+        // a rejected commit.
+        console.warn("cross-space inbound apply failed:", error);
+      });
+    const previous = this.#crossSpaceInboundApplyChains.get(space);
+    const queued = previous?.then(run, run) ?? run();
+    const tracked = queued.finally(() => {
+      if (this.#crossSpaceInboundApplyChains.get(space) === tracked) {
+        this.#crossSpaceInboundApplyChains.delete(space);
+      }
+      this.#pendingCrossSpaceInboundApplies.delete(tracked);
+    });
+    this.#crossSpaceInboundApplyChains.set(space, tracked);
+    this.#pendingCrossSpaceInboundApplies.add(tracked);
+  }
+
+  /**
+   * Same-host application barrier: resolve once every cross-space frame
+   * sent so far has been dispatched and its engine apply settled. One
+   * microtask hop lets the in-process channel's queued drain (scheduled
+   * at send time, FIFO-ordered before this continuation) run and enqueue
+   * applies; the loop then drains stragglers. Barrier-driven — no timers.
+   */
+  private async settleCrossSpaceDeliveries(): Promise<void> {
+    do {
+      await undefined;
+      const pending = [...this.#pendingCrossSpaceInboundApplies];
+      if (pending.length === 0) {
+        return;
+      }
+      await Promise.all(pending);
+    } while (true);
+  }
+
+  private async applyForeignObservationMirror(
+    message: ForeignObservationMirror,
+    context: CrossSpaceDeliveryContext,
+  ): Promise<void> {
+    // Full semantic validation with the engine's OWN validator — the
+    // codec only shallow-validates the observation (module boundary).
+    // An unparseable observation drops with zero side effects.
+    const observation = Engine.schedulerObservationFromValue(
+      message.observation,
+    );
+    if (observation === undefined) {
+      console.warn(
+        `cross-space mirror for ${context.space} from ` +
+          `${context.fromSpace} carried an invalid observation (dropped)`,
+      );
+      return;
+    }
+    const engine = await this.openHostedEngine(context.space);
+    Engine.upsertMirroredSchedulerObservation(engine, {
+      branch: message.branch,
+      // Envelope addressing IS the contract: the home space is the
+      // envelope's fromSpace (the codec pinned any payload ownerSpace to
+      // it), the read space this inbox's own.
+      ownerSpace: context.fromSpace,
+      observedAtSeq: message.observedAtSeq,
+      scopeContext: {
+        principal: message.scopeContext.principal,
+        sessionId: message.scopeContext.sessionId,
+      },
+      writerSessionId: message.writerSessionId,
+      originExecutionContextKey: message.originExecutionContextKey,
+      observation,
+      // C3A16 pointer (2026-07-18): like the pre-C3.1b direct call, no
+      // `causeCoverageSeq` rides here, so the upsert's cause consumption
+      // still crosses seq domains; C3.5's vector (read-space component)
+      // owns the fix — do not add an interim value as part of routing.
+    });
+  }
+
+  private async applyForeignDirtyMark(
+    message: ForeignDirtyMark,
+    context: CrossSpaceDeliveryContext,
+  ): Promise<void> {
+    const engine = await this.openHostedEngine(context.space);
+    Engine.markSchedulerActionsDirectDirty(engine, {
+      branch: message.branch,
+      ownerSpace: context.space,
+      dirtySeq: message.dirtySeq,
+      // The dirty path consumes exactly the action key (dedupe, the
+      // direct-dirty upsert, cause recording, and stale propagation all
+      // key on branch/ownerSpace/pieceId/processGeneration/actionId/
+      // executionContextKey); the read-row fields of a full
+      // SchedulerReaderIndexEntry (observationId/readKind/read) are
+      // write-space-local and were never meaningful across engines, so
+      // the wire identity is the key — hence the cast.
+      actions: message.readers.map((reader) =>
+        ({
+          branch: reader.branch,
+          ownerSpace: context.space,
+          pieceId: reader.pieceId,
+          processGeneration: reader.processGeneration,
+          actionId: reader.actionId,
+          executionContextKey: reader.executionContextKey,
+        }) as Engine.SchedulerReaderIndexEntry
+      ),
+    });
+    // C3.10b cursor slot (C3A12 keying — see the field docblock).
+    const cursorKey =
+      `${context.linkId}\0${context.fromSpace}\0${context.space}`;
+    const cursor = this.crossSpaceAppliedDirtCursors.get(cursorKey) ?? 0;
+    if (message.dirtySeq > cursor) {
+      this.crossSpaceAppliedDirtCursors.set(cursorKey, message.dirtySeq);
+    }
   }
 }
 

@@ -73,6 +73,47 @@ const validSubscribe: CrossSpaceMessage = {
   subscriptionGeneration: 1,
 };
 
+// A JSON-clean accepted-observation payload for the mirror (the codec
+// validates it shallowly; deep validation is the applying host's, via the
+// engine's own validator — module boundary).
+const mirrorObservation = {
+  version: 1,
+  ownerSpace: HOME,
+  branch: "",
+  pieceId: "of:piece",
+  processGeneration: 1,
+  actionId: "pattern.tsx:computed:1",
+  actionKind: "computation",
+  implementationFingerprint: "impl:v1",
+  runtimeFingerprint: "runtime:test",
+  observedAtSeq: 0,
+  inputBasisSeq: 0,
+  transactionKind: "action-run",
+  reads: [{
+    space: READ,
+    scope: "space",
+    id: "of:source",
+    path: ["value", "count"],
+  }],
+  shallowReads: [],
+  actualChangedWrites: [],
+  currentKnownWrites: [],
+  declaredWrites: [],
+  materializerWriteEnvelopes: [],
+  status: "success",
+};
+
+const validMirror: CrossSpaceMessage = {
+  ...envelope,
+  type: "foreign-observation.mirror",
+  branch: "",
+  observedAtSeq: 7,
+  originExecutionContextKey: sessionExecutionContextKey(ALICE, "session-1"),
+  scopeContext: { principal: ALICE, sessionId: "session-1" },
+  writerSessionId: sessionExecutionContextKey(ALICE, "session-1"),
+  observation: mirrorObservation,
+};
+
 const validPointRead: CrossSpaceMessage = {
   ...envelope,
   type: "foreign-point-read",
@@ -159,6 +200,62 @@ const VALID_MESSAGES: {
       readers: [],
     },
     payloadKeys: ["branch", "commitSeq", "readers"],
+  },
+  {
+    name: "foreign-observation.mirror (C3.1b — the wire form of the " +
+      "mirrored-observation upsert; retraction rides the same message)",
+    message: validMirror,
+    payloadKeys: [
+      "branch",
+      "observedAtSeq",
+      "originExecutionContextKey",
+      "scopeContext",
+      "writerSessionId",
+      "observation",
+    ],
+  },
+  {
+    name: "foreign-observation.mirror (seq 0 — an operations-empty home " +
+      "commit)",
+    message: { ...validMirror, observedAtSeq: 0 },
+    payloadKeys: [
+      "branch",
+      "observedAtSeq",
+      "originExecutionContextKey",
+      "scopeContext",
+      "writerSessionId",
+      "observation",
+    ],
+  },
+  {
+    name: "foreign-dirty-mark (C3.1b durable-dirt carriage, option (b))",
+    message: {
+      ...reverseEnvelope,
+      type: "foreign-dirty-mark",
+      branch: "",
+      dirtySeq: 4,
+      readers: [
+        {
+          branch: "",
+          pieceId: "of:piece",
+          processGeneration: 1,
+          actionId: "pattern.tsx:computed:1",
+          executionContextKey: sessionExecutionContextKey(ALICE, "session-1"),
+        },
+      ],
+    },
+    payloadKeys: ["branch", "dirtySeq", "readers"],
+  },
+  {
+    name: "foreign-dirty-mark (empty readers — a well-formed no-op)",
+    message: {
+      ...reverseEnvelope,
+      type: "foreign-dirty-mark",
+      branch: "",
+      dirtySeq: 9,
+      readers: [],
+    },
+    payloadKeys: ["branch", "dirtySeq", "readers"],
   },
   {
     name: "foreign-point-read (claim reference, never credentials)",
@@ -336,6 +433,99 @@ const MALFORMED: {
       type: "foreign-stale-readers",
       branch: "",
       commitSeq: 1,
+      readers: [
+        {
+          branch: "",
+          pieceId: "p",
+          processGeneration: 0,
+          executionContextKey: "space",
+        },
+      ],
+    },
+    detailIncludes: "actionId",
+  },
+  {
+    name: "mirror: negative observedAtSeq",
+    raw: { ...validMirror, observedAtSeq: -1 },
+    detailIncludes: "observedAtSeq",
+  },
+  {
+    name: "mirror: non-canonical origin execution context key",
+    raw: { ...validMirror, originExecutionContextKey: `user:${ALICE}` },
+    detailIncludes: "originExecutionContextKey",
+  },
+  {
+    name: "mirror: scope context without a session id",
+    raw: { ...validMirror, scopeContext: { principal: ALICE } },
+    detailIncludes: "scopeContext.sessionId",
+  },
+  {
+    name: "mirror: missing writer session key",
+    raw: { ...validMirror, writerSessionId: "" },
+    detailIncludes: "writerSessionId",
+  },
+  {
+    name: "mirror: observation smuggles an execution context key " +
+      "(carve-out — context rides originExecutionContextKey)",
+    raw: {
+      ...validMirror,
+      observation: { ...mirrorObservation, executionContextKey: "space" },
+    },
+    detailIncludes: 'must not carry "executionContextKey"',
+  },
+  {
+    name: "mirror: observation carries a claim assertion (transient " +
+      "protocol-boundary field the accepted form has stripped)",
+    raw: {
+      ...validMirror,
+      observation: {
+        ...mirrorObservation,
+        executionClaimAssertion: {
+          contextKey: "space",
+          leaseGeneration: 1,
+          claimGeneration: 1,
+        },
+      },
+    },
+    detailIncludes: 'must not carry "executionClaimAssertion"',
+  },
+  {
+    name: "mirror: observation.ownerSpace differs from the envelope's " +
+      "fromSpace (a host mirrors only observations of the space it " +
+      "speaks for — C3A13)",
+    raw: {
+      ...validMirror,
+      observation: { ...mirrorObservation, ownerSpace: READ },
+    },
+    detailIncludes: "must equal the envelope's fromSpace",
+  },
+  {
+    name: "mirror: observation without a piece id",
+    raw: {
+      ...validMirror,
+      observation: { ...mirrorObservation, pieceId: "" },
+    },
+    detailIncludes: "observation.pieceId",
+  },
+  {
+    name: "dirty-mark: zero dirty seq (only operations-empty commits " +
+      "carry seq 0, and those dirty nothing)",
+    raw: {
+      ...reverseEnvelope,
+      type: "foreign-dirty-mark",
+      branch: "",
+      dirtySeq: 0,
+      readers: [],
+    },
+    detailIncludes: "dirtySeq",
+  },
+  {
+    name: "dirty-mark: reader identity missing actionId",
+    raw: {
+      ...reverseEnvelope,
+      type: "foreign-dirty-mark",
+      branch: "",
+      dirtySeq: 1,
       readers: [
         {
           branch: "",
@@ -578,19 +768,34 @@ Deno.test("cross-space codec: envelope discipline", async (t) => {
   });
   await t.step(
     "unknown type is distinguishable (additive evolution: C3.1b's " +
-      "messages slot in without a version bump)",
+      "messages slotted in without a version bump)",
     () => {
+      // The dirt-snapshot leg is C3.1b's documented option-(a) slot — a
+      // plausible future additive message, unknown today.
       const parsed = parseCrossSpaceMessage(
+        JSON.stringify({
+          ...envelope,
+          type: "foreign-dirt-snapshot",
+          rows: [],
+        }),
+      );
+      assert(!parsed.ok);
+      assertEquals(parsed.error, "unknown-type");
+      assertEquals(parsed.type, "foreign-dirt-snapshot");
+      assertEquals(parsed.v, CROSS_SPACE_PROTOCOL_VERSION);
+      // And the type C3.1 used as its unknown-type example IS now known
+      // (C3.1b landed it additively, still protocol v1): a malformed
+      // body of it is malformed-message, no longer unknown-type.
+      const known = parseCrossSpaceMessage(
         JSON.stringify({
           ...envelope,
           type: "foreign-observation.mirror",
           upsert: {},
         }),
       );
-      assert(!parsed.ok);
-      assertEquals(parsed.error, "unknown-type");
-      assertEquals(parsed.type, "foreign-observation.mirror");
-      assertEquals(parsed.v, CROSS_SPACE_PROTOCOL_VERSION);
+      assert(!known.ok);
+      assertEquals(known.error, "malformed-message");
+      assertEquals(known.v, CROSS_SPACE_PROTOCOL_VERSION);
     },
   );
 });
