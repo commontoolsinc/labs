@@ -480,6 +480,17 @@ if [ -z "$ENTITY_DIR" ]; then
   error "Timed out waiting for entity directory entry for $ENTITY_ID."
 fi
 
+# A single read is enough to prove the generated file is served as one coherent
+# document through a real getattr and read. That the counters it carries are
+# fresh and advance is settled deterministically by the CellBridge.status unit
+# tests; asserting it here would mean polling out the macOS NFS attribute cache,
+# and this suite adds no waits it can avoid.
+STATUS_FILE="$MOUNTPOINT/.status"
+path_exists "$STATUS_FILE" || error ".status was not mounted at the mount root."
+cat "$STATUS_FILE" | jq -e . >/dev/null ||
+  error ".status did not read back as a whole JSON document."
+success ".status reads as a whole JSON document"
+
 HANDLER_FILE="$RESULT_DIR/recordMessage.handler"
 LEGACY_HANDLER_FILE="$RESULT_DIR/legacyWrite.handler"
 TOOL_FILE="$RESULT_DIR/search.tool"

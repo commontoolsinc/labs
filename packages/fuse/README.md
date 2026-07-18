@@ -389,6 +389,45 @@ Writes are fire-and-forget: the FUSE reply is sent before the cell write
 completes, so subscription rebuilds don't block the callback chain (required to
 avoid FUSE-T crashes from `notify_inval_entry` during callbacks).
 
+### The `.status` file
+
+`.status` at the mount root reports the daemon's API URL, debug flag, connection
+state, per-space piece counts, subtree rebuild metrics, write statistics, and a
+`cfc` section carrying writeback phase counts and recent diagnostics.
+
+The file is generated rather than written. `CellBridge.initStatus` registers it
+with `FsTree.addGeneratedFile`, giving the tree a function that renders the JSON
+from the daemon's current state. Nothing on the write path refreshes it, and no
+counter has to be published before a reader can see it: a flush increments
+`writeStats.flushed` and stops there.
+
+`FsTree.refreshGenerated` runs the renderer and publishes the result as the
+node's content, and the callbacks that report the file's size call it —
+`replyEntry` and `getattr`. Reads serve the bytes that were published, never
+rendered per read. This is what keeps a reader from seeing a partial document: a
+client stops a read at the size it was last given, so bytes from a render that
+grew since then would be cut off at that size, and bytes from one that shrank
+would be padded out to it with NULs. Publishing where the size is reported keeps
+the two halves of that answer from one render.
+
+`open` then fixes those published bytes into the descriptor's handle, and every
+read on the descriptor serves them. A reader that has consumed the whole file
+issues one more read to see EOF, which a newer, longer render would otherwise
+answer with a spliced tail. A getattr carrying a descriptor reports that
+descriptor's snapshot length and its publish time both, so a stat from elsewhere
+cannot move the size or the modification time out from under a read in progress.
+
+Publishing bumps the node's mtime whenever the rendered bytes change, so a
+generated file reports when its content last changed while the rest of the mount
+reports the epoch. A status counter can change without changing the document's
+length, and a client that validates its cached copy against the timestamp and
+the size would otherwise keep serving what it holds — on macOS an NFS client
+returning a frozen `.status`, on Linux a page cache that is never invalidated.
+The moving mtime is what tells both to re-read. macOS still bounds how soon that
+happens by the mount's attribute-cache option, for the same reason rebuilt
+subtrees are; see
+[macOS: NFS client cache tuning](#macos-nfs-client-cache-tuning).
+
 See [RELIABILITY_DESIGN.md](./RELIABILITY_DESIGN.md) for the package-local plan
 to move default mutating operations toward commit-confirmed replies, bounded
 deadlines, explicit backpressure, and watchdog/degraded-mode behavior while

@@ -19,9 +19,14 @@ The implementation already has several reliability foundations:
 - `handles.ts` owns per-handle write buffers, truncate state, dirty flags,
   versioning, range checks, and per-handle CFC authorization.
 - `mod.ts` schedules safety-net flushes for transports that do not reliably send
-  `flush`/`release`, and records write statistics in `.status`.
-- `cell-bridge.ts` exposes `.status`, marks the mount disconnected/read-only on
-  transport errors, and reconnects with capped exponential backoff.
+  `flush`/`release`, and keeps the write statistics that `.status` reports.
+- `cell-bridge.ts` exposes `.status` as a generated file: the write path leaves
+  it alone, and a lookup or a bare stat renders it from current state and
+  publishes what a following read serves. A getattr that carries an already-open
+  descriptor is the exception — it reports that descriptor's snapshot, size and
+  publish time both, rather than publishing again, so the descriptor's reads
+  stay consistent. It also marks the mount disconnected/read-only on transport
+  errors, and reconnects with capped exponential backoff.
 - `cell-bridge.ts` serializes and coalesces per-piece-property rebuilds, dedupes
   in-flight hydrations, stages rebuilds under pending roots and reconciles them
   onto the live subtree in place so inodes stay stable, and invalidates the
