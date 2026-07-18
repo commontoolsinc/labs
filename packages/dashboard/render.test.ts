@@ -2,7 +2,7 @@
 // in the page. Pure string work — no server, no network, no subprocess.
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Status, TileView } from "./types.ts";
-import { renderTile, shell, SHELL_VERSION } from "./render.ts";
+import { formatViewerTimes, renderTile, shell, SHELL_VERSION } from "./render.ts";
 import { humanSpan } from "./lib.ts";
 import { REPO } from "./config.ts";
 
@@ -159,6 +159,31 @@ Deno.test("shell: the freshness age and the refresh interval reach both the text
   assertEquals(html.match(/location\.reload\(\)/g)?.length, 2);
   assertStringIncludes(html, `if (current.outerHTML === next.outerHTML) return current;`);
   assertStringIncludes(html, `nextScroller.scrollTop = scrollTop`);
+});
+
+Deno.test("formatViewerTimes: the viewer's formatter replaces the UTC fallback", () => {
+  const time = { dateTime: "2024-01-02T17:05:00Z", textContent: "17:05 UTC" };
+  const viewerTime = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/Los_Angeles",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  formatViewerTimes([time], viewerTime);
+  assertEquals(time.textContent, "09:05");
+});
+
+Deno.test("shell: the browser runs the viewer-time formatter", () => {
+  const html = shell("", "", 0, 30_000, SHELL_VERSION);
+  const source = formatViewerTimes.toString();
+  assertStringIncludes(source, `time[data-viewer-time][datetime]`);
+  assert(!source.includes("timeZone"), "the default formatter must use the viewer's timezone");
+  assertStringIncludes(html, source);
+  assertStringIncludes(html, "formatViewerTimes();");
+  assertStringIncludes(
+    html,
+    `formatViewerTimes(template.content.querySelectorAll('time[data-viewer-time][datetime]'));`,
+  );
 });
 
 Deno.test("shell: the repo name in the header is escaped", () => {
