@@ -8,8 +8,8 @@ import { REPO } from "./config.ts";
 // styles, client code, or the update payload shape.
 export const SHELL_VERSION = 2;
 
-export function renderTile(v: TileView, id?: string): string {
-  const cls = `tile ${v.status}${v.href ? " link" : ""}${v.wide ? " wide" : ""}`;
+export function renderTile(v: TileView, id?: string, wide = false): string {
+  const cls = `tile ${v.status}${v.href ? " link" : ""}${wide ? " wide" : ""}`;
   const key = id ? ` data-tile-id="${escapeHtml(id)}"` : "";
   const dot = `<span class="dot ${STATUS_DOT[v.status]}"></span>`;
   const hint = v.hint ? `<span class="drill">${escapeHtml(v.hint)}</span>` : "";

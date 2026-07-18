@@ -37,8 +37,8 @@ function updateFromEvent(event: string): TestUpdate {
 
 // The rendered markup for one tile, keyed off its header label. The returned
 // string starts with the tile's status classes.
-function tileHtml(label: string): string {
-  const parts = page().split(`<div class="tile `);
+function tileHtml(label: string, html = page()): string {
+  const parts = html.split(`<div class="tile `);
   const hit = parts.filter((p) => p.includes(`</span> ${label}<span class="spacer">`));
   assertEquals(hit.length, 1, `expected exactly one tile labelled "${label}"`);
   return hit[0];
@@ -52,18 +52,27 @@ Deno.test("healthz: not ok until the board has collected something", async () =>
   assertEquals(await res.json(), { ok: false, at: 0 });
 });
 
-Deno.test("a tile that has never succeeded falls back to a gray tile labelled with its id", async () => {
-  await tick([fake("labs-ci", () => {
-    throw new Error("HTTP 404: Not Found");
-  })]);
-  const html = tileHtml("labs-ci"); // no view to keep, so the id stands in for the label
-  assert(html.startsWith(`unknown" data-tile-id="labs-ci">`)); // gray, never a color it hasn't earned
-  assertStringIncludes(html, `<p class="big unknown">—</p>`);
-  assertStringIncludes(html, `<p class="sub">not found</p>`); // the short reason, not the raw error
+Deno.test("registered tiles render before their first collection completes", () => {
+  const html = page(new Map());
+  for (const tile of TILES) {
+    assertStringIncludes(
+      html,
+      `</span> ${tile.id}<span class="spacer"></span>`,
+    );
+  }
+  assert(tileHtml("recent-runs", html).startsWith(`unknown wide" data-tile-id="recent-runs">`));
 });
 
-Deno.test("a tile whose collect throws keeps its last good view, desaturated to gray", async () => {
-  const good: TileView = { label: "recent main runs", status: "good", value: "passing", sub: "10 runs", wide: true };
+Deno.test("a tile stays wide through failures and keeps its last good view", async () => {
+  await tick([fake("recent-runs", () => {
+    throw new Error("HTTP 404: Not Found");
+  })]);
+  const firstFailure = tileHtml("recent-runs");
+  assert(firstFailure.startsWith(`unknown wide" data-tile-id="recent-runs">`));
+  assertStringIncludes(firstFailure, `<p class="big unknown">—</p>`);
+  assertStringIncludes(firstFailure, `<p class="sub">not found</p>`);
+
+  const good: TileView = { label: "recent main runs", status: "good", value: "passing", sub: "10 runs" };
   await tick([fake("recent-runs", () => good)]);
   assert(tileHtml("recent main runs").startsWith(`good wide" data-tile-id="recent-runs">`));
 
@@ -71,9 +80,9 @@ Deno.test("a tile whose collect throws keeps its last good view, desaturated to 
     throw new Error("error sending request for url");
   })]);
   const html = tileHtml("recent main runs");
-  assert(html.startsWith(`unknown wide" data-tile-id="recent-runs">`)); // gray, and still full-width
-  assertStringIncludes(html, `<p class="big unknown">passing</p>`); // the last-known value stays on the wall
-  assertStringIncludes(html, `<p class="sub">source unreachable</p>`); // and says why it can't tell
+  assert(html.startsWith(`unknown wide" data-tile-id="recent-runs">`));
+  assertStringIncludes(html, `<p class="big unknown">passing</p>`);
+  assertStringIncludes(html, `<p class="sub">source unreachable</p>`);
 });
 
 Deno.test("the ticker leaves a tile alone until its interval has elapsed", async () => {
@@ -105,6 +114,33 @@ Deno.test("a tick that is still running makes the next tick a no-op", async () =
   assertEquals(collects, 0, "the overlapping tick collected nothing");
   release({ label: "labs ci", status: "good", value: "passing" });
   await slow;
+});
+
+Deno.test("each completed collection is published while slower tiles are still running", async () => {
+  const messages: string[] = [];
+  const client = {
+    enqueue(value: Uint8Array) {
+      messages.push(dec.decode(value));
+    },
+  } as unknown as ReadableStreamDefaultController<Uint8Array>;
+  clients.add(client);
+  let beforeSlow: string[] = [];
+  try {
+    await tick([
+      fake("labs-ci", () => ({ label: "fast", status: "good" })),
+      fake("loom-ci", async () => {
+        await Promise.resolve();
+        beforeSlow = [...messages];
+        return { label: "slow", status: "good" };
+      }),
+    ]);
+  } finally {
+    clients.delete(client);
+  }
+  assertEquals(beforeSlow.length, 1);
+  assertStringIncludes(updateFromEvent(beforeSlow[0]).gridHtml, "fast");
+  assertEquals(messages.length, 2);
+  assertStringIncludes(updateFromEvent(messages[1]).gridHtml, "slow");
 });
 
 Deno.test("sse: /events opens a stream, tick pushes new tile markup, disconnect drops the client", async () => {

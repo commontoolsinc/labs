@@ -11,6 +11,7 @@ import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, RECENT_DISPLAY, RECENT_WINDOW
 export const recentRuns: Tile = {
   id: "recent-runs",
   intervalMs: 30_000,
+  wide: true,
   async collect(ctx): Promise<TileView> {
     // Two shared bases (labs + loom), merged newest-first and cut to the most
     // recent RECENT_DISPLAY across both.
@@ -50,7 +51,6 @@ export const recentRuns: Tile = {
     return {
       label: `recent main runs · ${runs.length} in window`,
       status,
-      wide: true,
       extra: `<div class="evscroll">${rows}</div>`,
     };
   },
