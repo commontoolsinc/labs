@@ -3,6 +3,7 @@
  *
  * Collects data domains across all marks and creates d3 scales.
  */
+// @deno-types="@types/d3-scale"
 import {
   type ScaleBand,
   scaleBand,
@@ -13,6 +14,7 @@ import {
   type ScaleTime,
   scaleTime,
 } from "d3-scale";
+// @deno-types="@types/d3-array"
 import { extent } from "d3-array";
 import type {
   ChartPadding,

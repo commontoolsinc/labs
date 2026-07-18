@@ -23,6 +23,47 @@ This guide covers coding standards, design principles, and build/test workflows 
 - Import either from `@commonfabric/api` (internal API) or
   `@commonfabric/api/interface` (external API), but not both.
 
+### Types for packages that ship none
+
+Some npm packages carry no type declarations of their own and are described by a
+separate `@types/*` package. Declaring that package in an import map is not what
+makes it apply. Deno looks for an `@types` package when it resolves through a
+`node_modules` directory, and this workspace does not use one, so the
+declaration alone leaves the package fetched and unused. The import then types
+as `any`, and nothing reports it: the import still resolves, and the type
+positions still fill, so a name like `ScaleBand` reads as a real type while
+standing for `any`.
+
+Point the import at its types with a `@deno-types` comment. Write the specifier
+bare so that it resolves through the import map, which keeps the version pinned
+in one place rather than repeated in every file that imports the package:
+
+```ts
+// Shown for illustration only.
+// @deno-types="@types/d3-scale"
+import { scaleBand } from "d3-scale";
+```
+
+Declare both packages in the import map of the package that imports them: the
+one supplying the code, and the one supplying its types.
+
+### Declared dependencies must be imported
+
+An import map that declares a dependency nothing imports carries dead weight: the
+package still downloads on install, and it can pin a second copy of something the
+rest of the tree already resolves. `deno outdated` never catches this, because it
+only reports packages that are behind — an unused dependency at its newest
+release is invisible to it. `deno task check-unused-deps` catches it instead. The
+check fails when an import map alias is imported by no source file in that map's
+scope, where a member's map covers only that member's files and the root map
+covers the whole workspace. It runs in CI alongside the other lockfile and lint
+checks.
+
+An `@types/*` alias reached only through a `@deno-types` comment still counts as
+imported, so wiring one up as above satisfies the check. A dependency that is
+declared without a local import on purpose goes in the allowlist in
+`tasks/check-unused-deps.ts` with a one-line reason.
+
 ## Code Design & Principles
 
 ### Error Handling

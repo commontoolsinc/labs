@@ -46,7 +46,6 @@
     "./sqlite/exec": "./v2/sqlite/exec.ts"
   },
   "imports": {
-    "@commonfabric/leb128": "jsr:@commonfabric/leb128",
     "@db/sqlite": "jsr:@db/sqlite@0.13.0",
     "@denosaurs/plug": "jsr:@denosaurs/plug@1",
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.0"
