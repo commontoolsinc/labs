@@ -83,15 +83,21 @@ export type LibrarySource =
   | { kind: "release" };
 
 /** `@db/sqlite` reads these vars behind a try/catch so a denied `--allow-env`
- *  falls through to its default rather than throwing; this does the same. A
- *  denied read is the only failure `Deno.env.get` raises for these constant key
- *  names — `NotCapable` on current Deno, `PermissionDenied` on older ones — so
- *  swallow it and report the var as unset. */
+ *  falls through to its default rather than throwing; this does the same. Only a
+ *  denied read is swallowed — `NotCapable` on current Deno, `PermissionDenied` on
+ *  older ones — and reported as the var being unset; any other failure is
+ *  unexpected and propagates. */
 function readEnv(key: string): string | undefined {
   try {
     return Deno.env.get(key);
-  } catch {
-    return undefined;
+  } catch (e) {
+    if (
+      e instanceof Deno.errors.NotCapable ||
+      e instanceof Deno.errors.PermissionDenied
+    ) {
+      return undefined;
+    }
+    throw e;
   }
 }
 
