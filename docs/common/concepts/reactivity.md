@@ -125,3 +125,21 @@ values with `.get()` inside `computed()`/`lift()`/handler bodies, just like a
 const game = Battleship({});
 const phase = computed(() => game.game.get().phase); // game.game: Writable<GameState>
 ```
+
+## User-Input Updates Are Rate-Shaped
+
+Reactive updates that originate from user input — a click reaching a handler,
+a keystroke flowing through a `$value` binding into your computeds and JSX —
+are delivered in realtime during normal interaction. Under sustained
+high-frequency input (a held key, scripted rapid events), delivery is
+throttled to about one update per second per pattern. Nothing is lost: every
+handler event is still delivered (a counter counts every click), and a
+`$value`-bound cell always shows the latest value when the update arrives.
+There is intentionally no opt-out — the throttle is a security measure that
+denies sandboxed patterns a fine-grained clock; see
+[Timing side-channel mitigations](../../specs/sandboxing/TIMING_SIDE_CHANNELS.md).
+
+Continuous-motion gestures (drawing, drag-tracking with a handler per
+pointer-move) are out of scope. Build continuous controls on `$value`-style
+bindings, which coalesce to the latest value, rather than on per-move event
+handlers.

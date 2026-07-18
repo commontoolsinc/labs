@@ -34,10 +34,13 @@ type JournalEntry = {
   space?: string;
 };
 
-function formatTimestamp(timestamp: number | undefined): string {
+function formatTimestamp(
+  timestamp: number | undefined,
+  nowMs: number,
+): string {
   if (!timestamp) return "";
   const date = new Date(timestamp);
-  const now = new Date();
+  const now = new Date(nowMs);
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMs / 3600000);
@@ -87,6 +90,10 @@ export default pattern<Record<string, never>>((_) => {
   const journalResult = wish<Array<JournalEntry>>({
     query: "#journal",
   });
+
+  // Current time, ticking every 60 seconds so relative-time labels
+  // ("just now", "5m ago", ...) refresh as time passes.
+  const nowCell = wish<number>({ query: "#now/60" });
 
   // Debug: stringify raw result for the debug panel
   const debugRaw = computed(() => {
@@ -197,7 +204,9 @@ export default pattern<Record<string, never>>((_) => {
                     color: "#666",
                   }}
                 >
-                  {formatTimestamp(entry.timestamp)}
+                  {nowCell.result == null
+                    ? ""
+                    : formatTimestamp(entry.timestamp, nowCell.result)}
                 </span>
               </div>
 

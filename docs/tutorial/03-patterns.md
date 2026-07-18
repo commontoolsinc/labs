@@ -260,11 +260,14 @@ Things worth noticing:
 ## What patterns may not do
 
 Pattern code runs sandboxed under SES (hardened JavaScript — Chapter 10), so
-some ambient capabilities are deliberately missing: `Date.now()`,
-`Math.random()`, `setTimeout`, `new Proxy()`. Use the provided
-`safeDateNow()` / `nonPrivateRandom()` from inside actions and handlers, and
-express "later" with reactivity rather than timers. Determinism isn't
-pedantry here: the same graph may be re-executed on a server, in another
+some ambient capabilities are gated. `Date.now()` (or `new Date()`) and
+`Math.random()` are the ordinary built-ins — nothing to import — but the
+sandbox allows them only inside an action or handler (the clock coarsened to
+one-second resolution) and throws if you call them in a `computed()`, a
+`lift()`, or the pattern body. `setTimeout` and `new Proxy()` are missing
+outright. Express "later" with reactivity rather than timers, and read a live
+clock inside a `computed()` through the reactive `#now` wish. Determinism
+isn't pedantry here: the same graph may be re-executed on a server, in another
 browser, or replayed after a conflict retry — nondeterministic body code
 would diverge.
 

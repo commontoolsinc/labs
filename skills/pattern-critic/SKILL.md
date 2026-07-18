@@ -17,14 +17,16 @@ the Priority Fixes list. If nothing fails, say so explicitly in two lines. Write
 the review to the output path you were given (in the factory:
 `reviews/critic-NN.md`).
 
-Be explicit about SES and determinism issues. Flag direct `Date.now()` or
-`Math.random()`, authored timers, and any call — including `safeDateNow()` /
-`nonPrivateRandom()` — made inside a re-running `computed()`/`lift()` without
-clear intent (non-idempotent use). Also flag bound-control self-feedback: if a
-`cf-*` form control is already bound to a cell, usually via `$value` or
-`$checked`, treat an event handler that writes the same value back into that
-same cell as a reactive-loop hazard unless it is clearly necessary and
-idempotent.
+Be explicit about SES and determinism issues. `Date.now()` (or no-argument
+`new Date()`) and `Math.random()` are the gated ambient intrinsics: allowed only
+inside a handler (the clock coarsened to one-second resolution) and throwing a
+TimeCapabilityError in a lift/computed or at pattern-body level. Flag any such
+call made inside a re-running `computed()`/`lift()` or at pattern-body level —
+it throws — and flag authored timers. For reactive time in a computed, the
+`#now` wish is the idiom. Also flag bound-control self-feedback: if a `cf-*`
+form control is already bound to a cell, usually via `$value` or `$checked`,
+treat an event handler that writes the same value back into that same cell as a
+reactive-loop hazard unless it is clearly necessary and idempotent.
 
 Also run the guide's advisory UI-idiom checks (category 15): hardcoded hex
 colors and inline typography in `style=`, `.set()`-only input handlers,

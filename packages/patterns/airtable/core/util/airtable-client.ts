@@ -68,7 +68,18 @@ export interface ListRecordsOptions {
 // HELPERS
 // ============================================================================
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+// The SES pattern sandbox endows no timers, so a real delay happens only in
+// host contexts that expose setTimeout; in-sandbox this resolves immediately
+// rather than throwing ReferenceError (retries stay ~1s apart anyway via the
+// gated fetch's grid-aligned settlement).
+const sleep = (ms: number): Promise<void> => {
+  if (ms <= 0) return Promise.resolve();
+  const timer = (globalThis as { setTimeout?: typeof setTimeout }).setTimeout;
+  if (typeof timer !== "function") return Promise.resolve();
+  return new Promise((resolve) => {
+    timer(resolve, ms);
+  });
+};
 
 function debugLog(debugMode: boolean, ...args: unknown[]) {
   if (debugMode) console.log("[AirtableClient]", ...args);
@@ -107,6 +118,9 @@ export function AirtableClient(
 
   /**
    * Make an authenticated API request with retry and token refresh.
+   * Call this only from handler code: the sandbox fetch is handler-only
+   * (it throws in a lift/computed or the pattern body) and its settlement
+   * is coarsened to one-second resolution.
    */
   async function request<T>(
     url: string,

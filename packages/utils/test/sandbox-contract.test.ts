@@ -36,8 +36,6 @@ describe("sandbox-contract", () => {
     expect([...TRUSTED_DATA_HELPERS]).toEqual([
       "schema",
       "__cf_data",
-      "nonPrivateRandom",
-      "safeDateNow",
     ]);
   });
 

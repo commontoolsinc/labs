@@ -23,6 +23,7 @@ import {
   getPatternIdentityRef,
   isCell,
   isCellResult,
+  markRendererInputTx,
   markUiInputBlindWriteTx,
   Runtime,
   runtimePresets,
@@ -918,6 +919,10 @@ export class RuntimeProcessor {
     const value = mapCellRefsToSigilLinks(request.value);
     if (blind) {
       markUiInputBlindWriteTx(tx);
+      // Renderer-input provenance that survives to commit, so the scheduler can
+      // shape the resulting subscriber wake (timing side-channel mitigation,
+      // channels 4/5). A `blind` write is exactly a renderer `$value` input write.
+      markRendererInputTx(tx);
       // The resolved storage address of the write target; its parent is the
       // structural existence/shape precondition for the blind write.
       const link = cell.withTx(tx).resolveAsCell().getAsNormalizedFullLink();

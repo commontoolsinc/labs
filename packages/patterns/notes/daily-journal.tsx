@@ -9,7 +9,6 @@ import {
   NAME,
   navigateTo,
   pattern,
-  safeDateNow,
   Stream,
   toSchema,
   UI,
@@ -30,7 +29,9 @@ const toLocalISODate = (d: Date): string => {
   return `${y}-${m}-${day}`;
 };
 
-const getTodayDate = (): string => toLocalISODate(new Date(safeDateNow()));
+// `nowMs` is the current time in epoch ms (handler callers pass Date.now();
+// lift/body callers pass the reactive #now value).
+const getTodayDate = (nowMs: number): string => toLocalISODate(new Date(nowMs));
 
 const journalTitle = (dateStr: string): string => {
   const d = new Date(dateStr + "T00:00:00");
@@ -110,7 +111,7 @@ const handleGoToToday = handler<
     addPiece: Stream<{ piece: MentionablePiece }>;
   }
 >((_event, { entries, template, selectedDate, addPiece }) => {
-  const dateStr = getTodayDate();
+  const dateStr = getTodayDate(Date.now());
   selectedDate.set(dateStr);
 
   const all = entries.get();
@@ -190,7 +191,16 @@ export default pattern<DailyJournalInput, DailyJournalOutput>(
 
     // UI state
     const showSettings = new Writable(false);
-    const selectedDate = new Writable(getTodayDate());
+    // Reactive #now; the date input defaults to today once it resolves (the
+    // ambient clock is not available at pattern body).
+    const nowCell = wish<number>({ query: "#now" });
+    const selectedDate = new Writable("");
+    computed(() => {
+      const nowMs = nowCell.result;
+      if (nowMs != null && selectedDate.get() === "") {
+        selectedDate.set(getTodayDate(nowMs));
+      }
+    });
 
     // Dates that already have a journal entry (for calendar markers)
     const datesWithNotes = computed(() => {
@@ -244,7 +254,8 @@ export default pattern<DailyJournalInput, DailyJournalOutput>(
 
     // Gather last 7 days of note content for the system prompt
     const recentNotesContext = computed(() => {
-      const now = safeDateNow();
+      const now = nowCell.result;
+      if (now == null) return [];
       const today = new Date(now);
       const sevenDaysAgo = new Date(now);
       sevenDaysAgo.setDate(today.getDate() - 7);

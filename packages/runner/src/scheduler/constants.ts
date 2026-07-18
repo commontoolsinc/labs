@@ -31,6 +31,12 @@ export const CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES = 3;
 export const MAX_SETTLE_STATS_HISTORY = 20;
 export const MAX_TRIGGER_TRACE_HISTORY = 400;
 export const MAX_ACTION_RUN_TRACE_HISTORY = 2000;
+// W4 (timing side-channel): the maximum number of pending events one stream may
+// hold for one handler before further enqueues collapse into the last pending
+// entry (last-wins). Bounds the post-block backlog a pattern can observe as an
+// event count, so the "block-and-count" timer cannot grow without limit. Well
+// above any normal burst, so it never changes ordinary delivery.
+export const MAX_EVENT_BACKLOG_PER_STREAM = 256;
 export const MAX_RETRIES_FOR_REACTIVE = 10;
 export const AUTO_DEBOUNCE_THRESHOLD_MS = 50;
 export const AUTO_DEBOUNCE_MIN_RUNS = 3;

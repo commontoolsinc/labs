@@ -14,6 +14,7 @@ import {
   NAME,
   pattern,
   UI,
+  wish,
   Writable,
 } from "commonfabric";
 
@@ -58,10 +59,10 @@ function formatTime(dateStr: string): string {
 }
 
 // Get relative date label
-function getRelativeLabel(dateStr: string): string {
+function getRelativeLabel(dateStr: string, nowMs: number): string {
   try {
     const date = new Date(dateStr);
-    const today = new Date();
+    const today = new Date(nowMs);
     today.setHours(0, 0, 0, 0);
     const eventDate = new Date(date);
     eventDate.setHours(0, 0, 0, 0);
@@ -110,6 +111,10 @@ export default pattern<{
 }>(({ events }) => {
   const hiddenCalendars = new Writable<string[]>([]);
 
+  // Reactive clock (ticks every 60s) used for relative date labels and the
+  // upcoming-events filter so they refresh as time passes.
+  const nowCell = wish<number>({ query: "#now/60" });
+
   const eventCount = events?.length ?? 0;
 
   // Extract unique calendar names for the filter bar
@@ -126,7 +131,8 @@ export default pattern<{
 
   // Upcoming events (sorted by start date, filtered by hidden calendars)
   const upcomingEvents = computed(() => {
-    const now = new Date();
+    if (nowCell.result == null) return [];
+    const now = new Date(nowCell.result);
     const hiddenSet = new Set(hiddenCalendars.get() || []);
     return [...(events || [])]
       .filter((e: CalendarEvent) =>
@@ -327,7 +333,10 @@ export default pattern<{
                           <div style={{ flex: 1 }}>
                             <div style={{ fontWeight: "600" }}>{evt.title}</div>
                             <div style={{ fontSize: "14px", color: "#666" }}>
-                              {getRelativeLabel(evt.startDate)} {evt.isAllDay
+                              {nowCell.result == null ? "" : getRelativeLabel(
+                                evt.startDate,
+                                nowCell.result,
+                              )} {evt.isAllDay
                                 ? "(All day)"
                                 : formatTime(evt.startDate)}
                             </div>

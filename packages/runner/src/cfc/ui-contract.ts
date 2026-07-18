@@ -121,7 +121,7 @@ export const propagateRendererTrustedEvent = (
   }
 };
 
-const isRendererTrustedEvent = (event: unknown): boolean =>
+export const isRendererTrustedEvent = (event: unknown): boolean =>
   isRecord(event) && rendererTrustedEvents.has(event);
 
 const trustRequirementsFromContract = (

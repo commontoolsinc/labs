@@ -194,16 +194,18 @@ are:
 - do not rely on authored timers or proxies:
   - `setTimeout()`, `setInterval()`, and `new Proxy()` are not part of the
     authored runtime surface yet
-- use explicit time/random escape hatches only when needed:
-  - use `safeDateNow()` instead of `Date.now()`
-  - use `nonPrivateRandom()` instead of `Math.random()`
-  - prefer calling them from `action()`, `handler()`, or one-time
-    initialization rather than inside re-running computations such as
-    `computed()` or `lift()`
-
-The current exported helper names are `safeDateNow()` and
-`nonPrivateRandom()`. Older shorthand such as `dateNow` or `insecureRandom`
-does not match the current API.
+- read the clock and randomness through the ordinary built-ins, only where
+  they belong:
+  - use `Date.now()` (or `new Date()`) for the clock and `Math.random()` for
+    randomness — inside a pattern these resolve to the gated sandbox
+    intrinsics, not the host ones
+  - call them from `action()`, `handler()`, or one-time initialization only.
+    In a re-running computation (`computed()` or `lift()`) they throw a
+    `TimeCapabilityError`, because an ambient clock/entropy read there would
+    break idempotency. Inside a handler the clock is coarsened to one-second
+    resolution.
+  - for a live clock a `computed()` can react to, read the `#now` wish
+    (`wish({ query: "#now" })` or `#now/N`) instead
 
 Locale-sensitive formatting works, with pinned defaults:
 
@@ -225,8 +227,8 @@ Locale-sensitive formatting works, with pinned defaults:
 // Shown inside a pattern body.
 const createItem = action(() => {
   items.push({
-    id: `item-${nonPrivateRandom().toString(36).slice(2, 8)}`,
-    createdAt: safeDateNow(),
+    id: `item-${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: Date.now(),
     title: title.get(),
   });
 });

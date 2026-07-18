@@ -64,8 +64,8 @@ import {
   Default,
   handler,
   pattern,
-  safeDateNow,
   Stream,
+  wish,
   Writable,
 } from "commonfabric";
 import GmailExtractor from "../gmail-extractor.tsx";
@@ -263,9 +263,10 @@ export function processBills(
   paymentConfirmations: Readonly<Record<string, readonly string[]>>,
   manuallyPaidKeys: readonly string[],
   isDemoMode: boolean,
+  nowMs: number,
 ): TrackedBill[] {
   const billMap: Record<string, TrackedBill> = {};
-  const today = new Date(safeDateNow());
+  const today = new Date(nowMs);
   today.setHours(0, 0, 0, 0);
 
   const sortedAnalyses = [...(rawAnalyses || [])]
@@ -411,14 +412,20 @@ const BillExtractor = pattern<BillExtractorInput, BillExtractorOutput>(
       return sortedResult;
     });
 
+    // Reactive #now (ticks each minute) so due-date/overdue math refreshes as
+    // the day boundary advances, instead of reading the ambient clock in a lift.
+    const nowCell = wish<number>({ query: "#now/60" });
+
     // Process analyses and build bill list with domain-specific logic
     const bills = computed(() => {
+      const nowMs = nowCell.result;
+      if (nowMs == null) return [];
       const billMap: Record<string, TrackedBill> = {};
       // Use .get() to access Writable values inside computed
       const paidKeys = manuallyPaid?.get() || [];
       const payments = paymentConfirmations || {};
       const isDemoMode = demoMode?.get() ?? true;
-      const today = new Date(safeDateNow());
+      const today = new Date(nowMs);
       today.setHours(0, 0, 0, 0);
 
       const sortedAnalyses = [...(extractor.rawAnalyses || [])]

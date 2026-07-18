@@ -10,7 +10,6 @@ import {
   pattern,
   type PerSession,
   type PerUser,
-  safeDateNow,
   SELF,
   Stream,
   UI,
@@ -331,7 +330,7 @@ export default pattern<TopicInput, TopicOutput>(
         // headless caller that never set a name) — same guard as myNameView.
         authorName: (myName.get() ?? "").trim() || "someone",
         body: trimmed,
-        sentAt: safeDateNow(),
+        sentAt: Date.now(),
       });
     });
 

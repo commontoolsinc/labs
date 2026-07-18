@@ -40,9 +40,10 @@ hardening of module-scope definitions at load time.
 5. **Verified Module-Safe Data**: Any other top-level value must be proven to
    be a versioned, recursively inert subset of `FabricValue` and then
    hardened by a custom checker/freezer. Computing that value via an IIFE is
-   allowed only if the final result passes this verifier. Transitional explicit
-   snapshot helpers such as `safeDateNow()` and `nonPrivateRandom()` are
-   allowed as narrow exceptions and return plain data.
+   allowed only if the final result passes this verifier. The gated ambient
+   clock/entropy intrinsics (`Date.now()`, no-argument `new Date()`,
+   `Math.random()`) are allowed as narrow exceptions inside a handler and
+   return plain data.
 6. **Compiler Assists, Runner Enforces**: Transformers may annotate or rewrite
    code to reduce runtime parsing cost, but compiler output is not trusted and
    the runner must verify the final code boundary.
@@ -355,10 +356,11 @@ accept proxy-backed host/runtime values that already exist and materialize them
 once into inert data. That is a compatibility boundary, not an authored escape
 hatch.
 
-Direct ambient `Date.now()` and `Math.random()` are not relied upon as the
-stable SES contract. Pattern authors should call `safeDateNow()` and
-`nonPrivateRandom()` explicitly, and the verifier treats those helpers as
-explicit narrow exceptions that yield plain data snapshots.
+The sandbox replaces ambient `Date.now()` / `new Date()` / `Math.random()` with
+gated intrinsics, and those are the stable SES contract: pattern authors call
+the built-ins directly, the runtime coarsens the clock to one-second resolution
+inside a handler, and it forbids any ambient clock/entropy read in a
+lift/computed or at pattern body.
 
 Version 1 of the allowed domain is a deliberate subset of
 `@commonfabric/memory`'s `FabricValue`:
@@ -2279,9 +2281,14 @@ const startTime = Date.now();  // Side effect at module scope
 **After:**
 ```typescript
 // Shown at module scope.
-import { safeDateNow } from "commonfabric";
-
-const getStartTime = lift(() => safeDateNow());
+// A lift/computed may not read the ambient clock, so capture the start time
+// inside a handler, where `Date.now()` is allowed (coarsened to one second)
+// and writes it into a cell.
+const captureStart = handler<unknown, { startTime: Writable<number> }>(
+  (_event, { startTime }) => {
+    startTime.set(Date.now());
+  },
+);
 ```
 
 #### Patterns with mutable module-scope state

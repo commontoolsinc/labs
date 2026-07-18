@@ -186,8 +186,8 @@ compilation cache), so opening a piece doesn't recompile it per client.
 ## Where compiled code runs
 
 Compiled pattern code executes inside an SES (hardened JavaScript)
-environment in the runtime's process — that's the "no `Date.now()`" rule
-from Chapter 3. For fully untrusted *rendered* content there's a second,
+environment in the runtime's process — that's the time-capability gate on
+`Date.now()` from Chapter 3. For fully untrusted *rendered* content there's a second,
 stronger boundary: `packages/iframe-sandbox` runs guest HTML/JS inside a
 double iframe (an outer `srcdoc` iframe that pins a strict
 Content-Security-Policy, enclosing an inner iframe with the guest code),

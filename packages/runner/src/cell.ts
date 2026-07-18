@@ -1255,6 +1255,18 @@ export class CellImpl<T extends FabricValue>
     // Check if we're dealing with a stream
     if (this.isStream(resolvedToValueLink)) {
       // Stream behavior
+
+      // A lift (reactive computation) must be pure: emitting an event from a
+      // lift is a feedback loop that breaks reactive settling. Gate only the
+      // positive "lift" frame — internal/renderer event delivery and handler
+      // emits run in other frames and pass through.
+      if (getTopFrame()?.frameKind === "lift") {
+        throw new Error(
+          "Cannot emit an event from a lift/computed context: a lift must be " +
+            "pure. Send to streams from a handler instead.",
+        );
+      }
+
       const event = convertCellsToLinks(newValue) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
 

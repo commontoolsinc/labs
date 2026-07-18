@@ -180,6 +180,16 @@ export interface TriggerTraceEntry {
 export type QueuedEvent = {
   /** Durable event id minted at send (spec §7.5). */
   readonly id: string;
+  /**
+   * The wall-clock instant (ms) bound to this event, captured at its causal
+   * origin: carried forward unchanged from the emitting handler's frame, or a
+   * fresh reading for a renderer/root event. The dispatching handler's ambient
+   * clock reads this (coarsened) instead of the live clock. See Frame.eventTime.
+   * Mutable because the backlog-cap collapse rewrites the surviving entry with
+   * the newest event's payload and time (last-wins), so the dispatched handler
+   * reads the instant of the event that actually dispatches.
+   */
+  time?: number;
   /** The transaction whose handler sent this event, when transactional. */
   readonly originTx?: IExtendedStorageTransaction;
   eventLink: NormalizedFullLink;

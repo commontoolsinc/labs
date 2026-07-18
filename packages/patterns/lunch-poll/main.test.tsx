@@ -11,7 +11,7 @@
  * are covered by multi-user.test.tsx.
  */
 
-import { action, computed, pattern, safeDateNow, UI } from "commonfabric";
+import { action, computed, pattern, UI, wish } from "commonfabric";
 import { findNode, propsOf, readValue } from "../test/vnode-helpers.ts";
 import CozyPoll, { dayKeyOf, type Option, type Vote } from "./main.tsx";
 
@@ -34,18 +34,28 @@ const SEEDED_OPTION: Option = {
 export default pattern(() => {
   const poll = CozyPoll({});
 
-  // One-time clock reads at pattern-body init (module scope must stay plain
-  // data in SES mode): "yesterday" for the seeded stale vote, and the day key
-  // the pattern is expected to filter to.
-  const STALE_CAST_AT = safeDateNow() - 86_400_000;
-  const TODAY_KEY = dayKeyOf(safeDateNow());
+  // Reference times derive from the one-shot `#now` wish (the pattern body
+  // cannot read the ambient clock — mirrors how the pattern under test gets
+  // its own "today"): "yesterday" for the seeded stale vote, and the day key
+  // the pattern is expected to filter to. Both read as unresolved
+  // (undefined / "") until `#now` resolves; the dependent assertions guard
+  // that window and the harness re-evaluates them once the wish lands.
+  const nowCell = wish<number>({ query: "#now" });
+  const staleCastAt = computed(() =>
+    nowCell.result == null ? undefined : nowCell.result - 86_400_000
+  );
+  const todayKey = computed(() =>
+    nowCell.result == null ? "" : dayKeyOf(nowCell.result)
+  );
 
   // A vote cast "yesterday" — stored, but hidden by the current-day filter.
+  // `castAt` resolves with the wish; until then it reads undefined, which
+  // the filter also treats as not-today.
   const STALE_VOTE: Vote = {
     voterName: "Stan",
     optionId: "opt-seeded",
     voteType: "green",
-    castAt: STALE_CAST_AT,
+    castAt: staleCastAt,
   };
 
   // Second instance seeded with a stale vote, for the current-day filter
@@ -293,15 +303,23 @@ export default pattern(() => {
   // === Current-day vote filter ===
 
   // The header renders the session's date, and `todayDate` exposes the local
-  // day key the votes are filtered to.
+  // day key the votes are filtered to. The `todayKey !== ""` guard holds the
+  // assertion false until this pattern's `#now` wish resolves.
   const assert_today_header_renders = computed(() =>
+    todayKey !== "" &&
     findNodeByProp(poll[UI], "data-poll-today", true) !== undefined &&
-    poll.todayDate === TODAY_KEY
+    poll.todayDate === todayKey
   );
 
   // The seeded stale vote is stored but hidden: absent from `todaysVotes`,
-  // the count, and the rendered swatches.
+  // the count, and the rendered swatches. Guarded on both `#now` reads —
+  // this pattern's (`todayKey`, which also resolves the seeded `castAt`) and
+  // the poll's own (via `todayDate`) — so it passes only once the day filter
+  // is live and the vote really is dated yesterday, not merely during the
+  // load window's empty vote view.
   const assert_stale_vote_hidden = computed(() =>
+    todayKey !== "" &&
+    stalePoll.todayDate === todayKey &&
     stalePoll.votes.length === 1 &&
     stalePoll.todaysVotes.length === 0 &&
     stalePoll.todayVoteCount === 0 &&
@@ -323,11 +341,12 @@ export default pattern(() => {
   // visible again (list, count, and swatch).
   const assert_stale_recast_visible = computed(() => {
     const v = stalePoll.todaysVotes[0];
-    return stalePoll.todaysVotes.length === 1 &&
+    return todayKey !== "" &&
+      stalePoll.todaysVotes.length === 1 &&
       v?.voterName === "Stan" &&
       v?.voteType === "green" &&
       typeof v?.castAt === "number" &&
-      dayKeyOf(v.castAt) === TODAY_KEY &&
+      dayKeyOf(v.castAt) === todayKey &&
       stalePoll.todayVoteCount === 1 &&
       findNodeByProp(stalePoll[UI], "data-vote-swatch-name", "Stan") !==
         undefined;

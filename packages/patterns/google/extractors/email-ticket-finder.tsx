@@ -20,9 +20,9 @@ import {
   JSONSchema,
   NAME,
   pattern,
-  safeDateNow,
   TILE_UI,
   UI,
+  wish,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
 import GmailExtractor from "../core/gmail-extractor.tsx";
@@ -581,6 +581,10 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     )
   );
 
+  // Reactive current time, ticking each minute so the day-relative status
+  // (today / days-until-event) refreshes as the day rolls over.
+  const nowCell = wish<number>({ query: "#now/60" });
+
   // ==========================================================================
   // TICKET TRACKING
   // Build deduplicated list of tickets
@@ -589,8 +593,12 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   const tickets = computed(() => {
     const ticketMap = new Map<string, TrackedTicket>();
 
+    // No reference time yet during load: return no tickets rather than
+    // categorizing against an arbitrary date.
+    if (nowCell.result == null) return [];
+
     // Create a single reference date for deterministic calculations
-    const today = new Date(safeDateNow());
+    const today = new Date(nowCell.result);
     today.setHours(0, 0, 0, 0);
 
     // Sort emails by date (newest first) so we keep most recent data

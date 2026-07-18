@@ -4,7 +4,6 @@ import {
   handler,
   NAME,
   pattern,
-  safeDateNow,
   type Stream,
   UI,
   type VNode,
@@ -54,7 +53,7 @@ const joinAs = handler<JoinEvent, {
       name: trimmed,
       avatar: override ? "" : (profileAvatar ?? "").trim(),
       color: colorForIndex(existing.length),
-      joinedAt: safeDateNow(),
+      joinedAt: Date.now(),
     };
     users.push(user);
     myName.set(trimmed);

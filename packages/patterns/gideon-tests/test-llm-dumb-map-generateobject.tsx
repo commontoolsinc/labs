@@ -35,9 +35,7 @@ import {
   generateObject,
   handler,
   NAME,
-  nonPrivateRandom,
   pattern,
-  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";
@@ -66,9 +64,7 @@ const addItem = handler<
     if (!content) return;
 
     items.push({
-      id: `item-${safeDateNow()}-${
-        nonPrivateRandom().toString(36).slice(2, 9)
-      }`,
+      id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       content,
     });
   },

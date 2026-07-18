@@ -152,20 +152,17 @@ state changes. If agents report "learned" entries that don't show up in
 
 ### Secure-mode time/random pitfalls in handlers
 
-Pattern handlers and actions may run under SES secure mode. Avoid raw zero-arg
-`new Date()` and `Math.random()` inside authored patterns — both can throw under
-secure mode.
-
-Use Common Fabric safe builtins instead:
+The pattern sandbox gates the ambient intrinsics `Date.now()`, no-argument
+`new Date()`, and `Math.random()`. They are allowed **inside a handler** (the
+clock coarsened to one-second resolution; entropy passes through) and throw a
+`TimeCapabilityError` in a lift/computed or at pattern-body level. Call the
+built-ins directly — they are not importable helpers.
 
 ```ts
-import { nonPrivateRandom, safeDateNow } from "commonfabric";
-
-const now = safeDateNow();
+// Inside a handler.
+const now = Date.now();
 const iso = new Date(now).toISOString();
-const id = `${now.toString(36)}-${
-  nonPrivateRandom().toString(36).slice(2, 11)
-}`;
+const id = `${now.toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 ```
 
 This specifically matters for:
@@ -174,23 +171,26 @@ This specifically matters for:
 - `agent.tsx` lifecycle handlers (`markIdle`, `markError`)
 - any handler-generated IDs or timestamps in experiment support patterns
 
-For event IDs in authored patterns, avoid `Math.random()` too. A safe pattern
-is:
+For event IDs in authored patterns, `Math.random()` is fine inside a handler:
 
 ```ts
-const now = safeDateNow();
-const id = `${now.toString(36)}-${
-  nonPrivateRandom().toString(36).slice(2, 11)
-}`;
+// Inside a handler.
+const now = Date.now();
+const id = `${now.toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 const timestamp = new Date(now).toISOString();
 ```
+
+For reactive time in a computed, read the live clock with the `#now` wish rather
+than calling `Date.now()`.
 
 If a handler fails with messages like:
 
 - `secure mode Calling new %SharedDate%() with no arguments throws`
 - `secure mode %SharedMath%.random() throws`
+- a `TimeCapabilityError`
 
-check the pattern source before assuming the agent invoked it incorrectly.
+check the pattern source — the clock/entropy call may be running in a
+lift/computed or at pattern-body level rather than inside a handler.
 
 ---
 
