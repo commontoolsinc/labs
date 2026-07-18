@@ -24,6 +24,10 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import {
+  currentPatternIntegrationShard,
+  selectPatternIntegrationShard,
+} from "./pattern-integration-shard.ts";
 
 const ROOT = join(import.meta.dirname!, "..");
 
@@ -117,26 +121,46 @@ const MIGRATED_OFFLINE_PATTERNS = [
 //   the in-memory store), which is unrelated to the time gate. It needs a
 //   verified-module environment to behaviorally verify.
 
-describe("capability gate (W1): patterns read the clock only in handlers", () => {
-  it("catches a lift-context clock read (negative control)", async () => {
-    const errors = await timeCapabilityErrors(
-      "integration/fixtures/lift-clock-violation.tsx",
-    );
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors[0]).toContain("ambient clock");
-  });
+interface CapabilityCase {
+  name: string;
+  run: () => Promise<void>;
+}
 
-  it("allows the #now reactive clock in a computed (positive control)", async () => {
-    const errors = await timeCapabilityErrors(
-      "integration/fixtures/lift-now-wish-ok.tsx",
-    );
-    expect(errors).toEqual([]);
-  });
-
-  for (const rel of MIGRATED_OFFLINE_PATTERNS) {
-    it(`materializes ${rel} with no lift-context clock read`, async () => {
+const CAPABILITY_CASES: CapabilityCase[] = [
+  {
+    name: "catches a lift-context clock read (negative control)",
+    run: async () => {
+      const errors = await timeCapabilityErrors(
+        "integration/fixtures/lift-clock-violation.tsx",
+      );
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors[0]).toContain("ambient clock");
+    },
+  },
+  {
+    name: "allows the #now reactive clock in a computed (positive control)",
+    run: async () => {
+      const errors = await timeCapabilityErrors(
+        "integration/fixtures/lift-now-wish-ok.tsx",
+      );
+      expect(errors).toEqual([]);
+    },
+  },
+  ...MIGRATED_OFFLINE_PATTERNS.map((rel): CapabilityCase => ({
+    name: `materializes ${rel} with no lift-context clock read`,
+    run: async () => {
       const errors = await timeCapabilityErrors(rel);
       expect(errors).toEqual([]);
-    });
+    },
+  })),
+];
+
+describe("capability gate (W1): patterns read the clock only in handlers", () => {
+  const cases = selectPatternIntegrationShard(
+    CAPABILITY_CASES,
+    currentPatternIntegrationShard(),
+  );
+  for (const testCase of cases) {
+    it(testCase.name, testCase.run);
   }
 });

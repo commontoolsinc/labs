@@ -46,7 +46,7 @@ import {
   downloadAndParsePerfMetricsDetailed,
   dropColdSamples,
   extractMetrics,
-  extractTestFileMetrics,
+  extractTimingArtifactMetrics,
   fetchArtifactsForRun,
   fetchCurrentPRBody,
   fetchJobsForRun,
@@ -62,9 +62,11 @@ import {
   MIN_REGRESSION_PCT,
   MIN_SAMPLES,
   newestArtifactsByName,
+  newestTimingArtifacts,
   parseAddedLinesFromPatch,
   parseBaselineOverrides,
   parseCacheStateFiles,
+  type ParsedTimingArtifact,
   PERF_METRICS_ARTIFACT_NAME,
   PERF_METRICS_BACKFILL_ARTIFACT_NAME,
   PERF_METRICS_BACKFILL_FILE,
@@ -76,7 +78,6 @@ import {
   REPO,
   shouldGateCoverageDebtMetric,
   STDDEV_FACTOR,
-  timingArtifactLabel,
   type TimingSample,
   walkFiles,
   WORKFLOW_FILE,
@@ -1454,27 +1455,27 @@ export async function main() {
   });
   fillMissingFamiliesFromFingerprint(currentCacheStates, inferredRunState);
 
-  // Extract per-test metrics from JUnit artifacts
+  // Extract per-test metrics from JUnit artifacts.
+  const parsedTimingArtifacts: ParsedTimingArtifact[] = [];
   try {
     // Newest per name: a re-run of a flagged test job must refresh its metric.
-    const timingArtifacts = newestArtifactsByName(currentArtifacts.filter(
-      (a) => a.name.startsWith("test-timing-") && !a.expired,
-    ));
+    const timingArtifacts = newestTimingArtifacts(currentArtifacts);
     for (const artifact of timingArtifacts) {
       const suites = await downloadAndParseJUnit(artifact.id);
-      const testMetrics = extractTestFileMetrics(
-        currentRunInfo,
-        timingArtifactLabel(artifact.name),
-        suites,
-      );
-      for (const [name, sample] of testMetrics) {
-        currentMetrics.set(name, sample);
-      }
+      parsedTimingArtifacts.push({ name: artifact.name, suites });
     }
   } catch (e) {
     console.warn(
       `  Warning: could not extract timing metrics from current run artifacts: ${e}`,
     );
+  }
+  for (
+    const [name, sample] of extractTimingArtifactMetrics(
+      currentRunInfo,
+      parsedTimingArtifacts,
+    )
+  ) {
+    currentMetrics.set(name, sample);
   }
 
   // Extract coverage debt metrics from coverage profile artifacts.
@@ -1672,29 +1673,28 @@ export async function main() {
 
         // Fetch per-test timing artifacts
         let canBackfill = true;
+        const parsedTimingArtifacts: ParsedTimingArtifact[] = [];
         try {
-          const timingArtifacts = artifacts.filter(
-            (a) => a.name.startsWith("test-timing-") && !a.expired,
-          );
+          const timingArtifacts = newestTimingArtifacts(artifacts);
           for (const artifact of timingArtifacts) {
             const suites = await downloadAndParseJUnit(artifact.id);
             if (suites.length === 0) {
               canBackfill = false;
               continue;
             }
-            const testMetrics = extractTestFileMetrics(
-              run,
-              timingArtifactLabel(artifact.name),
-              suites,
-            );
-            for (const [name, sample] of testMetrics) {
-              metrics.set(name, sample);
-              addSample(timelines, name, sample);
-            }
+            parsedTimingArtifacts.push({ name: artifact.name, suites });
           }
         } catch {
           // Artifacts may not exist for older runs
           canBackfill = false;
+        }
+        const testMetrics = extractTimingArtifactMetrics(
+          run,
+          parsedTimingArtifacts,
+        );
+        for (const [name, sample] of testMetrics) {
+          metrics.set(name, sample);
+          addSample(timelines, name, sample);
         }
 
         if (metrics.size > 0 && canBackfill) {

@@ -25,6 +25,7 @@ import {
   downloadAndExtractArtifact,
   dropColdSamples,
   extractMetrics,
+  extractTimingArtifactMetrics,
   fetchArtifactsForRun,
   fetchCurrentPRBody,
   fetchPRBody,
@@ -37,6 +38,7 @@ import {
   type Job,
   latestNonColdSample,
   newestArtifactsByName,
+  newestTimingArtifacts,
   parseAddedLinesFromPatch,
   parseBaselineOverrides,
   parseCacheStateFiles,
@@ -471,6 +473,47 @@ Deno.test("timingArtifactLabel normalizes matrix shard artifacts", () => {
     timingArtifactLabel("test-timing-package-integration"),
     "package-integration",
   );
+});
+
+Deno.test("timing artifacts combine internally sharded suites once per run", () => {
+  const suiteName =
+    "packages/patterns/integration/time-capability-full.test.ts";
+  const metrics = extractTimingArtifactMetrics(makeRun(), [
+    {
+      name: "test-timing-pattern-integration-1",
+      suites: [{
+        name: suiteName,
+        time: 117,
+        tests: [{ name: "case a", time: 30 }],
+      }],
+    },
+    {
+      name: "test-timing-pattern-integration-2",
+      suites: [{
+        name: suiteName,
+        time: 50,
+        tests: [{ name: "case b", time: 20 }],
+      }],
+    },
+  ]);
+
+  assertEquals(
+    metrics.get(`test: pattern-integration/${suiteName}`)?.durationSeconds,
+    117,
+  );
+  assertEquals(
+    metrics.get(
+      `subtest: pattern-integration/${suiteName} > case a`,
+    )?.durationSeconds,
+    30,
+  );
+  assertEquals(
+    metrics.get(
+      `subtest: pattern-integration/${suiteName} > case b`,
+    )?.durationSeconds,
+    20,
+  );
+  assertEquals(metrics.size, 3);
 });
 
 Deno.test("perf metrics files round-trip stable metric samples", () => {
@@ -1697,6 +1740,34 @@ Deno.test("newestArtifactsByName keeps the latest re-run upload per name", () =>
     [
       ["test-timing-pattern-unit-1", 150],
       ["test-timing-pattern-unit-4", 200],
+    ],
+  );
+});
+
+Deno.test("newestTimingArtifacts drops stale, expired, and unrelated artifacts", () => {
+  const artifact = (
+    id: number,
+    name: string,
+    expired = false,
+  ): Artifact => ({
+    id,
+    name,
+    size_in_bytes: 1,
+    expired,
+  });
+  const result = newestTimingArtifacts([
+    artifact(200, "test-timing-pattern-integration-3"),
+    artifact(150, "test-timing-pattern-integration-1"),
+    artifact(100, "test-timing-pattern-integration-3"),
+    artifact(300, "test-timing-pattern-integration-4", true),
+    artifact(400, "coverage-profile-pattern-integration-2"),
+  ]);
+
+  assertEquals(
+    result.map((item) => [item.name, item.id]).sort(),
+    [
+      ["test-timing-pattern-integration-1", 150],
+      ["test-timing-pattern-integration-3", 200],
     ],
   );
 });

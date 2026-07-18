@@ -214,6 +214,9 @@ One line per archived document; each document's header carries the fuller
   and
   [pattern-integration-compile-bound.md](development/performance/pattern-integration-compile-bound.md)
   — June 2026 profiling snapshots.
+- [2026-07-pattern-capability-ci-duration-increase.md](development/performance/2026-07-pattern-capability-ci-duration-increase.md)
+  — root cause of the July 2026 labs CI duration increase: two unsharded
+  pattern time-capability sweeps, especially the 56-pattern sweep on shard 3.
 - [scoped-cells-field-notes.md](development/scoped-cells-field-notes.md) —
   field journal from the first scoped-cell patterns.
 - [2026-07-02-convergence-evidence-appendix.md](plans/2026-07-02-convergence-evidence-appendix.md)
