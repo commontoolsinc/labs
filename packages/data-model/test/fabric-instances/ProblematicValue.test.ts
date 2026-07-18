@@ -1,7 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
+import type { FabricValue } from "@/interface.ts";
+import {
+  DEEP_FREEZE,
+  IS_DEEP_FROZEN,
+} from "@/fabric-instances/BaseFabricInstance.ts";
 import { CODEC } from "@/codec-common/interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { ExplicitTagValue } from "@/fabric-instances/ExplicitTagValue.ts";

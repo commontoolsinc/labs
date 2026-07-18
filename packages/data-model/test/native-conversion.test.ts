@@ -1,12 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import {
-  DEEP_FREEZE,
-  FabricInstance,
-  type FabricValue,
-  IS_DEEP_FROZEN,
-} from "@/interface.ts";
+import { FabricInstance, type FabricValue } from "@/interface.ts";
 import { CODEC } from "@/codec-common/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
@@ -25,7 +20,11 @@ import {
 import { FrozenMap, FrozenSet } from "@/frozen-builtins.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
+import {
+  BaseFabricInstance,
+  DEEP_FREEZE,
+  IS_DEEP_FROZEN,
+} from "@/fabric-instances/BaseFabricInstance.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { DummyReconstructionContext } from "./fabric-instances/fixtures.ts";
 

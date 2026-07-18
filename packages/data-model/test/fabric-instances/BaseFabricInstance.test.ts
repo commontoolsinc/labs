@@ -1,13 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { FabricInstance, type FabricValue } from "@/interface.ts";
 import {
+  BaseFabricInstance,
   DEEP_FREEZE,
-  FabricInstance,
-  type FabricValue,
   IS_DEEP_FROZEN,
-} from "@/interface.ts";
-import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
+} from "@/fabric-instances/BaseFabricInstance.ts";
 
 /**
  * Minimal `BaseFabricInstance` subclass used to exercise the template-method
@@ -54,12 +53,47 @@ class Probe extends BaseFabricInstance {
   }
 }
 
+/**
+ * A rogue direct subclass of `FabricInstance` that bypasses
+ * `BaseFabricInstance` -- the shape the invariant forbids. Used only to witness
+ * `isInstance()`'s enforcement throw; no production class is built this way.
+ */
+class RogueInstance extends FabricInstance {
+  deepClone(_frozen: boolean): FabricInstance {
+    throw new Error("not exercised here");
+  }
+
+  shallowClone(_frozen: boolean): FabricInstance {
+    throw new Error("not exercised here");
+  }
+}
+
 describe("BaseFabricInstance", () => {
   describe("inheritance", () => {
     it("is a subclass of `FabricInstance`", () => {
       const probe = new Probe("t");
       expect(probe instanceof BaseFabricInstance).toBe(true);
       expect(probe instanceof FabricInstance).toBe(true);
+    });
+  });
+
+  describe("isInstance()", () => {
+    it("is `true` for a `BaseFabricInstance`", () => {
+      expect(BaseFabricInstance.isInstance(new Probe("t"))).toBe(true);
+    });
+
+    it("is `false` for non-fabric values", () => {
+      expect(BaseFabricInstance.isInstance(null)).toBe(false);
+      expect(BaseFabricInstance.isInstance(42)).toBe(false);
+      expect(BaseFabricInstance.isInstance("x")).toBe(false);
+      expect(BaseFabricInstance.isInstance({})).toBe(false);
+      expect(BaseFabricInstance.isInstance([])).toBe(false);
+    });
+
+    it("throws for a `FabricInstance` that is not a `BaseFabricInstance`", () => {
+      expect(() => BaseFabricInstance.isInstance(new RogueInstance())).toThrow(
+        "Shouldn't happen",
+      );
     });
   });
 
