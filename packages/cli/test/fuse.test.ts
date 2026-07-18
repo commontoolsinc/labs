@@ -30,6 +30,7 @@ import {
 import {
   buildFuseChildCommand,
   cleanupFuseChild,
+  fuseSupervisorOptions,
   parseSupervisorArgs,
   recordFuseMountState,
   runFuseSupervisor,
@@ -1088,6 +1089,50 @@ describe("FUSE supervisor command construction", () => {
       state: "failed",
       extra: { error: "Error: connectSpace failed" },
     }]);
+
+    await expect(writeFailedSupervisorStartupStatus(
+      new Error("status path unavailable"),
+      () => Promise.reject(new Error("write failed")),
+    )).resolves.toBeUndefined();
+  });
+
+  it("maps hidden CLI options into the supervisor contract", () => {
+    expect(fuseSupervisorOptions({
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/id.key",
+      execCli: "/tmp/cf-exec",
+      logFile: "/tmp/cf-fuse.log",
+      space: ["home", "work"],
+      allowOther: true,
+      noattrcache: true,
+      attrcacheTimeout: "2",
+      cfcMode: "observe",
+      cfcAnnotations: true,
+      cfcXattrNamespace: "both",
+      cfcWritebackXattrs: true,
+      cfcWritebackState: "/tmp/cfc.json",
+      dangerouslyAllowIncompatibleSchema: true,
+      statePath: "/tmp/state.json",
+      supervisorStatus: "/tmp/status.json",
+    }, "/mnt")).toEqual({
+      mountpoint: "/mnt",
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/id.key",
+      execCli: "/tmp/cf-exec",
+      logFile: "/tmp/cf-fuse.log",
+      spaces: ["home", "work"],
+      allowOther: true,
+      noattrcache: true,
+      attrcacheTimeout: "2",
+      cfcMode: "observe",
+      cfcAnnotations: true,
+      cfcXattrNamespace: "both",
+      cfcWritebackXattrs: true,
+      cfcWritebackState: "/tmp/cfc.json",
+      dangerouslyAllowIncompatibleSchema: true,
+      statePath: "/tmp/state.json",
+      supervisorStatusPath: "/tmp/status.json",
+    });
   });
 
   it("builds a background supervisor invocation that does not load libfuse", () => {
@@ -1202,6 +1247,7 @@ describe("FUSE supervisor command construction", () => {
       execPath: "/usr/local/bin/cf",
       supervisorStatusPath: "/tmp/cf-status",
       attrcacheTimeout: "2",
+      dangerouslyAllowIncompatibleSchema: true,
     });
 
     expect(child.command).toBe("/usr/local/bin/cf");
@@ -1211,6 +1257,7 @@ describe("FUSE supervisor command construction", () => {
     const flagIndex = child.args.indexOf("--attrcache-timeout");
     expect(flagIndex).toBeGreaterThan(-1);
     expect(child.args[flagIndex + 1]).toBe("2");
+    expect(child.args).toContain("--dangerously-allow-incompatible-schema");
   });
 
   it("terminates the spawned FUSE child during supervisor cleanup", async () => {

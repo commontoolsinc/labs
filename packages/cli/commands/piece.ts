@@ -434,15 +434,7 @@ export const piece = new Command()
   .arguments("<main:string>")
   .action(async (options, mainPath) => {
     setQuietMode(!!options.quiet);
-    const pieceConfig = parsePieceOptions(options);
-    await setPiecePattern(
-      pieceConfig,
-      localPatternEntry(mainPath, options),
-      {
-        dangerouslyAllowIncompatibleSchema:
-          options.dangerouslyAllowIncompatibleSchema,
-      },
-    );
+    const pieceConfig = await setPieceSourceFromCommand(options, mainPath);
     render(`Updated source for piece ${pieceConfig.piece}`);
     hint(cliText(`NEXT STEPS:
   → Test in browser: ${pieceConfig.apiUrl}/${pieceConfig.space}/${pieceConfig.piece}
@@ -1036,12 +1028,40 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
   → Reset to default:     cf piece set-home --reset ...`));
   });
 
-interface PieceCLIOptions {
+/** Shared flags accepted by piece commands that resolve a target or source. */
+export interface PieceCLIOptions {
   piece?: string;
   apiUrl?: string;
   identity?: string;
   space?: string;
   url?: string;
+  mainExport?: string;
+  repository?: string;
+  root?: string;
+  dangerouslyAllowIncompatibleSchema?: boolean;
+}
+
+/** Injectable dependencies for testing the `piece setsrc` command boundary. */
+export interface SetPieceSourceCommandDependencies {
+  setPiecePattern?: typeof setPiecePattern;
+}
+
+/** Apply the parsed `piece setsrc` command while preserving its safety flag. */
+export async function setPieceSourceFromCommand(
+  options: PieceCLIOptions,
+  mainPath: string,
+  deps: SetPieceSourceCommandDependencies = {},
+): Promise<PieceConfig> {
+  const pieceConfig = parsePieceOptions(options);
+  await (deps.setPiecePattern ?? setPiecePattern)(
+    pieceConfig,
+    localPatternEntry(mainPath, options),
+    {
+      dangerouslyAllowIncompatibleSchema:
+        options.dangerouslyAllowIncompatibleSchema,
+    },
+  );
+  return pieceConfig;
 }
 
 const CELL_SCOPE_VALUES = new Set(["space", "user", "session"]);

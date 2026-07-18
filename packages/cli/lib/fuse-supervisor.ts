@@ -38,6 +38,53 @@ export interface FuseSupervisorOptions {
   supervisorPid?: number;
 }
 
+/** Parsed hidden-command flags used to launch a FUSE supervisor. */
+export interface FuseSupervisorCliOptions {
+  apiUrl?: string;
+  identity?: string;
+  execCli?: string;
+  logFile?: string;
+  space?: string[];
+  allowOther?: boolean;
+  noattrcache?: boolean;
+  attrcacheTimeout?: string;
+  cfcMode?: string;
+  cfcAnnotations?: boolean;
+  cfcXattrNamespace?: string;
+  cfcWritebackXattrs?: boolean;
+  cfcWritebackState?: string;
+  dangerouslyAllowIncompatibleSchema?: boolean;
+  statePath?: string;
+  supervisorStatus?: string;
+}
+
+/** Convert hidden CLI command options into the supervisor's runtime contract. */
+export function fuseSupervisorOptions(
+  options: FuseSupervisorCliOptions,
+  mountpoint: string,
+): FuseSupervisorOptions {
+  return {
+    mountpoint,
+    apiUrl: options.apiUrl ?? "",
+    identity: options.identity ?? "",
+    execCli: options.execCli ?? "",
+    logFile: options.logFile ?? "",
+    spaces: options.space ?? [],
+    allowOther: options.allowOther,
+    noattrcache: options.noattrcache,
+    attrcacheTimeout: options.attrcacheTimeout,
+    cfcMode: options.cfcMode,
+    cfcAnnotations: options.cfcAnnotations,
+    cfcXattrNamespace: options.cfcXattrNamespace,
+    cfcWritebackXattrs: options.cfcWritebackXattrs,
+    cfcWritebackState: options.cfcWritebackState,
+    dangerouslyAllowIncompatibleSchema:
+      options.dangerouslyAllowIncompatibleSchema,
+    statePath: options.statePath,
+    supervisorStatusPath: options.supervisorStatus,
+  };
+}
+
 export interface FuseCommandConstructor {
   new (command: string | URL, options: Deno.CommandOptions): {
     spawn(): {

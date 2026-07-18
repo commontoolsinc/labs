@@ -23,6 +23,7 @@ import {
   parsePieceOptions,
   parseSpaceOptions,
   piece,
+  setPieceSourceFromCommand,
 } from "../commands/piece.ts";
 
 const API_URL = "https://cf.dev";
@@ -489,6 +490,46 @@ describe("cli piece parsing", () => {
       mainExport: "named",
       repository: "https://github.com/commontoolsinc/labs",
       rootPath: "/repo",
+    });
+  });
+
+  it("forwards the dangerous override through setsrc command behavior", async () => {
+    let forwarded: unknown;
+    const pieceConfig = await setPieceSourceFromCommand(
+      {
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: "/tmp/test.key",
+        piece: PIECE,
+        mainExport: "named",
+        repository: "https://github.com/commontoolsinc/labs",
+        root: "/repo",
+        dangerouslyAllowIncompatibleSchema: true,
+      },
+      "/repo/pattern.tsx",
+      {
+        setPiecePattern: (config, entry, options) => {
+          forwarded = { config, entry, options };
+          return Promise.resolve();
+        },
+      },
+    );
+
+    expect(pieceConfig).toEqual({
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: "/tmp/test.key",
+      piece: PIECE,
+    });
+    expect(forwarded).toEqual({
+      config: pieceConfig,
+      entry: {
+        mainPath: "/repo/pattern.tsx",
+        mainExport: "named",
+        repository: "https://github.com/commontoolsinc/labs",
+        rootPath: "/repo",
+      },
+      options: { dangerouslyAllowIncompatibleSchema: true },
     });
   });
 

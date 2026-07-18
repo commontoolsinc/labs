@@ -138,27 +138,10 @@ export const main = new Command()
         collect: true,
       })
       .action(async (options, mountpoint) => {
-        const { runFuseSupervisor } = await import("../lib/fuse-supervisor.ts");
-        await runFuseSupervisor({
-          mountpoint,
-          apiUrl: options.apiUrl ?? "",
-          identity: options.identity ?? "",
-          execCli: options.execCli ?? "",
-          logFile: options.logFile ?? "",
-          spaces: options.space ?? [],
-          allowOther: options.allowOther,
-          noattrcache: options.noattrcache,
-          attrcacheTimeout: options.attrcacheTimeout,
-          cfcMode: options.cfcMode,
-          cfcAnnotations: options.cfcAnnotations,
-          cfcXattrNamespace: options.cfcXattrNamespace,
-          cfcWritebackXattrs: options.cfcWritebackXattrs,
-          cfcWritebackState: options.cfcWritebackState,
-          dangerouslyAllowIncompatibleSchema:
-            options.dangerouslyAllowIncompatibleSchema,
-          statePath: options.statePath,
-          supervisorStatusPath: options.supervisorStatus,
-        });
+        const { fuseSupervisorOptions, runFuseSupervisor } = await import(
+          "../lib/fuse-supervisor.ts"
+        );
+        await runFuseSupervisor(fuseSupervisorOptions(options, mountpoint));
       }),
   )
   .command("id", identity)

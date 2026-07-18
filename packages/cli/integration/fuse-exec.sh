@@ -215,6 +215,29 @@ wait_for_piece_value() {
   error "Timed out waiting for piece path '$path'. Expected: $expected, got: $actual"
 }
 
+piece_pattern_identity() {
+  cf piece inspect --json $SPACE_ARGS --piece "$PIECE_ID" 2>/dev/null |
+    jq -r '.patternRef.identity // empty'
+}
+
+wait_for_pattern_identity_change() {
+  local previous_identity="$1"
+  local timeout_seconds="${2:-10}"
+  local attempts=$((timeout_seconds * 10))
+
+  for _ in $(seq 1 "$attempts"); do
+    local actual
+    actual=$(piece_pattern_identity || true)
+    if [ -n "$actual" ] && [ "$actual" != "$previous_identity" ]; then
+      printf '%s\n' "$actual"
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  error "Timed out waiting for the FUSE source update to change pattern identity."
+}
+
 read_piece_value_or_default() {
   local path="$1"
   local fallback="$2"
@@ -246,20 +269,8 @@ cleanup() {
   set +e
   local can_remove_mountpoint=true
   if [ -n "${MOUNTPOINT:-}" ] && [ -d "${MOUNTPOINT:-}" ]; then
-    local unmount_status=0
-    if command -v timeout >/dev/null 2>&1; then
-      # A wedged kernel mount can block the unmount command indefinitely. Keep
-      # teardown from consuming the job deadline so CI can publish the daemon
-      # log that explains the original failure.
-      timeout --signal=KILL 5 cf fuse unmount "$MOUNTPOINT" >/dev/null 2>&1 ||
-        unmount_status=$?
-    else
-      cf fuse unmount "$MOUNTPOINT" >/dev/null 2>&1 || unmount_status=$?
-    fi
-    if [ "$unmount_status" -ne 0 ]; then
-      >&2 echo "WARN: leaving mounted filesystem at $MOUNTPOINT because unmount failed or hung"
-      can_remove_mountpoint=false
-    elif mount_is_active "$MOUNTPOINT"; then
+    cf fuse unmount "$MOUNTPOINT" >/dev/null 2>&1
+    if mount_is_active "$MOUNTPOINT"; then
       >&2 echo "WARN: leaving mounted filesystem at $MOUNTPOINT because unmount failed"
       can_remove_mountpoint=false
     fi
@@ -272,6 +283,9 @@ cleanup() {
   fi
   if [ -n "${NO_ARG_HANDLER_ERR:-}" ]; then
     rm -f "$NO_ARG_HANDLER_ERR"
+  fi
+  if [ -n "${INCOMPATIBLE_PATTERN_SRC:-}" ]; then
+    rm -f "$INCOMPATIBLE_PATTERN_SRC"
   fi
 }
 
@@ -303,7 +317,7 @@ PIECE_ID=$(cf piece new --main-export "$CUSTOM_EXPORT" $SPACE_ARGS "$PATTERN_SRC
 echo "Created piece: $PIECE_ID"
 cf piece step $SPACE_ARGS --piece "$PIECE_ID"
 echo "Stepped piece: $PIECE_ID"
-MOUNT_OUTPUT=$(cf fuse mount "$MOUNTPOINT" --api-url="$API_URL" --identity="$IDENTITY" --space="$SPACE" --background)
+MOUNT_OUTPUT=$(cf fuse mount "$MOUNTPOINT" --api-url="$API_URL" --identity="$IDENTITY" --space="$SPACE" --background --dangerously-allow-incompatible-schema)
 echo "$MOUNT_OUTPUT"
 
 MOUNT_PID="${MOUNT_OUTPUT#*PID }"
@@ -526,5 +540,36 @@ exec 9>&-
 # this wait reports it rather than reaching "".
 wait_for_piece_value "lastMessage" '""'
 success "Path truncate clears stale open write handles"
+
+FUSE_PATTERN_SRC="$PIECE_DIR/.src/fuse-exec.tsx"
+wait_for_path "$FUSE_PATTERN_SRC"
+PATTERN_IDENTITY_BEFORE_SOURCE_WRITE=$(piece_pattern_identity)
+if [ -z "$PATTERN_IDENTITY_BEFORE_SOURCE_WRITE" ]; then
+  error "Could not read the piece pattern identity before the FUSE source update."
+fi
+
+INCOMPATIBLE_PATTERN_SRC=$(mktemp)
+awk '
+  /^interface Output \{/ { in_output = 1 }
+  in_output && /^  lastMessage: string;$/ {
+    print "  lastMessage: string | number;"
+    in_output = 0
+    next
+  }
+  { print }
+' "$PATTERN_SRC" >"$INCOMPATIBLE_PATTERN_SRC"
+if ! grep -q '^  lastMessage: string | number;$' "$INCOMPATIBLE_PATTERN_SRC"; then
+  error "Failed to build the incompatible FUSE source update fixture."
+fi
+
+tee "$FUSE_PATTERN_SRC" <"$INCOMPATIBLE_PATTERN_SRC" >/dev/null
+PATTERN_IDENTITY_AFTER_SOURCE_WRITE=$(
+  wait_for_pattern_identity_change "$PATTERN_IDENTITY_BEFORE_SOURCE_WRITE"
+)
+if [ "$PATTERN_IDENTITY_AFTER_SOURCE_WRITE" = "$PATTERN_IDENTITY_BEFORE_SOURCE_WRITE" ]; then
+  error "Dangerously authorized FUSE source write did not update the piece."
+fi
+wait_for_piece_value "lastMessage" '""'
+success "FUSE source writes can explicitly authorize an incompatible schema update"
 
 echo "FUSE exec integration passed."
