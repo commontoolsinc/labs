@@ -127,10 +127,11 @@ four special values that JSON cannot represent natively (`-0`, `NaN`,
 - **`NaN`** is canonicalized to a single representation: the **quiet NaN**
   payload `7F F8 00 00 00 00 00 00`. Any input NaN bit pattern (signaling,
   quiet, with arbitrary payload bits) hashes via this canonical 8-byte
-  sequence. This ensures all NaN values produce identical hashes,
-  consistent with JavaScript semantics where every NaN compares unequal
-  to itself but is observationally indistinguishable from every other NaN
-  at the language level.
+  sequence. This ensures all NaN values produce identical hashes, matching
+  fabric value-equality, under which all `NaN`s are equal (`Object.is(NaN,
+  NaN)` is `true`; see `1-fabric-values.md` Section 6.7). Note this is
+  distinct from the `===` operator, under which a `NaN` compares unequal even
+  to itself.
 
 > **Conversion-gate cross-reference.** Whether `-0`, `NaN`, or `±Infinity`
 > reach this layer depends on the fabric-value conversion gate; see
