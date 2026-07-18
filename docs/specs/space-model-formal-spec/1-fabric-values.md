@@ -1068,7 +1068,62 @@ class, it hosts its own `[CODEC]` (tag `Bytes@1`), the same shape as
 `FabricEpochNsec` and `FabricEpochDays`. The hashing system uses the
 dedicated `TAG_BYTES` primitive tag (Section 6.3).
 
-#### 1.4.11 `bigint` — Not Wrapped
+#### 1.4.11 `FabricLink`
+
+`FabricLink` is a fabric-native `FabricInstance` — like the wrapper classes of
+Sections 1.4.2–1.4.4, but not wrapping any native JS type — that represents a
+**link**: the modern, object-shaped form of a reference to fabric data. It
+wraps a single **payload**, a plain object (`FabricPlainObject`) of addressing
+fields, as its sole nested `FabricValue`.
+
+A link is a `FabricInstance` rather than a `FabricPrimitive` because its
+payload is an **outgoing reference**, not leaf data: the payload may itself
+carry nested `FabricValue`s (for example a schema filter), so a link is a
+small object graph rather than an immutable scalar. Like every instance, a
+`FabricLink` is mutable until frozen and immutable thereafter, and its protocol
+members (`[DEEP_FREEZE]`, `[IS_DEEP_FROZEN]`, `deepClone()`, and the inherited
+`shallowClone()`; Section 2.3) recurse through the payload as their one nested
+value.
+
+**The data-model does not constrain the payload's field set.** The value
+definition here is deliberately general: the data-model requires only that the
+payload be a plain object with no prototype-polluting keys, and treats its
+entries as arbitrary `FabricValue`s. Which fields a link carries — and what
+they mean — is a **consumer concern**: a module that uses links (for example a
+runner's cell references) defines its own payload shape on top of this general
+form. Keeping the field set unconstrained is what lets `FabricLink` be reused
+across consumers, each specializing the general link value in its own way.
+
+Like every fabric class, `FabricLink` hosts a static `[CODEC]` (Section 2.4)
+with wire tag `Link@1`. Its encoded state **is** the payload object: the
+codec's `encode()` returns the payload directly, and `decode()` reconstructs a
+`FabricLink` from it (or a `ProblematicValue`, Section 3.5, if the payload is
+malformed). The JSON wire form is the `/Link@1`-tagged envelope
+`{ "/Link@1": <payload> }`; see Section 3 of `3-json-encoding.md` for the wire
+encoding, and the migration table in Section 4 for how legacy link forms
+(the IPLD sigil `{ "/": { "link@1": … } }` and `$alias`) map onto it.
+
+```typescript
+// Shown for illustration only.
+// file: packages/data-model/fabric-instances/FabricLink.ts
+
+/**
+ * A link value: a `FabricInstance` wrapping a plain-object addressing
+ * `payload` as its sole nested `FabricValue`. The data-model does not
+ * constrain the payload's fields; consumers define their own payload shape.
+ */
+export class FabricLink extends BaseFabricInstance {
+  constructor(payload: FabricPlainObject);
+
+  /** The wrapped addressing payload. */
+  get payload(): FabricPlainObject;
+
+  /** The codec for instances of this class; wire tag `Link@1`. */
+  static get [CODEC](): FabricCodec;
+}
+```
+
+#### 1.4.12 `bigint` — Not Wrapped
 
 `bigint` is a JavaScript primitive (`typeof x === 'bigint'`), not an object. It
 rides through the `FabricValue` layer directly, like `undefined`. No
@@ -1077,7 +1132,7 @@ rides through the `FabricValue` layer directly, like `undefined`. No
 `UndefinedCodec` — there is no owned class to host a `[CODEC]`); see
 Section 4.5.
 
-#### 1.4.12 Design Notes
+#### 1.4.13 Design Notes
 
 > **Why wrapper classes instead of inline serializer branches?** Each wrapper
 > genuinely implements `FabricInstance` and hosts its own `[CODEC]`, so the
