@@ -292,8 +292,9 @@ export interface ScanResult {
 }
 
 // The config file names Deno recognises for a directory, in the order it
-// prefers them: deno.jsonc wins when both are present.
-const CONFIG_NAMES = ["deno.jsonc", "deno.json"];
+// prefers them: when a directory holds both, Deno reads deno.json and ignores
+// deno.jsonc, so this reads the same file Deno would.
+const CONFIG_NAMES = ["deno.json", "deno.jsonc"];
 
 // Finds the Deno config for the directory `dir` (the empty string for the
 // workspace root) under `root`, trying each recognised name. Returns its

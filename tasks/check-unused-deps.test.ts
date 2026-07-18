@@ -381,14 +381,23 @@ Deno.test("main checks a member whose config is deno.json", async () => {
   }
 });
 
-Deno.test("main reads workspace members from a deno.json root", async () => {
-  // The root itself may be deno.json. Its workspace list and its own import map
-  // are read the same way, so a member's used alias is not misreported.
+Deno.test("main reads a deno.json root's own import map", async () => {
+  // The root itself may be deno.json. An unused alias in its import map must be
+  // reported at deno.json, which happens only if the root deno.json is read at
+  // all. With deno.json support absent the root goes unread, no entries are
+  // collected, and the check passes — so this fails unless the path works.
   const root = await Deno.makeTempDir({ prefix: "check-unused-deps-" });
   try {
     await Deno.writeTextFile(
       join(root, "deno.json"),
-      JSON.stringify({ workspace: ["./packages/foo"], imports: {} }, null, 2),
+      JSON.stringify(
+        {
+          workspace: ["./packages/foo"],
+          imports: { "left-pad": "npm:left-pad@^1" },
+        },
+        null,
+        2,
+      ),
     );
     const member = join(root, "packages", "foo");
     await Deno.mkdir(member, { recursive: true });
@@ -402,10 +411,11 @@ Deno.test("main reads workspace members from a deno.json root", async () => {
     );
 
     let code = -1;
-    await captureConsole(async () => {
+    const { err } = await captureConsole(async () => {
       code = await main(root);
     });
-    assertEquals(code, 0);
+    assertEquals(code, 1);
+    assert(err.includes("deno.json: left-pad"));
   } finally {
     await Deno.remove(root, { recursive: true });
   }
