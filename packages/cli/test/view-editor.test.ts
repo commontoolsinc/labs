@@ -230,6 +230,67 @@ Deno.test("editor: the save prompt ignores keys that are not its buttons", () =>
   assertEquals(saved(), "Zabc\n");
 });
 
+Deno.test("editor: the save prompt focuses its default button; Space activates it", () => {
+  const { src, saved } = memSource();
+  const s = editSession("abc\n", src);
+  press(s, "e");
+  type(s, "Z");
+  press(s, "escape", "q");
+  assertEquals(
+    s.view().dialog?.focus,
+    0,
+    "Save, the default button, is focused",
+  );
+  press(s, "space"); // Space activates the focused button, like Enter
+  assert(s.quit, "quits after saving");
+  assertEquals(saved(), "Zabc\n");
+});
+
+Deno.test("editor: Tab moves the focus ring; Enter activates the focused button", () => {
+  const { src, saved } = memSource();
+  const s = editSession("abc\n", src);
+  press(s, "e");
+  type(s, "Z");
+  press(s, "escape", "q");
+  press(s, "tab"); // Save → Discard
+  assertEquals(s.view().dialog?.focus, 1, "Tab advanced the focus to Discard");
+  press(s, "enter"); // Enter activates whichever button is focused
+  assert(s.quit, "quits after discarding");
+  assertEquals(saved(), null, "Discard was activated, not Save");
+});
+
+Deno.test("editor: Shift-Tab wraps the focus ring to the last button", () => {
+  const { src } = memSource();
+  const s = editSession("abc\n", src);
+  press(s, "e");
+  type(s, "Z");
+  press(s, "escape", "q");
+  press(s, "shift-tab"); // Save → Cancel, wrapping backwards
+  assertEquals(s.view().dialog?.focus, 2, "Shift-Tab wrapped to Cancel");
+  press(s, "enter");
+  assertEquals(s.view().message, "Cancelled");
+});
+
+Deno.test("editor: activating a button captures the pushed frame for its press", () => {
+  const { src } = memSource();
+  const s = editSession("abc\n", src);
+  press(s, "e");
+  type(s, "Z");
+  press(s, "escape", "q");
+  press(s, "shift-tab"); // focus Cancel (index 2)
+  press(s, "enter"); // activate it
+  const push = s.pendingPush;
+  assert(push, "the press captured a pushed frame");
+  assertEquals(
+    push!.view.dialog?.pushed,
+    2,
+    "the pushed frame shows Cancel pressed",
+  );
+  assertEquals(s.view().message, "Cancelled", "and the button's action ran");
+  press(s, "s"); // any following key clears the pending press
+  assertEquals(s.pendingPush, null, "the next key drops the pending press");
+});
+
 Deno.test("editor: quitting dirty, d discards and quits", () => {
   const { src, saved } = memSource();
   const s = editSession("abc\n", src);

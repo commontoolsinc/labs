@@ -599,6 +599,128 @@ Deno.test("dialog: collapses on a terminal too narrow to frame", () => {
   );
 });
 
+Deno.test("dialog: body sits two columns inside each border", () => {
+  const rows = renderFrame(
+    parseDocument("x\n"),
+    baseView({
+      width: 40,
+      height: 12,
+      color: false,
+      dialog: { title: "T", body: ["hello world"], buttons: [] },
+    }),
+  );
+  const bodyRow = rows.map(stripAnsi).find((r) => r.includes("hello world"))!;
+  const left = bodyRow.indexOf("║");
+  const right = bodyRow.indexOf("║", left + 1);
+  // Two blank margin columns separate the border from the content on each side.
+  assertEquals(
+    bodyRow.slice(left + 1, left + 3),
+    "  ",
+    "two blank columns after the left border",
+  );
+  assertEquals(
+    bodyRow.slice(left + 3, left + 3 + "hello world".length),
+    "hello world",
+    "content begins after the margin",
+  );
+  assertEquals(
+    bodyRow.slice(right - 2, right),
+    "  ",
+    "two blank columns before the right border",
+  );
+});
+
+Deno.test("dialog: the focused button — not just the default — is highlighted", () => {
+  const dlg: DialogState = {
+    title: "Pick",
+    body: ["Which one?"],
+    buttons: [
+      { label: "One", hotkey: "o" },
+      { label: "Two", hotkey: "t" },
+    ],
+  };
+  const render = (focus?: number) =>
+    renderFrame(
+      parseDocument("x\n"),
+      baseView({
+        width: 40,
+        height: 12,
+        color: true,
+        dialog: { ...dlg, focus },
+      }),
+    );
+  // The bright face is the default-button colour on the button-face background;
+  // it only appears where a button is highlighted.
+  const brightFace = fgCode(ui.buttonDefault.fg!) + ";" + bgCode(ui.button.bg!);
+
+  // No focus and no default kind: no button is brightened.
+  assert(
+    !render(-1).join("").includes(brightFace),
+    "nothing highlighted without focus",
+  );
+
+  // Focusing a button brightens that button, and moving focus moves the bright
+  // face to the newly focused label.
+  for (const [focus, label] of [[0, "One"], [1, "Two"]] as const) {
+    const btnRow = render(focus).find((r) => stripAnsi(r).includes("One"))!;
+    assert(btnRow.includes(brightFace), `button ${focus} is highlighted`);
+    // Read past the rest of the bright face's escape (its closing `m`) to the
+    // label text that follows it.
+    const sgrEnd = btnRow.indexOf("m", btnRow.indexOf(brightFace)) + 1;
+    const after = stripAnsi(btnRow.slice(sgrEnd)).trimStart();
+    assert(
+      after.startsWith(label),
+      `the highlight sits on ${label}: ${after}`,
+    );
+  }
+});
+
+Deno.test("dialog: a pushed button loses its shadow and shifts one column right", () => {
+  const dlg: DialogState = {
+    title: "T",
+    body: ["Go?"],
+    buttons: [{ label: "Ok", hotkey: "o", kind: "default" }],
+  };
+  const render = (over: Partial<DialogState>) =>
+    renderFrame(
+      parseDocument("x\n"),
+      baseView({
+        width: 40,
+        height: 12,
+        color: true,
+        dialog: { ...dlg, ...over },
+      }),
+    ).map(stripAnsi);
+
+  const normal = render({});
+  const pushed = render({ pushed: 0 });
+  // The half-block shadow glyphs come only from the button; a press drops them.
+  assert(
+    normal.join("\n").includes("▀"),
+    "a resting button casts a shadow band",
+  );
+  assert(
+    normal.join("\n").includes("▄"),
+    "a resting button casts a right edge",
+  );
+  assert(
+    !pushed.join("\n").includes("▀"),
+    "a pushed button casts no shadow band",
+  );
+  assert(
+    !pushed.join("\n").includes("▄"),
+    "a pushed button casts no right edge",
+  );
+  // The face slides one column into the space its shadow held.
+  const normalRow = normal.find((r) => r.includes("Ok"))!;
+  const pushedRow = pushed.find((r) => r.includes("Ok"))!;
+  assertEquals(
+    pushedRow.indexOf("Ok"),
+    normalRow.indexOf("Ok") + 1,
+    "the pressed face shifts right by one column",
+  );
+});
+
 Deno.test("renderFrame: the guide rail is blank on lines outside the selected node", () => {
   const ln = (text: string) => ({
     text,

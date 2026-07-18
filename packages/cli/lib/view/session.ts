@@ -163,6 +163,11 @@ export class Session {
    * the viewport holds still) or below it (so it slides as they land). The next
    * key clears it. */
   pendingReveal: { row: number; count: number; up: boolean } | null = null;
+  /** A prompt button was just activated. Holds the frame that shows it pushed —
+   * the dialog with that button drawn mid-press — so the driver can play the
+   * press for a moment before the action's result appears. The next key clears
+   * it. */
+  pendingPush: { doc: Document; view: ViewState } | null = null;
   /** The last key set a message that takes itself away again rather than sitting
    * in the bar — Ctrl-L pressed where it is not offered, which changed nothing
    * else. The driver leaves it up for a moment and then calls
@@ -185,6 +190,10 @@ export class Session {
   private cursorOn = false;
   /** Pending C-x prefix (Emacs chord), reset by the next key. */
   private chord: "ctrl-x" | null = null;
+  /** Which button the active prompt's Tab focus rests on — an index into its
+   * button row. Space and Enter activate it; it is reset to the default button
+   * each time a prompt opens. */
+  private dialogFocus = 0;
   /** What the active save prompt does on confirm. */
   private savePromptThen: "quit" | null = null;
   /** Set once the user confirms amending the commit message, so the save that
@@ -461,10 +470,25 @@ export class Session {
   /** The modal dialog for whichever confirmation prompt is open, or null when no
    * prompt is up. Rebuilt each frame from the current buffer and source. */
   private promptDialog(): DialogState | null {
-    if (this.mode === "savePrompt") return this.saveDialog();
-    if (this.mode === "amendPrompt") return this.amendDialog();
-    if (this.mode === "revertPrompt") return this.revertDialog();
-    return null;
+    let dialog: DialogState | null = null;
+    if (this.mode === "savePrompt") dialog = this.saveDialog();
+    else if (this.mode === "amendPrompt") dialog = this.amendDialog();
+    else if (this.mode === "revertPrompt") dialog = this.revertDialog();
+    if (!dialog) return null;
+    // -1 means no button is focused (a prompt with no default, before Tab).
+    const focus = this.dialogFocus < 0
+      ? -1
+      : clamp(this.dialogFocus, 0, Math.max(0, dialog.buttons.length - 1));
+    return { ...dialog, focus };
+  }
+
+  /** Rest the current prompt's Tab focus on its default button, called as each
+   * prompt opens. A prompt with no default button (the diff revert) starts with
+   * no focus — an index of -1 — so Space and Enter do nothing until Tab picks a
+   * button, keeping a stray Enter from reverting. */
+  private focusDefaultButton(): void {
+    const buttons = this.promptDialog()?.buttons ?? [];
+    this.dialogFocus = buttons.findIndex((b) => b.kind === "default");
   }
 
   /** The save-changes confirmation: names what a save writes, lists the files
@@ -546,17 +570,13 @@ export class Session {
     // itself away goes now rather than waiting out its moment, before this key
     // has the chance to set one of its own.
     this.pendingReveal = null;
+    this.pendingPush = null;
     this.expireMessage();
-    if (this.mode === "savePrompt") {
-      this.handleSavePrompt(key);
-      return;
-    }
-    if (this.mode === "amendPrompt") {
-      this.handleAmendPrompt(key);
-      return;
-    }
-    if (this.mode === "revertPrompt") {
-      this.handleRevertPrompt(key);
+    if (
+      this.mode === "savePrompt" || this.mode === "amendPrompt" ||
+      this.mode === "revertPrompt"
+    ) {
+      this.handleDialogKey(key);
       return;
     }
     if (this.mode === "filePicker") {
@@ -2030,6 +2050,7 @@ export class Session {
         return false;
       }
       this.mode = "amendPrompt";
+      this.focusDefaultButton();
       this.message = "";
       return false;
     }
@@ -2054,16 +2075,15 @@ export class Session {
     }
   }
 
-  private handleAmendPrompt(key: Key): void {
-    const k = (key.char ?? key.name).toLowerCase();
-    if (k === "y" || key.name === "enter") {
+  private applyAmendButton(button: DialogButton): void {
+    if (button.hotkey === "y") {
       this.amendConfirmed = true;
       const ok = this.requestSave();
       this.mode = "normal";
       this.editedFiles = [];
       if (ok && this.savePromptThen === "quit") this.quit = true;
       this.savePromptThen = null;
-    } else if (k === "n" || key.name === "escape") {
+    } else if (button.kind === "cancel") {
       this.mode = "normal";
       this.amendConfirmed = false;
       this.savePromptThen = null;
@@ -2082,6 +2102,7 @@ export class Session {
       this.mode = "savePrompt";
       this.savePromptThen = "quit";
       this.editedFiles = this.computeEditedFiles();
+      this.focusDefaultButton();
       this.message = "";
     } else {
       this.quit = true;
@@ -2115,10 +2136,65 @@ export class Session {
     return willPrompt;
   }
 
-  private handleSavePrompt(key: Key): void {
-    const k = (key.char ?? key.name).toLowerCase();
-    // Save is the default button, so Enter and either shortcut trigger it.
-    if (k === "s" || key.name === "enter") {
+  /** Keys while a modal prompt (save / amend / revert) is up. Tab and Shift-Tab
+   * move the focus ring between buttons, wrapping around; Space and Enter
+   * activate the focused button; Esc activates the cancel button; a button's
+   * shortcut letter activates it directly. Any other key leaves the prompt up. */
+  private handleDialogKey(key: Key): void {
+    const dialog = this.promptDialog();
+    if (!dialog) return;
+    const buttons = dialog.buttons;
+    const n = buttons.length;
+    if (n === 0) return;
+
+    // Tab moves the ring forward, Shift-Tab back, both wrapping around. From no
+    // focus (-1) Tab lands on the first button and Shift-Tab on the last.
+    if (key.name === "tab") {
+      this.dialogFocus = this.dialogFocus < 0 ? 0 : (this.dialogFocus + 1) % n;
+      return;
+    }
+    if (key.name === "shift-tab") {
+      this.dialogFocus = this.dialogFocus < 0
+        ? n - 1
+        : (this.dialogFocus - 1 + n) % n;
+      return;
+    }
+
+    let index = -1;
+    if (key.name === "enter" || key.name === "space" || key.char === " ") {
+      // The clamped focus the dialog was drawn with, so Enter always activates
+      // the highlighted button. -1 means nothing is focused: a no-op.
+      index = dialog.focus ?? -1;
+    } else if (key.name === "escape") {
+      index = buttons.findIndex((b) => b.kind === "cancel");
+    } else {
+      const k = (key.char ?? key.name).toLowerCase();
+      index = buttons.findIndex((b) => b.hotkey.toLowerCase() === k);
+    }
+    if (index < 0 || index >= n) return; // an unbound key leaves the prompt up
+    this.activateButton(index);
+  }
+
+  /** Run a prompt button's action, first capturing the frame that shows it
+   * pushed so the driver can play the press before the result appears. The
+   * activated button also takes the focus ring, so a shortcut-key press draws
+   * the pressed button highlighted rather than leaving the highlight behind. */
+  private activateButton(index: number): void {
+    this.dialogFocus = index;
+    const dialog = this.promptDialog();
+    if (!dialog) return;
+    this.pendingPush = {
+      doc: this.displayDoc(),
+      view: { ...this.view(), dialog: { ...dialog, pushed: index } },
+    };
+    const button = dialog.buttons[index];
+    if (this.mode === "savePrompt") this.applySaveButton(button);
+    else if (this.mode === "amendPrompt") this.applyAmendButton(button);
+    else if (this.mode === "revertPrompt") this.applyRevertButton(button);
+  }
+
+  private applySaveButton(button: DialogButton): void {
+    if (button.hotkey === "s") {
       const ok = this.requestSave();
       // The save may need to confirm a commit amend first; leave that prompt up
       // (keeping the quit intent) instead of forcing back to normal mode.
@@ -2127,12 +2203,12 @@ export class Session {
       this.editedFiles = [];
       if (ok && this.savePromptThen === "quit") this.quit = true;
       this.savePromptThen = null;
-    } else if (k === "d") {
+    } else if (button.hotkey === "d") {
       this.mode = "normal";
       this.editedFiles = [];
       if (this.savePromptThen === "quit") this.quit = true;
       this.savePromptThen = null;
-    } else if (k === "c" || key.name === "escape") {
+    } else if (button.kind === "cancel") {
       this.mode = "normal";
       this.savePromptThen = null;
       this.editedFiles = [];
@@ -2149,6 +2225,7 @@ export class Session {
       return;
     }
     this.mode = "revertPrompt";
+    this.focusDefaultButton();
     this.message = "";
   }
 
@@ -2173,29 +2250,32 @@ export class Session {
     return { chunk, file, message };
   }
 
-  private handleRevertPrompt(key: Key): void {
-    const k = (key.char ?? key.name).toLowerCase();
+  private applyRevertButton(button: DialogButton): void {
+    // The dialog only offers the scopes that apply where the cursor sits, so a
+    // scope button that reached here is always valid.
     let scope: RevertScope | null = null;
-    if (this.source?.policy) {
-      // A diff offers the scopes that apply at the cursor plus Cancel; there is
-      // no default button, so Enter (and any unlisted key) does nothing.
-      const s = this.revertScopesAt();
-      if (k === "h" && s.chunk) scope = "chunk";
-      else if (k === "f" && s.file) scope = "file";
-      else if (k === "m" && s.message) scope = "message";
-      else if (k === "a") scope = "all";
-    } else if (k === "y" || key.name === "enter") {
-      // A plain file has a single scope, so Yes is the default button.
-      scope = "all";
+    switch (button.hotkey) {
+      case "h":
+        scope = "chunk";
+        break;
+      case "f":
+        scope = "file";
+        break;
+      case "m":
+        scope = "message";
+        break;
+      case "a": // a diff's all
+      case "y": // a plain file's single scope
+        scope = "all";
+        break;
     }
     if (scope) {
       this.performRevert(scope);
       this.mode = "normal";
-    } else if (k === "c" || key.name === "escape") {
+    } else if (button.kind === "cancel") {
       this.message = "Cancelled";
       this.mode = "normal";
     }
-    // Any other key does nothing: the prompt stays up.
   }
 
   /** Restore the chosen scope to its original form, keeping the dirty baseline
