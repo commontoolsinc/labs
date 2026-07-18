@@ -1,7 +1,8 @@
 import { assert, assertEquals } from "@std/assert";
-import { join } from "@std/path";
+import { fromFileUrl, join } from "@std/path";
 import {
   ALLOWLIST,
+  gitTrackedFiles,
   importsAlias,
   main,
   owningMember,
@@ -84,6 +85,22 @@ Deno.test("importsAlias matches a @deno-types companion comment", () => {
     'import { scaleBand } from "d3-scale";',
   ].join("\n");
   assert(importsAlias(source, "@types/d3-scale"));
+});
+
+// `@ts-types` is Deno's current spelling of the companion-type comment; the
+// older `@deno-types` above still works and both must be recognised, or an
+// `@types/*` alias reached through the current form would be reported unused.
+
+Deno.test("importsAlias matches a @ts-types companion comment", () => {
+  const source = [
+    '// @ts-types="@types/d3-scale"',
+    'import { scaleBand } from "d3-scale";',
+  ].join("\n");
+  assert(importsAlias(source, "@types/d3-scale"));
+});
+
+Deno.test("importsAlias matches @ts-types with single quotes and spaces", () => {
+  assert(importsAlias("// @ts-types = '@types/leaflet'", "@types/leaflet"));
 });
 
 Deno.test("importsAlias matches a subpath import of a bare alias", () => {
@@ -189,6 +206,37 @@ Deno.test("parseWorkspaceMembers normalises leading ./ and trailing /", () => {
   assertEquals(parseWorkspaceMembers(text), ["packages/a", "packages/b"]);
 });
 
+Deno.test("parseWorkspaceMembers returns empty when there is no workspace array", () => {
+  assertEquals(parseWorkspaceMembers(`{ "name": "x" }`), []);
+});
+
+Deno.test("runs as a command-line program against the repository", async () => {
+  // Exercises the module's command-line entry point (the import.meta.main
+  // guard). It runs against the real repository, which the "no unused import
+  // map entries" test asserts is clean, so the check prints success and exits 0.
+  const script = fromFileUrl(
+    new URL("./check-unused-deps.ts", import.meta.url),
+  );
+  const { code, stdout } = await new Deno.Command(Deno.execPath(), {
+    args: ["run", "--allow-read", "--allow-run=git", script],
+    stdout: "piped",
+    stderr: "null",
+  }).output();
+  assertEquals(code, 0);
+  assert(
+    new TextDecoder().decode(stdout).includes("No unused import map entries"),
+  );
+});
+
+Deno.test("gitTrackedFiles returns null when git is not available", async () => {
+  // A missing git binary makes Deno.Command throw; the scan falls back to a
+  // filesystem walk rather than failing.
+  assertEquals(
+    await gitTrackedFiles(".", "git-binary-that-does-not-exist-xyz"),
+    null,
+  );
+});
+
 // --- scan over the real repository tree ---
 
 Deno.test("no unused import map entries in the repository", async () => {
@@ -241,6 +289,17 @@ async function fixtureTree(
   return root;
 }
 
+// Runs a git command under `root`, throwing if it fails. Used to turn a fixture
+// tree into a real git working tree so the tracked-files path is exercised.
+async function runGit(root: string, ...args: string[]): Promise<void> {
+  const { success } = await new Deno.Command("git", {
+    args: ["-C", root, ...args],
+    stdout: "null",
+    stderr: "null",
+  }).output();
+  if (!success) throw new Error(`git ${args.join(" ")} failed in ${root}`);
+}
+
 async function captureConsole(
   body: () => Promise<void>,
 ): Promise<{ out: string; err: string }> {
@@ -289,6 +348,64 @@ Deno.test("main returns 1 and names the offender on an unused entry", async () =
     assertEquals(code, 1);
     assert(err.includes("packages/foo/deno.jsonc: left-pad"));
     assert(!err.includes(": zod"));
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("main checks a member whose config is deno.json", async () => {
+  // Deno accepts deno.json as well as deno.jsonc for a member. An unused entry
+  // in a deno.json member must still be found, and reported at its real path.
+  const root = await Deno.makeTempDir({ prefix: "check-unused-deps-" });
+  try {
+    await Deno.writeTextFile(
+      join(root, "deno.jsonc"),
+      JSON.stringify({ workspace: ["./packages/foo"], imports: {} }, null, 2),
+    );
+    const member = join(root, "packages", "foo");
+    await Deno.mkdir(member, { recursive: true });
+    await Deno.writeTextFile(
+      join(member, "deno.json"),
+      JSON.stringify({ imports: { "left-pad": "npm:left-pad@^1" } }, null, 2),
+    );
+    await Deno.writeTextFile(join(member, "mod.ts"), "export const x = 1;\n");
+
+    let code = -1;
+    const { err } = await captureConsole(async () => {
+      code = await main(root);
+    });
+    assertEquals(code, 1);
+    assert(err.includes("packages/foo/deno.json: left-pad"));
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("main reads workspace members from a deno.json root", async () => {
+  // The root itself may be deno.json. Its workspace list and its own import map
+  // are read the same way, so a member's used alias is not misreported.
+  const root = await Deno.makeTempDir({ prefix: "check-unused-deps-" });
+  try {
+    await Deno.writeTextFile(
+      join(root, "deno.json"),
+      JSON.stringify({ workspace: ["./packages/foo"], imports: {} }, null, 2),
+    );
+    const member = join(root, "packages", "foo");
+    await Deno.mkdir(member, { recursive: true });
+    await Deno.writeTextFile(
+      join(member, "deno.jsonc"),
+      JSON.stringify({ imports: { zod: "npm:zod@^3" } }, null, 2),
+    );
+    await Deno.writeTextFile(
+      join(member, "mod.ts"),
+      'import { z } from "zod";\n',
+    );
+
+    let code = -1;
+    await captureConsole(async () => {
+      code = await main(root);
+    });
+    assertEquals(code, 0);
   } finally {
     await Deno.remove(root, { recursive: true });
   }
@@ -359,6 +476,77 @@ Deno.test("main counts an importer under an output-named directory", async () =>
     await captureConsole(async () => {
       code = await main(root);
     });
+    assertEquals(code, 0);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("main tolerates a workspace member with no config file", async () => {
+  // A directory listed as a member but carrying neither deno.jsonc nor
+  // deno.json contributes no entries; collecting from it must not fail.
+  const root = await Deno.makeTempDir({ prefix: "check-unused-deps-" });
+  try {
+    await Deno.writeTextFile(
+      join(root, "deno.jsonc"),
+      JSON.stringify(
+        { workspace: ["./packages/foo", "./packages/nocfg"], imports: {} },
+        null,
+        2,
+      ),
+    );
+    const foo = join(root, "packages", "foo");
+    await Deno.mkdir(foo, { recursive: true });
+    await Deno.writeTextFile(
+      join(foo, "deno.jsonc"),
+      JSON.stringify({ imports: { zod: "npm:zod@^3" } }, null, 2),
+    );
+    await Deno.writeTextFile(join(foo, "mod.ts"), 'import { z } from "zod";\n');
+    const nocfg = join(root, "packages", "nocfg");
+    await Deno.mkdir(nocfg, { recursive: true });
+    await Deno.writeTextFile(join(nocfg, "mod.ts"), "export const x = 1;\n");
+
+    let code = -1;
+    await captureConsole(async () => {
+      code = await main(root);
+    });
+    assertEquals(code, 0);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("main skips a tracked file missing from the working tree", async () => {
+  // In a real git tree, git may list a file the working tree no longer holds.
+  // Reading it fails, and the scan must skip it rather than throw.
+  const root = await Deno.makeTempDir({ prefix: "check-unused-deps-" });
+  try {
+    await Deno.writeTextFile(
+      join(root, "deno.jsonc"),
+      JSON.stringify({ workspace: ["./packages/foo"], imports: {} }, null, 2),
+    );
+    const member = join(root, "packages", "foo");
+    await Deno.mkdir(member, { recursive: true });
+    await Deno.writeTextFile(
+      join(member, "deno.jsonc"),
+      JSON.stringify({ imports: { zod: "npm:zod@^3" } }, null, 2),
+    );
+    await Deno.writeTextFile(
+      join(member, "mod.ts"),
+      'import { z } from "zod";\n',
+    );
+    const gone = join(member, "gone.ts");
+    await Deno.writeTextFile(gone, "export const g = 1;\n");
+    // Stage the files so git tracks them, then remove one from disk.
+    await runGit(root, "init");
+    await runGit(root, "add", "-A");
+    await Deno.remove(gone);
+
+    let code = -1;
+    await captureConsole(async () => {
+      code = await main(root);
+    });
+    // zod is still imported by the surviving file; gone.ts is skipped, not fatal.
     assertEquals(code, 0);
   } finally {
     await Deno.remove(root, { recursive: true });

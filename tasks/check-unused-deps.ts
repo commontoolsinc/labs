@@ -2,13 +2,13 @@
 //
 // Fails when an import map declares a dependency that nothing imports.
 //
-// Each package's deno.jsonc, and the root deno.jsonc, map short aliases to
-// concrete specifiers in an `imports` block. An alias that no source file
-// imports is dead weight: it still resolves and downloads on install, it can
-// pin a second copy of a package the rest of the tree already has, and it
-// survives `deno outdated`, which only reports packages that are behind. An
-// unused dependency at its newest release is invisible to that tool, so nothing
-// catches it drifting in. This check does.
+// Each package's Deno config (deno.jsonc or deno.json), and the root's, map
+// short aliases to concrete specifiers in an `imports` block. An alias that no
+// source file imports is dead weight: it still resolves and downloads on
+// install, it can pin a second copy of a package the rest of the tree already
+// has, and it survives `deno outdated`, which only reports packages that are
+// behind. An unused dependency at its newest release is invisible to that tool,
+// so nothing catches it drifting in. This check does.
 //
 // An alias counts as used when some source file *in that import map's scope*
 // imports it. Scope follows Deno's own resolution:
@@ -23,17 +23,17 @@
 //     declaration.
 //
 // "Imports it" means the alias appears as a module specifier after `from`,
-// `import`, `import(`, `require(`, or a `@deno-types=` companion-type comment —
-// either exactly, or as the head of a `<alias>/subpath`. A slash-terminated
-// alias (for example `@/`) is a prefix mapping, so any specifier starting with
-// it counts. Text inside comments or strings can produce a false "used", which
-// only ever hides a dead entry; it never flags a live one, so the check does
-// not misfire on a real dependency.
+// `import`, `import(`, `require(`, or a `@ts-types=` companion-type comment (or
+// its older `@deno-types=` spelling) — either exactly, or as the head of a
+// `<alias>/subpath`. A slash-terminated alias (for example `@/`) is a prefix
+// mapping, so any specifier starting with it counts. Text inside comments or
+// strings can produce a false "used", which only ever hides a dead entry; it
+// never flags a live one, so the check does not misfire on a real dependency.
 //
 // A type-only companion package (`@types/*`) is never imported by name. It
-// reaches its package through a `@deno-types=` comment on that package's
-// import, which is why that form is one of the specifier shapes above. Without
-// the comment the `@types/*` alias is genuinely unused, and this check says so.
+// reaches its package through a `@ts-types=` comment on that package's import,
+// which is why that form is one of the specifier shapes above. Without the
+// comment the `@types/*` alias is genuinely unused, and this check says so.
 //
 // The source files searched are the ones git tracks. Reading the tracked set
 // rather than walking the filesystem is what makes the scope exact: it leaves
@@ -125,11 +125,12 @@ function escapeRegExp(source: string): string {
 
 // A module specifier is preceded by one of these. `from` covers static import
 // and export; `import` alone covers a side-effect import and, with an optional
-// `(`, a dynamic import; `require(` covers npm-style interop; `@deno-types=`
+// `(`, a dynamic import; `require(` covers npm-style interop; `@ts-types=`
 // covers the companion-type comment that points an import at its `@types/*`
-// package.
+// package. `@deno-types=` is the older spelling of that comment, still accepted
+// by Deno, so it is matched too.
 const SPECIFIER_LEAD =
-  "(?:\\bfrom\\s*|\\bimport\\s*\\(?\\s*|\\brequire\\s*\\(\\s*|@deno-types\\s*=\\s*)";
+  "(?:\\bfrom\\s*|\\bimport\\s*\\(?\\s*|\\brequire\\s*\\(\\s*|@(?:ts|deno)-types\\s*=\\s*)";
 // One character that is not a quote, for the body of a specifier.
 const NON_QUOTE = "[^\"'`]";
 
@@ -201,11 +202,15 @@ interface SourceFile {
 // Repo-relative, forward-slash paths of the files git tracks under `root`, or
 // null when `root` is not the top of a git working tree (so a caller can fall
 // back to walking). `-z` NUL-separates the names, which keeps paths with odd
-// characters intact.
-async function gitTrackedFiles(root: string): Promise<string[] | null> {
+// characters intact. `gitCommand` names the git binary; it exists so a test can
+// point at a missing one and exercise the not-installed path.
+export async function gitTrackedFiles(
+  root: string,
+  gitCommand = "git",
+): Promise<string[] | null> {
   let output: Deno.CommandOutput;
   try {
-    output = await new Deno.Command("git", {
+    output = await new Deno.Command(gitCommand, {
       args: ["-C", root, "ls-files", "-z"],
       stdout: "piped",
       stderr: "null",
@@ -286,29 +291,47 @@ export interface ScanResult {
   allowlisted: UnusedEntry[];
 }
 
+// The config file names Deno recognises for a directory, in the order it
+// prefers them: deno.jsonc wins when both are present.
+const CONFIG_NAMES = ["deno.jsonc", "deno.json"];
+
+// Finds the Deno config for the directory `dir` (the empty string for the
+// workspace root) under `root`, trying each recognised name. Returns its
+// repo-relative path and text, or null when the directory has neither. A member
+// that keeps its config in deno.json rather than deno.jsonc is read the same
+// way, so its import map is checked too.
+async function readConfig(
+  root: string,
+  dir: string,
+): Promise<{ path: string; text: string } | null> {
+  for (const name of CONFIG_NAMES) {
+    const path = dir === "" ? name : `${dir}/${name}`;
+    try {
+      return { path, text: await Deno.readTextFile(join(root, path)) };
+    } catch {
+      // Try the next recognised name.
+    }
+  }
+  return null;
+}
+
 // Collects every import-map entry from the root config and each member config.
 async function collectEntries(
   root: string,
   members: readonly string[],
 ): Promise<Entry[]> {
   const entries: Entry[] = [];
-  const configs: Array<{ path: string; member: string | undefined }> = [
-    { path: "deno.jsonc", member: undefined },
-    ...members.map((member) => ({
-      path: `${member}/deno.jsonc`,
-      member,
-    })),
+  const dirs: Array<{ dir: string; member: string | undefined }> = [
+    { dir: "", member: undefined },
+    ...members.map((member) => ({ dir: member, member })),
   ];
-  for (const { path, member } of configs) {
-    let text: string;
-    try {
-      text = await Deno.readTextFile(join(root, path));
-    } catch {
-      // A member may have a deno.json rather than deno.jsonc, or none at all.
-      continue;
-    }
-    for (const [alias, specifier] of Object.entries(parseImportMap(text))) {
-      entries.push({ config: path, member, alias, specifier });
+  for (const { dir, member } of dirs) {
+    const config = await readConfig(root, dir);
+    if (config === null) continue; // the directory has no Deno config
+    for (
+      const [alias, specifier] of Object.entries(parseImportMap(config.text))
+    ) {
+      entries.push({ config: config.path, member, alias, specifier });
     }
   }
   return entries;
@@ -319,8 +342,10 @@ async function collectEntries(
  * in-scope source file imports, split by whether the allowlist excuses them.
  */
 export async function scan(root: string = REPO_ROOT): Promise<ScanResult> {
-  const rootConfigText = await Deno.readTextFile(join(root, "deno.jsonc"));
-  const members = parseWorkspaceMembers(rootConfigText);
+  const rootConfig = await readConfig(root, "");
+  const members = rootConfig === null
+    ? []
+    : parseWorkspaceMembers(rootConfig.text);
   const [entries, files] = await Promise.all([
     collectEntries(root, members),
     readSourceFiles(root, members),
@@ -360,7 +385,7 @@ function reportUnused(unused: UnusedEntry[]): void {
     "run `deno install` to drop it from deno.lock.",
     "",
     "If a `@types/*` alias is listed, its package is meant to type an npm import.",
-    'Point that import at it with a `// @deno-types="<alias>"` comment rather',
+    'Point that import at it with a `// @ts-types="<alias>"` comment rather',
     "than deleting the alias — the bare specifier resolves through the import map.",
     "",
     "If an entry is declared without a local import on purpose, add it to",

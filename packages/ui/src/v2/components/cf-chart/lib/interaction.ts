@@ -2,7 +2,7 @@
  * Interaction handling for cf-chart: hover, click, crosshair, tooltip.
  */
 import { svg, type TemplateResult } from "lit";
-// @deno-types="@types/d3-scale"
+// @ts-types="@types/d3-scale"
 import type { ScaleBand } from "d3-scale";
 import type { CollectedMarkData, XScale, YScale } from "./scales.ts";
 import type { ChartHoverDetail, DataPoint, XScaleType } from "../types.ts";

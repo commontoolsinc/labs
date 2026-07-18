@@ -8,7 +8,7 @@
 import { html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { styles } from "./styles.ts";
-// @deno-types="@types/leaflet"
+// @ts-types="@types/leaflet"
 import * as L from "leaflet";
 import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
 import { createCellController } from "../../core/cell-controller.ts";

@@ -34,13 +34,13 @@ as `any`, and nothing reports it: the import still resolves, and the type
 positions still fill, so a name like `ScaleBand` reads as a real type while
 standing for `any`.
 
-Point the import at its types with a `@deno-types` comment. Write the specifier
+Point the import at its types with a `@ts-types` comment. Write the specifier
 bare so that it resolves through the import map, which keeps the version pinned
 in one place rather than repeated in every file that imports the package:
 
 ```ts
 // Shown for illustration only.
-// @deno-types="@types/d3-scale"
+// @ts-types="@types/d3-scale"
 import { scaleBand } from "d3-scale";
 ```
 
@@ -59,7 +59,7 @@ scope, where a member's map covers only that member's files and the root map
 covers the whole workspace. It runs in CI alongside the other lockfile and lint
 checks.
 
-An `@types/*` alias reached only through a `@deno-types` comment still counts as
+An `@types/*` alias reached only through a `@ts-types` comment still counts as
 imported, so wiring one up as above satisfies the check. A dependency that is
 declared without a local import on purpose goes in the allowlist in
 `tasks/check-unused-deps.ts` with a one-line reason.
