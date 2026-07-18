@@ -1440,6 +1440,64 @@ Deno.test("CellBridge.rebuildPieceProp keeps the FS projection index inode stabl
   assertEquals(invalidatedInodes.includes(indexIno), true);
 });
 
+Deno.test("CellBridge.rebuildPieceProp reconciles a prop changing from an object to a scalar", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+
+  const objectSchema = {
+    type: "object",
+    properties: { title: { type: "string" } },
+  };
+  const piece = {
+    id: "of:object-to-scalar",
+    name: () => "Object To Scalar",
+    getPatternMeta: () => Promise.resolve({}),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(makeCell({ title: "x" }, objectSchema)),
+      get: () => Promise.resolve({ title: "x" }),
+    },
+  };
+  state.pieceControllers.set(
+    "Object To Scalar",
+    piece as unknown as SpaceState["pieceControllers"] extends
+      Map<string, infer T> ? T : never,
+  );
+  const pieceIno = await (bridge as unknown as { loadPieceTree: LoadPieceTree })
+    .loadPieceTree(piece, state.piecesIno, "Object To Scalar", "home");
+  state.pieceMap.set("Object To Scalar", piece.id);
+  state.pieceInos.set("Object To Scalar", pieceIno);
+
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
+  assertEquals(tree.getNode(tree.lookup(pieceIno, "result")!)?.kind, "dir");
+  assertEquals(tree.lookup(pieceIno, "result.json") !== undefined, true);
+
+  // The result becomes a bare string: `result` changes kind from a directory
+  // to a file (its inode is replaced), and its `.json` sibling disappears
+  // because a scalar has no aggregate form.
+  await (bridge as unknown as { rebuildPieceProp: RebuildPieceProp })
+    .rebuildPieceProp.call(bridge, {
+      cell: makeCell("y", undefined),
+      newValue: "y",
+      pieceId: piece.id,
+      pieceIno,
+      pieceName: "Object To Scalar",
+      propName: "result",
+      resolveLink: () => null,
+      spaceName: "home",
+    });
+
+  const resultIno = tree.lookup(pieceIno, "result");
+  assertEquals(tree.getNode(resultIno!)?.kind, "file");
+  assertEquals(getFileContent(tree, pieceIno, "result"), "y");
+  assertEquals(tree.lookup(pieceIno, "result.json"), undefined);
+});
+
 Deno.test("CellBridge.rebuildPieceProp invalidates the index dentry when an FS projection is removed", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/cf-exec");

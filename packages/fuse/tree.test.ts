@@ -561,3 +561,22 @@ Deno.test("touch advances a directory's mtime, clamped strictly upward", () => {
   // Touching a missing inode is a no-op.
   tree.touch(9_999n);
 });
+
+Deno.test("transplantSubtree throws when a root inode does not exist", () => {
+  const tree = new FsTree();
+  const dir = tree.addDir(tree.rootIno, "dir");
+  let threw = false;
+  try {
+    tree.transplantSubtree(dir, 9_999n);
+  } catch {
+    threw = true;
+  }
+  assertEquals(threw, true);
+});
+
+Deno.test("clear on a missing inode is a no-op", () => {
+  const tree = new FsTree();
+  const before = tree.inodes.size;
+  tree.clear(9_999n);
+  assertEquals(tree.inodes.size, before);
+});
