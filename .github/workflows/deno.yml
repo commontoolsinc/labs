@@ -531,13 +531,20 @@ jobs:
         env:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
           FUSE_DEEP_ENTITY_PROBE: "0"
+          # Single source for the outer step bound: 'timeout' enforces it, and the
+          # script's waits give up a few minutes before it (see
+          # FUSE_EXEC_OVERALL_TIMEOUT_SECONDS in integration/fuse-exec.sh) so a
+          # wedge is reported with diagnostics rather than truncated at cancel.
+          FUSE_STEP_TIMEOUT_SECONDS: "480"
         run: |
           set +e
-          API_URL="http://localhost:${TOOLSHED_PORT}" timeout 480 ./integration/${{ matrix.script }}
+          API_URL="http://localhost:${TOOLSHED_PORT}" \
+            FUSE_EXEC_OVERALL_TIMEOUT_SECONDS="${FUSE_STEP_TIMEOUT_SECONDS}" \
+            timeout "${FUSE_STEP_TIMEOUT_SECONDS}" ./integration/${{ matrix.script }}
           rc=$?
           set -e
           if [ "$rc" -eq 124 ]; then
-            echo "::error::FUSE integration timed out after 480 seconds"
+            echo "::error::FUSE integration timed out after ${FUSE_STEP_TIMEOUT_SECONDS} seconds"
           fi
           exit "$rc"
 

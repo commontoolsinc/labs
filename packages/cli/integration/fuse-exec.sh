@@ -9,7 +9,14 @@ export CF_FUSE_DEBUG=1
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 
 error() {
+  # Drop errexit for the diagnostics: this path is about to exit non-zero anyway,
+  # and one failing probe must not cut the dump short. Dump the daemon's own state
+  # (log tail and, on Linux, its threads' kernel state) first, because it reads
+  # only files off the mount and so survives a wedged mount, then the mount tree,
+  # which can stall even with each touch bounded.
+  set +e
   >&2 echo "ERROR: $1"
+  dump_daemon_state
   dump_mount_state
   exit 1
 }
@@ -23,15 +30,90 @@ dump_mount_state() {
   local pieces_dir="$MOUNTPOINT/$SPACE/pieces"
   >&2 echo "--- mount state dump ---"
   if path_exists "$pieces_dir" 2; then
-    >&2 ls -la "$pieces_dir" 2>&1 || true
+    >&2 run_bounded 5 ls -la "$pieces_dir" 2>&1 || true
     if path_exists "$pieces_dir/pieces.json" 2; then
       >&2 echo "--- pieces.json ---"
-      >&2 cat "$pieces_dir/pieces.json" 2>&1 || true
+      >&2 run_bounded 5 cat "$pieces_dir/pieces.json" 2>&1 || true
     fi
   else
     >&2 echo "(pieces dir not reachable: $pieces_dir)"
   fi
   >&2 echo "--- end mount state dump ---"
+}
+
+# The direct child processes of the background mount's supervisor. MOUNT_PID is
+# the supervisor; its one child is the worker that actually serves FUSE. pgrep is
+# present on both CI (Linux) and local (macOS); the /proc fallback covers a Linux
+# runner without pgrep.
+worker_pids() {
+  local supervisor="$1"
+  local kids
+  kids=$(pgrep -P "$supervisor" 2>/dev/null)
+  if [ -z "$kids" ] && [ -r "/proc/$supervisor/task/$supervisor/children" ]; then
+    kids=$(cat "/proc/$supervisor/task/$supervisor/children" 2>/dev/null)
+  fi
+  printf '%s\n' $kids
+}
+
+# Print each thread's scheduling state and kernel wait channel for a process,
+# read from /proc (Linux only). These reads never block regardless of process
+# state, unlike a stat() that crosses the wedged mount, so they are safe to run on
+# the failure path.
+dump_proc_state() {
+  local pid="$1"
+  local label="$2"
+  if [ ! -d "/proc/$pid" ]; then
+    >&2 echo "($label PID $pid: no /proc entry)"
+    return 0
+  fi
+  local cmd
+  cmd=$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null)
+  >&2 echo "--- $label PID $pid: ${cmd:-<unknown>} ---"
+  local task tid stat_line state wchan
+  for task in "/proc/$pid/task/"*; do
+    [ -d "$task" ] || continue
+    tid=$(basename "$task")
+    # stat field 3 is the state letter; the comm field (2) may hold spaces and
+    # parentheses, so read the state from after the final ') '.
+    stat_line=$(cat "$task/stat" 2>/dev/null)
+    state=${stat_line##*) }
+    state=${state%% *}
+    wchan=$(cat "$task/wchan" 2>/dev/null)
+    >&2 echo "  thread $tid: state=${state:-?} wchan=${wchan:-?}"
+  done
+}
+
+# Dump the FUSE daemon's own diagnostics without touching the mount: the tail of
+# its log file (a regular file off the mount) and, on Linux, each daemon thread's
+# kernel state. A wedged mount leaves the worker thread in uninterruptible sleep
+# (state 'D') parked in a FUSE wait, so the state letter and 'wchan' per thread
+# turn an opaque hang into a diagnosable one.
+dump_daemon_state() {
+  if [ -z "${MOUNT_PID:-}" ] && [ -z "${DAEMON_LOG:-}" ]; then
+    return 0
+  fi
+  # Both the test-body failure path (error) and the exit-trap cleanup can reach a
+  # wedge, but the daemon state only needs capturing once; whichever gets there
+  # first dumps it, and by the second the daemon may already be killed.
+  if [ -n "${DAEMON_STATE_DUMPED:-}" ]; then
+    return 0
+  fi
+  DAEMON_STATE_DUMPED=1
+  >&2 echo "--- daemon state dump ---"
+  if [ -n "${DAEMON_LOG:-}" ] && [ -f "$DAEMON_LOG" ]; then
+    >&2 echo "--- daemon log tail: $DAEMON_LOG ---"
+    >&2 tail -n 100 "$DAEMON_LOG" 2>&1 || true
+  else
+    >&2 echo "(daemon log not available: ${DAEMON_LOG:-<unparsed>})"
+  fi
+  if [ -n "${MOUNT_PID:-}" ] && [ -d "/proc/$MOUNT_PID" ]; then
+    dump_proc_state "$MOUNT_PID" "supervisor"
+    local worker
+    for worker in $(worker_pids "$MOUNT_PID"); do
+      dump_proc_state "$worker" "worker"
+    done
+  fi
+  >&2 echo "--- end daemon state dump ---"
 }
 
 success() {
@@ -57,22 +139,55 @@ assert_contains() {
 assert_not_exists() {
   local path="$1"
   local message="$2"
+  local status
 
-  if path_exists "$path"; then
-    error "$message"
+  # A stat on a FUSE path is a round-trip to the daemon, not a local lookup, so it
+  # can hang when the daemon wedges. path_exists distinguishes three outcomes: the
+  # path is present (0), it is genuinely absent (1), or the probe timed out with no
+  # answer (anything else). Reading a timed-out probe as "absent" would let a
+  # wedge — or the very path this forbids, hidden behind a hung stat — pass, so on
+  # a non-answer retry until the deadline and then fail rather than pass.
+  while true; do
+    if path_exists "$path" 1; then
+      status=0
+    else
+      status=$?
+    fi
+    if [ "$status" -eq 0 ]; then
+      error "$message"
+    elif [ "$status" -eq 1 ]; then
+      return 0
+    fi
+    if wait_deadline_reached; then
+      error "$message (could not confirm absence; a stat on the path never returned, so the FUSE daemon may be wedged)"
+    fi
+    sleep 0.1
+  done
+}
+
+# Run a command with a hard time bound where 'timeout' is available (Linux CI),
+# so a call that touches a wedged FUSE mount cannot block forever. SIGKILL,
+# because a stat parked on an unresponsive FUSE daemon does not act on a catchable
+# signal. macOS local dev has no 'timeout'; there the command runs unbounded,
+# which is acceptable because the daemon hang this guards against is a CI (Linux)
+# failure mode and not seen on local FUSE-T.
+run_bounded() {
+  local seconds="$1"
+  shift
+
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --signal=KILL "$seconds" "$@"
+    return $?
   fi
+
+  "$@"
 }
 
 path_exists() {
   local path="$1"
   local probe_timeout="${2:-3}"
 
-  if command -v timeout >/dev/null 2>&1; then
-    timeout --signal=KILL "$probe_timeout" test -e "$path" >/dev/null 2>&1
-    return $?
-  fi
-
-  test -e "$path"
+  run_bounded "$probe_timeout" test -e "$path" >/dev/null 2>&1
 }
 
 assert_json_eq() {
@@ -89,18 +204,27 @@ assert_json_eq() {
   fi
 }
 
+# The waits below fire only when the daemon has wedged — a healthy operation
+# settles in well under a second, so their deadline is not tuned to how long the
+# work takes. WAIT_DEADLINE_EPOCH is set at startup to a few minutes before the CI
+# step's outer 'timeout' would kill the script, so a wedge trips a wait — and
+# error() prints the daemon's state — while there is still time to flush the log,
+# rather than the step being cancelled mid-hang with the diagnostics truncated.
+# Because the bound only ever cuts off a wedge, making it this large costs a
+# healthy run nothing and widens the margin against a slow machine or a clock jump.
+wait_deadline_reached() {
+  [ "$(date +%s)" -ge "$WAIT_DEADLINE_EPOCH" ]
+}
+
 wait_for_path() {
   local path="$1"
-  local timeout_seconds="${2:-20}"
-  local started_at
-  started_at=$(date +%s)
 
   while true; do
     # Initial lazy hydration of FUSE paths may need a network round-trip.
     if path_exists "$path" 1; then
       return 0
     fi
-    if [ $(( $(date +%s) - started_at )) -ge "$timeout_seconds" ]; then
+    if wait_deadline_reached; then
       break
     fi
     sleep 0.1
@@ -117,15 +241,12 @@ wait_for_json() {
   local path="$1"
   local filter="$2"
   local message="$3"
-  local timeout_seconds="${4:-20}"
-  local started_at
-  started_at=$(date +%s)
 
   while true; do
     if jq -e "$filter" "$path" >/dev/null 2>&1; then
       return 0
     fi
-    if [ $(( $(date +%s) - started_at )) -ge "$timeout_seconds" ]; then
+    if wait_deadline_reached; then
       break
     fi
     sleep 0.1
@@ -150,9 +271,6 @@ fuse_encode_component() {
 resolve_entity_dir() {
   local entities_dir="$1"
   local entity_id="$2"
-  local timeout_seconds="${3:-20}"
-  local started_at
-  started_at=$(date +%s)
   local bare_id="${entity_id#of:}"
   local canonical_entity_dir="$entities_dir/of:$bare_id"
   local bare_entity_dir="$entities_dir/$bare_id"
@@ -186,7 +304,7 @@ resolve_entity_dir() {
       return 0
     fi
 
-    if [ $(( $(date +%s) - started_at )) -ge "$timeout_seconds" ]; then
+    if wait_deadline_reached; then
       break
     fi
     sleep 0.1
@@ -198,20 +316,19 @@ resolve_entity_dir() {
 wait_for_piece_value() {
   local path="$1"
   local expected="$2"
-  local timeout_seconds="${3:-5}"
-  local attempts=$((timeout_seconds * 10))
+  local actual
 
-  for _ in $(seq 1 "$attempts"); do
-    local actual
+  while true; do
     actual=$(cf piece get $SPACE_ARGS --piece "$PIECE_ID" "$path" 2>/dev/null || true)
     if [ "$actual" = "$expected" ]; then
       return 0
     fi
+    if wait_deadline_reached; then
+      break
+    fi
     sleep 0.1
   done
 
-  local actual
-  actual=$(cf piece get $SPACE_ARGS --piece "$PIECE_ID" "$path" 2>/dev/null || true)
   error "Timed out waiting for piece path '$path'. Expected: $expected, got: $actual"
 }
 
@@ -222,15 +339,16 @@ piece_pattern_identity() {
 
 wait_for_pattern_identity_change() {
   local previous_identity="$1"
-  local timeout_seconds="${2:-10}"
-  local attempts=$((timeout_seconds * 10))
+  local actual
 
-  for _ in $(seq 1 "$attempts"); do
-    local actual
+  while true; do
     actual=$(piece_pattern_identity || true)
     if [ -n "$actual" ] && [ "$actual" != "$previous_identity" ]; then
       printf '%s\n' "$actual"
       return 0
+    fi
+    if wait_deadline_reached; then
+      break
     fi
     sleep 0.1
   done
@@ -277,15 +395,12 @@ trace_contains_line() {
 wait_for_trace_line() {
   local mark="$1"
   local needle="$2"
-  local timeout_seconds="${3:-20}"
-  local started_at
-  started_at=$(date +%s)
 
   while true; do
     if trace_contains "$mark" "$needle"; then
       return 0
     fi
-    if [ $(( $(date +%s) - started_at )) -ge "$timeout_seconds" ]; then
+    if wait_deadline_reached; then
       break
     fi
     sleep 0.1
@@ -323,9 +438,6 @@ trace_release_line() {
 resolve_traced_write_fh() {
   local mark="$1"
   local size="$2"
-  local timeout_seconds="${3:-20}"
-  local started_at
-  started_at=$(date +%s)
   local fh
 
   while true; do
@@ -336,7 +448,7 @@ resolve_traced_write_fh() {
       printf '%s\n' "$fh"
       return 0
     fi
-    if [ $(( $(date +%s) - started_at )) -ge "$timeout_seconds" ]; then
+    if wait_deadline_reached; then
       break
     fi
     sleep 0.1
@@ -364,21 +476,115 @@ read_piece_value_or_default() {
   printf '%s\n' "$actual"
 }
 
+# True when the kernel's mount table still lists the mountpoint. Reading the mount
+# table does not cross the mount, so this never blocks and needs no time bound —
+# unlike a 'cd' or 'stat' into the mount root, which a wedged daemon would hang. It
+# compares against the physical path resolved before the mount (MOUNTPOINT_REAL),
+# which is how the mount appears in 'mount' output. With no resolvable path it
+# reports active, so cleanup never 'rm -rf's a mount it could not rule out.
 mount_is_active() {
-  local path="$1"
-  local canonical
+  local path="${MOUNTPOINT_REAL:-$1}"
+  [ -n "$path" ] || return 0
+  mount | grep -Fq " on $path "
+}
 
-  canonical=$(cd -P -- "$path" >/dev/null 2>&1 && pwd) || return 1
-  mount | grep -Fq " on $canonical "
+# True when the PID's command still looks like the FUSE daemon. Guards the
+# SIGKILLs below against a reused PID, mirroring isFuseProcessCommand in
+# packages/cli/commands/fuse.ts, which matches the supervisor and worker in both
+# the 'deno run' and compiled-binary forms and nothing merely containing 'fuse'.
+is_fuse_process() {
+  ps -o command= -p "$1" 2>/dev/null |
+    grep -qE 'packages/fuse/mod\.ts|fuse-supervisor|fuse-daemon'
+}
+
+# Kill the background FUSE daemon so a wedged mount stops blocking. MOUNT_PID is
+# the supervisor; the process that actually serves FUSE and holds the /dev/fuse
+# handle is its worker child, so kill the worker first — on Linux that makes the
+# kernel abort the connection so calls on the mount fail instead of blocking — then
+# the supervisor. SIGKILL, because a wedged worker does not act on SIGTERM.
+kill_fuse_daemon() {
+  if [ -z "${MOUNT_PID:-}" ]; then
+    return 0
+  fi
+  local pid
+  for pid in $(worker_pids "$MOUNT_PID") "$MOUNT_PID"; do
+    if is_fuse_process "$pid"; then
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
+  done
+}
+
+# Detach a mount whose daemon has been killed. 'cf fuse unmount' skips the system
+# unmount once it sees no live daemon, so the severed mount would otherwise stay
+# listed; remove it directly, on the physical path the unmount tools match against
+# (MOUNTPOINT_REAL). Bounded because it runs on the failure path.
+force_detach() {
+  local path="${MOUNTPOINT_REAL:-$1}"
+  if [ "$(uname)" = "Darwin" ]; then
+    run_bounded 15 umount -f "$path"
+  elif command -v fusermount3 >/dev/null 2>&1; then
+    run_bounded 15 fusermount3 -u -z "$path"
+  else
+    run_bounded 15 umount -l "$path"
+  fi
+}
+
+# Unmount, bounded by the shared outer deadline (WAIT_DEADLINE_EPOCH) rather than a
+# fixed duration, so a slow-but-succeeding unmount is never cut short — the bound is
+# whatever is left before the CI step's 'timeout' fires, minutes more than an
+# unmount ever needs. Only a genuinely hung teardown reaches it. run_bounded's
+# 'timeout' cannot exec a shell function, and local dev's 'cf' is one, so only an
+# external 'cf' (the compiled binary CI runs) is bounded; a 'cf' function runs
+# unbounded, the same as the no-'timeout' local path.
+unmount_until_deadline() {
+  local remaining
+  remaining=$((WAIT_DEADLINE_EPOCH - $(date +%s)))
+  [ "$remaining" -ge 1 ] || remaining=1
+  if [ "$(type -t cf)" = "file" ]; then
+    run_bounded "$remaining" cf fuse unmount "$1" >/dev/null 2>&1
+  else
+    cf fuse unmount "$1" >/dev/null 2>&1
+  fi
 }
 
 cleanup() {
+  # Capture the pending exit status before 'set +e' overwrites it: it tells us
+  # whether the test has already failed.
+  local exit_code=$?
   set +e
   local can_remove_mountpoint=true
-  if [ -n "${MOUNTPOINT:-}" ] && [ -d "${MOUNTPOINT:-}" ]; then
-    cf fuse unmount "$MOUNTPOINT" >/dev/null 2>&1
+  local wedge_confirmed=false
+  # Gate on MOUNTPOINT being set, not on '[ -d "$MOUNTPOINT" ]': that is a getattr
+  # on the mount root, which blocks on a wedged daemon. mktemp -d created the
+  # directory, so a set MOUNTPOINT is always a real directory to tear down.
+  if [ -n "${MOUNTPOINT:-}" ]; then
+    if [ "$exit_code" -ne 0 ]; then
+      # The test has already failed, for whatever reason, and error() has already
+      # dumped the daemon state if the failure was a wedge. We no longer care about
+      # a graceful unmount — hard-terminate the daemon so nothing it holds can block
+      # the process from exiting and reporting the failure to CI, then detach the
+      # severed mount. SIGKILL is non-blocking, so this needs no timeout.
+      kill_fuse_daemon
+      force_detach "$MOUNTPOINT" >/dev/null 2>&1
+    else
+      # The test passed, so tear the mount down gracefully — this is the only path
+      # that exercises the real 'cf fuse unmount', and it avoids leaving a stale
+      # FUSE-T mount on macOS. Bound it only by the shared outer deadline, so a
+      # slow-but-succeeding unmount is never cut short; the bound is minutes, far
+      # longer than an unmount takes. If it cannot finish by then, the teardown
+      # itself has wedged — a real failure a passing run must not hide. Capture the
+      # daemon state, hard-kill it, detach, and fail the run.
+      unmount_until_deadline "$MOUNTPOINT"
+      if mount_is_active "$MOUNTPOINT"; then
+        >&2 echo "WARN: $MOUNTPOINT still mounted after unmount; the FUSE teardown wedged"
+        dump_daemon_state
+        kill_fuse_daemon
+        force_detach "$MOUNTPOINT" >/dev/null 2>&1
+        wedge_confirmed=true
+      fi
+    fi
     if mount_is_active "$MOUNTPOINT"; then
-      >&2 echo "WARN: leaving mounted filesystem at $MOUNTPOINT because unmount failed"
+      >&2 echo "WARN: leaving mounted filesystem at $MOUNTPOINT because it could not be detached"
       can_remove_mountpoint=false
     fi
   fi
@@ -393,6 +599,14 @@ cleanup() {
   fi
   if [ -n "${INCOMPATIBLE_PATTERN_SRC:-}" ]; then
     rm -f "$INCOMPATIBLE_PATTERN_SRC"
+  fi
+  # If the graceful unmount could not complete before the deadline, the teardown
+  # wedged after the test otherwise passed. Fail the run so that hang is reported
+  # rather than masked by a green build. This runs after the temp files are
+  # cleaned; an exit from the EXIT trap keeps this status.
+  if [ "$wedge_confirmed" = true ]; then
+    >&2 echo "ERROR: FUSE teardown wedged after the test passed; failing the run so the hang is not masked."
+    exit 1
   fi
 }
 
@@ -409,9 +623,27 @@ fi
 SPACE=$(mktemp -u XXXXXXXXXX)
 IDENTITY=$(mktemp)
 MOUNTPOINT=$(mktemp -d)
+# Resolve the mountpoint's physical path now, while it is still an empty plain
+# directory. After 'cf fuse mount' it is the mount root, and resolving it then
+# would 'cd' across the mount and block on a wedged daemon. The resolved path does
+# not move when the mount appears over it, and it is what 'mount' output and the
+# unmount tools use, so cleanup can test and detach against it without ever
+# touching the mount.
+MOUNTPOINT_REAL=$(cd -P -- "$MOUNTPOINT" 2>/dev/null && pwd)
 SPACE_ARGS="--api-url=$API_URL --identity=$IDENTITY --space=$SPACE"
 PATTERN_SRC="$SCRIPT_DIR/pattern/fuse-exec.tsx"
 CUSTOM_EXPORT="customPatternExport"
+
+# The deadline for every wait that fails the test (see wait_deadline_reached).
+# The default overall bound matches the CI step's 'timeout' in
+# .github/workflows/deno.yml, which sets FUSE_EXEC_OVERALL_TIMEOUT_SECONDS to keep
+# the two in step; the waits give up a few minutes before it so error() can print
+# the daemon's state before the step is cancelled. The floor guards a
+# misconfigured tiny outer bound from making every wait fire at once.
+OVERALL_TIMEOUT_SECONDS="${FUSE_EXEC_OVERALL_TIMEOUT_SECONDS:-480}"
+WAIT_BUDGET_SECONDS=$((OVERALL_TIMEOUT_SECONDS - 300))
+[ "$WAIT_BUDGET_SECONDS" -ge 30 ] || WAIT_BUDGET_SECONDS=$((OVERALL_TIMEOUT_SECONDS / 2 + 1))
+WAIT_DEADLINE_EPOCH=$(($(date +%s) + WAIT_BUDGET_SECONDS))
 
 echo "API_URL=$API_URL"
 echo "SPACE=$SPACE"
@@ -439,6 +671,10 @@ case "$MOUNT_PID" in
     ;;
 esac
 
+# The background mount prints a 'log:' line pointing at the daemon's log file (see
+# packages/cli/commands/fuse.ts). That file lives off the mount, so it stays
+# readable even when the mount itself is wedged, and the trace assertions and the
+# failure-path daemon dump both read it. It is required, so a parse miss is fatal.
 DAEMON_LOG=$(printf '%s\n' "$MOUNT_OUTPUT" | sed -n 's/^[[:space:]]*log:[[:space:]]*//p')
 if [ -z "$DAEMON_LOG" ]; then
   error "Could not parse fuse daemon log path from mount output."
@@ -475,7 +711,7 @@ ENTITY_BARE_ID="${ENTITY_ID#of:}"
 ENTITY_DEEP_PROBE="${FUSE_DEEP_ENTITY_PROBE:-0}"
 ENTITIES_DIR="$MOUNTPOINT/$SPACE/entities"
 wait_for_path "$ENTITIES_DIR"
-ENTITY_DIR=$(resolve_entity_dir "$ENTITIES_DIR" "$ENTITY_ID" 20 || true)
+ENTITY_DIR=$(resolve_entity_dir "$ENTITIES_DIR" "$ENTITY_ID" || true)
 if [ -z "$ENTITY_DIR" ]; then
   error "Timed out waiting for entity directory entry for $ENTITY_ID."
 fi

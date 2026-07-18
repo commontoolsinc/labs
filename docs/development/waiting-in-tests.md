@@ -26,6 +26,52 @@ Reach for a poll only for the cases catalogued under [Where the polling
 `waitFor` stays](#where-the-polling-waitfor-stays). Everywhere else, wait on an
 event.
 
+## Wall-clock time is not a measure of progress
+
+The ceiling above assumes the bound is exceeded because the work was slow. There
+is a worse way to exceed it: the clock jumps forward while the work made no
+progress and nothing was wrong.
+
+A timeout counts wall-clock time, and wall-clock time diverges from real progress
+whenever the world outside the process pauses. A laptop is closed and reopened. A
+CI virtual machine is paused for an hour of host maintenance, or is live-migrated
+to another host, and resumes where it left off. A container is frozen by the
+cgroup freezer or a checkpoint. The clock is stepped by NTP. Each of these
+advances wall time — sometimes by a large, arbitrary amount — while the timed
+operation did not run at all, so a timeout fires on it exactly as it would on a
+genuine hang. It cannot tell "stuck" from "everyone was stopped."
+
+This is a stronger objection than "the machine might be slow, so pad the bound."
+Slowness you can pad against; a clock discontinuity you cannot, because no fixed
+bound survives an arbitrary jump — a suspend one second past the deadline trips a
+fifteen-second bound as surely as a one-second one. A bound sized "comfortably
+above how long the operation ever takes" is therefore safe against slowness only,
+not against this. The exposure also turns on details you do not control: GNU
+`timeout` arms a `CLOCK_REALTIME` timer, which counts suspend time, so the bound
+fires on resume; a `CLOCK_MONOTONIC` bound would survive a suspend-to-RAM but not
+a frozen process whose system clock kept running. No clock is safe against every
+kind of pause.
+
+So a bounded timeout is never a guarantee, only a heuristic with a real
+false-positive mode, and the test for whether one is acceptable is not "is the
+bound comfortably large" but "is firing early safe." Does the code still reach a
+correct outcome when the bound trips on a healthy operation? A bound whose early
+fire only repeats cleanup work is tolerable. A bound whose early fire fails a
+passing test, drops a real result, or corrupts state is not — and wanting one
+there is the signal to make the wait event-driven instead.
+
+Those two kinds map onto the rest of this note. The shutdown escalation in the
+mount handshake keeps a bound whose early fire is harmless — it `SIGKILL`s a
+child that was already exiting, reaching the same end either way. The rest — the
+polling waits under [Where the polling `waitFor`
+stays](#where-the-polling-waitfor-stays) and the FUSE cleanup's teardown bound —
+keep a bound whose early fire fails the run. They exist because no event reports
+the condition they wait on, so a large-enough clock jump can trip one on a
+healthy run and fail it. That is a fragility we accept for want of an
+alternative, sized so only a multi-minute jump reaches it — not one we have
+designed away. When an event boundary does exist, use it, and neither kind of
+exception arises.
+
 ## The primitives to use instead
 
 Waits split into two groups with different primitives.
@@ -547,6 +593,59 @@ shape of all three lines, so a reword fails there, naming what it broke.
 The value check stays, after the trace checks, as the end-to-end statement that
 the cell really is empty. It is the weaker of the two instruments and is not what
 makes a broken disarm fail.
+
+#### Cleanup hard-kills on a failure, unmounts gracefully on a pass
+
+The daemon can wedge — a hang that hits a meaningful share of CI runs, with its
+own root-cause investigation. When it does, every filesystem call that crosses
+the mount blocks with no time limit, because the daemon that would answer it
+never does. The exit-trap `cleanup` would run `cf fuse unmount` and check whether
+the mount is still active; both touch the mount, so left unbounded on a wedge the
+script neither reports nor exits. On CI the job then runs to its step timeout and
+is cancelled with the streamed log truncated at the hang, so no diagnostics
+survive — the original failure this guards against.
+
+`cleanup` handles the two ways it is reached differently, keyed on the pending
+exit status it captures before doing anything. If the test has **already failed**
+— a `wait_for_path` deadline, an assertion, anything — we no longer care how the
+mount is torn down, only that the process exits and reports the failure to CI. So
+it hard-kills the daemon and detaches: `SIGKILL` on the worker that holds
+`/dev/fuse` makes the kernel abort the connection, which is non-blocking and
+needs no timeout, and `error` has already dumped the daemon state on the way in.
+No graceful unmount is attempted, because a graceful unmount of a wedged mount is
+the very thing that would hang. The failure code is preserved — an exit trap that
+returns without calling `exit` keeps the status that triggered it — so nothing
+here can mask the failure.
+
+If the test **passed**, `cleanup` unmounts gracefully: the only path that
+exercises the real `cf fuse unmount`, and the one that avoids leaving a stale
+FUSE-T mount on macOS. That unmount is bounded, but by the shared outer deadline
+([above](#wall-clock-time-is-not-a-measure-of-progress)), not a fixed few seconds
+— so a slow-but-succeeding unmount is never cut short, and only a teardown that
+cannot finish before the deadline (the daemon wedging during its own shutdown)
+reaches the bound. That is a real failure a passing run must not hide, so
+`cleanup` dumps the daemon state, hard-kills it, detaches, and fails the run. The
+bound is still a ceiling, so a clock jump can trip it early on a healthy unmount;
+but it sits minutes above how long an unmount takes, so only a multi-minute jump
+does, and at that point we are out of diagnostic margin either way. Reporting is
+the honest response — preferred over masking a genuine wedge whenever we cannot
+prove it was a clock jump.
+
+Killing the worker, not the bound, is what actually unsticks the mount. Once the
+process holding `/dev/fuse` exits, the kernel aborts the connection and every
+pending call returns an error. That exit is the event this path leans on, the
+same way the shutdown escalation in the mount handshake leans on the child's exit
+and only sends `SIGKILL` after a grace period as a fallback.
+
+Before touching the mount at all, `error` dumps the daemon's own state — the tail
+of its log file, which is a regular file off the mount, and on Linux each daemon
+thread's scheduling state and kernel wait channel from `/proc`. A wedged mount
+parks the worker thread in uninterruptible sleep in a FUSE wait, so that per-
+thread state names the hang. Reading both crosses nothing that can block, so the
+diagnostics survive even when the mount-tree dump that follows stalls. The
+`/proc` state in particular has to be read here rather than from CI's post-run
+log step: by the time that step runs, `cleanup` has killed the daemon and its
+`/proc` entries are gone.
 
 #### The daemon's `.status` file is a probe, not a signal
 
