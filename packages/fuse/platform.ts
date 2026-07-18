@@ -117,13 +117,26 @@ export const COMMON_SYMBOLS = {
 
   // Kernel cache invalidation (FUSE 2.8+ / FUSE 3.x)
   // First param is channel (v2) or session (v3) — callers use MountHandle.notifyTarget.
+  //
+  // These run nonblocking, on an FFI thread rather than the isolate thread. On
+  // Linux, notify_inval_entry enters the kernel and takes the parent
+  // directory's inode lock for write; a concurrent lookup under that directory
+  // holds the same lock for read until the daemon answers it. The daemon
+  // answers requests on the isolate thread, so a synchronous notify would block
+  // that thread inside the kernel behind a lookup only that thread can complete,
+  // and the mount would stop serving. Running the notify off the isolate thread
+  // keeps the request path free to answer the lookup, which releases the read
+  // lock and lets the invalidation proceed. FUSE-T on macOS returns success
+  // from both without acting, so the thread choice is immaterial there.
   fuse_lowlevel_notify_inval_entry: {
     parameters: ["pointer", "u64", "buffer", "usize"],
     result: "i32",
+    nonblocking: true,
   },
   fuse_lowlevel_notify_inval_inode: {
     parameters: ["pointer", "u64", "i64", "i64"],
     result: "i32",
+    nonblocking: true,
   },
 } as const;
 

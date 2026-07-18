@@ -194,6 +194,10 @@ One line per archived document; each document's header carries the fuller
 
 ### Investigations, journals, and working notes
 
+- [reverse-invalidation-deadlock.md](packages/fuse/reverse-invalidation-deadlock.md)
+  — root cause of the FUSE daemon hang that flaked the CLI FUSE integration
+  suite: synchronous reverse invalidation deadlocking the request thread,
+  July 2026.
 - [settle-wave-2026-03-findings.md](development/debugging/settle-wave-2026-03-findings.md)
   — March 2026 settle-wave measurements.
 - [2026-07-group-chat-idempotency-false-positive.md](development/debugging/2026-07-group-chat-idempotency-false-positive.md)
