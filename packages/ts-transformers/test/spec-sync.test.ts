@@ -21,6 +21,7 @@ const DERIVE_TO_LIFT_DESIGN_URL = new URL(
   "../docs/derive-to-lift-design.md",
   import.meta.url,
 );
+const AGENT_GUIDE_URL = new URL("../AGENTS.md", import.meta.url);
 
 /** Extract the body of a `## N. Title` section, up to the next `## ` heading. */
 function extractSection(specText: string, headingPrefix: string): string {
@@ -101,6 +102,35 @@ describe("current-behavior spec stays in sync with canonical constants", () => {
           Number(ordinalText),
           expected,
           `${url.pathname}: ${name} is stage ${expected}`,
+        );
+      }
+    }
+  });
+
+  it("prose stage counts match CFC_TRANSFORMER_STAGE_NAMES", async () => {
+    const expected = CFC_TRANSFORMER_STAGE_NAMES.length;
+
+    for (
+      const url of [
+        BEHAVIOR_SPEC_URL,
+        ARRAY_METHOD_PIPELINE_URL,
+        DERIVE_TO_LIFT_DESIGN_URL,
+        AGENT_GUIDE_URL,
+      ]
+    ) {
+      const specText = await Deno.readTextFile(url);
+      // "23 ordered stages", "(23 stages)", "The 23-stage registry".
+      for (
+        const match of specText.matchAll(
+          /(\d+)(?:[ -](?:ordered )?stages?\b|-stage\b)/g,
+        )
+      ) {
+        assertEquals(
+          Number(match[1]),
+          expected,
+          `${url.pathname}: the pipeline has ${expected} stages, but the prose says ${
+            match[1]
+          } ("${match[0]}")`,
         );
       }
     }
