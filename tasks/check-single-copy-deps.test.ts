@@ -1,5 +1,6 @@
-import { assertEquals, assertStringIncludes } from "@std/assert";
-import { dirname, fromFileUrl } from "@std/path";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { dirname, fromFileUrl, join } from "@std/path";
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import {
   copiesOf,
   findProblems,
@@ -9,6 +10,26 @@ import {
 } from "./check-single-copy-deps.ts";
 
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
+
+// Runs `body` with console.log and console.error captured, returning what each
+// received. Restores the originals afterward.
+async function captureConsole(
+  body: () => Promise<void>,
+): Promise<{ out: string; err: string }> {
+  const out: string[] = [];
+  const err: string[] = [];
+  const origLog = console.log;
+  const origError = console.error;
+  console.log = (...args) => out.push(args.map(String).join(" "));
+  console.error = (...args) => err.push(args.map(String).join(" "));
+  try {
+    await body();
+  } finally {
+    console.log = origLog;
+    console.error = origError;
+  }
+  return { out: out.join("\n"), err: err.join("\n") };
+}
 
 // npm entry keys as deno.lock writes them: `name@version`, optionally with a
 // `_peer@version` suffix, and the name itself may be scoped.
@@ -76,6 +97,56 @@ Deno.test("findProblems does not report packages outside the list", () => {
 
 Deno.test("the repository's own lockfile passes", async () => {
   assertEquals(await main(REPO_ROOT), 0);
+});
+
+// main() reads deno.lock from the root it is given, so a temp tree with a
+// duplicated lockfile drives the reporting path the passing repo never does:
+// the message, the per-copy listing, and the non-zero exit.
+Deno.test("main reports the duplicate and returns 1", async () => {
+  const root = await Deno.makeTempDir({ prefix: "check-single-copy-deps-" });
+  try {
+    const lock = singleCopyLock();
+    lock.npm["ai@5.0.27_zod@3.25.76"] = {};
+    await Deno.writeTextFile(join(root, "deno.lock"), JSON.stringify(lock));
+
+    let code = -1;
+    const { err } = await captureConsole(async () => {
+      code = await main(root);
+    });
+
+    assertEquals(code, 1);
+    assertStringIncludes(err, "resolves more than one copy");
+    assertStringIncludes(err, "ai@5.0.27_zod@3.25.76");
+    assertStringIncludes(err, "ai@7.0.30_zod@3.25.76");
+    assertStringIncludes(err, "Roll the AI SDK");
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+// Runs the script the way `deno task check-single-copy-deps` does, which the
+// calls to main() above do not: they would still pass if the entry point never
+// ran it, or if the task's declared permissions were too narrow to read the
+// lockfile.
+Deno.test("running the script as a command reports single copies", async () => {
+  const output = await runDenoCommandWithTemporaryLock({
+    root: REPO_ROOT,
+    args: (lockPath) => [
+      "run",
+      "--config",
+      join(REPO_ROOT, "deno.jsonc"),
+      "--lock",
+      lockPath,
+      "--allow-read",
+      join(REPO_ROOT, "tasks/check-single-copy-deps.ts"),
+    ],
+  });
+  assertEquals(output.code, 0);
+  assert(
+    new TextDecoder().decode(output.stdout).includes(
+      "Single-copy packages resolve once each",
+    ),
+  );
 });
 
 Deno.test("every guarded package names what breaks when it is duplicated", () => {
