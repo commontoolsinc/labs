@@ -3266,15 +3266,19 @@ produces a `FabricValue` that is structurally equivalent to `sv`.
 
 `FabricValue` trees produced by reconstruction at boundary-crossings are
 deep-frozen by default. This is enforced via a small protocol on
-`FabricInstance` together with a generic top-level utility that dispatches
+`BaseFabricInstance` together with a generic top-level utility that dispatches
 across the four kinds of values that can appear in a `FabricValue` tree.
 
-#### Protocol members on `FabricInstance`
+#### Instance protocol members
 
-Every `FabricInstance` subclass implements three protocol members
-(Section 2.3) — these, plus the inherited `shallowClone()`, are the whole
-instance protocol (serialization lives on the class-side `[CODEC]`;
-Section 2.4):
+Every concrete `FabricInstance` provides the three members below
+(Section 2.3). Their declarations are split by concern: the freeze-protocol
+members `[DEEP_FREEZE]` and `[IS_DEEP_FROZEN]` are declared on
+`BaseFabricInstance` — the abstract base that concrete instance classes extend
+— keeping this implementation plumbing off the pure-protocol `FabricInstance`
+interface, while `deepClone()` and the inherited `shallowClone()` are declared
+on `FabricInstance` itself. These members, plus the class-side `[CODEC]`
+(serialization; Section 2.4), are the whole instance protocol:
 
 - **`[DEEP_FREEZE](subFreeze)`** — Deeply freezes this instance in place
   and returns it. The implementation freezes the instance's own internal
