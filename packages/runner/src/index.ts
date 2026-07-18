@@ -4,6 +4,7 @@ export type {
   ErrorHandler,
   ErrorWithContext as RuntimeErrorWithContext,
   ExperimentalOptions, // Space-model feature flags; see ExperimentalOptions in runtime.ts
+  RuntimeFetch,
   RuntimeOptions,
   SpaceCellContents,
   VersionSkewHandler,

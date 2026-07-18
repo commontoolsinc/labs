@@ -18,7 +18,7 @@ import {
 } from "./runtime-processor.ts";
 import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
 import { cfcAtom } from "@commonfabric/api/cfc";
-import { runtimePresets } from "@commonfabric/runner";
+import { type RuntimeFetch, runtimePresets } from "@commonfabric/runner";
 import {
   type CellRef,
   type CfcLabelView,
@@ -1038,7 +1038,7 @@ describe("RuntimeProcessor blob upload IPC", () => {
     const originalFetch = globalThis.fetch;
     let requestedUrl: string | undefined;
     let requestedPayload: unknown;
-    globalThis.fetch = (input, init) => {
+    const blobFetch: RuntimeFetch = (input, init) => {
       requestedUrl = input.toString();
       requestedPayload = decodeMemoryBoundary(init?.body as string);
       return Promise.resolve(
@@ -1054,6 +1054,7 @@ describe("RuntimeProcessor blob upload IPC", () => {
         ),
       );
     };
+    globalThis.fetch = blobFetch as typeof globalThis.fetch;
     // The constructor performs full runtime initialization; this focused unit
     // test calls the handler with the fields it reads directly.
     const hostForSpaceCalls: string[] = [];

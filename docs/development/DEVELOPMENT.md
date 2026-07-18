@@ -605,15 +605,17 @@ Whether its globals reach a given package's type graph is not something
 `deno info` will tell you. They arrive as a type-only injection rather than
 through the module graph, and which packages they reach shifts with the rest of
 the dependency tree and with the Deno version. At 26.1.1 under Deno 2.8.1 they
-reach `cf-harness`, and `typeof fetch` there resolves to a type whose `init`
-parameter is the union `global.RequestInit | RequestInit`. Neither `signal` nor
-`body` is available on that union, so reading either one stops type checking. At
-24.2.0 the same code checks clean, and so does 26.1.1 under Deno 2.8.3.
+reach several package graphs, and `typeof fetch` there resolves to a type whose
+`init` parameter is the union `global.RequestInit | RequestInit`. Fields such as
+`signal` and `body` are not available on that union, so reading them stops type
+checking. At 24.2.0 the same code checks clean, and so does 26.1.1 under Deno
+2.8.3.
 
 The practical trap is that `typeof fetch` is not a dependable way to name a
-fetch-shaped value. Write the signature out instead, as
-`packages/cf-harness/src/contracts/http-fetch.ts` does. That holds whichever
-version resolves and whichever compiler checks it.
+fetch-shaped value. Write the signature out instead. `HarnessFetch` in
+`packages/cf-harness/src/contracts/http-fetch.ts` and `RuntimeFetch` in
+`packages/runner/src/runtime.ts` are the package-level contracts. They hold
+whichever version resolves and whichever compiler checks them.
 
 Two things make this class of breakage easy to miss. `deno task check` does not
 cover every package: `cf-harness` is type checked only by its own test task, so
