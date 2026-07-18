@@ -14,6 +14,11 @@ import {
   createExecutorActionTransactionRouter,
   type ExecutorCandidateDiagnostic,
 } from "../src/executor/action-transaction-router.ts";
+import type { CandidateClaim } from "../src/executor/deno-space-executor.ts";
+import {
+  sessionExecutionContextKey,
+  userExecutionContextKey,
+} from "@commonfabric/memory/v2";
 import {
   classifyStaticActionServability,
   dynamicActionTransactionUnservableReason,
@@ -344,3 +349,172 @@ for (
     }
   });
 }
+
+// ---------------------------------------------------------------------------
+// C2.10 — the lunch-poll placement guard's CLASSIFICATION half at the router
+// seam. The design's §1 evidence: the lunch-poll space's rows classify
+// 24 space / 13 user / 226 SESSION context, so pre-C2 the vote workload's
+// readers were unservable at space rank (`non-space-*-scope`) and the
+// placement gate could not pass. With the C2.5 session dial and an open
+// session lane, the same actions must classify claim-ready AT SESSION RANK,
+// keyed by the open session lane's canonical context key only (CA9). The
+// dial-off leg is the self-control: the identical workload through the
+// identical seam produces ZERO session-rank candidates, pinning that the
+// dial (not some incidental change) is what turns session placement on.
+// The engine-admission half — R7 claim-context-mismatch hard-zero and the
+// served-recompute reversal against a real server — is the integration
+// gate's (packages/patterns/integration, C2.10).
+// ---------------------------------------------------------------------------
+
+const driveLunchPollThroughRouter = async (
+  sessionDial: boolean,
+): Promise<{
+  candidates: CandidateClaim[];
+  diagnostics: ExecutorCandidateDiagnostic[];
+  sessionLane: string;
+  userLane: string;
+}> => {
+  const signer = await Identity.fromPassphrase(
+    `server execution lunch-poll session placement ${sessionDial}`,
+  );
+  const space = signer.did() as MemorySpace;
+  const sessionLane = sessionExecutionContextKey(
+    signer.did(),
+    "lunch-poll-router-session-1",
+  );
+  const userLane = userExecutionContextKey(signer.did());
+  const candidates: CandidateClaim[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = createExecutorActionTransactionRouter({
+    servedSpace: space,
+    branch: "",
+    ...(sessionDial
+      ? {
+        userRankCandidates: true,
+        sessionRankCandidates: true,
+        lanePrincipal: signer.did(),
+        openUserLaneKeys: () => [sessionLane, userLane],
+      }
+      : {}),
+    claimForAction: () => undefined,
+    onCandidate: (candidate) => candidates.push(candidate),
+    onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+  const storage = StorageManager.emulate({
+    as: signer,
+    actionTransactionRouter: (input) => router(input),
+  });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: storage,
+    experimental: {
+      persistentSchedulerState: true,
+      serverPrimaryExecution: true,
+    },
+    trustSnapshotProvider: () => ({
+      id: `principal:${space}`,
+      actingPrincipal: space,
+    }),
+  });
+  try {
+    const program = await runtime.harness.resolve(
+      new FileSystemProgramResolver(
+        join(PATTERNS_ROOT, "lunch-poll/main.tsx"),
+        PATTERNS_ROOT,
+      ),
+    );
+    const compiled = await runtime.patternManager.compilePattern(program, {
+      space,
+    });
+    const tx = runtime.edit();
+    const result = runtime.getCell<Record<string, unknown>>(
+      space,
+      `lunch-poll-session-placement-${sessionDial}`,
+      undefined,
+      tx,
+    );
+    const handle = runtime.run(tx, compiled, {}, result);
+    runtime.prepareTxForCommit(tx);
+    assertEquals((await tx.commit()).error, undefined);
+    await handle.pull();
+    await runtime.settled();
+    // The §1 evidence names the VOTE workload specifically: join, add an
+    // option, cast a vote — the tally chains re-run over PerSession state
+    // (the current-day filter) as plain steady-state recomputes.
+    handle.key("joinAs").send({ name: "Alice" });
+    await runtime.idle();
+    await runtime.settled();
+    handle.key("addOption").send({ title: "Sushi Place" });
+    await runtime.idle();
+    await runtime.settled();
+    const options = await handle.key("options").pull() as
+      | ReadonlyArray<{ id?: string }>
+      | undefined;
+    const optionId = options?.[0]?.id;
+    assertExists(optionId, "the lunch-poll option was not created");
+    handle.key("castVote").send({ optionId, voteType: "green" });
+    await runtime.idle();
+    await runtime.settled();
+  } finally {
+    await runtime.dispose();
+    await storage.close();
+  }
+  return { candidates, diagnostics, sessionLane, userLane };
+};
+
+Deno.test("lunch-poll vote workload classifies claim-ready at session rank with the session dial on, keyed by the open session lane (C2.10)", async () => {
+  const { candidates, diagnostics, sessionLane, userLane } =
+    await driveLunchPollThroughRouter(true);
+  const sessionCandidates = candidates.filter((candidate) =>
+    candidate.claimKey.contextKey.startsWith("session:")
+  );
+  assert(
+    sessionCandidates.length > 0,
+    `no session-rank candidate for the lunch-poll workload: ${
+      JSON.stringify(candidates.map((candidate) => candidate.claimKey))
+    }; diagnostics: ${JSON.stringify(diagnostics.slice(0, 20))}`,
+  );
+  // CA9: every session-rank candidate names the OPEN session lane's
+  // canonical key — never a key fabricated from the bare DID.
+  assertEquals(
+    sessionCandidates.filter((candidate) =>
+      candidate.claimKey.contextKey !== sessionLane
+    ),
+    [],
+    "a session candidate names something other than the open session lane",
+  );
+  // Rank disjointness at the router seam (CA9's filter): no action
+  // classifies at both scoped ranks.
+  const sessionActionIds = new Set(
+    sessionCandidates.map((candidate) => candidate.claimKey.actionId),
+  );
+  const userActionIds = new Set(
+    candidates
+      .filter((candidate) => candidate.claimKey.contextKey === userLane)
+      .map((candidate) => candidate.claimKey.actionId),
+  );
+  assertEquals(
+    [...sessionActionIds].filter((actionId) => userActionIds.has(actionId)),
+    [],
+    "an action classified at both scoped ranks through the router",
+  );
+});
+
+Deno.test("lunch-poll control: the identical workload with the session dial off produces zero session-rank candidates (the §1 collapse, pinned)", async () => {
+  const { candidates } = await driveLunchPollThroughRouter(false);
+  assertEquals(
+    candidates.filter((candidate) =>
+      candidate.claimKey.contextKey.startsWith("session:") ||
+      candidate.claimKey.contextKey.startsWith("user:")
+    ),
+    [],
+    "scoped-rank candidates appeared with the rank dials off",
+  );
+  // The space-rank path still produces candidates for the space-context
+  // legs — the control proves the DIAL is the discriminator, not a broken
+  // workload.
+  assert(
+    candidates.some((candidate) => candidate.claimKey.contextKey === "space"),
+    "the dial-off control produced no space-rank candidate at all",
+  );
+});

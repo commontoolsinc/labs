@@ -73,20 +73,18 @@ export type ToleratedLeaseFenceCause = Readonly<{
   retirement: string;
 }>;
 
+// R7 RETIRED (C2.10, 2026-07-18): `claim-context-mismatch` — a space-lane
+// claim on an action whose runtime context floor evaluates above the claim's
+// context — was tolerated here from 2026-07-15 (register row R7, "temporary
+// by construction") until C2 shipped session lanes. Its return to hard-zero
+// is the named C2 acceptance criterion (context-lattice-execution.md §7 C2 /
+// §8 R7): session-context runs now have a lane to route to, so any mismatch
+// is a placement defect again. The entry was deleted per this registry's
+// contract ("a cause retires by deleting its entry"); the retirement is
+// pinned by the guard-contract test in
+// server-execution-lunch-poll-placement-gate.test.ts.
 export const TOLERATED_LEASE_FENCE_CAUSES: readonly ToleratedLeaseFenceCause[] =
   [
-    {
-      cause: "claim-context-mismatch",
-      // A space-lane claim on an action whose runtime context floor evaluates
-      // above the claim's context (e.g. a view conditional reading a
-      // session-scoped address during navigation) is fenced BY DESIGN and the
-      // client computes it fail-open — register row R7, temporary by
-      // construction.
-      reason: "space claim fenced when the run's context floor evaluates " +
-        "above its lane (R7); the client computes fail-open",
-      retirement: "C2 session lanes route these runs to their own lane; " +
-        "return to hard-zero is a named C2 acceptance criterion",
-    },
     {
       cause: "lane-generation-stale",
       // C1.3: a host-side lane drain (anchor-session loss, ACL fence, cohort
