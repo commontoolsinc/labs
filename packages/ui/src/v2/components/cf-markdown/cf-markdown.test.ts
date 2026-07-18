@@ -206,6 +206,16 @@ describe("cf-markdown", () => {
       expect(idsOf("# &#x1234567; tail")).toEqual(["x1234567-tail"]);
     });
 
+    it("resolves the named colon entity, then strips the colon", () => {
+      // `&colon;` is the one named entity marked resolves — to `:` — instead of
+      // dropping it whole the way it drops every other named entity. The colon
+      // it produces is punctuation, so the slug then removes it: `a:b` becomes
+      // `ab`, matching marked 4. Were `&colon;` left as literal text the slug
+      // would keep the letters and read `acolonb` instead.
+      expect(idsOf("# a&colon;b")).toEqual(["ab"]);
+      expect(idsOf("# time&colon; now")).toEqual(["time-now"]);
+    });
+
     it("slugs the heading's text, not its markup", () => {
       const rendered = (new CFMarkdown() as any)._renderMarkdown(
         "# Using **bold** and `code`",
