@@ -2,7 +2,10 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FabricPrimitive } from "@/interface.ts";
-import { BaseFabricPrimitive } from "@/fabric-primitives/BaseFabricPrimitive.ts";
+import {
+  BaseFabricPrimitive,
+  EXAMPLE_METHOD,
+} from "@/fabric-primitives/BaseFabricPrimitive.ts";
 
 /**
  * Minimal `BaseFabricPrimitive` subclass for exercising the static guard in
@@ -45,6 +48,14 @@ describe("BaseFabricPrimitive", () => {
         .toThrow(
           "Shouldn't happen",
         );
+    });
+  });
+
+  describe("`[EXAMPLE_METHOD]` (placeholder seed)", () => {
+    it("throws when invoked (unimplemented stub)", () => {
+      expect(() => new ProbePrimitive()[EXAMPLE_METHOD]()).toThrow(
+        "Not implemented",
+      );
     });
   });
 });

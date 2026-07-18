@@ -328,7 +328,11 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
 
     seen.add(item);
 
-    if (BaseFabricInstance.isInstance(item)) {
+    if (BaseFabricPrimitive.isInstance(item)) {
+      // `FabricPrimitive`s are by definition frozen and have no outbound
+      // references.
+      return true;
+    } else if (BaseFabricInstance.isInstance(item)) {
       // Object.freeze() cannot prove that a fabric instance's private logical
       // contents will remain unchanged, so validate it but do not root-cache a
       // graph that reaches one.
@@ -368,14 +372,6 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
         }
         if (!checkValue(record[key])) return false;
       }
-      return true;
-    } else if (BaseFabricPrimitive.isInstance(item)) {
-      // `FabricPrimitive`s are by definition frozen and have no outbound
-      // references. This arm is checked after the array / plain-object arms
-      // (unlike the primitive-first ordering elsewhere): `BaseFabricPrimitive`'s
-      // instance type has no members, so this guard's negative narrowing would
-      // collapse `item` to `never` for any following branch -- keeping it last
-      // confines that to the unreachable-for-`item` final `else`.
       return true;
     } else {
       // It's an instance of a class that isn't covered by the `FabricValue`
