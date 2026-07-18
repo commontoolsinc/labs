@@ -95,6 +95,16 @@ Deno.test("editor: revealing the cursor forces the first display mode", () => {
   );
 });
 
+Deno.test("editor: revealing the cursor turns line wrapping off", () => {
+  const { src } = memSource();
+  const s = editSession("x".repeat(90), src, 3);
+  press(s, "\\", "j", "e");
+  assert(!s.view().wrapLines, "editing uses one screen row per source line");
+  assertEquals(s.view().cursor, { line: 0, col: 39 });
+  assertEquals(s.view().left, 39, "the visible continuation stays at the left");
+  assertEquals(s.view().message, "Line wrapping turned off for editing.");
+});
+
 Deno.test("editor: a pipe rejects the cursor with a reason", () => {
   const reason =
     "This view is of a pipe — there is no underlying file to edit.";

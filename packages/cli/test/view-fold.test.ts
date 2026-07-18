@@ -14,6 +14,7 @@ import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { diffSource } from "../lib/view/diffedit.ts";
 import { renderFrame, type ViewState } from "../lib/view/render.ts";
 import { stripAnsi } from "../lib/view/ansi.ts";
+import { frameTop } from "../lib/view/actions.ts";
 
 const TWO_FILES = [
   "diff --git a/src/app.ts b/src/app.ts",
@@ -211,14 +212,14 @@ function press(s: Session, ...names: string[]): void {
 
 /** A diff session over `diffText` whose files do not resolve on disk (read-only,
  * but still a diff, so folding is offered). */
-function foldSession(diffText: string, height = 30): Session {
+function foldSession(diffText: string, height = 30, width = 80): Session {
   const ws: DiffWorkspace = { resolve: () => null, read: () => null };
   const model = parseDiff(diffText)!;
   const { doc, edit } = buildDiffDocument(diffText, model, ws);
   return new Session(
     doc,
     { color: false, showLineNumbers: false },
-    { width: 80, height },
+    { width, height },
     undefined,
     diffSource(ws, edit),
   );
@@ -270,6 +271,66 @@ Deno.test("fold: T hides only test / test-support files", () => {
   assert(s.view().message.includes("Hid 1 test file"), s.view().message);
 });
 
+Deno.test("fold: bulk commands preserve a wrapped viewport column", () => {
+  const show = [
+    "commit 0123456789abcdef0123456789abcdef01234567",
+    "Author: A",
+    "Date:   now",
+    "",
+    `    ${"x".repeat(96)}needle`,
+    "",
+    TWO_FILES,
+  ].join("\n");
+  const s = foldSession(show, 4, 16);
+  press(s, "\\", "/");
+  for (const ch of "needle") press(s, ch);
+  press(s, "enter");
+  const match = s.view().matches?.[s.view().currentMatch];
+  assert(match, "the long commit-message line matched");
+  const firstRow = s.view().wrapPlan?.firstRow[match.line] ?? 0;
+  const anchor = s.view().top;
+  assert(anchor > firstRow, "the viewport starts on a continuation row");
+
+  for (const key of ["T", "T", "F", "F", "E", "E"]) {
+    press(s, key);
+    assertEquals(s.view().top, anchor, `${key} preserves the continuation`);
+  }
+});
+
+Deno.test("fold: another fold preserves a wrapped summary continuation", () => {
+  const first = `src/${"first/".repeat(12)}app.ts`;
+  const second = `src/${"second/".repeat(12)}app.ts`;
+  const diff = [
+    `diff --git a/${first} b/${first}`,
+    `--- a/${first}`,
+    `+++ b/${first}`,
+    "@@ -1 +1 @@",
+    "-old",
+    "+new",
+    `diff --git a/${second} b/${second}`,
+    `--- a/${second}`,
+    `+++ b/${second}`,
+    "@@ -1 +1 @@",
+    "-x",
+    "+y",
+    "",
+  ].join("\n");
+  for (const selected of [false, true]) {
+    const s = foldSession(diff, 4, 10);
+    press(s, "f", "\\");
+    if (selected) {
+      press(s, "tab");
+      assert(s.view().selected, "the collapsed file is selected");
+    }
+    press(s, "j", "j");
+    const top = s.view().top;
+    assert(top > 0, "the viewport is on a summary continuation");
+
+    press(s, "F");
+    assertEquals(s.view().top, top, `selected: ${selected}`);
+  }
+});
+
 Deno.test("fold: the collapsed summary renders on screen", () => {
   const s = foldSession(TWO_FILES);
   press(s, "F");
@@ -278,6 +339,54 @@ Deno.test("fold: the collapsed summary renders on screen", () => {
   const text = rows.map(stripAnsi).join("\n");
   assert(text.includes("▸ src/app.ts  +1 −1"), text);
   assert(text.includes("▸ src/app.test.ts  +1 −0"), text);
+});
+
+Deno.test("fold: a selected file spans every wrapped summary row", () => {
+  const longPath = `src/${"nested/".repeat(10)}app.ts`;
+  const diff = [
+    "commit 0123456789abcdef0123456789abcdef01234567",
+    "Author: A",
+    "Date:   now",
+    "",
+    "    Subject",
+    "",
+    `diff --git a/${longPath} b/${longPath}`,
+    `--- a/${longPath}`,
+    `+++ b/${longPath}`,
+    "@@ -1 +1 @@",
+    "-old",
+    "+new",
+    "diff --git a/z.ts b/z.ts",
+    "--- a/z.ts",
+    "+++ b/z.ts",
+    "@@ -1 +1 @@",
+    "-x",
+    "+y",
+    "",
+  ].join("\n");
+  const height = 6;
+  const s = foldSession(diff, height, 20);
+  press(s, "\\", "F");
+  const summaryLine = s.displayDoc().lines.findIndex((line) =>
+    line.text.startsWith(`▸ ${longPath}`)
+  );
+  assert(summaryLine >= 0, "the long file is collapsed to a summary");
+  const plan = s.view().wrapPlan!;
+  const first = plan.firstRow[summaryLine];
+  const last = plan.lastRow[summaryLine];
+  assert(last > first, "the summary occupies continuation rows");
+
+  for (let i = 0; i < 500; i++) {
+    if (s.view().selected?.label.includes(longPath)) break;
+    press(s, "tab");
+  }
+  assert(s.view().selected?.label.includes(longPath), "the file is selected");
+  press(s, "enter", "z");
+  assertEquals(
+    s.view().top,
+    frameTop(first, last, height, plan.rowCount),
+    "the reveal frames the whole wrapped summary",
+  );
 });
 
 Deno.test("fold: folding is refused on a non-diff view", () => {
@@ -359,6 +468,23 @@ Deno.test("fold: a selected node and a search match map onto the summary row", (
   const m = s.view().matches?.[s.view().currentMatch];
   assert(m, "a match was found");
   assertEquals(m!.line, 0, "the hidden match maps to the summary row");
+  assertEquals(m!.start, 0, "the hidden match starts at the summary's edge");
+  assertEquals(
+    m!.end,
+    [...s.displayDoc().lines[0].text].length,
+    "the hidden match covers the summary",
+  );
+  press(s, "/");
+  for (const ch of "added") press(s, ch);
+  press(s, "enter");
+  const visible = s.view().matches?.[s.view().currentMatch];
+  assert(visible, "a match in the shown file was found");
+  const shownText = s.displayDoc().lines[visible!.line].text;
+  assertEquals(
+    shownText.slice(visible!.start, visible!.end),
+    "added",
+    "a shown match keeps its source columns",
+  );
 });
 
 Deno.test("fold: F / E / T are refused on a non-diff view", () => {
@@ -612,11 +738,18 @@ Deno.test("fold: navigating after the selected file collapses resumes at that fi
     "",
   ].join("\n");
   const s = foldSession(navDiff);
-  // Dive into the first file's interior.
-  press(s, "tab", "tab", "tab");
+  for (let i = 0; i < 16; i++) {
+    press(s, "tab");
+    if (s.view().selected?.label.includes("ƒ f")) break;
+  }
   const inside = s.view().selected!;
-  assert(inside.startLine <= 6, "a node inside the first file is selected");
+  assert(inside.label.includes("ƒ f"), "the first file's function is selected");
   press(s, "f"); // collapse the file the selection is in
+  const collapsed = s.view().selected!;
+  const summary = s.displayDoc().lines[collapsed.startLine];
+  assertEquals(collapsed.startLine, collapsed.endLine);
+  assertEquals(collapsed.startCol, 0);
+  assertEquals(collapsed.endCol, [...summary.text].length);
   press(s, "s"); // navigate: the folded-away selection resumes at the file
   const sel = s.view().selected!;
   assert(sel, "a node is selected after collapsing the selected file");

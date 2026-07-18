@@ -14,6 +14,7 @@ function baseView(over: Partial<ViewState> = {}): ViewState {
     height: 10,
     color: true,
     showLineNumbers: false,
+    wrapLines: false,
     displayMode: "pictures",
     selected: null,
     matches: null,
@@ -99,6 +100,233 @@ Deno.test("renderFrame: horizontal scroll slices from the left offset", () => {
   const doc = parseDocument(SAMPLE);
   const rows = renderFrame(doc, baseView({ left: 3 }));
   assertEquals(stripAnsi(rows[1]).trimEnd(), doc.lines[1].text.slice(3));
+});
+
+Deno.test("renderFrame: wraps long lines onto later screen rows", () => {
+  const doc = parseDocument("abcdefgh\nnext");
+  const rows = renderFrame(
+    doc,
+    baseView({ width: 4, height: 5, color: false, wrapLines: true }),
+  ).map(stripAnsi);
+  assertEquals(rows.slice(0, 4).map((row) => row.trimEnd()), [
+    "abc\\",
+    "def\\",
+    "gh",
+    "next",
+  ]);
+});
+
+Deno.test("renderFrame: styles wrapped continuation markers", () => {
+  const doc = parseDocument("abcdefgh");
+  const rows = renderFrame(
+    doc,
+    baseView({ width: 4, height: 4, wrapLines: true }),
+  );
+  assertEquals(stripAnsi(rows[0]), "abc\\");
+  assertEquals(stripAnsi(rows[1]), "def\\");
+  assert(rows[0].includes(fgCode(ui.wrapMarker.fg!)));
+  assert(rows[1].includes(fgCode(ui.wrapMarker.fg!)));
+  assertEquals(stripAnsi(rows[2]), "gh  ");
+  assert(!rows[2].includes(fgCode(ui.wrapMarker.fg!)));
+});
+
+Deno.test("renderFrame: the final wrapped row keeps the full content width", () => {
+  const doc = parseDocument("abcdefg");
+  const rows = renderFrame(
+    doc,
+    baseView({ width: 4, height: 3, color: false, wrapLines: true }),
+  );
+  assertEquals(rows.slice(0, 2), ["abc\\", "defg"]);
+});
+
+Deno.test("renderFrame: a physically one-column view preserves source text", () => {
+  const doc = parseDocument("ab");
+  const rows = renderFrame(
+    doc,
+    baseView({ width: 1, height: 3, color: false, wrapLines: true }),
+  );
+  assertEquals(rows.slice(0, 2), ["a", "b"]);
+});
+
+Deno.test("renderFrame: wrapping reclaims a gutter that leaves one content column", () => {
+  const doc = parseDocument("abcdef");
+  const rows = renderFrame(
+    doc,
+    baseView({
+      width: 5,
+      height: 3,
+      color: false,
+      showLineNumbers: true,
+      wrapLines: true,
+    }),
+  );
+  assertEquals(rows.slice(0, 2), ["abcd\\", "ef   "]);
+});
+
+Deno.test("renderFrame: wrapping reclaims a guide that leaves one content column", () => {
+  const doc = parseDocument("abc");
+  const selected = {
+    kind: "section" as const,
+    label: "all",
+    startLine: 0,
+    endLine: 0,
+    startCol: 0,
+    endCol: 3,
+    startOffset: 0,
+    endOffset: 3,
+    depth: 0,
+    children: [],
+  };
+  const rows = renderFrame(
+    doc,
+    baseView({
+      width: 2,
+      height: 3,
+      color: false,
+      selected,
+      wrapLines: true,
+    }),
+  );
+  assertEquals(rows.slice(0, 2), ["a\\", "bc"]);
+});
+
+Deno.test("renderFrame: wrapped top offsets address continuation rows", () => {
+  const doc = parseDocument("abcdefgh\nnext");
+  const rows = renderFrame(
+    doc,
+    baseView({
+      top: 1,
+      width: 4,
+      height: 3,
+      color: false,
+      wrapLines: true,
+    }),
+  ).map(stripAnsi);
+  assertEquals(rows.slice(0, 2).map((row) => row.trimEnd()), [
+    "def\\",
+    "gh",
+  ]);
+});
+
+Deno.test("renderFrame: only the first wrapped row repeats its line number", () => {
+  const doc = parseDocument("abcdefgh\nnext");
+  const rows = renderFrame(
+    doc,
+    baseView({
+      width: 8,
+      height: 5,
+      color: false,
+      showLineNumbers: true,
+      wrapLines: true,
+    }),
+  ).map(stripAnsi);
+  assertEquals(rows[0], "  1 abc\\");
+  assertEquals(rows[1], "    def\\");
+  assertEquals(rows[2], "    gh  ");
+  assertEquals(rows[3], "  2 next");
+});
+
+Deno.test("renderFrame: a selected line's guide spans its wrapped rows", () => {
+  const doc = parseDocument("const x = 123456;");
+  const selected = doc.flatStructure.find((node) => node.name === "x")!;
+  const rows = renderFrame(
+    doc,
+    baseView({
+      width: 8,
+      height: 4,
+      color: false,
+      selected,
+      wrapLines: true,
+    }),
+  ).map(stripAnsi);
+  assertEquals(rows.slice(0, 3).map((row) => row[0]), ["╭", "│", "╰"]);
+});
+
+Deno.test("renderFrame: a selected node guides only its wrapped column range", () => {
+  const doc = parseDocument("abcdefghijklmnopqrstuvwxyz");
+  const selected = {
+    ...doc.flatStructure[0]!,
+    startCol: 10,
+    endCol: 15,
+  };
+  const rows = renderFrame(
+    doc,
+    baseView({
+      width: 10,
+      height: 5,
+      color: false,
+      selected,
+      wrapLines: true,
+    }),
+  ).map(stripAnsi);
+  assertEquals(rows.slice(0, 3).map((row) => row[0]), [" ", "▶", " "]);
+});
+
+Deno.test("renderFrame: wrapped selection columns count Unicode code points", () => {
+  const doc = parseDocument(`/*😀*/ const x = 1;${" ".repeat(12)}`);
+  const selected = doc.flatStructure.find((node) => node.name === "x")!;
+  const rows = renderFrame(
+    doc,
+    baseView({
+      width: 8,
+      height: 6,
+      color: false,
+      selected,
+      wrapLines: true,
+    }),
+  ).map(stripAnsi);
+  assertEquals(rows.slice(0, 5).map((row) => row[0]), [
+    " ",
+    "╭",
+    "│",
+    "│",
+    "╰",
+  ]);
+});
+
+Deno.test("renderFrame: a selected empty line keeps its wrapped guide", () => {
+  const doc = parseDocument("a\n\nb");
+  const selected = {
+    ...doc.flatStructure[0]!,
+    startLine: 0,
+    endLine: 2,
+    startCol: 0,
+    endCol: 1,
+  };
+  const rows = renderFrame(
+    doc,
+    baseView({
+      width: 6,
+      height: 4,
+      color: false,
+      selected,
+      wrapLines: true,
+    }),
+  ).map(stripAnsi);
+  assertEquals(rows[1][0], "│");
+});
+
+Deno.test("renderFrame: wrapped status reports logical source lines", () => {
+  const doc = parseDocument("abcdefghijkl\nnext");
+  const status = stripAnsi(
+    renderFrame(
+      doc,
+      baseView({ width: 6, height: 3, color: false, wrapLines: true }),
+    ).at(-1)!,
+  );
+  assert(status.includes("1-1/2"), status);
+});
+
+Deno.test("renderFrame: wrapped status reports an empty document", () => {
+  const parsed = parseDocument("");
+  const doc = { ...parsed, lines: [] };
+  const status = stripAnsi(
+    renderFrame(
+      doc,
+      baseView({ width: 12, height: 3, color: false, wrapLines: true }),
+    ).at(-1)!,
+  );
+  assert(status.includes("0-0/0"), status);
 });
 
 Deno.test("renderFrame: monochrome output equals verbatim text", () => {
@@ -198,6 +426,74 @@ Deno.test("renderFrame: search matches are highlighted", () => {
   assert(
     rows[1].includes(bgCode(ui.searchMatch.bg!)),
     "non-current match highlighted",
+  );
+});
+
+Deno.test("renderFrame: dense wrapped matches keep the focused overlap", () => {
+  const doc = parseDocument("x".repeat(220));
+  const focused = { line: 0, start: 175, end: 176 };
+  const matches = Array.from({ length: 220 }, (_, start) => ({
+    line: 0,
+    start,
+    end: start + 1,
+  }));
+  matches.splice(176, 0, focused);
+  const rows = renderFrame(
+    doc,
+    baseView({
+      top: 19,
+      width: 10,
+      height: 4,
+      wrapLines: true,
+      matches,
+      currentMatch: 176,
+    }),
+  );
+  assert(
+    rows[0].includes(bgCode(ui.searchCurrent.bg!)),
+    "the focused match wins its overlapping cell",
+  );
+  assert(
+    rows[0].includes(bgCode(ui.searchMatch.bg!)),
+    "the other visible matches keep their ordinary style",
+  );
+});
+
+Deno.test("renderFrame: off-screen matches do not affect visible lookup", () => {
+  const doc = docOf("x");
+  const matches = Array.from({ length: 10_000 }, (_, line) => ({
+    line,
+    start: 0,
+    end: 1,
+  }));
+  const rows = renderFrame(
+    doc,
+    baseView({ matches, currentMatch: 0, width: 10, height: 3 }),
+  );
+  assert(
+    rows[0].includes(bgCode(ui.searchCurrent.bg!)),
+    "the focused visible match is highlighted",
+  );
+});
+
+Deno.test("renderFrame: an earlier ordinary overlap stays highlighted", () => {
+  const doc = parseDocument(`${"x".repeat(100)}\nz`);
+  const matches = [
+    { line: 0, start: 0, end: 100 },
+    ...Array.from({ length: 69 }, (_, offset) => ({
+      line: 0,
+      start: offset + 1,
+      end: offset + 2,
+    })),
+    { line: 1, start: 0, end: 1 },
+  ];
+  const rows = renderFrame(
+    doc,
+    baseView({ width: 100, height: 3, matches, currentMatch: 70 }),
+  );
+  assertEquals(
+    bgColumns(rows[0]).slice(0, 100),
+    Array(100).fill(true),
   );
 });
 

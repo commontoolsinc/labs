@@ -11,9 +11,21 @@
  */
 import { cpLen, paint, RESET, type Style } from "./ansi.ts";
 import type { Document, Line, StructureNode } from "./model.ts";
-import { displayLine, type DisplayMode, glyphFor } from "./display.ts";
+import {
+  type DisplayCell,
+  displayLine,
+  type DisplayMode,
+  glyphFor,
+} from "./display.ts";
 import { overlaySpanStyle, spanStyle } from "./highlight.ts";
 import { lineBg, ui } from "./theme.ts";
+import {
+  buildWrapPlan,
+  fitWrapChrome,
+  type WrappedRow,
+  wrappedRowAt,
+  type WrapPlan,
+} from "./wrap.ts";
 
 /** A key suggestion for the status line: the key (already capitalised for
  * display, e.g. `Q`, `^X^S`, `WASD`) and what it does. Drawn Turbo-Pascal style,
@@ -30,6 +42,10 @@ export interface ViewState {
   height: number;
   color: boolean;
   showLineNumbers: boolean;
+  /** Whether long logical lines continue on later screen rows. */
+  wrapLines: boolean;
+  /** A precomputed wrapping layout for `doc`, when the session has one. */
+  wrapPlan?: WrapPlan | null;
   /** The number to show in the gutter on each display row, or null there for a
    * blank gutter. Absent → the legacy 1-based display-row number. Only consulted
    * when `showLineNumbers` is set. */
@@ -90,16 +106,20 @@ function layout(
   doc: Document,
   view: ViewState,
 ): { gutterWidth: number; guideWidth: number } {
-  return {
+  const requested = {
     gutterWidth: gutterWidth(doc, view),
     guideWidth: view.selected ? 1 : 0,
   };
+  return view.wrapLines
+    ? fitWrapChrome(view.width, requested.gutterWidth, requested.guideWidth)
+    : requested;
 }
 
 /**
  * 1-based terminal (row, col) for the text cursor, or null when there is no
  * cursor, it is scrolled off screen, or an overlay or dialog covers the content.
- * Mirrors the layout `renderFrame` uses (gutter + guide + horizontal scroll).
+ * Mirrors the layout `renderFrame` uses, including a wrapped continuation's
+ * screen row and display-column offset.
  */
 export function cursorScreenPos(
   doc: Document,
@@ -107,12 +127,23 @@ export function cursorScreenPos(
 ): { row: number; col: number } | null {
   if (!view.cursor || view.overlay || view.dialog) return null;
   const { line, col } = view.cursor;
-  const contentHeight = view.height - 1;
-  const r = line - view.top;
-  if (r < 0 || r >= contentHeight) return null;
+  if (line < 0 || line >= doc.lines.length) return null;
   const { gutterWidth, guideWidth } = layout(doc, view);
-  const contentCol = col - view.left;
   const contentWidth = Math.max(1, view.width - gutterWidth - guideWidth);
+  let screenLine = line;
+  let contentCol = col - view.left;
+  if (view.wrapLines) {
+    const plan = view.wrapPlan ??
+      buildWrapPlan(doc.lines, view.displayMode, contentWidth);
+    const first = plan.firstRow[line];
+    const last = plan.lastRow[line];
+    screenLine = Math.min(first + Math.floor(col / plan.rowStride), last);
+    const rowOffset = (screenLine - first) * plan.rowStride;
+    contentCol = col - rowOffset;
+  }
+  const contentHeight = view.height - 1;
+  const r = screenLine - view.top;
+  if (r < 0 || r >= contentHeight) return null;
   if (contentCol < 0 || contentCol >= contentWidth) return null;
   return { row: r + 1, col: gutterWidth + guideWidth + contentCol + 1 };
 }
@@ -164,28 +195,95 @@ interface Cell {
 
 const EMPTY_STYLE: Style = {};
 
+interface LineMatches {
+  readonly matches: readonly Match[];
+  readonly from: number;
+  readonly to: number;
+  readonly currentIndex: number;
+  blockPrefixMaxEnd?: Float64Array;
+}
+
+const MATCH_BLOCK_SIZE = 64;
+
+/** The contiguous slice of document-ordered matches on one visible line. */
+function matchesOnLine(
+  view: ViewState,
+  line: number,
+): LineMatches | null {
+  const matches = view.matches;
+  if (!matches || matches.length === 0) return null;
+  let lo = 0;
+  let hi = matches.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (matches[mid].line < line) lo = mid + 1;
+    else hi = mid;
+  }
+  const from = lo;
+  if (matches[from]?.line !== line) return null;
+  hi = matches.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (matches[mid].line <= line) lo = mid + 1;
+    else hi = mid;
+  }
+  const to = lo;
+  const currentIndex = view.currentMatch >= from && view.currentMatch < to
+    ? view.currentMatch
+    : -1;
+  return { matches, from, to, currentIndex };
+}
+
 /** Render a complete frame: exactly `view.height` rows. */
 export function renderFrame(doc: Document, view: ViewState): string[] {
   const rows: string[] = [];
   const contentHeight = view.height - 1;
-  const gw = gutterWidth(doc, view);
-  const guideWidth = view.selected ? 1 : 0;
+  const { gutterWidth: gw, guideWidth } = layout(doc, view);
   const contentWidth = Math.max(1, view.width - gw - guideWidth);
+  const wrapPlan = view.wrapLines
+    ? view.wrapPlan ?? buildWrapPlan(doc.lines, view.displayMode, contentWidth)
+    : null;
+  const rowStride = wrapPlan?.rowStride ?? contentWidth;
+  let displayedLine = -1;
+  let displayedCells: readonly DisplayCell[] | undefined;
+  let displayedSelection: SelectionSpan | null = null;
+  let displayedMatches: LineMatches | null = null;
 
   for (let r = 0; r < contentHeight; r++) {
-    const lineIdx = view.top + r;
+    const rowIdx = view.top + r;
+    const wrappedRow: WrappedRow | undefined = wrapPlan
+      ? wrappedRowAt(wrapPlan, rowIdx)
+      : { line: rowIdx, offset: view.left, lastOffset: view.left };
+    const firstOfLine = !wrapPlan || wrappedRow === undefined ||
+      wrapPlan.firstRow[wrappedRow.line] === rowIdx;
+    if (wrappedRow && wrappedRow.line !== displayedLine) {
+      displayedLine = wrappedRow.line;
+      const line = doc.lines[displayedLine];
+      displayedCells = line ? displayLine(line, view.displayMode) : undefined;
+      displayedSelection = selectionSpan(view, displayedLine, line);
+      displayedMatches = view.color ? matchesOnLine(view, displayedLine) : null;
+    } else if (!wrappedRow) {
+      displayedCells = undefined;
+      displayedSelection = null;
+      displayedMatches = null;
+    }
     rows.push(
       renderContentRow(
         doc,
         view,
-        lineIdx,
+        wrappedRow,
+        displayedCells,
+        displayedSelection,
+        displayedMatches,
+        firstOfLine,
         gw,
         guideWidth,
         contentWidth,
+        rowStride,
       ),
     );
   }
-  rows.push(renderStatus(doc, view));
+  rows.push(renderStatus(doc, view, wrapPlan));
 
   if (view.notice && view.notice.length > 0) {
     const start = Math.max(0, contentHeight - view.notice.length);
@@ -206,19 +304,26 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
 function renderContentRow(
   doc: Document,
   view: ViewState,
-  lineIdx: number,
+  row: WrappedRow | undefined,
+  display: readonly DisplayCell[] | undefined,
+  selection: SelectionSpan | null,
+  matches: LineMatches | null,
+  firstOfLine: boolean,
   gutterWidth: number,
   guideWidth: number,
   contentWidth: number,
+  rowStride: number,
 ): string {
+  const lineIdx = row?.line ?? -1;
   const line: Line | undefined = doc.lines[lineIdx];
-  const sel = selectionSpan(view, lineIdx, line);
   const inSelRange = !!view.selected &&
     lineIdx >= view.selected.startLine && lineIdx <= view.selected.endLine;
 
   let gutter = "";
   if (gutterWidth > 0) {
-    const num = view.lineNumbers
+    const num = !firstOfLine
+      ? null
+      : view.lineNumbers
       ? view.lineNumbers[lineIdx] ?? null
       : (line ? lineIdx + 1 : null);
     const label = num !== null ? String(num) : "";
@@ -229,19 +334,106 @@ function renderContentRow(
   let guide = "";
   if (guideWidth > 0) {
     // guideWidth > 0 only when view.selected is set (see guideWidth above).
-    guide = paintIf(guideChar(view.selected!, lineIdx), ui.guide, view.color);
+    guide = paintIf(
+      view.wrapLines
+        ? wrappedGuideChar(
+          view.selected!,
+          lineIdx,
+          line,
+          row?.offset ?? 0,
+          rowStride,
+          row?.lastOffset ?? 0,
+          selection,
+          display,
+        )
+        : guideChar(view.selected!, lineIdx),
+      ui.guide,
+      view.color,
+    );
   }
 
-  const content = composeContent(line, view, lineIdx, contentWidth, sel);
+  const content = composeContent(
+    line,
+    view,
+    row?.offset ?? 0,
+    contentWidth,
+    selection,
+    display,
+    matches,
+    row !== undefined && row.offset < row.lastOffset,
+  );
   return gutter + guide + content;
 }
 
-function guideChar(selected: StructureNode, lineIdx: number): string {
+function guideChar(
+  selected: StructureNode,
+  lineIdx: number,
+): string {
   if (lineIdx < selected.startLine || lineIdx > selected.endLine) return " ";
   if (selected.startLine === selected.endLine) return "▶";
   if (lineIdx === selected.startLine) return "╭";
   if (lineIdx === selected.endLine) return "╰";
   return "│";
+}
+
+/** Guide character for a selected node on one wrapped continuation row. */
+function wrappedGuideChar(
+  selected: StructureNode,
+  lineIdx: number,
+  line: Line | undefined,
+  offset: number,
+  stride: number,
+  lastOffset: number,
+  span: SelectionSpan | null,
+  display: readonly DisplayCell[] | undefined,
+): string {
+  if (lineIdx < selected.startLine || lineIdx > selected.endLine || !line) {
+    return " ";
+  }
+  const bounds = selectionRowBounds(
+    span,
+    display ?? [],
+    stride,
+    lastOffset,
+  );
+  if (offset < bounds.first || offset > bounds.last) return " ";
+  const first = lineIdx === selected.startLine && offset === bounds.first;
+  const last = lineIdx === selected.endLine && offset === bounds.last;
+  if (first && last) return "▶";
+  if (first) return "╭";
+  if (last) return "╰";
+  return "│";
+}
+
+function selectionRowBounds(
+  span: SelectionSpan | null,
+  display: readonly DisplayCell[],
+  stride: number,
+  lastOffset: number,
+): { first: number; last: number } {
+  if (display.length === 0) return { first: 0, last: 0 };
+  const lo = span ? displayIndexAtOrAfter(display, span.lo) : 0;
+  const hi = span ? displayIndexAtOrAfter(display, span.hi) : display.length;
+  const firstCell = Math.min(lo, display.length - 1);
+  const lastCell = Math.max(firstCell, hi - 1);
+  return {
+    first: Math.min(Math.floor(firstCell / stride) * stride, lastOffset),
+    last: Math.min(Math.floor(lastCell / stride) * stride, lastOffset),
+  };
+}
+
+function displayIndexAtOrAfter(
+  display: readonly DisplayCell[],
+  sourceCol: number,
+): number {
+  let lo = 0;
+  let hi = display.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (display[mid].col < sourceCol) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
 }
 
 interface SelectionSpan {
@@ -264,13 +456,15 @@ function selectionSpan(
   if (!sel) return null;
   if (lineIdx < sel.startLine || lineIdx > sel.endLine) return null;
   const text = line ? line.text : "";
-  const lineLen = text.length;
+  const lineLen = cpLen(text);
   let lo = lineIdx === sel.startLine ? sel.startCol : 0;
   let hi = lineIdx === sel.endLine ? sel.endCol : lineLen;
   lo = Math.max(0, Math.min(lo, lineLen));
   hi = Math.max(0, Math.min(hi, lineLen));
-  if (lo > 0 && text.slice(0, lo).trim() === "") lo = 0; // leading indentation
-  if (hi < lineLen && text.slice(hi).trim() === "") hi = lineLen; // trailing ws
+  if (lo > 0 && codePointRangeIsWhitespace(text, 0, lo)) lo = 0;
+  if (hi < lineLen && codePointRangeIsWhitespace(text, hi, lineLen)) {
+    hi = lineLen;
+  }
   if (hi <= lo) return null;
   const bg: Style = sel.kind === "schema"
     ? { bg: ui.schemaRegionBg }
@@ -280,14 +474,31 @@ function selectionSpan(
   return { lo, hi, bg };
 }
 
+function codePointRangeIsWhitespace(
+  text: string,
+  from: number,
+  to: number,
+): boolean {
+  let col = 0;
+  for (const codePoint of text) {
+    if (col >= to) break;
+    if (col >= from && codePoint.trim() !== "") return false;
+    col++;
+  }
+  return true;
+}
+
 function composeContent(
   line: Line | undefined,
   view: ViewState,
-  lineIdx: number,
+  offset: number,
   width: number,
   sel: SelectionSpan | null,
+  display: readonly DisplayCell[] | undefined,
+  lineMatches: LineMatches | null,
+  continues: boolean,
 ): string {
-  const { left, color } = view;
+  const { color } = view;
   // Every content cell sits on the blue editor background; a diff line carries a
   // full-row add/removed tint instead. Syntax colours paint on top, and the
   // selection background still wins inside its range.
@@ -296,19 +507,18 @@ function composeContent(
     : EMPTY_STYLE;
   const cells: Cell[] = new Array(width);
   for (let i = 0; i < width; i++) cells[i] = { ch: " ", style: rowBg };
+  const showWrapMarker = continues && width > 1;
+  const sourceWidth = showWrapMarker ? width - 1 : width;
 
-  if (line) {
+  if (line && display) {
     // The display list may hold fewer cells than the line has code points —
     // ANSI sequences are hidden and runs of control codes collapse — so cells
     // are placed by their position in this list, not by their source column.
     // Each cell still knows the source column it stands for, which is what the
     // selection and search ranges are stated in.
-    const display = displayLine(line, view.displayMode);
-    const lineMatches = color ? matchesOnLine(view, lineIdx) : null;
-    for (let d = 0; d < display.length; d++) {
-      const idx = d - left;
-      if (idx >= width) break;
-      if (idx < 0) continue;
+    const end = Math.min(display.length, offset + sourceWidth);
+    for (let d = offset; d < end; d++) {
+      const idx = d - offset;
       const dc = display[d];
       let style: Style;
       if (!color) {
@@ -327,56 +537,95 @@ function composeContent(
     }
   }
 
-  return cellsToAnsi(cells, color);
-}
-
-/** The search matches that fall on `lineIdx`, each tagged with whether it is the
- * focused match, or null when there are none. */
-function matchesOnLine(
-  view: ViewState,
-  lineIdx: number,
-): Array<{ start: number; end: number; current: boolean }> | null {
-  if (!view.matches) return null;
-  const out: Array<{ start: number; end: number; current: boolean }> = [];
-  for (let m = 0; m < view.matches.length; m++) {
-    const hit: Match = view.matches[m];
-    if (hit.line === lineIdx) {
-      out.push({
-        start: hit.start,
-        end: hit.end,
-        current: m === view.currentMatch,
-      });
-    }
+  if (showWrapMarker) {
+    cells[width - 1] = {
+      ch: "\\",
+      style: color ? mergeBg(ui.wrapMarker, rowBg) : EMPTY_STYLE,
+    };
   }
-  return out.length > 0 ? out : null;
+
+  return cellsToAnsi(cells, color);
 }
 
 /** The search-match style for a cell at source column `col`, or null when the
  * column is in no match. The focused match wins over an ordinary one. */
 function matchStyle(
-  matches: ReadonlyArray<{ start: number; end: number; current: boolean }>,
+  line: LineMatches,
   col: number,
 ): Style | null {
-  let style: Style | null = null;
-  for (const m of matches) {
-    if (col >= m.start && col < m.end) {
-      if (m.current) return ui.searchCurrent;
-      style = ui.searchMatch;
-    }
+  const { matches, from, to, currentIndex } = line;
+  const current = matches[currentIndex];
+  if (current && col >= current.start && col < current.end) {
+    return ui.searchCurrent;
   }
-  return style;
+  let lo = from;
+  let hi = to;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (matches[mid].start <= col) lo = mid + 1;
+    else hi = mid;
+  }
+  const candidate = lo - 1;
+  if (candidate < from) return null;
+  const relative = candidate - from;
+  const block = Math.floor(relative / MATCH_BLOCK_SIZE);
+  const blockStart = from + block * MATCH_BLOCK_SIZE;
+  for (let i = candidate; i >= blockStart; i--) {
+    if (col < matches[i].end) return ui.searchMatch;
+  }
+  if (block === 0) return null;
+  const prefix = line.blockPrefixMaxEnd ??= matchBlockPrefix(line);
+  return prefix[block - 1] > col ? ui.searchMatch : null;
 }
 
-function renderStatus(doc: Document, view: ViewState): string {
+/** Largest match end through each fixed-size block of one logical line. */
+function matchBlockPrefix(line: LineMatches): Float64Array {
+  const { matches, from, to } = line;
+  const blocks = Math.ceil((to - from) / MATCH_BLOCK_SIZE);
+  const prefix = new Float64Array(blocks);
+  let maxEnd = -Infinity;
+  for (let i = from; i < to; i++) {
+    maxEnd = Math.max(maxEnd, matches[i].end);
+    const relative = i - from;
+    if (
+      relative % MATCH_BLOCK_SIZE === MATCH_BLOCK_SIZE - 1 || i === to - 1
+    ) {
+      prefix[Math.floor(relative / MATCH_BLOCK_SIZE)] = maxEnd;
+    }
+  }
+  return prefix;
+}
+
+function renderStatus(
+  doc: Document,
+  view: ViewState,
+  wrapPlan: WrapPlan | null,
+): string {
   if (view.inputLine !== null) {
     return view.color
       ? paint(padTo(view.inputLine, view.width), ui.statusBar)
       : padTo(view.inputLine, view.width);
   }
   const total = doc.lines.length;
-  const lastVisible = Math.min(total, view.top + view.height - 1);
-  const pct = total <= 1 ? 100 : Math.round((view.top / (total - 1)) * 100);
-  const atEnd = lastVisible >= total;
+  const rowCount = wrapPlan?.rowCount ?? total;
+  const lastRow = Math.min(
+    Math.max(0, rowCount - 1),
+    view.top + view.height - 2,
+  );
+  const first = total === 0
+    ? 0
+    : wrapPlan
+    ? (wrappedRowAt(wrapPlan, view.top)?.line ?? 0) + 1
+    : Math.min(total, view.top + 1);
+  const last = total === 0
+    ? 0
+    : wrapPlan
+    ? (wrappedRowAt(wrapPlan, lastRow)?.line ?? 0) + 1
+    : Math.min(total, lastRow + 1);
+  const pct = rowCount <= 1
+    ? 100
+    : Math.round((view.top / (rowCount - 1)) * 100);
+  const atEnd = view.top + view.height - 1 >= rowCount;
 
   // The left of the bar is either a message / selected-node label (plain text)
   // or a row of key hints (keys highlighted, Turbo Pascal style).
@@ -401,9 +650,9 @@ function renderStatus(doc: Document, view: ViewState): string {
 
   const pos = view.matches && view.matches.length > 0
     ? `match ${view.currentMatch + 1}/${view.matches.length}  ${
-      lineInfo(view, total, pct, atEnd)
+      lineInfo(first, last, total, pct, atEnd)
     }`
-    : lineInfo(view, total, pct, atEnd);
+    : lineInfo(first, last, total, pct, atEnd);
 
   // The right of the bar carries the current file (bold) then the position; the
   // file is capped so it never crowds out the position or the left hints.
@@ -486,6 +735,7 @@ function browseHints(view: ViewState): KeyHint[] {
   if (view.canExpand) hints.push({ key: "^L", label: "Expand" });
   if (view.canEdit) hints.push({ key: "e", label: "Edit" });
   if (view.hasNonPrintables) hints.push({ key: "C", label: "Chars" });
+  hints.push({ key: "\\", label: view.wrapLines ? "Unwrap" : "Wrap" });
   hints.push({ key: "#", label: "Lines" });
   return hints;
 }
@@ -509,16 +759,13 @@ function hintsAnsi(hints: readonly KeyHint[]): string {
 }
 
 function lineInfo(
-  view: ViewState,
+  first: number,
+  last: number,
   total: number,
   pct: number,
   atEnd: boolean,
 ): string {
-  const first = Math.min(total, view.top + 1);
-  const last = Math.min(total, view.top + view.height - 1);
-  const where = atEnd && view.top + view.height - 1 >= total
-    ? "END"
-    : `${pct}%`;
+  const where = atEnd ? "END" : `${pct}%`;
   return `${first}-${last}/${total}  ${where}`;
 }
 

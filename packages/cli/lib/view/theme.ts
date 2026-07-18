@@ -135,6 +135,8 @@ export const ui = {
   selectionBg: C.selectionBg,
   /** The vertical guide bar drawn beside a selected node. */
   guide: { fg: C.cyan, bold: true, bg: C.editorBg } as Style,
+  /** The marker in the final column of a row whose content continues. */
+  wrapMarker: { fg: C.yellow, bold: true } as Style,
   statusBar: { fg: C.fg, bg: C.panel } as Style,
   statusKey: { fg: C.red, bg: C.panel, bold: true } as Style,
   /** The current file name on the status bar. */
