@@ -238,6 +238,113 @@ wait_for_pattern_identity_change() {
   error "Timed out waiting for the FUSE source update to change pattern identity."
 }
 
+# The daemon writes its `[write-trace]` lines to the log named in the mount
+# output. The lines are emitted from the FUSE callbacks themselves, in the
+# order the single-threaded session loop runs them, so the log records what the
+# daemon decided rather than what the decision eventually did to a cell.
+trace_line_count() {
+  if [ ! -f "$DAEMON_LOG" ]; then
+    printf '0\n'
+    return 0
+  fi
+  wc -l <"$DAEMON_LOG" | tr -d ' '
+}
+
+trace_since() {
+  local mark="$1"
+  tail -n "+$((mark + 1))" "$DAEMON_LOG" 2>/dev/null || true
+}
+
+trace_contains() {
+  local mark="$1"
+  local needle="$2"
+  local trace
+  trace=$(trace_since "$mark")
+
+  [[ "$trace" == *"$needle"* ]]
+}
+
+# Match a whole trace line, so `fh=3` cannot satisfy a search for `fh=33`.
+trace_contains_line() {
+  local mark="$1"
+  local line="$2"
+  local trace
+  trace=$(trace_since "$mark")
+
+  [[ $'\n'"$trace"$'\n' == *$'\n'"$line"$'\n'* ]]
+}
+
+wait_for_trace_line() {
+  local mark="$1"
+  local needle="$2"
+  local timeout_seconds="${3:-20}"
+  local started_at
+  started_at=$(date +%s)
+
+  while true; do
+    if trace_contains "$mark" "$needle"; then
+      return 0
+    fi
+    if [ $(( $(date +%s) - started_at )) -ge "$timeout_seconds" ]; then
+      break
+    fi
+    sleep 0.1
+  done
+
+  error "Timed out waiting for daemon trace line: $needle"
+}
+
+assert_trace_line_absent() {
+  local mark="$1"
+  local line="$2"
+  local message="$3"
+
+  if trace_contains_line "$mark" "$line"; then
+    error "$message"
+  fi
+}
+
+# Print the daemon's release trace line for a handle. `releaseCb` traces the
+# handle's dirty/flushing/pending state as it found it, before making its own
+# flush decision, so the line states what close() saw regardless of which
+# callback ends up doing the flushing.
+trace_release_line() {
+  local mark="$1"
+  local fh="$2"
+
+  trace_since "$mark" |
+    sed -n "s/^\(\[write-trace\] release fh=$fh .*\)$/\1/p" |
+    tail -n 1
+}
+
+# Report the handle number the daemon assigned to the descriptor that wrote
+# `size` bytes at offset 0 since `mark`. The write callback traces its line
+# before replying, so the line is in the log once the write() has returned.
+resolve_traced_write_fh() {
+  local mark="$1"
+  local size="$2"
+  local timeout_seconds="${3:-20}"
+  local started_at
+  started_at=$(date +%s)
+  local fh
+
+  while true; do
+    fh=$(trace_since "$mark" |
+      sed -n "s/^\[write-trace\] write fh=\([0-9][0-9]*\) size=$size offset=0$/\1/p" |
+      tail -n 1)
+    if [ -n "$fh" ]; then
+      printf '%s\n' "$fh"
+      return 0
+    fi
+    if [ $(( $(date +%s) - started_at )) -ge "$timeout_seconds" ]; then
+      break
+    fi
+    sleep 0.1
+  done
+
+  return 1
+}
+
 read_piece_value_or_default() {
   local path="$1"
   local fallback="$2"
@@ -331,6 +438,11 @@ case "$MOUNT_PID" in
     error "Could not parse fuse daemon PID from mount output."
     ;;
 esac
+
+DAEMON_LOG=$(printf '%s\n' "$MOUNT_OUTPUT" | sed -n 's/^[[:space:]]*log:[[:space:]]*//p')
+if [ -z "$DAEMON_LOG" ]; then
+  error "Could not parse fuse daemon log path from mount output."
+fi
 
 # 'cf fuse mount --background' returns only after the daemon has reported the
 # 'mounted' supervisor state and been confirmed alive. The daemon reports that
@@ -528,16 +640,70 @@ wait_for_piece_value "legacyCount" "$((LEGACY_COUNT_BEFORE + 1))"
 success "Legacy handler write-through still works"
 
 wait_for_path "$INPUT_LAST_MESSAGE"
+
+# `handles.write` overlays the buffer the open seeded from the file, so the
+# stale value is this content over whatever tail of the old value outlives it.
+# The assertions below read the daemon's trace and do not depend on which.
+STALE_CONTENT="open-stale-descriptor"
+STALE_TRACE_MARK=$(trace_line_count)
+
+# Write and truncate under one sustained redirect of fd 9. On Linux the kernel
+# sends FUSE flush on every close(), and `printf >&9` closes a dup of fd 9 when
+# the redirect ends — which would flush the descriptor's buffered write before
+# the truncate ever runs, defeating the point of the test. Redirecting the whole
+# group keeps fd 9's buffered write on the handle until the group ends, so every
+# flush of it happens after the truncate has disarmed it.
 exec 9<> "$INPUT_LAST_MESSAGE"
-printf 'open-stale' >&9
-: > "$INPUT_LAST_MESSAGE"
+{
+  printf '%s' "$STALE_CONTENT"
+  : > "$INPUT_LAST_MESSAGE"
+} >&9
 exec 9>&-
-# The truncate empties the buffer of every descriptor open on this inode, which
-# disarms the one opened above. A descriptor that stayed armed is left dirty, and
-# a dirty handle flushes in the same tick as the callback the kernel sends on
-# close(), so its write is issued before the close returns. That write reaches the
-# cell after the truncate's own write, so lastMessage settles on 'open-stale' and
-# this wait reports it rather than reaching "".
+
+# The write above leaves fd 9's handle holding the stale content and marked
+# dirty. The truncate empties the buffer of every descriptor open on this inode
+# and clears `dirty` on all of them, and leaves `truncatePending` set only on
+# the truncating handle. `dirty || truncatePending` is what `flushHandle`,
+# `flushCb` and `releaseCb` gate on, so clearing both is what makes fd 9's
+# handle inert.
+#
+# `releaseCb` traces the handle's state before deciding anything, so its line
+# reports whether close() found the descriptor armed, on either truncate path
+# and whichever callback does the flushing. The cell value cannot report that;
+# `docs/development/waiting-in-tests.md` records why.
+STALE_FH=$(resolve_traced_write_fh "$STALE_TRACE_MARK" "${#STALE_CONTENT}") ||
+  error "Could not resolve the handle the daemon assigned to fd 9."
+
+wait_for_trace_line "$STALE_TRACE_MARK" "[write-trace] release fh=$STALE_FH "
+STALE_RELEASE_LINE=$(trace_release_line "$STALE_TRACE_MARK" "$STALE_FH")
+
+if [[ "$STALE_RELEASE_LINE" != *" pending="* ]] ||
+  [[ "$STALE_RELEASE_LINE" != *" flushing="* ]]; then
+  error "Daemon release trace no longer reports flushing/pending: $STALE_RELEASE_LINE"
+fi
+
+# `pending` is `dirty || truncatePending`, the pair every flush path gates on.
+if [[ "$STALE_RELEASE_LINE" != *" pending=false"* ]]; then
+  error "Truncate left the open descriptor armed at close(). Daemon traced: $STALE_RELEASE_LINE"
+fi
+
+# A flush already in flight carries the buffer it copied when it started, which
+# the truncate cannot recall.
+if [[ "$STALE_RELEASE_LINE" != *" flushing=false"* ]]; then
+  error "A flush was already in flight for the descriptor at close(). Daemon traced: $STALE_RELEASE_LINE"
+fi
+
+# The release line alone would miss a descriptor whose flush had already
+# finished by the time release arrived, which clears the same fields the disarm
+# does. `flushCb` traces `flush-fire` only for a handle that got past the gate,
+# so its absence rules that out. close() sends flush before release and the
+# daemon runs its callbacks on one thread, so a traced release means the flush
+# decision is already traced too.
+assert_trace_line_absent "$STALE_TRACE_MARK" \
+  "[write-trace] flush-fire fh=$STALE_FH" \
+  "Truncate left the open descriptor armed: the daemon flushed fh=$STALE_FH on close()"
+success "Path truncate disarms an already-open descriptor's buffered write"
+
 wait_for_piece_value "lastMessage" '""'
 success "Path truncate clears stale open write handles"
 

@@ -264,6 +264,41 @@ Deno.test("mounted is announced only after the session loop and signal handlers"
   );
 });
 
+Deno.test("write-trace lines the FUSE integration suite reads keep their shape", async () => {
+  const source = await Deno.readTextFile(new URL("./mod.ts", import.meta.url));
+
+  // `packages/cli/integration/fuse-exec.sh` asserts that truncating a path
+  // disarms an already-open descriptor by reading these three lines out of the
+  // daemon log. It resolves the handle from the `write` line, requires the
+  // `release` line to report the handle disarmed, and requires no `flush-fire`
+  // line for that handle. That last check is satisfied by a line being absent,
+  // so rewording it turns the check into a no-op that still passes. Pin the
+  // shapes here, where a reword fails and names what it broke.
+  const tracedLines = [
+    "console.log(`[write-trace] write fh=${fh} size=${sz} offset=${off}`);",
+    "console.log(`[write-trace] flush-fire fh=${fh}`);",
+    "[write-trace] release fh=${fh} dirty=${handle.dirty} flushing=${handle.flushing} pending=${",
+  ];
+
+  for (const line of tracedLines) {
+    assert(
+      source.includes(line),
+      `mod.ts no longer emits the trace line fuse-exec.sh reads: ${line}`,
+    );
+  }
+
+  // The release line is only a verdict because it reports the handle's state as
+  // releaseCb found it. Tracing it after the flush decision would report state
+  // that decision had already changed.
+  assertAppearsBeforeAfter(
+    source,
+    'logOp("release"',
+    "[write-trace] release fh=${fh} dirty=${handle.dirty}",
+    "if (handle && handleHasPendingChanges(handle) && bridge) {",
+    "release trace precedes the flush decision",
+  );
+});
+
 Deno.test("namespace write failures use shared outage accounting", async () => {
   const source = await Deno.readTextFile(new URL("./mod.ts", import.meta.url));
 
