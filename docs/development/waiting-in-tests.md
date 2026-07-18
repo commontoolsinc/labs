@@ -548,37 +548,41 @@ The value check stays, after the trace checks, as the end-to-end statement that
 the cell really is empty. It is the weaker of the two instruments and is not what
 makes a broken disarm fail.
 
-#### The daemon's `.status` file is not a wait signal
+#### The daemon's `.status` file is a probe, not a signal
 
 The FUSE daemon keeps write statistics (`writeStats` in `packages/fuse/mod.ts`)
-and publishes them through the `.status` file at the mount root. That file looks
-like a way to wait for the daemon to report a write-path event. It is not. The
-counters it carries lag the events they describe, and reading it around a write
-shows them frozen across the open, the write, the truncate and the release, then
-jumping several counts at once.
+and publishes them through the `.status` file at the mount root. A script can
+read that file to see how many descriptors the daemon has opened, written and
+flushed. The counts it reads are the ones the daemon held when it answered, so a
+loop around `.status` would converge on the write-path event it waits for. The
+`fuse-exec.sh` suite does not use it that way — it reads `.status` once, to
+confirm the generated file is served as one coherent document, and waits on the
+events it already has better signals for. Polling `.status` would be a poll it
+can avoid.
 
-The content is a snapshot rather than a live view. `CellBridge.initStatus` bakes
-JSON into a tree node and the read callback serves that node's stored bytes, so
-the numbers a reader sees are the ones the last `updateStatus` call baked.
+That works because nothing writes `.status`. `CellBridge.initStatus` registers
+it through `FsTree.addGeneratedFile`, which hands the tree a function that
+renders the status JSON from the daemon's current counters. The callbacks that
+report the file's size run that renderer and publish what it returns, and reads
+serve the published bytes. The write path announces nothing: a flush increments
+`writeStats.flushed` and stops there. No refresh has to be ordered after a
+counter, because no refresh exists to be ordered.
 
-Refreshes do reach `.status` from the write path, but never carrying the counter
-a waiter wants. A successful flush calls `markExistingFinalized`, which reaches
-`updateStatus` through `CfcWritebackStore.deletePrepared`, `persist` and the
-store's `onChange` hook. That chain runs before `writeStats.flushed++` on every
-flush branch, so the snapshot a flush triggers always reports the count from
-before that flush. Opening and writing move their own counters with no refresh
-attached at all.
+The kernel caches are set to match. `replyEntry` and the getattr callback treat
+a generated inode as dynamic and reply with a zero entry and attribute timeout,
+so on Linux a lookup and a getattr precede each read. Publishing bumps the
+node's mtime whenever the bytes change, and `.status` reports it, so a client
+that validates its cached copy against the timestamp and the size notices a
+counter going from 9 to 10 even though the document's length did not change.
 
-Attribute caching sits on top. `.status` is a static inode, so `replyEntry` gives
-it a one-second entry and attribute timeout on Linux, and a macOS mount bounds
-staleness through an NFS attribute-cache option instead, because FUSE-T ignores
-the timeouts a reply carries. `updateStatus` assigns `node.content` and changes
-no size or mtime, so nothing invalidates a cached reader either way.
-
-Waiting on `.status` therefore means waiting for a refresh that reports the state
-before the event, through a cache with no invalidation, at a granularity coarser
-than the wait itself. Making it a real signal means ordering the refresh after
-the counters, regenerating on read, and giving a reader something to notice.
+A macOS mount cannot use those timeouts, because FUSE-T ignores the ones a reply
+carries; it bounds staleness through an NFS attribute-cache mount option
+instead, the `attrcache-timeout` default described in
+`packages/fuse/mount-options.ts`. A `.status` poll on macOS is therefore only as
+sharp as that option allows: a reader that has read the file once holds the NFS
+client's cached copy until it expires, so a count arrives a beat after the write
+that caused it. That the counts advance is settled by the `CellBridge.status`
+unit tests, which drive the tree directly and need no mount and no wait.
 
 ## Production reconnect backoff
 

@@ -1,5 +1,5 @@
 // tree.test.ts — Unit tests for FsTree
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { CfcProjectionAnnotator } from "./annotations.ts";
 import { FsTree } from "./tree.ts";
 import type { JsonType } from "./types.ts";
@@ -579,4 +579,171 @@ Deno.test("clear on a missing inode is a no-op", () => {
   const before = tree.inodes.size;
   tree.clear(9_999n);
   assertEquals(tree.inodes.size, before);
+});
+
+// --- generated files (.status) -------------------------------------------
+
+Deno.test("addGeneratedFile publishes an initial render", () => {
+  const tree = new FsTree();
+  const ino = tree.addGeneratedFile(
+    tree.rootIno,
+    ".status",
+    () => "count=0",
+    "object",
+  );
+
+  assertEquals(tree.lookup(tree.rootIno, ".status"), ino);
+  assertEquals(tree.isGenerated(ino), true);
+
+  const node = tree.getNode(ino)!;
+  if (node.kind !== "file") throw new Error("not a file");
+  assertEquals(decoder.decode(node.content), "count=0");
+});
+
+Deno.test("refreshGenerated publishes the current render", () => {
+  const tree = new FsTree();
+  let count = 0;
+  const ino = tree.addGeneratedFile(
+    tree.rootIno,
+    ".status",
+    () => `count=${count}`,
+    "object",
+  );
+
+  count = 7;
+  assertEquals(decoder.decode(tree.refreshGenerated(ino)!), "count=7");
+
+  const node = tree.getNode(ino)!;
+  if (node.kind !== "file") throw new Error("not a file");
+  assertEquals(decoder.decode(node.content), "count=7");
+});
+
+Deno.test("a generated file holds its published bytes between refreshes", () => {
+  const tree = new FsTree();
+  let count = 0;
+  const ino = tree.addGeneratedFile(
+    tree.rootIno,
+    ".status",
+    () => `count=${count}`,
+    "object",
+  );
+  const node = tree.getNode(ino)!;
+  if (node.kind !== "file") throw new Error("not a file");
+
+  // Reads serve these bytes and stop at the size reported alongside them.
+  // State moving underneath must not change either until a refresh.
+  count = 1234;
+  assertEquals(decoder.decode(node.content), "count=0");
+  assertEquals(node.content.length, "count=0".length);
+});
+
+Deno.test("a generated file's mtime advances only when its bytes change", () => {
+  let clock = 5_000;
+  const tree = new FsTree(() => clock);
+  let count = 0;
+  const ino = tree.addGeneratedFile(
+    tree.rootIno,
+    ".status",
+    () => `count=${count}`,
+    "object",
+  );
+  const mtimeOf = () => (tree.getNode(ino) as { mtime: number }).mtime;
+  assertEquals(mtimeOf(), 5_000);
+
+  // A render equal to the published one is not a modification.
+  clock = 6_000;
+  tree.refreshGenerated(ino);
+  assertEquals(mtimeOf(), 5_000);
+
+  // A counter moving without changing the length still advances the mtime, so
+  // a client revalidating by attribute sees a change it could not see by size.
+  count = 9;
+  clock = 7_000;
+  tree.refreshGenerated(ino);
+  assertEquals(mtimeOf(), 7_000);
+  assertEquals(
+    decoder.decode((tree.getNode(ino) as { content: Uint8Array }).content),
+    "count=9",
+  );
+
+  // Two changes inside one clock tick still get distinct, advancing times.
+  count = 10;
+  tree.refreshGenerated(ino);
+  assertEquals(mtimeOf(), 7_001);
+});
+
+Deno.test("refreshGenerated ignores an inode that is not generated", () => {
+  const tree = new FsTree();
+  const ino = tree.addFile(tree.rootIno, "plain.txt", "hi", "string");
+  assertEquals(tree.refreshGenerated(ino), undefined);
+  assertEquals(tree.refreshGenerated(999n), undefined);
+});
+
+Deno.test("refreshGenerated returns undefined when a tracked node is gone", () => {
+  const tree = new FsTree();
+  const ino = tree.addGeneratedFile(
+    tree.rootIno,
+    ".status",
+    () => "{}",
+    "object",
+  );
+  // The public API keeps the generated map and the inode map in step, so this
+  // reaches past it to drop the node while leaving it tracked. The guard has to
+  // return undefined for the missing node rather than throw.
+  (tree as unknown as { inodes: Map<bigint, unknown> }).inodes.delete(ino);
+  assertEquals(tree.isGenerated(ino), true);
+  assertEquals(tree.refreshGenerated(ino), undefined);
+});
+
+Deno.test("a generated file owns its bytes against a renderer reusing its buffer", () => {
+  const tree = new FsTree();
+  const shared = new Uint8Array([1]);
+  const ino = tree.addGeneratedFile(
+    tree.rootIno,
+    "bytes",
+    () => shared,
+    "array",
+  );
+  const contentOf = () =>
+    (tree.getNode(ino) as { content: Uint8Array }).content;
+
+  // The published content is a copy, not the renderer's buffer.
+  assertEquals(contentOf() === shared, false);
+
+  // Mutating the renderer's own buffer does not change what a reader is served
+  // until a refresh, and the change is then seen rather than lost to an
+  // identity comparison against the same buffer.
+  shared[0] = 2;
+  assertEquals([...contentOf()], [1]);
+
+  const published = tree.refreshGenerated(ino)!;
+  assertEquals([...published], [2]);
+  assertEquals(published === shared, false);
+});
+
+Deno.test("stored files are not generated", () => {
+  const tree = new FsTree();
+  const ino = tree.addFile(tree.rootIno, "plain.txt", "hi", "string");
+  assertEquals(tree.isGenerated(ino), false);
+});
+
+Deno.test("updateFile rejects a generated file", () => {
+  const tree = new FsTree();
+  const ino = tree.addGeneratedFile(
+    tree.rootIno,
+    ".status",
+    () => "{}",
+    "object",
+  );
+  assertThrows(() => tree.updateFile(ino, "{}"), Error, "is a generated file");
+});
+
+Deno.test("removeChild forgets that an inode was generated", () => {
+  const tree = new FsTree();
+  const dir = tree.addDir(tree.rootIno, "d");
+  const ino = tree.addGeneratedFile(dir, ".status", () => "{}", "object");
+  assertEquals(tree.isGenerated(ino), true);
+  tree.removeChild(dir, ".status");
+  assertEquals(tree.isGenerated(ino), false);
+  assertEquals(tree.refreshGenerated(ino), undefined);
 });

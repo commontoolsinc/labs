@@ -145,6 +145,15 @@ function getFileContent(tree: FsTree, parentIno: bigint, name: string): string {
 }
 
 /**
+ * Read `.status` the way the daemon serves it: the getattr that reports the
+ * file's size publishes a render, and the read that follows serves those bytes.
+ */
+function readStatusFile(tree: FsTree): string {
+  tree.refreshGenerated(tree.lookup(tree.rootIno, ".status")!);
+  return getFileContent(tree, tree.rootIno, ".status");
+}
+
+/**
  * Build a minimal SpaceState backed by a fake PiecesController.
  * Registers the state in bridge.spaces and bridge.knownSpaces.
  */
@@ -3032,7 +3041,7 @@ Deno.test({
     const resultIno = tree.lookup(pieceIno, "result")!;
     assertEquals(getFileContent(tree, resultIno, "content"), "Final");
 
-    const status = JSON.parse(getFileContent(tree, tree.rootIno, ".status"));
+    const status = JSON.parse(readStatusFile(tree));
     assertEquals(status.debug, false);
     assertEquals(status.rebuilds.pending, 0);
     assertEquals(status.rebuilds.completed >= 1, true);
@@ -3047,6 +3056,93 @@ Deno.test({
     const subs = state.pieceSubs.get("Status-Piece");
     if (subs) { for (const cancel of subs) cancel(); }
   },
+});
+
+function makeStatusBridge(
+  tree: FsTree,
+  statusProvider: () => Record<string, unknown>,
+): CellBridge {
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", { statusProvider });
+  bridge.init({
+    apiUrl: "http://localhost:8000",
+    identity: "/tmp/test-identity.pem",
+  });
+  bridge.initStatus();
+  return bridge;
+}
+
+Deno.test("CellBridge.status reports state that moved since the last read", () => {
+  const tree = new FsTree();
+  const writes = { opened: 0, written: 0, flushed: 0 };
+  const bridge = makeStatusBridge(tree, () => ({ writes: { ...writes } }));
+
+  const readStatus = () => JSON.parse(readStatusFile(tree));
+  assertEquals(readStatus().writes, { opened: 0, written: 0, flushed: 0 });
+
+  // The write path moves these counters and tells the bridge nothing. Each
+  // read still has to see the counts as of that read.
+  writes.opened++;
+  assertEquals(readStatus().writes.opened, 1);
+
+  writes.written += 2;
+  writes.flushed++;
+  assertEquals(readStatus().writes, { opened: 1, written: 2, flushed: 1 });
+
+  bridge.setDebug(true);
+  assertEquals(readStatus().debug, true);
+});
+
+Deno.test("CellBridge.status sizes .status from the bytes a read serves", () => {
+  const tree = new FsTree();
+  let diagnostics: string[] = [];
+  makeStatusBridge(tree, () => ({ cfc: { diagnostics } }));
+
+  const statusIno = tree.lookup(tree.rootIno, ".status")!;
+  const sizeOf = () =>
+    (tree.getNode(statusIno) as { content: Uint8Array }).content.length;
+  const before = sizeOf();
+
+  // State moving on its own must not move the size, which a reader has already
+  // been given and will stop its read at.
+  diagnostics = ["denied write to piece result"];
+  assertEquals(sizeOf(), before);
+
+  // Publishing moves the size and the bytes together.
+  tree.refreshGenerated(statusIno);
+  const after = sizeOf();
+  assertEquals(after > before, true);
+  assertEquals(after, getFileContent(tree, tree.rootIno, ".status").length);
+});
+
+Deno.test("CellBridge.status renders nothing when its state moves", () => {
+  const tree = new FsTree();
+  let renders = 0;
+  const bridge = makeStatusBridge(tree, () => {
+    renders++;
+    return {};
+  });
+
+  // initStatus publishes once so the file has bytes before anyone reads it.
+  assertEquals(renders, 1);
+
+  // Rendering the document walks every space and its piece map. Nothing that
+  // moves the state it reports should pay for that — the reader does.
+  bridge.setDebug(true);
+  bridge.markDisconnected("socket closed");
+  assertEquals(renders, 1);
+});
+
+Deno.test("CellBridge.status renders when .status is read", () => {
+  const tree = new FsTree();
+  let renders = 0;
+  const bridge = makeStatusBridge(tree, () => {
+    renders++;
+    return {};
+  });
+  bridge.setDebug(true);
+
+  assertEquals(JSON.parse(readStatusFile(tree)).debug, true);
+  assertEquals(renders, 2);
 });
 
 Deno.test({

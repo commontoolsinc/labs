@@ -559,7 +559,6 @@ export async function main(argv: string[] = Deno.args) {
   let bridge: CellBridge | null = null;
   const cfcWritebacks = new CfcWritebackStore({
     storagePath: cfcWritebackStatePath,
-    onChange: () => bridge?.refreshStatus(),
   });
   const cfcDiagnostics: string[] = [];
 
@@ -744,6 +743,39 @@ export async function main(argv: string[] = Deno.args) {
       ),
       ownership: mountOwnership,
     });
+  }
+
+  /**
+   * The bytes an already-open descriptor serves for the generated file `ino`,
+   * and when they were published, when `fi` names such a descriptor. The kernel
+   * passes the descriptor on a getattr it issues to size a read, and omits it
+   * on a bare `stat`. Reporting both the snapshot's length and its publish time
+   * keeps the size and the modification time describing the same render.
+   */
+  function openGeneratedSnapshot(
+    fi: Deno.PointerValue,
+    ino: bigint,
+  ): { buffer: Uint8Array; mtime: number | undefined } | undefined {
+    if (!fi || !tree.isGenerated(ino)) return undefined;
+    const handle = handles.get(readFileInfo(fi).fh);
+    if (!handle || handle.ino !== ino || !handle.bufferValid) return undefined;
+    return { buffer: handle.buffer, mtime: handle.readSnapshotMtime };
+  }
+
+  /**
+   * Whether `ino` carries content the kernel must not cache: a piece inode the
+   * bridge hydrates on demand, or a generated file, which republishes its bytes
+   * whenever a reader asks for its size.
+   */
+  function isDynamicIno(ino: bigint): boolean {
+    if (tree.isGenerated(ino)) return true;
+    return Boolean(
+      bridge?.shouldPrepareDirectory(ino) ||
+        bridge?.shouldPrepareLookup(
+          tree.parents.get(ino) ?? 0n,
+          tree.getPath(ino).split("/").pop() ?? "",
+        ),
+    );
   }
 
   function recordCfcDiagnostics(messages: string[]): void {
@@ -1062,18 +1094,16 @@ export async function main(argv: string[] = Deno.args) {
     node: ReturnType<typeof tree.getNode>,
   ) {
     // These timeouts govern the Linux kernel's entry and attribute caches.
-    // Piece content inodes (under pieces/ and entities/) use 0 so every read
-    // hits our callbacks. Static inodes (root, space.json, .status) use 1s.
+    // Piece content inodes (under pieces/ and entities/) and generated files
+    // (.status) use 0 so every read hits our callbacks. Static inodes (root,
+    // space.json) use 1s.
     // FUSE-T (macOS NFS translation) ignores the timeouts a reply carries,
     // along with notify_inval_entry and notify_inval_inode. A macOS mount
     // bounds staleness with an NFS attribute-cache mount option instead; see
     // mount-options.ts.
-    const isDynamic = bridge?.shouldPrepareDirectory(ino) ||
-      bridge?.shouldPrepareLookup(
-        tree.parents.get(ino) ?? 0n,
-        tree.getPath(ino).split("/").pop() ?? "",
-      );
-    const timeout = isDynamic ? 0 : 1.0;
+    const timeout = isDynamicIno(ino) ? 0 : 1.0;
+    // This reply carries the file's size, so publish the render it sizes.
+    tree.refreshGenerated(ino);
     const entryBuf = new ArrayBuffer(ENTRY_PARAM_SIZE);
     writeEntryParam(entryBuf, {
       ino,
@@ -1186,7 +1216,7 @@ export async function main(argv: string[] = Deno.args) {
   // getattr(req, ino, fi_ptr)
   const getattrCb = new Deno.UnsafeCallback(
     { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
-    (req: Deno.PointerValue, ino: number | bigint, _fi: Deno.PointerValue) => {
+    (req: Deno.PointerValue, ino: number | bigint, fi: Deno.PointerValue) => {
       logOp("getattr", ino.toString());
       const inode = BigInt(ino);
       const node = tree.getNode(inode);
@@ -1196,19 +1226,31 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
 
+      // The kernel stops a descriptor's reads at the size this reply gives, and
+      // a descriptor serves the bytes it snapshotted at open for its whole
+      // life, so a getattr carrying one reports that snapshot's length. A
+      // getattr without one — a bare stat, and every getattr FUSE-T makes — is
+      // a reader learning the size before reading the node, so that one
+      // publishes.
+      const snapshot = openGeneratedSnapshot(fi, inode);
+      if (!snapshot) tree.refreshGenerated(inode);
+      const attr = buildStat(node, inode);
+      if (snapshot) {
+        // Report the snapshot's size and publish time together, so both
+        // describe the render this descriptor serves rather than the current
+        // one. A real snapshot always carries a time; a descriptor left empty
+        // by a truncate carries none, and reports the epoch, which matches its
+        // empty size.
+        attr.size = snapshot.buffer.length;
+        attr.mtime = snapshot.mtime;
+      }
       const statBuf = new ArrayBuffer(STAT_SIZE);
-      writeStat(statBuf, buildStat(node, inode));
+      writeStat(statBuf, attr);
 
-      const parentIno = tree.parents.get(inode) ?? 0n;
-      const isDynamic = bridge?.shouldPrepareDirectory(inode) ||
-        bridge?.shouldPrepareLookup(
-          parentIno,
-          tree.getPath(inode).split("/").pop() ?? "",
-        );
       fuse.symbols.fuse_reply_attr(
         req,
         Deno.UnsafePointer.of(new Uint8Array(statBuf)),
-        isDynamic ? 0 : 1.0,
+        isDynamicIno(inode) ? 0 : 1.0,
       );
     },
   );
@@ -1330,6 +1372,15 @@ export async function main(argv: string[] = Deno.args) {
       // Get current content for the handle buffer
       const content = node.kind === "file" ? node.content : new Uint8Array(0);
       const truncate = (flags & O_TRUNC) !== 0;
+      // Fix a generated file's bytes for the life of the descriptor, taking
+      // what the last getattr published so the descriptor serves the bytes
+      // whose size its reader was already given. A reader that has read to the
+      // end issues one more read to see EOF, which this answers too. Record
+      // when those bytes were published so the descriptor's later getattr
+      // carries a size and a modification time from the one render.
+      const snapshotGenerated = tree.isGenerated(inode) && !truncate;
+      const readSnapshot = snapshotGenerated ? content : undefined;
+      const readSnapshotMtime = snapshotGenerated ? node.mtime : undefined;
       if (isWriting && writeTarget?.kind !== "ignored") {
         const operation: CfcExistingWritebackOperation = truncate
           ? "truncate"
@@ -1344,7 +1395,13 @@ export async function main(argv: string[] = Deno.args) {
         inode,
         flags,
         truncate ? new Uint8Array(0) : content,
-        { writeTarget, cfcAuthorizedOperations, cfcAuthorizationAnnotation },
+        {
+          writeTarget,
+          cfcAuthorizedOperations,
+          cfcAuthorizationAnnotation,
+          readSnapshot,
+          readSnapshotMtime,
+        },
       );
       if (isWriting) {
         writeStats.opened++;
@@ -2221,7 +2278,7 @@ export async function main(argv: string[] = Deno.args) {
       fuse.symbols.fuse_reply_attr(
         req,
         Deno.UnsafePointer.of(new Uint8Array(statBuf)),
-        1.0,
+        isDynamicIno(inode) ? 0 : 1.0,
       );
       if (
         metadataAuthorization?.allowed &&
@@ -2455,14 +2512,12 @@ export async function main(argv: string[] = Deno.args) {
       }
       if (!result.ok) {
         console.warn(`[FUSE:CFC] rejected ${name}: ${result.reason}`);
-        bridge?.refreshStatus();
         fuse.symbols.fuse_reply_err(
           req,
           cfcWritebackXattrResultErrno(result, { enotsup: ENOTSUP }),
         );
         return;
       }
-      bridge?.refreshStatus();
       fuse.symbols.fuse_reply_err(req, 0);
     },
   );
@@ -2491,7 +2546,6 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
       cfcWritebacks.deleteAllForIno(BigInt(ino));
-      bridge?.refreshStatus();
       fuse.symbols.fuse_reply_err(req, 0);
     },
   );

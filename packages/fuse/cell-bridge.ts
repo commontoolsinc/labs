@@ -317,8 +317,6 @@ export class CellBridge {
   private onCfcProjectionRebuilt: (() => void) | undefined;
 
   private startedAt = new Date().toISOString();
-  /** Inode of the .status file (created by initStatus). */
-  private statusIno: bigint | null = null;
   /**
    * Set to true when a write fails due to a transport/connection error.
    * Once disconnected, all files appear read-only (EACCES on write)
@@ -345,7 +343,6 @@ export class CellBridge {
         `Will attempt reconnection in ${this._reconnectDelayMs()}ms.`,
     );
     this._scheduleReconnect();
-    this.updateStatus();
   }
 
   private _reconnectDelayMs(): number {
@@ -384,7 +381,6 @@ export class CellBridge {
           console.error(
             `[FUSE] Backend connection restored — write access resumed.`,
           );
-          this.updateStatus();
           return;
         } finally {
           await manager.runtime.dispose().catch((e) => {
@@ -430,11 +426,6 @@ export class CellBridge {
 
   setDebug(debug: boolean): void {
     this.debug = debug;
-    this.updateStatus();
-  }
-
-  refreshStatus(): void {
-    this.updateStatus();
   }
 
   private debugLog(message: string): void {
@@ -514,23 +505,19 @@ export class CellBridge {
     }
   }
 
-  /** Create the .status file at the mount root. Call once after init. */
+  /**
+   * Create the .status file at the mount root. Call once after init.
+   *
+   * The file is generated: `getStatusJson` runs when a reader asks the tree for
+   * the file's size, and no caller has to announce that a counter moved.
+   */
   initStatus(): void {
-    this.statusIno = this.tree.addFile(
+    this.tree.addGeneratedFile(
       this.tree.rootIno,
       ".status",
-      this.getStatusJson(),
+      () => this.getStatusJson(),
       "object",
     );
-  }
-
-  /** Update the .status file content in the tree. */
-  private updateStatus(): void {
-    if (this.statusIno === null) return;
-    const node = this.tree.getNode(this.statusIno);
-    if (node?.kind === "file") {
-      node.content = new TextEncoder().encode(this.getStatusJson());
-    }
   }
 
   /** Generate current status as JSON. */
@@ -1141,7 +1128,6 @@ export class CellBridge {
       pending.latestValue = args.newValue;
       pending.pieceName = args.pieceName;
       this.rebuildStats.coalesced++;
-      this.updateStatus();
       return;
     }
 
@@ -1163,7 +1149,6 @@ export class CellBridge {
           this.activePropRebuilds.size +
           this.deferredPropRebuilds.size,
       );
-      this.updateStatus();
       return;
     }
 
@@ -1180,7 +1165,6 @@ export class CellBridge {
       timer: setTimeout(() => {
         this.pendingPropRebuilds.delete(key);
         this.activePropRebuilds.add(key);
-        this.updateStatus();
         void this.enqueuePiecePropRebuild({
           cell: entry.cell,
           newValue: entry.latestValue,
@@ -1192,7 +1176,6 @@ export class CellBridge {
           spaceName: entry.spaceName,
         }).catch((e) => {
           this.rebuildStats.errors++;
-          this.updateStatus();
           console.error(
             `[${entry.spaceName}] Error rebuilding ${entry.pieceName}/${entry.propName}: ${e}`,
           );
@@ -1200,7 +1183,6 @@ export class CellBridge {
           this.activePropRebuilds.delete(key);
           const deferred = this.deferredPropRebuilds.get(key);
           this.deferredPropRebuilds.delete(key);
-          this.updateStatus();
           if (deferred) {
             this.schedulePropRebuild(deferred);
           }
@@ -1214,7 +1196,6 @@ export class CellBridge {
         this.activePropRebuilds.size +
         this.deferredPropRebuilds.size,
     );
-    this.updateStatus();
   }
 
   /**
@@ -1502,7 +1483,6 @@ export class CellBridge {
           this.rebuildStats.completed++;
           this.rebuildStats.lastDurationMs = Date.now() - startedAt;
           this.noteCfcProjectionRebuilt();
-          this.updateStatus();
           return;
         }
       }
@@ -1617,7 +1597,6 @@ export class CellBridge {
     this.rebuildStats.completed++;
     this.rebuildStats.lastDurationMs = Date.now() - startedAt;
     this.noteCfcProjectionRebuilt();
-    this.updateStatus();
     this.debugLog(`[${spaceName}] Updated ${pieceName}/${propName}`);
   }
 
@@ -1770,7 +1749,6 @@ export class CellBridge {
         this.onInvalidateInode(staleIno);
       }
     }
-    this.updateStatus();
     return true;
   }
 
@@ -2146,7 +2124,6 @@ export class CellBridge {
     });
     state.unsubscribes.push(piecesListCancel);
 
-    this.updateStatus();
     return state;
   }
 
@@ -2493,7 +2470,6 @@ export class CellBridge {
     if (this.onInvalidateInode) {
       this.onInvalidateInode(state.piecesIno);
     }
-    this.updateStatus();
   }
 
   /** Update the pieces/pieces.json manifest for a space. */

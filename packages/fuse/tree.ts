@@ -19,7 +19,7 @@ import {
   cfcDirectoryEntryNameDigest,
   type CfcNodeAnnotation,
 } from "./annotations.ts";
-import type { FsNode } from "./types.ts";
+import type { FsNode, JsonType } from "./types.ts";
 
 const ROOT_INO = 1n;
 const encoder = new TextEncoder();
@@ -48,12 +48,26 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
+/**
+ * Run a generated file's renderer and return bytes the tree owns. A string is
+ * encoded, which already yields a fresh array; a `Uint8Array` is copied, so a
+ * renderer reusing its buffer cannot mutate the published content.
+ */
+function ownedRender(render: () => Uint8Array | string): Uint8Array {
+  const rendered = render();
+  return typeof rendered === "string"
+    ? encoder.encode(rendered)
+    : new Uint8Array(rendered);
+}
+
 export class FsTree {
   inodes: Map<bigint, FsNode> = new Map();
   parents: Map<bigint, bigint> = new Map();
   paths: Map<string, bigint> = new Map();
   /** Reverse map: inode → path string (O(1) lookup). */
   private inoPaths: Map<bigint, string> = new Map();
+  /** Renderers for inodes added by `addGeneratedFile`. */
+  private generated: Map<bigint, () => Uint8Array | string> = new Map();
   private nextIno = 2n;
   private now: () => number;
 
@@ -160,6 +174,54 @@ export class FsTree {
     this.trackPath(ino, parentIno, name);
 
     return ino;
+  }
+
+  /**
+   * Add a file whose bytes are produced by `render` rather than written.
+   *
+   * The node's content is whatever `refreshGenerated` last published, and reads
+   * serve that. A client stops a read at the size it last learned, so the size
+   * a caller reports and the bytes it later serves have to come from one
+   * render: publish where the size is reported. A render returning a
+   * `Uint8Array` is copied, so a renderer reusing its buffer cannot change the
+   * published content out from under a reader.
+   */
+  addGeneratedFile(
+    parentIno: bigint,
+    name: string,
+    render: () => Uint8Array | string,
+    jsonType: JsonType,
+  ): bigint {
+    const ino = this.addFile(parentIno, name, ownedRender(render), jsonType);
+    this.generated.set(ino, render);
+    return ino;
+  }
+
+  /**
+   * Re-render a generated file and publish the result as its content.
+   *
+   * Returns the published bytes, or undefined when `ino` is not a generated
+   * file. Call this where the file's size is about to be reported, so that the
+   * size a client caches and the bytes a following read serves are one render.
+   *
+   * A render equal to the published one leaves the content and the node's mtime
+   * alone, so the mtime moves only when the bytes do, and then always forward.
+   */
+  refreshGenerated(ino: bigint): Uint8Array | undefined {
+    const render = this.generated.get(ino);
+    if (render === undefined) return undefined;
+    const node = this.inodes.get(ino);
+    if (!node || node.kind !== "file") return undefined;
+    const bytes = ownedRender(render);
+    if (bytesEqual(node.content, bytes)) return node.content;
+    this.bumpMtime(node);
+    node.content = bytes;
+    return node.content;
+  }
+
+  /** True when `ino` was added by `addGeneratedFile`. */
+  isGenerated(ino: bigint): boolean {
+    return this.generated.has(ino);
   }
 
   addCallable(
@@ -292,7 +354,13 @@ export class FsTree {
     return this.inoPaths.get(ino) ?? "/";
   }
 
-  /** Update a file node's content and optionally its jsonType. */
+  /**
+   * Update a file node's content and optionally its jsonType.
+   *
+   * Throws if `ino` is not a file, or is a generated file — a generated file's
+   * content comes from its renderer through `refreshGenerated`, so writing it
+   * directly would be overwritten and is rejected.
+   */
   updateFile(
     ino: bigint,
     content: Uint8Array | string,
@@ -301,6 +369,9 @@ export class FsTree {
     const node = this.inodes.get(ino);
     if (!node || node.kind !== "file") {
       throw new Error(`Inode ${ino} is not a file`);
+    }
+    if (this.generated.has(ino)) {
+      throw new Error(`Inode ${ino} is a generated file`);
     }
     const data = typeof content === "string"
       ? encoder.encode(content)
@@ -338,6 +409,7 @@ export class FsTree {
     }
     this.inodes.delete(ino);
     this.parents.delete(ino);
+    this.generated.delete(ino);
     this.untrackPath(ino);
   }
 
@@ -603,6 +675,7 @@ export class FsTree {
     this.unlinkFromParent(ino);
     this.inodes.delete(ino);
     this.parents.delete(ino);
+    this.generated.delete(ino);
     this.untrackPath(ino);
   }
 
