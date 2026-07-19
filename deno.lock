@@ -117,7 +117,7 @@
     "npm:fake-indexeddb@6.0.0": "6.0.0",
     "npm:fuse-native@*": "2.2.6",
     "npm:hash-wasm@^4.12.0": "4.12.0",
-    "npm:hono-pino@0.7": "0.7.2_hono@4.12.30_pino@10.3.1",
+    "npm:hono-pino@~0.10.3": "0.10.3_hono@4.12.30_pino@10.3.1",
     "npm:hono@^4.7.0": "4.12.30",
     "npm:htmlparser2@12.0.0": "12.0.0",
     "npm:json5@^2.2.3": "2.2.3",
@@ -1310,8 +1310,8 @@
         "ms"
       ]
     },
-    "defu@6.1.4": {
-      "integrity": "sha512-mEQCMmwJu317oSz8CwdIOdwf3xMif1ttiM8LTufzc3g6kR+9Pe236twL8j3IYT1F7GfRgGcW6MWxzZjLIkuHIg=="
+    "defu@6.1.7": {
+      "integrity": "sha512-7z22QmUWiQ/2d0KkdYmANbRUVABpZ9SNYyH5vx6PZ+nE5bcC0l7uFvEfHlyld/HcGBFTL536ClDt3DEcSlEJAQ=="
     },
     "delayed-stream@1.0.0": {
       "integrity": "sha512-ZySD7Nf91aLB0RxL4KGrKHBXl7Eds1DAmEdcoVawXnLD7SDhpNgtuII2aAkg7a7QS41jxPSZ17p4VdGnMHk3MQ=="
@@ -1581,8 +1581,8 @@
     "help-me@5.0.0": {
       "integrity": "sha512-7xgomUX6ADmcYzFik0HzAxh/73YlKR9bmFzf51CZwR+b6YtzU2m0u49hQCqV6SvlqIqsaxovfwdvbnsw3b/zpg=="
     },
-    "hono-pino@0.7.2_hono@4.12.30_pino@10.3.1": {
-      "integrity": "sha512-uLJOngId4Ia2eHXnCPE8xpyMVkh+AGxAkHZKgvZk8YkmuTbcVDDUMe7aHMEz+YLqCDgd/Hk9ytVmmoQ8QTUXgQ==",
+    "hono-pino@0.10.3_hono@4.12.30_pino@10.3.1": {
+      "integrity": "sha512-n0RNPIFOoq25Fg8b4D5gus4sVqI0z+8I17ibl96+p43d07UnZ0EMM/It0qSgfc7UtaC+XP5FkFmRHwBp6owsNA==",
       "dependencies": [
         "defu",
         "hono",
@@ -2132,7 +2132,7 @@
           "npm:@scalar/hono-api-reference@~0.11.10",
           "npm:ai@^7.0.30",
           "npm:ajv@^8.17.1",
-          "npm:hono-pino@0.7",
+          "npm:hono-pino@~0.10.3",
           "npm:hono@^4.7.0",
           "npm:jsonschema@^1.5.0",
           "npm:mistreevous@4.3.1",
