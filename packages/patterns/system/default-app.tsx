@@ -72,18 +72,15 @@ const dropOntoNotebook = handler<
   { notebook: Writable<{ notes?: NotePiece[] }> }
 >((event, { notebook }) => {
   const sourceCell = event.detail.sourceCell;
-  const notesCell = notebook.key("notes");
-  const notesList = notesCell.get() ?? [];
 
-  // Prevent duplicates using Writable.equals
-  const alreadyExists = notesList.some((n) => equals(sourceCell, n));
-  if (alreadyExists) return;
-
-  // Hide from Patterns list
+  // Hide from Patterns list. Idempotent on a re-drop: a note already in the
+  // notebook is already hidden.
   sourceCell.key("isHidden").set(true);
 
-  // Add to notebook - push cell reference, not value, to maintain piece identity
-  notesCell.push(sourceCell);
+  // Add to notebook by piece identity. addUnique compares a cell argument by
+  // link, so re-dropping the same note resolves to one membership entry and
+  // drops of distinct notes merge, without reading the whole list.
+  notebook.key("notes").addUnique(sourceCell);
 });
 
 // Toggle dropdown menu
@@ -117,17 +114,18 @@ const menuNewNotebook = handler<void, { menuOpen: Writable<boolean> }>(
   },
 );
 
-// Handler: Add piece to allPieces if not already present
+// Handler: Add piece to allPieces if not already present. The event field is
+// declared as a cell so it arrives as one (the shell sends a piece cell);
+// addUnique then dedups by link, so concurrent registrations of the same
+// piece resolve to one entry and adds of distinct pieces merge, without
+// reading the whole list.
 const addPiece = handler<
-  { piece: MentionablePiece },
+  { piece: Writable<MentionablePiece> },
   { allPieces: Writable<MentionablePiece[]> }
 >((event, { allPieces }) => {
   const piece = event?.piece;
   if (!piece) return;
-  const current = allPieces.get();
-  if (!current.some((c) => equals(c, piece))) {
-    allPieces.push(piece);
-  }
+  allPieces.addUnique(piece);
 });
 
 // Handler: Track piece as recently used (add to front, maintain max)
