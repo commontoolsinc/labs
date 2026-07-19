@@ -6,6 +6,6 @@
   "exports": "./src/index.ts",
   "imports": {
     "@noble/ed25519": "npm:@noble/ed25519@^3.1.0",
-    "@scure/bip39": "npm:@scure/bip39@^1.5.4"
+    "@scure/bip39": "npm:@scure/bip39@^2.2.0"
   }
 }

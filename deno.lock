@@ -100,7 +100,7 @@
     "npm:@opentelemetry/sdk-trace-web@^2.9.0": "2.9.0_@opentelemetry+api@1.9.1",
     "npm:@resvg/resvg-js@2.6.2": "2.6.2",
     "npm:@scalar/hono-api-reference@~0.11.10": "0.11.10_hono@4.12.30",
-    "npm:@scure/bip39@^1.5.4": "1.6.0",
+    "npm:@scure/bip39@^2.2.0": "2.2.0",
     "npm:@types/d3-array@^3.2.1": "3.2.2",
     "npm:@types/d3-scale@^4.0.8": "4.0.9",
     "npm:@types/d3-shape@^3.1.6": "3.1.8",
@@ -847,9 +847,6 @@
     "@noble/ed25519@3.1.0": {
       "integrity": "sha512-pfcObRY3CtvwfaG9Mt5XqZdKmAQppl37tHUeuBhDUbiwJBCVY4/A4lbMvb1xKhMDx96AqAqZpMWuBX1HulhX4g=="
     },
-    "@noble/hashes@1.8.0": {
-      "integrity": "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="
-    },
     "@noble/hashes@2.2.0": {
       "integrity": "sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg=="
     },
@@ -1123,13 +1120,13 @@
     "@scalar/validation@0.6.1": {
       "integrity": "sha512-XeJ+pvxag0rguuRT6hxNSXIsxleB8Gcs6WQ55vFRkB4qo2CCO+wIli+uipzM3pILu5cP7agcL3pgADiZzd1ZNg=="
     },
-    "@scure/base@1.2.6": {
-      "integrity": "sha512-g/nm5FgUa//MCj1gV09zTJTaM6KBAHqLN907YVQqf7zC49+DcO4B1so4ZX07Ef10Twr6nuqYEH9GEggFXA4Fmg=="
+    "@scure/base@2.2.0": {
+      "integrity": "sha512-b8XEupJibegiXV+tDUseI8oLQc8ei3d/4Jkb2RpbHh3MfE054ov3uIz2dhFkB3FI8iwYkEh0gGCApkrYggkPNg=="
     },
-    "@scure/bip39@1.6.0": {
-      "integrity": "sha512-+lF0BbLiJNwVlev4eKelw1WWLaiKXw7sSl8T6FvBlWkdX+94aGJ4o8XjUdlyhTCjd8c+B3KT3JfS8P0bLRNU6A==",
+    "@scure/bip39@2.2.0": {
+      "integrity": "sha512-T/Bj/YvYMNkIPq6EENO6/rcs2e7qTNuyoUXf0KBFDmp0ZDu0H2X4Lq6yC3i0c8PcWkov5EbW+yQZZbdMmk154A==",
       "dependencies": [
-        "@noble/hashes@1.8.0",
+        "@noble/hashes",
         "@scure/base"
       ]
     },
@@ -2044,7 +2041,7 @@
       "packages/identity": {
         "dependencies": [
           "npm:@noble/ed25519@^3.1.0",
-          "npm:@scure/bip39@^1.5.4"
+          "npm:@scure/bip39@^2.2.0"
         ]
       },
       "packages/js-compiler": {
