@@ -29,11 +29,14 @@ export const LLMHealthResponseSchema = z.object({
     healthy: z.number(),
     failed: z.number(),
   }),
-  models: z.record(z.object({
-    status: z.enum(["healthy", "failed"]),
-    latencyMs: z.number().nullable(),
-    error: z.string().optional(),
-  })),
+  models: z.record(
+    z.string(),
+    z.object({
+      status: z.enum(["healthy", "failed"]),
+      latencyMs: z.number().nullable(),
+      error: z.string().optional(),
+    }),
+  ),
   alertSent: z.boolean(),
 });
 export type LLMHealthResponse = z.infer<typeof LLMHealthResponseSchema>;

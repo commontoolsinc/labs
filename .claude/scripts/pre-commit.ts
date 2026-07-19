@@ -135,9 +135,19 @@ function isSchemaFixtureInput(path: string): boolean {
     path.endsWith(".input.ts");
 }
 
+// The static type assets are the standard library the pattern compiler serves
+// to authored code, not modules of this repo. `.d.ts` ends in `.ts`, so they
+// reach this filter, and checking them declares a second copy of the standard
+// library alongside Deno's — every shared name collides, and the wreckage
+// spreads to unrelated files in the same invocation. `deno.jsonc` keeps this
+// directory out of fmt and lint, and `tasks/check.sh` never lists it.
+function isStaticTypeAsset(path: string): boolean {
+  return path.includes("packages/static/assets/");
+}
+
 // 2. Lint and type-check can run in parallel (both read-only)
 const tsFiles = files.filter((f) =>
-  /\.(ts|tsx)$/.test(f) && !isSchemaFixtureInput(f)
+  /\.(ts|tsx)$/.test(f) && !isSchemaFixtureInput(f) && !isStaticTypeAsset(f)
 );
 
 const errors = [

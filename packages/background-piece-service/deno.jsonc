@@ -11,7 +11,7 @@
     "fmt": "deno fmt"
   },
   "imports": {
-    "@opentelemetry/api": "npm:@opentelemetry/api@^1.7.0",
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.1",
     "@opentelemetry/sdk-trace-base": "npm:@opentelemetry/sdk-trace-base@^2.9.0",
     "@opentelemetry/sdk-metrics": "npm:@opentelemetry/sdk-metrics@^2.9.0",
     "@opentelemetry/exporter-trace-otlp-proto": "npm:@opentelemetry/exporter-trace-otlp-proto@^0.220.0",

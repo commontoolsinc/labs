@@ -10,7 +10,7 @@ import {
 import { NativeEd25519Signer, NativeEd25519Verifier } from "./native.ts";
 import { NobleEd25519Signer, NobleEd25519Verifier } from "./noble.ts";
 import * as bip39 from "@scure/bip39";
-import { wordlist } from "@scure/bip39/wordlists/english";
+import { wordlist } from "@scure/bip39/wordlists/english.js";
 import {
   ed25519RawToPkcs8,
   fromPEM,

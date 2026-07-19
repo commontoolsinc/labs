@@ -36,7 +36,7 @@ const ToolCallPartSchema = z.object({
   type: z.literal("tool-call"),
   toolCallId: z.string(),
   toolName: z.string(),
-  input: z.record(z.any()),
+  input: z.record(z.string(), z.any()),
 });
 
 const ToolResultPartSchema = z.object({
@@ -76,17 +76,20 @@ export const LLMRequestSchema = toZod<LLMRequest>().with({
   stop: z.string().optional(),
   stream: z.boolean().optional(),
   mode: z.enum(["json"]).optional(),
-  metadata: z.record(z.union([z.string(), z.any()])).optional(),
+  metadata: z.record(z.string(), z.union([z.string(), z.any()])).optional(),
   cache: z.boolean().default(true).optional(),
-  tools: z.record(z.object({
-    description: z.string(),
-    inputSchema: z.record(z.any()),
-    handler: z.function().optional().openapi({
-      type: "object",
-      description:
-        "Function handler for tool execution (not serialized in API)",
+  tools: z.record(
+    z.string(),
+    z.object({
+      description: z.string(),
+      inputSchema: z.record(z.string(), z.any()),
+      handler: z.function().optional().openapi({
+        type: "object",
+        description:
+          "Function handler for tool execution (not serialized in API)",
+      }),
     }),
-  })).optional(),
+  ).optional(),
   nativeModelToolIds: z.array(NativeModelToolIdSchema).optional(),
 });
 
@@ -117,7 +120,7 @@ export const ModelInfoSchema = z.object({
   aliases: z.array(z.string()),
 });
 
-export const ModelsResponseSchema = z.record(ModelInfoSchema);
+export const ModelsResponseSchema = z.record(z.string(), ModelInfoSchema);
 
 // The streamed branch of this route writes one JSON event per line straight to
 // the response body, with no envelope around the sequence. The events are
@@ -165,7 +168,7 @@ export const FeedbackSchema = z.object({
     score: z.number().optional(),
     explanation: z.string().optional(),
   }),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 // Route definitions

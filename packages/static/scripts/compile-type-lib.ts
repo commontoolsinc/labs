@@ -1,5 +1,6 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write
 import * as path from "@std/path";
+import { stripWithheldGlobals } from "./strip-withheld-globals.ts";
 
 /**
  * We compile TypeScript in Deno/browser environments.
@@ -8,6 +9,10 @@ import * as path from "@std/path";
  *
  * This script "compiles" a `.d.ts` file, resolving its imports,
  * and creates a single `.d.ts` output file for use in browser and Deno environments.
+ *
+ * The output describes the sandbox the patterns run in, not stock TypeScript,
+ * so the `declare var` for each global in `SANDBOX_WITHHELD_GLOBALS` is dropped
+ * on the way out.
  */
 
 function help() {
@@ -69,10 +74,16 @@ async function compile(
   return out;
 }
 
-async function compileMain(options: CompileOptions) {
+export async function compileMain(options: CompileOptions) {
   const { target, libDir, outFile } = options;
 
   const out = await compile(libDir, target, []);
-  await Deno.writeFile(outFile, encoder.encode(out));
+  const { text } = stripWithheldGlobals(out);
+  await Deno.writeFile(outFile, encoder.encode(text));
 }
-compileMain(parseArgs(Deno.args[0], Deno.args[1]));
+
+export type { CompileOptions };
+
+if (import.meta.main) {
+  compileMain(parseArgs(Deno.args[0], Deno.args[1]));
+}

@@ -12,7 +12,9 @@
     ".": "./mod.ts"
   },
   "imports": {
-    "@cliffy/table": "jsr:@cliffy/table@^1.0.0-rc.8",
+    // Held at the release candidate alongside @cliffy/command; the two share
+    // internal packages and resolve as a set.
+    "@cliffy/table": "jsr:@cliffy/table@1.0.0-rc.8",
     "@db/sqlite": "jsr:@db/sqlite@0.13.0",
     "typescript": "npm:typescript@6.0.3"
   }

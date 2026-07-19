@@ -94,7 +94,7 @@ export function createOAuth2Routes(providerName: string) {
               z.object({
                 success: z.boolean(),
                 message: z.string(),
-                details: z.record(z.unknown()).optional(),
+                details: z.record(z.string(), z.unknown()).optional(),
               }),
               z.object({ error: z.string() }),
             ]),

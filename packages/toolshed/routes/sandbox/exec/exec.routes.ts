@@ -13,7 +13,7 @@ const SandboxExecRequestSchema = z.object({
   timeout: z.number().min(1000).max(300000).default(60000).describe(
     "Timeout in milliseconds",
   ),
-  environment: z.record(z.string()).optional().describe(
+  environment: z.record(z.string(), z.string()).optional().describe(
     "Additional environment variables as key-value pairs",
   ),
 });
