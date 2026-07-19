@@ -1632,6 +1632,146 @@ diff --git a/b.ts b/b.ts
   }
 });
 
+Deno.test("diffedit: a zero-count hunk expands down from its insertion point", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "a.ts"), "alpha\nbeta\n");
+    Deno.writeTextFileSync(join(root, "b.ts"), "new\n");
+    const diff = [
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -2 +1,0 @@",
+      "-old",
+      "diff --git a/b.ts b/b.ts",
+      "--- a/b.ts",
+      "+++ b/b.ts",
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+      "",
+    ].join("\n");
+    const ws = stubWs(root);
+    const model = parseDiff(diff)!;
+    const { edit } = buildDiffDocument(diff, model, ws);
+    const source = diffSource(ws, edit);
+    const expanded = source.expandContext?.(diff, diff, 4, false);
+    assert(expanded, "the workspace line below the insertion point is shown");
+    assertEquals(
+      expanded.text.split("\n")[3],
+      "@@ -2,2 +2,1 @@",
+      "a downward reveal advances a zero-count new-side coordinate",
+    );
+    assertEquals(expanded.revealed, { from: 2, to: 2 });
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: an overlapping repeated empty-file deletion stays read-only", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "m.ts"), "");
+    const log = [
+      "commit bbbbbbbbbbbbbbbb",
+      "diff --git a/m.ts b/m.ts",
+      "--- a/m.ts",
+      "+++ b/m.ts",
+      "@@ -1 +0,0 @@",
+      "-current",
+      "commit aaaaaaaaaaaaaaaa",
+      "diff --git a/m.ts b/m.ts",
+      "--- a/m.ts",
+      "+++ b/m.ts",
+      "@@ -1 +0,0 @@",
+      "-historical",
+      "",
+    ].join("\n");
+    const s = sessionFor(log, stubWs(root));
+    toLine(s, log.split("\n").indexOf("-current"));
+    assert(
+      s.view().editHint?.some((hint) => hint.key === "R"),
+      "the first empty-file deletion owns the insertion point",
+    );
+    press(s, "R");
+    toLine(s, s.doc.text.split("\n").indexOf("-historical"));
+    assert(
+      !s.view().editHint?.some((hint) => hint.key === "R"),
+      "the repeated zero-count range cannot write the same insertion point",
+    );
+    press(s, "f3");
+    assertEquals(Deno.readTextFileSync(join(root, "m.ts")), "current\n");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: a zero-count range cannot overlap a claimed blank file line", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "m.ts"), "");
+    const log = [
+      "commit bbbbbbbbbbbbbbbb",
+      "diff --git a/m.ts b/m.ts",
+      "--- a/m.ts",
+      "+++ b/m.ts",
+      "@@ -1 +1 @@",
+      "-old",
+      "+",
+      "\\ No newline at end of file",
+      "commit aaaaaaaaaaaaaaaa",
+      "diff --git a/m.ts b/m.ts",
+      "--- a/m.ts",
+      "+++ b/m.ts",
+      "@@ -1 +0,0 @@",
+      "-historical",
+      "",
+    ].join("\n");
+    const s = sessionFor(log, stubWs(root));
+    toLine(s, log.split("\n").indexOf("-old"));
+    assert(
+      s.view().editHint?.some((hint) => hint.key === "R"),
+      "the verified blank new-side line claims the current range",
+    );
+    toLine(s, log.split("\n").indexOf("-historical"));
+    assert(
+      !s.view().editHint?.some((hint) => hint.key === "R"),
+      "the later zero-count range cannot overlap that claimed line",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: removing the only addition restores a zero-count coordinate", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "m.ts"), "only\n");
+    const diff = [
+      "diff --git a/m.ts b/m.ts",
+      "--- /dev/null",
+      "+++ b/m.ts",
+      "@@ -0,0 +1 @@",
+      "+only",
+      "",
+    ].join("\n");
+    const s = sessionFor(diff, stubWs(root));
+    toLine(s, 4);
+    press(s, "end");
+    for (const _ of "only") press(s, "backspace");
+    press(s, "backspace");
+    assertEquals(
+      s.doc.text.split("\n")[3],
+      "@@ -0,0 +0,0 @@",
+      "crossing to zero moves the insertion coordinate before the first line",
+    );
+    press(s, "f3");
+    assertEquals(Deno.readTextFileSync(join(root, "m.ts")), "");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("diffedit: resurrects the only line of an empty file without adding a final newline", () => {
   const root = Deno.makeTempDirSync();
   try {
