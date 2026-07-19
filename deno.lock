@@ -2005,6 +2005,11 @@
           "npm:typescript@6.0.3"
         ]
       },
+      "packages/dashboard": {
+        "dependencies": [
+          "npm:@resvg/resvg-js@2.6.2"
+        ]
+      },
       "packages/deno-web-test": {
         "dependencies": [
           "npm:typescript@6.0.3"

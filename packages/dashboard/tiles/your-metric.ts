@@ -1,6 +1,5 @@
-// your metric here: a deliberately empty slot for a metric someone hasn't wired
-// up yet. It stays gray and carries an explicit "not a real metric" note so it
-// can't be mistaken for a live number on the wall.
+// your metric here: a static gray placeholder for a metric that has not been
+// wired up yet.
 import type { Tile, TileView } from "../types.ts";
 
 export const yourMetric: Tile = {

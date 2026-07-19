@@ -18,6 +18,7 @@ async function renderGantt(p: URLSearchParams): Promise<Response> {
   const out = await Deno.makeTempFile({ prefix: "ci-gantt-", suffix: ".png" });
   const args = [
     "run", "--allow-net", "--allow-read", "--allow-write", "--allow-env", "--allow-ffi",
+    "--allow-sys=cpus,networkInterfaces,hostname",
     CIGANTT, "--repo", REPO, "--workflow", CI_WORKFLOW, "--limit", String(limit), "--scale", "2", "--theme", "dark", "--out", out,
   ];
   if (mainOnly) args.push("--main-only");

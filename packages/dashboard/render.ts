@@ -3,10 +3,22 @@
 import type { TileView } from "./types.ts";
 import { durationTag, escapeHtml, STATUS_DOT } from "./lib.ts";
 import { REPO } from "./config.ts";
+import { faviconHref, faviconLink, type FaviconStatus } from "./favicon.ts";
+import { paintStatusFavicon } from "./favicon-client.ts";
+
+const FAVICON_PNG_HREFS = JSON.stringify({
+  good: faviconHref("good"),
+  warn: faviconHref("warn"),
+  bad: faviconHref("bad"),
+  "bad-crying": faviconHref("bad-crying"),
+});
+const PAINT_STATUS_FAVICON = paintStatusFavicon.toString();
+
+export const FAVICON_CRY_AFTER_MS = 60 * 60 * 1000;
 
 // Open dashboards reload when this changes. Increment it with shell markup,
 // styles, client code, or the update payload shape.
-export const SHELL_VERSION = 3;
+export const SHELL_VERSION = 4;
 
 type ViewerTimeElement = Pick<HTMLTimeElement, "dateTime" | "textContent">;
 
@@ -56,8 +68,12 @@ export function shell(
   ago: number,
   refreshMs: number,
   shellVersion: number,
+  status: FaviconStatus,
+  serverRedSince: number | null = null,
+  serverRedAgeMs: number | null = null,
 ): string {
   return `<!doctype html><html><head><meta charset="utf-8"><title>Fabric wall — LIVE</title>
+${faviconLink(status)}
 <style>
   body{margin:0;background:#0d0e11;color:#e7e9ee;font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:18px 20px 26px;max-width:1100px;margin:0 auto}
   .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
@@ -109,6 +125,9 @@ export function shell(
   const REFRESH = ${refreshMs};
   const SHELL_VERSION = ${shellVersion};
   const COL = { green: '#43c574', amber: '#e0a852', red: '#e2504a' };
+  const FAVICONS = ${FAVICON_PNG_HREFS};
+  const FAVICON_CRY_AFTER_MS = ${FAVICON_CRY_AFTER_MS};
+  const paintStatusFavicon = ${PAINT_STATUS_FAVICON};
   const badge = document.getElementById('livebadge');
   const dot = document.getElementById('freshdot');
   const agotext = document.getElementById('agotext');
@@ -118,6 +137,9 @@ export function shell(
   const wide = document.getElementById('dashboard-wide');
   let base = ${ago};
   let t0 = Date.now();
+  let faviconServerRedSince = ${serverRedSince};
+  let faviconServerRedAgeMs = ${serverRedAgeMs};
+  let faviconStartedAt = performance.now();
   function paint() {
     const ago = base + Math.floor((Date.now() - t0) / 1000);
     agotext.textContent = 'updated ' + ago + 's ago';
@@ -131,6 +153,13 @@ export function shell(
     if (state !== 'green') { badge.style.borderColor = COL[state]; badge.style.color = '#7c828c'; }
     else if (anyGray) { badge.style.borderColor = '#7c828c'; badge.style.color = '#7c828c'; }
     else { badge.style.borderColor = '#62d18d'; badge.style.color = '#62d18d'; }
+    paintStatusFavicon(
+      FAVICONS,
+      FAVICON_CRY_AFTER_MS,
+      faviconServerRedSince,
+      faviconServerRedAgeMs,
+      faviconStartedAt,
+    );
   }
   function reconcileTiles(container, html) {
     const template = document.createElement('template');
@@ -171,6 +200,9 @@ export function shell(
     reconcileTiles(wide, update.wideHtml);
     base = update.ageSeconds;
     t0 = Date.now();
+    faviconServerRedSince = update.faviconRedSince;
+    faviconServerRedAgeMs = update.faviconRedAgeMs;
+    faviconStartedAt = performance.now();
     paint();
   });
   paint();

@@ -4,7 +4,15 @@
 // collect(), registered under the ids the real registry uses so their views
 // reach the page.
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { broadcast, clients, handle, page, start, tick } from "./server.ts";
+import {
+  broadcast,
+  clients,
+  handle,
+  nextFaviconRedSince,
+  page,
+  start,
+  tick,
+} from "./server.ts";
 import { PORT } from "./config.ts";
 import { TILES } from "./registry.ts";
 import type { Tile, TileView } from "./types.ts";
@@ -28,6 +36,9 @@ interface TestUpdate {
   wideHtml: string;
   ageSeconds: number;
   shellVersion: number;
+  faviconStatus: "good" | "warn" | "bad";
+  faviconRedSince: number | null;
+  faviconRedAgeMs: number | null;
 }
 
 function updateFromEvent(event: string): TestUpdate {
@@ -42,6 +53,12 @@ function tileHtml(label: string, html = page()): string {
   const hit = parts.filter((p) => p.includes(`</span> ${label}<span class="spacer">`));
   assertEquals(hit.length, 1, `expected exactly one tile labelled "${label}"`);
   return hit[0];
+}
+
+function faviconRedSinceInPage(): string {
+  const match = page().match(/let faviconServerRedSince = ([^;]+);/);
+  assert(match, "the page includes the server red timestamp");
+  return match[1];
 }
 
 Deno.test("healthz: not ok until the board has collected something", async () => {
@@ -61,6 +78,105 @@ Deno.test("registered tiles render before their first collection completes", () 
     );
   }
   assert(tileHtml("recent-runs", html).startsWith(`unknown wide" data-tile-id="recent-runs">`));
+});
+
+Deno.test("favicon: serves distinct status PNGs and defaults unknown requests to green", async () => {
+  const signature = new Uint8Array([
+    0x89,
+    0x50,
+    0x4e,
+    0x47,
+    0x0d,
+    0x0a,
+    0x1a,
+    0x0a,
+  ]);
+  const encoded: string[] = [];
+  for (const status of ["good", "warn", "bad", "bad-crying"]) {
+    const res = await handle(req(`/favicon.png?status=${status}`));
+    assertEquals(res.headers.get("content-type"), "image/png");
+    assertEquals(res.headers.get("cache-control"), "public, max-age=3600");
+    const png = new Uint8Array(await res.arrayBuffer());
+    assertEquals(png.slice(0, signature.length), signature);
+    encoded.push(png.toBase64());
+  }
+  assertEquals(new Set(encoded).size, 4, "each face has its own raster icon");
+
+  const unknown = new Uint8Array(
+    await (await handle(req("/favicon.png?status=unknown"))).arrayBuffer(),
+  );
+  assertEquals(unknown.toBase64(), encoded[0], "an unsupported status stays green");
+});
+
+Deno.test("favicon: continuous red keeps its start time and recovery resets it", () => {
+  assertEquals(nextFaviconRedSince(null, "good", 1_000), null);
+  assertEquals(nextFaviconRedSince(null, "bad", 2_000), 2_000);
+  assertEquals(nextFaviconRedSince(2_000, "bad", 3_000), 2_000);
+  assertEquals(nextFaviconRedSince(2_000, "warn", 4_000), null);
+  assertEquals(nextFaviconRedSince(null, "bad", 5_000), 5_000);
+});
+
+Deno.test("per-collector updates keep a red handoff's incident age", async () => {
+  const modelBad: TileView = {
+    label: "atomic model spend",
+    status: "bad",
+    value: "failed",
+  };
+  const modelGood: TileView = {
+    label: "atomic model spend",
+    status: "good",
+    value: "passing",
+  };
+  const gcpGood: TileView = {
+    label: "atomic gcp spend",
+    status: "good",
+    value: "passing",
+  };
+  const gcpBad: TileView = {
+    label: "atomic gcp spend",
+    status: "bad",
+    value: "failed",
+  };
+  await tick([
+    fake("model-spend", () => modelBad),
+    fake("gcp-spend", () => gcpGood),
+  ]);
+  const redSince = faviconRedSinceInPage();
+  assert(redSince !== "null");
+
+  let release = (_: TileView) => {};
+  const handoff = tick([
+    fake("model-spend", () => modelGood),
+    fake("gcp-spend", () => new Promise<TileView>((resolve) => release = resolve)),
+  ]);
+  await Promise.resolve();
+  assertStringIncludes(
+    tileHtml("atomic model spend"),
+    `good" data-tile-id="model-spend">`,
+  );
+  assertStringIncludes(
+    tileHtml("atomic gcp spend"),
+    `good" data-tile-id="gcp-spend">`,
+  );
+  assertEquals(faviconRedSinceInPage(), redSince);
+
+  release(gcpBad);
+  await handoff;
+  assertStringIncludes(
+    tileHtml("atomic model spend"),
+    `good" data-tile-id="model-spend">`,
+  );
+  assertStringIncludes(
+    tileHtml("atomic gcp spend"),
+    `bad" data-tile-id="gcp-spend">`,
+  );
+  assertEquals(faviconRedSinceInPage(), redSince);
+
+  await tick([
+    fake("model-spend", () => modelGood),
+    fake("gcp-spend", () => gcpGood),
+  ]);
+  assertEquals(faviconRedSinceInPage(), "null");
 });
 
 Deno.test("a tile stays wide through failures and keeps its last good view", async () => {
@@ -153,6 +269,9 @@ Deno.test("sse: /events opens a stream, tick pushes new tile markup, disconnect 
   const initial = updateFromEvent(await chunk(reader));
   assert(initial.shellVersion > 0);
   assert(initial.ageSeconds >= 0);
+  assert(["good", "warn", "bad"].includes(initial.faviconStatus));
+  assert(Object.hasOwn(initial, "faviconRedSince"));
+  assert(Object.hasOwn(initial, "faviconRedAgeMs"));
 
   await tick([fake("labs-ci", () => ({ label: "labs ci", status: "good", value: "live update" }))]);
   const update = updateFromEvent(await chunk(reader));
@@ -160,6 +279,9 @@ Deno.test("sse: /events opens a stream, tick pushes new tile markup, disconnect 
   assertStringIncludes(update.gridHtml, "live update");
   assert(update.ageSeconds >= 0);
   assertEquals(update.shellVersion, initial.shellVersion);
+  assert(["good", "warn", "bad"].includes(update.faviconStatus));
+  assert(Object.hasOwn(update, "faviconRedSince"));
+  assert(Object.hasOwn(update, "faviconRedAgeMs"));
 
   await reader.cancel();
   assertEquals(clients.size, 0, "a disconnected browser is not kept as a client");
@@ -170,7 +292,15 @@ Deno.test("broadcast: a client whose stream is gone is dropped rather than throw
   const dead = [...clients].at(-1)!;
   await res.body!.cancel(); // closes the stream, so enqueueing to it now throws
   clients.add(dead); // back in the set, standing for a disconnect that went unnoticed
-  broadcast({ gridHtml: "", wideHtml: "", ageSeconds: 0, shellVersion: 1 });
+  broadcast({
+    gridHtml: "",
+    wideHtml: "",
+    ageSeconds: 0,
+    shellVersion: 1,
+    faviconStatus: "good",
+    faviconRedSince: null,
+    faviconRedAgeMs: null,
+  });
   assertEquals(clients.size, 0);
 });
 

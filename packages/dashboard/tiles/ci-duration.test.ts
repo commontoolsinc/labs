@@ -142,6 +142,7 @@ Deno.test("/ci-gantt.png: a successful render returns the png bytes uncached", a
   assertEquals(opt(args, "--repo"), REPO);
   assertEquals(opt(args, "--workflow"), CI_WORKFLOW);
   assertEquals(opt(args, "--limit"), "30");
+  assert(args.includes("--allow-sys=cpus,networkInterfaces,hostname"));
   assertEquals(opt(args, "--out"), "/fake-tmp/ci-gantt-1.png"); // the bytes come from where it was told to write
   assertEquals(leftover, []); // the temp file is cleaned up on the way out
 });
