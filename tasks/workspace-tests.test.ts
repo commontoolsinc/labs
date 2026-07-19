@@ -1,5 +1,6 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import {
+  assertTaskTestsIncluded,
   initializeDb,
   parseDisabledPackageList,
   readWorkspaceMembers,
@@ -169,9 +170,17 @@ Deno.test("readWorkspaceMembers reads the workspace list from a JSONC manifest",
   }
 });
 
-// Run `fn` with TEST_CONCURRENCY set (or cleared, on undefined), restoring
-// the caller's value afterwards. The CI test job itself sets the variable, so
-// tests must not read or leak the ambient value.
+Deno.test("assertTaskTestsIncluded requires tasks in the root workspace", () => {
+  assertTaskTestsIncluded(["./packages/api", "./tasks"]);
+  assertThrows(
+    () => assertTaskTestsIncluded(["./packages/api"]),
+    Error,
+    "workspace must include tasks",
+  );
+});
+
+// Run `fn` with TEST_CONCURRENCY set or cleared, then restore the caller's
+// value. This keeps each test independent of the ambient environment.
 async function withTestConcurrency<T>(
   value: string | undefined,
   fn: () => T | Promise<T>,

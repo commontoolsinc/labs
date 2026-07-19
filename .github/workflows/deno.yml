@@ -52,10 +52,6 @@ jobs:
       - name: 🔎 Type check codebase
         run: deno task check
 
-      # --no-check: the type-check step above covers tasks/ (tasks/check.sh).
-      - name: 🧪 Run tasks/ unit tests
-        run: deno test --no-check --allow-read --allow-write --allow-env --allow-run tasks/
-
       - name: 🧭 Check skill facts
         run: deno task check-skill-facts
 
@@ -131,9 +127,6 @@ jobs:
           packages: pkg-config gcc libfuse3-dev fuse3
           cache-key: cfc-pattern-check
 
-      - name: 📥 Download Deno dependency binaries
-        run: deno task initialize-db
-
       # For deno-web-test browser tests
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
       - name: 🛡️ Disable AppArmor for browser tests
@@ -145,11 +138,6 @@ jobs:
           DENO_COVERAGE_DIR: coverage/raw/workspace-${{ matrix.shard }}
           TEST_DISABLED_PACKAGES: runner
           TEST_SHARD: "${{ matrix.shard }}/${{ matrix.total }}"
-          # One package at a time: a package's own test task already
-          # parallelizes across all of this runner's cores, and cross-package
-          # concurrency destabilizes the timing-sensitive CLI pseudo-terminal
-          # tests (see docs/development/CI_PERFORMANCE.md).
-          TEST_CONCURRENCY: "1"
 
       - name: 🧾 Write coverage report
         if: always()
@@ -613,15 +601,17 @@ jobs:
       # This input list mirrors COMPILE_FINGERPRINT_INPUTS in
       # packages/runner/src/compilation-cache/compiler-fingerprint.deno.ts, which
       # fingerprints the same set for the durable runtime cache; the
-      # compiler-fingerprint test fails if the two drift. The pattern-source hash
-      # rolls the key while `restore-keys` still seeds from the most recent prior
-      # cache.
+      # compiler-fingerprint test fails if the two drift. The pattern-source and
+      # integration-harness hash rolls the key while `restore-keys` still seeds
+      # from the most recent prior cache. Hash both TypeScript extensions. An
+      # exact actions/cache entry is immutable; newly compiled bytes are saved
+      # under a rotated key.
       - name: ♻️ Restore/save compile byte cache
         id: compile-cache
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
-          key: cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/patterns/**/*.tsx') }}
+          key: cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx') }}
           restore-keys: |
             cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
 

@@ -18,42 +18,22 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
-import { createSession, Identity } from "@commonfabric/identity";
-import { Runtime } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { PieceManager } from "@commonfabric/piece";
-import { PiecesController } from "@commonfabric/piece/ops";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import {
   currentPatternIntegrationShard,
   selectPatternIntegrationShard,
 } from "./pattern-integration-shard.ts";
+import { initializeCapabilityGateController } from "./capability-gate-controller.ts";
+import { moduleByteCache } from "./pieces-controller.ts";
 
 const ROOT = join(import.meta.dirname!, "..");
-
-// Mirror of PiecesController.initialize() but with in-memory (offline) storage
-// and the time gate enabled — initialize() exposes no experimental hook.
-async function gatedController(spaceName: string): Promise<PiecesController> {
-  const identity = await Identity.generate({ implementation: "noble" });
-  const session = await createSession({ identity, spaceName });
-  const runtime = new Runtime({
-    apiUrl: new URL("http://localhost:8000/"),
-    storageManager: StorageManager.emulate({ as: session.as }),
-    cfcEnforcementMode: "enforce-explicit",
-    trustSnapshotProvider: () => ({
-      id: `principal:${session.as.did()}`,
-      actingPrincipal: session.as.did(),
-    }),
-  });
-  const manager = new PieceManager(session, runtime);
-  await manager.synced();
-  return new PiecesController(manager);
-}
 
 // Instantiate a pattern with the gate on, materialize its lifts, and return the
 // messages of any TimeCapabilityErrors the scheduler reported.
 async function timeCapabilityErrors(rel: string): Promise<string[]> {
-  const cc = await gatedController(`${rel}-${crypto.randomUUID()}`);
+  const cc = await initializeCapabilityGateController(
+    `${rel}-${crypto.randomUUID()}`,
+  );
   const errors: string[] = [];
   cc.manager().runtime.scheduler.onError((err) => {
     if (err?.name === "TimeCapabilityError") errors.push(err.message);
@@ -153,6 +133,19 @@ const CAPABILITY_CASES: CapabilityCase[] = [
       expect(errors).toEqual([]);
     },
   })),
+  {
+    name: "uses the process-wide pattern integration compile cache",
+    run: async () => {
+      const cc = await initializeCapabilityGateController(
+        `compile-cache-${crypto.randomUUID()}`,
+      );
+      try {
+        expect(cc.manager().runtime.moduleByteCache).toBe(moduleByteCache);
+      } finally {
+        await cc.dispose();
+      }
+    },
+  },
 ];
 
 describe("capability gate (W1): patterns read the clock only in handlers", () => {
