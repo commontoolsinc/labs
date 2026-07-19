@@ -5,6 +5,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  Stream,
   UI,
   Writable,
 } from "commonfabric";
@@ -33,6 +34,11 @@ export interface PiecesListOutput {
     mentionable: MentionablePiece[] | undefined;
   };
   sidebarUI?: unknown;
+  // Declared (not just index-signature) so the schema surfaces them to
+  // external callers and tests: the runtime reads outputs through the
+  // declared type.
+  allPieces: MentionablePiece[];
+  addPiece: Stream<{ piece: Writable<MentionablePiece> }>;
 }
 
 const _visit = handler<

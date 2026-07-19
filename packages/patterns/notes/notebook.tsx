@@ -188,6 +188,12 @@ const handleDropOntoNotebook = handler<
   const currentList = currentNotes.get();
   const selected = selectedNoteIndices.get();
 
+  // The only binding today passes the notebook's own SELF as the target, so
+  // target and current usually alias the same notes collection. In that case
+  // there is nothing to remove from "current": removing would strip or
+  // reorder the very memberships addUnique confirms below.
+  const targetIsCurrent = equals(targetNotesCell, currentNotes);
+
   // Check if dragged item is in the selection
   const draggedIndex = currentList.findIndex((n) => equals(sourceCell, n));
   const isDraggedInSelection = draggedIndex >= 0 &&
@@ -216,28 +222,39 @@ const handleDropOntoNotebook = handler<
     // Remove from all notebooks except target
     removeFromAllNotebooks(notebooks, itemsToMove, targetIndex);
 
-    // Remove from current notebook
-    currentNotes.set(
-      currentList.filter(
-        (n) => !itemsToMove.some((item) => equals(n, item)),
-      ),
-    );
+    // Remove from current notebook — unless current IS the target, where
+    // "removing" would strip the memberships this drop just confirmed. (The
+    // pre-addUnique code ran this unconditionally, so a same-notebook
+    // multi-drop silently dropped the selected notes from the notebook.)
+    if (!targetIsCurrent) {
+      currentNotes.set(
+        currentList.filter(
+          (n) => !itemsToMove.some((item) => equals(n, item)),
+        ),
+      );
+    }
     selectedNoteIndices.set([]);
   } else {
     // Single-item move
-    // Remove from current notebook if present
-    const indexInCurrent = currentList.findIndex((n) => equals(sourceCell, n));
-    if (indexInCurrent !== -1) {
-      const copy = [...currentList];
-      copy.splice(indexInCurrent, 1);
-      currentNotes.set(copy);
+    // Remove from current notebook if present — unless current IS the
+    // target, where the removal would turn addUnique's no-op below into a
+    // move-to-tail reorder of an already-present note.
+    if (!targetIsCurrent) {
+      const indexInCurrent = currentList.findIndex((n) =>
+        equals(sourceCell, n)
+      );
+      if (indexInCurrent !== -1) {
+        const copy = [...currentList];
+        copy.splice(indexInCurrent, 1);
+        currentNotes.set(copy);
+      }
     }
 
     sourceCell.key("isHidden").set(true);
     // Deduplicated by link identity on the server, so a note the target
-    // already holds is a no-op there while still moving out of the current
-    // notebook. (The old whole-list guard skipped the move entirely in that
-    // case, leaving the note in both notebooks.)
+    // already holds keeps a single membership with no whole-list read. For a
+    // genuinely distinct target this completes the move (the old guard
+    // skipped it entirely, leaving the note in both notebooks).
     targetNotesCell.addUnique(sourceCell);
   }
 });
