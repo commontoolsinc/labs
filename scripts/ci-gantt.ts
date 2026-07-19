@@ -1,4 +1,7 @@
-#!/usr/bin/env -S deno run --allow-net --allow-read --allow-write --allow-env --allow-ffi
+#!/usr/bin/env -S deno run --allow-net --allow-read --allow-write --allow-env --allow-ffi --allow-sys=cpus,networkInterfaces,hostname
+
+// Resvg's Linux loader calls Node's process report, which reads CPU,
+// network-interface, and hostname information.
 
 // Draw a Gantt chart of a typical CI run from the last N workflow runs on GitHub.
 //

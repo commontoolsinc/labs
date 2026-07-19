@@ -16,8 +16,14 @@ Tiles that read GitHub need `GH_TOKEN` (or `GITHUB_TOKEN`) set in the
 environment. The other token-gated tiles gray out cleanly until their env vars
 are set (see below).
 
-Tasks: `deno task dashboard` (run), `deno task dashboard-watch` (reload on edit),
-`deno task dashboard-test` (unit tests).
+The root `deno task dashboard` command starts the server once. Watch mode and
+dashboard-specific tests are package tasks:
+
+```bash
+cd packages/dashboard
+deno task watch
+deno task test
+```
 
 ## Architecture
 
@@ -27,6 +33,9 @@ dashboard/
   config.ts     port, repo, tunable status thresholds
   lib.ts        shared helpers (github, memo, escapeHtml, sparkline, strip, …)
   ctx.ts        shared, memoized data sources handed to every tile (ctx.runs)
+  favicon.ts    runtime status priority and access to generated PNG favicon copies
+  favicon-png.generated.ts  generated runtime PNG favicon copies
+  favicon-artwork.ts  build/test-only SVG source for those favicon copies
   render.ts     renderTile(view) + the page shell/CSS
   server.ts     generic runtime: scheduler, SSE, route mounting, page assembly
   registry.ts   THE ONE REGISTRATION POINT — the array of tiles
@@ -49,6 +58,24 @@ new collections. The browser reconciles that snapshot by tile ID, leaving
 unchanged elements, focus, and scroll positions in place. Routine data updates
 never navigate the page. A changed shell version reloads once so an unattended
 display picks up new CSS or client code after a dashboard deployment.
+
+The tab favicon follows the most urgent visible tile. It is red when any tile is
+red, orange when there are no red tiles but at least one orange tile, and green
+otherwise. Gray tiles do not turn the favicon gray. The page uses one URL-backed
+PNG favicon. Scalable source artwork is used only to generate and verify those
+raster assets; it is not part of the runtime dependency graph. The red favicon
+starts sad and becomes a crying face after the dashboard stays red for one
+continuous hour. The server retains the elapsed time across reloads. Returning
+below red resets it once every collector due in the same pass has finished.
+
+After changing `favicon-artwork.ts`, regenerate the embedded PNGs and their
+content-based cache version from the dashboard package directory:
+
+```bash
+cd packages/dashboard
+deno task regenerate-favicons
+deno task test-favicon-raster
+```
 
 ## Add a tile
 
@@ -131,7 +158,7 @@ surveillance tool.
 | model spend | OpenAI + Anthropic + OpenRouter usage APIs. Headline is the projected full-month spend (extrapolated from the recent daily rate, spilling into last month when this month is under two weeks old), summed across providers. OpenAI and Anthropic (which expose per-day cost) are charted as one line each over ~45 days, dimmed except for the current-month slice that feeds the headline, with each line's MTD in the right gutter; OpenRouter (monthly total only, abbreviated "OR") is folded into the totals. The subtitle is the bullet-separated key (`OpenAI • Anthropic • OR $0`); the combined MTD sits in the header (the `aside` slot); the span the chart covers is in its bottom-left corner (the `duration` slot). A provider we can't read shows `$???` and drops the tile to gray, but the rest still chart and total | any of `OPENAI_ADMIN_KEY`, `ANTHROPIC_ADMIN_KEY`, `OPENROUTER_KEY`; optional `MODEL_MONTHLY_BUDGET` |
 | discord online | Discord gateway presence, team vs visitors over time | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` (Server Members + Presence intents) |
 | dau | distinct identities active per UTC day on one named service, counted from the `user.did` attribute on the `memory.transact` and `memory.subscriber.sync` spans in SigNoz. The headline is the last day that ran to the end (today is still filling, and a part-day always reads as a drop); the sparkline is the retained history. Gray while the named service has no such spans — which is the resting state until a deployment's tracing is switched on. It counts keypairs rather than people; see [dau](#dau) below | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `DAU_EXCLUDE_DIDS`, `SIGNOZ_UI_URL` |
-| your metric here | a deliberately empty placeholder — always gray, labelled "not a real metric", so an open slot on the wall reads as an invitation rather than a live number | — |
+| your metric here | a static gray placeholder for a metric that has not been wired up yet | — |
 
 ## Credentials
 
@@ -384,7 +411,8 @@ Everything below is a tunable constant in `config.ts`:
 Local-first: no build step, no deployment, a single process on `localhost`.
 
 - One-shot: `deno task dashboard`.
-- Watch mode (reloads the server on any edit to a tile or the core): `deno task dashboard-watch`.
+- Watch mode from `packages/dashboard` (reloads the server on any edit to a tile
+  or the core): `deno task watch`.
 
 Env knobs for the dev loop:
 
@@ -413,16 +441,19 @@ const view = await myTile.collect(fakeCtx);
 ### Tests
 
 ```bash
-deno task dashboard-test     # = deno test --allow-env packages/dashboard/
+cd packages/dashboard
+deno task test
 ```
 
 `lib.test.ts` covers the pure helpers; `tiles.test.ts` covers each tile's
 `collect()` — the CI tiles against canned runs, and the token-gated tiles'
-gray-out contract. The suite is hermetic (no network, subprocess, or filesystem),
-so it needs only `--allow-env` (for the module-load config reads). The one live
-tile, `production`, is exercised by running the board rather than in the unit
-suite. This is a workspace package, so its `deno test --allow-env` also runs as
-part of the repo-wide `deno task test`.
+gray-out contract. These ordinary unit tests are hermetic and need only
+`--allow-env` for module-load configuration reads. The full `test` task also
+verifies that Resvg reproduces the embedded PNGs and runs the favicon
+behavior in the local browser test runner. The package tasks grant the additional
+permissions those two checks need. The one live tile, `production`, is exercised
+by running the board rather than in the unit suite. This is a workspace package,
+so its ordinary unit tests also run as part of the repo-wide `deno task test`.
 
 ## Deploying (stage GKE, tailnet-only)
 

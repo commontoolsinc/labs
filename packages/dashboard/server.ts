@@ -21,6 +21,8 @@ import { PORT } from "./config.ts";
 import { TILES } from "./registry.ts";
 import { makeCtx } from "./ctx.ts";
 import { friendlyError } from "./lib.ts";
+import { faviconPng, faviconStatus } from "./favicon.ts";
+import type { FaviconStatus } from "./favicon.ts";
 import { renderTile, shell, SHELL_VERSION } from "./render.ts";
 import type { Tile, TileView } from "./types.ts";
 
@@ -28,32 +30,64 @@ const ctx = makeCtx();
 const views = new Map<string, TileView>();
 const lastRun = new Map<string, number>();
 let lastChange = 0;
+let faviconRedSince: number | null = null;
+
+export function nextFaviconRedSince(
+  current: number | null,
+  status: FaviconStatus,
+  now: number,
+): number | null {
+  return status === "bad" ? current ?? now : null;
+}
+
+function updateFaviconRedSince(now: number, recoveryIsSettled = true): void {
+  const status = faviconStatus(
+    TILES.flatMap((tile) => {
+      const view = views.get(tile.id);
+      return view ? [view.status] : [];
+    }),
+  );
+  if (status === "bad" || recoveryIsSettled) {
+    faviconRedSince = nextFaviconRedSince(faviconRedSince, status, now);
+  }
+}
 
 interface DashboardUpdate {
   gridHtml: string;
   wideHtml: string;
   ageSeconds: number;
   shellVersion: number;
+  faviconStatus: FaviconStatus;
+  faviconRedSince: number | null;
+  faviconRedAgeMs: number | null;
 }
 
 function dashboardUpdate(currentViews: ReadonlyMap<string, TileView> = views): DashboardUpdate {
   const grid: string[] = [];
   const wide: string[] = [];
+  const statuses: TileView["status"][] = [];
   for (const t of TILES) {
     const v = currentViews.get(t.id) ?? {
       label: t.id,
       status: "unknown" as const,
     };
+    statuses.push(v.status);
     (t.wide ? wide : grid).push(renderTile(v, t.id, t.wide));
   }
+  const now = Date.now();
   const ageSeconds = lastChange
-    ? Math.max(0, Math.floor((Date.now() - lastChange) / 1000))
+    ? Math.max(0, Math.floor((now - lastChange) / 1000))
     : 0;
   return {
     gridHtml: grid.join(""),
     wideHtml: wide.join(""),
     ageSeconds,
     shellVersion: SHELL_VERSION,
+    faviconStatus: faviconStatus(statuses),
+    faviconRedSince,
+    faviconRedAgeMs: faviconRedSince === null
+      ? null
+      : Math.max(0, now - faviconRedSince),
   };
 }
 
@@ -83,24 +117,28 @@ export async function tick(tiles: Tile[] = TILES) {
     const now = Date.now();
     const due = tiles.filter((t) => now - (lastRun.get(t.id) ?? 0) >= t.intervalMs);
     if (!due.length) return;
+    let remaining = due.length;
     await Promise.all(due.map(async (t) => {
+      let view: TileView;
       try {
-        views.set(t.id, await t.collect(ctx));
+        view = await t.collect(ctx);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.error(`tile ${t.id} failed:`, msg); // full detail to the log
         // A failed collection preserves the previous view in gray and shows a
         // short error.
         const prev = views.get(t.id);
-        views.set(
-          t.id,
-          prev
-            ? { ...prev, status: "unknown", sub: friendlyError(msg) }
-            : { label: t.id, status: "unknown", value: "—", sub: friendlyError(msg) },
-        );
+        view = prev
+          ? { ...prev, status: "unknown", sub: friendlyError(msg) }
+          : { label: t.id, status: "unknown", value: "—", sub: friendlyError(msg) };
       }
+      views.set(t.id, view);
       lastRun.set(t.id, Date.now());
       lastChange = Date.now();
+      remaining--;
+      // A non-red intermediate snapshot keeps the incident until every due
+      // collection has settled.
+      updateFaviconRedSince(lastChange, remaining === 0);
       broadcast(dashboardUpdate());
     }));
   } finally {
@@ -127,11 +165,22 @@ export function page(currentViews: ReadonlyMap<string, TileView> = views): strin
     update.ageSeconds,
     REFRESH_MS,
     update.shellVersion,
+    update.faviconStatus,
+    update.faviconRedSince,
+    update.faviconRedAgeMs,
   );
 }
 
 export async function handle(req: Request): Promise<Response> {
   const url = new URL(req.url);
+  if (url.pathname === "/favicon.png") {
+    return new Response(faviconPng(url.searchParams.get("status")), {
+      headers: {
+        "content-type": "image/png",
+        "cache-control": "public, max-age=3600",
+      },
+    });
+  }
   if (url.pathname === "/events") {
     let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
     const stream = new ReadableStream<Uint8Array>({

@@ -199,7 +199,7 @@ Deno.test("dau: the exclusion list is read defensively", () => {
   assertEquals(parseExcludes("").size, 0);
 });
 
-Deno.test("your metric here: a gray placeholder that can't read as a live metric", async () => {
+Deno.test("your metric here: a static gray placeholder", async () => {
   const v = await yourMetric.collect(ctx([]));
   assertEquals(v.status, "unknown"); // never green/red
   assertEquals(v.label, "your metric here");
