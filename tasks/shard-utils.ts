@@ -11,6 +11,9 @@ export function parseShard(raw: string): Shard {
 
   const index = Number(match[1]);
   const total = Number(match[2]);
+  if (!Number.isSafeInteger(index) || !Number.isSafeInteger(total)) {
+    throw new Error(`Shard values must be safe integers, got: ${raw}`);
+  }
   if (index > total) {
     throw new Error(`Shard index ${index} exceeds total shard count ${total}`);
   }

@@ -56,6 +56,24 @@ per-pattern CFC compile, not by storage or sync — see
 [the profiling snapshot](../history/development/performance/pattern-integration-compile-bound.md)
 before optimizing there.
 
+### Pattern Integration Sharding
+
+Pattern Integration runs four jobs. Most integration test files run in exactly
+one job. Tests that sweep a pattern list run in every job and divide their own
+cases with `PATTERN_INTEGRATION_SHARD`. An unset variable selects every case, so
+the ordinary local command remains unsharded.
+
+`INTERNALLY_SHARDED_PATTERN_INTEGRATION_FILES` in
+`tasks/select-pattern-integration-files.ts` is the list of files that run in
+every job. Those files select their cases through
+`packages/patterns/integration/pattern-integration-shard.ts`. The selector tests
+verify that every real integration file follows one of these two contracts.
+
+Use internal sharding for a single file with many independent, expensive cases.
+Moving that file intact between jobs moves the delay without dividing it. Keep
+independent end-to-end files in the measured assignment table when their run
+times are large enough that count-based round-robin cannot balance them.
+
 ## Pulling Timing Data
 
 The labs repository is public, so the GitHub Actions REST API returns run, job,

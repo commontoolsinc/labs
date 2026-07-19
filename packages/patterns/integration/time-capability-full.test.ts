@@ -20,6 +20,10 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import {
+  currentPatternIntegrationShard,
+  selectPatternIntegrationShard,
+} from "./pattern-integration-shard.ts";
 
 const ROOT = join(import.meta.dirname!, "..");
 
@@ -142,7 +146,10 @@ async function checkPattern(rel: string): Promise<Outcome> {
   }
 }
 
-const PATTERNS = discoverPatterns();
+const PATTERNS = selectPatternIntegrationShard(
+  discoverPatterns(),
+  currentPatternIntegrationShard(),
+);
 
 describe("capability gate (W1): full pattern-set gate verification", () => {
   for (const rel of PATTERNS) {

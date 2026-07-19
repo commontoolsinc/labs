@@ -234,6 +234,11 @@ export interface JUnitTestSuite {
   tests: { name: string; time: number }[];
 }
 
+export interface ParsedTimingArtifact {
+  name: string;
+  suites: JUnitTestSuite[];
+}
+
 export interface PRInfo {
   number: number;
   title: string;
@@ -498,6 +503,14 @@ export function newestArtifactsByName(artifacts: Artifact[]): Artifact[] {
     }
   }
   return [...byName.values()];
+}
+
+export function newestTimingArtifacts(artifacts: Artifact[]): Artifact[] {
+  return newestArtifactsByName(
+    artifacts.filter((artifact) =>
+      artifact.name.startsWith("test-timing-") && !artifact.expired
+    ),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1202,6 +1215,30 @@ export function extractTestFileMetrics(
       if (test.time <= 0) continue;
       const testKey = `subtest: ${artifactName}/${suite.name} > ${test.name}`;
       metrics.set(testKey, makeSample(test.time));
+    }
+  }
+
+  return metrics;
+}
+
+/** Keeps the longest slice when normalized artifact labels share a metric. */
+export function extractTimingArtifactMetrics(
+  run: WorkflowRun,
+  artifacts: Iterable<ParsedTimingArtifact>,
+): Map<string, TimingSample> {
+  const metrics = new Map<string, TimingSample>();
+
+  for (const artifact of artifacts) {
+    const artifactMetrics = extractTestFileMetrics(
+      run,
+      timingArtifactLabel(artifact.name),
+      artifact.suites,
+    );
+    for (const [name, sample] of artifactMetrics) {
+      const existing = metrics.get(name);
+      if (!existing || sample.durationSeconds > existing.durationSeconds) {
+        metrics.set(name, sample);
+      }
     }
   }
 

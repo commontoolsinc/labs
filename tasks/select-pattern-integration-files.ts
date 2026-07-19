@@ -3,13 +3,17 @@
 import { parseShard } from "./shard-utils.ts";
 export { parseShard };
 
-// `all.test.ts` compiles and instantiates every authored pattern, so its cost
-// grows with the pattern catalog. It runs in EVERY shard and splits its own
-// pattern list by PATTERN_INTEGRATION_SHARD (see
-// packages/patterns/integration/all.test.ts), spreading the compile work across
-// shards instead of pinning it to one. It is therefore excluded from the
-// per-file shard assignment below.
-const ALL_PATTERNS_FILE = "all.test.ts";
+// These files run in every shard and divide their own independent cases by
+// PATTERN_INTEGRATION_SHARD. They are excluded from the per-file assignment
+// below.
+export const INTERNALLY_SHARDED_PATTERN_INTEGRATION_FILES = [
+  "all.test.ts",
+  "time-capability-full.test.ts",
+  "time-capability.test.ts",
+] as const;
+const INTERNALLY_SHARDED_FILE_SET = new Set<string>(
+  INTERNALLY_SHARDED_PATTERN_INTEGRATION_FILES,
+);
 
 // Explicit assignments balance the four browser-integration shards by
 // wall-time, using observed CI per-file timings. The heaviest end-to-end tests
@@ -17,10 +21,10 @@ const ALL_PATTERNS_FILE = "all.test.ts";
 // cfc-spec-gallery (~33s), cfc-group-chat-demo (~29s), and default-app (~26s);
 // they are spread so no shard carries two of them. The two group-chat browser
 // tests in particular go on different shards (they alone sum to ~70s). Each
-// shard also runs its slice of `all.test.ts` (see above). These weights span
-// ~100x, so a count-based split (hash or plain round-robin) cannot balance them;
-// the table is what keeps the shards even. Files not listed here fall back to
-// round-robin over the unlisted files.
+// shard also runs slices of the internally sharded files above. These weights
+// span ~100x, so a count-based split (hash or plain round-robin) cannot balance
+// them; the table is what keeps the shards even. Files not listed here fall back
+// to round-robin over the unlisted files.
 const FOUR_SHARD_ASSIGNMENTS: Record<string, number> = {
   // shard 1
   "parking-coordinator-admin-view.test.ts": 1,
@@ -51,9 +55,9 @@ const FOUR_SHARD_ASSIGNMENTS: Record<string, number> = {
   "chatbot.test.ts": 4,
 };
 
-// Assign each end-to-end file (everything except `all.test.ts`) to a shard:
-// the explicit table when running the canonical four-way split, else round-robin
-// over the unlisted files so a newly added file still lands somewhere even.
+// Assign each file without internal sharding to one shard: the explicit table
+// when running the canonical four-way split, else round-robin over the unlisted
+// files so a newly added file still lands somewhere even.
 export function assignPatternIntegrationShards(
   files: string[],
   total: number,
@@ -61,7 +65,8 @@ export function assignPatternIntegrationShards(
   const assignment = new Map<string, number>();
   let roundRobin = 0;
   for (
-    const name of files.filter((name) => name !== ALL_PATTERNS_FILE).sort()
+    const name of files.filter((name) => !INTERNALLY_SHARDED_FILE_SET.has(name))
+      .sort()
   ) {
     const pinned = total === 4 ? FOUR_SHARD_ASSIGNMENTS[name] : undefined;
     assignment.set(name, pinned ?? (roundRobin++ % total) + 1);
@@ -69,9 +74,8 @@ export function assignPatternIntegrationShards(
   return assignment;
 }
 
-// Select the files for one shard. `all.test.ts` is included in every shard (it
-// shards its own pattern list internally); the remaining files are assigned to
-// exactly one shard each.
+// Select the files for one shard. Internally sharded files are included in
+// every shard; the remaining files are assigned to exactly one shard each.
 export function selectPatternIntegrationFiles(
   files: string[],
   shard: { index: number; total: number },
@@ -83,11 +87,11 @@ export function selectPatternIntegrationFiles(
     if (assigned === shard.index) selected.push(`./integration/${name}`);
   }
 
-  if (files.includes(ALL_PATTERNS_FILE)) {
-    selected.unshift(`./integration/${ALL_PATTERNS_FILE}`);
-  }
+  const internallySharded = INTERNALLY_SHARDED_PATTERN_INTEGRATION_FILES
+    .filter((name) => files.includes(name))
+    .map((name) => `./integration/${name}`);
 
-  return selected;
+  return [...internallySharded, ...selected];
 }
 
 export async function listPatternIntegrationTests(): Promise<string[]> {
