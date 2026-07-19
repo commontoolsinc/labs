@@ -18,8 +18,8 @@
     "./debug": "./src/debug.ts"
   },
   "imports": {
-    "htmlparser2": "npm:htmlparser2",
-    "domhandler": "npm:domhandler",
-    "dom-serializer": "npm:dom-serializer"
+    "htmlparser2": "npm:htmlparser2@12.0.0",
+    "domhandler": "npm:domhandler@6.0.1",
+    "dom-serializer": "npm:dom-serializer@3.1.1"
   }
 }
