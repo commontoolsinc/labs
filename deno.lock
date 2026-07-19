@@ -131,7 +131,7 @@
     "npm:leaflet@^1.9.4": "1.9.4",
     "npm:lit@^3.3.0": "3.3.1",
     "npm:marked@^18.0.6": "18.0.6",
-    "npm:mistreevous@4.2.0": "4.2.0",
+    "npm:mistreevous@4.3.1": "4.3.1",
     "npm:multiformats@^14.0.4": "14.0.4",
     "npm:pino-pretty@13": "13.1.2",
     "npm:pino@^9.6.0": "9.14.0",
@@ -1699,8 +1699,8 @@
     "minimist@1.2.8": {
       "integrity": "sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA=="
     },
-    "mistreevous@4.2.0": {
-      "integrity": "sha512-ZlqX7Fp2O/wYG9QFIT/I1bRDBi6o2ko4S006/G17VT0YWgN1emVMJNAcNSxfD0u4Tg/HOfHziJe+J4L7Un7spA==",
+    "mistreevous@4.3.1": {
+      "integrity": "sha512-AnDNOd8qGcBbz1fDRGYh5Kf+FodR4KcZyc+H4rPpFL7kdOAmGSwnpW57HwX9h0J8pDrj6FJRSAXdfqI6/N1UTw==",
       "dependencies": [
         "lotto-draw"
       ]
@@ -2117,7 +2117,7 @@
           "npm:hono-pino@0.7",
           "npm:hono@^4.7.0",
           "npm:jsonschema@^1.5.0",
-          "npm:mistreevous@4.2.0",
+          "npm:mistreevous@4.3.1",
           "npm:pino-pretty@13",
           "npm:pino@^9.6.0",
           "npm:plaid@36",
