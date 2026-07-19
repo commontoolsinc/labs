@@ -132,7 +132,7 @@
     "npm:lit@^3.3.0": "3.3.1",
     "npm:marked@^18.0.6": "18.0.6",
     "npm:mistreevous@4.2.0": "4.2.0",
-    "npm:multiformats@^13.3.2": "13.4.1",
+    "npm:multiformats@^14.0.4": "14.0.4",
     "npm:pino-pretty@13": "13.1.2",
     "npm:pino@^9.6.0": "9.14.0",
     "npm:plaid@36": "36.0.0",
@@ -1708,8 +1708,8 @@
     "ms@2.1.3": {
       "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="
     },
-    "multiformats@13.4.1": {
-      "integrity": "sha512-VqO6OSvLrFVAYYjgsr8tyv62/rCQhPgsZUXLTqoFLSgdkgiUYKYeArbt1uWLlEpkjxQe+P0+sHlbPEte1Bi06Q=="
+    "multiformats@14.0.4": {
+      "integrity": "sha512-+SXItmOUWzT0kjlIfkZ4NawJaC9jW/mPlyn902V9Qgpc7YDwdEiwqbiZxTyvC0XWh1jZguXca3A/WQ+UOPRLUA=="
     },
     "nanoid@5.1.16": {
       "integrity": "sha512-kVrnsrJqMR8+oLJnGEmSWw9BivK5mt7H3FZatVRjrc5wGqFYuBxX1yG7+A7Gi5AefkX6t/oCkizcQgpu0cY1dQ==",
@@ -1976,7 +1976,7 @@
       "npm:dagre@~0.8.5",
       "npm:hash-wasm@^4.12.0",
       "npm:lit@^3.3.0",
-      "npm:multiformats@^13.3.2",
+      "npm:multiformats@^14.0.4",
       "npm:ses@^1.15.0",
       "npm:turndown@^7.1.2",
       "npm:zod@^3.24.1"
