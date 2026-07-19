@@ -4,7 +4,7 @@ import { overlayBox, renderFrame, type ViewState } from "../lib/view/render.ts";
 import { _internal } from "../lib/view/render.ts";
 import { stripAnsi, visibleWidth } from "../lib/view/ansi.ts";
 import { renderLineColored } from "../lib/view/highlight.ts";
-import { ui } from "../lib/view/theme.ts";
+import { lineBg, ui } from "../lib/view/theme.ts";
 
 function baseView(over: Partial<ViewState> = {}): ViewState {
   return {
@@ -56,6 +56,30 @@ function bgColumns(row: string): boolean[] {
   return out;
 }
 
+/** Background colour active at one visible column, as an RGB tuple string. */
+function bgAtColumn(row: string, target: number): string | null {
+  let bg: string | null = null;
+  let col = 0;
+  let i = 0;
+  while (i < row.length) {
+    if (row[i] === "\x1b") {
+      // deno-lint-ignore no-control-regex
+      const sgr = row.slice(i).match(/^\x1b\[([0-9;]*)m/);
+      if (sgr) {
+        if (sgr[1] === "0" || sgr[1] === "") bg = null;
+        const rgb = sgr[1].match(/(?:^|;)48;2;(\d+);(\d+);(\d+)(?:;|$)/);
+        if (rgb) bg = `${rgb[1]},${rgb[2]},${rgb[3]}`;
+        i += sgr[0].length;
+        continue;
+      }
+    }
+    if (col === target) return bg;
+    col += 1;
+    i += 1;
+  }
+  return null;
+}
+
 Deno.test("renderFrame: node highlight covers the whole statement, not the padding", () => {
   const doc = parseDocument("const x = 1;\nconst y = 2;\n");
   // A structure node now spans the whole statement `const x = 1;` (12 columns),
@@ -80,6 +104,14 @@ Deno.test("renderFrame: node highlight covers the whole statement, not the paddi
   // a line outside the (single-line) node has no highlight at all
   const cols1 = bgColumns(rows[1]);
   assertEquals(cols1.some((c) => c), false, "other lines are not highlighted");
+});
+
+Deno.test("renderFrame: node highlight includes leading indentation", () => {
+  const doc = parseDocument("  const x = 1;");
+  const node = doc.flatStructure.find((n) => n.name === "x")!;
+  const rows = renderFrame(doc, baseView({ selected: node, width: 24 }));
+  const cols = bgColumns(rows[0]);
+  assertEquals(cols.slice(0, 3), [false, true, true]);
 });
 
 Deno.test("renderFrame: emits exactly `height` rows", () => {
@@ -126,8 +158,25 @@ Deno.test("renderFrame: styles wrapped continuation markers", () => {
   assertEquals(stripAnsi(rows[1]), "def\\");
   assert(rows[0].includes(fgCode(ui.wrapMarker.fg!)));
   assert(rows[1].includes(fgCode(ui.wrapMarker.fg!)));
+  assertEquals(bgAtColumn(rows[0], 3), ui.editorBg.join(","));
   assertEquals(stripAnsi(rows[2]), "gh  ");
   assert(!rows[2].includes(fgCode(ui.wrapMarker.fg!)));
+});
+
+Deno.test("renderFrame: a wrapped marker keeps each diff-row background", () => {
+  const parsed = parseDocument("abcdefgh");
+  for (const bg of ["add", "del"] as const) {
+    const doc = {
+      ...parsed,
+      lines: parsed.lines.map((line) => ({ ...line, bg })),
+    };
+    const rows = renderFrame(
+      doc,
+      baseView({ width: 4, height: 4, wrapLines: true }),
+    );
+    assertEquals(stripAnsi(rows[0]), "abc\\");
+    assertEquals(bgAtColumn(rows[0], 3), lineBg(bg).join(","));
+  }
 });
 
 Deno.test("renderFrame: the final wrapped row keeps the full content width", () => {
@@ -304,6 +353,23 @@ Deno.test("renderFrame: a selected empty line keeps its wrapped guide", () => {
     }),
   ).map(stripAnsi);
   assertEquals(rows[1][0], "│");
+});
+
+Deno.test("renderFrame: a wrapped guide is blank outside the selected node", () => {
+  const doc = parseDocument("before\nconst x = 123456789;\nafter");
+  const selected = doc.flatStructure.find((node) => node.name === "x")!;
+  const rows = renderFrame(
+    doc,
+    baseView({
+      width: 8,
+      height: 7,
+      color: false,
+      selected,
+      wrapLines: true,
+    }),
+  ).map(stripAnsi);
+  assertEquals(rows[0][0], " ");
+  assertEquals(rows[5][0], " ");
 });
 
 Deno.test("renderFrame: wrapped status reports logical source lines", () => {
