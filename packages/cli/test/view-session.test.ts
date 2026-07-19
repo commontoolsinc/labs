@@ -2,6 +2,7 @@ import { assert, assertEquals } from "@std/assert";
 import { parseDocument, SAMPLE } from "./view-helpers.ts";
 import { Session } from "../lib/view/session.ts";
 import { frameTop } from "../lib/view/actions.ts";
+import { buildPeekCard } from "../lib/view/card.ts";
 import type { Key } from "../lib/view/keys.ts";
 import type { Semantics } from "../lib/view/semantics.ts";
 
@@ -49,6 +50,251 @@ Deno.test("session: horizontal scrolling", () => {
   assertEquals(s.view().left, 0);
   press(s, "h");
   assertEquals(s.view().left, 0, "left clamps at 0");
+});
+
+Deno.test("session: backslash toggles wrapping and continuation-row scrolling", () => {
+  const doc = parseDocument("abcdefghijkl\nsecond");
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 4, height: 3 },
+  );
+  press(s, "l", "\\");
+  assert(s.view().wrapLines, "wrapping is on");
+  assertEquals(s.view().left, 0, "wrapping resets horizontal panning");
+  assertEquals(s.view().top, 2, "wrapping keeps the panned content in view");
+  assertEquals(s.view().message, "Line wrapping: on");
+
+  press(s, "k");
+  assertEquals(s.view().top, 1, "k moves to the previous wrapped row");
+  press(s, "l", "right");
+  assertEquals(s.view().left, 0, "wrapped content does not pan");
+
+  press(s, "\\");
+  assert(!s.view().wrapLines, "wrapping is off");
+  assertEquals(s.view().top, 0, "the same logical line remains at the top");
+  assertEquals(s.view().left, 3, "unwrapping keeps the continuation visible");
+  assertEquals(s.view().message, "Line wrapping: off");
+});
+
+Deno.test("session: resizing a wrapped view keeps its top content in view", () => {
+  const doc = parseDocument("abcdefghijkl\nnext");
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 4, height: 3 },
+  );
+  press(s, "\\", "j", "j");
+  assertEquals(s.view().top, 2);
+  s.resize(6, 3);
+  assertEquals(s.view().top, 1, "the old column offset maps into the new rows");
+  s.resize(20, 3);
+  assertEquals(s.view().top, 0, "the line fits after a wide resize");
+});
+
+Deno.test("session: an empty wrapped document remains stable across resize", () => {
+  const parsed = parseDocument("");
+  const s = new Session(
+    { ...parsed, lines: [] },
+    { color: false, showLineNumbers: false },
+    { width: 4, height: 3 },
+  );
+  press(s, "\\");
+  s.resize(8, 4);
+  assertEquals(s.view().top, 0);
+  assertEquals(s.view().wrapPlan?.rowCount, 0);
+});
+
+Deno.test("session: a gutter-width change reflows wrapped rows around the anchor", () => {
+  const doc = parseDocument("abcdefghijkl\nnext");
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 8, height: 3 },
+  );
+  press(s, "\\", "j", "#");
+  assertEquals(s.view().top, 2, "the same display offset stays at the top");
+  assert(s.view().showLineNumbers, "line numbers are on");
+});
+
+Deno.test("session: removing a gutter clamps a wrapped view that now fits", () => {
+  const doc = parseDocument("abcdefghijklmnopqrst");
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 8, height: 4 },
+  );
+  press(s, "\\", "#", "G");
+  assertEquals(s.view().top, 4);
+  press(s, "#", "#");
+  assertEquals(s.view().top, 0, "the wider view is clamped to its only page");
+});
+
+Deno.test("session: search reveals the wrapped row containing the match", () => {
+  const doc = parseDocument("prefix----needle\nnext");
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 5, height: 3 },
+  );
+  press(s, "\\", "/", "n", "e", "e", "d", "l", "e", "enter");
+  assert(s.view().top > 0, "the continuation containing the match is visible");
+  assertEquals(s.view().left, 0, "search does not pan wrapped content");
+});
+
+Deno.test("session: clearing a selection reflows a wrapped logical line", () => {
+  const doc = parseDocument("const value = 123456789;");
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 8, height: 3 },
+  );
+  press(s, "s", "\\", "j", "j", "escape");
+  assertEquals(s.view().selected, null);
+  assertEquals(s.view().top, 1, "the selected continuation stays in view");
+});
+
+Deno.test("session: changing display mode reflows a wrapped logical line", () => {
+  const doc = parseDocument("abcdefgh\x1b[31mijklmnop");
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 4, height: 3 },
+  );
+  press(s, "\\", "j", "j", "c");
+  assertEquals(s.view().displayMode, "ansi");
+  assertEquals(s.view().top, 2, "the same source column stays in view");
+});
+
+Deno.test("session: selecting a node preserves the wrapped viewport anchor", () => {
+  const doc = parseDocument(Array(20).fill("abcdefghij").join("\n"));
+  const node = {
+    ...doc.flatStructure[0]!,
+    startLine: 5,
+    endLine: 5,
+    startCol: 0,
+    endCol: 10,
+    children: [],
+  };
+  const s = new Session(
+    { ...doc, structure: [node], flatStructure: [node] },
+    { color: false, showLineNumbers: false },
+    { width: 10, height: 4 },
+  );
+  press(s, "\\", "j", "j", "j", "j", "j", "s");
+  assertEquals(
+    s.view().top,
+    10,
+    "line 5 remains at the top after guide reflow",
+  );
+});
+
+Deno.test("session: structure navigation reveals a node on a continuation", () => {
+  const text = `${"x".repeat(235)}TARGET${"x".repeat(10)}`;
+  const doc = parseDocument(text);
+  const node = {
+    ...doc.flatStructure[0]!,
+    label: "target",
+    startCol: 235,
+    endCol: 241,
+    startOffset: 235,
+    endOffset: 241,
+    children: [],
+  };
+  const s = new Session(
+    { ...doc, structure: [node], flatStructure: [node] },
+    { color: false, showLineNumbers: false },
+    { width: 20, height: 4 },
+  );
+  press(s, "\\", "j", "j", "j", "j", "j", "j", "j", "s");
+  const nodeRow = 12;
+  assert(
+    s.view().top <= nodeRow && nodeRow < s.view().top + 3,
+    "the continuation containing the node is visible",
+  );
+});
+
+Deno.test("session: a wrapped use jump reveals its exact continuation", () => {
+  const text = `const base = 1;${" ".repeat(70)}const use = base;${
+    " ".repeat(70)
+  }const tail = 2;`;
+  const parsed = parseDocument(text);
+  const base = parsed.flatStructure.find((node) => node.name === "base")!;
+  const fallback = {
+    ...base,
+    label: "fallback",
+    startCol: text.length - 15,
+    endCol: text.length,
+    startOffset: text.length - 15,
+    endOffset: text.length,
+    children: [],
+  };
+  const doc = {
+    ...parsed,
+    structure: [...parsed.structure, fallback],
+    flatStructure: [...parsed.flatStructure, fallback],
+  };
+  const target = buildPeekCard(doc, base).targets.find((candidate) =>
+    candidate.defOffset === undefined && candidate.destCol > base.endCol
+  );
+  assert(target, "the base card contains its distant use");
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 20, height: 5 },
+  );
+  press(s, "\\");
+  selectByLabel(s, base.label);
+  press(s, "enter");
+  for (let i = 0; i < 50; i++) {
+    if (s.view().overlay?.selectedLine === target.cardLine) break;
+    press(s, "down");
+  }
+  assertEquals(s.view().overlay?.selectedLine, target.cardLine);
+  press(s, "z");
+
+  const view = s.view();
+  const plan = view.wrapPlan!;
+  const targetRow = Math.min(
+    plan.firstRow[target.destLine] +
+      Math.floor(target.destCol / plan.rowStride),
+    plan.lastRow[target.destLine],
+  );
+  assert(
+    targetRow >= view.top && targetRow < view.top + view.height - 1,
+    "the destination column is visible after the jump",
+  );
+});
+
+Deno.test("session: navigation selects the node spanning the viewport top", () => {
+  const text = "x".repeat(220);
+  const doc = parseDocument(text);
+  const template = doc.flatStructure[0]!;
+  const before = {
+    ...template,
+    label: "before",
+    startCol: 0,
+    endCol: 70,
+    startOffset: 0,
+    endOffset: 70,
+    children: [],
+  };
+  const visible = {
+    ...template,
+    label: "visible",
+    startCol: 80,
+    endCol: 200,
+    startOffset: 80,
+    endOffset: 200,
+    children: [],
+  };
+  const s = new Session(
+    { ...doc, structure: [before, visible], flatStructure: [before, visible] },
+    { color: false, showLineNumbers: false },
+    { width: 20, height: 4 },
+  );
+  press(s, "\\", "j", "j", "j", "j", "j", "s");
+  assertEquals(s.view().selected?.label, "visible");
 });
 
 Deno.test("session: bare arrows scroll and pan the view", () => {
@@ -537,6 +783,7 @@ Deno.test("session: the help overlay documents file folding and scrolling", () =
   assert(/hide\s*\/\s*show/.test(text), "documents hide/show");
   assert(text.includes("hide all files"), "documents hide all");
   assert(text.includes("hide test"), "documents hiding test files");
+  assert(text.includes("wrap / unwrap long lines"), "documents line wrapping");
   assert(
     ov.footer.includes("scroll"),
     `footer advertises scrolling: ${ov.footer}`,

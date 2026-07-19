@@ -35,9 +35,11 @@ import { buildPeekCard, type CardTarget } from "./card.ts";
 import {
   DISPLAY_MODES,
   displayColumnOf,
+  displayLine,
   type DisplayMode,
   displayModeLabel,
   hasNonPrintable,
+  sourceColumnOf,
 } from "./display.ts";
 import {
   buildFoldPlan,
@@ -58,6 +60,12 @@ import type {
 } from "./editsource.ts";
 import type { Highlighter } from "./parse.ts";
 import type { DirEntry, FileGateway } from "./filegateway.ts";
+import {
+  buildWrapPlan,
+  fitWrapChrome,
+  wrappedRowAt,
+  type WrapPlan,
+} from "./wrap.ts";
 
 export interface SessionOptions {
   color: boolean;
@@ -113,10 +121,25 @@ const JOIN_MSG =
  * new-file line) or commit message. */
 type LineNumberMode = "off" | "input" | "file";
 
+interface ViewportAnchor {
+  readonly docLine: number;
+  readonly foldedLine: number;
+  readonly displayCol: number;
+}
+
+interface FoldAnchor {
+  readonly docLine: number;
+  readonly sourceCol: number;
+  /** Display column within a collapsed summary that remains collapsed. */
+  readonly syntheticDisplayCol?: number;
+}
+
 export class Session {
   private currentDoc: Document;
   private color: boolean;
   private lineNumberMode: LineNumberMode = "off";
+  /** Whether long logical lines continue on later screen rows. */
+  private wrapLines = false;
   /** How non-printable characters are shown; edit mode forces the first mode. */
   private displayMode: DisplayMode = DISPLAY_MODES[0];
   /** Indices (document order) of the diff files collapsed to a summary line.
@@ -127,6 +150,17 @@ export class Session {
   private foldVersion = 0;
   private foldFileCache?: { doc: Document; files: DiffFileRange[] };
   private foldPlanCache?: { doc: Document; version: number; plan: FoldPlan };
+  private wrapPlanCache?: {
+    lines: readonly Line[];
+    mode: DisplayMode;
+    width: number;
+    plan: WrapPlan;
+  };
+  private displayColumnCache?: {
+    doc: Document;
+    mode: DisplayMode;
+    columns: Map<number, Uint32Array>;
+  };
   private nonPrintCache?: { doc: Document; value: boolean };
   private fileLineCache?: { doc: Document; value: (number | null)[] | null };
 
@@ -290,9 +324,30 @@ export class Session {
     return { ...this.currentDoc, lines: this.foldPlan().displayLines };
   }
 
-  /** Number of display rows (fewer than document lines when files are hidden). */
+  /** The screen-row layout while wrapping is on. */
+  private wrapPlan(): WrapPlan {
+    const lines = this.foldPlan().displayLines;
+    const width = this.contentWidth();
+    if (
+      this.wrapPlanCache?.lines !== lines ||
+      this.wrapPlanCache.mode !== this.displayMode ||
+      this.wrapPlanCache.width !== width
+    ) {
+      this.wrapPlanCache = {
+        lines,
+        mode: this.displayMode,
+        width,
+        plan: buildWrapPlan(lines, this.displayMode, width),
+      };
+    }
+    return this.wrapPlanCache.plan;
+  }
+
+  /** Number of screen rows after file folding and optional line wrapping. */
   private displayCount(): number {
-    return this.foldPlan().displayLines.length;
+    return this.wrapLines
+      ? this.wrapPlan().rowCount
+      : this.foldPlan().displayLines.length;
   }
 
   /** A frame part way through the last reveal: the finished document with only
@@ -302,7 +357,7 @@ export class Session {
    * key revealed nothing. */
   revealFrame(shown: number): { doc: Document; view: ViewState } | null {
     const rev = this.pendingReveal;
-    if (!rev) return null;
+    if (!rev || this.wrapLines) return null;
     const waiting = rev.count - clamp(shown, 0, rev.count);
     // The lines still to come are the ones furthest from the hunk, so what is on
     // screen is always a run of the file that meets the hunk's edge rather than
@@ -343,14 +398,53 @@ export class Session {
     };
   }
 
-  /** A document line → its display row (a hidden line maps to its summary row). */
-  private toDisplay(docLine: number): number {
+  /** A document line to its logical row after collapsed files are replaced. */
+  private toFolded(docLine: number): number {
     return this.foldPlan().docToDisplay(docLine);
   }
 
-  /** A display row → the document line it stands for. */
+  /** A document position to its screen row. A hidden line maps to its file's
+   * summary, and a wrapped line maps to the segment containing `displayCol`. */
+  private toDisplay(docLine: number, displayCol = 0): number {
+    const fold = this.foldPlan();
+    const folded = fold.docToDisplay(docLine);
+    const col = fold.displayLines[folded] === this.currentDoc.lines[docLine]
+      ? displayCol
+      : 0;
+    return this.foldedPositionToDisplay(folded, col);
+  }
+
+  /** A folded logical line and display column to its screen row. */
+  private foldedPositionToDisplay(folded: number, displayCol = 0): number {
+    if (!this.wrapLines) return folded;
+    const plan = this.wrapPlan();
+    const first = plan.firstRow[folded] ?? 0;
+    const last = plan.lastRow[folded] ?? first;
+    return clamp(
+      first + Math.floor(Math.max(0, displayCol) / plan.rowStride),
+      first,
+      last,
+    );
+  }
+
+  /** The last screen row occupied by a document line. */
+  private toDisplayEnd(docLine: number): number {
+    const folded = this.toFolded(docLine);
+    return this.wrapLines ? this.wrapPlan().lastRow[folded] ?? 0 : folded;
+  }
+
+  /** A screen row to the document line it stands for. */
   private toDoc(displayRow: number): number {
-    return this.foldPlan().displayToDoc(displayRow);
+    let folded = displayRow;
+    if (this.wrapLines) {
+      const plan = this.wrapPlan();
+      const row = wrappedRowAt(
+        plan,
+        clamp(displayRow, 0, Math.max(0, plan.rowCount - 1)),
+      );
+      folded = row?.line ?? 0;
+    }
+    return this.foldPlan().displayToDoc(folded);
   }
 
   /** The selected node with its line range mapped into display rows (a node in a
@@ -358,17 +452,40 @@ export class Session {
   private displaySelected(): StructureNode | null {
     const node = this.selectedNode();
     if (!node || this.collapsed.size === 0) return node;
+    const fold = this.foldPlan();
+    const startLine = fold.docToDisplay(node.startLine);
+    const endLine = fold.docToDisplay(node.endLine);
+    const startSynthetic = fold.displayLines[startLine] !==
+      this.currentDoc.lines[node.startLine];
+    const endSynthetic = fold.displayLines[endLine] !==
+      this.currentDoc.lines[node.endLine];
     return {
       ...node,
-      startLine: this.toDisplay(node.startLine),
-      endLine: this.toDisplay(node.endLine),
+      startLine,
+      endLine,
+      startCol: startSynthetic ? 0 : node.startCol,
+      endCol: endSynthetic
+        ? codePointLength(fold.displayLines[endLine]?.text ?? "")
+        : node.endCol,
     };
   }
 
   /** The search matches with their line mapped into display rows. */
   private displayMatches(): Match[] {
     if (this.collapsed.size === 0) return this.matches;
-    return this.matches.map((m) => ({ ...m, line: this.toDisplay(m.line) }));
+    const fold = this.foldPlan();
+    return this.matches.map((match) => {
+      const line = fold.docToDisplay(match.line);
+      if (fold.displayLines[line] === this.currentDoc.lines[match.line]) {
+        return { ...match, line };
+      }
+      return {
+        ...match,
+        line,
+        start: 0,
+        end: codePointLength(fold.displayLines[line]?.text ?? ""),
+      };
+    });
   }
 
   /** The file currently in view: the diff file or transformed-output section
@@ -396,10 +513,61 @@ export class Session {
     return m;
   }
 
+  /** The folded line and display column at the viewport's top-left content. */
+  private viewportAnchor(): ViewportAnchor {
+    const fold = this.foldPlan();
+    let foldedLine = clamp(
+      this.top,
+      0,
+      Math.max(0, fold.displayLines.length - 1),
+    );
+    let displayCol = this.left;
+    if (this.wrapLines) {
+      const plan = this.wrapPlan();
+      const row = wrappedRowAt(
+        plan,
+        clamp(this.top, 0, Math.max(0, plan.rowCount - 1)),
+      );
+      foldedLine = row?.line ?? 0;
+      displayCol = row?.offset ?? 0;
+    }
+    return {
+      docLine: fold.displayToDoc(foldedLine),
+      foldedLine,
+      displayCol,
+    };
+  }
+
+  /** Restore an anchor after the width or display layout changes. */
+  private restoreWrappedAnchor(anchor: ViewportAnchor): void {
+    const plan = this.wrapPlan();
+    const line = clamp(
+      anchor.foldedLine,
+      0,
+      Math.max(0, plan.firstRow.length - 1),
+    );
+    const first = plan.firstRow[line] ?? 0;
+    const last = plan.lastRow[line] ?? first;
+    this.top = clamp(
+      first + Math.floor(anchor.displayCol / plan.rowStride),
+      first,
+      last,
+    );
+    this.clampScroll();
+  }
+
+  /** Source column at an anchor under the current non-printable display mode. */
+  private anchorSourceCol(anchor: ViewportAnchor): number {
+    const line = this.foldPlan().displayLines[anchor.foldedLine];
+    return line ? sourceColumnOf(line, this.displayMode, anchor.displayCol) : 0;
+  }
+
   resize(width: number, height: number): void {
+    const anchor = this.wrapLines ? this.viewportAnchor() : null;
     this.width = width;
     this.height = height;
-    this.clampScroll();
+    if (anchor) this.restoreWrappedAnchor(anchor);
+    else this.clampScroll();
   }
 
   view(): ViewState {
@@ -428,6 +596,8 @@ export class Session {
       height: this.height,
       color: this.color,
       showLineNumbers: this.lineNumberMode !== "off",
+      wrapLines: this.wrapLines,
+      wrapPlan: this.wrapLines ? this.wrapPlan() : null,
       lineNumbers: this.lineNumberMode === "off" ? null : this.gutterNumbers(),
       displayMode: this.displayMode,
       selected: this.displaySelected(),
@@ -444,7 +614,7 @@ export class Session {
       dialog: this.promptDialog(),
       overlay: ov,
       cursor: this.cursorOn && this.buffer
-        ? { line: this.toDisplay(this.buffer.row), col: this.buffer.col }
+        ? { line: this.toFolded(this.buffer.row), col: this.buffer.col }
         : null,
       editHint: this.cursorOn ? this.editHint() : null,
       canExpand: this.canExpand(),
@@ -609,7 +779,7 @@ export class Session {
 
   private clampScroll(): void {
     this.top = clamp(this.top, 0, maxTop(this.displayCount(), this.height));
-    this.left = clamp(this.left, 0, this.maxLineLen);
+    this.left = this.wrapLines ? 0 : clamp(this.left, 0, this.maxLineLen);
   }
 
   private selectedNode(): StructureNode | null {
@@ -618,16 +788,39 @@ export class Session {
       : null;
   }
 
+  /** Screen row containing the first character of a structure node. */
+  private nodeStartRow(node: StructureNode): number {
+    return this.toDisplay(
+      node.startLine,
+      this.displayCol(node.startLine, node.startCol),
+    );
+  }
+
+  /** Screen row containing the last character of a structure node. */
+  private nodeEndRow(node: StructureNode): number {
+    const fold = this.foldPlan();
+    const folded = fold.docToDisplay(node.endLine);
+    if (fold.displayLines[folded] !== this.currentDoc.lines[node.endLine]) {
+      return this.wrapLines ? this.wrapPlan().lastRow[folded] ?? 0 : folded;
+    }
+    return this.toDisplay(
+      node.endLine,
+      this.displayCol(node.endLine, Math.max(0, node.endCol - 1)),
+    );
+  }
+
   private selectNode(idx: number): void {
     if (idx < 0 || idx >= this.doc.flatStructure.length) return;
+    const viewport = this.wrapLines ? this.viewportAnchor() : null;
     this.selectedIndex = idx;
     const node = this.doc.flatStructure[idx];
+    if (viewport) this.restoreWrappedAnchor(viewport);
     // Keep the viewport stable: only scroll if the selection's anchor (its first
     // line, where the block opens) would otherwise be off screen. Horizontal
     // scroll is left untouched for the same reason. Anchors are in display rows,
     // since a collapsed file's lines share its summary row.
     this.top = scrollToAnchor(
-      this.toDisplay(node.startLine),
+      this.nodeStartRow(node),
       this.top,
       this.height,
       this.displayCount(),
@@ -817,23 +1010,30 @@ export class Session {
     if (idx < 0) idx = nodeAtLine(this.doc.flatStructure, target.destLine);
     this.selectedIndex = idx >= 0 ? idx : null;
     const node = idx >= 0 ? this.doc.flatStructure[idx] : null;
-    // Frame the whole node (centred if it fits, else its top ~1/10 down). When
-    // no node resolves, frame the single destination line.
-    this.top = node
-      ? frameTop(
-        this.toDisplay(node.startLine),
-        this.toDisplay(node.endLine),
-        this.height,
-        this.displayCount(),
-      )
-      : frameTop(
-        this.toDisplay(target.destLine),
-        this.toDisplay(target.destLine),
-        this.height,
-        this.displayCount(),
-      );
     const destCol = this.displayCol(target.destLine, target.destCol);
-    if (destCol < this.left || destCol >= this.left + this.width) {
+    const destRow = this.toDisplay(target.destLine, destCol);
+    // Frame the resolved node and destination together when they fit. Otherwise
+    // center the destination row so the referenced text is visible.
+    let start = destRow;
+    let end = destRow;
+    if (node) {
+      start = Math.min(this.nodeStartRow(node), destRow);
+      end = Math.max(this.nodeEndRow(node), destRow);
+      if (end - start + 1 > this.contentRows()) {
+        start = destRow;
+        end = destRow;
+      }
+    }
+    this.top = frameTop(
+      start,
+      end,
+      this.height,
+      this.displayCount(),
+    );
+    if (
+      !this.wrapLines &&
+      (destCol < this.left || destCol >= this.left + this.width)
+    ) {
       this.left = clamp(destCol - 4, 0, this.maxLineLen);
     }
     this.message = `→ line ${target.destLine + 1}`;
@@ -951,7 +1151,8 @@ export class Session {
   private revealMatch(): void {
     const m = this.matches[this.currentMatch];
     if (!m) return;
-    const row = this.toDisplay(m.line);
+    const col = this.displayCol(m.line, m.start);
+    const row = this.toDisplay(m.line, col);
     if (row < this.top || row >= this.top + this.contentRows()) {
       this.top = clamp(
         row - Math.floor(this.contentRows() / 2),
@@ -959,8 +1160,10 @@ export class Session {
         maxTop(this.displayCount(), this.height),
       );
     }
-    const col = this.displayCol(m.line, m.start);
-    if (col < this.left || col >= this.left + this.width) {
+    if (
+      !this.wrapLines &&
+      (col < this.left || col >= this.left + this.width)
+    ) {
       this.left = clamp(col - 4, 0, this.maxLineLen);
     }
     this.message = "";
@@ -971,7 +1174,33 @@ export class Session {
    * fewer columns than the line has source code points. */
   private displayCol(line: number, sourceCol: number): number {
     const l = this.doc.lines[line];
-    return l ? displayColumnOf(l, this.displayMode, sourceCol) : sourceCol;
+    if (!l || this.displayMode === "pictures") return sourceCol;
+    if (
+      this.displayColumnCache?.doc !== this.currentDoc ||
+      this.displayColumnCache.mode !== this.displayMode
+    ) {
+      this.displayColumnCache = {
+        doc: this.currentDoc,
+        mode: this.displayMode,
+        columns: new Map(),
+      };
+    }
+    let columns = this.displayColumnCache.columns.get(line);
+    if (!columns) {
+      columns = Uint32Array.from(
+        displayLine(l, this.displayMode),
+        (cell) => cell.col,
+      );
+      this.displayColumnCache.columns.set(line, columns);
+    }
+    let lo = 0;
+    let hi = columns.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (columns[mid] < sourceCol) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
   }
 
   private handleInputKey(key: Key): void {
@@ -1194,11 +1423,15 @@ export class Session {
         return;
       case "h":
       case "H":
-        this.left = clamp(this.left - HORIZONTAL_STEP, 0, this.maxLineLen);
+        this.left = this.wrapLines
+          ? 0
+          : clamp(this.left - HORIZONTAL_STEP, 0, this.maxLineLen);
         return;
       case "l":
       case "L":
-        this.left = clamp(this.left + HORIZONTAL_STEP, 0, this.maxLineLen);
+        this.left = this.wrapLines
+          ? 0
+          : clamp(this.left + HORIZONTAL_STEP, 0, this.maxLineLen);
         return;
       case "space":
       case "pagedown":
@@ -1265,14 +1498,17 @@ export class Session {
         const node = this.selectedNode();
         if (node) {
           this.top = frameTop(
-            this.toDisplay(node.startLine),
-            this.toDisplay(node.endLine),
+            this.nodeStartRow(node),
+            this.nodeEndRow(node),
             this.height,
             this.displayCount(),
           );
         }
         return;
       }
+      case "\\":
+        this.toggleLineWrapping();
+        return;
       case "#":
         this.cycleLineNumbers();
         return;
@@ -1292,20 +1528,50 @@ export class Session {
       case "T":
         this.collapseTestFiles();
         return;
-      case "escape":
+      case "escape": {
+        const anchor = this.wrapLines ? this.viewportAnchor() : null;
         this.selectedIndex = null;
         this.query = "";
         this.matches = [];
         this.message = "";
+        if (anchor) this.restoreWrappedAnchor(anchor);
         return;
+      }
     }
   }
 
   /** Step to the next non-printable display mode and report it. */
   private cycleDisplayMode(): void {
+    const anchor = this.viewportAnchor();
+    const sourceCol = this.anchorSourceCol(anchor);
     const i = DISPLAY_MODES.indexOf(this.displayMode);
     this.displayMode = DISPLAY_MODES[(i + 1) % DISPLAY_MODES.length];
+    const line = this.foldPlan().displayLines[anchor.foldedLine];
+    const displayCol = line
+      ? displayColumnOf(line, this.displayMode, sourceCol)
+      : 0;
+    if (this.wrapLines) {
+      this.restoreWrappedAnchor({ ...anchor, displayCol });
+    } else {
+      this.left = displayCol;
+      this.clampScroll();
+    }
     this.message = `Non-printables: ${displayModeLabel(this.displayMode)}`;
+  }
+
+  /** Toggle line wrapping while keeping the top-left content in view. */
+  private toggleLineWrapping(): void {
+    const anchor = this.viewportAnchor();
+    this.wrapLines = !this.wrapLines;
+    if (this.wrapLines) {
+      this.left = 0;
+      this.restoreWrappedAnchor(anchor);
+    } else {
+      this.top = anchor.foldedLine;
+      this.left = anchor.displayCol;
+      this.clampScroll();
+    }
+    this.message = `Line wrapping: ${this.wrapLines ? "on" : "off"}`;
   }
 
   // --- file-fold commands ----------------------------------------------------
@@ -1318,19 +1584,54 @@ export class Session {
     return true;
   }
 
-  /** The document line the fold commands anchor the viewport to: the selected
-   * node's first line, else the line at the top of the viewport. */
-  private foldAnchorLine(): number {
+  /** The document position the fold commands keep at the top of the viewport. */
+  private foldAnchor(): FoldAnchor {
     const node = this.selectedNode();
-    return node ? node.startLine : this.toDoc(this.top);
+    const anchor = this.viewportAnchor();
+    const fold = this.foldPlan();
+    if (node) {
+      const folded = fold.docToDisplay(node.startLine);
+      const synthetic = fold.displayLines[folded] !==
+        this.currentDoc.lines[node.startLine];
+      return {
+        docLine: node.startLine,
+        sourceCol: node.startCol,
+        syntheticDisplayCol: synthetic && folded === anchor.foldedLine
+          ? anchor.displayCol
+          : undefined,
+      };
+    }
+    if (
+      fold.displayLines[anchor.foldedLine] !==
+        this.currentDoc.lines[anchor.docLine]
+    ) {
+      return {
+        docLine: anchor.docLine,
+        sourceCol: 0,
+        syntheticDisplayCol: anchor.displayCol,
+      };
+    }
+    return {
+      docLine: anchor.docLine,
+      sourceCol: this.anchorSourceCol(anchor),
+    };
   }
 
-  /** After the collapsed set changes, refresh the plan and keep `anchorDoc`
-   * (a document line) at the same spot on screen. */
-  private applyFoldChange(anchorDoc: number): void {
+  /** Refresh the layout after a fold changes and restore its viewport anchor. */
+  private applyFoldChange(anchor: FoldAnchor): void {
     this.markFoldChanged();
+    const fold = this.foldPlan();
+    const folded = fold.docToDisplay(anchor.docLine);
+    const stillSynthetic = fold.displayLines[folded] !==
+      this.currentDoc.lines[anchor.docLine];
+    const row = stillSynthetic && anchor.syntheticDisplayCol !== undefined
+      ? this.foldedPositionToDisplay(folded, anchor.syntheticDisplayCol)
+      : this.toDisplay(
+        anchor.docLine,
+        this.displayCol(anchor.docLine, anchor.sourceCol),
+      );
     this.top = clamp(
-      this.toDisplay(anchorDoc),
+      row,
       0,
       maxTop(this.displayCount(), this.height),
     );
@@ -1340,7 +1641,7 @@ export class Session {
   private toggleCurrentFile(): void {
     if (!this.ensureDiffForFolding()) return;
     const files = this.foldFiles();
-    const line = this.foldAnchorLine();
+    const line = this.foldAnchor().docLine;
     const file = files.find((f) => line >= f.headerLine && line <= f.endLine) ??
       files.find((f) => f.headerLine >= line) ?? files[files.length - 1];
     if (this.collapsed.has(file.index)) {
@@ -1350,31 +1651,39 @@ export class Session {
       this.collapsed.add(file.index);
       this.message = `Hiding ${file.path}`;
     }
-    this.applyFoldChange(file.headerLine);
+    this.applyFoldChange({ docLine: file.headerLine, sourceCol: 0 });
   }
 
   /** Hide every file (collapse all to summary lines). */
   private collapseAllFiles(): void {
     if (!this.ensureDiffForFolding()) return;
-    const anchor = this.foldAnchorLine();
-    for (const f of this.foldFiles()) this.collapsed.add(f.index);
-    this.applyFoldChange(anchor);
+    const anchor = this.foldAnchor();
+    let changed = false;
+    for (const f of this.foldFiles()) {
+      if (!this.collapsed.has(f.index)) {
+        this.collapsed.add(f.index);
+        changed = true;
+      }
+    }
+    if (changed) this.applyFoldChange(anchor);
     this.message = "Hid all files.";
   }
 
   /** Show every file (expand all). */
   private expandAllFiles(): void {
     if (!this.ensureDiffForFolding()) return;
-    const anchor = this.foldAnchorLine();
-    this.collapsed.clear();
-    this.applyFoldChange(anchor);
+    const anchor = this.foldAnchor();
+    if (this.collapsed.size > 0) {
+      this.collapsed.clear();
+      this.applyFoldChange(anchor);
+    }
     this.message = "Showing all files.";
   }
 
   /** Hide every test / test-support file, leaving the rest shown. */
   private collapseTestFiles(): void {
     if (!this.ensureDiffForFolding()) return;
-    const anchor = this.foldAnchorLine();
+    const anchor = this.foldAnchor();
     let n = 0;
     for (const f of this.foldFiles()) {
       if (f.isTest && !this.collapsed.has(f.index)) {
@@ -1382,7 +1691,7 @@ export class Session {
         n++;
       }
     }
-    this.applyFoldChange(anchor);
+    if (n > 0) this.applyFoldChange(anchor);
     this.message = n > 0
       ? `Hid ${n} test file${n === 1 ? "" : "s"}.`
       : "No shown test files to hide.";
@@ -1395,9 +1704,13 @@ export class Session {
     if (name === "up") this.top = clamp(this.top - 1, 0, lastTop);
     else if (name === "down") this.top = clamp(this.top + 1, 0, lastTop);
     else if (name === "left") {
-      this.left = clamp(this.left - HORIZONTAL_STEP, 0, this.maxLineLen);
+      this.left = this.wrapLines
+        ? 0
+        : clamp(this.left - HORIZONTAL_STEP, 0, this.maxLineLen);
     } else if (name === "right") {
-      this.left = clamp(this.left + HORIZONTAL_STEP, 0, this.maxLineLen);
+      this.left = this.wrapLines
+        ? 0
+        : clamp(this.left + HORIZONTAL_STEP, 0, this.maxLineLen);
     }
   }
 
@@ -1408,19 +1721,30 @@ export class Session {
         "This view has no underlying file to edit.";
       return;
     }
+    const wasWrapped = this.wrapLines;
+    const anchor = wasWrapped ? this.viewportAnchor() : null;
+    const topDoc = anchor?.docLine ?? this.toDoc(this.top);
+    const displayedLine = anchor
+      ? this.foldPlan().displayLines[anchor.foldedLine]
+      : undefined;
+    const cursorCol = anchor && displayedLine === this.currentDoc.lines[topDoc]
+      ? this.anchorSourceCol(anchor)
+      : 0;
+    this.wrapLines = false;
     this.cursorOn = true;
     this.selectedIndex = null;
     // Editing relies on every source column mapping to one display column, which
     // only the first mode guarantees (it hides nothing and collapses nothing).
     this.displayMode = DISPLAY_MODES[0];
+    if (anchor) this.left = cursorCol;
     // Editing works on the full text, so expand every folded file; the top
     // display row becomes its document line.
-    const topDoc = this.toDoc(this.top);
     this.clearFolds();
     this.top = topDoc;
-    this.buffer.place(topDoc, 0);
+    this.buffer.place(topDoc, cursorCol);
     this.seedHighlighter();
     this.ensureCursorVisible();
+    if (wasWrapped) this.message = "Line wrapping turned off for editing.";
   }
 
   private markFoldChanged(): void {
@@ -2041,15 +2365,21 @@ export class Session {
   }
 
   private contentWidth(): number {
-    const guide = this.selectedNode() ? 1 : 0;
-    return Math.max(1, this.width - this.gutterWidth() - guide);
+    const gutterWidth = this.gutterWidth();
+    const guideWidth = this.selectedNode() ? 1 : 0;
+    const fitted = this.wrapLines
+      ? fitWrapChrome(this.width, gutterWidth, guideWidth)
+      : { gutterWidth, guideWidth };
+    return Math.max(1, this.width - fitted.gutterWidth - fitted.guideWidth);
   }
 
   /** Cycle the line-number gutter: off → input position → file/message line. */
   private cycleLineNumbers(): void {
+    const anchor = this.wrapLines ? this.viewportAnchor() : null;
     const order: LineNumberMode[] = ["off", "input", "file"];
     this.lineNumberMode =
       order[(order.indexOf(this.lineNumberMode) + 1) % order.length];
+    if (anchor) this.restoreWrappedAnchor(anchor);
     const label = this.lineNumberMode === "off"
       ? "off"
       : this.lineNumberMode === "input"
@@ -2510,7 +2840,7 @@ export class Session {
     // its frames would stand the two hunks' bodies next to each other before the
     // lines that join them had arrived, showing a file that reads nothing like
     // the one on disk.
-    this.pendingReveal = r.removedAt !== null ? null : {
+    this.pendingReveal = r.removedAt !== null || this.wrapLines ? null : {
       row: this.toDisplay(r.insertedAt),
       count: r.inserted,
       up: r.up,
@@ -2563,8 +2893,8 @@ export class Session {
       node.startLine > f.headerLine && node.startLine <= f.endLine
     );
     if (inHiddenFile) return false;
-    return this.toDisplay(node.endLine) >= this.top &&
-      this.toDisplay(node.startLine) < this.top + this.contentRows();
+    return this.nodeEndRow(node) >= this.top &&
+      this.nodeStartRow(node) < this.top + this.contentRows();
   }
 
   /** The middle of the content on screen, as a display row. The rows the
@@ -2612,7 +2942,7 @@ export class Session {
       for (
         const [line, up] of [[h.startLine, true], [h.endLine, false]] as const
       ) {
-        const row = this.toDisplay(line);
+        const row = up ? this.toDisplay(line) : this.toDisplayEnd(line);
         if (onScreen(row)) out.push({ row, line, up, room: r });
       }
     }
@@ -2639,9 +2969,7 @@ export class Session {
         )
       )
       : [];
-    const from = own.length > 0
-      ? this.toDisplay(sel!.startLine)
-      : this.middleRow();
+    const from = own.length > 0 ? this.nodeStartRow(sel!) : this.middleRow();
     const pool = own.length > 0 ? own : edges;
     // Distance in display rows: a collapsed file stands on one row, and the
     // lines it hides are not distance the eye travels.
@@ -2932,12 +3260,30 @@ export class Session {
   private viewportNodeIndex(nodes: readonly StructureNode[]): number {
     const bottom = this.top + this.contentRows() - 1;
     for (let i = 0; i < nodes.length; i++) {
-      const row = this.toDisplay(nodes[i].startLine);
+      const row = this.nodeStartRow(nodes[i]);
       if (row >= this.top && row <= bottom) return i;
     }
-    const enclosing = nodeAtLine(nodes, this.toDoc(this.top));
-    return enclosing >= 0 ? enclosing : 0;
+    let enclosing = -1;
+    let enclosingSpan = Infinity;
+    for (let i = 0; i < nodes.length; i++) {
+      const start = this.nodeStartRow(nodes[i]);
+      const end = this.nodeEndRow(nodes[i]);
+      const span = end - start;
+      if (start <= this.top && end >= this.top && span <= enclosingSpan) {
+        enclosing = i;
+        enclosingSpan = span;
+      }
+    }
+    if (enclosing >= 0) return enclosing;
+    const onLine = nodeAtLine(nodes, this.toDoc(this.top));
+    return onLine >= 0 ? onLine : 0;
   }
+}
+
+function codePointLength(text: string): number {
+  let length = 0;
+  for (const _ of text) length++;
+  return length;
 }
 
 function isArrowName(name: string): boolean {
@@ -3002,6 +3348,7 @@ export function helpOverlay(): {
     ["", ""],
     ["View", ""],
     ["  #", "line numbers: off / input position / file or message line"],
+    ["  \\", "wrap / unwrap long lines"],
     ["  C", "cycle non-printables: pictures / ANSI colour / hidden"],
     ["  ?", "this help   ·   Q  quit"],
   ];

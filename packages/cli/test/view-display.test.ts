@@ -6,7 +6,9 @@ import {
   displayLine,
   type DisplayMode,
   displayModeLabel,
+  displayWidth,
   glyphFor,
+  sourceColumnOf,
 } from "../lib/view/display.ts";
 import type { Line } from "../lib/view/model.ts";
 
@@ -19,6 +21,29 @@ function ln(text: string): Line {
 function glyphs(text: string, mode: DisplayMode): string {
   return displayLine(ln(text), mode).map((c) => c.ch).join("");
 }
+
+Deno.test("displayWidth: matches the rendered cell count", () => {
+  const samples = [
+    "",
+    "plain ASCII",
+    "😀x",
+    "a\x1b[31mb",
+    "a\x1b[2Jb",
+    "a\x01\x02b",
+    "a\x01\x1b[2J\x02b",
+    "a\x1b[",
+    "\x1b[0 qx",
+  ];
+  for (const mode of DISPLAY_MODES) {
+    for (const text of samples) {
+      assertEquals(
+        displayWidth(ln(text), mode),
+        displayLine(ln(text), mode).length,
+        `${mode}: ${JSON.stringify(text)}`,
+      );
+    }
+  }
+});
 
 // --- mode cycle & labels -----------------------------------------------------
 
@@ -153,6 +178,14 @@ Deno.test("displayColumnOf: ansi skips a hidden colour sequence", () => {
     "inside the escape → the next cell",
   );
   assertEquals(displayColumnOf(line, "ansi", 6), 1, "b");
+});
+
+Deno.test("sourceColumnOf: maps compact display offsets back to source", () => {
+  const line = ln("a\x1b[31mb");
+  assertEquals(sourceColumnOf(line, "pictures", 3), 3);
+  assertEquals(sourceColumnOf(line, "ansi", 1), 6);
+  assertEquals(sourceColumnOf(line, "ansi", 9), 7);
+  assertEquals(sourceColumnOf(ln("\x1b[31m"), "ansi", 0), 0);
 });
 
 // --- internals ---------------------------------------------------------------

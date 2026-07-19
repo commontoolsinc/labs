@@ -12,6 +12,7 @@ function baseView(over: Partial<ViewState> = {}): ViewState {
     height: 10,
     color: true,
     showLineNumbers: false,
+    wrapLines: false,
     displayMode: "pictures",
     selected: null,
     matches: null,

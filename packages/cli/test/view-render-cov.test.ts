@@ -23,6 +23,7 @@ function baseView(over: Partial<ViewState> = {}): ViewState {
     height: 10,
     color: true,
     showLineNumbers: false,
+    wrapLines: false,
     displayMode: "pictures",
     selected: null,
     matches: null,
@@ -81,6 +82,25 @@ Deno.test("cursorScreenPos: maps document coords to 1-based screen coords", () =
   const pos = cursorScreenPos(doc, view);
   // r = line - top = 2; row = r + 1 = 3. col = gutter(0)+guide(0)+contentCol(4)+1
   assertEquals(pos, { row: 3, col: 5 });
+});
+
+Deno.test("cursorScreenPos: maps a wrapped continuation to its screen row", () => {
+  const doc = parseDocument("abcdefghij");
+  const view = baseView({
+    cursor: { line: 0, col: 7 },
+    width: 5,
+    height: 4,
+    wrapLines: true,
+  });
+  assertEquals(cursorScreenPos(doc, view), { row: 2, col: 4 });
+});
+
+Deno.test("cursorScreenPos: rejects a cursor outside the document", () => {
+  const doc = parseDocument("one line");
+  assertEquals(
+    cursorScreenPos(doc, baseView({ cursor: { line: 4, col: 0 } })),
+    null,
+  );
 });
 
 Deno.test("cursorScreenPos: accounts for the line-number gutter and guide bar", () => {
@@ -331,7 +351,10 @@ Deno.test("renderStatus: e / C / # hints appear only where they apply", () => {
   const neither = line({ canEdit: false, hasNonPrintables: false });
   assert(!neither.includes("e Edit"), neither);
   assert(!neither.includes("C Chars"), neither);
+  assert(neither.includes("\\ Wrap"), neither);
   assert(neither.includes("# Lines"), neither);
+  const wrapped = line({ wrapLines: true });
+  assert(wrapped.includes("\\ Unwrap"), wrapped);
 });
 
 Deno.test("renderStatus: a narrow bar drops the lowest-priority hints first", () => {
