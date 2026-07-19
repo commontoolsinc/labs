@@ -147,8 +147,9 @@ export interface EditableSource {
 /**
  * The editing constraints of a diff view. A line is editable past its marker
  * only when it is a context or added line inside a hunk whose new side matched
- * a file on disk — the change it would make can then be written back. Removed
- * lines, hunk/file headers, and any text that is not part of a savable hunk (a
+ * a file on disk — the change it would make can then be written back. A removed
+ * line in such a hunk may be resurrected intact, but cannot be edited as text.
+ * Hunk/file headers and any text that is not part of a savable hunk (a
  * commit-message preamble, an unverified hunk) are refused. Editability is
  * decided from the whole diff and the line's position, so it survives lines
  * being added or removed above it.
@@ -160,9 +161,13 @@ export interface EditPolicy {
    * region. */
   editStart(lines: readonly string[], row: number): number | null;
   /** What the row at `row` belongs to: a diff hunk's new side (edited as a
-   * removed/added pair), an editable commit message (edited as plain indented
-   * text), or neither. Drives how the editor treats an edit there. */
-  regionKind(lines: readonly string[], row: number): "hunk" | "message" | null;
+   * removed/added pair), a removed line that can be resurrected, an editable
+   * commit message (edited as plain indented text), or neither. Drives how the
+   * editor treats an edit there. */
+  regionKind(
+    lines: readonly string[],
+    row: number,
+  ): "hunk" | "removed" | "message" | null;
   /** The marker a newly inserted line is given inside a hunk (a diff adds an
    * added line, so `"+"`), keeping the diff well-formed as the user adds lines.
    * A commit message uses its own indent instead. */
