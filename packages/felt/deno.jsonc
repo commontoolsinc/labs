@@ -14,8 +14,8 @@
     // binary, in the lockfile. See "The esbuild dependency" in
     // docs/development/DEVELOPMENT.md before changing the esbuild or
     // @deno/esbuild-plugin entry below.
-    "esbuild": "npm:esbuild@^0.25.5",
+    "esbuild": "npm:esbuild@^0.25.12",
     "@deno/esbuild-plugin": "jsr:@deno/esbuild-plugin@^1.2.1",
-    "@std/fmt/colors": "jsr:@std/fmt@^1.0.3/colors"
+    "@std/fmt/colors": "jsr:@std/fmt@^1.0.10/colors"
   }
 }

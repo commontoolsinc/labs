@@ -16,9 +16,9 @@
     "./shared": "./shared/mod.ts"
   },
   "imports": {
-    "@lit/context": "npm:@lit/context@^1.1.5",
-    "@lit/task": "npm:@lit/task@^1.0.2",
-    "@opentelemetry/api": "npm:@opentelemetry/api@^1.7.0",
+    "@lit/context": "npm:@lit/context@^1.1.6",
+    "@lit/task": "npm:@lit/task@^1.0.3",
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "npm:@opentelemetry/exporter-trace-otlp-http@^0.220.0",
     "@opentelemetry/resources": "npm:@opentelemetry/resources@^2.9.0",
     "@opentelemetry/sdk-trace-web": "npm:@opentelemetry/sdk-trace-web@^2.9.0"
