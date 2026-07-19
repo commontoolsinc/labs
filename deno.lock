@@ -85,7 +85,7 @@
     "npm:@lit/context@^1.1.2": "1.1.6",
     "npm:@lit/context@^1.1.5": "1.1.6",
     "npm:@lit/task@^1.0.2": "1.0.3",
-    "npm:@noble/ed25519@^2.2.3": "2.3.0",
+    "npm:@noble/ed25519@^3.1.0": "3.1.0",
     "npm:@noble/hashes@^2.2.0": "2.2.0",
     "npm:@opentelemetry/api@^1.7.0": "1.9.1",
     "npm:@opentelemetry/api@^1.9.0": "1.9.1",
@@ -844,8 +844,8 @@
     "@msgpack/msgpack@3.1.2": {
       "integrity": "sha512-JEW4DEtBzfe8HvUYecLU9e6+XJnKDlUAIve8FvPzF3Kzs6Xo/KuZkZJsDH0wJXl/qEZbeeE7edxDNY3kMs39hQ=="
     },
-    "@noble/ed25519@2.3.0": {
-      "integrity": "sha512-M7dvXL2B92/M7dw9+gzuydL8qn/jiqNHaoR3Q+cb1q1GHV7uwE17WCyFMG+Y+TZb5izcaXk5TdJRrDUxHXL78A=="
+    "@noble/ed25519@3.1.0": {
+      "integrity": "sha512-pfcObRY3CtvwfaG9Mt5XqZdKmAQppl37tHUeuBhDUbiwJBCVY4/A4lbMvb1xKhMDx96AqAqZpMWuBX1HulhX4g=="
     },
     "@noble/hashes@1.8.0": {
       "integrity": "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="
@@ -2043,7 +2043,7 @@
       },
       "packages/identity": {
         "dependencies": [
-          "npm:@noble/ed25519@^2.2.3",
+          "npm:@noble/ed25519@^3.1.0",
           "npm:@scure/bip39@^1.5.4"
         ]
       },
