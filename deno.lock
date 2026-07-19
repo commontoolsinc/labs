@@ -130,8 +130,7 @@
     "npm:pino-pretty@13": "13.1.2",
     "npm:pino@^10.3.1": "10.3.1",
     "npm:plaid@43": "43.0.0",
-    "npm:ses@1.15.0": "1.15.0",
-    "npm:ses@^1.15.0": "1.15.0",
+    "npm:ses@^2.2.0": "2.2.0",
     "npm:source-map-js@^1.2.1": "1.2.1",
     "npm:stoker@^1.4.2": "1.4.3_@hono+zod-openapi@0.18.4__hono@4.12.30__zod@3.25.76_hono@4.12.30",
     "npm:turndown@^7.1.2": "7.2.2",
@@ -1858,8 +1857,8 @@
     "secure-json-parse@4.1.0": {
       "integrity": "sha512-l4KnYfEyqYJxDwlNVyRfO2E4NTHfMKAWdUuA8J0yve2Dz/E/PdBepY03RvyJpssIpRFwJoCD55wA+mEDs6ByWA=="
     },
-    "ses@1.15.0": {
-      "integrity": "sha512-Y7RvgVXhkwQEqVActNn44QBxB2BCUbPfexAaMiUFjbJkDXDnxPisQC5jYQeWOZ3QBOfecnmLfPn0sQKLiYGBAQ==",
+    "ses@2.2.0": {
+      "integrity": "sha512-mXZfO9O2bhE9E3INX5Dbqq+eo1Dj6Yeo+r7jas7GYTXRS6fzcZFYf0UbSHcXO7xJuPbhztBskSuSqJLMMoYMVQ==",
       "dependencies": [
         "@endo/cache-map",
         "@endo/env-options",
@@ -1995,7 +1994,7 @@
       "npm:hash-wasm@^4.12.0",
       "npm:lit@^3.3.0",
       "npm:multiformats@^14.0.4",
-      "npm:ses@^1.15.0",
+      "npm:ses@^2.2.0",
       "npm:turndown@^7.1.2",
       "npm:zod@^3.24.1"
     ],
@@ -2079,7 +2078,7 @@
       "packages/runner": {
         "dependencies": [
           "npm:@opentelemetry/api@^1.7.0",
-          "npm:ses@^1.15.0",
+          "npm:ses@^2.2.0",
           "npm:typescript@6.0.3"
         ]
       },

@@ -462,7 +462,10 @@ describe("SES security regressions", () => {
             "  }",
             "  result.fetchType = typeof fetch;",
             "  result.cloneType = typeof structuredClone;",
-            "  result.proxyType = typeof Proxy;",
+            // Through `host`, because the type libraries no longer declare
+            // `Proxy` — naming it directly is now a compile error rather than
+            // the `undefined` this asserts.
+            "  result.proxyType = typeof host.Proxy;",
             "  result.arrayName = Array.name;",
             '  result.hasInjected = "injected" in host;',
             "  return result;",

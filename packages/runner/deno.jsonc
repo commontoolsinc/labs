@@ -10,7 +10,7 @@
   },
   "imports": {
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.7.0",
-    "ses": "npm:ses@^1.15.0",
+    "ses": "npm:ses@^2.2.0",
     "typescript": "npm:typescript@6.0.3"
   },
   "exports": {

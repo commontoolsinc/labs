@@ -4475,8 +4475,6 @@ interface Float32ArrayConstructor {
      */
     from<T>(arrayLike: ArrayLike<T>, mapfn: (v: T, k: number) => number, thisArg?: any): Float32Array<ArrayBuffer>;
 }
-declare var Float32Array: Float32ArrayConstructor;
-
 /**
  * A typed array of 64-bit float values. The contents are initialized to 0. If the requested
  * number of bytes could not be allocated an exception is raised.
@@ -4757,8 +4755,6 @@ interface Float64ArrayConstructor {
      */
     from<T>(arrayLike: ArrayLike<T>, mapfn: (v: T, k: number) => number, thisArg?: any): Float64Array<ArrayBuffer>;
 }
-declare var Float64Array: Float64ArrayConstructor;
-
 /////////////////////////////
 /// ECMAScript Internationalization API
 /////////////////////////////
@@ -6506,8 +6502,6 @@ interface ProxyConstructor {
      */
     new <T extends object>(target: T, handler: ProxyHandler<T>): T;
 }
-declare var Proxy: ProxyConstructor;
-
 declare namespace Reflect {
     /**
      * Calls the function with the specified object as the this value
@@ -7154,8 +7148,6 @@ interface SharedArrayBufferConstructor {
     new (byteLength?: number): SharedArrayBuffer;
     readonly [Symbol.species]: SharedArrayBufferConstructor;
 }
-declare var SharedArrayBuffer: SharedArrayBufferConstructor;
-
 interface ArrayBufferTypes {
     SharedArrayBuffer: SharedArrayBuffer;
 }
@@ -7248,8 +7240,6 @@ interface Atomics {
 
     readonly [Symbol.toStringTag]: "Atomics";
 }
-
-declare var Atomics: Atomics;
 
 interface String {
     /**
@@ -9085,8 +9075,6 @@ interface WeakRefConstructor {
     new <T extends WeakKey>(target: T): WeakRef<T>;
 }
 
-declare var WeakRef: WeakRefConstructor;
-
 interface FinalizationRegistry<T> {
     readonly [Symbol.toStringTag]: "FinalizationRegistry";
 
@@ -9119,8 +9107,6 @@ interface FinalizationRegistryConstructor {
      */
     new <T>(cleanupCallback: (heldValue: T) => void): FinalizationRegistry<T>;
 }
-
-declare var FinalizationRegistry: FinalizationRegistryConstructor;
 
 declare namespace Intl {
     interface DateTimeFormatPartTypesRegistry {

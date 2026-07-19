@@ -78,6 +78,10 @@ jobs:
         working-directory: packages/static
         run: deno task check-cfc-types
 
+      - name: 🔎 Check type libraries declare no withheld globals
+        working-directory: packages/static
+        run: deno task check-withheld-globals
+
   cfcheck:
     name: "CFC Pattern Check (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
