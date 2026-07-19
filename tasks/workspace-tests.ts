@@ -92,6 +92,14 @@ export async function testPackage(
   };
 }
 
+type PackageResult = Awaited<ReturnType<typeof testPackage>>;
+
+function reportPackageFailure(result: PackageResult): void {
+  console.error(`Failed ${result.packageName} (${result.packagePath})`);
+  console.log(decode(result.result.stdout));
+  console.error(decode(result.result.stderr));
+}
+
 // Read the workspace member list from the root manifest. Parsed with the JSONC
 // parser so a `deno.jsonc` carrying comments is read correctly.
 export async function readWorkspaceMembers(
@@ -201,7 +209,7 @@ export async function runTests(
   );
   if (units.length === 0) {
     console.error("No workspace packages selected to test.");
-    Deno.exit(1);
+    return false;
   }
   // Resolve to an absolute path: each package's test subprocess runs with its
   // own cwd, so a relative DENO_COVERAGE_DIR would land under
@@ -211,24 +219,27 @@ export async function runTests(
     ? path.resolve(workspaceCwd, coverageRootRaw)
     : undefined;
 
-  type PackageResult = Awaited<ReturnType<typeof testPackage>>;
   const results: PackageResult[] = [];
   let nextUnit = 0;
+  let failureSeen = false;
   const workerCount = Math.min(testConcurrency(), units.length);
   const workers = Array.from({ length: workerCount }, async () => {
-    while (nextUnit < units.length) {
+    while (!failureSeen && nextUnit < units.length) {
       const unit = units[nextUnit++];
       console.log(`Testing ${unit.packageName}...`);
       const packagePath = path.resolve(workspaceCwd, unit.memberPath);
-      results.push(
-        await testPackage(
-          unit.memberPath,
-          unit.packageName,
-          packagePath,
-          coverageRoot,
-          unit.env,
-        ),
+      const result = await testPackage(
+        unit.memberPath,
+        unit.packageName,
+        packagePath,
+        coverageRoot,
+        unit.env,
       );
+      results.push(result);
+      if (!result.result.success) {
+        failureSeen = true;
+        reportPackageFailure(result);
+      }
     }
   });
   await Promise.all(workers);
@@ -254,10 +265,7 @@ export async function runTests(
     console.error("Failed packages:");
     for (const result of failedPackages) {
       console.error(`- ${result.packageName} (${result.packagePath})`);
-      console.log(decode(result.result.stdout));
-      console.error(decode(result.result.stderr));
     }
-    Deno.exit(1);
   }
 
   return failedPackages.length === 0;
@@ -267,11 +275,12 @@ export async function main(): Promise<void> {
   const shardRaw = Deno.env.get("TEST_SHARD");
   const shard = shardRaw ? parseShard(shardRaw) : undefined;
   await initializeDb();
-  await runTests(
+  const passed = await runTests(
     [
       ...ALL_DISABLED,
       ...parseDisabledPackageList(Deno.env.get("TEST_DISABLED_PACKAGES")),
     ],
     shard,
   );
+  if (!passed) Deno.exit(1);
 }

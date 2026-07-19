@@ -182,7 +182,9 @@ package-name list (`selectShardMembers`), and runs `deno task test` in every
 selected package, at most `TEST_CONCURRENCY` (default: half the cores) at a
 time to keep contention-sensitive tests stable. Each shard's wall time is set
 by the slowest package test task in the shard, plus the fixed setup and
-coverage report steps around it.
+coverage report steps around it. When a package fails, the runner prints that
+package's captured output immediately and stops starting new package tests.
+Package tests that are already running finish before the summary is printed.
 
 When a shard becomes the long pole, start with the `Package timings:` block
 printed by `tasks/test.ts`. The round-robin split carries no per-package
