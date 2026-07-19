@@ -29,7 +29,7 @@
     "@arizeai/openinference-vercel": "npm:@arizeai/openinference-vercel@^3.1.0",
     "@fal-ai/client": "npm:@fal-ai/client@^1.2.2",
     "@hono/hono": "npm:hono@^4.7.0",
-    "@hono/zod-openapi": "npm:@hono/zod-openapi@^0.18.3",
+    "@hono/zod-openapi": "npm:@hono/zod-openapi@^1.5.1",
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.7.0",
     "@opentelemetry/exporter-trace-otlp-proto": "npm:@opentelemetry/exporter-trace-otlp-proto@^0.220.0",
     "@opentelemetry/resources": "npm:@opentelemetry/resources@^2.9.0",
@@ -39,7 +39,7 @@
     "pino": "npm:pino@^10.3.1",
     "pino-pretty": "npm:pino-pretty@^13.0.0",
     "plaid": "npm:plaid@^43.0.0",
-    "stoker": "npm:stoker@^1.4.2",
+    "stoker": "npm:stoker@^2.0.1",
     "mistreevous": "npm:mistreevous@4.3.1"
   }
 }
