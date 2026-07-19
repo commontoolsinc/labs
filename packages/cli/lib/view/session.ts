@@ -462,6 +462,9 @@ export class Session {
       { key: "^S", label: "Search" },
       { key: "^R", label: "Revert" },
     ];
+    if (this.canResurrectRemovedLine()) {
+      hints.splice(1, 0, { key: "R", label: "Resurrect" });
+    }
     if (this.source?.policy) hints.push({ key: "^L", label: "Expand" });
     hints.push({ key: "^X^S", label: "Save" }, { key: "^X^F", label: "Open" });
     return hints;
@@ -1560,6 +1563,10 @@ export class Session {
       case "ctrl-c":
         this.requestQuit();
         return;
+      case "r":
+      case "R":
+        if (this.resurrectRemovedLine()) return;
+        break;
       case "delete":
       case "ctrl-d":
         if (this.guardForwardEdit()) {
@@ -1583,6 +1590,7 @@ export class Session {
         const prefix = this.source?.policy?.insertPrefix;
         if (prefix !== undefined) {
           if (this.allowEdit(false, false)) {
+            const hunkHeader = this.hunkHeaderAt(b.row);
             const start = this.editStart() ?? 1;
             const onContext = b.lines[b.row]?.[0] === " ";
             // Enter splits the line at the cursor. On a context line the result
@@ -1604,7 +1612,7 @@ export class Session {
             } else {
               b.insert(`\n${prefix}`);
             }
-            this.adjustHunkCounts(0, 1);
+            this.adjustHunkCounts(0, 1, hunkHeader);
             this.afterEdit();
           }
         } else {
@@ -1688,6 +1696,38 @@ export class Session {
     this.splitRow = b.row; // the added line, so undoing the edit can collapse it
   }
 
+  /** Whether the cursor is on a removed line in a hunk whose new side can be
+   * saved back to disk. */
+  private canResurrectRemovedLine(): boolean {
+    const pol = this.source?.policy;
+    const b = this.buffer;
+    return !!pol && !!b && b.lines[b.row]?.[0] === "-" &&
+      pol.regionKind(b.lines, b.row) === "removed";
+  }
+
+  /** Carry a removed line back onto the diff's new side as unchanged context.
+   * Its old-side count is unchanged and its new-side count grows by one. */
+  private resurrectRemovedLine(): boolean {
+    if (!this.canResurrectRemovedLine()) return false;
+    const b = this.buffer!;
+    const hunkHeader = this.hunkHeaderAt(b.row);
+    if (!this.adjustHunkCounts(0, 1, hunkHeader)) {
+      this.message = "This hunk could not be updated.";
+      return true;
+    }
+    const line = b.lines[b.row];
+    b.spliceLines(
+      b.row,
+      1,
+      [` ${line.slice(1)}`],
+      0,
+      Math.max(1, b.col),
+    );
+    this.afterEdit();
+    this.message = "Resurrected the removed line.";
+    return true;
+  }
+
   /** After editing a diff, collapse the added line a split just produced back
    * into a context line when its content again matches the removed line above it
    * — you undid the change. Scoped to the row {@link prepareContextEdit} created
@@ -1708,36 +1748,59 @@ export class Session {
     }
   }
 
-  /** After an edit changed the cursor's hunk's line count (a `+` line added or
-   * removed, a context line removed), grow or shrink that hunk header's counts
-   * to match, so the diff stays well-formed and the deferred re-parse keeps
-   * every body line in the hunk instead of dropping the overflow as plain text. */
-  private adjustHunkCounts(oldDelta: number, newDelta: number): void {
+  /** The parsed hunk containing a body row. Structural lookup keeps body text
+   * such as `--- prior` and `+++ next` from being mistaken for file headers. */
+  private hunkHeaderAt(row: number): number | null {
+    if (!this.buffer) return null;
+    const model = parseDiff(this.buffer.text());
+    for (const file of model?.files ?? []) {
+      for (const hunk of file.hunks) {
+        if (row > hunk.headerLine && row <= hunk.endLine) {
+          return hunk.headerLine;
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Grow or shrink a parsed hunk header after its body changes. A zero-count
+   * unified-diff range names the line before its insertion point, so crossing
+   * zero also moves the range start. */
+  private adjustHunkCounts(
+    oldDelta: number,
+    newDelta: number,
+    hunkHeader = this.hunkHeaderAt(this.buffer?.row ?? -1),
+  ): boolean {
     if (
       !this.source?.policy || !this.buffer || (oldDelta === 0 && newDelta === 0)
     ) {
-      return;
+      return false;
     }
     const b = this.buffer;
-    let h = Math.min(b.row, b.lines.length - 1);
-    while (h >= 0 && !b.lines[h].startsWith("@@ ")) {
-      if (/^(diff |--- |\+\+\+ )/.test(b.lines[h])) return; // not inside a hunk
-      h--;
-    }
-    if (h < 0) return;
-    const m = b.lines[h].match(
-      /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/,
+    if (hunkHeader === null) return false;
+    const m = b.lines[hunkHeader]?.match(
+      /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@([^\r]*)(\r?)$/,
     );
-    if (!m) return;
-    const oldCount = Math.max(
-      0,
-      (m[2] !== undefined ? parseInt(m[2], 10) : 1) + oldDelta,
-    );
-    const newCount = Math.max(
-      0,
-      (m[4] !== undefined ? parseInt(m[4], 10) : 1) + newDelta,
-    );
-    b.lines[h] = `@@ -${m[1]},${oldCount} +${m[3]},${newCount} @@${m[5] ?? ""}`;
+    if (!m) return false;
+    const adjust = (
+      startText: string,
+      countText: string | undefined,
+      delta: number,
+    ): { start: number; count: number } => {
+      let start = parseInt(startText, 10);
+      const count = countText === undefined ? 1 : parseInt(countText, 10);
+      const next = Math.max(0, count + delta);
+      if (count === 0 && next > 0) start++;
+      if (count > 0 && next === 0) start = Math.max(0, start - 1);
+      return { start, count: next };
+    };
+    const oldRange = adjust(m[1], m[2], oldDelta);
+    const newRange = adjust(m[3], m[4], newDelta);
+    b.lines[hunkHeader] =
+      `@@ -${oldRange.start},${oldRange.count} +${newRange.start},${newRange.count} @@${
+        m[5] ?? ""
+      }${m[6] ?? ""}`;
+    return true;
   }
 
   /** The first editable column on the cursor's line under the source's policy
@@ -1771,7 +1834,7 @@ export class Session {
     const b = this.buffer!;
     const start = this.editStart();
     if (start === null) {
-      this.message = NOT_EDITABLE_MSG;
+      this.message = this.notEditableMessage();
       return false;
     }
     if (b.col < start) b.place(b.row, start);
@@ -1787,7 +1850,7 @@ export class Session {
     const b = this.buffer!;
     const start = this.editStart();
     if (start === null) {
-      this.message = NOT_EDITABLE_MSG;
+      this.message = this.notEditableMessage();
       return false;
     }
     if (b.col < start) b.place(b.row, start);
@@ -1810,7 +1873,7 @@ export class Session {
     }
     const start = this.editStart();
     if (start === null) {
-      this.message = NOT_EDITABLE_MSG;
+      this.message = this.notEditableMessage();
       return;
     }
     if (b.col > start) {
@@ -1831,12 +1894,14 @@ export class Session {
   private removeDiffLine(markerLen: number): void {
     const b = this.buffer!;
     const marker = b.lines[b.row][0] ?? "";
+    const hunkHeader = this.hunkHeaderAt(b.row);
     b.place(b.row, 0);
     b.deleteBackward(); // join into the previous line
     for (let i = 0; i < markerLen; i++) b.deleteForward(); // drop the marker
     this.adjustHunkCounts(
       marker === " " || marker === "-" ? -1 : 0,
       marker === " " || marker === "+" ? -1 : 0,
+      hunkHeader,
     );
   }
 
@@ -1846,7 +1911,7 @@ export class Session {
     const b = this.buffer!;
     const start = this.editStart();
     if (start === null) {
-      this.message = NOT_EDITABLE_MSG;
+      this.message = this.notEditableMessage();
       return false;
     }
     if (b.col <= start) {
@@ -1873,7 +1938,7 @@ export class Session {
     }
     const start = this.editStart();
     if (start === null) {
-      this.message = NOT_EDITABLE_MSG;
+      this.message = this.notEditableMessage();
       return false;
     }
     if (Math.min(b.col, mark.col) < start) {
@@ -1882,6 +1947,12 @@ export class Session {
     }
     this.prepareContextEdit();
     return true;
+  }
+
+  private notEditableMessage(): string {
+    return this.canResurrectRemovedLine()
+      ? "This removed line isn't editable; press R to resurrect it."
+      : NOT_EDITABLE_MSG;
   }
 
   private afterMove(): void {
@@ -2917,6 +2988,7 @@ export function helpOverlay(): {
     ["  ⌥L ⌥U ⌥C", "lower / upper / capitalise word"],
     ["  ^S", "search from the cursor (Enter lands there, ^S steps)"],
     ["  ^R", "revert: a diff's hunk / file / all, or a file's edits"],
+    ["  R", "diff: resurrect the removed line under the cursor"],
     ["  ^L", "diff: reveal more of the file around the cursor's hunk"],
     ["  F3  ^X^S", "save to disk"],
     ["  ^X^F", "open another file"],
