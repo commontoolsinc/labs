@@ -80,6 +80,38 @@ export function fromURI(uri: URI | string): string {
 }
 
 /**
+ * Decodes the extracted payload text of an `application/json` `data:` URI.
+ * This is the single point of truth for how such payloads read, shared by
+ * every reader of them; per-reader payload extraction and error policy stay
+ * with the readers (see {@link getJSONFromDataURI} and
+ * `storage/transaction/attestation.ts`'s `load()`).
+ *
+ * @param text The payload text, after any percent- or Base64-decoding.
+ * @returns The decoded value.
+ * @throws If `text` is not valid JSON (including when it is empty; callers
+ *   with an empty-payload policy apply it before calling).
+ */
+export function decodeDataURIPayloadText(text: string): any {
+  // TODO(danfuzz): This `JSON.parse()` is the decode half of the `data:` URI
+  // boundary, and has to change in lockstep with the `JSON.stringify()` in
+  // `link-utils.ts`'s `createDataCellURI()`: whatever encodes the payload
+  // determines what can decode it. The `data-model` counterpart is
+  // `valueFromJson()`, given a `ReconstructionContext`;
+  // `memory/v2.ts`'s `encodeMemoryBoundary()`/`decodeMemoryBoundary()` pair is
+  // a worked example of the same boundary, and uses an
+  // `EmptyReconstructionContext` because links at that boundary are sigil
+  // (plain) data rather than `FabricInstance`s, which is true here too.
+  //
+  // Note that this decode cannot simply switch over: a `data:` URI _is_ its
+  // own content, and such URIs are embedded in persisted documents, so ids in
+  // the current (bare JSON) form survive indefinitely. This side will have to
+  // accept both forms for as long as any of them remain. The encoded form is
+  // self-identifying -- `data-model` tags it `fvj1:` -- and
+  // `seemsLikeJsonEncodedFabricValue()` exists to make that distinction.
+  return JSON.parse(text);
+}
+
+/**
  * Extracts and parses the JSON payload of a `data:` URI, which is required to
  * have the media type `application/json`. The payload is everything past the
  * first comma, and how it is spelled is dictated by the parameters in the
@@ -96,12 +128,15 @@ export function fromURI(uri: URI | string): string {
  * header parameters (`data:application/json,...`). The Base64 and `charset`
  * spellings are for `data:` URIs originating anywhere else.
  *
+ * The extracted payload text is decoded via {@link decodeDataURIPayloadText}.
+ *
  * **Note:** This is the decode half of a matched set: it reads what
  * `createDataCellURI()` writes. The two are a pair by construction -- the
  * encoding chosen there dictates what is decodable here -- but the dependency
  * between the files only runs one way (`link-utils.ts` imports this module,
  * not the reverse), so nothing mechanically holds them in agreement. Change
- * one and the other has to move with it; see the `TODO`s in both bodies.
+ * one and the other has to move with it; see the `TODO`s in
+ * `createDataCellURI()` and {@link decodeDataURIPayloadText}.
  *
  * @param uri The `data:` URI to read.
  * @returns The parsed payload, or `undefined` if the payload is empty.
@@ -152,21 +187,9 @@ export function getJSONFromDataURI(uri: URI | string): any {
     decodedData = decodeURIComponent(data);
   }
 
-  // TODO(danfuzz): This `JSON.parse()` is the decode half of the `data:` URI
-  // boundary, and has to change in lockstep with the `JSON.stringify()` in
-  // `link-utils.ts`'s `createDataCellURI()`: whatever encodes the payload
-  // determines what can decode it. The `data-model` counterpart is
-  // `valueFromJson()`, given a `ReconstructionContext`;
-  // `memory/v2.ts`'s `encodeMemoryBoundary()`/`decodeMemoryBoundary()` pair is
-  // a worked example of the same boundary, and uses an
-  // `EmptyReconstructionContext` because links at that boundary are sigil
-  // (plain) data rather than `FabricInstance`s, which is true here too.
-  //
-  // Note that this decode cannot simply switch over: a `data:` URI _is_ its
-  // own content, and such URIs are embedded in persisted documents, so ids in
-  // the current (bare JSON) form survive indefinitely. This side will have to
-  // accept both forms for as long as any of them remain. The encoded form is
-  // self-identifying -- `data-model` tags it `fvj1:` -- and
-  // `seemsLikeJsonEncodedFabricValue()` exists to make that distinction.
-  return decodedData.length > 0 ? JSON.parse(decodedData) : undefined;
+  if (decodedData.length === 0) {
+    return undefined;
+  }
+
+  return decodeDataURIPayloadText(decodedData);
 }

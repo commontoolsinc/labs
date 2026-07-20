@@ -23,6 +23,7 @@ import { unclaimed } from "@commonfabric/memory/fact";
 import { getLogger } from "@commonfabric/utils/logger";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { toTransactionDocumentValue } from "../v2-document.ts";
+import { decodeDataURIPayloadText } from "../../uri-utils.ts";
 
 const logger = getLogger("attestation", {
   enabled: false,
@@ -276,7 +277,7 @@ export const load = (
         if (mediaType === "application/json") {
           let value: FabricValue;
           try {
-            value = JSON.parse(content);
+            value = decodeDataURIPayloadText(content);
             result = { ok: { address: { ...address, path: [] }, value } };
           } catch (error) {
             const reason = error as Error;
