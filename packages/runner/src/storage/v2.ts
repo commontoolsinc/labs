@@ -55,7 +55,7 @@ import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
-import { getJSONFromDataURI } from "../uri-utils.ts";
+import { getJSONFromDataURI } from "../data-uri.ts";
 import {
   isPrimitiveCellLink,
   type NormalizedLink,

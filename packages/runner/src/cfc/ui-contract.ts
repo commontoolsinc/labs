@@ -6,7 +6,7 @@ import {
   parseLink,
 } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { getJSONFromDataURI } from "../uri-utils.ts";
+import { getJSONFromDataURI } from "../data-uri.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import type { CfcAddress } from "./types.ts";
 import { isNormalizedFullLink } from "../link-types.ts";
