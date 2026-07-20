@@ -1,14 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { jsonFromValue } from "@commonfabric/data-model/codec-json";
-import { encodeBase64Url } from "@std/encoding/base64url";
+import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import { load } from "../src/storage/transaction/attestation.ts";
 import type { URI } from "../src/sigil-types.ts";
 
 /** Percent-encoded `data:` URI with the given payload text. */
 const uriOf = (payload: string): URI =>
   `data:application/vnd.common-fabric.data,${
-    encodeBase64Url(new TextEncoder().encode(payload))
+    toUnpaddedBase64url(new TextEncoder().encode(payload))
   }` as URI;
 
 // `load()` is the storage-transaction-side reader of `data:` URI documents,
@@ -63,7 +63,7 @@ describe("attestation `load()` of `data:` URIs", () => {
   it("rejects the `application/json` media type", () => {
     const { ok, error } = load({
       id: `data:application/json,${
-        encodeBase64Url(new TextEncoder().encode(jsonFromValue({ a: 1 })))
+        toUnpaddedBase64url(new TextEncoder().encode(jsonFromValue({ a: 1 })))
       }` as URI,
     });
     expect(ok).toBeUndefined();

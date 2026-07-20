@@ -33,7 +33,7 @@ import {
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { valueFromJson } from "@commonfabric/data-model/codec-json";
-import { decodeBase64Url } from "@std/encoding/base64url";
+import { fromBase64url } from "@commonfabric/utils/base64url";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import { isRecord } from "@commonfabric/utils/types";
 import { type Cell, isCell } from "./cell.ts";
@@ -234,7 +234,7 @@ export function extractDataURIPayloadText(
   if (!/^[-_A-Za-z0-9]*$/.test(data)) {
     throw new Error(`Invalid data URI payload (not base64url): ${uri}`);
   }
-  return { mediaType, text: textDecoder.decode(decodeBase64Url(data)) };
+  return { mediaType, text: textDecoder.decode(fromBase64url(data)) };
 }
 
 /**
