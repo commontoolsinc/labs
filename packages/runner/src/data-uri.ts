@@ -216,6 +216,16 @@ export function getJSONFromDataURI(uri: URI | string): any {
 /**
  * Find any data: URI links and inline them.
  *
+ * TODO(danfuzz): This `isRecord`-gated walk has no `FabricSpecialObject`
+ * guard: after the link check, a non-link `FabricPrimitive`/`FabricInstance`
+ * falls into the `Object.entries` descent, which walks it by enumerable own
+ * props instead of treating it as a leaf. An instance with no enumerable
+ * props happens to pass through by reference, but the copy-on-write branch
+ * (`{ ...value }`) silently flattens any instance whose entry inlines
+ * differently into a plain object. The payload walk
+ * (`dataValue[path.shift()]`) indexes into decoded content with the same
+ * blindness.
+ *
  * @param value - The value to find and inline data: URI links in.
  * @returns The value with any data: URI links inlined.
  */
