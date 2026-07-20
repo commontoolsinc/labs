@@ -10,6 +10,7 @@ import {
   RECORD_SUBSCHEMA_KEYS,
   SINGLE_SUBSCHEMA_KEYS,
   type SchemaNode,
+  subschemaEdges,
   type SubschemaKeyword,
   walkSchema,
 } from "../src/schema-walk.ts";
@@ -131,6 +132,45 @@ describe("forEachSubschema", () => {
       const edges = edgesOf({ [keyword]: { x: { type: "string" } } });
       expect(edges.map((e) => e.keyword)).toContain(keyword);
     }
+  });
+});
+
+describe("subschemaEdges (generator form)", () => {
+  it("yields the same edges as forEachSubschema, usable via for-of", () => {
+    const schema: JSONSchema = {
+      properties: { a: { type: "string" }, b: { type: "number" } },
+      prefixItems: [{ type: "string" }],
+      items: { type: "null" },
+      not: { type: "array" },
+    };
+    // for-of + spread ergonomics.
+    const gen = [...subschemaEdges(schema)];
+    const cb = edgesOf(schema);
+    expect(gen.length).toBe(cb.length);
+    expect(gen.map((e) => `${e.keyword}:${e.key ?? e.index ?? ""}`).toSorted())
+      .toEqual(cb.map((e) => `${e.keyword}:${e.key ?? e.index ?? ""}`).toSorted());
+  });
+
+  it("honors includeDefs / includeUnused like the callback", () => {
+    const schema: JSONSchema = {
+      $defs: { Foo: { type: "string" } },
+      patternProperties: { ".*": { type: "number" } },
+    };
+    expect([...subschemaEdges(schema)].length).toBe(0);
+    expect([...subschemaEdges(schema, { includeDefs: true })].length).toBe(1);
+    expect([...subschemaEdges(schema, { includeUnused: true })].length).toBe(1);
+  });
+
+  it("supports early break", () => {
+    const schema: JSONSchema = {
+      properties: { a: { type: "string" }, b: { type: "number" } },
+    };
+    let count = 0;
+    for (const _ of subschemaEdges(schema)) {
+      count++;
+      break;
+    }
+    expect(count).toBe(1);
   });
 });
 

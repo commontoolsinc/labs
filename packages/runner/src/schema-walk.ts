@@ -203,6 +203,59 @@ export function forEachSubschema(
   return false;
 }
 
+/** One immediate subschema of a parent, with the edge that reached it. */
+export interface SubschemaEdge {
+  readonly schema: JSONSchema;
+  /** The keyword this subschema hangs off. */
+  readonly keyword: SubschemaKeyword;
+  /** For record-valued keywords: the property / definition name. */
+  readonly key?: string;
+  /** For array-valued keywords: the index. */
+  readonly index?: number;
+}
+
+/**
+ * Generator form of {@link forEachSubschema}: yields each immediate subschema
+ * as an edge object, so callers can use `for…of` (and `break`/spread/iterator
+ * helpers) instead of the callback + `return true` convention.
+ *
+ * ```ts
+ * for (const { schema, keyword } of subschemaEdges(node)) { ... }
+ * ```
+ *
+ * Simpler to read, but ~2× slower than `forEachSubschema` (a generator
+ * allocates an iterator and an edge object per node). Prefer `forEachSubschema`
+ * on hot paths; reach for this when clarity matters more than the microseconds.
+ * Same tiers apply (`includeDefs`, `includeUnused`).
+ */
+export function* subschemaEdges(
+  schema: JSONSchema,
+  opts: SchemaWalkOptions = {},
+): Generator<SubschemaEdge> {
+  if (!isRecord(schema)) return;
+  const node = schema as JSONSchemaObj;
+  for (const keyword of singleKeywordsFor(opts)) {
+    const child = node[keyword];
+    if (child !== undefined) yield { schema: child, keyword };
+  }
+  for (const keyword of ARRAY_SUBSCHEMA_KEYS) {
+    const arr = node[keyword];
+    if (Array.isArray(arr)) {
+      for (let index = 0; index < arr.length; index++) {
+        yield { schema: arr[index], keyword, index };
+      }
+    }
+  }
+  for (const keyword of recordKeywordsFor(opts)) {
+    const record = node[keyword];
+    if (isRecord(record)) {
+      for (const [key, child] of Object.entries(record)) {
+        yield { schema: child as JSONSchema, keyword, key };
+      }
+    }
+  }
+}
+
 /**
  * Rebuild `schema` replacing each immediate subschema with `map(child)`,
  * preserving object identity when nothing changed (returns the same object, and
