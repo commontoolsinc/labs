@@ -10,6 +10,10 @@ export interface DenoCommandWithTemporaryLockOptions {
 
 export interface DenoCheckWithTemporaryConfigOptions {
   root: string;
+  /**
+   * A copy of the root config with the same workspace dependency graph.
+   * Compiler options may differ for the check.
+   */
   config: unknown;
   files: string[];
   tempConfigPrefix: string;
@@ -85,6 +89,8 @@ export async function runDenoCheckWithTemporaryConfig(
         tempConfig,
         "--lock",
         tempLock,
+        // Verification uses the dependency graph pinned by the checked-in lock.
+        "--frozen=true",
         ...options.files,
       ],
     });

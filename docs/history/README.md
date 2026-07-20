@@ -220,6 +220,9 @@ One line per archived document; each document's header carries the fuller
 - [2026-07-ci-duration-profile.md](development/performance/2026-07-ci-duration-profile.md)
   — July 2026 Deno Workflow profile, including compile-cache validation,
   duplicate work, workspace shard balance, and follow-up experiments.
+- [2026-07-binary-artifact-transfer.md](development/performance/2026-07-binary-artifact-transfer.md)
+  — binary artifact file and byte transfer snapshot before the per-binary
+  workflow split, July 2026.
 - [scoped-cells-field-notes.md](development/scoped-cells-field-notes.md) —
   field journal from the first scoped-cell patterns.
 - [2026-07-02-convergence-evidence-appendix.md](plans/2026-07-02-convergence-evidence-appendix.md)

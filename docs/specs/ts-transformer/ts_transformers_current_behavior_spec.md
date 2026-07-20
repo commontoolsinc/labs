@@ -1983,25 +1983,29 @@ argument (`__cf_data((exports.x = evil, 1))`), and pipeline-compiled bodies are
 required precisely because bare `ts.transpileModule` cannot produce the
 `__cf_data` wrapping (`packages/runner/src/sandbox/module-record-compiler.ts`).
 
-### 15.6 Dormant alternate wiring (`__cfDataHelper`), historical
+### 15.6 Alternate wiring (`__cfDataHelper`), removed — historical
 
-The transformer and `CFHelpers` retain a second, data-helper-only emission
-path: when `__cfHelpers` is absent, `wrapWithCfData` falls back to a named
-`__cfDataHelper` import binding (`CFHelpers.getDataHelperExpr`) or a bare
-`__cfDataHelper` identifier plus a prepended
-`import { __cf_data as __cfDataHelper } from "commonfabric"`
-(`createCfDataHelperImport`, `CF_DATA_HELPER_IDENTIFIER`), and
-`shouldWrapTopLevelExpression` narrows to primitive-snapshot calls only. All
-of that is unreachable in the current pipeline: the `HelpersOnlyTransformer`
-filter guarantees `sourceHasHelpers()` at every wrap site. It is a remnant of
-the opt-in era (#3168), when modules without a `/// <cts-enable />` directive
-received only the data-helper import via `injectCfDataHelper`
-(`src/core/cf-helpers.ts`) from the runner's pretransform; that call site was
-removed when transforms became default-on (#3254,
-`packages/runner/src/harness/pretransform.ts`). `injectCfDataHelper` is still
-exported (`src/mod.ts`, `src/core/mod.ts`) but has **no callers** in the repo;
-`test/transform.test.ts` asserts `__cfDataHelper` does not appear in
-opted-out output.
+Until the 2026-07 docs audit the transformer and `CFHelpers` retained a
+second, data-helper-only emission path from the opt-in era (#3168), when
+modules without a `/// <cts-enable />` directive received only a
+`__cf_data as __cfDataHelper` import from the runner's pretransform (via a
+string-pass `injectCfDataHelper` helper): with `__cfHelpers` absent,
+`wrapWithCfData` fell back to that import binding or a bare `__cfDataHelper`
+identifier plus a prepended import, and `shouldWrapTopLevelExpression`
+narrowed to primitive-snapshot calls only. The wiring became unreachable when
+transforms went default-on (#3254 removed the pretransform call site; the
+`HelpersOnlyTransformer` filter guarantees `sourceHasHelpers()` at every wrap
+site) and its output had drifted out of contract — `__cfDataHelper(...)` is
+not in `TRUSTED_DATA_HELPERS`, so the sandbox verifier would not classify the
+fallback's wraps. The audit removed the whole path: `injectCfDataHelper`, the
+fallback emission arms, `createCfDataHelperImport`, and the
+`getDataHelperExpr` / `sourceHasDataHelper` recognizer surface.
+`wrapWithCfData` now has the single §15.2 emission form, and `getHelperExpr`
+throws if the filter invariant is ever violated (pinned in
+`test/module-scope-cf-data-coverage.test.ts`). `test/transform.test.ts` once
+asserted `__cfDataHelper` absent from opted-out output; #4463's
+structural-assertion rewrite already dropped that literal check, and after
+this removal no code in the package references the identifier at all.
 
 
 ## 16. Pattern Runtime Coverage Instrumentation

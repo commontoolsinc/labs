@@ -452,6 +452,71 @@ Deno.test("extractMetrics aggregates workspace test matrix shards", () => {
   assertEquals(metrics.get("step: workspace tests")?.durationSeconds, 180);
 });
 
+Deno.test("extractMetrics records separate binary builds and their critical path", () => {
+  const metrics = extractMetrics(makeRun(), [
+    makeJob(
+      1,
+      "Build Binary (toolshed)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:03:20Z",
+      [
+        makeStep(
+          "🏗️ Build toolshed binary",
+          "2026-01-01T00:00:20Z",
+          "2026-01-01T00:03:00Z",
+        ),
+      ],
+    ),
+    makeJob(
+      2,
+      "Build Binary (bg-piece-service)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:40Z",
+      [
+        makeStep(
+          "🏗️ Build bg-piece-service binary",
+          "2026-01-01T00:00:20Z",
+          "2026-01-01T00:01:20Z",
+        ),
+      ],
+    ),
+    makeJob(
+      3,
+      "Build Binary (cf)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:02:30Z",
+      [
+        makeStep(
+          "🏗️ Build cf binary",
+          "2026-01-01T00:00:20Z",
+          "2026-01-01T00:02:10Z",
+        ),
+      ],
+    ),
+  ]);
+
+  assertEquals(
+    metrics.get("job: Build Binary (toolshed)")?.durationSeconds,
+    200,
+  );
+  assertEquals(
+    metrics.get("job: Build Binary (bg-piece-service)")?.durationSeconds,
+    100,
+  );
+  assertEquals(metrics.get("job: Build Binary (cf)")?.durationSeconds, 150);
+  assertEquals(metrics.get("job: Build Binaries")?.durationSeconds, 200);
+  assertEquals(
+    metrics.get("step: Build toolshed binary")?.durationSeconds,
+    160,
+  );
+  assertEquals(
+    metrics.get("step: Build bg-piece-service binary")?.durationSeconds,
+    60,
+  );
+  assertEquals(metrics.get("step: Build cf binary")?.durationSeconds, 110);
+  assertEquals(metrics.get("step: Build application")?.durationSeconds, 160);
+});
+
 Deno.test("timingArtifactLabel normalizes matrix shard artifacts", () => {
   assertEquals(
     timingArtifactLabel("test-timing-package-integration-runner"),

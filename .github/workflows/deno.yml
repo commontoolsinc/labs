@@ -12,11 +12,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Define the list of binaries we're building
-# This makes it easy to add more binaries in the future
-env:
-  BINARIES: "toolshed bg-piece-service cf"
-
 # Every step name must begin with a phase-marker emoji (setup / work / shutdown).
 # scripts/ci-gantt.ts reads that emoji to split each job bar by phase. See the
 # "Step phase markers" table in docs/development/CI_PERFORMANCE.md for the
@@ -210,8 +205,8 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
-  build-binaries:
-    name: "Build Binaries"
+  build-toolshed:
+    name: "Build Binary (toolshed)"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -224,20 +219,69 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
-      - name: 🏗️ Build application binaries
-        run: deno task build-binaries
+      - name: 🏗️ Build toolshed binary
+        run: deno task build-binaries toolshed
         env:
           COMMIT_SHA: ${{ github.sha }}
 
-      # Upload binaries as artifacts for the integration tests
-      - name: 📤 Upload binaries for integration tests
+      - name: 📤 Upload toolshed binary
         uses: actions/upload-artifact@v7
         with:
-          name: common-binaries
-          path: |
-            ./dist/toolshed
-            ./dist/bg-piece-service
-            ./dist/cf
+          name: binary-toolshed
+          path: ./dist/toolshed
+          if-no-files-found: error
+
+  build-bg-piece-service:
+    name: "Build Binary (bg-piece-service)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v7
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      - name: 🏗️ Build bg-piece-service binary
+        run: deno task build-binaries bg-piece-service
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+
+      - name: 📤 Upload bg-piece-service binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: binary-bg-piece-service
+          path: ./dist/bg-piece-service
+          if-no-files-found: error
+
+  build-cf:
+    name: "Build Binary (cf)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v7
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      - name: 🏗️ Build cf binary
+        run: deno task build-binaries cf
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+
+      - name: 📤 Upload cf binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: binary-cf
+          path: ./dist/cf
+          if-no-files-found: error
 
   generated-patterns-integration-test:
     name: "Generated Patterns Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
@@ -326,7 +370,7 @@ jobs:
     name: "Package Integration Tests (${{ matrix.suite_name }})"
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: ["build-binaries"]
+    needs: ["build-toolshed"]
     strategy:
       fail-fast: false
       matrix:
@@ -356,10 +400,10 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
-      - name: 📥 Download built binaries
+      - name: 📥 Download toolshed binary
         uses: actions/download-artifact@v8
         with:
-          name: common-binaries
+          name: binary-toolshed
           path: common-binaries
 
       - name: 🔌 Start Toolshed server for testing
@@ -418,7 +462,7 @@ jobs:
     name: "CLI Integration Tests (${{ matrix.suite_name }})"
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.timeout_minutes }}
-    needs: ["build-binaries"]
+    needs: ["build-toolshed", "build-cf"]
     strategy:
       fail-fast: false
       matrix:
@@ -457,10 +501,16 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
-      - name: 📥 Download built binaries
+      - name: 📥 Download toolshed binary
         uses: actions/download-artifact@v8
         with:
-          name: common-binaries
+          name: binary-toolshed
+          path: common-binaries
+
+      - name: 📥 Download cf binary
+        uses: actions/download-artifact@v8
+        with:
+          name: binary-cf
           path: common-binaries
 
       - name: 🔌 Start Toolshed server for testing
@@ -571,7 +621,7 @@ jobs:
     name: "Pattern Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: ["build-binaries"]
+    needs: ["build-toolshed"]
     strategy:
       fail-fast: false
       matrix:
@@ -623,10 +673,10 @@ jobs:
           cache-file: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
           exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
 
-      - name: 📥 Download built binaries
+      - name: 📥 Download toolshed binary
         uses: actions/download-artifact@v8
         with:
-          name: common-binaries
+          name: binary-toolshed
           path: common-binaries
 
       - name: 🔌 Start Toolshed server for testing
@@ -748,7 +798,7 @@ jobs:
     name: "Pattern Unit Tests (${{ matrix.chunk }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: ["build-binaries"]
+    needs: ["build-cf"]
     strategy:
       matrix:
         chunk: [1, 2, 3, 4, 5]
@@ -783,10 +833,10 @@ jobs:
           cache-file: ${{ github.workspace }}/.compile-cache/pattern-unit-coverage-${{ matrix.chunk }}.json
           exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
 
-      - name: 📥 Download built binaries
+      - name: 📥 Download cf binary
         uses: actions/download-artifact@v8
         with:
-          name: common-binaries
+          name: binary-cf
           path: common-binaries
 
       - name: 🧪 Run pattern unit tests
@@ -833,7 +883,9 @@ jobs:
     needs:
       - check
       - test
-      - build-binaries
+      - build-toolshed
+      - build-bg-piece-service
+      - build-cf
       - package-integration-test
       - cli-integration-test
       - pattern-integration-test
@@ -901,6 +953,9 @@ jobs:
       [
         "test",
         "check",
+        "build-toolshed",
+        "build-bg-piece-service",
+        "build-cf",
         "runner-test",
         "pattern-integration-test",
         "pattern-reload-integration-test",
@@ -919,10 +974,22 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
 
-      - name: 📥 Download built binaries
+      - name: 📥 Download toolshed binary
         uses: actions/download-artifact@v8
         with:
-          name: common-binaries
+          name: binary-toolshed
+          path: common-binaries
+
+      - name: 📥 Download bg-piece-service binary
+        uses: actions/download-artifact@v8
+        with:
+          name: binary-bg-piece-service
+          path: common-binaries
+
+      - name: 📥 Download cf binary
+        uses: actions/download-artifact@v8
+        with:
+          name: binary-cf
           path: common-binaries
 
       - name: 🦕 Setup Deno
