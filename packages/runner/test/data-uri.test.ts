@@ -8,6 +8,7 @@ import {
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { UnknownValue } from "@commonfabric/data-model/fabric-instances";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   createDataCellURI,
@@ -271,6 +272,18 @@ describe("data-uri", () => {
       const parsed = getJSONFromDataURI(createDataCellURI({ h }));
       expect(parsed.value.h).toBeInstanceOf(FabricHash);
       expect(parsed.value.h.toString()).toBe(h.toString());
+    });
+
+    // Link-free content on purpose: for an instance whose state carries no
+    // links, today's pass-through and the eventual traverse-into-state
+    // behavior (see the `TODO` in the walk) coincide, so this pins only the
+    // codec round-trip, not the pass-through itself.
+    it("represents a link-free `FabricInstance` via its codec", () => {
+      const inst = new UnknownValue("zzz@1", { a: 1 });
+      const parsed = getJSONFromDataURI(createDataCellURI({ inst }));
+      expect(parsed.value.inst).toBeInstanceOf(UnknownValue);
+      expect(parsed.value.inst.wireTypeTag).toBe("zzz@1");
+      expect(parsed.value.inst.state).toEqual({ a: 1 });
     });
 
     it("rewrites relative links in the modern regime (`FabricLink`)", () => {
