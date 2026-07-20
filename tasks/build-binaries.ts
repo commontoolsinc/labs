@@ -10,12 +10,35 @@ import {
 export interface BuildConfigInitializer {
   root: string;
   toolshedFlags: string[];
+  binaries?: readonly BinaryName[];
   cliOnly?: boolean;
+}
+
+export const BINARY_NAMES = ["toolshed", "bg-piece-service", "cf"] as const;
+export type BinaryName = (typeof BINARY_NAMES)[number];
+
+export function requestedBinaries(args: readonly string[]): BinaryName[] {
+  if (args.length === 0) return [...BINARY_NAMES];
+  if (args.length === 1 && args[0] === "--cli-only") return ["cf"];
+
+  const requested = new Set<BinaryName>();
+  for (const arg of args) {
+    if (!BINARY_NAMES.includes(arg as BinaryName)) {
+      throw new Error(
+        `Unknown binary "${arg}". Expected one or more of: ${
+          BINARY_NAMES.join(", ")
+        }`,
+      );
+    }
+    requested.add(arg as BinaryName);
+  }
+  return BINARY_NAMES.filter((binary) => requested.has(binary));
 }
 
 export class BuildConfig {
   readonly root: string;
   readonly toolshedFlags: string[];
+  readonly binaries: readonly BinaryName[];
   readonly cliOnly: boolean;
   private _manifestOriginal: string;
   private _compileCacheVersionOriginal: string;
@@ -23,7 +46,13 @@ export class BuildConfig {
   constructor(options: BuildConfigInitializer) {
     this.root = options.root;
     this.toolshedFlags = options.toolshedFlags;
-    this.cliOnly = !!options.cliOnly;
+    if (options.cliOnly && options.binaries) {
+      throw new Error("cliOnly and binaries cannot be combined");
+    }
+    this.binaries = options.cliOnly
+      ? ["cf"]
+      : [...(options.binaries ?? BINARY_NAMES)];
+    this.cliOnly = this.binaries.length === 1 && this.binaries[0] === "cf";
     this._manifestOriginal = Deno.readTextFileSync(
       this.workspaceManifestPath(),
     );
@@ -145,6 +174,10 @@ export class BuildConfig {
   distPath(binary: string) {
     return this.path("dist", binary);
   }
+
+  builds(binary: BinaryName): boolean {
+    return this.binaries.includes(binary);
+  }
 }
 
 async function build(config: BuildConfig): Promise<void> {
@@ -153,11 +186,13 @@ async function build(config: BuildConfig): Promise<void> {
     // Ensure dist directory exists
     await ensureDistDir(config);
 
-    if (!config.cliOnly) await buildShell(config);
+    if (config.builds("toolshed")) await buildShell(config);
     await prepareWorkspace(config);
-    if (!config.cliOnly) await buildToolshed(config);
-    if (!config.cliOnly) await buildBgPieceService(config);
-    await buildCli(config);
+    if (config.builds("toolshed")) await buildToolshed(config);
+    if (config.builds("bg-piece-service")) {
+      await buildBgPieceService(config);
+    }
+    if (config.builds("cf")) await buildCli(config);
   } catch (e: unknown) {
     buildError = e as Error;
   }
@@ -485,7 +520,7 @@ if (import.meta.main) {
       "--allow-net",
       "--allow-write",
     ],
-    cliOnly: Deno.args.includes("--cli-only"),
+    binaries: requestedBinaries(Deno.args),
   });
 
   await runBuildWithSignalCleanup(config);

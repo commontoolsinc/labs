@@ -358,7 +358,7 @@ shell expansion to forward extra `deno test` flags (e.g. `--filter`).
 | `check` | Type-check all packages (`./tasks/check.sh`). |
 | `test` | Run all package tests (`./tasks/test.ts`). |
 | `integration` | Run integration tests (`./tasks/integration.ts`). |
-| `build-binaries` | Build standalone binaries (`cf`, `bg-piece-service`, etc.). |
+| `build-binaries` | Build all standalone binaries, or only the named targets passed after the task (`toolshed`, `bg-piece-service`, or `cf`). |
 | `cf` | Run the CLI via the launcher. |
 | `initialize-db` | Initialize the local development database. |
 | `install-hooks` | Install git pre-commit hooks. |

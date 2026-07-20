@@ -4,6 +4,7 @@ import {
   assertNotEquals,
   assertRejects,
   assertStringIncludes,
+  assertThrows,
 } from "@std/assert";
 import { exists } from "@std/fs";
 import { fromFileUrl, join } from "@std/path";
@@ -13,6 +14,7 @@ import {
   type BuildSignalApi,
   installBuildSignalCleanup,
   prepareWorkspace,
+  requestedBinaries,
   revertWorkspace,
   runBuildWithSignalCleanup,
 } from "./build-binaries.ts";
@@ -136,6 +138,7 @@ Deno.test("BuildConfig resolves workspace paths against the root", async () => {
     const config = new BuildConfig({ root, toolshedFlags: [], cliOnly: true });
 
     assertEquals(config.root, root);
+    assertEquals(config.binaries, ["cf"]);
     assertEquals(config.cliOnly, true);
     assertEquals(config.workspaceManifestPath(), join(root, "deno.jsonc"));
     assertEquals(config.workspaceLockPath(), join(root, "deno.lock"));
@@ -207,6 +210,27 @@ Deno.test("BuildConfig resolves workspace paths against the root", async () => {
   } finally {
     await Deno.remove(root, { recursive: true });
   }
+});
+
+Deno.test("requestedBinaries selects all binaries or named subsets", () => {
+  assertEquals(requestedBinaries([]), ["toolshed", "bg-piece-service", "cf"]);
+  assertEquals(requestedBinaries(["toolshed"]), ["toolshed"]);
+  assertEquals(requestedBinaries(["cf", "toolshed"]), ["toolshed", "cf"]);
+  assertEquals(requestedBinaries(["cf", "cf"]), ["cf"]);
+  assertEquals(requestedBinaries(["--cli-only"]), ["cf"]);
+});
+
+Deno.test("requestedBinaries rejects unknown build targets", () => {
+  assertThrows(
+    () => requestedBinaries(["unknown"]),
+    Error,
+    'Unknown binary "unknown". Expected one or more of: toolshed, bg-piece-service, cf',
+  );
+  assertThrows(
+    () => requestedBinaries(["--cli-only", "toolshed"]),
+    Error,
+    'Unknown binary "--cli-only"',
+  );
 });
 
 Deno.test("manifest() returns an independent parsed copy each call", async () => {
