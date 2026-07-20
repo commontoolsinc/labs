@@ -27,6 +27,20 @@ export function setupHostToggles(): void {
 }
 
 /**
+ * Read the pattern-coverage host flag. Unlike the other toggles this carries no
+ * `commonfabric.*` console command: it is set by the integration harness via
+ * localStorage before login (gated by CF_PATTERN_COVERAGE_DIR on the test
+ * process), never by a dogfooding user. See docs/development/COVERAGE.md.
+ */
+export function isPatternCoverageEnabled(): boolean {
+  try {
+    return globalThis.localStorage?.getItem("patternCoverage") === "true";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The host-toggle flags read at runtime creation and passed to
  * RuntimeInternals.create. Read fresh per creation: a re-created runtime
  * (identity or host change) picks up the current persisted state.
@@ -34,9 +48,11 @@ export function setupHostToggles(): void {
 export function runtimeHostFlags(): {
   forwardWorkerConsole: boolean;
   cfcRenderCeiling: boolean;
+  patternCoverage: boolean;
 } {
   return {
     forwardWorkerConsole: isWorkerConsoleForwardingEnabled(),
     cfcRenderCeiling: isCfcRenderCeilingEnabled(),
+    patternCoverage: isPatternCoverageEnabled(),
   };
 }

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { jsonFromValue } from "@commonfabric/data-model/codec-json";
+import { decodeBase64Url, encodeBase64Url } from "@std/encoding/base64url";
 import {
   linkRefFrom,
   linkRefPayload,
@@ -240,8 +241,8 @@ describe("data-uri", () => {
       const dataURI = createDataCellURI({ x: 1 });
       expect(dataURI.startsWith("data:application/vnd.common-fabric.data,"))
         .toBe(true);
-      const payload = decodeURIComponent(
-        dataURI.slice(dataURI.indexOf(",") + 1),
+      const payload = new TextDecoder().decode(
+        decodeBase64Url(dataURI.slice(dataURI.indexOf(",") + 1)),
       );
       expect(payload.startsWith("fvj1:")).toBe(true);
     });
@@ -349,29 +350,44 @@ describe("data-uri", () => {
   });
 
   describe("getJSONFromDataURI", () => {
-    /** Percent-encoded `data:` URI with the given payload text. */
+    /** `data:` cell URI (base64url payload) with the given payload text. */
     const uriOf = (payload: string): string =>
-      `data:application/vnd.common-fabric.data,${encodeURIComponent(payload)}`;
+      `data:application/vnd.common-fabric.data,${
+        encodeBase64Url(new TextEncoder().encode(payload))
+      }`;
 
-    /** Base64 `data:` URI with the given payload text. */
-    const base64UriOf = (payload: string): string => {
-      const bytes = new TextEncoder().encode(payload);
-      const binary = String.fromCharCode(...bytes);
-      return `data:application/vnd.common-fabric.data;base64,${btoa(binary)}`;
-    };
-
-    it("rejects a URI whose media type is not a data-cell type", () => {
-      expect(() => getJSONFromDataURI("data:text/plain,hello")).toThrow(
+    it("rejects a URI whose media type is not the data-cell type", () => {
+      expect(() => getJSONFromDataURI("data:text/plain,aGVsbG8")).toThrow(
         /Invalid URI/,
       );
     });
 
-    // `application/json` is the also-accepted read form; ids carrying it can
-    // arrive from external minters and from processes running earlier builds.
-    it("accepts the `application/json` media type", () => {
-      const payload = encodeURIComponent(jsonFromValue({ a: 1 }));
-      expect(getJSONFromDataURI(`data:application/json,${payload}`))
-        .toEqual({ a: 1 });
+    // Exactly one media type is accepted; the historical `application/json`
+    // form is not.
+    it("rejects the `application/json` media type", () => {
+      const payload = encodeBase64Url(
+        new TextEncoder().encode(jsonFromValue({ a: 1 })),
+      );
+      expect(() => getJSONFromDataURI(`data:application/json,${payload}`))
+        .toThrow(/Invalid URI/);
+    });
+
+    // There are no header parameters in this format; a header carrying any
+    // fails the media-type check.
+    it("rejects header parameters (charset, base64)", () => {
+      const payload = encodeBase64Url(
+        new TextEncoder().encode(jsonFromValue({})),
+      );
+      expect(() =>
+        getJSONFromDataURI(
+          `data:application/vnd.common-fabric.data;charset=utf-8,${payload}`,
+        )
+      ).toThrow(/Invalid URI/);
+      expect(() =>
+        getJSONFromDataURI(
+          `data:application/vnd.common-fabric.data;base64,${payload}`,
+        )
+      ).toThrow(/Invalid URI/);
     });
 
     it("rejects a URI with no comma", () => {
@@ -382,50 +398,39 @@ describe("data-uri", () => {
       );
     });
 
-    it("rejects a non-UTF-8 charset", () => {
+    it("rejects a percent-encoded payload", () => {
+      const payload = encodeURIComponent(jsonFromValue({ a: 1 }));
       expect(() =>
         getJSONFromDataURI(
-          "data:application/vnd.common-fabric.data;charset=latin1,x",
+          `data:application/vnd.common-fabric.data,${payload}`,
         )
-      ).toThrow(/Unsupported charset/);
-    });
-
-    it("accepts an explicit UTF-8 charset", () => {
-      const payload = encodeURIComponent(jsonFromValue({}));
-      expect(
-        getJSONFromDataURI(
-          `data:application/vnd.common-fabric.data;charset=utf-8,${payload}`,
-        ),
-      ).toEqual({});
+      ).toThrow(/not base64url/);
     });
 
     // Both `data:` URI payload readers (this one and attestation `load()`)
     // reject an empty payload uniformly; see `decodeDataURIPayloadText()`.
     it("rejects an empty payload", () => {
-      expect(() => getJSONFromDataURI("data:application/json,")).toThrow();
+      expect(() =>
+        getJSONFromDataURI("data:application/vnd.common-fabric.data,")
+      ).toThrow();
     });
 
     describe("historical bare-JSON payloads", () => {
-      it("rejects a percent-encoded payload", () => {
+      it("rejects one", () => {
         expect(() => getJSONFromDataURI(uriOf('{"value":{"b":1}}')))
-          .toThrow();
-      });
-
-      it("rejects a Base64 payload", () => {
-        expect(() => getJSONFromDataURI(base64UriOf('{"value":"x"}')))
           .toThrow();
       });
     });
 
     describe("encoded-`FabricValue` (`fvj1:`) payloads", () => {
-      it("decodes a percent-encoded payload", () => {
+      it("decodes a payload", () => {
         const value = { value: { b: 1, a: [true, null, "x"] } };
         expect(getJSONFromDataURI(uriOf(jsonFromValue(value)))).toEqual(value);
       });
 
-      it("decodes a Base64 payload, including non-ASCII text", () => {
+      it("decodes non-ASCII text", () => {
         const value = { value: "città" };
-        expect(getJSONFromDataURI(base64UriOf(jsonFromValue(value))))
+        expect(getJSONFromDataURI(uriOf(jsonFromValue(value))))
           .toEqual(value);
       });
 
@@ -463,13 +468,11 @@ describe("data-uri", () => {
       });
 
       it("stops the payload at a raw query or fragment delimiter", () => {
-        // Minted payloads percent-escape `?` and `#`; raw ones delimit a
-        // query/fragment per the URL grammar (externally-sourced ids).
-        const payload = encodeURIComponent(jsonFromValue({ a: 1 }));
-        expect(getJSONFromDataURI(`data:application/json,${payload}#frag`))
-          .toEqual({ a: 1 });
-        expect(getJSONFromDataURI(`data:application/json,${payload}?q=1`))
-          .toEqual({ a: 1 });
+        // base64url never contains `?` or `#`; raw ones delimit a
+        // query/fragment per the URL grammar.
+        const uri = uriOf(jsonFromValue({ a: 1 }));
+        expect(getJSONFromDataURI(`${uri}#frag`)).toEqual({ a: 1 });
+        expect(getJSONFromDataURI(`${uri}?q=1`)).toEqual({ a: 1 });
       });
 
       it("rejects a malformed payload past the tag", () => {

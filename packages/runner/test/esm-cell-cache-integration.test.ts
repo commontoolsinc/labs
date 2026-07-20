@@ -4,6 +4,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
+import { PatternCoverageCollector } from "../src/pattern-coverage.ts";
 import type { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type {
@@ -11,10 +12,13 @@ import type {
   IExtendedStorageTransaction,
 } from "../src/storage/interface.ts";
 import {
+  compiledDocKey,
+  compiledDocWriteSchema,
   getCompileCacheRuntimeVersion,
   loadCompiledClosure,
   loadVerifiedSourceClosure,
   setCompileCacheRuntimeVersionForTesting,
+  sourceDocKey,
   writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
 
@@ -25,6 +29,7 @@ if (resolvedRuntimeVersion === undefined) {
   throw new Error("compile-cache runtime version unavailable in Deno test");
 }
 const runtimeVersion = resolvedRuntimeVersion;
+const coverageRuntimeVersion = `${runtimeVersion}/pattern-coverage`;
 
 // Step 5: PatternManager drives the content-addressed cell cache on the ESM
 // path — cold compiles write the module set back (CFC-stamped), warm compiles
@@ -52,10 +57,11 @@ describe("ESM compile via content-addressed cell cache", () => {
     ],
   };
 
-  const newRuntime = () =>
+  const newRuntime = (patternCoverage?: PatternCoverageCollector) =>
     new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      ...(patternCoverage === undefined ? {} : { patternCoverage }),
     });
 
   beforeEach(() => {
@@ -168,6 +174,123 @@ describe("ESM compile via content-addressed cell cache", () => {
     expect(await run(warm, 6)).toEqual({ result: 12 });
   });
 
+  it("recompiles coverage documents without JSON spans before loading by identity", async () => {
+    const firstCoverage = new PatternCoverageCollector();
+    const firstRuntime = newRuntime(firstCoverage);
+    const firstTx = firstRuntime.edit();
+    try {
+      const compiled = await firstRuntime.patternManager.compilePattern(
+        PROGRAM,
+        { space, tx: firstTx },
+      );
+      const entryIdentity = firstRuntime.patternManager.getArtifactEntryRef(
+        compiled,
+      )!.identity;
+
+      const readTx = firstRuntime.edit();
+      const closure = await loadCompiledClosure(
+        firstRuntime,
+        space,
+        entryIdentity,
+        { runtimeVersion: coverageRuntimeVersion },
+        readTx,
+      );
+      readTx.abort?.("coverage closure read complete");
+      expect(closure.size).toBeGreaterThan(0);
+      for (const doc of closure.values()) {
+        expect(Array.isArray(doc.patternCoverageSpans)).toBe(true);
+      }
+
+      const legacyTx = firstRuntime.edit();
+      const previousIdentity = legacyTx.getCfcState().implementationIdentity;
+      legacyTx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "compile-cache",
+      });
+      try {
+        for (const identity of closure.keys()) {
+          const cell = firstRuntime.getCell(
+            space,
+            compiledDocKey(coverageRuntimeVersion, identity),
+            compiledDocWriteSchema(),
+            legacyTx,
+          );
+          const stored = { ...(cell.get() as Record<string, unknown>) };
+          delete stored.patternCoverageSpansJson;
+          cell.set(stored);
+        }
+      } finally {
+        legacyTx.setCfcImplementationIdentity(previousIdentity);
+      }
+      legacyTx.prepareCfc();
+      expect((await legacyTx.commit()).error).toBeUndefined();
+
+      const restoredCoverage = new PatternCoverageCollector();
+      const restoredRuntime = newRuntime(restoredCoverage);
+      try {
+        const restored = await restoredRuntime.patternManager
+          .loadPatternByIdentity(entryIdentity, "default", space);
+        expect(typeof restored).toBe("function");
+        await restoredRuntime.patternManager.flushCompileCacheWrites();
+        expect(restoredCoverage.report().files.length).toBeGreaterThan(0);
+
+        const inspectTx = restoredRuntime.edit();
+        for (const identity of closure.keys()) {
+          const stored = restoredRuntime.getCell(
+            space,
+            compiledDocKey(coverageRuntimeVersion, identity),
+            compiledDocWriteSchema(),
+            inspectTx,
+          ).get() as Record<string, unknown>;
+          expect(typeof stored.patternCoverageSpansJson).toBe("string");
+        }
+        inspectTx.abort?.("repaired coverage closure inspection complete");
+      } finally {
+        await restoredRuntime.dispose();
+      }
+    } finally {
+      firstTx.abort?.("coverage format recovery test complete");
+      await firstRuntime.dispose();
+    }
+  });
+
+  it("repairs missing source data before a known-identity warm load", async () => {
+    const pm = runtime.patternManager;
+    const cold = await pm.compilePattern(PROGRAM, { space, tx });
+    const entryIdentity = pm.getArtifactEntryRef(cold)!.identity;
+
+    const damageTx = runtime.edit();
+    runtime.getCell(
+      space,
+      sourceDocKey(entryIdentity),
+      undefined,
+      damageTx,
+    ).set({ damaged: true });
+    expect((await damageTx.commit()).error).toBeUndefined();
+
+    const repaired = await pm.compilePattern(PROGRAM, {
+      space,
+      tx,
+      knownEntryIdentity: entryIdentity,
+    });
+    expect(pm.getCompileCacheStats()).toEqual({
+      hits: 1,
+      misses: 1,
+      byIdentityHits: 0,
+    });
+    expect(await run(repaired, 4)).toEqual({ result: 8 });
+
+    const readTx = runtime.edit();
+    const source = await loadVerifiedSourceClosure(
+      runtime,
+      space,
+      entryIdentity,
+      readTx,
+    );
+    readTx.abort?.("known-identity source repair probe complete");
+    expect(source?.has(entryIdentity)).toBe(true);
+  });
+
   it("persists the derived record surface and reads it back (Fix B round-trip)", async () => {
     // Guards the Fix B perf win against a SILENT regression: because the parse
     // fallback yields byte-identical records, a pattern still loads + runs
@@ -241,7 +364,7 @@ describe("ESM compile via content-addressed cell cache", () => {
     }
   });
 
-  it("keeps source-free identity recovery best-effort when writeback fails", async () => {
+  it("retries a best-effort identity recovery writeback on the next load", async () => {
     const compiled = await (runtime.harness as Engine).compileToRecordGraph(
       PROGRAM,
     );
@@ -275,6 +398,26 @@ describe("ESM compile via content-addressed cell cache", () => {
       );
       expect(typeof loaded).toBe("function");
       await runtime2.patternManager.flushCompileCacheWrites();
+
+      runtime2.editWithRetry = originalEditWithRetry;
+      const retried = await runtime2.patternManager.loadPatternByIdentity(
+        compiled.entryIdentity,
+        "default",
+        space,
+      );
+      expect(typeof retried).toBe("function");
+      await runtime2.patternManager.flushCompileCacheWrites();
+
+      const readTx = runtime2.edit();
+      const recovered = await loadCompiledClosure(
+        runtime2,
+        space,
+        compiled.entryIdentity,
+        { runtimeVersion },
+        readTx,
+      );
+      readTx.abort?.();
+      expect(recovered.has(compiled.entryIdentity)).toBe(true);
     } finally {
       runtime2.editWithRetry = originalEditWithRetry;
       await runtime2.dispose();

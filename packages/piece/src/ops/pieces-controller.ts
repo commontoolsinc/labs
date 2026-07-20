@@ -9,6 +9,7 @@ import {
   type JSONSchema,
   type MemorySpace,
   type ModuleByteCache,
+  type PatternCoverageCollector,
   Runtime,
   runtimePresets,
   RuntimeProgram,
@@ -204,15 +205,23 @@ export class PiecesController<T = unknown> {
     }
   }
 
-  static async initialize({ apiUrl, identity, spaceName, moduleByteCache }: {
-    apiUrl: URL;
-    identity: Identity;
-    spaceName: string;
-    // Optional compiled-module-byte cache to share across controllers. Supplied
-    // only by test code (see the integration suite's compile-byte-cache helper);
-    // unset in production, so no cache is installed.
-    moduleByteCache?: ModuleByteCache;
-  }): Promise<PiecesController> {
+  static async initialize(
+    { apiUrl, identity, spaceName, moduleByteCache, patternCoverage }: {
+      apiUrl: URL;
+      identity: Identity;
+      spaceName: string;
+      // Optional compiled-module-byte cache to share across controllers. Supplied
+      // only by test code (see the integration suite's compile-byte-cache helper);
+      // unset in production, so no cache is installed.
+      moduleByteCache?: ModuleByteCache;
+      // Collect statement coverage for the patterns this controller compiles.
+      // Test/CI only. Beyond the coverage itself, this decides which cached
+      // variant the pieces it creates are stored under, so a browser collecting
+      // coverage against the same space warm-loads them instead of recompiling
+      // every pattern for itself.
+      patternCoverage?: PatternCoverageCollector;
+    },
+  ): Promise<PiecesController> {
     const session = await createSession({ identity, spaceName });
     // Shared first-party posture for client runtimes against a deployed API
     // (CT-1814); the CFC pin this site previously restated lives in the
@@ -226,6 +235,7 @@ export class PiecesController<T = unknown> {
       }),
       experimental: experimentalOptionsFromEnv(readEnv),
       moduleByteCache,
+      patternCoverage,
       trustSnapshotProvider: () => ({
         id: `principal:${session.as.did()}`,
         actingPrincipal: session.as.did(),

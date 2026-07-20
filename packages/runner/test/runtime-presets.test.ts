@@ -106,6 +106,7 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   hideInternalStackFrames: { treat: "absent" },
   commitBackpressure: { treat: "absent" },
   moduleByteCache: { treat: "absent" },
+  patternCoverage: { treat: "absent" },
   fetch: { treat: "absent" },
 };
 
@@ -182,6 +183,9 @@ describe("runtimePresets conformance (CT-1814)", () => {
       get: () => undefined,
       set: () => {},
     } as unknown as NonNullable<RuntimeOptions["moduleByteCache"]>;
+    const patternCoverage = {
+      registerSpan: () => {},
+    } as unknown as NonNullable<RuntimeOptions["patternCoverage"]>;
     const trustSnapshotProvider = () => undefined;
     const telemetry = {
       dispatchEvent: () => true,
@@ -215,12 +219,14 @@ describe("runtimePresets conformance (CT-1814)", () => {
         navigateCallback,
         moduleByteCache,
         trustSnapshotProvider,
+        patternCoverage,
       })).toEqual({
         ...minimalOutputs.remoteClient,
         errorHandlers,
         navigateCallback,
         moduleByteCache,
         trustSnapshotProvider,
+        patternCoverage,
       });
     });
 
@@ -232,6 +238,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         navigateCallback,
         moduleByteCache,
         cfcEnforcementMode: "observe",
+        patternCoverage,
       })).toEqual({
         ...minimalOutputs.patternTest,
         fetch: fetchSentinel,
@@ -239,6 +246,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         navigateCallback,
         moduleByteCache,
         cfcEnforcementMode: "observe",
+        patternCoverage,
       });
     });
 
@@ -256,6 +264,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         navigateCallback,
         pieceCreatedCallback,
         onVersionSkew,
+        patternCoverage,
       })).toEqual({
         ...minimalOutputs.browserWorker,
         spaceHostMap,
@@ -269,6 +278,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         navigateCallback,
         pieceCreatedCallback,
         onVersionSkew,
+        patternCoverage,
       });
     });
 
