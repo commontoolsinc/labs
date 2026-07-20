@@ -17,7 +17,6 @@ import {
 } from "./cell.ts";
 import { type CellLinkRefPayload, type SigilLink } from "./sigil-types.ts";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { getJSONFromDataURI } from "./data-uri.ts";
 import { toURI } from "./uri-utils.ts";
 import { arrayEqual } from "./path-utils.ts";
 import {
@@ -265,101 +264,6 @@ export function createSigilLinkFromParsedLink(
   }
 
   return sigil;
-}
-
-/**
- * Find any data: URI links and inline them.
- *
- * @param value - The value to find and inline data: URI links in.
- * @returns The value with any data: URI links inlined.
- */
-export function findAndInlineDataURILinks(value: any): any {
-  if (isCellLink(value)) {
-    const dataLink = parseLink(value)!;
-
-    if (dataLink.id?.startsWith("data:")) {
-      let dataValue: any = getJSONFromDataURI(dataLink.id);
-      const path = [...dataLink.path];
-
-      // This is a storage item, so we have to look into the "value" field for
-      // the actual data.
-      if (!isRecord(dataValue)) return undefined;
-      dataValue = dataValue["value"];
-
-      // If there is a link on the way to `path`, follow it, appending remaining
-      // path to the target link.
-      while (dataValue !== undefined) {
-        if (isPrimitiveCellLink(dataValue)) {
-          // Parse the link found in the data URI
-          // Do NOT pass parsedLink as base to avoid inheriting the data: URI id
-          const newLink = parseLink(dataValue);
-          let schema = newLink.schema;
-          if (schema !== undefined && path.length > 0) {
-            const cfc = new ContextualFlowControl();
-            schema = cfc.getSchemaAtPath(schema, path);
-          }
-          // Create new link by merging dataLink with remaining path
-          const newSigilLink = createSigilLinkFromParsedLink({
-            // Start with values from the original data link
-            ...dataLink,
-
-            // overwrite with values from the new link
-            ...newLink,
-
-            // extend path with remaining segments
-            path: [...newLink.path, ...path],
-
-            // use resolved schema if we have one
-            ...(schema !== undefined && { schema }),
-          }, {
-            includeSchema: true,
-            keepAsCell: KeepAsCell.All,
-          });
-          return findAndInlineDataURILinks(newSigilLink);
-        }
-        if (path.length > 0) {
-          dataValue = dataValue[path.shift()!];
-        } else {
-          break;
-        }
-      }
-
-      return dataValue;
-    } else {
-      return value;
-    }
-  } else if (Array.isArray(value)) {
-    let next: any[] | undefined;
-    for (let index = 0; index < value.length; index++) {
-      if (!(index in value)) continue;
-      const current = value[index];
-      const inlined = findAndInlineDataURILinks(current);
-      if (next) {
-        next[index] = inlined;
-      } else if (!Object.is(inlined, current)) {
-        // `Object.is`: an untouched `NaN` leaf comes back as the same value
-        // and must not force a clone of the whole array.
-        next = value.slice();
-        next[index] = inlined;
-      }
-    }
-    return next ?? value;
-  } else if (isRecord(value)) {
-    let next: Record<string, unknown> | undefined;
-    for (const [key, entry] of Object.entries(value)) {
-      const inlined = findAndInlineDataURILinks(entry);
-      if (next) {
-        next[key] = inlined;
-      } else if (!Object.is(inlined, entry)) {
-        // `Object.is`: see the array case above.
-        next = { ...value };
-        next[key] = inlined;
-      }
-    }
-    return next ?? value;
-  } else {
-    return value;
-  }
 }
 
 /**

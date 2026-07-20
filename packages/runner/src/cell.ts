@@ -107,11 +107,10 @@ import {
   type URI,
 } from "./sigil-types.ts";
 import type { Runtime } from "./runtime.ts";
-import { createDataCellURI } from "./data-uri.ts";
+import { createDataCellURI, findAndInlineDataURILinks } from "./data-uri.ts";
 import {
   areLinksSame,
   createSigilLinkFromParsedLink,
-  findAndInlineDataURILinks,
   isCellLink,
   KeepAsCell,
   type NormalizedFullLink,
