@@ -7,7 +7,7 @@
 
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { jsonFromValue } from "@commonfabric/data-model/codec-json";
-import { encodeBase64Url } from "@std/encoding/base64url";
+import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import type { URI } from "@commonfabric/memory/interface";
 
 /** The media type minted for `data:` cell URIs. */
@@ -38,7 +38,7 @@ export function isDataCellURI(id: string): boolean {
  * other preparation of `value`; callers hand it a ready `FabricValue`.
  */
 export function mintDataCellURI(value: FabricValue): URI {
-  const payload = encodeBase64Url(
+  const payload = toUnpaddedBase64url(
     new TextEncoder().encode(jsonFromValue(value)),
   );
   return `data:${DATA_CELL_MEDIA_TYPE},${payload}` as URI;

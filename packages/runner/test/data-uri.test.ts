@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { jsonFromValue } from "@commonfabric/data-model/codec-json";
-import { decodeBase64Url, encodeBase64Url } from "@std/encoding/base64url";
+import {
+  fromBase64url,
+  toUnpaddedBase64url,
+} from "@commonfabric/utils/base64url";
 import {
   linkRefFrom,
   linkRefPayload,
@@ -242,7 +245,7 @@ describe("data-uri", () => {
       expect(dataURI.startsWith("data:application/vnd.common-fabric.data,"))
         .toBe(true);
       const payload = new TextDecoder().decode(
-        decodeBase64Url(dataURI.slice(dataURI.indexOf(",") + 1)),
+        fromBase64url(dataURI.slice(dataURI.indexOf(",") + 1)),
       );
       expect(payload.startsWith("fvj1:")).toBe(true);
     });
@@ -353,7 +356,7 @@ describe("data-uri", () => {
     /** `data:` cell URI (base64url payload) with the given payload text. */
     const uriOf = (payload: string): string =>
       `data:application/vnd.common-fabric.data,${
-        encodeBase64Url(new TextEncoder().encode(payload))
+        toUnpaddedBase64url(new TextEncoder().encode(payload))
       }`;
 
     it("rejects a URI whose media type is not the data-cell type", () => {
@@ -365,7 +368,7 @@ describe("data-uri", () => {
     // Exactly one media type is accepted; the historical `application/json`
     // form is not.
     it("rejects the `application/json` media type", () => {
-      const payload = encodeBase64Url(
+      const payload = toUnpaddedBase64url(
         new TextEncoder().encode(jsonFromValue({ a: 1 })),
       );
       expect(() => getJSONFromDataURI(`data:application/json,${payload}`))
@@ -375,7 +378,7 @@ describe("data-uri", () => {
     // There are no header parameters in this format; a header carrying any
     // fails the media-type check.
     it("rejects header parameters (charset, base64)", () => {
-      const payload = encodeBase64Url(
+      const payload = toUnpaddedBase64url(
         new TextEncoder().encode(jsonFromValue({})),
       );
       expect(() =>
