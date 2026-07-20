@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { jsonFromValue } from "@commonfabric/data-model/codec-json";
-import { createDataCellURI, getJSONFromDataURI } from "../src/data-uri.ts";
+import {
+  createDataCellURI,
+  decodeDataURIPayloadText,
+  getJSONFromDataURI,
+} from "../src/data-uri.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
@@ -220,6 +224,33 @@ describe("data-uri", () => {
       expect(parsed.value.arabic).toBe("مرحبا بالعالم");
       expect(parsed.value.special).toBe("Ñoño™©®");
       expect(parsed.value.mixed).toBe("Test 🎉 with ñ and 中文");
+    });
+  });
+
+  describe("decodeDataURIPayloadText", () => {
+    it("decodes JSON payload text", () => {
+      expect(decodeDataURIPayloadText('{"value":{"b":1,"a":[true,null]}}'))
+        .toEqual({ value: { b: 1, a: [true, null] } });
+      expect(decodeDataURIPayloadText("[1,2,3]")).toEqual([1, 2, 3]);
+      expect(decodeDataURIPayloadText('"plain"')).toBe("plain");
+      expect(decodeDataURIPayloadText("null")).toBe(null);
+    });
+
+    it("rejects invalid payload text", () => {
+      expect(() => decodeDataURIPayloadText("{nope")).toThrow();
+    });
+
+    it("rejects empty payload text", () => {
+      expect(() => decodeDataURIPayloadText("")).toThrow();
+    });
+
+    it("decodes encoded-`FabricValue` (`fvj1:`) payload text", () => {
+      const value = { value: { b: 1, a: [true, null, "x"] } };
+      expect(decodeDataURIPayloadText(jsonFromValue(value))).toEqual(value);
+    });
+
+    it("rejects invalid payload text past the `fvj1:` tag", () => {
+      expect(() => decodeDataURIPayloadText("fvj1:{nope")).toThrow();
     });
   });
 

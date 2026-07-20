@@ -179,20 +179,23 @@ its packages with `DENO_COVERAGE_DIR` and uploads it as
 The root task is `tasks/test.ts`. It reads the workspace list from
 `deno.jsonc`, selects this shard's packages by round-robin over the sorted
 package-name list (`selectShardMembers`), and runs `deno task test` in every
-selected package, at most `TEST_CONCURRENCY` (default: half the cores) at a
-time to keep contention-sensitive tests stable. Each shard's wall time is set
-by the slowest package test task in the shard, plus the fixed setup and
-coverage report steps around it. When a package fails, the runner prints that
-package's captured output immediately and stops starting new package tests.
-Package tests that are already running finish before the summary is printed.
+selected package. The test runner uses half the available cores for package
+workers. This is two package workers on the standard four-core CI runner.
+`TEST_CONCURRENCY` can override that default for a diagnostic run. Each shard's
+test time follows the longest chain of package tasks assigned to one worker,
+plus initialization inside the root task. Fixed workflow setup and coverage
+reporting sit outside that test step. When a package fails, the runner prints
+that package's captured output immediately and stops starting new package
+tests. Package tests that are already running finish before the summary is
+printed.
 
 When a shard becomes the long pole, start with the `Package timings:` block
 printed by `tasks/test.ts`. The round-robin split carries no per-package
-weighting, so first check whether one shard simply drew several slow packages;
-changing the shard count in the workflow matrix reshuffles the assignment.
-A shard-count change must also update the `coverage-profile-workspace-*`
-entries in `EXPECTED_COVERAGE_ARTIFACT_NAMES` in `tasks/perf-check.ts`, which
-the Performance Check gate uses to require every shard's coverage artifact.
+weighting, so first check whether one shard simply drew several slow packages.
+Changing the shard count in the workflow matrix reshuffles the assignment. A
+shard-count change must also update the `coverage-profile-workspace-*` entries
+in `EXPECTED_COVERAGE_ARTIFACT_NAMES` in `tasks/perf-check.ts`, which the
+Performance Check gate uses to require every shard's coverage artifact.
 
 A package too heavy for any single shard can be split internally: the cli
 package runs as three units via `CLI_TEST_SHARD` (see
@@ -258,6 +261,14 @@ timing gate would trip against warm baselines. The other direction is just as
 bad: a cold main run covers compile branches that only execute on a cold cache,
 which lowers the coverage-debt baseline, so later warm PRs fail the coverage
 ratchet with phantom uncovered lines.
+
+The pattern-integration process owns one shared cache in
+`packages/patterns/integration/pieces-controller.ts`. Its controller helper and
+the capability-gate controller both inject that cache into every runtime they
+create. A custom runtime in this suite must do the same. Setting
+`CF_COMPILE_CACHE_FILE` only tells the test-support cache where to persist its
+bytes; a runtime uses those bytes only when it receives the cache through its
+`moduleByteCache` option.
 
 To compare like with like, each pattern job uploads a small `cache-state-*`
 artifact recording its cache restore result. Performance Check aggregates those

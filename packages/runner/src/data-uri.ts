@@ -6,7 +6,16 @@
  * side ({@link getJSONFromDataURI} and {@link decodeDataURIPayloadText}) --
  * because the encoding chosen by the one dictates what is decodable by the
  * other, and colocating them is what keeps a change to either from drifting
- * away from its partner.
+ * away from its partner. {@link findAndInlineDataURILinks}, which dissolves
+ * `data:` URI links back into the values they carry, lives here for the same
+ * reason: it is a direct consumer of the decode half.
+ *
+ * The dependency on the link machinery is one-way: this module imports from
+ * `link-utils.ts`, and `link-utils.ts` imports nothing back. The
+ * relationship with `cell.ts` is mutual -- this module needs `isCell` (and
+ * the `Cell` type) while `cell.ts` consumes the codec -- the same two-way
+ * shape `cell.ts` and `link-utils.ts` had while the codec lived there,
+ * relocated rather than newly introduced.
  */
 
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
@@ -20,9 +29,11 @@ import { type Cell, isCell } from "./cell.ts";
 import { isPrimitiveCellLink, type NormalizedLink } from "./link-types.ts";
 import {
   createSigilLinkFromParsedLink,
+  isCellLink,
   KeepAsCell,
   parseLink,
 } from "./link-utils.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import type { URI } from "./sigil-types.ts";
 
 /**
@@ -222,4 +233,109 @@ export function getJSONFromDataURI(uri: URI | string): any {
   }
 
   return decodeDataURIPayloadText(decodedData);
+}
+
+/**
+ * Find any data: URI links and inline them.
+ *
+ * TODO(danfuzz): This `isRecord`-gated walk has no `FabricSpecialObject`
+ * guard: after the link check, a non-link `FabricPrimitive`/`FabricInstance`
+ * falls into the `Object.entries` descent, which walks it by enumerable own
+ * props instead of treating it as a leaf. An instance with no enumerable
+ * props happens to pass through by reference, but the copy-on-write branch
+ * (`{ ...value }`) silently flattens any instance whose entry inlines
+ * differently into a plain object. The payload walk
+ * (`dataValue[path.shift()]`) indexes into decoded content with the same
+ * blindness.
+ *
+ * @param value - The value to find and inline data: URI links in.
+ * @returns The value with any data: URI links inlined.
+ */
+export function findAndInlineDataURILinks(value: any): any {
+  if (isCellLink(value)) {
+    const dataLink = parseLink(value)!;
+
+    if (dataLink.id?.startsWith("data:")) {
+      let dataValue: any = getJSONFromDataURI(dataLink.id);
+      const path = [...dataLink.path];
+
+      // This is a storage item, so we have to look into the "value" field for
+      // the actual data.
+      if (!isRecord(dataValue)) return undefined;
+      dataValue = dataValue["value"];
+
+      // If there is a link on the way to `path`, follow it, appending remaining
+      // path to the target link.
+      while (dataValue !== undefined) {
+        if (isPrimitiveCellLink(dataValue)) {
+          // Parse the link found in the data URI
+          // Do NOT pass parsedLink as base to avoid inheriting the data: URI id
+          const newLink = parseLink(dataValue);
+          let schema = newLink.schema;
+          if (schema !== undefined && path.length > 0) {
+            const cfc = new ContextualFlowControl();
+            schema = cfc.getSchemaAtPath(schema, path);
+          }
+          // Create new link by merging dataLink with remaining path
+          const newSigilLink = createSigilLinkFromParsedLink({
+            // Start with values from the original data link
+            ...dataLink,
+
+            // overwrite with values from the new link
+            ...newLink,
+
+            // extend path with remaining segments
+            path: [...newLink.path, ...path],
+
+            // use resolved schema if we have one
+            ...(schema !== undefined && { schema }),
+          }, {
+            includeSchema: true,
+            keepAsCell: KeepAsCell.All,
+          });
+          return findAndInlineDataURILinks(newSigilLink);
+        }
+        if (path.length > 0) {
+          dataValue = dataValue[path.shift()!];
+        } else {
+          break;
+        }
+      }
+
+      return dataValue;
+    } else {
+      return value;
+    }
+  } else if (Array.isArray(value)) {
+    let next: any[] | undefined;
+    for (let index = 0; index < value.length; index++) {
+      if (!(index in value)) continue;
+      const current = value[index];
+      const inlined = findAndInlineDataURILinks(current);
+      if (next) {
+        next[index] = inlined;
+      } else if (!Object.is(inlined, current)) {
+        // `Object.is`: an untouched `NaN` leaf comes back as the same value
+        // and must not force a clone of the whole array.
+        next = value.slice();
+        next[index] = inlined;
+      }
+    }
+    return next ?? value;
+  } else if (isRecord(value)) {
+    let next: Record<string, unknown> | undefined;
+    for (const [key, entry] of Object.entries(value)) {
+      const inlined = findAndInlineDataURILinks(entry);
+      if (next) {
+        next[key] = inlined;
+      } else if (!Object.is(inlined, entry)) {
+        // `Object.is`: see the array case above.
+        next = { ...value };
+        next[key] = inlined;
+      }
+    }
+    return next ?? value;
+  } else {
+    return value;
+  }
 }
