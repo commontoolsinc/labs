@@ -17,7 +17,8 @@ import {
   BuiltInLLMParams,
 } from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
-import type { JSONSchema } from "../builder/types.ts";
+import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
+import { mapSubschemas } from "../schema-walk.ts";
 import { cfcAtom } from "@commonfabric/api/cfc";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
@@ -157,31 +158,18 @@ function mergeLlmDerivedIntoNode(
  * An absent resultSchema defaults to a plain object schema.
  */
 function withLlmDerivedStamp(schema: JSONSchema | undefined): JSONSchema {
-  const stampNode = (node: Record<string, unknown>): JSONSchema => {
-    const stamped = mergeLlmDerivedIntoNode(node);
-
-    const descend = (value: unknown): unknown => {
-      if (Array.isArray(value)) return value.map(descend);
-      if (isRecord(value)) return stampNode(value);
-      return value;
-    };
-
-    for (const key of ["properties", "$defs", "patternProperties"]) {
-      const container = stamped[key];
-      if (isRecord(container)) {
-        stamped[key] = Object.fromEntries(
-          Object.entries(container).map(([k, v]) => [k, descend(v)]),
-        );
-      }
-    }
-    for (const key of ["items", "additionalProperties", "prefixItems"]) {
-      if (key in stamped) stamped[key] = descend(stamped[key]);
-    }
-    for (const key of ["anyOf", "oneOf", "allOf"]) {
-      if (Array.isArray(stamped[key])) stamped[key] = descend(stamped[key]);
-    }
-    return stamped as JSONSchema;
-  };
+  // Stamp this node, then every structural subschema. The descent is the shared
+  // vocabulary (`$defs` included): the previous hand-listed set covered
+  // properties/$defs/patternProperties/items/additionalProperties/prefixItems/
+  // anyOf/oneOf/allOf but skipped not/if/then/else/contains/propertyNames/
+  // dependentSchemas/contentSchema, leaving those nodes unstamped. `$ref` is a
+  // string, not a subschema, so a `$defs` self-reference stays a leaf.
+  const stampNode = (node: Record<string, unknown>): JSONSchema =>
+    mapSubschemas(
+      mergeLlmDerivedIntoNode(node) as JSONSchemaObj,
+      (child) => (isRecord(child) ? stampNode(child) : child),
+      { includeDefs: true },
+    );
 
   const base: Record<string, unknown> = isRecord(schema)
     ? schema
