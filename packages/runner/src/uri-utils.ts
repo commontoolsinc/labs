@@ -30,6 +30,33 @@ const dataUriReconstructionContext = new EmptyReconstructionContext(
 );
 
 /**
+ * Decodes the extracted payload text of an `application/json` `data:` URI.
+ * This is the single point of truth for how such payloads read, shared by
+ * every reader of them (per-reader payload extraction and error policy stay
+ * with the readers; see {@link getJSONFromDataURI} and
+ * `storage/transaction/attestation.ts`'s `load()`). Two forms are accepted:
+ *
+ * - Text bearing the `fvj1:` tag is decoded as the standard `data-model`
+ *   `FabricValue` JSON-embedded encoding. Results from this branch are
+ *   deep-frozen and may contain `FabricInstance`s.
+ * - Any other text is parsed as bare JSON. A `data:` URI _is_ its own
+ *   content and such URIs are embedded in persisted documents, so ids with
+ *   bare-JSON payloads survive indefinitely; this branch has to stay for as
+ *   long as any of them remain, that is, probably forever.
+ *
+ * @param text The payload text, after any percent- or Base64-decoding.
+ * @returns The decoded value.
+ * @throws If `text` is neither valid JSON nor a valid encoded `FabricValue`
+ *   (including when it is empty; callers with an empty-payload policy apply
+ *   it before calling).
+ */
+export function decodeDataURIPayloadText(text: string): any {
+  return seemsLikeJsonEncodedFabricValue(text)
+    ? valueFromJson(text, dataUriReconstructionContext)
+    : JSON.parse(text);
+}
+
+/**
  * Convert an entity ID to URI format. The scheme carries the entity kind:
  * no kind ⇒ `of:`, `kind: "computed"` ⇒ `computed:` (see `entity-kind.ts`).
  *
@@ -105,17 +132,11 @@ export function fromURI(uri: URI | string): string {
  * - `;charset=` is honored only as `utf-8` (or `utf8`), and any other value is
  *   rejected. It is UTF-8 either way; the parameter only gets to agree.
  *
- * The extracted payload text is decoded in one of two ways:
- *
- * - A payload bearing the `fvj1:` tag is decoded as the standard `data-model`
- *   `FabricValue` JSON-embedded encoding. Results from this branch are
- *   deep-frozen and may contain `FabricInstance`s. (The media type is
- *   admittedly a bit of a fib for this form, since the tag prefix makes the
- *   payload not actually be JSON.)
- * - Any other payload is parsed as bare JSON. A `data:` URI _is_ its own
- *   content and such URIs are embedded in persisted documents, so ids with
- *   bare-JSON payloads survive indefinitely; this branch has to stay for as
- *   long as any of them remain, that is, probably forever.
+ * The extracted payload text is decoded via {@link decodeDataURIPayloadText},
+ * which accepts both the standard `fvj1:`-tagged `FabricValue` encoding and
+ * bare JSON; see its doc comment for the details of the two forms. (The
+ * media type is admittedly a bit of a fib for the tagged form, since the tag
+ * prefix makes the payload not actually be JSON.)
  *
  * An empty payload yields `undefined`, rather than being a decode error.
  *
@@ -186,7 +207,5 @@ export function getJSONFromDataURI(uri: URI | string): any {
     return undefined;
   }
 
-  return seemsLikeJsonEncodedFabricValue(decodedData)
-    ? valueFromJson(decodedData, dataUriReconstructionContext)
-    : JSON.parse(decodedData);
+  return decodeDataURIPayloadText(decodedData);
 }
