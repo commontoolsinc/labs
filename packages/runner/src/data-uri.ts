@@ -16,6 +16,22 @@
  * the `Cell` type) while `cell.ts` consumes the codec -- the same two-way
  * shape `cell.ts` and `link-utils.ts` had while the codec lived there,
  * relocated rather than newly introduced.
+ *
+ * The payload is shaped as a document, `{ "value": <the value> }`, and the
+ * decode entry points return that document -- NOT the value. The document
+ * is the addressable unit: `storage/transaction/attestation.ts`'s `load()`
+ * resolves `["value", ...]`-rooted and facet paths against it. Extracting
+ * the value is each reader's own step, under its own policy for payloads
+ * that are not document-shaped (externally-minted URIs need not be).
+ *
+ * TODO(danfuzz): That layering is inside out. The payload should encode
+ * the value alone -- making this codec a symmetric value-to-text pair --
+ * with the document wrapper synthesized by the one reader that actually
+ * thinks in documents (attestation `load()`). Readers of the value then
+ * stop unwrapping, and externally-minted payloads can no longer alias
+ * document facets (`cfc`, `source`). Since `data:` ids are never durably
+ * stored, the resulting change of minted id form is a transient-only
+ * event.
  */
 
 import {
