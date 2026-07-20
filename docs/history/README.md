@@ -217,6 +217,9 @@ One line per archived document; each document's header carries the fuller
 - [2026-07-pattern-capability-ci-duration-increase.md](development/performance/2026-07-pattern-capability-ci-duration-increase.md)
   — root cause of the July 2026 labs CI duration increase: two unsharded
   pattern time-capability sweeps, especially the 56-pattern sweep on shard 3.
+- [2026-07-ci-duration-profile.md](development/performance/2026-07-ci-duration-profile.md)
+  — July 2026 Deno Workflow profile, including compile-cache validation,
+  duplicate work, workspace shard balance, and follow-up experiments.
 - [scoped-cells-field-notes.md](development/scoped-cells-field-notes.md) —
   field journal from the first scoped-cell patterns.
 - [2026-07-02-convergence-evidence-appendix.md](plans/2026-07-02-convergence-evidence-appendix.md)

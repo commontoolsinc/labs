@@ -6,7 +6,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { createDataCellURI } from "../src/data-uri.ts";
-import { findAndInlineDataURILinks } from "../src/link-utils.ts";
+import { findAndInlineDataURILinks } from "../src/data-uri.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -33,6 +33,18 @@ describe("data URI inlining", () => {
   });
 
   describe("findAndInlineDataURILinks", () => {
+    it("returns a link-free array holding NaN by reference", () => {
+      // The copy-on-write gate must treat an untouched `NaN` leaf as
+      // unchanged (`Object.is` semantics), not clone the container.
+      const value = [NaN, 1];
+      expect(findAndInlineDataURILinks(value)).toBe(value);
+    });
+
+    it("returns a link-free record holding NaN by reference", () => {
+      const value = { x: NaN };
+      expect(findAndInlineDataURILinks(value)).toBe(value);
+    });
+
     it("should inline simple data URI links", () => {
       const dataURI = createDataCellURI("test data");
       const link = {

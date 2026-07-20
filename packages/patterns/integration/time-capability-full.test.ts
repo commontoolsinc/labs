@@ -14,16 +14,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
-import { createSession, Identity } from "@commonfabric/identity";
-import { Runtime } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { PieceManager } from "@commonfabric/piece";
-import { PiecesController } from "@commonfabric/piece/ops";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import {
   currentPatternIntegrationShard,
   selectPatternIntegrationShard,
 } from "./pattern-integration-shard.ts";
+import { initializeCapabilityGateController } from "./capability-gate-controller.ts";
 
 const ROOT = join(import.meta.dirname!, "..");
 
@@ -67,23 +63,6 @@ function discoverPatterns(): string[] {
   return hits.sort();
 }
 
-async function gatedController(spaceName: string): Promise<PiecesController> {
-  const identity = await Identity.generate({ implementation: "noble" });
-  const session = await createSession({ identity, spaceName });
-  const runtime = new Runtime({
-    apiUrl: new URL("http://localhost:8000/"),
-    storageManager: StorageManager.emulate({ as: session.as }),
-    cfcEnforcementMode: "enforce-explicit",
-    trustSnapshotProvider: () => ({
-      id: `principal:${session.as.did()}`,
-      actingPrincipal: session.as.did(),
-    }),
-  });
-  const manager = new PieceManager(session, runtime);
-  await manager.synced();
-  return new PiecesController(manager);
-}
-
 interface Outcome {
   timeCapabilityErrors: string[];
   skipReason?: string;
@@ -92,7 +71,9 @@ interface Outcome {
 // Instantiate the pattern under the gate, materialize lifts, then fire every
 // top-level result stream to exercise handler-context clock reads too.
 async function checkPattern(rel: string): Promise<Outcome> {
-  const cc = await gatedController(`${rel}-${crypto.randomUUID()}`);
+  const cc = await initializeCapabilityGateController(
+    `${rel}-${crypto.randomUUID()}`,
+  );
   const errors: string[] = [];
   cc.manager().runtime.scheduler.onError((err) => {
     if (err?.name === "TimeCapabilityError") errors.push(err.message);

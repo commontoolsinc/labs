@@ -98,6 +98,7 @@ DIRS=(
   "packages/static/scripts"
   "packages/static/test"
   "packages/toolshed"
+  "packages/ts-transformers/src"
   "packages/utils"
   "packages/patterns/battleship"
   "packages/patterns/budget-tracker"
@@ -124,6 +125,10 @@ FILES_TO_CHECK+=(packages/cli/*.ts)
 FILES_TO_CHECK+=(packages/static/*.ts)
 FILES_TO_CHECK+=(packages/patterns/*.ts)
 FILES_TO_CHECK+=(packages/patterns/*.tsx)
+
+while IFS= read -r testFile; do
+  FILES_TO_CHECK+=("${testFile}")
+done < <(find packages/ts-transformers/test -type f -name '*.test.ts' -print)
 
 # Google patterns (previously checked individually to avoid OOM, now included
 # with increased heap limit)

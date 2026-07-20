@@ -1,6 +1,7 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import {
   assignPatternIntegrationShards,
+  FOUR_SHARD_ASSIGNMENTS,
   INTERNALLY_SHARDED_PATTERN_INTEGRATION_FILES,
   listPatternIntegrationTests,
   selectPatternIntegrationFiles,
@@ -130,37 +131,38 @@ Deno.test("pattern integration shard rejects unsafe integer values", () => {
   }
 });
 
-Deno.test("pattern integration four-way shard keeps the heaviest tests apart", () => {
-  const heavy = [
-    "parking-coordinator-admin-view.test.ts",
-    "cfc-group-chat-demo-two-browsers.test.ts",
-    "cfc-spec-gallery.test.ts",
-    "cfc-group-chat-demo.test.ts",
-  ];
-  const assignment = assignPatternIntegrationShards(heavy, TOTAL_SHARDS);
-  const shardOf = (file: string) => assignment.get(file);
-
-  // The two group-chat browser tests are the heaviest end-to-end tests on CI
-  // (~41s for two-browsers, ~29s for the single-browser one). They must not
-  // share a shard, or that shard carries ~70s of group-chat work alone.
-  assertEquals(
-    shardOf("cfc-group-chat-demo-two-browsers.test.ts") !==
-      shardOf("cfc-group-chat-demo.test.ts"),
-    true,
-    "the two group-chat browser tests must be on different shards",
+Deno.test("pattern integration profile separates the round-robin shard-one collision", async () => {
+  const files = (await listPatternIntegrationTests()).filter((name) =>
+    !INTERNALLY_SHARDED_FILE_NAMES.has(name)
   );
-
-  // The three heaviest single files land on distinct shards.
-  const top = [
-    "parking-coordinator-admin-view.test.ts",
-    "cfc-group-chat-demo-two-browsers.test.ts",
-    "cfc-spec-gallery.test.ts",
-  ].map(shardOf);
-  assertEquals(
-    new Set(top).size,
-    3,
-    "the three heaviest tests should be on distinct shards",
+  const roundRobin = new Map(
+    files.toSorted().map((name, index) => [name, index % TOTAL_SHARDS + 1]),
   );
+  const assignment = assignPatternIntegrationShards(files, TOTAL_SHARDS);
+  const cfCodeEditor = "cf-code-editor.test.ts";
+  const convergenceStorm = "convergence-storm.test.ts";
+
+  assertEquals(
+    roundRobin.get(cfCodeEditor),
+    roundRobin.get(convergenceStorm),
+    "the sorted round-robin control should reproduce the profiled collision",
+  );
+  assertEquals(
+    assignment.get(cfCodeEditor) === assignment.get(convergenceStorm),
+    false,
+    "the profiled assignment should separate the two expensive files",
+  );
+});
+
+Deno.test("profiled pattern integration assignments name real files", async () => {
+  const files = new Set(await listPatternIntegrationTests());
+  for (const name of Object.keys(FOUR_SHARD_ASSIGNMENTS)) {
+    assertEquals(
+      files.has(name),
+      true,
+      `profiled assignment ${name} should name a real integration test`,
+    );
+  }
 });
 
 Deno.test("internally sharded files run in every shard", () => {

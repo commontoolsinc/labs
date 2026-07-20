@@ -147,6 +147,23 @@ Deno.test("COMPILE_CACHE_KEY_GLOBS matches the cc-* cache keys in deno.yml", asy
   }
 });
 
+Deno.test("pattern integration cache rotates for .ts and .tsx changes", async () => {
+  const workflow = await Deno.readTextFile(
+    new URL("../.github/workflows/deno.yml", import.meta.url),
+  );
+  const start = workflow.indexOf("  pattern-integration-test:\n");
+  const end = workflow.indexOf("\n  pattern-reload-integration-test:", start);
+  assert(start >= 0 && end > start, "pattern integration job not found");
+
+  const job = workflow.slice(start, end);
+  assert(
+    job.includes(
+      "hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx')",
+    ),
+    "pattern integration cache must rotate when either TypeScript extension changes",
+  );
+});
+
 Deno.test("changedPathsOf surfaces both sides of a rename", () => {
   const paths = changedPathsOf([
     {

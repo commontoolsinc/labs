@@ -9,7 +9,11 @@ import {
 } from "@commonfabric/data-model/cell-rep";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { createDataCellURI, getJSONFromDataURI } from "../src/data-uri.ts";
+import {
+  createDataCellURI,
+  decodeDataURIPayloadText,
+  getJSONFromDataURI,
+} from "../src/data-uri.ts";
 import { isSigilLink, type NormalizedLink } from "../src/link-utils.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -291,6 +295,33 @@ describe("data-uri", () => {
       } finally {
         resetModernCellRepConfig();
       }
+    });
+  });
+
+  describe("decodeDataURIPayloadText", () => {
+    it("decodes JSON payload text", () => {
+      expect(decodeDataURIPayloadText('{"value":{"b":1,"a":[true,null]}}'))
+        .toEqual({ value: { b: 1, a: [true, null] } });
+      expect(decodeDataURIPayloadText("[1,2,3]")).toEqual([1, 2, 3]);
+      expect(decodeDataURIPayloadText('"plain"')).toBe("plain");
+      expect(decodeDataURIPayloadText("null")).toBe(null);
+    });
+
+    it("rejects invalid payload text", () => {
+      expect(() => decodeDataURIPayloadText("{nope")).toThrow();
+    });
+
+    it("rejects empty payload text", () => {
+      expect(() => decodeDataURIPayloadText("")).toThrow();
+    });
+
+    it("decodes encoded-`FabricValue` (`fvj1:`) payload text", () => {
+      const value = { value: { b: 1, a: [true, null, "x"] } };
+      expect(decodeDataURIPayloadText(jsonFromValue(value))).toEqual(value);
+    });
+
+    it("rejects invalid payload text past the `fvj1:` tag", () => {
+      expect(() => decodeDataURIPayloadText("fvj1:{nope")).toThrow();
     });
   });
 
