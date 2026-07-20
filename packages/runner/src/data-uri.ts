@@ -32,10 +32,7 @@ import {
   FabricPrimitive,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import {
-  jsonFromValue,
-  valueFromJson,
-} from "@commonfabric/data-model/codec-json";
+import { valueFromJson } from "@commonfabric/data-model/codec-json";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import { isRecord } from "@commonfabric/utils/types";
 import { type Cell, isCell } from "./cell.ts";
@@ -48,6 +45,14 @@ import {
 } from "./link-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { URI } from "./sigil-types.ts";
+import { isDataCellMediaType, mintDataCellURI } from "./data-uri-mint.ts";
+
+export {
+  DATA_CELL_MEDIA_TYPE,
+  isDataCellMediaType,
+  isDataCellURI,
+  mintDataCellURI,
+} from "./data-uri-mint.ts";
 
 /**
  * `ReconstructionContext` for decoding `data:` URI payloads. Links at this
@@ -59,33 +64,6 @@ const dataUriReconstructionContext = new EmptyReconstructionContext(
   true,
   "no cell reconstruction at the `data:` URI boundary",
 );
-
-/** The media type minted for `data:` cell URIs. */
-export const DATA_CELL_MEDIA_TYPE = "application/vnd.common-fabric.data";
-
-/**
- * Also-accepted media type for `data:` cell URIs: read, never minted here.
- * Ids in this form can arrive from external minters and from processes
- * running earlier builds.
- */
-const LEGACY_DATA_CELL_MEDIA_TYPE = "application/json";
-
-/**
- * Is `mediaType` one of the accepted `data:` cell URI media types?
- */
-export function isDataCellMediaType(mediaType: string): boolean {
-  return mediaType === DATA_CELL_MEDIA_TYPE ||
-    mediaType === LEGACY_DATA_CELL_MEDIA_TYPE;
-}
-
-/**
- * Does `id` look like a `data:` cell URI, in either accepted media type?
- * (Prefix check only; header parameters and payload are not validated.)
- */
-export function isDataCellURI(id: string): boolean {
-  return id.startsWith(`data:${DATA_CELL_MEDIA_TYPE}`) ||
-    id.startsWith(`data:${LEGACY_DATA_CELL_MEDIA_TYPE}`);
-}
 
 /**
  * Makes a `data:` URI that names a cell whose content is carried in the id
@@ -173,20 +151,7 @@ export function createDataCellURI(
 }
 
 /**
- * Assembles a `data:` cell URI carrying (the encoding of) `value` -- the
- * single place the URI shape is put together: scheme, media type, and the
- * percent-encoded (UTF-8-safe) `fvj1:` payload. Unlike
- * {@link createDataCellURI}, this does no link rewriting or other
- * preparation of `value`; callers hand it a ready `FabricValue`.
- */
-export function mintDataCellURI(value: FabricValue): URI {
-  return `data:${DATA_CELL_MEDIA_TYPE},${
-    encodeURIComponent(jsonFromValue(value))
-  }` as URI;
-}
-
-/**
- * Decodes the extracted payload text of a `data:` cell URI,
+ * Decodes the extracted payload text of an `application/json` `data:` URI,
  * which must be in the standard `data-model` `FabricValue` JSON-embedded
  * encoding (tagged `fvj1:`). Results are deep-frozen and may contain
  * `FabricInstance`s. This is the single point of truth for how such
