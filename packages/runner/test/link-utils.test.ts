@@ -24,7 +24,14 @@ import {
 import { getJSONFromDataURI } from "../src/uri-utils.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import {
+  linkRefFrom,
+  linkRefPayload,
+  resetModernCellRepConfig,
+  setModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
@@ -1588,6 +1595,68 @@ describe("link-utils", () => {
       expect(parsed.value.arabic).toBe("مرحبا بالعالم");
       expect(parsed.value.special).toBe("Ñoño™©®");
       expect(parsed.value.mixed).toBe("Test 🎉 with ñ and 中文");
+    });
+
+    it("mints a payload in the standard encoding (`fvj1:` tag)", () => {
+      const dataURI = createDataCellURI({ x: 1 });
+      const payload = decodeURIComponent(
+        dataURI.slice(dataURI.indexOf(",") + 1),
+      );
+      expect(payload.startsWith("fvj1:")).toBe(true);
+    });
+
+    // The standard encoding canonicalizes key order, so the minted id is a
+    // function of content alone. This is the property whose absence #4360
+    // worked around in `schema-hash.ts`.
+    it("mints the same URI regardless of key insertion order", () => {
+      const inOrder = { alpha: 1, beta: [2, 3], gamma: { delta: 4 } };
+      const scrambled = { gamma: { delta: 4 }, beta: [2, 3], alpha: 1 };
+      expect(createDataCellURI(scrambled)).toBe(createDataCellURI(inOrder));
+    });
+
+    it("preserves non-finite numbers and negative zero", () => {
+      const dataURI = createDataCellURI({ n: NaN, z: -0, i: -Infinity });
+      const parsed = getJSONFromDataURI(dataURI);
+      expect(Object.is(parsed.value.n, NaN)).toBe(true);
+      expect(Object.is(parsed.value.z, -0)).toBe(true);
+      expect(Object.is(parsed.value.i, -Infinity)).toBe(true);
+    });
+
+    it("encodes an `undefined` value as an empty document", () => {
+      const parsed = getJSONFromDataURI(createDataCellURI(undefined));
+      expect(parsed).toEqual({});
+      expect("value" in parsed).toBe(false);
+    });
+
+    it("represents a `FabricPrimitive` leaf correctly", () => {
+      const h = hashOf({ some: "value" });
+      const parsed = getJSONFromDataURI(createDataCellURI({ h }));
+      expect(parsed.value.h).toBeInstanceOf(FabricHash);
+      expect(parsed.value.h.toString()).toBe(h.toString());
+    });
+
+    it("rewrites relative links in the modern regime (`FabricLink`)", () => {
+      setModernCellRepConfig(true);
+      try {
+        const baseId = `of:${hashOf({ base: "modern" }).taggedHashString}`;
+        const base: NormalizedLink = {
+          id: baseId as any,
+          space,
+          scope: "space",
+          path: [],
+        };
+        const relativeLink = linkRefFrom({ path: ["nested", "value"] });
+
+        const dataURI = createDataCellURI({ link: relativeLink }, base);
+        const parsed = getJSONFromDataURI(dataURI);
+
+        expect(isSigilLink(parsed.value.link)).toBe(true);
+        const payload = linkRefPayload(parsed.value.link) as any;
+        expect(payload.id).toBe(baseId);
+        expect(payload.path).toEqual(["nested", "value"]);
+      } finally {
+        resetModernCellRepConfig();
+      }
     });
   });
 

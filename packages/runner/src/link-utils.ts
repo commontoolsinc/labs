@@ -1,7 +1,8 @@
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { isRecord } from "@commonfabric/utils/types";
+import { isInstance, isRecord } from "@commonfabric/utils/types";
 import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
 import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { jsonFromValue } from "@commonfabric/data-model/codec-json";
 import {
   type AnyCell,
   type DerivedInternalCellDescriptor,
@@ -378,22 +379,20 @@ export function findAndInlineDataURILinks(value: any): any {
  * `uri-utils.ts`) is what reads back what this writes. The two are a pair by
  * construction -- the encoding chosen here dictates what is decodable there --
  * but nothing mechanically holds them in agreement, so a change to either has
- * to move the other with it. The decode half accepts both the bare-JSON form
- * written here and the standard `data-model` `FabricValue` encoding (tagged
- * `fvj1:`); see the `TODO` in the body below about moving this side onto the
- * latter.
+ * to move the other with it. This side writes only the standard `data-model`
+ * `FabricValue` encoding (tagged `fvj1:`); the decode half additionally
+ * accepts the bare-JSON form this function historically wrote, for the sake
+ * of ids in the wild.
  *
  * Each primitive cell link within `data` is rewritten to a full sigil link,
  * with relative links resolved against `base`. That rewriting is what makes
  * the result self-contained: the ids it embeds don't depend on where it was
  * minted, so the URI denotes the same value wherever it later gets read.
  *
- * **Note:** This does not use the standard `data-model` value encoding, and
- * callers are exposed to two consequences. A `FabricSpecialObject` within
- * `data` is not represented correctly, and plain-object keys are not
- * canonicalized -- so two runtimes holding the same value can mint two
- * different ids for it, which is to say that the content addressing here is
- * not reliably addressing content. See the `TODO`s in the body.
+ * The standard encoding canonicalizes plain-object key order (UTF-8 byte
+ * order, per `3-json-encoding.md` section 10), so two runtimes holding the
+ * same value mint the same id regardless of key insertion history -- the
+ * property that makes this content addressing actually address content.
  *
  * @param data The value to encode. Must be acyclic.
  * @param base Optional base link; relative links within `data` are resolved
@@ -407,10 +406,6 @@ export function createDataCellURI(
 ): URI {
   const baseLink = isCell(base) ? base.getAsNormalizedFullLink() : base;
 
-  // TODO(danfuzz): This `isRecord`-gated walk guards only `isPrimitiveCellLink`;
-  // a `FabricPrimitive`/`FabricInstance` that is not a link falls through to the
-  // `Object.entries` descent (primitive decomposed, instance walked by internal
-  // slots).
   function traverseAndAddBaseIdToRelativeLinks(
     value: any,
     seen: Set<any>,
@@ -427,6 +422,11 @@ export function createDataCellURI(
           includeSchema: true,
           keepAsCell: KeepAsCell.All,
         });
+      } else if (isInstance(value)) {
+        // A non-link class instance is a leaf: the value encoding represents
+        // it via its codec (or rejects it loudly if it has none). Descending
+        // into it here would decompose it into its property shape.
+        return value;
       } else if (Array.isArray(value)) {
         return value.map((item) =>
           traverseAndAddBaseIdToRelativeLinks(item, seen)
@@ -442,15 +442,14 @@ export function createDataCellURI(
       seen.delete(value);
     }
   }
-  // TODO(danfuzz): This `JSON.stringify()` should be changed to use the
-  // standard `data-model` value encoding, both so that `FabricSpecialObject`s
-  // can be properly represented and so that plain objects get properly
-  // canonicalized. Once this is done, the changes to `schema-hash.ts` made in
-  // PR #4360 should be able to be reverted, as those changes amount to a
-  // workaround for the plain object canonicalization issue.
-  const json = JSON.stringify({
-    value: traverseAndAddBaseIdToRelativeLinks(data, new Set()),
-  });
+
+  // An `undefined` payload encodes as an empty document, mirroring how a
+  // storage document represents an unset value (absent `value` property, not
+  // a present-`undefined` one).
+  const document = (data === undefined)
+    ? {}
+    : { value: traverseAndAddBaseIdToRelativeLinks(data, new Set()) };
+  const json = jsonFromValue(document);
   // Use encodeURIComponent for UTF-8 safe encoding (matches runtime.ts pattern)
   return `data:application/json,${encodeURIComponent(json)}` as URI;
 }

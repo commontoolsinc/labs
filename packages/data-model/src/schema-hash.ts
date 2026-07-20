@@ -112,17 +112,18 @@ hashToRef.set(primInterns.undefined.taggedHashString, undefined);
  *   unchanged, preserving identity (and `internSchema`'s same-reference contract)
  *   for the common already-canonical case.
  *
- * TODO(danfuzz): This entire function is a workaround for a defect elsewhere:
- * `link-utils.ts`'s `createDataCellURI()` mints ids with a plain
- * `JSON.stringify()` instead of the standard `data-model` value encoding, which
- * canonicalizes key order as a matter of spec (see
- * `docs/specs/space-model-formal-spec/3-json-encoding.md` section 10, and the
- * `TODO` in that function). Because the id-minting encoder does not
- * canonicalize, the in-memory key order of every interned schema was made to
- * carry that weight instead -- which is an invariant this file cannot actually
- * maintain, per the by-reference note above. Once the ids are minted through a
- * conforming encoder, in-memory key order stops mattering, and this function
- * along with its call site should be removed rather than repaired.
+ * TODO(danfuzz): This entire function is a workaround for a defect elsewhere,
+ * now fixed: `link-utils.ts`'s `createDataCellURI()` used to mint ids with a
+ * plain `JSON.stringify()` instead of the standard `data-model` value
+ * encoding, which canonicalizes key order as a matter of spec (see
+ * `docs/specs/space-model-formal-spec/3-json-encoding.md` section 10). Because
+ * that id-minting encoder did not canonicalize, the in-memory key order of
+ * every interned schema was made to carry that weight instead -- which is an
+ * invariant this file cannot actually maintain, per the by-reference note
+ * above. Now that ids are minted through a conforming encoder, in-memory key
+ * order stops mattering once every deployed runtime mints that way; at that
+ * point this function along with its call site should be removed rather than
+ * repaired.
  */
 function canonicalizeSchemaKeyOrder(value: unknown): unknown {
   if (value === null || typeof value !== "object") return value;
