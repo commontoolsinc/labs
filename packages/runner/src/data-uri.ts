@@ -10,8 +10,12 @@
  * `data:` URI links back into the values they carry, lives here for the same
  * reason: it is a direct consumer of the decode half.
  *
- * This module depends on the general link machinery (`link-utils.ts`,
- * `cell.ts`), never the reverse.
+ * The dependency on the link machinery is one-way: this module imports from
+ * `link-utils.ts`, and `link-utils.ts` imports nothing back. The
+ * relationship with `cell.ts` is mutual -- this module needs `isCell` (and
+ * the `Cell` type) while `cell.ts` consumes the codec -- the same two-way
+ * shape `cell.ts` and `link-utils.ts` had while the codec lived there,
+ * relocated rather than newly introduced.
  */
 
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
