@@ -17,21 +17,13 @@
  * shape `cell.ts` and `link-utils.ts` had while the codec lived there,
  * relocated rather than newly introduced.
  *
- * The payload is shaped as a document, `{ "value": <the value> }`, and the
- * decode entry points return that document -- NOT the value. The document
- * is the addressable unit: `storage/transaction/attestation.ts`'s `load()`
- * resolves `["value", ...]`-rooted and facet paths against it. Extracting
- * the value is each reader's own step, under its own policy for payloads
- * that are not document-shaped (externally-minted URIs need not be).
- *
- * TODO(danfuzz): That layering is inside out. The payload should encode
- * the value alone -- making this codec a symmetric value-to-text pair --
- * with the document wrapper synthesized by the one reader that actually
- * thinks in documents (attestation `load()`). Readers of the value then
- * stop unwrapping, and externally-minted payloads can no longer alias
- * document facets (`cfc`, `source`). Since `data:` ids are never durably
- * stored, the resulting change of minted id form is a transient-only
- * event.
+ * The payload encodes the cell's VALUE, and the decode entry points
+ * return that value: this codec is a symmetric value-to-text pair. The
+ * document view that the address grammar requires (`["value", ...]`-rooted
+ * and facet paths) is synthesized by the one reader that thinks in
+ * documents -- `storage/transaction/attestation.ts`'s `load()` -- which
+ * also guarantees that payload content can never alias a document facet
+ * (`cfc`, `source`).
  */
 
 import {
@@ -39,10 +31,7 @@ import {
   FabricPrimitive,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import {
-  jsonFromValue,
-  valueFromJson,
-} from "@commonfabric/data-model/codec-json";
+import { valueFromJson } from "@commonfabric/data-model/codec-json";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import { isRecord } from "@commonfabric/utils/types";
 import { type Cell, isCell } from "./cell.ts";
@@ -55,6 +44,9 @@ import {
 } from "./link-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { URI } from "./sigil-types.ts";
+import { mintDataCellURI } from "./data-uri-mint.ts";
+
+export { mintDataCellURI };
 
 /**
  * `ReconstructionContext` for decoding `data:` URI payloads. Links at this
@@ -72,9 +64,8 @@ const dataUriReconstructionContext = new EmptyReconstructionContext(
  * itself. Reading such a cell means decoding its own id; there is no document
  * in a space to fetch.
  *
- * The encoded payload is a storage document of the conventional shape
- * `{"value": <data>}`, with readers unwrapping `value` before walking a link's
- * path.
+ * The encoded payload is the cell's value itself; the document view that
+ * the address grammar needs is synthesized on read (see the module doc).
  *
  * This is the encode half of the matched set this module exists to hold;
  * {@link getJSONFromDataURI} is what reads back what this writes. Both
@@ -150,11 +141,7 @@ export function createDataCellURI(
     }
   }
 
-  const json = jsonFromValue({
-    value: traverseAndAddBaseIdToRelativeLinks(data, new Set()),
-  });
-  // Use encodeURIComponent for UTF-8 safe encoding (matches runtime.ts pattern)
-  return `data:application/json,${encodeURIComponent(json)}` as URI;
+  return mintDataCellURI(traverseAndAddBaseIdToRelativeLinks(data, new Set()));
 }
 
 /**
@@ -208,21 +195,50 @@ export function decodeDataURIPayloadText(text: string): FabricValue {
  *   bare-JSON form).
  */
 export function getJSONFromDataURI(uri: URI | string): any {
-  if (!uri.startsWith("data:application/json")) {
+  const { mediaType, text } = extractDataURIPayloadText(uri);
+  if (mediaType !== "application/json") {
     throw new Error(`Invalid URI: ${uri}`);
   }
+  return decodeDataURIPayloadText(text);
+}
 
-  // Extract the data part after the comma
+/**
+ * Splits a `data:` URI and decodes its payload into text -- the single
+ * place the URI's surface syntax is taken apart. The payload is everything
+ * past the first comma; `;base64` selects Base64 (decoded as UTF-8 bytes),
+ * otherwise the payload is percent-encoded; a `;charset=` other than UTF-8
+ * is rejected. The media type is returned verbatim so each caller applies
+ * its own acceptance policy.
+ *
+ * A raw `?` or `#` after the comma delimits a query or fragment per the
+ * URL grammar and is not part of the payload.
+ *
+ * @param uri The `data:` URI to split.
+ * @returns The media type and the decoded payload text.
+ * @throws If `uri` is not a `data:` URI with a comma, or declares a
+ *   non-UTF-8 charset.
+ */
+export function extractDataURIPayloadText(
+  uri: string,
+): { mediaType: string; text: string } {
   const commaIndex = uri.indexOf(",");
-  if (commaIndex === -1) {
+  if (!uri.startsWith("data:") || commaIndex === -1) {
     throw new Error(`Invalid data URI format: ${uri}`);
   }
 
-  const header = uri.substring(0, commaIndex);
-  const data = uri.substring(commaIndex + 1);
+  const header = uri.substring("data:".length, commaIndex);
+  let data = uri.substring(commaIndex + 1);
 
-  // Parse the header to check for charset
+  // Per the URL grammar, an opaque-path URI's payload runs to the first raw
+  // `?` (query) or `#` (fragment). Minted payloads percent-escape both, so
+  // this only affects externally-sourced ids.
+  const delimIndex = data.search(/[?#]/);
+  if (delimIndex !== -1) {
+    data = data.substring(0, delimIndex);
+  }
+
   const headerParts = header.split(";").map((part) => part.trim());
+  const mediaType = headerParts[0];
   for (const part of headerParts) {
     if (part.startsWith("charset=")) {
       const charset = part.substring(8).toLowerCase();
@@ -234,24 +250,19 @@ export function getJSONFromDataURI(uri: URI | string): any {
     }
   }
 
-  // Check if data is base64 encoded
   const isBase64 = headerParts.some((part) => part === "base64");
-
-  let decodedData: string;
+  let text: string;
   if (isBase64) {
-    // Use TextDecoder to properly decode UTF-8 bytes from base64
     const binaryString = atob(data);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
       bytes[i] = binaryString.charCodeAt(i);
     }
-    const decoder = new TextDecoder();
-    decodedData = decoder.decode(bytes);
+    text = new TextDecoder().decode(bytes);
   } else {
-    decodedData = decodeURIComponent(data);
+    text = decodeURIComponent(data);
   }
-
-  return decodeDataURIPayloadText(decodedData);
+  return { mediaType, text };
 }
 
 /**
@@ -277,11 +288,6 @@ export function findAndInlineDataURILinks(value: any): any {
     if (dataLink.id?.startsWith("data:")) {
       let dataValue: any = getJSONFromDataURI(dataLink.id);
       const path = [...dataLink.path];
-
-      // This is a storage item, so we have to look into the "value" field for
-      // the actual data.
-      if (!isRecord(dataValue)) return undefined;
-      dataValue = dataValue["value"];
 
       // If there is a link on the way to `path`, follow it, appending remaining
       // path to the target link.

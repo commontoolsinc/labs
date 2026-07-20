@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
-import { jsonFromValue } from "@commonfabric/data-model/codec-json";
+import { mintDataCellURI } from "../src/data-uri.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -617,11 +617,7 @@ describe("CFC trusted UI event enforcement", () => {
     const eventEnvelopeLink = {
       "/": {
         [LINK_V1_TAG]: {
-          id: `data:application/json,${
-            encodeURIComponent(jsonFromValue({
-              value: { $event: rawTrustedEvent },
-            }))
-          }`,
+          id: mintDataCellURI({ $event: rawTrustedEvent }),
           path: ["$event"],
           space,
         },

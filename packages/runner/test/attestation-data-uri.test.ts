@@ -9,10 +9,9 @@ const uriOf = (payload: string): URI =>
   `data:application/json,${encodeURIComponent(payload)}` as URI;
 
 // `load()` is the storage-transaction-side reader of `data:` URI documents,
-// separate from `uri-utils.ts`'s `getJSONFromDataURI()`. Both route payload
+// separate from `data-uri.ts`'s `getJSONFromDataURI()`. Both route payload
 // text through `decodeDataURIPayloadText()`, so the two readers cannot
-// silently diverge on what a payload means — both accept the standard
-// `fvj1:`-tagged `FabricValue` encoding alongside bare JSON.
+// silently diverge on what a payload means.
 describe("attestation `load()` of `data:` URIs", () => {
   it("errors on a historical bare-JSON payload", () => {
     const { ok, error } = load({ id: uriOf('{"value":{"x":1}}') });
@@ -20,24 +19,24 @@ describe("attestation `load()` of `data:` URIs", () => {
     expect(error?.name).toBe("InvalidDataURIError");
   });
 
-  it("reports the whole document at the root path", () => {
-    const value = { value: { x: 1 } };
-    const { ok, error } = load({ id: uriOf(jsonFromValue(value)) });
+  it("synthesizes the document around the decoded value", () => {
+    const { ok, error } = load({ id: uriOf(jsonFromValue({ x: 1 })) });
     expect(error).toBeUndefined();
-    expect(ok!.value).toEqual(value);
+    expect(ok!.value).toEqual({ value: { x: 1 } });
     expect(ok!.address.path).toEqual([]);
+    expect(Object.isFrozen(ok!.value)).toBe(true);
   });
 
   it("loads an encoded-`FabricValue` (`fvj1:`) payload", () => {
-    const value = { value: { b: 1, a: [true, null, "x"] } };
+    const value = { b: 1, a: [true, null, "x"] };
     const { ok, error } = load({ id: uriOf(jsonFromValue(value)) });
     expect(error).toBeUndefined();
-    expect(ok!.value).toEqual(value);
+    expect(ok!.value).toEqual({ value });
   });
 
   it("preserves non-finite numbers in an `fvj1:` payload", () => {
     const { ok, error } = load({
-      id: uriOf(jsonFromValue({ value: [NaN, -0, Infinity] })),
+      id: uriOf(jsonFromValue([NaN, -0, Infinity])),
     });
     expect(error).toBeUndefined();
     const items = (ok!.value as { value: number[] }).value;
