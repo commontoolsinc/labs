@@ -1712,6 +1712,29 @@ export class Runtime {
     );
   }
 
+  /**
+   * Makes a read-only cell whose content is `data`, carried entirely in the
+   * cell's own `data:` URI id; there is no document in a space to fetch.
+   *
+   * **Contract note:** `data` is an arbitrary value, deliberately NOT
+   * limited to `FabricValue`. Callers pass, among other things, `Cell`
+   * objects (wish candidate lists), userland event payloads (whatever
+   * patterns and the DOM hand over, `Date`s and `Error`s included), and
+   * pattern-authored schema defaults. The body converts via
+   * `fabricFromNativeValue()`, which is the designed intake for exactly
+   * this: `Cell`s become sigil links (their `toJSON()`), native instances
+   * become their fabric counterparts, and input that is already a
+   * deep-frozen `FabricValue` passes through by identity.
+   *
+   * @param space The space the cell claims as its own (it is not stored
+   *   there; links within relate to it).
+   * @param data The value to carry. Must be acyclic.
+   * @param schema Optional schema for the resulting cell.
+   * @param tx Optional transaction for the resulting cell.
+   * @param cfcLabelView Optional CFC label view for the resulting cell.
+   * @returns A read-only cell whose value is (the fabric conversion of)
+   *   `data`.
+   */
   getImmutableCell<T>(
     space: MemorySpace,
     data: T,
