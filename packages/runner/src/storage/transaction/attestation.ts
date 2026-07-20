@@ -27,6 +27,7 @@ import {
   decodeDataURIPayloadText,
   extractDataURIPayloadText,
   isDataCellMediaType,
+  isDataCellURI,
 } from "../../data-uri.ts";
 
 const logger = getLogger("attestation", {
@@ -251,6 +252,16 @@ export const load = (
   >;
 
   try {
+    if (!isDataCellURI(address.id)) {
+      result = {
+        error: UnsupportedMediaTypeError(
+          `Unsupported media type in data URI: ${address.id.slice(0, 64)}`,
+        ),
+      };
+      dataURICache.put(cacheKey, result);
+      return result;
+    }
+
     const { mediaType, text } = extractDataURIPayloadText(address.id);
 
     if (isDataCellMediaType(mediaType)) {

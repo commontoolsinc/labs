@@ -1,13 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { jsonFromValue } from "@commonfabric/data-model/codec-json";
+import { encodeBase64Url } from "@std/encoding/base64url";
 import { load } from "../src/storage/transaction/attestation.ts";
 import type { URI } from "../src/sigil-types.ts";
 
 /** Percent-encoded `data:` URI with the given payload text. */
 const uriOf = (payload: string): URI =>
   `data:application/vnd.common-fabric.data,${
-    encodeURIComponent(payload)
+    encodeBase64Url(new TextEncoder().encode(payload))
   }` as URI;
 
 // `load()` is the storage-transaction-side reader of `data:` URI documents,
@@ -59,14 +60,14 @@ describe("attestation `load()` of `data:` URIs", () => {
     expect(error?.name).toBe("InvalidDataURIError");
   });
 
-  it("accepts the `application/json` media type", () => {
+  it("rejects the `application/json` media type", () => {
     const { ok, error } = load({
       id: `data:application/json,${
-        encodeURIComponent(jsonFromValue({ a: 1 }))
+        encodeBase64Url(new TextEncoder().encode(jsonFromValue({ a: 1 })))
       }` as URI,
     });
-    expect(error).toBeUndefined();
-    expect(ok!.value).toEqual({ value: { a: 1 } });
+    expect(ok).toBeUndefined();
+    expect(error?.name).toBe("UnsupportedMediaTypeError");
   });
 
   it("errors on an empty payload", () => {
