@@ -217,7 +217,7 @@ in scope at each site.
 | N4               | `transformers/builtins/lift-applied.ts:224` / `:270`                                                                                                                                                                                                                                                      | wrapper arrow + outer applied call                                                                                                                                                        | `expression`             | `preserveSourceMapRange` (a wrapper is NOT the wrapped expression's semantic predecessor — claiming its identity trips the compute-owned marker invariant; §6a)                                                                                                                                                                                                                                                                 |
 | N5               | `closures/strategies/array-method-transform.ts:297`                                                                                                                                                                                                                                                       | `mapWithPattern` call                                                                                                                                                                     | `methodCall`             | `preserveLineage`                                                                                                                                                                                                                                                                                                                                                                                                               |
 | N6               | `closures/utils/capture-scaffold.ts:54`                                                                                                                                                                                                                                                                   | outer applied handler call (inline-closure handlers)                                                                                                                                      | `originalNode`           | `preserveSourceMapRange` (survives to the printer at its JSX site — a real textRange reflows ternary/JSX layout; sweep-found, spot-verified)                                                                                                                                                                                                                                                                                    |
-| N7               | `transformers/schema-injection.ts` builder-call rebuild family: `:1489`, `:2379–:2410` (self-verified) + `:2728`, `:3190`, `:3289`, `:3520`, `:3729`, `:3818`, `:3895`, `:3985`, `:4080` and cluster `:985`, `:3782` (sweep-enumerated; `:2728`/`:3190` spot-verified — re-verify each at implementation) | every builder call SchemaInjection rebuilds to splice/prepend/append schemas — the immediate predecessor of the hoisting stage, so this family alone strips whatever survives stages 8–12 | `node` / `innerLiftCall` | **`create*` + `preserveSourceMapRange`** — NOT the originally-planned `update*`: its "free" textRange/original are precisely the observable channels (kitchensink JSX reflow; typeRegistry resurfacing via `getTypeAtLocationWithFallback` made module-scope-cf-data wrap a hoisted lift). Shipped as 16 smr-carry sites; anchors: inner rebuilds → `innerLiftCall`, outers/direct → `node`, asScope callee → `node.expression` |
+| N7               | `transformers/schema-injection.ts` builder-call rebuild family: `:1489`, `:2379–:2410` (self-verified) + `:2728`, `:3190`, `:3289`, `:3520`, `:3729`, `:3818`, `:3895`, `:3985`, `:4080` and cluster `:985`, `:3782` (sweep-enumerated; `:2728`/`:3190` spot-verified — re-verify each at implementation) | every builder call SchemaInjection rebuilds to splice/prepend/append schemas — the immediate predecessor of the hoisting stage, so this family alone strips whatever survives stages 8–12 | `node` / `innerLiftCall` | **`create*` + `preserveSourceMapRange`** — NOT the originally-planned `update*`: its "free" textRange/original are precisely the observable channels (kitchensink JSX reflow; typeRegistry resurfacing via `getTypeAtLocationWithFallback` made module-scope-cf-data wrap a hoisted lift). Shipped as **17** smr-carry sites; anchors: inner rebuilds → `innerLiftCall`, outers/direct → `node`, asScope callee → `node.expression`. Classification note: "builder call" here is the `detectCallKind`-builder sense — the set deliberately includes non-hoistable factory/API builders (reactive conditionals, cell factories/`.asSchema`, `wish`, `generateObject`, `sqliteQuery`, `fetchJson`), because the hoisting stage also visits in-place authored builder consts for `__cfReg` registration and A′ needs their `src` equally. The regression test location-pins the hoistable families + the in-place handler; the factory shapes ride the same §6a wrapper without dedicated location tests — add those alongside CT-1870's injection acceptance |
 | N8 (**DROPPED**) | `core/cf-helpers.ts` `createHelperCall`                                                                                                                                                                                                                                                                   | inner helper calls                                                                                                                                                                        | already smr-anchored     | Implemented, then reverted: the premise (smr doesn't ride `update*`) was refuted at TS source level (§2 correction), so N8 added no recovery; and helper-call original chains are exactly the §6 identity hazard. `createHelperCall` at HEAD already suffices                                                                                                                                                                   |
 
 "Narrow" here means **builder-path-complete**: every site that materializes or
@@ -232,15 +232,22 @@ reverting schema-injection.ts makes it fail).
 
 Notes:
 
-- N6/N7's `update*` switch also future-proofs against the smr-fragility class:
-  once nodes carry textRange+original, later `update*` rebuilds preserve them
-  with no cooperation needed.
+- N7's smr-carry future-proofs itself: sourceMapRange rides any later
+  `update*` rebuild automatically (`setOriginalNode` merges emitNode — §2
+  correction), so downstream stages need no cooperation. This is what the
+  originally-planned `update*` switch was for, achieved without its
+  observable textRange/original channels.
 - `setParentPointers` at the existing call sites is orthogonal (tree
   navigability, not lineage) and stays as-is.
 
 ## 6. `preserveLineage` design (and why `preserveNodeSourceMap` stays)
 
 ```ts
+// ORIGINAL design sketch (pre-implementation). Superseded on one point by
+// the shipped rule (§6a): wrappers NEVER take preserveLineage — a wrapper
+// arrow/call that reifies an authored expression is not its semantic
+// predecessor and carries position via preserveSourceMapRange only. The
+// shipped doc comments in ast/utils.ts are authoritative.
 // ast/utils.ts (next to setParentPointers; export via ast/mod.ts)
 /**
  * Carry full lineage from `origin` onto a synthesized replacement/reification
@@ -444,7 +451,8 @@ Filed 2026-07-07:
 
 - **[CT-1868](https://linear.app/common-tools/issue/CT-1868)** — the narrow
   lineage fix: `preserveLineage` helper + the §5 builder-path-complete site set
-  (create→update in SchemaInjection). Acceptance = §4, verification = §8.
+  (ticket title's "create→update in SchemaInjection" predates the shipped
+  `create*`+smr design — §6a). Acceptance = §4, verification = §8.
 - **[CT-1869](https://linear.app/common-tools/issue/CT-1869)** — the broad
   sweep, carrying the §7 work list. Related to CT-1868; sequenced after A′'s
   injection design.

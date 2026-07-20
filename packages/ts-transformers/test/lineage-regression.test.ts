@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { assert } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { CommonFabricTransformerPipeline } from "../src/mod.ts";
 import { batchTypeCheckFixtures } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
@@ -8,21 +8,44 @@ import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
  * CT-1868 lineage regression — the hermetic, tracked form of the transform-time
  * lineage probe documented in `APRIME-LINEAGE-HANDOFF.md` §3/§11.
  *
- * The transformer pipeline must arrive at BuilderCallHoisting (stage 14) with
- * every hoisted / authored builder call — its inner call AND its callback —
- * still carrying a recoverable AUTHORED source position. Before the fix these
- * arrived bare (`pos: -1`, no sourceMapRange, no original chain), so transform-
- * time / debug source resolution had nothing to read. The fix carries lineage
- * across the closure strategies, the expression-rewrite emitters and the
- * SchemaInjection rebuilds (see `preserveLineage` / `preserveSourceMapRange` and
- * the SchemaInjection `create → update*` conversions).
+ * The transformer pipeline must arrive at BuilderCallHoisting with every
+ * hoisted / authored builder call — its inner call AND its callback — still
+ * carrying a recoverable AUTHORED source position. Before the fix these arrived
+ * bare (`pos: -1`, no sourceMapRange, no original chain), so transform-time /
+ * debug source resolution had nothing to read. The fix carries lineage across
+ * the closure strategies, the expression-rewrite emitters and the
+ * SchemaInjection rebuilds (see `preserveLineage` / `preserveSourceMapRange` in
+ * `src/ast/utils.ts` — sourceMapRange is the carrier; the SchemaInjection
+ * rebuilds stay `create*` and wrap in `preserveSourceMapRange`).
  *
- * This drives the REAL pipeline over a five-origin fixture, then walks the
- * transformed AST for the hoisted `__cf{Lift,Pattern,Handler}_N` consts and the
- * top-level authored builders, asserting each recovers to the correct authored
- * snippet. Recovery mirrors the probe's precedence (own position → own
- * sourceMapRange → original-chain terminal); CONTENT is the ground truth — a
- * position pointing at the wrong text is still broken lineage.
+ * This drives the REAL pipeline over a multi-origin fixture, then checks the
+ * transformed AST three ways (each closing a review-found gap):
+ *   1. per-{tag, role} recovery — every hoisted const, in-place authored
+ *      builder, and export-default call/callback recovers a position;
+ *   2. per-tag CONTENT binding — each hoist's recovered text must contain its
+ *      OWN origin's distinctive marker, claimed exactly once (a global
+ *      any-marker check would let permuted anchors pass, because the
+ *      export-default span contains every marker);
+ *   3. rewritten-SITE recovery — the post-hoist call sites
+ *      (`__cfLift_N(...)` / `__cfHandler_N(...)` applications and the
+ *      `*WithPattern(__cfPattern_N, …)` enclosing calls) must recover to the
+ *      SAME origin as their hoisted const, pinning the outer-call lineage the
+ *      full-`preserveLineage` sites (lift-applied outer, mapWithPattern) and
+ *      the capture-scaffold outer carry.
+ * Recovery mirrors the probe's precedence (own position → own sourceMapRange →
+ * original-chain terminal); CONTENT is the ground truth — a position pointing
+ * at the wrong text is still broken lineage.
+ *
+ * Bite matrix (verified by reverting each fix file to its pre-fix state):
+ * pattern-builder, capture-scaffold, array-method-transform and
+ * schema-injection each individually FAIL this test when reverted. Known
+ * boundary: rewrite-helpers' zero-input wrapper branch
+ * (`createReactiveWrapperForExpression`'s non-input-bound path) is NOT
+ * position-pinned here — a corpus-wide probe shows it firing for branch-root
+ * shapes with non-destructured pattern input (e.g. jsx-direct-branch-roots'
+ * `!state.task.done`), which resisted reproduction in this destructured-input
+ * fixture; its preservations are kept §6a-symmetric and should get a direct
+ * unit pin alongside CT-1870's injection acceptance.
  */
 
 // One authored builder per origin path, each with a distinctive authored
@@ -31,8 +54,14 @@ import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 //   ORIGIN-A  computed() with a capture              → LiftApplied → __cfLift
 //   ORIGIN-N  computed() template for NAME           → LiftApplied → __cfLift
 //   ORIGIN-B  inline reactive binary expr in JSX     → expression-site → __cfLift
+//   ORIGIN-F  inline negation of a reactive property access in JSX →
+//             zero-input reactive wrapper (rewrite-helpers' non-input-bound
+//             branch) → __cfLift
+//   ORIGIN-G  pattern-body binary over a dynamic opaque access → __cfLift
+//   ORIGIN-E  inline captured action in JSX          → handler scaffold → __cfHandler
 //   ORIGIN-D  .map with an element callback in JSX   → array-method → __cfPattern
 const FIXTURE = `import {
+  action,
   computed,
   Default,
   handler,
@@ -44,6 +73,8 @@ const FIXTURE = `import {
 
 interface ProbeInput {
   count: number | Default<0>;
+  flag: boolean | Default<false>;
+  task: { done: boolean };
   label: string | Default<"probe">;
   items: string[] | Default<[]>;
 }
@@ -53,9 +84,11 @@ const bump = handler<unknown, { count: Writable<number> }>((_, state) => {
   state.count.set(state.count.get() + 1);
 });
 
-export default pattern<ProbeInput>(({ count, label, items }) => {
+export default pattern<ProbeInput>(({ count, flag, label, items, task }) => {
   // ORIGIN-A: authored computed with a capture
   const doubled = computed(() => count * 2);
+  // ORIGIN-G: binary over a dynamic opaque access — the zero-input wrapper
+  const pick = items[count] + "!";
   return {
     // ORIGIN-N: authored computed template
     [NAME]: computed(() => \`probe \${label}\`),
@@ -63,17 +96,24 @@ export default pattern<ProbeInput>(({ count, label, items }) => {
       <div>
         {/* ORIGIN-B: inline reactive binary expression */}
         <span>{count * 3}</span>
+        {/* ORIGIN-F: branch-root negation of a reactive property access */}
+        <i>{flag || !task.done ? "on" : "off"}</i>
         <b>{doubled}</b>
+        <em>{pick}</em>
         <ul>
           {/* ORIGIN-D: array map with element callback */}
           {items.map((item) => <li>{item}</li>)}
         </ul>
         <cf-button onClick={bump({ count })}>bump</cf-button>
+        {/* ORIGIN-E: inline captured action */}
+        <cf-button onClick={action(() => count * 4)}>quad</cf-button>
       </div>
     ),
     count,
+    flag,
     label,
     items,
+    task,
   };
 });
 `;
@@ -82,8 +122,8 @@ export default pattern<ProbeInput>(({ count, label, items }) => {
  * Best-available authored position for a (possibly synthetic) node, mirroring
  * the probe's recovery precedence: the node's own text range, else its explicit
  * sourceMapRange, else the terminal of its original-node chain. Returns
- * undefined when none of the three yields a real (`>= 0`) position — i.e. broken
- * lineage.
+ * undefined when none of the three yields a real (`>= 0`) position — i.e.
+ * broken lineage.
  */
 function recoverPosition(
   node: ts.Node,
@@ -115,11 +155,13 @@ function findCallbackArgument(
 interface BuilderSite {
   readonly tag: string;
   /** The builder call whose authored position must be recoverable. For a
-   * hoisted `const __cfLift_N = __cfHelpers.lift(...)` this is the INNER lift
+   * hoisted `const __cfLift_N = __cfHelpers.lift(...)` this is the INNER
    * call; for a top-level authored builder it is the call itself. */
   readonly call: ts.CallExpression;
   readonly callback: ts.ArrowFunction | ts.FunctionExpression | undefined;
 }
+
+const HOISTED_NAME = /^__cf(Lift|Pattern|Handler)_\d+$/;
 
 /**
  * Every hoisted builder-artifact const (`const __cf{Lift,Pattern,Handler}_N =
@@ -130,7 +172,6 @@ interface BuilderSite {
  */
 function collectBuilderSites(root: ts.SourceFile): BuilderSite[] {
   const sites: BuilderSite[] = [];
-  const hoistedName = /^__cf(Lift|Pattern|Handler)_\d+$/;
 
   for (const stmt of root.statements) {
     if (ts.isVariableStatement(stmt)) {
@@ -141,7 +182,7 @@ function collectBuilderSites(root: ts.SourceFile): BuilderSite[] {
         ) {
           const name = decl.name.text;
           // Hoisted synthetics plus the authored module-scope `bump` handler.
-          if (hoistedName.test(name) || name === "bump") {
+          if (HOISTED_NAME.test(name) || name === "bump") {
             sites.push({
               tag: name,
               call: decl.initializer,
@@ -173,6 +214,42 @@ function collectBuilderSites(root: ts.SourceFile): BuilderSite[] {
   return sites;
 }
 
+/**
+ * The rewritten post-hoist call SITES, keyed by the hoisted name they
+ * reference: `__cfLift_N(captures)` / `__cfHandler_N(captures)` applications
+ * (hoisted name as callee) and `receiver.*WithPattern(__cfPattern_N, …)`
+ * enclosing calls (hoisted name in argument position). These are the nodes the
+ * outer-call preservations (lift-applied outer, capture-scaffold outer,
+ * mapWithPattern rebuild) exist for — a collector that only reads the hoisted
+ * consts leaves those anchors unguarded (review finding on CT-1868).
+ */
+function collectRewrittenSites(
+  root: ts.SourceFile,
+): Map<string, ts.CallExpression> {
+  const sites = new Map<string, ts.CallExpression>();
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      if (
+        ts.isIdentifier(node.expression) &&
+        HOISTED_NAME.test(node.expression.text)
+      ) {
+        if (!sites.has(node.expression.text)) {
+          sites.set(node.expression.text, node);
+        }
+      } else {
+        for (const arg of node.arguments) {
+          if (ts.isIdentifier(arg) && HOISTED_NAME.test(arg.text)) {
+            if (!sites.has(arg.text)) sites.set(arg.text, node);
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(root);
+  return sites;
+}
+
 async function transformFixtureToAst(): Promise<{
   transformed: ts.SourceFile;
   /** The pre-transform source file, whose text the recovered positions index
@@ -198,6 +275,18 @@ async function transformFixtureToAst(): Promise<{
   return { transformed, original };
 }
 
+/** Distinctive authored markers for the hoisted-lift origins. Each hoisted
+ * lift must claim exactly one, and collectively all must be claimed — the
+ * per-tag binding a single global containment check cannot provide (the
+ * export-default span contains all of them). */
+const LIFT_MARKERS = [
+  "count * 2", // ORIGIN-A
+  "probe ${label}", // ORIGIN-N
+  "count * 3", // ORIGIN-B
+  "!task.done", // ORIGIN-F (zero-input wrapper route)
+  'items[count] + "!"', // ORIGIN-G (pattern-body initializer)
+];
+
 Deno.test(
   "CT-1868: builder lineage recovers authored positions at the hoisting stage",
   async () => {
@@ -205,17 +294,25 @@ Deno.test(
     const sourceText = original.text;
 
     const sites = collectBuilderSites(transformed);
+    const rewritten = collectRewrittenSites(transformed);
 
-    // Sanity: the fixture must actually exercise every origin path, or a silent
-    // pipeline change (e.g. a builder no longer hoisting) would vacuously pass.
+    // Sanity: the fixture must actually exercise every origin path, or a
+    // silent pipeline change (e.g. a builder no longer hoisting) would
+    // vacuously pass.
     const tags = sites.map((s) => s.tag);
     assert(
-      tags.filter((t) => t.startsWith("__cfLift_")).length >= 3,
-      `expected >= 3 hoisted lifts (ORIGIN-A/N/B), got: ${tags.join(", ")}`,
+      tags.filter((t) => t.startsWith("__cfLift_")).length >= 5,
+      `expected >= 5 hoisted lifts (ORIGIN-A/N/B/F/G), got: ${tags.join(", ")}`,
     );
     assert(
       tags.some((t) => t.startsWith("__cfPattern_")),
       `expected a hoisted pattern (ORIGIN-D), got: ${tags.join(", ")}`,
+    );
+    assert(
+      tags.some((t) => t.startsWith("__cfHandler_")),
+      `expected a hoisted handler (ORIGIN-E inline action), got: ${
+        tags.join(", ")
+      }`,
     );
     assert(tags.includes("bump"), "expected the authored `bump` handler");
     assert(
@@ -223,47 +320,103 @@ Deno.test(
       "expected the export-default pattern",
     );
 
-    // Every builder call AND its callback must recover an authored position.
-    const recoveredSnippets: string[] = [];
+    const recoveredByTag = new Map<string, string>();
+    const recover = (tag: string, role: string, node: ts.Node): string => {
+      const pos = recoverPosition(node);
+      assert(
+        pos,
+        `${tag} ${role}: reached the hoisting stage with no recoverable ` +
+          `authored position (broken lineage)`,
+      );
+      return sourceText.slice(pos.pos, pos.end);
+    };
+
+    // 1 + 2. Per-{tag, role} recovery AND per-tag content binding.
+    const claimedLiftMarkers = new Map<string, string>();
     for (const site of sites) {
-      const callPos = recoverPosition(site.call);
-      assert(
-        callPos,
-        `${site.tag}: builder call reached the hoisting stage with no ` +
-          `recoverable authored position (broken lineage)`,
-      );
-      recoveredSnippets.push(sourceText.slice(callPos.pos, callPos.end));
+      const callText = recover(site.tag, "call", site.call);
+      recoveredByTag.set(site.tag, callText);
 
-      assert(site.callback, `${site.tag}: expected a callback argument`);
-      const callbackPos = recoverPosition(site.callback);
-      assert(
-        callbackPos,
-        `${site.tag}: callback reached the hoisting stage with no ` +
-          `recoverable authored position (broken lineage)`,
-      );
-      recoveredSnippets.push(
-        sourceText.slice(callbackPos.pos, callbackPos.end),
-      );
+      if (site.tag !== "export-default") {
+        assert(site.callback, `${site.tag}: expected a callback argument`);
+      }
+      const callbackText = site.callback
+        ? recover(site.tag, "callback", site.callback)
+        : undefined;
+
+      if (site.tag.startsWith("__cfLift_")) {
+        const markers = LIFT_MARKERS.filter((m) => callText.includes(m));
+        assertEquals(
+          markers.length,
+          1,
+          `${site.tag}: recovered call text must contain exactly one lift ` +
+            `origin marker, got [${markers.join(", ")}] in: ${callText}`,
+        );
+        const marker = markers[0]!;
+        assert(
+          !claimedLiftMarkers.has(marker),
+          `${site.tag}: origin marker "${marker}" already claimed by ${
+            claimedLiftMarkers.get(marker)
+          } — permuted anchors`,
+        );
+        claimedLiftMarkers.set(marker, site.tag);
+        if (callbackText !== undefined) {
+          assert(
+            callbackText.includes(marker),
+            `${site.tag} callback: recovered text should carry the same ` +
+              `origin marker "${marker}", got: ${callbackText}`,
+          );
+        }
+      } else if (site.tag.startsWith("__cfHandler_")) {
+        assert(
+          callText.includes("count * 4"),
+          `${site.tag}: expected the ORIGIN-E action body, got: ${callText}`,
+        );
+      } else if (site.tag.startsWith("__cfPattern_")) {
+        assert(
+          callText.includes("(item) =>"),
+          `${site.tag}: expected the ORIGIN-D map callback, got: ${callText}`,
+        );
+      } else if (site.tag === "bump") {
+        assert(
+          callbackText !== undefined &&
+            callbackText.includes("state.count.set"),
+          `bump callback: expected the authored handler body, got: ${callbackText}`,
+        );
+      } else if (site.tag === "export-default") {
+        assert(
+          callText.includes("count, flag, label, items, task"),
+          `export-default: expected the authored pattern call, got: ${callText}`,
+        );
+      }
     }
+    assertEquals(
+      claimedLiftMarkers.size,
+      LIFT_MARKERS.length,
+      `every lift origin must be claimed by exactly one hoist; claimed: ${
+        [...claimedLiftMarkers.keys()].join(", ")
+      }`,
+    );
 
-    // Content is the ground truth: the recovered positions must collectively
-    // cover every authored origin's distinctive snippet. A `pos >= 0` pointing
-    // at the wrong text would pass the per-site checks above but fail here.
-    const recoveredText = recoveredSnippets.join("\n");
-    const originMarkers = [
-      "count * 2", // ORIGIN-A
-      "probe ${label}", // ORIGIN-N
-      "count * 3", // ORIGIN-B
-      "(item) =>", // ORIGIN-D (.map element callback)
-      "state.count.set", // ORIGIN-C (bump handler body)
-      "count, label, items", // export-default pattern callback
-    ];
-    for (const marker of originMarkers) {
+    // 3. Rewritten post-hoist SITES: each must recover, and to the SAME
+    // origin as its hoisted const.
+    for (const site of sites) {
+      if (!HOISTED_NAME.test(site.tag)) continue;
+      const siteCall = rewritten.get(site.tag);
       assert(
-        recoveredText.includes(marker),
-        `no recovered builder position covers authored origin ${
-          JSON.stringify(marker)
-        }.\nRecovered snippets:\n${recoveredText}`,
+        siteCall,
+        `${site.tag}: no rewritten call site found referencing the hoist`,
+      );
+      const siteText = recover(`site:${site.tag}`, "call", siteCall);
+      const hoistText = recoveredByTag.get(site.tag)!;
+      const sharedMarker = [...LIFT_MARKERS, "count * 4", "(item) =>"].find(
+        (m) => hoistText.includes(m),
+      );
+      assert(sharedMarker, `${site.tag}: hoist text carries no known marker`);
+      assert(
+        siteText.includes(sharedMarker),
+        `site:${site.tag}: rewritten site recovered to a different origin ` +
+          `than its hoist (expected marker "${sharedMarker}"), got: ${siteText}`,
       );
     }
   },
