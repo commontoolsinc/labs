@@ -142,6 +142,16 @@ export interface TransformationOptions {
   readonly assertDiagnostics?: boolean;
   /** Content identity assigned by the compiler for every authored source. */
   readonly moduleIdentities?: ReadonlyMap<string, string>;
+  /**
+   * Compile-name → authored-name mapping for CFC writer-identity file
+   * spellings (claim minting, provenance stamping, `PolicyOf` source
+   * matching). Callers whose program file names are not already authored
+   * paths — the runner's engine prefixes every module with a per-load
+   * `/<id>` segment — must supply their own unmapping here (the engine
+   * passes its `storedFilenameFor`). When absent, file names are recorded
+   * verbatim (modulo path-separator normalization).
+   */
+  readonly canonicalWriterIdentityFile?: (fileName: string) => string;
 }
 
 export type DiagnosticSeverity = "error" | "warning";

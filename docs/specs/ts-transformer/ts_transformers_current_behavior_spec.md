@@ -2545,16 +2545,25 @@ the annotated value itself and, when the value carries a function-valued
 `.implementation` (builder factories do), on that implementation function too
 (`createBindingIdentityHelper` / `createDefineBindingMetadataCall`).
 
-**File normalization.** `normalizeWriterIdentityFile` (backslashes → slashes,
-then strip the first path segment when the path has more than one) is
-deliberately duplicated, character-for-character, in
+**File normalization.** `normalizeWriterIdentityFile`
+(`src/utils/writer-identity-file.ts`, shared with
 `src/transformers/schema-generator.ts`, which emits the matching claim into
 schemas as `ifc: { writeAuthorizedBy: { __ctWriterIdentityOf: { file, path
-} } }` (`attachWriteAuthorizedByMarker` / `extractWriteAuthorizedByIdentity`).
-The stripped leading segment corresponds to the engine's per-load `/${id}`
-module-path prefix (see the prefix/identity-source-normalization discussion
-in `docs/specs/module-loading-verifier-and-engine-design.md`), keeping both
-sides load-independent and equal.
+} } }` — `attachWriteAuthorizedByMarker` / `extractWriteAuthorizedByIdentity`)
+normalizes backslashes → slashes and then applies the caller-supplied
+`canonicalWriterIdentityFile` option (`TransformerOptions`), the compile-name →
+authored-name unmapping. The runner's engine passes its `storedFilenameFor`
+(stripping the per-load `/${id}` module-path prefix and unmapping fabric-mount
+paths — see the prefix/identity-source-normalization discussion in
+`docs/specs/module-loading-verifier-and-engine-design.md`), keeping claim and
+provenance spellings load-independent and equal. Without the option the name
+is recorded verbatim: direct compiles (HTTP resolver, piece manifests) already
+present authored paths. Historical behavior — blindly stripping the first
+segment of any absolute multi-segment name as a presumed engine prefix —
+mis-spelled modules from direct compiles whose first segment was a real path
+segment, shearing claims from provenance across compile stacks (labs#4772 /
+CT-1886); stores hold claims minted under those spellings (see the
+spelling-compat note in the normalizer's doc comment).
 
 **Runtime consumption.** After a verified evaluation,
 `Engine.recordModuleProvenance` reads the annotation off each exported or
@@ -2881,7 +2890,7 @@ re-listing it. The enforced sources of truth:
 | Module-scope `__cf_data` wrap/exclusion name sets + verifier error strings (§15) | `TRUSTED_BUILDERS` / `TRUSTED_DATA_HELPERS` (`packages/utils/src/sandbox-contract.ts`); `CF_DATA_CONSTRUCTOR_NAMES` (`src/transformers/module-scope-cf-data.ts`); `TOP_LEVEL_CALL_RESULT_ERROR` (`packages/runner/src/sandbox/policy.ts`) | one module feeds both transformer and runner verifier — cross-package contract; runtime freezer semantics live in `packages/runner/src/sandbox/plain-data.ts` |
 | Coverage instrumentation + span schema (§16) | `PatternCoverageTransformer` (`src/transformers/pattern-coverage.ts`); `PatternCoverageSpan` / `PatternCoverageOptions` / `PATTERN_COVERAGE_GLOBAL` (`src/core/transformers.ts`) | line remapping pins the one-line helper prelude: `HELPERS_STMT` (`src/core/cf-helpers.ts`) ↔ `patternCoverageOptionsForCompile` (`packages/runner/src/harness/engine.ts`) — change them together |
 | Hardening/binding helper names, metadata field, canonical helper bodies (§17) | `FUNCTION_HARDENING_HELPER_NAME` / `BINDING_IDENTITY_HELPER_NAME` / `VERIFIED_BINDING_METADATA_FIELD` and `createFunctionHardeningHelperSource` / `createBindingIdentityHelperSource` (`packages/utils/src/sandbox-contract.ts`) | the runner verifier recognizes helper declarations by trivia-stripped byte equality to these sources (`CANONICAL_HARDENING_HELPER` in `packages/runner/src/sandbox/compiled-bundle-verifier.ts`); the transformer's AST-built twins (`createFunctionHardeningHelper` / `createBindingIdentityHelper` in `src/transformers/module-scope-function-hardening.ts`) must compile to exactly that text — drift fails every module load |
-| Trusted-binding type names + binding positions (§17.3) | seed map in `discoverWriteAuthorizedByBindingPositions` (`src/transformers/module-scope-function-hardening.ts`) | keep in sync with `WriteAuthorizedByValidationTransformer` (§6.8) and the schema generator's `__ctWriterIdentityOf` claim emission; `normalizeWriterIdentityFile` is intentionally duplicated in `schema-generator.ts` and must stay identical |
+| Trusted-binding type names + binding positions (§17.3) | seed map in `discoverWriteAuthorizedByBindingPositions` (`src/transformers/module-scope-function-hardening.ts`) | keep in sync with `WriteAuthorizedByValidationTransformer` (§6.8) and the schema generator's `__ctWriterIdentityOf` claim emission; both spell files via the shared `normalizeWriterIdentityFile` (`src/utils/writer-identity-file.ts`) so claim and provenance spellings cannot drift |
 
 A drift-resistant habit: when a section enumerates a set, cite the constant /
 function that defines it so a reader can confirm the live set, and keep prose

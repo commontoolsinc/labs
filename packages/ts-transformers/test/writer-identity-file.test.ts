@@ -1,0 +1,82 @@
+import { assert, assertEquals } from "@std/assert";
+import { normalizeWriterIdentityFile } from "../src/utils/writer-identity-file.ts";
+import { transformFiles } from "./utils.ts";
+import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+
+// The claim-minting + provenance-stamping source used across the cases: the
+// `typeof saver` type-query mints an `__ctWriterIdentityOf` marker carrying
+// this module's writer-identity file spelling.
+const CLAIM_SOURCE = `/// <cts-enable />
+import { toSchema, WriteAuthorizedBy, handler } from "commonfabric";
+const saver = handler({}, {}, () => {});
+const s = toSchema<WriteAuthorizedBy<{ title: string }, typeof saver>>();
+export { s };
+`;
+
+function markerFile(output: string): string {
+  const at = output.indexOf("__ctWriterIdentityOf");
+  assert(at >= 0, "expected a writer-identity marker in the output");
+  const match = output.slice(at).match(/file:\s*"([^"]+)"/);
+  assert(match, "expected a file spelling inside the marker");
+  return match[1]!;
+}
+
+Deno.test("writer-identity file spelling is verbatim without a canonicalizer", () => {
+  // Direct compiles (HTTP resolver, piece manifests) hand authored paths
+  // straight through; nothing may be guessed away from them. The historical
+  // first-segment strip turned this name into "/patterns/system/x.tsx",
+  // shearing claims from provenance across compile stacks (labs#4772).
+  assertEquals(
+    normalizeWriterIdentityFile("/api/patterns/system/x.tsx"),
+    "/api/patterns/system/x.tsx",
+  );
+  assertEquals(
+    normalizeWriterIdentityFile("api/patterns/system/x.tsx"),
+    "api/patterns/system/x.tsx",
+  );
+  assertEquals(normalizeWriterIdentityFile("/main.ts"), "/main.ts");
+});
+
+Deno.test("canonicalizer runs on the separator-normalized name", () => {
+  const seen: string[] = [];
+  const result = normalizeWriterIdentityFile(
+    "\\load-1\\api\\x.tsx",
+    (name) => {
+      seen.push(name);
+      return name.replace(/^\/load-1/, "");
+    },
+  );
+  assertEquals(seen, ["/load-1/api/x.tsx"]);
+  assertEquals(result, "/api/x.tsx");
+});
+
+Deno.test("claim spelling: direct absolute compile records the authored path", async () => {
+  const fileName = "/api/patterns/system/profile-embed.tsx";
+  const output = await transformFiles({ [fileName]: CLAIM_SOURCE }, {
+    types: COMMONFABRIC_TYPES,
+  });
+  assertEquals(markerFile(output[fileName]!), fileName);
+  // The pre-fix mis-spelling must not appear anywhere in the emitted module.
+  assertEquals(
+    output[fileName]!.includes('"/patterns/system/profile-embed.tsx"'),
+    false,
+  );
+});
+
+Deno.test("claim spelling: engine-prefixed compile canonicalizes to the same authored path", async () => {
+  // The engine compiles under a per-load `/<id>` prefix and passes its
+  // unmapping (storedFilenameFor) as the canonicalizer. The recorded spelling
+  // must equal the direct compile's — load-independent and shear-free.
+  const fileName = "/load-abc123/api/patterns/system/profile-embed.tsx";
+  const output = await transformFiles({ [fileName]: CLAIM_SOURCE }, {
+    types: COMMONFABRIC_TYPES,
+    canonicalWriterIdentityFile: (name) =>
+      name.startsWith("/load-abc123/")
+        ? name.slice("/load-abc123".length)
+        : name,
+  });
+  assertEquals(
+    markerFile(output[fileName]!),
+    "/api/patterns/system/profile-embed.tsx",
+  );
+});

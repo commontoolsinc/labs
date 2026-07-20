@@ -32,6 +32,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         const writeAuthorizedByIdentity = extractWriteAuthorizedByIdentity(
           typeArg,
           sourceFile.fileName,
+          context.options.canonicalWriterIdentityFile,
         );
         let schemaTypeArg: ts.TypeNode = typeArg;
         if (
@@ -198,7 +199,10 @@ function resolvePolicyOfMarkers(
     const normalizedSourceEntries = file === undefined
       ? []
       : identityEntries.filter(([sourceName]) =>
-        normalizeWriterIdentityFile(sourceName) === file
+        normalizeWriterIdentityFile(
+          sourceName,
+          context.options.canonicalWriterIdentityFile,
+        ) === file
       );
     const sourceEntry = exactSourceEntry ??
       (normalizedSourceEntries.length === 1
@@ -436,6 +440,7 @@ function attachUiContractToSchemaRecord(
 function extractWriteAuthorizedByIdentity(
   typeNode: ts.TypeNode,
   sourceFileName: string,
+  canonicalize?: (fileName: string) => string,
 ): { file: string; path: string[] } | undefined {
   if (!isWriteAuthorizedByType(typeNode)) {
     return undefined;
@@ -448,7 +453,7 @@ function extractWriteAuthorizedByIdentity(
     return undefined;
   }
   return {
-    file: normalizeWriterIdentityFile(sourceFileName),
+    file: normalizeWriterIdentityFile(sourceFileName, canonicalize),
     path: [bindingNode.exprName.text],
   };
 }

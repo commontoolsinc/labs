@@ -20,7 +20,10 @@ export class ModuleScopeFunctionHardeningTransformer extends Transformer {
     const trustedBindingNames = collectWriteAuthorizedByBindingNames(
       sourceFile,
     );
-    const sourceFileName = normalizeWriterIdentityFile(sourceFile.fileName);
+    const sourceFileName = normalizeWriterIdentityFile(
+      sourceFile.fileName,
+      context.options.canonicalWriterIdentityFile,
+    );
 
     const statements = sourceFile.statements.flatMap((statement) =>
       transformTopLevelStatement(statement, context, {
