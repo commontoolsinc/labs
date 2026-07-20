@@ -60,7 +60,8 @@ Three equivalent ways to run the CLI, in order of preference for agents:
   (`echo '{...}' | cf piece call ... handler -`), a bare pipe with no payload
   argument, or schema-derived flags after `--`. Empty stdin fails loudly.
 - A `piece get` path that doesn't resolve is a data error: one-line message on
-  stderr, exit 1 (no usage screen).
+  stderr, exit 1 (no usage screen). A `piece link` that fails validation
+  (missing source/target piece or path) reports the same way.
 
 ## Environment Setup
 

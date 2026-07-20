@@ -48,7 +48,9 @@ standard error and continues searching that piece and the rest of the space.
 - `piece call` accepts its payload as an inline JSON argument, `-` for stdin, an
   implicit pipe (no payload argument), or schema-derived flags after `--`.
 - A `piece get` path that doesn't resolve prints a one-line error on stderr and
-  exits 1 — it is a data error, not a usage error.
+  exits 1 — it is a data error, not a usage error. A `piece link` that fails
+  validation (a source/target piece or path that doesn't exist) reports the same
+  way.
 - The launcher spawns the child CLI with `deno run --quiet` so Deno's own
   warnings (npm "Ignored build scripts" banner) never reach users.
 

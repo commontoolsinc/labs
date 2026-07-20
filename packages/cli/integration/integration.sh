@@ -398,9 +398,23 @@ run_piece_links() {
   PIECE_ID3=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $PATTERN_SRC)
   echo "Created third piece: $PIECE_ID3"
 
-  # Linking from invented piece should fail without --allow-non-existing
-  if cf piece link $SPACE_ARGS $INVENTED_ID/value $PIECE_ID3/value 2>/dev/null; then
+  # Linking from invented piece should fail without --allow-non-existing —
+  # and as a DATA error: message (with the --allow-non-existing next step) and
+  # TIP on stderr, nothing on stdout, no usage screen (regression guard for
+  # the LinkValidationError → Cliffy usage-dump path).
+  LINK_ERR_FILE=$(mktemp)
+  if LINK_OUT=$(cf piece link $SPACE_ARGS $INVENTED_ID/value $PIECE_ID3/value 2>"$LINK_ERR_FILE"); then
     error "Linking from invented piece should have failed without --allow-non-existing"
+  fi
+  if [ -n "$LINK_OUT" ]; then
+    error "Link data error should print nothing to stdout, got: $LINK_OUT"
+  fi
+  grep -q -- "--allow-non-existing" "$LINK_ERR_FILE" ||
+    error "Link data error should carry the --allow-non-existing next step on stderr"
+  grep -q "TIP:" "$LINK_ERR_FILE" ||
+    error "Link data error should print the inspect hint on stderr"
+  if grep -q "Usage:" "$LINK_ERR_FILE"; then
+    error "Link data error must not dump the usage screen"
   fi
 
   # Now link with --allow-non-existing

@@ -7,10 +7,13 @@ import {
   PieceResultProjectionError,
 } from "../lib/piece.ts";
 import {
+  exitWithDataError,
   isPieceGetDataError,
   pieceCallRawArgs,
   pieceGetDataErrorReport,
+  pieceLinkDataErrorReport,
 } from "../commands/piece.ts";
+import { LinkValidationError } from "../lib/piece.ts";
 
 describe("executePieceCallable", () => {
   it("invokes handlers from schema-derived flags", async () => {
@@ -1019,5 +1022,67 @@ describe("piece get data errors", () => {
     expect(report?.message).toMatch(/schema could not resolve/);
     expect(report?.message).toMatch(/--step/);
     expect(report?.hint).toBeUndefined();
+  });
+});
+
+describe("piece link data errors", () => {
+  it("reports a validation failure with an inspect hint for both pieces", () => {
+    const report = pieceLinkDataErrorReport(
+      new LinkValidationError(
+        'Target path "config/email" does not exist on piece fid1:target-1\n\nUse --allow-non-existing to link anyway.',
+      ),
+      { sourcePieceId: "fid1:source-1", targetPieceId: "fid1:target-1" },
+    );
+    // The runtime's message survives verbatim — it carries its own
+    // --allow-non-existing next step — and the hint adds the inspect pointer.
+    expect(report?.message).toMatch(/does not exist on piece fid1:target-1/);
+    expect(report?.message).toMatch(/--allow-non-existing/);
+    expect(report?.hint).toMatch(/piece inspect/);
+    expect(report?.hint).toMatch(/fid1:source-1/);
+    expect(report?.hint).toMatch(/fid1:target-1/);
+  });
+
+  it("returns null for a non-validation error (caller rethrows)", () => {
+    expect(
+      pieceLinkDataErrorReport(new Error("network unreachable"), {
+        sourcePieceId: "fid1:source-1",
+        targetPieceId: "fid1:target-1",
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("exitWithDataError", () => {
+  const exitSentinel = (exited: number[]) => (code: number): never => {
+    exited.push(code);
+    throw new Error("exit-sentinel");
+  };
+
+  it("prints message then hint to stderr sinks and exits 1", () => {
+    const printed: string[] = [];
+    const exited: number[] = [];
+    expect(() =>
+      exitWithDataError({ message: "boom", hint: "TIP: look closer" }, {
+        printError: (m) => printed.push(`error:${m}`),
+        printHint: (m) => printed.push(`hint:${m}`),
+        exit: exitSentinel(exited),
+      })
+    ).toThrow("exit-sentinel");
+    expect(printed).toEqual(["error:boom", "hint:TIP: look closer"]);
+    expect(exited).toEqual([1]);
+  });
+
+  it("omits the hint line when the report has none", () => {
+    const printed: string[] = [];
+    const exited: number[] = [];
+    expect(() =>
+      exitWithDataError({ message: "boom" }, {
+        printError: (m) => printed.push(`error:${m}`),
+        printHint: (m) => printed.push(`hint:${m}`),
+        exit: exitSentinel(exited),
+      })
+    ).toThrow("exit-sentinel");
+    expect(printed).toEqual(["error:boom"]);
+    expect(exited).toEqual([1]);
   });
 });
