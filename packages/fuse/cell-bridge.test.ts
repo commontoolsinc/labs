@@ -44,7 +44,10 @@ interface FakeCell {
   getRaw(): unknown;
   asSchemaFromLinks(): FakeCell;
   key(segment: string): FakeCell;
-  sink?: (fn: (v: unknown) => void) => () => void;
+  sink?: (
+    fn: (v: unknown) => void,
+    options?: { materializeFactories?: boolean },
+  ) => () => void;
   isStream?: () => boolean;
 }
 
@@ -2696,6 +2699,52 @@ Deno.test("CellBridge.syncPieceListOnce removes a deleted piece from the tree", 
 // ---------------------------------------------------------------------------
 // Group 5: subscribePiece — rename on cell change
 // ---------------------------------------------------------------------------
+
+Deno.test("CellBridge subscribes to projected values without eagerly materializing factories", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+  const sinkOptions: Array<{ materializeFactories?: boolean } | undefined> = [];
+  const projectionCell = makeCell({}, undefined);
+  projectionCell.sink = (_sink, options) => {
+    sinkOptions.push(options);
+    return () => {};
+  };
+  const piece = {
+    id: "of:factory-projection-subscription",
+    name: () => "Factory Projection Subscription",
+    getPatternMeta: () => Promise.resolve({}),
+    input: {
+      getCell: () => Promise.resolve(projectionCell),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(projectionCell),
+      get: () => Promise.resolve({}),
+    },
+  };
+  const pieceIno = tree.addDir(
+    state.piecesIno,
+    "Factory-Projection-Subscription",
+  );
+
+  const subs = await (bridge as unknown as { subscribePiece: SubscribePiece })
+    .subscribePiece.call(
+      bridge,
+      piece,
+      pieceIno,
+      "Factory-Projection-Subscription",
+      "home",
+      state,
+    );
+
+  assertEquals(sinkOptions, [
+    { materializeFactories: false },
+    { materializeFactories: false },
+    { materializeFactories: false },
+  ]);
+  for (const cancel of subs) cancel();
+});
 
 Deno.test({
   name: "CellBridge.subscribePiece renames directory when piece name changes",

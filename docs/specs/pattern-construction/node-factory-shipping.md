@@ -1685,6 +1685,15 @@ JSON containing a malformed reserved tag is a write error; handler-file parsing
 falls back to convenient bare text only when JSON parsing itself fails, never
 when tagged Factory decoding fails.
 
+FUSE's reactive projection subscriptions read Factory values with execution
+materialization disabled. The mounted JSON and callable-file views need only the
+inert `Factory@1` state; they must not load code merely to observe an input,
+result, or name change. Invocation through a mounted callable remains a separate
+runner-owned boundary that materializes the then-current factory with the stable
+call-site identity. Consequently a cold factory cannot block unrelated sibling
+fields from refreshing in the mounted tree, and FUSE observation never turns a
+context-free shell into an executable callable.
+
 Authored code may neither supply a literal for such a field nor capture a
 chosen value and forward it. If a required system value or stable tool identity
 is unavailable, invocation fails closed.

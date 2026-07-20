@@ -168,6 +168,16 @@ function decodeSpaceDirectoryName(spaceName: string): string {
 
 type Cancel = () => void;
 
+function sinkProjectedCell<T>(
+  cell: Cell<T>,
+): (
+  callback: Parameters<Cell<T>["sink"]>[0],
+) => Cancel {
+  // FUSE is a projection boundary, not an execution boundary. Keep Factory@1
+  // inert here; `cf exec` later invokes through runner-owned materialization.
+  return (callback) => cell.sink(callback, { materializeFactories: false });
+}
+
 type ResolveLink = (value: unknown, depth: number) => string | null;
 
 export interface CellBridgeOptions {
@@ -3197,7 +3207,8 @@ export class CellBridge {
       try {
         const cell = await piece[propName].getCell();
         let debounceTimer: ReturnType<typeof setTimeout> | undefined;
-        const cancel = cell.sink((newValue: unknown) => {
+        const sinkProjection = sinkProjectedCell(cell);
+        const cancel = sinkProjection((newValue: unknown) => {
           if (debounceTimer !== undefined) clearTimeout(debounceTimer);
           debounceTimer = setTimeout(() => {
             debounceTimer = undefined;
@@ -3303,7 +3314,8 @@ export class CellBridge {
     // reads when setting up reactive subscriptions.
     try {
       const nameTrackingCell = await piece.result.getCell();
-      const cancelRootSub = nameTrackingCell.sink((newValue: unknown) => {
+      const sinkProjection = sinkProjectedCell(nameTrackingCell);
+      const cancelRootSub = sinkProjection((newValue: unknown) => {
         setTimeout(() => {
           try {
             // Use the state captured at subscription time, NOT
@@ -3409,7 +3421,10 @@ export class CellBridge {
               state.srcErrorLogInos.set(newName, errorLogIno);
             }
 
-            const renamedPieceIno = this.tree.lookup(state.piecesIno, newName);
+            const renamedPieceIno = this.tree.lookup(
+              state.piecesIno,
+              newName,
+            );
             if (renamedPieceIno !== undefined) {
               this.updatePieceMetaName(renamedPieceIno, newName);
             }
