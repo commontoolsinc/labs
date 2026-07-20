@@ -236,8 +236,10 @@ describe("data-uri", () => {
       expect(parsed.mixed).toBe("Test 🎉 with ñ and 中文");
     });
 
-    it("mints a payload in the standard encoding (`fvj1:` tag)", () => {
+    it("mints the data-cell media type and the standard encoding", () => {
       const dataURI = createDataCellURI({ x: 1 });
+      expect(dataURI.startsWith("data:application/vnd.common-fabric.data,"))
+        .toBe(true);
       const payload = decodeURIComponent(
         dataURI.slice(dataURI.indexOf(",") + 1),
       );
@@ -349,37 +351,51 @@ describe("data-uri", () => {
   describe("getJSONFromDataURI", () => {
     /** Percent-encoded `data:` URI with the given payload text. */
     const uriOf = (payload: string): string =>
-      `data:application/json,${encodeURIComponent(payload)}`;
+      `data:application/vnd.common-fabric.data,${encodeURIComponent(payload)}`;
 
     /** Base64 `data:` URI with the given payload text. */
     const base64UriOf = (payload: string): string => {
       const bytes = new TextEncoder().encode(payload);
       const binary = String.fromCharCode(...bytes);
-      return `data:application/json;base64,${btoa(binary)}`;
+      return `data:application/vnd.common-fabric.data;base64,${btoa(binary)}`;
     };
 
-    it("rejects a non-`application/json` URI", () => {
+    it("rejects a URI whose media type is not a data-cell type", () => {
       expect(() => getJSONFromDataURI("data:text/plain,hello")).toThrow(
         /Invalid URI/,
       );
     });
 
+    // `application/json` is the also-accepted read form; ids carrying it can
+    // arrive from external minters and from processes running earlier builds.
+    it("accepts the `application/json` media type", () => {
+      const payload = encodeURIComponent(jsonFromValue({ a: 1 }));
+      expect(getJSONFromDataURI(`data:application/json,${payload}`))
+        .toEqual({ a: 1 });
+    });
+
     it("rejects a URI with no comma", () => {
-      expect(() => getJSONFromDataURI("data:application/json")).toThrow(
+      expect(() =>
+        getJSONFromDataURI("data:application/vnd.common-fabric.data")
+      ).toThrow(
         /Invalid data URI format/,
       );
     });
 
     it("rejects a non-UTF-8 charset", () => {
       expect(() =>
-        getJSONFromDataURI("data:application/json;charset=latin1,{}")
+        getJSONFromDataURI(
+          "data:application/vnd.common-fabric.data;charset=latin1,x",
+        )
       ).toThrow(/Unsupported charset/);
     });
 
     it("accepts an explicit UTF-8 charset", () => {
       const payload = encodeURIComponent(jsonFromValue({}));
       expect(
-        getJSONFromDataURI(`data:application/json;charset=utf-8,${payload}`),
+        getJSONFromDataURI(
+          `data:application/vnd.common-fabric.data;charset=utf-8,${payload}`,
+        ),
       ).toEqual({});
     });
 

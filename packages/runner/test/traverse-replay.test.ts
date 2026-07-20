@@ -146,7 +146,7 @@ Deno.test("plain primitive-array traversal records indices after failure", () =>
   assert(oracle !== undefined);
   assert(
     oracle.readSet.some((read) =>
-      read.includes("data:application/json") &&
+      read.includes("data:application/vnd.common-fabric.data") &&
       read.endsWith('|["value","1"]|nt')
     ),
   );

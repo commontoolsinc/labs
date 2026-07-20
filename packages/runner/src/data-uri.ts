@@ -1,5 +1,6 @@
 /**
- * The `data:` URI codec. The runner uses `application/json` `data:` URIs as
+ * The `data:` URI codec. The runner uses `data:` URIs (media type
+ * `application/vnd.common-fabric.data`) as
  * self-contained content-addressed cell ids: the URI _is_ its content, so
  * reading such a cell means decoding its own id. This module holds the whole
  * matched set -- the minting side ({@link createDataCellURI}) and the reading
@@ -59,6 +60,33 @@ const dataUriReconstructionContext = new EmptyReconstructionContext(
   "no cell reconstruction at the `data:` URI boundary",
 );
 
+/** The media type minted for `data:` cell URIs. */
+export const DATA_CELL_MEDIA_TYPE = "application/vnd.common-fabric.data";
+
+/**
+ * Also-accepted media type for `data:` cell URIs: read, never minted here.
+ * Ids in this form can arrive from external minters and from processes
+ * running earlier builds.
+ */
+const LEGACY_DATA_CELL_MEDIA_TYPE = "application/json";
+
+/**
+ * Is `mediaType` one of the accepted `data:` cell URI media types?
+ */
+export function isDataCellMediaType(mediaType: string): boolean {
+  return mediaType === DATA_CELL_MEDIA_TYPE ||
+    mediaType === LEGACY_DATA_CELL_MEDIA_TYPE;
+}
+
+/**
+ * Does `id` look like a `data:` cell URI, in either accepted media type?
+ * (Prefix check only; header parameters and payload are not validated.)
+ */
+export function isDataCellURI(id: string): boolean {
+  return id.startsWith(`data:${DATA_CELL_MEDIA_TYPE}`) ||
+    id.startsWith(`data:${LEGACY_DATA_CELL_MEDIA_TYPE}`);
+}
+
 /**
  * Makes a `data:` URI that names a cell whose content is carried in the id
  * itself. Reading such a cell means decoding its own id; there is no document
@@ -85,7 +113,7 @@ const dataUriReconstructionContext = new EmptyReconstructionContext(
  * @param data The value to encode. Must be acyclic.
  * @param base Optional base link; relative links within `data` are resolved
  *   against it.
- * @returns A `data:application/json` URI naming a cell whose content is `data`.
+ * @returns A `data:` URI naming a cell whose content is `data`.
  * @throws If `data` contains a reference cycle.
  */
 export function createDataCellURI(
@@ -145,11 +173,11 @@ export function createDataCellURI(
     traverseAndAddBaseIdToRelativeLinks(data, new Set()),
   );
   // Use encodeURIComponent for UTF-8 safe encoding (matches runtime.ts pattern)
-  return `data:application/json,${encodeURIComponent(json)}` as URI;
+  return `data:${DATA_CELL_MEDIA_TYPE},${encodeURIComponent(json)}` as URI;
 }
 
 /**
- * Decodes the extracted payload text of an `application/json` `data:` URI,
+ * Decodes the extracted payload text of a `data:` cell URI,
  * which must be in the standard `data-model` `FabricValue` JSON-embedded
  * encoding (tagged `fvj1:`). Results are deep-frozen and may contain
  * `FabricInstance`s. This is the single point of truth for how such
@@ -183,7 +211,7 @@ export function decodeDataURIPayloadText(text: string): FabricValue {
  *
  * This reads a strict superset of what gets written by
  * {@link createDataCellURI}, which only ever emits the percent-encoded form
- * with no header parameters (`data:application/json,...`). The Base64 and
+ * with no header parameters. The Base64 and
  * `charset` spellings are for `data:` URIs originating anywhere else.
  *
  * The extracted payload text is decoded via {@link decodeDataURIPayloadText},
@@ -193,13 +221,13 @@ export function decodeDataURIPayloadText(text: string): FabricValue {
  *
  * @param uri The `data:` URI to read.
  * @returns The decoded payload.
- * @throws If `uri` is not an `application/json` `data:` URI, if it declares a
- *   charset other than UTF-8, or if its payload is not a valid encoded
- *   `FabricValue` (which includes the empty payload and the historical
- *   bare-JSON form).
+ * @throws If `uri` is not a `data:` URI in an accepted media type (see
+ *   {@link isDataCellMediaType}), if it declares a charset other than
+ *   UTF-8, or if its payload is not a valid encoded `FabricValue` (which
+ *   includes the empty payload and bare JSON).
  */
 export function getJSONFromDataURI(uri: URI | string): any {
-  if (!uri.startsWith("data:application/json")) {
+  if (!isDataCellURI(uri)) {
     throw new Error(`Invalid URI: ${uri}`);
   }
 

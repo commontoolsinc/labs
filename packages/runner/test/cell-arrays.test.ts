@@ -393,7 +393,7 @@ describe("plain-schema array traversal", () => {
     const trackedDataPaths: string[][] = [];
     const nativeTrackReadPaths = tx.trackReadPaths!.bind(tx);
     tx.trackReadPaths = (address, paths, options) => {
-      if (address.id.startsWith("data:application/json")) {
+      if (address.id.startsWith("data:application/vnd.common-fabric.data")) {
         trackedDataPaths.push(...paths.map((path) => [...path]));
       }
       return nativeTrackReadPaths(address, paths, options);

@@ -6,7 +6,9 @@ import type { URI } from "../src/sigil-types.ts";
 
 /** Percent-encoded `data:` URI with the given payload text. */
 const uriOf = (payload: string): URI =>
-  `data:application/json,${encodeURIComponent(payload)}` as URI;
+  `data:application/vnd.common-fabric.data,${
+    encodeURIComponent(payload)
+  }` as URI;
 
 // `load()` is the storage-transaction-side reader of `data:` URI documents,
 // separate from `uri-utils.ts`'s `getJSONFromDataURI()`. Both route payload
@@ -58,8 +60,20 @@ describe("attestation `load()` of `data:` URIs", () => {
     expect(error?.name).toBe("InvalidDataURIError");
   });
 
+  it("accepts the `application/json` media type", () => {
+    const { ok, error } = load({
+      id: `data:application/json,${
+        encodeURIComponent(jsonFromValue({ a: 1 }))
+      }` as URI,
+    });
+    expect(error).toBeUndefined();
+    expect(ok!.value).toEqual({ value: { a: 1 } });
+  });
+
   it("errors on an empty payload", () => {
-    const { ok, error } = load({ id: "data:application/json," as URI });
+    const { ok, error } = load({
+      id: "data:application/vnd.common-fabric.data," as URI,
+    });
     expect(ok).toBeUndefined();
     expect(error?.name).toBe("InvalidDataURIError");
   });

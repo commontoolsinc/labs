@@ -806,7 +806,11 @@ describe("Cell commit callbacks", () => {
         const resolved = itemCell.resolveAsCell();
         const resolvedLink = resolved.getAsNormalizedFullLink();
 
-        expect(resolvedLink.id.startsWith("data:application/json,")).toBe(true);
+        expect(
+          resolvedLink.id.startsWith(
+            "data:application/vnd.common-fabric.data,",
+          ),
+        ).toBe(true);
         expect(resolvedLink.path).toEqual([]);
         expect(resolved.get()).toEqualIgnoringSymbols({ name: "first" });
       });
@@ -898,7 +902,7 @@ describe("Cell commit callbacks", () => {
         const resolved = first.resolveAsCell();
         expect(
           resolved.getAsNormalizedFullLink().id.startsWith(
-            "data:application/json,",
+            "data:application/vnd.common-fabric.data,",
           ),
         ).toBe(true);
         expect(resolved.getAsNormalizedFullLink().path).toEqual([]);

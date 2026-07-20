@@ -2,7 +2,11 @@ import { isRecord } from "@commonfabric/utils/types";
 import type { CellScope, JSONSchema } from "../builder/types.ts";
 import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { findAndInlineDataURILinks, getJSONFromDataURI } from "../data-uri.ts";
+import {
+  findAndInlineDataURILinks,
+  getJSONFromDataURI,
+  isDataCellURI,
+} from "../data-uri.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import type { CfcAddress } from "./types.ts";
 import { isNormalizedFullLink } from "../link-types.ts";
@@ -528,7 +532,7 @@ const eventEnvelopePayloads = (
   }
   try {
     const eventLink = parseLink(event);
-    if (eventLink?.id?.startsWith("data:application/json")) {
+    if (eventLink?.id && isDataCellURI(eventLink.id)) {
       const decoded = getJSONFromDataURI(eventLink.id);
       addPayload(decoded, eventLink.space);
     }

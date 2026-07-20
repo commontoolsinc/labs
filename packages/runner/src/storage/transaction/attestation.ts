@@ -23,7 +23,10 @@ import { unclaimed } from "@commonfabric/memory/fact";
 import { getLogger } from "@commonfabric/utils/logger";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { toTransactionDocumentValue } from "../v2-document.ts";
-import { decodeDataURIPayloadText } from "../../data-uri.ts";
+import {
+  decodeDataURIPayloadText,
+  isDataCellMediaType,
+} from "../../data-uri.ts";
 
 const logger = getLogger("attestation", {
   enabled: false,
@@ -274,7 +277,7 @@ export const load = (
         // Decode data
         const content = isBase64 ? atob(data) : decodeURIComponent(data);
 
-        if (mediaType === "application/json") {
+        if (isDataCellMediaType(mediaType)) {
           let value: FabricValue;
           try {
             // The payload encodes the cell VALUE; the document that the
