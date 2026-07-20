@@ -55,15 +55,15 @@ export {
   mintDataCellURI,
 } from "./data-uri-mint.ts";
 
+/** Shared text decoder, created once. */
+const textDecoder = new TextDecoder();
+
 /**
  * `ReconstructionContext` for decoding `data:` URI payloads. Links at this
  * boundary are sigil (plain) data rather than cell references, so no cell
  * reconstruction is ever needed; this context exists so that an unexpected
  * cell reference produces a message that names the boundary.
  */
-/** Shared text decoder, created once. */
-const textDecoder = new TextDecoder();
-
 const dataUriReconstructionContext = new EmptyReconstructionContext(
   true,
   "no cell reconstruction at the `data:` URI boundary",
