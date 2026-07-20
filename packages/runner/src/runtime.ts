@@ -4,6 +4,8 @@ import {
   StaticCacheHTTP,
 } from "@commonfabric/static";
 import { RuntimeTelemetry } from "@commonfabric/runner";
+import { jsonFromValue } from "@commonfabric/data-model/codec-json";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import type { NonIdempotentReport } from "./telemetry.ts";
 import type {
   AnyCell,
@@ -1709,6 +1711,29 @@ export class Runtime {
     );
   }
 
+  /**
+   * Makes a read-only cell whose content is `data`, carried entirely in the
+   * cell's own `data:` URI id; there is no document in a space to fetch.
+   *
+   * **Contract note:** `data` is an arbitrary value, deliberately NOT
+   * limited to `FabricValue`. Callers pass, among other things, `Cell`
+   * objects (wish candidate lists), userland event payloads (whatever
+   * patterns and the DOM hand over, `Date`s and `Error`s included), and
+   * pattern-authored schema defaults. The body converts via
+   * `fabricFromNativeValue()`, which is the designed intake for exactly
+   * this: `Cell`s become sigil links (their `toJSON()`), native instances
+   * become their fabric counterparts, and input that is already a
+   * deep-frozen `FabricValue` passes through by identity.
+   *
+   * @param space The space the cell claims as its own (it is not stored
+   *   there; links within relate to it).
+   * @param data The value to carry. Must be acyclic.
+   * @param schema Optional schema for the resulting cell.
+   * @param tx Optional transaction for the resulting cell.
+   * @param cfcLabelView Optional CFC label view for the resulting cell.
+   * @returns A read-only cell whose value is (the fabric conversion of)
+   *   `data`.
+   */
   getImmutableCell<T>(
     space: MemorySpace,
     data: T,
@@ -1730,8 +1755,13 @@ export class Runtime {
     tx?: IExtendedStorageTransaction,
     cfcLabelView?: CfcLabelView,
   ): Cell<any> {
+    // The standard `FabricValue` encoding, matching `createDataCellURI()`
+    // (which is not used directly here because its link-rewriting walk is
+    // unwanted: this data is immutable as given). `fabricFromNativeValue()`
+    // converts what callers actually pass -- notably `Cell`s, which become
+    // sigil links via their `toJSON()` -- into encodable `FabricValue`s.
     const asDataURI = `data:application/json,${
-      encodeURIComponent(JSON.stringify({ value: data }))
+      encodeURIComponent(jsonFromValue({ value: fabricFromNativeValue(data) }))
     }` as const as `${string}:${string}`;
     return createCell(
       this,
