@@ -2002,8 +2002,10 @@ fallback emission arms, `createCfDataHelperImport`, and the
 `getDataHelperExpr` / `sourceHasDataHelper` recognizer surface.
 `wrapWithCfData` now has the single §15.2 emission form, and `getHelperExpr`
 throws if the filter invariant is ever violated (pinned in
-`test/module-scope-cf-data-coverage.test.ts`); `test/transform.test.ts` still
-asserts `__cfDataHelper` does not appear in opted-out output.
+`test/module-scope-cf-data-coverage.test.ts`). `test/transform.test.ts` once
+asserted `__cfDataHelper` absent from opted-out output; #4463's
+structural-assertion rewrite already dropped that literal check, and after
+this removal no code in the package references the identifier at all.
 
 
 ## 16. Pattern Runtime Coverage Instrumentation
