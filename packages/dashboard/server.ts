@@ -16,6 +16,8 @@
 //   GCP_BILLING_TABLE                 cloud-spend tile (BigQuery REST; Workload
 //                                     Identity in GKE, or GCP_SA_KEY locally)
 //   DISCORD_BOT_TOKEN, DISCORD_GUILD_ID   online-by-role tile
+//   GH_TOKEN                          GitHub tiles; org Members read also powers
+//                                     the organization-users tile
 
 import { PORT } from "./config.ts";
 import { TILES } from "./registry.ts";
