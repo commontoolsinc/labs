@@ -12,6 +12,7 @@ import {
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
+import { normalizeWriterIdentityFile } from "../utils/writer-identity-file.ts";
 import { compileCfcPolicyManifestsForSource } from "./cfc-policy-authoring.ts";
 
 export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
@@ -197,7 +198,7 @@ function resolvePolicyOfMarkers(
     const normalizedSourceEntries = file === undefined
       ? []
       : identityEntries.filter(([sourceName]) =>
-        normalizeSourceFilePath(sourceName) === file
+        normalizeWriterIdentityFile(sourceName) === file
       );
     const sourceEntry = exactSourceEntry ??
       (normalizedSourceEntries.length === 1
@@ -249,11 +250,6 @@ function resolvePolicyOfMarkers(
       resolvePolicyOfMarkers(entry, context, diagnosticNode),
     ]),
   );
-}
-
-function normalizeSourceFilePath(fileName: string): string {
-  const normalized = fileName.replace(/\\/g, "/");
-  return normalized.match(/^\/[^/]+(\/.+)$/)?.[1] ?? normalized;
 }
 
 function createSchemaAst(
@@ -452,7 +448,7 @@ function extractWriteAuthorizedByIdentity(
     return undefined;
   }
   return {
-    file: normalizeSourceFilePath(sourceFileName),
+    file: normalizeWriterIdentityFile(sourceFileName),
     path: [bindingNode.exprName.text],
   };
 }
