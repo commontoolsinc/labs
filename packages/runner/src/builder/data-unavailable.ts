@@ -19,7 +19,8 @@ import {
 export const isPending: IsPendingFunction = isPendingValue;
 
 /** Pure concrete-brand guard for the error unavailable variant. */
-export const hasError: HasErrorFunction = hasErrorValue;
+export const hasError: HasErrorFunction =
+  ((value: unknown) => hasErrorValue(value)) as HasErrorFunction;
 
 /** Pure concrete-brand guard for the syncing unavailable variant. */
 export const isSyncing: IsSyncingFunction = isSyncingValue;

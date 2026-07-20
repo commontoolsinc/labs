@@ -3114,7 +3114,18 @@ export type GetPatternEnvironmentFunction = () => PatternEnvironment;
 export type NonPrivateRandomFunction = () => number;
 export type SafeDateNowFunction = () => number;
 export type IsPendingFunction = (value: unknown) => value is IsPending;
-export type HasErrorFunction = (value: unknown) => value is HasError;
+/**
+ * Preserve a producer's specialized error variant when its input union exposes
+ * one. The conditional rest tuple disables that overload for ordinary values,
+ * which continue to narrow to the generic runtime-owned error marker.
+ */
+export interface HasErrorFunction {
+  <T>(
+    value: T,
+    ...narrowable: [Extract<T, HasError>] extends [never] ? [never] : []
+  ): value is Extract<T, HasError>;
+  (value: unknown): value is HasError;
+}
 export type IsSyncingFunction = (value: unknown) => value is IsSyncing;
 export type HasSchemaMismatchFunction = (
   value: unknown,

@@ -8,10 +8,7 @@ import {
   compileAndRunResult,
 } from "../src/builtins/compile-and-run.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import {
-  DataUnavailable,
-  type FabricError,
-} from "@commonfabric/data-model/fabric-instances";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { CompilerError } from "@commonfabric/js-compiler/errors";
 
 async function waitFor(
@@ -98,7 +95,12 @@ Deno.test("compileAndRun initializes outputs and handles invalid programs", asyn
       '"/missing.tsx" not found in files',
     );
     assertEquals(
-      (missingResult.error as FabricError).getExtra("diagnostics"),
+      missingResult.error.diagnostics,
+      [],
+    );
+    assertEquals(
+      outputs.result.withTx(tx).resolveAsCell().key("error", "diagnostics")
+        .get(),
       [],
     );
 
@@ -172,7 +174,17 @@ Deno.test("compileAndRun publishes pending and structured compile errors", async
     assertEquals(unavailable.reason, "error");
     assertEquals(unavailable.error.message, "[ERROR] invalid source");
     assertEquals(
-      (unavailable.error as FabricError).getExtra("diagnostics"),
+      unavailable.error.diagnostics,
+      [{
+        line: 1,
+        column: 1,
+        message: "invalid source",
+        type: "ERROR",
+        file: undefined,
+      }],
+    );
+    assertEquals(
+      outputs.result.resolveAsCell().key("error", "diagnostics").get(),
       [{
         line: 1,
         column: 1,
@@ -409,6 +421,72 @@ Deno.test("compileAndRunResult preserves the live compiled result", async () => 
       "live compiled result",
     );
     assertEquals(result.key("value").get(), 7);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("compileAndRun exposes diagnostics through the public hasError path", async () => {
+  const identity = await Identity.fromPassphrase(
+    "public compile diagnostics path",
+  );
+  const storageManager = StorageManager.emulate({ as: identity });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const space = identity.did();
+
+  try {
+    const compiled = await runtime.patternManager.compilePattern({
+      main: "/outer.tsx",
+      files: [{
+        name: "/outer.tsx",
+        contents: `
+          import {
+            compileAndRun,
+            computed,
+            hasError,
+            pattern,
+          } from "commonfabric";
+
+          export default pattern(() => {
+            const request = compileAndRun({
+              files: [{
+                name: "/broken.tsx",
+                contents: "export default function ({",
+              }],
+              main: "/broken.tsx",
+            });
+            const diagnostics = computed(() =>
+              hasError(request) ? request.error.diagnostics : []
+            );
+            return { diagnostics };
+          });
+        `,
+      }],
+    });
+    const tx = runtime.edit();
+    const resultCell = runtime.getCell(
+      space,
+      "public-compile-diagnostics",
+      compiled.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, compiled, {}, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.settled();
+    await runtime.idle();
+
+    const diagnostics = await result.key("diagnostics").pull() as Array<
+      Record<string, unknown>
+    >;
+    assertEquals(Array.isArray(diagnostics), true);
+    assertEquals(diagnostics.length > 0, true);
+    assertEquals(typeof diagnostics[0]?.message, "string");
+    assertEquals(typeof diagnostics[0]?.type, "string");
   } finally {
     await runtime.dispose();
     await storageManager.close();

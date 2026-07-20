@@ -187,6 +187,25 @@ describe("FabricError", () => {
         expect(restored.getExtra("code")).toBe(42);
       });
 
+      it("exposes serialized diagnostics through the public projection", () => {
+        const original = new Error("compile failed") as Error & {
+          diagnostics: readonly FabricValue[];
+        };
+        original.diagnostics = [{ message: "invalid source" }];
+        const encoded = FabricError[CODEC].encode(
+          FabricError.fromNativeError(original),
+        );
+        const restored = FabricError[CODEC].decode(
+          CODEC_TYPE_TAGS.Error,
+          encoded,
+          dummyContext,
+        ) as unknown as FabricError;
+
+        expect(restored.diagnostics).toEqual([
+          { message: "invalid source" },
+        ]);
+      });
+
       it("round-trips a `TypeError` with overridden `name`", () => {
         const original = new TypeError("bad value");
         original.name = "SpecialType";
