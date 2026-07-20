@@ -24,7 +24,6 @@ import {
   navigateTo,
   pattern,
   resultOf,
-  safeDateNow,
   Stream,
   UI,
   wish,

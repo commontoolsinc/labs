@@ -27,7 +27,6 @@ import {
   NAME,
   pattern,
   resultOf,
-  safeDateNow,
   toCompactDebugString,
   UI,
   Writable,

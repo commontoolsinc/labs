@@ -9,7 +9,6 @@ import {
   navigateTo,
   pattern,
   resultOf,
-  safeDateNow,
   UI,
   wish,
   Writable,

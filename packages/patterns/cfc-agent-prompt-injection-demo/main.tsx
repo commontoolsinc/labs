@@ -13,7 +13,6 @@ import {
   pattern,
   patternTool,
   resultOf,
-  safeDateNow,
   toIndentedDebugString,
   UI,
   Writable,

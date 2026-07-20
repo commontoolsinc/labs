@@ -39,7 +39,6 @@ import {
   NAME,
   pattern,
   resultOf,
-  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";

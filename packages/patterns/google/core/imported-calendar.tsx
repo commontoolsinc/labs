@@ -19,7 +19,6 @@ import {
   NAME,
   pattern,
   resultOf,
-  safeDateNow,
   UI,
   wish,
   Writable,

@@ -25,7 +25,6 @@ import {
   NAME,
   pattern,
   resultOf,
-  safeDateNow,
   Stream,
   toIndentedDebugString,
   UI,
