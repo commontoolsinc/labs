@@ -5,11 +5,8 @@
 
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 
-import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
-
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { SchemaAndHash } from "./SchemaAndHash.ts";
-import { deepFreeze } from "./deep-freeze.ts";
 import { toDeepFrozenSchema } from "./schema-utils.ts";
 import { hashOf, hashStringOf } from "./value-hash.ts";
 
@@ -84,88 +81,6 @@ hashToRef.set(primInterns.true.taggedHashString, true);
 hashToRef.set(primInterns.undefined.taggedHashString, undefined);
 
 /**
- * Recursively rebuild a (deep-frozen) schema so its object keys are in the same
- * UTF-8 byte order the schema hash already uses (`utf8SortedKeysOf`).
- *
- * The schema hash is key-order-insensitive (see `value-hash`'s `feedPlainObject`,
- * which sorts keys), but the *interned object* previously kept the key order of
- * whichever code path first interned it. Schemas are serialized directly from
- * the interned object — most consequentially into content-addressed `data:`
- * cell ids via `JSON.stringify` — so two runtimes that first interned the same
- * schema via different paths (a fresh deployer serializing links vs. a resumed
- * browser standardizing query selectors, whose `getStandardSchema` sorts keys)
- * minted *different* ids for the *same* schema. For space-scoped (shared) cells
- * that produced a non-terminating cross-runtime overwrite storm. Canonicalizing
- * the stored key order makes the interned object's serialization deterministic,
- * matching its already-canonical hash, so every path/runtime converges.
- *
- * - Array order is preserved (arrays are ordered).
- * - Already-interned sub-schemas are returned by reference, so that a freshly
- *   spread owned top is the only part rebuilt (see `traverse.ts`'s
- *   `schemaAtPathCanonical`). Note that this is _not_ sound as a
- *   canonicalization step: `internSchemaReturningSchemaAndHash()` registers the
- *   non-canonical input object along with the canonical one, so
- *   `isInternedSchema()` also answers `true` for objects which are not in
- *   canonical order, and this skip then preserves whatever order they had. The
- *   stored form is correspondingly not reliably canonical.
- * - An object already in canonical order with unchanged children is returned
- *   unchanged, preserving identity (and `internSchema`'s same-reference contract)
- *   for the common already-canonical case.
- *
- * TODO(danfuzz): This entire function is a workaround for a defect elsewhere,
- * now fixed: `link-utils.ts`'s `createDataCellURI()` used to mint ids with a
- * plain `JSON.stringify()` instead of the standard `data-model` value
- * encoding, which canonicalizes key order as a matter of spec (see
- * `docs/specs/space-model-formal-spec/3-json-encoding.md` section 10). Because
- * that id-minting encoder did not canonicalize, the in-memory key order of
- * every interned schema was made to carry that weight instead -- which is an
- * invariant this file cannot actually maintain, per the by-reference note
- * above. Now that ids are minted through a conforming encoder, in-memory key
- * order stops mattering once every deployed runtime mints that way; at that
- * point this function along with its call site should be removed rather than
- * repaired.
- */
-function canonicalizeSchemaKeyOrder(value: unknown): unknown {
-  if (value === null || typeof value !== "object") return value;
-  // Already-interned sub-schemas are kept as-is. Note that this is unsound as
-  // canonicalization -- "interned" does not imply "canonical" -- per the
-  // by-reference note in the doc comment above.
-  if (isInternedSchema(value as JSONSchema)) return value;
-  if (Array.isArray(value)) {
-    let changed = false;
-    const mapped = value.map((element) => {
-      const canon = canonicalizeSchemaKeyOrder(element);
-      // `Object.is`, not `===`: an untouched `NaN` leaf comes back as the
-      // same value, and `NaN !== NaN` would falsely count it as a change.
-      if (!Object.is(canon, element)) changed = true;
-      return canon;
-    });
-    return changed ? mapped : value;
-  }
-  const obj = value as Record<string, unknown>;
-  const sortedKeys = utf8SortedKeysOf(obj);
-  const currentKeys = Object.keys(obj);
-  let changed = false;
-  const out: Record<string, unknown> = {};
-  for (let i = 0; i < sortedKeys.length; i++) {
-    const key = sortedKeys[i];
-    if (key !== currentKeys[i]) changed = true;
-    const canon = canonicalizeSchemaKeyOrder(obj[key]);
-    // `Object.is`, not `===`: see the array case above.
-    if (!Object.is(canon, obj[key])) changed = true;
-    out[key] = canon;
-  }
-  if (!changed) return value;
-  // Never silently drop owned non-string (symbol) keys, even though schemas are
-  // normally string-keyed and symbol keys do not affect JSON serialization.
-  for (const sym of Object.getOwnPropertySymbols(obj)) {
-    (out as Record<symbol, unknown>)[sym] =
-      (obj as Record<symbol, unknown>)[sym];
-  }
-  return out;
-}
-
-/**
  * Helper for `internSchema()` and friends, which always returns a
  * `SchemaAndHash` and takes configurable sharing-or-not.
  */
@@ -235,21 +150,10 @@ function internSchemaReturningSchemaAndHash(
 
   // Not interned yet (or interned but later collected).
 
-  // Store the canonical (key-sorted) form so the interned object serializes
-  // deterministically regardless of which code path first interned it. The hash
-  // is key-order-insensitive, so it is unchanged and stays consistent with the
-  // stored object. (See `canonicalizeSchemaKeyOrder`.)
-  const canonicalized = canonicalizeSchemaKeyOrder(frozen);
-  const canonical =
-    (canonicalized === frozen
-      ? frozen
-      : deepFreeze(canonicalized)) as JSONSchemaObj;
-
-  const sah = new SchemaAndHash(canonical, hash);
+  const sah = new SchemaAndHash(frozen, hash);
   schemaToSah.set(frozen, sah);
-  if (canonical !== frozen) schemaToSah.set(canonical, sah);
-  hashToRef.set(hashStr, new WeakRef(canonical));
-  schemaFinalizer.register(canonical, hashStr);
+  hashToRef.set(hashStr, new WeakRef(frozen));
+  schemaFinalizer.register(frozen, hashStr);
 
   return sah;
 }
