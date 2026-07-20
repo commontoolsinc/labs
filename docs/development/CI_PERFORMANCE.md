@@ -252,6 +252,13 @@ coverage artifact set during that reset cycle. Jobs with no reportable covered
 files upload an empty LCOV report so missing artifacts mean the report upload
 itself failed.
 
+The workflow downloads the current run's `coverage-profile-*` artifacts before
+starting `tasks/perf-check.ts`. `COVERAGE_ARTIFACTS_DIR` points the script at one
+subdirectory per artifact. The download step checks the artifact digests. The
+script separately checks the expected artifact names. It also rejects an
+artifact containing no coverage files. A manual run without the environment
+variable uses the GitHub API download path instead.
+
 ## Compile Cache State and Cold Runs
 
 The pattern test jobs restore a compile byte cache keyed on a fingerprint hash
