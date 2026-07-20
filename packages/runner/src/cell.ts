@@ -2776,7 +2776,7 @@ function maybeConvertArrayPathToDataURILink(
     return link;
   }
 
-  let rootValue: unknown;
+  let rootValue: FabricValue;
   try {
     rootValue = tx.readValueOrThrow({ ...link, path: [] }, {
       meta: ignoreReadForScheduling,
@@ -2785,11 +2785,11 @@ function maybeConvertArrayPathToDataURILink(
     return link;
   }
 
-  let current: unknown = rootValue;
+  let current: FabricValue = rootValue;
   const prefix: string[] = [];
   let candidate:
     | {
-      value: unknown;
+      value: FabricValue;
       path: string[];
       remainingPath: string[];
     }
@@ -2801,13 +2801,13 @@ function maybeConvertArrayPathToDataURILink(
     }
 
     const segment = link.path[i];
-    let next: unknown;
+    let next: FabricValue;
 
     if (Array.isArray(current)) {
       if (!isArrayIndexPropertyName(segment)) {
         break;
       }
-      next = (current as unknown as Record<string, unknown>)[segment];
+      next = (current as unknown as Record<string, FabricValue>)[segment];
       if (isRecord(next) && !isCellLink(next)) {
         candidate = {
           value: next,
@@ -2816,7 +2816,7 @@ function maybeConvertArrayPathToDataURILink(
         };
       }
     } else {
-      next = (current as Record<string, unknown>)[segment];
+      next = (current as Record<string, FabricValue>)[segment];
     }
 
     prefix.push(segment);

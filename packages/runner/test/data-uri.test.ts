@@ -2,10 +2,20 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { jsonFromValue } from "@commonfabric/data-model/codec-json";
 import {
+  linkRefFrom,
+  linkRefPayload,
+  resetModernCellRepConfig,
+  setModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { UnknownValue } from "@commonfabric/data-model/fabric-instances";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import {
   createDataCellURI,
   decodeDataURIPayloadText,
   getJSONFromDataURI,
 } from "../src/data-uri.ts";
+import { isSigilLink, type NormalizedLink } from "../src/link-utils.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
@@ -224,6 +234,82 @@ describe("data-uri", () => {
       expect(parsed.value.arabic).toBe("مرحبا بالعالم");
       expect(parsed.value.special).toBe("Ñoño™©®");
       expect(parsed.value.mixed).toBe("Test 🎉 with ñ and 中文");
+    });
+
+    it("mints a payload in the standard encoding (`fvj1:` tag)", () => {
+      const dataURI = createDataCellURI({ x: 1 });
+      const payload = decodeURIComponent(
+        dataURI.slice(dataURI.indexOf(",") + 1),
+      );
+      expect(payload.startsWith("fvj1:")).toBe(true);
+    });
+
+    // The standard encoding canonicalizes key order, so the minted id is a
+    // function of content alone. This is the property whose absence #4360
+    // worked around in `schema-hash.ts`.
+    it("mints the same URI regardless of key insertion order", () => {
+      const inOrder = { alpha: 1, beta: [2, 3], gamma: { delta: 4 } };
+      const scrambled = { gamma: { delta: 4 }, beta: [2, 3], alpha: 1 };
+      expect(createDataCellURI(scrambled)).toBe(createDataCellURI(inOrder));
+    });
+
+    it("preserves non-finite numbers and negative zero", () => {
+      const dataURI = createDataCellURI({ n: NaN, z: -0, i: -Infinity });
+      const parsed = getJSONFromDataURI(dataURI);
+      expect(Object.is(parsed.value.n, NaN)).toBe(true);
+      expect(Object.is(parsed.value.z, -0)).toBe(true);
+      expect(Object.is(parsed.value.i, -Infinity)).toBe(true);
+    });
+
+    // `undefined` is a `FabricValue`, so it encodes as a present-`undefined`
+    // document value, not as an absent property.
+    it("encodes an `undefined` value as a present `undefined`", () => {
+      const parsed = getJSONFromDataURI(createDataCellURI(undefined));
+      expect("value" in parsed).toBe(true);
+      expect(parsed.value).toBeUndefined();
+    });
+
+    it("represents a `FabricPrimitive` leaf correctly", () => {
+      const h = hashOf({ some: "value" });
+      const parsed = getJSONFromDataURI(createDataCellURI({ h }));
+      expect(parsed.value.h).toBeInstanceOf(FabricHash);
+      expect(parsed.value.h.toString()).toBe(h.toString());
+    });
+
+    // Link-free content on purpose: for an instance whose state carries no
+    // links, today's pass-through and the eventual traverse-into-state
+    // behavior (see the `TODO` in the walk) coincide, so this pins only the
+    // codec round-trip, not the pass-through itself.
+    it("represents a link-free `FabricInstance` via its codec", () => {
+      const inst = new UnknownValue("zzz@1", { a: 1 });
+      const parsed = getJSONFromDataURI(createDataCellURI({ inst }));
+      expect(parsed.value.inst).toBeInstanceOf(UnknownValue);
+      expect(parsed.value.inst.wireTypeTag).toBe("zzz@1");
+      expect(parsed.value.inst.state).toEqual({ a: 1 });
+    });
+
+    it("rewrites relative links in the modern regime (`FabricLink`)", () => {
+      setModernCellRepConfig(true);
+      try {
+        const baseId = `of:${hashOf({ base: "modern" }).taggedHashString}`;
+        const base: NormalizedLink = {
+          id: baseId as any,
+          space,
+          scope: "space",
+          path: [],
+        };
+        const relativeLink = linkRefFrom({ path: ["nested", "value"] });
+
+        const dataURI = createDataCellURI({ link: relativeLink }, base);
+        const parsed = getJSONFromDataURI(dataURI);
+
+        expect(isSigilLink(parsed.value.link)).toBe(true);
+        const payload = linkRefPayload(parsed.value.link) as any;
+        expect(payload.id).toBe(baseId);
+        expect(payload.path).toEqual(["nested", "value"]);
+      } finally {
+        resetModernCellRepConfig();
+      }
     });
   });
 

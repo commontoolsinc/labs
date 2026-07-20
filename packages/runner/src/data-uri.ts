@@ -16,10 +16,31 @@
  * the `Cell` type) while `cell.ts` consumes the codec -- the same two-way
  * shape `cell.ts` and `link-utils.ts` had while the codec lived there,
  * relocated rather than newly introduced.
+ *
+ * The payload is shaped as a document, `{ "value": <the value> }`, and the
+ * decode entry points return that document -- NOT the value. The document
+ * is the addressable unit: `storage/transaction/attestation.ts`'s `load()`
+ * resolves `["value", ...]`-rooted and facet paths against it. Extracting
+ * the value is each reader's own step, under its own policy for payloads
+ * that are not document-shaped (externally-minted URIs need not be).
+ *
+ * TODO(danfuzz): That layering is inside out. The payload should encode
+ * the value alone -- making this codec a symmetric value-to-text pair --
+ * with the document wrapper synthesized by the one reader that actually
+ * thinks in documents (attestation `load()`). Readers of the value then
+ * stop unwrapping, and externally-minted payloads can no longer alias
+ * document facets (`cfc`, `source`). Since `data:` ids are never durably
+ * stored, the resulting change of minted id form is a transient-only
+ * event.
  */
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
+  FabricInstance,
+  FabricPrimitive,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
+import {
+  jsonFromValue,
   seemsLikeJsonEncodedFabricValue,
   valueFromJson,
 } from "@commonfabric/data-model/codec-json";
@@ -57,22 +78,20 @@ const dataUriReconstructionContext = new EmptyReconstructionContext(
  * path.
  *
  * This is the encode half of the matched set this module exists to hold;
- * {@link getJSONFromDataURI} is what reads back what this writes. The decode
- * half accepts both the bare-JSON form written here and the standard
- * `data-model` `FabricValue` encoding (tagged `fvj1:`); see the `TODO` in the
- * body below about moving this side onto the latter.
+ * {@link getJSONFromDataURI} is what reads back what this writes. This side
+ * writes only the standard `data-model` `FabricValue` encoding (tagged
+ * `fvj1:`); the decode half additionally accepts the bare-JSON form this
+ * function historically wrote, for the sake of ids in the wild.
  *
  * Each primitive cell link within `data` is rewritten to a full sigil link,
  * with relative links resolved against `base`. That rewriting is what makes
  * the result self-contained: the ids it embeds don't depend on where it was
  * minted, so the URI denotes the same value wherever it later gets read.
  *
- * **Note:** This does not use the standard `data-model` value encoding, and
- * callers are exposed to two consequences. A `FabricSpecialObject` within
- * `data` is not represented correctly, and plain-object keys are not
- * canonicalized -- so two runtimes holding the same value can mint two
- * different ids for it, which is to say that the content addressing here is
- * not reliably addressing content. See the `TODO`s in the body.
+ * The standard encoding canonicalizes plain-object key order (UTF-8 byte
+ * order, per `3-json-encoding.md` section 10), so two runtimes holding the
+ * same value mint the same id regardless of key insertion history -- the
+ * property that makes this content addressing actually address content.
  *
  * @param data The value to encode. Must be acyclic.
  * @param base Optional base link; relative links within `data` are resolved
@@ -81,19 +100,15 @@ const dataUriReconstructionContext = new EmptyReconstructionContext(
  * @throws If `data` contains a reference cycle.
  */
 export function createDataCellURI(
-  data: any,
+  data: FabricValue,
   base?: Cell | NormalizedLink,
 ): URI {
   const baseLink = isCell(base) ? base.getAsNormalizedFullLink() : base;
 
-  // TODO(danfuzz): This `isRecord`-gated walk guards only `isPrimitiveCellLink`;
-  // a `FabricPrimitive`/`FabricInstance` that is not a link falls through to the
-  // `Object.entries` descent (primitive decomposed, instance walked by internal
-  // slots).
   function traverseAndAddBaseIdToRelativeLinks(
-    value: any,
-    seen: Set<any>,
-  ): any {
+    value: FabricValue,
+    seen: Set<object>,
+  ): FabricValue {
     if (!isRecord(value)) return value;
     if (seen.has(value)) {
       throw new Error(`Cycle detected when creating data URI`);
@@ -106,6 +121,18 @@ export function createDataCellURI(
           includeSchema: true,
           keepAsCell: KeepAsCell.All,
         });
+      } else if (value instanceof FabricPrimitive) {
+        // A `FabricPrimitive` is a leaf; the value encoding represents it
+        // via its codec.
+        return value;
+      } else if (value instanceof FabricInstance) {
+        // TODO(danfuzz): A `FabricInstance` is not a leaf: its state can
+        // carry cell links, which need the same relative-to-absolute
+        // rewriting as everything else. That requires codec-mediated
+        // traversal into instance state; until that exists, the instance
+        // passes through unrewritten (encoded correctly in form, but any
+        // relative link within it stays relative).
+        return value;
       } else if (Array.isArray(value)) {
         return value.map((item) =>
           traverseAndAddBaseIdToRelativeLinks(item, seen)
@@ -114,20 +141,18 @@ export function createDataCellURI(
         return Object.fromEntries(
           Object.entries(value).map((
             [key, value],
-          ) => [key, traverseAndAddBaseIdToRelativeLinks(value, seen)]),
+          ) => [
+            key,
+            traverseAndAddBaseIdToRelativeLinks(value as FabricValue, seen),
+          ]),
         );
       }
     } finally {
       seen.delete(value);
     }
   }
-  // TODO(danfuzz): This `JSON.stringify()` should be changed to use the
-  // standard `data-model` value encoding, both so that `FabricSpecialObject`s
-  // can be properly represented and so that plain objects get properly
-  // canonicalized. Once this is done, the changes to `schema-hash.ts` made in
-  // PR #4360 should be able to be reverted, as those changes amount to a
-  // workaround for the plain object canonicalization issue.
-  const json = JSON.stringify({
+
+  const json = jsonFromValue({
     value: traverseAndAddBaseIdToRelativeLinks(data, new Set()),
   });
   // Use encodeURIComponent for UTF-8 safe encoding (matches runtime.ts pattern)
@@ -144,10 +169,12 @@ export function createDataCellURI(
  * - Text bearing the `fvj1:` tag is decoded as the standard `data-model`
  *   `FabricValue` JSON-embedded encoding. Results from this branch are
  *   deep-frozen and may contain `FabricInstance`s.
- * - Any other text is parsed as bare JSON. A `data:` URI _is_ its own
- *   content and such URIs are embedded in persisted documents, so ids with
- *   bare-JSON payloads survive indefinitely; this branch has to stay for as
- *   long as any of them remain, that is, probably forever.
+ * - Any other text is parsed as bare JSON, the historical form: current
+ *   writes inline `data:` links rather than persisting them (see
+ *   {@link findAndInlineDataURILinks}), so nothing durably stored mints
+ *   this form anymore. The branch stays because this reader accepts
+ *   `data:` URIs originating outside the runner and the storage layer
+ *   does not itself enforce the no-persistence convention.
  *
  * @param text The payload text, after any percent- or Base64-decoding.
  * @returns The decoded value.
