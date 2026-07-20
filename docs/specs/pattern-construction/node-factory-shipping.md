@@ -1690,9 +1690,12 @@ materialization disabled. The mounted JSON and callable-file views need only the
 inert `Factory@1` state; they must not load code merely to observe an input,
 result, or name change. Invocation through a mounted callable remains a separate
 runner-owned boundary that materializes the then-current factory with the stable
-call-site identity. Consequently a cold factory cannot block unrelated sibling
-fields from refreshing in the mounted tree, and FUSE observation never turns a
-context-free shell into an executable callable.
+call-site identity. Before generic tree traversal, a non-callable
+schema-declared Cell field is dereferenced to its current public value; the
+projection must never walk a Cell handle or its runner internals as authored
+data. Consequently a cold factory cannot block unrelated sibling fields from
+refreshing in the mounted tree, and FUSE observation never turns a context-free
+shell into an executable callable.
 
 Authored code may neither supply a literal for such a field nor capture a
 chosen value and forward it. If a required system value or stable tool identity

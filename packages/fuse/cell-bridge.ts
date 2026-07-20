@@ -5,7 +5,7 @@
 // Subscribes to cell changes and rebuilds subtrees on updates.
 
 import type { Cell } from "@commonfabric/runner";
-import { schemaToTypeString } from "@commonfabric/runner";
+import { isCell, schemaToTypeString } from "@commonfabric/runner";
 import { linkRefPayload } from "@commonfabric/runner/shared";
 import { nameSchema } from "@commonfabric/runner/schemas";
 import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
@@ -2952,7 +2952,21 @@ export class CellBridge {
         continue;
       }
 
-      if (childValue !== undefined && !(key in materialized)) {
+      const existingValue = materialized[key];
+      const projectedFromCell = isCell(childValue) || isCell(existingValue);
+      if (isCell(childValue)) {
+        // `asCell` schema fields intentionally arrive as Cell handles. FUSE
+        // projects their current public value; walking the handle would leak
+        // runner internals and encounter unrelated unsealed built-in factories
+        // in the runtime object graph.
+        childValue = childValue.asSchema(undefined).get();
+      }
+      if (projectedFromCell && childValue === undefined) {
+        delete materialized[key];
+      } else if (
+        childValue !== undefined &&
+        (!(key in materialized) || projectedFromCell)
+      ) {
         materialized[key] = childValue;
       }
     }
