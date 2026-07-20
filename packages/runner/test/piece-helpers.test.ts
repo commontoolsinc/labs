@@ -164,6 +164,32 @@ describe("resolveCellPath through linked slots", () => {
       "test-space",
     );
   });
+
+  it("still reports non-object traversal through a cell-valued slot", () => {
+    // Reading through the cell must not weaken the non-object guard: a
+    // linked slot holding a scalar still errors when the path continues.
+    const scalarCell = runtime.getCell(
+      space,
+      "linked scalar source",
+      undefined,
+      tx,
+    );
+    scalarCell.set("plain-text");
+
+    const pieceCell = runtime.getCell(
+      space,
+      "piece with linked scalar",
+      undefined,
+      tx,
+    );
+    pieceCell.set({ settings: scalarCell });
+
+    assertThrows(
+      () => resolveCellPath(pieceCell as never, ["settings", "theme"]),
+      Error,
+      'encountered non-object at "theme"',
+    );
+  });
 });
 
 describe("getResultCellWithSourceSchema", () => {
