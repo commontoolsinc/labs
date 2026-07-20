@@ -618,9 +618,7 @@ describe("CFC trusted UI event enforcement", () => {
       "/": {
         [LINK_V1_TAG]: {
           id: `data:application/json,${
-            encodeURIComponent(jsonFromValue({
-              value: { $event: rawTrustedEvent },
-            }))
+            encodeURIComponent(jsonFromValue({ $event: rawTrustedEvent }))
           }`,
           path: ["$event"],
           space,

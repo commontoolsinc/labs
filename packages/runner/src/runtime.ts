@@ -1738,7 +1738,7 @@ export class Runtime {
     // converts what callers actually pass -- notably `Cell`s, which become
     // sigil links via their `toJSON()` -- into encodable `FabricValue`s.
     const asDataURI = `data:application/json,${
-      encodeURIComponent(jsonFromValue({ value: fabricFromNativeValue(data) }))
+      encodeURIComponent(jsonFromValue(fabricFromNativeValue(data)))
     }` as const as `${string}:${string}`;
     return createCell(
       this,

@@ -277,7 +277,14 @@ export const load = (
         if (mediaType === "application/json") {
           let value: FabricValue;
           try {
-            value = decodeDataURIPayloadText(content);
+            // The payload encodes the cell VALUE; the document that the
+            // address grammar resolves against (`["value", ...]`-rooted and
+            // facet paths) is synthesized here, at the one reader that
+            // thinks in documents. Synthesis also guarantees payload
+            // content can never alias a document facet (`cfc`, `source`).
+            value = Object.freeze({
+              value: decodeDataURIPayloadText(content),
+            });
             result = { ok: { address: { ...address, path: [] }, value } };
           } catch (error) {
             const reason = error as Error;
