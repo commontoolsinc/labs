@@ -3,6 +3,7 @@ import type { HarnessedFunction } from "../harness/types.ts";
 import type { ImplementationIdentity } from "./types.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
+import { normalizeIdentitySource } from "./writer-claim-correspondence.ts";
 
 /**
  * Resolve the policy-facing implementation identity for a module invocation.
@@ -76,7 +77,7 @@ const resolveProvenanceImplementationIdentity = (
       ? {
         sourceFile: normalizeIdentitySource(
           provenance.bindingIdentity.sourceFile,
-        ),
+        )!,
         bindingPath: [...provenance.bindingIdentity.bindingPath],
       }
       : {}),
@@ -86,6 +87,3 @@ const resolveProvenanceImplementationIdentity = (
     }),
   };
 };
-
-const normalizeIdentitySource = (source: string): string =>
-  source.startsWith("/") ? source : `/${source}`;
