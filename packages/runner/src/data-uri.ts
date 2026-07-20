@@ -223,6 +223,9 @@ export function getJSONFromDataURI(uri: URI | string): any {
  * is rejected. The media type is returned verbatim so each caller applies
  * its own acceptance policy.
  *
+ * A raw `?` or `#` after the comma delimits a query or fragment per the
+ * URL grammar and is not part of the payload.
+ *
  * @param uri The `data:` URI to split.
  * @returns The media type and the decoded payload text.
  * @throws If `uri` is not a `data:` URI with a comma, or declares a
@@ -237,7 +240,15 @@ export function extractDataURIPayloadText(
   }
 
   const header = uri.substring("data:".length, commaIndex);
-  const data = uri.substring(commaIndex + 1);
+  let data = uri.substring(commaIndex + 1);
+
+  // Per the URL grammar, an opaque-path URI's payload runs to the first raw
+  // `?` (query) or `#` (fragment). Minted payloads percent-escape both, so
+  // this only affects externally-sourced ids.
+  const delimIndex = data.search(/[?#]/);
+  if (delimIndex !== -1) {
+    data = data.substring(0, delimIndex);
+  }
 
   const headerParts = header.split(";").map((part) => part.trim());
   const mediaType = headerParts[0];
