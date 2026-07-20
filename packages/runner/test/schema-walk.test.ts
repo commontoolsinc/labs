@@ -8,8 +8,8 @@ import {
   findSchema,
   forEachSubschema,
   RECORD_SUBSCHEMA_KEYS,
-  SINGLE_SUBSCHEMA_KEYS,
   type SchemaNode,
+  SINGLE_SUBSCHEMA_KEYS,
   subschemaEdges,
   type SubschemaKeyword,
   walkSchema,
@@ -148,7 +148,9 @@ describe("subschemaEdges (generator form)", () => {
     const cb = edgesOf(schema);
     expect(gen.length).toBe(cb.length);
     expect(gen.map((e) => `${e.keyword}:${e.key ?? e.index ?? ""}`).toSorted())
-      .toEqual(cb.map((e) => `${e.keyword}:${e.key ?? e.index ?? ""}`).toSorted());
+      .toEqual(
+        cb.map((e) => `${e.keyword}:${e.key ?? e.index ?? ""}`).toSorted(),
+      );
   });
 
   it("honors includeDefs / includeUnused like the callback", () => {
