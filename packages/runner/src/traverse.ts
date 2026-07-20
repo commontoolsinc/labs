@@ -3519,20 +3519,28 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // an array element under `items: true` still decomposes via
       // `traverseArrayWithSchema`'s `createDataCellURI` path (pre-existing;
       // not addressed here).
-    } else if (doc.value instanceof FabricSpecialObject) {
-      // A `FabricSpecialObject` (e.g. `FabricBytes`) is an opaque host value
-      // the fabric type system treats like a primitive — always frozen,
-      // passing through conversion unchanged — so it materializes as a LEAF:
-      // its `typeof` is "object", so this arm must precede the record branch
-      // below, which would otherwise decompose it via `Object.entries` over
-      // its own props (empty for e.g. `FabricBytes`, whose surface lives on
-      // the prototype). Type-validate as "object" — the shape the
+    } else if (doc.value instanceof FabricPrimitive) {
+      // A `FabricPrimitive` (e.g. `FabricBytes`) is a fully-opaque host
+      // value — always frozen, passing through conversion unchanged — so it
+      // materializes as a LEAF: its `typeof` is "object", so this arm must
+      // precede the record branch below, which would otherwise decompose it
+      // via `Object.entries` over its own props (empty — its state lives in
+      // private `#fields`). Type-validate as "object" — the shape the
       // schema-generator emits for these types today — but do not consult
-      // the schema's structural details: leaves are not property-walked
-      // (CT-1836).
+      // the schema's structural details: leaves are not property-walked.
       return this.isValidType(schemaObj, "object") !== TypeValidity.False
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
+    } else if (doc.value instanceof FabricInstance) {
+      // A `FabricInstance` is not a fully-opaque leaf: it can have
+      // model-visible outgoing references, so neither the generic record
+      // rebuild below (which strips its class and codec identity) nor
+      // leafing it whole traverses it correctly. Correct traversal descends
+      // it by its codec contents; fail loudly until that exists.
+      throw new Error(
+        `Cannot yet handle \`${doc.value.constructor.name}\` (a ` +
+          "`FabricInstance`) in schema traversal.",
+      );
     } else if (isRecord(doc.value)) {
       if (isSigilLink(doc.value)) {
         this.tx.read(doc.address, READ_FOR_SCHEDULING);
@@ -3692,7 +3700,20 @@ export class SchemaObjectTraverser<V extends FabricValue>
         : fail(TRAVERSE_FAILURES.invalidArray);
     }
 
-    if (doc.value instanceof FabricSpecialObject) return { ok: doc.value };
+    if (doc.value instanceof FabricSpecialObject) {
+      // A `FabricPrimitive` is a fully-opaque leaf; see the value-type
+      // dispatch's arm for the rationale (the plan compiles from the same
+      // schema family, so the same posture applies here).
+      if (doc.value instanceof FabricPrimitive) return { ok: doc.value };
+      // The other subclass, `FabricInstance`, is not a fully-opaque leaf
+      // (it can have model-visible outgoing references): fail loudly rather
+      // than leaf it whole or let it fall into the record copy below. See
+      // the dispatch's `FabricInstance` arm.
+      throw new Error(
+        `Cannot yet handle \`${doc.value.constructor.name}\` (a ` +
+          "`FabricInstance`) in plain-schema traversal.",
+      );
+    }
     if (!isRecord(doc.value)) return fail(TRAVERSE_FAILURES.invalidType);
 
     const newValue: Record<string, Immutable<FabricValue>> = {};
