@@ -286,13 +286,17 @@ export default pattern(() => {
   );
 
   // Detail-page view of the same edge: each board-created topic derives its
-  // own row from the mentionable siblings wired at creation (indices into
-  // `mentionable` = the board's own list), while a piece with no mentionable
-  // derives empty sets.
+  // own row from the mentionable siblings wired at creation (piece-valued,
+  // resolved from `mentionable` = the board's own list), while a piece with no
+  // mentionable derives empty sets.
   const assert_detail_edges = computed(() => {
-    return (board.topics?.[1]?.crossrefs?.refsOut ?? []).join(",") === "0" &&
+    return board.topics?.[1]?.crossrefs?.refsOut?.[0]?.title ===
+        "First topic" &&
+      (board.topics?.[1]?.crossrefs?.refsOut ?? []).length === 1 &&
       (board.topics?.[1]?.crossrefs?.referencedBy ?? []).length === 0 &&
-      (board.topics?.[0]?.crossrefs?.referencedBy ?? []).join(",") === "1" &&
+      board.topics?.[0]?.crossrefs?.referencedBy?.[0]?.title ===
+        "Second topic" &&
+      (board.topics?.[0]?.crossrefs?.referencedBy ?? []).length === 1 &&
       (board.topics?.[0]?.crossrefs?.refsOut ?? []).length === 0;
   });
 
@@ -309,9 +313,9 @@ export default pattern(() => {
   const assert_chip_row_markup = computed(() => {
     const list = (board.topics ?? []) as TopicPiece[];
     if (list.length < 2) return false;
-    const row = crossrefChipRow("references →", false, list, [0, 1]);
+    const row = crossrefChipRow("references →", false, [list[0], list[1]]);
     return row !== null &&
-      crossrefChipRow("← referenced by", true, list, []) === null;
+      crossrefChipRow("← referenced by", true, []) === null;
   });
 
   // A share link in a comment counts too — its colon is percent-encoded.
@@ -414,11 +418,16 @@ export default pattern(() => {
   });
 
   return {
-    // Continuous UI demand (#4715) over the board: its card list — including
-    // the in-card crossref chip rows — renders through the real reconciler
-    // while the suite runs. A board list element is the shared-safe
-    // TopicPiece projection and exposes no [UI]; the topic detail page is
-    // driven directly through the `render` steps below.
+    // UI demand (#4715) over the board: its card list — including the in-card
+    // crossref chip rows — renders through the real reconciler while the suite
+    // runs. The cards bind navigation to crossref-row pieces (wrapper-nested),
+    // which need real reconcile cycles to settle, so the passive [UI] export is
+    // backed by explicit `{ render: board[UI] }` steps below. Those cover the
+    // card path in both coverage lanes AND guard the wrapper-bind mechanism: a
+    // silent non-render regression (blank board, no error) would leave those
+    // lines uncovered and trip the coverage gate. A board list element is the
+    // shared-safe TopicPiece projection and exposes no [UI]; the topic detail
+    // page is driven through its own render step.
     [UI]: board[UI],
     tests: [
       { assertion: assert_initial },
@@ -442,12 +451,15 @@ export default pattern(() => {
       { assertion: assert_link_added },
       { action: action_add_second_topic },
       { assertion: assert_second_topic },
+      { render: board[UI] },
       { assertion: assert_crossrefs_baseline },
       { action: action_body_ref_first },
       { assertion: assert_body_edge },
+      { render: board[UI] },
       { assertion: assert_detail_edges },
       { assertion: assert_lone_edgeless },
       { assertion: assert_chip_row_markup },
+      { render: board[UI] },
       { action: action_comment_first_again },
       { action: action_submit_topic_via_composer },
       { assertion: assert_composed_topic },
