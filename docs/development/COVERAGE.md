@@ -164,6 +164,19 @@ before the cached module bytes run. The `pattern-unit-test` job wires both
 coverage-transformed module bytes between runs without mixing them with ordinary
 compiled bytes.
 
+The persistent cell cache stores each module's span list as one JSON string.
+This keeps reporting metadata in one value instead of expanding every span
+object into its own derived storage records. Coverage caches use the
+`pattern-coverage` variant. The cell-cache reader accepts only the JSON string
+representation. A covered closure without valid JSON spans is treated as a
+cache miss, recompiled from source, and written back in the scalar format.
+
+The runner remembers persisted closures for the lifetime of the runner session.
+Each entry is identified by its space, cache variant, entry identity, and
+complete module identity set. It skips another persistence operation for the
+same closure. Concurrent requests for the same closure share one persistence
+operation.
+
 ## How the integration jobs collect authored-pattern coverage
 
 For these jobs coverage is a runtime-level capability rather than a `cf test`

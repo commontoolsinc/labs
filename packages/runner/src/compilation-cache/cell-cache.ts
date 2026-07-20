@@ -94,9 +94,10 @@ export interface CompiledDoc extends ModuleDocBase {
    * Authored-line spans for the coverage probes the transformer baked into
    * `code`, keyed by `(fileName, id)`. Present only on documents written by a
    * coverage-instrumented compile, which store under their own runtime-version
-   * variant (`<runtimeVersion>/pattern-coverage`), so an ordinary document never
-   * carries them. A collector maps a probe's `(fileName, id)` back to source
-   * lines through these spans; a warm load that registers none reports nothing.
+   * variant (`<runtimeVersion>/pattern-coverage`), so an ordinary
+   * document never carries them. A collector maps a probe's `(fileName, id)`
+   * back to source lines through these spans; a warm load that registers none
+   * reports nothing.
    */
   readonly patternCoverageSpans?: readonly PatternCoverageSpan[];
 }
@@ -721,27 +722,6 @@ export async function loadVerifiedSourceClosure(
  */
 export const COMPILED_INTEGRITY_ATOM: string = CFC_COMPILED_BY_ATOM;
 
-/**
- * Schema for one {@link PatternCoverageSpan} on a compiled document. Shared by
- * the write and read schemas so a span field can never be written under one
- * shape and filtered out under the other.
- */
-const patternCoverageSpansSchema = {
-  type: "array",
-  items: {
-    type: "object",
-    properties: {
-      fileName: { type: "string" },
-      id: { type: "number" },
-      kind: { type: "string" },
-      startLine: { type: "number" },
-      endLine: { type: "number" },
-      startColumn: { type: "number" },
-      endColumn: { type: "number" },
-    },
-  },
-} as const;
-
 const compiledDocProperties = {
   kind: { type: "string" },
   identity: { type: "string" },
@@ -751,7 +731,7 @@ const compiledDocProperties = {
   exportNames: { type: "array", items: { type: "string" } },
   starTargetSpecs: { type: "array", items: { type: "string" } },
   importSpecs: { type: "array", items: { type: "string" } },
-  patternCoverageSpans: patternCoverageSpansSchema,
+  patternCoverageSpansJson: { type: "string" },
   policyManifests: {
     type: "array",
     items: { type: "object", additionalProperties: true },
@@ -787,7 +767,7 @@ export const COMPILED_DOC_SCHEMA = {
         exportNames: { type: "array", items: { type: "string" } },
         starTargetSpecs: { type: "array", items: { type: "string" } },
         importSpecs: { type: "array", items: { type: "string" } },
-        patternCoverageSpans: patternCoverageSpansSchema,
+        patternCoverageSpansJson: { type: "string" },
         policyManifests: {
           type: "array",
           items: { type: "object", additionalProperties: true },
@@ -829,25 +809,30 @@ interface StoredCompiledDoc {
   exportNames?: readonly string[];
   starTargetSpecs?: readonly string[];
   importSpecs?: readonly string[];
-  patternCoverageSpans?: readonly PatternCoverageSpan[];
+  patternCoverageSpansJson?: string;
   policyManifests?: readonly unknown[];
   imports: { specifier: string; link: unknown }[];
 }
 
 /**
- * The coverage spans stored on a compiled document, snapshotted off the
- * transaction and shape-checked. Yields `undefined` for a document written
- * without spans, and for a stored value that does not match the span shape —
- * the load then carries no spans for that module, and the collector reports no
- * lines for it rather than reporting against malformed coordinates. Spans are
- * a reporting aid, never an execution input, so a rejection here cannot affect
- * what the module does.
+ * The coverage spans stored as scalar JSON on a compiled document, parsed and
+ * shape-checked. Yields `undefined` for a document written without spans, and
+ * for a stored value that does not match the span shape. The load then carries
+ * no spans for that module, and the collector reports no lines for it rather
+ * than reporting against malformed coordinates. Spans are a reporting aid,
+ * never an execution input, so a rejection here cannot affect what the module
+ * does.
  */
 function storedCoverageSpans(
   stored: unknown,
 ): readonly PatternCoverageSpan[] | undefined {
-  if (stored === undefined) return undefined;
-  const spans = snapshotQueryResult(stored);
+  if (typeof stored !== "string") return undefined;
+  let spans: unknown;
+  try {
+    spans = JSON.parse(stored);
+  } catch {
+    return undefined;
+  }
   if (!Array.isArray(spans)) return undefined;
   const out: PatternCoverageSpan[] = [];
   for (const span of spans) {
@@ -957,9 +942,11 @@ export function writeCompiledDocs(
         ...(module.sourceMap !== undefined
           ? { sourceMap: module.sourceMap }
           : {}),
-        ...(module.patternCoverageSpans === undefined
-          ? {}
-          : { patternCoverageSpans: module.patternCoverageSpans }),
+        ...(module.patternCoverageSpans === undefined ? {} : {
+          patternCoverageSpansJson: JSON.stringify(
+            module.patternCoverageSpans,
+          ),
+        }),
         ...(policyManifests === undefined ? {} : { policyManifests }),
         imports: storedImportRefs(module, entryIdentity, extraRoots, {
           includeFabricEdges: true,
@@ -1055,7 +1042,9 @@ export async function loadCompiledClosure(
     // Detach the spans from the transaction: the callers abort their read tx
     // before the closure is consumed, and a collector holds registered spans for
     // the life of the process.
-    const coverageSpans = storedCoverageSpans(doc.patternCoverageSpans);
+    const coverageSpans = storedCoverageSpans(
+      doc.patternCoverageSpansJson,
+    );
 
     const imports: ModuleImportRef[] = [];
     for (const imp of doc.imports ?? []) {

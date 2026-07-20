@@ -717,6 +717,35 @@ Deno.test("runtime-level coverage instruments the cell-cache compile path", asyn
       report.totals.coveredRuntimeLines > 0,
       "cell-cache compile recorded no covered lines",
     );
+
+    // A stored coverage closure must carry its span metadata back into the
+    // engine. Without those spans the engine rejects the cached bodies and
+    // recompiles them.
+    const { compiler } = await runtime.harness.initialize();
+    const originalCompileToModules = compiler.compileToModules;
+    const originalCompileToModulesInterleaved =
+      compiler.compileToModulesInterleaved;
+    const failWarmCompile = () => {
+      throw new Error("warm coverage cache recompiled");
+    };
+    compiler.compileToModules =
+      failWarmCompile as typeof compiler.compileToModules;
+    compiler.compileToModulesInterleaved =
+      failWarmCompile as typeof compiler.compileToModulesInterleaved;
+    try {
+      await runtime.patternManager.compilePattern(source, {
+        space: identity.did(),
+      });
+    } finally {
+      compiler.compileToModules = originalCompileToModules;
+      compiler.compileToModulesInterleaved =
+        originalCompileToModulesInterleaved;
+    }
+    assertEquals(runtime.patternManager.getCompileCacheStats(), {
+      hits: 1,
+      misses: 1,
+      byIdentityHits: 0,
+    });
   } finally {
     await runtime.dispose();
     await storageManager.close();
