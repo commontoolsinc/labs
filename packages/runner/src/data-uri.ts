@@ -18,14 +18,18 @@
  * relocated rather than newly introduced.
  */
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  FabricInstance,
+  FabricPrimitive,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import {
   jsonFromValue,
   seemsLikeJsonEncodedFabricValue,
   valueFromJson,
 } from "@commonfabric/data-model/codec-json";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
-import { isInstance, isRecord } from "@commonfabric/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import { type Cell, isCell } from "./cell.ts";
 import { isPrimitiveCellLink, type NormalizedLink } from "./link-types.ts";
 import {
@@ -80,15 +84,15 @@ const dataUriReconstructionContext = new EmptyReconstructionContext(
  * @throws If `data` contains a reference cycle.
  */
 export function createDataCellURI(
-  data: any,
+  data: FabricValue,
   base?: Cell | NormalizedLink,
 ): URI {
   const baseLink = isCell(base) ? base.getAsNormalizedFullLink() : base;
 
   function traverseAndAddBaseIdToRelativeLinks(
-    value: any,
-    seen: Set<any>,
-  ): any {
+    value: FabricValue,
+    seen: Set<object>,
+  ): FabricValue {
     if (!isRecord(value)) return value;
     if (seen.has(value)) {
       throw new Error(`Cycle detected when creating data URI`);
@@ -101,10 +105,17 @@ export function createDataCellURI(
           includeSchema: true,
           keepAsCell: KeepAsCell.All,
         });
-      } else if (isInstance(value)) {
-        // A non-link class instance is a leaf: the value encoding represents
-        // it via its codec (or rejects it loudly if it has none). Descending
-        // into it here would decompose it into its property shape.
+      } else if (value instanceof FabricPrimitive) {
+        // A `FabricPrimitive` is a leaf; the value encoding represents it
+        // via its codec.
+        return value;
+      } else if (value instanceof FabricInstance) {
+        // TODO(danfuzz): A `FabricInstance` is not a leaf: its state can
+        // carry cell links, which need the same relative-to-absolute
+        // rewriting as everything else. That requires codec-mediated
+        // traversal into instance state; until that exists, the instance
+        // passes through unrewritten (encoded correctly in form, but any
+        // relative link within it stays relative).
         return value;
       } else if (Array.isArray(value)) {
         return value.map((item) =>
@@ -114,7 +125,10 @@ export function createDataCellURI(
         return Object.fromEntries(
           Object.entries(value).map((
             [key, value],
-          ) => [key, traverseAndAddBaseIdToRelativeLinks(value, seen)]),
+          ) => [
+            key,
+            traverseAndAddBaseIdToRelativeLinks(value as FabricValue, seen),
+          ]),
         );
       }
     } finally {
