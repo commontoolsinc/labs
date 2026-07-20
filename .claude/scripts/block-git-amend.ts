@@ -21,8 +21,18 @@ try {
   Deno.exit(0);
 }
 
+// Drop quoted segments so only actual shell words are inspected — a commit
+// message that merely mentions the flag must not trip the block. Double-quoted
+// segments can span newlines (e.g. -m "$(cat <<'EOF' ... EOF)").
+const bareWords = cmd
+  .replace(/"(?:\\.|[^"\\])*"/gs, '""')
+  .replace(/'[^']*'/g, "''");
+
 // Block git commit --amend (including abbreviated forms: --am, --ame, --amen, --amend)
-if (/\bgit\s+commit\b/.test(cmd) && /--am(e(nd?)?)?\b/.test(cmd)) {
+if (
+  /\bgit\s+commit\b/.test(bareWords) &&
+  /(^|\s)--am(e(nd?)?)?\b/.test(bareWords)
+) {
   console.error(
     "git commit --amend is not allowed. Create a new commit instead.",
   );
