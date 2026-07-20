@@ -1,4 +1,5 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
+import { jsonFromValue } from "@commonfabric/data-model/codec-json";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -617,7 +618,7 @@ describe("CFC trusted UI event enforcement", () => {
       "/": {
         [LINK_V1_TAG]: {
           id: `data:application/json,${
-            encodeURIComponent(JSON.stringify({
+            encodeURIComponent(jsonFromValue({
               value: { $event: rawTrustedEvent },
             }))
           }`,

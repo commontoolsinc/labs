@@ -314,12 +314,18 @@ describe("data-uri", () => {
   });
 
   describe("decodeDataURIPayloadText", () => {
-    it("decodes JSON payload text", () => {
-      expect(decodeDataURIPayloadText('{"value":{"b":1,"a":[true,null]}}'))
-        .toEqual({ value: { b: 1, a: [true, null] } });
-      expect(decodeDataURIPayloadText("[1,2,3]")).toEqual([1, 2, 3]);
-      expect(decodeDataURIPayloadText('"plain"')).toBe("plain");
-      expect(decodeDataURIPayloadText("null")).toBe(null);
+    it("decodes encoded payload text of every top-level shape", () => {
+      expect(decodeDataURIPayloadText(jsonFromValue({ b: 1, a: [true] })))
+        .toEqual({ b: 1, a: [true] });
+      expect(decodeDataURIPayloadText(jsonFromValue([1, 2, 3])))
+        .toEqual([1, 2, 3]);
+      expect(decodeDataURIPayloadText(jsonFromValue("plain"))).toBe("plain");
+      expect(decodeDataURIPayloadText(jsonFromValue(null))).toBe(null);
+    });
+
+    it("rejects historical bare-JSON payload text", () => {
+      expect(() => decodeDataURIPayloadText('{"value":{"x":1}}')).toThrow();
+      expect(() => decodeDataURIPayloadText("[1,2,3]")).toThrow();
     });
 
     it("rejects invalid payload text", () => {
@@ -371,8 +377,10 @@ describe("data-uri", () => {
     });
 
     it("accepts an explicit UTF-8 charset", () => {
-      expect(getJSONFromDataURI("data:application/json;charset=utf-8,{}"))
-        .toEqual({});
+      const payload = encodeURIComponent(jsonFromValue({}));
+      expect(
+        getJSONFromDataURI(`data:application/json;charset=utf-8,${payload}`),
+      ).toEqual({});
     });
 
     // Both `data:` URI payload readers (this one and attestation `load()`)
@@ -381,26 +389,15 @@ describe("data-uri", () => {
       expect(() => getJSONFromDataURI("data:application/json,")).toThrow();
     });
 
-    describe("bare-JSON payloads", () => {
-      it("decodes a percent-encoded payload", () => {
-        const uri = uriOf('{"value":{"b":1,"a":[true,null,"x"]}}');
-        expect(getJSONFromDataURI(uri)).toEqual({
-          value: { b: 1, a: [true, null, "x"] },
-        });
+    describe("historical bare-JSON payloads", () => {
+      it("rejects a percent-encoded payload", () => {
+        expect(() => getJSONFromDataURI(uriOf('{"value":{"b":1}}')))
+          .toThrow();
       });
 
-      it("decodes a Base64 payload, including non-ASCII text", () => {
-        const uri = base64UriOf('{"value":"città"}');
-        expect(getJSONFromDataURI(uri)).toEqual({ value: "città" });
-      });
-
-      it("decodes a non-object payload", () => {
-        expect(getJSONFromDataURI(uriOf("[1,2,3]"))).toEqual([1, 2, 3]);
-        expect(getJSONFromDataURI(uriOf('"plain"'))).toBe("plain");
-      });
-
-      it("rejects an invalid JSON payload", () => {
-        expect(() => getJSONFromDataURI(uriOf("{nope"))).toThrow();
+      it("rejects a Base64 payload", () => {
+        expect(() => getJSONFromDataURI(base64UriOf('{"value":"x"}')))
+          .toThrow();
       });
     });
 
@@ -414,6 +411,13 @@ describe("data-uri", () => {
         const value = { value: "città" };
         expect(getJSONFromDataURI(base64UriOf(jsonFromValue(value))))
           .toEqual(value);
+      });
+
+      it("decodes a non-object payload", () => {
+        expect(getJSONFromDataURI(uriOf(jsonFromValue([1, 2, 3]))))
+          .toEqual([1, 2, 3]);
+        expect(getJSONFromDataURI(uriOf(jsonFromValue("plain"))))
+          .toBe("plain");
       });
 
       it("preserves non-finite numbers and negative zero", () => {

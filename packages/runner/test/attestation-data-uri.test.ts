@@ -14,10 +14,17 @@ const uriOf = (payload: string): URI =>
 // silently diverge on what a payload means — both accept the standard
 // `fvj1:`-tagged `FabricValue` encoding alongside bare JSON.
 describe("attestation `load()` of `data:` URIs", () => {
-  it("loads a bare-JSON payload", () => {
+  it("errors on a historical bare-JSON payload", () => {
     const { ok, error } = load({ id: uriOf('{"value":{"x":1}}') });
+    expect(ok).toBeUndefined();
+    expect(error?.name).toBe("InvalidDataURIError");
+  });
+
+  it("reports the whole document at the root path", () => {
+    const value = { value: { x: 1 } };
+    const { ok, error } = load({ id: uriOf(jsonFromValue(value)) });
     expect(error).toBeUndefined();
-    expect(ok!.value).toEqual({ value: { x: 1 } });
+    expect(ok!.value).toEqual(value);
     expect(ok!.address.path).toEqual([]);
   });
 

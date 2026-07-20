@@ -41,7 +41,6 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import {
   jsonFromValue,
-  seemsLikeJsonEncodedFabricValue,
   valueFromJson,
 } from "@commonfabric/data-model/codec-json";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
@@ -78,10 +77,9 @@ const dataUriReconstructionContext = new EmptyReconstructionContext(
  * path.
  *
  * This is the encode half of the matched set this module exists to hold;
- * {@link getJSONFromDataURI} is what reads back what this writes. This side
- * writes only the standard `data-model` `FabricValue` encoding (tagged
- * `fvj1:`); the decode half additionally accepts the bare-JSON form this
- * function historically wrote, for the sake of ids in the wild.
+ * {@link getJSONFromDataURI} is what reads back what this writes. Both
+ * sides speak only the standard `data-model` `FabricValue` encoding
+ * (tagged `fvj1:`).
  *
  * Each primitive cell link within `data` is rewritten to a full sigil link,
  * with relative links resolved against `base`. That rewriting is what makes
@@ -160,32 +158,28 @@ export function createDataCellURI(
 }
 
 /**
- * Decodes the extracted payload text of an `application/json` `data:` URI.
- * This is the single point of truth for how such payloads read, shared by
- * every reader of them; per-reader payload extraction and error policy stay
- * with the readers (see {@link getJSONFromDataURI} and
- * `storage/transaction/attestation.ts`'s `load()`). Two forms are accepted:
+ * Decodes the extracted payload text of an `application/json` `data:` URI,
+ * which must be in the standard `data-model` `FabricValue` JSON-embedded
+ * encoding (tagged `fvj1:`). Results are deep-frozen and may contain
+ * `FabricInstance`s. This is the single point of truth for how such
+ * payloads read, shared by every reader of them; per-reader payload
+ * extraction and error policy stay with the readers (see
+ * {@link getJSONFromDataURI} and `storage/transaction/attestation.ts`'s
+ * `load()`).
  *
- * - Text bearing the `fvj1:` tag is decoded as the standard `data-model`
- *   `FabricValue` JSON-embedded encoding. Results from this branch are
- *   deep-frozen and may contain `FabricInstance`s.
- * - Any other text is parsed as bare JSON, the historical form: current
- *   writes inline `data:` links rather than persisting them (see
- *   {@link findAndInlineDataURILinks}), so nothing durably stored mints
- *   this form anymore. The branch stays because this reader accepts
- *   `data:` URIs originating outside the runner and the storage layer
- *   does not itself enforce the no-persistence convention.
+ * The historical bare-JSON form is intentionally rejected: nothing durably
+ * stored carries such ids (writes have inlined `data:` links rather than
+ * persisting them since long before the encoding switched -- see
+ * {@link findAndInlineDataURILinks}), and externally-minted `data:` URIs
+ * are required to use the standard encoding.
  *
  * @param text The payload text, after any percent- or Base64-decoding.
  * @returns The decoded value.
- * @throws If `text` is neither valid JSON nor a valid encoded `FabricValue`.
- *   Notably, an empty `text` is not valid and is rejected like any other
- *   invalid input.
+ * @throws If `text` is not a valid encoded `FabricValue` -- including when
+ *   it is empty or in the historical bare-JSON form.
  */
 export function decodeDataURIPayloadText(text: string): FabricValue {
-  return seemsLikeJsonEncodedFabricValue(text)
-    ? valueFromJson(text, dataUriReconstructionContext)
-    : JSON.parse(text);
+  return valueFromJson(text, dataUriReconstructionContext);
 }
 
 /**
@@ -204,16 +198,16 @@ export function decodeDataURIPayloadText(text: string): FabricValue {
  * `charset` spellings are for `data:` URIs originating anywhere else.
  *
  * The extracted payload text is decoded via {@link decodeDataURIPayloadText},
- * which accepts both the standard `fvj1:`-tagged `FabricValue` encoding and
- * bare JSON; see its doc comment for the details of the two forms. (The
- * media type is admittedly a bit of a fib for the tagged form, since the tag
- * prefix makes the payload not actually be JSON.)
+ * which requires the standard `fvj1:`-tagged `FabricValue` encoding. (The
+ * media type is admittedly a bit of a fib, since the tag prefix makes the
+ * payload not actually be JSON.)
  *
  * @param uri The `data:` URI to read.
  * @returns The decoded payload.
  * @throws If `uri` is not an `application/json` `data:` URI, if it declares a
- *   charset other than UTF-8, or if its payload is neither valid JSON nor a
- *   valid encoded `FabricValue` (which includes the empty payload).
+ *   charset other than UTF-8, or if its payload is not a valid encoded
+ *   `FabricValue` (which includes the empty payload and the historical
+ *   bare-JSON form).
  */
 export function getJSONFromDataURI(uri: URI | string): any {
   if (!uri.startsWith("data:application/json")) {

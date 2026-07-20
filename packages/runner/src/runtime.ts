@@ -4,6 +4,8 @@ import {
   StaticCacheHTTP,
 } from "@commonfabric/static";
 import { RuntimeTelemetry } from "@commonfabric/runner";
+import { jsonFromValue } from "@commonfabric/data-model/codec-json";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import type { NonIdempotentReport } from "./telemetry.ts";
 import type {
   AnyCell,
@@ -1730,8 +1732,13 @@ export class Runtime {
     tx?: IExtendedStorageTransaction,
     cfcLabelView?: CfcLabelView,
   ): Cell<any> {
+    // The standard `FabricValue` encoding, matching `createDataCellURI()`
+    // (which is not used directly here because its link-rewriting walk is
+    // unwanted: this data is immutable as given). `fabricFromNativeValue()`
+    // converts what callers actually pass -- notably `Cell`s, which become
+    // sigil links via their `toJSON()` -- into encodable `FabricValue`s.
     const asDataURI = `data:application/json,${
-      encodeURIComponent(JSON.stringify({ value: data }))
+      encodeURIComponent(jsonFromValue({ value: fabricFromNativeValue(data) }))
     }` as const as `${string}:${string}`;
     return createCell(
       this,
