@@ -167,16 +167,14 @@ export function createDataCellURI(
  * {@link getJSONFromDataURI} and `storage/transaction/attestation.ts`'s
  * `load()`).
  *
- * The historical bare-JSON form is intentionally rejected: nothing durably
- * stored carries such ids (writes have inlined `data:` links rather than
- * persisting them since long before the encoding switched -- see
- * {@link findAndInlineDataURILinks}), and externally-minted `data:` URIs
- * are required to use the standard encoding.
+ * Only the standard encoding is accepted, from external minters as much as
+ * from this module's own encode half; any other payload text (bare JSON
+ * included) fails loudly rather than being guessed at.
  *
  * @param text The payload text, after any percent- or Base64-decoding.
  * @returns The decoded value.
  * @throws If `text` is not a valid encoded `FabricValue` -- including when
- *   it is empty or in the historical bare-JSON form.
+ *   it is empty or is bare JSON.
  */
 export function decodeDataURIPayloadText(text: string): FabricValue {
   return valueFromJson(text, dataUriReconstructionContext);
