@@ -10,7 +10,8 @@ const uriOf = (payload: string): URI =>
 
 // `load()` is the storage-transaction-side reader of `data:` URI documents,
 // separate from `uri-utils.ts`'s `getJSONFromDataURI()`. Both route payload
-// text through `decodeDataURIPayloadText()`, so both accept the standard
+// text through `decodeDataURIPayloadText()`, so the two readers cannot
+// silently diverge on what a payload means — both accept the standard
 // `fvj1:`-tagged `FabricValue` encoding alongside bare JSON.
 describe("attestation `load()` of `data:` URIs", () => {
   it("loads a bare-JSON payload", () => {
@@ -39,6 +40,12 @@ describe("attestation `load()` of `data:` URIs", () => {
   });
 
   it("errors on an undecodable payload", () => {
+    const { ok, error } = load({ id: uriOf("{nope") });
+    expect(ok).toBeUndefined();
+    expect(error?.name).toBe("InvalidDataURIError");
+  });
+
+  it("errors on an undecodable payload past the `fvj1:` tag", () => {
     const { ok, error } = load({ id: uriOf("fvj1:{nope") });
     expect(ok).toBeUndefined();
     expect(error?.name).toBe("InvalidDataURIError");
