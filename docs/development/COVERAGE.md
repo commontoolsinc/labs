@@ -68,11 +68,14 @@ all.
 
 ## How the two feed the coverage gate
 
-`tasks/perf-check.ts` downloads every `coverage-profile-*` artifact, joins all
-the LCOV files together, and hands them to `tasks/coverage-metrics.ts`. That
-code walks the tracked source files under `packages` and `tasks`, and for each
-file counts how many of its lines no test covered. The top-level `scripts`
-directory is excluded from this gate. The counts roll up into
+The Performance Check job downloads every `coverage-profile-*` artifact with
+`actions/download-artifact`. The action checks each artifact's recorded digest.
+`tasks/perf-check.ts` verifies that every expected artifact is present. It joins
+all the downloaded LCOV files together and hands them to
+`tasks/coverage-metrics.ts`. That code walks the tracked source files under
+`packages` and `tasks`. For each file, it counts how many lines no test covered.
+The top-level `scripts` directory is excluded from this gate. The counts roll up
+into
 `coverage-debt: <group> uncovered lines` metrics, for example
 `coverage-debt: packages/patterns uncovered lines`, and the performance check
 gates a pull request on them.
