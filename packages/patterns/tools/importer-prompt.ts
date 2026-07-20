@@ -62,6 +62,7 @@ const AIRTABLE_AUTH_SOURCE = `import {
   handler,
   NAME,
   pattern,
+  resultOf,
   Stream,
   TILE_UI,
   UI,
@@ -411,16 +412,15 @@ export default pattern<Input, Output>(
     // Reactive clock for token-expiry display; ticks each minute so the
     // "Expires in" countdown refreshes. Coarsened to 1s and cached.
     const now = wish<number>({ query: "#now/60" });
+    const nowValue = resultOf(now.result);
 
     const isTokenExpired = computed(() => {
       if (!authValue?.accessToken || !authValue?.expiresAt) return false;
-      if (now.result == null) return false;
-      return authValue.expiresAt < now.result;
+      return authValue.expiresAt < nowValue;
     });
 
     const tokenExpiryDisplay = computed(() => {
-      if (now.result == null) return "";
-      return formatTokenExpiry(authValue?.expiresAt || 0, now.result);
+      return formatTokenExpiry(authValue?.expiresAt || 0, nowValue);
     });
 
     const checkboxesDisabled = computed(() => !!authValue?.accessToken);
@@ -439,7 +439,7 @@ export default pattern<Input, Output>(
       const email = authValue?.user?.email || "";
       const name = authValue?.user?.name || "";
       const isAuthenticated = !!email;
-      const nowMs = now.result ?? 0;
+      const nowMs = nowValue;
       const expiresAt = authValue?.expiresAt || 0;
       const isExpired = isAuthenticated && expiresAt > 0 && nowMs > 0 &&
         expiresAt < nowMs;
