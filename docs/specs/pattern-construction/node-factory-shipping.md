@@ -756,6 +756,9 @@ base64url payload as UTF-8 Fabric JSON. There is no media-type fallback or
 payload sniffing: the codec has one writer and one reader for one canonical
 format.
 
+> **Non-normative JavaScript example:** unlike `JSON.stringify`, Fabric JSON
+> round-trips `undefined`, bigint, symbols, `-0`, `NaN`, and infinities.
+
 The decoder returns inert callable shells for `Factory@1`, just
 like direct context-free `valueFromJson()`. Inline transport never grants code
 loading or execution authority. Once expanded into a containing document write,
