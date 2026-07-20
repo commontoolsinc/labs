@@ -2673,17 +2673,43 @@ function _combineSchemaUncached(
         ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
       };
     } else if (linkSchema.type === "array" && parentSchema.type === "array") {
-      // TODO(@ubik2): We should handle prefixItems
+      const {
+        prefixItems: parentPrefixItems,
+        ...parentSchemaWithoutPrefixItems
+      } = parentSchema;
+      const {
+        prefixItems: linkPrefixItems,
+        ...linkSchemaWithoutPrefixItems
+      } = linkSchema;
       const mergedDefs = { ...linkSchema.$defs, ...parentSchema.$defs };
       const mergedSchemaItems = parentSchema.items === undefined
         ? linkSchema.items
         : linkSchema.items === undefined
         ? parentSchema.items
         : combineSchema(parentSchema.items, linkSchema.items);
+      const prefixItemCount = Math.max(
+        parentPrefixItems?.length ?? 0,
+        linkPrefixItems?.length ?? 0,
+      );
+      const mergedPrefixItems = Array.from(
+        { length: prefixItemCount },
+        (_, index): JSONSchema => {
+          const parentItem = parentPrefixItems?.[index] ?? parentSchema.items;
+          const linkItem = linkPrefixItems?.[index] ?? linkSchema.items;
+          return parentItem === undefined
+            ? linkItem ?? true
+            : linkItem === undefined
+            ? parentItem
+            : combineSchema(parentItem, linkItem);
+        },
+      );
       return {
-        ...linkSchema,
-        ...parentSchema,
+        ...linkSchemaWithoutPrefixItems,
+        ...parentSchemaWithoutPrefixItems,
         type: "array",
+        ...(mergedPrefixItems.length > 0 && {
+          prefixItems: mergedPrefixItems,
+        }),
         ...(mergedSchemaItems !== undefined && { items: mergedSchemaItems }),
         ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
       };
