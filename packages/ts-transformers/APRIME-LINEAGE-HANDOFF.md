@@ -5,15 +5,19 @@
 correct and free, then delete the eager runtime resolution) and its
 prerequisite, the **transformer lineage fix**. Every claim in §2–§5 was
 re-derived on `main` @ `39afdb62b` (2026-07-07) with the probe rig in §3 — line
-numbers will drift; the rig is how you re-pin them. This doc supersedes the
-memory file `project_aprime_lineage_workline.md` (retired) and the workspace
-seed `APRIME-LINEAGE-SEED.md` (L-cf-repos, 2026-07-06).
+numbers will drift; the rig is how you re-pin them. Stage ordinals are
+deliberately not used: the registry (`CFC_TRANSFORMER_STAGE_SPECS`,
+`src/cf-pipeline.ts`) is canonical and grows; the load-bearing ordering facts
+here are relational — LiftLowering → closure strategies → expression-site
+lowerings → SchemaInjection → BuilderCallHoisting, the last two adjacent. This
+doc supersedes the memory file `project_aprime_lineage_workline.md` (retired)
+and the workspace seed `APRIME-LINEAGE-SEED.md` (L-cf-repos, 2026-07-06).
 
 Related merged context: #4458 (lazy/debug-only `fn.src`; production skips
 per-primitive resolution; identity re-rooted on content-addressed
 `{identity, symbol}` — see `cfc/implementation-identity.ts`), #4436 (identity
 re-root). Sibling, NOT part of A′: CT-1819 lazy source-map compose (PR #4560,
-open as of this writing) — do not merge scopes.
+merged 2026-07-09) — do not merge scopes.
 
 ---
 
@@ -31,8 +35,8 @@ open as of this writing) — do not merge scopes.
 - **The prerequisite**: transform-time injection needs the transformer pipeline
   to know, at the hoisting stage, where each builder call/callback was authored.
   Probe-verified on current main: **it doesn't** — all hoisted builder origins
-  arrive at `BuilderCallHoistingTransformer` (stage 14) with `pos=-1`, no
-  `sourceMapRange`, no original chain.
+  arrive at `BuilderCallHoistingTransformer` with `pos=-1`, no `sourceMapRange`,
+  no original chain.
 - **The law behind the breakage** (cleaner than the inherited three-site
   diagnosis): TS `factory.update*` preserves textRange + original-chain
   automatically; `factory.create*` yields bare nodes. The pattern-body path uses
@@ -41,7 +45,7 @@ open as of this writing) — do not merge scopes.
   closure strategies and SchemaInjection use `create*` **with the anchor node in
   scope and discarded** at every site. SchemaInjection is a second, independent
   strip layer the inherited diagnosis missed: a fix at the strategy sites alone
-  still arrives at stage 14 with nothing.
+  still arrives at the hoisting stage with nothing.
 - **Scope decision: narrow-first** — fix the enumerated builder-path sites (§5)
   with a shared `preserveLineage` helper (§6); price "broad" (every replacement
   node pipeline-wide) from the sweep in §7 and ticket it separately unless it
@@ -64,33 +68,34 @@ open as of this writing) — do not merge scopes.
 
 ## 2. Probe findings on main @ 39afdb62b (re-derived 2026-07-07)
 
-Fixture: five authored origins (see §3). What arrives at stage 14
+Fixture: five authored origins (see §3). What arrives at the hoisting stage
 (BuilderCallHoisting), per probe:
 
-| Authored origin                        | At stage 14                                                                 | Lineage dies at                                                                                                                                                                               |
+| Authored origin                        | At the hoisting stage                                                       | Lineage dies at                                                                                                                                                                               |
 | -------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `computed(() => …)` (×2)               | hoisted `__cfLift_1/2`: NOTHING                                             | **LiftAppliedStrategy** (stage 8). Probe in/out: enters with FULL lineage (stage-7 lowering preserves the triple), exits bare.                                                                |
-| inline JSX expr `{count * 3}`          | hoisted `__cfLift_3`: NOTHING                                               | Born mostly bare in **expression-rewrite emitters** (stages 9–10); the inner call _is_ born with smr via `createHelperCall`, which **SchemaInjection** (stage 13) then strips.                |
-| `.map((item) => <li>…)` in JSX         | hoisted `__cfPattern_1`: original chains exist but root in synthetics       | **ArrayMethodStrategy** (stage 8). Probe in/out: enters as the authored node, exits bare.                                                                                                     |
+| `computed(() => …)` (×2)               | hoisted `__cfLift_1/2`: NOTHING                                             | **LiftAppliedStrategy**. Probe in/out: enters with FULL lineage (the LiftLowering stage preserves the triple), exits bare.                                                                    |
+| inline JSX expr `{count * 3}`          | hoisted `__cfLift_3`: NOTHING                                               | Born mostly bare in the **expression-rewrite emitters**; the inner call _is_ born with smr via `createHelperCall`, which **SchemaInjection** then strips.                                     |
+| `.map((item) => <li>…)` in JSX         | hoisted `__cfPattern_1`: original chains exist but root in synthetics       | **ArrayMethodStrategy**. Probe in/out: enters as the authored node, exits bare.                                                                                                               |
 | module-scope `handler(…)` (in-place)   | call: NOTHING; **callback: authored pos survives** (30:60)                  | Call wrapper rebuilt by **SchemaInjection**'s handler schema-prepend (`schema-injection.ts:3190` family — the prepended two-schema shape matches the emitted output); callback never rebuilt. |
 | `export default pattern(…)` (in-place) | call: depth-1 chain to synthetic; **callback: authored pos + 6-deep chain** | Callback preserved correctly by the pattern-body path (precedent, §6); call wrapper stripped like the handler's.                                                                              |
 
 Key mechanism notes:
 
-- Stage 7 (`lift/transformer.ts` `finalizeLoweredCall`) does the full triple —
-  `setTextRange` + `setSourceMapRange` + `setOriginalNode` — and the probe
-  validates the instrument against it (lineage there is true _by construction_;
-  if the probe reports nulls there, the probe is broken).
+- `LiftLoweringTransformer`'s `finalizeLoweredCall` (`lift/transformer.ts`) does
+  the full triple — `setTextRange` + `setSourceMapRange` + `setOriginalNode` —
+  and the probe validates the instrument against it (lineage there is true _by
+  construction_; if the probe reports nulls there, the probe is broken).
 - `CfHelpers.createHelperCall` smr-preserves everything it builds (anchored to
   its `originalNode` arg). smr lives on `emitNode`; a later `create*` rebuild
   silently drops it — which is exactly what SchemaInjection did. **Correction
-  (2026-07-08, verified against TS 5.9.2 source during CT-1868):** smr is NOT
-  lost through `update*`/`setOriginalNode` — `setOriginalNode` merges the
-  original's `emitNode` (including `sourceMapRange`) onto the new node
-  (`typescript.js` `setOriginalNode`/`mergeEmitNode`). So smr dies only at
-  unanchored `create*` sites; it rides every `update*` rebuild for free. This
-  refuted the original N8 rationale (§5) and is why smr became the shipped
-  lineage carrier (§6a).
+  (2026-07-08, verified against TS 5.9.2 source during CT-1868; re-verified
+  unchanged on TS 6.0.3 at the 2026-07 rebase — same
+  `setOriginalNode`/`mergeEmitNode` shape):** smr is NOT lost through
+  `update*`/`setOriginalNode` — `setOriginalNode` merges the original's
+  `emitNode` (including `sourceMapRange`) onto the new node (`typescript.js`
+  `setOriginalNode`/`mergeEmitNode`). So smr dies only at unanchored `create*`
+  sites; it rides every `update*` rebuild for free. This refuted the original N8
+  rationale (§5) and is why smr became the shipped lineage carrier (§6a).
 - The hoisting stage itself is lineage-neutral (it relocates the inner call node
   and `update*`s the site) and already uses `setOriginalNode` for
   checker-identity (`__cfLift_N` identifier → inner call, so
@@ -107,7 +112,7 @@ survival; the update*-vs-create* law.
 
 The instrumentation is temporary and NOT left in the tree; this section is the
 complete recipe. (The fix PR should graduate it into a proper regression test —
-a stage-14 assertion fixture; see §8.)
+a hoisting-stage assertion fixture; see §8.)
 
 1. **Fixture** — `packages/patterns/aprime-lineage-probe-fixture.tsx`
    (untracked), one authored builder per origin path:
@@ -219,11 +224,11 @@ in scope at each site.
 rebuilds what `BuilderCallHoistingTransformer` consumes (builder calls, inner
 calls, callbacks — hoisted AND in-place). Shipped as ~24 edit sites; full
 `preserveLineage` survives only at N2/N5 (gate-proven inert — N2's channels are
-consumed and re-stripped at stage 13 before printing; N5's textRange is why the
-mapWithPattern outer recovers `self→`), smr-carry everywhere else. Acceptance
-verified per §4 (all 16 probe lines recover correct authored snippets) and
-guarded by `test/lineage-regression.test.ts` (bite-verified: reverting
-schema-injection.ts makes it fail).
+consumed and re-stripped by SchemaInjection before printing; N5's textRange is
+why the mapWithPattern outer recovers `self→`), smr-carry everywhere else.
+Acceptance verified per §4 (all 16 probe lines recover correct authored
+snippets) and guarded by `test/lineage-regression.test.ts` (bite-verified:
+reverting schema-injection.ts makes it fail).
 
 Notes:
 
@@ -261,7 +266,7 @@ export function preserveLineage<T extends ts.Node>(
 ```
 
 Precedents in-tree: the full triple at `lift/transformer.ts`
-`finalizeLoweredCall` (stage 7, probe-validated); the healthy pattern-body path
+`finalizeLoweredCall` (probe-validated); the healthy pattern-body path
 (`pattern-callback-lowering.ts` / `pattern-callback-transform.ts` /
 `pattern-body-reactive-root-lowering.ts` — `update*` + `preserveNodeSourceMap`
 throughout).
@@ -347,10 +352,10 @@ implementation):**
 
 - **Folded INTO narrow** (builder-path): the schema-injection builder-call
   rebuild family (~11 sites, §5 N7) and `capture-scaffold.ts:54` (§5 N6). The
-  sweep's key structural point: SchemaInjection (stage 13) is the immediate
-  predecessor of BuilderCallHoisting (stage 14) and rebuilds essentially every
-  builder call bare — it alone re-strips anything stages 8–12 preserve, which is
-  why the original three-site diagnosis could never have been sufficient.
+  sweep's key structural point: SchemaInjection is the immediate predecessor of
+  BuilderCallHoisting and rebuilds essentially every builder call bare — it
+  alone re-strips anything stages 8–12 preserve, which is why the original
+  three-site diagnosis could never have been sufficient.
 - **Remaining for broad** (~15–18 sites, none A′-gating, none structurally hard
   — an anchor is in scope at every one):
   - `pattern-body-reactive-root-lowering.ts` key()-lowering replacements
@@ -390,8 +395,8 @@ patterns) and the full fixture suite green.
   (not targeted tests) — transformer output is load-bearing for everything
   downstream.
 - The §3/§4 probe as acceptance; graduate it into a tracked regression test
-  (stage-14 fixture asserting recovered-authored positions for all five origins)
-  rather than leaving instrumentation ad hoc.
+  (hoisting-stage fixture asserting recovered-authored positions for all five
+  origins) rather than leaving instrumentation ad hoc.
 - Emit sanity: `--show-transformed` diff on a corpus pattern (e.g.
   `age-category.tsx`) should be **byte-identical** pre/post fix — lineage
   channels are emit-map metadata, not output text. Any text diff is a bug.

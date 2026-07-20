@@ -789,6 +789,9 @@ order:
 3. array-method strategy
 4. lift-applied strategy
 
+Strategy rebuilds — and the callbacks `PatternBuilder` assembles for them —
+carry the replaced nodes' source-map ranges (§11.5).
+
 There is no longer a separate patternTool closure strategy (CT-1655, #3862):
 `patternTool` now requires an explicit `pattern(...)` first argument (see
 §6.5 `pattern-context:patterntool-requires-pattern`), so the captures live on
@@ -972,7 +975,8 @@ site ownership** rather than a special-case callback return-expression rule.
 ## 10. Schema Injection
 
 `SchemaInjectionTransformer` runs only when helper import is present. It injects
-`toSchema<...>()` calls (later materialized to JSON schema literals).
+`toSchema<...>()` calls (later materialized to JSON schema literals). Every
+builder call it rebuilds carries the replaced call's source-map range (§11.5).
 
 ### 10.1 General typing rules
 
@@ -1287,6 +1291,39 @@ expected output of the large majority of builder-bearing fixtures.
 Note: the design comments frame this stage as Phase 2 of a
 "derive→lift→selfcontained" arc. Phase 3 (`selfcontained(...)` wrapping of the
 hoisted consts) is **not** implemented on `main` — see the design-deltas doc.
+
+### 11.5 Authored-position lineage at the hoisting boundary
+
+Every builder call this stage visits — hoisted inner calls, in-place authored
+builder consts, the `export default` pattern call — and every builder callback
+arrives carrying a recoverable **authored** source position (CT-1868). The
+carrier is the emit-node **source-map range**: the callbacks
+`PatternBuilder.buildCallback`/`buildHandlerCallback` assemble, the closure
+strategies' rebuilt applied calls, the expression-rewrite wrapper arrows and
+applied calls, and every SchemaInjection builder-call rebuild wrap their
+output in `preserveSourceMapRange(built, replaced)` (`src/ast/utils.ts`).
+Full `preserveLineage` (textRange + sourceMapRange + original) is applied only
+where the emit-invariance gate proved those channels inert — the lift-applied
+strategy's outer applied call and the array-method `mapWithPattern` rebuild.
+
+sourceMapRange is the one channel observable only by sourcemaps: a real
+`textRange` on a synthetic node changes printer layout (arrow-head
+parenthesization via `canEmitSimpleArrowHead`; JSX/ternary line-break reflow),
+and a real `original` feeds the §2.2 marker family, `typeRegistry` fallbacks,
+and schema derivation — all of which change emitted output. The rebuilds set
+no originals, so the `schemaInjected` flag's deliberate lack of a
+`getOriginalNode` fallback (§2.2) is unaffected. sourceMapRange also survives
+`factory.update*` rebuilds (`setOriginalNode` merges emit-node data,
+including `sourceMapRange` — verified on TS 5.9.2 and 6.0.3).
+
+Recovery precedence is: own text range → explicit source-map range →
+original-chain terminal. `test/lineage-regression.test.ts` pins it end to end:
+it drives the full pipeline over a five-origin fixture and asserts every
+builder call AND callback recovers to its distinctive authored snippet
+(content is the ground truth, not merely `pos >= 0`). This is the read path
+for transform-time source annotation (A′, CT-1870), and the same fallback
+family §16.2's coverage spans use. Rationale, per-site table, and the probe
+rig: `packages/ts-transformers/APRIME-LINEAGE-HANDOFF.md`.
 
 ## 12. Schema Generation
 
