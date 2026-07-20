@@ -928,6 +928,9 @@ const JOB_METRIC_NAMES: Record<string, string> = {
   "Generated Patterns Integration Tests":
     "job: Generated Patterns Integration Tests",
   "Runner Tests": "job: Runner Tests",
+  "Build Binary (toolshed)": "job: Build Binary (toolshed)",
+  "Build Binary (bg-piece-service)": "job: Build Binary (bg-piece-service)",
+  "Build Binary (cf)": "job: Build Binary (cf)",
   "Build Binaries": "job: Build Binaries",
   "Test": "job: Test",
   "Check": "job: Check",
@@ -1028,7 +1031,24 @@ const STEP_METRIC_MATCHERS: StepMetricMatcher[] = [
     stepKeyword: "build application",
     metricName: "step: Build application",
   },
+  {
+    jobName: "Build Binary (toolshed)",
+    stepKeyword: "build toolshed binary",
+    metricName: "step: Build toolshed binary",
+  },
+  {
+    jobName: "Build Binary (bg-piece-service)",
+    stepKeyword: "build bg-piece-service binary",
+    metricName: "step: Build bg-piece-service binary",
+  },
+  {
+    jobName: "Build Binary (cf)",
+    stepKeyword: "build cf binary",
+    metricName: "step: Build cf binary",
+  },
 ];
+
+const BUILD_BINARY_RE = /^Build Binary \((toolshed|bg-piece-service|cf)\)$/;
 
 export function extractMetrics(
   run: WorkflowRun,
@@ -1056,10 +1076,15 @@ export function extractMetrics(
     if (jobDuration <= 0) continue;
 
     const normalizedJobName = normalizeName(job.name);
+    const buildBinaryMatch = BUILD_BINARY_RE.exec(normalizedJobName);
 
     const jobMetricName = JOB_METRIC_NAMES[normalizedJobName];
     if (jobMetricName) {
-      metrics.set(jobMetricName, makeSample(jobDuration));
+      const sample = makeSample(jobDuration);
+      metrics.set(jobMetricName, sample);
+      if (buildBinaryMatch) {
+        setMaxMetric("job: Build Binaries", sample);
+      }
     }
 
     const packageIntegrationMatch = PACKAGE_INTEGRATION_RE.exec(
@@ -1168,6 +1193,12 @@ export function extractMetrics(
       if (stepDuration <= 0) continue;
 
       const normalizedStepName = normalizeName(step.name).toLowerCase();
+      if (
+        buildBinaryMatch && normalizedStepName.includes("build") &&
+        normalizedStepName.includes("binary")
+      ) {
+        setMaxMetric("step: Build application", makeSample(stepDuration));
+      }
       for (const matcher of STEP_METRIC_MATCHERS) {
         if (
           matcher.jobName === matcherJobName &&
