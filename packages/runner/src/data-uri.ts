@@ -143,10 +143,14 @@ export function createDataCellURI(
  * - Text bearing the `fvj1:` tag is decoded as the standard `data-model`
  *   `FabricValue` JSON-embedded encoding. Results from this branch are
  *   deep-frozen and may contain `FabricInstance`s.
- * - Any other text is parsed as bare JSON. A `data:` URI _is_ its own
- *   content and such URIs are embedded in persisted documents, so ids with
- *   bare-JSON payloads survive indefinitely; this branch has to stay for as
- *   long as any of them remain, that is, probably forever.
+ * - Any other text is parsed as bare JSON. Current writes never persist
+ *   `data:` ids -- the write boundary inlines such links (see
+ *   {@link findAndInlineDataURILinks}) -- but that is runner convention,
+ *   not a storage-layer guarantee: writes predating the inlining (PR
+ *   #1914, 2025-10) could and did store them (the `piece-query-legacy`
+ *   traverse-replay fixture captures one inside a persisted value), and
+ *   this reader also accepts `data:` URIs originating outside the runner.
+ *   This branch stays for as long as any such id can arrive.
  *
  * @param text The payload text, after any percent- or Base64-decoding.
  * @returns The decoded value.
