@@ -141,11 +141,20 @@ export function createDataCellURI(
     }
   }
 
-  const json = jsonFromValue(
-    traverseAndAddBaseIdToRelativeLinks(data, new Set()),
-  );
-  // Use encodeURIComponent for UTF-8 safe encoding (matches runtime.ts pattern)
-  return `data:application/json,${encodeURIComponent(json)}` as URI;
+  return mintDataCellURI(traverseAndAddBaseIdToRelativeLinks(data, new Set()));
+}
+
+/**
+ * Assembles a `data:` cell URI carrying (the encoding of) `value` -- the
+ * single place the URI shape is put together: scheme, media type, and the
+ * percent-encoded (UTF-8-safe) `fvj1:` payload. Unlike
+ * {@link createDataCellURI}, this does no link rewriting or other
+ * preparation of `value`; callers hand it a ready `FabricValue`.
+ */
+export function mintDataCellURI(value: FabricValue): URI {
+  return `data:application/json,${
+    encodeURIComponent(jsonFromValue(value))
+  }` as URI;
 }
 
 /**
