@@ -11,6 +11,7 @@ import {
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { URI } from "./sigil-types.ts";
 
 /**
@@ -88,10 +89,10 @@ export function fromURI(uri: URI | string): string {
  *
  * @param text The payload text, after any percent- or Base64-decoding.
  * @returns The decoded value.
- * @throws If `text` is not valid JSON (including when it is empty; callers
- *   with an empty-payload policy apply it before calling).
+ * @throws If `text` is not valid JSON. Notably, an empty `text` is not valid
+ *   JSON and is rejected like any other invalid input.
  */
-export function decodeDataURIPayloadText(text: string): any {
+export function decodeDataURIPayloadText(text: string): FabricValue {
   // TODO(danfuzz): This `JSON.parse()` is the decode half of the `data:` URI
   // boundary, and has to change in lockstep with the `JSON.stringify()` in
   // `link-utils.ts`'s `createDataCellURI()`: whatever encodes the payload
@@ -121,8 +122,6 @@ export function decodeDataURIPayloadText(text: string): any {
  * - `;charset=` is honored only as `utf-8` (or `utf8`), and any other value is
  *   rejected. It is UTF-8 either way; the parameter only gets to agree.
  *
- * An empty payload yields `undefined`, rather than being a parse error.
- *
  * This reads a strict superset of what gets written by `link-utils.ts`'s
  * `createDataCellURI()`, which only ever emits the percent-encoded form with no
  * header parameters (`data:application/json,...`). The Base64 and `charset`
@@ -139,9 +138,10 @@ export function decodeDataURIPayloadText(text: string): any {
  * `createDataCellURI()` and {@link decodeDataURIPayloadText}.
  *
  * @param uri The `data:` URI to read.
- * @returns The parsed payload, or `undefined` if the payload is empty.
+ * @returns The parsed payload.
  * @throws If `uri` is not an `application/json` `data:` URI, if it declares a
- *   charset other than UTF-8, or if its payload is not valid JSON.
+ *   charset other than UTF-8, or if its payload is not valid JSON (which
+ *   includes the empty payload).
  */
 export function getJSONFromDataURI(uri: URI | string): any {
   if (!uri.startsWith("data:application/json")) {
@@ -185,10 +185,6 @@ export function getJSONFromDataURI(uri: URI | string): any {
     decodedData = decoder.decode(bytes);
   } else {
     decodedData = decodeURIComponent(data);
-  }
-
-  if (decodedData.length === 0) {
-    return undefined;
   }
 
   return decodeDataURIPayloadText(decodedData);

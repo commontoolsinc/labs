@@ -7,7 +7,7 @@ import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { fromURI, toURI } from "../src/uri-utils.ts";
+import { fromURI, getJSONFromDataURI, toURI } from "../src/uri-utils.ts";
 
 const hash = hashOf({ causal: { test: "uri-utils" } });
 const tagged = hash.taggedHashString;
@@ -133,5 +133,13 @@ describe("fromURI", () => {
   it("is one-way for computed: ids (bare hash re-mints as of:)", () => {
     const bare = fromURI(`computed:${tagged}`);
     expect(toURI(FabricHash.fromString(bare))).toBe(`of:${tagged}`);
+  });
+});
+
+describe("getJSONFromDataURI", () => {
+  // Both `data:` URI payload readers (this one and attestation `load()`)
+  // reject an empty payload uniformly; see `decodeDataURIPayloadText()`.
+  it("rejects an empty payload", () => {
+    expect(() => getJSONFromDataURI("data:application/json,")).toThrow();
   });
 });

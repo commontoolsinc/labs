@@ -25,6 +25,12 @@ describe("attestation `load()` of `data:` URIs", () => {
     expect(error?.name).toBe("InvalidDataURIError");
   });
 
+  it("errors on an empty payload", () => {
+    const { ok, error } = load({ id: "data:application/json," as URI });
+    expect(ok).toBeUndefined();
+    expect(error?.name).toBe("InvalidDataURIError");
+  });
+
   it("errors on an unsupported media type", () => {
     const { error } = load({ id: "data:text/plain,hello" as URI });
     expect(error?.name).toBe("UnsupportedMediaTypeError");
