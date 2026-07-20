@@ -743,24 +743,24 @@ fallback and still requires complete closure verification.
 The canonical by-value inline representation is exactly:
 
 ```text
-data:application/vnd.commonfabric.fabric-value;charset=utf-8,<percent-encoded fvj1 payload>
+data:application/vnd.common-fabric.data,<base64url-encoded UTF-8 fvj1 payload>
 ```
 
 The payload is the complete output of the Fabric JSON encoder, including its
-`fvj1:` version prefix. Readers dispatch only from the exact media type:
-`application/json` retains the legacy `JSON.parse` interpretation, while
-`application/vnd.commonfabric.fabric-value` uses context-free Fabric decode.
-Readers never sniff one payload as the other format. In particular, a legacy
-JSON object whose literal key is `/` stays an ordinary object; it is not
-reinterpreted as a Fabric codec envelope. Both percent-encoded and base64
-UTF-8 legacy transports remain readable during migration.
+`fvj1:` version prefix. This transport is lossless for every admitted Fabric
+value, including `undefined`, bigint, symbols, and special numbers such as
+`-0`, `NaN`, and infinities; callers of immutable inline cells no longer inherit
+plain `JSON.stringify` coercions for those values. Readers accept only the exact
+`application/vnd.common-fabric.data` media type and decode its unpadded
+base64url payload as UTF-8 Fabric JSON. There is no media-type fallback or
+payload sniffing: the codec has one writer and one reader for one canonical
+format.
 
-The new decoder therefore returns inert callable shells for `Factory@1`, just
+The decoder returns inert callable shells for `Factory@1`, just
 like direct context-free `valueFromJson()`. Inline transport never grants code
-loading or execution authority. Dual-format readers land before canonical
-writers switch. Once expanded into a containing document write, nested factories
-follow the same speculative-local, causally gated publication protocol as every
-other by-value write.
+loading or execution authority. Once expanded into a containing document write,
+nested factories follow the same speculative-local, causally gated publication
+protocol as every other by-value write.
 
 Read-derived traversal, including query traversal and `resolveAsCell()`, may
 construct a transient data-URI address from a value already read inside a

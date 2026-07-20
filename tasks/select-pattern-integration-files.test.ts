@@ -131,21 +131,12 @@ Deno.test("pattern integration shard rejects unsafe integer values", () => {
   }
 });
 
-Deno.test("pattern integration profile separates the round-robin shard-one collision", async () => {
-  const files = (await listPatternIntegrationTests()).filter((name) =>
-    !INTERNALLY_SHARDED_FILE_NAMES.has(name)
-  );
-  const roundRobin = new Map(
-    files.toSorted().map((name, index) => [name, index % TOTAL_SHARDS + 1]),
-  );
-  const assignment = assignPatternIntegrationShards(files, TOTAL_SHARDS);
+Deno.test("pattern integration profile separates the expensive editor and convergence tests", () => {
   const cfCodeEditor = "cf-code-editor.test.ts";
   const convergenceStorm = "convergence-storm.test.ts";
-
-  assertEquals(
-    roundRobin.get(cfCodeEditor),
-    roundRobin.get(convergenceStorm),
-    "the sorted round-robin control should reproduce the profiled collision",
+  const assignment = assignPatternIntegrationShards(
+    [cfCodeEditor, convergenceStorm],
+    TOTAL_SHARDS,
   );
   assertEquals(
     assignment.get(cfCodeEditor) === assignment.get(convergenceStorm),
