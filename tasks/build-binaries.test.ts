@@ -4,16 +4,21 @@ import {
   assertNotEquals,
   assertRejects,
   assertStringIncludes,
+  assertThrows,
 } from "@std/assert";
 import { exists } from "@std/fs";
 import { fromFileUrl, join } from "@std/path";
 
 import {
+  build,
   BuildConfig,
+  type BuildDependencies,
   type BuildSignalApi,
   installBuildSignalCleanup,
   prepareWorkspace,
+  requestedBinaries,
   revertWorkspace,
+  runBuildBinaries,
   runBuildWithSignalCleanup,
 } from "./build-binaries.ts";
 import {
@@ -77,6 +82,26 @@ function makeFakeSignalApi(): {
   };
 }
 
+function recordingBuildDependencies(
+  calls: string[],
+  overrides: Partial<BuildDependencies> = {},
+): BuildDependencies {
+  const record = (name: string) => (_config: BuildConfig) => {
+    calls.push(name);
+    return Promise.resolve();
+  };
+  return {
+    ensureDistDir: record("ensureDistDir"),
+    buildShell: record("buildShell"),
+    prepareWorkspace: record("prepareWorkspace"),
+    buildToolshed: record("buildToolshed"),
+    buildBgPieceService: record("buildBgPieceService"),
+    buildCli: record("buildCli"),
+    revertWorkspace: record("revertWorkspace"),
+    ...overrides,
+  };
+}
+
 async function writeFile(filePath: string, contents: string): Promise<void> {
   await Deno.mkdir(filePath.slice(0, filePath.lastIndexOf("/")), {
     recursive: true,
@@ -136,6 +161,7 @@ Deno.test("BuildConfig resolves workspace paths against the root", async () => {
     const config = new BuildConfig({ root, toolshedFlags: [], cliOnly: true });
 
     assertEquals(config.root, root);
+    assertEquals(config.binaries, ["cf"]);
     assertEquals(config.cliOnly, true);
     assertEquals(config.workspaceManifestPath(), join(root, "deno.jsonc"));
     assertEquals(config.workspaceLockPath(), join(root, "deno.lock"));
@@ -204,6 +230,172 @@ Deno.test("BuildConfig resolves workspace paths against the root", async () => {
         "compile-cache-version.ts",
       ),
     );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("requestedBinaries selects all binaries or named subsets", () => {
+  assertEquals(requestedBinaries([]), ["toolshed", "bg-piece-service", "cf"]);
+  assertEquals(requestedBinaries(["toolshed"]), ["toolshed"]);
+  assertEquals(requestedBinaries(["cf", "toolshed"]), ["toolshed", "cf"]);
+  assertEquals(requestedBinaries(["cf", "cf"]), ["cf"]);
+  assertEquals(requestedBinaries(["--cli-only"]), ["cf"]);
+});
+
+Deno.test("requestedBinaries rejects unknown build targets", () => {
+  assertThrows(
+    () => requestedBinaries(["unknown"]),
+    Error,
+    'Unknown binary "unknown". Expected one or more of: toolshed, bg-piece-service, cf',
+  );
+  assertThrows(
+    () => requestedBinaries(["--cli-only", "toolshed"]),
+    Error,
+    'Unknown binary "--cli-only"',
+  );
+});
+
+Deno.test("runBuildBinaries preserves the legacy CLI-only entry point", async () => {
+  const root = await makeFakeRepo();
+  try {
+    const configs: BuildConfig[] = [];
+    await runBuildBinaries(["--cli-only"], {
+      root,
+      runBuild: (config) => {
+        configs.push(config);
+        return Promise.resolve();
+      },
+    });
+
+    assertEquals(configs.length, 1);
+    assertEquals(configs[0].root, root);
+    assertEquals(configs[0].binaries, ["cf"]);
+    assertEquals(configs[0].cliOnly, true);
+    assertEquals(configs[0].toolshedFlags, [
+      "--allow-env",
+      "--allow-sys",
+      "--allow-read",
+      "--allow-ffi",
+      "--allow-net",
+      "--allow-write",
+    ]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("BuildConfig selects named binaries and rejects conflicting options", async () => {
+  const root = await makeFakeRepo();
+  try {
+    const config = new BuildConfig({
+      root,
+      toolshedFlags: [],
+      binaries: ["toolshed", "cf"],
+    });
+
+    assertEquals(config.binaries, ["toolshed", "cf"]);
+    assertEquals(config.cliOnly, false);
+    assertEquals(config.builds("toolshed"), true);
+    assertEquals(config.builds("bg-piece-service"), false);
+    assertEquals(config.builds("cf"), true);
+
+    const duplicateCliConfig = new BuildConfig({
+      root,
+      toolshedFlags: [],
+      binaries: ["cf", "cf"],
+    });
+    assertEquals(duplicateCliConfig.binaries, ["cf"]);
+    assertEquals(duplicateCliConfig.cliOnly, true);
+
+    assertThrows(
+      () => new BuildConfig({ root, toolshedFlags: [], binaries: [] }),
+      Error,
+      "At least one binary must be selected",
+    );
+    assertThrows(
+      () =>
+        new BuildConfig({
+          root,
+          toolshedFlags: [],
+          binaries: ["cf"],
+          cliOnly: true,
+        }),
+      Error,
+      "cliOnly and binaries cannot be combined",
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("build runs only the steps required by each binary", async () => {
+  const root = await makeFakeRepo();
+  try {
+    const cases = [
+      {
+        binaries: ["toolshed"] as const,
+        expected: [
+          "ensureDistDir",
+          "buildShell",
+          "prepareWorkspace",
+          "buildToolshed",
+          "revertWorkspace",
+        ],
+      },
+      {
+        binaries: ["bg-piece-service"] as const,
+        expected: [
+          "ensureDistDir",
+          "prepareWorkspace",
+          "buildBgPieceService",
+          "revertWorkspace",
+        ],
+      },
+      {
+        binaries: ["cf"] as const,
+        expected: [
+          "ensureDistDir",
+          "prepareWorkspace",
+          "buildCli",
+          "revertWorkspace",
+        ],
+      },
+    ];
+
+    for (const { binaries, expected } of cases) {
+      const calls: string[] = [];
+      const config = new BuildConfig({ root, toolshedFlags: [], binaries });
+      await build(config, recordingBuildDependencies(calls));
+      assertEquals(calls, expected);
+    }
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("build reverts the workspace after a build step fails", async () => {
+  const root = await makeFakeRepo();
+  try {
+    const calls: string[] = [];
+    const config = new BuildConfig({
+      root,
+      toolshedFlags: [],
+      binaries: ["toolshed"],
+    });
+    const dependencies = recordingBuildDependencies(calls, {
+      buildShell: () => {
+        calls.push("buildShell");
+        return Promise.reject(new Error("shell build failed"));
+      },
+    });
+
+    await assertRejects(
+      () => build(config, dependencies),
+      Error,
+      "shell build failed",
+    );
+    assertEquals(calls, ["ensureDistDir", "buildShell", "revertWorkspace"]);
   } finally {
     await Deno.remove(root, { recursive: true });
   }
