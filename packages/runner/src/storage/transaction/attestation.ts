@@ -283,7 +283,7 @@ export const load = (
             const reason = error as Error;
             result = {
               error: InvalidDataURIError(
-                `Failed to parse JSON from data URI: ${reason.message}`,
+                `Failed to decode data URI payload: ${reason.message}`,
               ),
             };
           }

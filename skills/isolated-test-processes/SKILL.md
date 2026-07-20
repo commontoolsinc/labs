@@ -27,7 +27,11 @@ That helper keeps the generated Deno workspace config in the repository root,
 where Deno requires workspace members to be nested under the config directory.
 It points Deno at a temporary copy of `deno.lock`, so dependency metadata writes
 do not touch the real lockfile. It also removes the generated root config in a
-`finally` block.
+`finally` block. The nested check uses frozen dependency resolution, so its
+generated config must preserve the dependency graph in the checked-in lockfile.
+Start with the root config and change only the compiler settings needed by the
+test. Workspace member imports already come from their package configs. Do not
+copy them into the generated root config.
 
 For nested Deno commands that do not need a generated config:
 
@@ -43,6 +47,10 @@ command's `--lock` flag.
 ## Values
 
 - A verification test must not change `deno.lock` or repository files.
+- A verification test must use the dependency graph already recorded in
+  `deno.lock`. Dependency fetching belongs in setup before the test runs.
+- A generated config may change compiler options. It must preserve imports,
+  workspace members, and other dependency declarations.
 - If a test needs mutable inputs or outputs, put them under `Deno.makeTempDir()`
   or an explicit test fixture copy.
 - If a generated file must briefly live in the repository root for tool
