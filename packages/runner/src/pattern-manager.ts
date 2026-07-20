@@ -423,8 +423,23 @@ export class PatternManager {
         ]),
       });
     }
+    // Carry any product annotations already on the destination's entry doc
+    // (read OUTSIDE the write tx — an in-tx read would poison the commit on
+    // aged spaces, see writeSourceDocs / CT-1864). Fresh replicas simply have
+    // none, matching the prior behaviour.
+    const entryAnnotations = this.readEntrySourceAnnotations(
+      toSpace,
+      entryIdentity,
+    );
     const { error } = await this.runtime.editWithRetry((tx) => {
-      writeSourceDocs(this.runtime, toSpace, modules, entryIdentity, tx);
+      writeSourceDocs(
+        this.runtime,
+        toSpace,
+        modules,
+        entryIdentity,
+        tx,
+        entryAnnotations,
+      );
       if (runtimeVersion !== undefined) {
         writeCompiledDocs(
           this.runtime,
@@ -1336,6 +1351,43 @@ export class PatternManager {
     }
   }
 
+  /**
+   * Best-effort read of the entry source doc's product annotations, on a
+   * throwaway read transaction that is immediately aborted — so it can NEVER
+   * become a precondition on a write-back's commit.
+   *
+   * Preserving annotations across an idempotent recompile means reading the
+   * existing entry doc, but doing that read inside the write tx is exactly what
+   * conflicts forever on aged spaces (CT-1864 — see {@link writeSourceDocs}).
+   * Reading here keeps preservation best-effort: a healthy space returns its
+   * annotations; an aged space whose entry doc (or an old-era indirection it
+   * links to) cannot rematerialize simply yields `undefined`, and the rewrite
+   * overwrites without them rather than failing the deploy. The read is
+   * untyped and guarded because a partially-unreadable aged doc must degrade to
+   * `undefined`, not throw.
+   */
+  private readEntrySourceAnnotations(
+    space: MemorySpace,
+    entryIdentity: string,
+  ): Record<string, unknown> | undefined {
+    const readTx = this.runtime.edit();
+    try {
+      const annotations = this.runtime
+        .getCell<{ annotations?: Record<string, unknown> }>(
+          space,
+          sourceDocKey(entryIdentity),
+          undefined,
+          readTx,
+        )
+        .get()?.annotations;
+      return isRecord(annotations) ? annotations : undefined;
+    } catch {
+      return undefined;
+    } finally {
+      readTx.abort?.("read-entry-source-annotations complete");
+    }
+  }
+
   private async writeBackSourceCache(
     space: MemorySpace,
     modules: CacheableModule[],
@@ -1343,8 +1395,19 @@ export class PatternManager {
   ): Promise<void> {
     const writebackStart = performance.now();
     await this.syncSourceCacheWriteTargets(space, modules);
+    const entryAnnotations = this.readEntrySourceAnnotations(
+      space,
+      entryIdentity,
+    );
     const { error } = await this.runtime.editWithRetry((tx) => {
-      writeSourceDocs(this.runtime, space, modules, entryIdentity, tx);
+      writeSourceDocs(
+        this.runtime,
+        space,
+        modules,
+        entryIdentity,
+        tx,
+        entryAnnotations,
+      );
     });
     logger.time(writebackStart, "compile-cache", "source-writeback");
     if (error) {
@@ -1372,6 +1435,10 @@ export class PatternManager {
   ): Promise<void> {
     const writebackStart = performance.now();
     await this.syncCompileCacheWriteTargets(space, modules, opts);
+    const entryAnnotations = this.readEntrySourceAnnotations(
+      space,
+      entryIdentity,
+    );
     // The write-back re-writes source docs whose values carry quote-cell
     // indirections (one derived doc per import edge). On a cold replica those
     // derived docs are unknown, and each commit attempt discovers exactly ONE
@@ -1389,7 +1456,14 @@ export class PatternManager {
     const importEdges = modules.reduce((n, m) => n + m.imports.length, 0);
     const writebackMaxRetries = Math.max(16, 2 * importEdges + 8);
     const { error } = await this.runtime.editWithRetry((tx) => {
-      writeSourceDocs(this.runtime, space, modules, entryIdentity, tx);
+      writeSourceDocs(
+        this.runtime,
+        space,
+        modules,
+        entryIdentity,
+        tx,
+        entryAnnotations,
+      );
       writeCompiledDocs(this.runtime, space, modules, entryIdentity, opts, tx);
     }, writebackMaxRetries);
     logger.time(writebackStart, "compile-cache", "writeback");

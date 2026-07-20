@@ -546,6 +546,11 @@ export const WRITE_TARGET_EDGE_SYNC_SCHEMA = {
  * import a sigil link to its dependency cell (the entry additionally linking any
  * otherwise-unreachable module). Idempotent (content-addressed keys). The caller
  * owns the transaction's commit.
+ *
+ * Pure blind writer: it reads nothing, so it adds no commit read-preconditions.
+ * Product annotations to preserve on the entry doc must be read by the caller
+ * OUTSIDE this transaction and passed via `entryAnnotations` — reading them here
+ * would reintroduce the aged-space forever-conflict (CT-1864); see the body.
  */
 export function writeSourceDocs(
   runtime: Runtime,
@@ -553,6 +558,7 @@ export function writeSourceDocs(
   modules: readonly CacheableModule[],
   entryIdentity: string,
   tx: IExtendedStorageTransaction,
+  entryAnnotations?: Record<string, unknown>,
 ): void {
   assertNoUnpinnedFabricImports(modules);
   const docs = buildSourceDocs(modules, entryIdentity);
@@ -565,12 +571,20 @@ export function writeSourceDocs(
       undefined,
       tx,
     );
-    // Preserve product annotations on the entry doc only. Annotations are only
-    // written there; reading every dependency doc here turns unrelated stale
-    // cache cells into writeback conflict preconditions.
-    const existingAnnotations = identity === entryIdentity
-      ? cell.get()?.annotations
-      : undefined;
+    // Product annotations live on the entry doc only, and are supplied by the
+    // caller — this function NEVER reads an existing doc, so it is a pure blind
+    // writer with no read preconditions. Reading the current entry doc inside
+    // this write tx (as an earlier version did, to preserve annotations) makes
+    // it — and, on aged spaces, whatever old-era quote-cell indirection doc its
+    // `imports` links transitively resolve to — a commit read-precondition.
+    // When that linked doc is persisted in a shape the current pin cannot
+    // rematerialize, the writing session pins the read at seq 0 while the store
+    // holds a higher seq, so `editWithRetry` conflicts forever and the deploy
+    // hard-fails even though the compile itself succeeded (CT-1864). Callers
+    // that want to preserve annotations read them OUTSIDE this tx (see
+    // PatternManager.readEntrySourceAnnotations) and pass them via
+    // `entryAnnotations`; a blind `set()` has no precondition to poison.
+    const annotations = identity === entryIdentity ? entryAnnotations : undefined;
     cell.set({
       kind: "source",
       identity,
@@ -581,9 +595,7 @@ export function writeSourceDocs(
         link: runtime.getCell(space, sourceDocKey(imp.identity), undefined, tx)
           .getAsLink(),
       })),
-      ...(isRecord(existingAnnotations)
-        ? { annotations: existingAnnotations }
-        : {}),
+      ...(isRecord(annotations) ? { annotations } : {}),
     } as StoredSourceDoc);
   }
 }
