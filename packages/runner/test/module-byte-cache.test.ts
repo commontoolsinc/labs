@@ -9,10 +9,14 @@ import type {
   CompiledModuleArtifact,
   RuntimeProgram,
 } from "../src/harness/types.ts";
+import { PatternCoverageCollector } from "../src/pattern-coverage.ts";
 import {
+  compiledDocKey,
   getCompileCacheRuntimeVersion,
   loadCompiledClosure,
+  loadVerifiedSourceClosure,
   setCompileCacheRuntimeVersionForTesting,
+  sourceDocKey,
 } from "../src/compilation-cache/cell-cache.ts";
 
 const signer = await Identity.fromPassphrase("module byte cache test");
@@ -45,16 +49,20 @@ class FakeByteCache implements ModuleByteCache {
   }
   putAll(
     rt: string,
-    mods: readonly { identity: string; js: string; sourceMap?: unknown }[],
+    mods: readonly ({ identity: string } & CompiledModuleArtifact)[],
   ): void {
     this.puts++;
     for (const x of mods) {
-      this.m.set(
-        `${rt}\0${x.identity}`,
-        x.sourceMap === undefined
-          ? { js: x.js }
-          : { js: x.js, sourceMap: x.sourceMap },
-      );
+      this.m.set(`${rt}\0${x.identity}`, {
+        js: x.js,
+        ...(x.sourceMap === undefined ? {} : { sourceMap: x.sourceMap }),
+        ...(x.patternCoverageSpans === undefined
+          ? {}
+          : { patternCoverageSpans: x.patternCoverageSpans }),
+        ...(x.policyManifests === undefined
+          ? {}
+          : { policyManifests: x.policyManifests }),
+      });
     }
   }
 }
@@ -195,6 +203,146 @@ describe("ModuleByteCache cross-runtime reuse", () => {
       expect(result.getAsQueryResult()).toEqual({ result: 49 });
     } finally {
       await rtB.dispose();
+    }
+  });
+
+  it("repairs a remembered closure after its stored documents are damaged", async () => {
+    const byteCache = new FakeByteCache();
+    const rt = runtimeIn(byteCache);
+    const space = (await Identity.fromPassphrase(
+      "damaged byte-cache space",
+    )).did();
+    const originalEditWithRetry = rt.editWithRetry.bind(rt);
+    let persistenceWrites = 0;
+    rt.editWithRetry = ((fn, maxRetries) => {
+      persistenceWrites++;
+      return originalEditWithRetry(fn, maxRetries);
+    }) as typeof rt.editWithRetry;
+
+    const compile = async (): Promise<string> => {
+      const tx = rt.edit();
+      try {
+        const pattern = await rt.patternManager.compilePattern(PROGRAM, {
+          space,
+          tx,
+        });
+        await tx.commit();
+        return rt.patternManager.getArtifactEntryRef(pattern)!.identity;
+      } catch (error) {
+        tx.abort?.(error);
+        throw error;
+      }
+    };
+
+    try {
+      const entryIdentity = await compile();
+      expect(persistenceWrites).toBe(1);
+
+      const damageTx = rt.edit();
+      const previousIdentity = damageTx.getCfcState().implementationIdentity;
+      damageTx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "compile-cache",
+      });
+      try {
+        rt.getCell(
+          space,
+          sourceDocKey(entryIdentity),
+          undefined,
+          damageTx,
+        ).set({ damaged: true });
+        rt.getCell(
+          space,
+          compiledDocKey(runtimeVersion, entryIdentity),
+          undefined,
+          damageTx,
+        ).set({ damaged: true });
+      } finally {
+        damageTx.setCfcImplementationIdentity(previousIdentity);
+      }
+      damageTx.prepareCfc();
+      expect((await damageTx.commit()).error).toBeUndefined();
+
+      const repairedIdentity = await compile();
+      expect(repairedIdentity).toBe(entryIdentity);
+      expect(persistenceWrites).toBe(2);
+      expect(rt.patternManager.getCompileCacheStats()).toEqual({
+        hits: 1,
+        misses: 1,
+        byIdentityHits: 0,
+      });
+
+      const readTx = rt.edit();
+      const source = await loadVerifiedSourceClosure(
+        rt,
+        space,
+        entryIdentity,
+        readTx,
+      );
+      const compiled = await loadCompiledClosure(
+        rt,
+        space,
+        entryIdentity,
+        { runtimeVersion },
+        readTx,
+      );
+      readTx.abort?.();
+      expect(source?.has(entryIdentity)).toBe(true);
+      expect(compiled.has(entryIdentity)).toBe(true);
+    } finally {
+      rt.editWithRetry = originalEditWithRetry;
+      await rt.dispose();
+    }
+  });
+
+  it("persists covered process-cache hits once per space", async () => {
+    const byteCache = new FakeByteCache();
+    const coverage = new PatternCoverageCollector();
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      moduleByteCache: byteCache,
+      patternCoverage: coverage,
+    });
+    const spaceA = (await Identity.fromPassphrase(
+      "covered byte-cache space A",
+    )).did();
+    const spaceB = (await Identity.fromPassphrase(
+      "covered byte-cache space B",
+    )).did();
+    const originalEditWithRetry = rt.editWithRetry.bind(rt);
+    let persistenceWrites = 0;
+    rt.editWithRetry = ((fn, maxRetries) => {
+      persistenceWrites++;
+      return originalEditWithRetry(fn, maxRetries);
+    }) as typeof rt.editWithRetry;
+
+    const compileIn = async (space: typeof spaceA) => {
+      const tx = rt.edit();
+      try {
+        await rt.patternManager.compilePattern(PROGRAM, { space, tx });
+        await tx.commit();
+      } catch (error) {
+        tx.abort?.(error);
+        throw error;
+      }
+    };
+
+    try {
+      await compileIn(spaceA);
+      await compileIn(spaceA);
+      await Promise.all([compileIn(spaceB), compileIn(spaceB)]);
+
+      expect(persistenceWrites).toBe(2);
+      expect(rt.patternManager.getCompileCacheStats()).toEqual({
+        hits: 3,
+        misses: 1,
+        byIdentityHits: 0,
+      });
+      expect(coverage.report().files.length).toBeGreaterThan(0);
+    } finally {
+      rt.editWithRetry = originalEditWithRetry;
+      await rt.dispose();
     }
   });
 

@@ -179,6 +179,48 @@ Deno.test("collectCoverageDebtMetricsFromLcov computes debt from compact reports
   }
 });
 
+Deno.test("integration pattern coverage feeds the debt metric", async () => {
+  const rootDir = await Deno.makeTempDir({ prefix: "coverage-fold-test-" });
+  try {
+    const sourcePath = path.join(rootDir, "packages/patterns/main.tsx");
+    await Deno.mkdir(path.dirname(sourcePath), { recursive: true });
+    await Deno.writeTextFile(
+      sourcePath,
+      [
+        "export const a = 1;",
+        "export const b = 2;",
+        "export const c = 3;",
+      ].join("\n"),
+    );
+
+    const metricFor = async (lcov: string) =>
+      (await collectCoverageDebtMetricsFromLcov({ rootDir, lcov })).find(
+        (metric) =>
+          metric.name === "coverage-debt: packages/patterns uncovered lines",
+      )?.uncoveredLines;
+
+    // No record: every tracked line is uncovered.
+    assertEquals(await metricFor(""), 3);
+
+    // A record from the integration stream is scored like any other: its
+    // covered lines leave the debt and its unhit lines stay in it. Nothing
+    // discriminates on the test name, so a line only an end-to-end flow
+    // exercises lowers the gated number.
+    assertEquals(
+      await metricFor([
+        "TN:pattern-runtime-integration",
+        `SF:${sourcePath}`,
+        "DA:1,1",
+        "DA:2,0",
+        "end_of_record",
+      ].join("\n")),
+      1,
+    );
+  } finally {
+    await Deno.remove(rootDir, { recursive: true });
+  }
+});
+
 Deno.test("collectUncoveredLinesForFiles resolves lines only for requested files", async () => {
   const rootDir = await Deno.makeTempDir({ prefix: "coverage-lines-test-" });
   try {

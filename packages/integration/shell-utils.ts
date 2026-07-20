@@ -22,6 +22,10 @@ import {
   isAppViewEqual,
 } from "@commonfabric/shell/shared";
 import { waitFor } from "./utils.ts";
+import {
+  collectPatternCoverage,
+  enablePatternCoverage,
+} from "./pattern-coverage.ts";
 import { ConsoleEvent, PageErrorEvent } from "@astral/astral";
 
 import "../shell/src/globals.ts";
@@ -257,6 +261,10 @@ export class ShellIntegration {
     const page = this.page();
     await page.goto(url);
     await page.applyConsoleFormatter();
+    // The worker runtime reads this when it is constructed, at login, so it has
+    // to be set after the page has an origin to store it against and before the
+    // login below.
+    await enablePatternCoverage(page);
     await this.waitForState({ view });
     if (identity) {
       await this.login(identity);
@@ -312,6 +320,9 @@ export class ShellIntegration {
   #afterAll = async () => {
     if (this.#page) {
       await getPresentationSession()?.close(this.#page);
+      // Before disposing: the worker owns the collector, and disposing the
+      // runtime takes it with it.
+      await collectPatternCoverage(this.#page);
     }
     await this.#disposePageRuntime();
     await this.#page?.close();

@@ -35,6 +35,7 @@ import {
   setEagerSourceAnnotation,
 } from "./builder/module.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
+import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import type {
   ChangeGroup,
   CommitError,
@@ -441,6 +442,19 @@ export interface RuntimeOptions {
    */
   moduleByteCache?: ModuleByteCache;
   /**
+   * Statement-coverage collector for authored patterns. When set, every compile
+   * this runtime performs is instrumented — the transformer injects a hit call
+   * in front of each authored statement — and the collector receives the hits.
+   * The compiled-byte caches (the process byte cache and the per-space durable
+   * cell cache) key the instrumented variant separately from the ordinary one,
+   * so an instrumented and an uninstrumented compile of the same source never
+   * collide, and a runtime with coverage on never serves or stores uninstrumented
+   * bytes. A per-compile `patternCoverage` option still overrides this default.
+   * Test-and-CI only; production runtimes leave it unset. See
+   * packages/runner/src/pattern-coverage.ts and docs/development/COVERAGE.md.
+   */
+  patternCoverage?: PatternCoverageCollector;
+  /**
    * Override for the outbound `fetch` used by network builtins (`fetchJson` et al).
    * Defaults to the host `globalThis.fetch`. Scoped to this runtime instance, so
    * a test harness can inject a deterministic mock without mutating process
@@ -601,6 +615,8 @@ export class Runtime {
   readonly storageManager: IStorageManager;
   /** Optional process-level compiled-module-byte cache; see RuntimeOptions. */
   readonly moduleByteCache?: ModuleByteCache;
+  /** Optional pattern statement-coverage collector; see RuntimeOptions. */
+  readonly patternCoverage?: PatternCoverageCollector;
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
   readonly telemetry: RuntimeTelemetry;
   /** Resolved experimental flags (all properties present with built-in defaults). */
@@ -937,6 +953,7 @@ export class Runtime {
       setTelemetry?: (telemetry: RuntimeTelemetry) => void;
     }).setTelemetry?.(this.telemetry);
     this.moduleByteCache = options.moduleByteCache;
+    this.patternCoverage = options.patternCoverage;
     // Validated + digested + frozen before the trust-snapshot provider
     // default below, whose `revision` covers the config digest (a trust
     // config change must invalidate prepared digests like any other
