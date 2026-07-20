@@ -49,9 +49,12 @@ export class BuildConfig {
     if (options.cliOnly && options.binaries) {
       throw new Error("cliOnly and binaries cannot be combined");
     }
+    if (options.binaries?.length === 0) {
+      throw new Error("At least one binary must be selected");
+    }
     this.binaries = options.cliOnly
       ? ["cf"]
-      : [...(options.binaries ?? BINARY_NAMES)];
+      : requestedBinaries(options.binaries ?? []);
     this.cliOnly = this.binaries.length === 1 && this.binaries[0] === "cf";
     this._manifestOriginal = Deno.readTextFileSync(
       this.workspaceManifestPath(),
@@ -180,23 +183,46 @@ export class BuildConfig {
   }
 }
 
-async function build(config: BuildConfig): Promise<void> {
+export type BuildDependencies = {
+  ensureDistDir(config: BuildConfig): Promise<void>;
+  buildShell(config: BuildConfig): Promise<void>;
+  prepareWorkspace(config: BuildConfig): Promise<void>;
+  buildToolshed(config: BuildConfig): Promise<void>;
+  buildBgPieceService(config: BuildConfig): Promise<void>;
+  buildCli(config: BuildConfig): Promise<void>;
+  revertWorkspace(config: BuildConfig): Promise<void>;
+};
+
+export const defaultBuildDependencies: BuildDependencies = {
+  ensureDistDir,
+  buildShell,
+  prepareWorkspace,
+  buildToolshed,
+  buildBgPieceService,
+  buildCli,
+  revertWorkspace,
+};
+
+export async function build(
+  config: BuildConfig,
+  dependencies: BuildDependencies = defaultBuildDependencies,
+): Promise<void> {
   let buildError: Error | void;
   try {
     // Ensure dist directory exists
-    await ensureDistDir(config);
+    await dependencies.ensureDistDir(config);
 
-    if (config.builds("toolshed")) await buildShell(config);
-    await prepareWorkspace(config);
-    if (config.builds("toolshed")) await buildToolshed(config);
+    if (config.builds("toolshed")) await dependencies.buildShell(config);
+    await dependencies.prepareWorkspace(config);
+    if (config.builds("toolshed")) await dependencies.buildToolshed(config);
     if (config.builds("bg-piece-service")) {
-      await buildBgPieceService(config);
+      await dependencies.buildBgPieceService(config);
     }
-    if (config.builds("cf")) await buildCli(config);
+    if (config.builds("cf")) await dependencies.buildCli(config);
   } catch (e: unknown) {
     buildError = e as Error;
   }
-  await revertWorkspace(config);
+  await dependencies.revertWorkspace(config);
   // @ts-ignore This is used after being assigned.
   if (buildError) {
     throw buildError;
@@ -506,12 +532,17 @@ export async function runBuildWithSignalCleanup(
   }
 }
 
-// Only run the build when invoked directly (`deno task build-binaries`), not
-// when imported by tests, which exercise BuildConfig / prepareWorkspace /
-// revertWorkspace against a temporary tree.
-if (import.meta.main) {
+export interface RunBuildBinariesOptions {
+  root?: string;
+  runBuild?: (config: BuildConfig) => Promise<void>;
+}
+
+export async function runBuildBinaries(
+  args: readonly string[],
+  options: RunBuildBinariesOptions = {},
+): Promise<void> {
   const config = new BuildConfig({
-    root: Deno.cwd(),
+    root: options.root ?? Deno.cwd(),
     toolshedFlags: [
       "--allow-env",
       "--allow-sys",
@@ -520,8 +551,15 @@ if (import.meta.main) {
       "--allow-net",
       "--allow-write",
     ],
-    binaries: requestedBinaries(Deno.args),
+    binaries: requestedBinaries(args),
   });
 
-  await runBuildWithSignalCleanup(config);
+  await (options.runBuild ?? runBuildWithSignalCleanup)(config);
+}
+
+// Only run the build when invoked directly (`deno task build-binaries`), not
+// when imported by tests, which exercise BuildConfig / prepareWorkspace /
+// revertWorkspace against a temporary tree.
+if (import.meta.main) {
+  await runBuildBinaries(Deno.args);
 }
