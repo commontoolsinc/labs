@@ -462,6 +462,16 @@ describe("data-uri", () => {
         expect(Object.isFrozen(result.value.nested.deep)).toBe(true);
       });
 
+      it("stops the payload at a raw query or fragment delimiter", () => {
+        // Minted payloads percent-escape `?` and `#`; raw ones delimit a
+        // query/fragment per the URL grammar (externally-sourced ids).
+        const payload = encodeURIComponent(jsonFromValue({ a: 1 }));
+        expect(getJSONFromDataURI(`data:application/json,${payload}#frag`))
+          .toEqual({ a: 1 });
+        expect(getJSONFromDataURI(`data:application/json,${payload}?q=1`))
+          .toEqual({ a: 1 });
+      });
+
       it("rejects a malformed payload past the tag", () => {
         expect(() => getJSONFromDataURI(uriOf("fvj1:{nope"))).toThrow();
       });
