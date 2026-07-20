@@ -278,12 +278,13 @@ routed to the suggestion picker.
 // Shown inside a pattern body.
 // One-shot: captures the time once at first load, never updates.
 const createdAt = wish<number>({ query: "#now" });
+const createdAtValue = resultOf(createdAt.result);
 
 // Reactive: updates every 60 seconds, re-triggering downstream computed()s.
 const now = wish<number>({ query: "#now/60" });
+const nowValue = resultOf(now.result);
 const timeAgo = computed(() => {
-  if (now.result == null || createdAt.result == null) return "";
-  const ms = now.result - createdAt.result;
+  const ms = nowValue - createdAtValue;
   return `${Math.floor(ms / 60000)} minutes ago`;
 });
 ```
@@ -305,12 +306,11 @@ memoized repeat:
 // is read in reactive code — the tick is a cell, and the fetch is a reactive
 // builtin, so the graph still quiesces between windows.
 const tick = wish<number>({ query: "#now/300" });
+const tickValue = resultOf(tick.result);
 const feed = fetchJson<{ items: string[] }>({
-  url: computed(() =>
-    tick.result == null ? "" : `/api/my-feed?window=${tick.result}`
-  ),
+  url: computed(() => `/api/my-feed?window=${tickValue}`),
 });
-const items = computed(() => feed.result?.items ?? []);
+const items = computed(() => resultOf(feed).items);
 ```
 
 This stays inside the timing model: reactive fetch settlement is observed in a

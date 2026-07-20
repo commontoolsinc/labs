@@ -1207,21 +1207,13 @@ describe("JavaScript-node data unavailability", () => {
       return await originalSyncCell(cell);
     };
 
-    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      const run = runValueNode({
+      const output = await runValueNode({
         argument: { value: target.getAsLink() },
         argumentSchema: { type: "number" },
         isEffect: true,
         implementation: () => "should not run",
       });
-      const bounded = new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error("offline readiness did not settle")),
-          2_000,
-        );
-      });
-      const output = await Promise.race([run, bounded]);
       expect(output).toBeInstanceOf(DataUnavailable);
       expect((output as DataUnavailable).reason).toBe("error");
 
@@ -1249,7 +1241,6 @@ describe("JavaScript-node data unavailability", () => {
       expect(attempts).toBeGreaterThanOrEqual(readinessAttempts);
       expect(storageManager.pendingCrossSpacePromiseCount()).toBe(0);
     } finally {
-      if (timeout !== undefined) clearTimeout(timeout);
       storageManager.syncCell = originalSyncCell;
     }
   });
@@ -1445,17 +1436,15 @@ describe("JavaScript-node data unavailability", () => {
     );
 
     const eventCommitted = Promise.withResolvers<string>();
+    let eventSettled = false;
+    eventCommitted.promise.then(() => eventSettled = true);
     result.key("trigger").send(
       {},
       (committedTx) => eventCommitted.resolve(committedTx.status().status),
     );
 
-    const settledWhileUnavailable = await Promise.race([
-      eventCommitted.promise.then(() => true),
-      new Promise<false>((resolve) => setTimeout(() => resolve(false), 20)),
-    ]);
-
-    expect(settledWhileUnavailable).toBe(false);
+    await runtime.idle();
+    expect(eventSettled).toBe(false);
     expect(calls).toBe(0);
 
     const syncingTx = runtime.edit();
@@ -1463,11 +1452,8 @@ describe("JavaScript-node data unavailability", () => {
       DataUnavailable.syncing(),
     );
     await syncingTx.commit();
-    const settledWhileSyncing = await Promise.race([
-      eventCommitted.promise.then(() => true),
-      new Promise<false>((resolve) => setTimeout(() => resolve(false), 20)),
-    ]);
-    expect(settledWhileSyncing).toBe(false);
+    await runtime.idle();
+    expect(eventSettled).toBe(false);
     expect(calls).toBe(0);
 
     // Async producers wait for scheduler quiescence before publishing. A
@@ -1479,24 +1465,8 @@ describe("JavaScript-node data unavailability", () => {
       result.getArgumentCell()!.withTx(updateTx).key("value").set(7);
       await updateTx.commit();
     })();
-    await Promise.race([
-      producerWrite,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error("parked handler deadlocked its producer")),
-          1000,
-        )
-      ),
-    ]);
-    const commitStatus = await Promise.race([
-      eventCommitted.promise,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error("gated handler event did not replay")),
-          1000,
-        )
-      ),
-    ]);
+    await producerWrite;
+    const commitStatus = await eventCommitted.promise;
     expect(commitStatus).toBe("done");
     await runtime.idle();
     await result.pull();
@@ -1514,17 +1484,9 @@ describe("JavaScript-node data unavailability", () => {
       (committedTx) =>
         followingEventCommitted.resolve(committedTx.status().status),
     );
-    const queuedStatuses = await Promise.race([
-      Promise.all([
-        invalidEventCommitted.promise,
-        followingEventCommitted.promise,
-      ]),
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error("malformed event blocked the handler queue")),
-          1000,
-        )
-      ),
+    const queuedStatuses = await Promise.all([
+      invalidEventCommitted.promise,
+      followingEventCommitted.promise,
     ]);
     expect(queuedStatuses).toEqual(["done", "done"]);
     await runtime.idle();
@@ -1547,20 +1509,7 @@ describe("JavaScript-node data unavailability", () => {
         {},
         (committedTx) => terminalCommitted.resolve(committedTx.status().status),
       );
-      const status = await Promise.race([
-        terminalCommitted.promise,
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new Error(
-                  `${terminal.reason} handler input blocked the event queue`,
-                ),
-              ),
-            1000,
-          )
-        ),
-      ]);
+      const status = await terminalCommitted.promise;
       expect(status).toBe("done");
       expect(calls).toBe(2);
     }

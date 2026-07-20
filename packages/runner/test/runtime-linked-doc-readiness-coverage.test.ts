@@ -16,19 +16,6 @@ import {
 } from "./scheduler-test-utils.ts";
 import type { SchedulerTestStorageManager } from "./scheduler-test-utils.ts";
 
-const waitFor = async (
-  predicate: () => boolean,
-  timeoutMs = 1_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() >= deadline) {
-      throw new Error("Timed out waiting for linked-document state");
-    }
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-};
-
 describe("linked-document readiness lifecycle", () => {
   let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
@@ -113,14 +100,18 @@ describe("linked-document readiness lifecycle", () => {
     };
 
     let attempts = 0;
+    const firstAttemptStarted = Promise.withResolvers<void>();
+    const secondAttemptStarted = Promise.withResolvers<void>();
     let rejectFirstAttempt: ((cause: Error) => void) | undefined;
     storageManager.syncCell = <T>(cell: Cell<T>): Promise<Cell<T>> => {
       attempts++;
       if (attempts === 1) {
+        firstAttemptStarted.resolve();
         return new Promise<Cell<T>>((_resolve, reject) => {
           rejectFirstAttempt = reject;
         });
       }
+      secondAttemptStarted.resolve();
       if (connectionState.status === "disconnected") {
         return Promise.reject(new Error("storage remains disconnected"));
       }
@@ -143,7 +134,10 @@ describe("linked-document readiness lifecycle", () => {
         isEffect: true,
       });
       runtime.scheduler.queueExecution();
-      await waitFor(() => attempts === 1 && rejectFirstAttempt !== undefined);
+      await firstAttemptStarted.promise;
+      if (rejectFirstAttempt === undefined) {
+        throw new Error("first linked-document attempt did not install reject");
+      }
 
       connectionState = {
         status: "disconnected",
@@ -151,9 +145,8 @@ describe("linked-document readiness lifecycle", () => {
         cause: new Error("synthetic disconnect"),
       };
       connectionListener?.(connectionState);
-      rejectFirstAttempt!(connectionState.cause);
+      rejectFirstAttempt(connectionState.cause);
       await storageManager.crossSpaceSettled();
-      await new Promise((resolve) => setTimeout(resolve, 100));
       await runtime.scheduler.idle();
 
       expect(attempts).toBe(1);
@@ -161,7 +154,11 @@ describe("linked-document readiness lifecycle", () => {
 
       connectionState = { status: "ready", epoch: 2 };
       connectionListener?.(connectionState);
-      await waitFor(() => attempts === 2 && status === "settled");
+      await secondAttemptStarted.promise;
+      await storageManager.crossSpaceSettled();
+      await runtime.scheduler.idle();
+      expect(attempts).toBe(2);
+      expect(status).toBe("settled");
     } finally {
       runtime.scheduler.unsubscribe(consumer);
       storageManager.syncCell = originalSyncCell;
@@ -190,9 +187,13 @@ describe("linked-document readiness lifecycle", () => {
     };
 
     let attempts = 0;
+    const thirdAttemptStarted = Promise.withResolvers<void>();
+    const fourthAttemptStarted = Promise.withResolvers<void>();
     let allowSuccess = false;
     storageManager.syncCell = <T>(cell: Cell<T>): Promise<Cell<T>> => {
       attempts++;
+      if (attempts === 3) thirdAttemptStarted.resolve();
+      if (attempts === 4) fourthAttemptStarted.resolve();
       return allowSuccess
         ? Promise.resolve(cell)
         : Promise.reject(new Error(`sync failed ${attempts}`));
@@ -214,8 +215,10 @@ describe("linked-document readiness lifecycle", () => {
         isEffect: true,
       });
       runtime.scheduler.queueExecution();
-      await waitFor(() => attempts === 3 && status === "error");
+      await thirdAttemptStarted.promise;
+      await storageManager.crossSpaceSettled();
       await runtime.scheduler.idle();
+      expect(status).toBe("error");
 
       connectionState = {
         status: "disconnected",
@@ -227,7 +230,10 @@ describe("linked-document readiness lifecycle", () => {
       connectionState = { status: "ready", epoch: 2 };
       connectionListener?.(connectionState);
 
-      await waitFor(() => attempts === 4 && status === "settled");
+      await fourthAttemptStarted.promise;
+      await storageManager.crossSpaceSettled();
+      await runtime.scheduler.idle();
+      expect(status).toBe("settled");
     } finally {
       runtime.scheduler.unsubscribe(consumer);
       storageManager.syncCell = originalSyncCell;

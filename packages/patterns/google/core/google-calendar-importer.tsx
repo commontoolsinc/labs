@@ -1011,12 +1011,20 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
       ),
       getUpcomingEvents: patternTool(
         pattern(
-          ({ count, events }: { count: number; events: CalendarEvent[] }) => {
+          (
+            { count, events, now }: {
+              count: number;
+              events: CalendarEvent[];
+              now: number;
+            },
+          ) => {
             return computed(() => {
               if (!events || events.length === 0) return "No events";
-              const now = new Date(nowCellValue);
+              const currentTime = new Date(now);
               const upcoming = events
-                .filter((e) => new Date(e.startDateTime || e.start) >= now)
+                .filter((e) =>
+                  new Date(e.startDateTime || e.start) >= currentTime
+                )
                 .slice(0, count || 5);
               return upcoming.map((event) =>
                 `${
@@ -1032,13 +1040,13 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
             });
           },
         ),
-        { events },
+        { events, now: nowCellValue },
       ),
       getTodaysEvents: patternTool(
-        pattern(({ events }: { events: CalendarEvent[] }) => {
+        pattern(({ events, now }: { events: CalendarEvent[]; now: number }) => {
           return computed(() => {
             if (!events || events.length === 0) return "No events";
-            const today = new Date(nowCellValue).toISOString().split("T")[0];
+            const today = new Date(now).toISOString().split("T")[0];
             const todayEvents = events.filter((e) =>
               e.start === today ||
               (e.startDateTime && e.startDateTime.startsWith(today))
@@ -1055,7 +1063,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
             ).join("\n");
           });
         }),
-        { events },
+        { events, now: nowCellValue },
       ),
     };
   },

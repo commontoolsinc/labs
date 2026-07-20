@@ -354,25 +354,33 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   );
   const { events: importedEvents } = resultOf(calendarWish.result);
 
-  // Current date sourced from the reactive #now cell (one-shot, coarsened to
-  // 1s) instead of reading the clock directly at pattern-body level. Like the
-  // #calendarEvents wish above, the result is available synchronously here.
+  // Current date sourced from the reactive #now cell instead of reading the
+  // clock directly at pattern-body level. The derived date stays unavailable
+  // until the wish resolves.
   const nowCell = wish<number>({ query: "#now" });
   const nowCellValue = resultOf(nowCell.result);
-  const todayDate = getTodayDate(nowCellValue!);
+  const todayDate = computed(() => getTodayDate(nowCellValue));
 
-  // Navigation State (Writable so navigation buttons work)
-  const startDate = new Writable(getWeekStart(todayDate));
+  // Navigation State (Writable so navigation buttons work). Seed writable
+  // cells with static data; initialize their clock-derived defaults once the
+  // #now result becomes usable.
+  const startDate = new Writable("");
   const visibleDays = new Writable(7);
 
   // Create Form State
   const showNewEventPrompt = new Writable<boolean>(false);
   const newEventTitle = new Writable<string>("");
-  const newEventDate = new Writable<string>(todayDate);
+  const newEventDate = new Writable<string>("");
   const newEventStartTime = new Writable<string>("09:00");
   const newEventEndTime = new Writable<string>("10:00");
   const newEventColor = new Writable<string>(COLORS[0]);
   const usedCreateAnother = new Writable<boolean>(false);
+
+  computed(() => {
+    const today = todayDate;
+    if (startDate.get() === "") startDate.set(getWeekStart(today));
+    if (newEventDate.get() === "") newEventDate.set(today);
+  });
 
   // Edit Form State
   const showEditModal = new Writable<boolean>(false);

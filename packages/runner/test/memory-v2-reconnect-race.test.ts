@@ -307,6 +307,53 @@ Deno.test("storage manager publishes connection state per space", async () => {
 
 for (const closeKind of ["close", "closeNow"] as const) {
   Deno.test(
+    `storage manager ${closeKind} keeps closed terminal when transport disconnects during notification`,
+    async () => {
+      const server = new MemoryV2Server.Server({
+        ...TEST_MEMORY_SERVER_AUTH,
+        store: new URL(
+          `memory://runner-v2-terminal-close-${closeKind}-${crypto.randomUUID()}`,
+        ),
+      });
+      const transport = new SabotagedReconnectTransport(server);
+      const storageManager = TestStorageManager.create({
+        as: signer,
+        memoryHost: new URL(`memory://runner-v2-terminal-close-${closeKind}`),
+      }, new SingleSessionFactory(transport));
+      const states: Array<{ status: string; epoch: number }> = [];
+      let sabotaged = false;
+      const unsubscribe = storageManager.subscribeConnectionState(
+        space,
+        (state) => {
+          states.push({ status: state.status, epoch: state.epoch });
+          if (state.status === "closed" && !sabotaged) {
+            sabotaged = true;
+            transport.disconnect();
+          }
+        },
+      );
+      const provider = storageManager.open(space) as TestProvider;
+
+      try {
+        await provider.sync(
+          `of:terminal-close-${closeKind}-${crypto.randomUUID()}` as URI,
+        );
+        await storageManager[closeKind]();
+
+        assertEquals(states, [
+          { status: "idle", epoch: 0 },
+          { status: "ready", epoch: 1 },
+          { status: "closed", epoch: 1 },
+        ]);
+      } finally {
+        unsubscribe();
+        await storageManager.close();
+        await server.close();
+      }
+    },
+  );
+
+  Deno.test(
     `storage manager ${closeKind} does not publish ready from a late session`,
     async () => {
       const server = new MemoryV2Server.Server({

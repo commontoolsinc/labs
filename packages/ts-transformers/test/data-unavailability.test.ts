@@ -53,6 +53,51 @@ Deno.test("resultOf is a transparent policy-free reactive alias", async () => {
   assertEquals(output.includes("unavailableInputPolicy"), false);
 });
 
+Deno.test("resultOf source crosses a reactive map boundary for nested computed", async () => {
+  const output = await transformSource(
+    `
+    import {
+      computed,
+      Default,
+      pattern,
+      resultOf,
+      wish,
+    } from "commonfabric";
+
+    export default pattern(() => {
+      const request = wish<Default<number, 0>>({ query: "#now" });
+      const usable = resultOf(request.result);
+      const rows = computed(() => [1]);
+      return {
+        labels: rows.map((row) => computed(() => row + usable)),
+      };
+    });
+  `,
+    {
+      types: { "commonfabric.d.ts": commonfabricTypes },
+      typeCheck: true,
+    },
+  );
+
+  const root = parseModule(output);
+  const nestedPattern = collect(root, ts.isVariableDeclaration).find((node) =>
+    ts.isIdentifier(node.name) && node.name.text.startsWith("__cfPattern_") &&
+    node.initializer?.getText(root).includes("request")
+  );
+  assert(nestedPattern?.initializer);
+  const emitted = nestedPattern.initializer.getText(root);
+  assertStringIncludes(emitted, 'key("params", "request")');
+  assertStringIncludes(emitted, 'request.key("result")');
+  assertEquals(emitted.includes("usable"), false);
+
+  const nestedLift = collect(root, ts.isVariableDeclaration).find((node) =>
+    ts.isIdentifier(node.name) && node.name.text.startsWith("__cfLift_") &&
+    node.initializer?.getText(root).includes("request.result")
+  );
+  assert(nestedLift?.initializer);
+  assertEquals(nestedLift.initializer.getText(root).includes("usable"), false);
+});
+
 Deno.test("reports an availability guard inside computed without an external observation", async () => {
   const { diagnostics } = await validateSource(`
     import { computed, hasError, pattern } from "commonfabric";

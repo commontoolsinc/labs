@@ -4,16 +4,11 @@ import {
   computed,
   Default,
   handler,
-  hasError,
-  hasSchemaMismatch,
-  isPending,
-  isSyncing,
   NAME,
   pattern,
   type PerSpace,
   type RequiresIntegrity,
   resultOf,
-  safeDateNow,
   Stream,
   UI,
   type VNode,
@@ -436,16 +431,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     >(null);
 
     const nowRequest = wish<number>({ query: "#now" });
-    const fallbackNow = safeDateNow();
-    const todayStr = computed(() => {
-      const requestedNow = nowRequest.result;
-      return toLocalDateStr(
-        hasError(requestedNow) || isPending(requestedNow) ||
-          isSyncing(requestedNow) || hasSchemaMismatch(requestedNow)
-          ? fallbackNow
-          : resultOf(requestedNow),
-      );
-    });
+    const nowValue = resultOf(nowRequest.result);
+    const todayStr = computed(() => toLocalDateStr(nowValue));
     const weekDatesArr = computed(() => getWeekDates(todayStr));
 
     // User/session UI state

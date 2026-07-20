@@ -367,7 +367,9 @@ function cloneSourceExpression(
 ): ts.Expression {
   const target = unwrapAvailabilityExpression(expression);
   if (ts.isIdentifier(target)) {
-    return factory.createIdentifier(target.text);
+    const clone = factory.createIdentifier(target.text);
+    ts.setOriginalNode(clone, target);
+    return clone;
   }
   if (ts.isPropertyAccessExpression(target)) {
     return factory.createPropertyAccessExpression(

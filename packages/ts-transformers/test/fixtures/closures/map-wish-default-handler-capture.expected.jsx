@@ -54,10 +54,10 @@ const removeItem = handler({
 });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
-    const items = __cf_pattern_input.key("params", "items");
+    const itemsWish = __cf_pattern_input.key("params", "itemsWish");
     return (<li>
             {item.key("name")}
-            <button type="button" onClick={removeItem({ items, item })}>
+            <button type="button" onClick={removeItem({ items: itemsWish.key("result"), item })}>
               Remove
             </button>
           </li>);
@@ -70,15 +70,25 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         params: {
             type: "object",
             properties: {
-                items: {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Item"
+                itemsWish: {
+                    type: "object",
+                    properties: {
+                        result: {
+                            anyOf: [{
+                                    type: "array",
+                                    items: {
+                                        $ref: "#/$defs/Item"
+                                    }
+                                }, {
+                                    type: "object"
+                                }],
+                            "default": []
+                        }
                     },
-                    "default": []
+                    required: ["result"]
                 }
             },
-            required: ["items"]
+            required: ["itemsWish"]
         }
     },
     required: ["element", "params"],
@@ -150,7 +160,9 @@ export default pattern((_) => {
         [NAME]: "Test",
         [UI]: (<ul>
         {items.mapWithPattern(__cfPattern_1, {
-                items: items
+                itemsWish: {
+                    result: itemsWish.key("result")
+                }
             })}
       </ul>),
     };

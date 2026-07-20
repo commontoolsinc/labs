@@ -898,6 +898,13 @@ export class StorageManager implements IStorageManager {
     state: StorageConnectionState,
   ): void {
     const previous = this.#connectionStates.get(space);
+    // `closed` is terminal for this provider lifecycle. Teardown closes the
+    // transport after publishing it, and that close can synchronously report a
+    // disconnect through the still-installed session listener. Do not let the
+    // late transport notification regress the public lifecycle.
+    if (previous?.status === "closed") {
+      return;
+    }
     if (
       previous?.status === state.status && previous.epoch === state.epoch
     ) {
