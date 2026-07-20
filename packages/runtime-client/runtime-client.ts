@@ -9,6 +9,7 @@ import type { DID, Identity } from "@commonfabric/identity";
 import type {
   ActionRunTraceEntry,
   JSONSchema,
+  PatternCoverageData,
   RuntimeTelemetryMarkerResult,
   SchedulerDiagnosisResult,
   SchedulerGraphSnapshot,
@@ -145,6 +146,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       renderConfidentialityCeiling: options.renderConfidentialityCeiling,
       trustSnapshot: options.trustSnapshot,
       forwardWorkerConsole: options.forwardWorkerConsole,
+      patternCoverage: options.patternCoverage,
     });
     return new RuntimeClient(initialized, options);
   }
@@ -424,6 +426,19 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       timing: res.timing,
       flags: res.flags,
     };
+  }
+
+  /**
+   * Pull the worker runtime's accumulated pattern-coverage spans and hit counts,
+   * or `null` when this worker was not started with coverage on. The integration
+   * harness calls this once at teardown (through `commonfabric.rt`) and merges
+   * the result with the other realms' coverage. See docs/development/COVERAGE.md.
+   */
+  async getPatternCoverage(): Promise<PatternCoverageData | null> {
+    const res = await this.#conn.request<RequestType.GetPatternCoverage>({
+      type: RequestType.GetPatternCoverage,
+    });
+    return res.data;
   }
 
   /**

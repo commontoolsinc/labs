@@ -74,6 +74,9 @@
  * | pieceCreatedCallback       | delta (browserWorker only)                       |
  * | telemetry                  | delta (productionServer, browserWorker)          |
  * | moduleByteCache            | delta (patternTest, remoteClient, unitTest)      |
+ * | patternCoverage            | delta (patternTest, remoteClient, browserWorker) |
+ * |                            | — test/CI statement-coverage collection, unset   |
+ * |                            | elsewhere                                        |
  * | trustSnapshotProvider      | delta (remoteClient, browserWorker)              |
  * | spaceHostMap               | delta (browserWorker only — federation routing   |
  * |                            | is decided by the shell host)                    |
@@ -89,6 +92,7 @@ import type {
   TrustSnapshot,
 } from "./cfc/mod.ts";
 import type { CommitBackpressurePolicy } from "./scheduler/backpressure.ts";
+import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import type { IStorageManager } from "./storage/interface.ts";
 import type { RuntimeTelemetry } from "./telemetry.ts";
 import type {
@@ -144,6 +148,7 @@ export const RUNTIME_OPTION_KEYS = [
   "hideInternalStackFrames",
   "commitBackpressure",
   "moduleByteCache",
+  "patternCoverage",
   "fetch",
 ] as const satisfies readonly (keyof RuntimeOptions)[];
 
@@ -285,6 +290,8 @@ export interface RemoteClientPresetParams extends CoreParams {
   moduleByteCache?: ModuleByteCache;
   /** Trust provenance for CFC-relevant writes (pieces controller). */
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
+  /** Statement-coverage collector for the pattern integration harness. */
+  patternCoverage?: PatternCoverageCollector;
 }
 
 export interface PatternTestPresetParams extends CoreParams {
@@ -295,6 +302,8 @@ export interface PatternTestPresetParams extends CoreParams {
   moduleByteCache?: ModuleByteCache;
   /** Per-test laxer mode; defaults to the shared core pin. */
   cfcEnforcementMode?: CfcEnforcementMode;
+  /** Statement-coverage collector for `cf test` and the pattern harnesses. */
+  patternCoverage?: PatternCoverageCollector;
 }
 
 export interface BrowserWorkerPresetParams extends CoreParams {
@@ -313,6 +322,8 @@ export interface BrowserWorkerPresetParams extends CoreParams {
   pieceCreatedCallback?: PieceCreatedCallback;
   /** System-pattern update version-skew signal → shell IPC. */
   onVersionSkew?: VersionSkewHandler;
+  /** Statement-coverage collector, set only on the coverage-collecting shell build. */
+  patternCoverage?: PatternCoverageCollector;
 }
 
 export interface UnitTestPresetParams extends Omit<CoreParams, "experimental"> {
@@ -369,6 +380,9 @@ export const runtimePresets = {
       ...(params.trustSnapshotProvider !== undefined
         ? { trustSnapshotProvider: params.trustSnapshotProvider }
         : {}),
+      ...(params.patternCoverage !== undefined
+        ? { patternCoverage: params.patternCoverage }
+        : {}),
     };
   },
 
@@ -394,6 +408,9 @@ export const runtimePresets = {
         : {}),
       ...(params.moduleByteCache !== undefined
         ? { moduleByteCache: params.moduleByteCache }
+        : {}),
+      ...(params.patternCoverage !== undefined
+        ? { patternCoverage: params.patternCoverage }
         : {}),
     };
   },
@@ -445,6 +462,9 @@ export const runtimePresets = {
         : {}),
       ...(params.onVersionSkew !== undefined
         ? { onVersionSkew: params.onVersionSkew }
+        : {}),
+      ...(params.patternCoverage !== undefined
+        ? { patternCoverage: params.patternCoverage }
         : {}),
     };
   },

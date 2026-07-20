@@ -3,6 +3,7 @@ import type {
   JSONSchema,
   JSONValue,
   NormalizedFullLink,
+  PatternCoverageData,
   SchedulerDiagnosisResult,
   SchedulerGraphSnapshot,
   SettleStats,
@@ -57,6 +58,7 @@ export enum RequestType {
   FlushCompileCacheWrites = "runtime:flushCompileCacheWrites",
   GetGraphSnapshot = "runtime:getGraphSnapshot",
   GetLoggerCounts = "runtime:getLoggerCounts",
+  GetPatternCoverage = "runtime:getPatternCoverage",
   SetLoggerLevel = "runtime:setLoggerLevel",
   SetLoggerEnabled = "runtime:setLoggerEnabled",
   SetTelemetryEnabled = "runtime:setTelemetryEnabled",
@@ -210,6 +212,11 @@ export interface InitializationData {
   // integration-test console capture. Off by default: each forwarded call
   // costs one postMessage, so it is enabled only for diagnostic runs.
   forwardWorkerConsole?: boolean;
+  // When true, the worker runtime instruments every pattern compile for
+  // statement coverage and accumulates hits, which the integration harness
+  // pulls at teardown via GetPatternCoverage. Test/CI only (the coverage shell
+  // build sets it); off by default. See docs/development/COVERAGE.md.
+  patternCoverage?: boolean;
 }
 
 export interface InitializeRequest extends BaseRequest {
@@ -350,6 +357,10 @@ export interface GetGraphSnapshotRequest extends BaseRequest {
 
 export interface GetLoggerCountsRequest extends BaseRequest {
   type: RequestType.GetLoggerCounts;
+}
+
+export interface GetPatternCoverageRequest extends BaseRequest {
+  type: RequestType.GetPatternCoverage;
 }
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -739,6 +750,7 @@ export type IPCClientRequest =
   | EnsureHomePatternRunningRequest
   | GetGraphSnapshotRequest
   | GetLoggerCountsRequest
+  | GetPatternCoverageRequest
   | SetLoggerLevelRequest
   | SetLoggerEnabledRequest
   | SetTelemetryEnabledRequest
@@ -822,6 +834,17 @@ export interface LoggerCountsResponse {
   metadata: LoggerMetadata;
   timing: LoggerTimingData;
   flags: LoggerFlagsData;
+}
+
+export interface PatternCoverageResponse {
+  /**
+   * The worker collector's spans and hit counts, or `null` when this worker was
+   * built without a collector. Null and empty are kept apart on purpose: a
+   * worker that never had coverage on and one that had it on but ran nothing
+   * instrumented are different failures, and reporting both as an empty report
+   * makes the first invisible.
+   */
+  data: PatternCoverageData | null;
 }
 
 export interface CellUpdateNotification {
@@ -939,6 +962,7 @@ export type RemoteResponse =
   | CfcLabelViewResponse
   | GraphSnapshotResponse
   | LoggerCountsResponse
+  | PatternCoverageResponse
   | SettleStatsResponse
   | SettleStatsHistoryResponse
   | ActionRunTraceResponse
@@ -998,6 +1022,10 @@ export type Commands = {
   [RequestType.GetLoggerCounts]: {
     request: GetLoggerCountsRequest;
     response: LoggerCountsResponse;
+  };
+  [RequestType.GetPatternCoverage]: {
+    request: GetPatternCoverageRequest;
+    response: PatternCoverageResponse;
   };
   [RequestType.SetLoggerLevel]: {
     request: SetLoggerLevelRequest;

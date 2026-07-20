@@ -159,6 +159,12 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    */
   forwardWorkerConsole?: boolean;
   /**
+   * When true, the worker runtime instruments pattern compiles for statement
+   * coverage; the integration harness pulls the accumulated hits at teardown.
+   * Test/CI only, off by default. See docs/development/COVERAGE.md.
+   */
+  patternCoverage?: boolean;
+  /**
    * Override the runtime worker URL. By default, deployed builds use the
    * immutable `/builds/<clientVersion>/` asset namespace while local builds
    * fall back to `/scripts/worker-runtime.js`.
@@ -246,6 +252,7 @@ export function createRuntimeClientOptions({
   trustSnapshot,
   clientVersion,
   forwardWorkerConsole,
+  patternCoverage,
 }: {
   session: Session;
   apiUrl: URL;
@@ -257,6 +264,7 @@ export function createRuntimeClientOptions({
   trustSnapshot?: RuntimeTrustSnapshot | null;
   clientVersion?: string;
   forwardWorkerConsole?: boolean;
+  patternCoverage?: boolean;
 }) {
   const resolvedTrustSnapshot = trustSnapshot === undefined
     ? {
@@ -286,6 +294,7 @@ export function createRuntimeClientOptions({
     trustSnapshot: resolvedTrustSnapshot,
     clientVersion,
     forwardWorkerConsole,
+    patternCoverage,
   };
 }
 
@@ -656,6 +665,7 @@ export class RuntimeInternals extends EventTarget {
     trustSnapshot,
     clientVersion,
     forwardWorkerConsole,
+    patternCoverage,
     getBuildHash = fetchBuildHash,
     workerUrl,
     navigate,
@@ -714,6 +724,7 @@ export class RuntimeInternals extends EventTarget {
         trustSnapshot,
         clientVersion,
         forwardWorkerConsole,
+        patternCoverage,
       }),
     );
 

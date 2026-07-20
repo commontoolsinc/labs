@@ -8,6 +8,8 @@ import {
   preserveLineCount,
   transformInjectHelperModule,
 } from "../src/harness/pretransform.ts";
+import { helperInjectionLineOffset } from "../src/harness/engine.ts";
+import { injectCfHelpers } from "@commonfabric/ts-transformers";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
 import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
@@ -214,4 +216,68 @@ Deno.test("preserveLineCount rejects expanding rewrites", () => {
     Error,
     "Import rewrite expanded from 1 to 2 lines",
   );
+});
+
+// The coverage span mapper subtracts `helperInjectionLineOffset` from every span
+// line to recover the authored line, so it has to predict exactly how far
+// `transformInjectHelperModule` moved that file's content. The two live in
+// different modules and the prediction is a re-implementation of the injector's
+// branches, so pin them against each other rather than against a hand-written
+// number: only the leading helper import shifts lines, and the trailing `h` shim
+// the injector also appends must not count.
+Deno.test("helperInjectionLineOffset matches what the injector actually shifts", async () => {
+  await ensureCompilerStack();
+  const MARKER = "const marker = 1;";
+
+  // Every shape that reaches the mapper, and what the injector does with it.
+  const cases: { label: string; source: string }[] = [
+    { label: "plain authored source", source: `const top = 0;\n${MARKER}\n` },
+    {
+      label: "disable-transform directive (blanked in place)",
+      source: `/// <cf-disable-transform />\nconst top = 0;\n${MARKER}\n`,
+    },
+    {
+      label: "stored legacy envelope (passes through untouched)",
+      source: injectCfHelpers(`const top = 0;\n${MARKER}\n`),
+    },
+  ];
+
+  for (const { label, source } of cases) {
+    const injected = transformInjectHelperModule(
+      { main: "/main.tsx", files: [{ name: "/main.tsx", contents: source }] },
+      // Mounts and the stored-source recompile both tolerate the legacy
+      // envelope; this is the path whose offsets the mapper has to predict.
+      { tolerateStoredLegacyEnvelope: true },
+    ).files[0].contents;
+
+    const lineOf = (text: string, needle: string) =>
+      text.split("\n").findIndex((line) => line.includes(needle)) + 1;
+    const authoredLine = lineOf(source, MARKER);
+    const injectedLine = lineOf(injected, MARKER);
+    assertEquals(authoredLine > 0 && injectedLine > 0, true, label);
+
+    // A span is measured over the injected text; adding the offset must land on
+    // the authored line.
+    assertEquals(
+      injectedLine + helperInjectionLineOffset(source),
+      authoredLine,
+      `${label}: offset does not recover the authored line`,
+    );
+  }
+});
+
+Deno.test("helperInjectionLineOffset leaves a blank file alone", async () => {
+  await ensureCompilerStack();
+  // "Content" here means any non-blank line, comments included — a
+  // comment-only file is injected like any other, so only a wholly blank file
+  // takes this branch. Assert against what the injector did rather than a bare
+  // number, so the two cannot drift apart.
+  for (const source of ["", "\n\n"]) {
+    const injected = transformInjectHelperModule(
+      { main: "/main.tsx", files: [{ name: "/main.tsx", contents: source }] },
+      { tolerateStoredLegacyEnvelope: true },
+    ).files[0].contents;
+    assertEquals(injected, source, "the injector touched a blank file");
+    assertEquals(helperInjectionLineOffset(source), 0);
+  }
 });

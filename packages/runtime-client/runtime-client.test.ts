@@ -149,6 +149,43 @@ describe("RuntimeClient.hasPendingWrites", () => {
   });
 });
 
+describe("RuntimeClient.getPatternCoverage", () => {
+  // Same connection stub as above: the method is a single request whose response
+  // `data` it returns verbatim (null included), so a stub that records the
+  // request and replies with a fixed response pins the wiring.
+  function clientWithResponse(
+    response: unknown,
+  ): { client: RuntimeClient; requests: unknown[] } {
+    const requests: unknown[] = [];
+    const conn = {
+      on: () => {},
+      request: (message: unknown) => {
+        requests.push(message);
+        return Promise.resolve(response);
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+    return { client, requests };
+  }
+
+  it("returns the worker's coverage report", async () => {
+    const data = {
+      spans: [],
+      hits: [{ fileName: "/main.tsx", id: 1, count: 2 }],
+    };
+    const { client, requests } = clientWithResponse({ data });
+    expect(await client.getPatternCoverage()).toEqual(data);
+    expect(requests).toEqual([{ type: RequestType.GetPatternCoverage }]);
+  });
+
+  it("returns null when the worker has no collector", async () => {
+    const { client } = clientWithResponse({ data: null });
+    expect(await client.getPatternCoverage()).toBeNull();
+  });
+});
+
 describe("RuntimeClient boot-window diagnostics", () => {
   // Both getters are main-thread snapshots forwarded straight from the
   // connection (no worker round-trip), so a connection stub pins the wiring.
