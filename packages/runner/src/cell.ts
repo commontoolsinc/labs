@@ -107,9 +107,9 @@ import {
   type URI,
 } from "./sigil-types.ts";
 import type { Runtime } from "./runtime.ts";
+import { createDataCellURI } from "./data-uri.ts";
 import {
   areLinksSame,
-  createDataCellURI,
   createSigilLinkFromParsedLink,
   findAndInlineDataURILinks,
   isCellLink,
