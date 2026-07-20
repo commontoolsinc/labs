@@ -910,8 +910,18 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
+      - name: 📥 Download coverage reports
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-profile-*
+          path: coverage-artifacts
+          merge-multiple: false
+          skip-decompress: false
+          digest-mismatch: error
+
       - name: 📊 Run performance check
         env:
+          COVERAGE_ARTIFACTS_DIR: coverage-artifacts
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
