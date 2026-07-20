@@ -98,6 +98,74 @@ Deno.test("resultOf source crosses a reactive map boundary for nested computed",
   assertEquals(nestedLift.initializer.getText(root).includes("usable"), false);
 });
 
+Deno.test("resultOf element source crosses a reactive map boundary", async () => {
+  const output = await transformSource(
+    `
+    import {
+      AsyncResult,
+      computed,
+      Default,
+      pattern,
+      resultOf,
+    } from "commonfabric";
+
+    export default pattern((input: { requests: [AsyncResult<Default<number, 0>>] }) => {
+      const usable = resultOf(input.requests[0]);
+      const rows = computed(() => [1]);
+      return {
+        values: rows.map((row) => computed(() => row + usable)),
+      };
+    });
+  `,
+    {
+      types: { "commonfabric.d.ts": commonfabricTypes },
+      typeCheck: true,
+    },
+  );
+
+  assertStringIncludes(
+    output,
+    'const input = __cf_pattern_input.key("params", "input")',
+  );
+  assertStringIncludes(output, '"0": input.key("requests", "0")');
+  assertStringIncludes(output, "row + input.requests[0]");
+  assertEquals(output.includes("row + usable"), false);
+});
+
+Deno.test("resultOf direct producer stays a single captured alias", async () => {
+  const output = await transformSource(
+    `
+    import {
+      computed,
+      fetchJson,
+      pattern,
+      resultOf,
+    } from "commonfabric";
+
+    export default pattern(() => {
+      const usable = resultOf(fetchJson<number>({ url: "/value" }));
+      const rows = computed(() => [1]);
+      return {
+        values: rows.map((row) => computed(() => row + usable)),
+      };
+    });
+  `,
+    {
+      types: { "commonfabric.d.ts": commonfabricTypes },
+      typeCheck: true,
+    },
+  );
+
+  const root = parseModule(output);
+  const producerCalls = collect(root, ts.isCallExpression).filter((call) =>
+    ts.isIdentifier(call.expression) && call.expression.text === "fetchJson"
+  );
+  assertEquals(producerCalls.length, 1);
+  assertStringIncludes(output, "usable: usable");
+  assertStringIncludes(output, "mapWithPattern(__cfPattern_");
+  assertStringIncludes(output, 'key("params", "usable")');
+});
+
 Deno.test("reports an availability guard inside computed without an external observation", async () => {
   const { diagnostics } = await validateSource(`
     import { computed, hasError, pattern } from "commonfabric";

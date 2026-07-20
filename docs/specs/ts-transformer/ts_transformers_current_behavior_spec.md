@@ -1544,7 +1544,7 @@ preserved from the original initializer (`preserveNodeSourceMap`).
 
 ### 13.6 Ordering and the hoisting interplay
 
-Running at stage 19 means causes are derived from the final lowered shape:
+Running at stage 20 means causes are derived from the final lowered shape:
 `computed`/`action`/JSX expression sites have already become lift/handler
 applications and IIFE-local consts (stages 8–13), schemas are injected and
 generated (15, 17), and builder calls are hoisted (16). Two concrete
