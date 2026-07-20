@@ -7,8 +7,7 @@ import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { jsonFromValue } from "@commonfabric/data-model/codec-json";
-import { fromURI, getJSONFromDataURI, toURI } from "../src/uri-utils.ts";
+import { fromURI, toURI } from "../src/uri-utils.ts";
 
 const hash = hashOf({ causal: { test: "uri-utils" } });
 const tagged = hash.taggedHashString;
@@ -134,110 +133,5 @@ describe("fromURI", () => {
   it("is one-way for computed: ids (bare hash re-mints as of:)", () => {
     const bare = fromURI(`computed:${tagged}`);
     expect(toURI(FabricHash.fromString(bare))).toBe(`of:${tagged}`);
-  });
-});
-
-describe("getJSONFromDataURI", () => {
-  /** Percent-encoded `data:` URI with the given payload text. */
-  const uriOf = (payload: string): string =>
-    `data:application/json,${encodeURIComponent(payload)}`;
-
-  /** Base64 `data:` URI with the given payload text. */
-  const base64UriOf = (payload: string): string => {
-    const bytes = new TextEncoder().encode(payload);
-    const binary = String.fromCharCode(...bytes);
-    return `data:application/json;base64,${btoa(binary)}`;
-  };
-
-  it("rejects a non-`application/json` URI", () => {
-    expect(() => getJSONFromDataURI("data:text/plain,hello")).toThrow(
-      /Invalid URI/,
-    );
-  });
-
-  it("rejects a URI with no comma", () => {
-    expect(() => getJSONFromDataURI("data:application/json")).toThrow(
-      /Invalid data URI format/,
-    );
-  });
-
-  it("rejects a non-UTF-8 charset", () => {
-    expect(() => getJSONFromDataURI("data:application/json;charset=latin1,{}"))
-      .toThrow(/Unsupported charset/);
-  });
-
-  it("accepts an explicit UTF-8 charset", () => {
-    expect(getJSONFromDataURI("data:application/json;charset=utf-8,{}"))
-      .toEqual({});
-  });
-
-  it("yields `undefined` for an empty payload", () => {
-    expect(getJSONFromDataURI("data:application/json,")).toBeUndefined();
-  });
-
-  describe("bare-JSON payloads", () => {
-    it("decodes a percent-encoded payload", () => {
-      const uri = uriOf('{"value":{"b":1,"a":[true,null,"x"]}}');
-      expect(getJSONFromDataURI(uri)).toEqual({
-        value: { b: 1, a: [true, null, "x"] },
-      });
-    });
-
-    it("decodes a Base64 payload, including non-ASCII text", () => {
-      const uri = base64UriOf('{"value":"città"}');
-      expect(getJSONFromDataURI(uri)).toEqual({ value: "città" });
-    });
-
-    it("decodes a non-object payload", () => {
-      expect(getJSONFromDataURI(uriOf("[1,2,3]"))).toEqual([1, 2, 3]);
-      expect(getJSONFromDataURI(uriOf('"plain"'))).toBe("plain");
-    });
-
-    it("rejects an invalid JSON payload", () => {
-      expect(() => getJSONFromDataURI(uriOf("{nope"))).toThrow();
-    });
-  });
-
-  describe("encoded-`FabricValue` (`fvj1:`) payloads", () => {
-    it("decodes a percent-encoded payload", () => {
-      const value = { value: { b: 1, a: [true, null, "x"] } };
-      expect(getJSONFromDataURI(uriOf(jsonFromValue(value)))).toEqual(value);
-    });
-
-    it("decodes a Base64 payload, including non-ASCII text", () => {
-      const value = { value: "città" };
-      expect(getJSONFromDataURI(base64UriOf(jsonFromValue(value))))
-        .toEqual(value);
-    });
-
-    it("preserves non-finite numbers and negative zero", () => {
-      const uri = uriOf(jsonFromValue({ value: [NaN, -0, Infinity] }));
-      const result = getJSONFromDataURI(uri);
-      expect(Object.is(result.value[0], NaN)).toBe(true);
-      expect(Object.is(result.value[1], -0)).toBe(true);
-      expect(Object.is(result.value[2], Infinity)).toBe(true);
-    });
-
-    // Sigil links are plain objects with a `/`-prefixed key, which the codec
-    // escapes on encode (spec section 5.6); they must come back as the same
-    // plain objects, since link recognition downstream depends on that shape.
-    it("round-trips a plain object with a `/`-prefixed key", () => {
-      const value = {
-        value: { "/": { "link@1": { id: "of:xyz", path: ["a"] } } },
-      };
-      expect(getJSONFromDataURI(uriOf(jsonFromValue(value)))).toEqual(value);
-    });
-
-    it("returns deep-frozen results", () => {
-      const uri = uriOf(jsonFromValue({ value: { nested: { deep: [1] } } }));
-      const result = getJSONFromDataURI(uri);
-      expect(Object.isFrozen(result)).toBe(true);
-      expect(Object.isFrozen(result.value)).toBe(true);
-      expect(Object.isFrozen(result.value.nested.deep)).toBe(true);
-    });
-
-    it("rejects a malformed payload past the tag", () => {
-      expect(() => getJSONFromDataURI(uriOf("fvj1:{nope"))).toThrow();
-    });
   });
 });

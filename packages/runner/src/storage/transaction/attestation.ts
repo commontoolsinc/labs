@@ -23,7 +23,7 @@ import { unclaimed } from "@commonfabric/memory/fact";
 import { getLogger } from "@commonfabric/utils/logger";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { toTransactionDocumentValue } from "../v2-document.ts";
-import { decodeDataURIPayloadText } from "../../uri-utils.ts";
+import { decodeDataURIPayloadText } from "../../data-uri.ts";
 
 const logger = getLogger("attestation", {
   enabled: false,

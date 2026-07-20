@@ -40,12 +40,8 @@ import type {
   JSONSchemaTypes,
   SchemaScope,
 } from "./builder/types.ts";
-import {
-  addressKey,
-  createDataCellURI,
-  NormalizedFullLink,
-  parseLink,
-} from "./link-utils.ts";
+import { createDataCellURI } from "./data-uri.ts";
+import { addressKey, NormalizedFullLink, parseLink } from "./link-utils.ts";
 import { canFollowScopedLink } from "./scope.ts";
 import type {
   Activity,
