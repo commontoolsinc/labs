@@ -5,7 +5,7 @@ import {
 } from "@commonfabric/static";
 import { RuntimeTelemetry } from "@commonfabric/runner";
 import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
-import { mintDataCellURI } from "./data-uri.ts";
+import { mintDataCellURI } from "./data-uri-mint.ts";
 import type { NonIdempotentReport } from "./telemetry.ts";
 import type {
   AnyCell,

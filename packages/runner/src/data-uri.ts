@@ -31,10 +31,7 @@ import {
   FabricPrimitive,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import {
-  jsonFromValue,
-  valueFromJson,
-} from "@commonfabric/data-model/codec-json";
+import { valueFromJson } from "@commonfabric/data-model/codec-json";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import { isRecord } from "@commonfabric/utils/types";
 import { type Cell, isCell } from "./cell.ts";
@@ -47,6 +44,9 @@ import {
 } from "./link-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { URI } from "./sigil-types.ts";
+import { mintDataCellURI } from "./data-uri-mint.ts";
+
+export { mintDataCellURI };
 
 /**
  * `ReconstructionContext` for decoding `data:` URI payloads. Links at this
@@ -142,19 +142,6 @@ export function createDataCellURI(
   }
 
   return mintDataCellURI(traverseAndAddBaseIdToRelativeLinks(data, new Set()));
-}
-
-/**
- * Assembles a `data:` cell URI carrying (the encoding of) `value` -- the
- * single place the URI shape is put together: scheme, media type, and the
- * percent-encoded (UTF-8-safe) `fvj1:` payload. Unlike
- * {@link createDataCellURI}, this does no link rewriting or other
- * preparation of `value`; callers hand it a ready `FabricValue`.
- */
-export function mintDataCellURI(value: FabricValue): URI {
-  return `data:application/json,${
-    encodeURIComponent(jsonFromValue(value))
-  }` as URI;
 }
 
 /**
