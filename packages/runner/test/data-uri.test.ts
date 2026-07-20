@@ -261,10 +261,12 @@ describe("data-uri", () => {
       expect(Object.is(parsed.value.i, -Infinity)).toBe(true);
     });
 
-    it("encodes an `undefined` value as an empty document", () => {
+    // `undefined` is a `FabricValue`, so it encodes as a present-`undefined`
+    // document value, not as an absent property.
+    it("encodes an `undefined` value as a present `undefined`", () => {
       const parsed = getJSONFromDataURI(createDataCellURI(undefined));
-      expect(parsed).toEqual({});
-      expect("value" in parsed).toBe(false);
+      expect("value" in parsed).toBe(true);
+      expect(parsed.value).toBeUndefined();
     });
 
     it("represents a `FabricPrimitive` leaf correctly", () => {

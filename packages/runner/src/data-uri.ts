@@ -136,13 +136,9 @@ export function createDataCellURI(
     }
   }
 
-  // An `undefined` payload encodes as an empty document, mirroring how a
-  // storage document represents an unset value (absent `value` property, not
-  // a present-`undefined` one).
-  const document = (data === undefined)
-    ? {}
-    : { value: traverseAndAddBaseIdToRelativeLinks(data, new Set()) };
-  const json = jsonFromValue(document);
+  const json = jsonFromValue({
+    value: traverseAndAddBaseIdToRelativeLinks(data, new Set()),
+  });
   // Use encodeURIComponent for UTF-8 safe encoding (matches runtime.ts pattern)
   return `data:application/json,${encodeURIComponent(json)}` as URI;
 }
