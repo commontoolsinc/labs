@@ -13,6 +13,8 @@
  *   GITHUB_REPOSITORY   - Optional, defaults to "commontoolsinc/labs".
  *   GITHUB_RUN_ID       - Required. Current workflow run ID.
  *   PR_NUMBER           - Required. Pull request number.
+ *   COVERAGE_ARTIFACTS_DIR - Optional. Directory containing downloaded
+ *                            coverage artifacts, one subdirectory per name.
  */
 
 import {
@@ -746,25 +748,51 @@ function sampleForRun(run: WorkflowRun, value: number): TimingSample {
   };
 }
 
-async function copyCoverageArtifactFiles(
+export async function copyCoverageArtifactFiles(
   artifact: Artifact,
   profileDir: string,
   lcovDir: string,
+  coverageArtifactsDir?: string,
 ): Promise<{ profileFiles: number; lcovFiles: number }> {
-  const extractedDir = await downloadAndExtractArtifact(
-    artifact.id,
-    "coverage-profile-",
-  );
-  if (!extractedDir) {
-    throw new Error(
-      `Failed to download or extract coverage profile artifact ${artifact.name} (${artifact.id}).`,
+  let sourceDir: string;
+  let removeSourceDir = false;
+  if (coverageArtifactsDir) {
+    sourceDir = path.join(coverageArtifactsDir, artifact.name);
+    let sourceStat: Deno.FileInfo;
+    try {
+      sourceStat = await Deno.stat(sourceDir);
+    } catch (error) {
+      const problem = error instanceof Deno.errors.NotFound
+        ? "was not found"
+        : "could not be read";
+      throw new Error(
+        `Pre-downloaded coverage profile artifact ${artifact.name} (${artifact.id}) ${problem} at ${sourceDir}.`,
+        { cause: error },
+      );
+    }
+    if (!sourceStat.isDirectory) {
+      throw new Error(
+        `Pre-downloaded coverage profile artifact ${artifact.name} (${artifact.id}) is not a directory: ${sourceDir}.`,
+      );
+    }
+  } else {
+    const extractedDir = await downloadAndExtractArtifact(
+      artifact.id,
+      "coverage-profile-",
     );
+    if (!extractedDir) {
+      throw new Error(
+        `Failed to download or extract coverage profile artifact ${artifact.name} (${artifact.id}).`,
+      );
+    }
+    sourceDir = extractedDir;
+    removeSourceDir = true;
   }
 
   let profileFiles = 0;
   let lcovFiles = 0;
   try {
-    for await (const file of walkFiles(extractedDir)) {
+    for await (const file of walkFiles(sourceDir)) {
       const isProfile = file.endsWith(".json");
       const isLcov = file.endsWith(".lcov");
       if (!isProfile && !isLcov) continue;
@@ -785,9 +813,11 @@ async function copyCoverageArtifactFiles(
       );
     }
   } finally {
-    try {
-      await Deno.remove(extractedDir, { recursive: true });
-    } catch { /* ignore cleanup errors */ }
+    if (removeSourceDir) {
+      try {
+        await Deno.remove(sourceDir, { recursive: true });
+      } catch { /* ignore cleanup errors */ }
+    }
   }
 
   return { profileFiles, lcovFiles };
@@ -1055,6 +1085,7 @@ export function evaluateTimingMetric(
 async function extractCoverageDebtSamples(
   run: WorkflowRun,
   artifacts: Artifact[],
+  coverageArtifactsDir?: string,
 ): Promise<{ samples: Map<string, TimingSample>; lcov: string }> {
   const metrics = new Map<string, TimingSample>();
   const coverageArtifacts = newestArtifactsByName(artifacts.filter(
@@ -1086,6 +1117,7 @@ async function extractCoverageDebtSamples(
         artifact,
         profileDir,
         lcovDir,
+        coverageArtifactsDir,
       );
       profileFileCount += copied.profileFiles;
       lcovFileCount += copied.lcovFiles;
@@ -1490,6 +1522,7 @@ export async function main() {
     const coverage = await extractCoverageDebtSamples(
       currentRunInfo,
       currentArtifacts,
+      Deno.env.get("COVERAGE_ARTIFACTS_DIR"),
     );
     for (const [name, sample] of coverage.samples) {
       currentMetrics.set(name, sample);
