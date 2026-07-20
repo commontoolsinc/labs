@@ -70,7 +70,9 @@ const applyWriteToAttestation = (
   // same reference). A root delete retracts (root becomes undefined).
   if (relativePath.length === 0) {
     const nextValue = options?.delete === true ? undefined : value;
-    if (source.value === nextValue) return { ok: source };
+    // `Object.is`, not `===`: a primitive root can change from `0` to `-0`,
+    // which are distinct stored values that `===` conflates.
+    if (Object.is(source.value, nextValue)) return { ok: source };
     return { ok: { ...source, value: nextValue } };
   }
 
@@ -350,8 +352,9 @@ export class Chronicle {
         continue;
       }
 
-      if (merged.value === loaded.is) {
-        // Fast path: reference equality means no change needed.
+      if (Object.is(merged.value, loaded.is)) {
+        // Fast path: identity (`Object.is`, since `===` would conflate a
+        // `0` root loaded as `-0` or vice versa) means no change needed.
         edit.claim(loaded);
       } else {
         // Normalize both values for comparison and potential storage.

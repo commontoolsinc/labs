@@ -10,10 +10,7 @@ import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { scopedCell } from "./scope-policy.ts";
 import type { JSONSchema } from "@commonfabric/api";
-import {
-  schemaWithOpenObjects,
-  validateAgainstSchema,
-} from "../cfc/schema-sanitization.ts";
+import { validateSchemaValue } from "../cfc/schema-sanitization.ts";
 import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { selectUnavailableInput } from "../data-unavailability.ts";
 
@@ -303,10 +300,7 @@ function createStreamDataAction(
 
               for (const parsedData of decoded) {
                 if (schema !== undefined) {
-                  const failure = validateAgainstSchema(
-                    schemaWithOpenObjects(schema),
-                    parsedData,
-                  );
+                  const failure = validateSchemaValue(schema, parsedData);
                   if (failure) {
                     throw new StreamDataSchemaMismatchError(failure);
                   }

@@ -23,6 +23,7 @@ import {
   getPatternIdentityRef,
   isCell,
   isCellResult,
+  markRendererInputTx,
   markUiInputBlindWriteTx,
   Runtime,
   runtimePresets,
@@ -167,6 +168,24 @@ const cfcLabelLogger = getLogger("runtime-client.cfc-label", {
   level: "error",
 });
 
+/**
+ * PageId intake: accepts both the bare tagged hash (`fid1:<hash>`, the
+ * routing form `PageHandle.id()` emits) and the `of:`-schemed URI
+ * (`CellHandle.id()` emits the full schemed id). Without the strip, a
+ * schemed pageId would silently parse as a hash whose TAG is `of:fid1`
+ * and address the nonexistent entity `of:of:fid1:<hash>` — no error,
+ * just a page that never resolves. `computed:` ids are deliberately NOT
+ * accepted: pages are pieces (result cells, always `of:`-schemed), and
+ * the scheme is part of the identity, so stripping `computed:` would
+ * silently alias a different entity.
+ */
+function pageIdForRouting(pageId: string): string {
+  if (pageId.startsWith("computed:")) {
+    throw new Error("Computed ids are not valid page ids.");
+  }
+  return pageId.startsWith("of:") ? pageId.slice("of:".length) : pageId;
+}
+
 function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
   const spaceBaseUrl = new URL(`/${space}/`, apiUrl);
   return new URL(url, spaceBaseUrl).href;
@@ -189,50 +208,12 @@ export function postVersionSkew(info: VersionSkewInfo): void {
   self.postMessage(versionSkewNotification(info));
 }
 
-/**
- * Best-effort, non-blocking system-pattern update check for a space open. The
- * check itself never throws (it is internally best-effort); this only logs a
- * non-current outcome and defends against an unexpected rejection. Exported for
- * testing.
- */
-export function checkUpdateInBackground(
-  cc: Pick<PiecesController, "checkAndUpdateDefaultPattern">,
-  space: string,
-): void {
-  cc.checkAndUpdateDefaultPattern()
-    .then((outcome) => {
-      if (outcome === "updated" || outcome === "skipped-skew") {
-        console.log(`[space-root] update check for ${space}: ${outcome}`);
-      }
-    })
-    .catch((error) => {
-      console.warn(`[space-root] update check for ${space} threw`, error);
-    });
-}
-
-/**
- * Best-effort update check for the HOME root, gated behind its own flag
- * (pending the stable-addressing audit). No-ops unless both auto-update flags
- * are on — so the hot home fast path pays nothing when disabled — otherwise
- * builds a home PiecesController and kicks a non-blocking check. Exported for
- * testing.
- */
-export function maybeCheckHomeUpdate(
-  identity: Identity,
-  runtime: Runtime,
-): void {
-  if (
-    !runtime.experimental?.systemPatternAutoUpdate ||
-    !runtime.experimental?.systemPatternAutoUpdateHome
-  ) {
-    return;
-  }
-  const homeSession: Session = {
-    as: identity,
-    space: runtime.userIdentityDID,
-  };
-  const homeCC = new PiecesController(new PieceManager(homeSession, runtime));
-  void checkUpdateInBackground(homeCC, runtime.userIdentityDID);
+/** Whether the home root must take the reconcile-before-start path. */
+export function shouldReconcileHomeRoot(
+  runtime: Pick<Runtime, "experimental">,
+): boolean {
+  return runtime.experimental?.systemPatternAutoUpdate === true &&
+    runtime.experimental?.systemPatternAutoUpdateHome === true;
 }
 
 /**
@@ -938,6 +919,10 @@ export class RuntimeProcessor {
     const value = mapCellRefsToSigilLinks(request.value);
     if (blind) {
       markUiInputBlindWriteTx(tx);
+      // Renderer-input provenance that survives to commit, so the scheduler can
+      // shape the resulting subscriber wake (timing side-channel mitigation,
+      // channels 4/5). A `blind` write is exactly a renderer `$value` input write.
+      markRendererInputTx(tx);
       // The resolved storage address of the write target; its parent is the
       // structural existence/shape precondition for the blind write.
       const link = cell.withTx(tx).resolveAsCell().getAsNormalizedFullLink();
@@ -1106,22 +1091,24 @@ export class RuntimeProcessor {
       .resolveAsCell();
     await defaultPatternCell.sync();
 
-    // Fast path: pattern already exists
+    // Fast path: pattern already exists. When home auto-update is enabled,
+    // deliberately fall through to PiecesController.ensureDefaultPattern():
+    // it reconciles the persisted identity before starting the root. Starting
+    // here first would recreate the stale-root bootstrap dependency.
     // (Value is a Cell itself, and pattern metadata means it's instantiated)
     // We've followed all the links from "defaultPattern", so our cell should
     // be the result cell for the default pattern.
-    if (getMetaLink(defaultPatternCell, "pattern")) {
+    const reconcileHome = shouldReconcileHomeRoot(this.runtime);
+    if (getMetaLink(defaultPatternCell, "pattern") && !reconcileHome) {
       await this.runtime.start(defaultPatternCell);
       await this.runtime.idle();
-      // The home root is held behind its own flag (pending the stable-addressing
-      // audit); the helper no-ops on this hot fast path unless enabled.
-      maybeCheckHomeUpdate(this.identity, this.runtime);
       return {
         cell: createCellRef(defaultPatternCell),
       };
     }
 
-    // Pattern doesn't exist - create it via home space PieceController
+    // Pattern is absent, or update-enabled and must be reconciled before start:
+    // use the home-space PiecesController for the complete ensure sequence.
     const homeSession: Session = {
       as: this.identity,
       space: this.runtime.userIdentityDID,
@@ -1184,10 +1171,6 @@ export class RuntimeProcessor {
   ): Promise<PageResponse> {
     const { cc } = this.getSpaceCtx(request.space);
     const piece = await cc.ensureDefaultPattern();
-    // Best-effort, non-blocking: roll the root forward if its toolshed serves a
-    // newer identity. The watcher re-instantiates in place; a failed check
-    // never breaks space open, and we never block the response on it.
-    void checkUpdateInBackground(cc, request.space);
     return {
       page: createPageRef(piece.getCell()),
     };
@@ -1209,9 +1192,10 @@ export class RuntimeProcessor {
     request: PageGetRequest,
   ): Promise<PageResponse> {
     const { pieceManager, cc } = this.getSpaceCtx(request.space);
+    const pageId = pageIdForRouting(request.pageId);
     const requestedCell = this.runtime.getCellFromEntityId(
       pieceManager.getSpace(),
-      entityIdFrom(request.pageId),
+      entityIdFrom(pageId),
     );
     await requestedCell.sync();
     const redirect = parseLink(
@@ -1248,7 +1232,7 @@ export class RuntimeProcessor {
     }
 
     const cell = await cc.manager().get(
-      request.pageId,
+      pageId,
       request.runIt ?? false,
     );
 
@@ -1263,7 +1247,7 @@ export class RuntimeProcessor {
     const { pieceManager } = this.getSpaceCtx(request.space);
     const cell = this.runtime.getCellFromEntityId(
       pieceManager.getSpace(),
-      entityIdFrom(request.pageId),
+      entityIdFrom(pageIdForRouting(request.pageId)),
     );
     await cell.sync();
     const slug = cell.getMetaRaw("slug");

@@ -367,9 +367,9 @@ describe("Engine.evaluateRecordGraph()", () => {
         {
           name: "/main.ts",
           contents: [
-            'import { __cf_data, nonPrivateRandom, safeDateNow } from "commonfabric";',
-            "const startedAt = safeDateNow();",
-            "const seed = nonPrivateRandom();",
+            'import { __cf_data } from "commonfabric";',
+            "const startedAt = 1_700_000_000_000;",
+            "const seed = 0.5;",
             "const snapshot = __cf_data({ startedAt, seed });",
             "export default snapshot;",
           ].join("\n"),

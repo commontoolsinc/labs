@@ -76,7 +76,7 @@ const join = handler<JoinEvent, {
   const participants = roster.key("participants");
   const already = participants.get().some((p) => equals(p.profile, profile));
   if (!already) {
-    participants.push({ profile, name: trimmed, joinedAt: safeDateNow() });
+    participants.push({ profile, name: trimmed, joinedAt: Date.now() });
   }
   viewer.set({ joined: true });
 });

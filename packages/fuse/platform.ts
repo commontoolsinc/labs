@@ -13,6 +13,8 @@ export interface StatOpts {
   size: number;
   uid?: number;
   gid?: number;
+  /** Modification time in milliseconds since the epoch. */
+  mtime?: number;
 }
 
 export interface EntryParamOpts {
@@ -32,6 +34,19 @@ export interface MountHandle {
   session: Deno.PointerValue;
   /** Channel pointer on macOS (FUSE v2), session pointer on Linux (FUSE v3). */
   notifyTarget: Deno.PointerValue;
+}
+
+/**
+ * Split a millisecond timestamp into the seconds and nanoseconds of a
+ * `struct timespec`. An undefined timestamp maps to the epoch (all zero), which
+ * is what an uninitialized stat buffer already holds.
+ */
+export function msToTimespec(ms?: number): { sec: bigint; nsec: bigint } {
+  if (ms === undefined) return { sec: 0n, nsec: 0n };
+  return {
+    sec: BigInt(Math.floor(ms / 1000)),
+    nsec: BigInt(Math.floor((ms % 1000) * 1_000_000)),
+  };
 }
 
 // --- Common FFI symbols (identical between FUSE v2 and v3) ---
@@ -102,13 +117,27 @@ export const COMMON_SYMBOLS = {
 
   // Kernel cache invalidation (FUSE 2.8+ / FUSE 3.x)
   // First param is channel (v2) or session (v3) — callers use MountHandle.notifyTarget.
+  //
+  // These run nonblocking, on an FFI thread rather than the isolate thread. On
+  // Linux, notify_inval_entry enters the kernel and takes the parent
+  // directory's inode lock for write; a concurrent lookup under that directory
+  // holds the same lock for read until the daemon answers it. The daemon
+  // answers requests on the isolate thread, so a synchronous notify would block
+  // that thread inside the kernel behind a lookup only that thread can complete,
+  // and the mount would stop serving. Running the notify off the isolate thread
+  // keeps the request path free to answer the lookup, which releases the read
+  // lock and lets the invalidation proceed. FUSE-T on macOS acts on neither
+  // call, whether it returns success or an ENOTCONN error, so the thread
+  // choice is immaterial there.
   fuse_lowlevel_notify_inval_entry: {
     parameters: ["pointer", "u64", "buffer", "usize"],
     result: "i32",
+    nonblocking: true,
   },
   fuse_lowlevel_notify_inval_inode: {
     parameters: ["pointer", "u64", "i64", "i64"],
     result: "i32",
+    nonblocking: true,
   },
 } as const;
 
@@ -138,6 +167,8 @@ export interface FusePlatform {
   FUSE_ARGS_STRUCT_SIZE: number;
   /** Byte offset of st_size within struct stat. */
   STAT_ST_SIZE_OFFSET: number;
+  /** Byte offset of st_mtim(espec) within struct stat. */
+  STAT_ST_MTIM_OFFSET: number;
 
   // Struct helpers
   writeStat(buf: ArrayBuffer, opts: StatOpts): void;

@@ -109,11 +109,10 @@ import {
   type URI,
 } from "./sigil-types.ts";
 import type { Runtime } from "./runtime.ts";
+import { createDataCellURI, findAndInlineDataURILinks } from "./data-uri.ts";
 import {
   areLinksSame,
-  createDataCellURI,
   createSigilLinkFromParsedLink,
-  findAndInlineDataURILinks,
   isCellLink,
   KeepAsCell,
   type NormalizedFullLink,
@@ -352,6 +351,7 @@ declare module "@commonfabric/api" {
         base?: Cell<any>;
         baseSpace?: MemorySpace;
         includeSchema?: boolean;
+        keepAsCell?: KeepAsCell;
       },
     ): SigilWriteRedirectLink;
     getRaw(options?: RawCellReadOptions): Immutable<T> | undefined;
@@ -388,8 +388,6 @@ declare module "@commonfabric/api" {
      * register a dependency that could re-trigger the writing computation.
      */
     setRawUntyped(value: FabricValue, onlyIfDifferent?: boolean): void;
-    freeze(reason: string): void;
-    isFrozen(): boolean;
     setSchema(newSchema: JSONSchema): void;
     connect(node: NodeRef): void;
     export(): {
@@ -480,8 +478,6 @@ const cellMethods = new Set<
   "setRaw",
   "setRawUntyped",
   "getArgumentCell",
-  "freeze",
-  "isFrozen",
   "setSchema",
   "connect",
   "export",
@@ -644,8 +640,6 @@ interface CauseContainer {
  */
 export class CellImpl<T extends FabricValue>
   implements ICell<T>, IStreamable<T> {
-  private readOnlyReason: string | undefined;
-
   // Stream-specific fields
   private listeners = new Set<
     (event: AnyCellWrapping<T>) => Cancel | undefined
@@ -1275,6 +1269,18 @@ export class CellImpl<T extends FabricValue>
     // Check if we're dealing with a stream
     if (this.isStream(resolvedToValueLink)) {
       // Stream behavior
+
+      // A lift (reactive computation) must be pure: emitting an event from a
+      // lift is a feedback loop that breaks reactive settling. Gate only the
+      // positive "lift" frame — internal/renderer event delivery and handler
+      // emits run in other frames and pass through.
+      if (getTopFrame()?.frameKind === "lift") {
+        throw new Error(
+          "Cannot emit an event from a lift/computed context: a lift must be " +
+            "pure. Send to streams from a handler instead.",
+        );
+      }
+
       const event = convertCellsToLinks(newValue) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
 
@@ -1755,7 +1761,9 @@ export class CellImpl<T extends FabricValue>
           this.runtime,
         )
       )
-      : array.indexOf(ref as ElemT);
+      // Primitives match by `Object.is` (`NaN` is findable; `0` and `-0` are
+      // distinct), unlike `indexOf`'s `===`.
+      : array.findIndex((item) => Object.is(item, ref));
     if (index === -1) {
       return;
     }
@@ -1787,7 +1795,8 @@ export class CellImpl<T extends FabricValue>
           this.tx,
           this.runtime,
         )
-        : item !== ref
+        // As in `remove()`: primitives match by `Object.is`.
+        : !Object.is(item, ref)
     ) as unknown as T;
     this.set(newArray);
   }
@@ -2087,6 +2096,7 @@ export class CellImpl<T extends FabricValue>
       base?: Cell<any>;
       baseSpace?: MemorySpace;
       includeSchema?: boolean;
+      keepAsCell?: KeepAsCell;
     },
   ): SigilWriteRedirectLink {
     return createSigilLinkFromParsedLink(this.link, {
@@ -2189,14 +2199,6 @@ export class CellImpl<T extends FabricValue>
     const link = parseLink(linkObj, this._link);
     if (link === undefined) return undefined;
     return this.runtime.getCellFromLink(link).asSchema<U>(schema);
-  }
-
-  freeze(reason: string): void {
-    this.readOnlyReason = reason;
-  }
-
-  isFrozen(): boolean {
-    return !!this.readOnlyReason;
   }
 
   getMetaRaw(
@@ -2672,7 +2674,12 @@ function subscribeToReferencedDocs<T>(
       const schema = link.schema;
       const needsTraversal = schema === undefined ||
         ContextualFlowControl.isTrueSchema(schema);
-      const newValue = validateAndTransform(runtime, wrappedTx, ref);
+      // sink() always kicks off sync before subscribing. Preserve that state
+      // on asCell projections created for the callback, just as get() does, so
+      // nested sinks reuse the root query instead of opening one per cut point.
+      const newValue = validateAndTransform(runtime, wrappedTx, ref, [], {
+        synced: true,
+      });
       if (needsTraversal && newValue !== undefined && newValue !== null) {
         deepTraverse(newValue);
       }

@@ -16,26 +16,56 @@ import {
 } from "./parse.ts";
 import { createMarkdownHighlighter, isMarkdownPath } from "./markdown.ts";
 
-/** How much a revert restores: the cursor's hunk, the cursor's file, or all. */
-export type RevertScope = "chunk" | "file" | "all";
+/** How much a revert restores: the cursor's hunk, the cursor's file, the commit
+ * message the cursor is in, or all. */
+export type RevertScope = "chunk" | "file" | "message" | "all";
 
 /** The outcome of revealing more context (a diff only): the grown diff and its
  * matching grown baseline, where the cursor moves, and — so the pager can hold
- * its viewport and selection steady across the change — where the revealed lines
- * were inserted (`insertedAt`, a line index into the pre-expansion text) and how
- * many there are (`inserted`). Lines at or below `insertedAt` shift down by
- * `inserted`; lines above it do not move. */
+ * its viewport and selection steady across the change — what moved where.
+ *
+ * `inserted` lines went in at `insertedAt`, a line of the pre-expansion text.
+ * `up` tells which edge of the hunk they went in at: its top when they came from
+ * above the hunk, its bottom when they came from below.
+ *
+ * `removedAt` is the `@@` header a join took out, also a line of the
+ * pre-expansion text, or null when nothing joined. Revealing the last file line
+ * between two hunks leaves them touching, and a header between lines that are
+ * neighbours in the file describes nothing: the two become one hunk.
+ *
+ * So a line `n` of the pre-expansion text is afterwards at
+ * `n + (n >= insertedAt ? inserted : 0) - (removedAt !== null && n > removedAt ?
+ * 1 : 0)`, and the line at `removedAt` is gone. */
 export interface ExpandResult {
   text: string;
   baseline: string;
   cursorLine: number;
   insertedAt: number;
   inserted: number;
+  up: boolean;
+  removedAt: number | null;
+  /** Which lines of the workspace file the reveal showed, as the file numbers
+   * them and counting from one: `from` to `to`, both ends included. */
+  revealed: { from: number; to: number };
+}
+
+/** How much context a hunk can still reveal each way, and what stops it where it
+ * cannot: `atFileTop` / `atFileBottom` say the hunk's range reaches the file's
+ * first or last line, so a zero there is the file running out. A zero without
+ * one is the neighbouring hunk butting against it, with nothing in between. */
+export interface HunkRoom {
+  up: number;
+  down: number;
+  atFileTop: boolean;
+  atFileBottom: boolean;
 }
 
 export interface EditableSource {
   /** A short label for the editable target (the filename), or null. */
   readonly label: string | null;
+  /** True for a diff view (whether or not it is editable), so the pager offers
+   * file folding. Absent/false for a plain file or a non-diff pipe. */
+  readonly isDiff?: boolean;
   /** False when there is no underlying file to edit. `reason` is shown when a
    * cursor move is attempted on a non-editable view. */
   readonly editable: boolean;
@@ -77,19 +107,38 @@ export interface EditableSource {
     cursorLine: number,
     scope: RevertScope,
   ): { text: string; cursorLine: number } | null;
-  /** Reveal more of the underlying file around the cursor's hunk (a diff only).
-   * Returns the grown diff text, the matching grown baseline (so revealing
-   * context is not itself an edit), and where the cursor moves — or null when
-   * there is nothing to expand. */
+  /** Reveal more of the underlying file around the hunk `cursorLine` sits in (a
+   * diff only). Returns the grown diff text, the matching grown baseline (so
+   * revealing context is not itself an edit), and where the cursor moves — or
+   * null when there is nothing to expand. `up` names the edge to grow, and the
+   * call fails rather than growing the other one when that edge has run out;
+   * without it the boundary nearest `cursorLine` grows, falling back to the
+   * other. */
   expandContext?(
     current: string,
     baseline: string,
     cursorLine: number,
+    up?: boolean,
   ): ExpandResult | null;
+  /** How much context each hunk of `current` could still reveal, keyed by the
+   * line its header sits on. The pager offers Ctrl-L only where the edge the
+   * user is looking at has room, and says what stopped it where it has not. */
+  expandRoom?(current: string): ReadonlyMap<number, HunkRoom>;
   /** Constrains where editing may happen. Present only for a diff, whose lines
    * map to fixed file lines: edits stay within a line, past the diff marker. A
    * plain file has no policy and is edited freely. */
   readonly policy?: EditPolicy;
+  /** When an edited commit message (in `git show` output) differs from its
+   * original and belongs to the HEAD commit, the commit whose message a save
+   * would amend — for the confirmation prompt. Null when no such change is
+   * pending. Absent on sources that never edit a commit message. */
+  pendingAmend?(
+    baseline: string,
+    current: string,
+  ): { sha: string; subject: string } | null;
+  /** Amend the HEAD commit's message from the edited text, returning a status
+   * line. Called only after the save has been confirmed. */
+  amendCommit?(baseline: string, current: string): string;
   /** The path of the backing file, when there is a single one. The file picker
    * opens in its directory. */
   readonly path?: string;
@@ -97,17 +146,34 @@ export interface EditableSource {
 
 /**
  * The editing constraints of a diff view. A line is editable past its marker
- * when it is a context or added line; removed lines and hunk/file headers are
- * not. Editability is decided from the line's own text, so it survives lines
+ * only when it is a context or added line inside a hunk whose new side matched
+ * a file on disk — the change it would make can then be written back. A removed
+ * line in such a hunk may be resurrected intact, but cannot be edited as text.
+ * Hunk/file headers and any text that is not part of a savable hunk (a
+ * commit-message preamble, an unverified hunk) are refused. Editability is
+ * decided from the whole diff and the line's position, so it survives lines
  * being added or removed above it.
  */
 export interface EditPolicy {
-  /** The first editable column on a line given its text (just past the diff
-   * marker), or null when the line is not editable. */
-  editStart(lineText: string): number | null;
-  /** The marker a newly inserted line is given (a diff adds an added line, so
-   * `"+"`), keeping the diff well-formed as the user adds lines. */
+  /** The first editable column on the line at `row` (just past the diff marker,
+   * or past a commit message's indent), or null when the line is not editable.
+   * Takes the whole set of lines because editability depends on the row's
+   * region. */
+  editStart(lines: readonly string[], row: number): number | null;
+  /** What the row at `row` belongs to: a diff hunk's new side (edited as a
+   * removed/added pair), a removed line that can be resurrected, an editable
+   * commit message (edited as plain indented text), or neither. Drives how the
+   * editor treats an edit there. */
+  regionKind(
+    lines: readonly string[],
+    row: number,
+  ): "hunk" | "removed" | "message" | null;
+  /** The marker a newly inserted line is given inside a hunk (a diff adds an
+   * added line, so `"+"`), keeping the diff well-formed as the user adds lines.
+   * A commit message uses its own indent instead. */
   readonly insertPrefix: string;
+  /** The indent a new commit-message line is given (git's four spaces). */
+  readonly messageIndent: string;
 }
 
 /** An on-disk file: the document text is the file, edits write straight back. */

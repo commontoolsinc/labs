@@ -254,7 +254,7 @@ const logEmail = handler<
     route: string;
   }
 >(({ recipient, subject, body, result }, { emails, route }) => {
-  const timestamp = new Date(safeDateNow()).toISOString();
+  const timestamp = new Date().toISOString();
   // Flatten the link form to a display string so SentEmail.body stays string-
   // typed and the renderer doesn't have to branch.
   const displayBody = typeof body === "string"

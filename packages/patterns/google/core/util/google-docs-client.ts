@@ -56,7 +56,18 @@ export interface GoogleDocsClientConfig {
 // HELPERS
 // ============================================================================
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+// The SES pattern sandbox endows no timers, so a real delay happens only in
+// host contexts that expose setTimeout; in-sandbox this resolves immediately
+// rather than throwing ReferenceError (retries stay ~1s apart anyway via the
+// gated fetch's grid-aligned settlement).
+const sleep = (ms: number): Promise<void> => {
+  if (ms <= 0) return Promise.resolve();
+  const timer = (globalThis as { setTimeout?: typeof setTimeout }).setTimeout;
+  if (typeof timer !== "function") return Promise.resolve();
+  return new Promise((resolve) => {
+    timer(resolve, ms);
+  });
+};
 
 function debugLog(debugMode: boolean, ...args: unknown[]) {
   if (debugMode) console.log("[GoogleDocsClient]", ...args);

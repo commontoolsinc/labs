@@ -10,10 +10,7 @@ import type { CellScope } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
-import {
-  schemaWithOpenObjects,
-  validateAgainstSchema,
-} from "../cfc/schema-sanitization.ts";
+import { validateSchemaValue } from "../cfc/schema-sanitization.ts";
 import {
   isProtectedToolshedFirstPartyRoute,
   isToolshedApiOrigin,
@@ -151,7 +148,7 @@ async function processJsonResponse(
 ): Promise<unknown> {
   const data = await response.json();
   if (schema !== undefined) {
-    const failure = validateAgainstSchema(schemaWithOpenObjects(schema), data);
+    const failure = validateSchemaValue(schema, data);
     if (failure !== undefined) {
       throw new FetchResponseSchemaMismatch(
         `fetchJson result failed schema validation: ${failure}`,

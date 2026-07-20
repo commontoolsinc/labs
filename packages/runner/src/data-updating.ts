@@ -31,7 +31,6 @@ import {
   areMaybeLinkAndNormalizedLinkSame,
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
-  findAndInlineDataURILinks,
   isCellLink,
   isPrimitiveCellLink,
   isSigilLink,
@@ -39,6 +38,7 @@ import {
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
+import { findAndInlineDataURILinks } from "./data-uri.ts";
 import {
   type CfcCellLinkRefPayload,
   linkCfcLabelView,

@@ -79,8 +79,7 @@ interface State {
 
 // ============ HELPERS ============
 
-const getTodayDate = (): string =>
-  new Date(safeDateNow()).toISOString().split("T")[0];
+const getTodayDate = (): string => new Date().toISOString().split("T")[0];
 
 const toCents = (n: number): number => Math.round((n || 0) * 100);
 

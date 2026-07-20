@@ -142,7 +142,7 @@ const _postTelemetryEvent = handler<
     scope,
     tag: event.tag,
     action: event.action,
-    timestamp: safeDateNow(),
+    timestamp: Date.now(),
   };
 
   // Stream projected from the aggregator is a Cell containing the stream - call .send() directly
@@ -175,7 +175,7 @@ const onRemoveTag = handler<
         scope,
         tag: removedTag,
         action: "remove",
-        timestamp: safeDateNow(),
+        timestamp: Date.now(),
       });
     } catch (e) {
       console.warn("[folksonomy-tags] Failed to post remove event:", e);
@@ -218,7 +218,7 @@ const onTagsChanged = handler<
           scope,
           tag,
           action: "add",
-          timestamp: safeDateNow(),
+          timestamp: Date.now(),
         });
       }
     } catch (e) {

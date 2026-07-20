@@ -1,4 +1,8 @@
 import type { LLMNativeModelToolId } from "@commonfabric/llm/types";
+import {
+  defaultHarnessFetch,
+  type HarnessFetch,
+} from "../contracts/http-fetch.ts";
 
 export interface OpenAICompatibleGatewayClientOptions {
   baseUrl: string;
@@ -7,7 +11,7 @@ export interface OpenAICompatibleGatewayClientOptions {
   apiKeySource?: string;
   chatCompletionTransportRetries?: number;
   chatCompletionRetryDelayMs?: number;
-  fetchFn?: typeof fetch;
+  fetchFn?: HarnessFetch;
 }
 
 export type OpenAIChatMessageRole = "system" | "user" | "assistant" | "tool";
@@ -281,7 +285,7 @@ export class OpenAICompatibleGatewayClient {
   readonly authMode: "bearer" | "none";
   readonly apiKey?: string;
   readonly apiKeySource?: string;
-  readonly #fetchFn: typeof fetch;
+  readonly #fetchFn: HarnessFetch;
   readonly #chatCompletionTransportRetries: number;
   readonly #chatCompletionRetryDelayMs: number;
 
@@ -290,7 +294,7 @@ export class OpenAICompatibleGatewayClient {
     this.authMode = options.authMode ?? "bearer";
     this.apiKey = options.apiKey;
     this.apiKeySource = options.apiKeySource;
-    this.#fetchFn = options.fetchFn ?? fetch;
+    this.#fetchFn = options.fetchFn ?? defaultHarnessFetch;
     this.#chatCompletionTransportRetries = nonNegativeIntegerOrDefault(
       options.chatCompletionTransportRetries,
       DEFAULT_CHAT_COMPLETION_TRANSPORT_RETRIES,

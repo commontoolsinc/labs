@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { getPatternSource, Runtime } from "@commonfabric/runner";
+import {
+  getPatternIdentityRef,
+  getPatternSource,
+  Runtime,
+} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PieceManager } from "../src/manager.ts";
@@ -103,5 +107,14 @@ describe("ensureDefaultPattern stamps patternSource", () => {
     const piece = await controller.ensureDefaultPattern();
     const source = getPatternSource(piece.getCell());
     expect(source).toBe(DEFAULT_APP_PATTERN_URL);
+    const identityRef = getPatternIdentityRef(piece.getCell())!;
+    expect(await piece.getPatternRef()).toEqual({
+      ...identityRef,
+      source: {
+        ref: `cf:pattern:${identityRef.identity}`,
+        entry: DEFAULT_APP_PATTERN_URL,
+        origin: DEFAULT_APP_PATTERN_URL,
+      },
+    });
   });
 });

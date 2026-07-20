@@ -1,9 +1,86 @@
 import { assert, assertEquals } from "@std/assert";
 import {
+  BasicTracerProvider,
+  BatchSpanProcessor,
+  InMemorySpanExporter,
+  type ReadableSpan,
+} from "@opentelemetry/sdk-trace-base";
+import { OpenInferenceBatchSpanProcessor } from "@arizeai/openinference-vercel";
+import {
   getTracerProvider,
   initOpenTelemetry,
+  provider,
   shutdownOpenTelemetry,
 } from "@/lib/otel.ts";
+
+// The provider takes the configured resource as given, so the service
+// attributes and the SDK's own defaults have to be merged before it is handed
+// over. Both halves are read off a span the real provider produced, since a
+// span carries the resource the exporter will stamp on it. The span is left
+// unended so nothing is queued for export.
+Deno.test("spans carry both the service attributes and the SDK defaults", () => {
+  const span = provider.getTracer("otel-test").startSpan(
+    "resource-probe",
+  ) as unknown as ReadableSpan;
+  const attributes = span.resource.attributes;
+
+  assertEquals(attributes["service.name"], "toolshed");
+  assertEquals(attributes["service.version"], "1.0.0");
+
+  // Dropping these still exports spans, just anonymous ones, so nothing else
+  // here would notice their absence.
+  assertEquals(attributes["telemetry.sdk.language"], "nodejs");
+  assertEquals(attributes["telemetry.sdk.name"], "opentelemetry");
+  assert(
+    typeof attributes["telemetry.sdk.version"] === "string",
+    "telemetry.sdk.version should be set by the SDK's default resource",
+  );
+});
+
+// `OpenInferenceBatchSpanProcessor` subclasses `BatchSpanProcessor`, but
+// @arizeai/openinference-vercel imports @opentelemetry/sdk-trace-base without
+// declaring it as a dependency, and the range it names in its development
+// dependencies stops below the major this workspace resolves. Which copy it
+// subclasses is therefore decided by the workspace import map rather than by
+// anything the package states, and the span export above depends on the answer.
+Deno.test("the OpenInference processor extends the tracer SDK in use", () => {
+  assert(
+    OpenInferenceBatchSpanProcessor.prototype instanceof BatchSpanProcessor,
+    "OpenInferenceBatchSpanProcessor resolved a different copy of " +
+      "@opentelemetry/sdk-trace-base than the one the providers use",
+  );
+});
+
+Deno.test("spans pass through the OpenInference processor to the exporter", async () => {
+  const exporter = new InMemorySpanExporter();
+  const spanProcessor = new OpenInferenceBatchSpanProcessor({
+    exporter,
+    spanFilter: () => true,
+  });
+  const testProvider = new BasicTracerProvider({
+    spanProcessors: [spanProcessor],
+  });
+  try {
+    testProvider.getTracer("otel-test").startSpan("passthrough").end();
+    await testProvider.forceFlush();
+
+    const spans = exporter.getFinishedSpans();
+    assertEquals(spans.length, 1);
+    assertEquals(spans[0].name, "passthrough");
+  } finally {
+    await testProvider.shutdown();
+  }
+});
+
+// The `ai` package collects no spans until a telemetry integration is
+// registered, and it reports nothing when none is: the LLM spans simply stop
+// being produced. Importing this module is what registers ours.
+Deno.test("importing the module registers an AI SDK telemetry integration", () => {
+  assert(
+    (globalThis.AI_SDK_TELEMETRY_INTEGRATIONS?.length ?? 0) > 0,
+    "no AI SDK telemetry integration registered; LLM spans would not be collected",
+  );
+});
 
 Deno.test("shutdownOpenTelemetry is a no-op before init", async () => {
   assertEquals(getTracerProvider(), undefined);

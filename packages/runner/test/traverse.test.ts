@@ -14,6 +14,7 @@ import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import {
   canBranchMatch,
+  combineSchema,
   CompoundCycleTracker,
   createDefaultTraversalContext,
   createTraversalContext,
@@ -26,6 +27,7 @@ import {
   PointerCycleTracker,
   SchemaObjectTraverser,
   schemaTrackerCoversSelector,
+  type TraversalContext,
 } from "../src/traverse.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
@@ -39,11 +41,12 @@ import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
 function getTraverser(
   store: Map<string, Revision<State>>,
   selector: SchemaPathSelector,
+  context: TraversalContext = createDefaultTraversalContext(),
 ): SchemaObjectTraverser<FabricValue> {
   const manager = new StoreObjectManager(store);
   const managedTx = new ManagedStorageTransaction(manager);
   const tx = new ExtendedStorageTransaction(managedTx);
-  return new SchemaObjectTraverser(tx, selector);
+  return new SchemaObjectTraverser(tx, selector, context);
 }
 
 describe("SchemaObjectTraverser.traverseDAG", () => {
@@ -2606,6 +2609,76 @@ describe("link schema path narrowing", () => {
     };
   }
 
+  function makeRecursiveFriendsGraph(
+    prefix: string,
+    linkFriendsRequired: boolean,
+  ) {
+    const store = new Map<string, Revision<State>>();
+    const rootUri = `of:${prefix}-friends-root` as URI;
+    const directFriendsUri = `of:${prefix}-direct-friends` as URI;
+    const directFriendUri = `of:${prefix}-direct-friend` as URI;
+    const nestedFriendsUri = `of:${prefix}-nested-friends` as URI;
+    const secondDegreeFriendUri = `of:${prefix}-second-degree-friend` as URI;
+
+    const fullUserSchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { id: { type: "string" } },
+            required: ["id"],
+          },
+        },
+      },
+      required: linkFriendsRequired ? ["id", "friends"] : ["id"],
+    } as const satisfies JSONSchema;
+    const fullFriendsSchema = {
+      type: "array",
+      items: fullUserSchema,
+    } as const satisfies JSONSchema;
+
+    const rootValue = {
+      id: "root",
+      friends: makeLink(directFriendsUri, [], fullFriendsSchema),
+    };
+    const directFriendsValue = [
+      makeLink(directFriendUri, [], fullUserSchema),
+    ];
+    const directFriendValue = {
+      id: "direct",
+      friends: makeLink(nestedFriendsUri, [], fullFriendsSchema),
+    };
+    const nestedFriendsValue = [
+      makeLink(secondDegreeFriendUri, [], fullUserSchema),
+    ];
+
+    putDoc(store, rootUri, rootValue);
+    putDoc(store, directFriendsUri, directFriendsValue);
+    putDoc(store, directFriendUri, directFriendValue);
+    putDoc(store, nestedFriendsUri, nestedFriendsValue);
+    putDoc(store, secondDegreeFriendUri, {
+      id: "second-degree",
+      friends: [],
+    });
+
+    return {
+      store,
+      rootUri,
+      directFriendsUri,
+      directFriendUri,
+      nestedFriendsUri,
+      secondDegreeFriendUri,
+      fullUserSchema,
+      fullFriendsSchema,
+      rootValue,
+      directFriendValue,
+      trackerKey: (id: URI) => `${SPACE}/space/${id}`,
+    };
+  }
+
   const cases: Array<{
     name: string;
     targetPath: string[];
@@ -2749,6 +2822,210 @@ describe("link schema path narrowing", () => {
 
     expect(ok).toBeUndefined();
     expect(error).toBeDefined();
+  });
+
+  // A graph can contain records of one recursive type: for example, every
+  // User has a friends Cell whose elements are links to other Users. Each
+  // link legitimately carries the full User schema, including its required
+  // friends property. A query for "me and my direct friends" must therefore
+  // override that nested friends edge with an opaque boundary; otherwise the
+  // schema carried by each friend link makes traversal continue to friends of
+  // friends (and then onward through the recursive graph).
+  //
+  // The boundary should retain the direct friend's raw friends pointer in the
+  // query result, but must not load or subscribe to the pointer's target. The
+  // non-opaque control at the end proves that the deeper documents are
+  // reachable and are excluded specifically because of the boundary.
+  it("limits a recursive friends query to one hop with an opaque boundary", () => {
+    const {
+      store,
+      rootUri,
+      directFriendsUri,
+      directFriendUri,
+      nestedFriendsUri,
+      secondDegreeFriendUri,
+      fullUserSchema,
+      fullFriendsSchema,
+      rootValue,
+      directFriendValue,
+      trackerKey,
+    } = makeRecursiveFriendsGraph("opaque", true);
+
+    const directFriendSchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: {
+          type: "array",
+          items: fullUserSchema,
+          asCell: ["opaque"],
+        },
+      },
+      required: ["id", "friends"],
+    } as const satisfies JSONSchema;
+    const querySchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: {
+          type: "array",
+          items: directFriendSchema,
+        },
+      },
+      required: ["id", "friends"],
+    } as const satisfies JSONSchema;
+    const context = createDefaultTraversalContext();
+    const traverser = getTraverser(
+      store,
+      { path: ["value"], schema: querySchema },
+      context,
+    );
+
+    const { ok: result, error } = traverser.traverse({
+      address: {
+        space: SPACE,
+        id: rootUri,
+        type: TYPE,
+        path: ["value"],
+      },
+      value: rootValue,
+    });
+
+    expect(error).toBeUndefined();
+    expect(result).toEqual({
+      id: "root",
+      friends: [{ id: "direct", friends: directFriendValue.friends }],
+    });
+
+    expect(context.schemaTracker.has(trackerKey(rootUri))).toBe(true);
+    expect(context.schemaTracker.has(trackerKey(directFriendsUri))).toBe(true);
+    expect(context.schemaTracker.has(trackerKey(directFriendUri))).toBe(true);
+    expect(context.schemaTracker.has(trackerKey(nestedFriendsUri))).toBe(false);
+    expect(context.schemaTracker.has(trackerKey(secondDegreeFriendUri))).toBe(
+      false,
+    );
+
+    // Without the explicit boundary, the same schema-bearing graph expands
+    // through the direct friend's friends list to the second-degree friend.
+    const nonOpaqueDirectFriendSchema = {
+      ...directFriendSchema,
+      properties: {
+        ...directFriendSchema.properties,
+        friends: fullFriendsSchema,
+      },
+    } as const satisfies JSONSchema;
+    const nonOpaqueQuerySchema = {
+      ...querySchema,
+      properties: {
+        ...querySchema.properties,
+        friends: {
+          type: "array",
+          items: nonOpaqueDirectFriendSchema,
+        },
+      },
+    } as const satisfies JSONSchema;
+    const nonOpaqueContext = createDefaultTraversalContext();
+    const nonOpaqueTraverser = getTraverser(
+      store,
+      { path: ["value"], schema: nonOpaqueQuerySchema },
+      nonOpaqueContext,
+    );
+    nonOpaqueTraverser.traverse({
+      address: {
+        space: SPACE,
+        id: rootUri,
+        type: TYPE,
+        path: ["value"],
+      },
+      value: rootValue,
+    });
+
+    expect(nonOpaqueContext.schemaTracker.has(trackerKey(nestedFriendsUri)))
+      .toBe(true);
+    expect(
+      nonOpaqueContext.schemaTracker.has(trackerKey(secondDegreeFriendUri)),
+    ).toBe(true);
+  });
+
+  // This parent schema corresponds to the projected type
+  // `{ id: string; friends?: never }`. The stored link still carries a full
+  // User schema with an optional friends list. Intersecting the two should
+  // keep `friends: false` without making it required. Traversal can then omit
+  // that property while retaining the direct friend record itself.
+  it("omits an optional nested friends property narrowed to false", () => {
+    const {
+      store,
+      rootUri,
+      directFriendsUri,
+      directFriendUri,
+      nestedFriendsUri,
+      secondDegreeFriendUri,
+      fullUserSchema,
+      rootValue,
+      trackerKey,
+    } = makeRecursiveFriendsGraph("false-schema", false);
+    const directFriendSchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: false,
+      },
+      required: ["id"],
+    } as const satisfies JSONSchema;
+
+    expect(combineSchema(directFriendSchema, fullUserSchema)).toEqual({
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: false,
+      },
+      required: ["id"],
+    });
+
+    const querySchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: {
+          type: "array",
+          items: directFriendSchema,
+        },
+      },
+      required: ["id", "friends"],
+    } as const satisfies JSONSchema;
+    const context = createDefaultTraversalContext();
+    const traverser = getTraverser(
+      store,
+      { path: ["value"], schema: querySchema },
+      context,
+    );
+
+    const { ok: result, error } = traverser.traverse({
+      address: {
+        space: SPACE,
+        id: rootUri,
+        type: TYPE,
+        path: ["value"],
+      },
+      value: rootValue,
+    });
+
+    expect(error).toBeUndefined();
+    expect(result).toEqual({
+      id: "root",
+      friends: [{ id: "direct" }],
+    });
+    const directFriend = (result as { friends: Record<string, unknown>[] })
+      .friends[0];
+    expect(Object.hasOwn(directFriend, "friends")).toBe(false);
+
+    expect(context.schemaTracker.has(trackerKey(rootUri))).toBe(true);
+    expect(context.schemaTracker.has(trackerKey(directFriendsUri))).toBe(true);
+    expect(context.schemaTracker.has(trackerKey(directFriendUri))).toBe(true);
+    expect(context.schemaTracker.has(trackerKey(nestedFriendsUri))).toBe(false);
+    expect(context.schemaTracker.has(trackerKey(secondDegreeFriendUri))).toBe(
+      false,
+    );
   });
 });
 
@@ -3890,10 +4167,9 @@ describe("SchemaObjectTraverser unknown type handling", () => {
 });
 
 describe("canBranchMatch NaN and Infinity type handling", () => {
-  // getJsonType uses isFiniteNumber, so NaN/Infinity are not typed as "number".
-  // A schema requiring type "number" should therefore not exclude NaN/Infinity
-  // (canBranchMatch returns true — let traversal deal with it) rather than
-  // incorrectly filtering them out.
+  // NaN and the infinities are first-class stored numbers, so getJsonType
+  // types them as "number": a "number" branch accepts them and a
+  // non-number branch rejects them, exactly like any other number.
   it("does not reject NaN against a {type: 'number'} branch", () => {
     expect(canBranchMatch({ type: "number" }, NaN)).toBe(true);
   });
@@ -3914,10 +4190,9 @@ describe("canBranchMatch NaN and Infinity type handling", () => {
     expect(canBranchMatch({ type: "number" }, 42)).toBe(true);
   });
 
-  it("does not reject NaN against a {type: 'string'} branch (getJsonType returns null for NaN)", () => {
-    // NaN falls through all isFiniteNumber/isString/etc. checks so getJsonType
-    // returns null, and canBranchMatch conservatively allows the branch.
-    expect(canBranchMatch({ type: "string" }, NaN)).toBe(true);
+  it("rejects NaN against a {type: 'string'} branch", () => {
+    // NaN is a number, so a string-only branch definitively excludes it.
+    expect(canBranchMatch({ type: "string" }, NaN)).toBe(false);
   });
 
   it("rejects a finite number against a {type: 'string'} branch", () => {

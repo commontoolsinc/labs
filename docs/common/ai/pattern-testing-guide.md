@@ -64,13 +64,13 @@ The usual shape is:
 
 1. instantiate the pattern under test
 2. define actions that trigger output streams or bound handlers
-3. define assertions as `computed(() => boolean)`
+3. define assertions as `assert(() => boolean)`
 4. return the test sequence in order
 
 ```tsx
 // Shown at module scope.
 
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, pattern } from "commonfabric";
 import Pattern from "./pattern.tsx";
 
 export default pattern(() => {
@@ -80,8 +80,8 @@ export default pattern(() => {
     instance.someAction.send();
   });
 
-  const assertInitialState = computed(() => instance.someField === expectedValue);
-  const assertAfterAction = computed(() => instance.someField === newValue);
+  const assertInitialState = assert(() => instance.someField === expectedValue);
+  const assertAfterAction = assert(() => instance.someField === newValue);
 
   return {
     tests: [
@@ -95,6 +95,9 @@ export default pattern(() => {
 
 ## Key Points
 
+- write new assertions with `assert()` rather than `computed()`; a step accepts
+  either, and most existing test patterns still use `computed()`, but a failed
+  `assert()` reports its operands and a failed `computed()` cannot
 - trigger actions with `.send()` when the output exposes streams
 - use direct property access for assertions rather than `.get()` unless the API
   truly requires writable access
@@ -102,6 +105,45 @@ export default pattern(() => {
   transition
 - test a sub-pattern before building the next dependent layer when that helps
   isolate failures
+
+## Reading a Failed Assertion
+
+An `assert()` failure names the operands and the values they held:
+
+```
+✗ assertion_2 (after action_1)
+    instance.total <= budget
+      instance.total = 45
+      budget         = 30
+```
+
+Read it before reaching for other tools. It tells you which side was wrong and
+by how much, which is usually enough to locate the bug — no deploy, no
+inspection of the running piece. A `computed()` assertion cannot report this,
+because its comparison ran inside the closure and only the boolean survived:
+
+```
+✗ assertion_2 (after action_1)
+    Expected true, got false
+```
+
+A failure that reports the verdict ahead of the source had no operands worth
+recording:
+
+```
+✗ assertion_2 (after action_1)
+    Expected true, got false: instance.ready
+```
+
+Usually that means the assertion was a bare value rather than a comparison or
+call. Compare against what you expect (`assert(() => instance.ready === true)`)
+and the operands appear. The same happens when every operand is a literal,
+since a literal renders to the text you already wrote.
+
+Use `assert()` only for a test step's `assertion`. It carries a record rather
+than a bare boolean, and a record is always truthy — so an `assert()` used as a
+condition, in `ifElse()` or a JSX branch, would always take the true branch.
+Use `computed()` for a reactive boolean you intend to read as a value.
 
 ## Headless VDOM Materialization
 
@@ -276,12 +318,13 @@ Key points:
 
 ## Testing Time and Randomness
 
-If a pattern uses `safeDateNow()` or `nonPrivateRandom()`, keep the assertions
-deterministic:
+If a pattern reads the clock with `Date.now()`/`new Date()` or draws entropy
+with `Math.random()` (allowed inside a handler, coarsened to one-second
+resolution for the clock), keep the assertions deterministic:
 
 - prefer asserting that a value was set, changed, or has the expected shape
-- avoid calling `safeDateNow()`, `nonPrivateRandom()`, `Date.now()`, or
-  `Math.random()` inside a test `computed()` assertion
+- avoid calling `Date.now()` or `Math.random()` inside a test `computed()`
+  assertion — those built-ins throw a `TimeCapabilityError` in a computed
 - if you need an exact value, capture it in the action under test and assert
   against the captured result rather than recomputing it in the assertion
 

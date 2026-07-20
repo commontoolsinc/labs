@@ -53,9 +53,7 @@ note under legacy).
 
 Capability and app demos (root files): `annotation.tsx`,
 `annotation-manager.tsx`, `aside.tsx`, `bookmarks.tsx`, `chatbot.tsx`,
-`cheeseboard.tsx`, `compiler.tsx` (known issue: the December 2025 survey in
-`docs/history/packages/patterns/PREEXISTING_BUGS.md` found its "Navigate To
-Piece" button broken; unverified since), `deep-research.tsx`, `dice.tsx` (+
+`cheeseboard.tsx`, `compiler.tsx`, `deep-research.tsx`, `dice.tsx` (+
 `dice-handlers.ts`), `group-chat-lobby.tsx`, `group-chat-room.tsx`, `image.tsx`,
 `image-analysis.tsx`, `link-preview.tsx`, `map-demo.tsx`, `mobile-app-demo.tsx`,
 `pattern-index.tsx`, `profile-roster-live-demo.tsx` (demo: live multi-user
@@ -195,12 +193,15 @@ addPiece.send({ piece: ann });
 **Topics — a multi-user tracker over #topic pieces** (durable units of shared
 attention; CT-1878): title, living body document, flat chronological comment
 thread, typed links out. Deliberately minimal — no statuses, labels, or
-assignees. Demonstrates: reading-list-style piece-in-list composition, `PerUser`
-display-name on a shared piece, mergeable comment appends, session-scoped
-drafts, `multiUserTest` coverage.
+assignees. The board derives the corpus's prose reference graph (topic fids
+pasted in bodies/comments/link URLs → navigable crossref chips, never
+persisted). Demonstrates: reading-list-style piece-in-list composition,
+`PerUser` display-name on a shared piece, mergeable comment appends,
+session-scoped drafts, read-side derived backlinks over sibling pieces
+(`resolveAsCell().entityId` for piece identity), `multiUserTest` coverage.
 
 **Keywords:** topics, issues, tracker, discussion, thread, comments, multi-user,
-PerUser, mergeable
+PerUser, mergeable, backlinks, crossrefs, references, graph
 
 ### Input Schema
 
@@ -209,6 +210,8 @@ interface TopicsInput {
   topics?: Writable<TopicPiece[] | Default<[]>>;
   myName?: PerUser<Writable<string | Default<"">>>;
 }
+// TopicInput additionally takes mentionable?: Writable<TopicPiece[]> — the
+// board's own list, wired at creation, for detail-page Connections.
 ```
 
 ### Output Schema
@@ -218,6 +221,7 @@ interface TopicsOutput {
   topics: TopicPiece[];
   mentionable: TopicPiece[];
   topicCount: number;
+  crossrefs: TopicCrossref[]; // { fid, topic, refsOut, referencedBy }
   myName: string;
   addTopic: Stream<{ title: string }>;
   setMyName: Stream<{ name: string }>;
@@ -1172,6 +1176,31 @@ type ImageChatOutput = {
   pending: boolean | undefined;
 };
 ```
+
+## `examples/clock.tsx`
+
+Example pattern: a live wall clock driven by the reactive `#now` wish
+(`wish({ query: "#now/1" })`, ticking once per second). Shows the sanctioned way
+to read time in reactive code — the capability gate forbids `Date.now()` /
+`new Date()` in a lift/computed/pattern-body — plus the `null`-until-resolved
+load-window guard. `new Date(ms)` with an explicit argument stays fine for
+formatting.
+
+**Keywords:** now, wish, clock, time, reactive, capability-gate, timing
+
+## `examples/reactive-now.tsx`
+
+Example pattern demonstrating both pattern-facing surfaces of the timing
+side-channel mitigations. Reading time: a one-shot `#now` snapshot (load time),
+a ticking `#now/1` clock (current time), and a `#now`-derived "N seconds ago"
+elapsed label — a worked reference for migrating clock reads off the forbidden
+body-level `Date.now()` onto `#now`. Receiving input: a "Tap" button and a
+`$value` text box, so a live browser can watch the token-bucket delivery shaping
+— bursts are realtime, only sustained mashing/typing is throttled, and nothing
+is dropped.
+
+**Keywords:** now, wish, time, elapsed, relative-time, reactive,
+capability-gate, timing, delivery-shaping, token-bucket, input
 
 ## `examples/profile-aware-writer.tsx`
 

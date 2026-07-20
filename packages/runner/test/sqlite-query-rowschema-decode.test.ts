@@ -22,27 +22,7 @@ import { isCell } from "../src/cell.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { encodeCfLinkValue } from "../src/builtins/sqlite/cf-link.ts";
-
-// deno-lint-ignore no-explicit-any
-async function waitUntil<T>(
-  runtime: Runtime,
-  cell: any,
-  pred: (v: T) => boolean,
-  iterations = 400,
-): Promise<T> {
-  const cancel = cell.sink(() => {}) as () => void;
-  try {
-    for (let i = 0; i < iterations; i++) {
-      await runtime.idle();
-      const v = cell.get() as T;
-      if (pred(v)) return v;
-      await new Promise((r) => setTimeout(r, 15));
-    }
-    throw new Error("timeout waiting for sqlite result");
-  } finally {
-    cancel?.();
-  }
-}
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 
 type QueryState = {
   rows: Array<Record<string, unknown>>;
@@ -152,10 +132,10 @@ describe("sqliteQuery rowSchema-driven _cf_link decode (Piece A runtime)", () =>
     const result = runtime.run(tx2, p, {}, resultCell);
     await tx2.commit();
 
-    const v = await waitUntil<QueryState>(
+    const v = await waitForCellValue<QueryState>(
       runtime,
       result,
-      (s) => Array.isArray(s.rows) && s.rows.length === 1,
+      (s) => s !== undefined && Array.isArray(s.rows) && s.rows.length === 1,
     );
     expect(v.rows).toHaveLength(1);
 

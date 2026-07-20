@@ -823,17 +823,20 @@ export type AddIntegrity<T, X extends readonly unknown[]> = Cfc<T, {
   addIntegrity: X;
 }>;
 
+/** Runtime-resolved placeholder for the principal executing the pattern. */
+export type CurrentPrincipal = { readonly __ctCurrentPrincipal: true };
+
 export type RepresentsCurrentUser<T> = Cfc<T, {
   addIntegrity: readonly [{
     readonly kind: "represents-principal";
-    readonly subject: { readonly __ctCurrentPrincipal: true };
+    readonly subject: CurrentPrincipal;
   }];
 }>;
 
 export type AuthoredByCurrentUser<T> = Cfc<T, {
   addIntegrity: readonly [{
     readonly kind: "authored-by";
-    readonly subject: { readonly __ctCurrentPrincipal: true };
+    readonly subject: CurrentPrincipal;
   }];
 }>;
 

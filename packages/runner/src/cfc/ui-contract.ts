@@ -1,12 +1,8 @@
 import { isRecord } from "@commonfabric/utils/types";
 import type { CellScope, JSONSchema } from "../builder/types.ts";
-import {
-  findAndInlineDataURILinks,
-  type NormalizedFullLink,
-  parseLink,
-} from "../link-utils.ts";
+import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { getJSONFromDataURI } from "../uri-utils.ts";
+import { findAndInlineDataURILinks, getJSONFromDataURI } from "../data-uri.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import type { CfcAddress } from "./types.ts";
 import { isNormalizedFullLink } from "../link-types.ts";
@@ -121,7 +117,7 @@ export const propagateRendererTrustedEvent = (
   }
 };
 
-const isRendererTrustedEvent = (event: unknown): boolean =>
+export const isRendererTrustedEvent = (event: unknown): boolean =>
   isRecord(event) && rendererTrustedEvents.has(event);
 
 const trustRequirementsFromContract = (
@@ -519,7 +515,7 @@ const eventEnvelopePayloads = (
   const addPayload = (value: unknown, space?: string) => {
     if (
       !payloads.some((payload) =>
-        payload.value === value && payload.space === space
+        Object.is(payload.value, value) && payload.space === space
       )
     ) {
       payloads.push({ value, ...(space !== undefined ? { space } : {}) });

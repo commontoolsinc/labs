@@ -17,7 +17,6 @@ import {
   Default,
   handler,
   NAME,
-  nonPrivateRandom,
   pattern,
   resultOf,
   safeDateNow,
@@ -88,9 +87,7 @@ const COLORS = [
 
 // Simple random ID generator
 const generateId = () =>
-  `${safeDateNow().toString(36)}-${
-    nonPrivateRandom().toString(36).slice(2, 11)
-  }`;
+  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 
 // ============ STYLES ============
 
@@ -142,7 +139,7 @@ const STYLES = {
 const formatDatePST = (d: Date): string =>
   d.toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
 
-const getTodayDate = (): string => formatDatePST(new Date());
+const getTodayDate = (nowMs: number): string => formatDatePST(new Date(nowMs));
 
 const getWeekStart = (date: string): string => {
   const d = new Date(date + "T12:00:00-08:00");
@@ -358,14 +355,21 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   );
   const { events: importedEvents } = resultOf(calendarWish.result);
 
+  // Current date sourced from the reactive #now cell (one-shot, coarsened to
+  // 1s) instead of reading the clock directly at pattern-body level. Like the
+  // #calendarEvents wish above, the result is available synchronously here.
+  const nowCell = wish<number>({ query: "#now" });
+  const nowCellValue = resultOf(nowCell.result);
+  const todayDate = getTodayDate(nowCellValue!);
+
   // Navigation State (Writable so navigation buttons work)
-  const startDate = new Writable(getWeekStart(getTodayDate()));
+  const startDate = new Writable(getWeekStart(todayDate));
   const visibleDays = new Writable(7);
 
   // Create Form State
   const showNewEventPrompt = new Writable<boolean>(false);
   const newEventTitle = new Writable<string>("");
-  const newEventDate = new Writable<string>(getTodayDate());
+  const newEventDate = new Writable<string>(todayDate);
   const newEventStartTime = new Writable<string>("09:00");
   const newEventEndTime = new Writable<string>("10:00");
   const newEventColor = new Writable<string>(COLORS[0]);
@@ -388,7 +392,6 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   const localEventCount = localEvents.get().length;
   const eventCount = importedEventCount + localEventCount;
   const weekDates = getWeekDates(startDate.get(), 7);
-  const todayDate = getTodayDate();
 
   // Navigation Actions
   const goPrev = action(() => {
@@ -400,7 +403,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   });
 
   const goToday = action(() => {
-    const today = getTodayDate();
+    const today = getTodayDate(Date.now());
     startDate.set(visibleDays.get() === 1 ? today : getWeekStart(today));
   });
 
@@ -928,13 +931,13 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                       );
                     }
 
-                    lastDropTime.set(safeDateNow());
+                    lastDropTime.set(Date.now());
                   });
 
                   // Click handlers for creating events at specific hours
                   const hourClickActions = HOURS.map((hour) =>
                     action(() => {
-                      if (safeDateNow() - lastDropTime.get() < 300) {
+                      if (Date.now() - lastDropTime.get() < 300) {
                         return;
                       }
                       newEventTitle.set("");
@@ -1245,7 +1248,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
 
                   // Click action to open edit modal
                   const openEvent = action(() => {
-                    if (safeDateNow() - lastDropTime.get() < 300) {
+                    if (Date.now() - lastDropTime.get() < 300) {
                       return;
                     }
                     // Populate edit form with event data

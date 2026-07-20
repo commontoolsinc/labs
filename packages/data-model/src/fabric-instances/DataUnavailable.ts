@@ -9,10 +9,15 @@ import {
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
-import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
+import type { FabricValue } from "@/interface.ts";
 import { fabricFromNativeValue } from "@/native-conversion.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
-import { BaseFabricInstance } from "./BaseFabricInstance.ts";
+import {
+  BaseFabricInstance,
+  DEEP_FREEZE,
+  IS_DEEP_FROZEN,
+  SHALLOW_UNFROZEN_CLONE,
+} from "./BaseFabricInstance.ts";
 import {
   getCanonicalDataUnavailableClass,
   installCanonicalDataUnavailableClass,
@@ -205,7 +210,7 @@ export class DataUnavailable extends BaseFabricInstance
   }
 
   /** @inheritDoc */
-  protected shallowUnfrozenClone(): DataUnavailable {
+  protected [SHALLOW_UNFROZEN_CLONE](): DataUnavailable {
     return new DataUnavailable(this.#state);
   }
 

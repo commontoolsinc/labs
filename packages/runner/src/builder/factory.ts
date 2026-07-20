@@ -27,7 +27,15 @@ import {
 } from "./types.ts";
 import { h, UiAction, UiDisclosure, UiPromptSlot } from "@commonfabric/html";
 import { pattern } from "./pattern.ts";
-import { action, byRef, computed, handler, lift } from "./module.ts";
+import {
+  action,
+  assert,
+  assertCapture,
+  byRef,
+  computed,
+  handler,
+  lift,
+} from "./module.ts";
 import {
   hasError,
   hasSchemaMismatch,
@@ -97,7 +105,6 @@ import {
   toIndentedDebugString,
 } from "@commonfabric/data-model/value-debug";
 import { freezeVerifiedPlainData } from "../sandbox/plain-data.ts";
-import { nonPrivateRandom, safeDateNow } from "./safe-builtins.ts";
 import {
   registerUnsafeHostTrustedValue,
   type UnsafeHostTrust,
@@ -147,6 +154,10 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     trustValue(
       (computed as (...args: any[]) => unknown)(...args),
     )) as typeof computed;
+  const trustedAssert = ((...args: any[]) =>
+    trustValue(
+      (assert as (...args: any[]) => unknown)(...args),
+    )) as typeof assert;
   const trustedStr =
     ((strings: TemplateStringsArray, ...values: unknown[]) =>
       trustValue(str(strings, ...values))) as typeof str;
@@ -181,6 +192,11 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     handler: trustedHandler,
     action,
     computed: trustedComputed,
+    assert: trustedAssert,
+
+    // Operand recording for transformer-instrumented `assert` bodies. Plain
+    // data in, plain data out — no builder artifact to trust.
+    assertCapture,
 
     // Pure unavailable-data observation helpers
     isPending,
@@ -263,8 +279,6 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
 
     // Environment
     getPatternEnvironment,
-    nonPrivateRandom,
-    safeDateNow,
 
     // Entity utilities
     getEntityId,

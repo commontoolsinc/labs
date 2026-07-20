@@ -194,7 +194,7 @@ the full durable stack, not just shapes. Per-action observations
 `implementationFingerprint`, `observedAtSeq`, `reads`, `currentKnownWrites`,
 `declaredWrites`, gate options, status —
 `packages/runner/src/scheduler/persistent-observation.ts:22`) are attached
-to the live commit tx (`action-run.ts:646/708`) and persisted **inside the
+to the live commit tx (`run.ts:516`) and persisted **inside the
 single `applyCommit` SQLite transaction** (`packages/memory/v2/engine.ts:1554`
 → `upsertSchedulerObservationTransaction` `:3285`) across five tables
 (`scheduler_observation`, `scheduler_action_snapshot` LWW,
@@ -202,7 +202,7 @@ single `applyCommit` SQLite transaction** (`packages/memory/v2/engine.ts:1554`
 DDL `engine.ts:206`+). Cold start reads them back
 (`listSchedulerActionSnapshots` through the provider seam) and rehydrates
 without re-running unchanged actions. On #4288, the runner loads the
-snapshots and the facade in `packages/runner/src/scheduler.ts` applies
+snapshots and the facade in `packages/runner/src/scheduler/facade.ts` applies
 fingerprint-gated, fail-open
 rehydration. Restart-skip is proven by `reload-rehydration.test.ts` and
 `v2-scheduler-state-test.ts`.

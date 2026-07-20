@@ -9,7 +9,6 @@ import {
   isPending,
   isSyncing,
   NAME,
-  nonPrivateRandom,
   pattern,
   type PerSpace,
   type RequiresIntegrity,
@@ -254,7 +253,7 @@ const formatDateDisplay = (dateStr: string): string => {
 };
 
 const genId = (): string =>
-  `req-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2, 10)}`;
+  `req-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
 const parsePreferences = (s: string | null | undefined): string[] =>
   (s ?? "").split(",").map((x) => x.trim()).filter(Boolean);
@@ -452,7 +451,15 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     // User/session UI state
     const selectedPersonName = new Writable.perUser("");
     const adminMode = new Writable.perSession(false);
-    const requestDate = new Writable.perSession(toLocalDateStr(safeDateNow()));
+    // Seed empty and fill from #now once it resolves, so the request-date input
+    // defaults to today without reading the ambient clock at pattern body.
+    const requestDate = new Writable.perSession("");
+    computed(() => {
+      const today = todayStr;
+      if (today !== "" && requestDate.get() === "") {
+        requestDate.set(today);
+      }
+    });
     const requestResult = new Writable.perSession("");
 
     // Admin form state

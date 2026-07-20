@@ -229,6 +229,61 @@ describe("CellHandle CFC label IPC", () => {
     expect(cellRefToKey(first)).not.toEqual(cellRefToKey(second));
   });
 
+  it("keys on the full schemed id; id() strips of: only", () => {
+    const runtime = {
+      [$conn]: () => ({
+        request: () => Promise.resolve({}),
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+      }),
+    } as unknown as RuntimeClient;
+    const refFor = (id: string): CellRef => ({
+      id: id as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    });
+
+    // Keys carry the FULL schemed id: the hash preimage is kind-free, so
+    // of:fid1:H and computed:fid1:H can be two distinct docs for one cause —
+    // their subscriptions must not conflate.
+    expect(cellRefToKey(refFor("of:fid1:abc"))).not.toEqual(
+      cellRefToKey(refFor("computed:fid1:abc")),
+    );
+    expect(cellRefToKey(refFor("of:fid1:abc"))).not.toEqual(
+      cellRefToKey(refFor("fid1:abc")),
+    );
+
+    // Scope is part of the address: equal space/id/path values in different
+    // scopes refer to different documents and need independent subscriptions.
+    expect(cellRefToKey(refFor("of:fid1:abc"))).not.toEqual(
+      cellRefToKey({ ...refFor("of:fid1:abc"), scope: "user" }),
+    );
+    expect(
+      cellRefToKey({ ...refFor("of:fid1:abc"), scope: "user" }),
+    ).not.toEqual(
+      cellRefToKey({ ...refFor("of:fid1:abc"), scope: "session" }),
+    );
+
+    // Paths are JSON-encoded in keys: a "." join would conflate ["."] with
+    // ["", ""].
+    const withPath = (path: string[]): CellRef => ({
+      ...refFor("of:fid1:abc"),
+      path,
+    });
+    expect(cellRefToKey(withPath(["."]))).not.toEqual(
+      cellRefToKey(withPath(["", ""])),
+    );
+
+    // CellHandle.id() is the FULL schemed id — a true identity accessor.
+    // The routing/display strip lives on PageHandle.id().
+    expect(new CellHandle(runtime, refFor("of:fid1:abc")).id())
+      .toBe("of:fid1:abc");
+    expect(new CellHandle(runtime, refFor("computed:fid1:abc")).id())
+      .toBe("computed:fid1:abc");
+    expect(new CellHandle(runtime, refFor("fid1:abc")).id()).toBe("fid1:abc");
+  });
+
   it("refreshes reused cell refs when carried label views change", async () => {
     const requests: unknown[] = [];
     const runtime = {
@@ -408,6 +463,65 @@ describe("CellHandle reactive CFC label delivery", () => {
     expect(cell.wantsCfcLabel).toBe(true);
     await Promise.resolve(); // let the unsubscribe().finally(subscribe) settle
     expect(events).toEqual(["subscribe", "unsubscribe", "subscribe"]);
+  });
+});
+
+describe("CellHandle update change detection", () => {
+  const makeRuntime = () =>
+    ({
+      [$conn]: () => ({
+        request: () => Promise.resolve({ value: undefined }),
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+      }),
+    }) as unknown as RuntimeClient;
+  const ref: CellRef = {
+    id: "of:change-detection-cell" as CellRef["id"],
+    space: "did:key:test" as CellRef["space"],
+    scope: "space",
+    path: [],
+  };
+
+  it("does not re-notify on an unchanged NaN value", () => {
+    // Value equality is `Object.is`-based: `NaN` equals itself, so a
+    // delivery repeating a NaN-bearing value is not a change.
+    const cell = new CellHandle<number>(makeRuntime(), ref);
+    const calls: Array<number | undefined> = [];
+    cell.subscribe((value) => {
+      calls.push(value);
+    });
+
+    cell[$onCellUpdate](NaN);
+    const after = calls.length;
+    cell[$onCellUpdate](NaN);
+    expect(calls.length).toBe(after);
+  });
+
+  it("does not re-notify on an unchanged NaN-bearing record", () => {
+    const cell = new CellHandle<{ x: number }>(makeRuntime(), ref);
+    const calls: Array<unknown> = [];
+    cell.subscribe((value) => {
+      calls.push(value);
+    });
+
+    cell[$onCellUpdate]({ x: NaN });
+    const after = calls.length;
+    cell[$onCellUpdate]({ x: NaN });
+    expect(calls.length).toBe(after);
+  });
+
+  it("notifies on a 0 -> -0 change", () => {
+    // `0` and `-0` are distinct stored values (the content hash
+    // distinguishes them); the update must not be dropped.
+    const cell = new CellHandle<number>(makeRuntime(), ref);
+    const calls: Array<number | undefined> = [];
+    cell.subscribe((value) => {
+      calls.push(value);
+    });
+
+    cell[$onCellUpdate](0);
+    cell[$onCellUpdate](-0);
+    expect(Object.is(calls.at(-1), -0)).toBe(true);
   });
 });
 

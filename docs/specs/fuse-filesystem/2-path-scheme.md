@@ -38,6 +38,7 @@ The mount root contains spaces. Each space contains pieces and entities.
         result/*.handler             # Top-level mounted handlers
         result/*.tool                # Top-level mounted pattern tools
         meta.json                     # Read-only piece metadata
+      pieces.json                     # Discovery manifest incl. pattern refs
     entities/                         # Raw entity view (advanced)
       <entity-id>/
         .json                         # Full entity value
@@ -141,7 +142,7 @@ home/pieces/todo-app/
     addItem.handler   # executable: invoke via cf exec or write JSON
     search.tool       # executable: run via cf exec
     $UI.json          # serialized VNode tree (not exploded)
-  meta.json           # {"id":"of:ba4j...","patternName":"todo-app",...}
+  meta.json           # {"id":"of:ba4j...","patternRef":{...},...}
   .handlers           # hidden summary: one line per callable with type info
 ```
 
@@ -235,20 +236,47 @@ a stable `cf exec` shebang, and the same paths are valid under both
 Piece names are derived from:
 
 1. `piece.name()` if set (the user-visible display name)
-2. Pattern name from metadata
-3. Shortened entity ID (first 12 chars) as fallback
+2. The entity ID as fallback
 
 Names are sanitized for filesystem safety:
-- Replace `/` with `_`
-- Replace null bytes
-- Trim to 255 bytes (filesystem limit)
-- Ensure uniqueness within the directory
+
+- Normalize Unicode and remove combining marks and emoji
+- Collapse non-alphanumeric runs to `-`
+- Trim/collapse `-` runs
+- Ensure uniqueness within the directory with numeric suffixes
 
 A symlink or index file maps human names back to canonical entity IDs:
 
 ```
 pieces/.index.json    # {"todo-app": "of:ba4jcbvpq3k5soo...", ...}
 ```
+
+`meta.json` and `pieces/pieces.json` carry the same optional structured
+`patternRef`:
+
+```json
+{
+  "identity": "<content-hash>",
+  "symbol": "default",
+  "source": {
+    "ref": "cf:pattern:<content-hash>",
+    "repository": "https://github.com/commontoolsinc/labs",
+    "entry": "/packages/patterns/todo-app.tsx"
+  }
+}
+```
+
+The prefix-free identity and symbol are the authoritative pointer to the
+running artifact (`cf:module/<identity>#<symbol>` in display form).
+`source.ref` is the immutable in-fabric source reference from the pattern-import
+grammar. `source.repository` is optional, explicitly supplied repository
+discovery metadata. `source.entry` is the optional authored path inside the
+verified source closure; `source.origin` is the optional `patternSource` update
+provenance. For local deployments, `--root` defines the path namespace, while
+`--repository` records which repository that path belongs to without inspecting
+Git configuration. Pattern references update in place when the piece rolls
+forward; they do not participate in directory-name selection. See
+`docs/specs/pattern-imports/README.md` for the canonical field semantics.
 
 ## Entity Directory
 

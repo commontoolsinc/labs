@@ -1,7 +1,11 @@
 import { assert, assertEquals } from "@std/assert";
-import { parseDocument, SAMPLE } from "./view-helpers.ts";
+import { bgCode, fgCode, parseDocument, SAMPLE } from "./view-helpers.ts";
+import { ui } from "../lib/view/theme.ts";
 import {
+  _internal,
   cursorScreenPos,
+  dialogBox,
+  type DialogState,
   type Match,
   overlayBox,
   type OverlayState,
@@ -19,6 +23,8 @@ function baseView(over: Partial<ViewState> = {}): ViewState {
     height: 10,
     color: true,
     showLineNumbers: false,
+    wrapLines: false,
+    displayMode: "pictures",
     selected: null,
     matches: null,
     currentMatch: 0,
@@ -78,6 +84,25 @@ Deno.test("cursorScreenPos: maps document coords to 1-based screen coords", () =
   assertEquals(pos, { row: 3, col: 5 });
 });
 
+Deno.test("cursorScreenPos: maps a wrapped continuation to its screen row", () => {
+  const doc = parseDocument("abcdefghij");
+  const view = baseView({
+    cursor: { line: 0, col: 7 },
+    width: 5,
+    height: 4,
+    wrapLines: true,
+  });
+  assertEquals(cursorScreenPos(doc, view), { row: 2, col: 4 });
+});
+
+Deno.test("cursorScreenPos: rejects a cursor outside the document", () => {
+  const doc = parseDocument("one line");
+  assertEquals(
+    cursorScreenPos(doc, baseView({ cursor: { line: 4, col: 0 } })),
+    null,
+  );
+});
+
 Deno.test("cursorScreenPos: accounts for the line-number gutter and guide bar", () => {
   const doc = parseDocument(SAMPLE);
   const sel = node("pattern", { startLine: 0, endLine: 5 });
@@ -119,6 +144,15 @@ Deno.test("cursorScreenPos: null when the cursor column is past the content widt
   const doc = parseDocument(SAMPLE);
   const view = baseView({ cursor: { line: 1, col: 100 }, width: 20 });
   // contentCol = 100 >= contentWidth
+  assertEquals(cursorScreenPos(doc, view), null);
+});
+
+Deno.test("cursorScreenPos: null when a dialog covers the content", () => {
+  const doc = parseDocument(SAMPLE);
+  const view = baseView({
+    cursor: { line: 1, col: 2 },
+    dialog: { title: "Save", body: ["Save?"], buttons: [] },
+  });
   assertEquals(cursorScreenPos(doc, view), null);
 });
 
@@ -248,9 +282,25 @@ Deno.test("renderStatus: an edit hint shows when there is no message", () => {
   const doc = parseDocument(SAMPLE);
   const rows = renderFrame(
     doc,
-    baseView({ editHint: "esc done · ⏎ newline", color: false }),
+    baseView({
+      editHint: [{ key: "Esc", label: "Done" }, { key: "^Y", label: "Yank" }],
+      color: false,
+    }),
   );
-  assert(stripAnsi(rows[rows.length - 1]).includes("esc done"));
+  const status = stripAnsi(rows[rows.length - 1]);
+  assert(status.includes("Esc Done"), `edit hint shown: "${status}"`);
+});
+
+Deno.test("renderStatus: key hints are highlighted in colour", () => {
+  const doc = parseDocument(SAMPLE);
+  const rows = renderFrame(
+    doc,
+    baseView({ editHint: [{ key: "Esc", label: "Done" }], color: true }),
+  );
+  const status = rows[rows.length - 1];
+  // The key is painted in the status-key colour on the status-bar background.
+  assert(status.includes(fgCode(ui.statusKey.fg!)), "the key colour");
+  assert(status.includes(bgCode(ui.statusBar.bg!)), "on the status bar");
 });
 
 Deno.test("renderStatus: a selected node shows its glyph and label", () => {
@@ -264,18 +314,65 @@ Deno.test("renderStatus: a selected node shows its glyph and label", () => {
 
 Deno.test("renderStatus: the default help line advertises expand when allowed", () => {
   const doc = parseDocument(SAMPLE);
-  const rows = renderFrame(doc, baseView({ canExpand: true, color: false }));
+  // Wide enough that every hint fits (the bar drops trailing hints when narrow).
+  const rows = renderFrame(
+    doc,
+    baseView({ canExpand: true, color: false, width: 80 }),
+  );
   const status = stripAnsi(rows[rows.length - 1]);
-  assert(status.includes("? help"), "default help shown");
-  assert(status.includes("^l expand"), "expand hint advertised");
+  assert(status.includes("? Help"), "default help shown");
+  assert(status.includes("^L Expand"), "expand hint advertised");
 });
 
 Deno.test("renderStatus: the default help line omits expand when not allowed", () => {
   const doc = parseDocument(SAMPLE);
-  const rows = renderFrame(doc, baseView({ canExpand: false, color: false }));
+  const rows = renderFrame(
+    doc,
+    baseView({ canExpand: false, color: false, width: 80 }),
+  );
   const status = stripAnsi(rows[rows.length - 1]);
-  assert(status.includes("? help"), "default help shown");
-  assert(!status.includes("^l expand"), "expand hint absent");
+  assert(status.includes("? Help"), "default help shown");
+  assert(!status.includes("^L Expand"), "expand hint absent");
+});
+
+Deno.test("renderStatus: e / C / # hints appear only where they apply", () => {
+  const doc = parseDocument(SAMPLE);
+  const line = (over: Partial<ViewState>) =>
+    stripAnsi(
+      renderFrame(doc, baseView({ color: false, width: 100, ...over }))
+        .at(-1)!,
+    );
+  // Editable + non-printables present: e and C both show. # always shows.
+  const both = line({ canEdit: true, hasNonPrintables: true });
+  assert(both.includes("e Edit"), both);
+  assert(both.includes("C Chars"), both);
+  assert(both.includes("# Lines"), both);
+  // Read-only with only printable content: e and C are dropped, # stays.
+  const neither = line({ canEdit: false, hasNonPrintables: false });
+  assert(!neither.includes("e Edit"), neither);
+  assert(!neither.includes("C Chars"), neither);
+  assert(neither.includes("\\ Wrap"), neither);
+  assert(neither.includes("# Lines"), neither);
+  const wrapped = line({ wrapLines: true });
+  assert(wrapped.includes("\\ Unwrap"), wrapped);
+});
+
+Deno.test("renderStatus: a narrow bar drops the lowest-priority hints first", () => {
+  const doc = parseDocument(SAMPLE);
+  const all = { canExpand: true, canEdit: true, hasNonPrintables: true };
+  const line = (width: number) =>
+    stripAnsi(
+      renderFrame(doc, baseView({ color: false, width, ...all })).at(-1)!,
+    );
+  // At a middling width the top priorities survive and the tail (#, then C, e,
+  // ^L) is dropped; ? always outlives WASD.
+  const mid = line(46);
+  assert(mid.includes("? Help") && mid.includes("/ Search"), mid);
+  assert(!mid.includes("# Lines"), "the lowest-priority # drops first");
+  // Very narrow: only the highest priorities remain.
+  const tight = line(28);
+  assert(tight.includes("? Help") && tight.includes("Q Quit"), tight);
+  assert(!tight.includes("WASD Tree"), "WASD drops before Q");
 });
 
 // --- kindGlyph: every branch -------------------------------------------------
@@ -311,23 +408,24 @@ Deno.test("renderStatus: kindGlyph maps every node kind to a glyph", () => {
   }
 });
 
-// --- displayChar: tabs and control characters --------------------------------
+// --- display modes: tabs and control characters ------------------------------
 
-Deno.test("renderFrame: a tab renders as a single space", () => {
+Deno.test("renderFrame: a tab renders as its Control Pictures glyph", () => {
   const doc = parseDocument("a\tb\n");
   const rows = renderFrame(doc, baseView({ color: false }));
-  // The literal tab is replaced by a space in the rendered cell grid.
-  assertEquals(stripAnsi(rows[0]).slice(0, 3), "a b");
+  // The default "pictures" mode shows the tab as ␉ (U+2409), one column wide.
+  assertEquals(stripAnsi(rows[0]).slice(0, 3), "a␉b");
   assert(!rows[0].includes("\t"), "no raw tab in output");
 });
 
-Deno.test("renderFrame: a control character renders as a space", () => {
-  // Build a document whose line text carries a control char (e.g. \x01).
-  const doc = parseDocument("ab\n");
+Deno.test("renderFrame: a control character renders as its Control Pictures glyph", () => {
+  // The line text carries a control char (\x01) between "a" and "b".
+  const doc = parseDocument("a\x01b\n");
   const rows = renderFrame(doc, baseView({ color: false }));
   const text = stripAnsi(rows[0]);
-  assertEquals(text.slice(0, 3), "a b");
-  assert(!text.includes(""), "control char scrubbed");
+  // U+0001 → U+2401 (␁), one column wide, and the raw byte is gone.
+  assertEquals(text.slice(0, 3), "a␁b");
+  assert(!text.includes("\x01"), "control char scrubbed");
 });
 
 // --- overlay: span past the inner width / truncCenter truncation -------------
@@ -385,7 +483,7 @@ Deno.test("overlay: a title longer than the box is truncated to fit", () => {
   const joined = rows.map(stripAnsi).join("\n");
   // The truncated title appears but the top border row is no wider than the box.
   assert(joined.includes("TTT"), "truncated title still visible");
-  const topRow = rows.find((r) => stripAnsi(r).includes("╭"))!;
+  const topRow = rows.find((r) => stripAnsi(r).includes("╔"))!;
   assert(stripAnsi(topRow).includes("TTT"), "title sits on the top border");
 });
 
@@ -411,6 +509,239 @@ Deno.test("overlay: a selected reference line is tinted differently", () => {
   );
   const joined = rows.map(stripAnsi).join("\n");
   assert(joined.includes("two"), "selected ref line rendered");
+});
+
+Deno.test("overlay: content sits one column inside each border", () => {
+  const doc = parseDocument(SAMPLE);
+  const rows = renderFrame(
+    doc,
+    baseView({
+      width: 40,
+      height: 12,
+      color: false,
+      overlay: {
+        title: "PEEK",
+        lines: [{ text: "hi", spans: [{ col: 0, text: "hi", cls: "plain" }] }],
+        scroll: 0,
+        footer: "esc",
+      },
+    }),
+  );
+  const bodyRow = rows.map(stripAnsi).find((r) => r.includes("hi"))!;
+  const left = bodyRow.indexOf("║");
+  const right = bodyRow.indexOf("║", left + 1);
+  // A blank margin column separates the left border from the content, and the
+  // content ends before the right margin column.
+  assertEquals(bodyRow[left + 1], " ", "left margin column is blank");
+  assertEquals(bodyRow.slice(left + 2, left + 4), "hi", "content after margin");
+  assertEquals(bodyRow[right - 1], " ", "right margin column is blank");
+});
+
+const SAVE_DIALOG: DialogState = {
+  title: "Save Changes",
+  body: ["Save changes to schemas.tsx?"],
+  buttons: [
+    { label: "Save", hotkey: "s", kind: "default" },
+    { label: "Discard", hotkey: "d" },
+    { label: "Cancel", hotkey: "c", kind: "cancel" },
+  ],
+};
+
+Deno.test("dialog: frames a centred title, body and button row", () => {
+  const rows = renderFrame(
+    parseDocument(SAMPLE),
+    baseView({ width: 60, height: 18, color: false, dialog: SAVE_DIALOG }),
+  );
+  const text = rows.map(stripAnsi);
+  const joined = text.join("\n");
+  assert(joined.includes("Save Changes"), "title shown");
+  assert(joined.includes("Save changes to schemas.tsx?"), "body shown");
+  const btnRow = text.find((r) => r.includes("Save") && r.includes("Cancel"))!;
+  assert(btnRow.includes("Discard"), btnRow);
+  assert(joined.includes("╔") && joined.includes("╝"), "double-line frame");
+  // The status bar shows the dialog's buttons in place of the browse hints.
+  const status = text[text.length - 1];
+  assert(status.includes("Save") && status.includes("Cancel"), status);
+  assert(!status.includes("WASD"), "no navigation hints while a dialog is up");
+});
+
+Deno.test("dialog: the default button is brighter and the shortcuts are yellow", () => {
+  const rows = renderFrame(
+    parseDocument("x\n"),
+    baseView({ width: 60, height: 18, color: true, dialog: SAVE_DIALOG }),
+  );
+  const raw = rows.join("");
+  const face = bgCode(ui.button.bg!);
+  assert(raw.includes(face), "button face colour");
+  assert(
+    raw.includes(fgCode(ui.buttonDefault.fg!) + ";" + face),
+    "default-button label colour on the face",
+  );
+  assert(
+    raw.includes(fgCode(ui.buttonKey.fg!) + ";" + face),
+    "shortcut-letter colour on the face",
+  );
+  // The button shadows are half-block glyphs, not solid cells.
+  const plain = stripAnsi(raw);
+  assert(plain.includes("▄") && plain.includes("▀"), "half-block shadows");
+});
+
+Deno.test("dialog: a button-less dialog still frames its body", () => {
+  const rows = renderFrame(
+    parseDocument("x\n"),
+    baseView({
+      width: 40,
+      height: 12,
+      color: false,
+      dialog: { title: "Note", body: ["Nothing to do."], buttons: [] },
+    }),
+  );
+  const joined = rows.map(stripAnsi).join("\n");
+  assert(joined.includes("Note"), "title");
+  assert(joined.includes("Nothing to do."), "body");
+});
+
+Deno.test("dialog: collapses on a terminal too narrow to frame", () => {
+  const dlg: DialogState = {
+    title: "T",
+    body: ["hi"],
+    buttons: [{ label: "Ok", hotkey: "o", kind: "default" }],
+  };
+  // At each width the box shrinks; below the border chrome it draws nothing
+  // rather than indexing out of range, but always returns a full frame.
+  for (const width of [3, 4, 6]) {
+    const rows = renderFrame(
+      parseDocument("x\n"),
+      baseView({ width, height: 12, color: false, dialog: dlg }),
+    );
+    assertEquals(rows.length, 12, `full frame at width ${width}`);
+  }
+  assert(
+    dialogBox(baseView({ width: 3, height: 12 }), dlg).boxW < 2,
+    "collapses",
+  );
+});
+
+Deno.test("dialog: body sits two columns inside each border", () => {
+  const rows = renderFrame(
+    parseDocument("x\n"),
+    baseView({
+      width: 40,
+      height: 12,
+      color: false,
+      dialog: { title: "T", body: ["hello world"], buttons: [] },
+    }),
+  );
+  const bodyRow = rows.map(stripAnsi).find((r) => r.includes("hello world"))!;
+  const left = bodyRow.indexOf("║");
+  const right = bodyRow.indexOf("║", left + 1);
+  // Two blank margin columns separate the border from the content on each side.
+  assertEquals(
+    bodyRow.slice(left + 1, left + 3),
+    "  ",
+    "two blank columns after the left border",
+  );
+  assertEquals(
+    bodyRow.slice(left + 3, left + 3 + "hello world".length),
+    "hello world",
+    "content begins after the margin",
+  );
+  assertEquals(
+    bodyRow.slice(right - 2, right),
+    "  ",
+    "two blank columns before the right border",
+  );
+});
+
+Deno.test("dialog: the focused button — not just the default — is highlighted", () => {
+  const dlg: DialogState = {
+    title: "Pick",
+    body: ["Which one?"],
+    buttons: [
+      { label: "One", hotkey: "o" },
+      { label: "Two", hotkey: "t" },
+    ],
+  };
+  const render = (focus?: number) =>
+    renderFrame(
+      parseDocument("x\n"),
+      baseView({
+        width: 40,
+        height: 12,
+        color: true,
+        dialog: { ...dlg, focus },
+      }),
+    );
+  // The bright face is the default-button colour on the button-face background;
+  // it only appears where a button is highlighted.
+  const brightFace = fgCode(ui.buttonDefault.fg!) + ";" + bgCode(ui.button.bg!);
+
+  // No focus and no default kind: no button is brightened.
+  assert(
+    !render(-1).join("").includes(brightFace),
+    "nothing highlighted without focus",
+  );
+
+  // Focusing a button brightens that button, and moving focus moves the bright
+  // face to the newly focused label.
+  for (const [focus, label] of [[0, "One"], [1, "Two"]] as const) {
+    const btnRow = render(focus).find((r) => stripAnsi(r).includes("One"))!;
+    assert(btnRow.includes(brightFace), `button ${focus} is highlighted`);
+    // Read past the rest of the bright face's escape (its closing `m`) to the
+    // label text that follows it.
+    const sgrEnd = btnRow.indexOf("m", btnRow.indexOf(brightFace)) + 1;
+    const after = stripAnsi(btnRow.slice(sgrEnd)).trimStart();
+    assert(
+      after.startsWith(label),
+      `the highlight sits on ${label}: ${after}`,
+    );
+  }
+});
+
+Deno.test("dialog: a pushed button loses its shadow and shifts one column right", () => {
+  const dlg: DialogState = {
+    title: "T",
+    body: ["Go?"],
+    buttons: [{ label: "Ok", hotkey: "o", kind: "default" }],
+  };
+  const render = (over: Partial<DialogState>) =>
+    renderFrame(
+      parseDocument("x\n"),
+      baseView({
+        width: 40,
+        height: 12,
+        color: true,
+        dialog: { ...dlg, ...over },
+      }),
+    ).map(stripAnsi);
+
+  const normal = render({});
+  const pushed = render({ pushed: 0 });
+  // The half-block shadow glyphs come only from the button; a press drops them.
+  assert(
+    normal.join("\n").includes("▀"),
+    "a resting button casts a shadow band",
+  );
+  assert(
+    normal.join("\n").includes("▄"),
+    "a resting button casts a right edge",
+  );
+  assert(
+    !pushed.join("\n").includes("▀"),
+    "a pushed button casts no shadow band",
+  );
+  assert(
+    !pushed.join("\n").includes("▄"),
+    "a pushed button casts no right edge",
+  );
+  // The face slides one column into the space its shadow held.
+  const normalRow = normal.find((r) => r.includes("Ok"))!;
+  const pushedRow = pushed.find((r) => r.includes("Ok"))!;
+  assertEquals(
+    pushedRow.indexOf("Ok"),
+    normalRow.indexOf("Ok") + 1,
+    "the pressed face shifts right by one column",
+  );
 });
 
 Deno.test("renderFrame: the guide rail is blank on lines outside the selected node", () => {
@@ -444,4 +775,131 @@ Deno.test("renderFrame: the guide rail is blank on lines outside the selected no
   assertEquals(stripAnsi(rows[0])[0], " ", "blank guide above the node");
   assertEquals(stripAnsi(rows[2])[0], " ", "blank guide below the node");
   assertEquals(stripAnsi(rows[1])[0], "▶", "single-line node carries a glyph");
+});
+
+// --- SGR encoding helpers (dim/italic and background merge) -------------------
+
+Deno.test("cellsToAnsi: encodes dim, italic and underline attributes", () => {
+  const cells = [
+    { ch: "a", style: { dim: true } },
+    { ch: "b", style: { italic: true } },
+    { ch: "c", style: { underline: true } },
+  ];
+  const out = _internal.cellsToAnsi(cells, true);
+  assert(out.includes("\x1b[2m"), "dim → SGR 2");
+  assert(out.includes("\x1b[3m"), "italic → SGR 3");
+  assert(out.includes("\x1b[4m"), "underline → SGR 4");
+});
+
+Deno.test("mergeBg: overlays a background, or leaves the style when there is none", () => {
+  const style = { fg: [1, 2, 3] as const, bold: true };
+  // No background on the second argument: the style is returned unchanged.
+  assertEquals(_internal.mergeBg(style, {}), style);
+  // A background is merged over the style's own.
+  assertEquals(
+    _internal.mergeBg(style, { bg: [9, 9, 9] }),
+    { fg: [1, 2, 3], bold: true, bg: [9, 9, 9] },
+  );
+});
+
+Deno.test("darkenSpan: repaints a shadow span and clips out-of-bounds cells", () => {
+  const view = baseView({ width: 11 });
+  const rows = ["hello world"];
+  const before = [...rows];
+  // A row outside the frame, or a start at/past the right edge, changes nothing.
+  _internal.darkenSpan(rows, view, -1, 0, 2);
+  _internal.darkenSpan(rows, view, 0, 11, 2);
+  assertEquals(rows, before, "out-of-bounds shadow cells are left alone");
+  // A valid span repaints those cells (keeping their characters) in shadow.
+  _internal.darkenSpan(rows, view, 0, 2, 3);
+  assert(rows[0] !== before[0], "a valid span is repainted");
+  assertEquals(stripAnsi(rows[0]), "hello world", "the characters are kept");
+});
+
+// --- status-bar fitting (file, and left truncation) --------------------------
+
+Deno.test("renderStatus: a long current file is tail-truncated with a leading ellipsis", () => {
+  const doc = parseDocument(SAMPLE);
+  const rows = renderFrame(
+    doc,
+    baseView({
+      width: 44,
+      color: false,
+      currentFile: "packages/cli/lib/view/render.ts",
+    }),
+  );
+  const status = stripAnsi(rows[rows.length - 1]);
+  assert(status.includes("…"), `truncated with an ellipsis: "${status}"`);
+  assert(status.includes("render.ts"), "the file name (tail) is kept");
+});
+
+Deno.test("renderStatus: a long left label is head-truncated to fit", () => {
+  const doc = parseDocument(SAMPLE);
+  const sel = node("pattern", {
+    label: "pattern " + "aVeryLongIdentifierName".repeat(4),
+  });
+  const rows = renderFrame(
+    doc,
+    baseView({ width: 40, color: false, selected: sel, currentFile: "x.ts" }),
+  );
+  const status = stripAnsi(rows[rows.length - 1]);
+  assertEquals(status.length, 40, "the bar is exactly the terminal width");
+  assert(status.includes("…"), `the label is truncated: "${status}"`);
+});
+
+Deno.test("renderStatus: control characters in the current file are shown as glyphs", () => {
+  const doc = parseDocument(SAMPLE);
+  const rows = renderFrame(
+    doc,
+    baseView({ width: 60, color: false, currentFile: "a\x1b[31mb\x07.ts" }),
+  );
+  const status = rows[rows.length - 1];
+  assert(!status.includes("\x1b"), `no escape reaches the terminal: ${status}`);
+  assert(!status.includes("\x07"), "no bell reaches the terminal");
+  assert(status.includes("␛[31mb␇.ts"), `control pictures shown: ${status}`);
+  assertEquals(status.length, 60, "the bar is exactly the terminal width");
+});
+
+Deno.test("dialog: control characters in the body are shown as glyphs", () => {
+  const rows = renderFrame(
+    parseDocument("x\n"),
+    baseView({
+      width: 60,
+      height: 18,
+      color: false,
+      dialog: {
+        title: "Save Changes",
+        body: ["Save a\x1b[31mb\x07.ts?"],
+        buttons: [],
+      },
+    }),
+  );
+  // The frame carries its own resets even without colour, so the check is that
+  // the body's own escape and bell are not among what reaches the terminal.
+  const joined = rows.join("\n");
+  assert(!joined.includes("\x1b[31m"), "the body's escape is not passed on");
+  assert(!joined.includes("\x07"), "no bell reaches the terminal");
+  assert(joined.includes("Save a␛[31mb␇.ts?"), `control pictures: ${joined}`);
+});
+
+Deno.test("renderStatus: an over-wide input line is returned as-is", () => {
+  const doc = parseDocument(SAMPLE);
+  const long = "/" + "x".repeat(60);
+  const rows = renderFrame(doc, baseView({ width: 20, inputLine: long }));
+  assertEquals(stripAnsi(rows[rows.length - 1]), long);
+});
+
+Deno.test("renderStatus: on a tiny terminal the left collapses to an ellipsis", () => {
+  const doc = parseDocument(SAMPLE);
+  const sel = node("pattern", { label: "pattern longName" });
+  const rows = renderFrame(
+    doc,
+    baseView({
+      width: 14,
+      color: false,
+      selected: sel,
+      currentFile: "a/b/c.ts",
+    }),
+  );
+  assert(stripAnsi(rows[rows.length - 1]).includes("…"), "left collapses");
 });

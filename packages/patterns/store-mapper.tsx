@@ -2112,7 +2112,7 @@ export default pattern<Input, Output>(
                               itemName: item,
                               correctAisle: aisle,
                               incorrectAisle: "",
-                              timestamp: safeDateNow(),
+                              timestamp: Date.now(),
                             });
                             itemLocations.set(filtered);
                             newCorrectionItem.set("");

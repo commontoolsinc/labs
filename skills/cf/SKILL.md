@@ -77,18 +77,18 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 
 ## Quick Command Reference
 
-| Operation         | Command                                                                   |
-| ----------------- | ------------------------------------------------------------------------- |
-| Type check        | `deno task cf check pattern.tsx --no-run`                                 |
-| Deploy new        | `deno task cf piece new pattern.tsx -i key -a url -s space`               |
-| Update existing   | `deno task cf piece setsrc pattern.tsx --piece ID -i key -a url -s space` |
-| Inspect state     | `deno task cf piece inspect --piece ID ...`                               |
-| Get field         | `deno task cf piece get --piece ID fieldPath ...`                         |
-| Set field         | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`       |
-| Call handler      | `deno task cf piece call --piece ID handlerName ...`                      |
-| Trigger recompute | `deno task cf piece step --piece ID ...`                                  |
-| List pieces       | `deno task cf piece ls -i key -a url -s space`                            |
-| Visualize         | `deno task cf piece map ...`                                              |
+| Operation         | Command                                                                                              |
+| ----------------- | ---------------------------------------------------------------------------------------------------- |
+| Type check        | `deno task cf check pattern.tsx --no-run`                                                            |
+| Deploy new        | `deno task cf piece new pattern.tsx --root . --repository REPO -i key -a url -s space`               |
+| Update existing   | `deno task cf piece setsrc pattern.tsx --root . --repository REPO --piece ID -i key -a url -s space` |
+| Inspect state     | `deno task cf piece inspect --piece ID ...`                                                          |
+| Get field         | `deno task cf piece get --piece ID fieldPath ...`                                                    |
+| Set field         | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`                                  |
+| Call handler      | `deno task cf piece call --piece ID handlerName ...`                                                 |
+| Trigger recompute | `deno task cf piece step --piece ID ...`                                                             |
+| List pieces       | `deno task cf piece ls -i key -a url -s space`                                                       |
+| Visualize         | `deno task cf piece map ...`                                                                         |
 
 ## Check Command Flags
 
@@ -129,6 +129,27 @@ deno task cf piece setsrc pattern.tsx --piece bafyreia... ...
 ```
 
 **Why:** `new` creates duplicate pieces. `setsrc` updates in-place.
+
+`setsrc` normally rejects incompatible argument/result schema changes and
+retained links whose durable contracts no longer fit. For an intentional
+breaking migration, `--dangerously-allow-incompatible-schema` bypasses those
+compatibility proofs. `new` accepts the same flag for deploy-script symmetry,
+though a fresh piece has no predecessor schema to compare.
+
+Source-file writes through `cf fuse mount` hit the same update gate. Mount with
+`--dangerously-allow-incompatible-schema` when those writes are part of the same
+intentional breaking migration.
+
+### Source location metadata
+
+The local-source deployment commands `piece new`, `piece setsrc`, and custom
+`piece set-home` accept `--root` plus `--repository`. Use the repository
+checkout root for `--root`; this preserves `source.entry` as a path inside the
+repository. `--repository` is stored exactly as supplied in `source.repository`
+and is never inferred from Git configuration. On `setsrc`, omitting
+`--repository` preserves the existing value; supplying it replaces the value.
+`piece inspect --json` and `piece ls --json` expose the resulting structured
+source locator.
 
 ## JSON Input Format
 

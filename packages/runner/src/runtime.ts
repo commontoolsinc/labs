@@ -248,8 +248,9 @@ export type VersionSkewHandler = (info: VersionSkewInfo) => void;
 /**
  * Feature flags for the space-model data-layer changes. Each flag gates an
  * independent piece of the new fabric-value pipeline so that the features
- * can be enabled incrementally. Passed via `RuntimeOptions.experimental` and
- * propagated to the memory layer as ambient config.
+ * can be enabled incrementally. Passed via `RuntimeOptions.experimental`;
+ * lower-layer flags are propagated to their ambient control points, while
+ * runtime-owned flags remain scoped to the Runtime instance.
  *
  * See the formal spec at `docs/specs/space-model-formal-spec/`.
  *
@@ -265,6 +266,13 @@ export interface ExperimentalOptions {
   persistentSchedulerState?: boolean | undefined;
   /** Enforce scheduler-v2 lineage and event-receipt commit preconditions (default on). */
   commitPreconditions?: boolean | undefined;
+  /**
+   * Mint computed-scheme entity ids (`computed:fid1:<hash>`) for derived
+   * internal cells classified as replayable by the builder. Gates minting
+   * only; readers accept both forms unconditionally. See
+   * `docs/specs/computed-cell-identity.md`.
+   */
+  computedCellIds?: boolean | undefined;
   /**
    * Eagerly resolve the per-primitive debug source annotation (`fn.src`) at
    * module evaluation. Debug-only — identity never reads `.src` — and OFF by
@@ -328,6 +336,11 @@ export interface ModuleByteCache {
     modules: readonly ({ identity: string } & CompiledModuleArtifact)[],
   ): void;
 }
+
+export type RuntimeFetch = (
+  input: RequestInfo | URL,
+  init?: RequestInit & { client?: Deno.HttpClient },
+) => Promise<Response>;
 
 export interface RuntimeOptions {
   apiUrl: URL;
@@ -480,7 +493,7 @@ export interface RuntimeOptions {
    * a test harness can inject a deterministic mock without mutating process
    * globals. (LLM calls mock separately, at the `LLMClient` layer.)
    */
-  fetch?: typeof globalThis.fetch;
+  fetch?: RuntimeFetch;
 }
 
 export interface CfcRuntimeStats {
@@ -651,7 +664,7 @@ export class Runtime {
    * the host `globalThis.fetch`; a test harness can inject a mock via
    * `RuntimeOptions.fetch`.
    */
-  readonly fetch: typeof globalThis.fetch;
+  readonly fetch: RuntimeFetch;
   /** Runtime-learned host hints (site table); see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
   readonly userIdentityDID: DID;
@@ -867,6 +880,7 @@ export class Runtime {
       modernCellRep: undefined,
       persistentSchedulerState: undefined,
       commitPreconditions: undefined,
+      computedCellIds: undefined,
       eagerSourceAnnotation: undefined,
       ...options.experimental,
     };
@@ -888,6 +902,11 @@ export class Runtime {
         console.log(banner);
       }
     }
+
+    // Unlike ambient flags, computedCellIds is consumed from this Runtime's
+    // builder frame. Normalize its local default after override logging so an
+    // omitted option does not appear as an explicit `false` override.
+    this.experimental.computedCellIds ??= false;
 
     // Propagate experimental flags to their ambient control points, then read
     // back the effective state so `experimental.*` reflects what is actually in
@@ -2105,20 +2124,29 @@ export class Runtime {
     patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
+    options?: { patternRepository?: string },
   ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    options?: { patternRepository?: string },
   ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    options?: { patternRepository?: string },
   ): Promise<Cell<R>> {
-    return this.runner.setup<T, R>(tx, patternOrModule, argument, resultCell);
+    return this.runner.setup<T, R>(
+      tx,
+      patternOrModule,
+      argument,
+      resultCell,
+      options,
+    );
   }
   run<T, R>(
     tx: IExtendedStorageTransaction | undefined,
@@ -2145,8 +2173,16 @@ export class Runtime {
     resultCell: Cell<any>,
     pattern: Pattern | Module,
     inputs?: any,
+    options?: {
+      expectedPatternIdentity?: { identity: string; symbol: string };
+      validateArgumentLinks?: (
+        argumentCell: Cell<unknown>,
+        argumentSchema: JSONSchema,
+      ) => void;
+      patternRepository?: string;
+    },
   ) {
-    return this.runner.runSynced(resultCell, pattern, inputs);
+    return this.runner.runSynced(resultCell, pattern, inputs, options);
   }
 
   start<T = any>(resultCell: Cell<T>): Promise<boolean> {

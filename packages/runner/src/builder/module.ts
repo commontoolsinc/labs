@@ -1,4 +1,6 @@
 import type {
+  AssertPart,
+  AssertRecord,
   CellScope,
   FactoryInput,
   Frame,
@@ -17,6 +19,7 @@ import type {
   toJSON,
   UnavailableInputPolicy,
 } from "./types.ts";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { reactive, stream } from "./reactive.ts";
 import {
   applyArgumentIfcToResult,
@@ -24,7 +27,11 @@ import {
 } from "./node-utils.ts";
 import { assertNotInActionExecution } from "./action-context.ts";
 import { moduleToJSON } from "./json-utils.ts";
-import { brandTrustedBuilderArtifact } from "./pattern-metadata.ts";
+import {
+  brandTrustedBuilderArtifact,
+  getArtifactEntryRef,
+} from "./pattern-metadata.ts";
+import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
 import { getTopFrame } from "./pattern.ts";
 import { generateHandlerSchema } from "../schema.ts";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -525,6 +532,39 @@ export const computed: <T>(fn: () => T) => Reactive<T> = <T>(fn: () => T) =>
   })(undefined);
 
 /**
+ * Records one operand of an `assert` body and returns it unchanged.
+ *
+ * The value is rendered here, while it is still the resolved value the body
+ * computed. The array is local to a single evaluation of the body and is
+ * discarded unless the assertion fails.
+ */
+export const assertCapture = <T>(
+  parts: AssertPart[],
+  src: string,
+  value: T,
+): T => {
+  parts.push({ src, rendered: toCompactDebugString(value) });
+  return value;
+};
+
+/**
+ * assert: a `computed` for pattern-test assertions that reports its operands.
+ *
+ * The assert-diagnostics transformer rewrites the body to record each operand
+ * and to return an `AssertRecord`, so this implementation is reached only when
+ * a source opts out of the transform. It produces the same record shape with
+ * no operands recorded, so the declared type holds either way.
+ */
+export const assert: (fn: () => boolean) => Reactive<AssertRecord> = (
+  fn: () => boolean,
+) =>
+  createNodeFactory<any, AssertRecord>({
+    type: "javascript",
+    implementation: () => ({ ok: fn(), source: "", parts: [] }),
+    argumentSchema: false,
+  })(undefined);
+
+/**
  * action: Creates a handler that doesn't use the state parameter.
  *
  * This is to handler as computed is to lift:
@@ -665,6 +705,22 @@ function prepareInspectableImplementation<
   implementation: T,
 ): T {
   if (Object.isExtensible(implementation)) {
+    return implementation;
+  }
+
+  // A hardened implementation that already carries verified identity must be
+  // returned as-is. Provenance and artifact entry refs are keyed on the
+  // function OBJECT (WeakMaps, the anti-spoof design), so the wrapper below is
+  // a fresh identity-less function: it serializes body-only with no `$implRef`
+  // and re-evaluates bare-SES — module scope gone — on reload (the silent
+  // "helper is not a function" unlink; see the helper-unlink investigation
+  // record). A registered implementation already passed through a factory
+  // once — that is how it was registered — so it already carries its
+  // inspectable metadata and loses nothing by skipping the wrap.
+  if (
+    getVerifiedProvenance(implementation) !== undefined ||
+    getArtifactEntryRef(implementation) !== undefined
+  ) {
     return implementation;
   }
 

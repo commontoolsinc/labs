@@ -1,8 +1,10 @@
-import { assert, assertEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
 import {
+  announceSupervisorState,
   appendDecodedJsonPath,
   bufferForNoHandleTruncate,
   cfcWritebackXattrResultErrno,
+  createSupervisorStatusWriter,
   decodeFuseNamespaceName,
   DEFAULT_CFC_XATTR_NAMESPACE,
   defaultCfcWritebackStatePath,
@@ -231,6 +233,70 @@ Deno.test("mutating callbacks reject disconnected writes before optimistic mutat
   for (const [label, marker, guard, mutation] of mutationGuards) {
     assertAppearsBeforeAfter(source, marker, guard, mutation, label);
   }
+});
+
+Deno.test("mounted is announced only after the session loop and signal handlers", async () => {
+  // The readiness handshake carries no timed confirmation because the `mounted`
+  // announcement is honest: by the time a caller can read it, the session loop
+  // is dispatched and the signal handlers are installed, so the mount serves
+  // requests and unmounts cleanly on a signal. An announcement moved back ahead
+  // of either would reintroduce the confirmation the caller no longer pays for.
+  const source = await Deno.readTextFile(new URL("./mod.ts", import.meta.url));
+  assertAppearsBefore(
+    source,
+    "const sessionLoop = fuse.symbols.fuse_session_loop(handle.session);",
+    'reportSupervisorState("mounted")',
+    "session loop dispatched before mounted is announced",
+  );
+  assertAppearsBefore(
+    source,
+    'Deno.addSignalListener("SIGTERM"',
+    'reportSupervisorState("mounted")',
+    "signal handlers installed before mounted is announced",
+  );
+  // The announcement must also come before the loop is awaited, or every
+  // background mount would block on the loop before it could report `mounted`.
+  assertAppearsBefore(
+    source,
+    'reportSupervisorState("mounted")',
+    "const result = await sessionLoop;",
+    "mounted is announced before the session loop is awaited",
+  );
+});
+
+Deno.test("write-trace lines the FUSE integration suite reads keep their shape", async () => {
+  const source = await Deno.readTextFile(new URL("./mod.ts", import.meta.url));
+
+  // `packages/cli/integration/fuse-exec.sh` asserts that truncating a path
+  // disarms an already-open descriptor by reading these three lines out of the
+  // daemon log. It resolves the handle from the `write` line, requires the
+  // `release` line to report the handle disarmed, and requires no `flush-fire`
+  // line for that handle. That last check is satisfied by a line being absent,
+  // so rewording it turns the check into a no-op that still passes. Pin the
+  // shapes here, where a reword fails and names what it broke.
+  const tracedLines = [
+    "console.log(`[write-trace] write fh=${fh} size=${sz} offset=${off}`);",
+    "console.log(`[write-trace] flush-fire fh=${fh}`);",
+    "[write-trace] release fh=${fh} dirty=${handle.dirty} flushing=${handle.flushing} pending=${",
+  ];
+
+  for (const line of tracedLines) {
+    assert(
+      source.includes(line),
+      `mod.ts no longer emits the trace line fuse-exec.sh reads: ${line}`,
+    );
+  }
+
+  // The release line is only a verdict because it reports the handle's state as
+  // releaseCb found it. Tracing it after the flush decision would report state
+  // that decision had already changed.
+  assertAppearsBeforeAfter(
+    source,
+    'logOp("release"',
+    "[write-trace] release fh=${fh} dirty=${handle.dirty}",
+    "if (handle && handleHasPendingChanges(handle) && bridge) {",
+    "release trace precedes the flush decision",
+  );
 });
 
 Deno.test("namespace write failures use shared outage accounting", async () => {
@@ -578,4 +644,215 @@ Deno.test("platform provider reports the implementation openFuse loaded", () => 
     }),
     ["fuse_ct"],
   );
+});
+
+// A fake filesystem for the supervisor status writer, whose write latency the
+// test decides so two writes' ordering is chosen rather than raced.
+//
+// Held writes complete newest first, and a held write applies its content only
+// when released. That is an ordering the real filesystem is free to choose, and
+// it is the one that breaks an unserialized writer: the write issued first is
+// the one that lands last, so it is the one that wins the file. A writer that
+// lets only one write be in flight never has a second held write to reorder
+// against.
+function fakeStatusFilesystem() {
+  const files = new Map<string, string>();
+  const pending: Array<() => void> = [];
+  let holdWrites = false;
+
+  return {
+    holdNextWrites() {
+      holdWrites = true;
+    },
+    releaseHeldWrites() {
+      holdWrites = false;
+      while (pending.length > 0) pending.pop()!();
+    },
+    writeTextFile(path: string, data: string): Promise<void> {
+      if (!holdWrites) {
+        files.set(path, data);
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) =>
+        pending.push(() => {
+          files.set(path, data);
+          resolve();
+        })
+      );
+    },
+    rename(from: string, to: string): Promise<void> {
+      files.set(to, files.get(from)!);
+      files.delete(from);
+      return Promise.resolve();
+    },
+    remove(path: string): Promise<void> {
+      files.delete(path);
+      return Promise.resolve();
+    },
+    published(): string | undefined {
+      return files.get("/state/status");
+    },
+    scratchFilesLeft(): string[] {
+      return [...files.keys()].filter((path) => path.endsWith(".tmp"));
+    },
+  };
+}
+
+function statusWriterOver(fs: ReturnType<typeof fakeStatusFilesystem>) {
+  return createSupervisorStatusWriter({
+    statusPath: "/state/status",
+    pid: 321,
+    mountpoint: "/tmp/m",
+    startedAt: "2026-03-17T00:00:00.000Z",
+    now: () => "2026-03-17T00:00:01.000Z",
+    writeTextFile: fs.writeTextFile,
+    rename: fs.rename,
+    remove: fs.remove,
+  });
+}
+
+Deno.test("supervisor status publishes each state through a rename", () => {
+  // The reader must never see a half-written file, so the document lands under a
+  // scratch name and is renamed into place rather than written in place.
+  const renames: Array<[string, string]> = [];
+  const write = createSupervisorStatusWriter({
+    statusPath: "/state/status",
+    pid: 321,
+    mountpoint: "/tmp/m",
+    startedAt: "2026-03-17T00:00:00.000Z",
+    writeTextFile: () => Promise.resolve(),
+    rename: (from, to) => {
+      renames.push([from, to]);
+      return Promise.resolve();
+    },
+    remove: () => Promise.resolve(),
+  });
+
+  return write("mounted").then(() => {
+    assertEquals(renames.length, 1);
+    assertEquals(renames[0][1], "/state/status");
+    assert(renames[0][0].startsWith("/state/status."));
+    assert(renames[0][0].endsWith(".tmp"));
+  });
+});
+
+Deno.test("supervisor status does not regress when a slow write is still in flight", async () => {
+  const fs = fakeStatusFilesystem();
+  const write = statusWriterOver(fs);
+
+  // The heartbeat announces `mounted` and its write stalls. The session loop
+  // then ends and announces `exited`. The file must settle on the later call,
+  // not on whichever write the filesystem happens to finish last.
+  fs.holdNextWrites();
+  const heartbeat = write("mounted");
+  const exited = write("exited", { exitCode: 0 });
+  fs.releaseHeldWrites();
+  await Promise.all([heartbeat, exited]);
+
+  assertEquals(JSON.parse(fs.published()!).state, "exited");
+});
+
+Deno.test("supervisor status settles on exiting when it follows a stalled mounted", async () => {
+  const fs = fakeStatusFilesystem();
+  const write = statusWriterOver(fs);
+
+  // The readiness report stalls and a signal arrives while it is in flight.
+  fs.holdNextWrites();
+  const mounted = write("mounted");
+  const exiting = write("exiting");
+  fs.releaseHeldWrites();
+  await Promise.all([mounted, exiting]);
+
+  assertEquals(JSON.parse(fs.published()!).state, "exiting");
+});
+
+Deno.test("supervisor status keeps publishing after a write fails", async () => {
+  const fs = fakeStatusFilesystem();
+  let failNext = true;
+  const write = createSupervisorStatusWriter({
+    statusPath: "/state/status",
+    pid: 321,
+    mountpoint: "/tmp/m",
+    startedAt: "2026-03-17T00:00:00.000Z",
+    writeTextFile: (path, data) => {
+      if (failNext) {
+        failNext = false;
+        return Promise.reject(new Error("disk full"));
+      }
+      return fs.writeTextFile(path, data);
+    },
+    rename: fs.rename,
+    remove: fs.remove,
+  });
+
+  // A failed write is reported to its caller and leaves no scratch file, and the
+  // states after it still reach the file.
+  await assertRejects(() => write("mounted"), Error, "disk full");
+  await write("exited", { exitCode: 0 });
+
+  assertEquals(JSON.parse(fs.published()!).state, "exited");
+  assertEquals(fs.scratchFilesLeft(), []);
+});
+
+Deno.test("supervisor status records when a state was reached, not when it drained", async () => {
+  const fs = fakeStatusFilesystem();
+  let clock = "2026-03-17T00:00:01.000Z";
+  const write = createSupervisorStatusWriter({
+    statusPath: "/state/status",
+    pid: 321,
+    mountpoint: "/tmp/m",
+    startedAt: "2026-03-17T00:00:00.000Z",
+    now: () => clock,
+    writeTextFile: fs.writeTextFile,
+    rename: fs.rename,
+    remove: fs.remove,
+  });
+
+  // Serializing writes means a state can reach the file well after it was
+  // reached. The stamp has to come from the call, so time moves on while the
+  // write is stalled.
+  fs.holdNextWrites();
+  const mounted = write("mounted");
+  clock = "2026-03-17T00:00:09.000Z";
+  fs.releaseHeldWrites();
+  await mounted;
+
+  assertEquals(
+    JSON.parse(fs.published()!).updatedAt,
+    "2026-03-17T00:00:01.000Z",
+  );
+});
+
+Deno.test("supervisor state is announced on the pipe even when the file write fails", async () => {
+  // The pipe announcement is the handshake's channel; a failed status-file write
+  // must not stop it, or a parent blocked on the pipe would never wake. The write
+  // error still has to reach the caller.
+  const published: Array<[string, Record<string, unknown>]> = [];
+  const publish = (state: string, extra: Record<string, unknown> = {}) => {
+    published.push([state, extra]);
+    return Promise.resolve();
+  };
+  const write = () => Promise.reject(new Error("disk full"));
+
+  await assertRejects(
+    () => announceSupervisorState(write, publish, "mounted"),
+    Error,
+    "disk full",
+  );
+  assertEquals(published, [["mounted", {}]]);
+});
+
+Deno.test("supervisor state records before it announces on the success path", async () => {
+  const order: string[] = [];
+  const write = (state: string) => {
+    order.push(`write:${state}`);
+    return Promise.resolve();
+  };
+  const publish = (state: string) => {
+    order.push(`publish:${state}`);
+    return Promise.resolve();
+  };
+
+  await announceSupervisorState(write, publish, "failed", { error: "x" });
+  assertEquals(order, ["write:failed", "publish:failed"]);
 });

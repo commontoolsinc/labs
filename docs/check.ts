@@ -11,6 +11,7 @@
 //
 //   // Shown at module scope.                  -> top level of a module
 //   // Shown inside a pattern body.            -> inside `function () { ... }`
+//   // Shown inside a handler.                 -> inside `function () { ... }`
 //   // Shown as JSX element children.          -> inside `<>...</>`
 //   // Shown as interface or class members.    -> inside `interface { ... }` / `class { ... }`
 //   // Shown for illustration only.            -> not type-checked (pseudocode)
@@ -39,6 +40,7 @@ export type Context =
 const MARKERS: Array<[RegExp, Context]> = [
   [/^\/\/\s*Shown at module scope\.?\s*$/i, "module"],
   [/^\/\/\s*Shown inside a pattern body\.?\s*$/i, "pattern"],
+  [/^\/\/\s*Shown inside a handler\.?\s*$/i, "pattern"],
   [/^\/\/\s*Shown as JSX element children\.?\s*$/i, "jsx"],
   [/^\/\/\s*Shown as interface or class members\.?\s*$/i, "member"],
   [/^\/\/\s*Shown as alternative snippets\.?\s*$/i, "alternatives"],

@@ -161,6 +161,27 @@ describe("pattern-binding", () => {
       });
     });
 
+    it("accepts a matching static primitive binding, including NaN", () => {
+      const testCell = runtime.getCell<{ value: number }>(
+        space,
+        "static primitive binding leaf 1",
+        undefined,
+        tx,
+      );
+      testCell.set({ value: 0 });
+      const argumentCellLink = getMetaCell(testCell, "argument", tx)
+        .getAsNormalizedFullLink();
+
+      // A static primitive binding matches an identical produced value...
+      sendValueToBinding(tx, testCell, argumentCellLink, 42, 42);
+      // ...including `NaN` (`Object.is` semantics; a `!==` check would
+      // spuriously throw `Got NaN instead of NaN` here).
+      sendValueToBinding(tx, testCell, argumentCellLink, NaN, NaN);
+      // A genuine mismatch throws.
+      expect(() => sendValueToBinding(tx, testCell, argumentCellLink, 42, 43))
+        .toThrow("Got 43 instead of 42");
+    });
+
     it("normalizes cell values before writing a narrower scoped binding", () => {
       const output = runtime.getCell<{ value: unknown }>(
         space,

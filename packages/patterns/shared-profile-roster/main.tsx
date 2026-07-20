@@ -118,7 +118,7 @@ const join = handler<JoinEvent, {
       profile,
       name: trimmed,
       avatar: (avatar ?? "").trim(),
-      joinedAt: safeDateNow(),
+      joinedAt: Date.now(),
     });
   }
   viewer.set({ joined: true, joinedName: trimmed });

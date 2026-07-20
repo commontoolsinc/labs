@@ -194,11 +194,20 @@ function debugLog(debugMode: boolean, ...args: unknown[]) {
 }
 
 /**
- * Sleep for exponential backoff delay based on retry count.
+ * Sleep for exponential backoff delay based on retry count. The SES pattern
+ * sandbox endows no timers, so the wait happens only in host contexts that
+ * expose setTimeout; in-sandbox it resolves immediately rather than throwing
+ * ReferenceError (retries stay ~1s apart anyway via the gated fetch's
+ * grid-aligned settlement).
  */
 async function retryDelay(retryCount: number): Promise<void> {
   const delay = BASE_RETRY_DELAY_MS * Math.pow(2, retryCount);
-  await new Promise((resolve) => setTimeout(resolve, delay));
+  if (delay <= 0) return;
+  const timer = (globalThis as { setTimeout?: typeof setTimeout }).setTimeout;
+  if (typeof timer !== "function") return;
+  await new Promise<void>((resolve) => {
+    timer(resolve, delay);
+  });
 }
 
 /**

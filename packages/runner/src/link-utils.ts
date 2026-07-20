@@ -15,13 +15,9 @@ import {
   type MemorySpace,
   type Stream,
 } from "./cell.ts";
-import {
-  type CellLinkRefPayload,
-  type SigilLink,
-  type URI,
-} from "./sigil-types.ts";
+import { type CellLinkRefPayload, type SigilLink } from "./sigil-types.ts";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { getJSONFromDataURI, toURI } from "./uri-utils.ts";
+import { toURI } from "./uri-utils.ts";
 import { arrayEqual } from "./path-utils.ts";
 import {
   CellResultInternals,
@@ -268,147 +264,6 @@ export function createSigilLinkFromParsedLink(
   }
 
   return sigil;
-}
-
-/**
- * Find any data: URI links and inline them.
- *
- * @param value - The value to find and inline data: URI links in.
- * @returns The value with any data: URI links inlined.
- */
-export function findAndInlineDataURILinks(value: any): any {
-  if (isCellLink(value)) {
-    const dataLink = parseLink(value)!;
-
-    if (dataLink.id?.startsWith("data:")) {
-      let dataValue: any = getJSONFromDataURI(dataLink.id);
-      const path = [...dataLink.path];
-
-      // This is a storage item, so we have to look into the "value" field for
-      // the actual data.
-      if (!isRecord(dataValue)) return undefined;
-      dataValue = dataValue["value"];
-
-      // If there is a link on the way to `path`, follow it, appending remaining
-      // path to the target link.
-      while (dataValue !== undefined) {
-        if (isPrimitiveCellLink(dataValue)) {
-          // Parse the link found in the data URI
-          // Do NOT pass parsedLink as base to avoid inheriting the data: URI id
-          const newLink = parseLink(dataValue);
-          let schema = newLink.schema;
-          if (schema !== undefined && path.length > 0) {
-            const cfc = new ContextualFlowControl();
-            schema = cfc.getSchemaAtPath(schema, path);
-          }
-          // Create new link by merging dataLink with remaining path
-          const newSigilLink = createSigilLinkFromParsedLink({
-            // Start with values from the original data link
-            ...dataLink,
-
-            // overwrite with values from the new link
-            ...newLink,
-
-            // extend path with remaining segments
-            path: [...newLink.path, ...path],
-
-            // use resolved schema if we have one
-            ...(schema !== undefined && { schema }),
-          }, {
-            includeSchema: true,
-            keepAsCell: KeepAsCell.All,
-          });
-          return findAndInlineDataURILinks(newSigilLink);
-        }
-        if (path.length > 0) {
-          dataValue = dataValue[path.shift()!];
-        } else {
-          break;
-        }
-      }
-
-      return dataValue;
-    } else {
-      return value;
-    }
-  } else if (Array.isArray(value)) {
-    let next: any[] | undefined;
-    for (let index = 0; index < value.length; index++) {
-      if (!(index in value)) continue;
-      const current = value[index];
-      const inlined = findAndInlineDataURILinks(current);
-      if (next) {
-        next[index] = inlined;
-      } else if (inlined !== current) {
-        next = value.slice();
-        next[index] = inlined;
-      }
-    }
-    return next ?? value;
-  } else if (isRecord(value)) {
-    let next: Record<string, unknown> | undefined;
-    for (const [key, entry] of Object.entries(value)) {
-      const inlined = findAndInlineDataURILinks(entry);
-      if (next) {
-        next[key] = inlined;
-      } else if (inlined !== entry) {
-        next = { ...value };
-        next[key] = inlined;
-      }
-    }
-    return next ?? value;
-  } else {
-    return value;
-  }
-}
-
-// Helper to create data URIs for testing
-export function createDataCellURI(
-  data: any,
-  base?: Cell | NormalizedLink,
-): URI {
-  const baseLink = isCell(base) ? base.getAsNormalizedFullLink() : base;
-
-  // TODO(danfuzz): This `isRecord`-gated walk guards only `isPrimitiveCellLink`;
-  // a `FabricPrimitive`/`FabricInstance` that is not a link falls through to the
-  // `Object.entries` descent (primitive decomposed, instance walked by internal
-  // slots).
-  function traverseAndAddBaseIdToRelativeLinks(
-    value: any,
-    seen: Set<any>,
-  ): any {
-    if (!isRecord(value)) return value;
-    if (seen.has(value)) {
-      throw new Error(`Cycle detected when creating data URI`);
-    }
-    seen.add(value);
-    try {
-      if (isPrimitiveCellLink(value)) {
-        const link = parseLink(value, baseLink);
-        return createSigilLinkFromParsedLink(link, {
-          includeSchema: true,
-          keepAsCell: KeepAsCell.All,
-        });
-      } else if (Array.isArray(value)) {
-        return value.map((item) =>
-          traverseAndAddBaseIdToRelativeLinks(item, seen)
-        );
-      } else { // isObject
-        return Object.fromEntries(
-          Object.entries(value).map((
-            [key, value],
-          ) => [key, traverseAndAddBaseIdToRelativeLinks(value, seen)]),
-        );
-      }
-    } finally {
-      seen.delete(value);
-    }
-  }
-  const json = JSON.stringify({
-    value: traverseAndAddBaseIdToRelativeLinks(data, new Set()),
-  });
-  // Use encodeURIComponent for UTF-8 safe encoding (matches runtime.ts pattern)
-  return `data:application/json,${encodeURIComponent(json)}` as URI;
 }
 
 /**
@@ -761,11 +616,20 @@ export function getDerivedInternalCellLink(
   const parent = resultCell.entityId ?? resultCell;
   return {
     space: resultCellLink.space,
-    id: toURI(createRef({}, {
-      parent,
-      type: "internal",
-      cause: descriptor.partialCause,
-    })),
+    // The kind's ONLY representation is the URI scheme applied here by
+    // toURI; the hash preimage is kind-free, so this mint site is the single
+    // place a computed identity is established.
+    id: toURI(
+      createRef(
+        {},
+        {
+          parent,
+          type: "internal",
+          cause: descriptor.partialCause,
+        },
+      ),
+      descriptor.kind,
+    ),
     path: [],
     scope: descriptor.scope ?? resultCellLink.scope,
     ...(descriptor.schema !== undefined && { schema: descriptor.schema }),

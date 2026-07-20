@@ -214,6 +214,29 @@ Deno.test("card: an outline past the cap shows a trailing 'N more' line", () => 
   assert(text.includes("2 more"), `overflow line present: ${text}`);
 });
 
+Deno.test("card: the 'N more' line is a selectable expand target; expanding shows all", () => {
+  let src = "// transformed: /app.ts\n";
+  for (let i = 0; i < 16; i++) src += `const v${i} = ${i};\n`;
+  const doc = parseDocument(src);
+  const section = doc.flatStructure.find((n) => n.kind === "section")!;
+  const card = buildPeekCard(doc, section);
+  // The "… 2 more" line is a target, flagged expand, pointing at its own line.
+  const moreLine = card.info.findIndex((l) => l.text.includes("2 more"));
+  const expandTarget = card.targets.find((t) => t.expand);
+  assert(expandTarget, "the more line is a target");
+  assertEquals(expandTarget!.cardLine, moreLine, "it points at the more line");
+  // Rebuilding expanded lists every child and drops the more line (and its
+  // expand target).
+  const full = buildPeekCard(doc, section, undefined, true);
+  const fullText = full.info.map((l) => l.text).join("\n");
+  assert(
+    !fullText.includes("more"),
+    `no overflow line when expanded: ${fullText}`,
+  );
+  assert(fullText.includes("v15"), "the last child is now listed");
+  assert(!full.targets.some((t) => t.expand), "no expand target when expanded");
+});
+
 Deno.test("card: the outline picks a glyph for each child kind", () => {
   // A synthetic parent whose children span the glyph cases reachable from the
   // outline (which hoists through, and so never lists, generic node/comment

@@ -28,11 +28,12 @@ import {
   JSONSchema,
   NAME,
   pattern,
-  safeDateNow,
+  resultOf,
   Stream,
   TILE_UI,
   toIndentedDebugString,
   UI,
+  wish,
   Writable,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
@@ -255,8 +256,12 @@ function createItemKey(item: LibraryItem): string {
  * Calculate days until due date.
  * Returns negative number for overdue items.
  * Parses YYYY-MM-DD format explicitly to avoid timezone issues.
+ * The current time is passed in as nowMs (milliseconds since epoch).
  */
-function calculateDaysUntilDue(dueDate: string | undefined): number {
+function calculateDaysUntilDue(
+  dueDate: string | undefined,
+  nowMs: number,
+): number {
   if (!dueDate) return 999; // No due date = far in future
 
   // Parse YYYY-MM-DD explicitly as local date to avoid UTC timezone shifts
@@ -269,7 +274,7 @@ function calculateDaysUntilDue(dueDate: string | undefined): number {
   // Validate the parsed date is valid
   if (isNaN(due.getTime())) return 999;
 
-  const today = new Date(safeDateNow());
+  const today = new Date(nowMs);
   today.setHours(0, 0, 0, 0);
   due.setHours(0, 0, 0, 0);
   return Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
@@ -744,6 +749,11 @@ export default pattern<PatternInput, PatternOutput>(
       )
     );
 
+    // Current time for due-date urgency calculations. Ticks once per minute so
+    // day-count labels and overdue urgency refresh as time passes.
+    const nowCell = wish<number>({ query: "#now/60" });
+    const nowCellValue = resultOf(nowCell.result);
+
     // ==========================================================================
     // DEDUPLICATION AND TRACKING
     // Combine items from all emails, keeping most recent data for duplicates
@@ -756,6 +766,9 @@ export default pattern<PatternInput, PatternOutput>(
       const returnedKeys = manuallyReturned.get() || [];
       // Get due date overrides
       const overrides = dueDateOverrides.get() || {};
+
+      // Current time, resolved from the reactive #now cell.
+      const nowMs = nowCellValue;
 
       // Sort emails by date (newest first) so we keep most recent data
       if (!rawAnalyses || rawAnalyses.length === 0) {
@@ -789,7 +802,7 @@ export default pattern<PatternInput, PatternOutput>(
           // Use overridden due date if available, otherwise use original
           const effectiveDueDate = overrides[key] || item.dueDate;
 
-          const daysUntilDue = calculateDaysUntilDue(effectiveDueDate);
+          const daysUntilDue = calculateDaysUntilDue(effectiveDueDate, nowMs);
           const urgency = calculateUrgency(daysUntilDue, item.status);
 
           const trackedItem: TrackedItem = {

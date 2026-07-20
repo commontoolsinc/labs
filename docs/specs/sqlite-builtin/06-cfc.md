@@ -76,11 +76,38 @@ from SQLite column metadata via FFI (`sqlite3_column_origin_name` /
 | JOIN / UNION / CTE / view / subquery | true origin | disambiguated |
 
 This binds the SAME libsqlite3 `@db/sqlite` already loaded (it is compiled with
-`SQLITE_ENABLE_COLUMN_METADATA`; it just doesn't expose those symbols), getting
-its path the way `@db/sqlite` does — plug's `download({ cache: "use" })` (a cache
-hit returns the already-downloaded file; no scan, no network) — with
-`DENO_SQLITE_PATH` as an override. If the symbols can't be bound, a labeled query
-fails loudly rather than mislabeling.
+`SQLITE_ENABLE_COLUMN_METADATA`; it just doesn't expose those symbols), picking
+the file the way `@db/sqlite` picks it and in the same order: `DENO_SQLITE_LOCAL`
+selects the build in its own checkout, `DENO_SQLITE_PATH` names a file, and with
+neither set it takes plug's `download({ cache: "use" })` of the pinned release (a
+cache hit returns the already-downloaded file; no scan, no network). Exactly one
+of those is opened, and a source that cannot be opened is reported rather than
+replaced: substituting another file is what produces a second image. A
+`DENO_SQLITE_PATH` naming a libsqlite3 built without
+`SQLITE_ENABLE_COLUMN_METADATA` therefore reports that its symbols are missing.
+`DENO_SQLITE_LOCAL` is reported the same way, because the checkout's path is not
+derived here. If the symbols can't be bound, a labeled query fails loudly rather
+than mislabeling, and the reason goes to the server log: it names a filesystem
+path, and the error itself reaches the query caller.
+
+What this depends on is that both bindings open the same *file*. `dlopen` keys
+images by resolved path, so opening the same path hands back the image already
+loaded, and the process holds a single libsqlite3 with a single set of SQLite
+globals. Opening any other path — even a byte-identical copy — gives a second,
+independent image. `@db/sqlite` calls `sqlite3_initialize()` only on the image it
+loaded, so the second image's global state stays zeroed, and passing a prepared
+statement into it dispatches through that zeroed state and crashes the process.
+Initializing the second image stops the crash, and is not the repair: two
+initialized images still hold separate allocators and mutexes while sharing
+handles. The invariant is one image, not two agreeing ones.
+
+`@db/sqlite` builds its download URL from its own package version, so the release
+version pinned in `column-origin.ts` is what keeps both on one path, and it has
+to be the version the lockfile resolves `@db/sqlite` to. Plug's cache is keyed by
+the URL, so a pin naming a different version names a different file. Rolling
+`@db/sqlite` means updating the pin in the same change; a test in
+`packages/memory` checks the pin against the lockfile, so a stale pin is reported
+as a test failure rather than a crash.
 
 Provenance is captured **server-side** (where the prepared statement lives); the
 **runner** maps each origin → the column's `ifc` and writes the result rows under

@@ -14,9 +14,11 @@ import {
   ifElse,
   NAME,
   pattern,
+  resultOf,
   TILE_UI,
   UI,
   type VNode,
+  wish,
   type Writable,
 } from "commonfabric";
 import GoogleAuth, {
@@ -55,6 +57,10 @@ export default pattern<Input, Output>(({ auth, selectedScopes }) => {
   // Compose the base GoogleAuth pattern
   const baseAuth = GoogleAuth({ auth, selectedScopes });
 
+  // Reactive #now passed into the preview helper (snapshot for the picker chip).
+  const nowCell = wish<number>({ query: "#now/60" });
+  const nowCellValue = resultOf(nowCell.result);
+
   // Enhanced preview with WORK badge using shared helper
   // Build scopes record manually (same pattern as google-auth.tsx to avoid type casting)
   const previewUI = computed(() =>
@@ -70,6 +76,7 @@ export default pattern<Input, Output>(({ auth, selectedScopes }) => {
         docs: selectedScopes.docs,
         contacts: selectedScopes.contacts,
       },
+      nowCellValue,
       { text: "WORK", color: "#dc2626" },
     )
   );

@@ -73,6 +73,11 @@ interface MutableCapabilityState {
   readonly rawOpaquePaths: Set<string>;
   passthrough: boolean;
   wildcard: boolean;
+  /** Static path prefixes at which unknown (wildcard) accesses occurred.
+   * `[]` means the whole root. Lets the identity-path filter erase only
+   * identity paths the unknown access can actually cover, instead of
+   * blanket-erasing every capture sharing this root state (#4714). */
+  readonly wildcardPaths: Set<string>;
   hasIdentityUse: boolean;
   hasNonIdentityUse: boolean;
   hasNonIdentityRootUse: boolean;
@@ -83,7 +88,7 @@ interface MutableCapabilityState {
    * by recognized `set`/`send` calls carrying an onCommit callback (whose
    * closure can escape into fresh transactions or external I/O after
    * commit — writes this analysis cannot bound). Consumers asserting
-   * write exhaustiveness must fail closed
+   * write exhaustiveness (`completeSchedulerScopeSummary`) must fail closed
    * on this, like `wildcard`; recognized reads/derivations are unaffected.
    *
    * Syntactic boundary: detection is per method-CALL dispatch. An extracted
@@ -172,6 +177,9 @@ const mergeableMethods = (kind: MergeableOpMethodKind): string[] =>
 // commit in their own transaction — effects this analysis cannot see or
 // bound. Either way a callback that sends must never summarize as
 // write-free.
+// Classifying it here also keeps writePaths an exhaustive record of capture
+// writes, which the computed-cell classifier relies on
+// (docs/specs/computed-cell-identity.md).
 const WRITER_METHODS = new Set([
   "set",
   "update",
@@ -1229,7 +1237,7 @@ function assignParameterBindingAlias(
   source: AliasBinding | undefined,
   aliases: Map<string, SourceRef>,
   aliasShapes: Map<string, AliasShape>,
-  markWildcard: (name: string) => void,
+  markWildcard: (name: string, path?: readonly string[]) => void,
   checker?: ts.TypeChecker,
 ): void {
   if (ts.isIdentifier(name)) {
@@ -1253,7 +1261,7 @@ function assignParameterBindingAlias(
 
   if (ts.isArrayBindingPattern(name)) {
     if (isSourceRefBinding(source)) {
-      markWildcard(source.root);
+      markWildcard(source.root, source.path);
     }
     clearBindingAliases(name, aliases, aliasShapes);
     return;
@@ -1264,7 +1272,7 @@ function assignParameterBindingAlias(
 
     if (element.dotDotDotToken || element.initializer) {
       if (isSourceRefBinding(source)) {
-        markWildcard(source.root);
+        markWildcard(source.root, source.path);
       }
       clearBindingAliases(element.name, aliases, aliasShapes);
       continue;
@@ -1278,7 +1286,7 @@ function assignParameterBindingAlias(
     } else {
       key = getStaticPropertyKeyText(element.propertyName, checker);
       if (!key && isSourceRefBinding(source)) {
-        markWildcard(source.root);
+        markWildcard(source.root, source.path);
       }
     }
 
@@ -1331,10 +1339,28 @@ function normalizeObservedCapabilityUsage(
         opaquePath.every((segment, index) => path[index] === segment)
       )
     );
+  const wildcardPrefixes = Array.from(state.wildcardPaths).map(decodePath);
   const identityPaths = Array.from(state.rawIdentityPaths)
     .map(decodePath)
     .filter((identityPath) => {
-      if (state.wildcard) {
+      // A wildcard records that unknown reads/writes exist under some
+      // static prefix of this root. It must keep suppressing identityOnly
+      // (and the scope proofs gated on it), and it must erase identity
+      // markings the unknown access can cover — but NOT the markings of
+      // disjoint paths. Closure captures share one synthetic root state, so
+      // blanket erasure here degraded an equals()-only [SELF] capture to a
+      // full-value self-demand that can never satisfy — the consuming node
+      // then silently never ran (#4714). Overlap is checked in both
+      // directions: a wildcard above the identity path can value-read the
+      // compared node; a wildcard below it reaches inside the compared
+      // subtree. Markers with no path information use the root prefix and
+      // keep the old blanket behavior.
+      const overlapsWildcard = wildcardPrefixes.some((wp) =>
+        wp.length <= identityPath.length
+          ? wp.every((segment, index) => identityPath[index] === segment)
+          : identityPath.every((segment, index) => wp[index] === segment)
+      );
+      if (overlapsWildcard) {
         return false;
       }
       if (identityPath.length === 0 && state.hasNonIdentityRootUse) {
@@ -1473,6 +1499,7 @@ export function analyzeFunctionCapabilities(
           rawOpaquePaths: new Set<string>(),
           passthrough: false,
           wildcard: false,
+          wildcardPaths: new Set<string>(),
           hasIdentityUse: false,
           hasNonIdentityUse: false,
           hasNonIdentityRootUse: false,
@@ -1512,15 +1539,20 @@ export function analyzeFunctionCapabilities(
       state.hasNonIdentityUse = true;
     };
 
-    const markWildcard = (name: string): void => {
+    const markWildcard = (
+      name: string,
+      path: readonly string[] = [],
+    ): void => {
       const state = ensureState(name);
       state.wildcard = true;
+      state.wildcardPaths.add(encodePath(path));
       state.hasNonIdentityUse = true;
     };
 
     // Unlike markWildcard this does NOT change shrinking or identity
     // classification — it only poisons write-exhaustiveness for consumers
-    // that need `writes` to be a closed-world record, while everything else
+    // that need `writes` to be a closed-world record
+    // (`completeSchedulerScopeSummary` is withheld), while everything else
     // behaves as before.
     const markUnverifiedCellUse = (name: string): void => {
       const state = ensureState(name);
@@ -2124,7 +2156,7 @@ export function analyzeFunctionCapabilities(
       options?: { identityOnly?: boolean },
     ): void => {
       if (ref.dynamic) {
-        markWildcard(ref.root);
+        markWildcard(ref.root, ref.path);
         return;
       }
       trackRead(ref.root, ref.path, options);
@@ -2132,7 +2164,7 @@ export function analyzeFunctionCapabilities(
 
     const trackWriteRef = (ref: SourceRef): void => {
       if (ref.dynamic) {
-        markWildcard(ref.root);
+        markWildcard(ref.root, ref.path);
         return;
       }
       trackWrite(ref.root, ref.path);
@@ -2140,7 +2172,7 @@ export function analyzeFunctionCapabilities(
 
     const trackFullShapeReadRef = (ref: SourceRef): void => {
       if (ref.dynamic) {
-        markWildcard(ref.root);
+        markWildcard(ref.root, ref.path);
         return;
       }
       trackFullShapeRead(ref.root, ref.path);
@@ -2190,7 +2222,7 @@ export function analyzeFunctionCapabilities(
         for (const property of pattern.properties) {
           if (ts.isSpreadAssignment(property)) {
             if (isSourceRefBinding(source)) {
-              markWildcard(source.root);
+              markWildcard(source.root, source.path);
             }
             continue;
           }
@@ -2212,7 +2244,7 @@ export function analyzeFunctionCapabilities(
 
           const key = getStaticPropertyKeyText(property.name, checker);
           if (!key && isSourceRefBinding(source)) {
-            markWildcard(source.root);
+            markWildcard(source.root, source.path);
           }
 
           if (!key) {
@@ -2233,7 +2265,7 @@ export function analyzeFunctionCapabilities(
 
       if (ts.isArrayLiteralExpression(pattern)) {
         if (source && isSourceRefBinding(source)) {
-          markWildcard(source.root);
+          markWildcard(source.root, source.path);
         }
         for (const element of pattern.elements) {
           if (ts.isSpreadElement(element)) {
@@ -2247,7 +2279,7 @@ export function analyzeFunctionCapabilities(
     const markWildcardFromExpression = (expression: ts.Expression): void => {
       const ref = resolveSourceRef(expression);
       if (!ref) return;
-      markWildcard(ref.root);
+      markWildcard(ref.root, ref.path);
     };
 
     const markFromExpression = (
@@ -2257,7 +2289,7 @@ export function analyzeFunctionCapabilities(
       const ref = resolveSourceRef(expression);
       if (!ref) return;
       if (ref.dynamic) {
-        markWildcard(ref.root);
+        markWildcard(ref.root, ref.path);
         return;
       }
       marker(ref.root, ref.path);
@@ -2275,7 +2307,7 @@ export function analyzeFunctionCapabilities(
         ? recordComparablePath
         : recordIdentityPath;
       if (ref.dynamic) {
-        markWildcard(ref.root);
+        markWildcard(ref.root, ref.path);
       } else if (ref.path.length === 0) {
         record(ref.root, [], { cellLike });
         markPassthrough(ref.root, { identityOnly: true });
@@ -2287,7 +2319,7 @@ export function analyzeFunctionCapabilities(
     const markArrayItemIdentityUseRef = (ref: SourceRef): void => {
       const materialized = materializeSourceRef(ref);
       if (materialized.dynamic) {
-        markWildcard(materialized.root);
+        markWildcard(materialized.root, materialized.path);
         return;
       }
       recordIdentityPath(materialized.root, [...materialized.path, "0"]);
@@ -2459,7 +2491,7 @@ export function analyzeFunctionCapabilities(
         );
 
         if (source.dynamic) {
-          markWildcard(source.root);
+          markWildcard(source.root, source.path);
           continue;
         }
 
@@ -2944,7 +2976,7 @@ export function analyzeFunctionCapabilities(
             capabilityHandledArgs.add(index);
 
             if (source.dynamic || paramSummary.wildcard) {
-              markWildcard(source.root);
+              markWildcard(source.root, source.path);
               continue;
             }
             if (paramSummary.hasUnverifiedCellUse) {
@@ -2975,7 +3007,7 @@ export function analyzeFunctionCapabilities(
 
             for (const identityPath of paramSummary.identityPaths ?? []) {
               if (source.dynamic) {
-                markWildcard(source.root);
+                markWildcard(source.root, source.path);
               } else {
                 const isComparablePath = (paramSummary.comparablePaths ?? [])
                   .some((path) =>
@@ -3027,7 +3059,7 @@ export function analyzeFunctionCapabilities(
         if (node.questionDotToken && ts.isExpression(node.expression)) {
           const source = resolveSourceRef(node.expression);
           if (source) {
-            markWildcard(source.root);
+            markWildcard(source.root, source.path);
           }
         }
 
@@ -3061,14 +3093,14 @@ export function analyzeFunctionCapabilities(
             } else if (methodName === "elementById") {
               // Addresses a separately derived entity; attribute the access
               // conservatively to the whole array root.
-              markWildcard(receiver.root);
+              markWildcard(receiver.root, receiver.path);
             } else if (methodName === "key") {
               const argPath = extractLiteralPathArguments(
                 node.arguments,
                 checker,
               );
               if (argPath.dynamic) {
-                markWildcard(receiver.root);
+                markWildcard(receiver.root, receiver.path);
               } else {
                 const keyUsage = unwrapExpressionUsageSite(node);
                 const keyUsageParent = keyUsage.parent;
@@ -3155,7 +3187,7 @@ export function analyzeFunctionCapabilities(
               // results. Dynamic receivers can hide which branch is used, so
               // they must disable shrinking for the root.
               if (receiver.dynamic) {
-                markWildcard(receiver.root);
+                markWildcard(receiver.root, receiver.path);
               } else if (receiver.path.length > 0) {
                 recordOpaquePath(receiver.root, receiver.path);
               } else {
@@ -3198,7 +3230,7 @@ export function analyzeFunctionCapabilities(
             const source = resolveSourceRef(unwrappedArgument);
             if (!source) continue;
             if (source.dynamic || source.path.length > 0) continue;
-            markWildcard(source.root);
+            markWildcard(source.root, source.path);
           }
         }
         if (identityArgumentCall) {

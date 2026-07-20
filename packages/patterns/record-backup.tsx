@@ -172,7 +172,9 @@ function extractModuleData(
  * Build export data from all Records in the space
  */
 const buildExportData = lift(
-  ({ allPieces }: { allPieces: RecordPiece[] }): ExportData => {
+  (
+    { allPieces, now }: { allPieces: RecordPiece[]; now: number | undefined },
+  ): ExportData => {
     // Filter to only Record patterns
     const records = (allPieces || []).filter(
       (piece) => piece?.["#record"] === true,
@@ -224,7 +226,7 @@ const buildExportData = lift(
 
     return {
       version: "1.0",
-      exportDate: new Date(safeDateNow()).toISOString(),
+      exportDate: now == null ? "" : new Date(now).toISOString(),
       records: exportedRecords,
     };
   },
@@ -622,8 +624,15 @@ export default pattern<Input, Output>(({ importJson }) => {
   });
   const { allPieces } = resultOf(defaultWish.result);
 
+  // Current time, sourced from the reactive #now cell (coarsened to 1s).
+  const nowCell = wish<number>({ query: "#now" });
+  const nowCellValue = resultOf(nowCell.result);
+
   // Build export data
-  const exportData = buildExportData({ allPieces });
+  const exportData = buildExportData({
+    allPieces,
+    now: nowCellValue,
+  });
   const exportedJson = formatExportJson({ exportData });
   const recordCount = countRecords({ exportData });
 
@@ -677,9 +686,11 @@ export default pattern<Input, Output>(({ importJson }) => {
                 </p>
                 <cf-file-download
                   $data={exportedJson}
-                  filename={`record-backup-${
-                    new Date(safeDateNow()).toISOString().slice(0, 10)
-                  }.json`}
+                  filename={computed(() =>
+                    `record-backup-${
+                      new Date(nowCellValue).toISOString().slice(0, 10)
+                    }.json`
+                  )}
                   mimeType="application/json"
                   variant="primary"
                   allowAutosave

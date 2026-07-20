@@ -23,10 +23,11 @@ import {
   NAME,
   pattern,
   type PatternFactory,
-  safeDateNow,
+  resultOf,
   TILE_UI,
   toIndentedDebugString,
   UI,
+  wish,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
 import GmailExtractor from "../core/gmail-extractor.tsx";
@@ -547,6 +548,11 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
     {},
   );
 
+  // Reactive clock. Ticks every 60 seconds so day-based countdowns and the
+  // 24-hour check-in window refresh over time.
+  const nowCell = wish<number>({ query: "#now/60" });
+  const nowCellValue = resultOf(nowCell.result);
+
   // ==========================================================================
   // FLIGHT TRACKING - DEDUPLICATION AND MERGING
   // ==========================================================================
@@ -554,8 +560,9 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
   const flights = computed(() => {
     const flightMap: Record<string, TrackedFlight> = {};
 
+    // Wait for the clock before computing time-relative flight state.
     // Create reference dates for calculations
-    const now = new Date(safeDateNow());
+    const now = new Date(nowCellValue); // Current time for hour-based calculations
     const today = new Date(now);
     today.setHours(0, 0, 0, 0); // Midnight for day-based calculations
 

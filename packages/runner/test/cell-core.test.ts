@@ -1456,6 +1456,61 @@ describe(
       expect(result?.pos).toBe(Infinity);
       expect(result?.neg).toBe(-Infinity);
     });
+
+    it("projects a bare NaN through a number schema", () => {
+      // Non-finite numbers are first-class stored values; the schema read
+      // projection must classify them as numbers rather than hiding them.
+      const c = runtime.getCell<number>(
+        space,
+        "schema'd bare NaN",
+        { type: "number" },
+        tx,
+      );
+      c.set(NaN);
+      expect(Number.isNaN(c.get())).toBe(true);
+    });
+
+    it("projects a NaN property through an object schema", () => {
+      const c = runtime.getCell<{ x: number }>(
+        space,
+        "schema'd NaN property",
+        { type: "object", properties: { x: { type: "number" } } },
+        tx,
+      );
+      c.set({ x: NaN });
+      expect(Number.isNaN(c.get()?.x)).toBe(true);
+    });
+
+    it("projects NaN, infinities, and -0 through an array schema", () => {
+      const c = runtime.getCell<number[]>(
+        space,
+        "schema'd weird-number array",
+        { type: "array", items: { type: "number" } },
+        tx,
+      );
+      c.set([1, NaN, Infinity, -Infinity, -0, 2]);
+      const result = c.get();
+      expect(result?.length).toBe(6);
+      expect(result?.[0]).toBe(1);
+      expect(Number.isNaN(result?.[1])).toBe(true);
+      expect(result?.[2]).toBe(Infinity);
+      expect(result?.[3]).toBe(-Infinity);
+      expect(Object.is(result?.[4], -0)).toBe(true);
+      expect(result?.[5]).toBe(2);
+    });
+
+    it("does not project NaN through an integer schema", () => {
+      // `NaN` is a number but not an integer, so an `integer` schema still
+      // rejects it.
+      const c = runtime.getCell<number>(
+        space,
+        "integer schema vs NaN",
+        { type: "integer" },
+        tx,
+      );
+      c.set(NaN);
+      expect(c.get()).toBe(undefined);
+    });
   },
 );
 

@@ -109,7 +109,15 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
 
   /**
    * Parses an instance from its string representation
-   * (`<tag>:<base64urlHash>`).
+   * (`<tag>:<base64urlHash>`), which contains exactly one colon: a tag has
+   * none, and neither does base64url. Splitting at the first colon therefore
+   * rejects any source bearing a second one, since the colon then falls in the
+   * hash segment, where it is not valid base64url.
+   *
+   * That rejection is a feature. A string with an extra colon is not a tagged
+   * hash, and the only alternative to refusing it is to guess which colon was
+   * meant -- silently returning a `FabricHash` with a tag its author never
+   * wrote, which renders back as the string it came from and so looks correct.
    */
   static fromString(source: string): FabricHash {
     const colonIndex = source.indexOf(":");

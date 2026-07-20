@@ -251,10 +251,12 @@ export class CommonIframeSandboxElement extends LitElement {
           : message.data;
 
         for (const key of keys) {
-          const receipt = this.subscriptions.get(key);
-          if (!receipt) {
+          // A receipt is opaque and may be any value the handler returns,
+          // including falsy ones like `0`. Test for the entry, not the value.
+          if (!this.subscriptions.has(key)) {
             continue;
           }
+          const receipt = this.subscriptions.get(key);
           IframeHandler.unsubscribe(this, this.context, receipt);
           this.subscriptions.delete(key);
         }

@@ -11,7 +11,7 @@
  *
  * Run: deno task cf test packages/patterns/battleship/multiplayer/room.test.tsx --root packages/patterns/battleship --verbose
  */
-import { action, computed, pattern, safeDateNow, Writable } from "commonfabric";
+import { action, computed, pattern, Writable } from "commonfabric";
 import BattleshipRoom from "./room.tsx";
 import {
   createInitialShots,
@@ -41,13 +41,16 @@ function createTestShips(): Ship[] {
 
 /**
  * Create player data with known ships for testing.
+ *
+ * `joinedAt` uses a fixed timestamp: no assertion reads it, and calling a clock
+ * in the pattern top-level body is rejected by the time-capability gate.
  */
 function createTestPlayer(name: string, playerNum: 1 | 2): PlayerData {
   return {
     name,
     ships: createTestShips(),
     color: playerNum === 1 ? "#3b82f6" : "#ef4444",
-    joinedAt: safeDateNow(),
+    joinedAt: 0,
   };
 }
 

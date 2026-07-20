@@ -19,9 +19,9 @@ import {
   lift,
   NAME,
   pattern,
-  safeDateNow,
   SELF,
   str,
+  type Stream,
   toCompactDebugString,
   UI,
   Writable,
@@ -93,6 +93,12 @@ export interface RecordOutput {
   trashedSubPieces?: TrashedSubPieceEntry[] | Default<[]>;
   /** Self-reference for sub-pieces to access their parent Record */
   parentRecord?: RecordOutput | null;
+  /** Adds a module of the named type to this record's sub-pieces. */
+  addModule?: Stream<{
+    type: string;
+    initialData?: Record<string, unknown>;
+    result?: Writable<unknown>;
+  }>;
 }
 
 // ===== Auto-Initialize Notes + TypePicker (Two-Lift Pattern) =====
@@ -326,7 +332,7 @@ const trashSubPiece = handler<
   if (!entry) return;
 
   // Move to trash with timestamp
-  trash.push({ ...entry, trashedAt: new Date(safeDateNow()).toISOString() });
+  trash.push({ ...entry, trashedAt: new Date().toISOString() });
 
   // Remove from active using splice
   const updated = [...current];
@@ -629,13 +635,13 @@ const handleAddModule = handler<
   // Capture schema at creation time
   const schema = getResultSchema(piece);
 
-  sc.push({
+  sc.set([...current, {
     type,
     pinned: false,
     collapsed: false,
     piece,
     schema,
-  });
+  }]);
 
   if (result) {
     result.set({
@@ -740,7 +746,7 @@ const handleRemoveModule = handler<
   const def = getDefinition(entry.type);
 
   // Move to trash with timestamp
-  trash.push({ ...entry, trashedAt: new Date(safeDateNow()).toISOString() });
+  trash.push({ ...entry, trashedAt: new Date().toISOString() });
 
   // Remove from active
   const updated = [...current];

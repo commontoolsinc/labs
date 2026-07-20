@@ -236,6 +236,98 @@ export default pattern<Input>(({ enableSearch }) => {
 This ensures the wish is established once. Conditional logic belongs in how you
 *use* the result, not in whether you *create* the wish.
 
+## Built-in Targets
+
+These query strings resolve to well-known cells without a search. The
+`#`-prefixed targets resolve against the current space by default, except
+`#favorites`, `#journal`, `#learned`, `#learnedSummary`, and the `#profile*`
+targets, which require a signed-in user and resolve from that user's home space.
+The `scope` parameter can redirect or fan the others out across other spaces.
+
+| Target              | Description                                             |
+|---------------------|---------------------------------------------------------|
+| `/`                 | Current space cell                                      |
+| `/path/to/prop`     | Nested property of the current space cell               |
+| `#default`          | Default pattern of the current space                    |
+| `#mentionable`      | Mentionable pieces in the current space                 |
+| `#allPieces`        | All pieces in the current space                         |
+| `#recent`           | Recently-used pieces in the current space               |
+| `#suggestions`      | Suggestion history of the current space                 |
+| `#summaryIndex`     | Summary index of the current space                      |
+| `#knowledgeGraph`   | Knowledge graph of the current space                    |
+| `#now`              | Current timestamp (one-shot, 1s resolution)             |
+| `#now/N`            | Reactive timestamp, every N seconds (N must be 1-86400) |
+| `#favorites`        | User's favorites list (home space)                      |
+| `#favorites/<term>` | First favorite matching `<term>` (legacy search)        |
+| `#journal`          | User's journal (home space)                             |
+| `#learned`          | User's learned data (home space)                        |
+| `#learnedSummary`   | Free-form learned summary string (home space)           |
+| `#profile`          | Profile default pattern object                          |
+| `#profileName`      | User's profile display name                             |
+| `#profileAvatar`    | User's profile avatar                                   |
+| `#profileSpace`     | User's profile space cell                               |
+
+The `#profile*` targets are detailed under
+[Well-Known Profile Targets](#well-known-profile-targets). Any other `#tag` is a
+hashtag *search* rather than a well-known target: it returns every piece tagged
+`#tag`, scoped per the `scope` parameter (favorites only by default). A query
+that is neither a `/path` nor a `#tag` is treated as a free-form request and
+routed to the suggestion picker.
+
+```tsx
+// Shown inside a pattern body.
+// One-shot: captures the time once at first load, never updates.
+const createdAt = wish<number>({ query: "#now" });
+
+// Reactive: updates every 60 seconds, re-triggering downstream computed()s.
+const now = wish<number>({ query: "#now/60" });
+const timeAgo = computed(() => {
+  if (now.result == null || createdAt.result == null) return "";
+  const ms = now.result - createdAt.result;
+  return `${Math.floor(ms / 60000)} minutes ago`;
+});
+```
+
+### Periodic work: polling a data source on a `#now/N` tick
+
+`#now/N` is also how a pattern does periodic *work* — "check this feed every five
+minutes", "re-run this query every minute". The `#now/N` cell flips every `N`
+seconds; feed that tick into the input of a **reactive** fetch builtin
+(`fetchJson` / `fetchText` / `fetchData`), and the builtin re-runs each window
+because its input changed. Vary the request by the tick (a `since` parameter, or
+a cache-busting query value) so each window is a fresh request rather than a
+memoized repeat:
+
+```tsx
+// Shown inside a pattern body.
+// Poll a feed every 5 minutes. The #now/300 tick changes `url` each window, so
+// the reactive fetch re-runs; its result lands in a cell the UI reads. No clock
+// is read in reactive code — the tick is a cell, and the fetch is a reactive
+// builtin, so the graph still quiesces between windows.
+const tick = wish<number>({ query: "#now/300" });
+const feed = fetchJson<{ items: string[] }>({
+  url: computed(() =>
+    tick.result == null ? "" : `/api/my-feed?window=${tick.result}`
+  ),
+});
+const items = computed(() => feed.result?.items ?? []);
+```
+
+This stays inside the timing model: reactive fetch settlement is observed in a
+lift/computed context where the clock is denied, so a periodic re-fetch grants no
+fine clock (see `docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md`).
+
+**What a `#now/N` tick cannot do: trigger a handler.** A tick is a cell flip.
+Reactive code (lifts, computeds, the pattern body) cannot emit an event, so there
+is no way to make a `#now/N` tick *fire a handler* on a timer. That rules out
+timer-driven *imperative* work — the sequenced multi-request OAuth flows, token
+refreshes, and mutations that the email/calendar clients run inside handlers.
+Those still need a user action (a "Refresh" button, a visit) to start. Periodic
+work that can be expressed as "re-derive this value / re-read this source" fits
+the reactive-fetch shape above; periodic work that must *push* (send a reply,
+write to a remote mailbox) on a timer is deliberately not expressible, because an
+unattended background side-effect is a larger capability than a background read.
+
 ## Intended Usage
 
 Keep a handle to important information in a piece, e.g. google auth, user

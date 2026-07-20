@@ -137,6 +137,10 @@ export interface DiffHunkInfo {
   readonly newStart: number;
   readonly newCount: number;
   readonly verified: boolean;
+  /** The original diff marks the old side as having no final newline. */
+  readonly oldNoTrailingNewline?: boolean;
+  /** The original diff marks the new side as having no final newline. */
+  readonly newNoTrailingNewline?: boolean;
 }
 
 /** Maps between diff-text offsets and workspace-file offsets, for semantics. */
@@ -344,6 +348,9 @@ interface HunkCtx {
 
 function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
   const { rawLines, modelLines, lines, diffLineStarts } = ctx;
+  const isNoNewlineMarker = (line: string | undefined): boolean =>
+    line?.replace(/\r$/, "") === "\\ No newline at end of file";
+  const crlfTransport = rawLines[hunk.headerLine].endsWith("\r");
 
   // Header line.
   lines[hunk.headerLine].spans = [{
@@ -354,19 +361,43 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
 
   // Verify the hunk as a whole, the way `git apply` validates context: EVERY
   // context/addition line must match the workspace file at its stated new-side
-  // line number. A stale diff (the workspace gained or lost lines above the
+  // line number. New-side no-newline metadata must match the file ending too.
+  // A stale diff (the workspace gained or lost lines above the
   // hunk) can coincidentally match a single shifted line — blank lines, lone
   // braces, duplicated boilerplate — and per-line acceptance would then answer
   // type/definition queries about the wrong occurrence. All-or-nothing keeps
   // the maps honest: an unverified hunk renders via fragments and maps to
   // nothing.
+  let oldNoTrailingNewline = false;
+  let newNoTrailingNewline = false;
+  for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
+    if (!isNoNewlineMarker(rawLines[i])) continue;
+    const previous = modelLines[i - 1]?.kind;
+    if (previous === "del" || previous === "ctx") {
+      oldNoTrailingNewline = true;
+    }
+    if (previous === "add" || previous === "ctx") {
+      newNoTrailingNewline = true;
+    }
+  }
+
   let verified = ctx.fileDoc !== null;
   for (let i = hunk.headerLine + 1; verified && i <= hunk.endLine; i++) {
     const entry = modelLines[i];
     if (entry?.kind !== "ctx" && entry?.kind !== "add") continue;
-    if (fileLineText(ctx, entry.newLine!) !== rawLines[i].slice(1)) {
+    let diffText = rawLines[i].slice(1);
+    if (
+      crlfTransport && isNoNewlineMarker(rawLines[i + 1]) &&
+      diffText.endsWith("\r")
+    ) {
+      diffText = diffText.slice(0, -1);
+    }
+    if (fileLineText(ctx, entry.newLine!) !== diffText) {
       verified = false;
     }
+  }
+  if (verified && newNoTrailingNewline && ctx.fileText!.endsWith("\n")) {
+    verified = false;
   }
   // Record every hunk in document order so save can match the edited diff's
   // hunks to these by position and rewrite only the verified ones.
@@ -375,6 +406,8 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
     newStart: hunk.newStart,
     newCount: hunk.newCount,
     verified,
+    oldNoTrailingNewline,
+    newNoTrailingNewline,
   });
 
   // Mapping of this hunk's visible new-file lines → diff lines, and lazily-
@@ -644,6 +677,16 @@ interface RemapCtx {
  * exposes the innermost distinct nodes (and Tab never lands on two
  * identical-looking ones). Returns [] when no line of the node is visible.
  */
+/** An object/array literal or one of its entries — a generic node the diff
+ * structure keeps (rather than dissolving) so it can be navigated entry by
+ * entry. */
+function isLiteralShape(node: StructureNode): boolean {
+  return node.astKinds?.some((k) =>
+    k === "ObjectLiteralExpression" || k === "ArrayLiteralExpression" ||
+    k === "PropertyAssignment" || k === "ShorthandPropertyAssignment"
+  ) ?? false;
+}
+
 function remapNode(
   node: StructureNode,
   depth: number,
@@ -652,8 +695,12 @@ function remapNode(
 ): StructureNode[] {
   // A diff's structure stays focused on declarations and the like; the generic
   // expression and comment nodes that fill the full-AST tree are skipped, but
-  // their meaningful descendants are hoisted into this node's place.
-  if (node.kind === "node" || node.kind === "comment") {
+  // their meaningful descendants are hoisted into this node's place. Object and
+  // array literals and their entries are kept, though — an object literal in a
+  // diff (an options bag, a returned record) is worth navigating entry by entry.
+  if (
+    (node.kind === "node" || node.kind === "comment") && !isLiteralShape(node)
+  ) {
     const hoisted: StructureNode[] = [];
     for (const child of node.children) {
       hoisted.push(...remapNode(child, depth, parentRange, ctx));
@@ -733,6 +780,7 @@ function remapNode(
     depth,
     children,
     meta: node.meta,
+    astKinds: node.astKinds,
   };
   registerDefinition(
     node,

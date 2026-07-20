@@ -130,7 +130,7 @@ of).
 export interface Sighting {
   id: string; // genId()
   spotNumber: string; // "1" | "5" | "12" | "13" (validated against spots)
-  capturedAt: number; // safeDateNow() at capture
+  capturedAt: number; // Date.now() in the capture handler (one-second resolution)
   reportedBy: string; // employee name (current actor)
   image: ImageData; // original photo (kept for audit) — has .data/.url/.name
 

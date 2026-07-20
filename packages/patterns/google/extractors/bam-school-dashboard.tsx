@@ -31,6 +31,7 @@ import {
   safeDateNow,
   TILE_UI,
   UI,
+  wish,
   Writable,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
@@ -397,6 +398,12 @@ export interface PatternOutput {
 
 export default pattern<PatternInput, PatternOutput>(
   ({ settings, dismissedIds, overrideAuth }) => {
+    // Reactive clock for countdown labels and urgency colors. Ticks every
+    // minute so relative-time labels ("Today", "In 3 days") refresh across day
+    // boundaries.
+    const nowCell = wish<number>({ query: "#now/60" });
+    const nowCellValue = resultOf(nowCell.result);
+
     // Build Gmail query to find BAM school emails
     // Excludes fundraising emails (schoolsfund.berkeley.net)
     const gmailQuery =
@@ -470,7 +477,7 @@ export default pattern<PatternInput, PatternOutput>(
       }
 
       // Sort by: urgent first, then by date (soonest first), then by source priority
-      const today = new Date(safeDateNow());
+      const today = new Date(nowCellValue);
       today.setHours(0, 0, 0, 0);
 
       return events.sort((a, b) => {
@@ -492,7 +499,7 @@ export default pattern<PatternInput, PatternOutput>(
 
     // Filter events by category/criteria
     const urgentEvents = computed(() => {
-      const today = new Date(safeDateNow());
+      const today = new Date(nowCellValue);
       today.setHours(0, 0, 0, 0);
 
       return allEvents.filter((e) => {
@@ -509,7 +516,7 @@ export default pattern<PatternInput, PatternOutput>(
     });
 
     const upcomingEvents = computed(() => {
-      const today = new Date(safeDateNow());
+      const today = new Date(nowCellValue);
       today.setHours(0, 0, 0, 0);
 
       return allEvents
@@ -788,7 +795,9 @@ export default pattern<PatternInput, PatternOutput>(
                               style={{
                                 padding: "4px 10px",
                                 backgroundColor: computed(() => {
-                                  const today = new Date(safeDateNow());
+                                  const today = new Date(
+                                    nowCellValue,
+                                  );
                                   today.setHours(0, 0, 0, 0);
                                   return getUrgencyColor(
                                     daysUntil(event.date, today),
@@ -802,7 +811,9 @@ export default pattern<PatternInput, PatternOutput>(
                               }}
                             >
                               {computed(() => {
-                                const today = new Date(safeDateNow());
+                                const today = new Date(
+                                  nowCellValue,
+                                );
                                 today.setHours(0, 0, 0, 0);
                                 return getDateLabel(
                                   daysUntil(event.date, today),
@@ -1055,7 +1066,7 @@ export default pattern<PatternInput, PatternOutput>(
                           textAlign: "center",
                           padding: "8px",
                           backgroundColor: computed(() => {
-                            const today = new Date(safeDateNow());
+                            const today = new Date(nowCellValue);
                             today.setHours(0, 0, 0, 0);
                             return getUrgencyColor(
                               daysUntil(event.date, today),
@@ -1074,7 +1085,7 @@ export default pattern<PatternInput, PatternOutput>(
                           }}
                         >
                           {computed(() => {
-                            const today = new Date(safeDateNow());
+                            const today = new Date(nowCellValue);
                             today.setHours(0, 0, 0, 0);
                             return getDateLabel(daysUntil(event.date, today));
                           })}

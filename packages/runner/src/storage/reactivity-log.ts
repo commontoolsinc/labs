@@ -136,6 +136,22 @@ export function isUiInputBlindWriteTx(tx: object): boolean {
   return uiInputBlindWriteTxs.has(tx);
 }
 
+// Renderer-input (user-keystroke `$value`) provenance for timing-mitigation
+// cell-flip shaping (plan B, channels 4/5). Unlike the blind-write mark above —
+// which is cleared before commit — this one must SURVIVE to commit time so the
+// scheduler can recognize a renderer-input change at the storage-notification
+// choke point (via `notification.source`) and shape the resulting subscriber
+// wake. It is a superset marker: set on the same UI-input writes, never cleared.
+// See docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md.
+const rendererInputTxs = new WeakSet<object>();
+
+export function markRendererInputTx(tx: object): void {
+  for (const layer of blindWriteTxChain(tx)) rendererInputTxs.add(layer);
+}
+export function isRendererInputTx(tx: object): boolean {
+  return rendererInputTxs.has(tx);
+}
+
 // The structural existence/shape precondition for a blind UI-input write: the
 // PARENT address of the cell being set. handleCellSet computes it from the cell's
 // resolved write link — where the LOGICAL write path is known — because buildReads

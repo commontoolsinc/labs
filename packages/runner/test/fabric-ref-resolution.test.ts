@@ -125,6 +125,37 @@ describe("fabric ref resolution", () => {
     ).rejects.toThrow(`Slug "missing" not found. (chain: slug:missing)`);
   });
 
+  it("resolves an of: uri ref, preserving the schemed id in the chain", async () => {
+    const piece = pieceCell("uri-target");
+    await runtime.editWithRetry((tx) => {
+      const pieceWithTx = piece.withTx(tx);
+      pieceWithTx.set({ name: "uri-target" });
+      pieceWithTx.setMetaRaw("patternIdentity", {
+        identity: ENTRY_A,
+        symbol: "default",
+      });
+    });
+    const pieceUri = piece.getAsNormalizedFullLink().id; // "of:fid1:<hash>"
+    expect(pieceUri.startsWith("of:fid1:")).toBe(true);
+
+    const result = await resolveFabricRefToIdentity(
+      runtime,
+      space,
+      parse(`cf:${pieceUri}`),
+    );
+
+    expect(result.entryIdentity).toBe(ENTRY_A);
+    // The hop carries the FULL schemed URI exactly once — the scheme is part
+    // of the identity (a computed: ref is not its of: sibling), and it must
+    // not be double-prefixed into "of:of:fid1:…".
+    expect(result.chain).toEqual([
+      `uri:${pieceUri}`,
+      `piece:${pieceUri}`,
+      `patternIdentity:${ENTRY_A}`,
+      `entryIdentity:${ENTRY_A}`,
+    ]);
+  });
+
   it("reports a piece without a pattern identity with the chain", async () => {
     // A piece cell carrying only a legacy `pattern` link (no `patternIdentity`)
     // is unrecoverable post-retirement (the sanctioned data-wipe outcome).

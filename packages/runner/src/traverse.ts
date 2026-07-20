@@ -20,7 +20,6 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   type Immutable,
   isBoolean,
-  isFiniteNumber,
   isObject,
   isRecord,
   isString,
@@ -41,12 +40,8 @@ import type {
   JSONSchemaTypes,
   SchemaScope,
 } from "./builder/types.ts";
-import {
-  addressKey,
-  createDataCellURI,
-  NormalizedFullLink,
-  parseLink,
-} from "./link-utils.ts";
+import { createDataCellURI } from "./data-uri.ts";
+import { addressKey, NormalizedFullLink, parseLink } from "./link-utils.ts";
 import { canFollowScopedLink } from "./scope.ts";
 import type {
   Activity,
@@ -2866,11 +2861,6 @@ export class SchemaObjectTraverser<V extends FabricValue>
   private uniquePaths = new Set<string>();
   private maxDepth = 0;
   private currentDepth = 0;
-  // Armed by traverseArrayWithSchema just before traversing an element,
-  // consumed (read-and-clear) by the first traverseObjectWithSchema call —
-  // i.e. active exactly for the immediate element object of an array. See the
-  // B2 reader-blackout grace in traverseObjectWithSchema.
-  private pendingElementRequiredGrace = false;
   // Memoization cache for traverseWithSchema: key → result
   // Only used when traverseCells=true (query path) where the link
   // parameter doesn't affect the result (StandardObjectCreator ignores it).
@@ -3442,9 +3432,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
           this.isValidType(schemaObj, "string")
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
-    } else if (
-      typeof doc.value === "number" && isFiniteNumber(doc.value)
-    ) {
+    } else if (typeof doc.value === "number") {
+      // All numbers, including `NaN` and the infinities: they are
+      // first-class stored values, so they project like any other number.
       return isPlainTypeSchema(schemaObj, "number") ||
           this.isValidType(schemaObj, getJsonNumberType(doc.value))
         ? { ok: this.traversePrimitive(doc, schemaObj) }
@@ -4089,28 +4079,13 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // We want those links to point directly at the linked cells, instead
         // of using our path (e.g. ["items", "0"]), so don't pass in a
         // modified link.
-        // Arm the element-object grace: if this element is an object with a
-        // required property holding an unresolvable link, degrade that
-        // property instead of voiding the element (which would void the whole
-        // array — the reader blackout). Consumed (read-and-clear) by the first
-        // traverseObjectWithSchema call, i.e. the element object itself.
-        this.pendingElementRequiredGrace = true;
-        let val: Immutable<FabricValue> | undefined;
-        let error: TraverseFailure | undefined;
-        try {
-          const plan = !this.traverseCells && curSelector.schema !== undefined
-            ? preparePlainSchemaPlan(curSelector.schema)
-            : undefined;
-          ({ ok: val, error } = (plan === undefined
-            ? undefined
-            : this.traversePlainSchema(curDoc, plan)) ??
-            this.traverseWithSelector(curDoc, curSelector));
-        } finally {
-          // The traversal machinery can throw (path-mismatch invariants,
-          // malformed schemas); never leak an armed flag to an unrelated
-          // object traversal on this instance.
-          this.pendingElementRequiredGrace = false;
-        }
+        const plan = !this.traverseCells && curSelector.schema !== undefined
+          ? preparePlainSchemaPlan(curSelector.schema)
+          : undefined;
+        const { ok: val, error } = (plan === undefined
+          ? undefined
+          : this.traversePlainSchema(curDoc, plan)) ??
+          this.traverseWithSelector(curDoc, curSelector);
         if (error !== undefined) {
           // If our item doesn't match our schema, we may be able to use
           // undefined or null if those are valid according to our schema.
@@ -4143,37 +4118,6 @@ export class SchemaObjectTraverser<V extends FabricValue>
   }
 
   /**
-   * Whether a link-valued property's target is ABSENT for this reader — the
-   * resolved value is `undefined` (unwritten, cross-space not yet loaded, or
-   * scoped to another principal's partition). Distinguishes "reference cannot
-   * be resolved" (eligible for the element-level required grace) from "target
-   * exists but fails the schema" (a genuine schema error that must keep
-   * strict semantics). Absence cannot be read off the failure code: both
-   * cases surface as INVALID_TYPE, because an absent target's `undefined`
-   * fails the target schema's type check. Resolution mirrors the
-   * array-element link handling in traverseArrayWithSchema; a throw from
-   * malformed link data counts as not-absent so strict stays the default.
-   */
-  private linkTargetAbsent(
-    propDoc: IMemorySpaceValueAttestation,
-    propSchema: JSONSchema | undefined,
-  ): boolean {
-    try {
-      const selector = { path: propDoc.address.path, schema: propSchema };
-      const [redirDoc, redirSelector] = this.getDocAtPath(
-        propDoc,
-        [],
-        selector,
-        "writeRedirect",
-      );
-      const [targetDoc] = this.nextLink(redirDoc, redirSelector ?? selector);
-      return targetDoc.value === undefined;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
    * Traverse an object according to the specified schema, returning
    * a new object that only includes the properties that matched the schema.
    *
@@ -4198,18 +4142,6 @@ export class SchemaObjectTraverser<V extends FabricValue>
   ): Record<string, Immutable<FabricValue>> | undefined {
     this.traverseObjectCalls++;
     const filteredObj: Record<string, Immutable<FabricValue>> = {};
-    // B2 grace (reader blackout): ONLY when this object is the immediate
-    // element of an array (flag armed by traverseArrayWithSchema, consumed
-    // here), properties whose value is a LINK that cannot be resolved for
-    // THIS reader (target unwritten / cross-space not loaded / scoped to
-    // another principal) are exempted from the `required` check below: an
-    // unresolvable reference degrades that element field, it must not void
-    // the element and thereby the whole array read. Non-element object reads
-    // keep strict `required` semantics — the scheduler relies on those
-    // invalidations to defer actions until their arguments materialize.
-    const elementGrace = this.pendingElementRequiredGrace;
-    this.pendingElementRequiredGrace = false;
-    const unresolvableLinkProps = new Set<string>();
     const directProperties = plainObjectProperties(schema);
     for (const [propKey, propValue] of Object.entries(doc.value!)) {
       // We'll use marker schemas to detect some places where we want special
@@ -4270,44 +4202,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
         const { ok: val, error } = SchemaObjectTraverser.hasAsCell(propSchema)
           ? this.tx.runWithAmbientReadMeta(excludeReadFromConflict, descend)
           : descend();
-        // The grace below is only for link targets that are ABSENT for this
-        // reader (unwritten / cross-space not loaded / another principal's
-        // partition). A target that EXISTS but fails the schema keeps strict
-        // semantics — exempting it would mask a genuine schema error as a
-        // silently-missing field. Absence is checked by resolving the link,
-        // not by error code: an absent target surfaces as INVALID_TYPE (the
-        // undefined value fails the target schema's type check), the same
-        // code a present-but-wrong-shaped target produces.
-        const absentLinkTarget = elementGrace && error !== undefined &&
-          isSigilLink(propValue) &&
-          this.linkTargetAbsent(propDoc, propSchema);
-        if (absentLinkTarget) {
-          unresolvableLinkProps.add(propKey);
-        }
         if (error === undefined) {
           filteredObj[propKey] = val;
-        } else if (
-          absentLinkTarget &&
-          !this.traverseCells &&
-          SchemaObjectTraverser.hasAsCell(propSchema)
-        ) {
-          // B2 grace (element objects only, see above): an asCell property is
-          // an opaque boundary — if its link target is not resolvable for THIS
-          // reader (not written yet, cross-space not yet loaded, or scoped to
-          // another principal's partition), still return a cell for it instead
-          // of dropping the property. Dropping it made the `required` check
-          // below void the whole element, which voided the containing array
-          // (traverseArrayWithSchema), blacking out the entire read for every
-          // non-authoring session. This mirrors the existing policy for array
-          // elements ("If the target is not written yet, still return a cell
-          // for it instead of invalidating the parent array") and for
-          // inline-valued asCell properties above; downstream consumers can
-          // subscribe to the cell and observe the target when it materializes.
-          const cellLink = getNextCellLink(propDoc, propSchema);
-          filteredObj[propKey] = this.objectCreator.createObject(
-            cellLink,
-            undefined,
-          );
         }
       }
     }
@@ -4364,7 +4260,6 @@ export class SchemaObjectTraverser<V extends FabricValue>
       const required = schema["required"] as string[];
       if (Array.isArray(required)) {
         for (const requiredProperty of required) {
-          if (unresolvableLinkProps.has(requiredProperty)) continue;
           if (!(requiredProperty in filteredObj)) {
             logger.info("traverse", () => [
               "Missing required property",
@@ -4669,14 +4564,19 @@ export function canBranchMatch(
   return true;
 }
 
-/** Map JS typeof to its broad JSON Schema type, or null if unknown. */
+/**
+ * Map JS typeof to its broad JSON Schema type, or null if unknown. Every
+ * number is a `"number"`, including `NaN` and the infinities: they are
+ * first-class stored values in this system (the codec and content hash both
+ * represent them), so the schema projection must not hide them.
+ */
 function getPlainJsonType(
   value: unknown,
 ): JSONSchemaTypes | null {
   if (value === null) return "null";
   if (value === undefined) return "undefined";
   if (isString(value)) return "string";
-  if (typeof value === "number" && isFiniteNumber(value)) return "number";
+  if (typeof value === "number") return "number";
   if (isBoolean(value)) return "boolean";
   if (Array.isArray(value)) return "array";
   if (isObject(value)) return "object";
@@ -4685,7 +4585,7 @@ function getPlainJsonType(
 
 /** Refine the broad JSON Schema type so integer values can be distinguished. */
 function getJsonType(value: unknown): JSONSchemaTypes | null {
-  return (typeof value === "number" && isFiniteNumber(value))
+  return (typeof value === "number")
     ? getJsonNumberType(value)
     : getPlainJsonType(value);
 }

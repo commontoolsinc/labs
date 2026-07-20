@@ -6,7 +6,7 @@
 //   - legacy: plain JSON
 // In both, links/refs/streams appear as plain-data sigils:
 //   link   { "/": { "link@1": { id, space?, path?, scope?, schema? } } }
-//   ref    { "/": "of:…" | "fid1:…" }
+//   ref    { "/": "of:…" | "computed:…" | "fid1:…" }
 //   stream { "$stream": true }
 // `decodeStored()` routes by the `fvj1:` tag; everything else here is pure JSON
 // walking + recognition (no live runtime/Cell needed). In the fvj1 form embedded
@@ -79,7 +79,7 @@ export function decodedLinkOf(v: Json): DecodedLink | null {
   return null;
 }
 
-/** An entity reference: `{ "/": "of:…" | "fid1:…" }`. */
+/** An entity reference: `{ "/": "of:…" | "computed:…" | "fid1:…" }`. */
 export function parseEntityRef(v: Json): string | null {
   if (!isPlainObject(v)) return null;
   const keys = Object.keys(v);
@@ -100,7 +100,16 @@ function shortDid(did?: string): string | undefined {
 
 function shortId(id?: string): string | undefined {
   if (!id) return undefined;
-  const body = id.startsWith("of:") ? id.slice(3) : id;
+  // Strip `of:` for brevity; keep a `computed:` scheme visible — the hash
+  // preimage is kind-free, so the scheme is the only thing distinguishing a
+  // computed doc from a state sibling of the same cause.
+  if (id.startsWith("computed:")) {
+    const body = id.slice("computed:".length);
+    return body.length > 14
+      ? `computed:${body.slice(0, 8)}…${body.slice(-4)}`
+      : id;
+  }
+  const body = id.replace(/^of:/, "");
   return body.length > 14 ? `${body.slice(0, 8)}…${body.slice(-4)}` : body;
 }
 

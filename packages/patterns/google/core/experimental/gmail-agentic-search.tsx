@@ -320,7 +320,7 @@ export interface GmailAgenticSearchOutput {
 //   const existingKeys = new Set(currentItems.map(i => `${i.field1}:${i.field2}`.toLowerCase()));
 //
 //   if (!existingKeys.has(dedupeKey)) {
-//     const id = `record-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2, 8)}`;
+//     const id = `record-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 //     const newRecord = {
 //       id,
 //       field1: input.field1,
@@ -384,7 +384,7 @@ const stopScanHandler = handler<
     isScanning: Writable<boolean | Default<false>>;
   }
 >((_, state) => {
-  state.lastScanAt.set(safeDateNow());
+  state.lastScanAt.set(Date.now());
   state.isScanning.set(false);
   if (DEBUG_AGENT) {
     console.log("[GmailAgenticSearch] Scan stopped");
@@ -399,7 +399,7 @@ const completeScanHandler = handler<
     isScanning: Writable<boolean | Default<false>>;
   }
 >((_, state) => {
-  state.lastScanAt.set(safeDateNow());
+  state.lastScanAt.set(Date.now());
   state.isScanning.set(false);
   if (DEBUG_AGENT) {
     console.log("[GmailAgenticSearch] Scan completed");
@@ -428,7 +428,7 @@ const addDebugLogEntry = (
   entry: Omit<DebugLogEntry, "timestamp">,
 ) => {
   try {
-    logCell.push({ ...entry, timestamp: safeDateNow() });
+    logCell.push({ ...entry, timestamp: Date.now() });
   } catch (err) {
     // Log to console but don't let debug logging errors crash the agent
     console.error("[GmailAgenticSearch] Debug log error:", err);
@@ -635,7 +635,7 @@ const searchGmailHandler = handler<
           {
             query: input.query,
             emailCount: emails.length,
-            timestamp: safeDateNow(),
+            timestamp: Date.now(),
           },
         ],
         status: "analyzing",
@@ -653,7 +653,7 @@ const searchGmailHandler = handler<
         // Update existing query using .key().key().set() for atomic updates
         const existing = currentLocalQueries[existingQueryIndex];
         const itemCell = state.localQueries.key(existingQueryIndex);
-        itemCell.key("lastUsed").set(safeDateNow());
+        itemCell.key("lastUsed").set(Date.now());
         itemCell.key("useCount").set(existing.useCount + 1);
         // Auto-increase effectiveness if it found results (capped at 5)
         itemCell.key("effectiveness").set(
@@ -665,14 +665,14 @@ const searchGmailHandler = handler<
         state.lastExecutedQueryIdCell.set(existing.id);
       } else if (emails.length > 0) {
         // Only add new query if it found results
-        const newQueryId = `query-${safeDateNow()}-${
-          nonPrivateRandom().toString(36).slice(2, 8)
+        const newQueryId = `query-${Date.now()}-${
+          Math.random().toString(36).slice(2, 8)
         }`;
         const newQuery: LocalQuery = {
           id: newQueryId,
           query: input.query,
-          createdAt: safeDateNow(),
-          lastUsed: safeDateNow(),
+          createdAt: Date.now(),
+          lastUsed: Date.now(),
           useCount: 1,
           effectiveness: 1, // Start at 1 since it found results
           shareStatus: "private",
@@ -1182,12 +1182,18 @@ const GmailAgenticSearch = pattern<
     const isAuthenticated = !!(authValue && authValue.token && authValue.user &&
       authValue.user.email);
 
+    // Ticks every 60 seconds so the expiry warning re-evaluates as the clock
+    // advances toward the token's expiresAt timestamp.
+    const nowCell = wish<number>({ query: "#now/60" });
+    const nowCellValue = resultOf(nowCell.result);
+
     // Check if token may be expired based on expiresAt timestamp
     const tokenMayBeExpired = computed(() => {
       if (!authValue?.expiresAt) return false;
+      const nowMs = nowCellValue;
       // Add 5 minute buffer - if within 5 min of expiry, consider it potentially expired
       const bufferMs = 5 * 60 * 1000;
-      return safeDateNow() > (authValue.expiresAt - bufferMs);
+      return nowMs > (authValue.expiresAt - bufferMs);
     });
 
     // Gmail scope URL for checking
@@ -2762,7 +2768,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
                                       > = pendingWritable.key(idx).key(
                                         "submittedAt",
                                       );
-                                      submittedAtCell.set(safeDateNow());
+                                      submittedAtCell.set(Date.now());
                                     }
 
                                     // Update local query status to submitted

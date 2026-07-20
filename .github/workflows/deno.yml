@@ -52,11 +52,7 @@ jobs:
       - name: 🔎 Type check codebase
         run: deno task check
 
-      # --no-check: the type-check step above covers tasks/ (tasks/check.sh).
-      - name: 🧪 Run tasks/ unit tests
-        run: deno test --no-check --allow-read --allow-write --allow-env --allow-run tasks/
-
-      - name: 🧭 Check cf-review skill facts
+      - name: 🧭 Check skill facts
         run: deno task check-skill-facts
 
       - name: 📄 Type-check docs code blocks
@@ -65,9 +61,22 @@ jobs:
       - name: 🚧 Guard against new polling waitFor in integration tests
         run: deno task check-no-waitfor
 
+      - name: 🔎 Check for unused import map dependencies
+        run: deno task check-unused-deps
+
+      - name: 🔎 Check Deno toolchain pins are aligned
+        run: deno task check-deno-pins
+
+      - name: 🔎 Check single-copy packages resolve once
+        run: deno task check-single-copy-deps
+
       - name: 🔎 Check generated commonfabric/cfc types are up to date
         working-directory: packages/static
         run: deno task check-cfc-types
+
+      - name: 🔎 Check type libraries declare no withheld globals
+        working-directory: packages/static
+        run: deno task check-withheld-globals
 
   cfcheck:
     name: "CFC Pattern Check (${{ matrix.shard }}/${{ matrix.total }})"
@@ -118,9 +127,6 @@ jobs:
           packages: pkg-config gcc libfuse3-dev fuse3
           cache-key: cfc-pattern-check
 
-      - name: 📥 Download Deno dependency binaries
-        run: deno task initialize-db
-
       # For deno-web-test browser tests
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
       - name: 🛡️ Disable AppArmor for browser tests
@@ -132,11 +138,6 @@ jobs:
           DENO_COVERAGE_DIR: coverage/raw/workspace-${{ matrix.shard }}
           TEST_DISABLED_PACKAGES: runner
           TEST_SHARD: "${{ matrix.shard }}/${{ matrix.total }}"
-          # One package at a time: a package's own test task already
-          # parallelizes across all of this runner's cores, and cross-package
-          # concurrency destabilizes the timing-sensitive CLI pseudo-terminal
-          # tests (see docs/development/CI_PERFORMANCE.md).
-          TEST_CONCURRENCY: "1"
 
       - name: 🧾 Write coverage report
         if: always()
@@ -502,19 +503,40 @@ jobs:
           : > "$CF_CLI_INTEGRATION_TIMINGS_FILE"
           API_URL="http://localhost:${TOOLSHED_PORT}" ./integration/${{ matrix.script }}
 
+      # Deno-based integration tests against the same toolshed. Type checking
+      # of the CLI package is done by `deno task check`, so this run skips it.
+      # The prebuilt `cf` binary is on PATH, so the tests exercise it rather
+      # than the source-tree CLI task.
+      - name: 🧪 Run CLI deno integration tests
+        if: ${{ matrix.suite_name == 'core-piece-values' }}
+        working-directory: packages/cli
+        env:
+          TOOLSHED_PORT: ${{ matrix.toolshed_port }}
+        run: |
+          API_URL="http://localhost:${TOOLSHED_PORT}" deno test --no-check \
+            --allow-net --allow-ffi --allow-read --allow-write --allow-env \
+            --allow-run test/piece-integration.test.ts
+
       - name: 🧪 Run CLI FUSE integration suite
         if: ${{ matrix.suite_name == 'fuse' }}
         working-directory: packages/cli
         env:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
           FUSE_DEEP_ENTITY_PROBE: "0"
+          # Single source for the outer step bound: 'timeout' enforces it, and the
+          # script's waits give up a few minutes before it (see
+          # FUSE_EXEC_OVERALL_TIMEOUT_SECONDS in integration/fuse-exec.sh) so a
+          # wedge is reported with diagnostics rather than truncated at cancel.
+          FUSE_STEP_TIMEOUT_SECONDS: "480"
         run: |
           set +e
-          API_URL="http://localhost:${TOOLSHED_PORT}" timeout 480 ./integration/${{ matrix.script }}
+          API_URL="http://localhost:${TOOLSHED_PORT}" \
+            FUSE_EXEC_OVERALL_TIMEOUT_SECONDS="${FUSE_STEP_TIMEOUT_SECONDS}" \
+            timeout "${FUSE_STEP_TIMEOUT_SECONDS}" ./integration/${{ matrix.script }}
           rc=$?
           set -e
           if [ "$rc" -eq 124 ]; then
-            echo "::error::FUSE integration timed out after 480 seconds"
+            echo "::error::FUSE integration timed out after ${FUSE_STEP_TIMEOUT_SECONDS} seconds"
           fi
           exit "$rc"
 
@@ -579,15 +601,17 @@ jobs:
       # This input list mirrors COMPILE_FINGERPRINT_INPUTS in
       # packages/runner/src/compilation-cache/compiler-fingerprint.deno.ts, which
       # fingerprints the same set for the durable runtime cache; the
-      # compiler-fingerprint test fails if the two drift. The pattern-source hash
-      # rolls the key while `restore-keys` still seeds from the most recent prior
-      # cache.
+      # compiler-fingerprint test fails if the two drift. The pattern-source and
+      # integration-harness hash rolls the key while `restore-keys` still seeds
+      # from the most recent prior cache. Hash both TypeScript extensions. An
+      # exact actions/cache entry is immutable; newly compiled bytes are saved
+      # under a rotated key.
       - name: ♻️ Restore/save compile byte cache
         id: compile-cache
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
-          key: cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/patterns/**/*.tsx') }}
+          key: cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx') }}
           restore-keys: |
             cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
 

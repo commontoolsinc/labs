@@ -4,21 +4,19 @@ import {
   handler,
   NAME,
   pattern,
-  safeDateNow,
+  resultOf,
   Stream,
   TILE_UI,
   UI,
   type VNode,
+  wish,
   Writable,
 } from "commonfabric";
 
 type Secret<T> = T;
 
 import { refreshOAuthToken } from "../../auth/auth-refresh.ts";
-import {
-  REFRESH_THRESHOLD_MS,
-  startReactiveClock,
-} from "../../auth/auth-reactive.ts";
+import { REFRESH_THRESHOLD_MS } from "../../auth/auth-reactive.ts";
 import type { AuthStatus } from "../../auth/auth-types.ts";
 import {
   formatTokenExpiry,
@@ -65,10 +63,10 @@ export function createPreviewUI(
   const name = auth?.user?.name;
   const isAuthenticated = !!email;
 
-  // safeDateNow() capture is intentional — createPreviewUI produces a static
+  // Date.now() capture is intentional — createPreviewUI produces a static
   // snapshot for picker display, not a live-updating component. The main
   // pattern UI uses a reactive clock (startReactiveClock) separately.
-  const now = safeDateNow();
+  const now = Date.now();
   const expiresAt = auth?.expiresAt || 0;
   const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
   const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
@@ -285,7 +283,7 @@ const bgRefreshHandler = handler<
     const expiresAt = currentAuth.expiresAt ?? 0;
     if (expiresAt <= 0) return;
 
-    const timeRemaining = expiresAt - safeDateNow();
+    const timeRemaining = expiresAt - Date.now();
     if (timeRemaining > REFRESH_THRESHOLD_MS) return;
 
     console.log(
@@ -353,17 +351,19 @@ export default pattern<Input, Output>(
       return false;
     });
 
-    const now = new Writable(safeDateNow());
-    startReactiveClock(now);
+    // Reactive clock for token-expiry display; ticks each minute so the
+    // "Expires in" countdown refreshes. Coarsened to 1s and cached.
+    const now = wish<number>({ query: "#now/60" });
+    const nowValue = resultOf(now.result);
 
     const isTokenExpired = computed(() => {
       if (!authValue?.accessToken || !authValue?.expiresAt) return false;
-      return authValue.expiresAt < now.get();
+      return authValue.expiresAt < nowValue;
     });
 
-    const tokenExpiryDisplay = computed(() =>
-      formatTokenExpiry(authValue?.expiresAt || 0, now.get())
-    );
+    const tokenExpiryDisplay = computed(() => {
+      return formatTokenExpiry(authValue?.expiresAt || 0, nowValue);
+    });
 
     const checkboxesDisabled = computed(() => !!authValue?.accessToken);
 
@@ -381,11 +381,12 @@ export default pattern<Input, Output>(
       const email = authValue?.user?.email || "";
       const name = authValue?.user?.name || "";
       const isAuthenticated = !!email;
-      const now = safeDateNow();
+      const nowMs = nowValue;
       const expiresAt = authValue?.expiresAt || 0;
-      const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
+      const isExpired = isAuthenticated && expiresAt > 0 && nowMs > 0 &&
+        expiresAt < nowMs;
       const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
-        expiresAt - now < 10 * 60 * 1000;
+        nowMs > 0 && expiresAt - nowMs < 10 * 60 * 1000;
       const status: AuthStatus = !isAuthenticated
         ? "needs-login"
         : isExpired

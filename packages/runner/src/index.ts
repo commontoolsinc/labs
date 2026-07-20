@@ -4,6 +4,7 @@ export type {
   ErrorHandler,
   ErrorWithContext as RuntimeErrorWithContext,
   ExperimentalOptions, // Space-model feature flags; see ExperimentalOptions in runtime.ts
+  RuntimeFetch,
   RuntimeOptions,
   SpaceCellContents,
   VersionSkewHandler,
@@ -92,6 +93,8 @@ export {
 export { addCommonIDfromObjectID } from "./data-updating.ts";
 export {
   type BlindStructuralTarget,
+  isRendererInputTx,
+  markRendererInputTx,
   markUiInputBlindWriteTx,
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
@@ -106,13 +109,20 @@ export {
   parseLink,
   parseLinkOrThrow,
   parseLLMFriendlyLink,
+  sanitizeSchemaForLinks,
 } from "./link-utils.ts";
 export * from "./pattern-manager.ts";
 export {
   asPatternIdentityRef,
+  extractDefaultValues,
   getPatternIdentityRef,
+  getPatternRepository,
   getPatternSource,
+  mergeSchemaDefaults,
   patternIdentityKey,
+  schemaAcceptsOpaqueCellValue,
+  schemaHasDefaultValue,
+  setPatternRepository,
   setPatternSource,
 } from "./runner.ts";
 
@@ -243,6 +253,7 @@ export {
 export {
   type FabricRef,
   FabricRefError,
+  formatFabricRef,
   isFabricImportSpecifier,
   parseFabricRef,
 } from "./sandbox/fabric-import-specifier.ts";

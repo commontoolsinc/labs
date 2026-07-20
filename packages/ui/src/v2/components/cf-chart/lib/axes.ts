@@ -5,6 +5,7 @@
  * Accepts AxisConfig for customization (label, tickFormat, grid, tickCount).
  */
 import { svg, type TemplateResult } from "lit";
+// @ts-types="@types/d3-scale"
 import type { ScaleBand } from "d3-scale";
 import type { XScale, YScale } from "./scales.ts";
 import type { AxisConfig, XScaleType } from "../types.ts";
@@ -92,7 +93,7 @@ function tickXPos(xScale: XScale, val: unknown): number {
  */
 export function renderXAxis(
   xScale: XScale,
-  xType: XScaleType,
+  _xType: XScaleType,
   plotWidth: number,
   plotHeight: number,
   config: AxisConfig = {},

@@ -87,6 +87,8 @@ One line per archived document; each document's header carries the fuller
 
 ### Audits and reports
 
+- [cts-docs-audit-2026-07.md](cts-docs-audit-2026-07.md) —
+  ts-transformers/schema-generator documentation audit, July 2026.
 - [cfc-spec-audit.md](cfc-spec-audit.md) — the CFC spec versus the
   packages/runner implementation, June 2026.
 - [invalid-state-representations-report.md](future-tasks/code-quality-tasks/invalid-state-representations-report.md)
@@ -109,6 +111,9 @@ One line per archived document; each document's header carries the fuller
 - [2026-03-17-ct-exec-fuse-callables.md](plans/2026-03-17-ct-exec-fuse-callables.md)
   and [its test plan](plans/2026-03-17-ct-exec-fuse-callables-test-plan.md) —
   `cf exec` and mounted callable files.
+- [assertion-diagnostics.md](plans/assertion-diagnostics.md) — power-assert
+  operand reporting for pattern-test assertions, with the compile-time
+  constraints that shaped it, executed 2026-07.
 - [cfc-future-work-implementation.md](plans/cfc-future-work-implementation.md)
   — the CFC future-work epics (clause core, exchange rules/policy,
   observation classes, integrity floors, sqlite row-set, deployment flips),
@@ -187,16 +192,40 @@ One line per archived document; each document's header carries the fuller
   migration.
 - [unified-storage-stack.md](future-tasks/unified-storage-stack.md) —
   DocImpl-era storage-unification plan, superseded by the v2 stack.
+- [hierarchical-params-spec.md](packages/ts-transformers/docs/hierarchical-params-spec.md)
+  — hierarchical-capture implementation rationale, superseded by the behavior
+  spec.
+- [pr3154-review-guide.md](specs/ts-transformer/pr3154-review-guide.md) —
+  reviewer entrypoint for the shipped PR-3154 transformer architecture.
 
 ### Investigations, journals, and working notes
 
+- [reverse-invalidation-deadlock.md](packages/fuse/reverse-invalidation-deadlock.md)
+  — root cause of the FUSE daemon hang that flaked the CLI FUSE integration
+  suite: synchronous reverse invalidation deadlocking the request thread,
+  July 2026.
+- [2026-07-fuse-t-integration-flake-accumulated-nfs-state.md](packages/fuse/2026-07-fuse-t-integration-flake-accumulated-nfs-state.md)
+  — a FUSE-T integration-suite failure that looked like a #4811 daemon
+  regression but was accumulated stale kernel NFS mounts from SIGKILL churn;
+  directory visibility works via mtime plus the NFS attribute-cache bound, not
+  `notify_inval_entry`, July 2026.
 - [settle-wave-2026-03-findings.md](development/debugging/settle-wave-2026-03-findings.md)
   — March 2026 settle-wave measurements.
+- [2026-07-cf-profile-capture-exit-130.md](development/debugging/2026-07-cf-profile-capture-exit-130.md)
+  — root cause of the cf-profile capture exit-130 CI flake, July 2026.
+- [2026-07-group-chat-idempotency-false-positive.md](development/debugging/2026-07-group-chat-idempotency-false-positive.md)
+  — root cause of the group-chat idempotency false-positive CI flake, July 2026.
 - [default-app-note-create.md](development/performance/default-app-note-create.md),
   [two-browsers-cold-start.md](development/performance/two-browsers-cold-start.md),
   and
   [pattern-integration-compile-bound.md](development/performance/pattern-integration-compile-bound.md)
   — June 2026 profiling snapshots.
+- [2026-07-pattern-capability-ci-duration-increase.md](development/performance/2026-07-pattern-capability-ci-duration-increase.md)
+  — root cause of the July 2026 labs CI duration increase: two unsharded
+  pattern time-capability sweeps, especially the 56-pattern sweep on shard 3.
+- [2026-07-ci-duration-profile.md](development/performance/2026-07-ci-duration-profile.md)
+  — July 2026 Deno Workflow profile, including compile-cache validation,
+  duplicate work, workspace shard balance, and follow-up experiments.
 - [scoped-cells-field-notes.md](development/scoped-cells-field-notes.md) —
   field journal from the first scoped-cell patterns.
 - [2026-07-02-convergence-evidence-appendix.md](plans/2026-07-02-convergence-evidence-appendix.md)

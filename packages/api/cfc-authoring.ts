@@ -43,6 +43,7 @@ export type {
   CfcUserPattern,
   CfcUserSurfaceInputAtom,
   Confidential,
+  CurrentPrincipal,
   ExactCopy,
   Integrity,
   MaxConfidentiality,

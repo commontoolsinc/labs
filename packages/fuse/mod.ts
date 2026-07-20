@@ -81,6 +81,7 @@ import {
   resolveMountCacheOptions,
 } from "./mount-options.ts";
 import { buildNodeStat, getMountOwnership, nodeMode } from "./stat.ts";
+import { ReverseInvalidationQueue } from "./invalidation.ts";
 
 const encoder = new TextEncoder();
 // Operation ring buffer — last 50 ops for crash diagnostics
@@ -243,6 +244,104 @@ type SupervisorStatusState =
   | "exiting"
   | "exited";
 
+export interface SupervisorStatusWriterOptions {
+  statusPath: string;
+  pid: number;
+  mountpoint: string;
+  startedAt: string;
+  now?: () => string;
+  writeTextFile?: (path: string, data: string) => Promise<void>;
+  rename?: (from: string, to: string) => Promise<void>;
+  remove?: (path: string) => Promise<void>;
+}
+
+export type SupervisorStatusWriter = (
+  state: SupervisorStatusState,
+  extra?: Record<string, unknown>,
+) => Promise<void>;
+
+/**
+ * Build the function that writes the daemon's supervisor state to its status
+ * file, the record `cf fuse status` reads.
+ *
+ * The states form a lifecycle, and the calls announcing them come from places
+ * that do not coordinate: the startup path, the readiness report, the heartbeat
+ * and the signal handler. Two properties keep a concurrent reader from ever
+ * seeing a wrong file. Each write replaces the file by writing a scratch file
+ * and renaming it over the target, so a reader woken mid-write sees a complete
+ * document rather than a truncated one. And the writes are serialized through a
+ * queue, so the file ends on the state of the most recent call: renames issued
+ * concurrently could otherwise complete in either order and let a heartbeat
+ * still in flight replace a terminal state, leaving the file claiming a mount
+ * that has already gone.
+ */
+export function createSupervisorStatusWriter(
+  options: SupervisorStatusWriterOptions,
+): SupervisorStatusWriter {
+  const writeTextFile = options.writeTextFile ?? Deno.writeTextFile;
+  const rename = options.rename ?? Deno.rename;
+  const remove = options.remove ?? Deno.remove;
+  const now = options.now ?? (() => new Date().toISOString());
+  let queue: Promise<void> = Promise.resolve();
+  let writes = 0;
+
+  const publish = async (document: string): Promise<void> => {
+    // The scratch name carries the PID and a counter, so a daemon left over
+    // from an earlier mount at this path cannot share it.
+    const pendingPath = `${options.statusPath}.${options.pid}.${writes++}.tmp`;
+    try {
+      await writeTextFile(pendingPath, document);
+      await rename(pendingPath, options.statusPath);
+    } catch (error) {
+      await remove(pendingPath).catch(() => undefined);
+      throw error;
+    }
+  };
+
+  return (state, extra = {}) => {
+    // Built at call time, so `updatedAt` records when the state was reached
+    // rather than when its turn in the queue came up.
+    const document = JSON.stringify(
+      {
+        state,
+        pid: options.pid,
+        mountpoint: options.mountpoint,
+        startedAt: options.startedAt,
+        updatedAt: now(),
+        ...extra,
+      },
+      null,
+      2,
+    );
+    const write = queue.then(() => publish(document));
+    // A failed write must neither stop later states from being published nor
+    // surface through the queue as an unhandled rejection. The caller still
+    // sees the failure through the promise returned here.
+    queue = write.catch(() => undefined);
+    return write;
+  };
+}
+
+/**
+ * Report a supervisor state to both sinks. `write` records it in the status file
+ * that `cf fuse status` reads; `publish` announces it on the readiness channel a
+ * background mount's parent blocks on. The announcement goes out in a `finally`,
+ * so a failed status write cannot strand a parent waiting on the channel, and
+ * the write's error still reaches the caller.
+ */
+export async function announceSupervisorState(
+  write: SupervisorStatusWriter,
+  publish: SupervisorStatusWriter,
+  state: SupervisorStatusState,
+  extra: Record<string, unknown> = {},
+): Promise<void> {
+  try {
+    await write(state, extra);
+  } finally {
+    await publish(state, extra);
+  }
+}
+
 export async function writeFailedSupervisorStartupStatus(
   error: unknown,
   writeSupervisorStatus: (
@@ -265,7 +364,6 @@ export async function main(argv: string[] = Deno.args) {
       "exec-cli",
       "log-file",
       "supervisor-status",
-      "supervisor-token",
       "cfc-xattr-namespace",
       "cfc-mode",
       "cfc-writeback-state",
@@ -277,6 +375,7 @@ export async function main(argv: string[] = Deno.args) {
       "cfc-writeback-xattrs",
       "allow-other",
       "noattrcache",
+      "dangerously-allow-incompatible-schema",
     ],
     collect: ["space"],
     default: {
@@ -286,7 +385,6 @@ export async function main(argv: string[] = Deno.args) {
       "exec-cli": "",
       "log-file": "",
       "supervisor-status": "",
-      "supervisor-token": "",
       "cfc-xattr-namespace": DEFAULT_CFC_XATTR_NAMESPACE,
       "cfc-mode": "",
       "cfc-writeback-state": "",
@@ -296,6 +394,7 @@ export async function main(argv: string[] = Deno.args) {
       "cfc-writeback-xattrs": false,
       "allow-other": false,
       noattrcache: false,
+      "dangerously-allow-incompatible-schema": false,
     },
   });
 
@@ -341,6 +440,9 @@ export async function main(argv: string[] = Deno.args) {
   // The background supervisor doesn't forward --debug to the daemon child,
   // but env vars are inherited, so this is the reliable switch in CI.
   const debug = args.debug || Deno.env.get("CF_FUSE_DEBUG") === "1";
+  const dangerouslyAllowIncompatibleSchema = Boolean(
+    args["dangerously-allow-incompatible-schema"],
+  );
   const requestedCfcMode = String(args["cfc-mode"] ?? "");
   if (requestedCfcMode && !parseCfcMode(requestedCfcMode)) {
     console.warn(
@@ -390,30 +492,60 @@ export async function main(argv: string[] = Deno.args) {
     Deno.exit(1);
   }
   const supervisorStatusPath = String(args["supervisor-status"] ?? "");
-  const supervisorToken = String(args["supervisor-token"] ?? "");
   const supervisorStatusStartedAt = new Date().toISOString();
-  async function writeSupervisorStatus(
+  // The status file is the record `cf fuse status` reads later. The heartbeat
+  // refreshes it; readers take a snapshot whenever they ask. The writer keeps
+  // those snapshots whole and in order — see createSupervisorStatusWriter.
+  const writeSupervisorStatus: SupervisorStatusWriter = supervisorStatusPath
+    ? createSupervisorStatusWriter({
+      statusPath: supervisorStatusPath,
+      pid: Deno.pid,
+      mountpoint,
+      startedAt: supervisorStatusStartedAt,
+    })
+    : () => Promise.resolve();
+  // A background mount's parent holds the read end of this process's stdout and
+  // blocks on it, so one line here wakes it on the transition itself. Only the
+  // states a starting mount can settle on are published; the heartbeat stays out
+  // of the channel. A parent that has already exited leaves no reader, which
+  // makes the write fail rather than the mount.
+  async function publishSupervisorState(
     state: SupervisorStatusState,
     extra: Record<string, unknown> = {},
   ): Promise<void> {
     if (!supervisorStatusPath) return;
-    await Deno.writeTextFile(
-      supervisorStatusPath,
-      JSON.stringify(
-        {
-          state,
-          pid: Deno.pid,
-          mountpoint,
-          token: supervisorToken || undefined,
-          startedAt: supervisorStatusStartedAt,
-          updatedAt: new Date().toISOString(),
-          ...extra,
-        },
-        null,
-        2,
-      ),
-    );
+    const line = `${
+      JSON.stringify({
+        state,
+        pid: Deno.pid,
+        mountpoint,
+        startedAt: supervisorStatusStartedAt,
+        updatedAt: new Date().toISOString(),
+        ...extra,
+      })
+    }\n`;
+    const bytes = new TextEncoder().encode(line);
+    try {
+      for (let written = 0; written < bytes.length;) {
+        written += await Deno.stdout.write(bytes.subarray(written));
+      }
+    } catch {
+      // No reader: the mount continues unobserved.
+    }
   }
+  // Record the state in the status file, then announce it on the pipe. See
+  // announceSupervisorState for why the announcement runs even when the record
+  // fails.
+  const reportSupervisorState = (
+    state: SupervisorStatusState,
+    extra: Record<string, unknown> = {},
+  ): Promise<void> =>
+    announceSupervisorState(
+      writeSupervisorStatus,
+      publishSupervisorState,
+      state,
+      extra,
+    );
   try {
     await writeSupervisorStatus("starting");
   } catch (error) {
@@ -428,7 +560,6 @@ export async function main(argv: string[] = Deno.args) {
   let bridge: CellBridge | null = null;
   const cfcWritebacks = new CfcWritebackStore({
     storagePath: cfcWritebackStatePath,
-    onChange: () => bridge?.refreshStatus(),
   });
   const cfcDiagnostics: string[] = [];
 
@@ -446,7 +577,7 @@ export async function main(argv: string[] = Deno.args) {
     platform = await getPlatform();
     fuse = platform.openFuse();
   } catch (e) {
-    await writeFailedSupervisorStartupStatus(e, writeSupervisorStatus);
+    await writeFailedSupervisorStartupStatus(e, reportSupervisorState);
     Deno.exit(1);
   }
   const {
@@ -579,7 +710,7 @@ export async function main(argv: string[] = Deno.args) {
       console.log("Static mode: hello.txt");
     }
   } catch (e) {
-    await writeFailedSupervisorStartupStatus(e, writeSupervisorStatus);
+    await writeFailedSupervisorStartupStatus(e, reportSupervisorState);
     Deno.exit(1);
   }
 
@@ -613,6 +744,39 @@ export async function main(argv: string[] = Deno.args) {
       ),
       ownership: mountOwnership,
     });
+  }
+
+  /**
+   * The bytes an already-open descriptor serves for the generated file `ino`,
+   * and when they were published, when `fi` names such a descriptor. The kernel
+   * passes the descriptor on a getattr it issues to size a read, and omits it
+   * on a bare `stat`. Reporting both the snapshot's length and its publish time
+   * keeps the size and the modification time describing the same render.
+   */
+  function openGeneratedSnapshot(
+    fi: Deno.PointerValue,
+    ino: bigint,
+  ): { buffer: Uint8Array; mtime: number | undefined } | undefined {
+    if (!fi || !tree.isGenerated(ino)) return undefined;
+    const handle = handles.get(readFileInfo(fi).fh);
+    if (!handle || handle.ino !== ino || !handle.bufferValid) return undefined;
+    return { buffer: handle.buffer, mtime: handle.readSnapshotMtime };
+  }
+
+  /**
+   * Whether `ino` carries content the kernel must not cache: a piece inode the
+   * bridge hydrates on demand, or a generated file, which republishes its bytes
+   * whenever a reader asks for its size.
+   */
+  function isDynamicIno(ino: bigint): boolean {
+    if (tree.isGenerated(ino)) return true;
+    return Boolean(
+      bridge?.shouldPrepareDirectory(ino) ||
+        bridge?.shouldPrepareLookup(
+          tree.parents.get(ino) ?? 0n,
+          tree.getPath(ino).split("/").pop() ?? "",
+        ),
+    );
   }
 
   function recordCfcDiagnostics(messages: string[]): void {
@@ -930,17 +1094,17 @@ export async function main(argv: string[] = Deno.args) {
     ino: bigint,
     node: ReturnType<typeof tree.getNode>,
   ) {
-    // FUSE-T (macOS NFS translation) ignores notify_inval_entry and
-    // notify_inval_inode, so the only way to ensure reads see fresh data
-    // after writes is to keep cache timeouts short. Piece content inodes
-    // (under pieces/ and entities/) use 0 so every read hits our callbacks.
-    // Static inodes (root, space.json, .status) use 1s.
-    const isDynamic = bridge?.shouldPrepareDirectory(ino) ||
-      bridge?.shouldPrepareLookup(
-        tree.parents.get(ino) ?? 0n,
-        tree.getPath(ino).split("/").pop() ?? "",
-      );
-    const timeout = isDynamic ? 0 : 1.0;
+    // These timeouts govern the Linux kernel's entry and attribute caches.
+    // Piece content inodes (under pieces/ and entities/) and generated files
+    // (.status) use 0 so every read hits our callbacks. Static inodes (root,
+    // space.json) use 1s.
+    // FUSE-T (macOS NFS translation) ignores the timeouts a reply carries,
+    // along with notify_inval_entry and notify_inval_inode. A macOS mount
+    // bounds staleness with an NFS attribute-cache mount option instead; see
+    // mount-options.ts.
+    const timeout = isDynamicIno(ino) ? 0 : 1.0;
+    // This reply carries the file's size, so publish the render it sizes.
+    tree.refreshGenerated(ino);
     const entryBuf = new ArrayBuffer(ENTRY_PARAM_SIZE);
     writeEntryParam(entryBuf, {
       ino,
@@ -1053,7 +1217,7 @@ export async function main(argv: string[] = Deno.args) {
   // getattr(req, ino, fi_ptr)
   const getattrCb = new Deno.UnsafeCallback(
     { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
-    (req: Deno.PointerValue, ino: number | bigint, _fi: Deno.PointerValue) => {
+    (req: Deno.PointerValue, ino: number | bigint, fi: Deno.PointerValue) => {
       logOp("getattr", ino.toString());
       const inode = BigInt(ino);
       const node = tree.getNode(inode);
@@ -1063,19 +1227,31 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
 
+      // The kernel stops a descriptor's reads at the size this reply gives, and
+      // a descriptor serves the bytes it snapshotted at open for its whole
+      // life, so a getattr carrying one reports that snapshot's length. A
+      // getattr without one — a bare stat, and every getattr FUSE-T makes — is
+      // a reader learning the size before reading the node, so that one
+      // publishes.
+      const snapshot = openGeneratedSnapshot(fi, inode);
+      if (!snapshot) tree.refreshGenerated(inode);
+      const attr = buildStat(node, inode);
+      if (snapshot) {
+        // Report the snapshot's size and publish time together, so both
+        // describe the render this descriptor serves rather than the current
+        // one. A real snapshot always carries a time; a descriptor left empty
+        // by a truncate carries none, and reports the epoch, which matches its
+        // empty size.
+        attr.size = snapshot.buffer.length;
+        attr.mtime = snapshot.mtime;
+      }
       const statBuf = new ArrayBuffer(STAT_SIZE);
-      writeStat(statBuf, buildStat(node, inode));
+      writeStat(statBuf, attr);
 
-      const parentIno = tree.parents.get(inode) ?? 0n;
-      const isDynamic = bridge?.shouldPrepareDirectory(inode) ||
-        bridge?.shouldPrepareLookup(
-          parentIno,
-          tree.getPath(inode).split("/").pop() ?? "",
-        );
       fuse.symbols.fuse_reply_attr(
         req,
         Deno.UnsafePointer.of(new Uint8Array(statBuf)),
-        isDynamic ? 0 : 1.0,
+        isDynamicIno(inode) ? 0 : 1.0,
       );
     },
   );
@@ -1197,6 +1373,15 @@ export async function main(argv: string[] = Deno.args) {
       // Get current content for the handle buffer
       const content = node.kind === "file" ? node.content : new Uint8Array(0);
       const truncate = (flags & O_TRUNC) !== 0;
+      // Fix a generated file's bytes for the life of the descriptor, taking
+      // what the last getattr published so the descriptor serves the bytes
+      // whose size its reader was already given. A reader that has read to the
+      // end issues one more read to see EOF, which this answers too. Record
+      // when those bytes were published so the descriptor's later getattr
+      // carries a size and a modification time from the one render.
+      const snapshotGenerated = tree.isGenerated(inode) && !truncate;
+      const readSnapshot = snapshotGenerated ? content : undefined;
+      const readSnapshotMtime = snapshotGenerated ? node.mtime : undefined;
       if (isWriting && writeTarget?.kind !== "ignored") {
         const operation: CfcExistingWritebackOperation = truncate
           ? "truncate"
@@ -1211,7 +1396,13 @@ export async function main(argv: string[] = Deno.args) {
         inode,
         flags,
         truncate ? new Uint8Array(0) : content,
-        { writeTarget, cfcAuthorizedOperations, cfcAuthorizationAnnotation },
+        {
+          writeTarget,
+          cfcAuthorizedOperations,
+          cfcAuthorizationAnnotation,
+          readSnapshot,
+          readSnapshotMtime,
+        },
       );
       if (isWriting) {
         writeStats.opened++;
@@ -1590,7 +1781,7 @@ export async function main(argv: string[] = Deno.args) {
             main: baseMain,
             mainExport: baseMainExport,
             files: updatedFiles,
-          });
+          }, { dangerouslyAllowIncompatibleSchema });
           // Clear error.log on success
           const errorLogIno = tree.lookup(srcIno, "error.log");
           if (errorLogIno !== undefined) {
@@ -2088,7 +2279,7 @@ export async function main(argv: string[] = Deno.args) {
       fuse.symbols.fuse_reply_attr(
         req,
         Deno.UnsafePointer.of(new Uint8Array(statBuf)),
-        1.0,
+        isDynamicIno(inode) ? 0 : 1.0,
       );
       if (
         metadataAuthorization?.allowed &&
@@ -2322,14 +2513,12 @@ export async function main(argv: string[] = Deno.args) {
       }
       if (!result.ok) {
         console.warn(`[FUSE:CFC] rejected ${name}: ${result.reason}`);
-        bridge?.refreshStatus();
         fuse.symbols.fuse_reply_err(
           req,
           cfcWritebackXattrResultErrno(result, { enotsup: ENOTSUP }),
         );
         return;
       }
-      bridge?.refreshStatus();
       fuse.symbols.fuse_reply_err(req, 0);
     },
   );
@@ -2358,7 +2547,6 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
       cfcWritebacks.deleteAllForIno(BigInt(ino));
-      bridge?.refreshStatus();
       fuse.symbols.fuse_reply_err(req, 0);
     },
   );
@@ -3237,7 +3425,7 @@ export async function main(argv: string[] = Deno.args) {
     );
   } catch (e) {
     console.error(String(e));
-    await writeSupervisorStatus("failed", { error: String(e) }).catch(() => {
+    await reportSupervisorState("failed", { error: String(e) }).catch(() => {
       // Best effort; mount failure is already being reported by process exit.
     });
     Deno.exit(1);
@@ -3246,136 +3434,71 @@ export async function main(argv: string[] = Deno.args) {
 
   let unmounting = false;
 
+  // The reverse-invalidation queue, when a bridge is present. It is closed and
+  // its active flush awaited before the session is destroyed, so no notify call
+  // is still running on an FFI thread when the session memory it dereferences is
+  // freed. `cancelInvalidationFlush` drops a pending flush timer during that
+  // shutdown.
+  let invalidationQueue: ReverseInvalidationQueue | undefined;
+  let cancelInvalidationFlush: (() => void) | undefined;
+
   // Wire up kernel cache invalidation for subscriptions.
   //
   // libfuse reverse invalidation can block while the kernel answers the notify
   // request. Some bridge paths run while a FUSE request is still awaiting its
-  // reply (for example, lookup -> connectSpace -> syncPieceList). Calling
-  // notify inline from those paths can deadlock the daemon against the kernel's
-  // pending request. Queue notifications onto a timer and wait for all tracked
-  // async replies to drain before issuing reverse invalidations.
+  // reply (for example, lookup -> connectSpace -> syncPieceList). notify takes
+  // the parent directory's inode lock for write, which a concurrent lookup
+  // holds for read until the daemon answers it; the daemon answers on the
+  // isolate thread, so a notify on that thread would block behind a lookup only
+  // that thread can complete. The queue coalesces notifications, and a timer
+  // gated on tracked async replies drains it off the isolate thread (the notify
+  // FFI symbols are nonblocking) so the request path stays free.
   if (bridge) {
-    let entryNotifySupported = true;
-    let inodeNotifySupported = true;
-    const pendingEntryInvalidations = new Map<
-      string,
-      { parentIno: bigint; names: Set<string> }
-    >();
-    const pendingInodeInvalidations = new Set<bigint>();
     let invalidationTimer: ReturnType<typeof setTimeout> | undefined;
+    const queue = new ReverseInvalidationQueue({
+      invalidateEntry: (parentIno, nameBuf, nameLen) =>
+        fuse.symbols.fuse_lowlevel_notify_inval_entry(
+          handle.notifyTarget,
+          parentIno,
+          nameBuf,
+          nameLen,
+        ),
+      // off=0, len=-1 invalidates all cached data for the inode.
+      invalidateInode: (ino) =>
+        fuse.symbols.fuse_lowlevel_notify_inval_inode(
+          handle.notifyTarget,
+          ino,
+          0n,
+          -1n,
+        ),
+      isUnmounting: () => unmounting,
+      debug,
+    });
+    invalidationQueue = queue;
 
     const scheduleInvalidationFlush = () => {
       if (invalidationTimer !== undefined) return;
       invalidationTimer = setTimeout(() => {
         invalidationTimer = undefined;
         if (pendingFuseReplies > 0) return;
-        flushDeferredInvalidations();
+        queue.flush();
       }, 0);
     };
     onPendingFuseRepliesDrained = scheduleInvalidationFlush;
-
-    const flushDeferredInvalidations = () => {
-      if (unmounting) {
-        pendingEntryInvalidations.clear();
-        pendingInodeInvalidations.clear();
-        return;
+    cancelInvalidationFlush = () => {
+      if (invalidationTimer !== undefined) {
+        clearTimeout(invalidationTimer);
+        invalidationTimer = undefined;
       }
-
-      if (entryNotifySupported) {
-        for (const { parentIno, names } of pendingEntryInvalidations.values()) {
-          for (const name of names) {
-            const nameBuf = encoder.encode(name + "\0");
-            try {
-              const rc = fuse.symbols.fuse_lowlevel_notify_inval_entry(
-                handle.notifyTarget,
-                parentIno,
-                nameBuf,
-                BigInt(nameBuf.length - 1),
-              );
-              if (rc === -38) {
-                // ENOSYS — FUSE-T doesn't support notify_inval_entry.
-                console.log(
-                  "notify_inval_entry not supported (FUSE-T); relying on short timeouts",
-                );
-                entryNotifySupported = false;
-                break;
-              }
-              if (debug && rc !== 0) {
-                console.log(
-                  `notify_inval_entry(parent=${parentIno}, name=${name}) => ${rc}`,
-                );
-              }
-            } catch (e) {
-              console.warn(`notify_inval_entry failed: ${e}`);
-              entryNotifySupported = false;
-              break;
-            }
-          }
-          if (!entryNotifySupported) break;
-        }
-      }
-      pendingEntryInvalidations.clear();
-
-      if (inodeNotifySupported) {
-        for (const ino of pendingInodeInvalidations) {
-          try {
-            // Invalidate all cached data for this inode (off=0, len=-1 means all)
-            const ret = fuse.symbols.fuse_lowlevel_notify_inval_inode(
-              handle.notifyTarget,
-              ino,
-              0n,
-              -1n,
-            );
-            if (ret === -38) {
-              // ENOSYS — FUSE-T doesn't support notify_inval_inode.
-              inodeNotifySupported = false;
-              break;
-            }
-            if (debug) {
-              console.log(`notify_inval_inode(ino=${ino}) => ${ret}`);
-            }
-          } catch (e) {
-            console.warn(`notify_inval_inode failed: ${e}`);
-            inodeNotifySupported = false;
-            break;
-          }
-        }
-      }
-      pendingInodeInvalidations.clear();
     };
 
     bridge.onInvalidate = (parentIno: bigint, names: string[]) => {
-      if (!entryNotifySupported || unmounting) return;
-      const key = parentIno.toString();
-      let pending = pendingEntryInvalidations.get(key);
-      if (!pending) {
-        pending = { parentIno, names: new Set<string>() };
-        pendingEntryInvalidations.set(key, pending);
-      }
-      for (const name of names) {
-        pending.names.add(name);
-      }
-      scheduleInvalidationFlush();
+      if (queue.addEntry(parentIno, names)) scheduleInvalidationFlush();
     };
     bridge.onInvalidateInode = (ino: bigint) => {
-      if (!inodeNotifySupported || unmounting) return;
-      pendingInodeInvalidations.add(ino);
-      scheduleInvalidationFlush();
+      if (queue.addInode(ino)) scheduleInvalidationFlush();
     };
   }
-
-  await writeSupervisorStatus("mounted").catch((error) => {
-    console.warn(`[FUSE] Unable to write mounted supervisor status: ${error}`);
-  });
-  const supervisorHeartbeat = supervisorStatusPath
-    ? setInterval(() => {
-      if (unmounting) return;
-      writeSupervisorStatus("mounted").catch(() => undefined);
-    }, 1_000)
-    : undefined;
-
-  console.log(`Mounted at ${mountpoint}`);
-  console.log("Press Ctrl+C to unmount");
 
   // Cleanup on signal
   function unmount() {
@@ -3394,12 +3517,52 @@ export async function main(argv: string[] = Deno.args) {
   });
 
   // Run FUSE event loop (nonblocking: true → returns Promise)
-  const result = await fuse.symbols.fuse_session_loop(handle.session);
+  const sessionLoop = fuse.symbols.fuse_session_loop(handle.session);
+
+  // Readiness is reported here rather than earlier: the session loop is
+  // dispatched and the signal handlers are installed, so a caller that has seen
+  // `mounted` has a kernel mount that serves requests and unmounts cleanly on
+  // SIGTERM. Because the announcement carries that, the caller needs no timed
+  // confirmation after it. The guard skips the announcement when a signal has
+  // already begun tearing the mount down; a signal that lands during the
+  // announcement itself still publishes it, but that mount then unmounts
+  // through the handler installed above.
+  if (!unmounting) {
+    await reportSupervisorState("mounted").catch((error) => {
+      console.warn(
+        `[FUSE] Unable to write mounted supervisor status: ${error}`,
+      );
+    });
+  }
+  const supervisorHeartbeat = supervisorStatusPath
+    ? setInterval(() => {
+      if (unmounting) return;
+      writeSupervisorStatus("mounted").catch(() => undefined);
+    }, 1_000)
+    : undefined;
+
+  console.log(`Mounted at ${mountpoint}`);
+  console.log("Press Ctrl+C to unmount");
+
+  const result = await sessionLoop;
   console.log(`FUSE loop exited (code ${result})`);
   if (supervisorHeartbeat !== undefined) clearInterval(supervisorHeartbeat);
   await writeSupervisorStatus("exited", { exitCode: result }).catch(() => {
     // Best effort during shutdown.
   });
+
+  // Stop the reverse-invalidation queue before the session is destroyed. The
+  // session loop can exit without a signal — an external unmount or a kernel
+  // abort — leaving `unmounting` false, so the queue is closed here rather than
+  // relying on the signal handler. Closing refuses further additions and halts
+  // an in-flight flush; dropping the reschedule hook and any pending timer stops
+  // a new flush from starting; the await lets a flush already on an FFI thread
+  // finish. Together these ensure no notify call runs against the session after
+  // it is destroyed.
+  invalidationQueue?.close();
+  onPendingFuseRepliesDrained = undefined;
+  cancelInvalidationFlush?.();
+  await invalidationQueue?.active().catch(() => {});
 
   // Final cleanup
   platform.cleanup(fuse, handle, mountpointBuf, unmounting);

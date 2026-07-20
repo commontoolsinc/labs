@@ -109,6 +109,7 @@ import {
 import { loadHarnessSkillContext } from "./skills/registry.ts";
 import type { HarnessFailureRecord } from "./diagnostics.ts";
 import { DEFAULT_PARENT_TOOL_IDS as DEFAULT_PROMPT_LOOP_TOOL_IDS } from "./contracts/tool-descriptor.ts";
+import type { HarnessFetch } from "./contracts/http-fetch.ts";
 
 const DEFAULT_MAX_MODEL_TURNS = 8;
 const BASH_CWD_MARKER_PREFIX = "__CF_HARNESS_CWD__";
@@ -119,7 +120,7 @@ export interface CreateHarnessPromptLoopOptions
   gatewayClient?: OpenAICompatibleGatewayClient;
   apiKey?: string;
   apiKeySource?: string;
-  fetchFn?: typeof fetch;
+  fetchFn?: HarnessFetch;
   maxModelTurns?: number;
   allowedToolIds?: readonly BuiltinToolId[];
   allowedSubagentProfiles?: readonly HarnessSubagentProfile[];

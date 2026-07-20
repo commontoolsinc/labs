@@ -11,7 +11,7 @@
  * Run: deno task cf test packages/patterns/notes/note.test.tsx --verbose
  */
 import { action, computed, NAME, pattern } from "commonfabric";
-import Note from "./note.tsx";
+import Note, { bareMentionId } from "./note.tsx";
 import Notebook from "./notebook.tsx";
 
 export default pattern(() => {
@@ -287,6 +287,24 @@ export default pattern(() => {
     () => note.mentioned.length === 1,
   );
 
+  // The wiki-link embed contract: `of:` strips (the renderer re-adds it),
+  // bare ids pass through, and `computed:` is REJECTED — the bare embed
+  // format cannot carry the scheme, and the scheme is part of the identity.
+  const assert_mention_id_strips_of = computed(
+    () => bareMentionId("of:fid1:abc") === "fid1:abc",
+  );
+  const assert_mention_id_passes_bare = computed(
+    () => bareMentionId("fid1:abc") === "fid1:abc",
+  );
+  const assert_computed_mention_rejected = computed(() => {
+    try {
+      bareMentionId("computed:fid1:tripwire");
+      return false;
+    } catch {
+      return true;
+    }
+  });
+
   // ==========================================================================
   // Test Sequence
   // ==========================================================================
@@ -356,6 +374,9 @@ export default pattern(() => {
       { action: action_append_link },
       { assertion: assert_link_appended },
       { assertion: assert_mentioned_after_link },
+      { assertion: assert_mention_id_strips_of },
+      { assertion: assert_mention_id_passes_bare },
+      { assertion: assert_computed_mention_rejected },
     ],
     note,
     noteWithParent,

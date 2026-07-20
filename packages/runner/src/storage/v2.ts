@@ -55,7 +55,7 @@ import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
-import { getJSONFromDataURI } from "../uri-utils.ts";
+import { getJSONFromDataURI } from "../data-uri.ts";
 import {
   isPrimitiveCellLink,
   type NormalizedLink,
@@ -1730,6 +1730,7 @@ class SpaceReplica implements ISpaceReplica {
   #staleFloor = new Map<string, number>();
   #queuedWatchRefresh: WatchRefreshBatch | null = null;
   #queuedWatchRefreshScheduled = false;
+  #watchRefreshFlushing = false;
 
   constructor(options: ProviderOptions) {
     this.#space = options.space;
@@ -2335,16 +2336,29 @@ class SpaceReplica implements ISpaceReplica {
       pending: Promise.withResolvers<Result<Unit, PullError>>(),
     };
     this.#queuedWatchRefresh = batch;
+    this.scheduleWatchRefreshFlush();
+    return batch.pending.promise;
+  }
+
+  private scheduleWatchRefreshFlush(): void {
+    if (
+      this.#queuedWatchRefresh === null ||
+      this.#queuedWatchRefreshScheduled ||
+      this.#watchRefreshFlushing
+    ) {
+      return;
+    }
     this.#queuedWatchRefreshScheduled = true;
     queueMicrotask(() => {
       this.#queuedWatchRefreshScheduled = false;
-      if (this.#queuedWatchRefresh !== batch) {
+      if (this.#watchRefreshFlushing || this.#queuedWatchRefresh === null) {
         return;
       }
+      const batch = this.#queuedWatchRefresh;
       this.#queuedWatchRefresh = null;
+      this.#watchRefreshFlushing = true;
       void this.flushWatchRefreshBatch(batch);
     });
-    return batch.pending.promise;
   }
 
   private async flushWatchRefreshBatch(
@@ -2356,6 +2370,9 @@ class SpaceReplica implements ISpaceReplica {
       );
     } catch (error) {
       batch.pending.resolve({ error: toConnectionError(error) });
+    } finally {
+      this.#watchRefreshFlushing = false;
+      this.scheduleWatchRefreshFlush();
     }
   }
 

@@ -431,14 +431,6 @@ export function toCompactDebugString(value: unknown): string {
   return JSON.stringify(value);
 }
 
-export function nonPrivateRandom(): number {
-  return 0.123456789;
-}
-
-export function safeDateNow(): number {
-  return 1_700_000_000_000;
-}
-
 export function getPatternEnvironment(): { apiUrl: URL } {
   return { apiUrl: new URL("http://localhost/") };
 }

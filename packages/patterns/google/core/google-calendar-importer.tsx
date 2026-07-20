@@ -6,9 +6,11 @@ import {
   NAME,
   pattern,
   patternTool,
+  resultOf,
   str,
   UI,
   type VNode,
+  wish,
   Writable,
 } from "commonfabric";
 
@@ -593,9 +595,14 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
     const isReady = hasLinkedAuth ? hasLinkedAuth : wishedIsReady;
     const currentEmail = hasLinkedAuth ? overrideAuthEmail : wishedCurrentEmail;
 
+    // Reactive clock for relative "upcoming" filters; ticks each minute so the
+    // displayed event list refreshes as events move into the past.
+    const nowCell = wish<number>({ query: "#now/60" });
+    const nowCellValue = resultOf(nowCell.result);
+
     // Computed values for pagination
     const upcomingEvents = computed(() => {
-      const now = new Date();
+      const now = new Date(nowCellValue);
       return [...events.get()]
         .filter((e) => new Date(e.startDateTime || e.start) >= now)
         .sort((a, b) =>
@@ -616,7 +623,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
     // Paginated events for display - use computed with events Cell directly
     const _paginatedEvents = computed(() => {
       const allEvents = events.get() || [];
-      const now = new Date();
+      const now = new Date(nowCellValue);
       const upcoming = [...allEvents]
         .filter((e: CalendarEvent) =>
           new Date(e.startDateTime || e.start) >= now
@@ -1007,7 +1014,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
           ({ count, events }: { count: number; events: CalendarEvent[] }) => {
             return computed(() => {
               if (!events || events.length === 0) return "No events";
-              const now = new Date();
+              const now = new Date(nowCellValue);
               const upcoming = events
                 .filter((e) => new Date(e.startDateTime || e.start) >= now)
                 .slice(0, count || 5);
@@ -1031,7 +1038,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
         pattern(({ events }: { events: CalendarEvent[] }) => {
           return computed(() => {
             if (!events || events.length === 0) return "No events";
-            const today = new Date().toISOString().split("T")[0];
+            const today = new Date(nowCellValue).toISOString().split("T")[0];
             const todayEvents = events.filter((e) =>
               e.start === today ||
               (e.startDateTime && e.startDateTime.startsWith(today))

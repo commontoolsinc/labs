@@ -98,6 +98,7 @@ import type {
   ModuleByteCache,
   NavigateCallback,
   PieceCreatedCallback,
+  RuntimeFetch,
   RuntimeOptions,
   VersionSkewHandler,
 } from "./runtime.ts";
@@ -185,6 +186,7 @@ export const EXPERIMENTAL_ENV_VARS = {
   commitPreconditions: null,
   systemPatternAutoUpdate: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
   systemPatternAutoUpdateHome: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME",
+  computedCellIds: "EXPERIMENTAL_COMPUTED_CELL_IDS",
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
 
 /**
@@ -287,7 +289,7 @@ export interface RemoteClientPresetParams extends CoreParams {
 
 export interface PatternTestPresetParams extends CoreParams {
   /** Mock fetch honoring test-declared `fetchMocks` (CT-1768). */
-  fetch?: typeof globalThis.fetch;
+  fetch?: RuntimeFetch;
   errorHandlers?: ErrorHandler[];
   navigateCallback?: NavigateCallback;
   moduleByteCache?: ModuleByteCache;
@@ -316,7 +318,7 @@ export interface BrowserWorkerPresetParams extends CoreParams {
 export interface UnitTestPresetParams extends Omit<CoreParams, "experimental"> {
   /** Optional here (unlike the first-party presets): unit tests default to no flags. */
   experimental?: ExperimentalOptions;
-  fetch?: typeof globalThis.fetch;
+  fetch?: RuntimeFetch;
   errorHandlers?: ErrorHandler[];
   moduleByteCache?: ModuleByteCache;
   cfcEnforcementMode?: CfcEnforcementMode;

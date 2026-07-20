@@ -5,7 +5,7 @@
  * Workspace code should import these types via `@commonfabric/builder`.
  */
 
-import type { Cfc, WriteAuthorizedBy } from "./cfc.ts";
+import type { Cfc, CurrentPrincipal, WriteAuthorizedBy } from "./cfc.ts";
 
 // ============================================================================
 // Fabric Value Types
@@ -471,6 +471,7 @@ export type MetaField =
   | "patternIdentity" // content-addressed {identity, symbol} pattern reference
   | "patternSource" // provenance: the source a piece tracks for updates (a
   // toolshed pattern path, or later a `cf:` fabric ref)
+  | "patternRepository" // optional caller-supplied repository locator
   | "internal"
   | "schema"
   | "slug";
@@ -1775,7 +1776,7 @@ export type JSONSchemaObj = {
     readonly addIntegrity?: readonly ImmutableJSONValue[];
     readonly requiredIntegrity?: readonly ImmutableJSONValue[];
     readonly maxConfidentiality?: readonly ImmutableJSONValue[];
-    readonly ownerPrincipal?: string | { readonly __ctCurrentPrincipal: true };
+    readonly ownerPrincipal?: string | CurrentPrincipal;
     readonly writeAuthorizedBy?:
       | readonly string[]
       | {
@@ -2389,6 +2390,57 @@ export type ActionFunction = {
 };
 
 export type ComputedFunction = <T>(fn: () => T) => Reactive<T>;
+
+/**
+ * One operand recorded while an `assert` body ran: the operand's authored
+ * source text, and its value rendered with `toCompactDebugString`.
+ */
+export type AssertPart = {
+  src: string;
+  rendered: string;
+};
+
+/**
+ * The value an `assert(...)` assertion carries.
+ *
+ * `ok` is the assertion's result. When it is false, `parts` holds the operands
+ * of the top-level operator (or the arguments of a call) recorded during the
+ * evaluation that produced that result, and `source` is the authored text of
+ * the whole assertion. The pattern test runner renders them on failure.
+ *
+ * It is one record on both paths rather than `true | AssertPart[]`, because a
+ * union return infers as `unknown`, and a field whose schema is
+ * `{ type: "unknown" }` reads back as `undefined`.
+ */
+export type AssertRecord = {
+  ok: boolean;
+  source: string;
+  parts: AssertPart[];
+};
+
+/**
+ * assert: a `computed` for pattern-test assertions that reports its operands.
+ *
+ * `assert(() => a + b <= c)` evaluates like `computed(() => a + b <= c)`, but
+ * the transformer rewrites the body to record each operand as it is computed,
+ * so a failure can name `a + b` and `c` and their values instead of reporting
+ * only `false`. Use it in a test pattern's `tests` array:
+ *
+ *     { assertion: assert(() => list.items.length === 3) }
+ */
+export type AssertFunction = (fn: () => boolean) => Reactive<AssertRecord>;
+
+/**
+ * Records one operand of an `assert` body and returns it unchanged, so that
+ * wrapping an operand does not change evaluation order or semantics. The
+ * assert-diagnostics transformer emits the calls; authored code does not call
+ * it directly.
+ */
+export type AssertCaptureFunction = <T>(
+  parts: AssertPart[],
+  src: string,
+  value: T,
+) => T;
 
 export type StrFunction = (
   strings: TemplateStringsArray,
@@ -3156,6 +3208,7 @@ export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
 export declare const action: ActionFunction;
 export declare const computed: ComputedFunction;
+export declare const assert: AssertFunction;
 export declare const str: StrFunction;
 export declare const ifElse: IfElseFunction;
 export declare const when: WhenFunction;

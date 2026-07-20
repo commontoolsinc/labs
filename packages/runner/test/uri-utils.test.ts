@@ -1,12 +1,13 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   entityRefFrom,
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { toURI } from "../src/uri-utils.ts";
+import { fromURI, toURI } from "../src/uri-utils.ts";
 
 const hash = hashOf({ causal: { test: "uri-utils" } });
 const tagged = hash.taggedHashString;
@@ -64,5 +65,73 @@ describe("toURI", () => {
 
   it("rejects a value that is not an id", () => {
     expect(() => toURI({ not: "an id" })).toThrow();
+  });
+});
+
+describe("toURI with an entity kind (computed: scheme)", () => {
+  afterEach(() => {
+    resetModernCellRepConfig();
+  });
+
+  it("prefixes a FabricHash with computed: for kind 'computed'", () => {
+    expect(toURI(hash, "computed")).toBe(`computed:${tagged}`);
+  });
+
+  for (const modernCellRep of [false, true]) {
+    it(`prefixes the serialized ref (modernCellRep=${modernCellRep})`, () => {
+      setModernCellRepConfig(modernCellRep);
+      expect(toURI(entityRefFrom(hash), "computed")).toBe(
+        `computed:${tagged}`,
+      );
+    });
+  }
+
+  it("prefixes a bare id string with computed:", () => {
+    expect(toURI("bare-id", "computed")).toBe("computed:bare-id");
+  });
+
+  it("passes through an already-prefixed computed: URI (no kind)", () => {
+    expect(toURI(`computed:${tagged}`)).toBe(`computed:${tagged}`);
+  });
+
+  // `kind` is a minting-time argument; a schemed string is an already-minted
+  // identity — never re-scheme it, even when the scheme matches.
+  it("throws on kind + already-schemed string", () => {
+    expect(() => toURI(`of:${tagged}`, "computed")).toThrow(
+      /already-schemed/,
+    );
+    expect(() => toURI(`computed:${tagged}`, "computed")).toThrow(
+      /already-schemed/,
+    );
+  });
+});
+
+describe("fromURI", () => {
+  it("round-trips toURI for both entity schemes", () => {
+    expect(fromURI(toURI(hash))).toBe(tagged);
+    expect(fromURI(toURI(hash, "computed"))).toBe(tagged);
+  });
+
+  it("strips of: and computed: prefixes", () => {
+    expect(fromURI(`of:${tagged}`)).toBe(tagged);
+    expect(fromURI(`computed:${tagged}`)).toBe(tagged);
+  });
+
+  it("passes through a colon-free bare id", () => {
+    expect(fromURI("bare-id")).toBe("bare-id");
+  });
+
+  it("rejects unknown schemes", () => {
+    expect(() => fromURI(`future:${tagged}`)).toThrow(/Invalid URI/);
+  });
+
+  // The scheme is part of the identity: stripping it loses the kind, so a
+  // bare-hash round-trip through toURI renames a computed: id to its of:
+  // sibling. Documented one-way — never rebuild a computed URI from its
+  // bare hash (the salted preimage keeps the BYTES distinct, but the
+  // resulting URI names the wrong-scheme entity).
+  it("is one-way for computed: ids (bare hash re-mints as of:)", () => {
+    const bare = fromURI(`computed:${tagged}`);
+    expect(toURI(FabricHash.fromString(bare))).toBe(`of:${tagged}`);
   });
 });

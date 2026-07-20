@@ -13,7 +13,8 @@ import { renderFrame, type ViewState } from "../lib/view/render.ts";
 import { buildView } from "../lib/view/mod.ts";
 import { Session } from "../lib/view/session.ts";
 import type { Key } from "../lib/view/keys.ts";
-import { SAMPLE } from "./view-helpers.ts";
+import { bgCode, SAMPLE } from "./view-helpers.ts";
+import { lineBg } from "../lib/view/theme.ts";
 
 function press(session: Session, ...names: string[]): void {
   for (const name of names) {
@@ -462,7 +463,7 @@ Deno.test("diff render: added lines carry the add tint under the syntax colour",
     const { doc } = buildDiffDocument(DIFF, model, ws);
     // Non-interactive path: renderLineColored merges the line bg.
     const colored = renderLineColored(doc.lines[9], true);
-    assert(colored.includes("48;2;34;49;42"), "add bg in plain print");
+    assert(colored.includes(bgCode(lineBg("add"))), "add bg in plain print");
     // Interactive path: the frame row for the added line carries the bg too.
     const view: ViewState = {
       top: 9,
@@ -471,6 +472,8 @@ Deno.test("diff render: added lines carry the add tint under the syntax colour",
       height: 4,
       color: true,
       showLineNumbers: false,
+      wrapLines: false,
+      displayMode: "pictures",
       selected: null,
       matches: null,
       currentMatch: 0,
@@ -479,7 +482,7 @@ Deno.test("diff render: added lines carry the add tint under the syntax colour",
       overlay: null,
     };
     const rows = renderFrame(doc, view);
-    assert(rows[0].includes("48;2;34;49;42"), "add bg in the frame");
+    assert(rows[0].includes(bgCode(lineBg("add"))), "add bg in the frame");
     // Monochrome stays verbatim.
     assertEquals(
       renderLineColored(doc.lines[9], false),
@@ -1064,6 +1067,59 @@ Deno.test("card: uses over a diff exclude the removed side", () => {
     assert(text.includes("USES · 1"), `only the new side counts: ${text}`);
     assert(!text.includes("double(7)"), "removed-side uses not listed");
     assert(!text.includes("double(5)"), "deleted-only uses not listed");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+// --- object-literal properties are navigable in a diff hunk ------------------
+
+Deno.test("diff structure: an object literal's properties are each navigable", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const file = `export function make() {
+  return {
+    label: pick(a, b),
+    isDiff: true,
+    editable: true,
+    policy,
+    parse: (text) => reparse(text),
+  };
+}
+`;
+    Deno.writeTextFileSync(join(root, "m.ts"), file);
+    const ws: DiffWorkspace = {
+      resolve: (p) => join(root, p),
+      read: (a) => {
+        try {
+          return Deno.readTextFileSync(a);
+        } catch {
+          return null;
+        }
+      },
+    };
+    const diff = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,10 +1,10 @@
+ export function make() {
+   return {
+-    label: OLD,
++    label: pick(a, b),
+     isDiff: true,
+     editable: true,
+     policy,
+     parse: (text) => reparse(text),
+   };
+ }
+`;
+    const model = parseDiff(diff)!;
+    const { doc } = buildDiffDocument(diff, model, ws);
+    const labels = doc.flatStructure.map((n) => n.label);
+    // Every property — not just the closure-valued one — is a node in the tree.
+    for (const p of ["label:", "isDiff:", "editable:", "policy", "parse:"]) {
+      assert(labels.includes(p), `missing "${p}" in: ${labels.join(" | ")}`);
+    }
   } finally {
     Deno.removeSync(root, { recursive: true });
   }

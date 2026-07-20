@@ -8,6 +8,9 @@
 import type { Document, Line, StructureNode, TokenClass } from "./model.ts";
 import type { Key } from "./keys.ts";
 import {
+  type DialogButton,
+  type DialogState,
+  type KeyHint,
   type Match,
   overlayBox,
   type OverlayState,
@@ -20,7 +23,6 @@ import {
   maxTop,
   nextMatchIndex,
   nodeAtLine,
-  nodeForViewport,
   scrollToAnchor,
   treeChild,
   treeNextSibling,
@@ -30,11 +32,40 @@ import {
   treePrevSibling,
 } from "./actions.ts";
 import { buildPeekCard, type CardTarget } from "./card.ts";
+import {
+  DISPLAY_MODES,
+  displayColumnOf,
+  displayLine,
+  type DisplayMode,
+  displayModeLabel,
+  hasNonPrintable,
+  sourceColumnOf,
+} from "./display.ts";
+import {
+  buildFoldPlan,
+  type DiffFileRange,
+  diffFiles,
+  type FoldPlan,
+  identityFold,
+} from "./fold.ts";
+import { parseDiff } from "./diff.ts";
+import { findCommitMessages } from "./commitmsg.ts";
 import type { Semantics } from "./semantics.ts";
 import { EditBuffer } from "./editbuffer.ts";
-import type { EditableSource, RevertScope } from "./editsource.ts";
+import type {
+  EditableSource,
+  ExpandResult,
+  HunkRoom,
+  RevertScope,
+} from "./editsource.ts";
 import type { Highlighter } from "./parse.ts";
 import type { DirEntry, FileGateway } from "./filegateway.ts";
+import {
+  buildWrapPlan,
+  fitWrapChrome,
+  wrappedRowAt,
+  type WrapPlan,
+} from "./wrap.ts";
 
 export interface SessionOptions {
   color: boolean;
@@ -46,6 +77,7 @@ type Mode =
   | "search"
   | "deflookup"
   | "savePrompt"
+  | "amendPrompt"
   | "revertPrompt"
   | "filePicker";
 
@@ -67,6 +99,10 @@ interface PeekOverlay {
   node?: StructureNode;
   /** Footer for overlays without a toggle (e.g. help). */
   staticFooter?: string;
+  /** The `info` lines are verbatim source (a definition peek, an opened file),
+   * not a structured card, so the overlay is drawn as a blue editor window even
+   * in "info" mode. */
+  infoIsSource?: boolean;
 }
 
 const HORIZONTAL_STEP = 8;
@@ -80,10 +116,53 @@ const MULTILINE_MSG =
 const JOIN_MSG =
   "To remove a line in a diff, press Backspace at the start of it.";
 
+/** What the line-number gutter shows: nothing, the position in the piped input
+ * (the diff/document line), or the line of the underlying file (a diff line's
+ * new-file line) or commit message. */
+type LineNumberMode = "off" | "input" | "file";
+
+interface ViewportAnchor {
+  readonly docLine: number;
+  readonly foldedLine: number;
+  readonly displayCol: number;
+}
+
+interface FoldAnchor {
+  readonly docLine: number;
+  readonly sourceCol: number;
+  /** Display column within a collapsed summary that remains collapsed. */
+  readonly syntheticDisplayCol?: number;
+}
+
 export class Session {
   private currentDoc: Document;
   private color: boolean;
-  private showLineNumbers: boolean;
+  private lineNumberMode: LineNumberMode = "off";
+  /** Whether long logical lines continue on later screen rows. */
+  private wrapLines = false;
+  /** How non-printable characters are shown; edit mode forces the first mode. */
+  private displayMode: DisplayMode = DISPLAY_MODES[0];
+  /** Indices (document order) of the diff files collapsed to a summary line.
+   * Cleared when the text cursor is revealed, since hidden lines cannot be
+   * edited. `this.top` is a display row while any file is collapsed. */
+  private collapsed = new Set<number>();
+  /** Bumped whenever `collapsed` changes, to invalidate the fold-plan cache. */
+  private foldVersion = 0;
+  private foldFileCache?: { doc: Document; files: DiffFileRange[] };
+  private foldPlanCache?: { doc: Document; version: number; plan: FoldPlan };
+  private wrapPlanCache?: {
+    lines: readonly Line[];
+    mode: DisplayMode;
+    width: number;
+    plan: WrapPlan;
+  };
+  private displayColumnCache?: {
+    doc: Document;
+    mode: DisplayMode;
+    columns: Map<number, Uint32Array>;
+  };
+  private nonPrintCache?: { doc: Document; value: boolean };
+  private fileLineCache?: { doc: Document; value: (number | null)[] | null };
 
   width: number;
   height: number;
@@ -102,12 +181,34 @@ export class Session {
   private input = "";
   private overlay: PeekOverlay | null = null;
   private overlayScroll = 0;
+  /** The overlays followed to reach the current one, so Esc walks back through
+   * the chain of cards and file peeks. Empty when the current overlay is the
+   * first one opened from the main view. */
+  private overlayStack: Array<{ overlay: PeekOverlay; scroll: number }> = [];
   private semantics?: Semantics;
   quit = false;
   /** An edit patched only the changed lines for speed; a full re-parse (for
    * structure, cross-references, and multi-line token colours) is owed. The
    * driver runs it on a short idle, so typing stays responsive. */
   needsReparse = false;
+  /** What the last key revealed (Ctrl-L in pager mode), for the driver to walk
+   * the lines in a few at a time with {@link revealFrame}: the display row they
+   * start at, how many there are, and whether they came from above the hunk (so
+   * the viewport holds still) or below it (so it slides as they land). The next
+   * key clears it. */
+  pendingReveal: { row: number; count: number; up: boolean } | null = null;
+  /** A prompt button was just activated. Holds the frame that shows it pushed —
+   * the dialog with that button drawn mid-press — so the driver can play the
+   * press for a moment before the action's result appears. The next key clears
+   * it. */
+  pendingPush: { doc: Document; view: ViewState } | null = null;
+  /** The last key set a message that takes itself away again rather than sitting
+   * in the bar — Ctrl-L pressed where it is not offered, which changed nothing
+   * else. The driver leaves it up for a moment and then calls
+   * {@link expireMessage}; the next key takes it away too. */
+  transientMessage = false;
+  /** How much context each hunk can reveal, cached against the document. */
+  private roomCache?: { doc: Document; room: ReadonlyMap<number, HunkRoom> };
 
   // --- editing ---
   private source?: EditableSource;
@@ -123,8 +224,15 @@ export class Session {
   private cursorOn = false;
   /** Pending C-x prefix (Emacs chord), reset by the next key. */
   private chord: "ctrl-x" | null = null;
+  /** Which button the active prompt's Tab focus rests on — an index into its
+   * button row. Space and Enter activate it; it is reset to the default button
+   * each time a prompt opens. */
+  private dialogFocus = 0;
   /** What the active save prompt does on confirm. */
   private savePromptThen: "quit" | null = null;
+  /** Set once the user confirms amending the commit message, so the save that
+   * follows goes ahead instead of prompting again. */
+  private amendConfirmed = false;
   /** Filenames a save would write, computed when the quit prompt opens and
    * listed above it. */
   private editedFiles: string[] = [];
@@ -146,7 +254,7 @@ export class Session {
   ) {
     this.currentDoc = doc;
     this.color = options.color;
-    this.showLineNumbers = options.showLineNumbers;
+    this.lineNumberMode = options.showLineNumbers ? "input" : "off";
     this.width = size.width;
     this.height = size.height;
     this.semantics = semantics;
@@ -161,16 +269,305 @@ export class Session {
     return this.currentDoc;
   }
 
+  // --- file folding ----------------------------------------------------------
+
+  /** The diff's files (with collapsed summaries), or [] for a non-diff view.
+   * Cached against the current document. */
+  private foldFiles(): DiffFileRange[] {
+    if (!this.source?.isDiff) return []; // only a diff has foldable files
+    if (this.foldFileCache?.doc !== this.currentDoc) {
+      this.foldFileCache = {
+        doc: this.currentDoc,
+        files: diffFiles(this.currentDoc.text),
+      };
+    }
+    return this.foldFileCache.files;
+  }
+
+  /** Whether the document holds any non-printable character, so cycling the
+   * display mode would change what is shown. Cached against the document. */
+  private hasNonPrintables(): boolean {
+    if (this.nonPrintCache?.doc !== this.currentDoc) {
+      this.nonPrintCache = {
+        doc: this.currentDoc,
+        value: this.currentDoc.lines.some((l) => hasNonPrintable(l.text)),
+      };
+    }
+    return this.nonPrintCache.value;
+  }
+
+  /** The current collapse plan: the display line list and the maps between
+   * document lines and display rows. The identity plan when nothing is hidden. */
+  private foldPlan(): FoldPlan {
+    if (this.collapsed.size === 0) return identityFold(this.currentDoc.lines);
+    if (
+      this.foldPlanCache?.doc !== this.currentDoc ||
+      this.foldPlanCache.version !== this.foldVersion
+    ) {
+      this.foldPlanCache = {
+        doc: this.currentDoc,
+        version: this.foldVersion,
+        plan: buildFoldPlan(
+          this.currentDoc.lines,
+          this.foldFiles(),
+          this.collapsed,
+        ),
+      };
+    }
+    return this.foldPlanCache.plan;
+  }
+
+  /** The document as rendered: full lines, with each collapsed file replaced by
+   * its one-line summary. The renderer and cursor placement use this. */
+  displayDoc(): Document {
+    if (this.collapsed.size === 0) return this.currentDoc;
+    return { ...this.currentDoc, lines: this.foldPlan().displayLines };
+  }
+
+  /** The screen-row layout while wrapping is on. */
+  private wrapPlan(): WrapPlan {
+    const lines = this.foldPlan().displayLines;
+    const width = this.contentWidth();
+    if (
+      this.wrapPlanCache?.lines !== lines ||
+      this.wrapPlanCache.mode !== this.displayMode ||
+      this.wrapPlanCache.width !== width
+    ) {
+      this.wrapPlanCache = {
+        lines,
+        mode: this.displayMode,
+        width,
+        plan: buildWrapPlan(lines, this.displayMode, width),
+      };
+    }
+    return this.wrapPlanCache.plan;
+  }
+
+  /** Number of screen rows after file folding and optional line wrapping. */
+  private displayCount(): number {
+    return this.wrapLines
+      ? this.wrapPlan().rowCount
+      : this.foldPlan().displayLines.length;
+  }
+
+  /** A frame part way through the last reveal: the finished document with only
+   * the first `shown` of the revealed lines in it, and a viewport holding the
+   * same line still as the finished frame will. `shown` of `count` is the
+   * finished frame; 0 is the picture the reveal started from. Null when the last
+   * key revealed nothing. */
+  revealFrame(shown: number): { doc: Document; view: ViewState } | null {
+    const rev = this.pendingReveal;
+    if (!rev || this.wrapLines) return null;
+    const waiting = rev.count - clamp(shown, 0, rev.count);
+    // The lines still to come are the ones furthest from the hunk, so what is on
+    // screen is always a run of the file that meets the hunk's edge rather than
+    // a jump across the lines that have not arrived.
+    const from = rev.up ? rev.row : rev.row + rev.count - waiting;
+    const to = from + waiting;
+    // Rows past the ones still to come sit `waiting` lower in the finished
+    // document than in this frame; rows before them are in the same place.
+    const back = (n: number) => n >= to ? n - waiting : n;
+    const drop = <T>(xs: readonly T[]) => [
+      ...xs.slice(0, from),
+      ...xs.slice(to),
+    ];
+    const doc = this.displayDoc();
+    const view = this.view();
+    const sel = view.selected;
+    return {
+      doc: { ...doc, lines: drop(doc.lines) },
+      view: {
+        ...view,
+        top: rev.up ? view.top : Math.max(0, view.top - waiting),
+        lineNumbers: view.lineNumbers
+          ? drop(view.lineNumbers)
+          : view.lineNumbers,
+        selected: sel
+          ? {
+            ...sel,
+            startLine: back(sel.startLine),
+            endLine: back(sel.endLine),
+          }
+          : null,
+        // A match on a line that has not landed yet has nowhere to be drawn.
+        matches: view.matches
+          ? view.matches.filter((m) => m.line < from || m.line >= to)
+            .map((m) => ({ ...m, line: back(m.line) }))
+          : null,
+      },
+    };
+  }
+
+  /** A document line to its logical row after collapsed files are replaced. */
+  private toFolded(docLine: number): number {
+    return this.foldPlan().docToDisplay(docLine);
+  }
+
+  /** A document position to its screen row. A hidden line maps to its file's
+   * summary, and a wrapped line maps to the segment containing `displayCol`. */
+  private toDisplay(docLine: number, displayCol = 0): number {
+    const fold = this.foldPlan();
+    const folded = fold.docToDisplay(docLine);
+    const col = fold.displayLines[folded] === this.currentDoc.lines[docLine]
+      ? displayCol
+      : 0;
+    return this.foldedPositionToDisplay(folded, col);
+  }
+
+  /** A folded logical line and display column to its screen row. */
+  private foldedPositionToDisplay(folded: number, displayCol = 0): number {
+    if (!this.wrapLines) return folded;
+    const plan = this.wrapPlan();
+    const first = plan.firstRow[folded] ?? 0;
+    const last = plan.lastRow[folded] ?? first;
+    return clamp(
+      first + Math.floor(Math.max(0, displayCol) / plan.rowStride),
+      first,
+      last,
+    );
+  }
+
+  /** The last screen row occupied by a document line. */
+  private toDisplayEnd(docLine: number): number {
+    const folded = this.toFolded(docLine);
+    return this.wrapLines ? this.wrapPlan().lastRow[folded] ?? 0 : folded;
+  }
+
+  /** A screen row to the document line it stands for. */
+  private toDoc(displayRow: number): number {
+    let folded = displayRow;
+    if (this.wrapLines) {
+      const plan = this.wrapPlan();
+      const row = wrappedRowAt(
+        plan,
+        clamp(displayRow, 0, Math.max(0, plan.rowCount - 1)),
+      );
+      folded = row?.line ?? 0;
+    }
+    return this.foldPlan().displayToDoc(folded);
+  }
+
+  /** The selected node with its line range mapped into display rows (a node in a
+   * collapsed file collapses onto that file's summary row). */
+  private displaySelected(): StructureNode | null {
+    const node = this.selectedNode();
+    if (!node || this.collapsed.size === 0) return node;
+    const fold = this.foldPlan();
+    const startLine = fold.docToDisplay(node.startLine);
+    const endLine = fold.docToDisplay(node.endLine);
+    const startSynthetic = fold.displayLines[startLine] !==
+      this.currentDoc.lines[node.startLine];
+    const endSynthetic = fold.displayLines[endLine] !==
+      this.currentDoc.lines[node.endLine];
+    return {
+      ...node,
+      startLine,
+      endLine,
+      startCol: startSynthetic ? 0 : node.startCol,
+      endCol: endSynthetic
+        ? codePointLength(fold.displayLines[endLine]?.text ?? "")
+        : node.endCol,
+    };
+  }
+
+  /** The search matches with their line mapped into display rows. */
+  private displayMatches(): Match[] {
+    if (this.collapsed.size === 0) return this.matches;
+    const fold = this.foldPlan();
+    return this.matches.map((match) => {
+      const line = fold.docToDisplay(match.line);
+      if (fold.displayLines[line] === this.currentDoc.lines[match.line]) {
+        return { ...match, line };
+      }
+      return {
+        ...match,
+        line,
+        start: 0,
+        end: codePointLength(fold.displayLines[line]?.text ?? ""),
+      };
+    });
+  }
+
+  /** The file currently in view: the diff file or transformed-output section
+   * under the viewport (or the cursor, when editing), else the single file the
+   * view is of, else null (a bare pipe). */
+  private currentFile(): string | null {
+    const line = this.cursorOn && this.buffer
+      ? this.buffer.row
+      : this.toDoc(this.top);
+    // The innermost file/section node whose range holds the line (diff file
+    // nodes and `// transformed:` blocks are both `section` kind).
+    let section: StructureNode | null = null;
+    for (const n of this.doc.flatStructure) {
+      if (n.kind === "section" && line >= n.startLine && line <= n.endLine) {
+        section = n;
+      }
+    }
+    if (section) return section.name ?? section.label.replace(/^[▸▾]\s*/, "");
+    return this.source?.label ?? null;
+  }
+
   private get maxLineLen(): number {
     let m = 0;
     for (const l of this.currentDoc.lines) m = Math.max(m, l.text.length);
     return m;
   }
 
+  /** The folded line and display column at the viewport's top-left content. */
+  private viewportAnchor(): ViewportAnchor {
+    const fold = this.foldPlan();
+    let foldedLine = clamp(
+      this.top,
+      0,
+      Math.max(0, fold.displayLines.length - 1),
+    );
+    let displayCol = this.left;
+    if (this.wrapLines) {
+      const plan = this.wrapPlan();
+      const row = wrappedRowAt(
+        plan,
+        clamp(this.top, 0, Math.max(0, plan.rowCount - 1)),
+      );
+      foldedLine = row?.line ?? 0;
+      displayCol = row?.offset ?? 0;
+    }
+    return {
+      docLine: fold.displayToDoc(foldedLine),
+      foldedLine,
+      displayCol,
+    };
+  }
+
+  /** Restore an anchor after the width or display layout changes. */
+  private restoreWrappedAnchor(anchor: ViewportAnchor): void {
+    const plan = this.wrapPlan();
+    const line = clamp(
+      anchor.foldedLine,
+      0,
+      Math.max(0, plan.firstRow.length - 1),
+    );
+    const first = plan.firstRow[line] ?? 0;
+    const last = plan.lastRow[line] ?? first;
+    this.top = clamp(
+      first + Math.floor(anchor.displayCol / plan.rowStride),
+      first,
+      last,
+    );
+    this.clampScroll();
+  }
+
+  /** Source column at an anchor under the current non-printable display mode. */
+  private anchorSourceCol(anchor: ViewportAnchor): number {
+    const line = this.foldPlan().displayLines[anchor.foldedLine];
+    return line ? sourceColumnOf(line, this.displayMode, anchor.displayCol) : 0;
+  }
+
   resize(width: number, height: number): void {
+    const anchor = this.wrapLines ? this.viewportAnchor() : null;
     this.width = width;
     this.height = height;
-    this.clampScroll();
+    if (anchor) this.restoreWrappedAnchor(anchor);
+    else this.clampScroll();
   }
 
   view(): ViewState {
@@ -186,6 +583,10 @@ export class Session {
         selectedLine: o.mode === "info" && o.cardSel >= 0
           ? o.targets[o.cardSel]?.cardLine
           : undefined,
+        // Source (the toggled-to source view, or a peek that is itself source)
+        // is drawn as a blue editor window; a structured card is a grey dialog.
+        sourceView: o.mode === "source" ||
+          (o.mode === "info" && !!o.infoIsSource),
       }
       : null;
     return {
@@ -194,58 +595,161 @@ export class Session {
       width: this.width,
       height: this.height,
       color: this.color,
-      showLineNumbers: this.showLineNumbers,
-      selected: this.selectedNode(),
-      matches: this.query.length > 0 ? this.matches : null,
+      showLineNumbers: this.lineNumberMode !== "off",
+      wrapLines: this.wrapLines,
+      wrapPlan: this.wrapLines ? this.wrapPlan() : null,
+      lineNumbers: this.lineNumberMode === "off" ? null : this.gutterNumbers(),
+      displayMode: this.displayMode,
+      selected: this.displaySelected(),
+      matches: this.query.length > 0 ? this.displayMatches() : null,
       currentMatch: this.currentMatch,
       message: this.message,
       inputLine: this.mode === "search"
         ? `/${this.input}`
         : this.mode === "deflookup"
         ? `definition: ${this.input}`
-        : this.mode === "savePrompt" || this.mode === "revertPrompt"
-        ? this.message
         : this.mode === "filePicker"
         ? `find file: ${this.files?.join(this.pickerDir, this.pickerFilter)}`
         : null,
+      dialog: this.promptDialog(),
       overlay: ov,
       cursor: this.cursorOn && this.buffer
-        ? { line: this.buffer.row, col: this.buffer.col }
+        ? { line: this.toFolded(this.buffer.row), col: this.buffer.col }
         : null,
       editHint: this.cursorOn ? this.editHint() : null,
-      canExpand: !this.cursorOn && !!this.source?.expandContext,
-      notice: this.mode === "savePrompt" ? this.noticeLines() : null,
+      canExpand: this.canExpand(),
+      canEdit: !this.cursorOn && !!this.source?.editable,
+      hasNonPrintables: this.hasNonPrintables(),
+      notice: null,
+      currentFile: this.currentFile(),
     };
   }
 
   /** The edit-mode key hints for the status line. */
-  private editHint(): string {
-    const parts = ["esc done", "^s search", "^r revert"];
-    if (this.source?.policy) parts.push("^l expand");
-    parts.push("^x^s save", "^x^f open");
-    return `editing — ${parts.join(" · ")}`;
+  private editHint(): KeyHint[] {
+    const hints: KeyHint[] = [
+      { key: "Esc", label: "Done" },
+      { key: "^S", label: "Search" },
+      { key: "^R", label: "Revert" },
+    ];
+    if (this.canResurrectRemovedLine()) {
+      hints.splice(1, 0, { key: "R", label: "Resurrect" });
+    }
+    if (this.source?.policy) hints.push({ key: "^L", label: "Expand" });
+    hints.push({ key: "^X^S", label: "Save" }, { key: "^X^F", label: "Open" });
+    return hints;
   }
 
-  /** The files a save would write, listed above the quit prompt — only when
-   * more than one, since a single file is already named in the prompt itself. */
-  private noticeLines(): string[] | null {
-    if (this.editedFiles.length <= 1) return null;
-    const max = 6;
-    const head = `${this.editedFiles.length} files with changes:`;
-    const shown = this.editedFiles.slice(0, max).map((f) => `  ${f}`);
-    if (this.editedFiles.length > max) {
-      shown.push(`  … and ${this.editedFiles.length - max} more`);
+  /** The modal dialog for whichever confirmation prompt is open, or null when no
+   * prompt is up. Rebuilt each frame from the current buffer and source. */
+  private promptDialog(): DialogState | null {
+    let dialog: DialogState | null = null;
+    if (this.mode === "savePrompt") dialog = this.saveDialog();
+    else if (this.mode === "amendPrompt") dialog = this.amendDialog();
+    else if (this.mode === "revertPrompt") dialog = this.revertDialog();
+    if (!dialog) return null;
+    // -1 means no button is focused (a prompt with no default, before Tab).
+    const focus = this.dialogFocus < 0
+      ? -1
+      : clamp(this.dialogFocus, 0, Math.max(0, dialog.buttons.length - 1));
+    return { ...dialog, focus };
+  }
+
+  /** Rest the current prompt's Tab focus on its default button, called as each
+   * prompt opens. A prompt with no default button (the diff revert) starts with
+   * no focus — an index of -1 — so Space and Enter do nothing until Tab picks a
+   * button, keeping a stray Enter from reverting. */
+  private focusDefaultButton(): void {
+    const buttons = this.promptDialog()?.buttons ?? [];
+    this.dialogFocus = buttons.findIndex((b) => b.kind === "default");
+  }
+
+  /** The save-changes confirmation: names what a save writes, lists the files
+   * when there is more than one, and offers save / discard / cancel. */
+  private saveDialog(): DialogState {
+    const files = this.editedFiles;
+    const n = files.length;
+    const amend = this.source && this.buffer
+      ? this.source.pendingAmend?.(this.buffer.baseline(), this.buffer.text())
+      : null;
+    const what = n === 0
+      ? (amend ? "the commit message" : "your edits")
+      : n === 1
+      ? files[0]
+      : `${n} files`;
+    const body = [`Save changes to ${what}?`];
+    if (n > 1) {
+      const max = 6;
+      body.push("");
+      for (const f of files.slice(0, max)) body.push(`  ${f}`);
+      if (n > max) body.push(`  … and ${n - max} more`);
     }
-    return [head, ...shown];
+    return {
+      title: "Save Changes",
+      body,
+      buttons: [
+        { label: "Save", hotkey: "s", kind: "default" },
+        { label: "Discard", hotkey: "d" },
+        { label: "Cancel", hotkey: "c", kind: "cancel" },
+      ],
+    };
+  }
+
+  /** The amend-commit confirmation, naming the commit and its subject. */
+  private amendDialog(): DialogState {
+    const amend = this.source && this.buffer
+      ? this.source.pendingAmend?.(this.buffer.baseline(), this.buffer.text())
+      : null;
+    const sha = amend?.sha.slice(0, 9) ?? "";
+    const full = amend?.subject ?? "";
+    const subject = full.length > 46 ? `${full.slice(0, 45)}…` : full;
+    return {
+      title: "Amend Commit",
+      body: [`Amend commit ${sha}?`, `“${subject}”`],
+      buttons: [
+        { label: "Yes", hotkey: "y", kind: "default" },
+        { label: "No", hotkey: "n", kind: "cancel" },
+      ],
+    };
+  }
+
+  /** The revert confirmation. A diff offers only the scopes that apply where the
+   * cursor sits — the hunk and/or file it is in, or the commit message — plus
+   * all; a plain file reverts wholesale. */
+  private revertDialog(): DialogState {
+    if (!this.source?.policy) {
+      return {
+        title: "Revert",
+        body: ["Revert all edits?"],
+        buttons: [
+          { label: "Yes", hotkey: "y", kind: "default" },
+          { label: "Cancel", hotkey: "c", kind: "cancel" },
+        ],
+      };
+    }
+    const s = this.revertScopesAt();
+    const buttons: DialogButton[] = [];
+    if (s.chunk) buttons.push({ label: "Hunk", hotkey: "h" });
+    if (s.file) buttons.push({ label: "File", hotkey: "f" });
+    if (s.message) buttons.push({ label: "Message", hotkey: "m" });
+    buttons.push({ label: "All", hotkey: "a" });
+    buttons.push({ label: "Cancel", hotkey: "c", kind: "cancel" });
+    return { title: "Revert", body: ["Revert which changes?"], buttons };
   }
 
   handleKey(key: Key): void {
-    if (this.mode === "savePrompt") {
-      this.handleSavePrompt(key);
-      return;
-    }
-    if (this.mode === "revertPrompt") {
-      this.handleRevertPrompt(key);
+    // A reveal is animated by the driver over the frames after the key that
+    // caused it, so the next key ends it whatever it was. A message that takes
+    // itself away goes now rather than waiting out its moment, before this key
+    // has the chance to set one of its own.
+    this.pendingReveal = null;
+    this.pendingPush = null;
+    this.expireMessage();
+    if (
+      this.mode === "savePrompt" || this.mode === "amendPrompt" ||
+      this.mode === "revertPrompt"
+    ) {
+      this.handleDialogKey(key);
       return;
     }
     if (this.mode === "filePicker") {
@@ -274,8 +778,8 @@ export class Session {
   }
 
   private clampScroll(): void {
-    this.top = clamp(this.top, 0, maxTop(this.doc.lines.length, this.height));
-    this.left = clamp(this.left, 0, this.maxLineLen);
+    this.top = clamp(this.top, 0, maxTop(this.displayCount(), this.height));
+    this.left = this.wrapLines ? 0 : clamp(this.left, 0, this.maxLineLen);
   }
 
   private selectedNode(): StructureNode | null {
@@ -284,24 +788,66 @@ export class Session {
       : null;
   }
 
+  /** Screen row containing the first character of a structure node. */
+  private nodeStartRow(node: StructureNode): number {
+    return this.toDisplay(
+      node.startLine,
+      this.displayCol(node.startLine, node.startCol),
+    );
+  }
+
+  /** Screen row containing the last character of a structure node. */
+  private nodeEndRow(node: StructureNode): number {
+    const fold = this.foldPlan();
+    const folded = fold.docToDisplay(node.endLine);
+    if (fold.displayLines[folded] !== this.currentDoc.lines[node.endLine]) {
+      return this.wrapLines ? this.wrapPlan().lastRow[folded] ?? 0 : folded;
+    }
+    return this.toDisplay(
+      node.endLine,
+      this.displayCol(node.endLine, Math.max(0, node.endCol - 1)),
+    );
+  }
+
   private selectNode(idx: number): void {
     if (idx < 0 || idx >= this.doc.flatStructure.length) return;
+    const viewport = this.wrapLines ? this.viewportAnchor() : null;
     this.selectedIndex = idx;
     const node = this.doc.flatStructure[idx];
+    if (viewport) this.restoreWrappedAnchor(viewport);
     // Keep the viewport stable: only scroll if the selection's anchor (its first
     // line, where the block opens) would otherwise be off screen. Horizontal
-    // scroll is left untouched for the same reason.
+    // scroll is left untouched for the same reason. Anchors are in display rows,
+    // since a collapsed file's lines share its summary row.
     this.top = scrollToAnchor(
-      node.startLine,
+      this.nodeStartRow(node),
       this.top,
       this.height,
-      this.doc.lines.length,
+      this.displayCount(),
     );
     this.message = "";
   }
 
-  private openPeek(node: StructureNode): void {
-    const card = buildPeekCard(this.doc, node, this.semantics);
+  /** Remember the current overlay so a later Esc returns to it, before a link
+   * opens a new one over the top. */
+  private pushOverlay(): void {
+    if (this.overlay) {
+      this.overlayStack.push({
+        overlay: this.overlay,
+        scroll: this.overlayScroll,
+      });
+    }
+  }
+
+  /** Close the overlay and discard the whole navigation stack. */
+  private closeOverlay(): void {
+    this.overlay = null;
+    this.overlayScroll = 0;
+    this.overlayStack = [];
+  }
+
+  private openPeek(node: StructureNode, expanded = false): void {
+    const card = buildPeekCard(this.doc, node, this.semantics, expanded);
     this.overlay = {
       title: card.title,
       info: card.info,
@@ -312,6 +858,21 @@ export class Session {
       node,
     };
     this.overlayScroll = 0;
+  }
+
+  /** Rebuild the open card with every truncated list shown in full, keeping the
+   * scroll position so the newly revealed entries appear where "… N more" was. */
+  private expandCard(node: StructureNode): void {
+    const scroll = this.overlayScroll;
+    const card = buildPeekCard(this.doc, node, this.semantics, true);
+    this.overlay = {
+      ...this.overlay!,
+      info: card.info,
+      source: card.source,
+      targets: card.targets,
+      cardSel: -1,
+    };
+    this.overlayScroll = scroll;
   }
 
   private lookupDefinition(name: string): void {
@@ -344,6 +905,7 @@ export class Session {
         targets: [],
         cardSel: -1,
         staticFooter: "↑/↓ scroll · esc close",
+        infoIsSource: true,
       };
     }
     this.overlayScroll = 0;
@@ -367,7 +929,9 @@ export class Session {
     if (overlay.source) {
       parts.push(overlay.mode === "info" ? "tab source" : "tab card");
     }
-    parts.push("esc close");
+    // Esc walks back through followed links; only closes at the bottom.
+    if (this.overlayStack.length > 0) parts.push("esc back", "q close");
+    else parts.push("esc close");
     return parts.join(" · ");
   }
 
@@ -411,7 +975,7 @@ export class Session {
       mode: "info",
       targets: [],
       cardSel: -1,
-      staticFooter: "↑/↓ scroll · esc close",
+      infoIsSource: true,
     };
     this.overlayScroll = clamp(
       target.destLine - 2,
@@ -436,33 +1000,41 @@ export class Session {
     );
   }
 
-  /** Jump the main view to a card target, selecting the relevant node. */
+  /** Jump the main view to a card target, selecting the relevant node. This
+   * leaves the overlay for the main view, so the whole navigation stack goes. */
   private jumpToTarget(target: CardTarget): void {
     this.overlay = null;
     this.overlayScroll = 0;
+    this.overlayStack = [];
     let idx = this.findTargetIndex(target);
     if (idx < 0) idx = nodeAtLine(this.doc.flatStructure, target.destLine);
     this.selectedIndex = idx >= 0 ? idx : null;
     const node = idx >= 0 ? this.doc.flatStructure[idx] : null;
-    // Frame the whole node (centred if it fits, else its top ~1/10 down). When
-    // no node resolves, frame the single destination line.
-    this.top = node
-      ? frameTop(
-        node.startLine,
-        node.endLine,
-        this.height,
-        this.doc.lines.length,
-      )
-      : frameTop(
-        target.destLine,
-        target.destLine,
-        this.height,
-        this.doc.lines.length,
-      );
+    const destCol = this.displayCol(target.destLine, target.destCol);
+    const destRow = this.toDisplay(target.destLine, destCol);
+    // Frame the resolved node and destination together when they fit. Otherwise
+    // center the destination row so the referenced text is visible.
+    let start = destRow;
+    let end = destRow;
+    if (node) {
+      start = Math.min(this.nodeStartRow(node), destRow);
+      end = Math.max(this.nodeEndRow(node), destRow);
+      if (end - start + 1 > this.contentRows()) {
+        start = destRow;
+        end = destRow;
+      }
+    }
+    this.top = frameTop(
+      start,
+      end,
+      this.height,
+      this.displayCount(),
+    );
     if (
-      target.destCol < this.left || target.destCol >= this.left + this.width
+      !this.wrapLines &&
+      (destCol < this.left || destCol >= this.left + this.width)
     ) {
-      this.left = clamp(target.destCol - 4, 0, this.maxLineLen);
+      this.left = clamp(destCol - 4, 0, this.maxLineLen);
     }
     this.message = `→ line ${target.destLine + 1}`;
   }
@@ -496,7 +1068,9 @@ export class Session {
       this.message = this.query ? `Pattern not found: ${this.query}` : "";
       return;
     }
-    const idx = nextMatchIndex(this.matches, this.top - 1, -1, jumpForward);
+    // The viewport anchor is a display row; match lines are document lines.
+    const anchor = this.toDoc(this.top) - 1;
+    const idx = nextMatchIndex(this.matches, anchor, -1, jumpForward);
     this.currentMatch = idx < 0 ? 0 : idx;
     this.revealMatch();
   }
@@ -549,7 +1123,8 @@ export class Session {
   private isEditableLine(line: number): boolean {
     const pol = this.source?.policy;
     if (!pol) return true;
-    return pol.editStart(this.doc.lines[line]?.text ?? "") !== null;
+    const lines = this.buffer?.lines ?? this.doc.lines.map((l) => l.text);
+    return pol.editStart(lines, line) !== null;
   }
 
   /** Land the edit cursor on the focused match (edit-mode search commit). */
@@ -576,17 +1151,56 @@ export class Session {
   private revealMatch(): void {
     const m = this.matches[this.currentMatch];
     if (!m) return;
-    if (m.line < this.top || m.line >= this.top + this.contentRows()) {
+    const col = this.displayCol(m.line, m.start);
+    const row = this.toDisplay(m.line, col);
+    if (row < this.top || row >= this.top + this.contentRows()) {
       this.top = clamp(
-        m.line - Math.floor(this.contentRows() / 2),
+        row - Math.floor(this.contentRows() / 2),
         0,
-        maxTop(this.doc.lines.length, this.height),
+        maxTop(this.displayCount(), this.height),
       );
     }
-    if (m.start < this.left || m.start >= this.left + this.width) {
-      this.left = clamp(m.start - 4, 0, this.maxLineLen);
+    if (
+      !this.wrapLines &&
+      (col < this.left || col >= this.left + this.width)
+    ) {
+      this.left = clamp(col - 4, 0, this.maxLineLen);
     }
     this.message = "";
+  }
+
+  /** The display column a source column maps to on `line` under the current
+   * mode — what horizontal scrolling counts in, since a compacting mode draws
+   * fewer columns than the line has source code points. */
+  private displayCol(line: number, sourceCol: number): number {
+    const l = this.doc.lines[line];
+    if (!l || this.displayMode === "pictures") return sourceCol;
+    if (
+      this.displayColumnCache?.doc !== this.currentDoc ||
+      this.displayColumnCache.mode !== this.displayMode
+    ) {
+      this.displayColumnCache = {
+        doc: this.currentDoc,
+        mode: this.displayMode,
+        columns: new Map(),
+      };
+    }
+    let columns = this.displayColumnCache.columns.get(line);
+    if (!columns) {
+      columns = Uint32Array.from(
+        displayLine(l, this.displayMode),
+        (cell) => cell.col,
+      );
+      this.displayColumnCache.columns.set(line, columns);
+    }
+    let lo = 0;
+    let hi = columns.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (columns[mid] < sourceCol) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
   }
 
   private handleInputKey(key: Key): void {
@@ -640,37 +1254,74 @@ export class Session {
   private handleOverlayKey(key: Key): void {
     const overlay = this.overlay;
     if (!overlay) return;
-    const maxScroll = Math.max(0, this.activeOverlayLines(overlay).length - 1);
+    // Stop scrolling once the last line reaches the bottom of the box, so the
+    // final line does not drift up past the frame — the same clamp the main
+    // view uses.
+    const innerH = overlayBox(this.width, this.height).innerH;
+    const maxScroll = Math.max(
+      0,
+      this.activeOverlayLines(overlay).length - innerH,
+    );
     const hasTargets = overlay.mode === "info" && overlay.targets.length > 0;
     switch (key.name) {
       case "escape":
-      case "q":
-        this.overlay = null;
-        this.overlayScroll = 0;
-        break;
-      case "enter":
-        // Follow the selected reference: open its node's card, or — when the
-        // definition lives in another file — open that file in place.
-        if (hasTargets && overlay.cardSel >= 0) {
-          const target = overlay.targets[overlay.cardSel];
-          if (target.filePath) {
-            this.openExternalFile(target);
-          } else {
-            const node = this.resolveTargetNode(target);
-            if (node) this.openPeek(node);
-            else this.message = "Nothing to open for this reference";
-          }
+        // Walk back through the stack of followed links; the last Esc, with an
+        // empty stack, closes the overlay.
+        if (this.overlayStack.length > 0) {
+          const prev = this.overlayStack.pop()!;
+          this.overlay = prev.overlay;
+          this.overlayScroll = prev.scroll;
         } else {
           this.overlay = null;
           this.overlayScroll = 0;
         }
         break;
-      case "z": {
+      case "q":
+        this.closeOverlay();
+        break;
+      case "Q":
+        this.requestQuit();
+        break;
+      case "t":
+        this.mode = "deflookup";
+        this.input = overlay.node?.name ?? this.selectedNode()?.name ?? "";
+        break;
+      case "enter":
+        // Follow the selected reference, pushing this card so Esc returns to it:
+        // open the referenced node's card, or — when the definition lives in
+        // another file — open that file over the top.
+        if (hasTargets && overlay.cardSel >= 0) {
+          const target = overlay.targets[overlay.cardSel];
+          if (target.expand) {
+            this.expandCard(overlay.node!);
+          } else if (target.filePath) {
+            this.pushOverlay();
+            this.openExternalFile(target);
+          } else {
+            const node = this.resolveTargetNode(target);
+            if (node) {
+              this.pushOverlay();
+              this.openPeek(node);
+            } else this.message = "Nothing to open for this reference";
+          }
+        } else {
+          this.closeOverlay();
+        }
+        break;
+      case "z":
+      case "Z": {
         // Reveal the target: an external file opens in place; an in-blob target
-        // closes the card and centres the main view on it.
+        // closes the card and centres the main view on it. A "… N more" line has
+        // no destination to reveal.
         const reveal = this.overlayRevealTarget(overlay);
-        if (reveal?.filePath) this.openExternalFile(reveal);
-        else if (reveal) this.jumpToTarget(reveal);
+        if (reveal?.expand) break;
+        if (reveal?.filePath) {
+          // Opening the file over the card: Esc returns to the card.
+          this.pushOverlay();
+          this.openExternalFile(reveal);
+        } else if (reveal) {
+          this.jumpToTarget(reveal); // exits the card viewer entirely
+        }
         break;
       }
       case "tab":
@@ -682,11 +1333,13 @@ export class Session {
         break;
       case "down":
       case "j":
+      case "J":
         if (hasTargets) this.moveCardSelection(1);
         else this.overlayScroll = clamp(this.overlayScroll + 1, 0, maxScroll);
         break;
       case "up":
       case "k":
+      case "K":
         if (hasTargets) this.moveCardSelection(-1);
         else this.overlayScroll = clamp(this.overlayScroll - 1, 0, maxScroll);
         break;
@@ -694,6 +1347,8 @@ export class Session {
       case "space":
         this.overlayScroll = clamp(this.overlayScroll + 10, 0, maxScroll);
         break;
+      case "b":
+      case "B":
       case "pageup":
         this.overlayScroll = clamp(this.overlayScroll - 10, 0, maxScroll);
         break;
@@ -721,16 +1376,17 @@ export class Session {
       this.handleEditKey(key);
       return;
     }
-    // Cursor off: a bare arrow reveals the text cursor (if editable).
+    // Cursor off: a bare arrow scrolls or pans the view, like the vi keys.
     if (!key.alt && isArrowName(key.name)) {
-      this.revealCursor();
+      this.scrollOrPan(key.name);
       return;
     }
 
     const rows = this.contentRows();
-    const lastTop = maxTop(this.doc.lines.length, this.height);
+    const lastTop = maxTop(this.displayCount(), this.height);
     switch (key.name) {
       case "q":
+      case "Q":
       case "ctrl-c":
         this.requestQuit();
         return;
@@ -743,6 +1399,10 @@ export class Session {
         this.input = "";
         this.searchAnchor = null;
         return;
+      case "e":
+        // Enter edit mode: reveal the text cursor at the top of the view.
+        this.revealCursor();
+        return;
       case "t":
         this.mode = "deflookup";
         this.input = this.selectedNode()?.name ?? "";
@@ -754,16 +1414,24 @@ export class Session {
         this.stepMatch(false);
         return;
       case "j":
+      case "J":
         this.top = clamp(this.top + 1, 0, lastTop);
         return;
       case "k":
+      case "K":
         this.top = clamp(this.top - 1, 0, lastTop);
         return;
       case "h":
-        this.left = clamp(this.left - HORIZONTAL_STEP, 0, this.maxLineLen);
+      case "H":
+        this.left = this.wrapLines
+          ? 0
+          : clamp(this.left - HORIZONTAL_STEP, 0, this.maxLineLen);
         return;
       case "l":
-        this.left = clamp(this.left + HORIZONTAL_STEP, 0, this.maxLineLen);
+      case "L":
+        this.left = this.wrapLines
+          ? 0
+          : clamp(this.left + HORIZONTAL_STEP, 0, this.maxLineLen);
         return;
       case "space":
       case "pagedown":
@@ -771,6 +1439,7 @@ export class Session {
         this.top = clamp(this.top + rows - 1, 0, lastTop);
         return;
       case "b":
+      case "B":
       case "pageup":
       case "ctrl-b":
         this.top = clamp(this.top - rows + 1, 0, lastTop);
@@ -794,15 +1463,19 @@ export class Session {
         this.performExpand();
         return;
       case "w":
+      case "W":
         this.navigateTree(treePrevSibling);
         return;
       case "s":
+      case "S":
         this.navigateTree(treeNextSibling);
         return;
       case "a":
+      case "A":
         this.navigateTree(treeParent);
         return;
       case "d":
+      case "D":
         this.navigateTree(treeChild);
         return;
       case "tab":
@@ -820,40 +1493,224 @@ export class Session {
         }
         return;
       }
-      case "z": {
+      case "z":
+      case "Z": {
         const node = this.selectedNode();
         if (node) {
           this.top = frameTop(
-            node.startLine,
-            node.endLine,
+            this.nodeStartRow(node),
+            this.nodeEndRow(node),
             this.height,
-            this.doc.lines.length,
+            this.displayCount(),
           );
         }
         return;
       }
-      case "#":
-        this.showLineNumbers = !this.showLineNumbers;
+      case "\\":
+        this.toggleLineWrapping();
         return;
-      case "escape":
+      case "#":
+        this.cycleLineNumbers();
+        return;
+      case "c":
+      case "C":
+        this.cycleDisplayMode();
+        return;
+      case "f":
+        this.toggleCurrentFile();
+        return;
+      case "F":
+        this.collapseAllFiles();
+        return;
+      case "E":
+        this.expandAllFiles();
+        return;
+      case "T":
+        this.collapseTestFiles();
+        return;
+      case "escape": {
+        const anchor = this.wrapLines ? this.viewportAnchor() : null;
         this.selectedIndex = null;
         this.query = "";
         this.matches = [];
         this.message = "";
+        if (anchor) this.restoreWrappedAnchor(anchor);
         return;
+      }
     }
+  }
+
+  /** Step to the next non-printable display mode and report it. */
+  private cycleDisplayMode(): void {
+    const anchor = this.viewportAnchor();
+    const sourceCol = this.anchorSourceCol(anchor);
+    const i = DISPLAY_MODES.indexOf(this.displayMode);
+    this.displayMode = DISPLAY_MODES[(i + 1) % DISPLAY_MODES.length];
+    const line = this.foldPlan().displayLines[anchor.foldedLine];
+    const displayCol = line
+      ? displayColumnOf(line, this.displayMode, sourceCol)
+      : 0;
+    if (this.wrapLines) {
+      this.restoreWrappedAnchor({ ...anchor, displayCol });
+    } else {
+      this.left = displayCol;
+      this.clampScroll();
+    }
+    this.message = `Non-printables: ${displayModeLabel(this.displayMode)}`;
+  }
+
+  /** Toggle line wrapping while keeping the top-left content in view. */
+  private toggleLineWrapping(): void {
+    const anchor = this.viewportAnchor();
+    this.wrapLines = !this.wrapLines;
+    if (this.wrapLines) {
+      this.left = 0;
+      this.restoreWrappedAnchor(anchor);
+    } else {
+      this.top = anchor.foldedLine;
+      this.left = anchor.displayCol;
+      this.clampScroll();
+    }
+    this.message = `Line wrapping: ${this.wrapLines ? "on" : "off"}`;
+  }
+
+  // --- file-fold commands ----------------------------------------------------
+
+  private ensureDiffForFolding(): boolean {
+    if (this.foldFiles().length === 0) {
+      this.message = "Hiding files is only available in a diff view.";
+      return false;
+    }
+    return true;
+  }
+
+  /** The document position the fold commands keep at the top of the viewport. */
+  private foldAnchor(): FoldAnchor {
+    const node = this.selectedNode();
+    const anchor = this.viewportAnchor();
+    const fold = this.foldPlan();
+    if (node) {
+      const folded = fold.docToDisplay(node.startLine);
+      const synthetic = fold.displayLines[folded] !==
+        this.currentDoc.lines[node.startLine];
+      return {
+        docLine: node.startLine,
+        sourceCol: node.startCol,
+        syntheticDisplayCol: synthetic && folded === anchor.foldedLine
+          ? anchor.displayCol
+          : undefined,
+      };
+    }
+    if (
+      fold.displayLines[anchor.foldedLine] !==
+        this.currentDoc.lines[anchor.docLine]
+    ) {
+      return {
+        docLine: anchor.docLine,
+        sourceCol: 0,
+        syntheticDisplayCol: anchor.displayCol,
+      };
+    }
+    return {
+      docLine: anchor.docLine,
+      sourceCol: this.anchorSourceCol(anchor),
+    };
+  }
+
+  /** Refresh the layout after a fold changes and restore its viewport anchor. */
+  private applyFoldChange(anchor: FoldAnchor): void {
+    this.markFoldChanged();
+    const fold = this.foldPlan();
+    const folded = fold.docToDisplay(anchor.docLine);
+    const stillSynthetic = fold.displayLines[folded] !==
+      this.currentDoc.lines[anchor.docLine];
+    const row = stillSynthetic && anchor.syntheticDisplayCol !== undefined
+      ? this.foldedPositionToDisplay(folded, anchor.syntheticDisplayCol)
+      : this.toDisplay(
+        anchor.docLine,
+        this.displayCol(anchor.docLine, anchor.sourceCol),
+      );
+    this.top = clamp(
+      row,
+      0,
+      maxTop(this.displayCount(), this.height),
+    );
+  }
+
+  /** Toggle the file the viewport (or selection) is on between shown and hidden. */
+  private toggleCurrentFile(): void {
+    if (!this.ensureDiffForFolding()) return;
+    const files = this.foldFiles();
+    const line = this.foldAnchor().docLine;
+    const file = files.find((f) => line >= f.headerLine && line <= f.endLine) ??
+      files.find((f) => f.headerLine >= line) ?? files[files.length - 1];
+    if (this.collapsed.has(file.index)) {
+      this.collapsed.delete(file.index);
+      this.message = `Showing ${file.path}`;
+    } else {
+      this.collapsed.add(file.index);
+      this.message = `Hiding ${file.path}`;
+    }
+    this.applyFoldChange({ docLine: file.headerLine, sourceCol: 0 });
+  }
+
+  /** Hide every file (collapse all to summary lines). */
+  private collapseAllFiles(): void {
+    if (!this.ensureDiffForFolding()) return;
+    const anchor = this.foldAnchor();
+    let changed = false;
+    for (const f of this.foldFiles()) {
+      if (!this.collapsed.has(f.index)) {
+        this.collapsed.add(f.index);
+        changed = true;
+      }
+    }
+    if (changed) this.applyFoldChange(anchor);
+    this.message = "Hid all files.";
+  }
+
+  /** Show every file (expand all). */
+  private expandAllFiles(): void {
+    if (!this.ensureDiffForFolding()) return;
+    const anchor = this.foldAnchor();
+    if (this.collapsed.size > 0) {
+      this.collapsed.clear();
+      this.applyFoldChange(anchor);
+    }
+    this.message = "Showing all files.";
+  }
+
+  /** Hide every test / test-support file, leaving the rest shown. */
+  private collapseTestFiles(): void {
+    if (!this.ensureDiffForFolding()) return;
+    const anchor = this.foldAnchor();
+    let n = 0;
+    for (const f of this.foldFiles()) {
+      if (f.isTest && !this.collapsed.has(f.index)) {
+        this.collapsed.add(f.index);
+        n++;
+      }
+    }
+    if (n > 0) this.applyFoldChange(anchor);
+    this.message = n > 0
+      ? `Hid ${n} test file${n === 1 ? "" : "s"}.`
+      : "No shown test files to hide.";
   }
 
   // --- editing ---------------------------------------------------------------
 
   private scrollOrPan(name: string): void {
-    const lastTop = maxTop(this.doc.lines.length, this.height);
+    const lastTop = maxTop(this.displayCount(), this.height);
     if (name === "up") this.top = clamp(this.top - 1, 0, lastTop);
     else if (name === "down") this.top = clamp(this.top + 1, 0, lastTop);
     else if (name === "left") {
-      this.left = clamp(this.left - HORIZONTAL_STEP, 0, this.maxLineLen);
+      this.left = this.wrapLines
+        ? 0
+        : clamp(this.left - HORIZONTAL_STEP, 0, this.maxLineLen);
     } else if (name === "right") {
-      this.left = clamp(this.left + HORIZONTAL_STEP, 0, this.maxLineLen);
+      this.left = this.wrapLines
+        ? 0
+        : clamp(this.left + HORIZONTAL_STEP, 0, this.maxLineLen);
     }
   }
 
@@ -864,11 +1721,41 @@ export class Session {
         "This view has no underlying file to edit.";
       return;
     }
+    const wasWrapped = this.wrapLines;
+    const anchor = wasWrapped ? this.viewportAnchor() : null;
+    const topDoc = anchor?.docLine ?? this.toDoc(this.top);
+    const displayedLine = anchor
+      ? this.foldPlan().displayLines[anchor.foldedLine]
+      : undefined;
+    const cursorCol = anchor && displayedLine === this.currentDoc.lines[topDoc]
+      ? this.anchorSourceCol(anchor)
+      : 0;
+    this.wrapLines = false;
     this.cursorOn = true;
     this.selectedIndex = null;
-    this.buffer.place(this.top, 0);
+    // Editing relies on every source column mapping to one display column, which
+    // only the first mode guarantees (it hides nothing and collapses nothing).
+    this.displayMode = DISPLAY_MODES[0];
+    if (anchor) this.left = cursorCol;
+    // Editing works on the full text, so expand every folded file; the top
+    // display row becomes its document line.
+    this.clearFolds();
+    this.top = topDoc;
+    this.buffer.place(topDoc, cursorCol);
     this.seedHighlighter();
     this.ensureCursorVisible();
+    if (wasWrapped) this.message = "Line wrapping turned off for editing.";
+  }
+
+  private markFoldChanged(): void {
+    this.foldVersion++;
+    this.foldPlanCache = undefined;
+  }
+
+  private clearFolds(): void {
+    if (this.collapsed.size === 0) return;
+    this.collapsed.clear();
+    this.markFoldChanged();
   }
 
   /** Create (or re-baseline) the incremental highlighter, seeded with the
@@ -888,9 +1775,11 @@ export class Session {
     if (key.alt) {
       switch (key.name) {
         case "f":
+        case "F":
           b.moveWordForward();
           return this.afterMove();
         case "b":
+        case "B":
           b.moveWordBackward();
           return this.afterMove();
         case "v":
@@ -915,18 +1804,21 @@ export class Session {
           b.yankPop();
           return this.afterEdit();
         case "l":
+        case "L":
           if (this.allowEdit(false)) {
             b.lowercaseWord();
             this.afterEdit();
           }
           return;
         case "u":
+        case "U":
           if (this.allowEdit(false)) {
             b.uppercaseWord();
             this.afterEdit();
           }
           return;
         case "c":
+        case "C":
           if (this.allowEdit(false)) {
             b.capitalizeWord();
             this.afterEdit();
@@ -995,6 +1887,10 @@ export class Session {
       case "ctrl-c":
         this.requestQuit();
         return;
+      case "r":
+      case "R":
+        if (this.resurrectRemovedLine()) return;
+        break;
       case "delete":
       case "ctrl-d":
         if (this.guardForwardEdit()) {
@@ -1006,9 +1902,19 @@ export class Session {
         this.handleBackspace();
         return;
       case "enter": {
+        // A commit-message line splits into two indented message lines, plain
+        // text — no diff pairing, no hunk-count bookkeeping.
+        if (this.inMessageRow()) {
+          if (this.allowEdit(false, false)) {
+            b.insert(`\n${this.source!.policy!.messageIndent}`);
+            this.afterEdit();
+          }
+          return;
+        }
         const prefix = this.source?.policy?.insertPrefix;
         if (prefix !== undefined) {
           if (this.allowEdit(false, false)) {
+            const hunkHeader = this.hunkHeaderAt(b.row);
             const start = this.editStart() ?? 1;
             const onContext = b.lines[b.row]?.[0] === " ";
             // Enter splits the line at the cursor. On a context line the result
@@ -1030,7 +1936,7 @@ export class Session {
             } else {
               b.insert(`\n${prefix}`);
             }
-            this.adjustHunkCounts(0, 1);
+            this.adjustHunkCounts(0, 1, hunkHeader);
             this.afterEdit();
           }
         } else {
@@ -1098,6 +2004,9 @@ export class Session {
    */
   private prepareContextEdit(): void {
     if (!this.source?.policy || !this.buffer) return;
+    // A commit-message line is plain indented text, not a diff line: editing it
+    // must not split it into a removed/added pair.
+    if (this.inMessageRow()) return;
     const b = this.buffer;
     const line = b.lines[b.row];
     if (line === undefined || line[0] !== " ") return;
@@ -1109,6 +2018,38 @@ export class Session {
     }
     b.spliceLines(b.row, 1, [`-${content}`, `+${content}`], 1, col);
     this.splitRow = b.row; // the added line, so undoing the edit can collapse it
+  }
+
+  /** Whether the cursor is on a removed line in a hunk whose new side can be
+   * saved back to disk. */
+  private canResurrectRemovedLine(): boolean {
+    const pol = this.source?.policy;
+    const b = this.buffer;
+    return !!pol && !!b && b.lines[b.row]?.[0] === "-" &&
+      pol.regionKind(b.lines, b.row) === "removed";
+  }
+
+  /** Carry a removed line back onto the diff's new side as unchanged context.
+   * Its old-side count is unchanged and its new-side count grows by one. */
+  private resurrectRemovedLine(): boolean {
+    if (!this.canResurrectRemovedLine()) return false;
+    const b = this.buffer!;
+    const hunkHeader = this.hunkHeaderAt(b.row);
+    if (!this.adjustHunkCounts(0, 1, hunkHeader)) {
+      this.message = "This hunk could not be updated.";
+      return true;
+    }
+    const line = b.lines[b.row];
+    b.spliceLines(
+      b.row,
+      1,
+      [` ${line.slice(1)}`],
+      0,
+      Math.max(1, b.col),
+    );
+    this.afterEdit();
+    this.message = "Resurrected the removed line.";
+    return true;
   }
 
   /** After editing a diff, collapse the added line a split just produced back
@@ -1131,36 +2072,59 @@ export class Session {
     }
   }
 
-  /** After an edit changed the cursor's hunk's line count (a `+` line added or
-   * removed, a context line removed), grow or shrink that hunk header's counts
-   * to match, so the diff stays well-formed and the deferred re-parse keeps
-   * every body line in the hunk instead of dropping the overflow as plain text. */
-  private adjustHunkCounts(oldDelta: number, newDelta: number): void {
+  /** The parsed hunk containing a body row. Structural lookup keeps body text
+   * such as `--- prior` and `+++ next` from being mistaken for file headers. */
+  private hunkHeaderAt(row: number): number | null {
+    if (!this.buffer) return null;
+    const model = parseDiff(this.buffer.text());
+    for (const file of model?.files ?? []) {
+      for (const hunk of file.hunks) {
+        if (row > hunk.headerLine && row <= hunk.endLine) {
+          return hunk.headerLine;
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Grow or shrink a parsed hunk header after its body changes. A zero-count
+   * unified-diff range names the line before its insertion point, so crossing
+   * zero also moves the range start. */
+  private adjustHunkCounts(
+    oldDelta: number,
+    newDelta: number,
+    hunkHeader = this.hunkHeaderAt(this.buffer?.row ?? -1),
+  ): boolean {
     if (
       !this.source?.policy || !this.buffer || (oldDelta === 0 && newDelta === 0)
     ) {
-      return;
+      return false;
     }
     const b = this.buffer;
-    let h = Math.min(b.row, b.lines.length - 1);
-    while (h >= 0 && !b.lines[h].startsWith("@@ ")) {
-      if (/^(diff |--- |\+\+\+ )/.test(b.lines[h])) return; // not inside a hunk
-      h--;
-    }
-    if (h < 0) return;
-    const m = b.lines[h].match(
-      /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/,
+    if (hunkHeader === null) return false;
+    const m = b.lines[hunkHeader]?.match(
+      /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@([^\r]*)(\r?)$/,
     );
-    if (!m) return;
-    const oldCount = Math.max(
-      0,
-      (m[2] !== undefined ? parseInt(m[2], 10) : 1) + oldDelta,
-    );
-    const newCount = Math.max(
-      0,
-      (m[4] !== undefined ? parseInt(m[4], 10) : 1) + newDelta,
-    );
-    b.lines[h] = `@@ -${m[1]},${oldCount} +${m[3]},${newCount} @@${m[5] ?? ""}`;
+    if (!m) return false;
+    const adjust = (
+      startText: string,
+      countText: string | undefined,
+      delta: number,
+    ): { start: number; count: number } => {
+      let start = parseInt(startText, 10);
+      const count = countText === undefined ? 1 : parseInt(countText, 10);
+      const next = Math.max(0, count + delta);
+      if (count === 0 && next > 0) start++;
+      if (count > 0 && next === 0) start = Math.max(0, start - 1);
+      return { start, count: next };
+    };
+    const oldRange = adjust(m[1], m[2], oldDelta);
+    const newRange = adjust(m[3], m[4], newDelta);
+    b.lines[hunkHeader] =
+      `@@ -${oldRange.start},${oldRange.count} +${newRange.start},${newRange.count} @@${
+        m[5] ?? ""
+      }${m[6] ?? ""}`;
+    return true;
   }
 
   /** The first editable column on the cursor's line under the source's policy
@@ -1168,7 +2132,15 @@ export class Session {
   private editStart(): number | null {
     const pol = this.source?.policy;
     if (!pol) return 0;
-    return pol.editStart(this.buffer!.lines[this.buffer!.row]);
+    return pol.editStart(this.buffer!.lines, this.buffer!.row);
+  }
+
+  /** Whether the cursor sits in an editable commit-message line — plain indented
+   * text, edited without the diff's removed/added pairing. */
+  private inMessageRow(): boolean {
+    const pol = this.source?.policy;
+    return !!pol && !!this.buffer &&
+      pol.regionKind(this.buffer.lines, this.buffer.row) === "message";
   }
 
   /**
@@ -1186,7 +2158,7 @@ export class Session {
     const b = this.buffer!;
     const start = this.editStart();
     if (start === null) {
-      this.message = NOT_EDITABLE_MSG;
+      this.message = this.notEditableMessage();
       return false;
     }
     if (b.col < start) b.place(b.row, start);
@@ -1202,7 +2174,7 @@ export class Session {
     const b = this.buffer!;
     const start = this.editStart();
     if (start === null) {
-      this.message = NOT_EDITABLE_MSG;
+      this.message = this.notEditableMessage();
       return false;
     }
     if (b.col < start) b.place(b.row, start);
@@ -1225,7 +2197,7 @@ export class Session {
     }
     const start = this.editStart();
     if (start === null) {
-      this.message = NOT_EDITABLE_MSG;
+      this.message = this.notEditableMessage();
       return;
     }
     if (b.col > start) {
@@ -1246,12 +2218,14 @@ export class Session {
   private removeDiffLine(markerLen: number): void {
     const b = this.buffer!;
     const marker = b.lines[b.row][0] ?? "";
+    const hunkHeader = this.hunkHeaderAt(b.row);
     b.place(b.row, 0);
     b.deleteBackward(); // join into the previous line
     for (let i = 0; i < markerLen; i++) b.deleteForward(); // drop the marker
     this.adjustHunkCounts(
       marker === " " || marker === "-" ? -1 : 0,
       marker === " " || marker === "+" ? -1 : 0,
+      hunkHeader,
     );
   }
 
@@ -1261,7 +2235,7 @@ export class Session {
     const b = this.buffer!;
     const start = this.editStart();
     if (start === null) {
-      this.message = NOT_EDITABLE_MSG;
+      this.message = this.notEditableMessage();
       return false;
     }
     if (b.col <= start) {
@@ -1288,7 +2262,7 @@ export class Session {
     }
     const start = this.editStart();
     if (start === null) {
-      this.message = NOT_EDITABLE_MSG;
+      this.message = this.notEditableMessage();
       return false;
     }
     if (Math.min(b.col, mark.col) < start) {
@@ -1297,6 +2271,12 @@ export class Session {
     }
     this.prepareContextEdit();
     return true;
+  }
+
+  private notEditableMessage(): string {
+    return this.canResurrectRemovedLine()
+      ? "This removed line isn't editable; press R to resurrect it."
+      : NOT_EDITABLE_MSG;
   }
 
   private afterMove(): void {
@@ -1323,6 +2303,15 @@ export class Session {
     }
     this.clampScroll();
     this.ensureCursorVisible();
+  }
+
+  /** Take away a message that was set to go away on its own, once the driver has
+   * left it up for its moment. Does nothing to a message that is not one of
+   * those, so a later one is never cleared out from under itself. */
+  expireMessage(): void {
+    if (!this.transientMessage) return;
+    this.transientMessage = false;
+    this.message = "";
   }
 
   /** Live re-highlight `text` into rendered lines, or null when the source has
@@ -1376,11 +2365,91 @@ export class Session {
   }
 
   private contentWidth(): number {
-    const gutter = this.showLineNumbers
-      ? Math.max(4, String(this.doc.lines.length).length + 1)
-      : 0;
-    const guide = this.selectedNode() ? 1 : 0;
-    return Math.max(1, this.width - gutter - guide);
+    const gutterWidth = this.gutterWidth();
+    const guideWidth = this.selectedNode() ? 1 : 0;
+    const fitted = this.wrapLines
+      ? fitWrapChrome(this.width, gutterWidth, guideWidth)
+      : { gutterWidth, guideWidth };
+    return Math.max(1, this.width - fitted.gutterWidth - fitted.guideWidth);
+  }
+
+  /** Cycle the line-number gutter: off → input position → file/message line. */
+  private cycleLineNumbers(): void {
+    const anchor = this.wrapLines ? this.viewportAnchor() : null;
+    const order: LineNumberMode[] = ["off", "input", "file"];
+    this.lineNumberMode =
+      order[(order.indexOf(this.lineNumberMode) + 1) % order.length];
+    if (anchor) this.restoreWrappedAnchor(anchor);
+    const label = this.lineNumberMode === "off"
+      ? "off"
+      : this.lineNumberMode === "input"
+      ? "input position"
+      : "file / message line";
+    this.message = `Line numbers: ${label}`;
+  }
+
+  /** The gutter width for the current mode: wide enough for the largest number
+   * it shows (file lines can exceed the number of lines the diff spans). */
+  private gutterWidth(): number {
+    if (this.lineNumberMode === "off") return 0;
+    const max = this.gutterNumbers().reduce<number>(
+      (m, n) => n !== null && n > m ? n : m,
+      0,
+    );
+    return Math.max(4, String(Math.max(1, max)).length + 1);
+  }
+
+  /** The number the gutter shows on each display row, or null for a blank
+   * gutter there (a removed or structural diff line in file mode, or an
+   * unmapped row). */
+  private gutterNumbers(): (number | null)[] {
+    const plan = this.foldPlan();
+    const rows = plan.displayLines.length;
+    const fileNums = this.lineNumberMode === "file"
+      ? this.fileLineNumbers()
+      : null;
+    const out: (number | null)[] = new Array(rows);
+    for (let r = 0; r < rows; r++) {
+      const docLine = plan.displayToDoc(r);
+      // "input" numbers, and "file" numbers for a non-diff view (where the input
+      // is the file), are just the document line.
+      out[r] = fileNums ? fileNums[docLine] ?? null : docLine + 1;
+    }
+    return out;
+  }
+
+  /** For a diff, each document line's underlying line: a context/added line's
+   * new-file line, a commit-message line's position within the message, else
+   * null. Null for a non-diff view (no distinct underlying file). Cached against
+   * the document, since every frame draws the gutter and the map costs a parse
+   * of the whole diff. */
+  private fileLineNumbers(): (number | null)[] | null {
+    if (this.fileLineCache?.doc !== this.currentDoc) {
+      this.fileLineCache = {
+        doc: this.currentDoc,
+        value: this.computeFileLineNumbers(),
+      };
+    }
+    return this.fileLineCache.value;
+  }
+
+  private computeFileLineNumbers(): (number | null)[] | null {
+    if (!this.source?.isDiff) return null;
+    const texts = this.currentDoc.lines.map((l) => l.text);
+    const out: (number | null)[] = new Array(texts.length).fill(null);
+    const model = parseDiff(this.currentDoc.text);
+    if (model) {
+      for (let i = 0; i < model.lines.length && i < out.length; i++) {
+        const nl = model.lines[i].newLine;
+        if (nl !== undefined) out[i] = nl + 1;
+      }
+    }
+    for (const m of findCommitMessages(texts)) {
+      for (let i = m.start; i <= m.end && i < out.length; i++) {
+        out[i] = i - m.start + 1;
+      }
+    }
+    return out;
   }
 
   private handleChord(key: Key): void {
@@ -1401,40 +2470,86 @@ export class Session {
       this.message = this.source.reason ?? "This view is read-only.";
       return false;
     }
+    const baseline = this.buffer.baseline();
+    const current = this.buffer.text();
+    // A changed commit message rewrites git history, so confirm before saving.
+    const amend = this.source.pendingAmend?.(baseline, current) ?? null;
+    if (amend && !this.amendConfirmed) {
+      if (amend.subject.trim() === "") {
+        this.message = "Refusing to amend: the commit message would be empty.";
+        return false;
+      }
+      this.mode = "amendPrompt";
+      this.focusDefaultButton();
+      this.message = "";
+      return false;
+    }
     try {
-      this.message = this.source.save(this.buffer.text());
+      // Amend the commit before writing files: if the amend fails (an empty
+      // message, a rejecting hook, HEAD moved) nothing is written to disk, so a
+      // failed save never leaves the files half-written.
+      const amended = amend
+        ? this.source.amendCommit!(baseline, current)
+        : null;
+      const saved = this.source.save(current);
+      this.message = amended
+        ? (/^No(thing)?\b/.test(saved) ? amended : `${saved}; ${amended}`)
+        : saved;
       this.buffer.commitSaved();
       return true;
     } catch (e) {
       this.message = `Save failed: ${e instanceof Error ? e.message : e}`;
       return false;
+    } finally {
+      this.amendConfirmed = false;
+    }
+  }
+
+  private applyAmendButton(button: DialogButton): void {
+    if (button.hotkey === "y") {
+      this.amendConfirmed = true;
+      const ok = this.requestSave();
+      this.mode = "normal";
+      this.editedFiles = [];
+      if (ok && this.savePromptThen === "quit") this.quit = true;
+      this.savePromptThen = null;
+    } else if (button.kind === "cancel") {
+      this.mode = "normal";
+      this.amendConfirmed = false;
+      this.savePromptThen = null;
+      this.editedFiles = [];
+      this.message = "Save cancelled — the commit was not amended.";
     }
   }
 
   private requestQuit(): void {
     if (this.buffer?.dirty()) {
+      // A quit signal can arrive with a peek overlay still open; the modal save
+      // prompt replaces it rather than drawing over it.
+      this.overlay = null;
+      this.overlayScroll = 0;
+      this.overlayStack = [];
       this.mode = "savePrompt";
       this.savePromptThen = "quit";
       this.editedFiles = this.computeEditedFiles();
-      const n = this.editedFiles.length;
-      const what = n === 1 ? this.editedFiles[0] : `${n} files`;
-      const saveWord = n > 1 ? "save all" : "save";
-      this.message = `Save changes to ${what}?  ` +
-        `(y) ${saveWord}   (d) discard   (c) cancel`;
+      this.focusDefaultButton();
+      this.message = "";
     } else {
       this.quit = true;
     }
   }
 
   /** The files a save would write — just those an edit actually touched, not
-   * every file a diff spans. Falls back to the source's single label. */
+   * every file a diff spans. A diff source reports this exactly (an empty list
+   * when only the commit message changed); a plain file falls back to its one
+   * label. */
   private computeEditedFiles(): string[] {
     if (!this.source || !this.buffer) return [];
     const labels = this.source.dirtyLabels?.(
       this.buffer.baseline(),
       this.buffer.text(),
     );
-    if (labels && labels.length > 0) return labels;
+    if (labels !== undefined) return labels;
     return this.source.label ? [this.source.label] : [];
   }
 
@@ -1451,20 +2566,80 @@ export class Session {
     return willPrompt;
   }
 
-  private handleSavePrompt(key: Key): void {
-    const k = (key.char ?? key.name).toLowerCase();
-    if (k === "y") {
+  /** Keys while a modal prompt (save / amend / revert) is up. Tab and Shift-Tab
+   * move the focus ring between buttons, wrapping around; Space and Enter
+   * activate the focused button; Esc activates the cancel button; a button's
+   * shortcut letter activates it directly. Any other key leaves the prompt up. */
+  private handleDialogKey(key: Key): void {
+    // Reached only from the prompt modes, each of which builds a dialog with at
+    // least two buttons, so the dialog is present and its row is non-empty.
+    const dialog = this.promptDialog()!;
+    const buttons = dialog.buttons;
+    const n = buttons.length;
+
+    // Tab moves the ring forward, Shift-Tab back, both wrapping around. From no
+    // focus (-1) Tab lands on the first button and Shift-Tab on the last.
+    if (key.name === "tab") {
+      this.dialogFocus = this.dialogFocus < 0 ? 0 : (this.dialogFocus + 1) % n;
+      return;
+    }
+    if (key.name === "shift-tab") {
+      this.dialogFocus = this.dialogFocus < 0
+        ? n - 1
+        : (this.dialogFocus - 1 + n) % n;
+      return;
+    }
+
+    let index = -1;
+    if (key.name === "enter" || key.name === "space" || key.char === " ") {
+      // The clamped focus the dialog was drawn with, so Enter always activates
+      // the highlighted button. -1 means nothing is focused: a no-op.
+      index = dialog.focus ?? -1;
+    } else if (key.name === "escape") {
+      index = buttons.findIndex((b) => b.kind === "cancel");
+    } else {
+      const k = (key.char ?? key.name).toLowerCase();
+      index = buttons.findIndex((b) => b.hotkey.toLowerCase() === k);
+    }
+    if (index < 0 || index >= n) return; // an unbound key leaves the prompt up
+    this.activateButton(dialog, index);
+  }
+
+  /** Run a prompt button's action, first capturing the frame that shows it
+   * pushed so the driver can play the press before the result appears. The
+   * pressed button is drawn focused as well, so a shortcut-key press shows it
+   * highlighted rather than leaving the highlight on whatever Tab last chose. */
+  private activateButton(dialog: DialogState, index: number): void {
+    this.dialogFocus = index;
+    this.pendingPush = {
+      doc: this.displayDoc(),
+      view: {
+        ...this.view(),
+        dialog: { ...dialog, focus: index, pushed: index },
+      },
+    };
+    const button = dialog.buttons[index];
+    if (this.mode === "savePrompt") this.applySaveButton(button);
+    else if (this.mode === "amendPrompt") this.applyAmendButton(button);
+    else if (this.mode === "revertPrompt") this.applyRevertButton(button);
+  }
+
+  private applySaveButton(button: DialogButton): void {
+    if (button.hotkey === "s") {
       const ok = this.requestSave();
+      // The save may need to confirm a commit amend first; leave that prompt up
+      // (keeping the quit intent) instead of forcing back to normal mode.
+      if (this.mode === "amendPrompt") return;
       this.mode = "normal";
       this.editedFiles = [];
       if (ok && this.savePromptThen === "quit") this.quit = true;
       this.savePromptThen = null;
-    } else if (k === "d") {
+    } else if (button.hotkey === "d") {
       this.mode = "normal";
       this.editedFiles = [];
       if (this.savePromptThen === "quit") this.quit = true;
       this.savePromptThen = null;
-    } else if (k === "c" || key.name === "escape") {
+    } else if (button.kind === "cancel") {
       this.mode = "normal";
       this.savePromptThen = null;
       this.editedFiles = [];
@@ -1472,36 +2647,66 @@ export class Session {
     }
   }
 
-  /** Open the revert prompt (Ctrl-R while editing): a diff offers hunk / file /
-   * all; a plain file reverts wholesale. */
+  /** Open the revert prompt (Ctrl-R while editing). A diff offers only the
+   * scopes that apply where the cursor is — the hunk and/or file it is in, or
+   * the commit message it is in — plus all; a plain file reverts wholesale. */
   private openRevertPrompt(): void {
     if (!this.buffer?.dirty()) {
       this.message = "Nothing to revert.";
       return;
     }
     this.mode = "revertPrompt";
-    this.message = this.source?.policy
-      ? "Revert  (c) hunk   (f) file   (a) all   ·   esc cancel"
-      : "Revert all edits?   (y) yes   ·   esc cancel";
+    this.focusDefaultButton();
+    this.message = "";
   }
 
-  private handleRevertPrompt(key: Key): void {
-    const k = (key.char ?? key.name).toLowerCase();
-    let scope: RevertScope | null = null;
-    if (this.source?.policy) {
-      scope = k === "c"
-        ? "chunk"
-        : k === "f"
-        ? "file"
-        : k === "a"
-        ? "all"
-        : null;
-    } else if (k === "y" || k === "a") {
-      scope = "all";
+  /** Which revert scopes apply at the cursor: whether it sits in a hunk, in a
+   * file, and in an editable commit message. Derived from the current buffer
+   * text so it matches what the revert itself finds. */
+  private revertScopesAt(): {
+    chunk: boolean;
+    file: boolean;
+    message: boolean;
+  } {
+    const row = this.buffer!.row;
+    const message = this.inMessageRow();
+    let file = false;
+    let chunk = false;
+    const model = parseDiff(this.buffer!.text());
+    const f = model?.files.find((f) => row >= f.headerLine && row <= f.endLine);
+    if (f) {
+      file = true;
+      chunk = f.hunks.some((h) => row >= h.headerLine && row <= h.endLine);
     }
-    if (scope) this.performRevert(scope);
-    else this.message = "Cancelled";
-    this.mode = "normal";
+    return { chunk, file, message };
+  }
+
+  private applyRevertButton(button: DialogButton): void {
+    // The dialog only offers the scopes that apply where the cursor sits, so a
+    // scope button that reached here is always valid.
+    let scope: RevertScope | null = null;
+    switch (button.hotkey) {
+      case "h":
+        scope = "chunk";
+        break;
+      case "f":
+        scope = "file";
+        break;
+      case "m":
+        scope = "message";
+        break;
+      case "a": // a diff's all
+      case "y": // a plain file's single scope
+        scope = "all";
+        break;
+    }
+    if (scope) {
+      this.performRevert(scope);
+      this.mode = "normal";
+    } else if (button.kind === "cancel") {
+      this.message = "Cancelled";
+      this.mode = "normal";
+    }
   }
 
   /** Restore the chosen scope to its original form, keeping the dirty baseline
@@ -1541,38 +2746,77 @@ export class Session {
     const pol = this.source?.policy;
     if (!b || !pol) return;
     while (
-      b.row < b.lines.length - 1 && pol.editStart(b.lines[b.row]) === null
+      b.row < b.lines.length - 1 && pol.editStart(b.lines, b.row) === null
     ) {
       b.place(b.row + 1, 0);
     }
   }
 
   /** Reveal more of the underlying file around a hunk (Ctrl-L). When the text
-   * cursor is active the hunk is the one it sits in; in pager mode it is the
-   * selected node's hunk, or the first hunk on screen. The extra context is
-   * applied to the baseline too, so it does not count as an unsaved edit. */
+   * cursor is active the hunk is the one it sits in and the view follows the
+   * cursor; in pager mode it is the hunk at the middle of the screen, and the
+   * view holds the far edge of that hunk still so the revealed lines open a gap
+   * in front of the user. The extra context is applied to the baseline too, so
+   * it does not count as an unsaved edit. */
   private performExpand(): void {
     if (!this.source?.expandContext || !this.buffer) {
       this.message = "Expanding context isn't available here.";
       return;
     }
-    const refLine = this.cursorOn ? this.buffer.row : this.expandRefLine();
-    if (refLine === null) {
-      this.message = "Move to a hunk first, then Ctrl-L to expand its context.";
-      return;
+    let refLine: number;
+    let up: boolean | undefined;
+    if (this.cursorOn) {
+      refLine = this.buffer.row; // the cursor names a point, not an edge
+    } else {
+      const offer = this.expandOffer();
+      // Ctrl-L is not offered in any of these, so it changes nothing and there
+      // is nothing to leave the reason standing next to: say why, and take it
+      // away again once it has been read.
+      if (offer === null) {
+        this.message = "Move to a hunk's edge, then Ctrl-L to expand it.";
+        this.transientMessage = true;
+        return;
+      }
+      if ("blocked" in offer) {
+        this.message = offer.blocked === "top"
+          ? "Top of file."
+          : offer.blocked === "bottom"
+          ? "Bottom of file."
+          : "No more context to show.";
+        this.transientMessage = true;
+        return;
+      }
+      refLine = offer.line;
+      up = offer.up;
     }
     const r = this.source.expandContext(
       this.buffer.text(),
       this.buffer.baseline(),
       refLine,
+      up,
     );
     if (!r) {
       this.message = "No more context to show.";
       return;
     }
     // The node the selection denotes, captured before the reparse renumbers the
-    // structure tree under it.
+    // structure tree under it. The pinned line's row is captured too, before the
+    // fold plan (which the reparse invalidates) changes.
     const selected = this.cursorOn ? null : this.selectedNode();
+    // Where a line of the old text lands in the new one.
+    const moved = (n: number) =>
+      n + (n >= r.insertedAt ? r.inserted : 0) -
+      (r.removedAt !== null && n > r.removedAt ? 1 : 0);
+    // The line held still on screen: the one just outside the edge the revealed
+    // lines go in at, so they open a gap on the hunk's side of it. Expanding
+    // upwards holds the hunk's header and pushes the body down; expanding
+    // downwards holds what follows the hunk and lifts the body up. A join takes
+    // that very header away, so what is held is the line the other side of it —
+    // the neighbouring hunk's body, which is what is left to hold on to.
+    const pinDoc = r.removedAt !== null
+      ? (r.up ? r.removedAt - 1 : r.removedAt + 1)
+      : (r.up ? r.insertedAt - 1 : r.insertedAt);
+    const pinRow = this.toDisplay(pinDoc) - this.top;
     const col = this.cursorOn ? this.buffer.col : 0;
     this.buffer.setBaseline(r.baseline);
     this.buffer.setText(r.text, r.cursorLine, col);
@@ -1583,33 +2827,55 @@ export class Session {
       this.seedHighlighter();
       this.clampScroll();
       this.ensureCursorVisible();
-      this.message = "Expanded context.";
+      this.reportReveal(r);
       return;
     }
-    // Pager mode: re-point the selection at the same node (its line shifted),
-    // and hold the viewport on the same content. Only lines at or below the
-    // insertion point moved down, so the top shifts only when it is below it.
-    this.reselectAfterExpand(selected, r.insertedAt, r.inserted);
-    if (this.top >= r.insertedAt) this.top += r.inserted;
+    // Pager mode: re-point the selection at the same node (its line moved), and
+    // put the pinned line back on the row it was on.
+    this.reselectAfterExpand(selected, moved);
+    this.top = this.toDisplay(moved(pinDoc)) - pinRow;
     this.clampScroll();
-    this.message = "Expanded context.";
+    // The revealed lines fill the gap the insertion point opened, so the driver
+    // can walk them in from the held edge. A join is drawn in one step instead:
+    // its frames would stand the two hunks' bodies next to each other before the
+    // lines that join them had arrived, showing a file that reads nothing like
+    // the one on disk.
+    this.pendingReveal = r.removedAt !== null || this.wrapLines ? null : {
+      row: this.toDisplay(r.insertedAt),
+      count: r.inserted,
+      up: r.up,
+    };
+    this.reportReveal(r);
+  }
+
+  /** Say what a reveal showed: which way it reached, and which lines of the file
+   * came back with it. Naming the lines is the point — one run of context looks
+   * like any other, and the file's own numbers are what tie them to it. A reveal
+   * that closed the last gap between two hunks says so too, since a header
+   * disappearing is otherwise left to be puzzled over. */
+  private reportReveal(r: ExpandResult): void {
+    const { from, to } = r.revealed;
+    const lines = from === to ? `line ${from}` : `lines ${from}-${to}`;
+    const where = r.up ? "above" : "below";
+    this.message = r.removedAt !== null
+      ? `Showing ${lines} ${where} — the two hunks are now one.`
+      : `Showing ${lines} ${where} the hunk.`;
+    this.transientMessage = true;
   }
 
   /** After a pager-mode expand rebuilds the structure tree, point the selection
-   * back at the same node, whose line shifted down by `inserted` when it sat at
-   * or below the insertion point. Cleared when the node can no longer be found.
-   * A hunk is matched on its line alone — only one hunk starts at a given header
-   * line, and its label (the `@@` counts) changes as the hunk grows; other kinds
-   * keep the label, which is stable and tells apart nodes sharing a start line. */
+   * back at the same node, at wherever `moved` puts its line. Cleared when the
+   * node can no longer be found — a join takes one of the two hunks away, and
+   * there is nothing to point at. A hunk is matched on its line alone: only one
+   * hunk starts at a given header line, and its label (the `@@` counts) changes
+   * as the hunk grows; other kinds keep the label, which is stable and tells
+   * apart nodes sharing a start line. */
   private reselectAfterExpand(
     node: StructureNode | null,
-    insertedAt: number,
-    inserted: number,
+    moved: (line: number) => number,
   ): void {
     if (!node) return;
-    const startLine = node.startLine >= insertedAt
-      ? node.startLine + inserted
-      : node.startLine;
+    const startLine = moved(node.startLine);
     const idx = this.doc.flatStructure.findIndex((n) =>
       n.startLine === startLine && n.kind === node.kind &&
       (node.kind === "hunk" || n.label === node.label)
@@ -1617,35 +2883,125 @@ export class Session {
     this.selectedIndex = idx >= 0 ? idx : null;
   }
 
-  /** The reference line for an expand in pager mode: a line inside the hunk the
-   * user is focused on — the selected node's hunk when a node is selected and on
-   * screen, otherwise the first hunk overlapping the viewport. A node that spans
-   * hunks rather than sitting in one (the file node) resolves to the first hunk
-   * it covers that is on screen. Null when no hunk is in view. */
-  private expandRefLine(): number | null {
-    const rows = this.contentRows();
-    const viewEnd = this.top + rows;
-    const onScreen = (n: StructureNode) =>
-      n.endLine >= this.top && n.startLine < viewEnd;
-    const hunks = this.doc.flatStructure.filter((n) => n.kind === "hunk");
-    if (hunks.length === 0) return null;
-    const sel = this.selectedNode();
-    if (sel && onScreen(sel)) {
-      // A selection sitting inside a hunk keeps its line, so the up/down bias
-      // follows where the user is.
-      const inHunk = hunks.some((h) =>
-        sel.startLine >= h.startLine && sel.startLine <= h.endLine
-      );
-      if (inHunk) return sel.startLine;
-      // A selection spanning hunks (the file node) expands the first hunk it
-      // covers that is on screen.
-      const covered = hunks.find((h) =>
-        h.startLine >= sel.startLine && onScreen(h)
-      );
-      if (covered) return covered.startLine;
+  /** Whether a node is on screen: its display rows overlap the viewport, and it
+   * is not inside a collapsed file. A collapsed file's inner lines all map to
+   * its summary row, which overlaps the viewport whenever that row is shown, so
+   * the hidden range is excluded by its document extent instead. */
+  private nodeOnScreen(node: StructureNode): boolean {
+    const inHiddenFile = this.foldFiles().some((f) =>
+      this.collapsed.has(f.index) &&
+      node.startLine > f.headerLine && node.startLine <= f.endLine
+    );
+    if (inHiddenFile) return false;
+    return this.nodeEndRow(node) >= this.top &&
+      this.nodeStartRow(node) < this.top + this.contentRows();
+  }
+
+  /** The middle of the content on screen, as a display row. The rows the
+   * content occupies, rather than the rows the terminal has: a document shorter
+   * than the screen ends part-way down it, and the rows past its end are not
+   * somewhere the user is looking. */
+  private middleRow(): number {
+    const last = Math.min(this.top + this.contentRows(), this.displayCount()) -
+      1;
+    return Math.floor((this.top + last) / 2);
+  }
+
+  /** How much context each hunk can still reveal, keyed by its header line.
+   * Cached against the document, which the source rebuilds on every expand. */
+  private expandRoom(): ReadonlyMap<number, HunkRoom> {
+    if (this.roomCache?.doc !== this.currentDoc) {
+      this.roomCache = {
+        doc: this.currentDoc,
+        room: this.source?.expandRoom?.(this.currentDoc.text) ?? new Map(),
+      };
     }
-    const first = hunks.find(onScreen);
-    return first ? first.startLine : null;
+    return this.roomCache.room;
+  }
+
+  /** Every hunk edge the user can see: the row it sits on, the line to expand
+   * from, which way that grows, and what the file offers there. A hunk with
+   * neither edge on screen offers nothing to aim at — its boundaries are off in
+   * the dark, and growing one would happen where it could not be watched. */
+  private visibleEdges(): {
+    row: number;
+    line: number;
+    up: boolean;
+    room: HunkRoom;
+  }[] {
+    const room = this.expandRoom();
+    const rows = this.contentRows();
+    const onScreen = (row: number) => row >= this.top && row < this.top + rows;
+    const out = [];
+    for (const h of this.doc.flatStructure) {
+      if (h.kind !== "hunk" || !this.nodeOnScreen(h)) continue;
+      const r = room.get(h.startLine);
+      if (!r) continue;
+      // The top edge is the header the revealed lines land under; the bottom is
+      // the last body line they land after.
+      for (
+        const [line, up] of [[h.startLine, true], [h.endLine, false]] as const
+      ) {
+        const row = up ? this.toDisplay(line) : this.toDisplayEnd(line);
+        if (onScreen(row)) out.push({ row, line, up, room: r });
+      }
+    }
+    return out;
+  }
+
+  /** The hunk edge Ctrl-L acts on in pager mode: the visible one nearest the
+   * middle of the screen, or nearest a selected node when one sits in a hunk.
+   * Null when no edge is on screen. The edge is returned whether or not it has
+   * room, so that the offer of Ctrl-L and what Ctrl-L does agree. */
+  private expandEdge():
+    | { line: number; up: boolean; room: HunkRoom }
+    | null {
+    const edges = this.visibleEdges();
+    if (edges.length === 0) return null;
+    // A selected node sitting in a hunk aims at that hunk, and its own row is
+    // what the edges are measured from: the user picked a place to look.
+    const sel = this.selectedNode();
+    const own = sel && this.nodeOnScreen(sel)
+      ? edges.filter((e) =>
+        this.doc.flatStructure.some((h) =>
+          h.kind === "hunk" && h.startLine <= e.line && e.line <= h.endLine &&
+          sel.startLine >= h.startLine && sel.startLine <= h.endLine
+        )
+      )
+      : [];
+    const from = own.length > 0 ? this.nodeStartRow(sel!) : this.middleRow();
+    const pool = own.length > 0 ? own : edges;
+    // Distance in display rows: a collapsed file stands on one row, and the
+    // lines it hides are not distance the eye travels.
+    let best = pool[0];
+    for (const e of pool) {
+      if (Math.abs(e.row - from) < Math.abs(best.row - from)) best = e;
+    }
+    return { line: best.line, up: best.up, room: best.room };
+  }
+
+  /** Whether Ctrl-L would reveal anything from where the user is looking, which
+   * is what the status bar offers it on. Edit mode aims with the cursor rather
+   * than the screen, and keeps its own offer. */
+  private canExpand(): boolean {
+    if (this.cursorOn || !this.source?.expandContext) return false;
+    const offer = this.expandOffer();
+    return offer !== null && !("blocked" in offer);
+  }
+
+  /** Whether Ctrl-L would reveal anything, and what stops it when it would not.
+   * Drives both the status bar's offer of Ctrl-L and the key itself. */
+  private expandOffer():
+    | { line: number; up: boolean }
+    | { blocked: "top" | "bottom" | "hunk" }
+    | null {
+    const edge = this.expandEdge();
+    if (!edge) return null;
+    if ((edge.up ? edge.room.up : edge.room.down) > 0) {
+      return { line: edge.line, up: edge.up };
+    }
+    if (edge.up) return { blocked: edge.room.atFileTop ? "top" : "hunk" };
+    return { blocked: edge.room.atFileBottom ? "bottom" : "hunk" };
   }
 
   // --- file picker (C-x C-f) -------------------------------------------------
@@ -1656,7 +3012,12 @@ export class Session {
       return;
     }
     this.cursorOn = false;
+    // Opening the picker drops the text cursor, and cancelling it returns to
+    // navigation, which reads the structure tree. Refresh it here as leaving
+    // edit mode by Esc does, so that return lands on a current tree.
+    this.reparse();
     this.overlay = null;
+    this.overlayStack = [];
     this.pickerDir = this.pickerStartDir();
     this.pickerFilter = "";
     this.pickerSel = 0;
@@ -1802,12 +3163,14 @@ export class Session {
     this.buffer = new EditBuffer(opened.text);
     this.splitRow = null;
     this.highlighter = undefined; // the old highlighter was for the previous file
+    this.clearFolds(); // the previous file's fold indices do not carry over
     this.currentDoc = opened.source.parse(opened.text);
     this.semantics = undefined; // the old service was for the previous file
     this.mode = "normal";
     this.cursorOn = false;
     this.overlay = null;
     this.overlayScroll = 0;
+    this.overlayStack = [];
     this.selectedIndex = null;
     this.query = "";
     this.matches = [];
@@ -1844,14 +3207,83 @@ export class Session {
       this.message = "No structure detected";
       return;
     }
+    // Navigation walks only the nodes that are on screen: a collapsed file's
+    // interior (its hunks and code) is skipped, leaving just the file itself.
+    const nav = this.navigableIndices();
+    const navNodes = nav.map((i) => this.doc.flatStructure[i]);
     if (this.selectedIndex === null) {
-      this.selectNode(
-        nodeForViewport(this.doc.flatStructure, this.top, this.height),
-      );
+      this.selectNode(nav[this.viewportNodeIndex(navNodes)]);
       return;
     }
-    this.selectNode(step(this.doc.flatStructure, this.selectedIndex));
+    let cur = nav.indexOf(this.selectedIndex);
+    if (cur < 0) cur = this.reselectAfterCollapse(navNodes); // hidden by a fold
+    this.selectNode(nav[step(navNodes, cur)]);
   }
+
+  /** The full-flatStructure indices navigation may land on: every node except
+   * the interior of a collapsed file — its `section` node stays (it represents
+   * the collapsed file), its descendants are dropped. */
+  private navigableIndices(): number[] {
+    const flat = this.doc.flatStructure;
+    if (this.collapsed.size === 0) return flat.map((_, i) => i);
+    const hidden = this.foldFiles().filter((f) => this.collapsed.has(f.index));
+    const out: number[] = [];
+    for (let i = 0; i < flat.length; i++) {
+      const n = flat[i];
+      const file = hidden.find((f) =>
+        n.startLine >= f.headerLine && n.startLine <= f.endLine
+      );
+      // Keep the file's own section node; drop everything inside it.
+      if (file && !(n.kind === "section" && n.startLine === file.headerLine)) {
+        continue;
+      }
+      out.push(i);
+    }
+    return out;
+  }
+
+  /** Where to resume navigation when the selected node was folded away: the
+   * navigable `section` node whose range contains the old selection. */
+  private reselectAfterCollapse(navNodes: readonly StructureNode[]): number {
+    const sel = this.doc.flatStructure[this.selectedIndex!];
+    const idx = navNodes.findIndex((n) =>
+      n.kind === "section" && sel.startLine >= n.startLine &&
+      sel.startLine <= n.endLine
+    );
+    return idx >= 0 ? idx : this.viewportNodeIndex(navNodes);
+  }
+
+  /** The node to select when navigation starts with none selected: the first
+   * node whose start sits on screen, else the node enclosing the viewport top,
+   * else the first. Works in display rows, since a collapsed file's document
+   * lines are not a contiguous on-screen span. */
+  private viewportNodeIndex(nodes: readonly StructureNode[]): number {
+    const bottom = this.top + this.contentRows() - 1;
+    for (let i = 0; i < nodes.length; i++) {
+      const row = this.nodeStartRow(nodes[i]);
+      if (row >= this.top && row <= bottom) return i;
+    }
+    let enclosing = -1;
+    let enclosingSpan = Infinity;
+    for (let i = 0; i < nodes.length; i++) {
+      const start = this.nodeStartRow(nodes[i]);
+      const end = this.nodeEndRow(nodes[i]);
+      const span = end - start;
+      if (start <= this.top && end >= this.top && span <= enclosingSpan) {
+        enclosing = i;
+        enclosingSpan = span;
+      }
+    }
+    if (enclosing >= 0) return enclosing;
+    const onLine = nodeAtLine(nodes, this.toDoc(this.top));
+    return onLine >= 0 ? onLine : 0;
+  }
+}
+
+function codePointLength(text: string): number {
+  let length = 0;
+  for (const _ of text) length++;
+  return length;
 }
 
 function isArrowName(name: string): boolean {
@@ -1869,10 +3301,11 @@ export function helpOverlay(): {
 } {
   const rows: Array<[string, string]> = [
     ["Scrolling", ""],
-    ["  k / j", "line up / down"],
-    ["  h / l", "scroll left / right"],
-    ["  ⌥↑ ⌥↓ ⌥← ⌥→", "scroll / pan (cursor keys, when editing)"],
-    ["  Space / b", "page down / up"],
+    ["  K / J", "line up / down"],
+    ["  H / L", "scroll left / right"],
+    ["  ↑ ↓ ← →", "scroll / pan the view"],
+    ["  ⌥↑ ⌥↓ ⌥← ⌥→", "scroll / pan while editing"],
+    ["  Space / B", "page down / up"],
     ["  ^D / ^U", "half page down / up"],
     ["  g / G", "top / bottom"],
     ["", ""],
@@ -1880,41 +3313,51 @@ export function helpOverlay(): {
     ["  /", "search (smartcase, incremental)"],
     ["  n / N", "next / previous match"],
     ["", ""],
+    ["Diff files", ""],
+    ["  f", "hide / show the file under the cursor (collapse to a summary)"],
+    ["  F / E", "hide all files / show all files"],
+    ["  T", "hide test and test-support files"],
+    ["", ""],
     ["Structure tree", ""],
-    ["  w / s", "previous / next sibling (w → parent, s → out, at ends)"],
-    ["  a / d", "parent / first child"],
+    ["  W / S", "previous / next sibling (W → parent, S → out, at ends)"],
+    ["  A / D", "parent / first child"],
     ["  Tab / ⇧Tab", "next / previous node (depth-first)"],
-    ["  z", "centre selected node"],
-    ["  ^L", "diff: reveal more of the file around the hunk in view"],
+    ["  Z", "centre selected node"],
+    ["  ^L", "diff: reveal more of the file at the middle of the view"],
     ["  Esc", "clear selection / search"],
     ["", ""],
     ["Editing (a file or a diff)", ""],
-    ["  ↑ ↓ ← →", "show & move the text cursor   ·   Esc hides it"],
-    ["  ^A ^E  ⌥f ⌥b", "line start / end   ·   word forward / back"],
+    ["  e", "enter edit mode (reveal the text cursor)"],
+    ["  ↑ ↓ ← →", "move the text cursor   ·   Esc leaves edit mode"],
+    ["  ^A ^E  ⌥F ⌥B", "line start / end   ·   word forward / back"],
     ["  ^K ^Y  ^W ^Space", "kill line / yank   ·   kill region / set mark"],
-    ["  ⌥l ⌥u ⌥c", "lower / upper / capitalise word"],
+    ["  ⌥L ⌥U ⌥C", "lower / upper / capitalise word"],
     ["  ^S", "search from the cursor (Enter lands there, ^S steps)"],
     ["  ^R", "revert: a diff's hunk / file / all, or a file's edits"],
+    ["  R", "diff: resurrect the removed line under the cursor"],
     ["  ^L", "diff: reveal more of the file around the cursor's hunk"],
     ["  F3  ^X^S", "save to disk"],
     ["  ^X^F", "open another file"],
     ["", ""],
     ["Info card (Enter on a node)", ""],
-    ["  Enter", "open the selected reference's card"],
-    ["  z", "close & centre the main view on the target"],
+    ["  Enter", "open the reference — or expand a “… N more” line"],
+    ["  Esc", "back to the card you came from (or close)"],
+    ["  Z", "close & centre the main view on the target"],
     ["  Tab", "toggle info card ⇄ source"],
     ["  t", "look up a definition by name"],
     ["", ""],
     ["View", ""],
-    ["  #", "toggle line numbers"],
-    ["  ?", "this help   ·   q  quit"],
+    ["  #", "line numbers: off / input position / file or message line"],
+    ["  \\", "wrap / unwrap long lines"],
+    ["  C", "cycle non-printables: pictures / ANSI colour / hidden"],
+    ["  ?", "this help   ·   Q  quit"],
   ];
   const info: Line[] = rows.map(([k, v]) => {
     const text = v ? `${k.padEnd(22)} ${v}` : k;
     const spans = v
       ? [
         { col: 0, text: k.padEnd(22), cls: "builderCall" as TokenClass },
-        { col: 22, text: ` ${v}`, cls: "comment" as TokenClass },
+        { col: 22, text: ` ${v}`, cls: "plain" as TokenClass },
       ]
       : [{ col: 0, text: k, cls: "sectionHeader" as TokenClass }];
     return { text, spans };
@@ -1925,6 +3368,6 @@ export function helpOverlay(): {
     mode: "info",
     targets: [],
     cardSel: -1,
-    staticFooter: "esc / q close",
+    staticFooter: "↑/↓ scroll · esc / q close",
   };
 }

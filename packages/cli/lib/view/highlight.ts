@@ -9,7 +9,7 @@
  */
 import { paint, type Style } from "./ansi.ts";
 import type { Line, Span } from "./model.ts";
-import { bracketStyle, lineBg, styleFor } from "./theme.ts";
+import { bracketStyle, dialogStyleFor, lineBg, styleFor } from "./theme.ts";
 
 /** Resolve the ANSI {@link Style} for a span (bracket spans rainbow by depth). */
 export function spanStyle(span: Span): Style {
@@ -17,6 +17,12 @@ export function spanStyle(span: Span): Style {
     return bracketStyle(span.bracketDepth);
   }
   return styleFor(span.cls);
+}
+
+/** The style for a span shown inside a dialog (a light-grey panel), where the
+ * editor's bright colours would not read. */
+export function overlaySpanStyle(span: Span): Style {
+  return dialogStyleFor(span.cls);
 }
 
 /** The verbatim line, no colour. */

@@ -92,15 +92,32 @@ export async function testPackage(
   };
 }
 
+type PackageResult = Awaited<ReturnType<typeof testPackage>>;
+
+function reportPackageFailure(result: PackageResult): void {
+  console.error(`Failed ${result.packageName} (${result.packagePath})`);
+  console.log(decode(result.result.stdout));
+  console.error(decode(result.result.stderr));
+}
+
 // Read the workspace member list from the root manifest. Parsed with the JSONC
 // parser so a `deno.jsonc` carrying comments is read correctly.
 export async function readWorkspaceMembers(
-  configPath = "./deno.jsonc",
+  configPath: string | URL = "./deno.jsonc",
 ): Promise<string[]> {
   const manifest = parseJsonc(await Deno.readTextFile(configPath)) as {
     workspace: string[];
   };
   return manifest.workspace;
+}
+
+export function assertTaskTestsIncluded(members: string[]): void {
+  if (members.some((memberPath) => getPackageName(memberPath) === "tasks")) {
+    return;
+  }
+  throw new Error(
+    "The root workspace must include tasks so the workspace test job runs the task tests.",
+  );
 }
 
 // One `deno task test` invocation: a workspace member, plus environment
@@ -125,11 +142,8 @@ const INTERNALLY_SHARDED_PACKAGES: Record<
 };
 
 // Enabled workspace members are split across shards by round-robin over the
-// unit list sorted by package name, matching the other shard selectors. There
-// is no per-package weighting; rebalance by adjusting the shard count only
-// when the imbalance shows up on the critical path (see
-// docs/development/CI_PERFORMANCE.md). Without a shard, every enabled member
-// is selected as a single unit.
+// unit list sorted by package name, matching the other shard selectors. Without
+// a shard, every enabled member is selected as a single unit.
 export function selectShardMembers(
   members: string[],
   disabledPackages: string[],
@@ -167,12 +181,9 @@ export function selectShardMembers(
     .filter((_, i) => i % shard.total === shard.index - 1);
 }
 
-// Cap on concurrently running package test tasks. Each package's own test
-// task parallelizes across the machine's cores, so running every package at
-// once mostly adds contention, and timing-sensitive tests flake under that
-// load (see the known serial CLI tests in docs/development/CI_PERFORMANCE.md).
-// Half the cores balances throughput against contention; TEST_CONCURRENCY
-// overrides it.
+// Cap on concurrently running package test tasks. Individual packages may also
+// parallelize their tests. Half the cores limits that nested concurrency while
+// allowing independent packages to overlap. TEST_CONCURRENCY overrides it.
 export function testConcurrency(
   raw = Deno.env.get("TEST_CONCURRENCY"),
 ): number {
@@ -201,7 +212,7 @@ export async function runTests(
   );
   if (units.length === 0) {
     console.error("No workspace packages selected to test.");
-    Deno.exit(1);
+    return false;
   }
   // Resolve to an absolute path: each package's test subprocess runs with its
   // own cwd, so a relative DENO_COVERAGE_DIR would land under
@@ -211,24 +222,27 @@ export async function runTests(
     ? path.resolve(workspaceCwd, coverageRootRaw)
     : undefined;
 
-  type PackageResult = Awaited<ReturnType<typeof testPackage>>;
   const results: PackageResult[] = [];
   let nextUnit = 0;
+  let failureSeen = false;
   const workerCount = Math.min(testConcurrency(), units.length);
   const workers = Array.from({ length: workerCount }, async () => {
-    while (nextUnit < units.length) {
+    while (!failureSeen && nextUnit < units.length) {
       const unit = units[nextUnit++];
       console.log(`Testing ${unit.packageName}...`);
       const packagePath = path.resolve(workspaceCwd, unit.memberPath);
-      results.push(
-        await testPackage(
-          unit.memberPath,
-          unit.packageName,
-          packagePath,
-          coverageRoot,
-          unit.env,
-        ),
+      const result = await testPackage(
+        unit.memberPath,
+        unit.packageName,
+        packagePath,
+        coverageRoot,
+        unit.env,
       );
+      results.push(result);
+      if (!result.result.success) {
+        failureSeen = true;
+        reportPackageFailure(result);
+      }
     }
   });
   await Promise.all(workers);
@@ -254,10 +268,7 @@ export async function runTests(
     console.error("Failed packages:");
     for (const result of failedPackages) {
       console.error(`- ${result.packageName} (${result.packagePath})`);
-      console.log(decode(result.result.stdout));
-      console.error(decode(result.result.stderr));
     }
-    Deno.exit(1);
   }
 
   return failedPackages.length === 0;
@@ -266,12 +277,14 @@ export async function runTests(
 export async function main(): Promise<void> {
   const shardRaw = Deno.env.get("TEST_SHARD");
   const shard = shardRaw ? parseShard(shardRaw) : undefined;
+  assertTaskTestsIncluded(await readWorkspaceMembers());
   await initializeDb();
-  await runTests(
+  const passed = await runTests(
     [
       ...ALL_DISABLED,
       ...parseDisabledPackageList(Deno.env.get("TEST_DISABLED_PACKAGES")),
     ],
     shard,
   );
+  if (!passed) Deno.exit(1);
 }

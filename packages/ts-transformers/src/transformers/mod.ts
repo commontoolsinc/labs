@@ -1,3 +1,4 @@
+export { AssertDiagnosticsTransformer } from "./assert-diagnostics.ts";
 export { BuilderCallHoistingTransformer } from "./builder-call-hoisting.ts";
 export { CastValidationTransformer } from "./cast-validation.ts";
 export { CfcPolicyAuthoringTransformer } from "./cfc-policy-authoring.ts";

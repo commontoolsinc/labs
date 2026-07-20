@@ -193,41 +193,46 @@ slot's shape says the author wanted shared data: the slot's schema doesn't
 match `undefined` and has no effective `default`, **and** the parent schema
 lists the slot in `required` (approximating — not proving — that a read
 would reject the hole; rejection is ultimately judged against each reader's
-combined schema, and the element-level grace from the reader-blackout fix
-degrades rather than voids). Direct slot writes (`cell.key().set()`, bound
-handler cells) have no parent schema in view and keep the warn even for
-slots that are optional through the parent — declare the slot's scope or
-write through the parent object to silence those. Optional,
-undefined-tolerant, or defaulted slots written through their parent stay
-silent —
-per-reader resolution there degrades harmlessly, which is also how the
-runtime's own scoped-link writes (`.asScope()` result links, `navigateTo`
-result cells, argument setup wiring) stay quiet. If per-reader resolution is
-genuinely intended on a strict slot, declare the slot's schema scope (e.g.
-`PerUser<Cell<T>>` on the field type, or `scope: "user"` / a scoped `asCell`
-entry in the schema). A declared scope is a **cap**: content may be at most
-that narrow, so links at or broader than the cap are silent, while a
-narrower-than-cap link (e.g. a session link in a `PerUser` field) still
-warns.
+combined schema). A required scoped target that is unavailable to a reader
+rejects its containing object; use an optional, undefined-tolerant, or
+defaulted slot only when partial visibility is intended. Direct slot writes
+(`cell.key().set()`, bound handler cells) have no parent schema in view and
+keep the warn even for slots that are optional through the parent — declare
+the slot's scope or write through the parent object to silence those.
+Optional, undefined-tolerant, or defaulted slots written through their parent
+stay silent — per-reader resolution there degrades harmlessly, which is also
+how the runtime's own scoped-link writes (`.asScope()` result links,
+`navigateTo` result cells, argument setup wiring) stay quiet. If per-reader
+resolution is genuinely intended on a strict slot, declare the slot's schema
+scope (e.g. `PerUser<Cell<T>>` on the field type, or `scope: "user"` / a
+scoped `asCell` entry in the schema). A declared scope is a **cap**: content
+may be at most that narrow, so links at or broader than the cap are silent,
+while a narrower-than-cap link (e.g. a session link in a `PerUser` field)
+still warns.
 
-## 7. `Math.random()` throws under SES
+## 7. `Math.random()` / `Date.now()` throw outside a handler
 
-**Symptom:** `TypeError: secure mode %SharedMath%.random() throws` when a
-handler runs.
+**Symptom:** `TypeError: secure mode %SharedMath%.random() throws` or a
+`TimeCapabilityError` when the code runs.
 
-The pattern sandbox runs under SES, which removes ambient access to
-`Math.random()`. Use `nonPrivateRandom()` from `commonfabric` for
-non-cryptographic randomness inside patterns. This is not scope-specific but
-showed up while wiring up an option-id generator in a scoped poll.
+The pattern sandbox gates the ambient intrinsics `Math.random()`, `Date.now()`,
+and no-argument `new Date()`. They are allowed **inside a handler** (the clock
+coarsened to one-second resolution; entropy passes through) and throw in a
+lift/computed or at pattern-body level. Call the built-ins directly — they are
+not importable helpers. This is not scope-specific but showed up while wiring up
+an option-id generator in a scoped poll, where the generator ran inside a
+handler.
 
 ```typescript
-import { nonPrivateRandom, safeDateNow } from "commonfabric";
-
+// Inside a handler.
 const newId = () =>
-  `o_${safeDateNow().toString(36)}_${
-    Math.floor(nonPrivateRandom() * 1e6).toString(36)
+  `o_${Date.now().toString(36)}_${
+    Math.floor(Math.random() * 1e6).toString(36)
   }`;
 ```
+
+For reactive time in a computed, read the live clock with the `#now` wish rather
+than calling `Date.now()`.
 
 ## See Also
 

@@ -139,7 +139,7 @@ export default pattern<AgentInput, AgentOutput>(
         summary: string;
         learned?: string;
       }) => {
-        const nowIso = new Date(safeDateNow()).toISOString();
+        const nowIso = new Date().toISOString();
         status.set("idle");
         lastRun.set(nowIso);
         lastRunSummary.set(summary);
@@ -159,7 +159,7 @@ export default pattern<AgentInput, AgentOutput>(
     );
 
     const markError = action(({ summary }: { summary: string }) => {
-      const nowIso = new Date(safeDateNow()).toISOString();
+      const nowIso = new Date().toISOString();
       status.set("error");
       lastRun.set(nowIso);
       lastRunSummary.set(`ERROR: ${summary}`);

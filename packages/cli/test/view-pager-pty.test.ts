@@ -316,6 +316,13 @@ Deno.test({
         await p.expect("greet", "the first frame of the document");
         await p.sendExpectingRedraw("j");
         await p.sendExpectingRedraw("k");
+        await p.send("\\");
+        await p.expect("Line wrapping: on", "backslash enables line wrapping");
+        await p.send("\\");
+        await p.expect(
+          "Line wrapping: off",
+          "backslash disables line wrapping",
+        );
         await p.send("G");
         await p.expect("END", "the end-of-document position indicator");
         await p.sendExpectingRedraw("g");
@@ -340,8 +347,8 @@ Deno.test({
   fn: withDoc(SRC, async (file) => {
     await driveInteractive(["view", file], async (p) => {
       await p.expect("greet", "the first frame of the document");
-      await p.send("\x1b[B"); // down arrow reveals the text cursor
-      await p.expect("editing —", "the edit-mode status hint");
+      await p.send("e"); // 'e' enters edit mode, revealing the text cursor
+      await p.expect("Done", "the edit-mode status hint (Esc Done)");
       // Typing redraws once immediately; the deferred re-parse redraws a
       // second time once the debounce elapses.
       const frames = p.frameCount();
@@ -352,8 +359,8 @@ Deno.test({
       );
       await p.sendExpectingRedraw("\x1b"); // escape back to navigation
       await p.send("q"); // the dirty buffer raises the save prompt
-      await p.expect("(d) discard", "the save prompt");
-      await p.send("d"); // discard the edit and exit
+      await p.expect("Save changes to", "the save-prompt dialog");
+      await p.send("d"); // the Discard button, and exit
     });
   }),
 });

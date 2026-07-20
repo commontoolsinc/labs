@@ -234,6 +234,11 @@ export interface JUnitTestSuite {
   tests: { name: string; time: number }[];
 }
 
+export interface ParsedTimingArtifact {
+  name: string;
+  suites: JUnitTestSuite[];
+}
+
 export interface PRInfo {
   number: number;
   title: string;
@@ -330,12 +335,22 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function responseBodySnippet(resp: Response): Promise<string> {
+function githubApiError(
+  resp: Response,
+  path: string,
+  method: "GET" | "POST" | "PATCH",
+): Error {
+  const statusText = resp.statusText ? ` ${resp.statusText}` : "";
+  return new Error(
+    `GitHub API ${method} ${resp.status}${statusText}: ${path}`,
+  );
+}
+
+async function cancelResponseBody(resp: Response): Promise<void> {
   try {
-    const body = await resp.text();
-    return body.length > 1_000 ? `${body.slice(0, 1_000)}...` : body;
-  } catch (error) {
-    return `Could not read response body: ${error}`;
+    await resp.body?.cancel();
+  } catch {
+    // The GitHub status error remains the reported failure.
   }
 }
 
@@ -366,11 +381,11 @@ export async function githubGet<T>(path: string): Promise<T> {
       !RETRYABLE_GITHUB_STATUSES.has(resp.status) ||
       attempt === GITHUB_GET_MAX_ATTEMPTS
     ) {
-      const body = await resp.text();
-      throw new Error(`GitHub API ${resp.status}: ${path}\n${body}`);
+      await cancelResponseBody(resp);
+      throw githubApiError(resp, path, "GET");
     }
 
-    await resp.body?.cancel();
+    await cancelResponseBody(resp);
     await sleep(githubRetryDelayMs(resp, attempt));
   }
 
@@ -387,8 +402,8 @@ export async function githubPost<T>(
     body: JSON.stringify(body),
   });
   if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`GitHub API POST ${resp.status}: ${path}\n${text}`);
+    await cancelResponseBody(resp);
+    throw githubApiError(resp, path, "POST");
   }
   return resp.json();
 }
@@ -403,8 +418,8 @@ export async function githubPatch<T>(
     body: JSON.stringify(body),
   });
   if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`GitHub API PATCH ${resp.status}: ${path}\n${text}`);
+    await cancelResponseBody(resp);
+    throw githubApiError(resp, path, "PATCH");
   }
   return resp.json();
 }
@@ -488,6 +503,14 @@ export function newestArtifactsByName(artifacts: Artifact[]): Artifact[] {
     }
   }
   return [...byName.values()];
+}
+
+export function newestTimingArtifacts(artifacts: Artifact[]): Artifact[] {
+  return newestArtifactsByName(
+    artifacts.filter((artifact) =>
+      artifact.name.startsWith("test-timing-") && !artifact.expired
+    ),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -708,10 +731,11 @@ export async function downloadAndExtractArtifact(
     }
 
     if (!resp.ok) {
-      const body = await responseBodySnippet(resp);
+      const statusText = resp.statusText ? ` ${resp.statusText}` : "";
       lastError =
-        `GitHub artifact download ${resp.status} ${resp.statusText}: ${body}`;
+        `GitHub artifact download ${resp.status}${statusText}: ${artifactPath}`;
       attemptErrors.push(`attempt ${attempt}: ${lastError}`);
+      await cancelResponseBody(resp);
       if (
         attempt < GITHUB_GET_MAX_ATTEMPTS &&
         RETRYABLE_ARTIFACT_DOWNLOAD_STATUSES.has(resp.status)
@@ -1191,6 +1215,30 @@ export function extractTestFileMetrics(
       if (test.time <= 0) continue;
       const testKey = `subtest: ${artifactName}/${suite.name} > ${test.name}`;
       metrics.set(testKey, makeSample(test.time));
+    }
+  }
+
+  return metrics;
+}
+
+/** Keeps the longest slice when normalized artifact labels share a metric. */
+export function extractTimingArtifactMetrics(
+  run: WorkflowRun,
+  artifacts: Iterable<ParsedTimingArtifact>,
+): Map<string, TimingSample> {
+  const metrics = new Map<string, TimingSample>();
+
+  for (const artifact of artifacts) {
+    const artifactMetrics = extractTestFileMetrics(
+      run,
+      timingArtifactLabel(artifact.name),
+      artifact.suites,
+    );
+    for (const [name, sample] of artifactMetrics) {
+      const existing = metrics.get(name);
+      if (!existing || sample.durationSeconds > existing.durationSeconds) {
+        metrics.set(name, sample);
+      }
     }
   }
 

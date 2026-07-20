@@ -115,8 +115,18 @@ const resolveLocalSchemaRef = (root: JSONSchema, schema: JSONSchema) => {
     return schema;
   }
   const defName = ref.slice("#/$defs/".length);
-  return (root as { $defs?: Record<string, JSONSchema> }).$defs?.[defName] ??
-    schema;
+  const definition = (root as { $defs?: Record<string, JSONSchema> }).$defs?.[
+    defName
+  ];
+  if (
+    !definition || typeof definition !== "object" ||
+    typeof schema !== "object"
+  ) return definition ?? schema;
+  const { $ref: _ref, ...siblings } = schema as Record<string, unknown>;
+  return resolveLocalSchemaRef(root, {
+    ...(definition as Record<string, unknown>),
+    ...siblings,
+  } as JSONSchema);
 };
 
 const setTrustedProfileWriter = (
@@ -534,7 +544,15 @@ describe("profile owner CFC policy", () => {
         (rootSchema as { properties?: Record<string, JSONSchema> })
           .properties ?? {};
 
-      for (const field of ["name", "avatar", "externalLinks", "elements"]) {
+      for (
+        const field of [
+          "name",
+          "avatar",
+          "externalLinks",
+          "verifiedIdentities",
+          "elements",
+        ]
+      ) {
         const fieldSchema = resolveLocalSchemaRef(
           rootSchema,
           properties[field],
@@ -549,6 +567,43 @@ describe("profile owner CFC policy", () => {
         });
         expect(ifc?.writeAuthorizedBy).toBeDefined();
       }
+
+      const verifiedIdentitiesSchema = resolveLocalSchemaRef(
+        rootSchema,
+        properties.verifiedIdentities,
+      ) as { type?: string; items?: JSONSchema };
+      expect(verifiedIdentitiesSchema.type).toBe("array");
+      const verifiedIdentitySchema = resolveLocalSchemaRef(
+        rootSchema,
+        verifiedIdentitiesSchema.items ?? {},
+      ) as {
+        asCell?: unknown[];
+        ifc?: { addIntegrity?: unknown[]; requiredIntegrity?: unknown[] };
+      };
+      expect(verifiedIdentitySchema.ifc?.requiredIntegrity).toContain(
+        "loom-verified-external-identity",
+      );
+      expect(verifiedIdentitySchema.ifc?.addIntegrity).not.toContain(
+        "loom-verified-external-identity",
+      );
+
+      const publishSchema = resolveLocalSchemaRef(
+        rootSchema,
+        properties.publishVerifiedIdentities,
+      ) as { properties?: Record<string, JSONSchema> };
+      const publishedIdentities = resolveLocalSchemaRef(
+        rootSchema,
+        publishSchema.properties?.identities ?? {},
+      ) as { items?: JSONSchema };
+      const publishedIdentity = resolveLocalSchemaRef(
+        rootSchema,
+        publishedIdentities.items ?? {},
+      ) as {
+        ifc?: { requiredIntegrity?: unknown[] };
+      };
+      expect(publishedIdentity.ifc?.requiredIntegrity).toContain(
+        "loom-verified-external-identity",
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();

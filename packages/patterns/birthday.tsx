@@ -9,8 +9,9 @@ import {
   type Default,
   NAME,
   pattern,
-  safeDateNow,
+  resultOf,
   UI,
+  wish,
 } from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
@@ -56,15 +57,16 @@ const DAY_ITEMS = Array.from({ length: 31 }, (_, i) => ({
   searchAliases: i < 9 ? [`0${i + 1}`] : undefined,
 }));
 
-function generateYearItems(): Array<{ value: string; label: string }> {
-  const currentYear = new Date(safeDateNow()).getFullYear();
+function generateYearItems(
+  nowMs: number,
+): Array<{ value: string; label: string }> {
+  const currentYear = new Date(nowMs).getFullYear();
   const years: Array<{ value: string; label: string }> = [];
   for (let year = currentYear; year >= 1920; year--) {
     years.push({ value: String(year), label: String(year) });
   }
   return years;
 }
-const YEAR_ITEMS = generateYearItems();
 
 // ===== Helper Functions =====
 const getMonthName = (month: string): string => {
@@ -85,6 +87,16 @@ export interface BirthdayModuleInput {
 // ===== The Pattern =====
 export const BirthdayModule = pattern<BirthdayModuleInput, BirthdayModuleInput>(
   ({ birthMonth, birthDay, birthYear }) => {
+    // Year options derive from the reactive #now clock (one-shot, coarsened to
+    // 1s) instead of reading the wall clock at module-evaluation time. The list
+    // remains unavailable for the brief window before #now resolves.
+    const nowCell = wish<number>({ query: "#now" });
+    const nowCellValue = resultOf(nowCell.result);
+    const yearItems = computed(() => {
+      const nowMs = nowCellValue;
+      return generateYearItems(nowMs);
+    });
+
     // Compute display text for NAME
     const displayText = computed(() => {
       const month = birthMonth?.trim();
@@ -142,7 +154,7 @@ export const BirthdayModule = pattern<BirthdayModuleInput, BirthdayModuleInput>(
               <label style={{ fontSize: "12px", color: "#6b7280" }}>Year</label>
               <cf-autocomplete
                 $value={birthYear}
-                items={YEAR_ITEMS}
+                items={yearItems}
                 placeholder="Year"
                 allowCustom
                 maxVisible={10}

@@ -116,7 +116,7 @@ const addFavorite = handler<
     // Add journal entry for the favorite action
     const snapshot = captureSnapshot(piece, hashTags.join(" "));
     journal.push({
-      timestamp: safeDateNow(),
+      timestamp: Date.now(),
       eventType: "piece:favorited",
       subject: piece,
       snapshot,
@@ -144,7 +144,7 @@ const removeFavorite = handler<
 
     // Add journal entry for the unfavorite action
     journal.push({
-      timestamp: safeDateNow(),
+      timestamp: Date.now(),
       eventType: "piece:unfavorited",
       subject: piece,
       snapshot,

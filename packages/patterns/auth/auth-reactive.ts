@@ -4,11 +4,10 @@
 import { Writable } from "commonfabric";
 
 /**
- * Start a reactive clock that updates a Writable cell with safeDateNow()
+ * Start a reactive clock that updates a Writable cell with the current time
  * at a fixed interval. This makes time-dependent computeds reactive.
  *
  * TODO(CT-1163): Replace with wish("#now:30000") when reactive time wish is available.
- * safeDateNow() is the current explicit snapshot helper for authored patterns.
  * Interval is intentionally never cleared — pattern lifecycle matches page lifecycle.
  */
 export function startReactiveClock(

@@ -85,7 +85,7 @@ const sendMessage = handler<SendEvent, {
     author,
     avatar: (avatar ?? "").trim(),
     body,
-    sentAt: safeDateNow(),
+    sentAt: Date.now(),
   });
   draft.set("");
 });

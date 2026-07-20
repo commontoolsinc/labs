@@ -1,41 +1,20 @@
 /**
- * Reader-blackout / convergence repro — multi-runtime, in-process, no browser.
+ * Scoped-link / convergence coverage — multi-runtime, in-process, no browser.
  *
- * ROOT CAUSE (two composable defects, isolated by the fixture matrix here):
+ * The original reader-blackout investigation exposed a write-side identity
+ * defect: putting a live `PerUser` cell into shared `PerSpace` state stored a
+ * scope-generic link, so another session resolved the link into its own empty
+ * user partition.
  *
- *  B1 (write-side identity loss): a handler pushing a live `PerUser` cell into
- *     shared `PerSpace` state stores a scope-GENERIC `"user"` link — the owner
- *     DID is not captured — so every OTHER session resolves the link into its
- *     OWN (empty) user partition.
- *  B2 (read-side collapse): the element schema marks that field `required`;
- *     when the link target resolves absent for a reader, schema validation
- *     voids the WHOLE element and the WHOLE array read (undefined) — while
- *     sub-path reads (`messages.0.author`) still work.
+ * If that scoped field is required, its absent target correctly makes the
+ * element and containing array fail schema validation. Callers that want the
+ * remaining message fields while the target is unavailable must declare the
+ * field optional. The minimal cases pin that distinction, plus the PerSpace
+ * control where every reader resolves the same target.
  *
- * Composition: any session that didn't author the write reads the shared list
- * as EMPTY, even though its replica holds both the array and the linked docs
- * (verified via raw storage reads — see storm-driver.ts). With shared derived
- * cells over the list, the void read is recorded at seq 0 into their commits,
- * which then conflict forever once the docs land — the wedge / retry-storm /
- * starvation tower measured in the browser investigation
- * (docs/history/plans/2026-07-02-convergence-evidence-appendix.md).
- *
- * A third, INDEPENDENT defect — B3, the writer-side integration gap (a writer
- * that interleaves its own append never integrates a peer's concurrent append;
- * same-seq value divergence delta-sync can't repair) — is pinned by
- * deliberately-red tests in a separate follow-up PR, since its fix is an open
- * design decision. This suite asserts only what the B2 fix restores.
- *
- * All cases here are GREEN:
- *  - "reader blackout (minimal)" → fixed by the B2 grace change
- *    (traverse.ts required-exemption for unresolvable links).
- *  - "controls" (PerSpace link / optional field) → pin the two mechanisms.
- *  - "convergence storm — observer converges" → with B2 fixed, a non-writing
- *    participant fully converges under a 40-message storm (was the escalated
- *    blackout/wedge before the fix).
- *
- * Full context + measurements:
- * docs/history/plans/2026-07-02-convergence-evidence-appendix.md.
+ * The storm fixture uses the optional declaration and checks observer
+ * convergence under sustained writes. The independent B3 writer-integration
+ * gap remains covered separately.
  */
 
 import { assertEquals } from "@std/assert";
@@ -65,11 +44,13 @@ function summarize(list: Msg[]): Record<string, number> {
 }
 
 /**
- * The minimal flow shared by the blackout case and both controls: alice makes
- * ONE fully-settled post; the observer (a different identity that never
- * writes) must be able to read it.
+ * Alice makes one fully-settled post and a different identity reads the list.
  */
-function minimalCase(title: string, fixtureName: string) {
+function minimalCase(
+  title: string,
+  fixtureName: string,
+  observerBodies: string[],
+) {
   describe(title, () => {
     let harness: MultiRuntimeHarness;
     let alice: MultiRuntimeSession;
@@ -89,7 +70,7 @@ function minimalCase(title: string, fixtureName: string) {
       await harness?.dispose();
     });
 
-    it("a second session reads the settled post", async () => {
+    it("applies the element schema for a second session", async () => {
       await alice.send("post", { author: "alice", body: "alice-0", n: 0 });
       await harness.settle(5);
 
@@ -102,23 +83,19 @@ function minimalCase(title: string, fixtureName: string) {
       );
       assertEquals(
         bodies(observerView),
-        ["alice-0"],
-        `reader blackout: observer sees ${JSON.stringify(observerView)} ` +
-          `(raw replica holds the array + linked doc — see storm-driver.ts)`,
+        observerBodies,
+        `observer sees ${JSON.stringify(observerView)}`,
       );
     });
   });
 }
 
-// The reader blackout: a required element field carries a PerUser-cell link
-// that a non-authoring reader cannot resolve (B1 stores it scope-generic), and
-// the `required` check then voids the whole array read (B2). GREEN with the B2
-// fix in this PR (the required-exemption for unresolvable links); was the core
-// red repro before it. (B1 is still latent here — the reader now sees a cell
-// resolving into its own partition — but the LIST no longer blacks out.)
+// A required PerUser-cell link resolves to an absent target for the observer.
+// The property does not match, so neither does its element or containing array.
 minimalCase(
-  "reader blackout (minimal): required PerUser-cell link in elements",
+  "required PerUser-cell link in elements",
   "convergence-chat-noderived",
+  [],
 );
 
 // Control — B1 sidestepped: the linked cell is PerSpace, so every session
@@ -126,25 +103,24 @@ minimalCase(
 minimalCase(
   "control: PerSpace-scoped link in elements",
   "convergence-chat-spacelink",
+  ["alice-0"],
 );
 
-// Control — B2 sidestepped a different way: the field is optional, so the
-// absent resolution degrades that field instead of voiding the element/array.
-// (Green independent of the B2 fix; pins that `required` is the collapse lever.)
+// An optional field may be omitted when its PerUser target is unavailable, so
+// the remaining message object and array still match.
 minimalCase(
   "control: optional PerUser-cell link in elements",
   "convergence-chat-optlink",
+  ["alice-0"],
 );
 
-// The B2 fix, exercised at storm scale: a non-writing participant fully
-// converges under a sustained concurrent-write storm and sees every accepted
-// send. Before the fix this observer read `{}` (the reader blackout, escalated
-// by the shared derived reader in `convergence-chat` into the seq-0 commit
-// wedge). The writers' MUTUAL convergence is a SEPARATE, still-open concern
+// The optional-field model exercised at storm scale: a non-writing participant
+// fully converges under sustained concurrent writes. Writer convergence is a
+// separate, still-open concern
 // (B3 — the interleaving writer keeps only its own appends); it is pinned by
 // deliberately-red tests in the follow-up B3 PR, so this test deliberately
-// asserts only the reader/observer guarantee that B2 restores.
-describe("convergence storm — observer converges under concurrent writes (B2)", () => {
+// asserts only the reader/observer guarantee.
+describe("convergence storm — observer converges with optional scoped links", () => {
   let harness: MultiRuntimeHarness;
   let alice: MultiRuntimeSession;
   let bob: MultiRuntimeSession;

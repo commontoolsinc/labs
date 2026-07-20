@@ -1,12 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 import {
   DEEP_FREEZE,
-  FabricInstance,
-  FabricPrimitive,
   IS_DEEP_FROZEN,
-} from "@/interface.ts";
+} from "@/fabric-instances/BaseFabricInstance.ts";
 import { FabricLink } from "@/fabric-instances/FabricLink.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";

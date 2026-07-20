@@ -23,10 +23,10 @@ pair of files:
 
 | Directory | What it tests |
 |---|---|
-| `closures/` | Closure extraction: map/filter/flatMap to WithPattern, computed, derive, handler, action |
+| `closures/` | Closure extraction: map/filter/flatMap to WithPattern, computed (lift-applied), handler, action |
 | `kitchensink/` | Deeply nested cross-feature regressions spanning closures, JSX, helper branches, and computed maps |
-| `jsx-expressions/` | JSX expression handling: derive wrapping, conditionals, method chains |
-| `schema-injection/` | Schema argument injection for new Cell, derive, lift, etc. |
+| `jsx-expressions/` | JSX expression handling: computed/lift-applied wrapping, conditionals, method chains |
+| `schema-injection/` | Schema argument injection for new Cell, lift-applied computeds, lift, etc. |
 | `schema-transform/` | Schema generation from TypeScript types |
 | `handler-schema/` | Handler-specific schema generation |
 | `ast-transform/` | General AST transforms: pattern schemas, builder patterns |

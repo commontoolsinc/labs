@@ -7,9 +7,6 @@
     "./fixture-runner": "./src/fixture-runner.ts",
     "./isolated-deno": "./src/isolated-deno.ts"
   },
-  "imports": {
-    "typescript": "npm:typescript"
-  },
   "tasks": {
     "test": "deno test --allow-env=CF_COMPILE_CACHE_FILE --allow-read --allow-write src/*.test.ts",
     "check": "deno check src/**/*.ts",

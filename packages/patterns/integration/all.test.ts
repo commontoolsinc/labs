@@ -5,37 +5,18 @@ import { assert } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { initializePiecesController } from "./pieces-controller.ts";
+import {
+  currentPatternIntegrationShard,
+  selectPatternIntegrationShard,
+} from "./pattern-integration-shard.ts";
 
 const { API_URL } = env;
-
-// Optional sharding for CI fan-out: PATTERN_INTEGRATION_SHARD="i/n" (1-based)
-// runs only the patterns where (sorted index % n) == (i - 1), so the pattern
-// compiles spread across the n parallel "Pattern Integration Tests (i/n)" jobs
-// instead of all landing in one. Mirrors the CFCHECK_SHARD fan-out in
-// tasks/cfcheck.ts. Unset (local dev) runs every pattern.
-function parsePatternShard(): { index: number; count: number } {
-  const raw = Deno.env.get("PATTERN_INTEGRATION_SHARD");
-  if (!raw) return { index: 0, count: 1 };
-  const match = raw.match(/^(\d+)\/(\d+)$/);
-  if (!match) {
-    throw new Error(
-      `Invalid PATTERN_INTEGRATION_SHARD "${raw}"; expected "i/n" (1-based).`,
-    );
-  }
-  const index = Number(match[1]) - 1;
-  const count = Number(match[2]);
-  if (count < 1 || index < 0 || index >= count) {
-    throw new Error(`PATTERN_INTEGRATION_SHARD "${raw}" out of range.`);
-  }
-  return { index, count };
-}
 
 describe("Compile all patterns", () => {
   const skippedPatterns = [
     "system/link-tool.tsx", // Utility handlers, not a standalone pattern
   ];
 
-  const shard = parsePatternShard();
   const patterns = [...Deno.readDirSync(join(import.meta.dirname!, ".."))]
     .filter((file) => file.name.endsWith(".tsx"))
     .map((file) => file.name)
@@ -48,11 +29,13 @@ describe("Compile all patterns", () => {
     .filter((name) => !name.endsWith(".test.tsx") && !name.endsWith(".test.ts"))
     .filter((name) => !skippedPatterns.includes(name))
     .sort();
+  const selectedPatterns = selectPatternIntegrationShard(
+    patterns,
+    currentPatternIntegrationShard(),
+  );
 
   // Add a test for each pattern in this shard's slice.
-  for (const [i, name] of patterns.entries()) {
-    if (i % shard.count !== shard.index) continue;
-
+  for (const name of selectedPatterns) {
     it(`Executes: ${name}`, async () => {
       // Heap monitoring for bisection experiments (CT-1148)
       const heapBefore = Deno.memoryUsage().heapUsed;

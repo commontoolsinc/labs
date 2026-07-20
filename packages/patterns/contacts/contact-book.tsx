@@ -7,7 +7,6 @@ import {
   NAME,
   navigateTo,
   pattern,
-  safeDateNow,
   Stream,
   UI,
   Writable,
@@ -71,7 +70,7 @@ export default pattern<ContactBookInput, ContactBookOutput>(
         company: "",
         tags: [],
         notes: "",
-        createdAt: safeDateNow(),
+        createdAt: Date.now(),
       });
     });
 

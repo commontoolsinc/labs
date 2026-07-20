@@ -13,11 +13,13 @@
 // A file is in scope when it lives under an `integration/` directory somewhere
 // beneath `packages/`, excluding the `@commonfabric/integration` package itself,
 // which defines and re-exports `waitFor`. An in-scope file fails the check when
-// it names `waitFor` in an import from "@commonfabric/integration" and is not on
-// the ALLOWLIST below.
+// it names `waitFor` in an import of that package — either through the bare
+// specifier or through a relative path to the package's `utils.ts` or `index.ts`
+// — and is not on the ALLOWLIST below. Text inside a comment or a string is not
+// an import, so commenting the import out clears the check.
 //
 // The ALLOWLIST holds the files that are exempt from this check; the reason for
-// each is recorded in the "Where a bounded poll is the right tool" section of
+// each is recorded in the "Where the polling `waitFor` stays" section of
 // docs/development/waiting-in-tests.md.
 //
 // Usage: deno run --allow-read ./tasks/check-no-waitfor.ts
@@ -29,7 +31,7 @@ const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 
 // Files exempt from this check: they keep the polling `waitFor` from
 // "@commonfabric/integration". Each entry is a repo-relative path; the reason
-// for each is documented under "Where a bounded poll is the right tool" in
+// for each is documented under "Where the polling `waitFor` stays" in
 // docs/development/waiting-in-tests.md.
 export const ALLOWLIST: ReadonlySet<string> = new Set([
   // Headless cell pull: no page to attach an in-page waiter to.
@@ -42,29 +44,66 @@ export const ALLOWLIST: ReadonlySet<string> = new Set([
   // MockDoc rendered-HTML reads and fresh cell.sync() round-trips, with no
   // completion callback the test can hook.
   "packages/runtime-client/integration/client.test.ts",
-  // Instrumentation and profiling one-shots, shared button-click helpers used
-  // both wrapped and bare, and render/source-state probe waits.
+  // Instrumentation one-shots that arm a trace or install a telemetry handler,
+  // plus a piece-link click retry and a wait for the note modal to render.
   "packages/patterns/integration/default-app.test.ts",
+  // A telemetry-handler install, and a wait for the note modal to render.
   "packages/patterns/integration/reload/default-app-notebook.test.ts",
-  // Pre-existing OAuth end-to-end flow, predating the move to event-driven waits.
+  // Human-in-the-loop OAuth flow: a person completes the consent step in a real
+  // browser, and no CI lane runs the file.
   "packages/patterns/google/core/integration/google-calendar-importer.test.ts",
-  // Disabled tests: never run, so migrating them only churns dead code.
-  "packages/patterns/integration/cf-checkbox.test.disabled.ts",
-  "packages/patterns/integration/cf-code-editor.test.disabled.ts",
-  "packages/patterns/integration/cf-render.test.disabled.ts",
 ]);
 
-// Matches an import from exactly "@commonfabric/integration" and captures the
+// Matches an import of the `@commonfabric/integration` package and captures the
 // named-imports clause between the braces. A leading default import and a
-// `type` modifier are tolerated. The closing quote right after `integration`
-// keeps subpath specifiers (".../shell-utils") from matching, and `[^}]*` keeps
-// the capture from bleeding past the end of the clause.
-const NAMED_IMPORT_RE =
-  /import\s+(?:[\w$]+\s*,\s*)?(?:type\s+)?\{([^}]*)\}\s*from\s*["']@commonfabric\/integration["']/g;
+// `type` modifier are tolerated, and `[^}]*` keeps the capture from bleeding
+// past the end of the clause.
+//
+// Two spellings reach the package. The bare specifier names it directly; the
+// closing quote right after `integration` excludes its subpath exports
+// (".../shell-utils", which does not re-export `waitFor`). A relative path
+// reaches the same code without naming the package: `utils.ts` defines
+// `waitFor` and `index.ts` re-exports it, so a specifier that starts with a `.`
+// and ends at either file counts. Under `packages/`, only the package itself
+// holds an `integration/utils.ts` or an `integration/index.ts`.
+//
+// Namespace imports are out of scope: `import * as I from
+// "@commonfabric/integration"` with a later `I.waitFor(...)` passes the check.
+// Every import of this package in the repository uses the named form.
+const PACKAGE_IMPORT =
+  /import\s+(?:[\w$]+\s*,\s*)?(?:type\s+)?\{(?<clause>[^}]*)\}\s*from\s*["'](?:@commonfabric\/integration|\.[^"']*\/integration\/(?:utils|index)\.ts)["']/;
 
-// Removes `//` and `/* */` comments from a named-imports clause. Such a clause
-// holds only identifiers, `as`, `type`, and commas, so a `waitFor` inside a
-// comment is a commented-out member rather than a real import.
+// The comment and literal forms that can hold import-shaped text. A `'` or `"`
+// opens a string only when its closing quote lands on the same line; a template
+// literal may span lines, and its `${...}` is swallowed as part of the literal,
+// which holds here because an import statement cannot sit inside one.
+//
+// Regular-expression literals are not modelled. A `/\//` reads as a line
+// comment and a quote inside a regex reads as a string opening, so both blind
+// the scan to the rest of that line. Imports sit at the top of a file, above any
+// regex literal.
+const LINE_COMMENT = /\/\/[^\n]*/;
+const BLOCK_COMMENT = /\/\*[\s\S]*?\*\//;
+const TEMPLATE = /`(?:[^`\\]|\\[\s\S])*`/;
+const STRING = /"(?:[^"\\\n]|\\[\s\S])*"|'(?:[^'\\\n]|\\[\s\S])*'/;
+
+// One match per comment, literal, or package import, whichever starts first.
+// Each match consumes its own text, so a comment or a literal that opens before
+// an import carries the import-shaped text inside it away with it and
+// `PACKAGE_IMPORT` never matches there. Only a `PACKAGE_IMPORT` match sets the
+// `clause` group.
+const TOKEN_RE = new RegExp(
+  [LINE_COMMENT, BLOCK_COMMENT, TEMPLATE, STRING, PACKAGE_IMPORT]
+    .map((part) => part.source)
+    .join("|"),
+  "g",
+);
+
+// Removes `//` and `/* */` comments from a named-imports clause. A
+// `PACKAGE_IMPORT` match consumes its own braces, so a comment between them
+// arrives intact. Such a clause holds only identifiers, `as`, `type`, and
+// commas, so a `waitFor` inside a comment is a commented-out member rather than
+// a real import.
 function stripComments(clause: string): string {
   return clause
     .replace(/\/\*[\s\S]*?\*\//g, " ")
@@ -72,14 +111,17 @@ function stripComments(clause: string): string {
 }
 
 /**
- * Returns true when `source` imports the polling `waitFor` as a named import
- * from "@commonfabric/integration". `waitForCondition`, `waitForText`, and other
- * `waitFor`-prefixed names do not count; a `waitFor` on a subpath specifier or a
- * `harness.waitFor(...)` member call does not count either.
+ * Returns true when `source` imports the polling `waitFor` as a named import of
+ * the `@commonfabric/integration` package. `waitForCondition`, `waitForText`,
+ * and other `waitFor`-prefixed names do not count; neither does a `waitFor` on a
+ * subpath specifier, a `harness.waitFor(...)` member call, or an import that is
+ * commented out or quoted inside a string.
  */
 export function importsPollingWaitFor(source: string): boolean {
-  for (const match of source.matchAll(NAMED_IMPORT_RE)) {
-    if (/\bwaitFor\b/.test(stripComments(match[1]))) return true;
+  for (const match of source.matchAll(TOKEN_RE)) {
+    const clause = match.groups?.clause;
+    if (clause === undefined) continue;
+    if (/\bwaitFor\b/.test(stripComments(clause))) return true;
   }
   return false;
 }
@@ -155,7 +197,7 @@ function reportViolations(violations: string[]): void {
     "If an event-driven wait genuinely cannot express this (for example a",
     "cross-page condition or a headless cell read), add the file to ALLOWLIST in",
     "tasks/check-no-waitfor.ts with a one-line reason and record it under",
-    '"Where a bounded poll is the right tool" in docs/development/waiting-in-tests.md.',
+    '"Where the polling `waitFor` stays" in docs/development/waiting-in-tests.md.',
     "",
   ];
   console.error(lines.join("\n"));

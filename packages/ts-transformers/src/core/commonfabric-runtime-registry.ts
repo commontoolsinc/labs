@@ -78,8 +78,28 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
     builderName: "computed",
     reactiveOrigin: true,
   },
+  // `assert` is `computed` plus operand recording: AssertDiagnosticsTransformer
+  // rewrites the body, and everything after it lowers the call exactly as a
+  // computed. Mapping it onto `computed` here is what makes every stage that
+  // already handles computed handle assert with no change.
+  {
+    exportName: "assert",
+    category: "builder",
+    builderName: "computed",
+    reactiveOrigin: true,
+  },
   {
     exportName: "byRef",
+    category: "ignored",
+    reactiveOrigin: false,
+  },
+  // `assertCapture` records one operand of an `assert` body and returns it
+  // unchanged. AssertDiagnosticsTransformer emits the calls; authored code
+  // does not call it. It takes a resolved value and hands the same value back,
+  // so it originates nothing reactive and needs no dedicated CallKind — a
+  // plain call, like `byRef`.
+  {
+    exportName: "assertCapture",
     category: "ignored",
     reactiveOrigin: false,
   },
@@ -330,6 +350,17 @@ export const COMMONFABRIC_BUILDER_EXPORT_NAMES: ReadonlySet<string> = new Set(
     .filter((entry) => entry.category === "builder")
     .map((entry) => entry.exportName),
 );
+
+/**
+ * The builder a runtime export lowers as. This is the export's own name for
+ * every builder but `assert`, which lowers as a `computed`. Callers resolving
+ * a call site to a builder use this rather than the export name, so that an
+ * export mapped onto another builder reaches the stages that handle it.
+ */
+export function builderNameForExportName(exportName: string): string {
+  const entry = COMMONFABRIC_RUNTIME_EXPORTS_BY_NAME.get(exportName);
+  return entry?.category === "builder" ? entry.builderName : exportName;
+}
 
 export const COMMONFABRIC_CALL_EXPORT_NAMES: ReadonlySet<string> = new Set(
   COMMONFABRIC_RUNTIME_EXPORT_REGISTRY

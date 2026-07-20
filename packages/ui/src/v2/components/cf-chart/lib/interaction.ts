@@ -2,6 +2,7 @@
  * Interaction handling for cf-chart: hover, click, crosshair, tooltip.
  */
 import { svg, type TemplateResult } from "lit";
+// @ts-types="@types/d3-scale"
 import type { ScaleBand } from "d3-scale";
 import type { CollectedMarkData, XScale, YScale } from "./scales.ts";
 import type { ChartHoverDetail, DataPoint, XScaleType } from "../types.ts";
@@ -24,7 +25,7 @@ export function findNearest(
   allMarks: CollectedMarkData[],
   xScale: XScale,
   yScale: YScale,
-  xType: XScaleType,
+  _xType: XScaleType,
 ): NearestResult | null {
   let best: NearestResult | null = null;
   let bestDist = Infinity;

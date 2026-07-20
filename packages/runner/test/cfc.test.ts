@@ -10,8 +10,10 @@ import {
   findCfcSchemaRefs,
   pruneCfcSchemaDefinitions,
   resolveCfcSchemaRef,
+  resolveCfcSchemaRefs,
   selectReferencedCfcSchemaDefs,
 } from "../src/cfc/schema-refs.ts";
+import { validateSchemaValue } from "../src/cfc/schema-sanitization.ts";
 
 describe("ContextualFlowControl.schemaAtPath", () => {
   it("rejects leading-zero array index like '01'", () => {
@@ -180,6 +182,18 @@ describe("ContextualFlowControl.schemaAtPath", () => {
       .toThrow(/Failed to resolve \$ref/);
   });
 
+  it("falls back when a type-array classifier contains an unresolved union", () => {
+    const cfc = new ContextualFlowControl();
+    const schema = deepFreeze({
+      type: ["object", "undefined"],
+      anyOf: [{ $ref: "#/$defs/Missing" }],
+      $defs: { Present: { type: "string" } },
+    } as JSONSchemaObj);
+
+    expect(() => cfc.schemaAtPath(schema, ["value"]))
+      .toThrow(/Failed to resolve \$ref/);
+  });
+
   it("considers a schema with only $defs true'", () => {
     const schema: JSONSchema = {
       $defs: { Test: { type: "array", items: { type: "string" } } },
@@ -224,6 +238,57 @@ describe("ContextualFlowControl.schemaAtPath", () => {
         type: "array",
         items: { type: "number" },
       });
+  });
+
+  it("uses each anyOf branch's local definitions", () => {
+    const cfc = new ContextualFlowControl();
+    const schema = deepFreeze({
+      anyOf: [
+        {
+          $ref: "#/$defs/Obj",
+          $defs: {
+            Obj: {
+              type: "object",
+              properties: { a: { type: "string" } },
+              additionalProperties: false,
+            },
+          },
+        },
+        {
+          $ref: "#/$defs/Obj",
+          $defs: {
+            Obj: {
+              type: "object",
+              properties: { b: { type: "number" } },
+              additionalProperties: false,
+            },
+          },
+        },
+      ],
+      $defs: { Obj: { type: "null" } },
+    } as JSONSchemaObj);
+
+    expect(cfc.schemaAtPath(schema, ["a"], undefined, true, false)).toEqual({
+      type: "string",
+    });
+    expect(cfc.schemaAtPath(schema, ["b"], undefined, true, false)).toEqual({
+      type: "number",
+    });
+  });
+
+  it("descends through object and array type unions containing undefined", () => {
+    const cfc = new ContextualFlowControl();
+    const objectSchema = deepFreeze({
+      type: ["object", "undefined"],
+      properties: { x: { type: "string" } },
+    } as JSONSchemaObj);
+    const arraySchema = deepFreeze({
+      type: ["array", "undefined"],
+      items: { type: "number" },
+    } as JSONSchemaObj);
+
+    expect(cfc.schemaAtPath(objectSchema, ["x"])).toEqual({ type: "string" });
+    expect(cfc.schemaAtPath(arraySchema, ["0"])).toEqual({ type: "number" });
   });
 
   it("drops definitions that the derived schema cannot reach", () => {
@@ -521,6 +586,127 @@ describe("CFC schema reference discovery", () => {
     }
   });
 
+  it("preserves child-local definitions on a referenced definition body", () => {
+    const entry: JSONSchema = {
+      type: "object",
+      properties: { value: { $ref: "#/$defs/Value" } },
+      $defs: { Value: { type: "string", default: "local" } },
+    };
+    const schema: JSONSchema = {
+      $defs: {
+        Entry: entry,
+        Value: { type: "number", default: 1 },
+      },
+    };
+
+    expect(resolveCfcSchemaRef(schema, "#/$defs/Entry")).toEqual(entry);
+  });
+
+  it("switches roots across chained child-local references", () => {
+    const schema: JSONSchemaObj = {
+      $ref: "#/$defs/Entry",
+      $defs: {
+        Entry: {
+          $ref: "#/$defs/Value",
+          $defs: { Value: { type: "string" } },
+        },
+        Value: { type: "number" },
+      },
+    };
+
+    expect(resolveCfcSchemaRefs(schema)).toMatchObject({ type: "string" });
+  });
+
+  it("preserves ref-site definitions for sibling constraints", () => {
+    const schema: JSONSchemaObj = {
+      $ref: "#/$defs/Base",
+      $defs: {
+        Base: {
+          $ref: "#/$defs/BaseLocal",
+          $defs: { BaseLocal: { type: "object" } },
+        },
+        RefSiteLocal: { type: "string" },
+      },
+      properties: {
+        value: { $ref: "#/$defs/RefSiteLocal" },
+      },
+    };
+
+    const resolved = resolveCfcSchemaRefs(schema) as JSONSchemaObj;
+    const valueSchema = resolved.properties?.value as JSONSchemaObj;
+
+    expect(resolved).toMatchObject({ type: "object" });
+    expect(resolveCfcSchemaRefs(valueSchema, resolved)).toMatchObject({
+      type: "string",
+    });
+  });
+
+  it("keeps inherited ref-site definitions independent from target scope", () => {
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: {
+        item: {
+          $ref: "#/$defs/Base",
+          type: "object",
+          properties: { sibling: { $ref: "#/$defs/Value" } },
+          required: ["sibling"],
+        },
+      },
+      required: ["item"],
+      $defs: {
+        Base: {
+          $defs: { Value: { type: "number" } },
+          allOf: [{
+            type: "object",
+            properties: { target: { $ref: "#/$defs/Value" } },
+            required: ["target"],
+          }],
+        },
+        Value: { type: "string" },
+      },
+    };
+
+    expect(
+      validateSchemaValue(schema, {
+        item: { target: 1, sibling: "ref-site" },
+      }),
+    ).toBeUndefined();
+    expect(
+      validateSchemaValue(schema, { item: { target: 1, sibling: 2 } }),
+    ).toBeDefined();
+    expect(
+      validateSchemaValue(schema, {
+        item: { target: "wrong", sibling: "ref-site" },
+      }),
+    ).toBeDefined();
+  });
+
+  it("does not bind unresolved target refs to generated sibling names", () => {
+    const schema: JSONSchemaObj = {
+      $ref: "#/$defs/Base",
+      $defs: {
+        Base: {
+          $defs: { Other: { type: "number" } },
+          allOf: [{ $ref: "#/$defs/__cfc_ref_site_1_Value" }],
+        },
+        Value: { type: "string" },
+      },
+    };
+
+    expect(validateSchemaValue(schema, "must remain unresolved")).toBeDefined();
+  });
+
+  it("keeps missing refs unresolved across a definition-less ref site", () => {
+    const refSiteRoot: JSONSchemaObj = {};
+    const schema: JSONSchemaObj = {
+      $ref: "https://commonfabric.org/schemas/vnode.json",
+      allOf: [{ $ref: "#/$defs/Props" }],
+    };
+    const vnode = { type: "vnode", name: "div", props: {} };
+
+    expect(validateSchemaValue(schema, vnode, refSiteRoot)).toBeDefined();
+  });
+
   it("preserves nested definition scope boundaries while pruning", () => {
     const cfc = new ContextualFlowControl();
     const schema: JSONSchema = {
@@ -552,6 +738,18 @@ describe("CFC schema reference discovery", () => {
 });
 
 describe("schemaHasIfc", () => {
+  it("honors a caller-provided visited set", () => {
+    const secret: JSONSchema = {
+      type: "string",
+      ifc: { confidentiality: [cfcAtom.resource("AlreadySeen")] },
+    };
+    const schema: JSONSchema = { allOf: [secret] };
+
+    expect(schemaHasIfc(schema, new Set<JSONSchema>([secret]), schema)).toBe(
+      false,
+    );
+  });
+
   it("resolves nested $defs while scanning child schemas", () => {
     const schema: JSONSchema = {
       type: "object",
@@ -572,6 +770,30 @@ describe("schemaHasIfc", () => {
               ifc: {
                 confidentiality: [cfcAtom.resource("NestedSecret")],
               },
+            },
+          },
+        },
+      },
+    };
+
+    expect(schemaHasIfc(schema)).toBe(true);
+  });
+
+  it("tracks shared refs separately for each local definition root", () => {
+    const shared = { $ref: "#/$defs/V" } as const;
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        clean: {
+          allOf: [shared],
+          $defs: { V: { type: "string" } },
+        },
+        tainted: {
+          allOf: [shared],
+          $defs: {
+            V: {
+              type: "string",
+              ifc: { confidentiality: [cfcAtom.resource("Secret")] },
             },
           },
         },

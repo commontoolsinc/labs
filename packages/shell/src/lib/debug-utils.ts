@@ -19,6 +19,7 @@ import type {
   WriteStackTraceMatcher,
 } from "@commonfabric/runtime-client";
 import type { DID } from "@commonfabric/identity";
+import { hasEntityUriScheme } from "@commonfabric/runner/entity-kind";
 import { isRecord } from "@commonfabric/utils/types";
 import type { MetaField } from "@commonfabric/api";
 import { createVDomDebugHelpers, viewSettled } from "@commonfabric/html/debug";
@@ -184,18 +185,26 @@ function getDefaultDid(): string {
   return segments[2] ?? "";
 }
 
-function normalizeEntityId(
+/** Exported for tests; internal to the debug command surface. */
+export function normalizeEntityId(
   options?: Pick<DebugCellOptions, "did" | "id">,
 ): string {
+  // Full schemed ids are canonical and pass through untouched — the scheme
+  // is part of the identity, and everything programmatic (diagnostics
+  // pieceId, error strings) now emits full ids. Adding `of:` to a BARE id is
+  // a human-input convenience only (ids typed or copied from URL paths,
+  // which are piece roots and therefore always of:).
+  const withScheme = (value: string): string =>
+    hasEntityUriScheme(value) ? value : `of:${value}`;
   const id = options?.id;
   if (id) {
-    return id.startsWith("of:") ? id : `of:${id}`;
+    return withScheme(id);
   }
   const did = options?.did ?? getDefaultDid();
   if (!did) {
     return "";
   }
-  return did.startsWith("of:") ? did : `of:${did}`;
+  return withScheme(did);
 }
 
 function buildCellRef(

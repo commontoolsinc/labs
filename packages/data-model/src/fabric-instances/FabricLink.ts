@@ -4,13 +4,13 @@ import type {
 } from "@commonfabric/api";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
+import type { FabricPlainObject, FabricValue } from "@/interface.ts";
 import {
+  BaseFabricInstance,
   DEEP_FREEZE,
-  type FabricPlainObject,
-  type FabricValue,
   IS_DEEP_FROZEN,
-} from "@/interface.ts";
-import { BaseFabricInstance } from "./BaseFabricInstance.ts";
+  SHALLOW_UNFROZEN_CLONE,
+} from "./BaseFabricInstance.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
@@ -88,7 +88,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
   }
 
   /** @inheritDoc */
-  protected shallowUnfrozenClone(): FabricLink {
+  protected [SHALLOW_UNFROZEN_CLONE](): FabricLink {
     return new FabricLink(this.#payload);
   }
 

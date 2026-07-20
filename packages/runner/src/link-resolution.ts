@@ -6,9 +6,9 @@ import {
   linkProbeSubPath,
 } from "@commonfabric/data-model/cell-rep";
 import { type CellLinkRefPayload } from "./sigil-types.ts";
+import { createDataCellURI } from "./data-uri.ts";
 import {
   type CellLink,
-  createDataCellURI,
   type NormalizedFullLink,
   parseLink,
   toMemorySpaceAddress,

@@ -462,7 +462,10 @@ describe("SES security regressions", () => {
             "  }",
             "  result.fetchType = typeof fetch;",
             "  result.cloneType = typeof structuredClone;",
-            "  result.proxyType = typeof Proxy;",
+            // Through `host`, because the type libraries no longer declare
+            // `Proxy` — naming it directly is now a compile error rather than
+            // the `undefined` this asserts.
+            "  result.proxyType = typeof host.Proxy;",
             "  result.arrayName = Array.name;",
             '  result.hasInjected = "injected" in host;',
             "  return result;",
@@ -581,10 +584,10 @@ describe("SES security regressions", () => {
         {
           name: "/poison.ts",
           contents: [
-            'import { safeDateNow } from "commonfabric";',
+            'import { getPatternEnvironment } from "commonfabric";',
             "export default function poison() {",
             "  try {",
-            "    (safeDateNow as typeof safeDateNow & { poisoned?: number }).poisoned = 123;",
+            "    (getPatternEnvironment as typeof getPatternEnvironment & { poisoned?: number }).poisoned = 123;",
             '    return "allowed";',
             "  } catch (error) {",
             "    return (error as Error).name;",
@@ -600,9 +603,9 @@ describe("SES security regressions", () => {
         {
           name: "/probe.ts",
           contents: [
-            'import { safeDateNow } from "commonfabric";',
+            'import { getPatternEnvironment } from "commonfabric";',
             "export default function probe() {",
-            "  return (safeDateNow as typeof safeDateNow & { poisoned?: number }).poisoned ?? 0;",
+            "  return (getPatternEnvironment as typeof getPatternEnvironment & { poisoned?: number }).poisoned ?? 0;",
             "}",
           ].join("\n"),
         },

@@ -46,19 +46,13 @@ import {
   DataUnavailable,
   type DataUnavailableVariant,
 } from "@commonfabric/data-model/fabric-instances";
-import {
-  entityRefToString,
-  isEntityRef,
-} from "@commonfabric/data-model/cell-rep";
+import { stripEntityUriScheme } from "../entity-kind.ts";
 import { columnDeclaresIfc } from "@commonfabric/memory/v2";
 import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { selectUnavailableInput } from "../data-unavailability.ts";
 import type { SqliteQueryResult } from "@commonfabric/api";
-import {
-  schemaWithOpenObjects,
-  validateAgainstSchema,
-} from "../cfc/schema-sanitization.ts";
+import { validateSchemaValue } from "../cfc/schema-sanitization.ts";
 import type { JSONSchema } from "../builder/types.ts";
 
 type SqliteDbRef = {
@@ -586,8 +580,14 @@ export function sqliteDatabase(
       const options = inputsCell.withTx(tx).get() as
         | { tables?: Record<string, unknown> }
         | undefined;
-      const id = (isEntityRef(handle.entityId)
-        ? entityRefToString(handle.entityId)
+      // `handle` is a builtin RESULT cell (makeResultCell), and result cells
+      // are always `of:`-schemed — the computed kind applies only to derived
+      // internal cells — so stripping the entity scheme yields the handle's
+      // stable, historical key form. Deriving from the scheme-preserving
+      // sourceURI through the canonical helper keeps that assumption
+      // explicit and in one place.
+      const id = (typeof handle.sourceURI === "string"
+        ? stripEntityUriScheme(handle.sourceURI)
         : undefined) ?? JSON.stringify(handle.getAsLink());
       // Grow-only merge the per-column `ifc` against any prior committed handle
       // value at this (causally-stable) id: the store's effective label is
@@ -860,12 +860,12 @@ export function sqliteQuery(
             (typeof inputs.rowSchema === "object" ||
               typeof inputs.rowSchema === "boolean")
           ) {
-            const rowSchema = schemaWithOpenObjects(rowSchemaForDecodedLinks(
+            const rowSchema = rowSchemaForDecodedLinks(
               inputs.rowSchema as JSONSchema,
               linkCols,
-            ));
+            );
             const failure = rows.map((row) =>
-              validateAgainstSchema(rowSchema, row)
+              validateSchemaValue(rowSchema, row)
             ).find((item) => item !== undefined);
             if (failure !== undefined) {
               await rejectSchemaMismatch();

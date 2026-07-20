@@ -37,6 +37,7 @@ import { CF_HELPERS_IDENTIFIER } from "../core/cf-helpers.ts";
 import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
 import { getEnclosingFunctionLikeDeclaration } from "./function-predicates.ts";
 import {
+  builderNameForExportName,
   COMMONFABRIC_BUILDER_EXPORT_NAMES,
   COMMONFABRIC_CALL_EXPORT_NAMES,
   COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES,
@@ -1682,7 +1683,10 @@ function resolveBuilderExpressionKind(
   } else {
     const fallbackName = getDirectBuilderName(target);
     if (fallbackName) {
-      const result = { kind: "builder", builderName: fallbackName } as const;
+      const result = {
+        kind: "builder",
+        builderName: builderNameForExportName(fallbackName),
+      } as const;
       cache?.set(expression, result);
       return result;
     }
@@ -1805,7 +1809,11 @@ function resolveBuilderSymbolKind(
     BUILDER_SYMBOL_NAMES,
   );
   if (importedBuilderName) {
-    return { kind: "builder", symbol, builderName: importedBuilderName };
+    return {
+      kind: "builder",
+      symbol,
+      builderName: builderNameForExportName(importedBuilderName),
+    };
   }
 
   const resolved = resolveAlias(symbol, checker, seen);
@@ -1813,15 +1821,20 @@ function resolveBuilderSymbolKind(
   if (seen.has(resolved)) return undefined;
   seen.add(resolved);
 
+  // Three ways to be one of our builders: declared in the CommonFabric
+  // declarations, imported from them, or ambient. They differ only in how the
+  // symbol got here, not in what it is.
   const name = resolved.getName();
-  if (BUILDER_SYMBOL_NAMES.has(name) && isCommonFabricSymbol(resolved)) {
-    return { kind: "builder", symbol: resolved, builderName: name };
-  }
-  if (BUILDER_SYMBOL_NAMES.has(name) && isImportedFromCommonFabric(resolved)) {
-    return { kind: "builder", symbol: resolved, builderName: name };
-  }
-  if (BUILDER_SYMBOL_NAMES.has(name) && isAmbientSymbol(resolved)) {
-    return { kind: "builder", symbol: resolved, builderName: name };
+  if (
+    BUILDER_SYMBOL_NAMES.has(name) &&
+    (isCommonFabricSymbol(resolved) || isImportedFromCommonFabric(resolved) ||
+      isAmbientSymbol(resolved))
+  ) {
+    return {
+      kind: "builder",
+      symbol: resolved,
+      builderName: builderNameForExportName(name),
+    };
   }
 
   for (const declaration of resolved.declarations ?? []) {

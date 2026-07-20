@@ -64,8 +64,8 @@ Store a reference to the contributor's profile cell (the `result` of their
 `#profile` wish) and render it with `<cf-profile-badge $profile={p.profile} />`:
 
 ```ts
-// Shown inside a pattern body.
-participants.push({ profile: myProfile, joinedAt: safeDateNow() });
+// Shown inside a handler.
+participants.push({ profile: myProfile, joinedAt: Date.now() });
 // render: <cf-profile-badge $profile={p.profile} />
 ```
 
@@ -88,8 +88,8 @@ Copy the resolved `name` and `avatar` strings into the roster entry when the use
 joins:
 
 ```ts
-// Shown inside a pattern body.
-participants.push({ name, avatar, joinedAt: safeDateNow() });
+// Shown inside a handler.
+participants.push({ name, avatar, joinedAt: Date.now() });
 ```
 
 - **Pros:** Self-contained — every other viewer renders from plain strings
@@ -133,10 +133,10 @@ elsewhere in the repo:
 - `wish<string>({ query: "#profileName" | "#profileAvatar" })` and reading
   `.result` — `packages/patterns/shared-profile-demo/main.tsx`,
   `packages/patterns/chatbot.tsx`.
-- `PerSpace` / `PerUser` roster + writable-cell aliases + a `push`ing join
-  handler — `packages/patterns/scrabble/scrabble.tsx`,
+- `PerSpace` / `PerUser` roster + writable-cell aliases + a join handler that
+  writes the roster — `packages/patterns/scrabble/scrabble.tsx`,
   `packages/patterns/scoped-group-chat/main-plain-inputs.tsx`.
-- `safeDateNow()` for timestamps in handlers —
+- `Date.now()` for timestamps in handlers —
   `packages/patterns/scoped-group-chat/main-plain-inputs.tsx`.
 - avatar rendering from snapshot strings — `<img src={...}>` here for
   self-containment; production patterns use `<cf-avatar src name>`
@@ -220,7 +220,19 @@ export type JoinEvent = Record<PropertyKey, never>;
 // appends a snapshot to the shared roster and records that this viewer joined.
 // Identity is keyed on the `profile` CELL — never the display name, which is
 // mutable and may collide between distinct users. `profile` round-trips through
-// `push` as a link and is compared with `equals()`, the cell-identity idiom.
+// the roster write as a link and is compared with `equals()`, the cell-identity
+// idiom.
+//
+// The join reads the roster to decide whether to append, so it is a
+// read-modify-write `set` and not a mergeable `push`: a push drops its own read
+// of the list from conflict detection, which is what makes disjoint appends
+// merge, and pairing it with a dedup read of the same list is what the
+// mergeable-push diagnostic reports (see
+// docs/development/migrating-collection-writes.md). The keyed `elementById` +
+// `addUnique` form does not apply here — it needs a key derived from the
+// element, and pattern code cannot read a profile cell's link. Two viewers
+// joining at once therefore conflict and the loser retries, which is what makes
+// the dedup hold.
 
 const join = handler<JoinEvent, {
   roster: RosterCell;
@@ -235,14 +247,15 @@ const join = handler<JoinEvent, {
   // still counts as joined, and two distinct users sharing a display name don't
   // block each other.
   const participants = roster.key("participants");
-  const already = participants.get().some((p) => equals(p.profile, profile));
+  const existing = participants.get();
+  const already = existing.some((p) => equals(p.profile, profile));
   if (!already) {
-    participants.push({
+    participants.set([...existing, {
       profile,
       name: trimmed,
       avatar: (avatar ?? "").trim(),
-      joinedAt: safeDateNow(),
-    });
+      joinedAt: Date.now(),
+    }]);
   }
   viewer.set({ joined: true, joinedName: trimmed });
 });

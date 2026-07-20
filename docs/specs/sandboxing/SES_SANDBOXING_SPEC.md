@@ -6,7 +6,7 @@
 - AI-assisted specification
 
 ## Last Updated
-2026-07-10
+2026-07-17
 
 This document is the sole authoritative SES sandboxing specification for the
 current reimplementation effort. It supersedes prior divergence notes and
@@ -40,9 +40,10 @@ hardening of module-scope definitions at load time.
 5. **Verified Module-Safe Data**: Any other top-level value must be proven to
    be a versioned, recursively inert subset of `FabricValue` and then
    hardened by a custom checker/freezer. Computing that value via an IIFE is
-   allowed only if the final result passes this verifier. Transitional explicit
-   snapshot helpers such as `safeDateNow()` and `nonPrivateRandom()` are
-   allowed as narrow exceptions and return plain data.
+   allowed only if the final result passes this verifier. The gated ambient
+   clock/entropy intrinsics (`Date.now()`, no-argument `new Date()`,
+   `Math.random()`) are allowed as narrow exceptions inside a handler and
+   return plain data.
 6. **Compiler Assists, Runner Enforces**: Transformers may annotate or rewrite
    code to reduce runtime parsing cost, but compiler output is not trusted and
    the runner must verify the final code boundary.
@@ -355,10 +356,11 @@ accept proxy-backed host/runtime values that already exist and materialize them
 once into inert data. That is a compatibility boundary, not an authored escape
 hatch.
 
-Direct ambient `Date.now()` and `Math.random()` are not relied upon as the
-stable SES contract. Pattern authors should call `safeDateNow()` and
-`nonPrivateRandom()` explicitly, and the verifier treats those helpers as
-explicit narrow exceptions that yield plain data snapshots.
+The sandbox replaces ambient `Date.now()` / `new Date()` / `Math.random()` with
+gated intrinsics, and those are the stable SES contract: pattern authors call
+the built-ins directly, the runtime coarsens the clock to one-second resolution
+inside a handler, and it forbids any ambient clock/entropy read in a
+lift/computed or at pattern body.
 
 Version 1 of the allowed domain is a deliberate subset of
 `@commonfabric/memory`'s `FabricValue`:
@@ -854,6 +856,50 @@ Ambient globals available to authored module code in v1 MUST NOT include:
 - `randomUUID`
 - any host object that performs network, time, randomness, navigation, storage,
   or compilation effects immediately when called
+
+Whatever this surface ends up being, the type libraries the pattern compiler
+serves from `packages/static/assets/types` MUST NOT declare a global the
+Compartment does not install. A name the compiler declares but the sandbox
+lacks type checks, compiles and deploys, and then throws a `TypeError` in the
+user's hands, which is the one failure mode every gate lets through.
+`SANDBOX_WITHHELD_GLOBALS` in `packages/utils/src/sandbox-contract.ts` records
+the names held back and why; `deno task strip-withheld-globals` in
+`packages/static` removes their declarations, and
+`packages/runner/test/sandbox-global-contract.test.ts` checks both directions
+against a real Compartment. Endowing one of these globals means dropping it
+from that list and restoring its declaration together.
+
+Only the value declaration goes. The matching `interface` stays, so authored
+code may still name a withheld global in a type position — `let bytes:
+Float32Array` — and only the constructor is out of reach. What this does cost
+is feature detection: `typeof Proxy` no longer compiles, though coping with an
+absent global is the whole point of that idiom. Code that needs to ask must go
+through a `globalThis` record.
+
+`SANDBOX_UNRESOLVED_GLOBAL_GAPS` alongside it lists the names that still
+violate this rule: the timers, `queueMicrotask`, and `Intl`. Each is a live
+instance of the bug, held to an exact list by the same test so the set cannot
+grow. They are listed rather than stripped because several API clients under
+`packages/patterns` build retry backoff out of `setTimeout`, so the
+declarations cannot go until that code does.
+
+Notably, SES stops listing `Float32Array` and `Float64Array` as universal
+globals as of version 2. A NaN carries spare mantissa bits, and storing one
+into a float typed array writes them through to the underlying buffer, where a
+second view reads them back. Lockdown repairs `DataView.prototype.setFloat*` to
+write only canonical NaNs, but a typed-array element store is not a method and
+nothing can intercept it, so endowing the constructors would reopen the channel
+the repair closes.
+
+That channel is SES's threat model rather than this one: while the `fetch` shim
+above hands every compartment the open network, a pattern that wants to move
+bits out has a far shorter path than a NaN mantissa. The constructors stay out
+because doing so matches the upstream default, is reversible, and costs
+nothing — no pattern uses them — not because it denies an attacker anything
+today. What the roll does change is honesty: the compiler stops offering
+constructors the sandbox will not supply. Bundles compiled before the roll
+still carry `Float32Array` and throw at runtime regardless of what the type
+libraries say; stripping the declarations only fixes what compiles from here.
 
 When host constructors or functions from that compatibility surface are
 forwarded into a Compartment, the runtime MUST freeze the actual forwarded
@@ -2279,9 +2325,14 @@ const startTime = Date.now();  // Side effect at module scope
 **After:**
 ```typescript
 // Shown at module scope.
-import { safeDateNow } from "commonfabric";
-
-const getStartTime = lift(() => safeDateNow());
+// A lift/computed may not read the ambient clock, so capture the start time
+// inside a handler, where `Date.now()` is allowed (coarsened to one second)
+// and writes it into a cell.
+const captureStart = handler<unknown, { startTime: Writable<number> }>(
+  (_event, { startTime }) => {
+    startTime.set(Date.now());
+  },
+);
 ```
 
 #### Patterns with mutable module-scope state

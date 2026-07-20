@@ -34,7 +34,6 @@ import {
   type PerSession,
   type PerSpace,
   type PerUser,
-  safeDateNow,
   UI,
   type VNode,
   Writable,
@@ -112,7 +111,7 @@ const sendMessage = handler<void, {
     authorProfile: profile,
     authorName: currentProfile.name,
     body,
-    sentAt: safeDateNow(),
+    sentAt: Date.now(),
   });
   draft.set("");
 });

@@ -3,7 +3,6 @@ import {
   Default,
   handler,
   NAME,
-  nonPrivateRandom,
   pattern,
   UI,
   type VNode,
@@ -55,7 +54,7 @@ const removeItem = handler<
 
 export default pattern<ProjectListInput, ProjectListOutput>(({ items }) => {
   const addItem = action(() => {
-    const id = nonPrivateRandom().toString(36).slice(2, 8);
+    const id = Math.random().toString(36).slice(2, 8);
     items.set([
       ...items.get(),
       { id, title: `Project ${items.get().length + 1}`, done: false },

@@ -116,6 +116,9 @@ function makeNotificationState(args: {
       isMaterializer: () => false,
     },
     queueExecution: () => {},
+    isRendererInputSource: () => false,
+    holdShapedNotification: (_groupKey, _itemKey, _chargeKey, deliver) =>
+      deliver(),
   };
 }
 

@@ -104,6 +104,7 @@ export default pattern(() => {
   const assert_initial_state = computed(() =>
     profile.initialNameApplied === "Ada Lovelace" &&
     profile.externalLinks.length === 0 &&
+    profile.verifiedIdentities.length === 0 &&
     profile.elements.length === 0
   );
 

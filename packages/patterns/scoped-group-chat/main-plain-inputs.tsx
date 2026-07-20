@@ -6,7 +6,6 @@ import {
   type PerSession,
   type PerSpace,
   type PerUser,
-  safeDateNow,
   Stream,
   UI,
   type VNode,
@@ -131,7 +130,7 @@ const sendMessage = handler<SendMessageEvent, {
   if (!body) return;
 
   const author = senderName(name.get());
-  const sentAt = safeDateNow();
+  const sentAt = Date.now();
 
   const selectedRoomRef = selectedRoom.key("room");
   const hasSelectedRoom = selectedRoomRef.get();

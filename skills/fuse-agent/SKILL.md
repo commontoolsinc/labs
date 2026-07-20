@@ -45,6 +45,30 @@ cat "MOUNT/SPACE/pieces/pieces.json"
 4. Verify via `result/summary`
 5. Append wikilink to any source note that motivated the deploy
 
+### Identifying the running pattern
+
+`pieces/pieces.json` and each piece's `meta.json` expose `patternRef`:
+
+```json
+{
+  "identity": "<content-hash>",
+  "symbol": "default",
+  "source": {
+    "ref": "cf:pattern:<content-hash>",
+    "repository": "https://github.com/commontoolsinc/labs",
+    "entry": "/packages/patterns/annotation.tsx"
+  }
+}
+```
+
+The prefix-free `identity` + `symbol` are the authoritative reference to the
+running artifact (`cf:module/<identity>#<symbol>` in display form). `source.ref`
+addresses the immutable source closure; `source.repository` is an optional,
+explicitly supplied repository locator; `source.entry` is its optional authored
+entry path; and `source.origin` is optional update provenance. For pattern-kind
+discovery, match the entry filename and fall back to the origin path when the
+entry is absent; do not infer it from the piece's mutable display name.
+
 ---
 
 ## Lifecycle Gotchas
@@ -85,10 +109,26 @@ load. Reads stall during the window.
 ls /tmp/cf-mount/
 
 # Remount:
-cf fuse mount /tmp/cf-mount --background && sleep 3
+cf fuse mount /tmp/cf-mount --background
 ```
 
-Add `sleep 2` before verification reads if you see repeated stalls.
+`--background` waits until the daemon reports it has mounted, so no delay is
+needed after it. It exits non-zero if the child dies during startup, or if the
+child does not report readiness within about 20 seconds.
+
+If reads still stall, read the mount status rather than waiting:
+
+```bash
+cat /tmp/cf-mount/.status
+```
+
+- `connection.disconnected` — the transport is dead. Remount; waiting does not
+  recover it.
+- `rebuilds.pending` — a subtree is still rebuilding. Those reads settle on
+  their own.
+- On macOS/FUSE-T, staleness beyond about a second suggests the mount was
+  created with `--attrcache-timeout 0` or `--noattrcache`; remount with the
+  default of 1. Neither option applies on Linux or macFUSE.
 
 ### Transport disconnection (silent write failures)
 
@@ -112,20 +152,17 @@ state changes. If agents report "learned" entries that don't show up in
 
 ### Secure-mode time/random pitfalls in handlers
 
-Pattern handlers and actions may run under SES secure mode. Avoid raw zero-arg
-`new Date()` and `Math.random()` inside authored patterns — both can throw under
-secure mode.
-
-Use Common Fabric safe builtins instead:
+The pattern sandbox gates the ambient intrinsics `Date.now()`, no-argument
+`new Date()`, and `Math.random()`. They are allowed **inside a handler** (the
+clock coarsened to one-second resolution; entropy passes through) and throw a
+`TimeCapabilityError` in a lift/computed or at pattern-body level. Call the
+built-ins directly — they are not importable helpers.
 
 ```ts
-import { nonPrivateRandom, safeDateNow } from "commonfabric";
-
-const now = safeDateNow();
+// Inside a handler.
+const now = Date.now();
 const iso = new Date(now).toISOString();
-const id = `${now.toString(36)}-${
-  nonPrivateRandom().toString(36).slice(2, 11)
-}`;
+const id = `${now.toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 ```
 
 This specifically matters for:
@@ -134,31 +171,34 @@ This specifically matters for:
 - `agent.tsx` lifecycle handlers (`markIdle`, `markError`)
 - any handler-generated IDs or timestamps in experiment support patterns
 
-For event IDs in authored patterns, avoid `Math.random()` too. A safe pattern
-is:
+For event IDs in authored patterns, `Math.random()` is fine inside a handler:
 
 ```ts
-const now = safeDateNow();
-const id = `${now.toString(36)}-${
-  nonPrivateRandom().toString(36).slice(2, 11)
-}`;
+// Inside a handler.
+const now = Date.now();
+const id = `${now.toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 const timestamp = new Date(now).toISOString();
 ```
+
+For reactive time in a computed, read the live clock with the `#now` wish rather
+than calling `Date.now()`.
 
 If a handler fails with messages like:
 
 - `secure mode Calling new %SharedDate%() with no arguments throws`
 - `secure mode %SharedMath%.random() throws`
+- a `TimeCapabilityError`
 
-check the pattern source before assuming the agent invoked it incorrectly.
+check the pattern source — the clock/entropy call may be running in a
+lift/computed or at pattern-body level rather than inside a handler.
 
 ---
 
 ## Activity Log Pattern
 
-The Activity Log (`activity-log/activity-log.tsx`) is a structured event stream
-for recording agent actions. Log events incrementally as you work — not in one
-batch at the end.
+The Activity Log (`packages/patterns/activity-log/activity-log.tsx`) is a
+structured event stream for recording agent actions. Log events incrementally as
+you work — not in one batch at the end.
 
 **Calling `logEvent.handler`:**
 
@@ -244,14 +284,17 @@ cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c "
 import json, sys
 p = json.load(sys.stdin)
 for x in p:
-    if x.get('patternName','') == 'annotation':
+    ref = x.get('patternRef', {})
+    source = ref.get('source', {}) if isinstance(ref, dict) else {}
+    locator = (source.get('entry') or source.get('origin', '')) if isinstance(source, dict) else ''
+    if locator.rsplit('/', 1)[-1] == 'annotation.tsx':
         print(x['name'], '—', x.get('summary','')[:60])
 "
 ```
 
 ---
 
-## Agent Piece (`agent/agent.tsx`)
+## Agent Piece (`packages/patterns/agent/agent.tsx`)
 
 Each agent is a piece in the space with its own cells for directive, learned
 state, and lifecycle. Deploy one per agent in the space.
@@ -315,7 +358,7 @@ AGENT_NAME=$(resolve_agent)
 # Or on error:
 AGENT_NAME=$(resolve_agent)
 "MOUNT/SPACE/pieces/$AGENT_NAME/result/markError.handler" \
-  --summary "FUSE mount unresponsive after 3 retries"
+  --summary "FUSE mount unresponsive: .status reports transport disconnected"
 ```
 
 `markRunning`, `markIdle`, and `markError` automatically log to the Activity Log
@@ -329,7 +372,10 @@ cat "MOUNT/SPACE/pieces/pieces.json" | python3 -c "
 import json, sys
 p = json.load(sys.stdin)
 for x in p:
-    if x.get('patternName','') == 'agent':
+    ref = x.get('patternRef', {})
+    source = ref.get('source', {}) if isinstance(ref, dict) else {}
+    locator = (source.get('entry') or source.get('origin', '')) if isinstance(source, dict) else ''
+    if locator.rsplit('/', 1)[-1] == 'agent.tsx':
         print(x['name'], '—', x.get('summary','')[:60])
 "
 ```

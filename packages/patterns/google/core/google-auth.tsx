@@ -5,21 +5,19 @@ import {
   handler,
   NAME,
   pattern,
-  safeDateNow,
+  resultOf,
   Stream,
   TILE_UI,
   UI,
   type VNode,
+  wish,
   Writable,
 } from "commonfabric";
 
 type Secret<T> = T;
 
 import { refreshOAuthToken } from "../../auth/auth-refresh.ts";
-import {
-  REFRESH_THRESHOLD_MS,
-  startReactiveClock,
-} from "../../auth/auth-reactive.ts";
+import { REFRESH_THRESHOLD_MS } from "../../auth/auth-reactive.ts";
 import type { AuthStatus } from "../../auth/auth-types.ts";
 import {
   formatTokenExpiry,
@@ -83,13 +81,15 @@ const SCOPE_KEY_SHORT_NAMES: Record<string, string> = __cf_data({
  * Helper to create preview UI for picker display.
  * Exported for use by wrapper patterns (google-auth-personal, google-auth-work).
  *
- * NOTE: safeDateNow() is captured at call time. This is intentional — the preview
- * is a snapshot shown in the picker card, not a live-updating display. The main
- * pattern UI has its own reactive clock for real-time expiry tracking.
+ * NOTE: the current time is passed in as `nowMs` (the caller reads the reactive
+ * #now clock). The preview is a snapshot shown in the picker card; while #now is
+ * still loading (`nowMs` undefined) it shows no expiry warning rather than
+ * flashing an "expired" state.
  */
 export function createPreviewUI(
   auth: Auth | undefined,
   selectedScopes: Record<string, boolean>,
+  nowMs: number | undefined,
   badge?: { text: string; color: string },
 ): JSX.Element {
   const email = auth?.user?.email;
@@ -97,11 +97,11 @@ export function createPreviewUI(
   const name = auth?.user?.name;
   const isAuthenticated = !!email;
 
-  const now = safeDateNow();
   const expiresAt = auth?.expiresAt || 0;
-  const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
+  const isExpired = isAuthenticated && expiresAt > 0 && nowMs != null &&
+    expiresAt < nowMs;
   const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
-    expiresAt - now < 10 * 60 * 1000;
+    nowMs != null && expiresAt - nowMs < 10 * 60 * 1000;
 
   const status: AuthStatus = !isAuthenticated
     ? "needs-login"
@@ -356,7 +356,7 @@ const bgRefreshHandler = handler<
     const expiresAt = currentAuth.expiresAt ?? 0;
     if (expiresAt <= 0) return;
 
-    const timeRemaining = expiresAt - safeDateNow();
+    const timeRemaining = expiresAt - Date.now();
     if (timeRemaining > REFRESH_THRESHOLD_MS) return;
 
     console.log("[google-auth bgUpdater] Token expiring soon, refreshing...");
@@ -422,17 +422,21 @@ export default pattern<Input, Output>(
       return false;
     });
 
-    const now = new Writable(safeDateNow());
-    startReactiveClock(now);
+    // Reactive #now (ticks each minute) for live expiry tracking, replacing the
+    // ambient clock read at pattern body.
+    const nowCell = wish<number>({ query: "#now/60" });
+    const nowCellValue = resultOf(nowCell.result);
 
     const isTokenExpired = computed(() => {
       if (!authValue?.token || !authValue?.expiresAt) return false;
-      return authValue.expiresAt < now.get();
+      const nowMs = nowCellValue;
+      return authValue.expiresAt < nowMs;
     });
 
-    const tokenExpiryDisplay = computed(() =>
-      formatTokenExpiry(authValue?.expiresAt || 0, now.get())
-    );
+    const tokenExpiryDisplay = computed(() => {
+      const nowMs = nowCellValue;
+      return formatTokenExpiry(authValue?.expiresAt || 0, nowMs);
+    });
 
     // PERFORMANCE FIX: Pre-compute disabled state (same for all checkboxes)
     const checkboxesDisabled = computed(() => !!authValue?.user?.email);
@@ -514,7 +518,7 @@ export default pattern<Input, Output>(
         drive: selectedScopes.drive,
         docs: selectedScopes.docs,
         contacts: selectedScopes.contacts,
-      })
+      }, nowCellValue)
     );
 
     const loggedIn = computed(() => !!authValue?.user?.email);

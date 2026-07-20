@@ -1561,7 +1561,9 @@ export class WorkerReconciler {
     return isPrimitiveValue &&
       existingState !== undefined &&
       existingState.cell === undefined &&
-      existingState.currentValue === value &&
+      // `Object.is`, not `===`: an unchanged `NaN` prop must still be
+      // skippable, and a `0` -> `-0` change is a real change.
+      Object.is(existingState.currentValue, value) &&
       !this.isTextIntegrityProp(state, key) &&
       !DOM_LIVE_PROPS.has(key);
   }
@@ -2111,8 +2113,9 @@ export class WorkerReconciler {
    *
    * - Event props: resolved via .key().resolveAsCell() → stream/handler registration
    * - Binding props: resolved via .key().resolveAsCell() → cell reference
-   * - Object/array props: per-prop sink via .key().asSchema(true) for deep values
-   * - Primitive props: set directly from resolved Cell<Props> value
+   * - Style objects: resolved by the Cell<Props> schema and parent sink
+   * - Other object/array props: per-prop sink via .key().asSchema(true)
+   * - Primitive props: set directly from the resolved Cell<Props> value
    */
   private bindCellProps(
     ctx: ReconcileContext,
@@ -2258,9 +2261,13 @@ export class WorkerReconciler {
             cancel: () => {},
           });
         } else if (
-          value !== null && value !== undefined && typeof value === "object"
+          key !== "style" && value !== null && value !== undefined &&
+          typeof value === "object"
         ) {
-          // Object/array value - needs per-prop sink for deep resolution
+          // Generic object/array values are deliberately capped in
+          // rendererVDOMSchema, so they need a per-prop sink for deep
+          // resolution. Style is excluded: its explicit schema already
+          // traverses the object through the parent props sink.
           const existingState = state.propSubscriptions.get(key);
           if (existingState?.cell) continue; // Already has active per-prop sink
 
@@ -2283,19 +2290,19 @@ export class WorkerReconciler {
             cancel: propSinkCancel,
           });
         } else {
-          // Primitive value - set directly
+          // Schema-resolved style value or primitive value - set directly
           const existingState = state.propSubscriptions.get(key);
 
-          // Cancel per-prop sink if value transitioned from object to primitive
+          // Cancel a generic per-prop sink if its value became direct.
           if (existingState?.cell) {
             existingState.cancel();
           }
 
           // Skip a redundant op for an unchanged primitive, using the same
           // predicate as the inline static-prop path so both honor the same
-          // DOM-live / text-integrity exclusions (CT-1803). Object/cell prop
-          // states have cell !== undefined or no currentValue, so transitions
-          // (e.g. to undefined) still emit.
+          // DOM-live / text-integrity exclusions (CT-1803). Object values are
+          // never skipped by the predicate, and cell prop states have no
+          // currentValue, so transitions (e.g. to undefined) still emit.
           if (
             this.canSkipUnchangedStaticProp(state, key, value, existingState)
           ) {
@@ -2894,26 +2901,11 @@ export class WorkerReconciler {
     };
     addCancel(() => this.cleanupNodeHandlers(state));
 
-    // Render each child and insert it
-    for (const childNode of nodes) {
-      const childState = this.renderNode(
-        ctx,
-        childNode,
-        new Set(visited),
-        policy,
-      );
-      if (childState) {
-        addCancel(childState.cancel);
-        this.queueOps([
-          {
-            op: "insert-child",
-            parentId: nodeId,
-            childId: childState.nodeId,
-            beforeId: null,
-          },
-        ]);
-      }
-    }
+    // Array items use the same Cell-aware child path as VNode children.
+    // rendererVDOMSchema projects array items as Cells, including at the root,
+    // so handing them directly to renderNode would violate its invariant that
+    // Cell children have already passed through renderCellChild.
+    addCancel(this.bindChildren(ctx, state, nodes, visited, policy));
 
     return state;
   }
@@ -3564,7 +3556,7 @@ export class WorkerReconciler {
       // may have flipped.
       if (
         !forced && !unavailable && !isInitialRender &&
-        resolvedChild === childState.currentValue
+        Object.is(resolvedChild, childState.currentValue)
       ) {
         return;
       }

@@ -7,7 +7,6 @@ import {
   ifElse,
   NAME,
   navigateTo,
-  nonPrivateRandom,
   pattern,
   resultOf,
   safeDateNow,
@@ -56,8 +55,8 @@ const resetLobby = handler<
 >((_event, { messages, users, sessionId }) => {
   console.log("[resetLobby] Resetting all chat state...");
   // Generate new session ID to invalidate all existing chat room connections
-  const newSessionId = `session-${safeDateNow()}-${
-    nonPrivateRandom().toString(36).slice(2)
+  const newSessionId = `session-${Date.now()}-${
+    Math.random().toString(36).slice(2)
   }`;
   sessionId.set(newSessionId);
   messages.set([]);
@@ -96,8 +95,8 @@ const joinChat = handler<
   // Initialize session ID if not set (first user joining)
   let currentSessionId = sessionId.get();
   if (!currentSessionId) {
-    currentSessionId = `session-${safeDateNow()}-${
-      nonPrivateRandom().toString(36).slice(2)
+    currentSessionId = `session-${Date.now()}-${
+      Math.random().toString(36).slice(2)
     }`;
     sessionId.set(currentSessionId);
     console.log("[joinChat] Initialized new session:", currentSessionId);
@@ -122,7 +121,7 @@ const joinChat = handler<
     }
     users.push({
       name: displayName,
-      joinedAt: safeDateNow(),
+      joinedAt: Date.now(),
       avatar: (avatar ?? "").trim(),
       profile,
     });
@@ -130,10 +129,10 @@ const joinChat = handler<
 
     // Add system message for join
     messages.push({
-      id: `msg-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2)}`,
+      id: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       author: "System",
       content: `${displayName} joined the chat`,
-      timestamp: safeDateNow(),
+      timestamp: Date.now(),
       type: "system",
       reactions: [],
     });

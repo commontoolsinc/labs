@@ -11,7 +11,6 @@ import {
   isPending,
   isSyncing,
   NAME,
-  nonPrivateRandom,
   pattern,
   type PerSpace,
   type PerUser,
@@ -228,7 +227,7 @@ export interface LotWatchOutput {
 // ============================================================
 
 const genId = (): string =>
-  `sighting-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2, 10)}`;
+  `sighting-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
 type ImageUploadEvent = {
   detail?: {
@@ -764,7 +763,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       const sighting: Sighting = {
         id: genId(),
         spotNumber,
-        capturedAt: safeDateNow(),
+        capturedAt: Date.now(),
         reportedBy: reporterName.get() || "Unknown",
         image: lightImage,
         description: description.trim(),

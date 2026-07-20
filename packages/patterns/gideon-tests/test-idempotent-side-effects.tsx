@@ -30,7 +30,6 @@ import {
   ifElse,
   NAME,
   pattern,
-  safeDateNow,
   toIndentedDebugString,
   UI,
   Writable,
@@ -83,11 +82,14 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
     // Only run side effect after user clicks (triggerCount > 0)
     // This prevents thrashing during initial load
     if (trigger > 0) {
-      // NON-IDEMPOTENT SIDE EFFECT: Always append
+      // NON-IDEMPOTENT SIDE EFFECT: Always append. The non-idempotence is the
+      // unconditional append, not a clock read — the ambient clock throws in a
+      // computed (see docs/development/debugging/non-idempotent-detection.md),
+      // so `seq` is used as a per-run distinguishing value instead.
       const current = nonIdempotentArray.get();
       nonIdempotentArray.set([...current, {
         trigger,
-        timestamp: safeDateNow(),
+        seq: current.length,
       }]);
 
       // Increment counter to show how many times this ran
@@ -112,11 +114,12 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
       const current = idempotentMap.get();
       const key = `trigger-${trigger}`; // Deterministic key based on input
 
-      // Check before write - idempotent!
+      // Check before write - idempotent! (No clock read: the ambient clock
+      // throws in a computed, and it is incidental to the idempotency here.)
       if (!(key in current)) {
         idempotentMap.set({
           ...current,
-          [key]: { trigger, timestamp: safeDateNow() },
+          [key]: { trigger },
         });
       }
 

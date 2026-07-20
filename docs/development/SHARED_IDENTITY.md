@@ -5,6 +5,12 @@ when testing identity-sensitive behavior. Scoped cells make this important:
 `PerUser<T>` and `PerSession<T>` data is keyed by the active user DID, not only
 by the space DID.
 
+The workflows here are also the reason an identity is not a reliable stand-in
+for a person: one human routinely holds several identities, and one identity is
+routinely driven by several actors. See
+[`active-user-counting.md`](active-user-counting.md) for what that means when
+counting users.
+
 > **Use a unique key (`id new`) for your own identity.** `cf id derive "implicit
 > trust"` produces a *fixed, publicly-derivable* DID — the one the local toolshed
 > runs as in dev mode — so every developer who derives it shares the exact same

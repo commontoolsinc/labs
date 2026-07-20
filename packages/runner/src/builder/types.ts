@@ -1,4 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
+import type { EntityKind } from "../entity-kind.ts";
 import type { PatternBuilder } from "./pattern.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 
@@ -8,6 +9,8 @@ import type {
   AsComparableCell,
   AsOpaqueCell,
   AsReadonlyCell,
+  AssertCaptureFunction,
+  AssertFunction,
   AsStream,
   AsWriteonlyCell,
   ByRefFunction,
@@ -121,6 +124,8 @@ export type {
   AsComparableCell,
   AsOpaqueCell,
   AsReadonlyCell,
+  AssertPart,
+  AssertRecord,
   AsStream,
   AsWriteonlyCell,
   Cell,
@@ -274,6 +279,14 @@ export type DerivedInternalCellDescriptor = {
   partialCause: JSONValue;
   schema?: JSONSchema;
   scope?: CellScope;
+  /**
+   * Entity kind minted into the cell's id (preimage + visible tag). Set to
+   * `"computed"` only when the builder proves the cell is written solely by
+   * compute nodes. Participates in manifest matching: a kind change
+   * re-materializes the cell under a new id. See
+   * `docs/specs/computed-cell-identity.md`.
+   */
+  kind?: EntityKind;
 };
 
 declare module "@commonfabric/api" {
@@ -324,6 +337,24 @@ export type Frame = {
   space?: MemorySpace;
   inHandler?: boolean;
   reactives: Set<Reactive<any>>;
+  /**
+   * Positive marker for the kind of authored pattern code running under this
+   * frame: "handler" for an event handler, "lift" for a reactive computation
+   * (lift/computed/derived/action). Absent for internal runner frames. Unlike
+   * `inHandler`, this lets a guard distinguish a pattern lift from internal code
+   * — both of which lack `inHandler` — without conflating them.
+   */
+  frameKind?: "lift" | "handler";
+  /**
+   * The wall-clock instant (ms) bound to the event that opened this handler
+   * frame. A handler's ambient clock reads this FROZEN value, coarsened, rather
+   * than the live wall clock, so time does not advance during a handler's own
+   * work — reading it before and after an `await` yields the same value, which
+   * denies a handler an intra-run clock. Events a handler emits carry this same
+   * instant forward, so a whole causal chain from one gesture shares one time.
+   * Only meaningful on handler frames.
+   */
+  eventTime?: number;
   unsafe_binding?: UnsafeBinding;
   sourceLocationContext?: SourceLocationContext;
   /**
@@ -347,6 +378,12 @@ export interface BuilderFunctionsAndConstants {
   handler: HandlerFunction;
   action: ActionFunction;
   computed: ComputedFunction;
+  assert: AssertFunction;
+
+  // Operand recording for `assert` bodies. The assert-diagnostics transformer
+  // emits calls to this against the injected `__cfHelpers` object; it is not
+  // meant to be called from authored code.
+  assertCapture: AssertCaptureFunction;
 
   // Availability observation
   isPending: IsPendingFunction;
@@ -404,8 +441,6 @@ export interface BuilderFunctionsAndConstants {
 
   // Environment
   getPatternEnvironment: GetPatternEnvironmentFunction;
-  nonPrivateRandom: NonPrivateRandomFunction;
-  safeDateNow: SafeDateNowFunction;
 
   // Entity utilities
   getEntityId: GetEntityIdFunction;

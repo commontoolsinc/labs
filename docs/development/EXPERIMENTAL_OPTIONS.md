@@ -20,7 +20,7 @@ in the same change.
 > flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-07-09. Each flag's section carries the date its status
+**Last reviewed:** 2026-07-15. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -33,6 +33,7 @@ was last checked against the code.
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (non-home roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete both auto-update flags | implemented, on in the shell |
 | [`systemPatternAutoUpdateHome`](#systempatternautoupdatehome) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` env / shell build define, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#4611) | on after the home.tsx stable-addressing audit | implemented, off by default |
+| [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | off | Robin McCollum (in development) | graduate to always-on with the computed-cell write-conflict policy | in development on robin/feat-computed-cell-identity-p2 (redesigned: `computed:` URI scheme) |
 | [`cfcEnforcementMode`](#cfcenforcementmode) | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse) | `enforce-explicit` | Bernhard Seefeld (#3263) | tighten default toward `enforce-strict` | active; ladder is permanent |
 | [`cfcFlowLabels`](#cfcflowlabels) | `RuntimeOptions.cfcFlowLabels` | `off` | Bernhard Seefeld (#4011) | move toward `persist` | implemented, staged rollout |
 | [`cfcWriteFloor`](#cfcwritefloor) | `RuntimeOptions.cfcWriteFloor` | `off` | Bernhard Seefeld (#4479) | move toward `enforce` | implemented, staged rollout |
@@ -69,11 +70,11 @@ The mapping from environment variable to flag is defined once, canonically, as
 and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
 the background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines.
-Five flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
+Six flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
 `eagerSourceAnnotation`, `systemPatternAutoUpdate`,
-`systemPatternAutoUpdateHome`); `commitPreconditions` is deliberately mapped to
-`null` there, which records "not env-reachable" as a decision rather than an
-omission.
+`systemPatternAutoUpdateHome`, `computedCellIds`); `commitPreconditions` is
+deliberately mapped to `null` there, which records "not env-reachable" as a
+decision rather than an omission.
 The mapping accepts exactly `"true"` and `"false"`; any other value is ignored
 with a warning rather than coerced. See [How flags
 propagate](#how-flags-propagate).
@@ -219,12 +220,15 @@ propagate](#how-flags-propagate).
 - **Purpose.** At space open, rolls a space's **non-home** root system pattern
   (default-app) forward in place when its toolshed serves a newer content
   identity: version gate (client vs toolshed build sha) → cached `?identity`
-  compare → in-place `patternIdentity` swap, re-instantiated by the existing
-  pattern watcher onto the same result cell. Best-effort and non-blocking: no
-  failure of the check may break space open. When either build sha is unknown
-  (dev/source servers carry none) the check skips silently; the `versionSkew`
-  IPC signal — which raises the shell's reload banner — fires only on a proven
-  mismatch (both shas known and different). See
+  compare → in-place `patternIdentity` swap. Persisted roots are resolved
+  without starting; the check is awaited and the reconciled identity is
+  committed before root bootstrap, so an unloadable obsolete root cannot block
+  its own repair. The check remains best-effort and converts its own failures
+  to a no-op; if repair is unavailable, the subsequent root start retains its
+  normal loud failure behavior. When either build sha is unknown (dev/source
+  servers carry none) the check skips silently; the `versionSkew` IPC signal —
+  which raises the shell's reload banner — fires only on a proven mismatch
+  (both shas known and different). See
   [`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md).
 - **Current default and planned end state.** The runner built-in default is off
   like every flag in this category; the shell build injects `true` unless the
@@ -233,8 +237,8 @@ propagate](#how-flags-propagate).
   background piece service) leave it off unless the env var is set. End state:
   graduate to always-on for system roots once golden-replay coverage has soaked
   and the home audit lands, then delete both auto-update flags.
-- **Status on 2026-07-09.** Implemented; on in the shell for non-home roots,
-  off elsewhere.
+- **Status on 2026-07-14.** Implemented; on in the shell for non-home roots,
+  off elsewhere. Root reconciliation runs before bootstrap.
 - **Path to removal.** Graduate the home root (below), make the check
   unconditional, and remove both flags together.
 
@@ -255,6 +259,37 @@ propagate](#how-flags-propagate).
 - **Status on 2026-07-09.** Implemented, off by default.
 - **Path to removal.** Complete the audit, default the home root on, and delete
   both flags when the check becomes unconditional.
+
+### `computedCellIds`
+
+- **Toggle via.** `EXPERIMENTAL_COMPUTED_CELL_IDS` environment variable
+  (through the canonical env registry) or
+  `RuntimeOptions.experimental.computedCellIds`.
+- **Added by.** Robin McCollum, on the computed-cell-identity branch (spec:
+  [`docs/specs/computed-cell-identity.md`](../specs/computed-cell-identity.md)).
+- **Purpose.** Mints kind-schemed entity ids (`computed:fid1:<hash>`, the
+  `computed:` URI scheme replacing `of:`) for derived internal cells. The
+  builder classifies written internals as computed by default, then applies
+  conservative writer- and input-side disqualifiers. These include streams;
+  handler, writable-proxy, effect, opaque, and non-replayable writers; and
+  roots handed writable to handlers, sub-patterns, sub-pattern operations, or
+  non-replayable builtins. The linked spec is the exhaustive classifier
+  reference. The flag gates minting only; readers accept both id forms
+  unconditionally, so it can flip either way without a migration — but see the
+  version-skew note below.
+- **Current default and planned end state.** Off by default. Graduates to
+  always-on together with the computed-cell write-conflict policy (ack-and-drop
+  for stale all-computed commits), then the flag is deleted. The flag is the
+  rollout gate for version skew: clients predating the `computed:` scheme
+  throw on such ids arriving via sync, so it must not graduate until every
+  syncing client carries the readers (old servers are safe — an unknown
+  scheme parses as no kind and stays strict).
+- **Status on 2026-07-15.** In development on
+  `robin/feat-computed-cell-identity-p2`: phase 1 (kind-schemed minting,
+  redesigned from a retired kind-in-hash-tag format that never shipped)
+  implemented behind the flag. Phase 2 (ack-and-drop of stale all-computed
+  commits) is split into its own follow-up PR with its own flag, so this
+  branch changes no conflict semantics.
 
 ---
 
