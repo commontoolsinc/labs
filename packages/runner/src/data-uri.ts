@@ -147,10 +147,8 @@ export function createDataCellURI(
  *   writes inline `data:` links rather than persisting them (see
  *   {@link findAndInlineDataURILinks}), so nothing durably stored mints
  *   this form anymore. The branch stays because this reader accepts
- *   `data:` URIs originating outside the runner, the storage layer does
- *   not itself enforce the no-persistence convention, and in-tree legacy
- *   captures (the `piece-query-legacy` traverse-replay fixture) still
- *   carry bare-JSON ids inside persisted values.
+ *   `data:` URIs originating outside the runner and the storage layer
+ *   does not itself enforce the no-persistence convention.
  *
  * @param text The payload text, after any percent- or Base64-decoding.
  * @returns The decoded value.
