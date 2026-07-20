@@ -11,7 +11,23 @@ import {
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
+import {
+  seemsLikeJsonEncodedFabricValue,
+  valueFromJson,
+} from "@commonfabric/data-model/codec-json";
+import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import type { URI } from "./sigil-types.ts";
+
+/**
+ * `ReconstructionContext` for decoding `data:` URI payloads. Links at this
+ * boundary are sigil (plain) data rather than cell references, so no cell
+ * reconstruction is ever needed; this context exists so that an unexpected
+ * cell reference produces a message that names the boundary.
+ */
+const dataUriReconstructionContext = new EmptyReconstructionContext(
+  true,
+  "no cell reconstruction at the `data:` URI boundary",
+);
 
 /**
  * Convert an entity ID to URI format. The scheme carries the entity kind:
@@ -80,7 +96,7 @@ export function fromURI(uri: URI | string): string {
 }
 
 /**
- * Extracts and parses the JSON payload of a `data:` URI, which is required to
+ * Extracts and decodes the payload of a `data:` URI, which is required to
  * have the media type `application/json`. The payload is everything past the
  * first comma, and how it is spelled is dictated by the parameters in the
  * header before that comma:
@@ -89,7 +105,19 @@ export function fromURI(uri: URI | string): string {
  * - `;charset=` is honored only as `utf-8` (or `utf8`), and any other value is
  *   rejected. It is UTF-8 either way; the parameter only gets to agree.
  *
- * An empty payload yields `undefined`, rather than being a parse error.
+ * The extracted payload text is decoded in one of two ways:
+ *
+ * - A payload bearing the `fvj1:` tag is decoded as the standard `data-model`
+ *   `FabricValue` JSON-embedded encoding. Results from this branch are
+ *   deep-frozen and may contain `FabricInstance`s. (The media type is
+ *   admittedly a bit of a fib for this form, since the tag prefix makes the
+ *   payload not actually be JSON.)
+ * - Any other payload is parsed as bare JSON. A `data:` URI _is_ its own
+ *   content and such URIs are embedded in persisted documents, so ids with
+ *   bare-JSON payloads survive indefinitely; this branch has to stay for as
+ *   long as any of them remain, that is, probably forever.
+ *
+ * An empty payload yields `undefined`, rather than being a decode error.
  *
  * This reads a strict superset of what gets written by `link-utils.ts`'s
  * `createDataCellURI()`, which only ever emits the percent-encoded form with no
@@ -101,12 +129,14 @@ export function fromURI(uri: URI | string): string {
  * encoding chosen there dictates what is decodable here -- but the dependency
  * between the files only runs one way (`link-utils.ts` imports this module,
  * not the reverse), so nothing mechanically holds them in agreement. Change
- * one and the other has to move with it; see the `TODO`s in both bodies.
+ * one and the other has to move with it; see the `TODO` in that function's
+ * body.
  *
  * @param uri The `data:` URI to read.
- * @returns The parsed payload, or `undefined` if the payload is empty.
+ * @returns The decoded payload, or `undefined` if the payload is empty.
  * @throws If `uri` is not an `application/json` `data:` URI, if it declares a
- *   charset other than UTF-8, or if its payload is not valid JSON.
+ *   charset other than UTF-8, or if its payload is neither valid JSON nor a
+ *   valid encoded `FabricValue`.
  */
 export function getJSONFromDataURI(uri: URI | string): any {
   if (!uri.startsWith("data:application/json")) {
@@ -152,21 +182,11 @@ export function getJSONFromDataURI(uri: URI | string): any {
     decodedData = decodeURIComponent(data);
   }
 
-  // TODO(danfuzz): This `JSON.parse()` is the decode half of the `data:` URI
-  // boundary, and has to change in lockstep with the `JSON.stringify()` in
-  // `link-utils.ts`'s `createDataCellURI()`: whatever encodes the payload
-  // determines what can decode it. The `data-model` counterpart is
-  // `valueFromJson()`, given a `ReconstructionContext`;
-  // `memory/v2.ts`'s `encodeMemoryBoundary()`/`decodeMemoryBoundary()` pair is
-  // a worked example of the same boundary, and uses an
-  // `EmptyReconstructionContext` because links at that boundary are sigil
-  // (plain) data rather than `FabricInstance`s, which is true here too.
-  //
-  // Note that this decode cannot simply switch over: a `data:` URI _is_ its
-  // own content, and such URIs are embedded in persisted documents, so ids in
-  // the current (bare JSON) form survive indefinitely. This side will have to
-  // accept both forms for as long as any of them remain. The encoded form is
-  // self-identifying -- `data-model` tags it `fvj1:` -- and
-  // `seemsLikeJsonEncodedFabricValue()` exists to make that distinction.
-  return decodedData.length > 0 ? JSON.parse(decodedData) : undefined;
+  if (decodedData.length === 0) {
+    return undefined;
+  }
+
+  return seemsLikeJsonEncodedFabricValue(decodedData)
+    ? valueFromJson(decodedData, dataUriReconstructionContext)
+    : JSON.parse(decodedData);
 }

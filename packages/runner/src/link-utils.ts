@@ -378,7 +378,10 @@ export function findAndInlineDataURILinks(value: any): any {
  * `uri-utils.ts`) is what reads back what this writes. The two are a pair by
  * construction -- the encoding chosen here dictates what is decodable there --
  * but nothing mechanically holds them in agreement, so a change to either has
- * to move the other with it; see the `TODO`s in both bodies.
+ * to move the other with it. The decode half accepts both the bare-JSON form
+ * written here and the standard `data-model` `FabricValue` encoding (tagged
+ * `fvj1:`); see the `TODO` in the body below about moving this side onto the
+ * latter.
  *
  * Each primitive cell link within `data` is rewritten to a full sigil link,
  * with relative links resolved against `base`. That rewriting is what makes
