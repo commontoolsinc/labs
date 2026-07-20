@@ -236,21 +236,39 @@ export function decodeDataURIPayloadText(text: string): FabricValue {
  *   includes the empty payload and bare JSON).
  */
 export function getJSONFromDataURI(uri: URI | string): any {
-  if (!isDataCellURI(uri)) {
+  const { mediaType, text } = extractDataURIPayloadText(uri);
+  if (!isDataCellMediaType(mediaType)) {
     throw new Error(`Invalid URI: ${uri}`);
   }
+  return decodeDataURIPayloadText(text);
+}
 
-  // Extract the data part after the comma
+/**
+ * Splits a `data:` URI and decodes its payload into text -- the single
+ * place the URI's surface syntax is taken apart. The payload is everything
+ * past the first comma; `;base64` selects Base64 (decoded as UTF-8 bytes),
+ * otherwise the payload is percent-encoded; a `;charset=` other than UTF-8
+ * is rejected. The media type is returned verbatim so each caller applies
+ * its own acceptance policy.
+ *
+ * @param uri The `data:` URI to split.
+ * @returns The media type and the decoded payload text.
+ * @throws If `uri` is not a `data:` URI with a comma, or declares a
+ *   non-UTF-8 charset.
+ */
+export function extractDataURIPayloadText(
+  uri: string,
+): { mediaType: string; text: string } {
   const commaIndex = uri.indexOf(",");
-  if (commaIndex === -1) {
+  if (!uri.startsWith("data:") || commaIndex === -1) {
     throw new Error(`Invalid data URI format: ${uri}`);
   }
 
-  const header = uri.substring(0, commaIndex);
+  const header = uri.substring("data:".length, commaIndex);
   const data = uri.substring(commaIndex + 1);
 
-  // Parse the header to check for charset
   const headerParts = header.split(";").map((part) => part.trim());
+  const mediaType = headerParts[0];
   for (const part of headerParts) {
     if (part.startsWith("charset=")) {
       const charset = part.substring(8).toLowerCase();
@@ -262,24 +280,19 @@ export function getJSONFromDataURI(uri: URI | string): any {
     }
   }
 
-  // Check if data is base64 encoded
   const isBase64 = headerParts.some((part) => part === "base64");
-
-  let decodedData: string;
+  let text: string;
   if (isBase64) {
-    // Use TextDecoder to properly decode UTF-8 bytes from base64
     const binaryString = atob(data);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
       bytes[i] = binaryString.charCodeAt(i);
     }
-    const decoder = new TextDecoder();
-    decodedData = decoder.decode(bytes);
+    text = new TextDecoder().decode(bytes);
   } else {
-    decodedData = decodeURIComponent(data);
+    text = decodeURIComponent(data);
   }
-
-  return decodeDataURIPayloadText(decodedData);
+  return { mediaType, text };
 }
 
 /**
