@@ -15,6 +15,24 @@ deno task test
 
 **Important:** Always use `deno task test` from the root, NOT `deno test`, as the task includes necessary flags.
 
+### Tests that start Deno
+
+Dependency installation and verification are separate parts of CI. Installation
+may fetch registry metadata and package contents. Verification must use the
+dependency graph recorded in `deno.lock` without resolving package versions
+again.
+
+Use `@commonfabric/test-support/isolated-deno` when a test starts another Deno
+process. Its check helper copies the lockfile and runs `deno check` with frozen
+dependency resolution. A generated config may change compiler options, but it
+must preserve the root config's imports and workspace members. Package imports
+already come from each workspace member's config and must not be copied into
+the generated root config.
+
+This boundary keeps a verification test independent of mutable registry
+metadata. It also makes an accidental dependency graph change fail as an
+out-of-date lockfile instead of silently resolving a different graph.
+
 ### Test Structure
 
 - **Unit tests**: Use `@std/testing/bdd` (`describe`/`it`) with `@std/expect` for assertions
