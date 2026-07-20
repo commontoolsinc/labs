@@ -79,6 +79,93 @@ describe("resolveCellPath", () => {
   });
 });
 
+describe("resolveCellPath through linked slots", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("reads through a cell link at an intermediate segment", () => {
+    // The deploy shape that hit this: a piece whose `status` field is a
+    // LINK to another cell (`cf piece link`), read back as
+    // `status/spaceName`. The leaf already derefs a cell-valued result;
+    // an intermediate segment must do the same or the traversal inspects
+    // the Cell instance's own JS properties and reports its internals as
+    // "available keys".
+    const statusCell = runtime.getCell(
+      space,
+      "linked status source",
+      undefined,
+      tx,
+    );
+    statusCell.set({ spaceName: "test-space" });
+
+    const pieceCell = runtime.getCell(
+      space,
+      "piece with linked status",
+      undefined,
+      tx,
+    );
+    pieceCell.set({ status: statusCell });
+
+    assertEquals(
+      resolveCellPath(pieceCell as never, ["status", "spaceName"]),
+      "test-space",
+    );
+  });
+
+  it("reads through an asCell-schema slot at an intermediate segment", () => {
+    // A piece result whose schema declares the linked field asCell (the
+    // Writable<...> output shape) surfaces the slot as a Cell from get():
+    // the parent's value then holds a live Cell instance, and traversal
+    // must read through it rather than inspecting the Cell's own JS
+    // properties (which reports runner internals as "available keys").
+    const statusCell = runtime.getCell(
+      space,
+      "asCell status source",
+      undefined,
+      tx,
+    );
+    statusCell.set({ spaceName: "test-space" });
+
+    const pieceCell = runtime.getCell(
+      space,
+      "piece with asCell status",
+      {
+        type: "object",
+        properties: {
+          status: {
+            type: "object",
+            properties: { spaceName: { type: "string" } },
+            asCell: ["cell"],
+          },
+        },
+      } as const,
+      tx,
+    );
+    pieceCell.set({ status: statusCell as never });
+
+    assertEquals(
+      resolveCellPath(pieceCell as never, ["status", "spaceName"]),
+      "test-space",
+    );
+  });
+});
+
 describe("getResultCellWithSourceSchema", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
