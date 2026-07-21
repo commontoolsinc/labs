@@ -1,4 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   emptySchemaObject,
   schemaForValueType,
@@ -30,6 +31,15 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { isCell } from "../cell.ts";
+
+// Ledger-visible counter for the silent sick-write shape (see moduleToJSON):
+// counts increment even while the logger is disabled, so a worker's logger
+// ledger exposes how many function implementations serialized with neither
+// provenance nor an entry ref without turning any logging on.
+const serializeShapeLogger = getLogger("builder.serialize-shape", {
+  enabled: false,
+  logCountEvery: 0,
+});
 
 export type CellAliasResolver = (
   cell: Reactive<any>,
@@ -408,6 +418,25 @@ export function moduleToJSON(module: Module) {
     const implRefValue = (provenance?.symbol
       ? { identity: provenance.identity, symbol: provenance.symbol }
       : undefined) ?? entryRefValue;
+    if (module.type === "javascript" && implRefValue === undefined) {
+      // This module will serialize body-only with no `$implRef` — the shape a
+      // reader can only resolve through the silent bare-SES stringified-source
+      // fallback, where module-scope references break (the helper-unlink
+      // failure family; topics-dev record, 2026-07). Legitimate for test-built
+      // / never-verified modules, so this stays at debug — but the ledger
+      // count fires even when disabled, so the sick-write volume is always
+      // observable from the logger ledger.
+      serializeShapeLogger.debug("noref-body-write", () => [
+        "Serializing a function implementation with neither provenance nor a" +
+        " verified entry ref (body-only, no $implRef)",
+        {
+          preview: Function.prototype.toString.call(implementation).slice(
+            0,
+            80,
+          ),
+        },
+      ]);
+    }
     const implRef = implRefValue ? { $implRef: implRefValue } : {};
     const preview = (implementation as { preview?: string }).preview ??
       implementation.toString().slice(0, 200);
