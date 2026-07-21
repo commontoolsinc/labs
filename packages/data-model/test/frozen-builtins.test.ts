@@ -54,6 +54,28 @@ describe("frozen-builtins", () => {
       expect(fm.has("b")).toBe(false);
     });
 
+    it("rejects a receiver that has no backing store", () => {
+      const foreign = Object.create(FrozenMap.prototype) as FrozenMap<
+        string,
+        number
+      >;
+
+      expect(() => foreign.get("a")).toThrow("Incompatible FrozenMap receiver");
+      expect(() => foreign.has("a")).toThrow("Incompatible FrozenMap receiver");
+      expect(() => foreign.size).toThrow("Incompatible FrozenMap receiver");
+      expect(() => foreign.keys()).toThrow("Incompatible FrozenMap receiver");
+      expect(() => foreign.values()).toThrow("Incompatible FrozenMap receiver");
+      expect(() => foreign.entries()).toThrow(
+        "Incompatible FrozenMap receiver",
+      );
+    });
+
+    it("reports `Map` as its `Symbol.toStringTag`", () => {
+      const fm = new FrozenMap<string, number>([["a", 1]]);
+      expect(fm[Symbol.toStringTag]).toBe("Map");
+      expect(Object.prototype.toString.call(fm)).toBe("[object Map]");
+    });
+
     it("throws on `getOrInsert()`", () => {
       const fm = new FrozenMap<string, number>([["a", 1]]) as
         & FrozenMap<
@@ -153,6 +175,34 @@ describe("frozen-builtins", () => {
       expect(fs.has(2)).toBe(false);
     });
 
+    it("rejects a receiver that has no backing store", () => {
+      const foreign = Object.create(FrozenSet.prototype) as FrozenSet<number>;
+
+      expect(() => foreign.has(1)).toThrow("Incompatible FrozenSet receiver");
+      expect(() => foreign.size).toThrow("Incompatible FrozenSet receiver");
+      expect(() => foreign.keys()).toThrow("Incompatible FrozenSet receiver");
+      expect(() => foreign.values()).toThrow("Incompatible FrozenSet receiver");
+      expect(() => foreign.entries()).toThrow(
+        "Incompatible FrozenSet receiver",
+      );
+    });
+
+    it("reports `Set` as its `Symbol.toStringTag`", () => {
+      const fs = new FrozenSet<number>([1]);
+      expect(fs[Symbol.toStringTag]).toBe("Set");
+      expect(Object.prototype.toString.call(fs)).toBe("[object Set]");
+    });
+
+    it("yields value-value pairs from `entries()`, as `Set` does", () => {
+      const fs = new FrozenSet<number>([1, 2]);
+      expect([...fs.entries()]).toEqual([[1, 1], [2, 2]]);
+    });
+
+    it("yields values from `keys()`, as `Set` does", () => {
+      const fs = new FrozenSet<number>([1, 2]);
+      expect([...fs.keys()]).toEqual([1, 2]);
+    });
+
     it("supports forEach iteration", () => {
       const fs = new FrozenSet([10, 20, 30]);
       const values: number[] = [];
@@ -180,6 +230,124 @@ describe("frozen-builtins", () => {
         "Cannot mutate a finalized FrozenSet builder",
       );
       expect([...fs.values()]).toEqual([1]);
+    });
+
+    describe("set algebra", () => {
+      it("computes `union()`", () => {
+        const fs = new FrozenSet<number>([1, 2]);
+        expect([...fs.union(new Set([2, 3]))]).toEqual([1, 2, 3]);
+      });
+
+      it("computes `intersection()`", () => {
+        const fs = new FrozenSet<number>([1, 2, 3]);
+        expect([...fs.intersection(new Set([2, 3, 4]))]).toEqual([2, 3]);
+      });
+
+      it("computes `difference()`", () => {
+        const fs = new FrozenSet<number>([1, 2, 3]);
+        expect([...fs.difference(new Set([2, 4]))]).toEqual([1, 3]);
+      });
+
+      it("computes `symmetricDifference()`", () => {
+        const fs = new FrozenSet<number>([1, 2, 3]);
+        expect([...fs.symmetricDifference(new Set([3, 4]))]).toEqual([1, 2, 4]);
+      });
+
+      it("computes `isSubsetOf()`", () => {
+        const fs = new FrozenSet<number>([1, 2]);
+        expect(fs.isSubsetOf(new Set([1, 2, 3]))).toBe(true);
+        expect(fs.isSubsetOf(new Set([1, 3]))).toBe(false);
+      });
+
+      it("computes `isSupersetOf()`", () => {
+        const fs = new FrozenSet<number>([1, 2, 3]);
+        expect(fs.isSupersetOf(new Set([1, 3]))).toBe(true);
+        expect(fs.isSupersetOf(new Set([1, 4]))).toBe(false);
+      });
+
+      it("computes `isDisjointFrom()`", () => {
+        const fs = new FrozenSet<number>([1, 2]);
+        expect(fs.isDisjointFrom(new Set([3, 4]))).toBe(true);
+        expect(fs.isDisjointFrom(new Set([2, 3]))).toBe(false);
+      });
+
+      it("returns a mutable `Set` from the value-producing methods", () => {
+        const result = new FrozenSet<number>([1]).union(new Set([2]));
+
+        expect(result).toBeInstanceOf(Set);
+        expect(result).not.toBeInstanceOf(FrozenSet);
+        result.add(3);
+        expect([...result]).toEqual([1, 2, 3]);
+      });
+
+      it("handles an empty operand on both sides", () => {
+        const empty = new FrozenSet<number>();
+
+        expect([...empty.union(new Set([1]))]).toEqual([1]);
+        expect([...empty.intersection(new Set([1]))]).toEqual([]);
+        expect([...empty.difference(new Set([1]))]).toEqual([]);
+        expect([...new FrozenSet([1]).intersection(new Set<number>())])
+          .toEqual([]);
+        expect(empty.isSubsetOf(new Set([1]))).toBe(true);
+        expect(empty.isDisjointFrom(new Set([1]))).toBe(true);
+      });
+
+      // `Set.prototype.intersection` iterates whichever operand is smaller,
+      // so the result's iteration order follows that operand rather than
+      // always following the receiver.
+      it("takes `intersection()` order from the smaller operand", () => {
+        const fs = new FrozenSet<number>([1, 2, 3, 4, 5]);
+        expect([...fs.intersection(new Set([5, 1]))]).toEqual([5, 1]);
+      });
+
+      it("takes `intersection()` order from itself when no larger", () => {
+        const fs = new FrozenSet<number>([5, 1]);
+        expect([...fs.intersection(new Set([1, 2, 3, 4, 5]))]).toEqual([5, 1]);
+      });
+    });
+
+    describe("non-finite and signed-zero values", () => {
+      // `toBe()` compares with `Object.is()`, which tells `-0` from `+0`.
+      // `toEqual()` does not, and would make these assertions vacuous.
+      it("normalizes `-0` to `+0` on insertion, as `Set` does", () => {
+        const fs = new FrozenSet<number>([-0]);
+
+        expect(fs.size).toBe(1);
+        expect([...fs.values()][0]).toBe(0);
+      });
+
+      it("treats `-0` and `+0` as the same element", () => {
+        const fs = new FrozenSet<number>([-0, 0]);
+
+        expect(fs.size).toBe(1);
+        expect(fs.has(0)).toBe(true);
+        expect(fs.has(-0)).toBe(true);
+      });
+
+      it("unifies `-0` and `+0` across set algebra", () => {
+        const fs = new FrozenSet<number>([-0]);
+
+        expect([...fs.intersection(new Set([0]))]).toEqual([0]);
+        expect([...fs.difference(new Set([0]))]).toEqual([]);
+        expect(fs.isSubsetOf(new Set([0]))).toBe(true);
+        expect(fs.isDisjointFrom(new Set([0]))).toBe(false);
+      });
+
+      it("treats all `NaN`s as one element", () => {
+        const fs = new FrozenSet<number>([NaN, NaN]);
+
+        expect(fs.size).toBe(1);
+        expect(fs.has(NaN)).toBe(true);
+      });
+
+      it("keeps the two infinities distinct", () => {
+        const fs = new FrozenSet<number>([Infinity, -Infinity]);
+
+        expect(fs.size).toBe(2);
+        expect([...fs.values()][0]).toBe(Infinity);
+        expect([...fs.values()][1]).toBe(-Infinity);
+        expect(fs.isDisjointFrom(new Set([Infinity]))).toBe(false);
+      });
     });
   });
 });
