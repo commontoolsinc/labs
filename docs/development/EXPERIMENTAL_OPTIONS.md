@@ -604,21 +604,24 @@ the per-epic implementation notes).
   memory protocol itself (hello flags, message shapes, ordering) is
   untouched — this substitutes for the permessage-deflate extension that
   `Deno.upgradeWebSocket` does not support.
-- **Current default and planned end state.** On by default in the spike
-  branch. RFC 6455 requires a client that offers a subprotocol to fail the
-  connection if the server selects none, so server-side support must deploy
-  before clients offer it. End state: graduate to always-on (and eventually
-  drop the text fallback), or delete the branch if the spike is not adopted.
-- **Status on 2026-07-17.** Productionizing: synchronous server codec,
+- **Current default and planned end state.** On by default. RFC 6455
+  requires a client that offers a subprotocol to fail the connection if the
+  server selects none — browsers enforce this, Deno clients tolerate it and
+  continue uncompressed — so server-side support must be deployed fleet-wide
+  before browser clients offer. End state: graduate to always-on and
+  eventually drop the text fallback for negotiated connections.
+- **Status on 2026-07-21.** Implemented (#4770): synchronous server codec,
   auth-frame exemption, client inbound backlog bound, and reconnect-window
-  send guard are implemented with test coverage. Measured on the Lunch Poll
-  two-browser flow (−78–79% browser payload bytes; ~+150 ms localhost CPU
-  cost in the A/B, roughly halved by the sync server codec). Rollout: deploy
-  server support fleet-wide first (a normal rolling restart), then let
+  send guard, all with test coverage. Measured on the Lunch Poll two-browser
+  flow: −78–79% browser payload bytes; ~+150 ms localhost CPU cost in the
+  A/B, roughly halved by the sync server codec. Rollout: deploy server
+  support fleet-wide first (a normal rolling restart), then let browser
   clients offer.
-- **Path to removal.** Adopt: keep the subprotocol negotiation until every
-  client offers it, then require it. Reject: revert the spike branch; the
-  subprotocol was never shipped so no peer depends on it.
+- **Path to removal.** Keep the subprotocol negotiation until every client
+  offers it, then require it and delete the text fallback. If the transport
+  layer ever gains native permessage-deflate (upstream fastwebsockets),
+  clients stop offering the subprotocol when `socket.extensions` shows it
+  and this feature deletes entirely.
 - **Companion diagnostic.** `CF_MEMORY_WS_DEFLATE_STATS_FILE=<path>` makes
   toolshed append one JSON line per closed memory websocket connection with
   logical-versus-wire byte totals per direction (no payload contents). Unset

@@ -383,3 +383,62 @@ Deno.test("memory websocket closes on a malformed compressed frame", async () =>
     await server.shutdown();
   }
 });
+
+Deno.test("stats recorder captures negotiated compression per connection", async () => {
+  const identity = await Identity.fromPassphrase("memory-ws-deflate-stats");
+  const statsFile = await Deno.makeTempFile({ suffix: ".jsonl" });
+  const server = Deno.serve({ port: 0 }, app.fetch);
+  const address = new URL(
+    `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+  );
+  const space = identity.did();
+
+  Deno.env.set("CF_MEMORY_WS_DEFLATE_STATS_FILE", statsFile);
+  try {
+    const socket = await openSocket(address, [MEMORY_WS_DEFLATE_SUBPROTOCOL]);
+    const { sessionId } = await negotiateSession(socket, identity, space);
+    await transactAndWatchFatDoc(socket, space, sessionId, identity.did());
+    await closeSocket(socket);
+
+    // The recorder appends on the server's close event; poll briefly.
+    let lines: string[] = [];
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const content = await Deno.readTextFile(statsFile).catch(() => "");
+      lines = content.split("\n").filter((line) => line.length > 0);
+      if (lines.length > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assertEquals(lines.length, 1, "one closed connection, one stats line");
+    const record = JSON.parse(lines[0]) as {
+      negotiated: boolean;
+      kind: string;
+      cpuMs: number;
+      inbound: {
+        wireBytes: number;
+        logicalBytes: number;
+        frames: number;
+        compressedFrames: number;
+      };
+      outbound: {
+        wireBytes: number;
+        logicalBytes: number;
+        frames: number;
+        compressedFrames: number;
+      };
+    };
+    assertEquals(record.negotiated, true);
+    assertEquals(record.kind, "runtime");
+    // The fat transact went up compressed and the fat watch response came
+    // down compressed, so both directions must show savings.
+    assert(record.inbound.compressedFrames >= 1);
+    assert(record.outbound.compressedFrames >= 1);
+    assert(record.inbound.wireBytes < record.inbound.logicalBytes);
+    assert(record.outbound.wireBytes < record.outbound.logicalBytes);
+    assert(record.inbound.frames > record.inbound.compressedFrames);
+    assert(record.cpuMs >= 0);
+  } finally {
+    Deno.env.delete("CF_MEMORY_WS_DEFLATE_STATS_FILE");
+    await server.shutdown();
+    await Deno.remove(statsFile).catch(() => {});
+  }
+});
