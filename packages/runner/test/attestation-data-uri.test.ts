@@ -83,4 +83,29 @@ describe("attestation `load()` of `data:` URIs", () => {
     const { error } = load({ id: "data:text/plain,hello" as URI });
     expect(error?.name).toBe("UnsupportedMediaTypeError");
   });
+
+  // A parameterized header passes the prefix pre-gate but is not the exact
+  // media type (this format has no parameters).
+  it("errors on a parameterized header", () => {
+    const payload = toUnpaddedBase64url(
+      new TextEncoder().encode(jsonFromValue({ a: 1 })),
+    );
+    const { ok, error } = load({
+      id: `data:${DATA_CELL_MEDIA_TYPE};base64,${payload}` as URI,
+    });
+    expect(ok).toBeUndefined();
+    expect(error?.name).toBe("UnsupportedMediaTypeError");
+  });
+
+  // Extraction-level failure (as opposed to payload-decode failure): a
+  // percent-encoded payload is not base64url.
+  it("errors on a percent-encoded payload", () => {
+    const { ok, error } = load({
+      id: `data:${DATA_CELL_MEDIA_TYPE},${
+        encodeURIComponent(jsonFromValue({ a: 1 }))
+      }` as URI,
+    });
+    expect(ok).toBeUndefined();
+    expect(error?.name).toBe("InvalidDataURIError");
+  });
 });
