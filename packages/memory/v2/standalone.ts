@@ -81,7 +81,7 @@ export class StandaloneMemoryServer {
       if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
         return new Response("memory websocket endpoint", { status: 200 });
       }
-      // SPIKE: mirror toolshed's deflate subprotocol so in-repo clients that
+      // mirror toolshed's deflate subprotocol so in-repo clients that
       // offer it keep working against the standalone harness server. The
       // offer is always selected (refusal fails the connection per RFC 6455);
       // the env switch only gates this server's outbound compression.

@@ -13,8 +13,7 @@
  * Deno/Node only — this module must never be imported into browser bundles.
  */
 
-import { deflateRawSync, inflateRawSync } from "node:zlib";
-import { Buffer } from "node:buffer";
+import { deflateRawSync, inflateRawSync } from "builtin-zlib";
 import { MEMORY_WS_INFLATE_MAX_BYTES } from "./transport-deflate.ts";
 
 const textEncoder = new TextEncoder();
@@ -47,8 +46,8 @@ export const inflateWirePayloadSync = (
   maxBytes: number = MEMORY_WS_INFLATE_MAX_BYTES,
 ): string => {
   const bytes = ArrayBuffer.isView(data)
-    ? Buffer.from(data.buffer, data.byteOffset, data.byteLength)
-    : Buffer.from(data);
+    ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+    : new Uint8Array(data);
   const inflated = inflateRawSync(bytes, { maxOutputLength: maxBytes });
   return textDecoder.decode(inflated);
 };

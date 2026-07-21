@@ -49,6 +49,7 @@
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@0.13.0",
+    "builtin-zlib": "node:zlib",
     "@denosaurs/plug": "jsr:@denosaurs/plug@^1.1.0",
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.1"
   }

@@ -1,5 +1,5 @@
 /**
- * SPIKE: transport-level per-message compression for the memory v2 websocket.
+ * transport-level per-message compression for the memory v2 websocket.
  *
  * Negotiated via the websocket subprotocol `fvj1.deflate`: the client offers
  * it in the upgrade request, and the server always selects an offer. Once

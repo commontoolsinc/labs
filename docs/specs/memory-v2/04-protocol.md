@@ -128,6 +128,39 @@ a client and server may connect when their scheduler-state flags differ, and
 the server's flag controls the scheduler-observation data plane for that
 connection.
 
+#### Transport compression (`fvj1.deflate`)
+
+The connection MAY negotiate per-message compression at the websocket layer,
+below the message protocol: the client offers the `fvj1.deflate` subprotocol
+in its upgrade request, and a supporting server always selects an offered
+subprotocol (refusing one fails the connection for RFC 6455-conforming
+clients such as browsers). Nothing in the hello handshake changes.
+
+On a negotiated connection, either peer MAY send any wire payload as a
+binary frame containing the raw-deflate (RFC 1951) compression of the
+payload's UTF-8 bytes. Text frames remain valid and are processed
+unchanged. Compression is stateless per message: no sliding window is
+shared between frames, so reconnects and replays carry no compression
+state. Senders SHOULD leave payloads under 192 UTF-8 bytes as text.
+
+Auth-bearing frames — `hello`, `hello.ok`, `session.open`, and any response
+whose body carries the session bearer token or the next session-open
+challenge — MUST NOT be compressed by the sender, keeping credential
+material out of compression-size side channels. Receivers accept any frame
+in either framing; the exemption is sender policy.
+
+Receivers bound inflation (servers reject frames that inflate past their
+cap by closing with code 1007; an undecodable compressed frame also closes
+1007) and non-negotiated connections keep the historical text-only framing:
+binary frames on them remain a protocol error (1003).
+
+Clients MUST NOT offer the subprotocol unless they can inflate `deflate-raw`
+streams. Deno-based clients tolerate a server that selects no subprotocol
+and simply continue uncompressed; browser clients fail such connections per
+RFC 6455, so server-side support MUST be deployed before browser clients
+offer. The `memoryWsDeflate` entry in the experimental-options registry
+records the rollout state and the `CF_MEMORY_WS_DEFLATE` kill switch.
+
 ### 4.1.2 Logical Sessions and Resume
 
 Pending-read resolution, idempotent replay, and live sync are scoped to a

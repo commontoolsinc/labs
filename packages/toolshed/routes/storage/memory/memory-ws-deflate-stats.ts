@@ -1,5 +1,5 @@
 /**
- * SPIKE diagnostic: per-connection byte accounting for the memory websocket
+ * Diagnostic: per-connection byte accounting for the memory websocket
  * deflate transport. When `CF_MEMORY_WS_DEFLATE_STATS_FILE` names a file,
  * every memory websocket connection appends one JSON line on close with its
  * logical (uncompressed text) versus wire (post-compression) byte totals per

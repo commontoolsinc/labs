@@ -108,16 +108,16 @@ export class WebSocketTransport implements MemoryClient.Transport {
   #closeReceiver: (error?: Error) => void = () => {};
   #socket: WebSocket | null = null;
   #opening: Promise<WebSocket> | null = null;
-  // SPIKE: outbound ordering queue for the async deflate hop on a negotiated
+  // outbound ordering queue for the async deflate hop on a negotiated
   // connection. One queue per transport is safe across reconnects because
   // each task captures its own socket and no-ops once that socket closes.
   #outbound = new SerialTaskQueue();
-  // SPIKE: while a closed socket's queued frames drain toward the close
+  // While a closed socket's queued frames drain toward the close
   // notification, a re-dial must wait — otherwise a send() could open a new
   // socket before the consumer learns the old one closed, a window the
-  // synchronous pre-spike path never had.
+  // historical synchronous path never had.
   #draining: Promise<void> | null = null;
-  // SPIKE: once close() is called nothing may dial again. Without this latch
+  // once close() is called nothing may dial again. Without this latch
   // an open() parked on #draining could resume after close() returned and
   // leak a brand-new live socket.
   #closed = false;
@@ -219,7 +219,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
     }
     const address = toWebSocketAddress(this.address);
     const opening = new Promise<WebSocket>((resolve, reject) => {
-      // SPIKE: offer the deflate subprotocol when this runtime can actually
+      // offer the deflate subprotocol when this runtime can actually
       // inflate (offering is a commitment) and it is not opted out via
       // CF_MEMORY_WS_DEFLATE=0. Servers that predate the subprotocol will
       // fail this connection per RFC 6455, so server support deploys first.
@@ -232,7 +232,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
       socket.binaryType = "arraybuffer";
       this.#socket = socket;
       let opened = false;
-      // SPIKE: inbound ordering queue, per socket — async inflation must not
+      // inbound ordering queue, per socket — async inflation must not
       // let a later text frame overtake an earlier compressed frame. A failed
       // inflate poisons the queue: delivering frames past a transport-level
       // gap would let the session ack and resume beyond messages it never
@@ -329,7 +329,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
         if (this.#opening === opening) {
           this.#opening = null;
         }
-        // SPIKE: the close notification queues behind pending inflates so
+        // the close notification queues behind pending inflates so
         // every frame that arrived before the close is delivered first —
         // the client's reconnect must not race a stale frame (and nothing
         // may be delivered after the close notification).

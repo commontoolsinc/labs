@@ -244,7 +244,7 @@ const attachMemorySocketPipeline = (
   negotiation: ReturnType<typeof bufferTextMessagesUntilNegotiated>,
   firstMessage: string,
   options: {
-    /** SPIKE: compress outbound payloads (deflate subprotocol negotiated). */
+    /** compress outbound payloads (deflate subprotocol negotiated). */
     deflateOutbound?: boolean;
     stats?: MemoryWsDeflateStatsRecorder;
   } = {},
@@ -383,7 +383,7 @@ export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
     try {
       span.setAttribute("memory.operation", "subscribe");
 
-      // SPIKE: transport-level compression rides the websocket subprotocol.
+      // transport-level compression rides the websocket subprotocol.
       // Selection is unconditional on the offer — refusing an offered
       // subprotocol fails the connection per RFC 6455 — while the env kill
       // switch only stops this server from compressing its own outbound.

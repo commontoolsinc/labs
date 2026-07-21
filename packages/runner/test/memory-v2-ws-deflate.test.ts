@@ -1,5 +1,5 @@
 /**
- * SPIKE: WebSocketTransport behavior on a connection that negotiated the
+ * WebSocketTransport behavior on a connection that negotiated the
  * `fvj1.deflate` subprotocol — threshold framing, strict ordering across the
  * async compression hops, and unchanged behavior when not negotiated.
  */
