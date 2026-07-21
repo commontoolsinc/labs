@@ -12,23 +12,18 @@
  * bundles.
  */
 
-import { encodeMemoryBoundary } from "../v2.ts";
 import * as MemoryServer from "./server.ts";
 import { verifySessionOpenAuthorization } from "./session-open-auth.ts";
 import {
-  isAuthBearingWireMessage,
-  MEMORY_WS_DEFLATE_MIN_BYTES,
   MEMORY_WS_SERVER_INFLATE_MAX_BYTES,
   memoryWsDeflateEnabled,
   selectMemoryWsDeflateProtocol,
 } from "./transport-deflate.ts";
 import {
-  deflateWirePayloadSync,
+  encodeMemoryWireFrameSync,
   inflateWirePayloadSync,
 } from "./transport-deflate-sync.ts";
 import { Identity } from "@commonfabric/identity";
-
-const standaloneTextEncoder = new TextEncoder();
 
 const standaloneMemoryAudience = (await Identity.fromPassphrase(
   "common tools standalone memory audience",
@@ -100,20 +95,10 @@ export class StandaloneMemoryServer {
         if (socket.readyState !== WebSocket.OPEN) {
           return;
         }
-        const payload = encodeMemoryBoundary(message);
-        // Auth-bearing frames stay uncompressed (see toolshed's
-        // memory.handlers.ts for the side-channel rationale).
-        if (
-          !deflateOutbound ||
-          isAuthBearingWireMessage(message) ||
-          standaloneTextEncoder.encode(payload).byteLength <
-            MEMORY_WS_DEFLATE_MIN_BYTES
-        ) {
-          socket.send(payload);
-          return;
-        }
+        // Shared sender policy (auth exemption, threshold) lives in
+        // encodeMemoryWireFrameSync; teardown stays per-site.
         try {
-          socket.send(deflateWirePayloadSync(payload));
+          socket.send(encodeMemoryWireFrameSync(message, deflateOutbound));
         } catch {
           socket.close(1011, "memory websocket send failure");
           connection.close();

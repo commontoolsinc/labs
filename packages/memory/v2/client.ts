@@ -1,5 +1,6 @@
 import {
   type ClientCommit,
+  type ClientMessage,
   compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
@@ -8,6 +9,7 @@ import {
   getPersistentSchedulerStateConfig,
   type GraphQuery,
   type GraphQueryResult,
+  isAuthBearingWireMessage,
   MEMORY_PROTOCOL,
   type MemoryProtocolFlags,
   parseMemoryProtocolFlags,
@@ -185,11 +187,13 @@ export class Client {
     const pending = Promise.withResolvers<unknown>();
     this.#pending.set(requestId, pending);
     try {
-      // session.open carries the signed invocation and challenge response:
-      // auth-bearing frames are never compressed.
+      // Auth-bearing frames (per the shared classifier beside the message
+      // unions) are never compressed.
       await this.transport.send(
         encodeMemoryBoundary(message),
-        message.type === "session.open" ? { noCompress: true } : undefined,
+        isAuthBearingWireMessage(message as unknown as ClientMessage)
+          ? { noCompress: true }
+          : undefined,
       );
     } catch (error) {
       // The request never reached the wire: withdraw the pending entry so a

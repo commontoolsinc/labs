@@ -1,15 +1,12 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
-import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import * as MemoryServer from "@commonfabric/memory/v2/server";
 import {
-  isAuthBearingWireMessage,
-  MEMORY_WS_DEFLATE_MIN_BYTES,
   MEMORY_WS_SERVER_INFLATE_MAX_BYTES,
   memoryWsDeflateEnabled,
   selectMemoryWsDeflateProtocol,
 } from "@commonfabric/memory/v2/transport-deflate";
 import {
-  deflateWirePayloadSync,
+  encodeMemoryWireFrameSync,
   inflateWirePayloadSync,
 } from "@commonfabric/memory/v2/transport-deflate-sync";
 import type * as Routes from "./memory.routes.ts";
@@ -30,11 +27,11 @@ type NegotiatedSocketHandlers = {
 type NegotiationOptions = {
   maxBufferedBytes?: number;
   /**
-   * Present only when the connection negotiated `fvj1.deflate`. The codec is
+   * Present only when the connection negotiated `cf-memory.deflate.v1`. The codec is
    * deliberately SYNCHRONOUS: dispatch stays inside the message event
    * handler, so frame ordering, pre-close delivery, and nothing-after-close
    * remain event-loop properties rather than queue invariants. Absent, the
-   * historical text-only path is unchanged and binary frames stay fatal.
+   * connection is text-only and binary frames are fatal.
    */
   inflateBinarySync?: (data: ArrayBuffer | ArrayBufferView) => string;
   /** Diagnostic: per-frame inbound byte accounting. */
@@ -270,42 +267,24 @@ const attachMemorySocketPipeline = (
     if (socket.readyState !== WebSocket.OPEN) {
       return;
     }
-    const payload = encodeMemoryBoundary(message);
-    // Auth-bearing frames (hello.ok's challenge, the session.open response's
-    // bearer token) are never compressed: credential material stays out of
-    // compression-size side channels (CRIME-class). The codec is
-    // synchronous, so ordering needs no queue.
-    if (
-      options.deflateOutbound !== true ||
-      isAuthBearingWireMessage(message)
-    ) {
-      if (options.stats !== undefined) {
-        const bytes = TEXT_ENCODER.encode(payload).byteLength;
-        options.stats.recordOutbound(bytes, bytes, false);
-      }
-      socket.send(payload);
-      return;
-    }
-    const payloadBytes = TEXT_ENCODER.encode(payload);
-    if (payloadBytes.byteLength < MEMORY_WS_DEFLATE_MIN_BYTES) {
-      options.stats?.recordOutbound(
-        payloadBytes.byteLength,
-        payloadBytes.byteLength,
-        false,
-      );
-      socket.send(payload);
-      return;
-    }
+    // The shared frame encoder owns the sender policy (compression off,
+    // auth-bearing exemption, size threshold); teardown stays here, tied to
+    // this server's close machinery. The codec is synchronous, so ordering
+    // needs no queue.
     try {
-      const started = performance.now();
-      const compressed = deflateWirePayloadSync(payloadBytes);
-      options.stats?.recordOutbound(
-        compressed.byteLength,
-        payloadBytes.byteLength,
-        true,
-        performance.now() - started,
-      );
-      socket.send(compressed);
+      socket.send(encodeMemoryWireFrameSync(
+        message,
+        options.deflateOutbound === true,
+        options.stats === undefined
+          ? undefined
+          : (wireBytes, logicalBytes, compressed, cpuMs) =>
+            options.stats!.recordOutbound(
+              wireBytes,
+              logicalBytes,
+              compressed,
+              cpuMs,
+            ),
+      ));
     } catch {
       safeSocketClose(1011, "Memory websocket send failure");
       connection.close();

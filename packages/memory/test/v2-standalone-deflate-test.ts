@@ -1,5 +1,5 @@
 /**
- * Real-socket coverage for the standalone harness server's `fvj1.deflate`
+ * Real-socket coverage for the standalone harness server's `cf-memory.deflate.v1`
  * support: negotiation, synchronous inflate/deflate both directions, the
  * auth-frame exemption, and frame-error close codes — mirroring toolshed's
  * behavior so `cf test` multi-user harnesses exercise the same transport.

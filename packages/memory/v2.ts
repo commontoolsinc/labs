@@ -667,6 +667,54 @@ export type ServerMessage =
   | SessionEffectMessage
   | SessionRevokedMessage;
 
+const SESSION_TOKEN_KEY = "sessionToken" satisfies keyof SessionOpenResult;
+const SESSION_OPEN_KEY = "sessionOpen" satisfies keyof SessionOpenResult;
+
+/**
+ * Whether a wire message carries authentication material and must therefore
+ * never be COMPRESSED by a sender (the deflate transport's auth exemption —
+ * receivers accept any framing; this is sender policy). Lives beside the
+ * message unions so the exhaustive switch makes every new wire message type
+ * a compile error until classified, and the `satisfies keyof` tethers make
+ * a credential-field rename a compile error. The runtime default fails
+ * closed: never-compressing is always safe, since text frames stay valid on
+ * a negotiated connection.
+ */
+export const isAuthBearingWireMessage = (
+  message: ClientMessage | ServerMessage,
+): boolean => {
+  if (typeof message !== "object" || message === null) {
+    // Unreachable for typed callers; untyped embedders fail closed.
+    return true;
+  }
+  switch (message.type) {
+    case "hello":
+    case "hello.ok":
+    case "session.open":
+      return true;
+    case "response": {
+      const ok: unknown = message.ok;
+      return typeof ok === "object" && ok !== null &&
+        (SESSION_TOKEN_KEY in ok || SESSION_OPEN_KEY in ok);
+    }
+    case "transact":
+    case "graph.query":
+    case "sqlite.query":
+    case "sqlite.register-disk-source":
+    case "session.watch.set":
+    case "session.watch.add":
+    case "scheduler.snapshot.list":
+    case "session.ack":
+    case "session/effect":
+    case "session/revoked":
+      return false;
+    default: {
+      message satisfies never;
+      return true;
+    }
+  }
+};
+
 const memoryReconstructionContext = new EmptyReconstructionContext(
   true,
   "no cell reconstruction at the memory boundary",

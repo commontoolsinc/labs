@@ -587,7 +587,7 @@ the per-epic implementation notes).
   stop compressing their outbound. Servers always select an offered
   subprotocol and always accept compressed inbound — refusing an offer fails
   the whole connection per RFC 6455 for clients (like browsers) that cannot
-  read env. Negotiated per connection via the `fvj1.deflate` websocket
+  read env. Negotiated per connection via the `cf-memory.deflate.v1` websocket
   subprotocol declared in
   [`packages/memory/v2/transport-deflate.ts`](../../packages/memory/v2/transport-deflate.ts).
 - **Added by.** William Kelly (#4770).

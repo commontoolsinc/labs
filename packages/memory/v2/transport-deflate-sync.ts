@@ -1,5 +1,5 @@
 /**
- * Synchronous server-side codec for the `fvj1.deflate` memory websocket
+ * Synchronous server-side codec for the `cf-memory.deflate.v1` memory websocket
  * transport (see transport-deflate.ts for the negotiation contract).
  *
  * Servers use the synchronous zlib codec instead of the streaming one for a
@@ -14,7 +14,15 @@
  */
 
 import { deflateRawSync, inflateRawSync } from "builtin-zlib";
-import { MEMORY_WS_INFLATE_MAX_BYTES } from "./transport-deflate.ts";
+import {
+  MEMORY_WS_DEFLATE_MIN_BYTES,
+  MEMORY_WS_INFLATE_MAX_BYTES,
+} from "./transport-deflate.ts";
+import {
+  encodeMemoryBoundary,
+  isAuthBearingWireMessage,
+  type ServerMessage,
+} from "../v2.ts";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
@@ -50,4 +58,49 @@ export const inflateWirePayloadSync = (
     : new Uint8Array(data);
   const inflated = inflateRawSync(bytes, { maxOutputLength: maxBytes });
   return textDecoder.decode(inflated);
+};
+
+/** Per-frame accounting hook for {@link encodeMemoryWireFrameSync}. */
+export type OutboundFrameHook = (
+  wireBytes: number,
+  logicalBytes: number,
+  compressed: boolean,
+  cpuMs?: number,
+) => void;
+
+/**
+ * Encodes one outbound server frame, owning the shared sender policy: text
+ * when compression is off for this connection, for auth-bearing messages
+ * (see `isAuthBearingWireMessage` in ../v2.ts), or below the size
+ * threshold; compressed otherwise. Both memory websocket servers (toolshed
+ * and the standalone harness) route sends through this single decision
+ * tree; error handling and socket teardown stay per-site.
+ */
+export const encodeMemoryWireFrameSync = (
+  message: ServerMessage,
+  deflateOutbound: boolean,
+  onFrame?: OutboundFrameHook,
+): string | Uint8Array<ArrayBuffer> => {
+  const payload = encodeMemoryBoundary(message);
+  if (!deflateOutbound || isAuthBearingWireMessage(message)) {
+    if (onFrame !== undefined) {
+      const bytes = textEncoder.encode(payload).byteLength;
+      onFrame(bytes, bytes, false);
+    }
+    return payload;
+  }
+  const payloadBytes = textEncoder.encode(payload);
+  if (payloadBytes.byteLength < MEMORY_WS_DEFLATE_MIN_BYTES) {
+    onFrame?.(payloadBytes.byteLength, payloadBytes.byteLength, false);
+    return payload;
+  }
+  const started = performance.now();
+  const compressed = deflateWirePayloadSync(payloadBytes);
+  onFrame?.(
+    compressed.byteLength,
+    payloadBytes.byteLength,
+    true,
+    performance.now() - started,
+  );
+  return compressed;
 };

@@ -128,10 +128,10 @@ a client and server may connect when their scheduler-state flags differ, and
 the server's flag controls the scheduler-observation data plane for that
 connection.
 
-#### Transport compression (`fvj1.deflate`)
+#### Transport compression (`cf-memory.deflate.v1`)
 
 The connection MAY negotiate per-message compression at the websocket layer,
-below the message protocol: the client offers the `fvj1.deflate` subprotocol
+below the message protocol: the client offers the `cf-memory.deflate.v1` subprotocol
 in its upgrade request, and a supporting server always selects an offered
 subprotocol (refusing one fails the connection for RFC 6455-conforming
 clients such as browsers). Nothing in the hello handshake changes.

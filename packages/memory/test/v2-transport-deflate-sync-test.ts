@@ -3,8 +3,8 @@ import { assertEquals, assertThrows } from "@std/assert";
 import {
   deflateWirePayload,
   inflateWirePayload,
-  isAuthBearingWireMessage,
 } from "../v2/transport-deflate.ts";
+import { isAuthBearingWireMessage } from "../v2.ts";
 import {
   deflateWirePayloadSync,
   inflateWirePayloadSync,
@@ -62,9 +62,12 @@ describe("memory ws sync codec", () => {
 
 describe("auth-bearing wire message detection", () => {
   it("classifies handshake and credential frames", () => {
-    assertEquals(isAuthBearingWireMessage({ type: "hello" }), true);
-    assertEquals(isAuthBearingWireMessage({ type: "hello.ok" }), true);
-    assertEquals(isAuthBearingWireMessage({ type: "session.open" }), true);
+    assertEquals(isAuthBearingWireMessage({ type: "hello" } as never), true);
+    assertEquals(isAuthBearingWireMessage({ type: "hello.ok" } as never), true);
+    assertEquals(
+      isAuthBearingWireMessage({ type: "session.open" } as never),
+      true,
+    );
     assertEquals(
       isAuthBearingWireMessage({
         type: "response",
@@ -92,8 +95,14 @@ describe("auth-bearing wire message detection", () => {
       }),
       false,
     );
-    assertEquals(isAuthBearingWireMessage({ type: "session/effect" }), false);
-    assertEquals(isAuthBearingWireMessage("fvj1:{}"), false);
-    assertEquals(isAuthBearingWireMessage(null), false);
+    assertEquals(
+      isAuthBearingWireMessage({ type: "session/effect" } as never),
+      false,
+    );
+    // Values outside the message unions fail CLOSED (never compressed):
+    // the classifier's default arm is unreachable for typed callers, and
+    // never-compressing is always safe for untyped embedders.
+    assertEquals(isAuthBearingWireMessage("fvj1:{}" as never), true);
+    assertEquals(isAuthBearingWireMessage(null as never), true);
   });
 });

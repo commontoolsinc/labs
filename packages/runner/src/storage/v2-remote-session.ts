@@ -123,8 +123,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
   #outbound = new SerialTaskQueue();
   // While a closed socket's queued frames drain toward the close
   // notification, a re-dial must wait — otherwise a send() could open a new
-  // socket before the consumer learns the old one closed, a window the
-  // historical synchronous path never had.
+  // socket before the consumer learns the old one closed.
   #draining: Promise<void> | null = null;
   // Once close() is called nothing may dial again: a late send must not
   // leak a brand-new live socket that nothing owns.
@@ -310,7 +309,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
           });
           return;
         }
-        // Non-negotiated binary frames stay ignored (historical behavior).
+        // Binary frames on a non-negotiated socket are ignored.
       });
       socket.addEventListener("close", () => {
         if (this.#socket === socket) {

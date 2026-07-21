@@ -1,5 +1,5 @@
 /**
- * Real-websocket coverage for the negotiated `fvj1.deflate` memory
+ * Real-websocket coverage for the negotiated `cf-memory.deflate.v1` memory
  * transport: negotiation via subprotocol, synchronous server codec both
  * directions, the auth-frame compression exemption, the env kill switch,
  * and byte-identical behavior for clients that do not offer the

@@ -1,6 +1,6 @@
 /**
  * WebSocketTransport behavior on a connection that negotiated the
- * `fvj1.deflate` subprotocol — threshold framing, strict ordering across the
+ * `cf-memory.deflate.v1` subprotocol — threshold framing, strict ordering across the
  * async compression hops, and unchanged behavior when not negotiated.
  */
 import { describe, it } from "@std/testing/bdd";

@@ -1,7 +1,7 @@
 /**
  * transport-level per-message compression for the memory v2 websocket.
  *
- * Negotiated via the websocket subprotocol `fvj1.deflate`: the client offers
+ * Negotiated via the websocket subprotocol `cf-memory.deflate.v1`: the client offers
  * it in the upgrade request, and the server always selects an offer. Once
  * negotiated, either peer MAY send any memory wire payload as a binary frame
  * containing the raw-deflate (RFC 1951) compression of the payload's UTF-8
@@ -32,7 +32,7 @@
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
-export const MEMORY_WS_DEFLATE_SUBPROTOCOL = "fvj1.deflate";
+export const MEMORY_WS_DEFLATE_SUBPROTOCOL = "cf-memory.deflate.v1";
 
 /**
  * Payloads whose UTF-8 encoding is below this size are sent as plain text
@@ -121,29 +121,6 @@ export const MEMORY_WS_MAX_PENDING_INFLATE_BYTES = 16 * 1024 * 1024;
  * frames may be larger, so clients keep the wider cap above.
  */
 export const MEMORY_WS_SERVER_INFLATE_MAX_BYTES = 8 * 1024 * 1024;
-
-/**
- * Whether a wire message carries authentication material and must therefore
- * never be compressed by the sender (see the module doc): `hello`,
- * `hello.ok`, `session.open`, and any response whose body carries the
- * session bearer token or the next session-open challenge (the session.open
- * response). Structural, so both servers and any host embedding the codec
- * apply the same policy.
- */
-export const isAuthBearingWireMessage = (message: unknown): boolean => {
-  if (typeof message !== "object" || message === null) return false;
-  const record = message as Record<string, unknown>;
-  if (
-    record.type === "hello" || record.type === "hello.ok" ||
-    record.type === "session.open"
-  ) {
-    return true;
-  }
-  if (record.type !== "response") return false;
-  const ok = record.ok;
-  return typeof ok === "object" && ok !== null &&
-    ("sessionToken" in ok || "sessionOpen" in ok);
-};
 
 /**
  * Picks the deflate subprotocol out of a `Sec-WebSocket-Protocol` offer
