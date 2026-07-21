@@ -133,6 +133,46 @@ describe("frozen-builtins", () => {
       );
       expect([...fm.entries()]).toEqual([["a", 1]]);
     });
+
+    // Keys go through `Map.prototype.set`, which carries the same signed-zero
+    // normalization as `Set.prototype.add`. This is a separate construction
+    // site from `FrozenSet`'s, so the equivalent `FrozenSet` cases below do
+    // not reach it -- see the rationale on that block for why the behavior is
+    // deliberate rather than a defect.
+    describe("non-finite and signed-zero keys", () => {
+      it("normalizes a `-0` key to `+0`, as `Map` does", () => {
+        const fm = new FrozenMap<number, string>([[-0, "a"]]);
+
+        expect(fm.size).toBe(1);
+        expect([...fm.keys()][0]).toBe(0);
+      });
+
+      it("treats `-0` and `+0` as the same key", () => {
+        const fm = new FrozenMap<number, string>([[-0, "a"], [0, "b"]]);
+
+        expect(fm.size).toBe(1);
+        expect(fm.get(0)).toBe("b");
+        expect(fm.get(-0)).toBe("b");
+      });
+
+      it("treats all `NaN`s as one key", () => {
+        const fm = new FrozenMap<number, string>([[NaN, "a"], [NaN, "b"]]);
+
+        expect(fm.size).toBe(1);
+        expect(fm.get(NaN)).toBe("b");
+      });
+
+      it("keeps the two infinities as distinct keys", () => {
+        const fm = new FrozenMap<number, string>([
+          [Infinity, "pos"],
+          [-Infinity, "neg"],
+        ]);
+
+        expect(fm.size).toBe(2);
+        expect(fm.get(Infinity)).toBe("pos");
+        expect(fm.get(-Infinity)).toBe("neg");
+      });
+    });
   });
 
   describe("FrozenSet", () => {
@@ -304,6 +344,16 @@ describe("frozen-builtins", () => {
         const fs = new FrozenSet<number>([5, 1]);
         expect([...fs.intersection(new Set([1, 2, 3, 4, 5]))]).toEqual([5, 1]);
       });
+
+      // Equal sizes are the boundary between the two branches, and the
+      // intrinsic iterates the receiver there. The operands below share their
+      // elements but not their order, so the result distinguishes which side
+      // was iterated -- which an equal-size case with coinciding orders
+      // cannot.
+      it("takes `intersection()` order from itself on equal sizes", () => {
+        const fs = new FrozenSet<number>([1, 2]);
+        expect([...fs.intersection(new Set([2, 1]))]).toEqual([1, 2]);
+      });
     });
 
     describe("non-finite and signed-zero values", () => {
@@ -344,7 +394,9 @@ describe("frozen-builtins", () => {
       it("unifies `-0` and `+0` across set algebra", () => {
         const fs = new FrozenSet<number>([-0]);
 
-        expect([...fs.intersection(new Set([0]))]).toEqual([0]);
+        const intersected = [...fs.intersection(new Set([0]))];
+        expect(intersected.length).toBe(1);
+        expect(Object.is(intersected[0], 0)).toBe(true);
         expect([...fs.difference(new Set([0]))]).toEqual([]);
         expect(fs.isSubsetOf(new Set([0]))).toBe(true);
         expect(fs.isDisjointFrom(new Set([0]))).toBe(false);
