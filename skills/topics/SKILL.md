@@ -66,7 +66,7 @@ the canonical fid published in the board's `crossrefs` result:
 
 ```bash
 deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input
-deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs
+deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step
 export TOPIC_URL='https://estuary.saga-castor.ts.net/topics-dev-476ea34f/<topic-fid>'
 deno task cf piece get --url "$TOPIC_URL" title --input
 deno task cf piece get --url "$TOPIC_URL" body --input
@@ -77,8 +77,9 @@ deno task cf piece get --url "$TOPIC_URL" links --input
 Each crossref row's `fid` is the canonical address for its `topic`. Prefer it to
 the intermediate wrapper link stored in the board's topics array. Read the
 existing topic's input before changing it, especially its full body, comments,
-and links. If `topics --input` is non-empty but `crossrefs` is empty or absent,
-do not infer that the board is empty; see the Estuary caveat below.
+and links. Input reads are durable and do not need `--step`; use `--step` on
+result reads that must be current. If `topics --input` is non-empty but
+`crossrefs --step` is empty or fails, do not infer that the board is empty.
 
 ## Creating and updating
 
@@ -88,8 +89,7 @@ directly:
 ```bash
 # First setMyName on the board as shown above.
 deno task cf piece call --url "$TOPICS_BOARD_URL" addTopic '{"title":"<title>"}'
-deno task cf piece step --url "$TOPICS_BOARD_URL"
-deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs
+deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step
 ```
 
 Find the new topic's canonical fid in `crossrefs` before applying further
@@ -101,7 +101,7 @@ passing an unescaped string.
 deno task cf piece call --url "$TOPIC_URL" setBody '{"body":"<complete revised body>"}'
 deno task cf piece call --url "$TOPIC_URL" addComment '{"body":"<point-in-time update>"}'
 deno task cf piece call --url "$TOPIC_URL" addLink '{"kind":"pr","url":"<PR URL>","label":"<PR label>"}'
-deno task cf piece step --url "$TOPIC_URL"
+deno task cf piece get --url "$TOPIC_URL" commentCount --step
 ```
 
 The body is the living big-picture document. Replace it in place with the full
@@ -121,31 +121,27 @@ comments, and link URLs, so do not add manual `kind: "topic"` links.
 
 ## Persistence and computed results
 
-Topics handler writes commit durably before `piece step`: verify source fields
-such as bodies, comments, and links with `piece get ... --input`. Do not expect
-computed result fields to refresh without a step or renderer materialization.
-After changing a topic, request a topic step before checking `commentCount`,
-`lastActivityAt`, or derived connections. After creating a topic, request a
-board step before checking `topicCount` or `crossrefs`.
+Topics handlers commit source writes before result recomputation. Verify bodies,
+comments, links, titles, and the board's topic list with
+`piece get ... --input`. To read `topicCount`, `crossrefs`, `commentCount`,
+`lastActivityAt`, or other computed results, use `piece get ... --step`. This
+keeps start, pull, recomputation, synchronization, read, and stop in one CLI
+runtime; a separate `piece step` process cannot carry session-scoped
+materialization into a later `piece get` process.
 
-There is no Topics-specific prohibition on requesting a step from a fresh CLI
-replica, but a successful `piece step` message is not proof that the expected
-result materialized. Re-read the result fields you need. The linked-input
-regression at `packages/runner/test/fresh-replica-read-asymmetry.test.ts` pins
-input-read convergence; it does not cover pattern result recomputation.
+An unstepped result read with stored raw data but unresolved required values
+exits nonzero and points to `--step`; it is not an empty or absent result. If
+`--step` itself reports that a required value did not materialize, use input
+reads to establish what committed, but do not claim result-dependent
+verification succeeded.
 
-## Current Estuary caveat
+## Troubleshooting
 
-Re-verified on 2026-07-21 after the #4768 Topics deployment: a fresh current-
-`main` CLI could read all durable board inputs and direct topic inputs, but both
-board and topic results were `undefined`. Board and topic steps reported success
-without materializing those results, and `crossrefs` read as its default empty
-list despite non-empty `topics --input`.
-
-In that state, a known topic URL remains readable through the input-only
-commands above, but board-to-topic fid discovery and verification of
-result-dependent operations are blocked. Do not substitute `piece ls` as an
-authoritative topic list; it can omit pieces created inside handlers. Report the
-deployment/runtime blocker instead of claiming a read or mutation succeeded.
-Remove this caveat only after the live board and a regression test both
-demonstrate fresh-CLI result materialization.
+- If initial CLI synchronization times out, no piece read or mutation ran. Retry
+  once; if it repeats, report the deployment or authorization blocker.
+- If `topics --input` is non-empty while `crossrefs --step` is empty or fails,
+  do not call the board empty. Preserve the input evidence and report the
+  result-materialization failure.
+- Do not substitute `piece ls` for the board's topic list. Pieces created inside
+  handlers can be absent from that listing; `crossrefs --step` is the canonical
+  fid index, with `topics --input` as the durable fallback.

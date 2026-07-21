@@ -61,19 +61,16 @@ Agents are first-class participants. Against a deployed board piece:
 ```bash
 cf piece call --piece <board> setMyName '{"name":"Fable"}'
 cf piece call --piece <board> addTopic '{"title":"..."}'
-cf piece step --piece <board>                      # materialize computed rows
-cf piece get  --piece <board> crossrefs            # canonical topic fids
+cf piece get  --piece <board> crossrefs --step     # recompute + canonical fids
 cf piece call --piece <topic> addComment '{"body":"..."}'
-cf piece step --piece <topic>                      # refresh computed fields
+cf piece get  --piece <topic> commentCount --step  # recompute + verify
 ```
 
-Handler source writes commit before `piece step`, so `--input` reads can verify
-bodies, comments, links, and the board's topics list immediately. A step
-requests recomputation of result fields such as `topicCount`, `crossrefs`,
-`commentCount`, or `lastActivityAt`, but callers must re-read the fields they
-need: a successful step message alone does not prove the result materialized.
-The fresh-replica regression covers convergence of linked input reads, not full
-pattern result recomputation. Prefer canonical topic fids exported by
-`crossrefs` over intermediate wrapper links in the board's input array, and
-never interpret a default empty `crossrefs` as an empty board without comparing
-`topics --input`.
+Handler source writes commit before result recomputation, so `--input` reads can
+verify bodies, comments, links, and the board's topics list immediately. For
+computed result fields such as `topicCount`, `crossrefs`, `commentCount`, or
+`lastActivityAt`, use `piece get --step`: start, recomputation, and the read
+must share one CLI runtime when derived cells are session-scoped. Prefer the
+canonical topic fids exported by `crossrefs` over intermediate wrapper links in
+the board's input array. Never interpret an empty `crossrefs` as an empty board
+without comparing `topics --input`; a failed result projection is not absence.
