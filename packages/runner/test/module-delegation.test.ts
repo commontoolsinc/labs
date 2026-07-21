@@ -214,7 +214,7 @@ describe("module identity delegation", () => {
     expect(denied.error?.message).toContain("writeAuthorizedBy failed");
   });
 
-  it("allows a loaded successor module to satisfy its predecessor's writer claim", async () => {
+  it("allows a loaded successor module while keeping the binding path exact", async () => {
     const oldIdentity = computeModuleHashes(moduleProgram("old")).get(
       "/writer.ts",
     )!;
@@ -280,5 +280,35 @@ describe("module identity delegation", () => {
     }, 0);
     expect(allowed.error).toBeUndefined();
     expect(protectedCell.get()).toEqual({ value: "after-load" });
+
+    // Resolver-dependent source-file spelling is diagnostic once the
+    // successor's authenticated delegation has established module authority.
+    const differentFileAllowed = await runtime.editWithRetry((tx) => {
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        moduleIdentity: successor.identity,
+        sourceFile: "/resolver-prefix/writer.ts",
+        bindingPath: ["setValue"],
+      });
+      protectedCell.withTx(tx).set({ value: "different-file" });
+    }, 0);
+    expect(differentFileAllowed.error).toBeUndefined();
+    expect(protectedCell.get()).toEqual({ value: "different-file" });
+
+    // Delegation grants only module authority; it must not relax which binding
+    // inside that module may write the protected field.
+    const wrongPathDenied = await runtime.editWithRetry((tx) => {
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        moduleIdentity: successor.identity,
+        sourceFile: "/writer.ts",
+        bindingPath: ["otherBinding"],
+      });
+      protectedCell.withTx(tx).set({ value: "wrong-binding" });
+    }, 0);
+    expect(wrongPathDenied.error?.message).toContain(
+      "writeAuthorizedBy failed",
+    );
+    expect(protectedCell.get()).toEqual({ value: "different-file" });
   });
 });
