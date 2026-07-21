@@ -114,6 +114,10 @@ function findRepoRoot(cwd: string): string | null {
  * structure are not present.
  */
 export interface DiffEdit {
+  /** The diff text used to build this edit map. Commit-only views have no file
+   * mappings, so the source text is also what makes their HEAD message
+   * editable. */
+  readonly sourceText?: string;
   /** Diff line → the file line it edits, with its marker width (1, or 0 for a
    * trimmed empty context line). */
   readonly lines: ReadonlyMap<
@@ -296,7 +300,7 @@ export function buildDiffDocument(
   return {
     doc,
     maps: buildMaps(diffLineStarts, rawLines, mappings),
-    edit: buildEdit(rawLines, mappings, hunks),
+    edit: buildEdit(text, rawLines, mappings, hunks),
   };
 }
 
@@ -304,6 +308,7 @@ export function buildDiffDocument(
  * diff line, plus that file's captured content for save-time splicing and the
  * verified hunks that save rewrites. */
 function buildEdit(
+  sourceText: string,
   rawLines: string[],
   mappings: Map<string, FileMapping>,
   hunks: DiffHunkInfo[],
@@ -320,7 +325,7 @@ function buildEdit(
       lines.set(diffLine, { absPath: m.absPath, newLine, markerLen });
     }
   }
-  return { lines, fileText, hunks };
+  return { sourceText, lines, fileText, hunks };
 }
 
 // --- hunk rendering + structure ------------------------------------------------

@@ -5,10 +5,12 @@ import type { JSONSchema } from "@commonfabric/api";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
   type ExecCommandSpec,
+  normalizeCallableInputForExecution,
   parseExecArgs,
   renderExecHelp,
   renderExecHelpJson,
   renderPieceCallHelp,
+  resolveExecInvocation,
   resolveParsedExecInput,
 } from "../lib/exec-schema.ts";
 import {
@@ -390,6 +392,186 @@ describe("parseExecArgs", () => {
   });
 });
 
+describe("parseExecArgs edge cases", () => {
+  it("validates every generated flag value by its schema type", () => {
+    const spec = makeSpec("tool", {
+      type: "object",
+      properties: {
+        enabled: { type: "boolean" },
+        count: { type: "number" },
+        whole: { type: "integer" },
+        items: { type: "array" },
+        config: { type: "object" },
+        nothing: { type: "null" },
+      },
+    });
+
+    expect(() => parseExecArgs(spec, ["--enabled=maybe"])).toThrow(
+      /expected true or false/,
+    );
+    expect(() => parseExecArgs(spec, ["--count", "NaN"])).toThrow(
+      /expected number/,
+    );
+    expect(() => parseExecArgs(spec, ["--whole", "1.5"])).toThrow(
+      /expected integer/,
+    );
+    expect(() => parseExecArgs(spec, ["--items", "{"])).toThrow(
+      /Invalid JSON/,
+    );
+    expect(() => parseExecArgs(spec, ["--items", "{}"])).toThrow(
+      /expected array JSON/,
+    );
+    expect(() => parseExecArgs(spec, ["--config", "[]"])).toThrow(
+      /expected object JSON/,
+    );
+    expect(() => parseExecArgs(spec, ["--nothing", "false"])).toThrow(
+      /expected null/,
+    );
+    expect(parseExecArgs(spec, ["--nothing", "null"]).input).toEqual({
+      nothing: null,
+    });
+  });
+
+  it("rejects conflicting object-input modes at the point they conflict", () => {
+    const spec = makeSpec("tool", {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        enabled: { type: "boolean" },
+      },
+    });
+
+    expect(() => parseExecArgs(spec, ["value"])).toThrow(
+      /Unexpected argument value/,
+    );
+    expect(() => parseExecArgs(spec, ["--json", "--query", "tea"])).toThrow(
+      /cannot be combined/,
+    );
+    expect(() => parseExecArgs(spec, ["--query", "tea", "--json", "{}"]))
+      .toThrow(/cannot be combined/);
+    expect(() => parseExecArgs(spec, ["--json", "{}", "--json", "{}"]))
+      .toThrow(/only be provided once/);
+    expect(() =>
+      parseExecArgs(spec, ["--query", "tea", "--json-file", "input.json"])
+    ).toThrow(/json-file cannot be combined/);
+    expect(() =>
+      parseExecArgs(spec, ["--json", "{}", "--json-file", "input.json"])
+    ).toThrow(/only be provided once/);
+    expect(() => parseExecArgs(spec, ["--json-file"])).toThrow(
+      /Missing value/,
+    );
+    expect(parseExecArgs(spec, ["--json-file", "-"])).toMatchObject({
+      readJsonFromStdin: true,
+      usedJsonInput: true,
+    });
+    expect(parseExecArgs(spec, ["--no-enabled"]).input).toEqual({
+      enabled: false,
+    });
+    expect(() => parseExecArgs(spec, ["--no-query"])).toThrow(
+      /Unknown flag/,
+    );
+    expect(() => parseExecArgs(spec, ["--query"])).toThrow(/Missing value/);
+  });
+
+  it("handles each non-object input mode and its errors", () => {
+    const booleanSpec = makeSpec("tool", { type: "boolean" });
+    const stringSpec = makeSpec("tool", { type: "string" });
+
+    expect(parseExecArgs(booleanSpec, ["--value", "true"]).input).toBe(true);
+    expect(() => parseExecArgs(stringSpec, ["--value", "one", "extra"]))
+      .toThrow(/Unexpected argument extra/);
+    expect(() => parseExecArgs(stringSpec, ["--other", "value"])).toThrow(
+      /Unknown flag/,
+    );
+    expect(() => parseExecArgs(stringSpec, ["--json", "--other"])).toThrow(
+      /cannot be combined/,
+    );
+    expect(parseExecArgs(stringSpec, ["--json", '"value"']).input).toBe(
+      "value",
+    );
+    expect(parseExecArgs(stringSpec, ["--json-file", "-"])).toMatchObject({
+      readJsonFromStdin: true,
+      usedJsonInput: true,
+    });
+    expect(parseExecArgs(stringSpec, ["--json-file", "input.json"]).inputFile)
+      .toEqual({ format: "json", path: "input.json" });
+  });
+
+  it("validates explicit verbs and explicit-verb help", () => {
+    const spec = makeSpec("tool", { type: "object", properties: {} });
+
+    expect(() => parseExecArgs(spec, ["invoke"])).toThrow(/Invalid verb/);
+    expect(() => parseExecArgs(spec, ["--help", "extra"])).toThrow(
+      /Unknown flag --help/,
+    );
+    expect(parseExecArgs(spec, ["run", "--help"])).toMatchObject({
+      verb: "run",
+      showHelp: true,
+      showHelpJson: false,
+    });
+    expect(parseExecArgs(spec, ["run", "--help", "--json"]))
+      .toMatchObject({ showHelp: true, showHelpJson: true });
+    expect(() => parseExecArgs(spec, ["run", "--help", "extra"])).toThrow(
+      /Unknown flag --help/,
+    );
+  });
+});
+
+describe("resolveParsedExecInput edge cases", () => {
+  it("reports empty and malformed JSON read from stdin", async () => {
+    const spec = makeSpec("tool", { type: "object", properties: {} });
+    const parsed = parseExecArgs(spec, ["--json"]);
+
+    await expect(resolveParsedExecInput(spec, parsed, {
+      readTextInput: () => Promise.resolve("  \n"),
+    })).rejects.toThrow(/Expected JSON/);
+    await expect(resolveParsedExecInput(spec, parsed, {
+      readTextInput: () => Promise.resolve("not json"),
+    })).rejects.toThrow(/Invalid JSON/);
+  });
+
+  it("parses primitive stdin and handles terminal or empty implicit input", async () => {
+    const primitive = makeSpec("handler", { type: "boolean" });
+    const parsed = parseExecArgs(primitive, ["--value-file", "-"]);
+    expect(
+      await resolveParsedExecInput(primitive, parsed, {
+        readTextInput: () => Promise.resolve("false"),
+      }),
+    ).toBe(false);
+
+    const optional = makeSpec("handler", {
+      type: "object",
+      properties: {},
+    });
+    expect(
+      (await resolveExecInvocation(optional, [], {
+        isStdinTerminal: () => true,
+      })).input,
+    ).toEqual({});
+    expect(
+      (await resolveExecInvocation(optional, [], {
+        isStdinTerminal: () => false,
+        readTextInput: () => Promise.resolve(""),
+      })).input,
+    ).toEqual({});
+  });
+
+  it("normalizes only object inputs for tools with a string help field", () => {
+    const spec = makeSpec("tool", {
+      type: "object",
+      properties: { help: { type: "string" } },
+    });
+
+    expect(normalizeCallableInputForExecution(spec, null)).toBe(null);
+    expect(normalizeCallableInputForExecution(spec, ["value"])).toEqual([
+      "value",
+    ]);
+    expect(normalizeCallableInputForExecution(spec, { query: "tea" })).toEqual(
+      { query: "tea", help: "" },
+    );
+  });
+});
+
 describe("resolveParsedExecInput", () => {
   it("reads text payloads from files for primitive inputs", async () => {
     const spec = makeSpec("handler", { type: "string" });
@@ -624,6 +806,64 @@ describe("renderExecHelp", () => {
 
     expect(help).toContain("--help=<boolean> | --no-help");
     expect(help).toContain("Boolean. Use --help=true or --no-help.");
+  });
+
+  it("renders typed flags, schema details, deep shapes, and empty output objects", () => {
+    const help = renderExecHelp(
+      "/tmp/complex.tool",
+      makeSpec(
+        "tool",
+        {
+          type: "object",
+          properties: {
+            enabled: {
+              type: "boolean",
+              default: true,
+              description: "Enables the operation.",
+            },
+            count: { type: "integer" },
+            settings: { type: "object", properties: {} },
+            items: { type: "array", items: { type: "string" } },
+            nothing: { type: "null" },
+            mode: { enum: ["fast", "safe"] },
+            choice: { anyOf: [{ type: "string" }, { type: "number" }] },
+            deep: {
+              type: "object",
+              properties: {
+                one: {
+                  type: "object",
+                  properties: {
+                    two: {
+                      type: "object",
+                      properties: {
+                        three: {
+                          type: "object",
+                          properties: { four: { type: "string" } },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          required: ["enabled", "count", "settings", "items", "nothing"],
+        },
+        { type: "object", properties: {} },
+      ),
+    );
+
+    expect(help).toContain("--enabled | --no-enabled");
+    expect(help).toContain("--count <integer>");
+    expect(help).toContain("--settings <json-object>");
+    expect(help).toContain("--items <json-array>");
+    expect(help).toContain("--nothing <null>");
+    expect(help).toContain('Allowed: "fast" | "safe".');
+    expect(help).toContain("Default: true.");
+    expect(help).toContain("Enables the operation.");
+    expect(help).toContain("choice?: string | number");
+    expect(help).toContain("{...}");
+    expect(help).toContain("JSON on success.");
   });
 });
 

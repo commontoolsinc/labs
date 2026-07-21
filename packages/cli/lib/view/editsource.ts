@@ -60,6 +60,13 @@ export interface HunkRoom {
   atFileBottom: boolean;
 }
 
+/** Which parts of an edited view a save should persist. Commit-aware sources
+ * amend by default. The file-only choice writes changes backed by workspace
+ * files without rewriting Git history. */
+export interface SaveOptions {
+  readonly amendCommit?: boolean;
+}
+
 export interface EditableSource {
   /** A short label for the editable target (the filename), or null. */
   readonly label: string | null;
@@ -89,8 +96,18 @@ export interface EditableSource {
     text: string,
     seedLines?: readonly Line[],
   ): Highlighter;
-  /** Persist the edited text. Returns a status message. Throws on I/O failure. */
-  save(text: string): string;
+  /** Persist the edited text. `baseline` is the text at the last successful
+   * save. Returns a status message. Throws on failure. */
+  save(text: string, baseline?: string, options?: SaveOptions): string;
+  /** The clean baseline after a successful save. Most sources persist the
+   * whole buffer and omit this method. A commit view that saves files without
+   * amending keeps commit-message edits outside the returned baseline, so they
+   * remain visibly unsaved. */
+  baselineAfterSave?(
+    baseline: string,
+    current: string,
+    options?: SaveOptions,
+  ): string;
   /** The labels (filenames) of the targets that differ between `original` and
    * `current` — what a save would actually write. A plain file is its one label
    * when changed; a diff reports just the files whose lines an edit touched, so
@@ -128,17 +145,13 @@ export interface EditableSource {
    * map to fixed file lines: edits stay within a line, past the diff marker. A
    * plain file has no policy and is edited freely. */
   readonly policy?: EditPolicy;
-  /** When an edited commit message (in `git show` output) differs from its
-   * original and belongs to the HEAD commit, the commit whose message a save
+  /** When changed `git show` output contains the HEAD commit, the commit a save
    * would amend — for the confirmation prompt. Null when no such change is
-   * pending. Absent on sources that never edit a commit message. */
+   * pending. Absent on sources that never edit a commit. */
   pendingAmend?(
     baseline: string,
     current: string,
   ): { sha: string; subject: string } | null;
-  /** Amend the HEAD commit's message from the edited text, returning a status
-   * line. Called only after the save has been confirmed. */
-  amendCommit?(baseline: string, current: string): string;
   /** The path of the backing file, when there is a single one. The file picker
    * opens in its directory. */
   readonly path?: string;
@@ -160,6 +173,12 @@ export interface EditPolicy {
    * Takes the whole set of lines because editability depends on the row's
    * region. */
   editStart(lines: readonly string[], row: number): number | null;
+  /** A source-specific explanation for refusing an edit at `row`, or null to
+   * use the editor's general explanation. */
+  notEditableMessage?(
+    lines: readonly string[],
+    row: number,
+  ): string | null;
   /** What the row at `row` belongs to: a diff hunk's new side (edited as a
    * removed/added pair), a removed line that can be resurrected, an editable
    * commit message (edited as plain indented text), or neither. Drives how the
@@ -198,7 +217,7 @@ export function fileSource(path: string): EditableSource {
       },
     save: (text) => {
       Deno.writeTextFileSync(path, text);
-      return `Saved ${shortName(path)}`;
+      return "Saved 1 file";
     },
   };
 }
