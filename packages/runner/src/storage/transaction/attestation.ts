@@ -28,7 +28,7 @@ import {
   isDataUri,
   isDataUriMediaType,
   valueFromDataUriPayloadText,
-} from "../../data-uri-codec.ts";
+} from "@commonfabric/data-model/data-uri-codec";
 
 const logger = getLogger("attestation", {
   enabled: false,

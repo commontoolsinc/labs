@@ -3,22 +3,27 @@
  * facts, the mint half ({@link dataUriFromValue}), and the read half
  * ({@link valueFromDataUri}, {@link extractDataUriPayloadText},
  * {@link valueFromDataUriPayloadText}). This is a leaf module -- its only
- * dependencies are `data-model`, `utils`, and type imports -- so any
+ * dependencies are sibling `data-model` modules and `utils` -- so any
  * module, however graph-entangled, can use the codec without importing
  * the cell/link machinery. (That leafness is load-bearing: see the
- * `data-uri.ts` module doc for the dividing line, and #4846 for the
- * module-evaluation bug that a cycle-cluster import edge can trip.)
+ * runner's `data-uri.ts` module doc for the dividing line, and #4846 for
+ * the module-evaluation bug that a cycle-cluster import edge can trip.)
  */
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { jsonFromValue } from "@commonfabric/data-model/codec-json";
 import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
-import { valueFromJson } from "@commonfabric/data-model/codec-json";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
-import type { URI } from "@commonfabric/memory/interface";
+import { EmptyReconstructionContext } from "./codec-common/index.ts";
+import { jsonFromValue, valueFromJson } from "./codec-json/index.ts";
+import type { FabricValue } from "./fabric-value.ts";
+
+/**
+ * A URI in string form. Structurally identical to (and hence
+ * interchangeable with) the `URI` type in `memory/interface`, which this
+ * package does not depend on.
+ */
+type UriString = `${string}:${string}`;
 
 /** The media type minted for `data:` URIs. */
 export const DATA_URI_MEDIA_TYPE = "application/vnd.common-fabric.data";
@@ -44,15 +49,15 @@ export function isDataUri(id: string): boolean {
 /**
  * Assembles a `data:` URI carrying (the encoding of) `value` -- the
  * single place the URI shape is put together: scheme, media type, and the
- * base64url-of-UTF-8 `fvj1:` payload. Unlike
- * `data-uri.ts`'s `dataUriFromValueWithResolvedLinks()`, this does no link rewriting or
+ * base64url-of-UTF-8 `fvj1:` payload. Unlike the runner's
+ * `dataUriFromValueWithResolvedLinks()`, this does no link rewriting or
  * other preparation of `value`; callers hand it a ready `FabricValue`.
  */
-export function dataUriFromValue(value: FabricValue): URI {
+export function dataUriFromValue(value: FabricValue): UriString {
   const payload = toUnpaddedBase64url(
     new TextEncoder().encode(jsonFromValue(value)),
   );
-  return `data:${DATA_URI_MEDIA_TYPE},${payload}` as URI;
+  return `data:${DATA_URI_MEDIA_TYPE},${payload}` as UriString;
 }
 
 /** Shared text decoder, created once. */
@@ -150,7 +155,7 @@ export function valueFromDataUriPayloadText(text: string): FabricValue {
  *   payload is not a valid encoded `FabricValue` (which includes the empty
  *   payload and bare JSON).
  */
-export function valueFromDataUri(uri: URI | string): any {
+export function valueFromDataUri(uri: UriString | string): any {
   const { mediaType, text } = extractDataUriPayloadText(uri);
   if (!isDataUriMediaType(mediaType)) {
     throw new Error(`Invalid URI: ${uri}`);

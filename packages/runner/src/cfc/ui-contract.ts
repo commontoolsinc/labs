@@ -3,7 +3,10 @@ import type { CellScope, JSONSchema } from "../builder/types.ts";
 import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { findAndInlineDataUriLinks } from "../data-uri.ts";
-import { isDataUri, valueFromDataUri } from "../data-uri-codec.ts";
+import {
+  isDataUri,
+  valueFromDataUri,
+} from "@commonfabric/data-model/data-uri-codec";
 import { ContextualFlowControl } from "../cfc.ts";
 import type { CfcAddress } from "./types.ts";
 import { isNormalizedFullLink } from "../link-types.ts";

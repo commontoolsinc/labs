@@ -19,7 +19,7 @@ import {
   DATA_URI_MEDIA_TYPE,
   valueFromDataUri,
   valueFromDataUriPayloadText,
-} from "../src/data-uri-codec.ts";
+} from "@commonfabric/data-model/data-uri-codec";
 import { isSigilLink, type NormalizedLink } from "../src/link-utils.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
