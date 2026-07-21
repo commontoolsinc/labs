@@ -136,11 +136,15 @@ function mergeLlmDerivedIntoNode(
 }
 
 /**
- * Deep-merge the `LlmDerived` stamp into a generateObject result schema's
- * `ifc.addIntegrity` at EVERY node — the root AND every nested property / item /
- * `$defs` / compound-branch node — so it rides the (possibly custom /
- * injection-safe) resultSchema write to wherever the model bytes land, whether
- * inline at `["result"]` or in a SPLIT CHILD DOCUMENT.
+ * Deep-merge the `LlmDerived` stamp into every object subschema in a
+ * generateObject result schema. Storage-addressable nodes (properties,
+ * additional properties, items / prefix items, compound branches, and `$defs`
+ * targets) need the stamp so it rides the possibly custom / injection-safe
+ * resultSchema to wherever the model bytes land, whether inline at `["result"]`
+ * or in a SPLIT CHILD DOCUMENT. The shared walker's complete vocabulary is
+ * stamped too: this runs once per model result, so defensive completeness for
+ * caller-supplied schemas has no noticeable cost and preserves provenance if
+ * more keywords become storage-addressable later.
  *
  * A root-only merge is not enough: when a nested value redirects/splits into its
  * own document (an `asCell` field, an ID-anchored array item), the child write
@@ -158,17 +162,14 @@ function mergeLlmDerivedIntoNode(
  * An absent resultSchema defaults to a plain object schema.
  */
 function withLlmDerivedStamp(schema: JSONSchema | undefined): JSONSchema {
-  // Stamp this node, then every structural subschema. The descent is the shared
-  // vocabulary (`$defs` included): the previous hand-listed set covered
-  // properties/$defs/patternProperties/items/additionalProperties/prefixItems/
-  // anyOf/oneOf/allOf but skipped not/if/then/else/contains/propertyNames/
-  // dependentSchemas/contentSchema, leaving those nodes unstamped. `$ref` is a
-  // string, not a subschema, so a `$defs` self-reference stays a leaf.
+  // Stamp this node, then every structural subschema, including `$defs` and the
+  // keywords our generators do not currently emit. `$ref` is a string, not a
+  // subschema, so a `$defs` self-reference stays a leaf.
   const stampNode = (node: Record<string, unknown>): JSONSchema =>
     mapSubschemas(
       mergeLlmDerivedIntoNode(node) as JSONSchemaObj,
       (child) => (isRecord(child) ? stampNode(child) : child),
-      { includeDefs: true },
+      { includeDefs: true, includeUnused: true },
     );
 
   const base: Record<string, unknown> = isRecord(schema)
