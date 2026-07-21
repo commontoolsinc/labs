@@ -708,13 +708,53 @@ export class PiecesController<T = unknown> {
       // A sourceless root is eligible only when its full content identity (which
       // includes authored module paths) is exactly the official current entry.
       // This admits a known system identity, never a lookalike filename. A stale
-      // sourceless root stays pinned until an explicit migration supplies its
-      // durable provenance.
-      if (
-        storedSource === undefined &&
-        (runningRef.identity !== currentId || runningRef.symbol !== "default")
-      ) {
-        return "current";
+      // sourceless root that still LOADS stays pinned: it may be a custom
+      // program (custom recreation deliberately stamps no provenance), and
+      // rolling it forward would overwrite that choice with the system pattern.
+      //
+      // When the stored root cannot cold-load at all, the pin protects only a
+      // dead page: an obsolete system root heals, and a broken custom root
+      // degrades to a WORKING system root with its displaced identity recorded
+      // under `displacedPattern` meta for recovery. (2026-07-21: a runtime
+      // migration bricked every pre-provenance home root, and this pin kept
+      // them bricked after the update flag opened.)
+      const staleSourceless = storedSource === undefined &&
+        (runningRef.identity !== currentId || runningRef.symbol !== "default");
+      if (staleSourceless) {
+        // Home only: the fleet evidence is pre-provenance system HOME roots
+        // bricked by a runtime migration. An arbitrary space's sourceless
+        // root is more plausibly a deliberate custom program; widening the
+        // destructive fallback needs its own evidence and a tested
+        // restoration path.
+        if (space !== runtime.userIdentityDID) return "current";
+        // The probe is only meaningful where by-identity recovery is
+        // supported: under cfcEnforcementMode "disabled" it returns
+        // `undefined` unconditionally, which must not read as "dead".
+        if (runtime.cfcEnforcementMode === "disabled") return "current";
+        try {
+          const staleRoot = await runtime.patternManager.loadPatternByIdentity(
+            runningRef.identity,
+            runningRef.symbol,
+            space,
+          );
+          // Loadable in the current runtime → the pin still protects a live
+          // object. Only an explicit `undefined` — the artifact unavailable
+          // through every supported recovery path — authorizes replacement.
+          if (staleRoot !== undefined) return "current";
+        } catch (error) {
+          // A failed CHECK is not authority to replace an ambiguous root:
+          // fail closed like the enclosing function.
+          pieceUpdateLogger.warn(
+            "stale-root-probe-failed",
+            () => [
+              "checkAndUpdateDefaultPattern: stale-root load probe failed",
+              space,
+              runningRef,
+              error,
+            ],
+          );
+          return "current";
+        }
       }
 
       // 6. Equal identity is not enough to declare the root healthy: persisted
@@ -782,6 +822,17 @@ export class PiecesController<T = unknown> {
       }
       const result = await runtime.editWithRetry((tx) => {
         if (!rootStillMatches(root.withTx(tx))) return false;
+        if (staleSourceless) {
+          // The displaced ref had no provenance, so this swap is the only
+          // record of it. A replaced custom root's compiled artifacts remain
+          // content-addressed in the space; this breadcrumb is the pointer a
+          // recovery needs.
+          root.withTx(tx).setMetaRaw("displacedPattern", {
+            identity: runningRef.identity,
+            symbol: runningRef.symbol,
+            displacedAt: Date.now(),
+          });
+        }
         root.withTx(tx).setMetaRaw("patternIdentity", {
           identity: entryRef.identity,
           symbol: entryRef.symbol,

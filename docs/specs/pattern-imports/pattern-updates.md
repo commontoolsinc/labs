@@ -103,6 +103,30 @@ official entry appropriate to the space (`home.tsx` for Home,
 Neither space type nor an author-controlled source filename is provenance: a
 stale, custom, or repository-pinned sourceless root stays pinned.
 
+One exception, scoped to **home spaces** (`space === userIdentityDID`): a stale
+sourceless home root whose stored pattern the current runtime **explicitly
+cannot load** is replaced with the official `home.tsx` (the 2026-07-21 estuary
+migration bricked every pre-provenance home root, and no explicit-migration
+tool can reach a private home whose owner key lives only in a browser). The
+exception's semantics are deliberately narrow:
+
+- Replacement is authorized only when the load probe resolves `undefined` —
+  the artifact unavailable through every supported recovery path. A probe
+  **exception** is a failed check, not evidence: the updater logs and stays
+  pinned.
+- The probe asks "loadable in the **current runtime**" (in-memory artifact
+  index, live evaluated modules, then durable storage) — not "survives a cold
+  restart". A warm artifact can only cause extra pinning, never extra
+  replacement.
+- Under `cfcEnforcementMode: "disabled"` the by-identity probe is unsupported
+  (it returns `undefined` unconditionally), so the updater stays pinned there.
+- Non-home spaces always stay pinned; widening the destructive fallback needs
+  its own evidence and a tested restoration path.
+- The replaced root records the displaced `{ identity, symbol, displacedAt }`
+  under `displacedPattern` meta. This is an audit/forensic pointer — the
+  displaced program's compiled artifacts remain content-addressed in the
+  space — not (yet) an automated restoration mechanism.
+
 System patterns run this loop automatically at space open (always-update);
 published patterns will run it behind an explicit user action (§ Phasing).
 
