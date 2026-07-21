@@ -204,7 +204,7 @@ export function getJSONFromDataURI(uri: URI | string): any {
  * `data:` and the first comma) is returned verbatim as the media type;
  * there are no header parameters in this format, so a header carrying any
  * (`;charset=`, `;base64`, ...) simply fails the caller's media-type
- * check. The payload is base64url (unpadded) of UTF-8 text; a raw `?` or
+ * check. The payload is base64url of UTF-8 text; a raw `?` or
  * `#` after the comma delimits a query or fragment per the URL grammar and
  * is not part of the payload.
  *
@@ -231,10 +231,13 @@ export function extractDataURIPayloadText(
     data = data.substring(0, delimIndex);
   }
 
-  if (!/^[-_A-Za-z0-9]*$/.test(data)) {
+  let bytes: Uint8Array;
+  try {
+    bytes = fromBase64url(data);
+  } catch {
     throw new Error(`Invalid data URI payload (not base64url): ${uri}`);
   }
-  return { mediaType, text: textDecoder.decode(fromBase64url(data)) };
+  return { mediaType, text: textDecoder.decode(bytes) };
 }
 
 /**
