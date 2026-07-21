@@ -1097,16 +1097,13 @@ describe("RuntimeProcessor blob upload IPC", () => {
 });
 
 describe("RuntimeProcessor home pattern IPC", () => {
-  it("reconciles the home root only when both update flags are enabled", () => {
+  it("reconciles the home root when the update flag is enabled", () => {
     expect(shouldReconcileHomeRoot({ experimental: {} })).toBe(false);
     expect(shouldReconcileHomeRoot({
-      experimental: { systemPatternAutoUpdate: true },
+      experimental: { systemPatternAutoUpdate: false },
     })).toBe(false);
     expect(shouldReconcileHomeRoot({
-      experimental: {
-        systemPatternAutoUpdate: true,
-        systemPatternAutoUpdateHome: true,
-      },
+      experimental: { systemPatternAutoUpdate: true },
     })).toBe(true);
   });
 
@@ -1197,10 +1194,7 @@ describe("RuntimeProcessor home pattern IPC", () => {
     let startedDirectly = false;
     const runtime = {
       userIdentityDID: "did:key:test-home",
-      experimental: {
-        systemPatternAutoUpdate: true,
-        systemPatternAutoUpdateHome: true,
-      },
+      experimental: { systemPatternAutoUpdate: true },
       getHomeSpaceCell: () => ({
         sync: () => Promise.resolve(),
         key: () => ({

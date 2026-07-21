@@ -242,17 +242,12 @@ export interface ExperimentalOptions {
   /**
    * Roll a space's system root pattern (default-app / home) forward in place
    * when its toolshed serves a newer content identity. Default off; enabled per
-   * deployment once CI golden-replay coverage exists. The home root has an
-   * additional gate ({@link systemPatternAutoUpdateHome}) pending the
-   * stable-addressing audit. See docs/specs/pattern-imports/pattern-updates.md.
+   * deployment once CI golden-replay coverage exists. Covers the home root too:
+   * home state survival across an in-place roll is pinned by
+   * home-golden-replay.test.ts. See
+   * docs/specs/pattern-imports/pattern-updates.md.
    */
   systemPatternAutoUpdate?: boolean | undefined;
-  /**
-   * Also auto-update the HOME space root (favorites/journal/spaces). Requires
-   * {@link systemPatternAutoUpdate}. Held separately until home.tsx addresses
-   * its durable state by stable key/cause (spec § open question 4).
-   */
-  systemPatternAutoUpdateHome?: boolean | undefined;
 }
 
 /**

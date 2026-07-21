@@ -31,8 +31,7 @@ was last checked against the code.
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | graduate to always-on | implemented, off by default, rollout in progress |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
-| [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (non-home roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete both auto-update flags | implemented, on in the shell |
-| [`systemPatternAutoUpdateHome`](#systempatternautoupdatehome) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` env / shell build define, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#4611) | on after the home.tsx stable-addressing audit | implemented, off by default |
+| [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (all tracked system roots, home included); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete flag | implemented, on in the shell |
 | [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | off | Robin McCollum (in development) | graduate to always-on with the computed-cell write-conflict policy | in development on robin/feat-computed-cell-identity-p2 (redesigned: `computed:` URI scheme) |
 | [`cfcEnforcementMode`](#cfcenforcementmode) | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse) | `enforce-explicit` | Bernhard Seefeld (#3263) | tighten default toward `enforce-strict` | active; ladder is permanent |
 | [`cfcFlowLabels`](#cfcflowlabels) | `RuntimeOptions.cfcFlowLabels` | `off` | Bernhard Seefeld (#4011) | move toward `persist` | implemented, staged rollout |
@@ -70,11 +69,10 @@ The mapping from environment variable to flag is defined once, canonically, as
 and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
 the background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines.
-Six flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
-`eagerSourceAnnotation`, `systemPatternAutoUpdate`,
-`systemPatternAutoUpdateHome`, `computedCellIds`); `commitPreconditions` is
-deliberately mapped to `null` there, which records "not env-reachable" as a
-decision rather than an omission.
+Five flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
+`eagerSourceAnnotation`, `systemPatternAutoUpdate`, `computedCellIds`);
+`commitPreconditions` is deliberately mapped to `null` there, which records
+"not env-reachable" as a decision rather than an omission.
 The mapping accepts exactly `"true"` and `"false"`; any other value is ignored
 with a warning rather than coerced. See [How flags
 propagate](#how-flags-propagate).
@@ -217,9 +215,10 @@ propagate](#how-flags-propagate).
 - **Added by.** Bernhard Seefeld, in "system-pattern auto-update (in-place
   rollforward, flag-gated)" (#4611, 2026-07-08); defaulted on for the shell in
   #4619 (2026-07-09).
-- **Purpose.** At space open, rolls a space's **non-home** root system pattern
-  (default-app) forward in place when its toolshed serves a newer content
-  identity. Every tracked root uses the client/toolshed version gate and cached
+- **Purpose.** At space open, rolls a space's root system pattern (default-app,
+  and the home root — the home-specific second gate was retired on the strength
+  of home-golden-replay state-survival coverage) forward in place when its
+  toolshed serves a newer content identity. Every tracked root uses the client/toolshed version gate and cached
   `?identity` comparison before an in-place `patternIdentity` swap. The
   identity response, every fetched source/import, and the compiler-produced
   entry must all agree with the same client build and identity. Equal identities
@@ -243,31 +242,13 @@ propagate](#how-flags-propagate).
   define is set to `"false"`, so the deployed product (and local shell dev
   builds) run it on for non-home roots. Server-side processes (toolshed, CLI,
   background piece service) leave it off unless the env var is set. End state:
-  graduate to always-on for system roots once golden-replay coverage has soaked
-  and the home audit lands, then delete both auto-update flags.
-- **Status on 2026-07-21.** Implemented; on in the shell for non-home roots,
-  off elsewhere. Root reconciliation and broken-root repair run before
-  bootstrap.
-- **Path to removal.** Graduate the home root (below), make the check
-  unconditional, and remove both flags together.
-
-### `systemPatternAutoUpdateHome`
-
-- **Toggle via.** `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` environment
-  variable, the shell build define of the same name, or
-  `RuntimeOptions.experimental.systemPatternAutoUpdateHome`.
-- **Added by.** Bernhard Seefeld, in #4611 (2026-07-08).
-- **Purpose.** Second gate holding the **home** root (home.tsx) out of
-  [`systemPatternAutoUpdate`](#systempatternautoupdate): the home root carries
-  real user data (favorites, journal, the spaces list) and stays pinned until
-  the stable-addressing audit verifies an in-place swap preserves that state.
-  Both flags must be on for a home root to auto-update.
-- **Current default and planned end state.** Off everywhere (no shell-side
-  default-on). End state: flip on after the home.tsx stable-addressing audit,
-  then remove together with `systemPatternAutoUpdate`.
-- **Status on 2026-07-09.** Implemented, off by default.
-- **Path to removal.** Complete the audit, default the home root on, and delete
-  both flags when the check becomes unconditional.
+  graduate to always-on for system roots once golden-replay coverage has
+  soaked, then delete the flag.
+- **Status on 2026-07-21.** Implemented; on in the shell for all tracked system
+  roots, home included ([`systemPatternAutoUpdateHome`](#appendix-a-removed-and-never-shipped-flags)
+  removed), off elsewhere. Root reconciliation and broken-root repair run
+  before bootstrap.
+- **Path to removal.** Make the check unconditional and remove the flag.
 
 ### `computedCellIds`
 
@@ -685,8 +666,7 @@ the per-epic implementation notes).
 The environment-backed flags (`EXPERIMENTAL_MODERN_CELL_REP`,
 `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`,
 `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION`,
-`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE`,
-`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME`) reach the runtime through the
+`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE`) reach the runtime through the
 deployed processes. The runtime-only flags (`commitPreconditions`, the CFC
 dials) reach it only through the `RuntimeOptions` passed to `new Runtime(...)`.
 
@@ -848,6 +828,20 @@ config reaches:
 
 These are recorded so that references to them elsewhere in the tree do not send a
 future reader hunting for a flag that no longer exists.
+
+### `systemPatternAutoUpdateHome` / `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` (removed)
+
+The second gate that held the **home** root (home.tsx) out of
+[`systemPatternAutoUpdate`](#systempatternautoupdate) while the
+stable-addressing question was open: the home root carries real user data
+(favorites, journal, the spaces list), and an in-place roll had to be proven
+state-preserving first. `home-golden-replay.test.ts` pins exactly that (seed
+representative home data, roll N→N+1 in place, prove every list survives), and
+the 2026-07-21 estuary incident — a runtime migration bricking every
+old-generation home root with no self-repair path because this flag was off —
+made the cost of the extra gate concrete. Removed at the flag owner's direction;
+home roots now ride `systemPatternAutoUpdate` like every other tracked system
+root.
 
 ### `schedulerHistoricalMightWrite` (removed)
 

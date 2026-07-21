@@ -32,7 +32,6 @@ export type ExperimentalRuntimeFlags = {
   persistentSchedulerState?: boolean;
   eagerSourceAnnotation?: boolean;
   systemPatternAutoUpdate?: boolean;
-  systemPatternAutoUpdateHome?: boolean;
 };
 
 export type RuntimeCfcEnforcementMode = NonNullable<
