@@ -207,8 +207,8 @@ dataset.
 6. For local development instead, grant those two roles to a service account,
    download a key for it, and set `GCP_SA_KEY` to the file's contents.
 
-The tile sums the raw `cost` column, i.e. total GCP spend across all services,
-gross of credits.
+The tile sums the raw `cost` column, i.e. total spend across every project tied
+to the exported billing account, gross of credits.
 
 ### `OPENAI_ADMIN_KEY`
 
@@ -431,18 +431,24 @@ its embedded tsnet).
 **One-time setup (human steps):**
 
 1. Tailscale admin console: add `tag:dashboard` to `tagOwners`, grant who may
-   reach it, and mint an **ephemeral** `tag:dashboard` auth key. The tailnet
-   also needs MagicDNS and HTTPS certificates enabled — `tailscale serve` fetches
-   a cert for `dashboard.<tailnet>.ts.net` and can't without them.
-2. `tofu apply` in `infra/tofu/gke` creates all the dev-dashboard Secret Manager
-   containers (authkey, github token, and the optional discord/signoz ones). Then
-   store the two required values:
+   reach it, and configure a federated identity restricted to `auth_keys` and
+   `tag:dashboard`. The infra overlay supplies that identity's public client ID
+   with `ephemeral=false&preauthorized=true` and its audience; no Tailscale auth
+   key or OAuth secret is stored in Kubernetes or Secret Manager. The tailnet
+   also needs MagicDNS and HTTPS certificates enabled — `tailscale serve`
+   fetches a cert for `dashboard.<tailnet>.ts.net` and can't without them.
+2. `tofu apply` in `infra/tofu/gke` creates the dev-dashboard Secret Manager
+   containers and Workload Identity/BigQuery grants. Store the required GitHub
+   token (and each provider credential you want to enable):
    ```bash
-   printf %s "tskey-auth-…" | gcloud secrets versions add k8s-stage-dashboard-authkey --data-file=-
    printf %s "github_pat_…" | gcloud secrets versions add k8s-stage-dashboard-github-token --data-file=-
    ```
    The GitHub token is fine-grained, read-only (repo `commontoolsinc/labs`, Actions: read).
    For the github-ci-spend tile it must additionally carry org billing read.
+3. The infra manifests create separate 1 Gi `standard-rwo` PVCs for the Discord
+   history file and Tailscale node state. The dashboard remains a one-replica
+   `Recreate` Deployment; pod replacement reuses the same non-ephemeral
+   Tailscale node ID and `dashboard.<tailnet>.ts.net` name.
 
 **Build, push, deploy**
 
@@ -480,19 +486,20 @@ Tailscale console as `tag:dashboard`; open
 `https://dashboard.<tailnet>.ts.net/`. (The sidecar image is already pinned by
 `@sha256` digest in `03-deployment.yaml`, matching golink.)
 
-**Gated tiles** stay gray until wired: add the Secret Manager *value* (the
-container already exists from `tofu apply`), uncomment the ExternalSecret in
-`dashboard-secrets.yaml` and the env block in `03-deployment.yaml`, then re-run
-`make apply-dev-dashboard-stage`. So you can deploy green and light tiles up one
-at a time.
+**Provider-gated tiles** stay gray until their credential or public configuration
+is wired: add the Secret Manager *value* (the container already exists from
+`tofu apply`), enable the matching ExternalSecret/env when needed, then re-run
+`make apply-dev-dashboard-stage`. Stage's Cloud Billing table is already wired;
+during Google's initial export backfill it reports `no billing data yet` rather
+than a false zero.
 
 Every backend is reached over its REST API, so the image carries no cloud CLI.
 The GitHub tiles use `GH_TOKEN`; the cloud-spend tile queries BigQuery as the
 pod's own service account through Workload Identity — the infra repo's
 `tofu/gke/dashboard.tf` provisions that account, the Workload Identity binding,
 and its BigQuery Job User + Data Viewer grants, so no key is stored in the
-cluster. Lighting the tile up is then just setting `GCP_BILLING_TABLE` (and
-`dashboard_billing_dataset` for the export dataset).
+cluster. The stage deployment sets `GCP_BILLING_TABLE` to the standard export
+table, and `dashboard_billing_dataset` scopes its dataset reader grant.
 
 ## Design notes
 
