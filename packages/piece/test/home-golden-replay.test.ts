@@ -18,11 +18,12 @@ import {
 // default-app-golden-replay.test.ts.
 //
 // The home root (home.tsx) carries the user's REAL durable data — favorites,
-// journal, spaces — and is held behind its OWN flag (systemPatternAutoUpdateHome)
-// precisely because losing that data on an update would be unrecoverable. This
-// test is the state-survival evidence that flag would need before it can flip:
-// seed representative home data, roll the home root N→N+1 in place, and prove
-// every list survives intact and the new code runs over it.
+// journal, spaces — where losing data on an update would be unrecoverable.
+// This test is the state-survival evidence that lets home ride the same
+// `systemPatternAutoUpdate` flag as every other tracked system root (the
+// home-specific second gate was retired on its strength): seed representative
+// home data, roll the home root N→N+1 in place, and prove every list survives
+// intact and the new code runs over it.
 //
 // It is deliberately faithful to how real home OWNS its state. home.tsx does:
 //   const favorites = new Writable<Favorite[]>([]).for("favorites");
@@ -155,11 +156,8 @@ describe("home golden replay (durable home state survives an in-place roll-forwa
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
       clientVersion: BUILD_SHA,
-      // The home root needs BOTH flags: the base gate AND the home-specific one.
-      experimental: {
-        systemPatternAutoUpdate: true,
-        systemPatternAutoUpdateHome: true,
-      },
+      // One flag covers every tracked system root, home included.
+      experimental: { systemPatternAutoUpdate: true },
     });
     // A HOME session: space === the user's identity DID, which is what flips
     // `isHomeSpace` on inside the controller (ensureDefaultPattern + the update
