@@ -56,11 +56,16 @@ export const MEMORY_WS_INFLATE_MAX_BYTES = 64 * 1024 * 1024;
  * whole connection per RFC 6455 §4.1, and browsers cannot read env — so the
  * kill switch only stops this process from spending compression CPU.
  */
-export const memoryWsDeflateEnabled = (): boolean => {
+const defaultEnvReader = (): string | undefined =>
+  (globalThis as { Deno?: typeof Deno }).Deno?.env?.get(
+    "CF_MEMORY_WS_DEFLATE",
+  );
+
+export const memoryWsDeflateEnabled = (
+  readEnv: () => string | undefined = defaultEnvReader,
+): boolean => {
   try {
-    const value = (globalThis as { Deno?: typeof Deno }).Deno?.env?.get(
-      "CF_MEMORY_WS_DEFLATE",
-    );
+    const value = readEnv();
     return value !== "0" && value !== "false";
   } catch {
     // Browsers (no Deno global) default on; a Deno process whose env is
@@ -71,16 +76,27 @@ export const memoryWsDeflateEnabled = (): boolean => {
 
 let deflateRawSupport: boolean | null = null;
 
+const defaultDeflateRawProbe = (): void => {
+  new CompressionStream("deflate-raw");
+  new DecompressionStream("deflate-raw");
+};
+
+/** Test seam: forget the cached probe result. */
+export const resetMemoryWsDeflateSupport = (): void => {
+  deflateRawSupport = null;
+};
+
 /**
  * Whether this runtime can construct `deflate-raw` compression streams.
  * Clients must not offer the subprotocol without this: an offer is a
  * commitment to inflate whatever the server compresses.
  */
-export const memoryWsDeflateSupported = (): boolean => {
+export const memoryWsDeflateSupported = (
+  probe: () => void = defaultDeflateRawProbe,
+): boolean => {
   if (deflateRawSupport !== null) return deflateRawSupport;
   try {
-    new CompressionStream("deflate-raw");
-    new DecompressionStream("deflate-raw");
+    probe();
     deflateRawSupport = true;
   } catch {
     deflateRawSupport = false;

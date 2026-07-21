@@ -16,6 +16,15 @@ import {
 
 const TEXT_ENCODER = new TextEncoder();
 
+/** Close, tolerating a socket already racing the peer's close. */
+const safeClose = (socket: WebSocket): void => {
+  try {
+    socket.close();
+  } catch {
+    // Ignore close races with the peer.
+  }
+};
+
 export interface SessionFactory {
   /** Opt in to StorageManager's ACL genesis handshake. Scripted factories used
    *  by lower-level replica tests omit this because they intentionally model
@@ -117,9 +126,8 @@ export class WebSocketTransport implements MemoryClient.Transport {
   // socket before the consumer learns the old one closed, a window the
   // historical synchronous path never had.
   #draining: Promise<void> | null = null;
-  // once close() is called nothing may dial again. Without this latch
-  // an open() parked on #draining could resume after close() returned and
-  // leak a brand-new live socket.
+  // Once close() is called nothing may dial again: a late send must not
+  // leak a brand-new live socket that nothing owns.
   #closed = false;
 
   constructor(private readonly address: URL) {}
@@ -211,12 +219,6 @@ export class WebSocketTransport implements MemoryClient.Transport {
     if (this.#opening) {
       return await this.#opening;
     }
-    if (this.#draining !== null) {
-      await this.#draining;
-      // Drain completion may have raced another open() or a close(); re-enter
-      // to observe the current state (including the closed latch).
-      return await this.open();
-    }
     const address = toWebSocketAddress(this.address);
     const opening = new Promise<WebSocket>((resolve, reject) => {
       // offer the deflate subprotocol when this runtime can actually
@@ -254,11 +256,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
             error,
           );
           poisoned = true;
-          try {
-            socket.close();
-          } catch {
-            // Ignore close races with the peer.
-          }
+          safeClose(socket);
         }
       };
       socket.addEventListener("open", () => {
@@ -287,11 +285,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
             // treat it as a transport failure rather than buffering without
             // bound.
             poisoned = true;
-            try {
-              socket.close();
-            } catch {
-              // Ignore close races with the peer.
-            }
+            safeClose(socket);
             return;
           }
           pendingInflateBytes += data.byteLength;
@@ -312,11 +306,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
           }).catch(() => {
             // A malformed compressed frame is a transport failure: close so
             // the client's reconnect machinery takes over and replays.
-            try {
-              socket.close();
-            } catch {
-              // Ignore close races with the peer.
-            }
+            safeClose(socket);
           });
           return;
         }
@@ -339,11 +329,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
           // notification is not rejected by the draining guard.
           if (this.#draining === drained) this.#draining = null;
           this.#closeReceiver();
-        })
-          .catch(() => {})
-          .finally(() => {
-            if (this.#draining === drained) this.#draining = null;
-          });
+        }).catch(() => {});
         this.#draining = drained;
         if (!opened) {
           reject(new Error("memory websocket transport closed before opening"));
@@ -363,11 +349,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
         const drained = inbound.enqueue(() => {
           if (this.#draining === drained) this.#draining = null;
           this.#closeReceiver(error);
-        })
-          .catch(() => {})
-          .finally(() => {
-            if (this.#draining === drained) this.#draining = null;
-          });
+        }).catch(() => {});
         this.#draining = drained;
         reject(event);
       }, { once: true });

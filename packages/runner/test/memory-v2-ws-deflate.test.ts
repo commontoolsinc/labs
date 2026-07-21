@@ -235,6 +235,63 @@ describe("WebSocketTransport deflate framing", () => {
     });
   });
 
+  it("closes the socket when the receiver fails to apply a frame", async () => {
+    await withTransport(async (transport, socket) => {
+      const received: string[] = [];
+      transport.setReceiver((payload) => {
+        received.push(payload);
+        if (received.length === 1) {
+          throw new Error("consumer failed to apply this frame");
+        }
+      });
+
+      const send = transport.send(SMALL);
+      openSocket(socket());
+      await send;
+
+      const closed = new Promise<void>((resolve) => {
+        socket().addEventListener("close", () => resolve(), { once: true });
+      });
+      // First frame throws in the receiver: the transport must treat the
+      // unapplied frame as a gap and close rather than deliver frame two
+      // (which the session would ack from inconsistent state).
+      socket().dispatchEvent(
+        new MessageEvent("message", {
+          data: (await deflateWirePayload(LARGE)).buffer,
+        }),
+      );
+      socket().dispatchEvent(new MessageEvent("message", { data: SMALL }));
+
+      await closed;
+      expect(received).toEqual([LARGE]);
+    });
+  });
+
+  it("tolerates a close() that throws while poisoning", async () => {
+    await withTransport(async (transport, socket) => {
+      const received: string[] = [];
+      transport.setReceiver((payload) => received.push(payload));
+      const send = transport.send(SMALL);
+      openSocket(socket());
+      await send;
+
+      // Force the poison path's socket.close() to throw: the failure must
+      // stay contained (no unhandled rejection, no delivery past the gap).
+      socket().close = () => {
+        throw new Error("close raced the peer");
+      };
+      socket().dispatchEvent(
+        new MessageEvent("message", {
+          data: new Uint8Array([0xde, 0xad, 0xbe, 0xef]).buffer,
+        }),
+      );
+      socket().dispatchEvent(new MessageEvent("message", { data: SMALL }));
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(received).toEqual([]);
+    });
+  });
+
   it("ignores binary frames when the socket did not negotiate deflate", async () => {
     await withTransport(async (transport, socket) => {
       const received: string[] = [];

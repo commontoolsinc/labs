@@ -4,6 +4,9 @@ import {
   deflateWirePayload,
   inflateWirePayload,
   MEMORY_WS_DEFLATE_SUBPROTOCOL,
+  memoryWsDeflateEnabled,
+  memoryWsDeflateSupported,
+  resetMemoryWsDeflateSupport,
   selectMemoryWsDeflateProtocol,
   SerialTaskQueue,
 } from "../v2/transport-deflate.ts";
@@ -138,5 +141,37 @@ describe("memory ws deflate serial queue", () => {
     await assertRejects(() => failing, Error, "boom");
     assertEquals(await after, "ok");
     assertEquals(order, ["after"]);
+  });
+});
+
+describe("memory ws deflate environment probes", () => {
+  it("fails safe when env access throws in a Deno process", () => {
+    assertEquals(
+      memoryWsDeflateEnabled(() => {
+        throw new Error("env permission denied");
+      }),
+      // Deno global present: an unexpressable opt-out defaults to off.
+      false,
+    );
+    assertEquals(memoryWsDeflateEnabled(() => "0"), false);
+    assertEquals(memoryWsDeflateEnabled(() => "false"), false);
+    assertEquals(memoryWsDeflateEnabled(() => undefined), true);
+  });
+
+  it("caches a failed deflate-raw capability probe as unsupported", () => {
+    resetMemoryWsDeflateSupport();
+    try {
+      assertEquals(
+        memoryWsDeflateSupported(() => {
+          throw new Error("no deflate-raw");
+        }),
+        false,
+      );
+      // Cached: a later working probe is not consulted.
+      assertEquals(memoryWsDeflateSupported(() => {}), false);
+    } finally {
+      resetMemoryWsDeflateSupport();
+    }
+    assertEquals(memoryWsDeflateSupported(), true);
   });
 });
