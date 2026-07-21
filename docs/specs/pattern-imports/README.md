@@ -26,18 +26,21 @@ distinction evaporates at pin time — both freeze to the same kind of hash.
 
 ## Status
 
-**Implemented** (`#4081`; grammar/resolver/pinning/mounting as described). This
-remains the design of record; for the as-built pointer model note that the
-patternId + pattern **meta cell** this document originally leaned on were
-**retired** in `#4156` (`docs/specs/pattern-id-retirement.md`) — a piece now
-carries only `patternIdentity = { identity, symbol }`, and a pattern's source
-lives in the `pattern:<identity>` source-doc closure. References below are
-updated to match. Update propagation (rolling a running piece to a new version)
-is a companion: `pattern-updates.md`.
+**Implemented for content-addressed and same-toolshed references** (`#4081`):
+parsing, slug and piece resolution, deploy-time pinning, and mounting. Dynamic
+host-qualified routing, `cf publish`, and source subpaths remain planned as
+listed under Phasing. This remains the design of record; for the as-built
+pointer model note that the patternId + pattern **meta cell** this document
+originally leaned on were **retired** in `#4156`
+(`docs/specs/pattern-id-retirement.md`) — a piece now carries only
+`patternIdentity = { identity, symbol }`, and a pattern's source lives in the
+`pattern:<identity>` source-doc closure. References below are updated to match.
+System-root update propagation is described in `pattern-updates.md`; the
+general piece origin model is described in `../piece-source-lifecycle.md`.
 
 ## Last Updated
 
-2026-07-17
+2026-07-21
 
 ## Motivation
 
@@ -78,15 +81,15 @@ is a companion: `pattern-updates.md`.
 | Piece of machinery | Where | Role here |
 |---|---|---|
 | `ProgramResolver` seam (`main()` / `resolveSource(specifier)`, async) | `packages/js-compiler/program.ts`, `typescript/resolver.ts` | The hook where fabric imports plug in; compilation already runs inside a runtime with storage + network access |
-| Authored-import policy | `packages/runner/src/sandbox/runtime-module-policy.ts:25` | Single dispatch point to extend for `cf:` specifiers |
-| Per-module Merkle identity (source + deps; external deps fold the full specifier string into the leaf: `runtime:${specifier}@${fingerprint}`) | `packages/runner/src/harness/module-identity.ts:145-149` | Makes pinned specifiers content-derived with **no hashing changes** (§ Snapshot semantics) |
-| Piece → pattern pointer: `meta("patternIdentity")` = `{ identity, symbol }` (entry-module identity), the sole pointer post-`#4156` (a separate `meta("pattern")` survives only as a builtin parent-backlink) | write `runner.ts:1012`, read `getPatternIdentityRef` `runner.ts:4441` | The terminal hop of the resolution chain |
+| Authored-import policy | `packages/runner/src/sandbox/runtime-module-policy.ts` | Single dispatch point for `cf:` specifiers |
+| Per-module Merkle identity (source + deps; external deps fold the full specifier string into the leaf: `runtime:${specifier}@${fingerprint}`) | `computeModuleHashes` in `packages/runner/src/harness/module-identity.ts` | Makes pinned specifiers content-derived with **no hashing changes** (§ Snapshot semantics) |
+| Piece → pattern pointer: `meta("patternIdentity")` = `{ identity, symbol }` (entry-module identity), the sole pointer post-`#4156` (a separate `meta("pattern")` survives only as a builtin parent-backlink) | write `applySetupState`, read `getPatternIdentityRef` in `packages/runner/src/runner.ts` | The terminal hop of the resolution chain |
 | Pattern source-of-truth: the `pattern:<identity>` source-doc closure (there is no longer a meta cell; the retired one's `program` was pure duplication of these docs) | `packages/runner/src/compilation-cache/cell-cache.ts` | Recovered via `getPatternSourceProgramByIdentity` / `loadVerifiedSourceClosure` |
 | Compile cache: source docs at cell key **`pattern:<identity>`**, compiled docs at `compileCache:<rtVersion>/<identity>` | `packages/runner/src/compilation-cache/cell-cache.ts` (`sourceDocKey`/`compiledDocKey`) | **The URI a pattern is saved under by hash.** Content-addressed per-module source + compiled storage; imports resolve from and dedupe into it |
-| Slug cells: generic **redirect link to any cell** (`setSlugLink` is target-agnostic; only `resolvePieceAddress` layers a "must be a piece" check) | `packages/piece/src/slugs.ts:34-80` | Slugs can name pieces *or* patterns today, mechanically |
+| Slug cells: generic **redirect link to any cell** (`setSlugLink` is target-agnostic; only `resolvePieceAddress` layers a "must be a piece" check) | `packages/piece/src/slugs.ts` | Slugs can name pieces *or* patterns today, mechanically |
 | Slug ids: `hashOf({causal:{space, slug}})`; slug grammar `[a-z0-9]+(-[a-z0-9]+)*`, ≤80 chars; **`isSlugAddress(t) = !t.includes(":")`** | `packages/runner/src/slugs.ts` | The existing slug-vs-URI discriminator the grammar reuses |
-| `loadPatternByIdentity(entryIdentity, symbol, space)` | `packages/runner/src/pattern-manager.ts:839` | Existing by-identity load path the resolver builds on |
-| Per-space host routing: `spaceHostMap` resolves each space to its memory host; foreign-host sessions are ordinary authenticated memory sessions (#3947) | `packages/runner/src/storage/v2-remote-session.ts:47` | Cross-toolshed refs are just cell reads in a space routed to another host — no HTTP endpoints needed |
+| `loadPatternByIdentity(entryIdentity, symbol, space)` | `packages/runner/src/pattern-manager.ts` | Existing by-identity load path the resolver builds on |
+| Per-space host routing: `spaceHostMap` resolves each space to its memory host; foreign-host sessions are ordinary authenticated memory sessions (#3947) | `packages/runner/src/storage/v2-remote-session.ts` | Reads work for a foreign space whose route is already known; applying a host from an explicit `cf://` reference remains planned |
 
 ### The two "pattern by hash" handles, explicitly
 
@@ -141,9 +144,19 @@ separate fields:
   preserves a path inside that repository rather than only a basename.
   Absolute paths from the author's machine are never persisted.
 - `source.origin` is the optional `patternSource` update provenance carried by
-  the piece (a `cf:` publication ref or a toolshed system-pattern path). It
-  answers "where should updates be checked?", not "which exact bytes are
-  running?"; `source.ref` answers the latter.
+  the piece. Today only toolshed system-pattern paths drive an implemented
+  update check. General source URLs include external `https://` URLs and
+  fabric-internal `cf:` URLs, including the host-qualified `cf://...` form. A
+  fabric URL that is unpinned and resolves to a piece or another mutable
+  `patternIdentity`-bearing entity follows that entity's current pattern. A
+  fabric URL that resolves to `pattern:<identity>` names content-addressed
+  source and cannot update. A trailing `@<identity>` pin makes any fabric URL
+  immutable, even when its unpinned form names a piece. These piece-origin
+  semantics are specified in
+  [`../piece-source-lifecycle.md`](../piece-source-lifecycle.md) and require
+  work. An origin answers "where did this source come from, and should that
+  place be checked again?"; `source.ref` answers "which exact bytes are
+  running?"
 
 `cf piece new`, `cf piece setsrc`, and custom `cf piece set-home` accept
 `--repository <locator>` alongside `--root`. `new` and custom `set-home` stamp
@@ -368,7 +381,7 @@ join inside the mounted program).
 |---|---|---|
 | `./ ../ /` | program-relative files | today |
 | bare (`commonfabric`, `turndown`, …) | **reserved for runtime modules only**, allowlist | today; never used for packages |
-| `cf:` (authored reference grammar above) | this spec | new |
+| `cf:` (authored reference grammar above) | this spec | today for content-addressed and same-toolshed references; host-qualified routing and subpaths planned |
 | `cf:module/`, `cf:cache-root/` | compiled output / cache internals; rejected in authored source | today |
 | `npm: jsr: https:` | future external packages | reserved now |
 
@@ -517,12 +530,14 @@ unchanged.
 
 ### 5. CLI / shell
 
-- `cf deploy`: pins unpinned mutable refs (rewrites the stored source, which
-  re-derives the pinned identity and its `pattern:<identity>` source docs).
+- `cf deps update <file> [--import <specifier>]`: pins unpinned mutable refs by
+  rewriting the stored source, which re-derives the pinned identity and its
+  `pattern:<identity>` source documents.
+- Automatic pinning during piece deployment remains required work. The CLI
+  intentionally has no `cf deploy` command.
 - `cf publish <pattern> [--slug name] [--space …]` *(not yet built)*: ensure the
   source docs exist in the target space + assign the slug to a
   patternIdentity-bearing cell.
-- `cf deps update [specifier]`: re-resolve + rewrite pins.
 - `cf dev` / `cf check`: live-resolve unpinned refs against the connected
   toolshed; `--frozen` to forbid (CI). `--show-transformed` shows mounted
   files like any other program file.

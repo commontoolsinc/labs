@@ -1,11 +1,16 @@
-# Pattern Updates — rolling a running piece forward
+# System-source pattern updates — rolling running pieces forward
 
-How a running piece moves from the pattern version it was created with to a
-newer one — automatically for patterns backed by a same-toolshed **system
-source** (including home and default-app), and (a later phase) on demand for
-**published** patterns. Companion to `README.md`
-(which covers `cf:` imports and publishing-as-naming); this doc covers the
-*update propagation* side.
+How the currently implemented, specialized updater moves pieces backed by a
+same-toolshed **system source** from one pattern version to another. This
+includes home, default-app, and other successfully instantiated system-source
+patterns. The general lifecycle for ordinary pieces, including external
+`https://` origins, fabric `cf://` origins, following another piece, source
+history, revert, and repoint, is specified in
+[`../piece-source-lifecycle.md`](../piece-source-lifecycle.md).
+
+This document is also a companion to `README.md`, which covers static `cf:`
+imports and publication through naming and placement. Static imports remain
+pinned and do not adopt the live update behavior specified for piece origins.
 
 ## Status
 
@@ -24,7 +29,7 @@ and an unloadable tracked root is repaired before bootstrap through the same
 found during implementation are archived at
 [`docs/history/specs/pattern-imports/system-pattern-updates-implementation-plan.md`](../../history/specs/pattern-imports/system-pattern-updates-implementation-plan.md).
 The home root rides the shipped root machinery since the second flag's removal;
-published-pattern updates remain design.
+general piece origins and source history remain design.
 
 ## Last Updated
 
@@ -49,14 +54,17 @@ published-pattern updates remain design.
   schema-incompatible update slips through — the damage must be *bounded*
   (fast rollback), because the schema-valid-but-semantically-wrong case is not
   reliably detectable.
-- **One mechanism, two audiences.** The same "resolve a source pointer to a
-  current identity, swap in place" loop serves system patterns (auto) now and
-  published patterns (on click) later; they differ only in the resolver.
+- **A reusable mechanism.** The existing "resolve a source pointer to a current
+  identity, then swap in place" loop is a foundation for general piece origins.
+  Ordinary pieces need history, detach, compatibility, authorization, and
+  concurrency guarantees before they can use that lifecycle.
 
 ## Non-goals (this doc / v1)
 
-- **Published-pattern update UX** (a shell "update available" affordance) —
-  designed-*for* here, implemented later (§ Phasing).
+- **General piece origins and source history.** Web URL origins, fabric URLs
+  that name pieces or content-addressed patterns, detach, fork, revert, and
+  repoint are specified in
+  [`../piece-source-lifecycle.md`](../piece-source-lifecycle.md).
 - **Lineage / fork detection.** No substrate exists today — `parents` was
   deleted with the pattern-id retirement, and `pieceLineageSchema`
   (`packages/runner/src/schemas.ts`) is dead code, referenced nowhere.
@@ -147,10 +155,11 @@ The exception's semantics are deliberately narrow:
   space — not (yet) an automated restoration mechanism.
 
 Default system roots run this loop before bootstrap. Every other pattern runs it
-after successful instantiation, without delaying that instantiation. Published
-patterns will use a separate explicit action (§ Phasing).
+after successful instantiation, without delaying that instantiation. The
+general lifecycle replaces this specialized path after its source-state and
+history requirements are implemented.
 
-### `patternSource`: one field, two variants
+### `patternSource`: current value and planned migration
 
 A string meta on the piece result cell (space root: on the root piece).
 Dispatched by the `cf:` prefix:
@@ -163,6 +172,10 @@ Dispatched by the `cf:` prefix:
   `/api/patterns/system/default-app.tsx`) → use `?identity` against the space's
   host, then fetch and compile whenever the persisted artifact needs an update
   or repair.
+
+General source URL origins use the discriminated active-origin and revision
+schemas defined by the piece source lifecycle spec. They do not permanently
+overload this raw string with origin-kind-specific behavior.
 
 **Born-from determinism.** Once recorded, the *string* is frozen (which source);
 the *resolved identity* is live (which version). A non-home space's root
@@ -384,11 +397,13 @@ binary populates from baked build metadata; the updater does not consult it.
 3. **Other system-source patterns.** Recover a non-root's verified authored
    entry path at instantiation, recognize a system source by its same-toolshed
    `?identity` route, and check it without delaying the current graph.
-4. **Published-pattern updates.** `patternSource` = `cf:` ref; lazy check +
-   shell "update available" + click-to-apply; fork/lineage handling
-   (needs the deferred lineage substrate).
-5. **Cross-host published** + persisted space→host hints + CFC provenance
-   labels on fetched source.
+4. **General piece source lifecycle.** Reconcile external web URLs and fabric
+   URLs before ordinary piece start. Subscribe while running only when an
+   unpinned fabric URL resolves to a mutable pattern-bearing entity. Add atomic
+   revision history, detach, fork, revert, and repoint semantics as specified
+   in [`../piece-source-lifecycle.md`](../piece-source-lifecycle.md).
+5. **Cross-host origins.** Persist accepted space-to-host hints and enforce CFC
+   provenance labels on fetched source.
 
 ## Open questions
 
