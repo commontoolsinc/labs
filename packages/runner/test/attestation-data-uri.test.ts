@@ -5,7 +5,7 @@ import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import { load } from "../src/storage/transaction/attestation.ts";
 import type { URI } from "../src/sigil-types.ts";
 
-/** Percent-encoded `data:` URI with the given payload text. */
+/** `data:` cell URI (base64url payload) with the given payload text. */
 const uriOf = (payload: string): URI =>
   `data:application/vnd.common-fabric.data,${
     toUnpaddedBase64url(new TextEncoder().encode(payload))
