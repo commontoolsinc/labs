@@ -37,15 +37,15 @@ const isPlainRecord = (value: FabricValue): value is FabricPlainObject =>
  * verification is never rewritten afterwards.
  *
  * Non-link `FabricInstance`s are not walked: their contents live in private
- * slots, not enumerable own-properties. That blindness is sound because
- * every consumer of these positions — the compressor, the expander, and the
- * reserved-ref validator (a probe over this same walk) — shares it, so a
- * reference inside an instance can be neither produced nor interpreted; the
- * engine's serialized substring gate still sees instance contents verbatim.
- * INVARIANT: any instance type this walk learns to descend into is
- * inherited by the probe-based validator automatically, but the string
- * scanner `containsSyncSchemaRefString` in sync-schema-ref.ts must be
- * taught in the same change.
+ * slots, not enumerable own-properties. That is safe because every consumer
+ * of these positions — the compressor, the expander, and the reserved-ref
+ * validator in sync-schema-ref.ts — skips them the same way, so a reference
+ * inside an instance can be neither produced nor interpreted, and the
+ * engine's serialized substring check still sees instance contents
+ * verbatim. If this walk ever learns to descend into an instance type, the
+ * validator and `containsSyncSchemaRefString` must learn it in the same
+ * change — the walker-agreement test in v2-sync-schema-table-test.ts fails
+ * until they do.
  */
 export const mapLinkSchemas = (
   value: FabricValue,
