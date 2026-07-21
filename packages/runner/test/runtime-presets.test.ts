@@ -1,6 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  CLIENT_VERSION_ENV_VAR,
+  clientVersionFromEnv,
   EXPERIMENTAL_ENV_VARS,
   experimentalOptionsFromEnv,
   RUNTIME_OPTION_KEYS,
@@ -203,12 +205,14 @@ describe("runtimePresets conformance (CT-1814)", () => {
         consoleHandler,
         errorHandlers,
         telemetry,
+        clientVersion,
       })).toEqual({
         ...minimalOutputs.productionServer,
         patternEnvironment: { apiUrl: patternApiUrl },
         consoleHandler,
         errorHandlers,
         telemetry,
+        clientVersion,
       });
     });
 
@@ -220,6 +224,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         moduleByteCache,
         trustSnapshotProvider,
         patternCoverage,
+        clientVersion,
       })).toEqual({
         ...minimalOutputs.remoteClient,
         errorHandlers,
@@ -227,6 +232,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         moduleByteCache,
         trustSnapshotProvider,
         patternCoverage,
+        clientVersion,
       });
     });
 
@@ -349,6 +355,23 @@ describe("runtimePresets conformance (CT-1814)", () => {
       }
       expect(warnings.length).toBe(1);
       expect(String(warnings[0][0])).toContain("EXPERIMENTAL_MODERN_CELL_REP");
+    });
+  });
+
+  describe("clientVersionFromEnv", () => {
+    it("reads and trims the shared COMMIT_SHA", () => {
+      const consulted: string[] = [];
+      expect(clientVersionFromEnv((name) => {
+        consulted.push(name);
+        return "  build-sha-x  ";
+      })).toBe("build-sha-x");
+      expect(consulted).toEqual([CLIENT_VERSION_ENV_VAR]);
+      expect(CLIENT_VERSION_ENV_VAR).toBe("COMMIT_SHA");
+    });
+
+    it("treats unset and blank values as unknown", () => {
+      expect(clientVersionFromEnv(() => undefined)).toBeUndefined();
+      expect(clientVersionFromEnv(() => "   ")).toBeUndefined();
     });
   });
 

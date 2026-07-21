@@ -37,8 +37,9 @@ import type { HarnessedFunction } from "../src/harness/types.ts";
  *     the RESOLVED function's provenance, so editing the ref cannot borrow
  *     another module's authority.
  *   - writeAuthorizedBy is an ownership gate: a verified-binding claim verifies
- *     only when the resolved identity's moduleIdentity (or legacy bundleId),
- *     file, AND path all match. Any mismatch — or a claim with neither id field —
+ *     only when the resolved identity's moduleIdentity AND bindingPath match
+ *     (the file SPELLING is resolver-dependent and deliberately not load-
+ *     bearing — labs#4772). Any mismatch — or a claim with no moduleIdentity —
  *     fails closed.
  */
 

@@ -2550,9 +2550,13 @@ sides load-independent and equal.
 CFC's implementation identity surfaces it as `sourceFile`/`bindingPath`
 (`packages/runner/src/cfc/implementation-identity.ts`), and at commit the
 `writeAuthorizedBy` check requires the writing identity's
-moduleIdentity + normalized source file + binding path to equal the claim's
-(`packages/runner/src/cfc/prepare.ts`; both sides pass through
-`normalizeIdentitySource`, which only guarantees a leading slash). The
+moduleIdentity to equal the claim's directly or name an authenticated
+`piece setsrc` predecessor, plus an equal binding path — the file SPELLING is
+deliberately not load-bearing at verification (it is resolver-dependent;
+labs#4772). Stamp MINTING (`rebindWriteAuthorizedByClaims`) still requires exact
+slash-normalized file equality, and stored-claim reconciliation tolerates
+spellings one leading segment apart
+(`packages/runner/src/cfc/writer-claim-correspondence.ts`). The
 non-exported case reaches provenance through the `__cfReg` registration sink
 — the gap guarded by
 `packages/runner/test/cfc-nonexported-binding-identity.test.ts`.

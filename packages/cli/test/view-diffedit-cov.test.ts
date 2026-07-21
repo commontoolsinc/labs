@@ -8,7 +8,7 @@
  * original diff, a missing workspace file, a hunk with no room to expand, the
  * read-only (no-disk) source, and the defensive guards in `save`.
  */
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import { parseDiff } from "../lib/view/diff.ts";
 import {
@@ -625,7 +625,7 @@ Deno.test("diffedit cov: save skips a verified hunk whose file was not captured 
   const text = "@@ -1,1 +1,1 @@\n+only line\n";
   assertEquals(
     src.save(text),
-    "No editable changes to save.",
+    "Saved 0 files",
     "an uncaptured file is skipped, leaving nothing written",
   );
 });
@@ -693,27 +693,115 @@ Deno.test("editableStart: editable only inside a verified hunk", () => {
   );
 });
 
-// --- commit-message amend helpers -------------------------------------------
-
-Deno.test("amendCommit: throws with no git runner (defensive; caller checks first)", () => {
-  let threw = false;
-  try {
-    _de.amendCommit(undefined, () => null, "", "");
-  } catch {
-    threw = true;
-  }
-  assert(threw, "no git runner means nothing to amend");
-});
+// --- commit amend helpers ----------------------------------------------------
 
 Deno.test("pendingAmend: null when there is no editable message", () => {
-  assertEquals(_de.pendingAmend(() => null, "a", "b"), null);
+  assertEquals(
+    _de.pendingAmend(() => null, () => null, false, "a", "b"),
+    null,
+  );
 });
 
-Deno.test("pendingAmend: null when the message is unchanged", () => {
+Deno.test("pendingAmend: null when the full buffer is unchanged", () => {
   const msg = { sha: "abcdef1", start: 0, end: 0 };
-  // The same one-line message in both baseline and current: no change.
   const both = () => msg;
-  assertEquals(_de.pendingAmend(both, "    hi", "    hi"), null);
+  assertEquals(_de.pendingAmend(both, both, false, "    hi", "    hi"), null);
+});
+
+Deno.test("pendingAmend: an unchanged message still amends changed commit contents", () => {
+  const msg = { sha: "abcdef1", start: 0, end: 0 };
+  const both = () => msg;
+  assertEquals(
+    _de.pendingAmend(both, both, true, "    hi\n-old", "    hi\n+new"),
+    { sha: "abcdef1", subject: "hi" },
+  );
+});
+
+Deno.test("baselineAfterSave: keeps the baseline for a changed hunk layout", () => {
+  const { ws, done } = tempWs({ "m.ts": FILE_TEXT });
+  try {
+    const { src } = sourceFor(DIFF, ws);
+    const moved = DIFF.replace("b/m.ts", "b/other.ts");
+    assertEquals(
+      src.baselineAfterSave!(DIFF, moved, { amendCommit: false }),
+      DIFF,
+    );
+
+    const extra = `${DIFF}@@ -5,0 +6,1 @@\n+extra\n`;
+    assertEquals(
+      src.baselineAfterSave!(DIFF, extra, { amendCommit: false }),
+      DIFF,
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffSource: ignores commit-shaped text inside a file diff", () => {
+  const head = "1".repeat(40);
+  const embedded = "2".repeat(40);
+  const text = [
+    `From ${head} Mon Sep 17 00:00:00 2001`,
+    "From: A B <a@b.example>",
+    "Date: Wed, 1 Jul 2026 12:00:00 -0700",
+    "Subject: [PATCH] Subject",
+    "",
+    "diff --git a/m.ts b/m.ts",
+    "index 1111..2222 100644",
+    "--- a/m.ts",
+    "+++ b/m.ts",
+    "@@ -1,1 +1,1 @@",
+    "-old",
+    "+new",
+    `From ${embedded} Mon Sep 17 00:00:00 2001`,
+    "From: C D <c@d.example>",
+    "Date: Thu, 2 Jul 2026 12:00:00 -0700",
+    "Subject: embedded text",
+    "",
+  ].join("\n");
+  const { ws, done } = tempWs({ "m.ts": "new\n" });
+  const matched: string[] = [];
+  try {
+    const model = parseDiff(text)!;
+    const { edit } = buildDiffDocument(text, model, ws);
+    const src = diffSource(ws, edit, undefined, {
+      headSha: () => head,
+      fileAtCommit: () => null,
+      applyFileChanges: (committed) => committed,
+      amendCommit: () => ({ status: "unused", head }),
+      commitMatchesDiff: (commit) => {
+        matched.push(commit);
+        return commit === head;
+      },
+    });
+    const edited = text.replace("+new", "+newer");
+
+    assertEquals(src.pendingAmend!(text, edited), {
+      sha: head,
+      subject: "(empty commit message)",
+    });
+    assertEquals(matched, [head]);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("save: rejects a diff with a different hunk count", () => {
+  const { root, ws, done } = tempWs({ "m.ts": FILE_TEXT });
+  try {
+    const { src } = sourceFor(DIFF, ws);
+    const edited = `${DIFF.replace("+const y = 2;", "+const y = 20;")}` +
+      `@@ -3,0 +4,1 @@\n+const added = true;\n`;
+
+    assertThrows(
+      () => src.save(edited, DIFF, { amendCommit: false }),
+      Error,
+      "The edited diff no longer matches its saved hunk map.",
+    );
+    assertEquals(Deno.readTextFileSync(join(root, "m.ts")), FILE_TEXT);
+  } finally {
+    done();
+  }
 });
 
 // --- message-scope revert ----------------------------------------------------
@@ -883,4 +971,38 @@ Deno.test("diffedit cov: joinAdjacent declines when the text will not drop a hea
     { absPath: "/x", newStart: 2, newCount: 1, verified: true },
   ];
   assertEquals(_de.joinAdjacent(oneHunk, oneHunk, hunks, 0), null);
+});
+
+Deno.test("diffedit cov: joinAdjacent keeps hunks from different commits separate", () => {
+  const twoHunks = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,1 +1,1 @@
+-a
++A
+@@ -2,1 +2,1 @@
+-b
++B
+`;
+  const hunks = [
+    {
+      absPath: "/x",
+      newStart: 1,
+      newCount: 1,
+      verified: true,
+      writable: true,
+      commitSha: "1111",
+    },
+    {
+      absPath: "/x",
+      newStart: 2,
+      newCount: 1,
+      verified: true,
+      writable: true,
+      commitSha: "2222",
+    },
+  ];
+
+  assertEquals(_de.joinAdjacent(twoHunks, twoHunks, hunks, 0), null);
+  assertEquals(hunks.length, 2);
 });

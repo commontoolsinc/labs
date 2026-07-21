@@ -45,7 +45,7 @@ Deno.test("diffedit gate: save skips a verified hunk whose path parsed but has n
   );
   assertEquals(
     src.save(text),
-    "No editable changes to save.",
+    "Saved 0 files",
     "a path with no captured base content is skipped, leaving nothing written",
   );
 });

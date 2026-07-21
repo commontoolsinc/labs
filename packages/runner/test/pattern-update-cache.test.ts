@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 
+import { PATTERN_RESPONSE_BUILD_HEADER } from "../src/harness/version-gate.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { VersionSkewInfo } from "../src/runtime.ts";
@@ -19,6 +20,7 @@ describe("Runtime system-pattern update helpers", () => {
   let calls: string[];
   let metaGitSha: string | null;
   let identityBody: string | { status: number };
+  let identityBuildSha: string | null;
 
   function makeRuntime(
     onVersionSkew?: (info: VersionSkewInfo) => void,
@@ -44,7 +46,13 @@ describe("Runtime system-pattern update helpers", () => {
             new Response("nope", { status: identityBody.status }),
           );
         }
-        return Promise.resolve(new Response(identityBody));
+        return Promise.resolve(
+          new Response(identityBody, {
+            headers: identityBuildSha === null
+              ? undefined
+              : { [PATTERN_RESPONSE_BUILD_HEADER]: identityBuildSha },
+          }),
+        );
       }
       return Promise.resolve(new Response("nf", { status: 404 }));
     }) as typeof globalThis.fetch;
@@ -62,6 +70,7 @@ describe("Runtime system-pattern update helpers", () => {
     calls = [];
     metaGitSha = "build-1";
     identityBody = "the-identity";
+    identityBuildSha = "build-1";
   });
 
   afterEach(async () => {
@@ -98,15 +107,21 @@ describe("Runtime system-pattern update helpers", () => {
     const host = "http://toolshed.test";
     const url = "/api/patterns/system/default-app.tsx";
     try {
-      expect(await rt.cachedPatternIdentity(host, url)).toBe("the-identity");
-      expect(await rt.cachedPatternIdentity(host, url)).toBe("the-identity");
+      expect(await rt.cachedPatternIdentity(host, url, "build-1")).toBe(
+        "the-identity",
+      );
+      expect(await rt.cachedPatternIdentity(host, url, "build-1")).toBe(
+        "the-identity",
+      );
       const idFetches = () =>
         calls.filter((c) => c.includes("identity")).length;
       expect(idFetches()).toBe(1);
 
       rt.clearPatternUpdateCaches();
       identityBody = "next-identity";
-      expect(await rt.cachedPatternIdentity(host, url)).toBe("next-identity");
+      expect(await rt.cachedPatternIdentity(host, url, "build-1")).toBe(
+        "next-identity",
+      );
       expect(idFetches()).toBe(2);
     } finally {
       await rt.dispose();
@@ -119,9 +134,38 @@ describe("Runtime system-pattern update helpers", () => {
     const host = "http://toolshed.test";
     const url = "/api/patterns/system/default-app.tsx";
     try {
-      expect(await rt.cachedPatternIdentity(host, url)).toBe(undefined);
-      expect(await rt.cachedPatternIdentity(host, url)).toBe(undefined);
+      expect(await rt.cachedPatternIdentity(host, url, "build-1")).toBe(
+        undefined,
+      );
+      expect(await rt.cachedPatternIdentity(host, url, "build-1")).toBe(
+        undefined,
+      );
       expect(calls.filter((c) => c.includes("identity")).length).toBe(2);
+    } finally {
+      await rt.dispose();
+    }
+  });
+
+  it("cachedPatternIdentity requires and keys by the serving build", async () => {
+    const rt = makeRuntime();
+    const host = "http://toolshed.test";
+    const url = "/api/patterns/system/default-app.tsx";
+    try {
+      expect(await rt.cachedPatternIdentity(host, url, "build-1")).toBe(
+        "the-identity",
+      );
+
+      identityBody = "next-identity";
+      identityBuildSha = "build-2";
+      expect(await rt.cachedPatternIdentity(host, url, "build-2")).toBe(
+        "next-identity",
+      );
+
+      identityBuildSha = "other-build";
+      expect(await rt.cachedPatternIdentity(host, url, "build-3")).toBe(
+        undefined,
+      );
+      expect(calls.filter((c) => c.includes("identity")).length).toBe(3);
     } finally {
       await rt.dispose();
     }

@@ -415,8 +415,10 @@ Verified source loads register only field-integrity-authenticated lists;
 integrity-valid compiled-cache loads register lists from their root-authenticated
 documents. Each transaction snapshots the resulting successor-to-predecessor
 map's transitive closure. `writeAuthorizedBy` may then match the live writer's
-module hash directly or through that snapshot, while its normalized source file
-and binding path must still match exactly. A rename does not inherit authority.
+module hash directly or through that snapshot, while its binding path must still
+match exactly. Source-file spelling is diagnostic at verification because it is
+resolver-dependent; a rename still receives no delegation because old and new
+modules no longer match by canonical authored filename.
 Ambiguous canonical filenames and unauthenticated metadata fail closed by
 receiving no delegation. If a runtime-version miss recompiles from source, the
 compiled-cache repair carries the authenticated map forward so later warm loads

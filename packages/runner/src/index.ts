@@ -12,6 +12,8 @@ export type {
 } from "./runtime.ts";
 export {
   type BrowserWorkerPresetParams,
+  CLIENT_VERSION_ENV_VAR,
+  clientVersionFromEnv,
   type EnvReader,
   EXPERIMENTAL_ENV_VARS,
   experimentalOptionsFromEnv,
@@ -74,6 +76,8 @@ export {
   ConsoleMethod,
   Engine,
   fetchToolshedGitSha,
+  PATTERN_RESPONSE_BUILD_HEADER,
+  patternResponseBuild,
   resolveEntryIdentity,
   type RuntimeProgram,
   type TypeScriptHarnessProcessOptions,

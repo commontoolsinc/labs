@@ -7,6 +7,7 @@ import {
 } from "../src/builtins/llm-dialog.ts";
 import { schemaWithInjectionSafeAnnotations } from "../src/cfc/schema-sanitization.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 const {
   buildAvailableCellsDocumentation,
@@ -530,6 +531,28 @@ Deno.test("traverseAndCellify converts LLM-friendly links inside strings and obj
   assertEquals(nested.list[0].kind, "cell");
   assertEquals(nested.malformed, '{"@link":');
   assertEquals(parsedLinks.length, 2);
+});
+
+Deno.test("traverseAndCellify passes a nested FabricPrimitive through intact", () => {
+  // A `FabricBytes` (a `FabricPrimitive`) keeps its state in private fields and
+  // exposes zero enumerable own-props, so the `Object.fromEntries(Object.
+  // entries(...))` rebuild flattens it to `{}`, silently dropping its bytes. It
+  // is atomic (no link, no descent) and must pass through as the same instance,
+  // just like a string or number leaf does.
+  const runtime = {
+    getCellFromLink() {
+      throw new Error("should not be called for a FabricPrimitive");
+    },
+  };
+  const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+  const result = traverseAndCellify(
+    runtime as any,
+    "did:test:cellify",
+    { payload: bytes },
+  ) as any;
+
+  assert(result.payload === bytes, "FabricBytes instance must survive intact");
 });
 
 Deno.test("buildToolCatalog normalizes dynamic legacy tools", () => {

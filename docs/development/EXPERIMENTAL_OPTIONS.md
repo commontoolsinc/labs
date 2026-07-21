@@ -219,16 +219,24 @@ propagate](#how-flags-propagate).
   #4619 (2026-07-09).
 - **Purpose.** At space open, rolls a space's **non-home** root system pattern
   (default-app) forward in place when its toolshed serves a newer content
-  identity: version gate (client vs toolshed build sha) → cached `?identity`
-  compare → in-place `patternIdentity` swap. Persisted roots are resolved
-  without starting; the check is awaited and the reconciled identity is
-  committed before root bootstrap, so an unloadable obsolete root cannot block
-  its own repair. The check remains best-effort and converts its own failures
-  to a no-op; if repair is unavailable, the subsequent root start retains its
-  normal loud failure behavior. When either build sha is unknown (dev/source
-  servers carry none) the check skips silently; the `versionSkew` IPC signal —
-  which raises the shell's reload banner — fires only on a proven mismatch
-  (both shas known and different). See
+  identity. Every tracked root uses the client/toolshed version gate and cached
+  `?identity` comparison before an in-place `patternIdentity` swap. The
+  identity response, every fetched source/import, and the compiler-produced
+  entry must all agree with the same client build and identity. Equal identities
+  take the fast path only after the persisted artifact loads; an unloadable root
+  is rebuilt through that same identity-authorized source path before bootstrap.
+  Source-run toolsheds, CLI, and daemon processes can receive the shared Labs
+  revision through `COMMIT_SHA`. Persisted roots are resolved without starting.
+  A pre-provenance root may be back-filled only when its stored
+  `{ identity, symbol }` exactly equals the build-attested current official
+  entry; stale, custom, and repository-pinned sourceless roots remain pinned.
+  URL-based creation and recreation stamp provenance; custom `RuntimeProgram`
+  recreation does not. The check remains best-effort; if identity lookup or
+  replacement compilation is unavailable, the subsequent root start retains
+  its normal loud failure behavior. An unknown build SHA skips silently; the
+  `versionSkew` IPC
+  signal—which raises the shell's reload banner—fires only on a proven mismatch
+  (both SHAs known and different). See
   [`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md).
 - **Current default and planned end state.** The runner built-in default is off
   like every flag in this category; the shell build injects `true` unless the
@@ -237,8 +245,9 @@ propagate](#how-flags-propagate).
   background piece service) leave it off unless the env var is set. End state:
   graduate to always-on for system roots once golden-replay coverage has soaked
   and the home audit lands, then delete both auto-update flags.
-- **Status on 2026-07-14.** Implemented; on in the shell for non-home roots,
-  off elsewhere. Root reconciliation runs before bootstrap.
+- **Status on 2026-07-21.** Implemented; on in the shell for non-home roots,
+  off elsewhere. Root reconciliation and broken-root repair run before
+  bootstrap.
 - **Path to removal.** Graduate the home root (below), make the check
   unconditional, and remove both flags together.
 

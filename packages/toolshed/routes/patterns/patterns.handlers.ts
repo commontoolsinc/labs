@@ -1,8 +1,26 @@
 import type { Context } from "@hono/hono";
+import { PATTERN_RESPONSE_BUILD_HEADER } from "@commonfabric/runner";
+import { resolveGitSha } from "@/lib/build-info.ts";
 import { PatternsServer } from "./patterns-server.ts";
 
 // Create a single server instance to be reused across requests
 const patternsServer = new PatternsServer();
+const PATTERN_BUILD = resolveGitSha();
+
+/** Headers shared by source and `?identity` responses from this process. */
+export function patternResponseHeaders(
+  contentType: string,
+  build: string | null = PATTERN_BUILD,
+): Record<string, string> {
+  return {
+    "Content-Type": contentType,
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Expose-Headers": PATTERN_RESPONSE_BUILD_HEADER,
+    ...(build === null ? {} : { [PATTERN_RESPONSE_BUILD_HEADER]: build }),
+  };
+}
 
 /**
  * Handler for serving pattern files from the patterns directory.
@@ -38,12 +56,7 @@ export const getPattern = async (
       const identity = await patternsServer.identity(filename);
       return new Response(identity, {
         status: 200,
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type",
-        },
+        headers: patternResponseHeaders("text/plain; charset=utf-8"),
       });
     }
 
@@ -53,12 +66,9 @@ export const getPattern = async (
     // Return with proper headers for TSX files
     return new Response(content, {
       status: 200,
-      headers: {
-        "Content-Type": "text/typescript-jsx; charset=utf-8",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-      },
+      headers: patternResponseHeaders(
+        "text/typescript-jsx; charset=utf-8",
+      ),
     });
   } catch (error) {
     const { status, body } = classifyPatternError(error);

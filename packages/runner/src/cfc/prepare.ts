@@ -14,6 +14,7 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { normalizeIdentitySource } from "./writer-claim-correspondence.ts";
 import type { FabricValue } from "@commonfabric/api";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { isRecord } from "@commonfabric/utils/types";
@@ -555,6 +556,12 @@ const writeAuthorizedByReason = (
   // must match the live identity's. The legacy bundleId-only arm (stored
   // pre-#4009 claims) retired with the legacy read path (identity E5,
   // data-wipe decision): a claim without a moduleIdentity is rejected.
+  //
+  // The binding is `moduleIdentity` + `bindingPath`. The claim's file SPELLING
+  // deliberately does not participate: it is resolver-dependent (the same
+  // module spells differently across piece-deploy and HTTP compiles —
+  // labs#4772), while moduleIdentity already pins the module content-
+  // addressed, subsuming anything the spelling could soundly assert.
   const claimedModuleIdentity = bindingIdentity.moduleIdentity;
   const writerModuleIdentity = identity.moduleIdentity;
   const identityArmMatches = typeof claimedModuleIdentity === "string" &&
@@ -566,8 +573,6 @@ const writeAuthorizedByReason = (
         ) === true);
   if (
     !identityArmMatches ||
-    normalizeIdentitySource(identity.sourceFile) !==
-      normalizeIdentitySource(bindingIdentity.file) ||
     !arraysEqual(identity.bindingPath, bindingIdentity.path)
   ) {
     return `writeAuthorizedBy failed at /${path.join("/")}`;
@@ -608,15 +613,6 @@ const arraysEqual = (
 ): boolean =>
   left.length === right.length &&
   left.every((value, index) => value === right[index]);
-
-const normalizeIdentitySource = (
-  source: string | undefined,
-): string | undefined => {
-  if (typeof source !== "string" || source.length === 0) {
-    return undefined;
-  }
-  return source.startsWith("/") ? source : `/${source}`;
-};
 
 type StructuralProvenanceInput = Extract<
   WritePolicyInput,
@@ -1085,7 +1081,8 @@ const rebindWriteAuthorizedByClaims = (
   }
   // Only the function NAMED by a binding may stamp that binding's provenance
   // moduleIdentity. The writer's own binding (sourceFile + bindingPath) must
-  // match the claim's binding (file + path); otherwise a foreign writer that
+  // match the claim's binding (file + path) exactly; otherwise a foreign
+  // writer that
   // merely *initializes* the protected field — e.g. profile-create's
   // `submitProfileCreation` seeding a freshly `inSpace`'d ProfileHome whose
   // `elements` bind to profile-home's `mutateElements` — would stamp ITS module
@@ -1151,6 +1148,16 @@ const rebindWriteAuthorizedByClaimsInner = (
     // match rationale in rebindWriteAuthorizedByClaims). When we can identify
     // both bindings, require they match; a mismatch means a foreign writer is
     // initializing the field, so we leave the claim unstamped.
+    // Minting the FIRST stamp requires exact (slash-normalized) file
+    // equality, not the tolerant spelling correspondence: a claim being
+    // stamped here rides a schema emitted by the SAME compile as the live
+    // writer, so their spellings agree whenever the writer genuinely is the
+    // named binding. Cross-spelling healing of stored claims deliberately
+    // does NOT happen here — the current compile's claim gets stamped
+    // exactly, and reconcileWriterClaimStamp adopts that stamp onto the
+    // stored spelling (schema-merge.ts). Keeping the mint exact means the
+    // tolerance never widens who can create authority, only how an
+    // already-minted stamp meets an aged spelling.
     const writerOwnsBinding = ids.writerFile !== undefined &&
       ids.writerPath !== undefined && bindingFile !== undefined &&
       bindingPath !== undefined &&

@@ -386,11 +386,13 @@ is an explicit `piece setsrc` update: canonical-filename matches in the old and
 new recursive module closures persist a cumulative successor-to-predecessor
 delegation. `writeAuthorizedBy` accepts the current module hash or a predecessor
 reachable through that loaded delegation map, but still requires the same
-source file and symbol/binding path. Because the delegation list is mutable and
-outside the source Merkle identity, it is authority-bearing only when protected
-by the compiler's integrity attestation (field-level in source documents,
-root-level in compiled documents). Replace §8.15.6's "no separate naming scheme"
-claim with the pair definition and this explicit delegation rule.
+symbol/binding path. Source-file spelling remains diagnostic at verification;
+canonical authored filenames govern whether `setsrc` derives a delegation in
+the first place. Because the delegation list is mutable and outside the source
+Merkle identity, it is authority-bearing only when protected by the compiler's
+integrity attestation (field-level in source documents, root-level in compiled
+documents). Replace §8.15.6's "no separate naming scheme" claim with the pair
+definition and this explicit delegation rule.
 
 **SC-23 [interpretation] Per-write read-prefix provenance classed as
 decomposition-grade precision — §8.9.1/§8.9.2 (Epic D4).** The runner's

@@ -60,7 +60,10 @@ import {
   resolveCommitBackpressure,
 } from "./scheduler/backpressure.ts";
 import { Engine } from "./harness/index.ts";
-import { fetchToolshedGitSha } from "./harness/version-gate.ts";
+import {
+  fetchToolshedGitSha,
+  patternResponseBuild,
+} from "./harness/version-gate.ts";
 import {
   CellLink,
   isCellLink,
@@ -186,8 +189,8 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
 
 /**
  * TTL backstop for the system-pattern update caches (toolshed git sha and
- * ?identity). Bounds how long a stale value survives a toolshed redeploy
- * mid-session; the primary invalidation is clearPatternUpdateCaches().
+ * ?identity). Pattern identities are also keyed by and response-bound to their
+ * serving build, so a stale metadata entry cannot authorize another build.
  */
 const PATTERN_UPDATE_CACHE_TTL_MS = 5 * 60_000;
 
@@ -1991,11 +1994,10 @@ export class Runtime {
 
   // --- System-pattern update caches ---------------------------------------
   // A toolshed's build sha and each pattern's content identity are fixed for
-  // its process lifetime, so both are cached. Keyed by host / (host,url), with
-  // single-flight in-flight sharing. A failed (undefined) lookup is evicted so
-  // it retries. Cleared explicitly by clearPatternUpdateCaches() and, as a
-  // backstop against a toolshed redeploy mid-session (we have no
-  // storage-socket-reset event to hang invalidation on yet), after a TTL.
+  // its process lifetime, so both are cached. Identity entries include the
+  // expected serving build in their key and accept only a response attested by
+  // that build. A failed (undefined) lookup is evicted so it retries. Entries
+  // expire after a TTL and can also be cleared explicitly by tests/hosts.
   #toolshedGitShaCache = new Map<
     string,
     { at: number; value: Promise<string | undefined> }
@@ -2017,19 +2019,21 @@ export class Runtime {
 
   /**
    * A pattern file's content identity from its toolshed (cached), via
-   * `GET {host}{url}?identity`. Undefined on any failure. Equals the
-   * patternIdentity the worker would compile for the same source at the same
-   * build (see the toolshed parity test).
+   * `GET {host}{url}?identity`. The cache key includes `expectedBuild`, and the
+   * response must attest that build. Undefined on any failure. Equals the
+   * patternIdentity the worker would compile for the same source at that build
+   * (see the toolshed parity test).
    */
   cachedPatternIdentity(
     host: string | URL,
     url: string,
+    expectedBuild: string,
   ): Promise<string | undefined> {
-    const key = `${host.toString()} ${url}`;
+    const key = `${host.toString()} ${url} ${expectedBuild}`;
     return this.#cachedLookup(
       this.#patternIdentityCache,
       key,
-      () => this.#fetchPatternIdentity(host, url),
+      () => this.#fetchPatternIdentity(host, url, expectedBuild),
     );
   }
 
@@ -2042,12 +2046,14 @@ export class Runtime {
   async #fetchPatternIdentity(
     host: string | URL,
     url: string,
+    expectedBuild: string,
   ): Promise<string | undefined> {
     try {
       const u = new URL(url, host.toString());
       u.searchParams.set("identity", "");
       const res = await this.fetch(u);
       if (!res.ok) return undefined;
+      if (patternResponseBuild(res) !== expectedBuild) return undefined;
       const body = (await res.text()).trim();
       return body.length > 0 ? body : undefined;
     } catch {

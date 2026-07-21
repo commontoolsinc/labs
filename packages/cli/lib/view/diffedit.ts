@@ -19,8 +19,11 @@ import {
 } from "./diffdoc.ts";
 import { type DiffHunk, type DiffModel, parseDiff } from "./diff.ts";
 import {
+  type CommitHeader,
   type CommitMessage,
   extractMessage,
+  findCommitHeaderCandidates,
+  findCommitHeaders,
   findCommitMessages,
   type GitRunner,
   MESSAGE_INDENT,
@@ -45,25 +48,38 @@ export function diffSource(
   git?: GitRunner,
 ): EditableSource {
   const files = [...edit.fileText.keys()];
-  // The HEAD commit's hash, computed once — the message of that commit (and only
-  // it) is editable. Absent when there is no git runner or no repository.
-  let headResolved = false;
-  let head: string | null = null;
-  const headSha = (): string | null => {
-    if (!headResolved) {
-      headResolved = true;
-      head = git?.headSha() ?? null;
+  const expectedFiles = new Map(edit.fileText);
+  // The HEAD commit at open is the commit represented by the `git show` output.
+  // After this pager amends it, `expectedHead` follows the new commit while the
+  // displayed header continues to name the original object.
+  const shownHead = git?.headSha() ?? null;
+  const shownRef = git?.headRef?.() ?? null;
+  let expectedHead = shownHead;
+  const resolvedCommits = new Map<string, string | null>();
+  const matchesShownHead = (sha: string): boolean => {
+    if (!shownHead) return false;
+    if (!git?.resolveCommit) return sameCommit(sha, shownHead);
+    if (!resolvedCommits.has(sha)) {
+      resolvedCommits.set(sha, git.resolveCommit(sha));
     }
-    return head;
+    return resolvedCommits.get(sha) === shownHead;
   };
 
   // The HEAD commit's message region in the given lines, or null. The regions
   // shift as the diff is edited, so they are re-derived from the current text.
   const editableMessage = (lines: readonly string[]): CommitMessage | null => {
-    const h = headSha();
-    if (!h) return null;
+    if (!shownHead) return null;
     for (const m of findCommitMessages(lines)) {
-      if (sameCommit(m.sha, h)) return m;
+      if (matchesShownHead(m.sha)) return m;
+    }
+    return null;
+  };
+  const representedCommit = (
+    lines: readonly string[],
+  ): { sha: string } | null => {
+    if (!shownHead) return null;
+    for (const commit of findCommitHeaders(lines)) {
+      if (matchesShownHead(commit.sha)) return { sha: commit.sha };
     }
     return null;
   };
@@ -72,13 +88,17 @@ export function diffSource(
   // grows, so keep a mutable copy that expand and save share. A hunk is writable
   // only when its new side identifies one current workspace range. Historical
   // hunks in `git log -p` can repeat that range and must not write it again.
-  const saveHunks = mutableHunks(edit);
+  const saveHunks = mutableHunks(
+    edit,
+    hunkCommitOwners(edit.sourceText ?? "", git),
+  );
 
   // No file on disk backs this diff (nothing resolved or verified): read-only.
   // A deletion of an entire file has no new-side lines, but its empty workspace
   // file still fixes the removed lines' insertion point exactly.
   if (
-    edit.lines.size === 0 && !saveHunks.some((h) => canResurrect(h))
+    edit.lines.size === 0 && !saveHunks.some((h) => canResurrect(h)) &&
+    !editableMessage((edit.sourceText ?? "").split("\n"))
   ) {
     return {
       label: null,
@@ -97,17 +117,39 @@ export function diffSource(
   // keystroke reuse them.
   let memoText: string | null = null;
   let memoModel: DiffModel | null = null;
+  let memoCommits: readonly CommitHeader[] = [];
   let memoMessages: readonly CommitMessage[] = [];
   const classify = (
     lines: readonly string[],
-  ): { model: DiffModel | null; messages: readonly CommitMessage[] } => {
+  ): {
+    model: DiffModel | null;
+    commits: readonly CommitHeader[];
+    messages: readonly CommitMessage[];
+  } => {
     const text = lines.join("\n");
     if (text !== memoText) {
       memoText = text;
       memoModel = parseDiff(text);
+      memoCommits = findCommitHeaders(lines);
       memoMessages = findCommitMessages(lines);
     }
-    return { model: memoModel, messages: memoMessages };
+    return {
+      model: memoModel,
+      commits: memoCommits,
+      messages: memoMessages,
+    };
+  };
+
+  const commitAt = (
+    commits: readonly CommitHeader[],
+    row: number,
+  ): CommitHeader | null => {
+    let owner: CommitHeader | null = null;
+    for (const commit of commits) {
+      if (commit.line > row) break;
+      owner = commit;
+    }
+    return owner;
   };
 
   const kindOf = (
@@ -122,10 +164,9 @@ export function diffSource(
       row,
     );
     if (diffKind) return diffKind;
-    const h = headSha();
-    if (h) {
+    if (shownHead) {
       const m = messageAt(messages, row);
-      if (m && sameCommit(m.sha, h)) return "message";
+      if (m && matchesShownHead(m.sha)) return "message";
     }
     return null;
   };
@@ -144,13 +185,24 @@ export function diffSource(
       // A message line is editable past its four-space indent.
       return kind === "message" ? MESSAGE_INDENT.length : null;
     },
+    notEditableMessage: (lines, row) => {
+      if (!shownHead) return null;
+      const commit = commitAt(classify(lines).commits, row);
+      return commit && !matchesShownHead(commit.sha)
+        ? "This line belongs to a commit other than HEAD and cannot be edited."
+        : null;
+    },
     regionKind: kindOf,
     insertPrefix: "+",
     messageIndent: MESSAGE_INDENT,
   };
 
   return {
-    label: files.length === 1 ? shortName(files[0]) : `${files.length} files`,
+    label: files.length === 0
+      ? null
+      : files.length === 1
+      ? shortName(files[0])
+      : `${files.length} files`,
     isDiff: true,
     editable: true,
     policy,
@@ -161,68 +213,301 @@ export function diffSource(
     // not the whole diff, and the unchanged headers never flicker colour. The
     // full parse on pause restores workspace-verified spans across the edit.
     createHighlighter: (text, seed) => createDiffHighlighter(text, seed),
-    dirtyLabels: (original, current) => dirtyLabels(original, current),
+    dirtyLabels: (original, current) =>
+      [
+        ...collectFileOutputs(
+          current,
+          expectedFiles,
+          saveHunks,
+          changedHunkIndices(original, current),
+        ).keys(),
+      ].map(shortName),
     revert: (original, current, cursorLine, scope) =>
       revert(original, current, cursorLine, scope),
     expandContext: (current, baseline, cursorLine, up) =>
       expandContext(ws, cache, saveHunks, current, baseline, cursorLine, up),
     expandRoom: (current) => expandRoom(ws, cache, saveHunks, current),
-    save: (text) => save(text, edit.fileText, saveHunks),
+    save: (text, baseline, options) => {
+      const changedHunks = baseline === undefined
+        ? undefined
+        : changedHunkIndices(baseline, text);
+      const amendedHunks = new Set(
+        [...changedHunks ?? []].filter((index) => {
+          const sha = saveHunks[index]?.commitSha;
+          return sha !== null && sha !== undefined && matchesShownHead(sha);
+        }),
+      );
+      const changes = collectFileOutputs(
+        text,
+        expectedFiles,
+        saveHunks,
+        changedHunks,
+      );
+      const advancedHunks = changes.size === 0
+        ? []
+        : planSavedHunkRanges(text, saveHunks, changedHunks);
+      const pending = options?.amendCommit === false || baseline === undefined
+        ? null
+        : pendingAmend(
+          editableMessage,
+          representedCommit,
+          amendedHunks.size > 0,
+          baseline,
+          text,
+        );
+      let replacementMessage: string | null = null;
+      if (pending && baseline !== undefined) {
+        const currentLines = text.split("\n");
+        const baselineLines = baseline.split("\n");
+        const message = editableMessage(currentLines);
+        const baselineMessage = editableMessage(baselineLines);
+        const messageChanged = message === null || baselineMessage === null
+          ? message !== baselineMessage
+          : extractMessage(currentLines, message) !==
+            extractMessage(baselineLines, baselineMessage);
+        if (messageChanged) {
+          replacementMessage = message === null
+            ? ""
+            : extractMessage(currentLines, message);
+        }
+      }
+      const commit = pending ? representedCommit(text.split("\n")) : null;
+      const commitFiles = new Map<string, string>();
+      if (pending) {
+        if (
+          !git || !commit || !expectedHead || !shownHead ||
+          baseline === undefined
+        ) {
+          throw new Error("No commit to amend.");
+        }
+        const live = git.headSha();
+        if (!live || !sameCommit(expectedHead, live)) {
+          throw new Error(
+            "HEAD has moved since this diff was shown; the commit was not amended.",
+          );
+        }
+        const liveRef = git.headRef?.() ?? null;
+        if (shownRef !== null && liveRef !== shownRef) {
+          throw new Error(
+            "HEAD now names a different branch; the commit was not amended.",
+          );
+        }
+        const commitBase = new Map<string, string>();
+        const amendedPaths = new Set(
+          [...amendedHunks].flatMap((index) => {
+            const path = saveHunks[index]?.absPath;
+            return path === null || path === undefined ? [] : [path];
+          }),
+        );
+        for (const path of amendedPaths) {
+          const committed = git.fileAtCommit(expectedHead, path);
+          if (committed === null) {
+            throw new Error(`The shown commit does not contain ${path}.`);
+          }
+          commitBase.set(path, committed);
+        }
+        const pagerFiles = collectFileOutputs(
+          text,
+          expectedFiles,
+          saveHunks,
+          amendedHunks,
+        );
+        for (const path of amendedPaths) {
+          const committed = commitBase.get(path);
+          const before = expectedFiles.get(path);
+          const after = pagerFiles.get(path);
+          if (
+            committed === undefined || before === undefined ||
+            after === undefined
+          ) {
+            throw new Error(
+              `Could not rebuild ${path} for the amended commit.`,
+            );
+          }
+          commitFiles.set(
+            path,
+            git.applyFileChanges(committed, before, after, path),
+          );
+        }
+      }
+
+      const writes = [...changes].flatMap(([path, contents]) => {
+        const before = ws.read(path);
+        if (before === null) {
+          throw new Error(`Could not read ${path}; no files were saved.`);
+        }
+        const expected = expectedFiles.get(path);
+        if (expected === undefined) {
+          throw new Error(`No saved baseline exists for ${path}.`);
+        }
+        if (before !== expected && before !== contents) {
+          throw new Error(
+            `${path} changed after this view opened; no files were saved.`,
+          );
+        }
+        return before === contents ? [] : [{ path, before, contents }];
+      });
+      const attempted: typeof writes = [];
+      try {
+        for (const write of writes) {
+          attempted.push(write);
+          Deno.writeTextFileSync(write.path, write.contents);
+        }
+
+        let amended: string | null = null;
+        if (pending && git && expectedHead) {
+          const result = git.amendCommit(
+            replacementMessage,
+            commitFiles,
+            expectedHead,
+            shownRef,
+            changes,
+          );
+          amended = result.status;
+          expectedHead = result.head;
+        }
+        for (const [path, contents] of changes) {
+          expectedFiles.set(path, contents);
+          cache?.delete(path);
+        }
+        for (const { hunk, newStart, newCount } of advancedHunks) {
+          hunk.newStart = newStart;
+          hunk.newCount = newCount;
+        }
+        return saveStatus(writes.length, amended);
+      } catch (error) {
+        const rollbackErrors: string[] = [];
+        for (const write of attempted.reverse()) {
+          try {
+            const live = ws.read(write.path);
+            if (live === write.before) continue;
+            if (live !== write.contents) {
+              rollbackErrors.push(
+                `${write.path} changed again and was not restored`,
+              );
+              continue;
+            }
+            Deno.writeTextFileSync(write.path, write.before);
+          } catch (rollbackError) {
+            rollbackErrors.push(String(rollbackError));
+          }
+        }
+        const detail = error instanceof Error ? error.message : String(error);
+        const suffix = rollbackErrors.length > 0
+          ? `; restoring files failed: ${rollbackErrors.join("; ")}`
+          : "";
+        throw new Error(`${detail}${suffix}`);
+      }
+    },
     pendingAmend: (baseline, current) =>
-      pendingAmend(editableMessage, baseline, current),
-    amendCommit: (baseline, current) =>
-      amendCommit(git, editableMessage, baseline, current),
+      pendingAmend(
+        editableMessage,
+        representedCommit,
+        [...changedHunkIndices(baseline, current)].some((index) => {
+          const sha = saveHunks[index]?.commitSha;
+          return sha !== null && sha !== undefined && matchesShownHead(sha);
+        }),
+        baseline,
+        current,
+      ),
+    baselineAfterSave: (baseline, current, options) =>
+      options?.amendCommit === false
+        ? baselineWithCurrentHunks(baseline, current)
+        : current,
   };
 }
 
-/** The commit whose message a save would amend: the HEAD message region differs
- * from the baseline, or has been deleted outright. Null otherwise. */
+/** The commit a save would amend when changed text represents HEAD. */
 function pendingAmend(
   editableMessage: (lines: readonly string[]) => CommitMessage | null,
+  representedCommit: (lines: readonly string[]) => { sha: string } | null,
+  commitContentsChanged: boolean,
   baseline: string,
   current: string,
 ): { sha: string; subject: string } | null {
+  if (baseline === current) return null;
   const curLines = current.split("\n");
   const baseLines = baseline.split("\n");
   const msg = editableMessage(curLines);
   const baseMsg = editableMessage(baseLines);
+  const messageChanged = msg === null || baseMsg === null
+    ? msg !== baseMsg
+    : extractMessage(curLines, msg) !== extractMessage(baseLines, baseMsg);
+  if (!messageChanged && !commitContentsChanged) return null;
   if (!msg) {
     // Every line of the region was deleted, so there is no region left to read
     // the new message from. The message the save would write is empty, and the
     // caller refuses an empty subject.
-    return baseMsg ? { sha: baseMsg.sha, subject: "" } : null;
+    if (baseMsg) return { sha: baseMsg.sha, subject: "" };
+    const commit = representedCommit(curLines);
+    return commit && representedCommit(baseLines)
+      ? { sha: commit.sha, subject: "(empty commit message)" }
+      : null;
   }
   const newText = extractMessage(curLines, msg);
-  if (baseMsg && extractMessage(baseLines, baseMsg) === newText) {
-    return null; // the message is unchanged
-  }
   // The subject is the first non-blank line — git strips leading blanks — so an
   // all-blank message reports an empty subject, which the caller refuses.
   const subject = newText.split("\n").find((l) => l.trim() !== "") ?? "";
   return { sha: msg.sha, subject };
 }
 
-/** Amend the HEAD commit's message from the edited text. Re-reads HEAD to guard
- * against it having moved (an external commit) since the diff was shown — the
- * amend rewrites whatever is HEAD, so it must still be the commit the message
- * belongs to. Throws when there is no git runner or no editable message (the
- * caller checks {@link pendingAmend} first, so those are defensive). */
-function amendCommit(
-  git: GitRunner | undefined,
-  editableMessage: (lines: readonly string[]) => CommitMessage | null,
-  _baseline: string,
-  current: string,
-): string {
-  const curLines = current.split("\n");
-  const msg = editableMessage(curLines);
-  if (!git || !msg) throw new Error("No commit message to amend.");
-  const live = git.headSha();
-  if (!live || !sameCommit(msg.sha, live)) {
-    throw new Error(
-      "HEAD has moved since this diff was shown; the commit was not amended.",
+/** The hunks whose rendered text changed between the last save and now. */
+function changedHunkIndices(original: string, current: string): Set<number> {
+  if (original === current) return new Set();
+  const before = parseDiff(original);
+  const after = parseDiff(current);
+  if (!before || !after) return new Set();
+  const bodies = (model: DiffModel, text: string): string[] => {
+    const raw = text.split("\n");
+    return model.files.flatMap((file) =>
+      file.hunks.map((hunk) =>
+        raw.slice(hunk.headerLine, hunk.endLine + 1).join("\n")
+      )
+    );
+  };
+  const beforeBodies = bodies(before, original);
+  const afterBodies = bodies(after, current);
+  return new Set(
+    afterBodies.flatMap((body, index) =>
+      beforeBodies[index] === body ? [] : [index]
+    ),
+  );
+}
+
+/** Build the clean baseline after saving only workspace-backed hunk edits.
+ * Commit-message text stays as it was before the save, so an edited message
+ * remains dirty and can still be amended or cancelled separately. */
+function baselineWithCurrentHunks(original: string, current: string): string {
+  const before = parseDiff(original);
+  const after = parseDiff(current);
+  if (!before || !after) return original;
+  const hunks = (model: DiffModel) =>
+    model.files.flatMap((file) =>
+      file.hunks.map((hunk) => ({
+        path: file.newPath ?? file.oldPath,
+        hunk,
+      }))
+    );
+  const beforeHunks = hunks(before);
+  const afterHunks = hunks(after);
+  if (
+    beforeHunks.length !== afterHunks.length ||
+    beforeHunks.some((entry, index) => entry.path !== afterHunks[index]?.path)
+  ) {
+    return original;
+  }
+  const baselineLines = original.split("\n");
+  const currentLines = current.split("\n");
+  for (let index = beforeHunks.length - 1; index >= 0; index--) {
+    const beforeHunk = beforeHunks[index].hunk;
+    const afterHunk = afterHunks[index].hunk;
+    baselineLines.splice(
+      beforeHunk.headerLine,
+      beforeHunk.endLine - beforeHunk.headerLine + 1,
+      ...currentLines.slice(afterHunk.headerLine, afterHunk.endLine + 1),
     );
   }
-  return git.amendMessage(extractMessage(curLines, msg));
+  return baselineLines.join("\n");
 }
 
 /**
@@ -360,7 +645,7 @@ function hunkFooting(
   // an insert grows past the file range). Insertion positions and the global
   // index come from the parse. Clamp how far context may grow by the
   // neighbouring hunks of the SAME file, so an expansion never overlaps another
-  // hunk's file range — that would make save() splice the two ranges into each
+  // hunk's file range — that would splice the two ranges into each
   // other (silently dropping edits or duplicating lines) and malform the diff.
   const range = hunks[index];
   if (!range) return null;
@@ -606,12 +891,13 @@ function joinAdjacent(
   const a = hunks[first];
   const b = hunks[first + 1];
   if (!a || !b || a.absPath === null || a.absPath !== b.absPath) return null;
+  if ((a.commitSha ?? null) !== (b.commitSha ?? null)) return null;
   if (a.newStart + a.newCount !== b.newStart) return null; // a gap remains
   if (!isWritable(a) || !isWritable(b)) return null;
   const joined = dropHeaderBetween(text, first);
   const joinedBase = dropHeaderBetween(baseline, first);
   if (!joined || !joinedBase) return null;
-  // save() pairs the text's hunks with this map by position, so it loses an
+  // Saving pairs the text's hunks with this map by position, so it loses an
   // entry exactly as the text loses a header.
   a.newCount += b.newCount;
   a.oldNoTrailingNewline ||= b.oldNoTrailingNewline;
@@ -681,38 +967,6 @@ function applyExpansion(
 }
 
 /**
- * The filenames whose lines differ between the original diff and the edited one.
- * Each file's slice of the diff text (its header through its last hunk line) is
- * compared, matched by path so a line shift in an earlier file does not
- * misattribute a later one. Repeated paths (`git log -p`) are concatenated. A
- * change that touches no file's slice — an edited commit message — names no
- * file, so a save (and the quit prompt) reflects that it writes no files.
- */
-function dirtyLabels(original: string, current: string): string[] {
-  if (original === current) return [];
-  const o = parseDiff(original);
-  const c = parseDiff(current);
-  if (!o || !c) return [];
-  const bodies = (model: DiffModel, text: string): Map<string, string> => {
-    const raw = text.split("\n");
-    const m = new Map<string, string>();
-    for (const f of model.files) {
-      const path = f.newPath ?? f.oldPath ?? "(unknown)";
-      const body = raw.slice(f.headerLine, f.endLine + 1).join("\n");
-      m.set(path, (m.get(path) ?? "") + "\n" + body);
-    }
-    return m;
-  };
-  const ob = bodies(o, original);
-  const cb = bodies(c, current);
-  const out: string[] = [];
-  for (const [path, body] of cb) {
-    if (body !== ob.get(path)) out.push(shortName(path));
-  }
-  return out;
-}
-
-/**
  * An incremental highlighter for a diff. It recolours only the lines an edit
  * changes (found by a common prefix/suffix of the line arrays) and keeps `seed`
  * — the colours {@link buildDiffDocument} produced for the unedited text — for
@@ -764,7 +1018,7 @@ export function createDiffHighlighter(
  * that can be resurrected. A line belongs only when the hunk's new side matched
  * a file on disk. Structural lines, empty lines, unverified hunks, and text
  * outside a hunk are refused. Hunks are matched to the save map by document
- * order, as {@link save} does, so a repeated file in `git log -p` and a context
+ * order, as saving does, so a repeated file in `git log -p` and a context
  * expansion both stay in step.
  */
 function editableHunkRegion(
@@ -853,7 +1107,6 @@ function isMarkdownDiffLine(rawLines: string[], lineIdx: number): boolean {
 export const _internal = {
   editableStart,
   pendingAmend,
-  amendCommit,
   dropHeaderBetween,
   joinAdjacent,
 };
@@ -890,6 +1143,8 @@ interface MutableHunk {
   verified: boolean;
   oldNoTrailingNewline?: boolean;
   newNoTrailingNewline?: boolean;
+  /** The nearest preceding commit header in the source text. */
+  commitSha?: string | null;
   /** This is the first verified hunk that names its workspace range. */
   writable?: boolean;
   /** Removed lines have a workspace-verified insertion point. */
@@ -925,10 +1180,16 @@ function rangesOverlap(a: MutableHunk, b: MutableHunk): boolean {
  * can repeat a file across historical commits. The first verified occurrence
  * represents the current workspace, while a later overlapping occurrence must
  * not overwrite edits made through the first. */
-function mutableHunks(edit: DiffEdit): MutableHunk[] {
+function mutableHunks(
+  edit: DiffEdit,
+  commitOwners: readonly (string | null)[] = [],
+): MutableHunk[] {
   const claimed = new Map<string, MutableHunk[]>();
-  return edit.hunks.map((hunk) => {
-    const out: MutableHunk = { ...hunk };
+  return edit.hunks.map((hunk, index) => {
+    const out: MutableHunk = {
+      ...hunk,
+      commitSha: commitOwners[index] ?? null,
+    };
     const file = hunk.absPath === null
       ? undefined
       : edit.fileText.get(hunk.absPath);
@@ -947,12 +1208,61 @@ function mutableHunks(edit: DiffEdit): MutableHunk[] {
   });
 }
 
+/** The commit header that owns each parsed hunk, in document order. */
+function hunkCommitOwners(
+  text: string,
+  git?: GitRunner,
+): (string | null)[] {
+  const model = parseDiff(text);
+  if (!model) return [];
+  const lines = text.split("\n");
+  const headers = findCommitHeaders(lines);
+  const candidates = findCommitHeaderCandidates(lines);
+  return model.files.flatMap((file) => {
+    let owner: string | null = null;
+    if (candidates.length > 0 && git?.commitMatchesDiff) {
+      const firstHunk = file.hunks[0]?.headerLine ?? file.endLine + 1;
+      const objects = lines.slice(file.headerLine, firstHunk).map((line) =>
+        line.replace(/\r$/, "")
+      ).map((line) =>
+        /^index ([0-9a-f]{4,64})\.\.([0-9a-f]{4,64})(?:\s|$)/.exec(
+          line,
+        )
+      ).find((match) => match !== null);
+      if (objects) {
+        for (let index = candidates.length - 1; index >= 0; index--) {
+          const candidate = candidates[index];
+          if (!candidate || candidate.line >= file.headerLine) continue;
+          if (
+            git.commitMatchesDiff(
+              candidate.sha,
+              file.oldPath,
+              file.newPath,
+              objects[1],
+              objects[2],
+            )
+          ) {
+            owner = candidate.sha;
+            break;
+          }
+        }
+      }
+    } else {
+      for (const header of headers) {
+        if (header.line >= file.headerLine) break;
+        owner = header.sha;
+      }
+    }
+    return file.hunks.map(() => owner);
+  });
+}
+
 /**
- * Rebuild each touched file from the edited diff. The edited diff's hunks are
+ * Rebuild each changed file from the edited diff. The edited diff's hunks are
  * matched to the hunks recorded at open, in document order — robust to `git log
  * -p` repeating a file and its ranges across commits — and only the verified
- * ones are written (their captured content is known to be the hunk's new side,
- * so an unverified hunk is never miswritten). For each, the current new side
+ * ones are considered. Their captured content is known to be the hunk's new
+ * side, so an unverified hunk is never used. For each, the current new side
  * (its context and added lines, markers stripped) replaces the file lines that
  * hunk covered, taken from the recorded `newStart`/`newCount`. Hunks apply high
  * line number first so earlier ranges do not shift.
@@ -966,11 +1276,12 @@ function mutableHunks(edit: DiffEdit): MutableHunk[] {
  * Inter-hunk text (`git log -p` commit metadata, a trailing separator) falls
  * outside the parsed body, so it is never absorbed.
  */
-function save(
+function collectFileOutputs(
   text: string,
   fileText: ReadonlyMap<string, string>,
   hunks: readonly MutableHunk[],
-): string {
+  changedHunks?: ReadonlySet<number>,
+): Map<string, string> {
   const model = parseDiff(text);
   const rawLines = text.split("\n");
   const byFile = new Map<string, FileSplice[]>();
@@ -982,8 +1293,10 @@ function save(
       if (kind === "ctx" || kind === "add") finalNewSideLine = i;
     }
     for (const hunk of file.hunks) {
-      const info = hunks[hunkIndex++];
-      if (!info || !isWritable(info) || !info.absPath) continue;
+      const index = hunkIndex++;
+      const info = hunks[index];
+      const include = changedHunks === undefined || changedHunks.has(index);
+      if (!include || !info || !isWritable(info) || !info.absPath) continue;
       const newSide: string[] = [];
       let noTrailingNewline = false;
       for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
@@ -1016,7 +1329,7 @@ function save(
     }
   }
 
-  const out = new Map<string, string[]>();
+  const out = new Map<string, string>();
   for (const [path, splices] of byFile) {
     const base = fileText.get(path);
     if (base === undefined) continue;
@@ -1039,16 +1352,60 @@ function save(
         fileLines[last] = fileLines[last].slice(0, -1);
       }
     }
-    out.set(path, fileLines);
+    out.set(path, fileLines.join("\n"));
   }
+  return out;
+}
 
-  let written = 0;
-  for (const [path, fileLines] of out) {
-    Deno.writeTextFileSync(path, fileLines.join("\n"));
-    written++;
+/**
+ * Advance each writable hunk's workspace range to the file produced by this
+ * save. A line insertion or deletion changes the edited hunk's size and shifts
+ * every later hunk in the same file. The plan is built before any file or Git
+ * change, then applied only after the whole save succeeds.
+ */
+function planSavedHunkRanges(
+  text: string,
+  hunks: readonly MutableHunk[],
+  changedHunks?: ReadonlySet<number>,
+): Array<{ hunk: MutableHunk; newStart: number; newCount: number }> {
+  const parsed = parseDiff(text)?.files.flatMap((file) => file.hunks) ?? [];
+  if (parsed.length !== hunks.length) {
+    throw new Error("The edited diff no longer matches its saved hunk map.");
   }
-  if (written === 0) return "No editable changes to save.";
-  return written === 1
-    ? `Saved ${shortName([...out.keys()][0])}`
-    : `Saved ${written} files`;
+  const saved = hunks.flatMap((hunk, index) => {
+    const include = changedHunks === undefined || changedHunks.has(index);
+    return include && isWritable(hunk) && hunk.absPath
+      ? [{
+        index,
+        path: hunk.absPath,
+        start: spliceStart(hunk),
+        oldCount: hunk.newCount,
+        newCount: parsed[index].newCount,
+      }]
+      : [];
+  });
+
+  return hunks.flatMap((hunk, index) => {
+    if (!isWritable(hunk) || !hunk.absPath) return [];
+    const own = saved.find((change) => change.index === index);
+    const shift = saved.reduce(
+      (total, change) =>
+        change.path === hunk.absPath && change.start < spliceStart(hunk)
+          ? total + change.newCount - change.oldCount
+          : total,
+      0,
+    );
+    const start = spliceStart(hunk) + shift;
+    const newCount = own?.newCount ?? hunk.newCount;
+    return [{
+      hunk,
+      newStart: newCount === 0 ? start : start + 1,
+      newCount,
+    }];
+  });
+}
+
+function saveStatus(changed: number, amended: string | null): string {
+  const saved = `Saved ${changed} ${changed === 1 ? "file" : "files"}`;
+  return amended ? `${saved}; ${amended}` : saved;
 }

@@ -6,7 +6,8 @@
 //
 // In non-compiled runs (e.g. `deno task production` from a checkout) the
 // file does not exist and `commitSha` is null — `resolveGitSha()` then
-// returns the operator-set env var if any, otherwise null.
+// returns an operator-set attestation if any, then falls back to the shared
+// source-run COMMIT_SHA, otherwise null.
 
 import env from "@/env.ts";
 
@@ -55,8 +56,9 @@ export const buildInfo: BuildInfo = readBuildInfoFrom(COMPILED_PATH);
 export function resolveGitShaFrom(
   envValue: string | null | undefined,
   baked: string | null,
+  runtimeValue: string | null | undefined,
 ): string | null {
-  return normalize(envValue) ?? baked;
+  return normalize(envValue) ?? normalize(baked) ?? normalize(runtimeValue);
 }
 
 /**
@@ -68,10 +70,16 @@ export function resolveGitShaFrom(
  *      hot-patched binaries where you want to declare a different commit
  *      than what was compiled.
  *   2. SHA baked into the binary at build time (read above).
- *   3. `null` — `/api/meta` reports null.
+ *   3. Shared `COMMIT_SHA` env var — source-run attestation, used only when
+ *      there is no explicit toolshed override or compiled build metadata.
+ *   4. `null` — `/api/meta` reports null.
  *
  * Empty / whitespace-only values at any level are treated as unset.
  */
 export function resolveGitSha(): string | null {
-  return resolveGitShaFrom(env.TOOLSHED_GIT_SHA, buildInfo.commitSha);
+  return resolveGitShaFrom(
+    env.TOOLSHED_GIT_SHA,
+    buildInfo.commitSha,
+    env.COMMIT_SHA,
+  );
 }

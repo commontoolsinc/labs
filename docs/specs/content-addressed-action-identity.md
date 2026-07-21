@@ -113,9 +113,10 @@ introduced the `$patternRef` sentinel, `builtins/op-pattern-ref.ts`).
 equality. Its old/new recursive source closures are matched by canonical full
 filename, and successor module documents accumulate the predecessor hashes they
 may act as. A loaded successor can satisfy a `writeAuthorizedBy` claim stamped
-by one of those predecessors only when the normalized source file and binding
-path still match. Ordinary recompilation, renames, and unrelated module loads
-grant no such authority.
+by one of those predecessors only when the binding path still matches. Source
+file spelling is diagnostic at verification; a rename grants no authority
+because canonical filename matching derives no delegation. Ordinary
+recompilation and unrelated module loads grant no such authority.
 
 ## Last Updated
 

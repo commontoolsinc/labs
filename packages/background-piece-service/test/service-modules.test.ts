@@ -181,6 +181,7 @@ function pieceEntry(
 
 function fakeRuntime(piecesCell: FakePiecesCell) {
   return {
+    clientVersion: "service-build",
     experimental: {
       modernCellRep: true,
       persistentSchedulerState: false,
@@ -464,7 +465,10 @@ describe("BackgroundPieceService", () => {
       runtime: runtime as never,
       workerTimeoutMs: 123,
       createSpaceManager: (options) => ({
-        start: () => started.push(options.did),
+        start: () => {
+          assertEquals(options.clientVersion, "service-build");
+          started.push(options.did);
+        },
         stop: () => {
           stopped.push(options.did);
           return Promise.resolve();
@@ -946,6 +950,7 @@ describe("WorkerController", () => {
         did: TEST_DID,
         toolshedUrl: "http://localhost:8000",
         identity: await Identity.generate({ implementation: "noble" }),
+        clientVersion: "worker-build",
       });
       await controller.initializeResolve;
       assertEquals(controller.isReady(), true);
@@ -954,6 +959,11 @@ describe("WorkerController", () => {
       await controller.runPiece(entry as never);
       await controller.shutdown();
       const worker = MockWorker.instances[0];
+      assertEquals(
+        (worker.messages[0] as { data: { clientVersion?: string } }).data
+          .clientVersion,
+        "worker-build",
+      );
       assertEquals(worker.terminated, true);
       assertEquals(
         worker.messages.map((message) =>
@@ -1143,9 +1153,15 @@ describe("background piece service entry point", () => {
       identity,
       // Experimental flags flow through the injectable reader and the
       // canonical runner mapping, not EnvVars (CT-1814).
-      (key) => key === "EXPERIMENTAL_MODERN_CELL_REP" ? "true" : undefined,
+      (key) =>
+        key === "EXPERIMENTAL_MODERN_CELL_REP"
+          ? "true"
+          : key === "COMMIT_SHA"
+          ? "main-runtime-sha"
+          : undefined,
     );
     assertEquals(runtime.experimental.modernCellRep, true);
+    assertEquals(runtime.clientVersion, "main-runtime-sha");
     await runtime.dispose();
   });
 
@@ -1460,10 +1476,11 @@ describe("cast admin entry point", () => {
       identity,
       (key) => {
         consulted.add(key);
-        return undefined;
+        return key === "COMMIT_SHA" ? "cast-runtime-sha" : undefined;
       },
     );
     try {
+      assertEquals(runtime.clientVersion, "cast-runtime-sha");
       // The canonical mapping consults the reader passed through the
       // CastAdminDependencies boundary — not process env — for every
       // env-wired EXPERIMENTAL_* flag.
