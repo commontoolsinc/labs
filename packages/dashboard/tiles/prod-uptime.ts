@@ -66,12 +66,13 @@ export const prodUptime: Tile = {
       new URL(ctx.env("PROD_URL") ?? "https://estuary.saga-castor.ts.net")
         .origin;
     const proxy = ctx.env("PROD_PROXY");
-    const client = proxy === undefined ? undefined : clientForProxy(proxy);
     const url = `${origin}${HEALTH_PATH}`;
     const host = new URL(origin).host;
     const drill = { href: origin, hint: "open ↗" };
+    let client: Deno.HttpClient | undefined;
 
     try {
+      client = proxy === undefined ? undefined : clientForProxy(proxy);
       const t0 = Date.now();
       const init: ProxyFetchInit = {
         signal: AbortSignal.timeout(8000),

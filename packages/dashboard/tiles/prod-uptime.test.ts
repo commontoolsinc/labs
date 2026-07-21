@@ -281,7 +281,8 @@ Deno.test("prod uptime: proxy client closes when fetch fails", async () => {
   }
 });
 
-Deno.test("prod uptime: invalid or unsupported PROD_PROXY throws instead of falling back direct", async () => {
+Deno.test("prod uptime: invalid or unsupported PROD_PROXY is unreachable without falling back direct", async () => {
+  await resetFailCounter();
   let created = 0;
   let fetched = 0;
   const restoreClient = setProdUptimeHttpClientFactoryForTest(() => {
@@ -293,16 +294,19 @@ Deno.test("prod uptime: invalid or unsupported PROD_PROXY throws instead of fall
     return new Response("ok", { status: 200 });
   });
   try {
-    await assertRejects(
-      () => prodUptime.collect(ctx({ PROD_PROXY: "not a url" })),
-      TypeError,
-      "invalid PROD_PROXY URL",
+    const invalid = await prodUptime.collect(
+      ctx({ PROD_PROXY: "not a url" }),
     );
-    await assertRejects(
-      () => prodUptime.collect(ctx({ PROD_PROXY: "ftp://proxy.example" })),
-      TypeError,
-      "unsupported PROD_PROXY URL scheme",
+    assertEquals(invalid.status, "unknown");
+    assertEquals(invalid.value, "—");
+    assertEquals(invalid.sub, "unreachable · estuary.saga-castor.ts.net");
+
+    const unsupported = await prodUptime.collect(
+      ctx({ PROD_PROXY: "ftp://proxy.example" }),
     );
+    assertEquals(unsupported.status, "unknown");
+    assertEquals(unsupported.value, "—");
+    assertEquals(unsupported.sub, "unreachable · estuary.saga-castor.ts.net");
     assertEquals(created, 0);
     assertEquals(fetched, 0);
   } finally {
