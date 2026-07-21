@@ -134,9 +134,7 @@ export const attest = (
  * of the fact in the given replica otherwise function fails with
  * `IStorageTransactionInconsistent` error.
  *
- * Values are compared with `valueEqual`, the `Fabric`-aware content equality
- * (reference-identical operands settle immediately via its leading
- * `Object.is`, without hashing).
+ * Values are compared with `valueEqual()`.
  */
 export const claim = (
   { address, value: expected }: IAttestation,
@@ -154,13 +152,6 @@ export const claim = (
     )
     : read(source, address)?.ok?.value;
 
-  // Compare the stored document value (the read/attested value) with
-  // `valueEqual`, the `Fabric`-aware content equality: a `FabricPrimitive`
-  // keeps its state in private `#fields` with zero enumerable own-props, so
-  // only a content-aware comparison can detect the changed Fabric value this
-  // check exists to catch. `valueEqual` settles identical references via its
-  // leading `Object.is`, which is also why there is no `===` fast path here:
-  // `+0 === -0` is `true`, but they are distinct stored values.
   if (valueEqual(expected, actual)) {
     return { ok: state };
   } else {

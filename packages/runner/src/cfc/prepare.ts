@@ -2602,14 +2602,10 @@ const writeInstallsInitialSchemaDefault = (
     return false;
   }
   const pathTarget = { ...target, path };
-  // `schema.default` can hold a `FabricValue` (a native `Uint8Array`/`Date`
-  // default interns to `FabricBytes`/`FabricEpoch*`), so this write-policy
-  // check compares with `valueEqual`, the `Fabric`-aware content equality that
-  // distinguishes `FabricPrimitive` values by content (state in private
-  // `#fields`, zero enumerable own-props). The cast is required: `default` is
-  // statically `ImmutableJSONValue`, whose deeply-`readonly`,
-  // `ArrayLike`-based JSON shape is not assignable to `FabricValue`, even
-  // though the runtime value is one.
+  // The cast is required: `default` is statically `ImmutableJSONValue`, whose
+  // deeply-`readonly`, `ArrayLike`-based JSON shape is not assignable to
+  // `FabricValue` -- though the runtime value is one (a native
+  // `Uint8Array`/`Date` default interns to a `FabricPrimitive`).
   return previousWriteValueForTarget(tx, pathTarget) === undefined &&
     valueEqual(
       writeValueForTarget(tx, pathTarget),
