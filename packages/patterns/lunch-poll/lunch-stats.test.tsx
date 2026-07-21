@@ -15,7 +15,7 @@
  *   - pre-yellow query had no `yellows` field at all (=> undefined !== 1)
  */
 
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, pattern } from "commonfabric";
 import CozyPoll from "./main.tsx";
 
 export default pattern(() => {
@@ -46,7 +46,7 @@ export default pattern(() => {
   });
 
   // Only Thai was visited, so placeStats has exactly its row.
-  const assert_thai_stats_scoped_and_yellow = computed(() => {
+  const assert_thai_stats_scoped_and_yellow = assert(() => {
     const s = (poll.placeStats ?? [])[0];
     return !!s &&
       s.title === "Thai" &&

@@ -10,7 +10,7 @@
  *
  * Run: deno task cf test packages/patterns/battleship/multiplayer/lobby.test.tsx --verbose
  */
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, assert, pattern, Writable } from "commonfabric";
 import BattleshipLobby from "./lobby.tsx";
 import {
   createInitialShots,
@@ -82,26 +82,26 @@ export default pattern(() => {
   // ==========================================================================
 
   // Game name defaults to "Battleship"
-  const assert_initial_game_name = computed(
+  const assert_initial_game_name = assert(
     () => lobby.gameName === "Battleship",
   );
 
   // Both players are initially null
-  const assert_initial_player1_null = computed(() => lobby.player1 === null);
-  const assert_initial_player2_null = computed(() => lobby.player2 === null);
+  const assert_initial_player1_null = assert(() => lobby.player1 === null);
+  const assert_initial_player2_null = assert(() => lobby.player2 === null);
 
   // Game state phase is "waiting"
-  const assert_initial_phase_waiting = computed(
+  const assert_initial_phase_waiting = assert(
     () => lobby.gameState.phase === "waiting",
   );
 
   // Game state currentTurn is 1 initially
-  const assert_initial_current_turn = computed(
+  const assert_initial_current_turn = assert(
     () => lobby.gameState.currentTurn === 1,
   );
 
   // Game state winner is null initially
-  const assert_initial_winner_null = computed(
+  const assert_initial_winner_null = assert(
     () => lobby.gameState.winner === null,
   );
 
@@ -110,10 +110,10 @@ export default pattern(() => {
   // ==========================================================================
 
   // Player 1 has joined with correct name
-  const assert_player1_name = computed(() => lobby.player1?.name === "Alice");
+  const assert_player1_name = assert(() => lobby.player1?.name === "Alice");
 
   // Player 1 has ships assigned
-  const assert_player1_has_ships = computed(
+  const assert_player1_has_ships = assert(
     () =>
       lobby.player1 !== null &&
       Array.isArray(lobby.player1.ships) &&
@@ -121,7 +121,7 @@ export default pattern(() => {
   );
 
   // Player 1 has a color
-  const assert_player1_has_color = computed(
+  const assert_player1_has_color = assert(
     () =>
       lobby.player1 !== null &&
       typeof lobby.player1.color === "string" &&
@@ -129,10 +129,10 @@ export default pattern(() => {
   );
 
   // Player 2 is still null
-  const assert_player2_still_null = computed(() => lobby.player2 === null);
+  const assert_player2_still_null = assert(() => lobby.player2 === null);
 
   // Game state is still waiting (only 1 player joined)
-  const assert_still_waiting_one_player = computed(
+  const assert_still_waiting_one_player = assert(
     () => lobby.gameState.phase === "waiting",
   );
 
@@ -141,10 +141,10 @@ export default pattern(() => {
   // ==========================================================================
 
   // Player 2 has joined with correct name
-  const assert_player2_name = computed(() => lobby.player2?.name === "Bob");
+  const assert_player2_name = assert(() => lobby.player2?.name === "Bob");
 
   // Player 2 has ships assigned
-  const assert_player2_has_ships = computed(
+  const assert_player2_has_ships = assert(
     () =>
       lobby.player2 !== null &&
       Array.isArray(lobby.player2.ships) &&
@@ -152,12 +152,12 @@ export default pattern(() => {
   );
 
   // Game state phase changes to "playing"
-  const assert_phase_playing = computed(
+  const assert_phase_playing = assert(
     () => lobby.gameState.phase === "playing",
   );
 
   // Game state currentTurn is set to 1 when game starts
-  const assert_current_turn_player1 = computed(
+  const assert_current_turn_player1 = assert(
     () => lobby.gameState.currentTurn === 1,
   );
 
@@ -166,29 +166,29 @@ export default pattern(() => {
   // ==========================================================================
 
   // Both players are back to null
-  const assert_reset_player1_null = computed(() => lobby.player1 === null);
-  const assert_reset_player2_null = computed(() => lobby.player2 === null);
+  const assert_reset_player1_null = assert(() => lobby.player1 === null);
+  const assert_reset_player2_null = assert(() => lobby.player2 === null);
 
   // Game state returns to "waiting"
-  const assert_reset_phase_waiting = computed(
+  const assert_reset_phase_waiting = assert(
     () => lobby.gameState.phase === "waiting",
   );
 
   // Winner is null after reset
-  const assert_reset_winner_null = computed(
+  const assert_reset_winner_null = assert(
     () => lobby.gameState.winner === null,
   );
 
   // ==========================================================================
   // Edge Case: Stale per-user slot should not block rejoin
   // ==========================================================================
-  const assert_stale_slot_rejoined = computed(() =>
+  const assert_stale_slot_rejoined = assert(() =>
     lobby.player1?.name === "Carol" &&
     lobby.myName === "Carol" &&
     lobby.myPlayerNumber === 1
   );
 
-  const assert_stale_slot_prepared = computed(() =>
+  const assert_stale_slot_prepared = assert(() =>
     lobby.player1 === null &&
     lobby.myName === "Alice" &&
     lobby.myPlayerNumber === 1
@@ -197,7 +197,7 @@ export default pattern(() => {
   // ==========================================================================
   // Edge Case: Empty name should be ignored
   // ==========================================================================
-  const assert_empty_name_ignored = computed(() => lobby.player1 === null);
+  const assert_empty_name_ignored = assert(() => lobby.player1 === null);
 
   // ==========================================================================
   // Test Sequence

@@ -1,4 +1,4 @@
-import { computed, handler, pattern, Stream, Writable } from "commonfabric";
+import { assert, handler, pattern, Stream, Writable } from "commonfabric";
 import {
   SAVE_DRAFT_ACTION,
   SAVE_TITLE_ACTION,
@@ -309,82 +309,82 @@ export default pattern(() => {
     stream: trustedRedactedRelease.releaseRedactedContent,
   });
 
-  const assert_saved = computed(() =>
+  const assert_saved = assert(() =>
     savedTitle.get() === "Saved from trusted surface"
   );
-  const assert_saved_draft = computed(() =>
+  const assert_saved_draft = assert(() =>
     savedDraftTitle.get() === "Saved from trusted surface" &&
     savedBody.get() === "Draft body"
   );
-  const assert_forward_prepared = computed(() =>
+  const assert_forward_prepared = assert(() =>
     forwardPrepared.get() ===
       "Prepared for night-audit@hotel.example: Guest arrives late and needs the bell desk to hold room access after midnight. Only the bounded itinerary excerpt will be forwarded."
   );
-  const assert_forward_committed = computed(() =>
+  const assert_forward_committed = assert(() =>
     forwardedNote.get() === forwardPrepared.get()
   );
-  const assert_command_captured = computed(() =>
+  const assert_command_captured = assert(() =>
     capturedCommand.get() ===
       "Research Common Fabric launch updates and email a three-bullet brief to team@example.com"
   );
-  const assert_brief_prepared = computed(() =>
+  const assert_brief_prepared = assert(() =>
     preparedBrief.get() ===
       'Prepared outbound draft: concise summary for "Research Common Fabric launch updates and email a three-bullet brief to team@example.com". The send action stays separately gated.'
   );
-  const assert_send_authorized = computed(() =>
+  const assert_send_authorized = assert(() =>
     authorizedSend.get() ===
       'Authorized outbound message for "Research Common Fabric launch updates and email a three-bullet brief to team@example.com": Prepared outbound draft: concise summary for "Research Common Fabric launch updates and email a three-bullet brief to team@example.com". The send action stays separately gated.'
   );
-  const assert_safe_link_prepared = computed(() =>
+  const assert_safe_link_prepared = assert(() =>
     preparedSafeLink.get() ===
       "https://source.example.com/private/report?view=summary"
   );
-  const assert_safe_link_released = computed(() =>
+  const assert_safe_link_released = assert(() =>
     releasedSafeLink.get() ===
       "Released safe link https://source.example.com/private/report?view=summary"
   );
-  const assert_conversation_sent = computed(() =>
+  const assert_conversation_sent = assert(() =>
     sentMessage.get() ===
       "Sent in Project Sync to product thread: Ship the reviewed update only."
   );
-  const assert_audience_prepared = computed(() =>
+  const assert_audience_prepared = assert(() =>
     preparedAudiencePublish.get() ===
       "Prepared publish for public: Release note — Summarize the trusted review before publish."
   );
-  const assert_audience_published = computed(() =>
+  const assert_audience_published = assert(() =>
     publishedAudiencePost.get() === preparedAudiencePublish.get()
   );
-  const assert_disclaimer_acknowledged = computed(() =>
+  const assert_disclaimer_acknowledged = assert(() =>
     acknowledgedDisclaimer.get() ===
       "Acknowledged trusted disclaimer: Disclosure before use is required."
   );
-  const assert_provenance_reviewed = computed(() =>
+  const assert_provenance_reviewed = assert(() =>
     reviewedProvenance.get() ===
       "Reviewed provenance: Rendered provenance from trusted source."
   );
-  const assert_fact_check_released = computed(() =>
+  const assert_fact_check_released = assert(() =>
     factCheckResult.get() ===
       "Fact-check gate opened for: Claim checked against trusted facts."
   );
-  const assert_song_id_recorded = computed(() =>
+  const assert_song_id_recorded = assert(() =>
     identifiedSongId.get() === "Mock song id: midnight-bloom"
   );
-  const assert_share_policy_saved = computed(() =>
+  const assert_share_policy_saved = assert(() =>
     savedSharePolicy.get() === "Share policy saved for team (share-only)"
   );
-  const assert_job_authorized = computed(() =>
+  const assert_job_authorized = assert(() =>
     jobStatus.get() === "Running" &&
     jobAuthorization.get() === "Authorized long-running job: nightly export"
   );
-  const assert_job_cancelled = computed(() =>
+  const assert_job_cancelled = assert(() =>
     jobStatus.get() === "Cancelled" &&
     jobCancellation.get() === "Cancelled long-running job: nightly export"
   );
-  const assert_recipient_confirmed = computed(() =>
+  const assert_recipient_confirmed = assert(() =>
     confirmedRecipientRelease.get() ===
       "Confirmed release to finance@example.com: Quarterly budget packet"
   );
-  const assert_redacted_released = computed(() =>
+  const assert_redacted_released = assert(() =>
     releasedRedactedContent.get() ===
       "Released redacted support case: Customer [redacted-secret] code [redacted-id] may be released after redaction."
   );

@@ -1,4 +1,4 @@
-import { computed, pattern } from "commonfabric";
+import { assert, pattern } from "commonfabric";
 import ImportedPolicy from "./imported-policy.tsx";
 
 export default pattern(() => {
@@ -8,13 +8,13 @@ export default pattern(() => {
   return {
     tests: [
       {
-        assertion: computed(() =>
+        assertion: assert(() =>
           defaultPolicy.message ===
             "Protected by the defining module's rules"
         ),
       },
       {
-        assertion: computed(() =>
+        assertion: assert(() =>
           customPolicy.message === "Imported policy message"
         ),
       },

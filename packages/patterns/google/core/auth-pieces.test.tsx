@@ -6,7 +6,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/auth-pieces.test.tsx --root packages/patterns --verbose
  */
-import { computed, pattern, UI, Writable } from "commonfabric";
+import { assert, pattern, UI, Writable } from "commonfabric";
 import AirtableAuth, {
   type AirtableAuth as AirtableAuthData,
 } from "../../airtable/core/airtable-auth.tsx";
@@ -92,14 +92,14 @@ export default pattern(() => {
     },
   });
 
-  const assert_google_scopes_include_selected_permissions = computed(() =>
+  const assert_google_scopes_include_selected_permissions = assert(() =>
     google.scopes.includes("email") &&
     google.scopes.includes("profile") &&
     google.scopes.includes("https://www.googleapis.com/auth/gmail.readonly") &&
     google.scopes.includes("https://www.googleapis.com/auth/calendar.readonly")
   );
 
-  const assert_personal_and_work_wrappers_show_account_type = computed(() =>
+  const assert_personal_and_work_wrappers_show_account_type = assert(() =>
     personal.accountType === "personal" &&
     work.accountType === "work" &&
     hasText(personal[UI], "PERSONAL") &&
@@ -108,13 +108,13 @@ export default pattern(() => {
     hasText(work[UI], "work@example.com")
   );
 
-  const assert_switcher_prompts_for_classification = computed(() =>
+  const assert_switcher_prompts_for_classification = assert(() =>
     hasText(switcher[UI], "What type of account is this?") &&
     hasText(switcher[UI], "Personal Account") &&
     hasText(switcher[UI], "Work Account")
   );
 
-  const assert_airtable_scopes_include_selected_permissions = computed(() =>
+  const assert_airtable_scopes_include_selected_permissions = assert(() =>
     airtable.scopes.includes("user.email:read") &&
     airtable.scopes.includes("data.records:read") &&
     airtable.scopes.includes("schema.bases:read")

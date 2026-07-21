@@ -1,4 +1,4 @@
-import { computed, handler, pattern } from "commonfabric";
+import { assert, handler, pattern } from "commonfabric";
 import {
   BatchPhotoUploadJobExample,
   CalendarAvailabilityPolicyExample,
@@ -38,19 +38,19 @@ export default pattern(() => {
   const photoJob = BatchPhotoUploadJobExample({});
   const exportJob = DocumentExportJobExample({});
 
-  const assert_song_id_only = computed(() =>
+  const assert_song_id_only = assert(() =>
     song.decoyStatus ===
       "Host raw-audio shortcut did not authorize recording; only song ID can be written." &&
     song.identifiedSongId!.includes("Mock song id")
   );
 
-  const assert_policy_saved = computed(() =>
+  const assert_policy_saved = assert(() =>
     policy.decoyStatus ===
       "Host full-calendar shortcut did not save policy; trusted surface scopes the contribution." &&
     policy.savedSharePolicy!.includes("free/busy windows only")
   );
 
-  const assert_photo_job_visible_and_cancelable = computed(() =>
+  const assert_photo_job_visible_and_cancelable = assert(() =>
     photoJob.decoyStatus ===
       "Host all-photo shortcut did not authorize the job; the trusted job stays visible and cancelable." &&
     photoJob.jobStatus === "Cancelled" &&
@@ -58,7 +58,7 @@ export default pattern(() => {
     photoJob.jobCancellation!.includes("Batch photo upload")
   );
 
-  const assert_document_export_authorized = computed(() =>
+  const assert_document_export_authorized = assert(() =>
     exportJob.decoyStatus ===
       "Host one-click export did not authorize the job; the trusted job surface controls export." &&
     exportJob.jobStatus === "Running" &&

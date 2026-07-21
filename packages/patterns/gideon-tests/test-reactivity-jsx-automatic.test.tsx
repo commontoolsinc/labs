@@ -7,7 +7,7 @@
  *
  * Run: deno task cf test packages/patterns/gideon-tests/test-reactivity-jsx-automatic.test.tsx --root packages/patterns --verbose
  */
-import { action, computed, pattern, UI } from "commonfabric";
+import { action, assert, pattern, UI } from "commonfabric";
 import {
   findElementByText,
   propsOf,
@@ -30,48 +30,46 @@ export default pattern(() => {
     }
   });
 
-  const assert_initial_count = computed(() => subject.count === 0);
-  const assert_initial_user = computed(() => subject.user.name === "Alice");
-  const assert_initial_items = computed(() => [...subject.items].length === 3);
+  const assert_initial_count = assert(() => subject.count === 0);
+  const assert_initial_user = assert(() => subject.user.name === "Alice");
+  const assert_initial_items = assert(() => [...subject.items].length === 3);
 
   // The pattern's claim is that an expression in JSX tracks its inputs with no
   // computed() wrapper, so read it from the rendered tree rather than from the
   // output.
-  const assert_initial_inline_expression = computed(() =>
+  const assert_initial_inline_expression = assert(() =>
     textContent(findElementByText(subject[UI], "div", "Count x 2 ="))
       .includes("Count x 2 = 0")
   );
 
-  const assert_count_after_first = computed(() => subject.count === 1);
-  const assert_user_after_first = computed(() => subject.user.name === "Bob");
-  const assert_inline_expression_after_first = computed(() =>
+  const assert_count_after_first = assert(() => subject.count === 1);
+  const assert_user_after_first = assert(() => subject.user.name === "Bob");
+  const assert_inline_expression_after_first = assert(() =>
     textContent(findElementByText(subject[UI], "div", "Count x 2 ="))
       .includes("Count x 2 = 2")
   );
 
   // The append derives the new title from the same snapshot the length guard
   // read, so the fourth item is titled from a length of 3.
-  const assert_items_after_first = computed(() => {
+  const assert_items_after_first = assert(() => {
     const items = [...subject.items];
     return items.length === 4 && items[3].title === "Item 4";
   });
 
   // Each further click appends one item, titled from the growing snapshot,
   // until the guard stops the append at five.
-  const assert_items_after_second = computed(() => {
+  const assert_items_after_second = assert(() => {
     const items = [...subject.items];
     return items.length === 5 && items[4].title === "Item 5";
   });
-  const assert_user_after_second = computed(() =>
-    subject.user.name === "Alice"
-  );
+  const assert_user_after_second = assert(() => subject.user.name === "Alice");
 
   // At five entries the guard takes the other branch and truncates to three.
-  const assert_items_after_third = computed(() => {
+  const assert_items_after_third = assert(() => {
     const items = [...subject.items];
     return items.length === 3 && items[2].title === "Item 3";
   });
-  const assert_count_after_third = computed(() => subject.count === 3);
+  const assert_count_after_third = assert(() => subject.count === 3);
 
   return {
     tests: [

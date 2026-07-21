@@ -1,4 +1,4 @@
-import { computed, pattern, UI, Writable } from "commonfabric";
+import { assert, computed, pattern, UI, Writable } from "commonfabric";
 import Lobby, {
   addSelfToLobby,
   commitTrustedLobbyAction,
@@ -150,7 +150,7 @@ export default pattern(() => {
 
   const lobby = Lobby({ roster, adminRegistry } as LobbyInputArg);
 
-  const assert_selected_profile_drives_viewer_state = computed(() =>
+  const assert_selected_profile_drives_viewer_state = assert(() =>
     selectedViewer.myName === "Selected Profile" &&
     selectedViewer.hasProfile === true &&
     selectedViewer.hasJoined === false &&
@@ -169,7 +169,7 @@ export default pattern(() => {
     missingProfileViewer.joinDisabled === true &&
     missingProfileViewer.currentUserIsAdmin === false
   );
-  const assert_selected_profile_joined = computed(() =>
+  const assert_selected_profile_joined = assert(() =>
     participantNames(viewerRoster).join(",") === "Selected Profile" &&
     lobbyParticipantsValue(viewerRoster)[0]?.profile.get()
         ?.externalLinks?.[0]?.url === "https://github.com/octocat" &&
@@ -180,7 +180,7 @@ export default pattern(() => {
     selectedViewer.joinDisabled === true &&
     selectedViewer.currentUserIsAdmin === true
   );
-  const assert_selected_admin_lockdown = computed(() =>
+  const assert_selected_admin_lockdown = assert(() =>
     selectedViewer.everyoneIsAdmin === false &&
     selectedViewer.currentUserIsAdmin === true &&
     selectedViewer.adminSummary ===
@@ -189,70 +189,70 @@ export default pattern(() => {
     selectedViewer.adminBadgeLabel === "Explicit admins"
   );
 
-  const assert_initial_open_fallback = computed(() =>
+  const assert_initial_open_fallback = assert(() =>
     lobbyParticipantsValue(roster).length === 0 &&
     lobbyAdminRolesValue(adminRegistry).length === 0 &&
     lobbyEveryoneIsAdmin(adminRegistry) === true
   );
-  const assert_alice_joined_once = computed(() =>
+  const assert_alice_joined_once = assert(() =>
     participantNames(roster).join(",") === "Alice" &&
     currentLobbyUserIsAdmin(aliceProfile, roster, adminRegistry)
   );
-  const assert_blank_profile_rejected = computed(() =>
+  const assert_blank_profile_rejected = assert(() =>
     participantNames(roster).join(",") === "Alice"
   );
-  const assert_both_are_admin_by_fallback = computed(() =>
+  const assert_both_are_admin_by_fallback = assert(() =>
     participantNames(roster).join(",") === "Alice,Bob" &&
     currentLobbyUserIsAdmin(aliceProfile, roster, adminRegistry) &&
     currentLobbyUserIsAdmin(bobProfile, roster, adminRegistry)
   );
-  const assert_bob_removed_alice_while_open = computed(() =>
+  const assert_bob_removed_alice_while_open = assert(() =>
     participantNames(roster).join(",") === "Bob"
   );
-  const assert_lockdown_bootstraps_alice = computed(() => {
+  const assert_lockdown_bootstraps_alice = assert(() => {
     const roles = lobbyAdminRolesValue(adminRegistry);
     return lobbyEveryoneIsAdmin(adminRegistry) === false &&
       roles.length === 1 &&
       currentLobbyUserIsAdmin(aliceProfile, roster, adminRegistry) &&
       !currentLobbyUserIsAdmin(bobProfile, roster, adminRegistry);
   });
-  const assert_non_admin_remove_is_blocked = computed(() =>
+  const assert_non_admin_remove_is_blocked = assert(() =>
     participantNames(roster).join(",") === "Bob,Alice"
   );
-  const assert_bob_promoted = computed(() =>
+  const assert_bob_promoted = assert(() =>
     lobbyAdminRolesValue(adminRegistry).length === 2 &&
     currentLobbyUserIsAdmin(bobProfile, roster, adminRegistry)
   );
-  const assert_public_output_explicit_policy = computed(() =>
+  const assert_public_output_explicit_policy = assert(() =>
     lobby.everyoneIsAdmin === false &&
     lobby.allParticipants[0]?.isAdmin === true &&
     lobby.allParticipants[1]?.isAdmin === true
   );
-  const assert_bob_removed_alice_and_role = computed(() =>
+  const assert_bob_removed_alice_and_role = assert(() =>
     participantNames(roster).join(",") === "Bob" &&
     lobbyAdminRolesValue(adminRegistry).length === 1 &&
     currentLobbyUserIsAdmin(bobProfile, roster, adminRegistry)
   );
-  const assert_last_admin_removal_blocked = computed(() =>
+  const assert_last_admin_removal_blocked = assert(() =>
     lobbyAdminRolesValue(adminRegistry).length === 1 &&
     currentLobbyUserIsAdmin(bobProfile, roster, adminRegistry)
   );
-  const assert_open_policy_restored = computed(() =>
+  const assert_open_policy_restored = assert(() =>
     lobbyEveryoneIsAdmin(adminRegistry) === true &&
     currentLobbyUserIsAdmin(bobProfile, roster, adminRegistry)
   );
-  const assert_same_name_profiles_both_join = computed(() =>
+  const assert_same_name_profiles_both_join = assert(() =>
     participantNames(roster).filter((name) => name === "Alex").length === 2
   );
-  const assert_public_output_count = computed(() =>
+  const assert_public_output_count = assert(() =>
     lobby.participantCount === 3 &&
     lobby.allParticipants.length === 3 &&
     lobby.participants.length === 3
   );
-  const assert_public_output_policy = computed(() =>
+  const assert_public_output_policy = assert(() =>
     lobby.everyoneIsAdmin === true
   );
-  const assert_public_output_is_profile_free = computed(() =>
+  const assert_public_output_is_profile_free = assert(() =>
     lobby.allParticipants[0]?.name === "Bob" &&
     lobby.allParticipants[1]?.name === "Alex" &&
     lobby.allParticipants[2]?.name === "Alex" &&

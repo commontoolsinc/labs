@@ -27,7 +27,7 @@
  */
 import {
   action,
-  computed,
+  assert,
   equals,
   handler,
   pattern,
@@ -228,72 +228,68 @@ export default pattern(() => {
   // ==========================================================================
 
   // Initial state - use computed count values for reliable reactive array length checks
-  const assert_initial_store_name = computed(() =>
+  const assert_initial_store_name = assert(() =>
     String(store.storeName) === "Test Store"
   );
-  const assert_initial_no_aisles = computed(() =>
-    Number(store.aisleCount) === 0
-  );
+  const assert_initial_no_aisles = assert(() => Number(store.aisleCount) === 0);
   // With auto-populated default departments (7 total)
-  const assert_initial_default_departments = computed(() =>
+  const assert_initial_default_departments = assert(() =>
     Number(store.deptCount) === 7
   );
-  const assert_initial_no_corrections = computed(() =>
+  const assert_initial_no_corrections = assert(() =>
     Number(store.correctionCount) === 0
   );
 
   // After adding aisles - use computed aisleCount for reliable reactive array length checks
-  const assert_one_aisle = computed(() => Number(store.aisleCount) === 1);
-  const assert_two_aisles = computed(() => Number(store.aisleCount) === 2);
-  const assert_three_aisles = computed(() => Number(store.aisleCount) === 3);
-  const assert_first_aisle_is_1 = computed(() => store.aisles[0]?.name === "1");
+  const assert_one_aisle = assert(() => Number(store.aisleCount) === 1);
+  const assert_two_aisles = assert(() => Number(store.aisleCount) === 2);
+  const assert_three_aisles = assert(() => Number(store.aisleCount) === 3);
+  const assert_first_aisle_is_1 = assert(() => store.aisles[0]?.name === "1");
 
   // After setting description
-  const assert_aisle_1_has_description = computed(() =>
+  const assert_aisle_1_has_description = assert(() =>
     store.aisles[0]?.description === "Dairy & Eggs"
   );
 
   // After loading departments - use computed deptCount for reliable reactive array length checks
-  const assert_three_departments = computed(() =>
-    Number(store.deptCount) === 3
-  );
-  const assert_bakery_exists = computed(() =>
+  const assert_three_departments = assert(() => Number(store.deptCount) === 3);
+  const assert_bakery_exists = assert(() =>
     store.departments[0]?.name === "Bakery"
   );
-  const assert_bakery_unassigned = computed(() =>
+  const assert_bakery_unassigned = assert(() =>
     store.departments[0]?.location === "unassigned"
   );
 
   // After assigning location
-  const assert_bakery_assigned = computed(() =>
+  const assert_bakery_assigned = assert(() =>
     store.departments[0]?.location === "front-left"
   );
 
   // After adding correction - use computed correctionCount for reliable reactive array length checks
-  const assert_one_correction = computed(() =>
+  const assert_one_correction = assert(() =>
     Number(store.correctionCount) === 1
   );
-  const assert_coffee_correction = computed(() =>
+  const assert_coffee_correction = assert(() =>
     store.itemLocations[0]?.itemName === "Coffee" &&
     store.itemLocations[0]?.correctAisle === "Aisle 5"
   );
 
   // Outline generation
-  const assert_outline_contains_aisle_1 = computed(() =>
+  const assert_outline_contains_aisle_1 = assert(() =>
     String(store.outline).includes("# Aisle 1")
   );
-  const assert_outline_contains_description = computed(() =>
+  const assert_outline_contains_description = assert(() =>
     String(store.outline).includes("Dairy & Eggs")
   );
-  const assert_outline_contains_bakery = computed(() =>
+  const assert_outline_contains_bakery = assert(() =>
     String(store.outline).includes("# Bakery")
   );
-  const assert_outline_contains_coffee = computed(() =>
+  const assert_outline_contains_coffee = assert(() =>
     String(store.outline).includes("Coffee")
   );
 
   // Store name change
-  const assert_store_name_changed = computed(() =>
+  const assert_store_name_changed = assert(() =>
     String(store.storeName) === "My Grocery Store"
   );
 
@@ -369,93 +365,91 @@ export default pattern(() => {
   // ==========================================================================
 
   // After adding extracted aisle 8
-  const assert_four_aisles = computed(() => Number(store.aisleCount) === 4);
-  const assert_aisle_8_exists = computed(() =>
+  const assert_four_aisles = assert(() => Number(store.aisleCount) === 4);
+  const assert_aisle_8_exists = assert(() =>
     store.aisles.some((a: Aisle) => a.name === "8")
   );
-  const assert_aisle_8_has_products = computed(() => {
+  const assert_aisle_8_has_products = assert(() => {
     const aisle8 = store.aisles.find((a: Aisle) => a.name === "8");
-    return aisle8 &&
+    return aisle8 !== undefined &&
       String(aisle8.description).includes("Bread") &&
       String(aisle8.description).includes("Cereal") &&
       String(aisle8.description).includes("Coffee");
   });
 
   // After adding extracted aisle 9 with null products
-  const assert_five_aisles = computed(() => Number(store.aisleCount) === 5);
-  const assert_aisle_9_exists = computed(() =>
+  const assert_five_aisles = assert(() => Number(store.aisleCount) === 5);
+  const assert_aisle_9_exists = assert(() =>
     store.aisles.some((a: Aisle) => a.name === "9")
   );
-  const assert_aisle_9_empty_description = computed(() => {
+  const assert_aisle_9_empty_description = assert(() => {
     const aisle9 = store.aisles.find((a: Aisle) => a.name === "9");
-    return aisle9 && String(aisle9.description) === "";
+    return aisle9 !== undefined && String(aisle9.description) === "";
   });
 
   // After attempting to add duplicate aisle 8 (count should remain 5)
-  const assert_still_five_aisles = computed(() =>
-    Number(store.aisleCount) === 5
-  );
-  const assert_aisle_8_unchanged = computed(() => {
+  const assert_still_five_aisles = assert(() => Number(store.aisleCount) === 5);
+  const assert_aisle_8_unchanged = assert(() => {
     const aisle8 = store.aisles.find((a: Aisle) => a.name === "8");
     // Description should NOT contain Snacks or Chips from the duplicate attempt
-    return aisle8 &&
+    return aisle8 !== undefined &&
       !String(aisle8.description).includes("Snacks") &&
       !String(aisle8.description).includes("Chips");
   });
 
   // After merging into aisle 8
-  const assert_aisle_8_merged = computed(() => {
+  const assert_aisle_8_merged = assert(() => {
     const aisle8 = store.aisles.find((a: Aisle) => a.name === "8");
     // Should have original items plus Tea and Sugar, but Coffee only once
-    return aisle8 &&
+    return aisle8 !== undefined &&
       String(aisle8.description).includes("Bread") &&
       String(aisle8.description).includes("Tea") &&
       String(aisle8.description).includes("Sugar");
   });
-  const assert_aisle_8_no_duplicate_coffee = computed(() => {
+  const assert_aisle_8_no_duplicate_coffee = assert(() => {
     const aisle8 = store.aisles.find((a: Aisle) => a.name === "8");
     if (!aisle8) return false;
     // Count occurrences of "Coffee" in description
     const matches = String(aisle8.description).match(/Coffee/g);
-    return matches && matches.length === 1;
+    return matches !== null && matches.length === 1;
   });
 
   // ==========================================================================
   // Held-reference survival assertions (CT-1715)
   // ==========================================================================
 
-  const assert_held_dept_stashed = computed(() => {
+  const assert_held_dept_stashed = assert(() => {
     const h = heldDept.get();
     return h.name !== "" && equals(store.departments[0], h);
   });
-  const assert_dept_relocated = computed(() =>
+  const assert_dept_relocated = assert(() =>
     store.departments[0]?.location === "back-center"
   );
   // KEY: the stale-but-once-valid reference still equals()-matches the
   // department AFTER setDepartmentLocation updated it.
-  const assert_held_dept_survives = computed(() => {
+  const assert_held_dept_survives = assert(() => {
     const h = heldDept.get();
     return h.name !== "" && equals(store.departments[0], h);
   });
   // KEY: the held reference still DRIVES the handler after the update.
-  const assert_dept_relocated_via_held = computed(() =>
+  const assert_dept_relocated_via_held = assert(() =>
     store.departments[0]?.location === "right-back"
   );
 
-  const assert_held_aisle_stashed = computed(() => {
+  const assert_held_aisle_stashed = assert(() => {
     const h = heldAisle.get();
     return h.name !== "" && equals(store.aisles[3], h);
   });
-  const assert_aisle_8_has_honey = computed(() => {
+  const assert_aisle_8_has_honey = assert(() => {
     const aisle8 = store.aisles.find((a: Aisle) => a.name === "8");
     return aisle8 !== undefined &&
       String(aisle8.description).includes("Honey");
   });
-  const assert_held_aisle_survives = computed(() => {
+  const assert_held_aisle_survives = assert(() => {
     const h = heldAisle.get();
     return h.name !== "" && equals(store.aisles[3], h);
   });
-  const assert_aisle_8_removed_via_held = computed(() =>
+  const assert_aisle_8_removed_via_held = assert(() =>
     Number(store.aisleCount) === 4 &&
     store.aisles.find((a: Aisle) => a.name === "8") === undefined
   );

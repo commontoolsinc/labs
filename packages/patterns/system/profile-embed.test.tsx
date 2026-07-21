@@ -1,4 +1,4 @@
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, pattern } from "commonfabric";
 import ProfileEmbed from "./profile-embed.tsx";
 import ProfileHome from "./profile-home.tsx";
 
@@ -24,12 +24,8 @@ export default pattern(() => {
   // (1) Fallback branch: with no profile resolvable in lane-2, the embed reports
   // no profile and is not in edit mode; the `[UI]` renders the wish fallback.
   const embed = ProfileEmbed({});
-  const assert_no_profile_in_harness = computed(() =>
-    embed.hasProfile === false
-  );
-  const assert_not_editing_by_default = computed(() =>
-    embed.isEditing === false
-  );
+  const assert_no_profile_in_harness = assert(() => embed.hasProfile === false);
+  const assert_not_editing_by_default = assert(() => embed.isEditing === false);
 
   // (2) Amend contract: a real profile the embed's save handlers write through.
   const profile = ProfileHome({ initialName: "Ada Lovelace" });
@@ -65,21 +61,21 @@ export default pattern(() => {
     profile.setBio.send({ bio: "" });
   });
 
-  const assert_initial_name = computed(() =>
+  const assert_initial_name = assert(() =>
     profile.initialNameApplied === "Ada Lovelace"
   );
-  const assert_name_amended = computed(() =>
+  const assert_name_amended = assert(() =>
     profile.initialNameApplied === "Grace Hopper"
   );
-  const assert_name_survives_empty = computed(() =>
+  const assert_name_survives_empty = assert(() =>
     profile.initialNameApplied === "Grace Hopper"
   );
-  const assert_avatar_amended = computed(() => profile.avatar === "GH");
-  const assert_avatar_survives_empty = computed(() => profile.avatar === "GH");
-  const assert_bio_amended = computed(() =>
+  const assert_avatar_amended = assert(() => profile.avatar === "GH");
+  const assert_avatar_survives_empty = assert(() => profile.avatar === "GH");
+  const assert_bio_amended = assert(() =>
     profile.bio === "Countess of computing."
   );
-  const assert_bio_cleared = computed(() => profile.bio === "");
+  const assert_bio_cleared = assert(() => profile.bio === "");
 
   return {
     tests: [

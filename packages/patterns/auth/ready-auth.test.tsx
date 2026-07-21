@@ -6,7 +6,7 @@
  *
  * Run: deno task cf test packages/patterns/auth/ready-auth.test.tsx --verbose
  */
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, assert, computed, pattern, Writable } from "commonfabric";
 import {
   type AuthAvailability,
   authIsReady,
@@ -83,11 +83,11 @@ export default pattern(() => {
 
   const assert_auth_unavailable = authReady ? false : true;
   const assert_auth_available = authReady ? true : false;
-  const assert_ready_reads_current_token = computed(() =>
+  const assert_ready_reads_current_token = assert(() =>
     availability.state === "ready" &&
     availability.auth?.get?.()?.token === "initial"
   );
-  const assert_refresh_writes_original_cell = computed(() =>
+  const assert_refresh_writes_original_cell = assert(() =>
     authCell.get().token === "refreshed" &&
     availability.state === "ready" &&
     availability.auth?.get?.()?.token === "refreshed"

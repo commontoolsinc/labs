@@ -11,7 +11,7 @@
  * are covered by multi-user.test.tsx.
  */
 
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, pattern } from "commonfabric";
 import CozyPoll from "./main.tsx";
 
 export default pattern(() => {
@@ -89,7 +89,7 @@ export default pattern(() => {
   // Alex is in users, no admin name was claimed by anyone else, and the
   // "Should not appear" option is absent (implied by chipotle assertions
   // later — options.length === 1 after only Chipotle is added).
-  const assert_joined_as_alex = computed(() =>
+  const assert_joined_as_alex = assert(() =>
     poll.users.length === 1 &&
     poll.users[0]?.name === "Alex" &&
     poll.myName === "Alex" &&
@@ -98,49 +98,49 @@ export default pattern(() => {
     poll.isAdmin === true
   );
 
-  const assert_immutable_after_join = computed(() =>
+  const assert_immutable_after_join = assert(() =>
     poll.users.length === 1 &&
     poll.myName === "Alex"
   );
 
-  const assert_chipotle_added = computed(() =>
+  const assert_chipotle_added = assert(() =>
     poll.options.length === 1 &&
     poll.options[0]?.title === "Chipotle" &&
     poll.options[0]?.addedByName === "Alex"
   );
 
-  const assert_two_options = computed(() => poll.options.length === 2);
+  const assert_two_options = assert(() => poll.options.length === 2);
 
-  const assert_green_vote_recorded = computed(() => {
+  const assert_green_vote_recorded = assert(() => {
     const v = poll.votes[0];
     return poll.votes.length === 1 &&
       v?.voteType === "green" &&
       v?.voterName === "Alex";
   });
 
-  const assert_changed_to_yellow = computed(() => {
+  const assert_changed_to_yellow = assert(() => {
     const v = poll.votes[0];
     return poll.votes.length === 1 &&
       v?.voteType === "yellow";
   });
 
-  const assert_changed_to_red = computed(() => {
+  const assert_changed_to_red = assert(() => {
     const v = poll.votes[0];
     return poll.votes.length === 1 &&
       v?.voteType === "red";
   });
 
-  const assert_revote_green_cleared = computed(() => poll.votes.length === 0);
+  const assert_revote_green_cleared = assert(() => poll.votes.length === 0);
 
-  const assert_votes_reset = computed(() => poll.votes.length === 0);
+  const assert_votes_reset = assert(() => poll.votes.length === 0);
 
-  const assert_option_removed_with_its_votes = computed(() =>
+  const assert_option_removed_with_its_votes = assert(() =>
     poll.options.length === 1 &&
     poll.options[0]?.title === "Thai Kitchen" &&
     poll.votes.length === 0
   );
 
-  const assert_still_alex_host = computed(() =>
+  const assert_still_alex_host = assert(() =>
     poll.adminName === "Alex" && poll.isAdmin === true
   );
 

@@ -11,7 +11,7 @@
  * Run:
  *   deno task cf test packages/patterns/gideon-tests/test-handler-capture-key-equals.test.tsx --verbose
  */
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, pattern } from "commonfabric";
 import {
   CellInboxItemCapturePattern,
   WritableInboxItemCapturePattern,
@@ -41,15 +41,15 @@ export default pattern(() => {
     handlers[1]?.send();
   });
 
-  const assert_writable_initial_handlers = computed(() => {
+  const assert_writable_initial_handlers = assert(() => {
     return writableSubject.deleteHandlers.filter(() => true).length === 3;
   });
 
-  const assert_cell_initial_handlers = computed(() => {
+  const assert_cell_initial_handlers = assert(() => {
     return cellSubject.deleteHandlers.filter(() => true).length === 3;
   });
 
-  const assert_writable_initial_items = computed(() => {
+  const assert_writable_initial_items = assert(() => {
     const items = writableSubject.inboxItems.filter(() => true);
     return items.length === 3 &&
       items[0]?.id === "a" &&
@@ -57,7 +57,7 @@ export default pattern(() => {
       items[2]?.id === "c";
   });
 
-  const assert_cell_initial_items = computed(() => {
+  const assert_cell_initial_items = assert(() => {
     const items = cellSubject.inboxItems.filter(() => true);
     return items.length === 3 &&
       items[0]?.id === "a" &&
@@ -65,7 +65,7 @@ export default pattern(() => {
       items[2]?.id === "c";
   });
 
-  const assert_writable_removed_middle = computed(() => {
+  const assert_writable_removed_middle = assert(() => {
     const items = writableSubject.inboxItems.filter(() => true);
     return items.length === 2 &&
       items[0]?.id === "a" &&
@@ -73,7 +73,7 @@ export default pattern(() => {
       !items.some((item) => item.id === "b");
   });
 
-  const assert_cell_removed_middle = computed(() => {
+  const assert_cell_removed_middle = assert(() => {
     const items = cellSubject.inboxItems.filter(() => true);
     return items.length === 2 &&
       items[0]?.id === "a" &&

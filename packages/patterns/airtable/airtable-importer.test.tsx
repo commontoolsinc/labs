@@ -6,7 +6,7 @@
  *
  * Run: deno task cf test packages/patterns/airtable/airtable-importer.test.tsx --root packages/patterns --verbose
  */
-import { computed, pattern, UI } from "commonfabric";
+import { assert, pattern, UI } from "commonfabric";
 import { hasText } from "../test/vnode-helpers.ts";
 import AirtableImporter from "./airtable-importer.tsx";
 
@@ -16,19 +16,19 @@ export default pattern(() => {
     selectedTableId: "",
   });
 
-  const assert_initial_data_empty = computed(() =>
+  const assert_initial_data_empty = assert(() =>
     importer.bases.length === 0 &&
     importer.tables.length === 0 &&
     importer.records.length === 0 &&
     importer.recordCount === 0
   );
 
-  const assert_selected_names_empty = computed(() =>
+  const assert_selected_names_empty = assert(() =>
     importer.selectedBaseName === "" &&
     importer.selectedTableName === ""
   );
 
-  const assert_waiting_message_is_rendered = computed(() =>
+  const assert_waiting_message_is_rendered = assert(() =>
     hasText(importer[UI], "Waiting for Airtable connection") &&
     hasText(
       importer[UI],
@@ -36,7 +36,7 @@ export default pattern(() => {
     )
   );
 
-  const assert_fetch_controls_are_hidden_until_auth = computed(() =>
+  const assert_fetch_controls_are_hidden_until_auth = assert(() =>
     !hasText(importer[UI], "Load Bases") &&
     !hasText(importer[UI], "Load Tables") &&
     !hasText(importer[UI], "Fetch Records")

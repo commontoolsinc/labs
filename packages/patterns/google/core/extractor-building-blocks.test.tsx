@@ -7,7 +7,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/extractor-building-blocks.test.tsx --root packages/patterns/google --verbose
  */
-import { computed, pattern, wish, Writable } from "commonfabric";
+import { assert, pattern, wish, Writable } from "commonfabric";
 import BillExtractor, { processBills } from "./bill-extractor/index.tsx";
 import { createBillKey } from "./bill-extractor/helpers.ts";
 import GmailExtractor, {
@@ -59,7 +59,7 @@ export default pattern(() => {
     supportsAutoDetect: false,
   });
 
-  const assert_gmail_extractor_starts_disconnected = computed(() =>
+  const assert_gmail_extractor_starts_disconnected = assert(() =>
     extractor.isConnected === false &&
     extractor.emailCount === 0 &&
     extractor.rawAnalyses.length === 0 &&
@@ -67,13 +67,13 @@ export default pattern(() => {
     extractor.completedCount === 0
   );
 
-  const assert_gmail_extractor_ui_bundle_exists = computed(() =>
+  const assert_gmail_extractor_ui_bundle_exists = assert(() =>
     extractor.ui.authStatusUI !== undefined &&
     extractor.ui.connectionStatusUI !== undefined &&
     extractor.ui.previewUI !== undefined
   );
 
-  const assert_bill_extractor_starts_empty = computed(() =>
+  const assert_bill_extractor_starts_empty = assert(() =>
     billExtractor.bills.length === 0 &&
     billExtractor.unpaidBills.length === 0 &&
     billExtractor.paidBills.length === 0 &&
@@ -82,14 +82,14 @@ export default pattern(() => {
     billExtractor.isConnected === false
   );
 
-  const assert_bill_extractor_config_is_preserved = computed(() =>
+  const assert_bill_extractor_config_is_preserved = assert(() =>
     billExtractor.title === "Example Bill Tracker" &&
     billExtractor.shortName === "Example" &&
     billExtractor.brandColor === "#2563eb" &&
     billExtractor.supportsAutoDetect === false
   );
 
-  const assert_analysis_helpers_count_states = computed(() => {
+  const assert_analysis_helpers_count_states = assert(() => {
     const analyses: AnalysisItem<{ ok: boolean }>[] = [
       { analysis: { pending: true } },
       { analysis: { pending: false, result: { ok: true } } },
@@ -100,7 +100,7 @@ export default pattern(() => {
     return countPending(analyses) === 1 && countCompleted(analyses) === 1;
   });
 
-  const assert_template_interpolation_sanitizes_content = computed(() => {
+  const assert_template_interpolation_sanitizes_content = assert(() => {
     const email: Email = {
       id: "msg-1",
       threadId: "thread-1",
@@ -140,7 +140,7 @@ export default pattern(() => {
 
   const nowCell = wish<number>({ query: "#now" });
 
-  const assert_process_bills_applies_payment_rules = computed(() => {
+  const assert_process_bills_applies_payment_rules = assert(() => {
     const nowMs = nowCell.result;
     if (nowMs == null) return false;
     const upcomingDueDate = isoDateDaysFromNow(nowMs, 10);

@@ -24,7 +24,7 @@
  *
  * Run: deno task cf test packages/patterns/record.test.tsx --root packages/patterns --verbose
  */
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, assert, pattern, Writable } from "commonfabric";
 import RecordPattern from "./record.tsx";
 
 interface AddResult {
@@ -85,16 +85,16 @@ export default pattern(() => {
     subject.addModule!.send({ type: "notes", result: notesType });
   });
 
-  const assert_starts_empty = computed(() =>
+  const assert_starts_empty = assert(() =>
     [...(subject.subPieces ?? [])].length === 0
   );
 
   // The first add lands in the empty list and reports slot 0.
-  const assert_first_email_appended = computed(() => {
+  const assert_first_email_appended = assert(() => {
     const current = [...(subject.subPieces ?? [])];
     return current.length === 1 && current[0].type === "email";
   });
-  const assert_first_email_result = computed(() => {
+  const assert_first_email_result = assert(() => {
     const result = firstEmail.get();
     return result?.success === true &&
       result?.type === "email" &&
@@ -103,27 +103,27 @@ export default pattern(() => {
 
   // The second add reads a list that already holds the first, so it has to
   // report the next slot rather than the one it read.
-  const assert_second_email_appended = computed(() => {
+  const assert_second_email_appended = assert(() => {
     const current = [...(subject.subPieces ?? [])];
     return current.length === 2 && current[1].type === "email";
   });
-  const assert_second_email_result = computed(() =>
+  const assert_second_email_result = assert(() =>
     secondEmail.get()?.moduleIndex === 1
   );
 
-  const assert_phone_appended = computed(() => {
+  const assert_phone_appended = assert(() => {
     const current = [...(subject.subPieces ?? [])];
     return current.length === 3 && current[2].type === "phone";
   });
-  const assert_phone_result = computed(() => phone.get()?.moduleIndex === 2);
+  const assert_phone_result = assert(() => phone.get()?.moduleIndex === 2);
 
-  const assert_initial_data_accepted = computed(() => {
+  const assert_initial_data_accepted = assert(() => {
     const result = withInitialData.get();
     return result?.success === true && result?.moduleIndex === 3;
   });
 
   // Adds land in the order they were sent, and nothing earlier moved.
-  const assert_entries_in_add_order = computed(() => {
+  const assert_entries_in_add_order = assert(() => {
     const types = [...(subject.subPieces ?? [])].map((entry) => entry.type);
     return types.length === 4 &&
       types[0] === "email" &&
@@ -133,7 +133,7 @@ export default pattern(() => {
   });
 
   // Every reported index addresses the module that its own add created.
-  const assert_reported_indices_address_their_modules = computed(() => {
+  const assert_reported_indices_address_their_modules = assert(() => {
     const current = [...(subject.subPieces ?? [])];
     const reported = [
       { index: firstEmail.get()?.moduleIndex, type: "email" },
@@ -174,25 +174,25 @@ export default pattern(() => {
   );
 
   // The rejection paths report the reason and leave the list alone.
-  const assert_unknown_type_rejected = computed(() => {
+  const assert_unknown_type_rejected = assert(() => {
     const result = unknownType.get();
     return result?.success === false &&
       typeof result?.error === "string" &&
       result.error.includes("Unknown module type");
   });
-  const assert_missing_type_rejected = computed(() => {
+  const assert_missing_type_rejected = assert(() => {
     const result = missingType.get();
     return result?.success === false &&
       typeof result?.error === "string" &&
       result.error.includes("Module type is required");
   });
-  const assert_notes_type_rejected = computed(() => {
+  const assert_notes_type_rejected = assert(() => {
     const result = notesType.get();
     return result?.success === false &&
       typeof result?.error === "string" &&
       result.error.includes("Notes modules must be added via UI");
   });
-  const assert_rejections_appended_nothing = computed(() =>
+  const assert_rejections_appended_nothing = assert(() =>
     [...(subject.subPieces ?? [])].length === 4
   );
 

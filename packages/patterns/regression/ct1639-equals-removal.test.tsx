@@ -18,7 +18,7 @@
  * Run: deno task cf test packages/patterns/regression/ct1639-equals-removal.test.tsx
  */
 import {
-  computed,
+  assert,
   Default,
   equals,
   handler,
@@ -75,21 +75,21 @@ export default pattern(() => {
   ]);
   const repro = Repro({ items: itemsCell });
 
-  const assertStartsThree = computed(() => repro.items.length === 3);
+  const assertStartsThree = assert(() => repro.items.length === 3);
 
   // Remove the middle item ("b") via equals()-located findIndex.
   const removeMiddle = removeAt({ items: itemsCell, which: 1 });
-  const assertTwoAfterRemove = computed(() => repro.items.length === 2);
-  const assertMiddleGone = computed(() =>
+  const assertTwoAfterRemove = assert(() => repro.items.length === 2);
+  const assertMiddleGone = assert(() =>
     repro.items.findIndex((i: Item) => i.label === "b") === -1
   );
-  const assertEndsRemain = computed(() =>
+  const assertEndsRemain = assert(() =>
     repro.items[0]?.label === "a" && repro.items[1]?.label === "c"
   );
 
   // Removing by a linkless plain value must NOT match → "a" stays.
   const removeByValue = removeByPlainValue({ items: itemsCell, label: "a" });
-  const assertPlainValueNoops = computed(() =>
+  const assertPlainValueNoops = assert(() =>
     repro.items.findIndex((i: Item) => i.label === "a") !== -1
   );
 

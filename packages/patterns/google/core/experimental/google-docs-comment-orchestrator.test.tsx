@@ -6,7 +6,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/experimental/google-docs-comment-orchestrator.test.tsx --root packages/patterns --verbose
  */
-import { computed, pattern, UI, Writable } from "commonfabric";
+import { assert, pattern, UI, Writable } from "commonfabric";
 import { hasText } from "../../../test/vnode-helpers.ts";
 import GoogleDocsCommentOrchestrator from "./google-docs-comment-orchestrator.tsx";
 
@@ -34,11 +34,11 @@ export default pattern(() => {
     isExecuting: new Writable(false),
   });
 
-  const assert_fetch_waits_for_auth = computed(() =>
+  const assert_fetch_waits_for_auth = assert(() =>
     hasText(orchestrator[UI], "Connect Google")
   );
 
-  const assert_auth_ui_explains_required_scopes = computed(() =>
+  const assert_auth_ui_explains_required_scopes = assert(() =>
     hasText(orchestrator[UI], "Connect Your Google Account") &&
     hasText(
       orchestrator[UI],
@@ -46,7 +46,7 @@ export default pattern(() => {
     )
   );
 
-  const assert_no_comments_initially = computed(() =>
+  const assert_no_comments_initially = assert(() =>
     orchestrator.openCommentCount === 0 &&
     orchestrator.comments.length === 0
   );

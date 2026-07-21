@@ -12,7 +12,7 @@
  *
  * Run: deno task cf test packages/patterns/notes/note-md.test.tsx --verbose
  */
-import { action, computed, NAME, pattern, Writable } from "commonfabric";
+import { action, assert, NAME, pattern, Writable } from "commonfabric";
 import NoteMd from "./note-md.tsx";
 import Note from "./note.tsx";
 
@@ -229,14 +229,14 @@ export default pattern(() => {
   // Assertions - Static properties
   // ==========================================================================
 
-  const assert_is_hidden = computed(() => md.isHidden === true);
-  const assert_is_not_mentionable = computed(() => md.isMentionable === false);
+  const assert_is_hidden = assert(() => md.isHidden === true);
+  const assert_is_not_mentionable = assert(() => md.isMentionable === false);
 
   // ==========================================================================
   // Assertions - Note passthrough
   // ==========================================================================
 
-  const assert_note_title = computed(
+  const assert_note_title = assert(
     () => md.note?.title === "Test Note",
   );
 
@@ -244,7 +244,7 @@ export default pattern(() => {
   // Assertions - NAME computed
   // ==========================================================================
 
-  const assert_name = computed(
+  const assert_name = assert(
     () => md[NAME] === "📖 Test Note",
   );
 
@@ -253,19 +253,19 @@ export default pattern(() => {
   // ==========================================================================
 
   // Content with wiki-links should be converted
-  const assert_wiki_links_converted = computed(
+  const assert_wiki_links_converted = assert(
     () =>
       mdWiki.processedContent ===
         "See [Alice](/of:abc123) and [Bob](/of:def456) for details",
   );
 
   // Content without wiki-links passes through unchanged
-  const assert_plain_passthrough = computed(
+  const assert_plain_passthrough = assert(
     () => mdPlain.processedContent === "No links here, just plain text.",
   );
 
   // After updating wiki content, new links should be converted
-  const assert_multi_wiki_converted = computed(
+  const assert_multi_wiki_converted = assert(
     () =>
       mdWiki.processedContent ===
         "Link to [Charlie](/of:ghi789) and back to [Alice](/of:abc123)",
@@ -275,28 +275,28 @@ export default pattern(() => {
   // Assertions - Checkbox toggle
   // ==========================================================================
 
-  const assert_initial_checkboxes = computed(
+  const assert_initial_checkboxes = assert(
     () =>
       mdCheckbox.processedContent ===
         "- [ ] Task one\n- [x] Task two\n- [ ] Task three",
   );
 
   // After checking first: "- [x] Task one\n- [x] Task two\n- [ ] Task three"
-  const assert_first_checked = computed(
+  const assert_first_checked = assert(
     () =>
       mdCheckbox.processedContent ===
         "- [x] Task one\n- [x] Task two\n- [ ] Task three",
   );
 
   // After unchecking second: "- [x] Task one\n- [ ] Task two\n- [ ] Task three"
-  const assert_second_unchecked = computed(
+  const assert_second_unchecked = assert(
     () =>
       mdCheckbox.processedContent ===
         "- [x] Task one\n- [ ] Task two\n- [ ] Task three",
   );
 
   // After checking third: "- [x] Task one\n- [ ] Task two\n- [x] Task three"
-  const assert_third_checked = computed(
+  const assert_third_checked = assert(
     () =>
       mdCheckbox.processedContent ===
         "- [x] Task one\n- [ ] Task two\n- [x] Task three",
@@ -306,7 +306,7 @@ export default pattern(() => {
   // Assertions - hasBacklinks computed
   // ==========================================================================
 
-  const assert_no_backlinks_initially = computed(
+  const assert_no_backlinks_initially = assert(
     () => md.hasBacklinks === false,
   );
 
@@ -314,13 +314,13 @@ export default pattern(() => {
   // Assertions - Edge cases - wiki-links
   // ==========================================================================
 
-  const assert_regular_links_passthrough = computed(
+  const assert_regular_links_passthrough = assert(
     () =>
       mdRegularLinks.processedContent ===
         "Use [regular markdown](http://example.com) links",
   );
 
-  const assert_special_chars_converted = computed(
+  const assert_special_chars_converted = assert(
     () =>
       mdSpecialChars.processedContent === "See [Alice & Bob](/of:special-123)",
   );
@@ -329,27 +329,27 @@ export default pattern(() => {
   // Assertions - Edge cases - checkboxes
   // ==========================================================================
 
-  const assert_no_checkbox_content = computed(
+  const assert_no_checkbox_content = assert(
     () => mdNoCheckbox.processedContent === "Just regular text\nNo checkboxes",
   );
 
-  const assert_no_checkbox_unchanged = computed(
+  const assert_no_checkbox_unchanged = assert(
     () => mdNoCheckbox.processedContent === "Just regular text\nNo checkboxes",
   );
 
-  const assert_mixed_initial = computed(
+  const assert_mixed_initial = assert(
     () =>
       mdMixed.processedContent ===
         "# Title\n\n- [ ] First task\n\nSome text\n\n- [x] Second task",
   );
 
-  const assert_mixed_first_checked = computed(
+  const assert_mixed_first_checked = assert(
     () =>
       mdMixed.processedContent ===
         "# Title\n\n- [x] First task\n\nSome text\n\n- [x] Second task",
   );
 
-  const assert_mixed_second_unchecked = computed(
+  const assert_mixed_second_unchecked = assert(
     () =>
       mdMixed.processedContent ===
         "# Title\n\n- [x] First task\n\nSome text\n\n- [ ] Second task",
@@ -359,11 +359,11 @@ export default pattern(() => {
   // Assertions - Edge cases - empty/missing content
   // ==========================================================================
 
-  const assert_empty_content = computed(
+  const assert_empty_content = assert(
     () => mdEmpty.processedContent === "",
   );
 
-  const assert_whitespace_preserved = computed(
+  const assert_whitespace_preserved = assert(
     () => mdWhitespace.processedContent === "   \n\n   ",
   );
 
@@ -371,25 +371,25 @@ export default pattern(() => {
   // Assertions - sourceNoteRef path
   // ==========================================================================
 
-  const assert_source_name = computed(
+  const assert_source_name = assert(
     () => mdWithSource[NAME] === "📖 Source Note",
   );
 
-  const assert_source_content = computed(
+  const assert_source_content = assert(
     () => mdWithSource.processedContent === "Content from source",
   );
 
-  const assert_source_is_hidden = computed(
+  const assert_source_is_hidden = assert(
     () => mdWithSource.isHidden === true,
   );
 
   // Verify state is stable after goToEdit with sourceNoteRef
-  const assert_source_stable_after_edit = computed(
+  const assert_source_stable_after_edit = assert(
     () => mdWithSource.processedContent === "Content from source",
   );
 
   // Verify state is stable after goToEdit without sourceNoteRef (wish fallback)
-  const assert_no_source_stable_after_edit = computed(
+  const assert_no_source_stable_after_edit = assert(
     () => mdWithoutSource.processedContent === "Direct content",
   );
 

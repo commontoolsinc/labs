@@ -1,4 +1,4 @@
-import { computed, handler, pattern, Writable } from "commonfabric";
+import { assert, handler, pattern, Writable } from "commonfabric";
 import {
   DISCLAIMER_EXAMPLE_COUNT,
   DISCLAIMER_RENDERED_EXAMPLE_COUNT,
@@ -107,30 +107,30 @@ export default pattern(() => {
     fakeStatus: lookalikeFakeStatus,
   });
 
-  const assert_influence_disclosure_is_render_only = computed(() =>
+  const assert_influence_disclosure_is_render_only = assert(() =>
     influenceFakeStatus.get() ===
       "The lookalike influence notice did not update trusted state." &&
     influenceAcknowledged.get() === ""
   );
 
-  const assert_provenance_disclosure_is_render_only = computed(() =>
+  const assert_provenance_disclosure_is_render_only = assert(() =>
     provenanceFakeStatus.get() ===
       "The lookalike provenance card did not update the reviewed text." &&
     reviewedProvenance.get() === ""
   );
 
-  const assert_fact_check_disclosure_is_render_only = computed(() =>
+  const assert_fact_check_disclosure_is_render_only = assert(() =>
     factCheckFakeStatus.get() ===
       "The lookalike fact-check gate did not approve the brief." &&
     factCheckResult.get() === ""
   );
 
-  const assert_lookalike_stays_untrusted = computed(() =>
+  const assert_lookalike_stays_untrusted = assert(() =>
     lookalikeFakeStatus.get() ===
       "The host lookalike never changed the trusted output." &&
     lookalikeAcknowledged.get() === ""
   );
-  const assert_gallery_renders_catalog = computed(() =>
+  const assert_gallery_renders_catalog = assert(() =>
     DISCLAIMER_EXAMPLE_COUNT === 14 &&
     DISCLAIMER_RENDERED_EXAMPLE_COUNT === DISCLAIMER_EXAMPLE_COUNT
   );

@@ -16,7 +16,7 @@
  */
 import {
   action,
-  computed,
+  assert,
   equals,
   handler,
   pattern,
@@ -84,38 +84,34 @@ export default pattern(() => {
   // Assertions
   // ==========================================================================
 
-  const assert_food_created = computed(() => {
+  const assert_food_created = assert(() => {
     const cur = budgetsCell.get();
     return cur.length === 1 && cur[0]?.category === "Food" &&
       cur[0]?.limit === 100;
   });
 
-  const assert_held_stashed = computed(() => {
+  const assert_held_stashed = assert(() => {
     const h = heldBudget.get();
     return h.category === "Food" && equals(budgetsCell.get()[0], h);
   });
 
-  const assert_food_updated_in_place = computed(() => {
+  const assert_food_updated_in_place = assert(() => {
     const cur = budgetsCell.get();
     return cur.length === 1 && cur[0]?.category === "Food" &&
       cur[0]?.limit === 250;
   });
   // KEY: the stale-but-once-valid reference still equals()-matches the
   // budget AFTER setBudget updated its limit.
-  const assert_held_survives_update = computed(() => {
+  const assert_held_survives_update = assert(() => {
     const h = heldBudget.get();
     return equals(budgetsCell.get()[0], h);
   });
   // The held reference also READS the update (it would show the stale,
   // orphaned entity if setBudget had re-minted identity).
-  const assert_held_reads_update = computed(() =>
-    heldBudget.get().limit === 250
-  );
+  const assert_held_reads_update = assert(() => heldBudget.get().limit === 250);
 
   // KEY: the held reference still DRIVES an equals()-located removal.
-  const assert_removed_via_held = computed(() =>
-    budgetsCell.get().length === 0
-  );
+  const assert_removed_via_held = assert(() => budgetsCell.get().length === 0);
 
   // ==========================================================================
   // Test Sequence

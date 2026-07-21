@@ -11,7 +11,7 @@
  * are covered by multi-user.test.tsx.
  */
 
-import { action, computed, pattern, UI, wish } from "commonfabric";
+import { action, assert, computed, pattern, UI, wish } from "commonfabric";
 import {
   findNode,
   hasExactText,
@@ -407,7 +407,7 @@ export default pattern(() => {
   // Alex is in users, no admin name was claimed by anyone else, and the
   // "Should not appear" option is absent (implied by chipotle assertions
   // later — options.length === 1 after only Chipotle is added).
-  const assert_joined_as_alex = computed(() =>
+  const assert_joined_as_alex = assert(() =>
     poll.users.length === 1 &&
     poll.users[0]?.name === "Alex" &&
     poll.myName === "Alex" &&
@@ -416,20 +416,20 @@ export default pattern(() => {
     poll.isAdmin === true
   );
 
-  const assert_immutable_after_join = computed(() =>
+  const assert_immutable_after_join = assert(() =>
     poll.users.length === 1 &&
     poll.myName === "Alex"
   );
 
-  const assert_chipotle_added = computed(() =>
+  const assert_chipotle_added = assert(() =>
     poll.options.length === 1 &&
     poll.options[0]?.title === "Chipotle" &&
     poll.options[0]?.addedByName === "Alex"
   );
 
-  const assert_two_options = computed(() => poll.options.length === 2);
+  const assert_two_options = assert(() => poll.options.length === 2);
 
-  const assert_green_vote_recorded = computed(() => {
+  const assert_green_vote_recorded = assert(() => {
     const v = poll.votes[0];
     return poll.votes.length === 1 &&
       v?.voteType === "green" &&
@@ -446,33 +446,33 @@ export default pattern(() => {
   // to a proxy-vs-proxy `===` (always false), so the filter dropped every vote
   // and the swatches silently stopped rendering: after Alex's green vote, his
   // swatch must appear in the rendered UI tree.
-  const assert_alex_swatch_renders = computed(() =>
+  const assert_alex_swatch_renders = assert(() =>
     findNodeByProp(poll[UI], "data-vote-swatch-name", "Alex") !== undefined
   );
 
-  const assert_changed_to_yellow = computed(() => {
+  const assert_changed_to_yellow = assert(() => {
     const v = poll.votes[0];
     return poll.votes.length === 1 &&
       v?.voteType === "yellow";
   });
 
-  const assert_changed_to_red = computed(() => {
+  const assert_changed_to_red = assert(() => {
     const v = poll.votes[0];
     return poll.votes.length === 1 &&
       v?.voteType === "red";
   });
 
-  const assert_revote_green_cleared = computed(() => poll.votes.length === 0);
+  const assert_revote_green_cleared = assert(() => poll.votes.length === 0);
 
-  const assert_votes_reset = computed(() => poll.votes.length === 0);
+  const assert_votes_reset = assert(() => poll.votes.length === 0);
 
-  const assert_option_removed_with_its_votes = computed(() =>
+  const assert_option_removed_with_its_votes = assert(() =>
     poll.options.length === 1 &&
     poll.options[0]?.title === "Thai Kitchen" &&
     poll.votes.length === 0
   );
 
-  const assert_still_alex_host = computed(() =>
+  const assert_still_alex_host = assert(() =>
     poll.adminName === "Alex" && poll.isAdmin === true
   );
 
@@ -484,7 +484,7 @@ export default pattern(() => {
   // to the host (the frozen `loggedByName` snapshot). If the pre-join attempt
   // ("Sneaky") had not been gated, an entry would exist before this — so this
   // implicitly verifies the host gate too.
-  const assert_thai_logged = computed(() => {
+  const assert_thai_logged = assert(() => {
     const rows = poll.recentVisits ?? [];
     return rows.length === 1 &&
       rows[0]?.title === "Thai Kitchen" &&
@@ -493,7 +493,7 @@ export default pattern(() => {
       poll.mostRecentTitle === "Thai Kitchen";
   });
 
-  const assert_recent_visit_row_renders = computed(() =>
+  const assert_recent_visit_row_renders = assert(() =>
     findNodeByProp(
       poll[UI],
       "data-recent-visit-title",
@@ -503,12 +503,12 @@ export default pattern(() => {
 
   // The live green vote on Thai was snapshotted into the entry's `votes` when
   // Thai was logged → exactly one embedded snapshot.
-  const assert_vote_snapshot = computed(() => poll.voteHistoryCount === 1);
+  const assert_vote_snapshot = assert(() => poll.voteHistoryCount === 1);
 
   // Second entry is the backdated Chipotle log; newest-first sort puts it after
   // today's Thai, so it's rows[1]. `wentAt` is a plain ms-epoch number now, so
   // the backdated value compares directly (no TEXT encoding to round-trip).
-  const assert_two_history = computed(() => {
+  const assert_two_history = assert(() => {
     const rows = poll.recentVisits ?? [];
     return rows.length === 2 &&
       rows[1]?.title === "Chipotle" &&
@@ -521,7 +521,7 @@ export default pattern(() => {
   // the row content directly (which entry survived), not just the count — and
   // that the entry's live `loggedBy` link survives the array round-trip (push
   // on log + the set-subset filter on delete).
-  const assert_one_history_after_remove = computed(() => {
+  const assert_one_history_after_remove = assert(() => {
     const rows = poll.recentVisits ?? [];
     return poll.historyCount === 1 &&
       rows.length === 1 &&
@@ -531,7 +531,7 @@ export default pattern(() => {
   });
 
   // Clearing visits also drops the embedded vote snapshots.
-  const assert_history_cleared = computed(() =>
+  const assert_history_cleared = assert(() =>
     poll.historyCount === 0 &&
     poll.voteHistoryCount === 0
   );
@@ -541,13 +541,13 @@ export default pattern(() => {
   // The header renders the current date, and `todayDate` exposes the local
   // day key the votes are filtered to. The `todayKey !== ""` guard holds the
   // assertion false until this pattern's `#now` wish resolves.
-  const assert_today_header_renders = computed(() =>
+  const assert_today_header_renders = assert(() =>
     todayKey !== "" &&
     findNodeByProp(poll[UI], "data-poll-today", true) !== undefined &&
     poll.todayDate === todayKey
   );
 
-  const assert_colliding_initials_are_disambiguated = computed(() => {
+  const assert_colliding_initials_are_disambiguated = assert(() => {
     const ui = initialsPoll[UI];
     const daffodil = findNodeByProp(
       ui,
@@ -625,7 +625,7 @@ export default pattern(() => {
       hasExactText(accentBob, "E\u0301B");
   });
 
-  const assert_vote_swatches_have_accessible_names = computed(() => {
+  const assert_vote_swatches_have_accessible_names = assert(() => {
     const ui = initialsPoll[UI];
     const daffodil = findNodeByProp(
       ui,
@@ -651,7 +651,7 @@ export default pattern(() => {
   // the poll's own (via `todayDate`) — so it passes only once the day filter
   // is live and the vote really is dated yesterday, not merely during the
   // load window's empty vote view.
-  const assert_stale_vote_hidden = computed(() =>
+  const assert_stale_vote_hidden = assert(() =>
     todayKey !== "" &&
     stalePoll.todayDate === todayKey &&
     stalePoll.votes.length === 1 &&
@@ -684,7 +684,7 @@ export default pattern(() => {
   // A same-color click on a stale vote RE-CASTS it for today (fresh castAt)
   // instead of toggling off a vote the voter cannot see; the vote becomes
   // visible again (list, count, and swatch).
-  const assert_stale_recast_visible = computed(() => {
+  const assert_stale_recast_visible = assert(() => {
     const v = stalePoll.todaysVotes[0];
     return todayKey !== "" &&
       stalePoll.todaysVotes.length === 1 &&
@@ -698,7 +698,7 @@ export default pattern(() => {
   });
 
   // A second same-color click is the normal today-toggle-off.
-  const assert_stale_recast_cleared = computed(() =>
+  const assert_stale_recast_cleared = assert(() =>
     stalePoll.todaysVotes.length === 0 &&
     stalePoll.todayVoteCount === 0
   );

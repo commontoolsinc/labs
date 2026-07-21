@@ -1,4 +1,4 @@
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, pattern } from "commonfabric";
 import ProfileHome from "./profile-home.tsx";
 
 export default pattern(() => {
@@ -29,15 +29,15 @@ export default pattern(() => {
   // distinct from the edit form) is verified in the browser.
 
   // Visiting a profile starts in the read-only presentation, not the edit form.
-  const assert_not_editing = computed(() => profile.isEditing === false);
+  const assert_not_editing = assert(() => profile.isEditing === false);
   // The toggle flips into the edit form, then back.
-  const assert_editing = computed(() => profile.isEditing === true);
+  const assert_editing = assert(() => profile.isEditing === true);
 
   // The avatar the badge binds resolves (single context — owner-protected reads
   // are clean here; cross-stamp masking is the browser-only CT-1740 issue).
-  const assert_avatar_set = computed(() => profile.avatar === "AL");
+  const assert_avatar_set = assert(() => profile.avatar === "AL");
   // CT-1828: an empty send must not clear a previously-set avatar.
-  const assert_avatar_unchanged_after_empty = computed(() =>
+  const assert_avatar_unchanged_after_empty = assert(() =>
     profile.avatar === "AL"
   );
 
@@ -101,38 +101,38 @@ export default pattern(() => {
     });
   });
 
-  const assert_initial_state = computed(() =>
+  const assert_initial_state = assert(() =>
     profile.initialNameApplied === "Ada Lovelace" &&
     profile.externalLinks.length === 0 &&
     profile.verifiedIdentities.length === 0 &&
     profile.elements.length === 0
   );
 
-  const assert_name_set = computed(() =>
+  const assert_name_set = assert(() =>
     profile.initialNameApplied === "Grace Hopper"
   );
 
   // The prior (non-empty) name must survive both an empty and a
   // whitespace-only send.
-  const assert_name_unchanged_after_empty = computed(() =>
+  const assert_name_unchanged_after_empty = assert(() =>
     profile.initialNameApplied === "Grace Hopper"
   );
 
-  const assert_external_profile_link_added = computed(() =>
+  const assert_external_profile_link_added = assert(() =>
     profile.externalLinks.length === 1 &&
     profile.externalLinks[0]?.label === "GitHub" &&
     profile.externalLinks[0]?.url === "https://github.com/gracehopper"
   );
 
-  const assert_unsafe_external_profile_link_rejected = computed(() =>
+  const assert_unsafe_external_profile_link_rejected = assert(() =>
     profile.externalLinks.length === 1
   );
 
-  const assert_external_profile_link_removed = computed(() =>
+  const assert_external_profile_link_removed = assert(() =>
     profile.externalLinks.length === 0
   );
 
-  const assert_added_element = computed(() => {
+  const assert_added_element = assert(() => {
     const element = profile.elements[0];
     return profile.elements.length === 1 &&
       element?.tag === "#profileCard" &&
@@ -140,7 +140,7 @@ export default pattern(() => {
       element?.userTags.includes("person") === true;
   });
 
-  const assert_removed_element = computed(() => profile.elements.length === 0);
+  const assert_removed_element = assert(() => profile.elements.length === 0);
 
   return {
     tests: [

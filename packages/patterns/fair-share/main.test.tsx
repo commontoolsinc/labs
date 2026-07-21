@@ -23,7 +23,7 @@
  */
 import {
   action,
-  computed,
+  assert,
   equals,
   handler,
   pattern,
@@ -111,43 +111,43 @@ export default pattern(() => {
   // Assertions
   // ==========================================================================
 
-  const assert_ann_added = computed(() => {
+  const assert_ann_added = assert(() => {
     const cur = peopleCell.get();
     return cur.length === 1 && cur[0]?.name === "Ann" && !cur[0]?.avatar;
   });
-  const assert_my_name_ann = computed(() => myNameCell.get() === "Ann");
+  const assert_my_name_ann = assert(() => myNameCell.get() === "Ann");
 
-  const assert_held_stashed = computed(() => {
+  const assert_held_stashed = assert(() => {
     const h = held.get();
     return h.name === "Ann" && equals(peopleCell.get()[0], h);
   });
 
-  const assert_avatar_backfilled = computed(() =>
+  const assert_avatar_backfilled = assert(() =>
     peopleCell.get()[0]?.avatar === "🙂"
   );
   // KEY: the stale-but-once-valid reference still equals()-matches the
   // person AFTER the backfill wrote through the element's cell.
-  const assert_held_survives_backfill = computed(() => {
+  const assert_held_survives_backfill = assert(() => {
     const h = held.get();
     return equals(peopleCell.get()[0], h);
   });
   // The held reference also READS the update (it would show the stale,
   // orphaned entity if the backfill had re-minted identity).
-  const assert_held_reads_backfill = computed(() => held.get().avatar === "🙂");
+  const assert_held_reads_backfill = assert(() => held.get().avatar === "🙂");
 
-  const assert_avatar_not_clobbered = computed(() =>
+  const assert_avatar_not_clobbered = assert(() =>
     peopleCell.get()[0]?.avatar === "🙂"
   );
 
-  const assert_bob_added_with_avatar = computed(() => {
+  const assert_bob_added_with_avatar = assert(() => {
     const cur = peopleCell.get();
     return cur.length === 2 && cur[1]?.name === "Bob" &&
       cur[1]?.avatar === "🐱";
   });
-  const assert_my_name_bob = computed(() => myNameCell.get() === "Bob");
+  const assert_my_name_bob = assert(() => myNameCell.get() === "Bob");
 
   // KEY: the held reference still DRIVES an equals()-located removal.
-  const assert_removed_via_held = computed(() => {
+  const assert_removed_via_held = assert(() => {
     const cur = peopleCell.get();
     return cur.length === 1 && cur[0]?.name === "Bob";
   });
