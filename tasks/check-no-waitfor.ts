@@ -13,10 +13,11 @@
 // A file is in scope when it lives under an `integration/` directory somewhere
 // beneath `packages/`, excluding the `@commonfabric/integration` package itself,
 // which defines and re-exports `waitFor`. An in-scope file fails the check when
-// it names `waitFor` in an import of that package — either through the bare
-// specifier or through a relative path to the package's `utils.ts` or `index.ts`
-// — and is not on the ALLOWLIST below. Text inside a comment or a string is not
-// an import, so commenting the import out clears the check.
+// it takes `waitFor` as a value from an import of that package — either through
+// the bare specifier or through a relative path to the package's `utils.ts` or
+// `index.ts` — and is not on the ALLOWLIST below. Text inside a comment or a
+// string is not an import, so commenting the import out clears the check, and a
+// type-only import is erased before the test runs, so it polls nothing.
 //
 // The ALLOWLIST holds the files that are exempt from this check; the reason for
 // each is recorded in the "Where the polling `waitFor` stays" section of
@@ -55,9 +56,12 @@ export const ALLOWLIST: ReadonlySet<string> = new Set([
 ]);
 
 // Matches an import of the `@commonfabric/integration` package and captures the
-// named-imports clause between the braces. A leading default import and a
-// `type` modifier are tolerated, and `[^}]*` keeps the capture from bleeding
-// past the end of the clause.
+// named-imports clause between the braces. A leading default import is
+// tolerated, and `[^}]*` keeps the capture from bleeding past the end of the
+// clause.
+//
+// `import type { ... }` does not match. A type-only import binds the type of
+// `waitFor` and is erased before the test runs, so it polls nothing.
 //
 // Two spellings reach the package. The bare specifier names it directly; the
 // closing quote right after `integration` excludes its subpath exports
@@ -71,7 +75,7 @@ export const ALLOWLIST: ReadonlySet<string> = new Set([
 // "@commonfabric/integration"` with a later `I.waitFor(...)` passes the check.
 // Every import of this package in the repository uses the named form.
 const PACKAGE_IMPORT =
-  /import\s+(?:[\w$]+\s*,\s*)?(?:type\s+)?\{(?<clause>[^}]*)\}\s*from\s*["'](?:@commonfabric\/integration|\.[^"']*\/integration\/(?:utils|index)\.ts)["']/;
+  /import\s+(?:[\w$]+\s*,\s*)?\{(?<clause>[^}]*)\}\s*from\s*["'](?:@commonfabric\/integration|\.[^"']*\/integration\/(?:utils|index)\.ts)["']/;
 
 // The comment and literal forms that can hold import-shaped text. A `'` or `"`
 // opens a string only when its closing quote lands on the same line; a template
@@ -111,17 +115,29 @@ function stripComments(clause: string): string {
 }
 
 /**
- * Returns true when `source` imports the polling `waitFor` as a named import of
- * the `@commonfabric/integration` package. `waitForCondition`, `waitForText`,
- * and other `waitFor`-prefixed names do not count; neither does a `waitFor` on a
- * subpath specifier, a `harness.waitFor(...)` member call, or an import that is
- * commented out or quoted inside a string.
+ * Returns the members of a named-imports clause that a `type` modifier does not
+ * erase. A member is dropped whole rather than having its `type` deleted in
+ * place, so the local name an erased member binds — the `waitFor` in
+ * `{ type Poll as waitFor }` — goes with it.
+ */
+function valueMembers(clause: string): string[] {
+  return clause.split(",").filter((member) => !/^\s*type\s/.test(member));
+}
+
+/**
+ * Returns true when `source` imports the polling `waitFor` as a named value
+ * import of the `@commonfabric/integration` package. `waitForCondition`,
+ * `waitForText`, and other `waitFor`-prefixed names do not count; neither does a
+ * `waitFor` on a subpath specifier, a `harness.waitFor(...)` member call, a
+ * type-only import, or an import that is commented out or quoted inside a
+ * string.
  */
 export function importsPollingWaitFor(source: string): boolean {
   for (const match of source.matchAll(TOKEN_RE)) {
     const clause = match.groups?.clause;
     if (clause === undefined) continue;
-    if (/\bwaitFor\b/.test(stripComments(clause))) return true;
+    const members = valueMembers(stripComments(clause));
+    if (members.some((member) => /\bwaitFor\b/.test(member))) return true;
   }
   return false;
 }
