@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { assert, assertEquals, assertRejects } from "@std/assert";
+import { encodeMemoryBoundary } from "../v2.ts";
 import {
   deflateWirePayload,
   inflateWirePayload,
@@ -13,16 +14,20 @@ import {
 
 describe("memory ws deflate codec", () => {
   it("roundtrips wire payloads through raw deflate", async () => {
+    // The deflate layer treats payload content as opaque text; real wire
+    // frames come from the codec, and the remaining cases are arbitrary
+    // text (unicode, empty) with no reason to imitate frame shape.
     const payloads = [
-      "fvj1:{}",
-      "fvj1:" + JSON.stringify({
+      encodeMemoryBoundary({ type: "hello", flags: {} }),
+      encodeMemoryBoundary({
         type: "sync",
         upserts: Array.from({ length: 64 }, (_, i) => ({
           id: `of:entity-${i}`,
           doc: { value: { n: i, text: "x".repeat(200) } },
         })),
       }),
-      "fvj1:" + JSON.stringify({ unicode: "snowman ☃ και ελληνικά 🎿" }),
+      "snowman ☃ και ελληνικά 🎿",
+      "",
     ];
     for (const payload of payloads) {
       const compressed = await deflateWirePayload(payload);
@@ -31,7 +36,7 @@ describe("memory ws deflate codec", () => {
   });
 
   it("compresses repetitive protocol payloads well", async () => {
-    const payload = "fvj1:" + JSON.stringify({
+    const payload = encodeMemoryBoundary({
       upserts: Array.from({ length: 100 }, (_, i) => ({
         id: "of:did:key:z6MkjJcyGFU2QkPjvzuWUHr59i112SkPBkXQo2TVdWLPUdKB",
         seq: i,
@@ -47,7 +52,7 @@ describe("memory ws deflate codec", () => {
   });
 
   it("accepts typed-array views over the compressed bytes", async () => {
-    const payload = "fvj1:" + JSON.stringify({ hello: "world".repeat(50) });
+    const payload = "compressible ".repeat(40);
     const compressed = await deflateWirePayload(payload);
     const padded = new Uint8Array(compressed.byteLength + 8);
     padded.set(compressed, 4);

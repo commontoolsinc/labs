@@ -4,13 +4,13 @@ import {
   deflateWirePayload,
   inflateWirePayload,
 } from "../v2/transport-deflate.ts";
-import { isAuthBearingWireMessage } from "../v2.ts";
+import { encodeMemoryBoundary, isAuthBearingWireMessage } from "../v2.ts";
 import {
   deflateWirePayloadSync,
   inflateWirePayloadSync,
 } from "../v2/transport-deflate-sync.ts";
 
-const PAYLOAD = "fvj1:" + JSON.stringify({
+const PAYLOAD = encodeMemoryBoundary({
   upserts: Array.from({ length: 64 }, (_, index) => ({
     id: `of:entity-${index}`,
     doc: { value: { text: "x".repeat(120), index } },

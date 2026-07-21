@@ -60,10 +60,10 @@ const openSocket = (socket: DeflatingWebSocket) => {
   socket.dispatchEvent(new Event("open"));
 };
 
-const SMALL = "fvj1:{}";
-const LARGE = "fvj1:" + JSON.stringify({
-  padding: "x".repeat(MEMORY_WS_DEFLATE_MIN_BYTES * 4),
-});
+const SMALL = "small";
+// The transport treats payloads as opaque text; this only needs to be
+// compressible and above the threshold.
+const LARGE = "large-payload ".repeat(MEMORY_WS_DEFLATE_MIN_BYTES / 2);
 
 describe("WebSocketTransport deflate framing", () => {
   it("offers the deflate subprotocol when opening", async () => {

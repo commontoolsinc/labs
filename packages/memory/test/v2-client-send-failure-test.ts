@@ -9,6 +9,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { assertEquals, assertRejects } from "@std/assert";
 import {
+  decodeMemoryBoundary,
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
   MEMORY_PROTOCOL,
@@ -41,9 +42,7 @@ describe("memory v2 client transport send failures", () => {
     const transport: Transport = {
       send(payload: string): Promise<void> {
         if (failSends) return Promise.reject(connectionError());
-        const message = JSON.parse(payload.slice("fvj1:".length)) as {
-          type?: string;
-        };
+        const message = decodeMemoryBoundary(payload) as { type?: string };
         if (message.type === "hello") {
           queueMicrotask(() => receiver(encodeMemoryBoundary(HELLO_OK)));
         }
