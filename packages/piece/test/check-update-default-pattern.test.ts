@@ -128,6 +128,29 @@ describe("checkAndUpdateDefaultPattern", () => {
     controller = new PiecesController(manager);
   }
 
+  async function setupHome(
+    experimental: Record<string, boolean>,
+    clientVersion: string | undefined = BUILD_SHA,
+  ) {
+    versionSkews = [];
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+      clientVersion,
+      experimental,
+      onVersionSkew: (info) => versionSkews.push(info),
+    });
+    const session = await createSession({
+      identity: signer,
+      spaceDid: signer.did(),
+    });
+    expect(session.space).toBe(runtime.userIdentityDID);
+    manager = new PieceManager(session, runtime);
+    await manager.synced();
+    controller = new PiecesController(manager);
+  }
+
   beforeEach(() => {
     stub = installFetchStub();
     stub.setSource(SOURCE_V1);
@@ -352,16 +375,129 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(getPatternIdentityRef(piece.getCell())?.identity).toBe(before);
   });
 
-  it("skips a legacy non-home root with no patternSource (custom-app safety)", async () => {
+  it("back-fills provenance on a verified legacy system root", async () => {
     await setup({ systemPatternAutoUpdate: true });
-    // Model a legacy root created before provenance existed (which might be a
-    // custom app seeded from home's defaultAppUrl, NOT the default app).
-    // recreateDefaultPattern stamps patternSource since CT-1890, so erase the
-    // stamp to reproduce the sourceless legacy shape.
-    await controller.recreateDefaultPattern();
-    const stamped = (await manager.getDefaultPattern(false))!;
-    await runtime.editWithRetry((tx) => {
-      stamped.withTx(tx).setMetaRaw("patternSource", null);
+    const piece = await controller.recreateDefaultPattern({
+      customProgram: {
+        main: DEFAULT_APP_PATTERN_URL,
+        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: SOURCE_V1 }],
+      },
+    });
+    expect(getPatternSource(piece.getCell())).toBeUndefined();
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe(
+      "repaired-provenance",
+    );
+
+    const root = (await manager.getDefaultPattern(false))!;
+    expect(getPatternSource(root)).toBe(DEFAULT_APP_PATTERN_URL);
+    expect(getPatternIdentityRef(root)?.identity).toBe(
+      await identityForSource(SOURCE_V1),
+    );
+  });
+
+  it("repairs an unloadable legacy system root without build metadata", async () => {
+    await setup({ systemPatternAutoUpdate: true }, undefined);
+    stub.setGitSha(null);
+    const piece = await controller.recreateDefaultPattern({
+      customProgram: {
+        main: DEFAULT_APP_PATTERN_URL,
+        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: SOURCE_V1 }],
+      },
+    });
+    const rootLinkBefore = JSON.stringify(piece.getCell().getAsLink());
+    const oldRef = getPatternIdentityRef(piece.getCell())!;
+    expect(getPatternSource(piece.getCell())).toBeUndefined();
+    await manager.stopPiece(piece.getCell());
+
+    // Model the 2026-07-21 Loom incident: the verified authored source closure
+    // still identifies the official system root, but the current runtime can no
+    // longer load that old identity. Neither the daemon nor its source-run
+    // toolshed carries a build SHA, so the light ?identity comparison is
+    // unavailable. Repair must compile the tracked source directly instead.
+    const originalLoad = runtime.patternManager.loadPatternByIdentity;
+    runtime.patternManager.loadPatternByIdentity =
+      ((identity, symbol, space) =>
+        identity === oldRef.identity
+          ? Promise.reject(new Error("legacy identity cannot load"))
+          : originalLoad.call(
+            runtime.patternManager,
+            identity,
+            symbol,
+            space,
+          )) as typeof runtime.patternManager.loadPatternByIdentity;
+    stub.setSource(SOURCE_V2);
+
+    try {
+      const repaired = await controller.ensureDefaultPattern();
+      await runtime.idle();
+
+      expect(JSON.stringify(repaired.getCell().getAsLink())).toBe(
+        rootLinkBefore,
+      );
+      expect(getPatternIdentityRef(repaired.getCell())?.identity).toBe(
+        await identityForSource(SOURCE_V2),
+      );
+      expect(getPatternSource(repaired.getCell())).toBe(
+        DEFAULT_APP_PATTERN_URL,
+      );
+      expect(stub.identityFetches()).toBe(0);
+      expect(versionSkews).toEqual([]);
+    } finally {
+      runtime.patternManager.loadPatternByIdentity = originalLoad;
+    }
+  });
+
+  it("leaves an unloadable root untouched when repair compilation fails", async () => {
+    await setup({ systemPatternAutoUpdate: true }, undefined);
+    stub.setGitSha(null);
+    const piece = await controller.recreateDefaultPattern({
+      customProgram: {
+        main: DEFAULT_APP_PATTERN_URL,
+        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: SOURCE_V1 }],
+      },
+    });
+    const root = piece.getCell();
+    const oldRef = getPatternIdentityRef(root)!;
+    const originalLoad = runtime.patternManager.loadPatternByIdentity;
+    const originalCompile = runtime.patternManager.compilePattern;
+    runtime.patternManager.loadPatternByIdentity =
+      ((identity, symbol, space) =>
+        identity === oldRef.identity
+          ? Promise.resolve(undefined)
+          : originalLoad.call(
+            runtime.patternManager,
+            identity,
+            symbol,
+            space,
+          )) as typeof runtime.patternManager.loadPatternByIdentity;
+    runtime.patternManager.compilePattern = (() =>
+      Promise.reject(
+        new Error("repair compilation failed"),
+      )) as typeof runtime.patternManager.compilePattern;
+    stub.setSource(SOURCE_V2);
+
+    try {
+      expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+
+      const unchanged = (await manager.getDefaultPattern(false))!;
+      expect(getPatternIdentityRef(unchanged)).toEqual(oldRef);
+      expect(getPatternSource(unchanged)).toBeUndefined();
+      expect(stub.identityFetches()).toBe(0);
+      expect(versionSkews).toEqual([]);
+    } finally {
+      runtime.patternManager.loadPatternByIdentity = originalLoad;
+      runtime.patternManager.compilePattern = originalCompile;
+    }
+  });
+
+  it("skips a custom root with no patternSource", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-root.tsx",
+        files: [{ name: "/custom-root.tsx", contents: SOURCE_V1 }],
+      },
     });
     const root = (await manager.getDefaultPattern(false))!;
     expect(getPatternSource(root)).toBeUndefined();
@@ -375,26 +511,33 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(stub.identityFetches()).toBe(0);
   });
 
+  it("skips a custom home root with both update flags on", async () => {
+    await setupHome({
+      systemPatternAutoUpdate: true,
+      systemPatternAutoUpdateHome: true,
+    });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    const before = getPatternIdentityRef(root);
+    expect(getPatternSource(root)).toBeUndefined();
+
+    stub.setSource(SOURCE_V2);
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    expect(getPatternIdentityRef(root)).toEqual(before);
+    expect(getPatternSource(root)).toBeUndefined();
+    expect(stub.identityFetches()).toBe(0);
+  });
+
   it("holds the home root behind its own flag (M4.2)", async () => {
     // A home space (session space == the identity DID), with the base flag on
     // but the home flag off, must not auto-update — it short-circuits before
     // any fetch.
-    versionSkews = [];
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      apiUrl: new URL("http://toolshed.test"),
-      storageManager,
-      clientVersion: BUILD_SHA,
-      experimental: { systemPatternAutoUpdate: true },
-    });
-    const homeSession = await createSession({
-      identity: signer,
-      spaceDid: signer.did(),
-    });
-    expect(homeSession.space).toBe(runtime.userIdentityDID);
-    manager = new PieceManager(homeSession, runtime);
-    await manager.synced();
-    controller = new PiecesController(manager);
+    await setupHome({ systemPatternAutoUpdate: true });
 
     expect(await controller.checkAndUpdateDefaultPattern()).toBe(
       "skipped-disabled",
@@ -422,20 +565,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     });
 
     it("stamps a recreated home root with home.tsx", async () => {
-      storageManager = StorageManager.emulate({ as: signer });
-      runtime = new Runtime({
-        apiUrl: new URL("http://toolshed.test"),
-        storageManager,
-        clientVersion: BUILD_SHA,
-      });
-      const homeSession = await createSession({
-        identity: signer,
-        spaceDid: signer.did(),
-      });
-      expect(homeSession.space).toBe(runtime.userIdentityDID);
-      manager = new PieceManager(homeSession, runtime);
-      await manager.synced();
-      controller = new PiecesController(manager);
+      await setupHome({});
 
       await controller.recreateDefaultPattern();
       const root = (await manager.getDefaultPattern(false))!;

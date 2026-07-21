@@ -213,9 +213,16 @@ Both the home pattern and the default app pattern follow the same mechanism:
      `/api/patterns/system/profile-home.tsx`
    - **Other spaces**: reads `defaultAppUrl` from the home space; falls back to
      `/api/patterns/system/default-app.tsx`
-3. The pattern is compiled, run, and linked as `spaceCell.defaultPattern`
-4. `recreateDefaultPattern()` can replace it — either with a URL-based system
-   pattern or a custom `RuntimeProgram` (used by `cf piece set-home`)
+3. The pattern is compiled, run, linked as `spaceCell.defaultPattern`, and its
+   source URL is stamped as `patternSource` for future updates
+4. `recreateDefaultPattern()` can replace it — either with a URL-based pattern,
+   which also stamps `patternSource`, or a custom `RuntimeProgram` (used by
+   `cf piece set-home`), which remains untracked by the URL updater and may carry
+   a separate repository locator
+5. Before an existing eligible root starts, it is reconciled in place. A legacy
+   sourceless root is eligible only when its verified stored source closure
+   names the exact official system entry for that space; custom roots remain
+   pinned
 
 
 Runtime internals (ACL initialization, PieceManager home-space detection) are
