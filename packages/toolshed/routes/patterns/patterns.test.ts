@@ -1,10 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import env from "@/env.ts";
+import { PATTERN_RESPONSE_BUILD_HEADER } from "@commonfabric/runner";
 import createApp from "@/lib/create-app.ts";
 import router from "@/routes/patterns/patterns.index.ts";
 import { PatternsServer } from "@/routes/patterns/patterns-server.ts";
-import { classifyPatternError } from "@/routes/patterns/patterns.handlers.ts";
+import {
+  classifyPatternError,
+  patternResponseHeaders,
+} from "@/routes/patterns/patterns.handlers.ts";
 
 const IDENTITY_RE = /^[A-Za-z0-9_-]{43}$/;
 
@@ -129,6 +133,17 @@ describe("Patterns API", () => {
       expect(response.headers.get("Content-Type")).toContain("text/plain");
       const identity = (await response.text()).trim();
       expect(identity).toMatch(IDENTITY_RE);
+    });
+
+    it("builds attested CORS response headers", () => {
+      const headers = new Headers(patternResponseHeaders(
+        "text/plain; charset=utf-8",
+        "test-build",
+      ));
+      expect(headers.get(PATTERN_RESPONSE_BUILD_HEADER)).toBe("test-build");
+      expect(headers.get("Access-Control-Expose-Headers")).toContain(
+        PATTERN_RESPONSE_BUILD_HEADER,
+      );
     });
 
     it("matches the shared resolveEntryIdentity over the real closure (HTTP-boundary drift guard)", async () => {

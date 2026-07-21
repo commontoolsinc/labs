@@ -153,7 +153,7 @@ export async function initialize(
     return;
   }
 
-  const { did, toolshedUrl, rawIdentity, experimental } = data;
+  const { did, toolshedUrl, rawIdentity, experimental, clientVersion } = data;
   const identity = await Identity.deserialize(rawIdentity);
   const apiUrl = new URL(toolshedUrl);
 
@@ -179,6 +179,7 @@ export async function initialize(
     // runtime's resolved flags; `{}` (constructor defaults) covers a bare
     // caller.
     experimental: experimental ?? {},
+    clientVersion,
     consoleHandler: consoleHandler,
     errorHandlers: [errorHandler],
   }));

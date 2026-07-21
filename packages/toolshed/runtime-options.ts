@@ -6,6 +6,7 @@ import {
   runtimePresets,
 } from "@commonfabric/runner";
 import type { env as ToolshedEnv } from "@/env.ts";
+import { buildInfo, resolveGitShaFrom } from "@/lib/build-info.ts";
 
 /**
  * Assemble this toolshed's `RuntimeOptions` (CT-1814), extracted pure from
@@ -26,6 +27,11 @@ export function toolshedRuntimeOptions(
     patternApiUrl: new URL(config.API_URL),
     storageManager,
     experimental: experimentalOptionsFromEnv(envGet),
+    clientVersion: resolveGitShaFrom(
+      envGet("TOOLSHED_GIT_SHA"),
+      buildInfo.commitSha,
+      envGet("COMMIT_SHA"),
+    ) ?? undefined,
   });
 }
 

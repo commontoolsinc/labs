@@ -200,6 +200,12 @@ export class XRootView extends BaseView {
           // This client build's git sha, for the system-pattern auto-update
           // version-skew gate (compared to a space's toolshed /api/meta).
           clientVersion: COMMIT_SHA,
+          // A source-run shell serves its worker graph from /scripts even when
+          // COMMIT_SHA attests the checkout. Only deployed builds use the
+          // immutable /builds/<sha>/ namespace selected by RuntimeInternals.
+          workerUrl: ENVIRONMENT === "development"
+            ? new URL("/scripts/worker-runtime.js", globalThis.location.href)
+            : undefined,
           onError: (event) => this._handleRuntimeError(event, generation),
           onVersionSkew: this._handleVersionSkew,
           // Per-profile dogfood toggles: worker-console forwarding and the

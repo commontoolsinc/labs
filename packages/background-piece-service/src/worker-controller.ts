@@ -23,6 +23,7 @@ export interface WorkerOptions {
   did: string;
   toolshedUrl: string;
   identity: Identity;
+  clientVersion?: string;
   timeoutMs?: number;
   experimental?: {
     modernCellRep?: boolean;
@@ -54,6 +55,7 @@ export class WorkerController extends EventTarget {
   private toolshedUrl: string;
   private identity: Identity;
   private timeoutMs: number;
+  private clientVersion?: string;
   private experimental?: WorkerOptions["experimental"];
   private msgId: number = 0;
   private pending = new Map<
@@ -71,6 +73,7 @@ export class WorkerController extends EventTarget {
     this.identity = options.identity;
     this.toolshedUrl = options.toolshedUrl;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TASK_TIMEOUT;
+    this.clientVersion = options.clientVersion;
     this.experimental = options.experimental;
 
     console.log(`${this.did}: Creating worker controller`);
@@ -97,6 +100,7 @@ export class WorkerController extends EventTarget {
         toolshedUrl: this.toolshedUrl,
         rawIdentity: this.identity.serialize(),
         experimental: this.experimental,
+        clientVersion: this.clientVersion,
       });
       this.state = WorkerState.Ready;
     } catch (e) {
