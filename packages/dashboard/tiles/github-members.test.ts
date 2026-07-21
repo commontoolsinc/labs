@@ -135,6 +135,45 @@ Deno.test("github users: organization rosters read every page and deduplicate id
   });
 });
 
+Deno.test("github users: configured history loads once across collections", async () => {
+  const key = "GITHUB_MEMBERS_HISTORY_FILE";
+  const saved = Deno.env.get(key);
+  const configured = "/configured/github-users-history.json";
+  Deno.env.set(key, configured);
+  clock = T0;
+
+  try {
+    await withWire({
+      reply: (url) =>
+        url.pathname.endsWith("/outside_collaborators")
+          ? users(3)
+          : users(1, 2),
+    }, async (wire) => {
+      const tile = createGithubMembers();
+      await tile.collect(ctx({ GH_TOKEN: "token" }));
+      clock += HOUR;
+      await tile.collect(ctx({ GH_TOKEN: "token" }));
+
+      assertEquals(wire.reads, [configured]);
+      assertEquals(wire.writes.map((write) => write.path), [
+        `${configured}.tmp`,
+        `${configured}.tmp`,
+      ]);
+      assertEquals(JSON.parse(wire.writes[1].data), [
+        { t: T0, members: 2, collaborators: 1 },
+        { t: T0 + HOUR, members: 2, collaborators: 1 },
+      ]);
+      assertEquals(wire.renames, [
+        { from: `${configured}.tmp`, to: configured },
+        { from: `${configured}.tmp`, to: configured },
+      ]);
+    });
+  } finally {
+    if (saved === undefined) Deno.env.delete(key);
+    else Deno.env.set(key, saved);
+  }
+});
+
 Deno.test("github users: transitional overlap counts once and draws retained history", async () => {
   clock = T0;
   const persisted = [
