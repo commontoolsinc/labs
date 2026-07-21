@@ -208,6 +208,102 @@ describe("FabricError", () => {
       });
     });
 
+    describe("extras bag", () => {
+      it("round-trips a value through `setExtra()` / `getExtra()`", () => {
+        const fe = FabricError.fromNativeError(new Error("test"));
+        fe.setExtra("code", 404);
+        expect(fe.getExtra("code")).toBe(404);
+      });
+
+      it("returns `undefined` from `getExtra()` for an absent key", () => {
+        const fe = FabricError.fromNativeError(new Error("test"));
+        expect(fe.getExtra("nope")).toBe(undefined);
+      });
+
+      it("reports presence via `hasExtra()`", () => {
+        const fe = FabricError.fromNativeError(new Error("test"));
+        fe.setExtra("code", 404);
+        expect(fe.hasExtra("code")).toBe(true);
+        expect(fe.hasExtra("other")).toBe(false);
+      });
+
+      it("reports the entry count via `extraSize`", () => {
+        const fe = FabricError.fromNativeError(new Error("test"));
+        expect(fe.extraSize).toBe(0);
+        fe.setExtra("a", 1);
+        fe.setExtra("b", 2);
+        expect(fe.extraSize).toBe(2);
+      });
+
+      it("overwrites rather than duplicates an existing key", () => {
+        const fe = FabricError.fromNativeError(new Error("test"));
+        fe.setExtra("a", 1);
+        fe.setExtra("a", 2);
+        expect(fe.getExtra("a")).toBe(2);
+        expect(fe.extraSize).toBe(1);
+      });
+
+      it("enumerates keys and entries", () => {
+        const fe = FabricError.fromNativeError(new Error("test"));
+        fe.setExtra("a", 1);
+        fe.setExtra("b", 2);
+        expect([...fe.extraKeys()]).toEqual(["a", "b"]);
+        expect([...fe.extraEntries()]).toEqual([["a", 1], ["b", 2]]);
+      });
+
+      it("reports removal success via `deleteExtra()`", () => {
+        const fe = FabricError.fromNativeError(new Error("test"));
+        fe.setExtra("a", 1);
+        expect(fe.deleteExtra("a")).toBe(true);
+        expect(fe.hasExtra("a")).toBe(false);
+        expect(fe.deleteExtra("a")).toBe(false);
+      });
+
+      it("rejects a fixed-schema slot name as an extras key", () => {
+        const fe = FabricError.fromNativeError(new Error("test"));
+        for (const key of ["type", "name", "message", "stack", "cause"]) {
+          expect(() => fe.setExtra(key, 1)).toThrow(
+            `Cannot use fixed-schema slot name in FabricError extras: ${key}`,
+          );
+        }
+      });
+
+      it("rejects a prototype-sensitive extras key", () => {
+        const fe = FabricError.fromNativeError(new Error("test"));
+        for (const key of ["__proto__", "constructor"]) {
+          expect(() => fe.setExtra(key, 1)).toThrow(
+            `Cannot use unsafe key in FabricError extras: ${key}`,
+          );
+        }
+        expect(fe.extraSize).toBe(0);
+      });
+
+      it("refuses mutation once frozen", () => {
+        const fe = FabricError.fromNativeError(new Error("test"));
+        fe.setExtra("a", 1);
+        Object.freeze(fe);
+
+        expect(() => fe.setExtra("b", 2)).toThrow(
+          "Cannot modify frozen FabricError",
+        );
+        expect(() => fe.deleteExtra("a")).toThrow(
+          "Cannot modify frozen FabricError",
+        );
+        expect(fe.getExtra("a")).toBe(1);
+        expect(fe.extraSize).toBe(1);
+      });
+
+      it("still reads while frozen", () => {
+        const fe = FabricError.fromNativeError(new Error("test"));
+        fe.setExtra("a", 1);
+        Object.freeze(fe);
+
+        expect(fe.getExtra("a")).toBe(1);
+        expect(fe.hasExtra("a")).toBe(true);
+        expect([...fe.extraKeys()]).toEqual(["a"]);
+      });
+    });
+
     describe("toNativeValue()", () => {
       it("returns a frozen `Error` projection when `frozen` is `true`", () => {
         const err = new Error("native");
