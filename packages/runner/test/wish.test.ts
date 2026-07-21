@@ -3469,11 +3469,10 @@ describe("wish built-in", () => {
       const pieceData = result.key("pieceData").get()?.result;
       expect(pieceData).toBeDefined();
       expect(typeof pieceData).toBe("object");
+      expect(pieceData).not.toBeNull();
 
       // The piece should be running and have its state accessible.
-      if (typeof pieceData === "object" && pieceData !== null) {
-        expect("count" in pieceData).toBe(true);
-      }
+      expect(pieceData).toHaveProperty("count");
     });
 
     // Host-embedding contract seam 1 (docs/development/HOST_EMBEDDING.md §1):

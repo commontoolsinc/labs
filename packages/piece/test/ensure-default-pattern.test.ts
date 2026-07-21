@@ -110,6 +110,9 @@ describe("PiecesController.ensureDefaultPattern", () => {
     // The cell should have a reference linked
     const value = defaultPatternCell.get();
     expect(value).toBeDefined();
+    expect(
+      defaultPatternCell.asSchema<{ name?: string }>().key("name").get(),
+    ).toBe("MockDefaultPattern");
   });
 
   it("should find defaultPattern when its untyped schema view is undefined", async () => {
@@ -179,6 +182,9 @@ describe("PiecesController.ensureDefaultPattern", () => {
       const defaultPatternCell = spaceCell.key("defaultPattern");
       const value = defaultPatternCell.get();
       expect(value).toBeDefined();
+      expect(
+        defaultPatternCell.asSchema<{ name?: string }>().key("name").get(),
+      ).toBe("MockDefaultPattern");
     });
 
     it("should replace existing pattern when linking a different one", async () => {
@@ -205,6 +211,9 @@ describe("PiecesController.ensureDefaultPattern", () => {
       const defaultPatternCell = spaceCell.key("defaultPattern");
       const firstValue = defaultPatternCell.get();
       expect(firstValue).toBeDefined();
+      expect(
+        defaultPatternCell.asSchema<{ name?: string }>().key("name").get(),
+      ).toBe("MockDefaultPattern1");
       const firstJson = JSON.stringify(firstValue);
 
       // Link second pattern (replacing first)
@@ -213,6 +222,9 @@ describe("PiecesController.ensureDefaultPattern", () => {
       // Verify second pattern is now linked
       const secondValue = defaultPatternCell.get();
       expect(secondValue).toBeDefined();
+      expect(
+        defaultPatternCell.asSchema<{ name?: string }>().key("name").get(),
+      ).toBe("MockDefaultPattern2");
       const secondJson = JSON.stringify(secondValue);
 
       // The links should be different (different patterns)
