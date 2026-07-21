@@ -1,4 +1,5 @@
 import {
+  fabricFromNativeValue,
   type FabricValue,
   isFabricPlainObject,
   shallowMutableClone,
@@ -158,84 +159,163 @@ export function describePatternOrModule(
   return `pattern:nodes=${patternOrModule.nodes.length}`;
 }
 
+const hasToJSON = (value: object): boolean =>
+  "toJSON" in value &&
+  typeof (value as { toJSON?: unknown }).toJSON === "function";
+
 /**
- * Validates an action result and checks if it contains opaque refs.
- * Throws if result contains invalid types (Map, Set, functions, etc.).
- * Returns true if the result contains any Reactives.
+ * Returns whether the value is a native container whose children can contain
+ * Reactives. Objects with `toJSON()` are atomic at the native-conversion
+ * boundary, so their implementation details must not participate in Reactive
+ * detection.
+ */
+function isActionResultContainer(
+  value: unknown,
+): value is unknown[] | Record<string, unknown> {
+  if (value === null || typeof value !== "object") return false;
+  if (Array.isArray(value)) return true;
+  if (hasToJSON(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === null || proto === Object.prototype;
+}
+
+function typeNameForActionResult(value: unknown): string {
+  switch (typeof value) {
+    case "function":
+      return "function";
+    case "symbol":
+      return "Symbol";
+    case "bigint":
+      return "BigInt";
+    case "number":
+      if (Number.isNaN(value)) return "NaN";
+      if (!Number.isFinite(value)) return "Infinity";
+      return "number";
+    case "object":
+      if (value === null) return "null";
+      return value.constructor?.name ?? "unknown type";
+    default:
+      return typeof value;
+  }
+}
+
+function hintForActionResult(value: unknown): string | undefined {
+  const typeName = typeNameForActionResult(value);
+  if (typeName === "Map") return "Consider using a plain object instead.";
+  if (typeName === "Set") return "Consider using an array instead.";
+  if (typeof value === "symbol") return "Consider removing this property.";
+  return undefined;
+}
+
+function formatActionResultError(
+  value: unknown,
+  cause: unknown,
+  actionName: string | undefined,
+  path: string[],
+): Error {
+  const pathStr = path.length > 0 ? ` at path "${path.join(".")}"` : "";
+  const actionStr = actionName ? `\n  in action: ${actionName}` : "";
+  const hint = hintForActionResult(value);
+  const hintStr = hint ? ` ${hint}` : "";
+  const causeStr = cause instanceof Error ? `\n${cause.message}` : "";
+  return new Error(
+    `Action returned a ${typeNameForActionResult(value)}${pathStr}.` +
+      `${actionStr}\nActions must return FabricValues, Reactives, or Cells.` +
+      `${hintStr}${causeStr}`,
+    { cause },
+  );
+}
+
+/**
+ * Applies the data-model's native-to-Fabric conversion as the sole authority
+ * for action-result value legality. On failure, descends only to identify the
+ * offending path for the action-facing diagnostic.
+ */
+function validateFabricActionResult(
+  value: unknown,
+  actionName: string | undefined,
+  path: string[],
+  seen: Set<object> = new Set(),
+): void {
+  try {
+    // Validation must not freeze or retain a duplicate result tree. The actual
+    // cell write performs the canonical conversion with its normal freezing.
+    fabricFromNativeValue(value, false);
+    return;
+  } catch (cause) {
+    if (isActionResultContainer(value) && !seen.has(value)) {
+      seen.add(value);
+      for (const [key, child] of Object.entries(value)) {
+        try {
+          fabricFromNativeValue(child, false);
+        } catch {
+          validateFabricActionResult(
+            child,
+            actionName,
+            [...path, Array.isArray(value) ? `[${key}]` : key],
+            seen,
+          );
+        }
+      }
+    }
+    throw formatActionResultError(value, cause, actionName, path);
+  }
+}
+
+/**
+ * Produces the value tree used for data-model validation. Reactive and Cell
+ * leaves are legal action-result placeholders but are not FabricValues, so the
+ * recursive walk replaces them with `undefined` while preserving container
+ * structure, shared references, cycles, and invalid array properties for the
+ * authoritative conversion check.
+ */
+function prepareActionResultValidation(
+  value: unknown,
+  prepared: Map<object, { value: unknown; hasReactive: boolean }> = new Map(),
+): { value: unknown; hasReactive: boolean } {
+  if (isReactive(value)) return { value: undefined, hasReactive: true };
+  if (isCellLink(value)) return { value: undefined, hasReactive: false };
+  if (!isActionResultContainer(value)) {
+    return { value, hasReactive: false };
+  }
+  const existing = prepared.get(value);
+  if (existing !== undefined) return existing;
+
+  const valueIsArray = Array.isArray(value);
+  const copy: unknown[] | Record<string, unknown> = valueIsArray
+    ? []
+    : Object.create(Object.getPrototypeOf(value));
+  const result = { value: copy, hasReactive: false };
+  prepared.set(value, result);
+  if (valueIsArray) {
+    (copy as unknown[]).length = (value as unknown[]).length;
+  }
+
+  for (const [key, child] of Object.entries(value)) {
+    const childResult = prepareActionResultValidation(child, prepared);
+    result.hasReactive ||= childResult.hasReactive;
+    Object.defineProperty(copy, key, {
+      value: childResult.value,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }
+  return result;
+}
+
+/**
+ * Validates an action result and reports whether it contains Reactives.
+ * Reactives and Cell links remain legal leaves; every native value subtree is
+ * accepted or rejected by `fabricFromNativeValue()`.
  */
 export function validateAndCheckReactives(
   value: unknown,
   actionName?: string,
-  path: string[] = [],
 ): boolean {
-  if (value === null || value === undefined) return false;
-  if (isReactive(value)) return true;
-  if (isCellLink(value)) return false;
-
-  const formatError = (typeName: string, hint?: string) => {
-    const pathStr = path.length > 0 ? ` at path "${path.join(".")}"` : "";
-    const actionStr = actionName ? `\n  in action: ${actionName}` : "";
-    const hintStr = hint ? ` ${hint}` : "";
-    return `Action returned a ${typeName}${pathStr}.${actionStr}\nActions must return JSON-serializable values, Reactives, or Cells.${hintStr}`;
-  };
-
-  if (typeof value === "function") {
-    throw new Error(formatError("function"));
-  }
-
-  if (typeof value === "symbol") {
-    throw new Error(formatError("Symbol", "Consider removing this property."));
-  }
-
-  if (typeof value === "bigint") {
-    throw new Error(
-      formatError("BigInt", "Consider converting to number or string."),
-    );
-  }
-
-  if (typeof value === "number") {
-    if (Number.isNaN(value)) {
-      throw new Error(
-        formatError("NaN", "Check your inputs or return null instead."),
-      );
-    }
-    if (!Number.isFinite(value)) {
-      throw new Error(
-        formatError("Infinity", "Check your inputs or return null instead."),
-      );
-    }
-    return false;
-  }
-
-  if (typeof value !== "object") return false;
-
-  const obj = value as object;
-
-  if (obj instanceof Map) {
-    throw new Error(
-      formatError("Map", "Consider using a plain object instead."),
-    );
-  }
-
-  if (obj instanceof Set) {
-    throw new Error(formatError("Set", "Consider using an array instead."));
-  }
-
-  if (Array.isArray(obj)) {
-    return obj.some((item: unknown, index: number) =>
-      validateAndCheckReactives(item, actionName, [...path, `[${index}]`])
-    );
-  }
-
-  const proto = Object.getPrototypeOf(obj);
-  if (proto !== null && proto !== Object.prototype) {
-    const typeName = obj.constructor?.name ?? "unknown type";
-    throw new Error(formatError(typeName));
-  }
-
-  return Object.entries(obj as Record<string, unknown>).some(
-    ([key, val]) => validateAndCheckReactives(val, actionName, [...path, key]),
-  );
+  const prepared = prepareActionResultValidation(value);
+  validateFabricActionResult(prepared.value, actionName, []);
+  return prepared.hasReactive;
 }
 
 /**

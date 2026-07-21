@@ -43,6 +43,46 @@ export const NATIVE_TAGS = Object.freeze(
 /** One of the native-instance tag strings. */
 export type NativeTag = typeof NATIVE_TAGS[keyof typeof NATIVE_TAGS];
 
+const regexpSourceGetter = Object.getOwnPropertyDescriptor(
+  RegExp.prototype,
+  "source",
+)?.get;
+
+/**
+ * Recognizes native instances created in another realm. Constructor identity
+ * cannot cross a realm boundary, while the intrinsic brand checks below do.
+ * `Object.prototype.toString` narrows the candidate and the native operation
+ * verifies the internal slot so `Symbol.toStringTag` spoofing is rejected.
+ */
+function tagFromCrossRealmNativeValue(value: object): NativeTag | null {
+  const brand = Object.prototype.toString.call(value);
+  try {
+    switch (brand) {
+      case "[object Date]":
+        Date.prototype.getTime.call(value);
+        return NATIVE_TAGS.Date;
+      case "[object RegExp]":
+        regexpSourceGetter?.call(value);
+        return regexpSourceGetter === undefined ? null : NATIVE_TAGS.RegExp;
+      case "[object Uint8Array]":
+        return ArrayBuffer.isView(value) &&
+            (value as Uint8Array).BYTES_PER_ELEMENT === 1
+          ? NATIVE_TAGS.Uint8Array
+          : null;
+      case "[object Map]":
+        Map.prototype.has.call(value, tagFromCrossRealmNativeValue);
+        return NATIVE_TAGS.Map;
+      case "[object Set]":
+        Set.prototype.has.call(value, tagFromCrossRealmNativeValue);
+        return NATIVE_TAGS.Set;
+      default:
+        return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Maps a constructor to its native-instance tag. Returns the tag string if
  * the constructor is a recognized type (JS builtins or system-defined
@@ -123,10 +163,10 @@ export function tagFromNativeClass(
  *
  * Dispatches via the value's constructor (O(1) switch in `tagFromNativeClass`,
  * which matches `Error` subclasses via `prototype instanceof Error`). Falls
- * back to `Error.isError()` and `Array.isArray()` for values whose constructor
- * is unreachable -- a severed prototype, or another realm -- since the internal
- * slot survives where a constructor lookup does not, and to a prototype check
- * for null-prototype objects.
+ * back to `Error.isError()` (when implemented) for errors whose constructor is
+ * unreachable, intrinsic brand checks for other cross-realm native objects,
+ * `Array.isArray()` for cross-realm arrays, and a prototype check for
+ * null-prototype objects.
  *
  * For tags that have pass-through handling (`Object`, `Array`) or no dedicated
  * handler (`null`), a per-instance `hasToJSON()` check upgrades the tag to
@@ -161,8 +201,24 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     // been severed, or one from another realm. An ordinary subclass (including
     // `DOMException`) never gets here: `tagFromNativeClass()` matches it via
     // `prototype instanceof Error`. The internal slot survives either way,
-    // which is what `Error.isError()` reads.
-    if (Error.isError(value)) return NATIVE_TAGS.Error;
+    // which is what `Error.isError()` reads where the runtime implements it.
+    const isError = (Error as ErrorConstructor & {
+      isError?: (candidate: unknown) => boolean;
+    }).isError;
+    if (isError?.(value)) return NATIVE_TAGS.Error;
+
+    const crossRealmTag = tagFromCrossRealmNativeValue(value);
+    if (crossRealmTag !== null) return crossRealmTag;
+
+    // The fallback for runtimes without `Error.isError()` is necessarily
+    // brand-based because Error has no other standard cross-realm internal-slot
+    // probe. Do not use the brand fallback when the intrinsic rejected a value.
+    if (
+      isError === undefined &&
+      Object.prototype.toString.call(value) === "[object Error]"
+    ) {
+      return NATIVE_TAGS.Error;
+    }
 
     // `FabricInstance` values (object-like protocol types).
     if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;

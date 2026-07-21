@@ -70,7 +70,10 @@ export class FabricRegExp extends BaseFabricPrimitive {
   ) {
     super();
 
-    if (regexOrFlavor instanceof RegExp) {
+    // Use the overload's object-vs-string distinction rather than
+    // `instanceof`: native RegExp values returned from sandboxed actions come
+    // from another realm and intentionally fail the host-realm identity test.
+    if (typeof regexOrFlavor !== "string") {
       rejectExtraRegExpProperties(regexOrFlavor);
       this.#source = regexOrFlavor.source;
       this.#flags = regexOrFlavor.flags;

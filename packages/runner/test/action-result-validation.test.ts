@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { validateAndCheckReactives } from "../src/runner.ts";
 import { isReactiveMarker } from "../src/builder/types.ts";
 
@@ -18,6 +19,28 @@ describe("validateAndCheckReactives", () => {
       expect(validateAndCheckReactives(42)).toBe(false);
       expect(validateAndCheckReactives(true)).toBe(false);
       expect(validateAndCheckReactives(false)).toBe(false);
+    });
+
+    it("accepts every primitive admitted by the data model", () => {
+      expect(validateAndCheckReactives(1n)).toBe(false);
+      expect(validateAndCheckReactives(NaN)).toBe(false);
+      expect(validateAndCheckReactives(Infinity)).toBe(false);
+      expect(validateAndCheckReactives(-Infinity)).toBe(false);
+      expect(validateAndCheckReactives(Symbol.for("action-result"))).toBe(
+        false,
+      );
+    });
+
+    it("accepts materializable special and native objects", () => {
+      expect(
+        validateAndCheckReactives(
+          new FabricBytes(new Uint8Array([1, 2, 3])),
+        ),
+      ).toBe(false);
+      expect(validateAndCheckReactives(new Uint8Array([4, 5, 6]))).toBe(false);
+      expect(validateAndCheckReactives(new Date(0))).toBe(false);
+      expect(validateAndCheckReactives(/fabric/gi)).toBe(false);
+      expect(validateAndCheckReactives(new Error("fabric"))).toBe(false);
     });
 
     it("accepts plain objects", () => {
@@ -64,51 +87,23 @@ describe("validateAndCheckReactives", () => {
       );
     });
 
-    it("rejects Date", () => {
-      expect(() => validateAndCheckReactives(new Date())).toThrow(
-        /Action returned a Date/,
-      );
-    });
-
-    it("rejects RegExp", () => {
-      expect(() => validateAndCheckReactives(/test/)).toThrow(
-        /Action returned a RegExp/,
-      );
-    });
-
-    it("rejects NaN", () => {
-      expect(() => validateAndCheckReactives(NaN)).toThrow(
-        /Action returned a NaN[\s\S]*Check your inputs or return null instead/,
-      );
-    });
-
-    it("rejects Infinity", () => {
-      expect(() => validateAndCheckReactives(Infinity)).toThrow(
-        /Action returned a Infinity[\s\S]*Check your inputs or return null instead/,
-      );
-    });
-
-    it("rejects -Infinity", () => {
-      expect(() => validateAndCheckReactives(-Infinity)).toThrow(
-        /Action returned a Infinity[\s\S]*Check your inputs or return null instead/,
-      );
-    });
-
-    it("rejects BigInt", () => {
-      expect(() => validateAndCheckReactives(BigInt(123))).toThrow(
-        /Action returned a BigInt[\s\S]*Consider converting to number or string/,
-      );
-    });
-
-    it("rejects Symbol", () => {
+    it("rejects unique Symbol", () => {
       expect(() => validateAndCheckReactives(Symbol("test"))).toThrow(
         /Action returned a Symbol[\s\S]*Consider removing this property/,
       );
     });
 
-    it("rejects NaN nested in object", () => {
-      expect(() => validateAndCheckReactives({ value: NaN })).toThrow(
-        /Action returned a NaN at path "value"/,
+    it("rejects class instances without native conversion", () => {
+      class Unsupported {}
+      expect(() => validateAndCheckReactives({ value: new Unsupported() }))
+        .toThrow(/Action returned a Unsupported at path "value"/);
+    });
+
+    it("rejects circular references through data-model authority", () => {
+      const circular: Record<string, unknown> = {};
+      circular.self = circular;
+      expect(() => validateAndCheckReactives(circular)).toThrow(
+        /Actions must return FabricValues, Reactives, or Cells\.[\s\S]*Cannot store circular reference/,
       );
     });
 
@@ -134,6 +129,12 @@ describe("validateAndCheckReactives", () => {
     it("rejects function in object with path info", () => {
       expect(() => validateAndCheckReactives({ handler: () => {} })).toThrow(
         /Action returned a function at path "handler"/,
+      );
+    });
+
+    it("states the FabricValue action contract", () => {
+      expect(() => validateAndCheckReactives(new Map())).toThrow(
+        /Actions must return FabricValues, Reactives, or Cells\./,
       );
     });
   });
@@ -181,6 +182,12 @@ describe("validateAndCheckReactives", () => {
     it("returns true when opaque ref is in array", () => {
       const reactive = { [isReactiveMarker]: true };
       expect(validateAndCheckReactives([1, reactive, 3])).toBe(true);
+    });
+
+    it("still rejects an invalid sibling after finding an opaque ref", () => {
+      const reactive = { [isReactiveMarker]: true };
+      expect(() => validateAndCheckReactives({ reactive, invalid: new Map() }))
+        .toThrow(/Action returned a Map at path "invalid"/);
     });
 
     it("returns false when no opaque refs present", () => {

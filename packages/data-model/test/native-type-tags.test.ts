@@ -94,6 +94,14 @@ describe("native-type-tags", () => {
       expect(tagFromNativeValue(/abc/)).toBe(NATIVE_TAGS.RegExp);
     });
 
+    it("rejects spoofed cross-realm native brands", () => {
+      const fake = {
+        [Symbol.toStringTag]: "RegExp",
+        source: "spoofed",
+      };
+      expect(tagFromNativeValue(fake)).toBe(NATIVE_TAGS.Object);
+    });
+
     it("returns `Object` tag for null-prototype objects (no constructor)", () => {
       const obj = Object.create(null);
       expect(tagFromNativeValue(obj)).toBe(NATIVE_TAGS.Object);
