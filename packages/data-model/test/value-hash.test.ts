@@ -647,6 +647,13 @@ describe("value-hash", () => {
         expect(h1).toEqual(h2);
       });
 
+      it("hashes a null-prototype object as an ordinary plain object", () => {
+        const nullProto = Object.create(null) as Record<string, FabricValue>;
+        nullProto.a = 1;
+
+        expect(hashBytesOf(nullProto)).toEqual(hashBytesOf({ a: 1 }));
+      });
+
       it("matches a hand-computed byte stream for {a: 1, b: 2}", () => {
         // Keys sorted: "a" (0x61) < "b" (0x62)
         // LEB128 lengths are single bytes for small values.
