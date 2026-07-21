@@ -84,6 +84,84 @@ describe("memory v2 client transport send failures", () => {
     await client.close();
   });
 
+  it("stops rescheduling the ack flush when the connection is turning over", async () => {
+    const sends: string[] = [];
+    let receiver = (_payload: string) => {};
+    let closeReceiver: (error?: Error) => void = () => {};
+    let failSends = false;
+    const transport: Transport = {
+      send(payload: string): Promise<void> {
+        const message = decodeMemoryBoundary(payload) as {
+          type?: string;
+          requestId?: string;
+        };
+        if (message.type) sends.push(message.type);
+        if (failSends) return Promise.reject(connectionError());
+        if (message.type === "hello") {
+          queueMicrotask(() => receiver(encodeMemoryBoundary(HELLO_OK)));
+        }
+        if (message.type === "session.open") {
+          queueMicrotask(() =>
+            receiver(encodeMemoryBoundary({
+              type: "response",
+              requestId: message.requestId!,
+              ok: {
+                sessionId: "session:ack-flush",
+                sessionToken: "token:ack-flush",
+                serverSeq: 0,
+                sessionOpen: HELLO_OK.sessionOpen,
+              },
+            }))
+          );
+        }
+        return Promise.resolve();
+      },
+      close: () => Promise.resolve(),
+      setReceiver(next) {
+        receiver = next;
+      },
+      setCloseReceiver(next) {
+        closeReceiver = next;
+      },
+    };
+
+    const client = await Client.connect({ transport });
+    const session = await client.mount("did:key:z6Mk-ack-flush");
+
+    // Deliver an effect the session must ack while sends already fail with a
+    // retryable connection error: the scheduled flush runs against a
+    // connection that is turning over but still reads as connected.
+    failSends = true;
+    receiver(encodeMemoryBoundary({
+      type: "session/effect",
+      space: "did:key:z6Mk-ack-flush",
+      sessionId: "session:ack-flush",
+      effect: {
+        type: "sync",
+        fromSeq: 0,
+        toSeq: 1,
+        upserts: [],
+        removes: [],
+      },
+    }));
+
+    // The flush is scheduled on a 0ms timer; a regression that reschedules
+    // after the connection error would attempt its second ack on the next
+    // timer turn, so draining three turns makes a respin observable.
+    for (let turn = 0; turn < 3; turn += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    assertEquals(
+      sends.filter((type) => type === "session.ack").length,
+      1,
+      "a turning-over connection must get exactly one ack attempt",
+    );
+
+    closeReceiver(connectionError());
+    await session.close();
+    await client.close();
+  });
+
   it("clears the pending hello when the handshake send fails", async () => {
     let closeReceiver: (error?: Error) => void = () => {};
     const transport: Transport = {

@@ -105,4 +105,16 @@ describe("auth-bearing wire message detection", () => {
     assertEquals(isAuthBearingWireMessage("fvj1:{}" as never), true);
     assertEquals(isAuthBearingWireMessage(null as never), true);
   });
+
+  it("fails closed on frame types the unions do not know", () => {
+    // Unlike the non-object garbage above (caught by the early guard), an
+    // object with an unrecognized `type` reaches the exhaustive switch's
+    // default arm — e.g. a frame from a newer server this client build has
+    // no case for. It must classify as auth-bearing so it is never
+    // compressed.
+    assertEquals(
+      isAuthBearingWireMessage({ type: "session.telemetry" } as never),
+      true,
+    );
+  });
 });
