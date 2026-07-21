@@ -18,6 +18,7 @@ import {
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
 import { createCell, isCell } from "./cell.ts";
+import { forEachSubschema } from "./schema-walk.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
@@ -539,47 +540,17 @@ function _schemaHasIfcUncached(
     return true;
   }
 
-  const compound = [
-    ...(resolved.anyOf ?? []),
-    ...(resolved.oneOf ?? []),
-    ...(resolved.allOf ?? []),
-  ];
-  if (
-    compound.some((item) =>
-      isRecord(item) &&
-      _schemaHasIfcUncached(item, childFullSchema, context)
-    )
-  ) {
-    return true;
-  }
-  if (
-    resolved.properties !== undefined &&
-    Object.values(resolved.properties).some((item) =>
-      isRecord(item) &&
-      _schemaHasIfcUncached(item, childFullSchema, context)
-    )
-  ) {
-    return true;
-  }
-  if (
-    typeof resolved.additionalProperties === "object" &&
-    isRecord(resolved.additionalProperties) &&
-    _schemaHasIfcUncached(
-      resolved.additionalProperties,
-      childFullSchema,
-      context,
-    )
-  ) {
-    return true;
-  }
-  if (
-    typeof resolved.items === "object" &&
-    isRecord(resolved.items) &&
-    _schemaHasIfcUncached(resolved.items, childFullSchema, context)
-  ) {
-    return true;
-  }
-  return false;
+  // Descend every structural subschema via the shared vocabulary. Previously
+  // this hand-listed only anyOf/oneOf/allOf/properties/additionalProperties/
+  // items and silently skipped prefixItems, patternProperties, contains,
+  // if/then/else, not, propertyNames, dependentSchemas, and contentSchema — so
+  // an `ifc` in a tuple element or pattern property went undetected. `$defs`
+  // bodies are reached through `$ref` resolution above, not walked directly.
+  return forEachSubschema(
+    resolved,
+    (child) =>
+      isRecord(child) && _schemaHasIfcUncached(child, childFullSchema, context),
+  );
 }
 
 const _filterAsCellCache = new WeakMap<

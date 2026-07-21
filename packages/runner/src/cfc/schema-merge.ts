@@ -2,6 +2,7 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
+import { forEachSubschema } from "../schema-walk.ts";
 import { normalizeClause } from "./clause.ts";
 
 const IFC_KEYS = [
@@ -257,26 +258,15 @@ const mergeIfc = (
   return merged as JSONSchemaObj["ifc"];
 };
 
+// `$defs` bodies were part of this walk before the shared-walker move, so keep
+// descending them (`includeDefs`). This walk does not resolve `$ref`, so a
+// definition referenced but not inlined is only seen through `$defs`.
 const branchContainsIfc = (schema: JSONSchema): boolean => {
-  if (!isRecord(schema)) {
-    return false;
-  }
-  const object = schema as JSONSchemaObj;
-  if (object.ifc !== undefined) {
-    return true;
-  }
-  return [
-    ...(object.anyOf ?? []),
-    ...(object.oneOf ?? []),
-    ...(object.allOf ?? []),
-    ...(object.prefixItems ?? []),
-    ...(object.items ? [object.items] : []),
-    ...(object.properties ? Object.values(object.properties) : []),
-    ...(object.$defs ? Object.values(object.$defs) : []),
-    ...(isRecord(object.additionalProperties)
-      ? [object.additionalProperties as JSONSchema]
-      : []),
-  ].some(branchContainsIfc);
+  if (!isRecord(schema)) return false;
+  if ((schema as JSONSchemaObj).ifc !== undefined) return true;
+  return forEachSubschema(schema, (child) => branchContainsIfc(child), {
+    includeDefs: true,
+  });
 };
 
 const assertNoDivergentIfcBranches = (
