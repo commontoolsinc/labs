@@ -5,8 +5,8 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { dataURIFromValueWithResolvedLinks } from "../src/data-uri.ts";
-import { findAndInlineDataURILinks } from "../src/data-uri.ts";
+import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
+import { findAndInlineDataUriLinks } from "../src/data-uri.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -32,21 +32,21 @@ describe("data URI inlining", () => {
     await storageManager?.close();
   });
 
-  describe("findAndInlineDataURILinks", () => {
+  describe("findAndInlineDataUriLinks", () => {
     it("returns a link-free array holding NaN by reference", () => {
       // The copy-on-write gate must treat an untouched `NaN` leaf as
       // unchanged (`Object.is` semantics), not clone the container.
       const value = [NaN, 1];
-      expect(findAndInlineDataURILinks(value)).toBe(value);
+      expect(findAndInlineDataUriLinks(value)).toBe(value);
     });
 
     it("returns a link-free record holding NaN by reference", () => {
       const value = { x: NaN };
-      expect(findAndInlineDataURILinks(value)).toBe(value);
+      expect(findAndInlineDataUriLinks(value)).toBe(value);
     });
 
     it("should inline simple data URI links", () => {
-      const dataURI = dataURIFromValueWithResolvedLinks("test data");
+      const dataURI = dataUriFromValueWithResolvedLinks("test data");
       const link = {
         "/": {
           [LINK_V1_TAG]: {
@@ -56,12 +56,12 @@ describe("data URI inlining", () => {
         },
       };
 
-      const result = findAndInlineDataURILinks(link);
+      const result = findAndInlineDataUriLinks(link);
       expect(result).toBe("test data");
     });
 
     it("should inline data URI links with paths", () => {
-      const dataURI = dataURIFromValueWithResolvedLinks({
+      const dataURI = dataUriFromValueWithResolvedLinks({
         nested: { value: 42 },
       });
       const link = {
@@ -73,13 +73,13 @@ describe("data URI inlining", () => {
         },
       };
 
-      const result = findAndInlineDataURILinks(link);
+      const result = findAndInlineDataUriLinks(link);
       expect(result).toBe(42);
     });
 
     it("should inline data URI links in arrays", () => {
-      const dataURI1 = dataURIFromValueWithResolvedLinks("first");
-      const dataURI2 = dataURIFromValueWithResolvedLinks("second");
+      const dataURI1 = dataUriFromValueWithResolvedLinks("first");
+      const dataURI2 = dataUriFromValueWithResolvedLinks("second");
 
       const array = [
         {
@@ -100,12 +100,12 @@ describe("data URI inlining", () => {
         },
       ];
 
-      const result = findAndInlineDataURILinks(array);
+      const result = findAndInlineDataUriLinks(array);
       expect(result).toEqual(["first", "second"]);
     });
 
     it("should inline data URI links in objects", () => {
-      const dataURI = dataURIFromValueWithResolvedLinks("nested value");
+      const dataURI = dataUriFromValueWithResolvedLinks("nested value");
       const obj = {
         key1: "regular value",
         key2: {
@@ -118,7 +118,7 @@ describe("data URI inlining", () => {
         },
       };
 
-      const result = findAndInlineDataURILinks(obj);
+      const result = findAndInlineDataUriLinks(obj);
       expect(result).toEqual({
         key1: "regular value",
         key2: "nested value",
@@ -129,7 +129,7 @@ describe("data URI inlining", () => {
       const innerCell = runtime.getCell(space, "inner", undefined, tx);
       innerCell.set({ value: "inner data" });
 
-      const dataURI = dataURIFromValueWithResolvedLinks(innerCell.getAsLink());
+      const dataURI = dataUriFromValueWithResolvedLinks(innerCell.getAsLink());
       const link = {
         "/": {
           [LINK_V1_TAG]: {
@@ -139,7 +139,7 @@ describe("data URI inlining", () => {
         },
       };
 
-      const result = findAndInlineDataURILinks(link);
+      const result = findAndInlineDataUriLinks(link);
       expect(result).toMatchObject({
         "/": {
           [LINK_V1_TAG]: {
@@ -154,7 +154,7 @@ describe("data URI inlining", () => {
       const innerCell = runtime.getCell(space, "inner", undefined, tx);
       innerCell.set({ nested: { value: "inner data" } });
 
-      const dataURI = dataURIFromValueWithResolvedLinks(innerCell.getAsLink());
+      const dataURI = dataUriFromValueWithResolvedLinks(innerCell.getAsLink());
       const link = {
         "/": {
           [LINK_V1_TAG]: {
@@ -164,7 +164,7 @@ describe("data URI inlining", () => {
         },
       };
 
-      const result = findAndInlineDataURILinks(link);
+      const result = findAndInlineDataUriLinks(link);
       expect(result).toMatchObject({
         "/": {
           [LINK_V1_TAG]: {
@@ -175,7 +175,7 @@ describe("data URI inlining", () => {
     });
 
     it("should return undefined for data URIs with invalid paths", () => {
-      const dataURI = dataURIFromValueWithResolvedLinks({ a: 1 });
+      const dataURI = dataUriFromValueWithResolvedLinks({ a: 1 });
       const link = {
         "/": {
           [LINK_V1_TAG]: {
@@ -185,7 +185,7 @@ describe("data URI inlining", () => {
         },
       };
 
-      const result = findAndInlineDataURILinks(link);
+      const result = findAndInlineDataUriLinks(link);
       expect(result).toBeUndefined();
     });
 
@@ -193,7 +193,7 @@ describe("data URI inlining", () => {
       const normalCell = runtime.getCell(space, "normal", undefined, tx);
       const link = normalCell.getAsLink();
 
-      const result = findAndInlineDataURILinks(link);
+      const result = findAndInlineDataUriLinks(link);
       expect(result).toBe(link);
     });
 
@@ -206,14 +206,14 @@ describe("data URI inlining", () => {
         },
       };
 
-      const result = findAndInlineDataURILinks(value);
+      const result = findAndInlineDataUriLinks(value);
       expect(result).toBe(value);
       expect(result.nested).toBe(value.nested);
       expect(result.nested.tags).toBe(value.nested.tags);
     });
 
     it("should preserve unchanged branches when inlining nested data URI links", () => {
-      const dataURI = dataURIFromValueWithResolvedLinks("inline me");
+      const dataURI = dataUriFromValueWithResolvedLinks("inline me");
       const untouched = {
         keep: true,
         nested: { count: 1 },
@@ -230,21 +230,21 @@ describe("data URI inlining", () => {
         },
       };
 
-      const result = findAndInlineDataURILinks(value);
+      const result = findAndInlineDataUriLinks(value);
       expect(result).not.toBe(value);
       expect(result.untouched).toBe(untouched);
       expect(result.change).toBe("inline me");
     });
 
     it("should handle primitives", () => {
-      expect(findAndInlineDataURILinks("string")).toBe("string");
-      expect(findAndInlineDataURILinks(42)).toBe(42);
-      expect(findAndInlineDataURILinks(true)).toBe(true);
-      expect(findAndInlineDataURILinks(null)).toBe(null);
+      expect(findAndInlineDataUriLinks("string")).toBe("string");
+      expect(findAndInlineDataUriLinks(42)).toBe(42);
+      expect(findAndInlineDataUriLinks(true)).toBe(true);
+      expect(findAndInlineDataUriLinks(null)).toBe(null);
     });
 
     it("should deeply traverse nested structures", () => {
-      const dataURI = dataURIFromValueWithResolvedLinks("deep value");
+      const dataURI = dataUriFromValueWithResolvedLinks("deep value");
       const complex = {
         level1: {
           level2: [
@@ -262,12 +262,12 @@ describe("data URI inlining", () => {
         },
       };
 
-      const result = findAndInlineDataURILinks(complex);
+      const result = findAndInlineDataUriLinks(complex);
       expect(result.level1.level2[0].level3).toBe("deep value");
     });
 
     it("should handle data URIs with schema", () => {
-      const dataURI = dataURIFromValueWithResolvedLinks(42);
+      const dataURI = dataUriFromValueWithResolvedLinks(42);
       const link = {
         "/": {
           [LINK_V1_TAG]: {
@@ -278,7 +278,7 @@ describe("data URI inlining", () => {
         },
       };
 
-      const result = findAndInlineDataURILinks(link);
+      const result = findAndInlineDataUriLinks(link);
       expect(result).toBe(42);
     });
 
@@ -286,7 +286,7 @@ describe("data URI inlining", () => {
       const innerCell = runtime.getCell(space, "inner", undefined, tx);
       innerCell.set({ nested: { value: "data" } });
 
-      const dataURI = dataURIFromValueWithResolvedLinks(innerCell.getAsLink({
+      const dataURI = dataUriFromValueWithResolvedLinks(innerCell.getAsLink({
         includeSchema: true,
       }));
       const link = {
@@ -299,7 +299,7 @@ describe("data URI inlining", () => {
         },
       };
 
-      const result = findAndInlineDataURILinks(link);
+      const result = findAndInlineDataUriLinks(link);
       expect(result).toMatchObject({
         "/": {
           [LINK_V1_TAG]: {
@@ -312,7 +312,7 @@ describe("data URI inlining", () => {
 
   describe("setRaw with data URI inlining", () => {
     it("should inline data URIs when using setRaw", () => {
-      const dataURI = dataURIFromValueWithResolvedLinks("inlined value");
+      const dataURI = dataUriFromValueWithResolvedLinks("inlined value");
       const targetCell = runtime.getCell(space, "target", undefined, tx);
 
       const link = {
@@ -329,8 +329,8 @@ describe("data URI inlining", () => {
     });
 
     it("should inline nested data URIs in objects", () => {
-      const dataURI1 = dataURIFromValueWithResolvedLinks("value1");
-      const dataURI2 = dataURIFromValueWithResolvedLinks("value2");
+      const dataURI1 = dataUriFromValueWithResolvedLinks("value1");
+      const dataURI2 = dataUriFromValueWithResolvedLinks("value2");
       const targetCell = runtime.getCell(space, "target", undefined, tx);
 
       targetCell.setRaw({
@@ -359,7 +359,7 @@ describe("data URI inlining", () => {
     });
 
     it("should inline data URIs in arrays", () => {
-      const dataURI = dataURIFromValueWithResolvedLinks("array item");
+      const dataURI = dataUriFromValueWithResolvedLinks("array item");
       const targetCell = runtime.getCell(space, "target", undefined, tx);
 
       targetCell.setRaw([
@@ -380,7 +380,7 @@ describe("data URI inlining", () => {
 
   describe("diffAndUpdate with data URI inlining", () => {
     it("should inline data URIs during diffAndUpdate", () => {
-      const dataURI = dataURIFromValueWithResolvedLinks("updated value");
+      const dataURI = dataUriFromValueWithResolvedLinks("updated value");
       const targetCell = runtime.getCell(space, "target", undefined, tx);
       targetCell.set({ initial: "value" });
 
@@ -398,7 +398,7 @@ describe("data URI inlining", () => {
     });
 
     it("should handle data URIs with complex nested structures", () => {
-      const dataURI = dataURIFromValueWithResolvedLinks({
+      const dataURI = dataUriFromValueWithResolvedLinks({
         nested: {
           array: [1, 2, 3],
           obj: { key: "value" },
@@ -425,7 +425,7 @@ describe("data URI inlining", () => {
     });
 
     it("should not write data URIs to storage", () => {
-      const dataURI = dataURIFromValueWithResolvedLinks("test");
+      const dataURI = dataUriFromValueWithResolvedLinks("test");
       const targetCell = runtime.getCell(space, "target", undefined, tx);
 
       const link = {
@@ -458,7 +458,7 @@ describe("data URI inlining", () => {
           },
         },
       };
-      const dataURI = dataURIFromValueWithResolvedLinks({
+      const dataURI = dataUriFromValueWithResolvedLinks({
         link: relativeLink,
         other: { path: "success" },
       });
@@ -474,7 +474,7 @@ describe("data URI inlining", () => {
       };
 
       // The relative link should be fully resolved to the actual value
-      const result = findAndInlineDataURILinks(link);
+      const result = findAndInlineDataUriLinks(link);
 
       // Should return the final resolved value "success"
       expect(result).toBe("success");
@@ -518,7 +518,7 @@ describe("data URI inlining", () => {
       };
 
       // Embed the link in a data URI at some intermediate level
-      const dataURI = dataURIFromValueWithResolvedLinks({
+      const dataURI = dataUriFromValueWithResolvedLinks({
         intermediate: linkToOtherDoc,
       });
 
@@ -533,7 +533,7 @@ describe("data URI inlining", () => {
         },
       };
 
-      const result = findAndInlineDataURILinks(complexLink);
+      const result = findAndInlineDataUriLinks(complexLink);
 
       // Result should be a link pointing into the linked document
       // with the path extended beyond the data URI's structure
@@ -572,7 +572,7 @@ describe("data URI inlining", () => {
           },
         },
       };
-      const dataURI = dataURIFromValueWithResolvedLinks(relativeLink);
+      const dataURI = dataUriFromValueWithResolvedLinks(relativeLink);
 
       // Link with additional path that goes beyond the relative link
       const link = {
@@ -584,7 +584,7 @@ describe("data URI inlining", () => {
         },
       };
 
-      const result = findAndInlineDataURILinks(link);
+      const result = findAndInlineDataUriLinks(link);
 
       // Should combine the paths: relative link's path + additional path
       expect(result).toMatchObject({
@@ -612,7 +612,7 @@ describe("data URI inlining", () => {
       const linkToTarget = targetCell.getAsLink();
 
       // Wrap it in a data URI
-      const dataURI1 = dataURIFromValueWithResolvedLinks({
+      const dataURI1 = dataUriFromValueWithResolvedLinks({
         wrapped: linkToTarget,
       });
 
@@ -627,7 +627,7 @@ describe("data URI inlining", () => {
       };
 
       // Wrap that in another data URI
-      const dataURI2 = dataURIFromValueWithResolvedLinks({
+      const dataURI2 = dataUriFromValueWithResolvedLinks({
         doubleWrapped: linkToDataURI1,
       });
 
@@ -641,7 +641,7 @@ describe("data URI inlining", () => {
         },
       };
 
-      const result = findAndInlineDataURILinks(finalLink);
+      const result = findAndInlineDataUriLinks(finalLink);
 
       // Should eventually resolve to a link to the target cell
       expect(result).toMatchObject({
@@ -682,7 +682,7 @@ describe("data URI inlining", () => {
         },
       };
 
-      const dataURI = dataURIFromValueWithResolvedLinks(linkWithSchema);
+      const dataURI = dataUriFromValueWithResolvedLinks(linkWithSchema);
 
       // Path extends into the linked document
       const link = {
@@ -694,7 +694,7 @@ describe("data URI inlining", () => {
         },
       };
 
-      const result = findAndInlineDataURILinks(link);
+      const result = findAndInlineDataUriLinks(link);
 
       // Should return a link with the extended path and resolved schema
       expect(result).toMatchObject({

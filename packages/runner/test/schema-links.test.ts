@@ -11,7 +11,7 @@ import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { ID, type JSONSchema } from "../src/builder/types.ts";
 import { diffAndUpdate } from "../src/data-updating.ts";
 import { Runtime } from "../src/runtime.ts";
-import { dataURIFromValueWithResolvedLinks } from "../src/data-uri.ts";
+import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
 import { areLinksSame } from "../src/link-utils.ts";
 import { toCell } from "../src/back-to-cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -1727,7 +1727,7 @@ describe("Schema - Link Resolution", () => {
       } as FabricValue);
 
       // data cell's system points to cellB's argument.system
-      const dataCellURI = dataURIFromValueWithResolvedLinks({
+      const dataCellURI = dataUriFromValueWithResolvedLinks({
         "system": cellB.key("argument").key("system").getAsWriteRedirectLink({
           includeSchema: true,
         }),

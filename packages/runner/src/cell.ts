@@ -108,8 +108,8 @@ import {
 } from "./sigil-types.ts";
 import type { Runtime } from "./runtime.ts";
 import {
-  dataURIFromValueWithResolvedLinks,
-  findAndInlineDataURILinks,
+  dataUriFromValueWithResolvedLinks,
+  findAndInlineDataUriLinks,
 } from "./data-uri.ts";
 import {
   areLinksSame,
@@ -2146,7 +2146,7 @@ export class CellImpl<T extends FabricValue>
     // retry on conflict.
     if (!this.synced) this.sync();
 
-    const inlined = findAndInlineDataURILinks(value);
+    const inlined = findAndInlineDataUriLinks(value);
 
     // When asked to write only on change, read the current raw value and bail
     // out if it already equals what we'd write. `readValueOrThrow` mirrors the
@@ -2837,7 +2837,7 @@ function maybeConvertArrayPathToDataURILink(
 
   return {
     ...link,
-    id: dataURIFromValueWithResolvedLinks(candidate.value, baseLink),
+    id: dataUriFromValueWithResolvedLinks(candidate.value, baseLink),
     path: candidate.remainingPath,
   };
 }

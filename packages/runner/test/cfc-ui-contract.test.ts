@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
-import { dataURIFromValue } from "../src/data-uri-codec.ts";
+import { dataUriFromValue } from "../src/data-uri-codec.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -617,7 +617,7 @@ describe("CFC trusted UI event enforcement", () => {
     const eventEnvelopeLink = {
       "/": {
         [LINK_V1_TAG]: {
-          id: dataURIFromValue({ $event: rawTrustedEvent }),
+          id: dataUriFromValue({ $event: rawTrustedEvent }),
           path: ["$event"],
           space,
         },

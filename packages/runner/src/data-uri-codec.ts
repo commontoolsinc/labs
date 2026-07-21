@@ -1,8 +1,8 @@
 /**
  * The `data:` URI codec, complete and self-contained: the media-type
- * facts, the mint half ({@link dataURIFromValue}), and the read half
- * ({@link valueFromDataURI}, {@link extractDataURIPayloadText},
- * {@link valueFromDataURIPayloadText}). This is a leaf module -- its only
+ * facts, the mint half ({@link dataUriFromValue}), and the read half
+ * ({@link valueFromDataUri}, {@link extractDataUriPayloadText},
+ * {@link valueFromDataUriPayloadText}). This is a leaf module -- its only
  * dependencies are `data-model`, `utils`, and type imports -- so any
  * module, however graph-entangled, can use the codec without importing
  * the cell/link machinery. (That leafness is load-bearing: see the
@@ -28,7 +28,7 @@ export const DATA_URI_MEDIA_TYPE = "application/vnd.common-fabric.data";
  * accepted; there are no parameters (the payload is always base64url of
  * UTF-8 text, so none are needed).
  */
-export function isDataURIMediaType(mediaType: string): boolean {
+export function isDataUriMediaType(mediaType: string): boolean {
   return mediaType === DATA_URI_MEDIA_TYPE;
 }
 
@@ -37,7 +37,7 @@ export function isDataURIMediaType(mediaType: string): boolean {
  * only -- notably NOT any-`data:`-URI-at-all; the payload
  * is not validated.)
  */
-export function isDataURI(id: string): boolean {
+export function isDataUri(id: string): boolean {
   return id.startsWith(`data:${DATA_URI_MEDIA_TYPE}`);
 }
 
@@ -45,10 +45,10 @@ export function isDataURI(id: string): boolean {
  * Assembles a `data:` URI carrying (the encoding of) `value` -- the
  * single place the URI shape is put together: scheme, media type, and the
  * base64url-of-UTF-8 `fvj1:` payload. Unlike
- * `data-uri.ts`'s `dataURIFromValueWithResolvedLinks()`, this does no link rewriting or
+ * `data-uri.ts`'s `dataUriFromValueWithResolvedLinks()`, this does no link rewriting or
  * other preparation of `value`; callers hand it a ready `FabricValue`.
  */
-export function dataURIFromValue(value: FabricValue): URI {
+export function dataUriFromValue(value: FabricValue): URI {
   const payload = toUnpaddedBase64url(
     new TextEncoder().encode(jsonFromValue(value)),
   );
@@ -85,7 +85,7 @@ const dataUriReconstructionContext = new EmptyReconstructionContext(
  * @throws If `uri` is not a `data:` URI with a comma, or its payload is
  *   not base64url.
  */
-export function extractDataURIPayloadText(
+export function extractDataUriPayloadText(
   uri: string,
 ): { mediaType: string; text: string } {
   const commaIndex = uri.indexOf(",");
@@ -121,7 +121,7 @@ export function extractDataURIPayloadText(
  * `FabricInstance`s. This is the single point of truth for how such
  * payloads read, shared by every reader of them; per-reader payload
  * extraction and error policy stay with the readers (see
- * {@link valueFromDataURI} and `storage/transaction/attestation.ts`'s
+ * {@link valueFromDataUri} and `storage/transaction/attestation.ts`'s
  * `load()`).
  *
  * Only the standard encoding is accepted, from external minters as much as
@@ -133,16 +133,16 @@ export function extractDataURIPayloadText(
  * @throws If `text` is not a valid encoded `FabricValue` -- including when
  *   it is empty or is bare JSON.
  */
-export function valueFromDataURIPayloadText(text: string): FabricValue {
+export function valueFromDataUriPayloadText(text: string): FabricValue {
   return valueFromJson(text, dataUriReconstructionContext);
 }
 
 /**
  * Extracts and decodes the payload of a `data:` URI of this codec. Exactly one
- * shape is accepted -- the shape {@link dataURIFromValue} writes: the
+ * shape is accepted -- the shape {@link dataUriFromValue} writes: the
  * `application/vnd.common-fabric.data` media type with no parameters, and
  * a base64url payload carrying the `fvj1:`-tagged `FabricValue` encoding
- * as UTF-8 text (decoded via {@link valueFromDataURIPayloadText}).
+ * as UTF-8 text (decoded via {@link valueFromDataUriPayloadText}).
  *
  * @param uri The `data:` URI to read.
  * @returns The decoded payload.
@@ -150,10 +150,10 @@ export function valueFromDataURIPayloadText(text: string): FabricValue {
  *   payload is not a valid encoded `FabricValue` (which includes the empty
  *   payload and bare JSON).
  */
-export function valueFromDataURI(uri: URI | string): any {
-  const { mediaType, text } = extractDataURIPayloadText(uri);
-  if (!isDataURIMediaType(mediaType)) {
+export function valueFromDataUri(uri: URI | string): any {
+  const { mediaType, text } = extractDataUriPayloadText(uri);
+  if (!isDataUriMediaType(mediaType)) {
     throw new Error(`Invalid URI: ${uri}`);
   }
-  return valueFromDataURIPayloadText(text);
+  return valueFromDataUriPayloadText(text);
 }

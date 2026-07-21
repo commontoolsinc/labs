@@ -3,9 +3,9 @@
  * between this module and `data-uri-codec.ts` is the need for the
  * cell/link machinery: everything that can be expressed against
  * `data-model` alone lives in the codec (a leaf module); this module holds
- * the two operations that cannot -- {@link dataURIFromValueWithResolvedLinks},
+ * the two operations that cannot -- {@link dataUriFromValueWithResolvedLinks},
  * which rewrites relative links against a base before encoding, and
- * {@link findAndInlineDataURILinks}, which dissolves `data:` URI links
+ * {@link findAndInlineDataUriLinks}, which dissolves `data:` URI links
  * back into the values they carry.
  *
  * The payload encodes the cell's VALUE, and the codec's decode entry
@@ -39,7 +39,7 @@ import {
 } from "./link-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { URI } from "./sigil-types.ts";
-import { dataURIFromValue, valueFromDataURI } from "./data-uri-codec.ts";
+import { dataUriFromValue, valueFromDataUri } from "./data-uri-codec.ts";
 
 /**
  * Makes a `data:` URI that names a cell whose content is carried in the id
@@ -50,7 +50,7 @@ import { dataURIFromValue, valueFromDataURI } from "./data-uri-codec.ts";
  * the address grammar needs is synthesized on read (see the module doc).
  *
  * This is the encode half of the matched set this module exists to hold;
- * {@link valueFromDataURI} is what reads back what this writes. Both
+ * {@link valueFromDataUri} is what reads back what this writes. Both
  * sides speak only the standard `data-model` `FabricValue` encoding
  * (tagged `fvj1:`).
  *
@@ -70,7 +70,7 @@ import { dataURIFromValue, valueFromDataURI } from "./data-uri-codec.ts";
  * @returns A `data:` URI naming a cell whose content is `data`.
  * @throws If `data` contains a reference cycle.
  */
-export function dataURIFromValueWithResolvedLinks(
+export function dataUriFromValueWithResolvedLinks(
   data: FabricValue,
   base?: Cell | NormalizedLink,
 ): URI {
@@ -123,7 +123,7 @@ export function dataURIFromValueWithResolvedLinks(
     }
   }
 
-  return dataURIFromValue(
+  return dataUriFromValue(
     traverseAndAddBaseIdToRelativeLinks(data, new Set()),
   );
 }
@@ -144,12 +144,12 @@ export function dataURIFromValueWithResolvedLinks(
  * @param value - The value to find and inline data: URI links in.
  * @returns The value with any data: URI links inlined.
  */
-export function findAndInlineDataURILinks(value: any): any {
+export function findAndInlineDataUriLinks(value: any): any {
   if (isCellLink(value)) {
     const dataLink = parseLink(value)!;
 
     if (dataLink.id?.startsWith("data:")) {
-      let dataValue: any = valueFromDataURI(dataLink.id);
+      let dataValue: any = valueFromDataUri(dataLink.id);
       const path = [...dataLink.path];
 
       // If there is a link on the way to `path`, follow it, appending remaining
@@ -181,7 +181,7 @@ export function findAndInlineDataURILinks(value: any): any {
             includeSchema: true,
             keepAsCell: KeepAsCell.All,
           });
-          return findAndInlineDataURILinks(newSigilLink);
+          return findAndInlineDataUriLinks(newSigilLink);
         }
         if (path.length > 0) {
           dataValue = dataValue[path.shift()!];
@@ -199,7 +199,7 @@ export function findAndInlineDataURILinks(value: any): any {
     for (let index = 0; index < value.length; index++) {
       if (!(index in value)) continue;
       const current = value[index];
-      const inlined = findAndInlineDataURILinks(current);
+      const inlined = findAndInlineDataUriLinks(current);
       if (next) {
         next[index] = inlined;
       } else if (!Object.is(inlined, current)) {
@@ -213,7 +213,7 @@ export function findAndInlineDataURILinks(value: any): any {
   } else if (isRecord(value)) {
     let next: Record<string, unknown> | undefined;
     for (const [key, entry] of Object.entries(value)) {
-      const inlined = findAndInlineDataURILinks(entry);
+      const inlined = findAndInlineDataUriLinks(entry);
       if (next) {
         next[key] = inlined;
       } else if (!Object.is(inlined, entry)) {

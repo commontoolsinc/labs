@@ -13,8 +13,8 @@ const uriOf = (payload: string): URI =>
   }` as URI;
 
 // `load()` is the storage-transaction-side reader of `data:` URI documents,
-// separate from `data-uri.ts`'s `valueFromDataURI()`. Both route payload
-// text through `valueFromDataURIPayloadText()`, so the two readers cannot
+// separate from `data-uri.ts`'s `valueFromDataUri()`. Both route payload
+// text through `valueFromDataUriPayloadText()`, so the two readers cannot
 // silently diverge on what a payload means.
 describe("attestation `load()` of `data:` URIs", () => {
   it("errors on a historical bare-JSON payload", () => {
