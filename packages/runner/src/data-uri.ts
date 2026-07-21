@@ -204,9 +204,10 @@ export function getJSONFromDataURI(uri: URI | string): any {
  * `data:` and the first comma) is returned verbatim as the media type;
  * there are no header parameters in this format, so a header carrying any
  * (`;charset=`, `;base64`, ...) simply fails the caller's media-type
- * check. The payload is base64url of UTF-8 text; a raw `?` or
- * `#` after the comma delimits a query or fragment per the URL grammar and
- * is not part of the payload.
+ * check. The payload is base64url of UTF-8 text. A raw `?` or `#` after
+ * the comma delimits a query or fragment per the URL grammar; everything
+ * from that delimiter onward (the delimiter included) is ignored -- it is
+ * neither decoded, nor validated, nor returned.
  *
  * @param uri The `data:` URI to split.
  * @returns The media type and the decoded payload text.
