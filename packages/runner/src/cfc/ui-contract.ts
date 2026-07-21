@@ -3,7 +3,7 @@ import type { CellScope, JSONSchema } from "../builder/types.ts";
 import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { findAndInlineDataURILinks } from "../data-uri.ts";
-import { isDataCellURI, valueFromDataCellURI } from "../data-uri-codec.ts";
+import { isDataURI, valueFromDataURI } from "../data-uri-codec.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import type { CfcAddress } from "./types.ts";
 import { isNormalizedFullLink } from "../link-types.ts";
@@ -529,8 +529,8 @@ const eventEnvelopePayloads = (
   }
   try {
     const eventLink = parseLink(event);
-    if (eventLink?.id && isDataCellURI(eventLink.id)) {
-      const decoded = valueFromDataCellURI(eventLink.id);
+    if (eventLink?.id && isDataURI(eventLink.id)) {
+      const decoded = valueFromDataURI(eventLink.id);
       addPayload(decoded, eventLink.space);
     }
   } catch {

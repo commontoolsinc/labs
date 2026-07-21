@@ -39,10 +39,7 @@ import {
 } from "./link-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { URI } from "./sigil-types.ts";
-import {
-  dataCellURIFromValue,
-  valueFromDataCellURI,
-} from "./data-uri-codec.ts";
+import { dataURIFromValue, valueFromDataURI } from "./data-uri-codec.ts";
 
 /**
  * Makes a `data:` URI that names a cell whose content is carried in the id
@@ -53,7 +50,7 @@ import {
  * the address grammar needs is synthesized on read (see the module doc).
  *
  * This is the encode half of the matched set this module exists to hold;
- * {@link valueFromDataCellURI} is what reads back what this writes. Both
+ * {@link valueFromDataURI} is what reads back what this writes. Both
  * sides speak only the standard `data-model` `FabricValue` encoding
  * (tagged `fvj1:`).
  *
@@ -126,7 +123,7 @@ export function dataCellURIWithResolvedLinks(
     }
   }
 
-  return dataCellURIFromValue(
+  return dataURIFromValue(
     traverseAndAddBaseIdToRelativeLinks(data, new Set()),
   );
 }
@@ -152,7 +149,7 @@ export function findAndInlineDataURILinks(value: any): any {
     const dataLink = parseLink(value)!;
 
     if (dataLink.id?.startsWith("data:")) {
-      let dataValue: any = valueFromDataCellURI(dataLink.id);
+      let dataValue: any = valueFromDataURI(dataLink.id);
       const path = [...dataLink.path];
 
       // If there is a link on the way to `path`, follow it, appending remaining

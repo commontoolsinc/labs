@@ -1,8 +1,8 @@
 /**
- * The `data:` cell URI codec, complete and self-contained: the media-type
- * facts, the mint half ({@link dataCellURIFromValue}), and the read half
- * ({@link valueFromDataCellURI}, {@link extractDataURIPayloadText},
- * {@link valueFromDataCellPayloadText}). This is a leaf module -- its only
+ * The `data:` URI codec, complete and self-contained: the media-type
+ * facts, the mint half ({@link dataURIFromValue}), and the read half
+ * ({@link valueFromDataURI}, {@link extractDataURIPayloadText},
+ * {@link valueFromDataURIPayloadText}). This is a leaf module -- its only
  * dependencies are `data-model`, `utils`, and type imports -- so any
  * module, however graph-entangled, can use the codec without importing
  * the cell/link machinery. (That leafness is load-bearing: see the
@@ -20,38 +20,39 @@ import { valueFromJson } from "@commonfabric/data-model/codec-json";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import type { URI } from "@commonfabric/memory/interface";
 
-/** The media type minted for `data:` cell URIs. */
-export const DATA_CELL_MEDIA_TYPE = "application/vnd.common-fabric.data";
+/** The media type minted for `data:` URIs. */
+export const DATA_URI_MEDIA_TYPE = "application/vnd.common-fabric.data";
 
 /**
- * Is `mediaType` the `data:` cell URI media type? Exactly one type is
+ * Is `mediaType` the `data:` URI media type? Exactly one type is
  * accepted; there are no parameters (the payload is always base64url of
  * UTF-8 text, so none are needed).
  */
-export function isDataCellMediaType(mediaType: string): boolean {
-  return mediaType === DATA_CELL_MEDIA_TYPE;
+export function isDataURIMediaType(mediaType: string): boolean {
+  return mediaType === DATA_URI_MEDIA_TYPE;
 }
 
 /**
- * Does `id` look like a `data:` cell URI? (Prefix check only; the payload
+ * Does `id` look like one of this codec's `data:` URIs? (Prefix check
+ * only -- notably NOT any-`data:`-URI-at-all; the payload
  * is not validated.)
  */
-export function isDataCellURI(id: string): boolean {
-  return id.startsWith(`data:${DATA_CELL_MEDIA_TYPE}`);
+export function isDataURI(id: string): boolean {
+  return id.startsWith(`data:${DATA_URI_MEDIA_TYPE}`);
 }
 
 /**
- * Assembles a `data:` cell URI carrying (the encoding of) `value` -- the
+ * Assembles a `data:` URI carrying (the encoding of) `value` -- the
  * single place the URI shape is put together: scheme, media type, and the
  * base64url-of-UTF-8 `fvj1:` payload. Unlike
  * `data-uri.ts`'s `dataCellURIWithResolvedLinks()`, this does no link rewriting or
  * other preparation of `value`; callers hand it a ready `FabricValue`.
  */
-export function dataCellURIFromValue(value: FabricValue): URI {
+export function dataURIFromValue(value: FabricValue): URI {
   const payload = toUnpaddedBase64url(
     new TextEncoder().encode(jsonFromValue(value)),
   );
-  return `data:${DATA_CELL_MEDIA_TYPE},${payload}` as URI;
+  return `data:${DATA_URI_MEDIA_TYPE},${payload}` as URI;
 }
 
 /** Shared text decoder, created once. */
@@ -114,13 +115,13 @@ export function extractDataURIPayloadText(
 }
 
 /**
- * Decodes the extracted payload text of a `data:` cell URI,
+ * Decodes the extracted payload text of a `data:` URI of this codec,
  * which must be in the standard `data-model` `FabricValue` JSON-embedded
  * encoding (tagged `fvj1:`). Results are deep-frozen and may contain
  * `FabricInstance`s. This is the single point of truth for how such
  * payloads read, shared by every reader of them; per-reader payload
  * extraction and error policy stay with the readers (see
- * {@link valueFromDataCellURI} and `storage/transaction/attestation.ts`'s
+ * {@link valueFromDataURI} and `storage/transaction/attestation.ts`'s
  * `load()`).
  *
  * Only the standard encoding is accepted, from external minters as much as
@@ -132,27 +133,27 @@ export function extractDataURIPayloadText(
  * @throws If `text` is not a valid encoded `FabricValue` -- including when
  *   it is empty or is bare JSON.
  */
-export function valueFromDataCellPayloadText(text: string): FabricValue {
+export function valueFromDataURIPayloadText(text: string): FabricValue {
   return valueFromJson(text, dataUriReconstructionContext);
 }
 
 /**
- * Extracts and decodes the payload of a `data:` cell URI. Exactly one
- * shape is accepted -- the shape {@link dataCellURIFromValue} writes: the
+ * Extracts and decodes the payload of a `data:` URI of this codec. Exactly one
+ * shape is accepted -- the shape {@link dataURIFromValue} writes: the
  * `application/vnd.common-fabric.data` media type with no parameters, and
  * a base64url payload carrying the `fvj1:`-tagged `FabricValue` encoding
- * as UTF-8 text (decoded via {@link valueFromDataCellPayloadText}).
+ * as UTF-8 text (decoded via {@link valueFromDataURIPayloadText}).
  *
  * @param uri The `data:` URI to read.
  * @returns The decoded payload.
- * @throws If `uri` is not a `data:` cell URI of exactly that shape, or its
+ * @throws If `uri` is not a `data:` URI of exactly that shape, or its
  *   payload is not a valid encoded `FabricValue` (which includes the empty
  *   payload and bare JSON).
  */
-export function valueFromDataCellURI(uri: URI | string): any {
+export function valueFromDataURI(uri: URI | string): any {
   const { mediaType, text } = extractDataURIPayloadText(uri);
-  if (!isDataCellMediaType(mediaType)) {
+  if (!isDataURIMediaType(mediaType)) {
     throw new Error(`Invalid URI: ${uri}`);
   }
-  return valueFromDataCellPayloadText(text);
+  return valueFromDataURIPayloadText(text);
 }

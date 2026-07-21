@@ -11,23 +11,23 @@ import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import type { URI } from "@commonfabric/memory/interface";
 
 /** The media type minted for `data:` cell URIs. */
-export const DATA_CELL_MEDIA_TYPE = "application/vnd.common-fabric.data";
+export const DATA_URI_MEDIA_TYPE = "application/vnd.common-fabric.data";
 
 /**
  * Is `mediaType` the `data:` cell URI media type? Exactly one type is
  * accepted; there are no parameters (the payload is always base64url of
  * UTF-8 text, so none are needed).
  */
-export function isDataCellMediaType(mediaType: string): boolean {
-  return mediaType === DATA_CELL_MEDIA_TYPE;
+export function isDataURIMediaType(mediaType: string): boolean {
+  return mediaType === DATA_URI_MEDIA_TYPE;
 }
 
 /**
  * Does `id` look like a `data:` cell URI? (Prefix check only; the payload
  * is not validated.)
  */
-export function isDataCellURI(id: string): boolean {
-  return id.startsWith(`data:${DATA_CELL_MEDIA_TYPE}`);
+export function isDataURI(id: string): boolean {
+  return id.startsWith(`data:${DATA_URI_MEDIA_TYPE}`);
 }
 
 /**
@@ -41,5 +41,5 @@ export function mintDataCellURI(value: FabricValue): URI {
   const payload = toUnpaddedBase64url(
     new TextEncoder().encode(jsonFromValue(value)),
   );
-  return `data:${DATA_CELL_MEDIA_TYPE},${payload}` as URI;
+  return `data:${DATA_URI_MEDIA_TYPE},${payload}` as URI;
 }
