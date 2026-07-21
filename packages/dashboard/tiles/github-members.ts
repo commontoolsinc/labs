@@ -34,7 +34,7 @@ const isCount = (value: unknown): value is number =>
 
 const isPoint = (value: unknown): value is Point =>
   typeof value === "object" && value !== null &&
-  typeof (value as Point).t === "number" &&
+  Number.isFinite((value as Point).t) &&
   isCount((value as Point).members) &&
   isCount((value as Point).collaborators);
 

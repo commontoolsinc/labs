@@ -232,6 +232,26 @@ Deno.test("github users: transitional overlap counts once and draws retained his
   });
 });
 
+Deno.test("github users: a non-finite persisted timestamp is discarded", async () => {
+  clock = T0;
+  await withWire({
+    reply: (url) =>
+      url.pathname.endsWith("/outside_collaborators") ? users(3) : users(1, 2),
+    read: () =>
+      Promise.resolve('[{"t":1e400,"members":99,"collaborators":99}]'),
+  }, async (wire) => {
+    const view = await createGithubMembers().collect(
+      ctx({ GH_TOKEN: "token" }),
+    );
+
+    assertEquals(view.duration, 0);
+    assert(!(view.extra ?? "").includes("<svg"));
+    assertEquals(JSON.parse(wire.writes[0].data), [
+      { t: T0, members: 2, collaborators: 1 },
+    ]);
+  });
+});
+
 Deno.test("github users: a new history window shows both counts without a chart", async () => {
   clock = T0 + 90 * DAY;
   await withWire({
