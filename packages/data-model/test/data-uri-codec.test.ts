@@ -64,6 +64,37 @@ describe("data-uri-codec", () => {
       expect(Object.is(parsed.z, -0)).toBe(true);
       expect(Object.is(parsed.i, -Infinity)).toBe(true);
     });
+
+    // Distinctness is a separate property from round-tripping, and the more
+    // important one here: these URIs are content addresses, so two values that
+    // are not equal must not mint the same identifier. A codec could round-trip
+    // every value faithfully and still collide.
+    it("mints distinct URIs for `-0` and `+0`", () => {
+      expect(dataUriFromValue(-0)).not.toBe(dataUriFromValue(0));
+      expect(dataUriFromValue({ z: -0 })).not.toBe(dataUriFromValue({ z: 0 }));
+    });
+
+    it("mints distinct URIs for the two infinities", () => {
+      expect(dataUriFromValue(Infinity)).not.toBe(
+        dataUriFromValue(-Infinity),
+      );
+    });
+
+    it("mints distinct URIs for `NaN` and other non-finites", () => {
+      expect(dataUriFromValue(NaN)).not.toBe(dataUriFromValue(Infinity));
+      expect(dataUriFromValue(NaN)).not.toBe(dataUriFromValue(-Infinity));
+    });
+
+    it("mints one URI for every `NaN`", () => {
+      expect(dataUriFromValue(NaN)).toBe(dataUriFromValue(0 / 0));
+      expect(dataUriFromValue({ n: NaN })).toBe(
+        dataUriFromValue({ n: Number("x") }),
+      );
+    });
+
+    it("mints the same URI for repeated `-0`", () => {
+      expect(dataUriFromValue(-0)).toBe(dataUriFromValue(-0));
+    });
   });
 
   describe("valueFromDataUriPayloadText", () => {
