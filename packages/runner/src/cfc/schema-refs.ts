@@ -4,6 +4,18 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import {
+  forEachSubschema,
+  mapSubschemas,
+  type SchemaWalkOptions,
+} from "../schema-walk.ts";
+
+// `$ref` discovery / rewriting must be COMPLETE over every subschema keyword,
+// including the ones we never emit: a ref this walk misses is a schema doc that
+// fails to replicate (fail-open). So opt into the unused-keyword tier
+// everywhere in this module. (`$defs` bodies stay dormant — reached through the
+// definition-scope logic, not this flag.)
+const ALL_SUBSCHEMAS: SchemaWalkOptions = { includeUnused: true };
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { rendererVDOMSchema, vnodeSchema } from "@commonfabric/runner/schemas";
 import { decodeJsonPointer, encodeJsonPointer } from "../link-types.ts";
@@ -42,29 +54,6 @@ const definitionIndexCache = new WeakMap<object, DefinitionIndex>();
 const prunedRootSchemaCache = new WeakMap<object, JSONSchema>();
 const prunedScopedSchemaCache = new WeakMap<object, JSONSchema>();
 const EMPTY_DEFINITIONS: SchemaDefinitions = Object.freeze({});
-
-const singleSubschemaKeys = [
-  "not",
-  "if",
-  "then",
-  "else",
-  "items",
-  "contains",
-  "additionalProperties",
-  "propertyNames",
-  "contentSchema",
-] as const;
-const arraySubschemaKeys = [
-  "allOf",
-  "anyOf",
-  "oneOf",
-  "prefixItems",
-] as const;
-const recordSubschemaKeys = [
-  "dependentSchemas",
-  "properties",
-  "patternProperties",
-] as const;
 
 // Caching resolveCfcSchemaRef also makes its result identity-STABLE per
 // (fullSchema, ref), which lets downstream identity-keyed hash/traverse caches
@@ -137,70 +126,6 @@ const localDefinitionName = (schemaRef: string): string | undefined => {
 const encodedLocalDefinitionRef = (name: string): string =>
   encodeJsonPointer(["#", "$defs", name]);
 
-const forEachSubschema = (
-  schema: JSONSchemaObj,
-  visit: (child: JSONSchema) => void,
-): void => {
-  for (const key of singleSubschemaKeys) {
-    const child = schema[key];
-    if (child !== undefined) visit(child);
-  }
-  for (const key of arraySubschemaKeys) {
-    for (const child of schema[key] ?? []) visit(child);
-  }
-  for (const key of recordSubschemaKeys) {
-    for (const child of Object.values(schema[key] ?? {})) visit(child);
-  }
-};
-
-const mapSubschemas = (
-  schema: JSONSchemaObj,
-  map: (child: JSONSchema) => JSONSchema,
-): JSONSchemaObj => {
-  let result: Record<string, unknown> | undefined;
-  const update = (key: string, value: unknown): void => {
-    result ??= { ...schema };
-    result[key] = value;
-  };
-
-  for (const key of singleSubschemaKeys) {
-    const child = schema[key];
-    if (child === undefined) continue;
-    const mapped = map(child);
-    if (mapped !== child) update(key, mapped);
-  }
-  for (const key of arraySubschemaKeys) {
-    const children = schema[key];
-    if (children === undefined) continue;
-    let mapped: JSONSchema[] | undefined;
-    for (let index = 0; index < children.length; index++) {
-      const child = children[index];
-      const next = map(child);
-      if (next !== child) {
-        mapped ??= [...children];
-        mapped[index] = next;
-      }
-    }
-    if (mapped !== undefined) update(key, mapped);
-  }
-  for (const key of recordSubschemaKeys) {
-    const children = schema[key];
-    if (children === undefined) continue;
-    let mapped: [string, JSONSchema][] | undefined;
-    const entries = Object.entries(children);
-    for (let index = 0; index < entries.length; index++) {
-      const [name, child] = entries[index];
-      const next = map(child);
-      if (next !== child) {
-        mapped ??= entries;
-        mapped[index] = [name, next];
-      }
-    }
-    if (mapped !== undefined) update(key, Object.fromEntries(mapped));
-  }
-  return (result ?? schema) as JSONSchemaObj;
-};
-
 const localDefinitionNamesInScope = (
   schema: JSONSchemaObj,
   definitions: SchemaDefinitions,
@@ -218,7 +143,7 @@ const localDefinitionNamesInScope = (
         child.$defs !== definitions
       ) return;
       collect(child);
-    });
+    }, ALL_SUBSCHEMAS);
   };
   collect(schema);
   for (const definition of Object.values(definitions)) {
@@ -270,6 +195,7 @@ const namespaceLocalDefinitionScope = (
         isRecord(child) && isRecord(child.$defs) && child.$defs !== definitions
           ? child
           : rewrite(child),
+      ALL_SUBSCHEMAS,
     );
   };
 
@@ -311,7 +237,7 @@ const summarizeCfcSchemaRefs = (schema: JSONSchema): SchemaRefSummary => {
     if (!(isRecord(child) && child.$defs !== undefined)) {
       addRefs(localDefinitions, childSummary.localDefinitions);
     }
-  });
+  }, ALL_SUBSCHEMAS);
 
   const summary: SchemaRefSummary = {
     all: all.size === 0 ? EMPTY_REFS : all,
@@ -447,6 +373,7 @@ const pruneCfcSchemaDefinitionsInternal = (
   let result = mapSubschemas(
     schema,
     (child) => pruneCfcSchemaDefinitionsInternal(child, true),
+    ALL_SUBSCHEMAS,
   );
   if (schema.$defs !== undefined) {
     const selected = selectReferencedCfcSchemaDefs(schema);

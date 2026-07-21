@@ -4,6 +4,7 @@ import {
   classifyArrayMethodCall,
   getLoweredArrayMethodName,
   getTypeAtLocationWithFallback,
+  preserveLineage,
   registerSyntheticCallType,
   typeToTypeNodeWithRegistry,
 } from "../../ast/mod.ts";
@@ -294,10 +295,13 @@ function createPatternCallWithParams(
     }
   }
 
-  const mapWithPatternCall = factory.createCallExpression(
-    mapWithPatternAccess,
-    methodCall.typeArguments,
-    args,
+  const mapWithPatternCall = preserveLineage(
+    factory.createCallExpression(
+      mapWithPatternAccess,
+      methodCall.typeArguments,
+      args,
+    ),
+    methodCall,
   );
 
   if (typeRegistry) {

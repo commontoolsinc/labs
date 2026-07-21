@@ -232,13 +232,15 @@ export function extractDataURIPayloadText(
     data = data.substring(0, delimIndex);
   }
 
-  let bytes: Uint8Array;
   try {
-    bytes = fromBase64url(data);
+    // Note that `textDecoder` uses the default configuration of
+    // `fatal: false`, so its `decode()` never throws; only the base64url
+    // decode can land in the `catch`.
+    const bytes = fromBase64url(data);
+    return { mediaType, text: textDecoder.decode(bytes) };
   } catch {
     throw new Error(`Invalid data URI payload (not base64url): ${uri}`);
   }
-  return { mediaType, text: textDecoder.decode(bytes) };
 }
 
 /**
