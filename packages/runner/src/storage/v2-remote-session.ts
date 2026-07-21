@@ -245,9 +245,20 @@ export class WebSocketTransport implements MemoryClient.Transport {
         try {
           this.#receiver(payload);
         } catch (error) {
-          // Receiver failures are the consumer's problem, not a transport
-          // gap: log and keep delivering (same as the non-negotiated path).
-          console.error("memory websocket receiver failed", error);
+          // A frame the consumer failed to apply is a gap: continuing would
+          // let the session ack past it from inconsistent state. Poison this
+          // socket and close so the client's reconnect machinery restores a
+          // consistent view from the server.
+          console.error(
+            "memory websocket receiver failed; reconnecting",
+            error,
+          );
+          poisoned = true;
+          try {
+            socket.close();
+          } catch {
+            // Ignore close races with the peer.
+          }
         }
       };
       socket.addEventListener("open", () => {

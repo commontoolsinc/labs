@@ -120,15 +120,25 @@ export class StandaloneMemoryServer {
         }
       });
       const debugWrites = Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";
+      // Closing drops chained-but-unstarted receives; frames already handed
+      // to receive() must settle before the connection closes.
+      let lastReceive: Promise<unknown> = Promise.resolve();
+      const closeConnection = () => {
+        void lastReceive.catch(() => undefined).finally(() =>
+          connection.close()
+        );
+      };
       const handleText = (text: string) => {
         if (debugWrites) {
           logCommitOperations(connectionTag, text);
         }
-        connection.receive(text).catch(() => {
+        const received = connection.receive(text);
+        lastReceive = received;
+        received.catch(() => {
           if (socket.readyState === WebSocket.OPEN) {
             socket.close(1011, "memory websocket receive failure");
           }
-          connection.close();
+          closeConnection();
         });
       };
       socket.addEventListener("message", (event) => {
@@ -149,17 +159,17 @@ export class StandaloneMemoryServer {
             );
           } catch {
             socket.close(1007, "memory websocket inflate failure");
-            connection.close();
+            closeConnection();
             return;
           }
           handleText(text);
           return;
         }
         socket.close(1003, "memory websocket expects text frames");
-        connection.close();
+        closeConnection();
       });
-      socket.addEventListener("close", () => connection.close());
-      socket.addEventListener("error", () => connection.close());
+      socket.addEventListener("close", () => closeConnection());
+      socket.addEventListener("error", () => closeConnection());
       return response;
     });
     return new StandaloneMemoryServer(memory, http);

@@ -311,8 +311,13 @@ const attachMemorySocketPipeline = (
       connection.close();
     }
   });
+  // The connection processes receives through an ordered chain, and closing
+  // drops chained-but-unstarted receives. Frames already handed to receive()
+  // — including the handoff's buffered flush — must settle before the close,
+  // or messages that arrived before the close event are silently discarded.
+  let lastReceive: Promise<unknown> = Promise.resolve();
   const closeConnection = () => {
-    connection.close();
+    void lastReceive.catch(() => undefined).finally(() => connection.close());
   };
 
   // Gated diagnostic write trace (off by default). `CF_DEBUG_MEMORY_WRITES=1`
@@ -348,7 +353,9 @@ const attachMemorySocketPipeline = (
         onMessage(message) {
           // Trace only after the receive resolves, so a message whose receive
           // fails (the fatal-error path below) is not logged as a write.
-          void connection.receive(message).then(
+          const received = connection.receive(message);
+          lastReceive = received;
+          void received.then(
             () => logMemWrites(message),
             () => {
               safeSocketClose(1011, "Memory websocket receive failure");

@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-07-16
+archived: 2026-07-21
+reason: "Spike record for the memory websocket deflate transport; the feature productionized in PR #4770 and live guidance moved to the memoryWsDeflate registry entry."
+---
+
 # Spike: websocket compression for the memory v2 transport
 
 Branch `spike/ws-compression`, based on main @ `f4faf22f1`. Status:
@@ -44,7 +51,9 @@ Files:
 ## Measured results (Lunch Poll two-browser flow, 2026-07-16)
 
 Same-run paired accounting: logical = UTF-8 bytes of the uncompressed text
-payload (identical to the metric PR #4712 uses), wire = bytes actually sent.
+payload (identical to the metric PR #4712 uses), wire = websocket payload
+bytes as sent (excludes frame headers, masking, and TLS — not an end-to-end
+bandwidth measurement).
 
 | Run                             | Result | Scenario wall | Bytes                                                                                        |
 | ------------------------------- | ------ | ------------: | -------------------------------------------------------------------------------------------- |
@@ -80,8 +89,10 @@ measured on top of already-interned payloads.
     stop offering, servers stop compressing outbound. Inbound decompression
     stays unconditional.
   - **Rollout order**: server support must deploy before clients offer.
-- **Ordering**: websocket delivery is ordered but deflate/inflate are async;
-  each direction of each connection funnels through a `SerialTaskQueue`. Order
+- **Ordering (client-side)**: the server codec is synchronous, so server
+  dispatch order is an event-loop property with no queues. Browsers only have
+  the async streaming codec, so on the CLIENT each direction funnels through a
+  `SerialTaskQueue`. Order
   is fixed at enqueue time, and the CLOSE notification queues behind pending
   inflates so every frame that arrived before a close is delivered before the
   close is signaled — the exact contract of the synchronous pre-spike path. (Two
@@ -103,8 +114,10 @@ measured on top of already-interned payloads.
   frame cannot poison later frames. Context takeover would buy roughly a further
   8 points (measured offline: −89% vs −81%) at the cost of per-connection window
   state; not worth it for a first pass.
-- **Zip-bomb guard**: streaming inflate with a 64 MiB cap per frame; the
-  server's 1 MiB pre-handshake negotiation buffer counts inflated bytes.
+- **Zip-bomb guard**: the client's streaming inflate caps a frame at 64 MiB;
+  the server's synchronous inflate caps inbound frames at 8 MiB (bounding
+  pre-authorization event-loop blocking); the server's 1 MiB pre-handshake
+  negotiation buffer counts queued (inflated) text bytes.
 
 ## Hardening before productionizing
 

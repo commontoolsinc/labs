@@ -44,7 +44,7 @@ was last checked against the code.
 | [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
-| [`memoryWsDeflate`](#memorywsdeflate) | `CF_MEMORY_WS_DEFLATE` env (negotiated per connection via websocket subprotocol) | on | William Kelly (spike) | graduate or delete after spike evaluation | SPIKE, on by default in the spike branch |
+| [`memoryWsDeflate`](#memorywsdeflate) | `CF_MEMORY_WS_DEFLATE` env (negotiated per connection via websocket subprotocol) | on | William Kelly (#4770) | graduate to always-on after fleet rollout | implemented, on by default |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
 
@@ -580,7 +580,9 @@ the per-epic implementation notes).
 ### `memoryWsDeflate`
 
 - **Toggle via.** `CF_MEMORY_WS_DEFLATE` env var (`0`/`false` disables;
-  anything else, including unset, enables). The switch gates only what a
+  anything else, including unset, enables). A Deno process whose env access is
+  permission-restricted cannot express an opt-out, so it defaults to NOT
+  offering (fail-safe); browsers have no env and default on. The switch gates only what a
   process SPENDS: Deno clients stop offering the subprotocol, and servers
   stop compressing their outbound. Servers always select an offered
   subprotocol and always accept compressed inbound — refusing an offer fails
@@ -588,7 +590,7 @@ the per-epic implementation notes).
   read env. Negotiated per connection via the `fvj1.deflate` websocket
   subprotocol declared in
   [`packages/memory/v2/transport-deflate.ts`](../../packages/memory/v2/transport-deflate.ts).
-- **Added by.** William Kelly, websocket compression spike (no PR yet).
+- **Added by.** William Kelly (#4770).
 - **Purpose.** Transport-level wire-size reduction: on a negotiated connection
   either peer may send a memory wire payload as a binary frame holding the
   raw-deflate compression of its UTF-8 bytes. Payloads under 192 bytes stay as
