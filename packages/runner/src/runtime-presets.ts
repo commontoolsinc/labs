@@ -67,6 +67,9 @@
  * |                            | against the real deployment, not the builder's   |
  * |                            | localhost fallback); constructor default in the  |
  * |                            | local presets (patternTest/localDev/unitTest)    |
+ * | clientVersion              | delta (productionServer, remoteClient,           |
+ * |                            | browserWorker) — shared build attestation for    |
+ * |                            | the system-pattern update version gate           |
  * | fetch                      | real everywhere; patternTest delta (mock)        |
  * | errorHandlers              | delta (collectors/telemetry), per preset         |
  * | consoleHandler             | delta (productionServer, browserWorker)          |
@@ -167,6 +170,19 @@ const _unclassifiedOptions: never[] = [] as MissingOptionKeys[];
 
 /** Reads one environment variable; pass `Deno.env.get` in Deno contexts. */
 export type EnvReader = (name: string) => string | undefined;
+
+/** Shared build attestation consumed by shell and headless runtimes. */
+export const CLIENT_VERSION_ENV_VAR = "COMMIT_SHA";
+
+/**
+ * Read the current Labs build identity for a headless runtime. Empty values
+ * remain unknown so callers cannot accidentally satisfy a version gate with
+ * whitespace.
+ */
+export function clientVersionFromEnv(env: EnvReader): string | undefined {
+  const value = env(CLIENT_VERSION_ENV_VAR)?.trim();
+  return value || undefined;
+}
 
 /**
  * The one env mapping for {@link ExperimentalOptions}. `null` declares a flag
@@ -272,6 +288,8 @@ function coreOptions(params: CoreParams): RuntimeOptions {
 // ---------------------------------------------------------------------------
 
 export interface ProductionServerPresetParams extends CoreParams {
+  /** This process's Labs git SHA, for the system-pattern update version gate. */
+  clientVersion?: string;
   /**
    * Base URL patterns see (`patternEnvironment.apiUrl`) for relative fetches.
    * Defaults to `apiUrl`; toolshed passes its public API_URL here while
@@ -284,6 +302,8 @@ export interface ProductionServerPresetParams extends CoreParams {
 }
 
 export interface RemoteClientPresetParams extends CoreParams {
+  /** This client build's Labs git SHA, for the system-pattern update version gate. */
+  clientVersion?: string;
   errorHandlers?: ErrorHandler[];
   navigateCallback?: NavigateCallback;
   /** Shared compiled-module-byte cache (integration suites). */
@@ -347,6 +367,9 @@ export const runtimePresets = {
     return {
       ...coreOptions(params),
       patternEnvironment: { apiUrl: params.patternApiUrl ?? params.apiUrl },
+      ...(params.clientVersion !== undefined
+        ? { clientVersion: params.clientVersion }
+        : {}),
       ...(params.consoleHandler !== undefined
         ? { consoleHandler: params.consoleHandler }
         : {}),
@@ -368,6 +391,9 @@ export const runtimePresets = {
     return {
       ...coreOptions(params),
       patternEnvironment: { apiUrl: params.apiUrl },
+      ...(params.clientVersion !== undefined
+        ? { clientVersion: params.clientVersion }
+        : {}),
       ...(params.errorHandlers !== undefined
         ? { errorHandlers: params.errorHandlers }
         : {}),

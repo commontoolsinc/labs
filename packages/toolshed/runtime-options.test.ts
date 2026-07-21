@@ -25,7 +25,12 @@ Deno.test("toolshedRuntimeOptions splits MEMORY_URL/API_URL and honors the env r
       API_URL: "http://api.test:9000/",
     },
     storageManager,
-    (name) => name === "EXPERIMENTAL_MODERN_CELL_REP" ? "true" : undefined,
+    (name) =>
+      name === "EXPERIMENTAL_MODERN_CELL_REP"
+        ? "true"
+        : name === "COMMIT_SHA"
+        ? "toolshed-source-sha"
+        : undefined,
   );
 
   assertEquals(options.apiUrl.href, "http://memory.test:8000/");
@@ -37,6 +42,7 @@ Deno.test("toolshedRuntimeOptions splits MEMORY_URL/API_URL and honors the env r
   assertEquals(options.experimental?.modernCellRep, true);
   // Unset flags stay unset (tri-state fidelity), not coerced.
   assertEquals(options.experimental?.persistentSchedulerState, undefined);
+  assertEquals(options.clientVersion, "toolshed-source-sha");
   assertEquals(options.cfcEnforcementMode, "enforce-explicit");
 });
 

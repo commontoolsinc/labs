@@ -1,6 +1,7 @@
 import {
   buildsMatch,
   type Cell,
+  clientVersionFromEnv,
   entityIdFrom,
   type EnvReader,
   experimentalOptionsFromEnv,
@@ -266,6 +267,7 @@ export class PiecesController<T = unknown> {
         spaceIdentity: session.spaceIdentity,
       }),
       experimental: experimentalOptionsFromEnv(readEnv),
+      clientVersion: clientVersionFromEnv(readEnv),
       moduleByteCache,
       patternCoverage,
       trustSnapshotProvider: () => ({
@@ -685,16 +687,39 @@ export class PiecesController<T = unknown> {
         return "repaired-provenance";
       };
 
-      // The version gate (step 4) validates `host`'s build, and the light
-      // ?identity is only trustworthy from that same build — so only act on a
-      // source served BY `host`. A cross-origin patternSource (a published /
-      // custom-app source on another host) would be gated against the wrong
-      // build; defer it to the cross-host published-pattern flow (Phase 4).
+      // The version gate (step 4) validates `host`'s build, and any replacement
+      // compiled from its source is only safe under that same build — so only
+      // act on a source served BY `host`. A cross-origin patternSource (a
+      // published / custom-app source on another host) would be gated against
+      // the wrong build; defer it to the cross-host published-pattern flow.
       const target = new URL(url, host);
       if (target.origin !== new URL(host).origin) {
         return "current";
       }
 
+      // 4. Version gate. This is a precondition for every mutation, including
+      // direct repair of an unloadable root. Falling back from ?identity to
+      // compilation does not make cross-build replacement safe.
+      const toolshedVersion = await runtime.toolshedGitSha(host);
+      if (!buildsMatch(runtime.clientVersion, toolshedVersion)) {
+        // An unknown sha on either side proves nothing — skip silently. The
+        // skew signal raises the shell's "reload to update" banner, which must
+        // only claim what is proven: both builds known and different.
+        if (
+          runtime.clientVersion === undefined || toolshedVersion === undefined
+        ) {
+          return "skipped-unknown-build";
+        }
+        runtime.reportVersionSkew({
+          space,
+          clientVersion: runtime.clientVersion,
+          toolshedVersion,
+        });
+        return "skipped-skew";
+      }
+
+      // 5. Determine whether the persisted root is loadable under the matched
+      // build. A failed load takes the direct compile-and-repair path below.
       const runningRef = getPatternIdentityRef(root);
       let runningPatternIsLoadable = false;
       if (runningRef !== undefined) {
@@ -721,33 +746,11 @@ export class PiecesController<T = unknown> {
       let currentId: string | undefined;
 
       if (runningPatternIsLoadable) {
-        // 4. Healthy-root fast path. The light ?identity is only comparable
-        //    within a build, so retain the SHA gate for this cheap check.
-        const toolshedVersion = await runtime.toolshedGitSha(host);
-        if (!buildsMatch(runtime.clientVersion, toolshedVersion)) {
-          // An unknown sha on either side (dev/source servers carry none)
-          // proves nothing — skip silently. The skew signal raises the shell's
-          // "reload to update" banner, which must only claim what is proven:
-          // both builds known and different. Signalling on unknown would show
-          // the banner on every space open in local dev, where no reload helps.
-          if (
-            runtime.clientVersion === undefined || toolshedVersion === undefined
-          ) {
-            return "skipped-unknown-build";
-          }
-          runtime.reportVersionSkew({
-            space,
-            clientVersion: runtime.clientVersion,
-            toolshedVersion,
-          });
-          return "skipped-skew";
-        }
-
-        // 5. Current identity from the toolshed (cached).
+        // 6. Current identity from the toolshed (cached).
         currentId = await runtime.cachedPatternIdentity(host, url);
         if (currentId === undefined) return "current"; // unresolved → skip
 
-        // 6. Compare to the running identity. A verified legacy root that is
+        // 7. Compare to the running identity. A verified legacy root that is
         //    already current needs only the missing provenance write.
         if (currentId === runningRef?.identity) {
           if (storedSource !== undefined) return "current";
@@ -755,11 +758,10 @@ export class PiecesController<T = unknown> {
         }
       }
 
-      // 7. Apply/repair. A root that cannot load must not be blocked by the
-      //    version gate: fetch and compile its proven source directly, making
-      //    the compiler-produced entry ref authoritative instead of comparing
-      //    the cross-build light identity. Compilation failure is caught by the
-      //    outer best-effort boundary and leaves the stored root untouched.
+      // 8. Apply/repair. For an unloadable root, fetch and compile its proven
+      //    source directly under the already-matched build, making the
+      //    compiler-produced entry ref authoritative instead of depending on
+      //    ?identity. Compilation failure leaves the stored root untouched.
       const program = await runtime.harness.resolve(
         new HttpProgramResolver(target.href),
       );

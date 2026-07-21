@@ -222,15 +222,16 @@ propagate](#how-flags-propagate).
   identity. A loadable root uses the client/toolshed version gate and cached
   `?identity` comparison before an in-place `patternIdentity` swap. An
   unloadable tracked root instead compiles its source directly under the current
-  runtime, so CLI/daemon and source-run toolsheds can repair it without build
-  metadata; a failed compile performs no metadata write. Persisted roots are
+  runtime after that same version gate; a failed compile performs no metadata
+  write. Source-run toolsheds, CLI, and daemon processes can receive the shared
+  Labs revision through `COMMIT_SHA`. Persisted roots are
   resolved without starting, and a verified legacy root whose content-addressed
   source closure names the official entry can have missing `patternSource`
   provenance back-filled. Custom sourceless roots remain pinned. URL-based
   creation and recreation stamp provenance; custom `RuntimeProgram` recreation
   does not. The check remains best-effort; if repair is unavailable, the
   subsequent root start retains its normal loud failure behavior. For a
-  loadable root, an unknown build SHA skips silently; the `versionSkew` IPC
+  root, an unknown build SHA skips silently; the `versionSkew` IPC
   signal—which raises the shell's reload banner—fires only on a proven mismatch
   (both SHAs known and different). See
   [`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md).

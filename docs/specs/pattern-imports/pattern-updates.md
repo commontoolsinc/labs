@@ -12,9 +12,9 @@ Phase 1 shipped: the `systemPatternAutoUpdate` flag is on in the shell for
 non-home default-app roots (`systemPatternAutoUpdateHome` stays off pending the
 home.tsx stable-addressing audit). URL-based creation and recreation stamp
 update provenance; verified legacy system roots can recover missing provenance;
-and an unloadable tracked root is repaired by compiling its source directly,
-even when build metadata is unavailable. The executed milestone map and the
-corrections found during implementation are archived at
+and an unloadable tracked root is repaired by compiling its source directly
+when the client and toolshed attest the same build. The executed milestone map
+and the corrections found during implementation are archived at
 [`docs/history/specs/pattern-imports/system-pattern-updates-implementation-plan.md`](../../history/specs/pattern-imports/system-pattern-updates-implementation-plan.md).
 Home root and published-pattern updates remain design (Phases 2–4).
 
@@ -113,9 +113,9 @@ Dispatched by the `cf:` prefix:
   `cf:pattern:<hash>` ref is **frozen** (resolves to a constant → never
   updates); a bare slug **tracks**. Immutability is just a pinned ref.
 - **non-`cf:` toolshed source path** (system, e.g.
-  `/api/patterns/system/default-app.tsx`) → for a loadable root, resolve via
-  `?identity` against the space's host; for an unloadable root, fetch and compile
-  the source directly under the current runtime (below).
+  `/api/patterns/system/default-app.tsx`) → after the build-version gate, use
+  `?identity` against the space's host for a loadable root; for an unloadable
+  root, fetch and compile the source directly under the matched runtime (below).
 
 **Born-from determinism.** The *string* is frozen at birth (which source); the
 *resolved identity* is live (which version). A non-home space's root
@@ -160,9 +160,10 @@ The apply is: ensure the new closure is loadable in the space
 (`compilePattern(program, { space })` writes source + compiled docs), then
 write `{ identity, symbol }` to the piece's `patternIdentity` meta. During space
 open, `ensureDefaultPattern` performs this write before calling `startPiece`,
-so an obsolete pattern that cannot load never blocks its replacement. If the
-piece is already running, the watcher cancels its old reactive nodes and
-re-instantiates the new pattern onto the **same result cell**.
+so an obsolete pattern that cannot load can be replaced before bootstrap once
+the client and toolshed builds match. If the piece is already running, the
+watcher cancels its old reactive nodes and re-instantiates the new pattern onto
+the **same result cell**.
 
 - **Survives**: the result cell's entity and inbound links; any state cells the
   new pattern still reads (addressed by stable key/cause).
@@ -207,17 +208,21 @@ transaction, and only then start it:
    official system root appropriate to this space; otherwise leave the root
    pinned. `host` = `mappedHostFor(space) ?? apiUrl`. Only same-origin toolshed
    sources participate in this v1 loop.
-2. Probe whether the stored `patternIdentity` can load in the current runtime
+2. **Version gate** (§ below). Compare the client build to this space's
+   toolshed build before loading the stored pattern, querying the current
+   identity, compiling a replacement, or mutating the root. Unknown or
+   mismatched builds leave it untouched; signal the shell only on a proven
+   mismatch (both SHAs known).
+3. Probe whether the stored `patternIdentity` can load in the current runtime
    (for example, aged source may import a runtime API removed by the new build).
-3. **Broken-root repair.** If it cannot load (including a thrown cold-load
+4. **Broken-root repair.** If it cannot load (including a thrown cold-load
    failure), fetch and compile `{host}{url}` directly. The compiler-produced
    entry ref is authoritative: write it in place if it differs and back-fill
-   verified legacy provenance. This path deliberately uses neither the build
-   gate nor `?identity`. Fetch or compile failure performs no metadata write;
-   the subsequent root start retains its normal loud failure.
-4. **Healthy-root version gate** (§ below). Not the same known build → skip;
-   signal the shell only on a proven mismatch (both shas known).
-5. `currentId` = **cached** `GET {host}{url}?identity` (cache keyed by
+   verified legacy provenance. This path skips `?identity`, but remains behind
+   the build gate. Fetch or compile failure performs no metadata write; the
+   subsequent root start retains its normal loud failure.
+5. For a loadable root, `currentId` = **cached**
+   `GET {host}{url}?identity` (cache keyed by
    `(host, url)`; cleared on socket reset — the identity is fixed for the
    toolshed's lifetime, and a socket reset is the proxy for "maybe a restarted
    or different toolshed"). Steady state is an in-memory compare, no request.
@@ -231,10 +236,12 @@ transaction, and only then start it:
 
 ## Version-skew gate
 
-For a healthy, loadable root, the light `?identity` is only comparable to the
-worker's identity when
+The light `?identity` is only comparable to the worker's identity when
 **toolshed and worker are the same build** (then `computeModuleIdentities` is
-literally the same function). So gate on it:
+literally the same function). Directly compiling a replacement does not remove
+that safety requirement: source served by one build must not mutate durable
+state under a different build. The version check is therefore a precondition
+for every system-root update or repair:
 
 - Compare the client's `gitSha` to the space's toolshed `gitSha` (`/api/meta`,
   cached per host).
@@ -246,22 +253,19 @@ literally the same function). So gate on it:
   visualizes it and may restart/reload the worker to pick up a matching client
   build (a page reload / cache-bust is what actually swaps the client bundle;
   the shell owns that UX).
-- **Unknown build on either side** (dev/source servers carry no sha) → skip the
-  healthy-root update **silently** (`skipped-unknown-build`). Nothing is
+- **Unknown build on either side** → skip the update or repair **silently**
+  (`skipped-unknown-build`). Nothing is
   provably newer, so there is nothing to tell the user — signalling here would
   raise the reload banner on every space open in local dev, where no reload
   helps.
 
-**The gate is exactly what makes the light `?identity` sound, not a precondition
-for repairing a broken root.** An unloadable root cannot continue as-is, so its
-already-proven source is compiled under the current runtime and that compiler's
-entry ref is installed. This works for CLI/daemon and source-run toolsheds that
-carry no build SHA, while preserving the no-cross-build-compare rule.
-
-For healthy roots, the only failure mode of the light computation is
-cross-build drift, and we now never compare across builds. Multi-toolshed makes
-the gate **per-space** (client vs *that* space's toolshed); rough edges accepted
-for v1, and a stale-client banner is useful hygiene beyond patterns.
+Source-run and headless processes can receive the same attested Labs revision
+through `COMMIT_SHA`: source-run toolshed exposes it from `/api/meta`, while the
+CLI and background-piece-service pass it as `Runtime.clientVersion` (including
+through the service's worker IPC). This makes the gate usable outside the
+browser without weakening it. Multi-toolshed makes the gate **per-space**
+(client vs *that* space's toolshed); rough edges accepted for v1, and a
+stale-client banner is useful hygiene beyond patterns.
 
 **The gate is a system-pattern concern only.** Published-pattern updates
 resolve by reading a slug's target `patternIdentity` (a cell read of a value
@@ -275,7 +279,7 @@ so no build-dependence and no gate.
   and we own the source).
 - **Self-heal from a borked ship**: fix source → new identity → next space open
   compiles and swaps it before bootstrap → recovered even when the old identity
-  cannot load and neither process exposes a build SHA.
+  cannot load, provided the client and toolshed attest the same build.
 - **Rollback = redeploy**: ship the prior source → toolshed serves the prior
   identity → the same swap rolls back. No per-piece rollback state needed.
 - **Escape hatch**: manual `recreateDefaultPattern` remains (state-losing; last
@@ -293,7 +297,7 @@ so no build-dependence and no gate.
   `handleGetSpaceRootPattern` / `ensureDefaultPattern`
   (`runtime-client/backends/runtime-processor.ts`, `pieces-controller.ts`):
   per-space host resolution, verified legacy-provenance recovery, broken-root
-  direct compilation, healthy-root version gate and `?identity` cache, and an
+  direct compilation behind the version gate, `?identity` cache, and an
   in-place `patternIdentity` swap.
 - **Piece**: `patternSource` meta getter/setter; stamped by URL-based creation
   and recreation from the applicable source (system path, or a `cf:` ref derived

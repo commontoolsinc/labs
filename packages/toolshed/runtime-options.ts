@@ -1,4 +1,5 @@
 import {
+  clientVersionFromEnv,
   type EnvReader,
   experimentalOptionsFromEnv,
   Runtime,
@@ -26,6 +27,7 @@ export function toolshedRuntimeOptions(
     patternApiUrl: new URL(config.API_URL),
     storageManager,
     experimental: experimentalOptionsFromEnv(envGet),
+    clientVersion: clientVersionFromEnv(envGet),
   });
 }
 

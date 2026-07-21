@@ -3,6 +3,7 @@ import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
 import {
   Cell,
+  clientVersionFromEnv,
   entityIdFrom,
   experimentalOptionsFromEnv,
   formatFabricRef,
@@ -222,6 +223,7 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
           spaceIdentity: session.spaceIdentity,
         }),
         experimental: experimentalOptionsFromEnv(Deno.env.get),
+        clientVersion: clientVersionFromEnv(Deno.env.get),
         errorHandlers: [
           (error) => {
             runtimeErrors.push({
