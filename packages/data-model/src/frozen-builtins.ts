@@ -40,7 +40,9 @@ function throwFinalizedBuilderMutation(typeName: string): never {
 /**
  * Helper for the `FrozenMap` methods, which fetches the backing `Map` for the
  * given wrapper instance. Throws if `value` is not a recognized `FrozenMap`
- * receiver (e.g. when an intrinsic mutator was called via `call(...)`).
+ * receiver (e.g. when a `FrozenMap` method was applied to a foreign object via
+ * `call(...)`). Note that an *intrinsic* `Map` method applied to a `FrozenMap`
+ * never gets this far: it fails its own internal-slot check first.
  */
 function getMapBacking<K, V>(value: object): MapBacking<K, V> {
   const backing = MAP_BACKING.get(value);
@@ -53,7 +55,7 @@ function getMapBacking<K, V>(value: object): MapBacking<K, V> {
 /**
  * Helper for the `FrozenSet` methods, which fetches the backing `Set` for the
  * given wrapper instance. Throws if `value` is not a recognized `FrozenSet`
- * receiver.
+ * receiver, under the same conditions described on `getMapBacking()`.
  */
 function getSetBacking<T>(value: object): SetBacking<T> {
   const backing = SET_BACKING.get(value);
@@ -313,13 +315,26 @@ export class FrozenSet<T> implements Set<T> {
     return result;
   }
 
-  /** Same as `Set.prototype.intersection`. Returns a new (mutable) `Set`. */
+  /**
+   * Same as `Set.prototype.intersection`. Returns a new (mutable) `Set`.
+   *
+   * As with the intrinsic, the smaller operand is the one iterated, which
+   * means the result's iteration order follows that operand.
+   */
   intersection<U>(other: ReadonlySetLike<U>): Set<T & U> {
     const result = new Set<T & U>();
-    for (const value of this.values()) {
-      if (other.has(value as unknown as U)) {
-        result.add(value as T & U);
+    if (this.size <= other.size) {
+      for (const value of this.values()) {
+        if (other.has(value as unknown as U)) {
+          result.add(value as T & U);
+        }
       }
+    } else {
+      forEachSetLikeValue(other, (value) => {
+        if (this.has(value as unknown as T)) {
+          result.add(value as T & U);
+        }
+      });
     }
     return result;
   }

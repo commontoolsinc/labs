@@ -32,9 +32,36 @@ describe("native-type-tags", () => {
         }
       }
       const exotic = new MyFancyError("exotic");
-      // Constructor is MyFancyError, not in the switch -- falls back to
-      // Error.isError().
+      // Recognized by class: `tagFromNativeClass()` walks the prototype chain,
+      // so an `Error` subclass is tagged without reaching the value-level
+      // fallbacks below.
       expect(tagFromNativeValue(exotic)).toBe(NATIVE_TAGS.Error);
+    });
+
+    it("returns `Error` tag for an `Error` whose prototype was severed", () => {
+      const severed = new Error("severed");
+      Object.setPrototypeOf(severed, null);
+
+      // No reachable constructor, so the class-level lookup yields nothing and
+      // the `Error.isError()` fallback is what recognizes it.
+      expect((severed as { constructor?: unknown }).constructor).toBe(
+        undefined,
+      );
+      expect(tagFromNativeValue(severed)).toBe(NATIVE_TAGS.Error);
+    });
+
+    it("returns `Array` tag for an `Array` subclass", () => {
+      class MyArray extends Array {}
+
+      expect(tagFromNativeClass(MyArray)).toBe(null);
+      expect(tagFromNativeValue(new MyArray())).toBe(NATIVE_TAGS.Array);
+    });
+
+    it("returns `Array` tag for an array whose prototype was severed", () => {
+      const severed = [1, 2];
+      Object.setPrototypeOf(severed, null);
+
+      expect(tagFromNativeValue(severed)).toBe(NATIVE_TAGS.Array);
     });
 
     it("returns `Map` tag for `Map` instances", () => {

@@ -64,6 +64,53 @@ describe("data-uri-codec", () => {
       expect(Object.is(parsed.z, -0)).toBe(true);
       expect(Object.is(parsed.i, -Infinity)).toBe(true);
     });
+
+    // Distinctness is a separate property from round-tripping, and the more
+    // important one here: these URIs are content addresses, so two values that
+    // are not equal must not mint the same identifier. A codec could round-trip
+    // every value faithfully and still collide.
+    it("mints distinct URIs for `-0` and `+0`", () => {
+      expect(dataUriFromValue(-0)).not.toBe(dataUriFromValue(0));
+      expect(dataUriFromValue({ z: -0 })).not.toBe(dataUriFromValue({ z: 0 }));
+    });
+
+    it("mints distinct URIs for the two infinities", () => {
+      expect(dataUriFromValue(Infinity)).not.toBe(
+        dataUriFromValue(-Infinity),
+      );
+    });
+
+    it("mints distinct URIs for `NaN` and other non-finites", () => {
+      expect(dataUriFromValue(NaN)).not.toBe(dataUriFromValue(Infinity));
+      expect(dataUriFromValue(NaN)).not.toBe(dataUriFromValue(-Infinity));
+    });
+
+    // Arithmetic only ever yields one `NaN` bit pattern, so `NaN` and `0 / 0`
+    // are the same value and comparing them proves only determinism. A
+    // distinct payload has to be built through a typed-array view, which is
+    // also how one reaches a caller in practice.
+    it("mints one URI for every `NaN`, whatever its payload", () => {
+      const buffer = new ArrayBuffer(8);
+      const bytes = new Uint8Array(buffer);
+      const doubles = new Float64Array(buffer);
+      bytes.set([0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf8, 0x7f]);
+      const payloadNan = doubles[0];
+
+      // Guard the premise: if this ever stops holding, the case below is
+      // vacuous and should fail loudly rather than pass for free.
+      doubles[0] = 0 / 0;
+      expect(Number.isNaN(payloadNan)).toBe(true);
+      expect(bytes[0]).not.toBe(0x01);
+
+      expect(dataUriFromValue(payloadNan)).toBe(dataUriFromValue(0 / 0));
+      expect(dataUriFromValue({ n: payloadNan })).toBe(
+        dataUriFromValue({ n: NaN }),
+      );
+    });
+
+    it("mints the same URI for repeated `-0`", () => {
+      expect(dataUriFromValue(-0)).toBe(dataUriFromValue(-0));
+    });
   });
 
   describe("valueFromDataUriPayloadText", () => {
