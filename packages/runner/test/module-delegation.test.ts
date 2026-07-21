@@ -77,6 +77,52 @@ describe("module identity delegation", () => {
     await storageManager?.close();
   });
 
+  it("filters invalid identities and pins each transaction's trust snapshot", () => {
+    runtime.registerModuleDelegations(
+      new Map([
+        ["", new Set(["ignored-predecessor"])],
+        ["successor", new Set(["predecessor"])],
+      ]),
+    );
+
+    const tx = runtime.edit();
+    expect(tx.getCfcState().moduleDelegations.has("")).toBe(false);
+    expect(tx.getCfcState().moduleDelegations.get("successor")).toEqual([
+      "predecessor",
+    ]);
+
+    // The Runtime pins this trust snapshot when it creates the transaction.
+    // Code that reaches the concrete transaction must not replace it later.
+    const delegationSetter = tx as unknown as {
+      setCfcModuleDelegations(
+        delegations: ReadonlyMap<string, readonly string[]>,
+      ): void;
+    };
+    delegationSetter.setCfcModuleDelegations(
+      new Map([["successor", ["attacker"]]]),
+    );
+    expect(tx.getCfcState().moduleDelegations.get("successor")).toEqual([
+      "predecessor",
+    ]);
+    tx.abort?.("module-delegation snapshot pin test complete");
+  });
+
+  it("rejects an update when the predecessor source closure is unavailable", async () => {
+    const manager = runtime.patternManager as unknown as {
+      loadPreviousSourceClosure(
+        space: string,
+        entryIdentity: string,
+      ): Promise<Map<string, SourceDoc>>;
+    };
+
+    await expect(
+      manager.loadPreviousSourceClosure(space, "missing-predecessor"),
+    ).rejects.toThrow(
+      "cannot authorize module update from missing-predecessor: " +
+        "verified source closure is unavailable",
+    );
+  });
+
   it("matches canonical full paths and carries the predecessor chain", () => {
     const previous = new Map<string, SourceDoc>([
       ["old-a", {

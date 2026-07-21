@@ -1280,14 +1280,25 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     const replicationOpts = {
       runtimeVersion,
     };
+    const predecessorIdentity = "replicated-predecessor";
+    const moduleDelegations = new Map([
+      [importerIdentity, new Set([predecessorIdentity])],
+    ]);
     const wtx = runtime.edit();
-    writeSourceDocs(runtime, spaceA, modules, importerIdentity, wtx);
+    writeSourceDocs(
+      runtime,
+      spaceA,
+      modules,
+      importerIdentity,
+      wtx,
+      moduleDelegations,
+    );
     writeCompiledDocs(
       runtime,
       spaceA,
       modules,
       importerIdentity,
-      replicationOpts,
+      { ...replicationOpts, moduleDelegations },
       wtx,
     );
     wtx.prepareCfc();
@@ -1334,6 +1345,11 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     expect(compiled.get(importerIdentity)?.policyManifests).toEqual([
       policyManifest,
     ]);
+    expect(importerSource?.get(importerIdentity)?.delegatedModuleIdentities)
+      .toEqual([predecessorIdentity]);
+    expect(compiled.get(importerIdentity)?.delegatedModuleIdentities).toEqual([
+      predecessorIdentity,
+    ]);
 
     const damageTx = runtime.edit();
     const previousIdentity = damageTx.getCfcState().implementationIdentity;
@@ -1378,6 +1394,138 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     repairedTx.abort?.();
     expect(repairedSource?.has(importerIdentity)).toBe(true);
     expect(repairedCompiled.has(importerIdentity)).toBe(true);
+  });
+
+  it("does not reuse a closure missing required delegation metadata", async () => {
+    const targetSpace = "did:key:z6MkCellCacheDelegationPersistenceTarget";
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const requiredDelegations = new Map([
+      [entryIdentity, new Set(["required-predecessor"])],
+    ]);
+    const manager = runtime.patternManager as unknown as {
+      hasStoredCompileCacheClosure(
+        space: string,
+        modules: readonly CacheableModule[],
+        entryIdentity: string,
+        opts: { runtimeVersion: string },
+        moduleDelegations: ReadonlyMap<string, ReadonlySet<string>>,
+      ): Promise<boolean>;
+    };
+
+    const initialWrite = runtime.edit();
+    writeSourceDocs(
+      runtime,
+      targetSpace,
+      modules,
+      entryIdentity,
+      initialWrite,
+    );
+    writeCompiledDocs(
+      runtime,
+      targetSpace,
+      modules,
+      entryIdentity,
+      opts(),
+      initialWrite,
+    );
+    initialWrite.prepareCfc();
+    expect((await initialWrite.commit()).error).toBeUndefined();
+
+    const missingModule: CacheableModule = {
+      identity: "missing-source-module",
+      filename: "/missing.ts",
+      source: "export {};",
+      js: "export {};",
+      imports: [],
+    };
+    expect(
+      await manager.hasStoredCompileCacheClosure(
+        targetSpace,
+        [...modules, missingModule],
+        entryIdentity,
+        opts(),
+        new Map(),
+      ),
+    ).toBe(false);
+
+    const coverageRuntimeVersion = `${RTVER}/pattern-coverage`;
+    const uninstrumentedCoverageWrite = runtime.edit();
+    writeCompiledDocs(
+      runtime,
+      targetSpace,
+      modules,
+      entryIdentity,
+      { runtimeVersion: coverageRuntimeVersion },
+      uninstrumentedCoverageWrite,
+    );
+    uninstrumentedCoverageWrite.prepareCfc();
+    expect((await uninstrumentedCoverageWrite.commit()).error).toBeUndefined();
+    expect(
+      await manager.hasStoredCompileCacheClosure(
+        targetSpace,
+        modules,
+        entryIdentity,
+        { runtimeVersion: coverageRuntimeVersion },
+        new Map(),
+      ),
+    ).toBe(false);
+
+    // The source set does not yet carry the requested authority.
+    expect(
+      await manager.hasStoredCompileCacheClosure(
+        targetSpace,
+        modules,
+        entryIdentity,
+        opts(),
+        requiredDelegations,
+      ),
+    ).toBe(false);
+
+    const sourceOnlyRepair = runtime.edit();
+    writeSourceDocs(
+      runtime,
+      targetSpace,
+      modules,
+      entryIdentity,
+      sourceOnlyRepair,
+      requiredDelegations,
+    );
+    sourceOnlyRepair.prepareCfc();
+    expect((await sourceOnlyRepair.commit()).error).toBeUndefined();
+
+    // A source-only repair is insufficient: a later warm load could trust the
+    // still-stale compiled set without ever consulting source metadata.
+    expect(
+      await manager.hasStoredCompileCacheClosure(
+        targetSpace,
+        modules,
+        entryIdentity,
+        opts(),
+        requiredDelegations,
+      ),
+    ).toBe(false);
+
+    const compiledRepair = runtime.edit();
+    writeCompiledDocs(
+      runtime,
+      targetSpace,
+      modules,
+      entryIdentity,
+      { ...opts(), moduleDelegations: requiredDelegations },
+      compiledRepair,
+    );
+    compiledRepair.prepareCfc();
+    expect((await compiledRepair.commit()).error).toBeUndefined();
+
+    expect(
+      await manager.hasStoredCompileCacheClosure(
+        targetSpace,
+        modules,
+        entryIdentity,
+        opts(),
+        requiredDelegations,
+      ),
+    ).toBe(true);
   });
 
   it("distinguishes persisted closures that share an entry module", async () => {
