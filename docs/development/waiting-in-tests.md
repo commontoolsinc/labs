@@ -81,16 +81,17 @@ Waits split into two groups with different primitives.
 
 **Browser integration tests** have a page to attach an in-page waiter to:
 
-- `waitForCondition(page, predicate, { timeout, args })` installs a single
-  waiter inside the page. A shared MutationObserver hub watches the document and
-  every shadow root — including shadow roots created after the wait began — and
-  re-evaluates the predicate the instant the DOM reflects new state, then signals
-  the test process over a protocol binding. The `timeout` argument is a genuine
-  stuck-condition safety net, not a poll interval; a coarse 500-millisecond
-  in-page backstop covers conditions that flip with no DOM mutation (for example
-  a runtime global being set). The predicate is serialized and runs in the page,
-  so it closes over nothing from the test module — inline any collection it
-  needs, and pass values in through `args`.
+- `waitForCondition(page, predicate, { args })` installs a single waiter inside
+  the page. A shared MutationObserver hub watches the document and every shadow
+  root — including shadow roots created after the wait began — and re-evaluates
+  the predicate the instant the DOM reflects new state, then signals the test
+  process over a protocol binding. It takes no caller-supplied timeout: a
+  built-in five-minute stuck-condition safety net bounds a condition that never
+  holds, and a coarse 500-millisecond in-page backstop covers conditions that
+  flip with no DOM mutation (for example a runtime global being set). The
+  predicate is serialized and runs in the page, so it closes over nothing from
+  the test module — inline any collection it needs, and pass values in through
+  `args`.
 - `awaitViewSettled(page)` resolves once the worker has settled reactively, the
   resulting vdom batch has crossed to the main thread and been applied, and Lit
   has finished its update cycle. This is the "is the control interactive yet"
