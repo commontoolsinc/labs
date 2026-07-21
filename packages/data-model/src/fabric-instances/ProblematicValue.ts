@@ -1,5 +1,6 @@
 import type { FabricValue } from "@/interface.ts";
 import {
+  DEEP_CLONE_CORE,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
@@ -59,8 +60,8 @@ export class ProblematicValue extends ExplicitTagValue {
     return Object.isFrozen(this) && subIsDeepFrozen(this.state);
   }
 
-  /** @inheritDoc */
-  deepClone(_frozen: boolean): ProblematicValue {
+  /** @inheritDoc Not yet implemented, so `deepClone()` throws. */
+  protected [DEEP_CLONE_CORE](_frozen: boolean): ProblematicValue {
     throw new Error("Cannot yet handle deep cloning of `ProblematicValue`.");
   }
 

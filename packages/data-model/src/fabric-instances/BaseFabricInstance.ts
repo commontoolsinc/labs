@@ -1,4 +1,9 @@
 import { FabricInstance, type FabricValue } from "@/interface.ts";
+// Used only inside method bodies: this import participates in a module cycle
+// with `deep-freeze.ts` (which imports this module's symbols and class for its
+// generic dispatch), which is safe for call-time function use but must not be
+// dereferenced during module evaluation.
+import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 
 /**
  * Well-known symbol for deeply freezing a fabric instance in place. The method
@@ -45,17 +50,29 @@ export const SHALLOW_UNFROZEN_CLONE: unique symbol = Symbol.for(
 );
 
 /**
+ * Well-known symbol for producing a new deep clone of a fabric instance,
+ * cloning nested `FabricValue`s to the requested frozenness. This is the
+ * `protected` template-method primitive that the concrete `deepClone()` calls
+ * when a fresh instance is needed; each concrete subclass implements it.
+ * Symbol-keyed as implementation plumbing (matching
+ * `[SHALLOW_UNFROZEN_CLONE]`), while `deepClone()` stays a regular-named
+ * client method. Unlike the shallow core, this core takes the `frozen` intent:
+ * a deep clone's nested handling depends on it (already-deep-frozen subtrees
+ * may be identity-shared when `frozen` is `true` -- the "maximal structural
+ * sharing" the `deepClone()` contract promises -- but must be force-copied
+ * when `frozen` is `false`).
+ */
+export const DEEP_CLONE_CORE: unique symbol = Symbol.for(
+  "data-model.deepCloneCore",
+);
+
+/**
  * Abstract base class providing shared scaffolding for `FabricInstance`
  * subclasses. Concrete `FabricInstance` classes extend this, not
  * `FabricInstance` directly: `FabricInstance` is the pure abstract protocol
  * (the `instanceof`-able contract that external code is written against), while
  * `BaseFabricInstance` is where shared template-method implementations and the
  * freeze-protocol plumbing (`[DEEP_FREEZE]()`, `[IS_DEEP_FROZEN]()`) live.
- *
- * TODO(danfuzz): `deepClone()` should grow a base implementation here that
- * defers to a sibling `protected abstract` method (mirroring the
- * `shallowClone()`/`[SHALLOW_UNFROZEN_CLONE]()` template-method split), at which
- * point individual subclasses stop implementing `deepClone()` directly.
  */
 export abstract class BaseFabricInstance extends FabricInstance {
   //
@@ -113,6 +130,33 @@ export abstract class BaseFabricInstance extends FabricInstance {
     // Cast needed: `Object.freeze()` returns `Readonly<T>`, which TS considers
     // incompatible with abstract class types due to protected members.
     return frozen ? Object.freeze(copy) as FabricInstance : copy;
+  }
+
+  /**
+   * Returns a new deep clone of this instance, cloning nested `FabricValue`s
+   * to the requested frozenness (see `[DEEP_CLONE_CORE]`'s symbol doc). The
+   * returned instance itself is not yet frozen: the `deepClone()` template
+   * method owns the identity optimization and the final freeze. Called by
+   * `deepClone()` when a fresh instance is needed.
+   */
+  protected abstract [DEEP_CLONE_CORE](frozen: boolean): FabricInstance;
+
+  /**
+   * Returns a deep clone of this instance with the requested frozenness.
+   *
+   * When `frozen` is `true` and this instance is already *deeply* frozen,
+   * returns `this` (identity optimization). Note the asymmetry with
+   * `shallowClone()`: shallow identity gates on `Object.isFrozen(this)` (only
+   * the instance's own slot need be frozen), whereas deep identity must gate
+   * on `isDeepFrozen(this)` -- a shallowly-frozen instance whose nested
+   * `FabricValue`s are still mutable is not safe to alias as a deep clone. In
+   * all other cases, creates a new instance via `[DEEP_CLONE_CORE](frozen)`
+   * and deep-freezes it if requested.
+   */
+  deepClone(frozen: boolean): FabricInstance {
+    if (frozen && isDeepFrozen(this)) return this;
+    const copy = this[DEEP_CLONE_CORE](frozen);
+    return frozen ? deepFreeze(copy) : copy;
   }
 
   //

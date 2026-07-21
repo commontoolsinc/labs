@@ -38,11 +38,12 @@ export abstract class FabricSpecialObject {}
  * than this class directly; `BaseFabricInstance` is where shared
  * template-method scaffolding (such as `shallowClone()`) lives.
  *
- * Subclasses must implement `deepClone()` and `shallowClone()` (the latter is
- * normally inherited from `BaseFabricInstance`). The freeze-protocol members
- * `[DEEP_FREEZE]()` and `[IS_DEEP_FROZEN]()` are declared on
- * `BaseFabricInstance`, not here: they are implementation plumbing and are kept
- * off this pure-protocol class.
+ * Subclasses must implement `deepClone()` and `shallowClone()`; both are
+ * normally inherited from `BaseFabricInstance` as template methods, with the
+ * subclass supplying the symbol-keyed clone core each one calls. The
+ * freeze-protocol members `[DEEP_FREEZE]()` and `[IS_DEEP_FROZEN]()` are
+ * declared on `BaseFabricInstance`, not here: they are implementation plumbing
+ * and are kept off this pure-protocol class.
  */
 export abstract class FabricInstance extends FabricSpecialObject {
   /**
@@ -53,9 +54,11 @@ export abstract class FabricInstance extends FabricSpecialObject {
    * produces a deeply-mutable instance with no visible shared reference
    * structure with the original.
    *
-   * TODO(danfuzz): This method should grow a base implementation on
-   * `BaseFabricInstance` which defers to a `protected abstract` sibling,
-   * mirroring the `shallowClone()`/`[SHALLOW_UNFROZEN_CLONE]()` split.
+   * The concrete template-method implementation lives on
+   * `BaseFabricInstance` (deferring to the `[DEEP_CLONE_CORE]` sibling,
+   * mirroring the `shallowClone()`/`[SHALLOW_UNFROZEN_CLONE]()` split); this
+   * declaration just pins the protocol surface so that callers can invoke it
+   * through a `FabricInstance` reference.
    */
   abstract deepClone(frozen: boolean): FabricInstance;
 
