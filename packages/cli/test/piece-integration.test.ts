@@ -26,6 +26,8 @@ const API_URL = Deno.env.get("API_URL");
 
 const REPO_ROOT = resolve(import.meta.dirname!, "../../..");
 const NOTE_PATTERN = `${REPO_ROOT}/packages/patterns/notes/note.tsx`;
+const SESSION_RESULT_PATTERN =
+  `${REPO_ROOT}/packages/cli/test/fixtures/session-derived-result.tsx`;
 
 const NOTE_CONTENT = "Hello world";
 const REPOSITORY = "https://github.com/commontoolsinc/labs";
@@ -37,6 +39,7 @@ const noteEntry: EntryConfig = {
 };
 
 let pieceId = "";
+let sessionResultPieceId = "";
 let flags = "";
 let identityPath = "";
 let spaceConfig: SpaceConfig;
@@ -82,6 +85,10 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
       identity: identityPath,
     };
     pieceId = await newPiece(spaceConfig, noteEntry);
+    sessionResultPieceId = await newPiece(spaceConfig, {
+      mainPath: SESSION_RESULT_PATTERN,
+      rootPath: REPO_ROOT,
+    });
     await callPieceHandler(
       { ...spaceConfig, piece: pieceId },
       "setTitle",
@@ -124,6 +131,27 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
     expect(code).toBe(0);
     const json = JSON.parse(stdout.join(""));
     expect(typeof json).toBe("object");
+  });
+
+  it("reports present result data that cannot project in a fresh session", async () => {
+    const sessionFlags =
+      `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${sessionResultPieceId}`;
+    const { code, stderr } = await integrationCf(
+      `piece get ${sessionFlags}`,
+    );
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain("stored data is present");
+    expect(stderr.join("\n")).toContain("--step");
+  });
+
+  it("steps and reads session-scoped computed results atomically", async () => {
+    const sessionFlags =
+      `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${sessionResultPieceId}`;
+    const { code, stdout } = await integrationCf(
+      `piece get ${sessionFlags} --step`,
+    );
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toEqual({ value: "session-ready" });
   });
 
   it("list and inspect expose the running pattern reference", async () => {
