@@ -249,13 +249,135 @@ const clearVoteEntity = (votes: VotesCell, key: string): void => {
   vote.set(undefined);
 };
 
-const getInitials = (name: string): string => {
+const COMBINING_MARK = /^\p{Mark}$/u;
+const EMOJI_MODIFIER = /^\p{Emoji_Modifier}$/u;
+const REGIONAL_INDICATOR = /^\p{Regional_Indicator}$/u;
+const ZERO_WIDTH_JOINER = "\u200D";
+
+// Groups combining marks, emoji modifiers, joined emoji, and regional-indicator
+// pairs into the characters displayed in participant labels.
+const displayCharactersOf = (value: string): string[] => {
+  const codePoints = Array.from(value);
+  const characters: string[] = [];
+  for (let index = 0; index < codePoints.length; index += 1) {
+    let character = codePoints[index] ?? "";
+    const next = codePoints[index + 1] ?? "";
+    if (
+      REGIONAL_INDICATOR.test(character) && REGIONAL_INDICATOR.test(next)
+    ) {
+      character += next;
+      index += 1;
+    }
+    while (index + 1 < codePoints.length) {
+      const continuation = codePoints[index + 1] ?? "";
+      if (
+        COMBINING_MARK.test(continuation) ||
+        EMOJI_MODIFIER.test(continuation)
+      ) {
+        character += continuation;
+        index += 1;
+        continue;
+      }
+      if (
+        continuation === ZERO_WIDTH_JOINER && index + 2 < codePoints.length
+      ) {
+        character += continuation + (codePoints[index + 2] ?? "");
+        index += 2;
+        continue;
+      }
+      break;
+    }
+    characters.push(character);
+  }
+  return characters;
+};
+
+const getDefaultInitials = (name: string): string => {
   const trimmed = name.trim();
   if (!trimmed) return "?";
-  return trimmed.split(/\s+/).map((w) => w[0]).join("").toUpperCase().slice(
-    0,
-    2,
+  const initials = trimmed.split(/\s+/).map((word) =>
+    displayCharactersOf(word)[0] ?? ""
+  ).join("").toUpperCase();
+  return displayCharactersOf(initials).slice(0, 2).join("");
+};
+
+const compactName = (name: string): string =>
+  name.trim().split(/\s+/).join("").toUpperCase();
+
+const getInitials = (
+  name: string,
+  participantNames: readonly string[],
+): string => {
+  const compact = compactName(name);
+  const characters = displayCharactersOf(compact);
+  if (characters.length === 0) return "?";
+  const peers = participantNames
+    .map(compactName)
+    .filter((candidate) =>
+      candidate !== compact &&
+      displayCharactersOf(candidate)[0] === characters[0]
+    );
+  if (peers.length === 0) return getDefaultInitials(name);
+
+  const distinguishingIndex = characters.findIndex((_, index) =>
+    index > 0 &&
+    peers.every((peer) =>
+      !peer.startsWith(characters.slice(0, index + 1).join(""))
+    )
   );
+  const secondInitial = distinguishingIndex >= 1
+    ? characters[distinguishingIndex]
+    : characters[1];
+  return `${characters[0]}${secondInitial ?? ""}`;
+};
+
+const getInitialsByName = (
+  participantNames: readonly string[],
+): Map<string, string> => {
+  const provisionalByName = new Map<string, string>();
+  const countByInitials = new Map<string, number>();
+  for (const name of participantNames) {
+    const initials = getInitials(name, participantNames);
+    provisionalByName.set(name, initials);
+    countByInitials.set(initials, (countByInitials.get(initials) ?? 0) + 1);
+  }
+
+  const expandedByName = new Map<string, string>();
+  const countByExpanded = new Map<string, number>();
+  for (const name of participantNames) {
+    const initials = provisionalByName.get(name) ?? getDefaultInitials(name);
+    const expanded = (countByInitials.get(initials) ?? 0) > 1
+      ? compactName(name)
+      : initials;
+    expandedByName.set(name, expanded);
+    countByExpanded.set(expanded, (countByExpanded.get(expanded) ?? 0) + 1);
+  }
+
+  const result = new Map<string, string>();
+  const usedLabels = new Set<string>();
+  for (const name of participantNames) {
+    const expanded = expandedByName.get(name) ?? getDefaultInitials(name);
+    if ((countByExpanded.get(expanded) ?? 0) <= 1) {
+      result.set(name, expanded);
+      usedLabels.add(expanded);
+    }
+  }
+
+  const nextSuffixByExpanded = new Map<string, number>();
+  for (const name of participantNames) {
+    const expanded = expandedByName.get(name) ?? getDefaultInitials(name);
+    if ((countByExpanded.get(expanded) ?? 0) <= 1) continue;
+    let suffix = nextSuffixByExpanded.get(expanded) ?? 1;
+    let label = `${expanded}${suffix}`;
+    while (usedLabels.has(label)) {
+      suffix += 1;
+      label = `${expanded}${suffix}`;
+    }
+    nextSuffixByExpanded.set(expanded, suffix + 1);
+    result.set(name, label);
+    usedLabels.add(label);
+  }
+  return result;
 };
 
 const DAY_NAMES = [
@@ -587,7 +709,12 @@ interface OptionTally {
   green: number;
   yellow: number;
   red: number;
-  voters: Array<{ name: string; voteType: VoteColor; color: string }>;
+  voters: Array<{
+    name: string;
+    voteType: VoteColor;
+    color: string;
+    initials: string;
+  }>;
 }
 
 const tallyOptions = (
@@ -596,6 +723,8 @@ const tallyOptions = (
   users: readonly User[],
 ): OptionTally[] => {
   const colorByName = new Map(users.map((u) => [u.name, u.color]));
+  const participantNames = users.map((u) => u.name);
+  const initialsByName = getInitialsByName(participantNames);
   const tallies = options.map((option): OptionTally => {
     const optionVotes = votes.filter((v) => v.optionId === option.id);
     return {
@@ -607,6 +736,8 @@ const tallyOptions = (
         name: v.voterName,
         voteType: v.voteType,
         color: colorByName.get(v.voterName) ?? "#888",
+        initials: initialsByName.get(v.voterName) ??
+          getInitials(v.voterName, participantNames),
       })),
     };
   });
@@ -748,9 +879,11 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // different schema default per runtime and churn the built graph.
     const today = Writable.perSession.of<number>(0);
     // Two-step confirmation for destructive actions. Stores the optionId
-    // pending remove-confirm (null = nothing pending). Same idiom as
+    // pending remove-confirm (null or undefined = nothing pending). Same idiom as
     // parking-coordinator's `removePersonConfirmTarget`.
-    const removeConfirmTarget = Writable.perSession.of<string | null>(null);
+    const removeConfirmTarget = Writable.perSession.of<
+      string | null | undefined
+    >(null);
     const resetConfirmPending = Writable.perSession.of<boolean>(false);
     const clearHistoryConfirmPending = Writable.perSession.of<boolean>(false);
     const participantIdentity = ParticipantIdentityCard({
@@ -1149,6 +1282,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                 {tally.voters.map((voter) => (
                                   <span
                                     title={voter.name}
+                                    role="img"
+                                    aria-label={`${voter.name}: ${voter.voteType} vote`}
                                     data-vote-swatch-name={voter.name}
                                     style={{
                                       display: "inline-flex",
@@ -1168,7 +1303,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                         : "none",
                                     }}
                                   >
-                                    {getInitials(voter.name)}
+                                    {voter.initials}
                                   </span>
                                 ))}
                               </div>
@@ -1231,7 +1366,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     const idx = ranked.findIndex(
                       (t) => t.option.id === oid,
                     );
-                    return idx >= 0 ? idx + 1 : 0;
+                    return idx >= 0 ? idx + 1 : undefined;
                   });
                   return (
                     <PollOptionCard

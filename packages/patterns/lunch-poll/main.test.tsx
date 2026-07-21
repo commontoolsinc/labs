@@ -12,8 +12,18 @@
  */
 
 import { action, computed, pattern, UI, wish } from "commonfabric";
-import { findNode, propsOf, readValue } from "../test/vnode-helpers.ts";
-import CozyPoll, { dayKeyOf, type Option, type Vote } from "./main.tsx";
+import {
+  findNode,
+  hasExactText,
+  propsOf,
+  readValue,
+} from "../test/vnode-helpers.ts";
+import CozyPoll, {
+  dayKeyOf,
+  type Option,
+  type User,
+  type Vote,
+} from "./main.tsx";
 
 const findNodeByProp = (
   root: unknown,
@@ -30,6 +40,111 @@ const SEEDED_OPTION: Option = {
   title: "Leftover Café",
   addedByName: "Stan",
 };
+
+const COLLIDING_INITIAL_OPTION: Option = {
+  id: "opt-colliding-initials",
+  title: "Initials Café",
+  addedByName: "Daffodil",
+};
+
+const COLLIDING_INITIAL_USERS: User[] = [
+  {
+    name: "Daffodil",
+    avatar: "",
+    color: "#2f6f4e",
+    joinedAt: 1,
+  },
+  {
+    name: "Dragonfly",
+    avatar: "",
+    color: "#c2573a",
+    joinedAt: 2,
+  },
+  {
+    name: "Dan",
+    avatar: "",
+    color: "#3b4a6b",
+    joinedAt: 3,
+  },
+  {
+    name: "Dana",
+    avatar: "",
+    color: "#a33b35",
+    joinedAt: 4,
+  },
+  {
+    name: "dan",
+    avatar: "",
+    color: "#b27722",
+    joinedAt: 5,
+  },
+  {
+    name: "A",
+    avatar: "",
+    color: "#7c3aed",
+    joinedAt: 6,
+  },
+  {
+    name: "a",
+    avatar: "",
+    color: "#2f6f4e",
+    joinedAt: 7,
+  },
+  {
+    name: "A1",
+    avatar: "",
+    color: "#c2573a",
+    joinedAt: 8,
+  },
+  {
+    name: "Bob Smith",
+    avatar: "",
+    color: "#3b4a6b",
+    joinedAt: 9,
+  },
+  {
+    name: "Bob  Smith",
+    avatar: "",
+    color: "#a33b35",
+    joinedAt: 10,
+  },
+  {
+    name: "👩🏽‍💻Alice",
+    avatar: "",
+    color: "#7c3aed",
+    joinedAt: 11,
+  },
+  {
+    name: "👩🏽‍💻Bob",
+    avatar: "",
+    color: "#2f6f4e",
+    joinedAt: 12,
+  },
+  {
+    name: "🇺🇸Alice",
+    avatar: "",
+    color: "#c2573a",
+    joinedAt: 13,
+  },
+  {
+    name: "🇺🇸Bob",
+    avatar: "",
+    color: "#3b4a6b",
+    joinedAt: 14,
+  },
+  {
+    name: "e\u0301Alice",
+    avatar: "",
+    color: "#a33b35",
+    joinedAt: 15,
+  },
+  {
+    name: "e\u0301Bob",
+    avatar: "",
+    color: "#b27722",
+    joinedAt: 16,
+  },
+];
 
 export default pattern(() => {
   const poll = CozyPoll({});
@@ -63,6 +178,112 @@ export default pattern(() => {
   const stalePoll = CozyPoll({
     options: [SEEDED_OPTION],
     votes: [STALE_VOTE],
+  });
+
+  // Participant names with shared prefixes use distinct current-day vote labels.
+  // Each label preserves complete displayed characters.
+  const collidingCastAt = computed(() => nowCell.result ?? undefined);
+  const initialsPoll = CozyPoll({
+    options: [COLLIDING_INITIAL_OPTION],
+    users: COLLIDING_INITIAL_USERS,
+    votes: [
+      {
+        voterName: "Daffodil",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "green",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "Dragonfly",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "yellow",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "Dan",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "red",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "Dana",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "green",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "dan",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "yellow",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "A",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "red",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "a",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "green",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "A1",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "yellow",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "Bob Smith",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "red",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "Bob  Smith",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "green",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "👩🏽‍💻Alice",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "yellow",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "👩🏽‍💻Bob",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "red",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "🇺🇸Alice",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "green",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "🇺🇸Bob",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "yellow",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "e\u0301Alice",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "red",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "e\u0301Bob",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "green",
+        castAt: collidingCastAt,
+      },
+    ],
   });
 
   // === Actions ===
@@ -311,6 +532,104 @@ export default pattern(() => {
     poll.todayDate === todayKey
   );
 
+  const assert_colliding_initials_are_disambiguated = computed(() => {
+    const ui = initialsPoll[UI];
+    const daffodil = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "Daffodil",
+    );
+    const dragonfly = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "Dragonfly",
+    );
+    const dan = findNodeByProp(ui, "data-vote-swatch-name", "Dan");
+    const dana = findNodeByProp(ui, "data-vote-swatch-name", "Dana");
+    const lowerDan = findNodeByProp(ui, "data-vote-swatch-name", "dan");
+    const upperA = findNodeByProp(ui, "data-vote-swatch-name", "A");
+    const lowerA = findNodeByProp(ui, "data-vote-swatch-name", "a");
+    const aOne = findNodeByProp(ui, "data-vote-swatch-name", "A1");
+    const bobSmith = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "Bob Smith",
+    );
+    const bobDoubleSpace = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "Bob  Smith",
+    );
+    const emojiAlice = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "👩🏽‍💻Alice",
+    );
+    const emojiBob = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "👩🏽‍💻Bob",
+    );
+    const flagAlice = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "🇺🇸Alice",
+    );
+    const flagBob = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "🇺🇸Bob",
+    );
+    const accentAlice = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "e\u0301Alice",
+    );
+    const accentBob = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "e\u0301Bob",
+    );
+    return todayKey !== "" &&
+      initialsPoll.todayDate === todayKey &&
+      hasExactText(daffodil, "DF") &&
+      hasExactText(dragonfly, "DR") &&
+      hasExactText(dan, "DAN1") &&
+      hasExactText(dana, "DANA") &&
+      hasExactText(lowerDan, "DAN2") &&
+      hasExactText(upperA, "A2") &&
+      hasExactText(lowerA, "A3") &&
+      hasExactText(aOne, "A1") &&
+      hasExactText(bobSmith, "BOBSMITH1") &&
+      hasExactText(bobDoubleSpace, "BOBSMITH2") &&
+      hasExactText(emojiAlice, "👩🏽‍💻A") &&
+      hasExactText(emojiBob, "👩🏽‍💻B") &&
+      hasExactText(flagAlice, "🇺🇸A") &&
+      hasExactText(flagBob, "🇺🇸B") &&
+      hasExactText(accentAlice, "E\u0301A") &&
+      hasExactText(accentBob, "E\u0301B");
+  });
+
+  const assert_vote_swatches_have_accessible_names = computed(() => {
+    const ui = initialsPoll[UI];
+    const daffodil = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "Daffodil",
+    );
+    const emojiBob = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "👩🏽‍💻Bob",
+    );
+    return readValue(propsOf(daffodil)?.role) === "img" &&
+      readValue(propsOf(daffodil)?.["aria-label"]) ===
+        "Daffodil: green vote" &&
+      readValue(propsOf(emojiBob)?.role) === "img" &&
+      readValue(propsOf(emojiBob)?.["aria-label"]) ===
+        "👩🏽‍💻Bob: red vote";
+  });
+
   // The seeded stale vote is stored but hidden: absent from `todaysVotes`,
   // the count, and the rendered swatches. Guarded on both `#now` reads —
   // this pattern's (`todayKey`, which also resolves the seeded `castAt`) and
@@ -453,6 +772,9 @@ export default pattern(() => {
       // === Current-day vote filter ===
       // Header date + exposed day key.
       { assertion: assert_today_header_renders },
+      // Same-first-letter participant names get stable, distinct swatches.
+      { assertion: assert_colliding_initials_are_disambiguated },
+      { assertion: assert_vote_swatches_have_accessible_names },
       // Seeded stale (yesterday) vote: stored but hidden everywhere.
       { assertion: assert_stale_vote_hidden },
       // Same-color click on the stale vote re-casts it for today…

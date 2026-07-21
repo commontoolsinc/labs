@@ -1,5 +1,6 @@
 import {
   computed,
+  lift,
   NAME,
   pattern,
   type Stream,
@@ -17,7 +18,7 @@ import type {
 } from "./main.tsx";
 
 /** Shared per-session target cell used for one open option editor at a time. */
-export type PollOptionLinkTargetCell = Writable<string | null>;
+export type PollOptionLinkTargetCell = Writable<string | null | undefined>;
 
 const myVoteFor = (
   votes: readonly Vote[],
@@ -29,6 +30,10 @@ const myVoteFor = (
     (v) => v.voterName === me && v.optionId === optionId,
   )?.voteType;
 };
+
+const formatRank = lift<{ rank: number | undefined }, string>(({ rank }) =>
+  rank === undefined || rank <= 0 ? "—" : `#${rank}`
+);
 
 /**
  * PollOptionCard renders one complete ranked restaurant option row.
@@ -52,8 +57,8 @@ export interface PollOptionCardInput {
   /** Option record to render. */
   option: Option;
 
-  /** One-based display rank supplied by the parent's ranking computation. */
-  rank: number;
+  /** One-based display rank, or undefined while the parent ranking settles. */
+  rank: number | undefined;
 
   /** Resolved current viewer name; required for per-option vote styling. */
   me: string;
@@ -110,6 +115,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
   ) => {
     const oid = option.id;
     const optionTitle = option.title;
+    const displayRank = formatRank({ rank });
     const myVote = computed(() => myVoteFor(votes, me, oid));
     const isRemoveConfirm = computed(() => removeConfirmTarget.get() === oid);
 
@@ -143,7 +149,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
               fontWeight: 700,
             }}
           >
-            #{rank}
+            {displayRank}
           </span>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div
@@ -167,22 +173,30 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
               <span>added by {option.addedByName}</span>
               {isAdmin
                 ? (
-                  <button
-                    type="button"
-                    aria-label="Remove option (host)"
-                    style={{
-                      background: "none",
-                      border: "none",
-                      padding: 0,
-                      color: "#9ca3af",
-                      fontSize: "11px",
-                      textDecoration: "underline",
-                      cursor: "pointer",
-                    }}
-                    onClick={() => removeConfirmTarget.set(oid)}
-                  >
-                    · remove
-                  </button>
+                  <>
+                    <span
+                      aria-hidden="true"
+                      style={{ textDecoration: "none" }}
+                    >
+                      ·
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="Remove option (host)"
+                      style={{
+                        background: "none",
+                        border: "none",
+                        padding: 0,
+                        color: "#9ca3af",
+                        fontSize: "11px",
+                        textDecoration: "underline",
+                        cursor: "pointer",
+                      }}
+                      onClick={() => removeConfirmTarget.set(oid)}
+                    >
+                      remove
+                    </button>
+                  </>
                 )
                 : null}
               {isAdmin

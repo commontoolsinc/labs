@@ -85,6 +85,23 @@ describe("FabricBytes", () => {
         const target = new Uint8Array(3);
         expect(() => fb.copyInto(target, 0, -1)).toThrow(RangeError);
       });
+
+      it("copies nothing when the offset is at or past the end", () => {
+        const fb = new FabricBytes(new Uint8Array([1, 2, 3]));
+        const target = new Uint8Array([9, 9, 9]);
+
+        expect(fb.copyInto(target, 3)).toBe(0);
+        expect(fb.copyInto(target, 4)).toBe(0);
+        expect(target).toEqual(new Uint8Array([9, 9, 9]));
+      });
+
+      it("copies nothing from an empty source", () => {
+        const fb = new FabricBytes(new Uint8Array());
+        const target = new Uint8Array([9]);
+
+        expect(fb.copyInto(target)).toBe(0);
+        expect(target).toEqual(new Uint8Array([9]));
+      });
     });
   });
 
