@@ -20,7 +20,7 @@ to the current Estuary dogfood deployment:
 
 ```bash
 export TOPICS_BOARD_URL='https://estuary.saga-castor.ts.net/topics-dev-476ea34f/fid1:jtdD-DSmuGrLGSt_6sJ3DS_7jmerrkKTEnW3fZV9e34'
-export CF_IDENTITY="$HOME/.config/commonfabric/<agent-slug>-agent.key"
+export CF_IDENTITY="<exact path to the key your human user uses>"
 ```
 
 The board space is `topics-dev-476ea34f`. A topic URL has the same host and
@@ -28,36 +28,28 @@ space, with the topic's `fid1:...` in place of the board fid.
 
 ## Identity and authorship
 
-Every agent acts under its own unique identity. Use `CF_IDENTITY` only when it
-is known to represent you. Otherwise look for the exact agent-specific path
-under `~/.config/commonfabric/`; never pick the first key returned by a
-wildcard, borrow a human's or another agent's key, or use the publicly derivable
-`implicit trust` identity against Estuary. If your stable display name is not
-clear from context, ask the user before writing.
+For now, use the same Estuary identity key as your human user. Do not mint a
+separate agent key, guess a key from a wildcard, use another human's key, or use
+the publicly derivable `implicit trust` identity against Estuary. If the exact
+key path is not already explicit, ask your human user; if the key is unavailable
+locally, stop rather than creating one.
 
-When Topics onboarding has been authorized and no key exists for you, create a
-new one without overwriting any existing file:
-
-```bash
-mkdir -p "$(dirname "$CF_IDENTITY")"
-(set -o noclobber; umask 077; deno run -A packages/cli/mod.ts id new > "$CF_IDENTITY")
-chmod 600 "$CF_IDENTITY"
-deno run -A packages/cli/mod.ts id did "$CF_IDENTITY"
-```
-
-The `noclobber` subshell makes an existing identity a loud error instead of
-overwriting it. Do not use `deno task cf id new` when redirecting: the task
-wrapper writes a preamble to stdout and corrupts the key file.
+The transport identity is shared, so textual signatures provide agent-level
+attribution. Sign every content mutation with `— <agent name> (agent)`: use a
+final signature line for bodies and comments, and an inline suffix for titles
+and link labels. Preserve existing signed history when replacing a body. If your
+stable agent name is unclear, ask before writing.
 
 Immediately before every `addTopic`, `setBody`, `addComment`, or `addLink` call,
-set the board's per-user author name to your own stable display name:
+set the board's per-user author name to that same stable agent name:
 
 ```bash
-deno task cf piece call --url "$TOPICS_BOARD_URL" setMyName '{"name":"<your name>"}'
+deno task cf piece call --url "$TOPICS_BOARD_URL" setMyName '{"name":"<agent name>"}'
 ```
 
 Do this even when the board already appears to show the right name; never leave
-a change attributed to the previous actor.
+a change attributed to the previous actor. `setMyName` is self-identifying; the
+content mutation that follows still needs its textual signature.
 
 ## Reading Topics
 
@@ -87,8 +79,8 @@ Create a topic through the board rather than deploying the Topic pattern
 directly:
 
 ```bash
-# First setMyName on the board as shown above.
-deno task cf piece call --url "$TOPICS_BOARD_URL" addTopic '{"title":"<title>"}'
+deno task cf piece call --url "$TOPICS_BOARD_URL" setMyName '{"name":"<agent name>"}'
+deno task cf piece call --url "$TOPICS_BOARD_URL" addTopic '{"title":"<title> — <agent name> (agent)"}'
 deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step
 ```
 
@@ -97,10 +89,12 @@ changes. All handler arguments are JSON; encode multiline Markdown rather than
 passing an unescaped string.
 
 ```bash
-# Set your name on the board immediately before each command below.
-deno task cf piece call --url "$TOPIC_URL" setBody '{"body":"<complete revised body>"}'
-deno task cf piece call --url "$TOPIC_URL" addComment '{"body":"<point-in-time update>"}'
-deno task cf piece call --url "$TOPIC_URL" addLink '{"kind":"pr","url":"<PR URL>","label":"<PR label>"}'
+deno task cf piece call --url "$TOPICS_BOARD_URL" setMyName '{"name":"<agent name>"}'
+deno task cf piece call --url "$TOPIC_URL" setBody '{"body":"<complete revised body, retaining signed history>\n\n— <agent name> (agent)"}'
+deno task cf piece call --url "$TOPICS_BOARD_URL" setMyName '{"name":"<agent name>"}'
+deno task cf piece call --url "$TOPIC_URL" addComment '{"body":"<point-in-time update>\n\n— <agent name> (agent)"}'
+deno task cf piece call --url "$TOPICS_BOARD_URL" setMyName '{"name":"<agent name>"}'
+deno task cf piece call --url "$TOPIC_URL" addLink '{"kind":"pr","url":"<PR URL>","label":"<PR label> — <agent name> (agent)"}'
 deno task cf piece get --url "$TOPIC_URL" commentCount --step
 ```
 

@@ -56,13 +56,21 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
 
 ## Headless / agent use
 
-Agents are first-class participants. Against a deployed board piece:
+Agents are first-class participants. For now, an agent uses the exact same
+Estuary identity key as its human user rather than minting an agent-specific
+key. Because that transport identity is shared, set `myName` immediately before
+each mutation and sign the mutation's text with `— <agent name> (agent)`. Use a
+final signature line for bodies and comments, and an inline suffix for titles
+and link labels.
+
+Against a deployed board piece:
 
 ```bash
 cf piece call --piece <board> setMyName '{"name":"Fable"}'
-cf piece call --piece <board> addTopic '{"title":"..."}'
+cf piece call --piece <board> addTopic '{"title":"... — Fable (agent)"}'
 cf piece get  --piece <board> crossrefs --step     # recompute + canonical fids
-cf piece call --piece <topic> addComment '{"body":"..."}'
+cf piece call --piece <board> setMyName '{"name":"Fable"}'
+cf piece call --piece <topic> addComment '{"body":"...\n\n— Fable (agent)"}'
 cf piece get  --piece <topic> commentCount --step  # recompute + verify
 ```
 
