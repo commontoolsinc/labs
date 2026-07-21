@@ -7,7 +7,12 @@ import {
   type RuntimeProgram,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { loadVerifiedSourceClosure } from "../../runner/src/compilation-cache/cell-cache.ts";
+import {
+  loadCompiledClosure,
+  loadSourceClosure,
+  loadVerifiedSourceClosure,
+  setCompileCacheRuntimeVersionForTesting,
+} from "../../runner/src/compilation-cache/cell-cache.ts";
 import { PieceManager } from "../src/manager.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
@@ -150,25 +155,103 @@ describe("setsrc module delegation", () => {
 
     await runtime.patternManager.flushCompileCacheWrites();
     await manager.synced();
-    const freshSession = await createSession({
-      identity: signer,
-      spaceName: manager.getSpaceName()!,
-    });
-    const freshRuntime = new Runtime({
-      apiUrl: new URL("http://toolshed.test"),
-      storageManager,
-      cfcEnforcementMode: "enforce-explicit",
-    });
+    const freshRuntimes: Runtime[] = [];
     try {
-      const freshManager = new PieceManager(freshSession, freshRuntime);
-      await freshManager.synced();
-      const freshPiece = await new PiecesController(freshManager).get(
+      const createFreshRuntime = () => {
+        const freshRuntime = new Runtime({
+          apiUrl: new URL("http://toolshed.test"),
+          storageManager,
+          cfcEnforcementMode: "enforce-explicit",
+        });
+        // Runtime.dispose() closes the shared emulated storage manager, so all
+        // cold-start runtimes stay alive until the assertions are complete.
+        freshRuntimes.push(freshRuntime);
+        return freshRuntime;
+      };
+      const createFreshManager = async (freshRuntime: Runtime) => {
+        const freshSession = await createSession({
+          identity: signer,
+          spaceName: manager.getSpaceName()!,
+        });
+        const freshManager = new PieceManager(freshSession, freshRuntime);
+        await freshManager.synced();
+        return freshManager;
+      };
+
+      // The ordinary compiled-cache cold start still exercises delegation at
+      // the authorization boundary.
+      const coldRuntime = createFreshRuntime();
+      const coldManager = await createFreshManager(coldRuntime);
+      const coldPiece = await new PiecesController(coldManager).get(
         first.id,
         true,
       );
-      expect(await invokeSetName(freshPiece, "cold")).toBe("v3:cold");
+      expect(await invokeSetName(coldPiece, "cold")).toBe("v3:cold");
+
+      const bumpedRuntimeVersion = "setsrc-delegation-version-b";
+      const restoreRuntimeVersion = setCompileCacheRuntimeVersionForTesting(
+        bumpedRuntimeVersion,
+      );
+      try {
+        const repairRuntime = createFreshRuntime();
+        const inspectTx = repairRuntime.edit();
+        let authenticatedSourceClosure: Awaited<
+          ReturnType<typeof loadSourceClosure>
+        >;
+        try {
+          authenticatedSourceClosure = await loadSourceClosure(
+            repairRuntime,
+            manager.getSpace(),
+            successorRef.identity,
+            inspectTx,
+          );
+          expect(
+            authenticatedSourceClosure?.get(successorRef.identity)
+              ?.delegatedModuleIdentities?.length,
+          ).toBeGreaterThan(0);
+        } finally {
+          inspectTx.abort();
+        }
+
+        const repairManager = await createFreshManager(repairRuntime);
+        await new PiecesController(repairManager).get(
+          first.id,
+          true,
+        );
+        const delegationTx = repairRuntime.edit();
+        expect(
+          delegationTx.getCfcState().moduleDelegations.get(
+            successorRef.identity,
+          )?.length,
+        ).toBeGreaterThan(0);
+        delegationTx.abort();
+        await repairRuntime.patternManager.flushCompileCacheWrites();
+        await repairManager.synced();
+
+        const compiledTx = repairRuntime.edit();
+        try {
+          const repairedClosure = await loadCompiledClosure(
+            repairRuntime,
+            manager.getSpace(),
+            successorRef.identity,
+            { runtimeVersion: bumpedRuntimeVersion },
+            compiledTx,
+          );
+          for (const [identity, sourceDoc] of authenticatedSourceClosure!) {
+            expect(
+              repairedClosure.get(identity)?.delegatedModuleIdentities,
+            ).toEqual(sourceDoc.delegatedModuleIdentities);
+          }
+        } finally {
+          compiledTx.abort();
+        }
+      } finally {
+        restoreRuntimeVersion();
+      }
     } finally {
-      await freshRuntime.dispose();
+      for (const freshRuntime of freshRuntimes.reverse()) {
+        await freshRuntime.dispose();
+      }
     }
   });
 });

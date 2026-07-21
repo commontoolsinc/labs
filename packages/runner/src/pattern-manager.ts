@@ -36,6 +36,7 @@ import {
   loadCompiledClosure,
   loadVerifiedSourceClosure,
   type ModuleDelegationMap,
+  moduleDelegationsFromDocs,
   ROOT_LINK_SPECIFIER,
   type SourceDoc,
   sourceDocKey,
@@ -1304,6 +1305,7 @@ export class PatternManager {
     if (sourceDocs === undefined) return undefined;
     const entry = sourceDocs.get(entryIdentity);
     if (entry === undefined) return undefined;
+    const moduleDelegations = moduleDelegationsFromDocs(sourceDocs);
 
     const sourceFiles: Source[] = [...sourceDocs.values()].map((doc) => ({
       name: doc.filename,
@@ -1356,6 +1358,7 @@ export class PatternManager {
           compiled.modules,
           entryIdentity,
           cacheOpts,
+          moduleDelegations,
         ).then(() => {
           this.failedCompileCacheRecoveries.delete(recoveryKey);
         }).catch((error) => {

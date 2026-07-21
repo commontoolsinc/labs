@@ -66,6 +66,15 @@ export type ModuleDelegationMap = ReadonlyMap<
 
 const EMPTY_MODULE_DELEGATIONS: ModuleDelegationMap = new Map();
 
+/**
+ * Runtime-minted compiler attestation. Compiled documents carry it at their
+ * root; source documents carry it only on delegation metadata, whose mutable
+ * value is otherwise excluded from the source Merkle identity.
+ */
+export const COMPILED_INTEGRITY_ATOM: string = CFC_COMPILED_BY_ATOM;
+
+const SOURCE_DELEGATION_PATH = ["delegatedModuleIdentities"] as const;
+
 interface ModuleDocBase {
   /** Module code: authored TS (source set) or compiled JS (compiled set). */
   readonly code: string;
@@ -189,7 +198,7 @@ export function deriveModuleDelegations(
   return delegations;
 }
 
-function delegationMapFromDocs(
+export function moduleDelegationsFromDocs(
   docs: ReadonlyMap<string, ModuleDocBase>,
 ): Map<string, ReadonlySet<string>> {
   const result = new Map<string, ReadonlySet<string>>();
@@ -634,6 +643,57 @@ export const SOURCE_DOC_SCHEMA = {
 } as const satisfies JSONSchema;
 
 /**
+ * Flat source-document write schema. Only delegation metadata receives the
+ * runtime-minted compiler attestation: source code/imports remain
+ * self-verifying through their content identity, while annotations remain
+ * independently mutable.
+ */
+function sourceDocWriteSchema(): JSONSchema {
+  return {
+    type: "object",
+    properties: {
+      kind: { type: "string" },
+      identity: { type: "string" },
+      code: { type: "string" },
+      filename: { type: "string" },
+      imports: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            specifier: { type: "string" },
+            link: true,
+          },
+        },
+      },
+      delegatedModuleIdentities: {
+        type: "array",
+        items: { type: "string" },
+        ifc: { addIntegrity: [COMPILED_INTEGRITY_ATOM] },
+      },
+      annotations: { type: "object" },
+    },
+  };
+}
+
+/** Attribute cache-document writes to the trusted compiler builtin. */
+function withCompileCacheBuiltin<T>(
+  tx: IExtendedStorageTransaction,
+  action: () => T,
+): T {
+  const priorIdentity = tx.getCfcState().implementationIdentity;
+  tx.setCfcImplementationIdentity({
+    kind: "builtin",
+    builtinId: "compile-cache",
+  });
+  try {
+    return action();
+  } finally {
+    tx.setCfcImplementationIdentity(priorIdentity);
+  }
+}
+
+/**
  * One-hop selector for pre-syncing write-back targets (CT-1848). A stored
  * source/compiled doc's `imports` array holds LIVE links to per-edge element
  * docs (the cell layer hoists each `{specifier, link}` element into its own
@@ -686,45 +746,61 @@ export function writeSourceDocs(
 ): void {
   assertNoUnpinnedFabricImports(modules);
   const docs = buildSourceDocs(modules, entryIdentity, moduleDelegations);
-  for (const [identity, doc] of docs) {
-    // Write with an untyped cell (the recursive read schema would over-constrain
-    // `set`); reads address the same entity via SOURCE_DOC_SCHEMA.
-    const cell = runtime.getCell<StoredSourceDoc>(
-      space,
-      sourceDocKey(identity),
-      undefined,
-      tx,
-    );
-    // Preserve product annotations on the entry doc only. Annotations are only
-    // written there; reading every dependency doc here turns unrelated stale
-    // cache cells into writeback conflict preconditions.
-    const existing = cell.get();
-    const existingAnnotations = identity === entryIdentity
-      ? existing?.annotations
-      : undefined;
-    const delegatedModuleIdentities = validDelegatedModuleIdentities(
-      identity,
-      existing?.delegatedModuleIdentities,
-      doc.delegatedModuleIdentities,
-    );
-    cell.set({
-      kind: "source",
-      identity,
-      code: doc.code,
-      filename: doc.filename,
-      imports: doc.imports.map((imp) => ({
-        specifier: imp.specifier,
-        link: runtime.getCell(space, sourceDocKey(imp.identity), undefined, tx)
-          .getAsLink(),
-      })),
-      ...(delegatedModuleIdentities.length > 0
-        ? { delegatedModuleIdentities }
-        : {}),
-      ...(isRecord(existingAnnotations)
-        ? { annotations: existingAnnotations }
-        : {}),
-    } as StoredSourceDoc);
-  }
+  withCompileCacheBuiltin(tx, () => {
+    for (const [identity, doc] of docs) {
+      // Flat write schema: source recursion is a read concern; the delegation
+      // field alone receives compiler integrity.
+      const cell = runtime.getCell<StoredSourceDoc>(
+        space,
+        sourceDocKey(identity),
+        sourceDocWriteSchema(),
+        tx,
+      );
+      // Preserve product annotations on the entry doc only. Annotations are
+      // only written there; reading every dependency doc here turns unrelated
+      // stale cache cells into writeback conflict preconditions.
+      const existing = cell.get();
+      const existingAnnotations = identity === entryIdentity
+        ? existing?.annotations
+        : undefined;
+      // Never turn arbitrary mutable source metadata into trusted authority:
+      // only merge predecessor entries carrying the compiler's field label.
+      const authenticatedExistingDelegations = cellCarriesIntegrity(
+          cell,
+          COMPILED_INTEGRITY_ATOM,
+          tx,
+          SOURCE_DELEGATION_PATH,
+        )
+        ? existing?.delegatedModuleIdentities
+        : undefined;
+      const delegatedModuleIdentities = validDelegatedModuleIdentities(
+        identity,
+        authenticatedExistingDelegations,
+        doc.delegatedModuleIdentities,
+      );
+      cell.set({
+        kind: "source",
+        identity,
+        code: doc.code,
+        filename: doc.filename,
+        imports: doc.imports.map((imp) => ({
+          specifier: imp.specifier,
+          link: runtime.getCell(
+            space,
+            sourceDocKey(imp.identity),
+            undefined,
+            tx,
+          ).getAsLink(),
+        })),
+        ...(delegatedModuleIdentities.length > 0
+          ? { delegatedModuleIdentities }
+          : {}),
+        ...(isRecord(existingAnnotations)
+          ? { annotations: existingAnnotations }
+          : {}),
+      } as StoredSourceDoc);
+    }
+  });
 }
 
 /**
@@ -755,41 +831,50 @@ export async function loadSourceClosure(
   if (!root || typeof root.identity !== "string") return undefined;
 
   const out = new Map<string, SourceDoc>();
-  const queue: StoredSourceDoc[] = [root];
+  const queue: { doc: StoredSourceDoc; cell: Cell<unknown> }[] = [{
+    doc: root,
+    cell: entry,
+  }];
   while (queue.length > 0) {
-    const doc = queue.shift()!;
+    const { doc, cell } = queue.shift()!;
     if (out.has(doc.identity)) continue;
     const imports: ModuleImportRef[] = [];
-    const childDocs: StoredSourceDoc[] = [];
+    const childDocs: { doc: StoredSourceDoc; cell: Cell<unknown> }[] = [];
     for (const imp of doc.imports ?? []) {
       // `link` is already a loaded Cell (the entry sync pulled it). View it
       // under the recursive schema so its own links resolve as cells too.
       if (!isCell(imp.link)) continue;
-      const child = (imp.link as Cell<unknown>)
-        .asSchema(SOURCE_DOC_SCHEMA)
-        .get() as StoredSourceDoc | undefined;
+      const childCell = (imp.link as Cell<unknown>).asSchema(
+        SOURCE_DOC_SCHEMA,
+      );
+      const child = childCell.get() as StoredSourceDoc | undefined;
       if (!child || typeof child.identity !== "string") continue;
       imports.push({ specifier: imp.specifier, identity: child.identity });
-      childDocs.push(child);
+      childDocs.push({ doc: child, cell: childCell });
     }
+    const delegatedModuleIdentities = cellCarriesIntegrity(
+        cell,
+        COMPILED_INTEGRITY_ATOM,
+        tx,
+        SOURCE_DELEGATION_PATH,
+      )
+      ? validDelegatedModuleIdentities(
+        doc.identity,
+        doc.delegatedModuleIdentities,
+      )
+      : [];
     out.set(doc.identity, {
       kind: "source",
       code: doc.code,
       filename: doc.filename,
       imports,
-      ...(() => {
-        const delegatedModuleIdentities = validDelegatedModuleIdentities(
-          doc.identity,
-          doc.delegatedModuleIdentities,
-        );
-        return delegatedModuleIdentities.length > 0
-          ? { delegatedModuleIdentities }
-          : {};
-      })(),
+      ...(delegatedModuleIdentities.length > 0
+        ? { delegatedModuleIdentities }
+        : {}),
       ...(isRecord(doc.annotations) ? { annotations: doc.annotations } : {}),
     });
     for (const child of childDocs) {
-      if (!out.has(child.identity)) queue.push(child);
+      if (!out.has(child.doc.identity)) queue.push(child);
     }
   }
   return out;
@@ -843,22 +928,11 @@ export async function loadVerifiedSourceClosure(
     ]);
     return undefined;
   }
-  runtime.registerModuleDelegations(delegationMapFromDocs(closure));
+  runtime.registerModuleDelegations(moduleDelegationsFromDocs(closure));
   return closure;
 }
 
 // --- Compiled-set store (4.3.3): `compileCache:<rtver>/<identity>` + CFC ------
-
-/**
- * The CFC integrity atom stamped on a compiled document: the constant
- * `cf-compiled-by:cf-compiler`, attesting that the doc was emitted by the
- * system compiler. The atom covers the code that produced the doc, so every
- * member of a shared space can read the same compiled cache entry. Minting is
- * gated: prepare strips `cf-compiled-by:` atoms from any write not authored by a
- * trusted builtin, and `writeCompiledDocs` below is the legitimate minter. The
- * server-side attestation model is described in docs/specs/module-loading.md.
- */
-export const COMPILED_INTEGRITY_ATOM: string = CFC_COMPILED_BY_ATOM;
 
 const compiledDocProperties = {
   kind: { type: "string" },
@@ -1007,11 +1081,12 @@ function storedCoverageSpans(
   return out;
 }
 
-/** Whether a cell's persisted CFC label carries `atom` at its root path. */
+/** Whether a cell's persisted CFC label carries `atom` at `path`. */
 function cellCarriesIntegrity(
   cell: Cell<unknown>,
   atom: string,
   tx: IExtendedStorageTransaction,
+  path: readonly (string | number)[] = [],
 ): boolean {
   const link = cell.getAsNormalizedFullLink();
   const metadata = readStoredCfcMetadata(tx, {
@@ -1021,7 +1096,8 @@ function cellCarriesIntegrity(
   });
   if (metadata === undefined) return false;
   return metadata.labelMap.entries.some((entry) =>
-    entry.path.length === 0 &&
+    entry.path.length === path.length &&
+    entry.path.every((segment, index) => segment === path[index]) &&
     Array.isArray(entry.label.integrity) &&
     entry.label.integrity.some((a) => a === atom)
   );
@@ -1049,16 +1125,7 @@ export function writeCompiledDocs(
   assertNoUnpinnedFabricImports(modules);
   const extraRoots = unreachedRoots(modules, entryIdentity);
   const schema = compiledDocWriteSchema();
-  // Attribute these writes to the compile-cache builtin for the duration of
-  // the doc writes: prepare's runtime-minted-evidence gate strips the
-  // `cf-compiled-by:` atom from any write whose recorded author is not a
-  // trusted builtin, and the author is captured per write at record time.
-  const priorIdentity = tx.getCfcState().implementationIdentity;
-  tx.setCfcImplementationIdentity({
-    kind: "builtin",
-    builtinId: "compile-cache",
-  });
-  try {
+  withCompileCacheBuiltin(tx, () => {
     for (const module of modules) {
       const cell = runtime.getCell(
         space,
@@ -1070,9 +1137,16 @@ export function writeCompiledDocs(
       // the boot-time record build reads it instead of re-parsing per load.
       const derived = deriveModuleRecordFields(module.js);
       const existing = cell.get() as StoredCompiledDoc | undefined;
+      const authenticatedExistingDelegations = cellCarriesIntegrity(
+          cell,
+          COMPILED_INTEGRITY_ATOM,
+          tx,
+        )
+        ? existing?.delegatedModuleIdentities
+        : undefined;
       const delegatedModuleIdentities = validDelegatedModuleIdentities(
         module.identity,
-        existing?.delegatedModuleIdentities,
+        authenticatedExistingDelegations,
         [...(opts.moduleDelegations?.get(module.identity) ?? [])],
       );
       const policyManifests = module.policyManifests?.map((input) => {
@@ -1120,9 +1194,7 @@ export function writeCompiledDocs(
         })),
       } as StoredCompiledDoc);
     }
-  } finally {
-    tx.setCfcImplementationIdentity(priorIdentity);
-  }
+  });
 }
 
 /**
@@ -1250,6 +1322,6 @@ export async function loadCompiledClosure(
       imports,
     });
   }
-  runtime.registerModuleDelegations(delegationMapFromDocs(out));
+  runtime.registerModuleDelegations(moduleDelegationsFromDocs(out));
   return out;
 }

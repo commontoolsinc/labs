@@ -143,7 +143,7 @@ describe("module identity delegation", () => {
     expect(delegations.has("new")).toBe(false);
   });
 
-  it("allows a loaded successor module to satisfy its predecessor's writer claim", async () => {
+  it("does not trust delegation metadata without compiler integrity", async () => {
     const oldIdentity = computeModuleHashes(moduleProgram("old")).get(
       "/writer.ts",
     )!;
@@ -151,16 +151,84 @@ describe("module identity delegation", () => {
 
     const sourceTx = runtime.edit();
     writeSourceDocs(runtime, space, [successor], successor.identity, sourceTx);
+    runtime.prepareTxForCommit(sourceTx);
+    expect((await sourceTx.commit()).error).toBeUndefined();
+
+    // A later ordinary write can mutate the Merkle-excluded metadata but must
+    // not inherit the compiler-only attestation from the original cache write.
+    const forgeTx = runtime.edit();
     const sourceCell = runtime.getCell<Record<string, unknown>>(
       space,
       sourceDocKey(successor.identity),
       undefined,
-      sourceTx,
+      forgeTx,
     );
+    await sourceCell.sync();
     sourceCell.set({
-      ...sourceCell.get(),
+      kind: "source",
+      identity: successor.identity,
+      code: successor.source,
+      filename: successor.filename,
+      imports: [],
       delegatedModuleIdentities: [oldIdentity],
     });
+    runtime.prepareTxForCommit(forgeTx);
+    expect((await forgeTx.commit()).error).toBeUndefined();
+
+    const protectedCell = runtime.getCell<{ value: string }>(
+      space,
+      "module-delegation-untrusted-source",
+      protectedSchema,
+    );
+    const seed = await runtime.editWithRetry((tx) => {
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        moduleIdentity: oldIdentity,
+        sourceFile: "/writer.ts",
+        bindingPath: ["setValue"],
+      });
+      protectedCell.withTx(tx).set({ value: "seed" });
+    });
+    expect(seed.error).toBeUndefined();
+
+    const loadTx = runtime.edit();
+    const closure = await loadVerifiedSourceClosure(
+      runtime,
+      space,
+      successor.identity,
+      loadTx,
+    );
+    loadTx.abort?.("untrusted module-delegation source load complete");
+    expect(closure?.get(successor.identity)?.delegatedModuleIdentities)
+      .toBeUndefined();
+
+    const denied = await runtime.editWithRetry((tx) => {
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        moduleIdentity: successor.identity,
+        sourceFile: "/writer.ts",
+        bindingPath: ["setValue"],
+      });
+      protectedCell.withTx(tx).set({ value: "forged" });
+    }, 0);
+    expect(denied.error?.message).toContain("writeAuthorizedBy failed");
+  });
+
+  it("allows a loaded successor module to satisfy its predecessor's writer claim", async () => {
+    const oldIdentity = computeModuleHashes(moduleProgram("old")).get(
+      "/writer.ts",
+    )!;
+    const successor = moduleFor(moduleProgram("new"));
+
+    const sourceTx = runtime.edit();
+    writeSourceDocs(
+      runtime,
+      space,
+      [successor],
+      successor.identity,
+      sourceTx,
+      new Map([[successor.identity, new Set([oldIdentity])]]),
+    );
     runtime.prepareTxForCommit(sourceTx);
     expect((await sourceTx.commit()).error).toBeUndefined();
 

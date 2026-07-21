@@ -378,10 +378,14 @@ Each document holds
 where `link` is a sigil link to the dependency's document in the same set.
 `delegatedModuleIdentities` is mutable metadata, excluded from the Merkle
 identity, that records predecessor module hashes whose writer authority the
-current module may exercise. The general source/compiled save path merges this
-set with the stored document under `editWithRetry`; it never replaces entries,
-because one content-addressed successor can be shared by patterns updated from
-different predecessors. Because
+current module may exercise. Since content-addressing does not authenticate
+that mutable field, source documents carry the compiler integrity stamp on the
+delegation field alone; compiled documents authenticate it with their existing
+root compiler stamp. Loaders discard delegation metadata without the applicable
+stamp. The general source/compiled save path merges newly derived entries only
+with authenticated stored entries under `editWithRetry`; it never replaces
+entries, because one content-addressed successor can be shared by patterns
+updated from different predecessors. Because
 `identity` is a one-way Merkle hash, the `imports` links are load-bearing (stored
 explicitly), but the parent hash commits to its children's identities, so the
 graph wiring is verifiable on load by recomputing identities and checking each
@@ -405,13 +409,16 @@ For every unambiguous match, the successor records the direct predecessor plus
 the predecessor's cumulative delegation list. This makes an update chain
 cold-reload-stable.
 
-Both verified source loads and integrity-valid compiled-cache loads register the
-stored lists in the runtime as a successor-to-predecessor map. Each transaction
-snapshots its transitive closure. `writeAuthorizedBy` may then match the live
-writer's module hash directly or through that snapshot, while its normalized
-source file and binding path must still match exactly. A rename does not inherit
-authority. Ambiguous canonical filenames fail closed by receiving no
-delegation.
+Verified source loads register only field-integrity-authenticated lists;
+integrity-valid compiled-cache loads register lists from their root-authenticated
+documents. Each transaction snapshots the resulting successor-to-predecessor
+map's transitive closure. `writeAuthorizedBy` may then match the live writer's
+module hash directly or through that snapshot, while its normalized source file
+and binding path must still match exactly. A rename does not inherit authority.
+Ambiguous canonical filenames and unauthenticated metadata fail closed by
+receiving no delegation. If a runtime-version miss recompiles from source, the
+compiled-cache repair carries the authenticated map forward so later warm loads
+retain the same authority chain.
 
 ## Verifiable Execution Implications
 
@@ -436,7 +443,10 @@ The cache is designed around this:
   its own contents, so a reader self-checks `hash(content) === <identity>`. A
   tampered source document fails the check; a poisoned-but-different source would
   not hash to the requested identity. Recompiling a source document also re-runs
-  the SES verifier, so a malformed source is rejected on the compile path.
+  the SES verifier, so a malformed source is rejected on the compile path. The
+  one exception is mutable delegation metadata, which is deliberately outside
+  that hash and therefore requires its own field-level compiler integrity stamp
+  before a loader can use it as authority.
 - **Compiled set integrity is a CFC label.** `compileCache:<runtimeVersion>/<identity>`
   is keyed by the *source* identity, which does not bind the *JS* bytes.
   The compiled document therefore carries a **CFC integrity label**, written with

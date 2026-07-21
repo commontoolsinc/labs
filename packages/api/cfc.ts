@@ -129,13 +129,13 @@ export const CFC_RUNTIME_SUBJECT = "did:web:commonfabric.org#runtime";
 export const CFC_COMPILED_BY_ATOM_PREFIX = "cf-compiled-by:" as const;
 
 /**
- * The single attestation stamped on compile-cache docs: the doc was emitted by
- * the system compiler. Deliberately NOT bound to a user identity — the atom
- * attests to the code that produced the doc, not to who ran it, so a shared
- * space's compile cache is readable by every member. The hard (cryptographic)
- * guarantee lands when compilation becomes server-only and the server attaches
- * real attestation data; until then minting is gated to builtin-authored
- * writes (see prefix doc above).
+ * The single compiler attestation: stamped on compiled-cache document roots and
+ * on mutable source-document delegation metadata. Deliberately NOT bound to a
+ * user identity — the atom attests to the system compiler's write, not to who
+ * ran it, so every member of a shared space can reuse the result. The hard
+ * (cryptographic) guarantee lands when compilation becomes server-only and the
+ * server attaches real attestation data; until then minting is gated to
+ * builtin-authored writes (see prefix doc above).
  */
 export const CFC_COMPILED_BY_ATOM = "cf-compiled-by:cf-compiler" as const;
 
