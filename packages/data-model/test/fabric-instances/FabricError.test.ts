@@ -293,6 +293,29 @@ describe("FabricError", () => {
         expect(fe.extraSize).toBe(1);
       });
 
+      // The constructor filters its `extras` input independently of the codec,
+      // which filters again on the way in. Both layers matter: extras carry
+      // whatever the wire supplied, and the constructor is public.
+      it("drops unsafe and reserved keys supplied to the constructor", () => {
+        const fe = new FabricError({
+          type: "Error",
+          name: "Error",
+          message: "m",
+          stack: undefined,
+          cause: undefined,
+          extras: [
+            ["__proto__", "bad"],
+            ["constructor", "bad"],
+            ["type", "bad"],
+            ["message", "bad"],
+            ["kept", 1],
+          ] as Array<[string, FabricValue]>,
+        });
+
+        expect([...fe.extraKeys()]).toEqual(["kept"]);
+        expect(fe.message).toBe("m");
+      });
+
       it("still reads while frozen", () => {
         const fe = FabricError.fromNativeError(new Error("test"));
         fe.setExtra("a", 1);
@@ -461,6 +484,26 @@ describe("FabricError", () => {
       // Decoding hand-built state (not via `encode()`): exercises name/type
       // handling and back-compat that the round-trip tests don't.
       describe("decode()", () => {
+        // `JSON.parse` creates an own `__proto__` property where an object
+        // literal instead invokes the setter, so parsed wire state is the one
+        // place a prototype-sensitive key genuinely arrives as decodable input.
+        it("drops a `__proto__` key arriving from parsed wire state", () => {
+          const state = JSON.parse(
+            '{"type":"Error","message":"x","__proto__":"bad","code":7}',
+          );
+          expect(Object.hasOwn(state, "__proto__")).toBe(true);
+
+          const result = codec.decode(
+            expectedTag,
+            state,
+            context,
+          ) as unknown as FabricError;
+
+          expect([...result.extraKeys()]).toEqual(["code"]);
+          expect(result.hasExtra("__proto__")).toBe(false);
+          expect(Object.getPrototypeOf({})).toBe(Object.prototype);
+        });
+
         it("creates a `FabricError` from state (null `name` = same as `type`)", () => {
           const state = { type: "Error", name: null, message: "hello" };
           const result = codec.decode(
