@@ -292,7 +292,7 @@ The shape is always: settle the view, click once, then wait for the effect —
 never poll-and-pray, and never re-click.
 
 A CI check enforces this for the polling `waitFor`: `deno task check-no-waitfor`
-fails when an integration test imports `waitFor` from
+fails when an integration test imports `waitFor` as a value from
 `@commonfabric/integration`, whether through the bare specifier or a relative
 path to the package. See [`waiting-in-tests.md`](./waiting-in-tests.md) for the
 rationale, the full event-driven toolkit, and the allowlist of intentional

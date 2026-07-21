@@ -244,12 +244,15 @@ their teeth come from the wait being long enough to have seen an unwanted op.
 A check prevents new integration tests from importing the polling `waitFor`.
 `tasks/check-no-waitfor.ts` scans the `.ts` files under any `integration/`
 directory beneath `packages/` (excluding the `@commonfabric/integration` package,
-which defines `waitFor`) and fails when one names `waitFor` in an import of that
-package and is not on the check's allowlist. Two spellings reach it and both
-count: the bare `@commonfabric/integration` specifier, and a relative path ending
-at the package's `utils.ts` or `index.ts`. Commenting the import out clears the
-check, so it stays out of the way while a test is being migrated — text inside a
-comment or a string is not an import. Run it with `deno task check-no-waitfor`;
+which defines `waitFor`) and fails when one takes `waitFor` as a value from an
+import of that package and is not on the check's allowlist. Two spellings reach
+it and both count: the bare `@commonfabric/integration` specifier, and a relative
+path ending at the package's `utils.ts` or `index.ts`. Commenting the import out
+clears the check, so it stays out of the way while a test is being migrated —
+text inside a comment or a string is not an import. A type-only import, whether
+`import type { waitFor }` or an inline `{ type waitFor }`, is erased before the
+test runs and polls nothing, so it does not count either. Run it with
+`deno task check-no-waitfor`;
 the CI "Check" job runs it on every pull request. The error names the offending
 file and points at `waitForCondition`, `awaitViewSettled`, the in-process
 `defer()` replacement, and this report.
