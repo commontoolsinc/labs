@@ -32,6 +32,8 @@ import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
 import { buildCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
+import { PatternCoverageCollector } from "../src/pattern-coverage.ts";
+import { pattern } from "../src/builder/pattern.ts";
 
 // These tests drive the sync parse internals directly (below the async flow
 // boundaries that normally load the deferred compiler stack), so load it here.
@@ -796,6 +798,14 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     expect((await coldLoad()).get(entryIdentity)?.patternCoverageSpans)
       .toBeUndefined();
 
+    // Valid JSON still has to describe an array of span records.
+    await replaceSpans({ patternCoverageSpansJson: JSON.stringify({}) });
+    expect((await coldLoad()).get(entryIdentity)?.patternCoverageSpans)
+      .toBeUndefined();
+    await replaceSpans({ patternCoverageSpansJson: JSON.stringify([null]) });
+    expect((await coldLoad()).get(entryIdentity)?.patternCoverageSpans)
+      .toBeUndefined();
+
     // The durable format accepts only the scalar JSON field.
     await replaceSpans({ patternCoverageSpans: spans });
     expect((await coldLoad()).get(entryIdentity)?.patternCoverageSpans)
@@ -1249,6 +1259,42 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     }
   });
 
+  it("skips same-space and keyless pattern replication", async () => {
+    const keyed = pattern(() => ({}));
+    const keyless = pattern(() => ({}));
+    const ref = { identity: "same-space-entry", symbol: "default" };
+    runtime.patternManager.associatePatternIdentity(keyed, ref);
+    expect(runtime.patternManager.getArtifactEntryRef(keyed)).toEqual(ref);
+    expect(runtime.patternManager.getArtifactEntryRef(keyless)).toBeUndefined();
+
+    const manager = runtime.patternManager as unknown as {
+      replicateClosures(
+        entryIdentity: string,
+        fromSpace: string,
+        toSpace: string,
+      ): Promise<void>;
+    };
+    const originalReplicateClosures = manager.replicateClosures;
+    let replicationCalls = 0;
+    manager.replicateClosures = () => {
+      replicationCalls++;
+      return Promise.resolve();
+    };
+    try {
+      runtime.patternManager.replicatePatternToSpace(keyed, spaceA, spaceA);
+      runtime.patternManager.replicatePatternToSpace(
+        keyless,
+        "did:key:z6MkCellCacheKeylessReplicationTarget",
+        spaceA,
+      );
+
+      await runtime.patternManager.flushCompileCacheWrites();
+      expect(replicationCalls).toBe(0);
+    } finally {
+      manager.replicateClosures = originalReplicateClosures;
+    }
+  });
+
   it("replicates fabric dependencies even though source closures exclude them", async () => {
     const spaceB = "did:key:z6MkCellCacheFabricReplicationTarget";
     const { modules, importerIdentity, depIdentity } = fabricLinkedModules();
@@ -1394,6 +1440,100 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     repairedTx.abort?.();
     expect(repairedSource?.has(importerIdentity)).toBe(true);
     expect(repairedCompiled.has(importerIdentity)).toBe(true);
+  });
+
+  it("rejects replication from an incomplete origin closure", async () => {
+    const targetSpace = "did:key:z6MkCellCacheIncompleteReplicationTarget";
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const manager = runtime.patternManager as unknown as {
+      replicateClosures(
+        entryIdentity: string,
+        fromSpace: string,
+        toSpace: string,
+        visited?: Set<string>,
+      ): Promise<void>;
+    };
+
+    const visitKey = `${spaceA}\0${targetSpace}\0${entryIdentity}`;
+    await expect(
+      manager.replicateClosures(
+        entryIdentity,
+        spaceA,
+        targetSpace,
+        new Set([visitKey]),
+      ),
+    ).resolves.toBeUndefined();
+
+    await expect(
+      manager.replicateClosures(entryIdentity, spaceA, targetSpace),
+    ).rejects.toThrow("source closure unavailable in origin space");
+
+    const sourceOnlyWrite = runtime.edit();
+    writeSourceDocs(
+      runtime,
+      spaceA,
+      modules,
+      entryIdentity,
+      sourceOnlyWrite,
+    );
+    sourceOnlyWrite.prepareCfc();
+    expect((await sourceOnlyWrite.commit()).error).toBeUndefined();
+
+    await expect(
+      manager.replicateClosures(entryIdentity, spaceA, targetSpace),
+    ).rejects.toThrow(`compiled doc missing for ${entryIdentity}`);
+  });
+
+  it("rejects coverage replication when compiled spans are absent", async () => {
+    const coverageStorageManager = StorageManager.emulate({ as: signer });
+    const coverageRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: coverageStorageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      trustSnapshotProvider: () => ({
+        id: "cell-cache-coverage-replication-test",
+        actingPrincipal: signer.did(),
+      }),
+      patternCoverage: new PatternCoverageCollector(),
+    });
+    const targetSpace = "did:key:z6MkCellCacheCoverageReplicationTarget";
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const coverageRuntimeVersion = `${runtimeVersion}/pattern-coverage`;
+
+    try {
+      const writeTx = coverageRuntime.edit();
+      writeSourceDocs(
+        coverageRuntime,
+        spaceA,
+        modules,
+        entryIdentity,
+        writeTx,
+      );
+      writeCompiledDocs(
+        coverageRuntime,
+        spaceA,
+        modules,
+        entryIdentity,
+        { runtimeVersion: coverageRuntimeVersion },
+        writeTx,
+      );
+      writeTx.prepareCfc();
+      expect((await writeTx.commit()).error).toBeUndefined();
+
+      const manager = coverageRuntime.patternManager as unknown as {
+        replicateClosures(
+          entryIdentity: string,
+          fromSpace: string,
+          toSpace: string,
+        ): Promise<void>;
+      };
+      await expect(
+        manager.replicateClosures(entryIdentity, spaceA, targetSpace),
+      ).rejects.toThrow("coverage spans unavailable in origin space");
+    } finally {
+      await coverageRuntime.dispose();
+      await coverageStorageManager.close();
+    }
   });
 
   it("does not reuse a closure missing required delegation metadata", async () => {
