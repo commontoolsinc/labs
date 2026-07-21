@@ -9,7 +9,7 @@
  * PR.
  */
 import { assert } from "@std/assert";
-import { DATA_CELL_MEDIA_TYPE } from "../src/data-uri.ts";
+import { DATA_CELL_MEDIA_TYPE } from "../src/data-uri-codec.ts";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {

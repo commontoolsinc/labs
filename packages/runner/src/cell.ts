@@ -107,7 +107,10 @@ import {
   type URI,
 } from "./sigil-types.ts";
 import type { Runtime } from "./runtime.ts";
-import { createDataCellURI, findAndInlineDataURILinks } from "./data-uri.ts";
+import {
+  dataCellURIWithResolvedLinks,
+  findAndInlineDataURILinks,
+} from "./data-uri.ts";
 import {
   areLinksSame,
   createSigilLinkFromParsedLink,
@@ -2834,7 +2837,7 @@ function maybeConvertArrayPathToDataURILink(
 
   return {
     ...link,
-    id: createDataCellURI(candidate.value, baseLink),
+    id: dataCellURIWithResolvedLinks(candidate.value, baseLink),
     path: candidate.remainingPath,
   };
 }

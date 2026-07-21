@@ -2,7 +2,7 @@
 // after cell writes reach a final commit result.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { DATA_CELL_MEDIA_TYPE } from "../src/data-uri.ts";
+import { DATA_CELL_MEDIA_TYPE } from "../src/data-uri-codec.ts";
 import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
 

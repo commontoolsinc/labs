@@ -24,11 +24,11 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { toTransactionDocumentValue } from "../v2-document.ts";
 import {
-  decodeDataURIPayloadText,
   extractDataURIPayloadText,
   isDataCellMediaType,
   isDataCellURI,
-} from "../../data-uri.ts";
+  valueFromDataCellPayloadText,
+} from "../../data-uri-codec.ts";
 
 const logger = getLogger("attestation", {
   enabled: false,
@@ -273,7 +273,7 @@ export const load = (
         // thinks in documents. Synthesis also guarantees payload
         // content can never alias a document facet (`cfc`, `source`).
         value = Object.freeze({
-          value: decodeDataURIPayloadText(text),
+          value: valueFromDataCellPayloadText(text),
         });
         result = { ok: { address: { ...address, path: [] }, value } };
       } catch (error) {

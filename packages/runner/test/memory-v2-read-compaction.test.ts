@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
-import { mintDataCellURI } from "../src/data-uri.ts";
+import { dataCellURIFromValue } from "../src/data-uri-codec.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -123,7 +123,7 @@ Deno.test("memory v2 excludes inline data URI reads from tracked commit dependen
     "memory-v2-read-compaction-inline-data",
   );
   const space = signer.did();
-  const dataUri = mintDataCellURI({ inline: true });
+  const dataUri = dataCellURIFromValue({ inline: true });
 
   const seed = runtime.edit();
   seed.writeValueOrThrow(

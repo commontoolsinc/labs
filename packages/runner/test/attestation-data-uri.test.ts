@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { jsonFromValue } from "@commonfabric/data-model/codec-json";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
-import { DATA_CELL_MEDIA_TYPE } from "../src/data-uri.ts";
+import { DATA_CELL_MEDIA_TYPE } from "../src/data-uri-codec.ts";
 import { load } from "../src/storage/transaction/attestation.ts";
 import type { URI } from "../src/sigil-types.ts";
 
@@ -13,8 +13,8 @@ const uriOf = (payload: string): URI =>
   }` as URI;
 
 // `load()` is the storage-transaction-side reader of `data:` URI documents,
-// separate from `data-uri.ts`'s `getJSONFromDataURI()`. Both route payload
-// text through `decodeDataURIPayloadText()`, so the two readers cannot
+// separate from `data-uri.ts`'s `valueFromDataCellURI()`. Both route payload
+// text through `valueFromDataCellPayloadText()`, so the two readers cannot
 // silently diverge on what a payload means.
 describe("attestation `load()` of `data:` URIs", () => {
   it("errors on a historical bare-JSON payload", () => {
