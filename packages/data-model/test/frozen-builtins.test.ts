@@ -307,6 +307,16 @@ describe("frozen-builtins", () => {
     });
 
     describe("non-finite and signed-zero values", () => {
+      // These wrappers follow `Set`'s `SameValueZero` comparison, under which
+      // `-0` and `+0` are the same element. That differs from `FabricValue`
+      // equality, which follows `Object.is()` and holds `-0` distinct from
+      // `+0` -- so the behavior pinned here can look like a bug against that
+      // rule. It isn't: `FrozenMap` / `FrozenSet` exist to be drop-in
+      // substitutes for the intrinsics they wrap, and a wrapper that mirrored
+      // `Set` in every respect except `-0` would be a worse trap than the
+      // difference between the two layers. These tests are what keep the
+      // wrapper from being "corrected" to `Object.is()` for consistency.
+      //
       // `toBe()` compares with `Object.is()`, which tells `-0` from `+0`.
       // `toEqual()` does not, and would make these assertions vacuous.
       it("normalizes `-0` to `+0` on insertion, as `Set` does", () => {
