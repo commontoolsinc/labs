@@ -13,6 +13,7 @@ import {
   isInternedSchema,
 } from "@/schema-hash.ts";
 import { SchemaAndHash } from "@/SchemaAndHash.ts";
+import { dataUriFromValue } from "@/data-uri-codec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { hashStringOf, taggedHashStringOf } from "@/value-hash.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
@@ -230,6 +231,22 @@ describe("schema-hash", () => {
         });
       });
     }
+  });
+
+  describe("interned key order vs. minted `data:` ids", () => {
+    it("mints identical ids for equal-content schemas regardless of interned key order", () => {
+      // Interning preserves the object's construction key order; id
+      // determinism is entirely the value encoding's job. So a schema
+      // interned in non-canonical key order and a never-interned
+      // structurally-equal schema in canonical (UTF-8-sorted) order must
+      // mint the same content-addressed id.
+      const title = `schemaHashTestAt${Date.now()}-${Math.random()}`;
+      const scrambled = internSchema({ type: "number", title });
+      const sorted: JSONSchemaObj = { title, type: "number" };
+
+      expect(dataUriFromValue({ schema: scrambled }))
+        .toBe(dataUriFromValue({ schema: sorted }));
+    });
   });
 
   describe("deepFrozenCloneAndInternSchema()", () => {
