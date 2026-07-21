@@ -13,6 +13,7 @@ import {
   isInternedSchema,
 } from "@/schema-hash.ts";
 import { SchemaAndHash } from "@/SchemaAndHash.ts";
+import { dataUriFromValue } from "@/data-uri-codec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { hashStringOf, taggedHashStringOf } from "@/value-hash.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
@@ -108,10 +109,9 @@ describe("schema-hash", () => {
           expect(isDeepFrozen(schema)).toBe(true);
         });
 
-        it("uses an already-deep-frozen, already-canonical schema by reference", () => {
-          // Content-unique key guarantees no prior interning has seen this exact
-          // schema. Its keys are already in canonical (UTF-8 byte) order, so
-          // interning returns the input by reference — no canonicalizing clone.
+        it("uses an already-deep-frozen schema by reference", () => {
+          // Content-unique key guarantees no prior interning has seen this
+          // exact schema; interning returns the input by reference.
           const schema = toDeepFrozenSchema({
             title: `schemaHashTestAt${Date.now()}-${Math.random()}`,
             type: "object",
@@ -121,10 +121,9 @@ describe("schema-hash", () => {
           expect(result).toBe(schema);
         });
 
-        it("preserves identity for an already-canonical schema holding NaN", () => {
-          // `NaN` never `===`-equals itself, so an identity-change check
-          // spelled `!==` spuriously reports the untouched leaf as changed
-          // and clones (and re-registers) the whole schema.
+        it("preserves identity for a schema holding NaN", () => {
+          // `NaN` never `===`-equals itself; identity preservation must not
+          // depend on leaf self-equality.
           const schema = toDeepFrozenSchema({
             default: NaN,
             title: `schemaHashTestAt${Date.now()}-${Math.random()}`,
@@ -134,8 +133,8 @@ describe("schema-hash", () => {
           expect(result).toBe(schema);
         });
 
-        it("preserves identity for an already-canonical schema holding NaN in an array", () => {
-          // As above, via the array (`examples`) canonicalization branch.
+        it("preserves identity for a schema holding NaN in an array", () => {
+          // As above, with the leaf inside an array (`examples`).
           const schema = toDeepFrozenSchema({
             examples: [NaN],
             title: `schemaHashTestAt${Date.now()}-${Math.random()}`,
@@ -145,29 +144,15 @@ describe("schema-hash", () => {
           expect(result).toBe(schema);
         });
 
-        it("uses a never-before-encountered, already-canonical mutable schema by reference", () => {
-          // As above: content-unique, with keys already in canonical order, so
-          // it is frozen in place and returned by reference.
-          const schema: JSONSchemaObj = {
-            title: `schemaHashTestAt${Date.now()}-${Math.random()}`,
-            type: "number",
-          };
-          const result = callIntern(schema);
-          expect(result).toBe(schema);
-        });
-
-        it("returns a sorted clone (not by reference) for a non-canonical schema", () => {
-          // Keys NOT in canonical order: interning returns a structurally-equal
-          // clone with keys sorted, so the interned form serializes the same way
-          // regardless of the input's key order (the convergence property).
+        it("uses a never-before-encountered mutable schema by reference", () => {
+          // Content-unique: frozen in place and returned by reference,
+          // regardless of key order.
           const schema: JSONSchemaObj = {
             type: "object",
             title: `schemaHashTestAt${Date.now()}-${Math.random()}`,
           };
-          const result = callIntern(schema) as JSONSchemaObj;
-          expect(result).not.toBe(schema);
-          expect(result).toEqual(schema); // structurally equal
-          expect(Object.keys(result)).toEqual(["title", "type"]); // sorted
+          const result = callIntern(schema);
+          expect(result).toBe(schema);
           expect(isDeepFrozen(result)).toBe(true);
         });
 
@@ -246,6 +231,22 @@ describe("schema-hash", () => {
         });
       });
     }
+  });
+
+  describe("interned key order vs. minted `data:` ids", () => {
+    it("mints identical ids for equal-content schemas regardless of interned key order", () => {
+      // Interning preserves the object's construction key order; id
+      // determinism is entirely the value encoding's job. So a schema
+      // interned in non-canonical key order and a never-interned
+      // structurally-equal schema in canonical (UTF-8-sorted) order must
+      // mint the same content-addressed id.
+      const title = `schemaHashTestAt${Date.now()}-${Math.random()}`;
+      const scrambled = internSchema({ type: "number", title });
+      const sorted: JSONSchemaObj = { title, type: "number" };
+
+      expect(dataUriFromValue({ schema: scrambled }))
+        .toBe(dataUriFromValue({ schema: sorted }));
+    });
   });
 
   describe("deepFrozenCloneAndInternSchema()", () => {
@@ -435,137 +436,5 @@ describe("schema-hash", () => {
   it("returns base64url strings from `hashSchema()` (no algorithm prefix)", () => {
     const result = hashSchema({ type: "number" });
     expect(result).toMatch(/^[A-Za-z0-9_-]+$/);
-  });
-
-  // The schema hash is key-order-insensitive (value-hash sorts keys), but the
-  // interned object previously kept the key order of whichever code path first
-  // interned it. Schemas are serialized directly from the interned object (e.g.
-  // into content-addressed `data:` cell ids), so divergent stored key order let
-  // two runtimes mint different ids for the same schema. The interned form is
-  // now key-order-canonical so serialization is deterministic across paths.
-  describe("key-order canonicalization", () => {
-    it("interns object keys in UTF-8 sorted order regardless of input order", () => {
-      // "$defs" (0x24) < "items" (0x69) < "type" (0x74)
-      const interned = internSchema({
-        type: "array",
-        items: { type: "string" },
-        $defs: { X: { type: "null" } },
-      }) as JSONSchemaObj;
-      expect(Object.keys(interned)).toEqual(["$defs", "items", "type"]);
-    });
-
-    it("sorts keys deeply (nested objects too)", () => {
-      const interned = internSchema({
-        type: "object",
-        properties: { b: { type: "number" }, a: { type: "string" } },
-      }) as JSONSchemaObj;
-      expect(Object.keys(interned)).toEqual(["properties", "type"]);
-      expect(Object.keys(interned.properties as JSONSchemaObj)).toEqual([
-        "a",
-        "b",
-      ]);
-    });
-
-    it("preserves array order (arrays are ordered, not sorted)", () => {
-      const interned = internSchema({
-        type: "object",
-        required: ["b", "a", "c"],
-      }) as JSONSchemaObj;
-      expect(interned.required).toEqual(["b", "a", "c"]);
-    });
-
-    it("converges: equal schemas in opposite key orders intern to one object and serialize identically", () => {
-      // A unique `title` keeps this test's structural hash to itself.
-      const tag = "canon-converge-test";
-      const unsorted: JSONSchema = {
-        type: "array",
-        title: tag,
-        items: { type: "string" },
-        $defs: { X: { type: "null" } },
-      };
-      const sorted: JSONSchema = {
-        $defs: { X: { type: "null" } },
-        items: { type: "string" },
-        title: tag,
-        type: "array",
-      };
-      const a = internSchema(unsorted);
-      const b = internSchema(sorted);
-      expect(a).toBe(b); // same canonical object, regardless of which interned first
-      expect(JSON.stringify(a)).toBe(JSON.stringify(b));
-      // ...and the canonical serialization is the sorted one.
-      expect(JSON.stringify(a)).toBe(JSON.stringify(sorted));
-    });
-
-    it("leaves the schema hash unchanged (it was already key-order-insensitive)", () => {
-      const tag = "canon-hash-test";
-      const unsorted: JSONSchema = {
-        type: "number",
-        title: tag,
-        description: "d",
-      };
-      const sorted: JSONSchema = {
-        description: "d",
-        title: tag,
-        type: "number",
-      };
-      expect(hashSchema(unsorted)).toBe(hashSchema(sorted));
-      expect(hashSchema(internSchema(unsorted))).toBe(hashSchema(unsorted));
-    });
-
-    it("interns to a deep-frozen object", () => {
-      const interned = internSchema({
-        type: "array",
-        items: { type: "string" },
-        $defs: { X: { type: "null" } },
-      });
-      assert(isDeepFrozen(interned));
-    });
-
-    it("shares already-interned sub-schemas by reference (no needless rebuild)", () => {
-      // Pre-intern a child, then intern a parent that holds it. Canonicalizing
-      // the parent keeps the already-interned (already-canonical) child by
-      // reference instead of cloning it, preserving structural sharing.
-      const child = internSchema({
-        title: `canon-child-${Date.now()}-${Math.random()}`,
-        type: "string",
-      }) as JSONSchemaObj;
-      const parent = internSchema({
-        type: "object",
-        title: `canon-parent-${Date.now()}-${Math.random()}`,
-        properties: { x: child },
-      }) as JSONSchemaObj;
-      expect((parent.properties as Record<string, unknown>).x).toBe(child);
-    });
-
-    it("rebuilds non-canonical array elements while preserving array order", () => {
-      // An array element that is itself a non-canonical object gets its keys
-      // sorted, but the array's element order is preserved (arrays are ordered).
-      const interned = internSchema({
-        title: `canon-arr-${Date.now()}-${Math.random()}`,
-        anyOf: [
-          { type: "object", $defs: { X: { type: "null" } } }, // non-canonical
-          { type: "string" },
-        ],
-      }) as JSONSchemaObj;
-      const anyOf = interned.anyOf as JSONSchemaObj[];
-      expect(Object.keys(anyOf[0])).toEqual(["$defs", "type"]); // element sorted
-      expect((anyOf[1] as JSONSchemaObj).type).toBe("string"); // order preserved
-      expect(anyOf.length).toBe(2);
-    });
-
-    it("preserves owned symbol-keyed properties when it rebuilds for sorting", () => {
-      // Schemas are normally string-keyed, but canonicalization must never
-      // silently drop an owned (symbol) property when it rebuilds to sort keys.
-      const marker = Symbol("schemaMarker");
-      const schema = {
-        type: "object",
-        title: `canon-sym-${Date.now()}-${Math.random()}`,
-        [marker]: "kept",
-      } as unknown as JSONSchemaObj;
-      const interned = internSchema(schema) as JSONSchemaObj;
-      expect(Object.keys(interned)).toEqual(["title", "type"]); // string keys sorted
-      expect((interned as Record<symbol, unknown>)[marker]).toBe("kept");
-    });
   });
 });
