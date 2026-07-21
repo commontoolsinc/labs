@@ -218,8 +218,8 @@ Off by default; flip `OTEL_ENABLED=true` to start exporting.
 
 | Var | Default | Notes |
 |---|---|---|
-| `TOOLSHED_GIT_SHA` | _(auto-detected)_ | Deployed commit SHA, surfaced via `lib/build-info.ts`. Takes priority over the build-baked SHA. |
-| `COMMIT_SHA` | _(unset)_ | Shared Labs build attestation. A source-run toolshed exposes it through `/api/meta`; shell and headless runtimes use it as `clientVersion` for the system-pattern update gate. On a compiled toolshed, baked metadata takes priority over this fallback. |
+| `TOOLSHED_GIT_SHA` | _(auto-detected)_ | Deployed commit SHA, surfaced via `lib/build-info.ts`. Takes priority over the build-baked SHA for `/api/meta`, pattern-response attestations, and the toolshed Runtime. |
+| `COMMIT_SHA` | _(unset)_ | Shared Labs build attestation. A source-run toolshed exposes it through `/api/meta` and pattern responses; shell and headless runtimes use it as `clientVersion` for the system-pattern update gate. On a compiled toolshed, baked metadata takes priority over this fallback. |
 
 Set `COMMIT_SHA` to the same exact Labs revision in every process that belongs
 to one deployment. It is an operator attestation, not source auto-detection:
@@ -269,7 +269,7 @@ Most shell config is **build-time**: esbuild injects defines in
 |---|---|---|---|
 | `PRODUCTION` | `$ENVIRONMENT` (`"production"` if set, else `"development"`) | _(unset = dev)_ | Triggers minified bundle and disables sourcemaps. |
 | `API_URL` | `$API_URL` | falls back to `location.origin` | Backend the shell calls. |
-| `COMMIT_SHA` | `$COMMIT_SHA` | _(unset)_ | Surfaced for debugging and passed to the browser runtime as its build version. |
+| `COMMIT_SHA` | `$COMMIT_SHA` | _(unset)_ | Surfaced for debugging and passed to the browser runtime as its build version. In development it does not change the worker route from `/scripts/worker-runtime.js` to the deployed `/builds/<sha>` namespace. |
 | `EXPERIMENTAL_MODERN_CELL_REP` | `EXPERIMENTAL.modernCellRep` | _(unset)_ | See experimental flags. |
 | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` | `EXPERIMENTAL.persistentSchedulerState` | _(unset)_ | See experimental flags. |
 | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` | `EXPERIMENTAL.eagerSourceAnnotation` | on in dev builds, off in production | See experimental flags. |

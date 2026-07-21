@@ -220,18 +220,21 @@ propagate](#how-flags-propagate).
 - **Purpose.** At space open, rolls a space's **non-home** root system pattern
   (default-app) forward in place when its toolshed serves a newer content
   identity. Every tracked root uses the client/toolshed version gate and cached
-  `?identity` comparison before an in-place `patternIdentity` swap. The check
-  does not load the persisted identity, so an unloadable stale root can still
-  be replaced before bootstrap through that same path. Source-run toolsheds,
-  CLI, and daemon processes can receive the shared Labs revision through
-  `COMMIT_SHA`. Persisted roots are resolved without starting, and a verified
-  legacy root whose content-addressed source closure names the official entry
-  can have missing `patternSource` provenance back-filled. Custom sourceless
-  roots remain pinned. URL-based creation and recreation stamp provenance;
-  custom `RuntimeProgram` recreation does not. The check remains best-effort;
-  if identity lookup or replacement compilation is unavailable, the subsequent
-  root start retains its normal loud failure behavior. An unknown build SHA
-  skips silently; the `versionSkew` IPC
+  `?identity` comparison before an in-place `patternIdentity` swap. The
+  identity response, every fetched source/import, and the compiler-produced
+  entry must all agree with the same client build and identity. Equal identities
+  take the fast path only after the persisted artifact loads; an unloadable root
+  is rebuilt through that same identity-authorized source path before bootstrap.
+  Source-run toolsheds, CLI, and daemon processes can receive the shared Labs
+  revision through `COMMIT_SHA`. Persisted roots are resolved without starting.
+  A pre-provenance root may be back-filled only when its stored
+  `{ identity, symbol }` exactly equals the build-attested current official
+  entry; stale, custom, and repository-pinned sourceless roots remain pinned.
+  URL-based creation and recreation stamp provenance; custom `RuntimeProgram`
+  recreation does not. The check remains best-effort; if identity lookup or
+  replacement compilation is unavailable, the subsequent root start retains
+  its normal loud failure behavior. An unknown build SHA skips silently; the
+  `versionSkew` IPC
   signal—which raises the shell's reload banner—fires only on a proven mismatch
   (both SHAs known and different). See
   [`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md).

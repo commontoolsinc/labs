@@ -76,6 +76,8 @@ export {
   ConsoleMethod,
   Engine,
   fetchToolshedGitSha,
+  PATTERN_RESPONSE_BUILD_HEADER,
+  patternResponseBuild,
   resolveEntryIdentity,
   type RuntimeProgram,
   type TypeScriptHarnessProcessOptions,

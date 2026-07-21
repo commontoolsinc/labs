@@ -6,11 +6,13 @@ import {
   type EnvReader,
   experimentalOptionsFromEnv,
   getPatternIdentityRef,
+  getPatternRepository,
   getPatternSource,
   type JSONSchema,
   type MemorySpace,
   type ModuleByteCache,
   type PatternCoverageCollector,
+  patternResponseBuild,
   Runtime,
   runtimePresets,
   RuntimeProgram,
@@ -36,15 +38,13 @@ const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
 // System space-root patterns, served as raw TSX by the toolshed patterns route.
 export const HOME_PATTERN_URL = "/api/patterns/system/home.tsx";
 export const DEFAULT_APP_PATTERN_URL = "/api/patterns/system/default-app.tsx";
-const LOCAL_HOME_PATTERN_PATH = "/system/home.tsx";
-const LOCAL_DEFAULT_APP_PATTERN_PATH = "/system/default-app.tsx";
 
 /**
  * The official system space-root pattern URL for a space type — the home DID
- * gets home.tsx, every other space gets the default app. This derivation alone
- * is not proof that an existing sourceless root is a system root: legacy
- * recovery must first verify its stored source closure and exact entry path via
- * {@link inferLegacySystemPatternSource}.
+ * gets home.tsx, every other space gets the default app. This derivation only
+ * selects the identity to check; it never proves that a sourceless root tracks
+ * that URL. Exact equality with the build-attested official identity supplies
+ * that proof below.
  */
 export function deriveSystemPatternUrl(
   space: MemorySpace,
@@ -53,40 +53,6 @@ export function deriveSystemPatternUrl(
   return space === runtime.userIdentityDID
     ? HOME_PATTERN_URL
     : DEFAULT_APP_PATTERN_URL;
-}
-
-/**
- * Recover update provenance for a pre-`patternSource` root only when its
- * content-addressed source closure verifies and names the official system entry
- * appropriate to this space. The filename check is deliberately exact: a
- * custom or mismatched root must remain pinned rather than being replaced with
- * the default app.
- */
-async function inferLegacySystemPatternSource(
-  root: Cell<unknown>,
-  runtime: Runtime,
-  space: MemorySpace,
-): Promise<string | undefined> {
-  const ref = getPatternIdentityRef(root);
-  if (ref === undefined) return undefined;
-  const program = await runtime.patternManager
-    .getPatternSourceProgramByIdentity(
-      ref.identity,
-      space,
-    );
-  const expected = deriveSystemPatternUrl(space, runtime);
-  switch (program?.main) {
-    case HOME_PATTERN_URL:
-    case LOCAL_HOME_PATTERN_PATH:
-      return expected === HOME_PATTERN_URL ? HOME_PATTERN_URL : undefined;
-    case DEFAULT_APP_PATTERN_URL:
-    case LOCAL_DEFAULT_APP_PATTERN_PATH:
-      return expected === DEFAULT_APP_PATTERN_URL
-        ? DEFAULT_APP_PATTERN_URL
-        : undefined;
-    default:
-      return undefined;
-  }
 }
 
 // Same logger as manager.ts's timePiecePhase: timing stats record even while
@@ -409,9 +375,10 @@ export class PiecesController<T = unknown> {
 
       // Stamp the provenance the piece tracks for updates, mirroring
       // ensureDefaultPattern (CT-1890). Without this, every recreated root
-      // is born unprovenanced and checkAndUpdateDefaultPattern skips
-      // sourceless non-home roots forever — the repair path would mint
-      // roots that can never auto-migrate. A custom program has no URL the
+      // is born unprovenanced and checkAndUpdateDefaultPattern can only admit
+      // it while its ref exactly equals the current official identity — the
+      // repair path would otherwise mint roots with no durable update source.
+      // A custom program has no URL the
       // auto-updater could re-fetch (stamping the "custom" placeholder
       // would poison URL resolution — it would resolve relative to the
       // host); its locator, when supplied, is recorded via
@@ -625,9 +592,9 @@ export class PiecesController<T = unknown> {
    * Roll the space's system root pattern forward in place if its toolshed
    * serves a newer content identity. Best-effort: every failure logs and
    * returns without throwing. During {@link ensureDefaultPattern}, this runs
-   * before the persisted root is started, so an unloadable obsolete identity
-   * can be replaced before bootstrap. If the root is already running, its
-   * watcher applies the same metadata swap in place.
+   * before the persisted root is started, so an eligible tracked root's
+   * unloadable obsolete identity can be replaced before bootstrap. If the root
+   * is already running, its watcher applies the same metadata swap in place.
    *
    * Never calls run()/stop()/recreateDefaultPattern.
    */
@@ -655,21 +622,21 @@ export class PiecesController<T = unknown> {
       if (!root) return "current";
 
       // 3. Provenance + per-space host (NOT the global apiUrl — a foreign-homed
-      //    space must resolve against its own toolshed). A root created before
-      //    provenance stamping is eligible only when its content-addressed,
-      //    verified source closure names the official system entry appropriate
-      //    to this space. Blindly deriving by space type could replace a custom
-      //    home or a non-home root seeded from home's custom defaultAppUrl.
+      //    space must resolve against its own toolshed). For a pre-provenance
+      //    root, derive only the official URL whose identity can be tested. The
+      //    URL or an author-controlled filename is not provenance: below, only
+      //    an exact match with the build-attested current identity admits it.
+      const runningRef = getPatternIdentityRef(root);
+      if (runningRef === undefined) return "current";
       const storedSource = getPatternSource(root);
-      const inferredSource = storedSource === undefined
-        ? await inferLegacySystemPatternSource(root, runtime, space)
-        : undefined;
-      if (storedSource === undefined && inferredSource === undefined) {
+      if (
+        storedSource === undefined && getPatternRepository(root) !== undefined
+      ) {
         return "current";
       }
-      const url = storedSource ?? inferredSource!;
+      const url = storedSource ?? deriveSystemPatternUrl(space, runtime);
       const host = runtime.mappedHostFor(space) ?? runtime.apiUrl.href;
-      const repairInferredProvenance = async (): Promise<UpdateOutcome> => {
+      const repairProvenance = async (): Promise<UpdateOutcome> => {
         const { error } = await runtime.editWithRetry((tx) => {
           setPatternSource(root, tx, url);
         });
@@ -715,38 +682,91 @@ export class PiecesController<T = unknown> {
         });
         return "skipped-skew";
       }
+      const expectedBuild = runtime.clientVersion;
+      if (expectedBuild === undefined) return "skipped-unknown-build";
 
-      // 5. Current identity from the toolshed (cached). This does not load the
-      // persisted pattern, so a stale identity that cannot start can still be
-      // replaced before bootstrap.
-      const runningRef = getPatternIdentityRef(root);
-      const currentId = await runtime.cachedPatternIdentity(host, url);
+      // 5. Current identity from the toolshed (cached per serving build). The
+      // response itself must attest `expectedBuild`, binding this request to the
+      // version gate even during a rolling deploy.
+      const currentId = await runtime.cachedPatternIdentity(
+        host,
+        url,
+        expectedBuild,
+      );
       if (currentId === undefined) return "current"; // unresolved → skip
 
-      // 6. Compare to the persisted identity. A verified legacy root that is
-      // already current needs only the missing provenance write.
-      if (currentId === runningRef?.identity) {
-        if (storedSource !== undefined) return "current";
-        return await repairInferredProvenance();
+      // A sourceless root is eligible only when its full content identity (which
+      // includes authored module paths) is exactly the official current entry.
+      // This admits a known system identity, never a lookalike filename. A stale
+      // sourceless root stays pinned until an explicit migration supplies its
+      // durable provenance.
+      if (
+        storedSource === undefined &&
+        (runningRef.identity !== currentId || runningRef.symbol !== "default")
+      ) {
+        return "current";
       }
 
-      // 7. Apply. Fetch and compile only after ?identity proves that the
-      // toolshed serves a different pattern. Compilation failure leaves the
-      // persisted root untouched.
+      // 6. Equal identity is not enough to declare the root healthy: persisted
+      // source/compiled closures or the stored symbol may still be unloadable.
+      // Probe the exact ref; only the successful load takes the fast path.
+      if (currentId === runningRef?.identity) {
+        let loadable = false;
+        try {
+          loadable = await runtime.patternManager.loadPatternByIdentity(
+            runningRef.identity,
+            runningRef.symbol,
+            space,
+          ) !== undefined;
+        } catch {
+          // Continue through the same identity-authorized source path below.
+        }
+        if (loadable) {
+          if (storedSource !== undefined) return "current";
+          return await repairProvenance();
+        }
+      }
+
+      // 7. Apply/repair. Every successful source response must attest the same
+      // build as ?identity; imports are checked too because HttpProgramResolver
+      // uses this fetch for the whole authored closure.
+      const attestedFetch: typeof globalThis.fetch = async (input, init) => {
+        const response = await runtime.fetch(input, init);
+        if (
+          response.ok && patternResponseBuild(response) !== expectedBuild
+        ) {
+          throw new Error(
+            `Pattern source response was not served by build ${expectedBuild}`,
+          );
+        }
+        return response;
+      };
       const program = await runtime.harness.resolve(
-        new HttpProgramResolver(target.href),
+        new HttpProgramResolver(target.href, attestedFetch),
       );
       const pattern = await runtime.patternManager.compilePattern(program, {
         space,
       });
-      const entryRef = runtime.patternManager.getArtifactEntryRef(pattern) ??
-        { identity: currentId, symbol: "default" };
+      const entryRef = runtime.patternManager.getArtifactEntryRef(pattern);
+      if (entryRef === undefined || entryRef.identity !== currentId) {
+        pieceUpdateLogger.warn(
+          "identity-attestation-mismatch",
+          () => [
+            "checkAndUpdateDefaultPattern: compiled source did not match " +
+            "the build-attested identity",
+            space,
+            currentId,
+            entryRef?.identity,
+          ],
+        );
+        return "current";
+      }
       if (
         entryRef.identity === runningRef?.identity &&
         entryRef.symbol === runningRef.symbol
       ) {
         if (storedSource === undefined) {
-          return await repairInferredProvenance();
+          return await repairProvenance();
         }
         return "current";
       }

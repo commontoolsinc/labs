@@ -219,10 +219,11 @@ Both the home pattern and the default app pattern follow the same mechanism:
    which also stamps `patternSource`, or a custom `RuntimeProgram` (used by
    `cf piece set-home`), which remains untracked by the URL updater and may carry
    a separate repository locator
-5. Before an existing eligible root starts, it is reconciled in place. A legacy
-   sourceless root is eligible only when its verified stored source closure
-   names the exact official system entry for that space; custom roots remain
-   pinned
+5. Before an existing eligible root starts, it is reconciled in place. A root
+   with stored `patternSource` tracks that source. A pre-provenance root is
+   admitted only when its stored `{ identity, symbol }` exactly matches the
+   build-attested current official entry for that space; stale, custom, and
+   repository-pinned sourceless roots remain pinned
 
 
 Runtime internals (ACL initialization, PieceManager home-space detection) are

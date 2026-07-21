@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import {
   getPatternIdentityRef,
   getPatternSource,
+  PATTERN_RESPONSE_BUILD_HEADER,
   resolveEntryIdentity,
   Runtime,
   type VersionSkewInfo,
@@ -29,32 +30,58 @@ const SOURCE_V1 = patternSource("v1");
 const SOURCE_V2 = patternSource("v2");
 
 const BUILD_SHA = "build-sha-1";
+const IMPORTED_MODULE_URL = "/api/patterns/system/update-marker.ts";
 
 /** Content identity a toolshed at this build would serve for `source`. */
-function identityForSource(source: string): Promise<string> {
+function identityForSource(
+  source: string,
+  imports: Record<string, string> = {},
+  entry = DEFAULT_APP_PATTERN_URL,
+): Promise<string> {
   return resolveEntryIdentity(
-    DEFAULT_APP_PATTERN_URL, // /api/patterns/system/default-app.tsx
-    (name) =>
-      name === DEFAULT_APP_PATTERN_URL
-        ? Promise.resolve(source)
-        : Promise.reject(new Error(`not found: ${name}`)),
+    entry,
+    (name) => {
+      if (name === entry) return Promise.resolve(source);
+      if (Object.hasOwn(imports, name)) return Promise.resolve(imports[name]);
+      return Promise.reject(new Error(`not found: ${name}`));
+    },
   );
 }
 
 interface StubControls {
   setSource(source: string): void;
+  setIdentitySource(source: string): void;
   setGitSha(sha: string | null): void;
+  setIdentityBuildSha(sha: string | null): void;
+  setSourceBuildSha(sha: string | null): void;
+  setImport(path: string, source: string): void;
+  setImportBuildSha(sha: string | null): void;
   failIdentity(fail: boolean): void;
   identityFetches(): number;
+  sourceFetches(): number;
   restore(): void;
 }
 
 function installFetchStub(): StubControls {
   const original = globalThis.fetch;
   let source = SOURCE_V1;
+  let identitySource: string | undefined;
   let gitSha: string | null = BUILD_SHA;
+  let identityBuildSha: string | null = BUILD_SHA;
+  let sourceBuildSha: string | null = BUILD_SHA;
+  let importBuildSha: string | null = BUILD_SHA;
+  const imports: Record<string, string> = {};
   let failIdentityFetch = false;
   let identityFetchCount = 0;
+  let sourceFetchCount = 0;
+
+  const patternHeaders = (
+    contentType: string,
+    buildSha: string | null,
+  ): HeadersInit => ({
+    "content-type": contentType,
+    ...(buildSha === null ? {} : { [PATTERN_RESPONSE_BUILD_HEADER]: buildSha }),
+  });
 
   globalThis.fetch = (async (input: string | URL | Request) => {
     const href = typeof input === "string"
@@ -77,12 +104,25 @@ function installFetchStub(): StubControls {
       if (url.searchParams.has("identity")) {
         identityFetchCount++;
         if (failIdentityFetch) throw new Error("identity fetch failed");
-        return new Response(await identityForSource(source), {
-          headers: { "content-type": "text/plain" },
-        });
+        return new Response(
+          await identityForSource(
+            identitySource ?? source,
+            imports,
+            url.pathname,
+          ),
+          { headers: patternHeaders("text/plain", identityBuildSha) },
+        );
       }
+      sourceFetchCount++;
       return new Response(source, {
-        headers: { "content-type": "text/typescript-jsx" },
+        headers: patternHeaders("text/typescript-jsx", sourceBuildSha),
+      });
+    }
+
+    if (Object.hasOwn(imports, url.pathname)) {
+      sourceFetchCount++;
+      return new Response(imports[url.pathname], {
+        headers: patternHeaders("text/typescript", importBuildSha),
       });
     }
 
@@ -91,9 +131,15 @@ function installFetchStub(): StubControls {
 
   return {
     setSource: (s) => (source = s),
+    setIdentitySource: (s) => (identitySource = s),
     setGitSha: (s) => (gitSha = s),
+    setIdentityBuildSha: (s) => (identityBuildSha = s),
+    setSourceBuildSha: (s) => (sourceBuildSha = s),
+    setImport: (path, s) => (imports[path] = s),
+    setImportBuildSha: (s) => (importBuildSha = s),
     failIdentity: (f) => (failIdentityFetch = f),
     identityFetches: () => identityFetchCount,
+    sourceFetches: () => sourceFetchCount,
     restore: () => (globalThis.fetch = original),
   };
 }
@@ -241,6 +287,44 @@ describe("checkAndUpdateDefaultPattern", () => {
     );
   });
 
+  it("repairs persisted artifacts when the served identity is unchanged", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const currentRef = getPatternIdentityRef(piece.getCell())!;
+    const sourceFetchesBefore = stub.sourceFetches();
+    const originalLoad = runtime.patternManager.loadPatternByIdentity;
+    let loadAttempts = 0;
+    runtime.patternManager.loadPatternByIdentity =
+      ((identity, symbol, space) => {
+        loadAttempts++;
+        if (loadAttempts === 1 && identity === currentRef.identity) {
+          return Promise.resolve(undefined);
+        }
+        return originalLoad.call(
+          runtime.patternManager,
+          identity,
+          symbol,
+          space,
+        );
+      }) as typeof runtime.patternManager.loadPatternByIdentity;
+
+    try {
+      expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+      expect(loadAttempts).toBe(1);
+      expect(stub.sourceFetches()).toBe(sourceFetchesBefore + 1);
+      await expect(
+        originalLoad.call(
+          runtime.patternManager,
+          currentRef.identity,
+          currentRef.symbol,
+          manager.getSpace(),
+        ),
+      ).resolves.toBeDefined();
+    } finally {
+      runtime.patternManager.loadPatternByIdentity = originalLoad;
+    }
+  });
+
   it("reconciles a persisted root discovered after a creation race", async () => {
     await setup({ systemPatternAutoUpdate: true });
     const existing = await controller.ensureDefaultPattern();
@@ -301,6 +385,75 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(versionSkews.length).toBe(1);
     expect(versionSkews[0].clientVersion).toBe(BUILD_SHA);
     expect(versionSkews[0].toolshedVersion).toBe("a-different-build");
+  });
+
+  it("rejects identity served by a different build than /api/meta", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const before = getPatternIdentityRef(piece.getCell());
+    const sourceFetchesBefore = stub.sourceFetches();
+
+    stub.setSource(SOURCE_V2);
+    stub.setIdentityBuildSha("rolling-deploy-build");
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    expect(getPatternIdentityRef(piece.getCell())).toEqual(before);
+    expect(stub.identityFetches()).toBe(1);
+    expect(stub.sourceFetches()).toBe(sourceFetchesBefore);
+  });
+
+  it("rejects source served by a different build than its identity", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const before = getPatternIdentityRef(piece.getCell());
+    const sourceFetchesBefore = stub.sourceFetches();
+
+    stub.setSource(SOURCE_V2);
+    stub.setSourceBuildSha("rolling-deploy-build");
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    expect(getPatternIdentityRef(piece.getCell())).toEqual(before);
+    expect(stub.identityFetches()).toBe(1);
+    expect(stub.sourceFetches()).toBe(sourceFetchesBefore + 1);
+  });
+
+  it("rejects an imported module served by a different build", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const before = getPatternIdentityRef(piece.getCell());
+    const sourceFetchesBefore = stub.sourceFetches();
+
+    stub.setImport(
+      IMPORTED_MODULE_URL,
+      'export const marker = "v2-from-import";\n',
+    );
+    stub.setSource([
+      "import { pattern } from 'commonfabric';",
+      "import { marker } from './update-marker.ts';",
+      "export default pattern<{ items: string[] }>(({ items }) => ({ items, marker }));",
+      "",
+    ].join("\n"));
+    stub.setImportBuildSha("rolling-deploy-build");
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    expect(getPatternIdentityRef(piece.getCell())).toEqual(before);
+    expect(stub.identityFetches()).toBe(1);
+    expect(stub.sourceFetches()).toBe(sourceFetchesBefore + 2);
+  });
+
+  it("rejects source whose compiled identity differs from ?identity", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const before = getPatternIdentityRef(piece.getCell());
+    const sourceFetchesBefore = stub.sourceFetches();
+
+    stub.setIdentitySource(SOURCE_V2);
+    stub.setSource(patternSource("different-source-response"));
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    expect(getPatternIdentityRef(piece.getCell())).toEqual(before);
+    expect(stub.identityFetches()).toBe(1);
+    expect(stub.sourceFetches()).toBe(sourceFetchesBefore + 1);
   });
 
   it("skips silently when both builds are unknown (dev servers)", async () => {
@@ -375,15 +528,15 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(getPatternIdentityRef(piece.getCell())?.identity).toBe(before);
   });
 
-  it("back-fills provenance on a verified legacy system root", async () => {
+  it("back-fills provenance when a legacy root is the current official identity", async () => {
     await setup({ systemPatternAutoUpdate: true });
-    const piece = await controller.recreateDefaultPattern({
-      customProgram: {
-        main: DEFAULT_APP_PATTERN_URL,
-        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: SOURCE_V1 }],
-      },
+    const piece = await controller.ensureDefaultPattern();
+    const { error } = await runtime.editWithRetry((tx) => {
+      piece.getCell().withTx(tx).setMetaRaw("patternSource", undefined);
     });
-    expect(getPatternSource(piece.getCell())).toBeUndefined();
+    expect(error).toBeUndefined();
+    const legacyRoot = (await manager.getDefaultPattern(false))!;
+    expect(getPatternSource(legacyRoot)).toBeUndefined();
 
     expect(await controller.checkAndUpdateDefaultPattern()).toBe(
       "repaired-provenance",
@@ -396,7 +549,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     );
   });
 
-  it("repairs an unloadable legacy system root when builds match", async () => {
+  it("does not infer provenance from an official-looking filename", async () => {
     await setup({ systemPatternAutoUpdate: true });
     const piece = await controller.recreateDefaultPattern({
       customProgram: {
@@ -404,57 +557,21 @@ describe("checkAndUpdateDefaultPattern", () => {
         files: [{ name: DEFAULT_APP_PATTERN_URL, contents: SOURCE_V1 }],
       },
     });
-    const rootLinkBefore = JSON.stringify(piece.getCell().getAsLink());
     const oldRef = getPatternIdentityRef(piece.getCell())!;
     expect(getPatternSource(piece.getCell())).toBeUndefined();
-    await manager.stopPiece(piece.getCell());
-
-    // Model the 2026-07-21 Loom incident: the verified authored source closure
-    // still identifies the official system root, but the current runtime can no
-    // longer load that old identity. The updater must resolve the new identity
-    // without loading the old one, then compile and install the newer source
-    // before ensure() starts the root.
-    const originalLoad = runtime.patternManager.loadPatternByIdentity;
-    runtime.patternManager.loadPatternByIdentity =
-      ((identity, symbol, space) =>
-        identity === oldRef.identity
-          ? Promise.reject(new Error("legacy identity cannot load"))
-          : originalLoad.call(
-            runtime.patternManager,
-            identity,
-            symbol,
-            space,
-          )) as typeof runtime.patternManager.loadPatternByIdentity;
     stub.setSource(SOURCE_V2);
 
-    try {
-      const repaired = await controller.ensureDefaultPattern();
-      await runtime.idle();
-
-      expect(JSON.stringify(repaired.getCell().getAsLink())).toBe(
-        rootLinkBefore,
-      );
-      expect(getPatternIdentityRef(repaired.getCell())?.identity).toBe(
-        await identityForSource(SOURCE_V2),
-      );
-      expect(getPatternSource(repaired.getCell())).toBe(
-        DEFAULT_APP_PATTERN_URL,
-      );
-      expect(stub.identityFetches()).toBe(1);
-      expect(versionSkews).toEqual([]);
-    } finally {
-      runtime.patternManager.loadPatternByIdentity = originalLoad;
-    }
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    const pinned = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(pinned)).toEqual(oldRef);
+    expect(getPatternSource(pinned)).toBeUndefined();
+    expect(stub.identityFetches()).toBe(1);
+    expect(stub.sourceFetches()).toBe(0);
   });
 
   it("leaves a stale root untouched when replacement compilation fails", async () => {
     await setup({ systemPatternAutoUpdate: true });
-    const piece = await controller.recreateDefaultPattern({
-      customProgram: {
-        main: DEFAULT_APP_PATTERN_URL,
-        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: SOURCE_V1 }],
-      },
-    });
+    const piece = await controller.ensureDefaultPattern();
     const root = piece.getCell();
     const oldRef = getPatternIdentityRef(root)!;
     const originalCompile = runtime.patternManager.compilePattern;
@@ -469,7 +586,7 @@ describe("checkAndUpdateDefaultPattern", () => {
 
       const unchanged = (await manager.getDefaultPattern(false))!;
       expect(getPatternIdentityRef(unchanged)).toEqual(oldRef);
-      expect(getPatternSource(unchanged)).toBeUndefined();
+      expect(getPatternSource(unchanged)).toBe(DEFAULT_APP_PATTERN_URL);
       expect(stub.identityFetches()).toBe(1);
       expect(versionSkews).toEqual([]);
     } finally {
@@ -490,11 +607,12 @@ describe("checkAndUpdateDefaultPattern", () => {
     const before = getPatternIdentityRef(root)?.identity;
 
     // Even though the toolshed serves a (different) default-app identity, we must
-    // NOT roll this space to default-app: skip without touching it or fetching.
+    // NOT roll this space to default-app. The identity probe may establish that
+    // it is not a known official identity; source must never be fetched/applied.
     stub.setSource(SOURCE_V2);
     expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
     expect(getPatternIdentityRef(root)?.identity).toBe(before);
-    expect(stub.identityFetches()).toBe(0);
+    expect(stub.identityFetches()).toBe(1);
   });
 
   it("skips a custom home root with both update flags on", async () => {
@@ -516,7 +634,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
     expect(getPatternIdentityRef(root)).toEqual(before);
     expect(getPatternSource(root)).toBeUndefined();
-    expect(stub.identityFetches()).toBe(0);
+    expect(stub.identityFetches()).toBe(1);
   });
 
   it("holds the home root behind its own flag (M4.2)", async () => {
