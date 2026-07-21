@@ -739,6 +739,35 @@ describe("native-conversion", () => {
             "`toJSON()` on object returned something other than a fabric value",
           );
       });
+
+      it("throws if a function's `toJSON()` returns a non-fabric value", () => {
+        const fn = Object.assign(() => 1, { toJSON: () => new Map() });
+        expect(() => shallowFabricFromNativeValue(fn)).toThrow(
+          "`toJSON()` on function returned something other than a fabric value",
+        );
+      });
+
+      it("converts a function via a `toJSON()` returning a fabric value", () => {
+        const fn = Object.assign(() => 1, { toJSON: () => ({ x: 1 }) });
+        expect(shallowFabricFromNativeValue(fn)).toEqual({ x: 1 });
+      });
+    });
+
+    // "Death before confusion": a native type with a dedicated fabric
+    // representation carries no room for extra state, so silently dropping it
+    // would lose data on a round trip.
+    describe("rejects extra enumerable properties", () => {
+      it("throws for a `Date` carrying an extra property", () => {
+        const date = new Date(0) as Date & { extra?: number };
+        date.extra = 1;
+        expect(() => shallowFabricFromNativeValue(date)).toThrow(
+          "Cannot store Date with extra enumerable properties",
+        );
+      });
+
+      it("still converts a `Date` with no extra properties", () => {
+        expect(() => shallowFabricFromNativeValue(new Date(0))).not.toThrow();
+      });
     });
 
     describe("throws for non-convertible values", () => {
