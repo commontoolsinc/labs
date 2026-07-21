@@ -21,73 +21,24 @@ try {
   Deno.exit(0);
 }
 
-/**
- * Split a command into shell-like words, honoring single quotes, double
- * quotes, and backslash escapes. Quoting joins characters into the current
- * word (so a message passed as -m "mentions --amend" stays one word), while
- * a quoted-but-real argument like "--amend" still surfaces as its own word.
- * Unterminated quotes swallow the rest of the string into the current word,
- * which errs toward blocking.
- */
-function shellWords(command: string): string[] {
-  const words: string[] = [];
-  let current = "";
-  let inWord = false;
-  let i = 0;
-  while (i < command.length) {
-    const ch = command[i];
-    if (ch === "'") {
-      inWord = true;
-      const end = command.indexOf("'", i + 1);
-      current += end === -1
-        ? command.slice(i + 1)
-        : command.slice(i + 1, end);
-      i = end === -1 ? command.length : end + 1;
-    } else if (ch === '"') {
-      inWord = true;
-      i++;
-      while (i < command.length && command[i] !== '"') {
-        if (command[i] === "\\" && i + 1 < command.length) {
-          current += command[i + 1];
-          i += 2;
-        } else {
-          current += command[i];
-          i++;
-        }
-      }
-      i++; // skip closing quote
-    } else if (ch === "\\" && i + 1 < command.length) {
-      inWord = true;
-      current += command[i + 1];
-      i += 2;
-    } else if (/\s/.test(ch)) {
-      if (inWord) {
-        words.push(current);
-        current = "";
-        inWord = false;
-      }
-      i++;
-    } else {
-      inWord = true;
-      current += ch;
-      i++;
-    }
-  }
-  if (inWord) words.push(current);
-  return words;
-}
+// Drop quoted segments so only actual shell words are inspected — a commit
+// message that merely mentions the flag must not trip the block. Double-quoted
+// segments can span newlines (e.g. -m "$(cat <<'EOF' ... EOF)").
+//
+// Known gap, accepted: a deliberately quoted flag (git commit "--amend") is
+// erased along with the message text and slips through. This hook is a
+// guardrail against accidental amends, not a security boundary — a deliberate
+// bypass has routes no string check can catch (FLAG=--amend, sh -c, a script
+// file), so shell-aware parsing would add complexity without closing anything.
+const bareWords = cmd
+  .replace(/"(?:\\.|[^"\\])*"/gs, '""')
+  .replace(/'[^']*'/g, "''");
 
-// Block git commit --amend (including abbreviated forms: --am, --ame, --amen,
-// --amend). Matching whole words means a quoted flag ("--amend") is still
-// caught, while a commit message that merely mentions the flag is not — the
-// message is a single word containing more than the flag itself.
-const words = shellWords(cmd);
-const invokesGitCommit = words.some((word, i) =>
-  word === "git" && words[i + 1] === "commit"
-);
-const hasAmendFlag = words.some((word) => /^--am(e(nd?)?)?$/.test(word));
-
-if (invokesGitCommit && hasAmendFlag) {
+// Block git commit --amend (including abbreviated forms: --am, --ame, --amen, --amend)
+if (
+  /\bgit\s+commit\b/.test(bareWords) &&
+  /(^|\s)--am(e(nd?)?)?\b/.test(bareWords)
+) {
   console.error(
     "git commit --amend is not allowed. Create a new commit instead.",
   );
