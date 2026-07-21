@@ -155,7 +155,7 @@ export function createDataCellURI(
 }
 
 /**
- * Decodes the extracted payload text of an `application/json` `data:` URI,
+ * Decodes the extracted payload text of a `data:` cell URI,
  * which must be in the standard `data-model` `FabricValue` JSON-embedded
  * encoding (tagged `fvj1:`). Results are deep-frozen and may contain
  * `FabricInstance`s. This is the single point of truth for how such

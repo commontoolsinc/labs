@@ -51,7 +51,7 @@ describe("toURI", () => {
   });
 
   it("passes through a `data:` URI", () => {
-    const uri = "data:application/json,{}";
+    const uri = "data:application/vnd.common-fabric.data,e30";
     expect(toURI(uri)).toBe(uri);
   });
 
