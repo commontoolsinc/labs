@@ -565,7 +565,7 @@ describe("CFC trusted UI event enforcement", () => {
     ).toBe(true);
   });
 
-  // The one deliberate `data:application/json` example: an event delivered as a
+  // The one deliberate `data:` cell URI example: an event delivered as a
   // sigil link to a data-URI envelope is the exceptional shape we verify is still
   // decoded and handled. Other event-context tests use the plain in-memory
   // envelope so they don't imply the input is always a data-URI link.

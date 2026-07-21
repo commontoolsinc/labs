@@ -1,5 +1,6 @@
 /**
- * The `data:` URI codec. The runner uses `application/json` `data:` URIs as
+ * The `data:` URI codec. The runner uses `data:` URIs (media type
+ * `application/vnd.common-fabric.data`) as
  * self-contained content-addressed cell ids: the URI _is_ its content, so
  * reading such a cell means decoding its own id. This module holds the whole
  * matched set -- the minting side ({@link createDataCellURI}) and the reading
@@ -32,6 +33,7 @@ import {
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { valueFromJson } from "@commonfabric/data-model/codec-json";
+import { fromBase64url } from "@commonfabric/utils/base64url";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import { isRecord } from "@commonfabric/utils/types";
 import { type Cell, isCell } from "./cell.ts";
@@ -44,9 +46,17 @@ import {
 } from "./link-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { URI } from "./sigil-types.ts";
-import { mintDataCellURI } from "./data-uri-mint.ts";
+import { isDataCellMediaType, mintDataCellURI } from "./data-uri-mint.ts";
 
-export { mintDataCellURI };
+export {
+  DATA_CELL_MEDIA_TYPE,
+  isDataCellMediaType,
+  isDataCellURI,
+  mintDataCellURI,
+} from "./data-uri-mint.ts";
+
+/** Shared text decoder, created once. */
+const textDecoder = new TextDecoder();
 
 /**
  * `ReconstructionContext` for decoding `data:` URI payloads. Links at this
@@ -85,7 +95,7 @@ const dataUriReconstructionContext = new EmptyReconstructionContext(
  * @param data The value to encode. Must be acyclic.
  * @param base Optional base link; relative links within `data` are resolved
  *   against it.
- * @returns A `data:application/json` URI naming a cell whose content is `data`.
+ * @returns A `data:` URI naming a cell whose content is `data`.
  * @throws If `data` contains a reference cycle.
  */
 export function createDataCellURI(
@@ -145,7 +155,7 @@ export function createDataCellURI(
 }
 
 /**
- * Decodes the extracted payload text of an `application/json` `data:` URI,
+ * Decodes the extracted payload text of a `data:` cell URI,
  * which must be in the standard `data-model` `FabricValue` JSON-embedded
  * encoding (tagged `fvj1:`). Results are deep-frozen and may contain
  * `FabricInstance`s. This is the single point of truth for how such
@@ -158,7 +168,7 @@ export function createDataCellURI(
  * from this module's own encode half; any other payload text (bare JSON
  * included) fails loudly rather than being guessed at.
  *
- * @param text The payload text, after any percent- or Base64-decoding.
+ * @param text The payload text, after base64url decoding.
  * @returns The decoded value.
  * @throws If `text` is not a valid encoded `FabricValue` -- including when
  *   it is empty or is bare JSON.
@@ -168,35 +178,21 @@ export function decodeDataURIPayloadText(text: string): FabricValue {
 }
 
 /**
- * Extracts and decodes the payload of a `data:` URI, which is required to
- * have the media type `application/json`. The payload is everything past the
- * first comma, and how it is spelled is dictated by the parameters in the
- * header before that comma:
- *
- * - `;base64` selects Base64. Without it, the payload is percent-encoded.
- * - `;charset=` is honored only as `utf-8` (or `utf8`), and any other value is
- *   rejected. It is UTF-8 either way; the parameter only gets to agree.
- *
- * This reads a strict superset of what gets written by
- * {@link createDataCellURI}, which only ever emits the percent-encoded form
- * with no header parameters (`data:application/json,...`). The Base64 and
- * `charset` spellings are for `data:` URIs originating anywhere else.
- *
- * The extracted payload text is decoded via {@link decodeDataURIPayloadText},
- * which requires the standard `fvj1:`-tagged `FabricValue` encoding. (The
- * media type is admittedly a bit of a fib, since the tag prefix makes the
- * payload not actually be JSON.)
+ * Extracts and decodes the payload of a `data:` cell URI. Exactly one
+ * shape is accepted -- the shape {@link mintDataCellURI} writes: the
+ * `application/vnd.common-fabric.data` media type with no parameters, and
+ * a base64url payload carrying the `fvj1:`-tagged `FabricValue` encoding
+ * as UTF-8 text (decoded via {@link decodeDataURIPayloadText}).
  *
  * @param uri The `data:` URI to read.
  * @returns The decoded payload.
- * @throws If `uri` is not an `application/json` `data:` URI, if it declares a
- *   charset other than UTF-8, or if its payload is not a valid encoded
- *   `FabricValue` (which includes the empty payload and the historical
- *   bare-JSON form).
+ * @throws If `uri` is not a `data:` cell URI of exactly that shape, or its
+ *   payload is not a valid encoded `FabricValue` (which includes the empty
+ *   payload and bare JSON).
  */
 export function getJSONFromDataURI(uri: URI | string): any {
   const { mediaType, text } = extractDataURIPayloadText(uri);
-  if (mediaType !== "application/json") {
+  if (!isDataCellMediaType(mediaType)) {
     throw new Error(`Invalid URI: ${uri}`);
   }
   return decodeDataURIPayloadText(text);
@@ -204,19 +200,19 @@ export function getJSONFromDataURI(uri: URI | string): any {
 
 /**
  * Splits a `data:` URI and decodes its payload into text -- the single
- * place the URI's surface syntax is taken apart. The payload is everything
- * past the first comma; `;base64` selects Base64 (decoded as UTF-8 bytes),
- * otherwise the payload is percent-encoded; a `;charset=` other than UTF-8
- * is rejected. The media type is returned verbatim so each caller applies
- * its own acceptance policy.
- *
- * A raw `?` or `#` after the comma delimits a query or fragment per the
- * URL grammar and is not part of the payload.
+ * place the URI's surface syntax is taken apart. The header (between
+ * `data:` and the first comma) is returned verbatim as the media type;
+ * there are no header parameters in this format, so a header carrying any
+ * (`;charset=`, `;base64`, ...) simply fails the caller's media-type
+ * check. The payload is base64url of UTF-8 text. A raw `?` or `#` after
+ * the comma delimits a query or fragment per the URL grammar; everything
+ * from that delimiter onward (the delimiter included) is ignored -- it is
+ * neither decoded, nor validated, nor returned.
  *
  * @param uri The `data:` URI to split.
  * @returns The media type and the decoded payload text.
- * @throws If `uri` is not a `data:` URI with a comma, or declares a
- *   non-UTF-8 charset.
+ * @throws If `uri` is not a `data:` URI with a comma, or its payload is
+ *   not base64url.
  */
 export function extractDataURIPayloadText(
   uri: string,
@@ -226,43 +222,25 @@ export function extractDataURIPayloadText(
     throw new Error(`Invalid data URI format: ${uri}`);
   }
 
-  const header = uri.substring("data:".length, commaIndex);
+  const mediaType = uri.substring("data:".length, commaIndex);
   let data = uri.substring(commaIndex + 1);
 
   // Per the URL grammar, an opaque-path URI's payload runs to the first raw
-  // `?` (query) or `#` (fragment). Minted payloads percent-escape both, so
-  // this only affects externally-sourced ids.
+  // `?` (query) or `#` (fragment); base64url never contains either.
   const delimIndex = data.search(/[?#]/);
   if (delimIndex !== -1) {
     data = data.substring(0, delimIndex);
   }
 
-  const headerParts = header.split(";").map((part) => part.trim());
-  const mediaType = headerParts[0];
-  for (const part of headerParts) {
-    if (part.startsWith("charset=")) {
-      const charset = part.substring(8).toLowerCase();
-      if (charset !== "utf-8" && charset !== "utf8") {
-        throw new Error(
-          `Unsupported charset: ${charset}. Only UTF-8 is supported.`,
-        );
-      }
-    }
+  try {
+    // Note that `textDecoder` uses the default configuration of
+    // `fatal: false`, so its `decode()` never throws; only the base64url
+    // decode can land in the `catch`.
+    const bytes = fromBase64url(data);
+    return { mediaType, text: textDecoder.decode(bytes) };
+  } catch {
+    throw new Error(`Invalid data URI payload (not base64url): ${uri}`);
   }
-
-  const isBase64 = headerParts.some((part) => part === "base64");
-  let text: string;
-  if (isBase64) {
-    const binaryString = atob(data);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    text = new TextDecoder().decode(bytes);
-  } else {
-    text = decodeURIComponent(data);
-  }
-  return { mediaType, text };
 }
 
 /**

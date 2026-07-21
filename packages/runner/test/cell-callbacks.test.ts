@@ -2,6 +2,7 @@
 // after cell writes reach a final commit result.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { DATA_CELL_MEDIA_TYPE } from "../src/data-uri.ts";
 import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
 
@@ -806,7 +807,11 @@ describe("Cell commit callbacks", () => {
         const resolved = itemCell.resolveAsCell();
         const resolvedLink = resolved.getAsNormalizedFullLink();
 
-        expect(resolvedLink.id.startsWith("data:application/json,")).toBe(true);
+        expect(
+          resolvedLink.id.startsWith(
+            `data:${DATA_CELL_MEDIA_TYPE},`,
+          ),
+        ).toBe(true);
         expect(resolvedLink.path).toEqual([]);
         expect(resolved.get()).toEqualIgnoringSymbols({ name: "first" });
       });
@@ -898,7 +903,7 @@ describe("Cell commit callbacks", () => {
         const resolved = first.resolveAsCell();
         expect(
           resolved.getAsNormalizedFullLink().id.startsWith(
-            "data:application/json,",
+            `data:${DATA_CELL_MEDIA_TYPE},`,
           ),
         ).toBe(true);
         expect(resolved.getAsNormalizedFullLink().path).toEqual([]);

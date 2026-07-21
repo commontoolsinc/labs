@@ -26,6 +26,8 @@ import { toTransactionDocumentValue } from "../v2-document.ts";
 import {
   decodeDataURIPayloadText,
   extractDataURIPayloadText,
+  isDataCellMediaType,
+  isDataCellURI,
 } from "../../data-uri.ts";
 
 const logger = getLogger("attestation", {
@@ -250,9 +252,19 @@ export const load = (
   >;
 
   try {
+    if (!isDataCellURI(address.id)) {
+      result = {
+        error: UnsupportedMediaTypeError(
+          `Unsupported media type in data URI: ${address.id.slice(0, 64)}`,
+        ),
+      };
+      dataURICache.put(cacheKey, result);
+      return result;
+    }
+
     const { mediaType, text } = extractDataURIPayloadText(address.id);
 
-    if (mediaType === "application/json") {
+    if (isDataCellMediaType(mediaType)) {
       let value: FabricValue;
       try {
         // The payload encodes the cell VALUE; the document that the

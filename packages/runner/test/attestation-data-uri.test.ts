@@ -1,12 +1,16 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { jsonFromValue } from "@commonfabric/data-model/codec-json";
+import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
+import { DATA_CELL_MEDIA_TYPE } from "../src/data-uri.ts";
 import { load } from "../src/storage/transaction/attestation.ts";
 import type { URI } from "../src/sigil-types.ts";
 
-/** Percent-encoded `data:` URI with the given payload text. */
+/** `data:` cell URI (base64url payload) with the given payload text. */
 const uriOf = (payload: string): URI =>
-  `data:application/json,${encodeURIComponent(payload)}` as URI;
+  `data:${DATA_CELL_MEDIA_TYPE},${
+    toUnpaddedBase64url(new TextEncoder().encode(payload))
+  }` as URI;
 
 // `load()` is the storage-transaction-side reader of `data:` URI documents,
 // separate from `data-uri.ts`'s `getJSONFromDataURI()`. Both route payload
@@ -57,8 +61,20 @@ describe("attestation `load()` of `data:` URIs", () => {
     expect(error?.name).toBe("InvalidDataURIError");
   });
 
+  it("rejects the `application/json` media type", () => {
+    const { ok, error } = load({
+      id: `data:application/json,${
+        toUnpaddedBase64url(new TextEncoder().encode(jsonFromValue({ a: 1 })))
+      }` as URI,
+    });
+    expect(ok).toBeUndefined();
+    expect(error?.name).toBe("UnsupportedMediaTypeError");
+  });
+
   it("errors on an empty payload", () => {
-    const { ok, error } = load({ id: "data:application/json," as URI });
+    const { ok, error } = load({
+      id: `data:${DATA_CELL_MEDIA_TYPE},` as URI,
+    });
     expect(ok).toBeUndefined();
     expect(error?.name).toBe("InvalidDataURIError");
   });
@@ -66,5 +82,30 @@ describe("attestation `load()` of `data:` URIs", () => {
   it("errors on an unsupported media type", () => {
     const { error } = load({ id: "data:text/plain,hello" as URI });
     expect(error?.name).toBe("UnsupportedMediaTypeError");
+  });
+
+  // A parameterized header passes the prefix pre-gate but is not the exact
+  // media type (this format has no parameters).
+  it("errors on a parameterized header", () => {
+    const payload = toUnpaddedBase64url(
+      new TextEncoder().encode(jsonFromValue({ a: 1 })),
+    );
+    const { ok, error } = load({
+      id: `data:${DATA_CELL_MEDIA_TYPE};base64,${payload}` as URI,
+    });
+    expect(ok).toBeUndefined();
+    expect(error?.name).toBe("UnsupportedMediaTypeError");
+  });
+
+  // Extraction-level failure (as opposed to payload-decode failure): a
+  // percent-encoded payload is not base64url.
+  it("errors on a percent-encoded payload", () => {
+    const { ok, error } = load({
+      id: `data:${DATA_CELL_MEDIA_TYPE},${
+        encodeURIComponent(jsonFromValue({ a: 1 }))
+      }` as URI,
+    });
+    expect(ok).toBeUndefined();
+    expect(error?.name).toBe("InvalidDataURIError");
   });
 });
