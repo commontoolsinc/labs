@@ -24,6 +24,7 @@ import {
   resolveCfcSchemaRefsOrThrow,
   selectReferencedCfcSchemaDefs,
 } from "./cfc/schema-refs.ts";
+import { forEachSubschema } from "./schema-walk.ts";
 export {
   CFC_ATOM_TYPE,
   CFC_CONCEPT_KIND,
@@ -288,74 +289,23 @@ export class ContextualFlowControl {
     if (schema.ifc) {
       ContextualFlowControl.addIfcAtoms(joined, schema.ifc.confidentiality);
     }
-    // A value validates against one (anyOf/oneOf) or all (allOf) branches, so the
-    // confidentiality LUB must union every branch's atoms; otherwise branch-local
-    // confidentiality is silently dropped (under-tainting fail-open, audit 1.6).
-    for (const key of ["anyOf", "oneOf", "allOf"] as const) {
-      const branches = (schema as Record<string, unknown>)[key];
-      if (Array.isArray(branches)) {
-        for (const branch of branches) {
-          if (branch !== undefined && typeof branch === "object") {
-            ContextualFlowControl.joinSchema(
-              joined,
-              branch as JSONSchema,
-              cfcSchemaChildRoot(
-                branch as JSONSchema,
-                schemaRoot,
-              ),
-              nextActive,
-            );
-          }
-        }
-      }
-    }
-    // Tuple element schemas carry their own confidentiality too.
-    if (Array.isArray((schema as Record<string, unknown>).prefixItems)) {
-      for (
-        const item of (schema as { prefixItems: JSONSchema[] }).prefixItems
-      ) {
-        if (item !== undefined && typeof item === "object") {
-          ContextualFlowControl.joinSchema(
-            joined,
-            item,
-            cfcSchemaChildRoot(item, schemaRoot),
-            nextActive,
-          );
-        }
-      }
-    }
-    if (schema.properties && typeof schema.properties === "object") {
-      for (const value of Object.values(schema.properties)) {
-        ContextualFlowControl.joinSchema(
-          joined,
-          value,
-          cfcSchemaChildRoot(value, schemaRoot),
-          nextActive,
-        );
-      }
-    }
-    if (
-      schema.additionalProperties &&
-      typeof schema.additionalProperties === "object"
-    ) {
+    // The LUB must union the atoms of every subschema a value could validate
+    // against — one (anyOf/oneOf) or all (allOf) branches, every property,
+    // every tuple slot, items and additionalProperties alike; a skipped
+    // keyword is branch-local confidentiality silently dropped
+    // (under-tainting fail-open, audit 1.6). `not` is unioned too: usually
+    // its atoms describe values the data must NOT contain — a conservative
+    // over-taint — but a nested `not` (not-of-not) re-selects values that DO
+    // match the inner subschema, so skipping `not` could under-taint.
+    forEachSubschema(schema, (child) => {
       ContextualFlowControl.joinSchema(
         joined,
-        schema.additionalProperties,
-        cfcSchemaChildRoot(
-          schema.additionalProperties,
-          schemaRoot,
-        ),
+        child,
+        cfcSchemaChildRoot(child, schemaRoot),
         nextActive,
       );
-    } else if (schema.items && typeof schema.items === "object") {
-      // TODO(@ubik2): need to handle prefixItems -- also probably not else if here
-      ContextualFlowControl.joinSchema(
-        joined,
-        schema.items,
-        cfcSchemaChildRoot(schema.items, schemaRoot),
-        nextActive,
-      );
-    } else if (schema.$ref) {
+    });
+    if (schema.$ref) {
       // Follow the references
       const resolvedSchema = ContextualFlowControl.resolveSchemaRefsOrThrow(
         schema,

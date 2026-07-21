@@ -40,6 +40,47 @@ describe("ContextualFlowControl.lubSchema combinator descent", () => {
     } as JSONSchema)).toEqual(["t0", "t1"]);
   });
 
+  // joinSchema used to chain additionalProperties / items / $ref with
+  // `else if`, so a schema carrying more than one of them joined only the
+  // first — the same under-tainting class as the combinator gap above.
+  it("unions additionalProperties and items together", () => {
+    expect(atomsOf({
+      type: "object",
+      additionalProperties: {
+        type: "string",
+        ifc: { confidentiality: ["ap"] },
+      },
+      items: { type: "number", ifc: { confidentiality: ["it"] } },
+    } as JSONSchema)).toEqual(["ap", "it"]);
+  });
+
+  it("follows $ref alongside items", () => {
+    expect(atomsOf({
+      type: "array",
+      items: { type: "string", ifc: { confidentiality: ["el"] } },
+      $ref: "#/$defs/R",
+      $defs: {
+        R: { type: "array", ifc: { confidentiality: ["ref"] } },
+      },
+    } as JSONSchema)).toEqual(["el", "ref"]);
+  });
+
+  // A plain `not` over-taints conservatively, but a nested `not` (not-of-not)
+  // re-selects values that DO match the inner subschema — descending `not` is
+  // needed for soundness, not just conservatism.
+  it("unions confidentiality under not (conservative over-taint)", () => {
+    expect(atomsOf({
+      type: "string",
+      not: { ifc: { confidentiality: ["n"] } },
+    } as JSONSchema)).toEqual(["n"]);
+  });
+
+  it("reaches atoms under a double negation (not-of-not matches)", () => {
+    expect(atomsOf({
+      not: { not: { type: "string", ifc: { confidentiality: ["nn"] } } },
+    } as JSONSchema)).toEqual(["nn"]);
+  });
+
   it("does not mistake identical refs in different definition roots for a cycle", () => {
     const shared = { $ref: "#/$defs/V" } as const;
     expect(atomsOf({
