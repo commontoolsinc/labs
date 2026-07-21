@@ -12,6 +12,7 @@ import { createSession, Identity } from "@commonfabric/identity";
 import { PieceManager } from "../src/manager.ts";
 import {
   DEFAULT_APP_PATTERN_URL,
+  HOME_PATTERN_URL,
   PiecesController,
 } from "../src/ops/pieces-controller.ts";
 
@@ -69,7 +70,10 @@ function installFetchStub(): StubControls {
       });
     }
 
-    if (url.pathname === DEFAULT_APP_PATTERN_URL) {
+    if (
+      url.pathname === DEFAULT_APP_PATTERN_URL ||
+      url.pathname === HOME_PATTERN_URL
+    ) {
       if (url.searchParams.has("identity")) {
         identityFetchCount++;
         if (failIdentityFetch) throw new Error("identity fetch failed");
@@ -350,10 +354,15 @@ describe("checkAndUpdateDefaultPattern", () => {
 
   it("skips a legacy non-home root with no patternSource (custom-app safety)", async () => {
     await setup({ systemPatternAutoUpdate: true });
-    // recreateDefaultPattern does NOT stamp patternSource — it stands in for a
-    // legacy root created before provenance existed (which might be a custom app
-    // seeded from home's defaultAppUrl, NOT the default app).
+    // Model a legacy root created before provenance existed (which might be a
+    // custom app seeded from home's defaultAppUrl, NOT the default app).
+    // recreateDefaultPattern stamps patternSource since CT-1890, so erase the
+    // stamp to reproduce the sourceless legacy shape.
     await controller.recreateDefaultPattern();
+    const stamped = (await manager.getDefaultPattern(false))!;
+    await runtime.editWithRetry((tx) => {
+      stamped.withTx(tx).setMetaRaw("patternSource", null);
+    });
     const root = (await manager.getDefaultPattern(false))!;
     expect(getPatternSource(root)).toBeUndefined();
     const before = getPatternIdentityRef(root)?.identity;
@@ -391,5 +400,46 @@ describe("checkAndUpdateDefaultPattern", () => {
       "skipped-disabled",
     );
     expect(stub.identityFetches()).toBe(0);
+  });
+
+  describe("recreateDefaultPattern provenance (CT-1890)", () => {
+    it("stamps a recreated non-home root so it can auto-update", async () => {
+      await setup({ systemPatternAutoUpdate: true });
+      await controller.recreateDefaultPattern();
+      const root = (await manager.getDefaultPattern(false))!;
+      expect(getPatternSource(root)).toBe(DEFAULT_APP_PATTERN_URL);
+
+      // The stamp is the point: it makes the recreated root eligible for
+      // auto-update. A newer toolshed identity must roll it forward instead
+      // of being skipped forever at the sourceless-root gate.
+      stub.setSource(SOURCE_V2);
+      expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
+      await runtime.idle();
+      const updated = (await manager.getDefaultPattern(false))!;
+      expect(getPatternIdentityRef(updated)?.identity).toBe(
+        await identityForSource(SOURCE_V2),
+      );
+    });
+
+    it("stamps a recreated home root with home.tsx", async () => {
+      storageManager = StorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL("http://toolshed.test"),
+        storageManager,
+        clientVersion: BUILD_SHA,
+      });
+      const homeSession = await createSession({
+        identity: signer,
+        spaceDid: signer.did(),
+      });
+      expect(homeSession.space).toBe(runtime.userIdentityDID);
+      manager = new PieceManager(homeSession, runtime);
+      await manager.synced();
+      controller = new PiecesController(manager);
+
+      await controller.recreateDefaultPattern();
+      const root = (await manager.getDefaultPattern(false))!;
+      expect(getPatternSource(root)).toBe(HOME_PATTERN_URL);
+    });
   });
 });

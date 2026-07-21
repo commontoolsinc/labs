@@ -331,14 +331,14 @@ export class PiecesController<T = unknown> {
       if (isHomeSpace) {
         patternConfig = {
           name: "Home",
-          urlPath: "/api/patterns/system/home.tsx",
+          urlPath: HOME_PATTERN_URL,
           cause: `home-pattern-${Date.now()}`,
         };
       } else {
         const customUrl = await this.getDefaultAppUrlFromHome();
         patternConfig = {
           name: "DefaultPieceList",
-          urlPath: customUrl || "/api/patterns/system/default-app.tsx",
+          urlPath: customUrl || DEFAULT_APP_PATTERN_URL,
           cause: `space-root-${Date.now()}`,
         };
       }
@@ -372,6 +372,20 @@ export class PiecesController<T = unknown> {
 
       // Run pattern setup within same transaction
       this.#manager.runtime.run(tx, pattern, {}, pieceCell);
+
+      // Stamp the provenance the piece tracks for updates, mirroring
+      // ensureDefaultPattern (CT-1890). Without this, every recreated root
+      // is born unprovenanced and checkAndUpdateDefaultPattern skips
+      // sourceless non-home roots forever — the repair path would mint
+      // roots that can never auto-migrate. A custom program has no URL the
+      // auto-updater could re-fetch (stamping the "custom" placeholder
+      // would poison URL resolution — it would resolve relative to the
+      // host); its locator, when supplied, is recorded via
+      // setPatternRepository below, so a custom root without a repository
+      // intentionally stays unstamped.
+      if (options?.customProgram === undefined) {
+        setPatternSource(pieceCell, tx, patternConfig.urlPath);
+      }
 
       if (options?.repository !== undefined) {
         setPatternRepository(pieceCell, tx, options.repository);
