@@ -70,6 +70,8 @@ export {
   isFunctionParameter,
   isMethodCall,
   isOptionalMemberSymbol,
+  preserveLineage,
+  preserveSourceMapRange,
   setParentPointers,
   visitEachChildWithJsx,
 } from "./utils.ts";

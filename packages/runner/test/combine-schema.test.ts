@@ -252,6 +252,7 @@ describe("combineSchema array handling", () => {
   for (const direction of directions) {
     it(`keeps parent metadata and merges definitions when ${direction.name}`, () => {
       const merged = combineSchema(direction.parent, direction.link);
+      expect(merged).not.toHaveProperty("prefixItems");
       expect(merged).toMatchObject({
         type: "array",
         title: direction.parentTitle,
@@ -291,6 +292,70 @@ describe("combineSchema array handling", () => {
       });
     });
   }
+
+  const shortTuple = {
+    type: "array",
+    prefixItems: [{ type: "number" }],
+    items: { type: "string" },
+  } as const satisfies JSONSchema;
+  const longTuple = {
+    type: "array",
+    prefixItems: [
+      { type: "integer" },
+      { type: "string" },
+      { type: "boolean" },
+    ],
+    items: { type: "boolean" },
+  } as const satisfies JSONSchema;
+
+  for (
+    const direction of [
+      {
+        name: "short tuple is the parent",
+        parent: shortTuple,
+        link: longTuple,
+      },
+      { name: "long tuple is the parent", parent: longTuple, link: shortTuple },
+    ] as const
+  ) {
+    it(`combines prefix items and falls back to items when the ${direction.name}`, () => {
+      expect(combineSchema(direction.parent, direction.link)).toEqual({
+        type: "array",
+        prefixItems: [
+          { type: "integer" },
+          { type: "string" },
+          false,
+        ],
+        items: false,
+      });
+    });
+  }
+
+  it("uses the available prefix item when the other array has no items schema", () => {
+    expect(
+      combineSchema(
+        { type: "array" },
+        {
+          type: "array",
+          prefixItems: [{ type: "string" }],
+        },
+      ),
+    ).toEqual({
+      type: "array",
+      prefixItems: [{ type: "string" }],
+    });
+  });
+
+  it("omits prefixItems when the merged prefix would be empty", () => {
+    expect(
+      combineSchema(
+        { type: "array", prefixItems: [] },
+        { type: "array" },
+      ),
+    ).toEqual({
+      type: "array",
+    });
+  });
 });
 
 // combineSchema builds the pseudo-intersection of the schema a doc was
