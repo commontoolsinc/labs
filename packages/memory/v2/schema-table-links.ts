@@ -1,4 +1,9 @@
-import { LINK_V1_TAG } from "@commonfabric/data-model/cell-rep";
+import {
+  isLinkRef,
+  linkRefFrom,
+  linkRefPayload,
+} from "@commonfabric/data-model/cell-rep";
+import type { FabricPlainObject } from "@commonfabric/api";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 export const REQUEST_SCHEMA_CAS_REF_PREFIX = "schema-cas@1:";
@@ -12,7 +17,15 @@ export interface LinkSchemaTraversal {
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
   isPlainObject(value);
 
-/** Maps schemas only in modern and legacy link payload positions. */
+/**
+ * Maps schemas only in link-payload and legacy `$alias` schema positions.
+ *
+ * Link recognition and reconstruction go through the `cell-rep` chokepoint
+ * ({@link isLinkRef} / {@link linkRefPayload} / {@link linkRefFrom}), so both
+ * `modernCellRep` regimes are handled transparently — legacy envelope or
+ * `FabricLink` instance alike. The `$alias` form predates the chokepoint and
+ * is never regime-dispatched, so it is recognized locally here.
+ */
 export const mapLinkSchemas = (
   value: unknown,
   mapSchema: (schema: unknown) => unknown,
@@ -30,26 +43,35 @@ export const mapLinkSchemas = (
     return changed ? mapped : value;
   }
 
+  if (isLinkRef(value)) {
+    const payload = linkRefPayload(value);
+    let mappedPayload: FabricPlainObject = payload;
+    let changed = false;
+    if (Object.hasOwn(payload, "schema")) {
+      traversal?.visitSchemaPosition();
+      const schema = mapSchema(payload.schema);
+      if (schema !== payload.schema) {
+        mappedPayload = { ...payload, schema } as FabricPlainObject;
+        changed = true;
+      }
+    }
+    const walked = mapRecordChildren(
+      mappedPayload as Record<string, unknown>,
+      mapSchema,
+      traversal,
+      depth,
+    );
+    if (walked !== mappedPayload) {
+      mappedPayload = walked as FabricPlainObject;
+      changed = true;
+    }
+    return changed ? linkRefFrom(mappedPayload) : value;
+  }
+
   if (!isPlainRecord(value)) return value;
 
   let mappedValue = value;
   let changed = false;
-  const linkEnvelope = value["/"];
-  if (isPlainRecord(linkEnvelope)) {
-    const payload = linkEnvelope[LINK_V1_TAG];
-    if (isPlainRecord(payload) && Object.hasOwn(payload, "schema")) {
-      traversal?.visitSchemaPosition();
-      const schema = mapSchema(payload.schema);
-      if (schema !== payload.schema) {
-        mappedValue = {
-          ...mappedValue,
-          "/": { ...linkEnvelope, [LINK_V1_TAG]: { ...payload, schema } },
-        };
-        changed = true;
-      }
-    }
-  }
-
   const alias = value.$alias;
   if (isPlainRecord(alias) && Object.hasOwn(alias, "schema")) {
     traversal?.visitSchemaPosition();
@@ -60,12 +82,22 @@ export const mapLinkSchemas = (
     }
   }
 
-  // Read via entries (own properties only) and defer allocating the copy
-  // until a child actually changes: unchanged records — the overwhelmingly
-  // common case — cost no object build. Plain assignment is safe for every
-  // key except "__proto__", whose assignment would hit the prototype
-  // accessor instead of creating an own property.
-  const entries = Object.entries(mappedValue);
+  const walked = mapRecordChildren(mappedValue, mapSchema, traversal, depth);
+  if (walked !== mappedValue) return walked;
+  return changed ? mappedValue : value;
+};
+
+/** Walks every own entry of a record, allocating a copy only on change.
+ *  Plain assignment is safe for every key except "__proto__", whose
+ *  assignment would hit the prototype accessor instead of creating an own
+ *  property. */
+const mapRecordChildren = (
+  record: Record<string, unknown>,
+  mapSchema: (schema: unknown) => unknown,
+  traversal: LinkSchemaTraversal | undefined,
+  depth: number,
+): Record<string, unknown> => {
+  const entries = Object.entries(record);
   const mappedChildren: unknown[] = new Array(entries.length);
   let childChanged = false;
   for (let index = 0; index < entries.length; index += 1) {
@@ -74,7 +106,7 @@ export const mapLinkSchemas = (
     mappedChildren[index] = next;
     childChanged ||= next !== child;
   }
-  if (!childChanged) return changed ? mappedValue : value;
+  if (!childChanged) return record;
 
   const mapped: Record<string, unknown> = {};
   for (let index = 0; index < entries.length; index += 1) {

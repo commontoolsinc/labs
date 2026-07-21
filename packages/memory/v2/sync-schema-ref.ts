@@ -1,4 +1,4 @@
-import { LINK_V1_TAG } from "@commonfabric/data-model/cell-rep";
+import { isLinkRef, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { isPlainObject } from "@commonfabric/utils/types";
 import { REQUEST_SCHEMA_CAS_REF_PREFIX } from "./schema-table-links.ts";
 
@@ -22,7 +22,7 @@ export const containsReservedSchemaRefSubstring = (value: string): boolean =>
   value.includes(SYNC_SCHEMA_REF_PREFIX) ||
   value.includes(REQUEST_SCHEMA_CAS_REF_PREFIX);
 
-const schemaRefInPayload = (
+const schemaRefIn = (
   payload: Record<string, unknown>,
 ): string | undefined => {
   const schema = payload.schema;
@@ -31,19 +31,15 @@ const schemaRefInPayload = (
     : undefined;
 };
 
-const pushOwnValuesExcept = (
-  pending: unknown[],
-  record: Record<string, unknown>,
-  skippedKey: string,
-): void => {
-  for (const key in record) {
-    if (key !== skippedKey && Object.hasOwn(record, key)) {
-      pending.push(record[key]);
-    }
-  }
-};
-
-/** Finds reserved wire references only in link-payload schema positions. */
+/**
+ * Finds reserved wire references only in link-payload and legacy `$alias`
+ * schema positions.
+ *
+ * Link recognition goes through the `cell-rep` chokepoint ({@link isLinkRef}
+ * / {@link linkRefPayload}), covering both `modernCellRep` regimes — legacy
+ * envelope or `FabricLink` instance. The `$alias` form predates the
+ * chokepoint and is never regime-dispatched, so it is recognized locally.
+ */
 export const findSyncSchemaRef = (value: unknown): string | undefined => {
   const pending: unknown[] = [value];
 
@@ -55,43 +51,44 @@ export const findSyncSchemaRef = (value: unknown): string | undefined => {
       }
       continue;
     }
-    if (!isPlainRecord(current)) {
-      continue;
-    }
 
-    const linkEnvelope = current["/"];
-    const linkPayload = isPlainRecord(linkEnvelope)
-      ? linkEnvelope[LINK_V1_TAG]
-      : undefined;
-    const hasLinkPayload = isPlainRecord(linkEnvelope) &&
-      isPlainRecord(linkPayload);
-    if (hasLinkPayload) {
-      const ref = schemaRefInPayload(linkPayload);
+    if (isLinkRef(current)) {
+      const payload = linkRefPayload(current) as Record<string, unknown>;
+      const ref = schemaRefIn(payload);
       if (ref !== undefined) {
         return ref;
       }
-      pushOwnValuesExcept(pending, linkPayload, "schema");
-      pushOwnValuesExcept(pending, linkEnvelope, LINK_V1_TAG);
+      for (const key in payload) {
+        if (key !== "schema" && Object.hasOwn(payload, key)) {
+          pending.push(payload[key]);
+        }
+      }
+      continue;
+    }
+
+    if (!isPlainRecord(current)) {
+      continue;
     }
 
     const legacyAlias = current.$alias;
     const hasLegacyAlias = isPlainRecord(legacyAlias);
     if (hasLegacyAlias) {
-      const ref = schemaRefInPayload(legacyAlias);
+      const ref = schemaRefIn(legacyAlias);
       if (ref !== undefined) {
         return ref;
       }
-      pushOwnValuesExcept(pending, legacyAlias, "schema");
+      for (const key in legacyAlias) {
+        if (key !== "schema" && Object.hasOwn(legacyAlias, key)) {
+          pending.push(legacyAlias[key]);
+        }
+      }
     }
 
     for (const key in current) {
       if (!Object.hasOwn(current, key)) {
         continue;
       }
-      if (
-        (key === "/" && hasLinkPayload) ||
-        (key === "$alias" && hasLegacyAlias)
-      ) {
+      if (key === "$alias" && hasLegacyAlias) {
         continue;
       }
       pending.push(current[key]);
@@ -117,6 +114,11 @@ export const containsSyncSchemaRefString = (value: unknown): boolean => {
       for (let index = 0; index < current.length; index += 1) {
         pending.push(current[index]);
       }
+      continue;
+    }
+    if (isLinkRef(current)) {
+      // A FabricLink's payload is not reachable by plain-record iteration.
+      pending.push(linkRefPayload(current));
       continue;
     }
     if (!isPlainRecord(current)) {

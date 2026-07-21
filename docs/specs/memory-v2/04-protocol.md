@@ -380,9 +380,13 @@ expansion, downstream consumers observe the historical `SessionSync` shape with
 inline schemas and no `schemaTable` field.
 
 The `schema-ref@2:` prefix is reserved in the `schema` field of `link@1` and
-legacy `$alias` payloads. Memory servers MUST reject set or patch operations
-whose resulting stored document uses that prefix as an opaque schema string;
-ordinary strings in other document positions are unaffected.
+legacy `$alias` payloads. Link recognition follows the canonical cell-rep
+form — in the legacy representation, the single-key `{ "/": { "link@1": … } }`
+envelope — so an envelope carrying sibling keys is not a link and its contents
+are ordinary data. Memory servers MUST reject set or patch operations
+whose resulting stored document uses that prefix as an opaque schema string in
+a recognized schema position; ordinary strings in other document positions are
+unaffected.
 
 ### 4.2.4 Batching
 

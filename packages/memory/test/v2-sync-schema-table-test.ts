@@ -5,7 +5,15 @@ import {
   assertStrictEquals,
   assertThrows,
 } from "@std/assert";
-import { LINK_V1_TAG, linkRefFrom } from "@commonfabric/data-model/cell-rep";
+import {
+  isLinkRef,
+  LINK_V1_TAG,
+  linkRefFrom,
+  linkRefPayload,
+  resetModernCellRepConfig,
+  setModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchema } from "@commonfabric/api";
 import {
@@ -286,7 +294,12 @@ Deno.test("sync schema table round-trips legacy aliases nested in arrays", () =>
   assertEquals(expandedSchemas, [internSchema(schema, true).schema]);
 });
 
-Deno.test("sync schema table continues through sibling fields after link payloads", () => {
+Deno.test("sync schema table interns only strict link envelopes", () => {
+  // Link recognition goes through the cell-rep chokepoint, which defines a
+  // legacy link as the single-key `{ "/": { "link@1": ... } }` envelope. An
+  // envelope with sibling keys is NOT a link: its inner "schema" is inert
+  // user data — uniformly for compression, expansion, and the reserved-ref
+  // hardening — while a strict sibling link in the same record is interned.
   const primarySchema: JSONSchema = {
     type: "object",
     properties: { title: { type: "string" } },
@@ -338,17 +351,26 @@ Deno.test("sync schema table continues through sibling fields after link payload
     ((compressedCompound.sibling as Record<string, unknown>)[
       "/"
     ] as Record<string, unknown>)[LINK_V1_TAG] as Record<string, unknown>;
-  const primaryHash = internSchema(primarySchema, true).taggedHashString;
   const siblingHash = internSchema(siblingSchema, true).taggedHashString;
 
   assertExists(compressed.schemaTable);
-  assertEquals(
-    Object.keys(compressed.schemaTable).sort(),
-    [primaryHash, siblingHash].sort(),
-  );
-  assertEquals(compressedPayload.schema, `schema-ref@2:${primaryHash}`);
+  assertEquals(Object.keys(compressed.schemaTable), [siblingHash]);
+  // The sibling'd envelope is not a link: its schema stays inline.
+  assertEquals(compressedPayload.schema, primarySchema);
   assertEquals(compressedSiblingPayload.schema, `schema-ref@2:${siblingHash}`);
   assertEquals(expandSessionSyncSchemas(compressed), sync);
+
+  // The hardening applies the same strictness: a reserved string inside a
+  // sibling'd envelope's payload is ordinary data, not a schema position.
+  assertEquals(
+    findSyncSchemaRef({
+      "/": {
+        [LINK_V1_TAG]: { id: "of:x", path: [], schema: "schema-ref@2:z" },
+      },
+      sibling: true,
+    }),
+    undefined,
+  );
 });
 
 Deno.test("sync schema table ignores inherited fields while finding schema refs", () => {
@@ -738,23 +760,24 @@ Deno.test("memory server negotiates schema-table v2 sync frames per connection",
 });
 
 Deno.test("findSyncSchemaRef ignores inherited object properties", () => {
-  // The traversal must only follow own properties: an enumerable prototype
-  // pollution carrying a link-payload shape must not surface as a reserved
-  // reference in an unrelated document.
-  const polluted = {
-    $alias: { id: "of:polluted", path: [], schema: "schema-ref@2:fid1:evil" },
+  // The traversal must only follow own properties: an enumerable INHERITED
+  // key carrying a link-payload shape must not surface as a reserved
+  // reference. Built on a custom prototype so the test never touches
+  // Object.prototype.
+  const pollutedProto = {
+    polluted: {
+      $alias: { id: "of:polluted", path: [], schema: "schema-ref@2:fid1:evil" },
+    },
   };
-  Object.defineProperty(Object.prototype, "polluted", {
-    value: polluted,
-    enumerable: true,
-    configurable: true,
-    writable: true,
-  });
-  try {
-    assertEquals(findSyncSchemaRef({ value: { plain: "doc" } }), undefined);
-  } finally {
-    delete (Object.prototype as Record<string, unknown>).polluted;
-  }
+  const doc = Object.assign(Object.create(pollutedProto), {
+    value: { plain: "doc" },
+  }) as Record<string, unknown>;
+  assertEquals(findSyncSchemaRef(doc), undefined);
+  // Sanity: the same shape as an OWN property is found.
+  assertEquals(
+    findSyncSchemaRef({ nested: pollutedProto.polluted }),
+    "schema-ref@2:fid1:evil",
+  );
 });
 
 Deno.test("sync schema table compression preserves own __proto__ keys", () => {
@@ -841,4 +864,73 @@ Deno.test("findSyncSchemaRef traverses arrays and containsSyncSchemaRefString sc
     }),
     false,
   );
+});
+
+Deno.test("schema table and reserved-ref detection handle modern cell-rep links", () => {
+  // Under modernCellRep, links are FabricLink instances rather than plain
+  // envelopes; recognition must go through the cell-rep chokepoint or every
+  // link becomes an opaque leaf and both interning and hardening no-op.
+  setModernCellRepConfig(true);
+  try {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: { name: { type: "string" } },
+    };
+    const canonical = internSchema(schema, true);
+    const sync: SessionSync = {
+      type: "sync",
+      fromSeq: 0,
+      toSeq: 1,
+      upserts: [{
+        branch: "",
+        id: "of:modern",
+        scope: "space",
+        seq: 1,
+        doc: {
+          value: {
+            contact: linkRefFrom({
+              id: "of:contact",
+              path: [],
+              schema,
+            }) as unknown as FabricValue,
+          },
+        } as unknown as EntityDocument,
+      }],
+      removes: [],
+    };
+
+    const compressed = compressSessionSyncSchemas(
+      sync,
+    ) as SchemaTableSessionSync;
+    assertExists(compressed.schemaTable, "modern links must be interned");
+    const compressedLink =
+      (compressed.upserts[0].doc?.value as Record<string, unknown>).contact;
+    assert(isLinkRef(compressedLink), "rewrite must preserve the link form");
+    assertEquals(
+      (linkRefPayload(compressedLink) as Record<string, unknown>).schema,
+      `schema-ref@2:${canonical.taggedHashString}`,
+    );
+
+    // Hardening detection sees inside FabricLink payloads too.
+    assertEquals(
+      findSyncSchemaRef(compressed.upserts[0].doc),
+      `schema-ref@2:${canonical.taggedHashString}`,
+    );
+    assertEquals(
+      containsSyncSchemaRefString(compressed.upserts[0].doc),
+      true,
+    );
+
+    const expanded = expandSessionSyncSchemas(compressed);
+    const expandedLink =
+      (expanded.upserts[0].doc?.value as Record<string, unknown>).contact;
+    assert(isLinkRef(expandedLink));
+    assertEquals(
+      (linkRefPayload(expandedLink) as Record<string, unknown>).schema,
+      canonical.schema,
+    );
+  } finally {
+    setModernCellRepConfig(false);
+    resetModernCellRepConfig();
+  }
 });
