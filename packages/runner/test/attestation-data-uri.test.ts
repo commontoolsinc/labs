@@ -2,19 +2,19 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { jsonFromValue } from "@commonfabric/data-model/codec-json";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
-import { DATA_CELL_MEDIA_TYPE } from "../src/data-uri.ts";
+import { DATA_URI_MEDIA_TYPE } from "../src/data-uri-codec.ts";
 import { load } from "../src/storage/transaction/attestation.ts";
 import type { URI } from "../src/sigil-types.ts";
 
 /** `data:` cell URI (base64url payload) with the given payload text. */
 const uriOf = (payload: string): URI =>
-  `data:${DATA_CELL_MEDIA_TYPE},${
+  `data:${DATA_URI_MEDIA_TYPE},${
     toUnpaddedBase64url(new TextEncoder().encode(payload))
   }` as URI;
 
 // `load()` is the storage-transaction-side reader of `data:` URI documents,
-// separate from `data-uri.ts`'s `getJSONFromDataURI()`. Both route payload
-// text through `decodeDataURIPayloadText()`, so the two readers cannot
+// separate from `data-uri.ts`'s `valueFromDataUri()`. Both route payload
+// text through `valueFromDataUriPayloadText()`, so the two readers cannot
 // silently diverge on what a payload means.
 describe("attestation `load()` of `data:` URIs", () => {
   it("errors on a historical bare-JSON payload", () => {
@@ -73,7 +73,7 @@ describe("attestation `load()` of `data:` URIs", () => {
 
   it("errors on an empty payload", () => {
     const { ok, error } = load({
-      id: `data:${DATA_CELL_MEDIA_TYPE},` as URI,
+      id: `data:${DATA_URI_MEDIA_TYPE},` as URI,
     });
     expect(ok).toBeUndefined();
     expect(error?.name).toBe("InvalidDataURIError");
@@ -91,7 +91,7 @@ describe("attestation `load()` of `data:` URIs", () => {
       new TextEncoder().encode(jsonFromValue({ a: 1 })),
     );
     const { ok, error } = load({
-      id: `data:${DATA_CELL_MEDIA_TYPE};base64,${payload}` as URI,
+      id: `data:${DATA_URI_MEDIA_TYPE};base64,${payload}` as URI,
     });
     expect(ok).toBeUndefined();
     expect(error?.name).toBe("UnsupportedMediaTypeError");
@@ -101,7 +101,7 @@ describe("attestation `load()` of `data:` URIs", () => {
   // percent-encoded payload is not base64url.
   it("errors on a percent-encoded payload", () => {
     const { ok, error } = load({
-      id: `data:${DATA_CELL_MEDIA_TYPE},${
+      id: `data:${DATA_URI_MEDIA_TYPE},${
         encodeURIComponent(jsonFromValue({ a: 1 }))
       }` as URI,
     });

@@ -40,7 +40,7 @@ import type {
   JSONSchemaTypes,
   SchemaScope,
 } from "./builder/types.ts";
-import { createDataCellURI } from "./data-uri.ts";
+import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
 import { addressKey, NormalizedFullLink, parseLink } from "./link-utils.ts";
 import { canFollowScopedLink } from "./scope.ts";
 import type {
@@ -4069,7 +4069,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
           ...curDoc,
           address: {
             ...curDoc.address,
-            id: createDataCellURI(curDoc.value, elementLink),
+            id: dataUriFromValueWithResolvedLinks(curDoc.value, elementLink),
             path: ["value"],
           },
         };

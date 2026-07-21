@@ -9,7 +9,7 @@
  * PR.
  */
 import { assert } from "@std/assert";
-import { DATA_CELL_MEDIA_TYPE } from "../src/data-uri.ts";
+import { DATA_URI_MEDIA_TYPE } from "../src/data-uri-codec.ts";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
@@ -147,7 +147,7 @@ Deno.test("plain primitive-array traversal records indices after failure", () =>
   assert(oracle !== undefined);
   assert(
     oracle.readSet.some((read) =>
-      read.includes(`data:${DATA_CELL_MEDIA_TYPE}`) &&
+      read.includes(`data:${DATA_URI_MEDIA_TYPE}`) &&
       read.endsWith('|["value","1"]|nt')
     ),
   );

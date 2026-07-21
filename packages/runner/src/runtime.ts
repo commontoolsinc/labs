@@ -5,7 +5,7 @@ import {
 } from "@commonfabric/static";
 import { RuntimeTelemetry } from "@commonfabric/runner";
 import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
-import { mintDataCellURI } from "./data-uri-mint.ts";
+import { dataUriFromValue } from "./data-uri-codec.ts";
 import type { NonIdempotentReport } from "./telemetry.ts";
 import type {
   AnyCell,
@@ -1772,11 +1772,11 @@ export class Runtime {
     tx?: IExtendedStorageTransaction,
     cfcLabelView?: CfcLabelView,
   ): Cell<any> {
-    // Not `createDataCellURI()`: its link-rewriting walk is unwanted here
+    // Not `dataUriFromValueWithResolvedLinks()`: its link-rewriting walk is unwanted here
     // (this data is immutable as given). `fabricFromNativeValue()` converts
     // what callers actually pass -- notably `Cell`s, which become sigil
     // links via their `toJSON()` -- into an encodable `FabricValue`.
-    const asDataURI = mintDataCellURI(fabricFromNativeValue(data));
+    const asDataURI = dataUriFromValue(fabricFromNativeValue(data));
     return createCell(
       this,
       {

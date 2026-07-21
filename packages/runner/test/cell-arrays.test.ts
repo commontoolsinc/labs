@@ -1,7 +1,7 @@
 // Cell array tests: element conversion plus optimized plain-schema traversal.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { DATA_CELL_MEDIA_TYPE } from "../src/data-uri.ts";
+import { DATA_URI_MEDIA_TYPE } from "../src/data-uri-codec.ts";
 import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
 
@@ -394,7 +394,7 @@ describe("plain-schema array traversal", () => {
     const trackedDataPaths: string[][] = [];
     const nativeTrackReadPaths = tx.trackReadPaths!.bind(tx);
     tx.trackReadPaths = (address, paths, options) => {
-      if (address.id.startsWith(`data:${DATA_CELL_MEDIA_TYPE}`)) {
+      if (address.id.startsWith(`data:${DATA_URI_MEDIA_TYPE}`)) {
         trackedDataPaths.push(...paths.map((path) => [...path]));
       }
       return nativeTrackReadPaths(address, paths, options);

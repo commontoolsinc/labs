@@ -2,11 +2,8 @@ import { isRecord } from "@commonfabric/utils/types";
 import type { CellScope, JSONSchema } from "../builder/types.ts";
 import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import {
-  findAndInlineDataURILinks,
-  getJSONFromDataURI,
-  isDataCellURI,
-} from "../data-uri.ts";
+import { findAndInlineDataUriLinks } from "../data-uri.ts";
+import { isDataUri, valueFromDataUri } from "../data-uri-codec.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import type { CfcAddress } from "./types.ts";
 import { isNormalizedFullLink } from "../link-types.ts";
@@ -418,7 +415,7 @@ const trustedEventMatchCandidates = (event: unknown): unknown[] => {
 
   add(event);
   try {
-    add(findAndInlineDataURILinks(event));
+    add(findAndInlineDataUriLinks(event));
   } catch {
     // Invalid data URI links cannot establish trusted provenance.
   }
@@ -532,8 +529,8 @@ const eventEnvelopePayloads = (
   }
   try {
     const eventLink = parseLink(event);
-    if (eventLink?.id && isDataCellURI(eventLink.id)) {
-      const decoded = getJSONFromDataURI(eventLink.id);
+    if (eventLink?.id && isDataUri(eventLink.id)) {
+      const decoded = valueFromDataUri(eventLink.id);
       addPayload(decoded, eventLink.space);
     }
   } catch {
