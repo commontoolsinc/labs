@@ -33,6 +33,10 @@ const SOURCE_V2 = patternSource("v2");
 const BUILD_SHA = "build-sha-1";
 const IMPORTED_MODULE_URL = "/api/patterns/system/update-marker.ts";
 
+// A same-host custom-app path, as home config would supply via
+// `defaultAppUrl` (a published custom app, NOT a system pattern).
+const CUSTOM_APP_URL = "/api/patterns/custom/my-app.tsx";
+
 /** Content identity a toolshed at this build would serve for `source`. */
 function identityForSource(
   source: string,
@@ -51,6 +55,7 @@ function identityForSource(
 
 interface StubControls {
   setSource(source: string): void;
+  setCustomSource(source: string | null): void;
   setIdentitySource(source: string): void;
   setGitSha(sha: string | null): void;
   setIdentityBuildSha(sha: string | null): void;
@@ -67,6 +72,8 @@ interface StubControls {
 function installFetchStub(): StubControls {
   const original = globalThis.fetch;
   let source = SOURCE_V1;
+  // Served at CUSTOM_APP_URL when set; null keeps the path unserved (404).
+  let customSource: string | null = null;
   let identitySource: string | undefined;
   let gitSha: string | null = BUILD_SHA;
   let identityBuildSha: string | null = BUILD_SHA;
@@ -123,6 +130,21 @@ function installFetchStub(): StubControls {
       });
     }
 
+    if (url.pathname === CUSTOM_APP_URL && customSource !== null) {
+      if (url.searchParams.has("identity")) {
+        identityFetchCount++;
+        if (failIdentityFetch) throw new Error("identity fetch failed");
+        return new Response(
+          await identityForSource(customSource, imports, CUSTOM_APP_URL),
+          { headers: patternHeaders("text/plain", identityBuildSha) },
+        );
+      }
+      sourceFetchCount++;
+      return new Response(customSource, {
+        headers: patternHeaders("text/typescript-jsx", sourceBuildSha),
+      });
+    }
+
     if (Object.hasOwn(imports, url.pathname)) {
       sourceFetchCount++;
       return new Response(imports[url.pathname], {
@@ -135,6 +157,7 @@ function installFetchStub(): StubControls {
 
   return {
     setSource: (s) => (source = s),
+    setCustomSource: (s) => (customSource = s),
     setIdentitySource: (s) => (identitySource = s),
     setGitSha: (s) => (gitSha = s),
     setIdentityBuildSha: (s) => (identityBuildSha = s),
@@ -911,6 +934,51 @@ describe("checkAndUpdateDefaultPattern", () => {
       const updated = (await manager.getDefaultPattern(false))!;
       expect(getPatternIdentityRef(updated)?.identity).toBe(
         await identityForSource(SOURCE_V2),
+      );
+    });
+
+    it("stamps the configured custom defaultAppUrl and updates through it", async () => {
+      await setup({ systemPatternAutoUpdate: true });
+
+      // Home config supplies a custom-app URL for new space roots: the home
+      // root's `defaultAppUrl`, read via getDefaultAppUrlFromHome().
+      const homeSpaceCell = runtime.getHomeSpaceCell();
+      await homeSpaceCell.sync();
+      const homeRoot = runtime.getCell(
+        runtime.userIdentityDID,
+        "home-root-config",
+      );
+      const { error } = await runtime.editWithRetry((tx) => {
+        homeRoot.withTx(tx).set({ defaultAppUrl: CUSTOM_APP_URL });
+        // deno-lint-ignore no-explicit-any
+        (homeSpaceCell.withTx(tx) as any).key("defaultPattern").set(homeRoot);
+      });
+      expect(error).toBeUndefined();
+      await runtime.idle();
+
+      const customV1 = patternSource("custom-v1");
+      stub.setCustomSource(customV1);
+      await controller.recreateDefaultPattern();
+      const root = (await manager.getDefaultPattern(false))!;
+      // patternSource freezes the exact source selected at birth — the
+      // configured custom path, not the default-app fallback.
+      expect(getPatternSource(root)).toBe(CUSTOM_APP_URL);
+      expect(getPatternIdentityRef(root)?.identity).toBe(
+        await identityForSource(customV1, {}, CUSTOM_APP_URL),
+      );
+
+      // ...and update lookup continues THROUGH that custom path: a newer
+      // custom-app source rolls the root forward to the custom identity,
+      // untouched by whatever the default-app path serves.
+      const customV2 = patternSource("custom-v2");
+      stub.setCustomSource(customV2);
+      stub.setSource(SOURCE_V2);
+      expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
+      await runtime.idle();
+      const updated = (await manager.getDefaultPattern(false))!;
+      expect(getPatternSource(updated)).toBe(CUSTOM_APP_URL);
+      expect(getPatternIdentityRef(updated)?.identity).toBe(
+        await identityForSource(customV2, {}, CUSTOM_APP_URL),
       );
     });
 
