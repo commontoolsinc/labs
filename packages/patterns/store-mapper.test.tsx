@@ -31,7 +31,6 @@ import {
   equals,
   handler,
   pattern,
-  safeDateNow,
   Writable,
 } from "commonfabric";
 import StoreMapper, {
@@ -211,7 +210,10 @@ export default pattern(() => {
         itemName: "Coffee",
         correctAisle: "Aisle 5",
         incorrectAisle: "",
-        timestamp: safeDateNow(),
+        // Fixed timestamp: the correction's timestamp value is never asserted
+        // on, and reading the ambient clock in the pattern top-level body is
+        // not permitted under the time/entropy capability gate.
+        timestamp: 0,
       },
     ],
   });

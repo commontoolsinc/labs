@@ -66,7 +66,10 @@ import { RowLabelCommitError } from "./sqlite/commit-eval.ts";
 import type { TableSchema } from "./sqlite/schema.ts";
 import { DiskSourceRegistry } from "./sqlite/disk-source.ts";
 import { ReadConnectionPool } from "./sqlite/read-pool.ts";
-import { ensureColumnOriginAvailable } from "./sqlite/column-origin.ts";
+import {
+  columnOriginUnavailableReason,
+  ensureColumnOriginAvailable,
+} from "./sqlite/column-origin.ts";
 import {
   cloneTrackedGraphState,
   extendTrackedGraph,
@@ -1657,6 +1660,12 @@ export class Server {
       // Bind @db/sqlite's column-origin symbols before a labeled read; fail
       // loudly if they can't be bound rather than mislabeling the result.
       if (wantColumns && !(await ensureColumnOriginAvailable())) {
+        // The reason names a filesystem path, and this error reaches the query
+        // caller, so it goes to the log and the caller gets the bare fact.
+        console.warn(
+          `[memory-sqlite] column-origin symbols could not be bound: ` +
+            `${columnOriginUnavailableReason()}`,
+        );
         throw new Error(
           "sqlite: CFC read labeling needs SQLite column-metadata FFI, but " +
             "@db/sqlite's column-origin symbols could not be bound",

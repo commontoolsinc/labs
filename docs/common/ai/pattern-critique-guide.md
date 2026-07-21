@@ -46,8 +46,8 @@ Allowed inside patterns:
 | `.get()` on computed or lift result | Access directly; only `Writable` uses `.get()` |
 | `items.filter(...)` inline in JSX | Wrap in `computed()` outside JSX |
 | `items.sort(...)` inline in JSX | Wrap in `computed()` outside JSX |
-| `Date.now()` or `Math.random()` in authored pattern code | Use `safeDateNow()` or `nonPrivateRandom()` |
-| `safeDateNow()` or `nonPrivateRandom()` inside a re-running computation (`computed()` or `lift()`) without clear intent | Move the snapshot into `action()`, `handler()`, or one-time initialization |
+| `Date.now()`/`new Date()` or `Math.random()` in a `computed()` or `lift()`, or at pattern-body level | These built-ins throw a `TimeCapabilityError` outside a handler; read them in `action()`/`handler()`, or use the `#now` wish for reactive time |
+| `Date.now()`/`new Date()` or `Math.random()` inside a re-running computation (`computed()` or `lift()`) without clear intent | Move the snapshot into `action()`, `handler()`, or one-time initialization |
 | nested computed with outer-scope reactive vars | Pre-compute with lift or an outer computed |
 | `lift()` closing over reactive deps | Pass dependencies as explicit parameters |
 | cells from composed patterns in `ifElse` | Wrap in a local `computed()` bridge |

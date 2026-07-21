@@ -235,9 +235,7 @@ Deno.test("diffcov2: pressing Enter on a body line with no hunk header above is 
   }
 });
 
-Deno.test("diffcov2: a malformed hunk header is left untouched by adjustHunkCounts (no regex match)", () => {
-  // The header begins "@@ " (so the climb stops on it) but does not match the
-  // full hunk pattern, so the regex match is null and the header is untouched.
+Deno.test("diffcov2: adjustHunkCounts rejects a malformed explicit hunk header", () => {
   const lines = [
     "@@ this is not a valid hunk header @@",
     " context one",
@@ -246,13 +244,20 @@ Deno.test("diffcov2: a malformed hunk header is left untouched by adjustHunkCoun
   ];
   const { s, done } = doctoredDiffSession(lines, 2); // on the added line
   try {
-    const headerBefore = s.doc.lines[0].text;
+    const internals = s as unknown as {
+      buffer: { lines: string[] };
+      adjustHunkCounts(
+        oldDelta: number,
+        newDelta: number,
+        hunkHeader?: number | null,
+      ): boolean;
+    };
+    const headerBefore = internals.buffer.lines[0];
     assert(headerBefore.startsWith("@@ "), headerBefore);
-    press(s, "end");
-    press(s, "enter"); // splits -> adjustHunkCounts stops on the "@@ " line, m=null
-    const headerAfter = s.doc.lines[0]?.text ?? "";
+    const adjusted = internals.adjustHunkCounts(0, 1, 0);
+    assertEquals(adjusted, false, "the malformed header was rejected");
     assertEquals(
-      headerAfter,
+      internals.buffer.lines[0],
       headerBefore,
       "the malformed header was not rewritten",
     );

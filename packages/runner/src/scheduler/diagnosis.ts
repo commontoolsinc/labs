@@ -96,7 +96,17 @@ export function captureTransactionWrites(
         }
         writeDetailsBySpace.set(write.space, details);
       }
-      writeValues.set(key, details.has(key) ? details.get(key) : undefined);
+      // Record only value-carrying writes — those the transaction journal has
+      // novelty for. An address that is in the reactivity write log but produced
+      // no novelty is a no-op write or a read-triggered materialization touch
+      // (for example, resolving a redirect link into a replica the first time it
+      // is read). Such a touch happens in a fresh recheck run but not in the
+      // original run, which already materialized it; recording it would make the
+      // idempotency comparison see a differing write where the computation's
+      // output did not actually change.
+      if (details.has(key)) {
+        writeValues.set(key, details.get(key));
+      }
     } catch (error) {
       if (!("errorValue" in options)) throw error;
       writeValues.set(key, options.errorValue);

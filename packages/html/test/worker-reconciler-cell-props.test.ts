@@ -385,10 +385,10 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         assertEquals(
           styleOp !== undefined,
           true,
-          "Should emit set-prop for style (via per-prop sink)",
+          "Should emit set-prop for schema-resolved style",
         );
         // Style objects get transformed to CSS strings by transformPropValue
-        // The per-prop sink delivers the full object; transformPropValue converts it
+        // after the parent props schema resolves the full object.
       } finally {
         cancel();
       }
@@ -402,9 +402,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
           onOps: collector.onOps,
         });
 
-        const propsCell = new MockPropsCell({
-          style: { color: "blue" },
-        });
+        const propsCell = new MockPropsCell({ items: [1, 2, 3] });
         const rootCell = new MockCell({
           type: "vnode",
           name: "div",
@@ -417,16 +415,16 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
           await opsFlushed(runtime);
           collector.clear();
 
-          propsCell.set({ style: undefined });
+          propsCell.set({ items: undefined });
           await opsFlushed(runtime);
 
           const setPropOps = collector.getOpsOfType("set-prop");
           assertEquals(
             setPropOps.some((op: any) =>
-              op.key === "style" && op.value === undefined
+              op.key === "items" && op.value === undefined
             ),
             true,
-            "Should emit set-prop when an object-backed prop becomes undefined",
+            "Should emit set-prop when a generic object prop becomes undefined",
           );
         } finally {
           cancel();
@@ -1489,7 +1487,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
           "Should have className set-prop",
         );
 
-        // Verify style (object → per-prop sink)
+        // Verify schema-resolved style.
         const styleOp = setPropOps.find((op: any) => op.key === "style");
         assertEquals(styleOp !== undefined, true, "Should have style set-prop");
 

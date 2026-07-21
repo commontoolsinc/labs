@@ -297,13 +297,20 @@ export const piece = new Command()
     "Repository locator associated with the authored source (stored exactly as supplied).",
   )
   .option("--slug <slug:string>", "Slug URL/address for this piece.")
+  .option(
+    "--dangerously-allow-incompatible-schema",
+    "Accepted for deploy-script symmetry; a new piece has no previous schema to compare.",
+  )
   .action(async (options, main) => {
     setQuietMode(!!options.quiet);
     const spaceConfig = parseSpaceOptions(options);
     const pieceId = await newPiece(
       spaceConfig,
       localPatternEntry(main, options),
-      { start: options.start, slug: options.slug },
+      {
+        start: options.start,
+        slug: options.slug,
+      },
     );
     render(pieceId);
     const browserPieceRef = options.slug ?? pieceId;
@@ -420,11 +427,14 @@ export const piece = new Command()
     "--repository <repository:string>",
     "Repository locator associated with the authored source (stored exactly as supplied).",
   )
+  .option(
+    "--dangerously-allow-incompatible-schema",
+    "Replace the source even when pattern or retained-link schema compatibility cannot be proven.",
+  )
   .arguments("<main:string>")
   .action(async (options, mainPath) => {
     setQuietMode(!!options.quiet);
-    const pieceConfig = parsePieceOptions(options);
-    await setPiecePattern(pieceConfig, localPatternEntry(mainPath, options));
+    const pieceConfig = await setPieceSourceFromCommand(options, mainPath);
     render(`Updated source for piece ${pieceConfig.piece}`);
     hint(cliText(`NEXT STEPS:
   → Test in browser: ${pieceConfig.apiUrl}/${pieceConfig.space}/${pieceConfig.piece}
@@ -1018,12 +1028,40 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
   → Reset to default:     cf piece set-home --reset ...`));
   });
 
-interface PieceCLIOptions {
+/** Shared flags accepted by piece commands that resolve a target or source. */
+export interface PieceCLIOptions {
   piece?: string;
   apiUrl?: string;
   identity?: string;
   space?: string;
   url?: string;
+  mainExport?: string;
+  repository?: string;
+  root?: string;
+  dangerouslyAllowIncompatibleSchema?: boolean;
+}
+
+/** Injectable dependencies for testing the `piece setsrc` command boundary. */
+export interface SetPieceSourceCommandDependencies {
+  setPiecePattern?: typeof setPiecePattern;
+}
+
+/** Apply the parsed `piece setsrc` command while preserving its safety flag. */
+export async function setPieceSourceFromCommand(
+  options: PieceCLIOptions,
+  mainPath: string,
+  deps: SetPieceSourceCommandDependencies = {},
+): Promise<PieceConfig> {
+  const pieceConfig = parsePieceOptions(options);
+  await (deps.setPiecePattern ?? setPiecePattern)(
+    pieceConfig,
+    localPatternEntry(mainPath, options),
+    {
+      dangerouslyAllowIncompatibleSchema:
+        options.dangerouslyAllowIncompatibleSchema,
+    },
+  );
+  return pieceConfig;
 }
 
 const CELL_SCOPE_VALUES = new Set(["space", "user", "session"]);

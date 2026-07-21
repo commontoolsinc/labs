@@ -1,8 +1,8 @@
 # Fabric wall — modular dev/company dashboard
 
 A small Deno server that renders a dark, glanceable wall of status tiles and
-refreshes browsers over Server-Sent Events. Every tile is one file with a fixed
-interface; a single file registers them.
+updates their markup in place over Server-Sent Events. Every tile is one file
+with a fixed interface; a single file registers them.
 
 ## Run
 
@@ -16,8 +16,14 @@ Tiles that read GitHub need `GH_TOKEN` (or `GITHUB_TOKEN`) set in the
 environment. The other token-gated tiles gray out cleanly until their env vars
 are set (see below).
 
-Tasks: `deno task dashboard` (run), `deno task dashboard-watch` (reload on edit),
-`deno task dashboard-test` (unit tests).
+The root `deno task dashboard` command starts the server once. Watch mode and
+dashboard-specific tests are package tasks:
+
+```bash
+cd packages/dashboard
+deno task watch
+deno task test
+```
 
 ## Architecture
 
@@ -27,6 +33,9 @@ dashboard/
   config.ts     port, repo, tunable status thresholds
   lib.ts        shared helpers (github, memo, escapeHtml, sparkline, strip, …)
   ctx.ts        shared, memoized data sources handed to every tile (ctx.runs)
+  favicon.ts    runtime status priority and access to generated PNG favicon copies
+  favicon-png.generated.ts  generated runtime PNG favicon copies
+  favicon-artwork.ts  build/test-only SVG source for those favicon copies
   render.ts     renderTile(view) + the page shell/CSS
   server.ts     generic runtime: scheduler, SSE, route mounting, page assembly
   registry.ts   THE ONE REGISTRATION POINT — the array of tiles
@@ -35,11 +44,38 @@ dashboard/
 
 `server.ts` knows nothing about individual tiles. It runs a single ticker,
 collects each tile that is due (respecting its `intervalMs`), renders the
-results uniformly, mounts any drill-down routes a tile declares, and pushes an
-SSE reload when anything changes. A tile whose `collect()` throws is desaturated
-to a gray "unknown" — it keeps its last-known value and shows a short reason
-(e.g. "source unreachable"), with the full error in the server log — so one
-unreachable source never blanks or breaks the board.
+results uniformly, mounts any drill-down routes a tile declares, and pushes new
+tile markup as each collection completes. Every registered tile has a gray
+placeholder labelled with its id in its registered position until its first
+collection completes, so slow collectors do not leave holes in the board. A
+tile whose `collect()` throws is desaturated to a gray "unknown" — it keeps its
+last-known value and shows a short reason (e.g. "source unreachable"), with the
+full error in the server log — so one unreachable source never blanks or breaks
+the board.
+
+Each event connection receives the current tile snapshot before it waits for
+new collections. The browser reconciles that snapshot by tile ID, leaving
+unchanged elements, focus, and scroll positions in place. Routine data updates
+never navigate the page. A changed shell version reloads once so an unattended
+display picks up new CSS or client code after a dashboard deployment.
+
+The tab favicon follows the most urgent visible tile. It is red when any tile is
+red, orange when there are no red tiles but at least one orange tile, and green
+otherwise. Gray tiles do not turn the favicon gray. The page uses one URL-backed
+PNG favicon. Scalable source artwork is used only to generate and verify those
+raster assets; it is not part of the runtime dependency graph. The red favicon
+starts sad and becomes a crying face after the dashboard stays red for one
+continuous hour. The server retains the elapsed time across reloads. Returning
+below red resets it once every collector due in the same pass has finished.
+
+After changing `favicon-artwork.ts`, regenerate the embedded PNGs and their
+content-based cache version from the dashboard package directory:
+
+```bash
+cd packages/dashboard
+deno task regenerate-favicons
+deno task test-favicon-raster
+```
 
 ## Add a tile
 
@@ -51,6 +87,7 @@ import type { Status, Tile, TileView } from "../types.ts";
 export const myTile: Tile = {
   id: "my-tile",          // unique, stable
   intervalMs: 60_000,     // how often collect() runs
+  // wide: true,           // optional full-width placement
   async collect(ctx): Promise<TileView> {
     // ctx.runs() -> shared CI runs; ctx.env("KEY") -> env var.
     // If a required env var is missing, return a gray "unknown" view — don't throw.
@@ -103,7 +140,6 @@ surveillance tool.
 | `aside` | trusted inline HTML minor header facet (e.g. an MTD or a "running" badge) |
 | `href` | makes the whole tile a link (an `http…` link opens a new tab) |
 | `hint` | small drill affordance, e.g. `"commits ↗"` |
-| `wide` | render full-width below the grid instead of as a grid cell |
 
 ## Tiles
 
@@ -122,7 +158,7 @@ surveillance tool.
 | model spend | OpenAI + Anthropic + OpenRouter usage APIs. Headline is the projected full-month spend (extrapolated from the recent daily rate, spilling into last month when this month is under two weeks old), summed across providers. OpenAI and Anthropic (which expose per-day cost) are charted as one line each over ~45 days, dimmed except for the current-month slice that feeds the headline, with each line's MTD in the right gutter; OpenRouter (monthly total only, abbreviated "OR") is folded into the totals. The subtitle is the bullet-separated key (`OpenAI • Anthropic • OR $0`); the combined MTD sits in the header (the `aside` slot); the span the chart covers is in its bottom-left corner (the `duration` slot). A provider we can't read shows `$???` and drops the tile to gray, but the rest still chart and total | any of `OPENAI_ADMIN_KEY`, `ANTHROPIC_ADMIN_KEY`, `OPENROUTER_KEY`; optional `MODEL_MONTHLY_BUDGET` |
 | discord online | Discord gateway presence, team vs visitors over time | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` (Server Members + Presence intents) |
 | dau | distinct identities active per UTC day on one named service, counted from the `user.did` attribute on the `memory.transact` and `memory.subscriber.sync` spans in SigNoz. The headline is the last day that ran to the end (today is still filling, and a part-day always reads as a drop); the sparkline is the retained history. Gray while the named service has no such spans — which is the resting state until a deployment's tracing is switched on. It counts keypairs rather than people; see [dau](#dau) below | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `DAU_EXCLUDE_DIDS`, `SIGNOZ_UI_URL` |
-| your metric here | a deliberately empty placeholder — always gray, labelled "not a real metric", so an open slot on the wall reads as an invitation rather than a live number | — |
+| github users | organization members plus outside collaborators, with each roster's size charted over about two months. The headline counts unique users across both rosters | `GH_TOKEN` (with org Members read) |
 
 ## Credentials
 
@@ -139,27 +175,34 @@ if you lose it you have to regenerate.
 ### `GH_TOKEN` (or `GITHUB_TOKEN`)
 
 Powers **labs ci**, **labs ci trust**, **labs ci duration**, the **loom**
-counterparts, **recent main runs**, and **ci spend**. Needs repo
+counterparts, **recent main runs**, **ci spend**, and **github users**. Needs repo
 **Actions: read** on both `commontoolsinc/labs` and `commontoolsinc/loom`; the
 github-ci-spend tile additionally needs org **Administration: read** on
-`commontoolsinc`, which only an org owner or billing manager can grant. One
-fine-grained token can carry all of these:
+`commontoolsinc`. The **github users** tile needs org **Members: read**. One
+fine-grained token can carry all of these permissions:
+
+The account that owns the token must be a member of the organization. GitHub's
+member endpoint returns both concealed and public members to an authenticated
+organization member; other callers see only public memberships.
 
 1. GitHub → your avatar → **Settings** → **Developer settings** → **Personal
    access tokens** → **Fine-grained tokens** → **Generate new token**.
 2. Set **Resource owner** to the **commontoolsinc** organization (not your
    personal account) — org ownership is what unlocks the billing permission.
-3. **Repository access** → **Only select repositories** → `commontoolsinc/labs`.
+3. **Repository access** → **Only select repositories** → `commontoolsinc/labs`
+   and `commontoolsinc/loom`.
 4. **Repository permissions**: set **Actions** and **Contents** to **Read-only**.
-5. **Organization permissions**: set **Administration** to **Read-only** — this
-   is how github-ci-spend reads the billing usage and budget APIs. Skip it if you
-   only want the CI tiles.
+5. **Organization permissions**: set **Members** to **Read-only** for GitHub
+   users. Set **Administration** to **Read-only** for ci spend. Only an org
+   owner or billing manager can grant the latter permission. Skip either
+   permission when its tile is not needed.
 6. **Generate token** and copy it (`github_pat_…`, shown once).
 
-If you only need the CI tiles, a token owned by your own account and scoped to
-just `labs` with Actions/Contents read is enough. Classic PATs also work (use
-`admin:org` for the billing scope). If the org requires approval for fine-grained
-tokens, yours stays pending until an owner approves it.
+If you only need the labs CI tiles, keep `commontoolsinc` as the resource owner,
+select only `commontoolsinc/labs`, and grant Actions/Contents read without any
+organization permissions. Classic PATs also work (use `read:org` for GitHub
+users and `admin:org` for ci spend). If the org requires approval for
+fine-grained tokens, yours stays pending until an owner approves it.
 
 ### `SIGNOZ_URL` + `SIGNOZ_API_KEY`
 
@@ -275,8 +318,9 @@ it.
 | `PROD_URL` | production | the production **server**, as an origin — the tile checks `/_health` on it and links to it. Defaults to estuary, the production toolshed. Note `production.commontools.dev` is the shell, a static site in a GCS bucket: it has no health endpoint, and its index page answers 200 whether or not the server behind it is serving, so it cannot see an outage. |
 | `PROD_PROXY` | production | optional proxy used only for the production health check. Use `socks5h://127.0.0.1:1055` with the Tailscale userspace proxy so the tailnet hostname resolves through it. Also accepts `socks5://`, `http://`, and `https://`; invalid values fail closed instead of fetching directly. |
 | `COMMON_TOOLS_URL` | common.tools | override the public-site URL (e.g. the `www` host if the apex redirects). |
-| `DASHBOARD_REPO` | CI tiles | which repo the CI tiles read (default `commontoolsinc/labs`). |
+| `DASHBOARD_REPO` | CI tiles, github users | which repo the CI tiles read. Its owner is the organization the **github users** tile reads (default `commontoolsinc/labs`). |
 | `DISCORD_HISTORY_FILE` | discord online | where the team/visitors history is persisted (default: a file in the temp dir). |
+| `GITHUB_MEMBERS_HISTORY_FILE` | github users | where the Members/Collaborators history is persisted (default: an organization-specific file in the temp dir). |
 | `BENCH_METRIC` | benchmark | substring that pins which benchmark the grid tile shows; unset, it rotates hourly through all of them (see the note below). |
 | `SIGNOZ_UI_URL` | prod errors | browser-facing SigNoz URL for the "logs" pop-out. Defaults to `SIGNOZ_URL` when that is a public `https://` URL; set it when the server reaches SigNoz over an in-cluster URL a browser can't. |
 | `PROD_SERVICE` | prod errors, dau | the `service.name` production reports under in SigNoz, which both trace-reading tiles scope to. Defaults to `toolshed-production`. A name outside `[A-Za-z0-9._-]` is ignored, since it lands inside a query expression. |
@@ -312,9 +356,10 @@ off. It needs no second change to light up once that deployment starts exporting
 Notes:
 
 - **One GitHub token:** every GitHub tile uses `GH_TOKEN`. The github-ci-spend
-  tile needs it to also carry org billing read; a second token wouldn't reduce
-  exposure (the process holds both anyway), so there is just the one. If you keep
-  `GH_TOKEN` at Actions:read only, that tile grays out and the rest still work.
+  tile also needs org billing read. The **github users** tile needs org Members
+  read. A second token would not reduce exposure because the process would hold
+  both, so there is just one. With Actions read alone, those two tiles gray out
+  and the other GitHub tiles still work.
 - **`ci spend`** shows the org's **projected** full-month Actions spend —
   extrapolated from the billable daily rate over a trailing window of at least two
   weeks (spilling into last month's daily data early in the month), or the whole
@@ -376,13 +421,17 @@ Everything below is a tunable constant in `config.ts`:
 Local-first: no build step, no deployment, a single process on `localhost`.
 
 - One-shot: `deno task dashboard`.
-- Watch mode (reloads the server on any edit to a tile or the core): `deno task dashboard-watch`.
+- Watch mode from `packages/dashboard` (reloads the server on any edit to a tile
+  or the core): `deno task watch`.
 
 Env knobs for the dev loop:
 
-- `GH_TOKEN` (or `GITHUB_TOKEN`) — required for the GitHub tiles (labs + loom ci / ci trust / ci duration, recent main runs, and, with billing read, ci spend); without it those tiles stay gray.
+- `GH_TOKEN` (or `GITHUB_TOKEN`) — required for the GitHub tiles. CI spend also
+  needs Administration read. GitHub users also needs Members read. Without the
+  token, those tiles stay gray.
 - `DASHBOARD_PORT` — run several instances at once (e.g. one per branch) without clashing.
-- `DASHBOARD_REPO` — point the CI tiles at any repo.
+- `DASHBOARD_REPO` — point the CI tiles at any repo. Its owner selects the
+  organization for GitHub users.
 - `PROD_URL` — point the production tile at a local server (`http://localhost:8000/`) instead of prod. It checks `/_health` on that origin.
 - `PROD_PROXY` — route only the production health check through a proxy, for example `socks5h://127.0.0.1:1055` with a local Tailscale userspace proxy.
 - The other credential envs (see **Credentials** above — `SIGNOZ_*`, `GCP_*`, `OPENAI_ADMIN_KEY`/`ANTHROPIC_ADMIN_KEY`/`OPENROUTER_KEY`, `DISCORD_*`) — set one to develop that gated tile against its real backend.
@@ -406,16 +455,19 @@ const view = await myTile.collect(fakeCtx);
 ### Tests
 
 ```bash
-deno task dashboard-test     # = deno test --allow-env packages/dashboard/
+cd packages/dashboard
+deno task test
 ```
 
 `lib.test.ts` covers the pure helpers; `tiles.test.ts` covers each tile's
 `collect()` — the CI tiles against canned runs, and the token-gated tiles'
-gray-out contract. The suite is hermetic (no network, subprocess, or filesystem),
-so it needs only `--allow-env` (for the module-load config reads). The one live
-tile, `production`, is exercised by running the board rather than in the unit
-suite. This is a workspace package, so its `deno test --allow-env` also runs as
-part of the repo-wide `deno task test`.
+gray-out contract. These ordinary unit tests are hermetic and need only
+`--allow-env` for module-load configuration reads. The full `test` task also
+verifies that Resvg reproduces the embedded PNGs and runs the favicon
+behavior in the local browser test runner. The package tasks grant the additional
+permissions those two checks need. The one live tile, `production`, is exercised
+by running the board rather than in the unit suite. This is a workspace package,
+so its ordinary unit tests also run as part of the repo-wide `deno task test`.
 
 ## Deploying (stage GKE, tailnet-only)
 
@@ -443,8 +495,9 @@ its embedded tsnet).
    ```bash
    printf %s "github_pat_…" | gcloud secrets versions add k8s-stage-dashboard-github-token --data-file=-
    ```
-   The GitHub token is fine-grained, read-only (repo `commontoolsinc/labs`, Actions: read).
-   For the github-ci-spend tile it must additionally carry org billing read.
+   The GitHub token is fine-grained and read-only. It has Actions read for the
+   dashboard repositories. The GitHub users tile also needs org Members read;
+   CI spend also needs org Administration read.
 3. The infra manifests create separate 1 Gi `standard-rwo` PVCs for the Discord
    history file and Tailscale node state. The dashboard remains a one-replica
    `Recreate` Deployment; pod replacement reuses the same non-ephemeral

@@ -35,9 +35,11 @@ import { buildPeekCard, type CardTarget } from "./card.ts";
 import {
   DISPLAY_MODES,
   displayColumnOf,
+  displayLine,
   type DisplayMode,
   displayModeLabel,
   hasNonPrintable,
+  sourceColumnOf,
 } from "./display.ts";
 import {
   buildFoldPlan,
@@ -50,9 +52,20 @@ import { parseDiff } from "./diff.ts";
 import { findCommitMessages } from "./commitmsg.ts";
 import type { Semantics } from "./semantics.ts";
 import { EditBuffer } from "./editbuffer.ts";
-import type { EditableSource, RevertScope } from "./editsource.ts";
+import type {
+  EditableSource,
+  ExpandResult,
+  HunkRoom,
+  RevertScope,
+} from "./editsource.ts";
 import type { Highlighter } from "./parse.ts";
 import type { DirEntry, FileGateway } from "./filegateway.ts";
+import {
+  buildWrapPlan,
+  fitWrapChrome,
+  wrappedRowAt,
+  type WrapPlan,
+} from "./wrap.ts";
 
 export interface SessionOptions {
   color: boolean;
@@ -108,10 +121,25 @@ const JOIN_MSG =
  * new-file line) or commit message. */
 type LineNumberMode = "off" | "input" | "file";
 
+interface ViewportAnchor {
+  readonly docLine: number;
+  readonly foldedLine: number;
+  readonly displayCol: number;
+}
+
+interface FoldAnchor {
+  readonly docLine: number;
+  readonly sourceCol: number;
+  /** Display column within a collapsed summary that remains collapsed. */
+  readonly syntheticDisplayCol?: number;
+}
+
 export class Session {
   private currentDoc: Document;
   private color: boolean;
   private lineNumberMode: LineNumberMode = "off";
+  /** Whether long logical lines continue on later screen rows. */
+  private wrapLines = false;
   /** How non-printable characters are shown; edit mode forces the first mode. */
   private displayMode: DisplayMode = DISPLAY_MODES[0];
   /** Indices (document order) of the diff files collapsed to a summary line.
@@ -122,6 +150,17 @@ export class Session {
   private foldVersion = 0;
   private foldFileCache?: { doc: Document; files: DiffFileRange[] };
   private foldPlanCache?: { doc: Document; version: number; plan: FoldPlan };
+  private wrapPlanCache?: {
+    lines: readonly Line[];
+    mode: DisplayMode;
+    width: number;
+    plan: WrapPlan;
+  };
+  private displayColumnCache?: {
+    doc: Document;
+    mode: DisplayMode;
+    columns: Map<number, Uint32Array>;
+  };
   private nonPrintCache?: { doc: Document; value: boolean };
   private fileLineCache?: { doc: Document; value: (number | null)[] | null };
 
@@ -152,6 +191,24 @@ export class Session {
    * structure, cross-references, and multi-line token colours) is owed. The
    * driver runs it on a short idle, so typing stays responsive. */
   needsReparse = false;
+  /** What the last key revealed (Ctrl-L in pager mode), for the driver to walk
+   * the lines in a few at a time with {@link revealFrame}: the display row they
+   * start at, how many there are, and whether they came from above the hunk (so
+   * the viewport holds still) or below it (so it slides as they land). The next
+   * key clears it. */
+  pendingReveal: { row: number; count: number; up: boolean } | null = null;
+  /** A prompt button was just activated. Holds the frame that shows it pushed —
+   * the dialog with that button drawn mid-press — so the driver can play the
+   * press for a moment before the action's result appears. The next key clears
+   * it. */
+  pendingPush: { doc: Document; view: ViewState } | null = null;
+  /** The last key set a message that takes itself away again rather than sitting
+   * in the bar — Ctrl-L pressed where it is not offered, which changed nothing
+   * else. The driver leaves it up for a moment and then calls
+   * {@link expireMessage}; the next key takes it away too. */
+  transientMessage = false;
+  /** How much context each hunk can reveal, cached against the document. */
+  private roomCache?: { doc: Document; room: ReadonlyMap<number, HunkRoom> };
 
   // --- editing ---
   private source?: EditableSource;
@@ -167,6 +224,10 @@ export class Session {
   private cursorOn = false;
   /** Pending C-x prefix (Emacs chord), reset by the next key. */
   private chord: "ctrl-x" | null = null;
+  /** Which button the active prompt's Tab focus rests on — an index into its
+   * button row. Space and Enter activate it; it is reset to the default button
+   * each time a prompt opens. */
+  private dialogFocus = 0;
   /** What the active save prompt does on confirm. */
   private savePromptThen: "quit" | null = null;
   /** Set once the user confirms amending the commit message, so the save that
@@ -263,19 +324,127 @@ export class Session {
     return { ...this.currentDoc, lines: this.foldPlan().displayLines };
   }
 
-  /** Number of display rows (fewer than document lines when files are hidden). */
-  private displayCount(): number {
-    return this.foldPlan().displayLines.length;
+  /** The screen-row layout while wrapping is on. */
+  private wrapPlan(): WrapPlan {
+    const lines = this.foldPlan().displayLines;
+    const width = this.contentWidth();
+    if (
+      this.wrapPlanCache?.lines !== lines ||
+      this.wrapPlanCache.mode !== this.displayMode ||
+      this.wrapPlanCache.width !== width
+    ) {
+      this.wrapPlanCache = {
+        lines,
+        mode: this.displayMode,
+        width,
+        plan: buildWrapPlan(lines, this.displayMode, width),
+      };
+    }
+    return this.wrapPlanCache.plan;
   }
 
-  /** A document line → its display row (a hidden line maps to its summary row). */
-  private toDisplay(docLine: number): number {
+  /** Number of screen rows after file folding and optional line wrapping. */
+  private displayCount(): number {
+    return this.wrapLines
+      ? this.wrapPlan().rowCount
+      : this.foldPlan().displayLines.length;
+  }
+
+  /** A frame part way through the last reveal: the finished document with only
+   * the first `shown` of the revealed lines in it, and a viewport holding the
+   * same line still as the finished frame will. `shown` of `count` is the
+   * finished frame; 0 is the picture the reveal started from. Null when the last
+   * key revealed nothing. */
+  revealFrame(shown: number): { doc: Document; view: ViewState } | null {
+    const rev = this.pendingReveal;
+    if (!rev || this.wrapLines) return null;
+    const waiting = rev.count - clamp(shown, 0, rev.count);
+    // The lines still to come are the ones furthest from the hunk, so what is on
+    // screen is always a run of the file that meets the hunk's edge rather than
+    // a jump across the lines that have not arrived.
+    const from = rev.up ? rev.row : rev.row + rev.count - waiting;
+    const to = from + waiting;
+    // Rows past the ones still to come sit `waiting` lower in the finished
+    // document than in this frame; rows before them are in the same place.
+    const back = (n: number) => n >= to ? n - waiting : n;
+    const drop = <T>(xs: readonly T[]) => [
+      ...xs.slice(0, from),
+      ...xs.slice(to),
+    ];
+    const doc = this.displayDoc();
+    const view = this.view();
+    const sel = view.selected;
+    return {
+      doc: { ...doc, lines: drop(doc.lines) },
+      view: {
+        ...view,
+        top: rev.up ? view.top : Math.max(0, view.top - waiting),
+        lineNumbers: view.lineNumbers
+          ? drop(view.lineNumbers)
+          : view.lineNumbers,
+        selected: sel
+          ? {
+            ...sel,
+            startLine: back(sel.startLine),
+            endLine: back(sel.endLine),
+          }
+          : null,
+        // A match on a line that has not landed yet has nowhere to be drawn.
+        matches: view.matches
+          ? view.matches.filter((m) => m.line < from || m.line >= to)
+            .map((m) => ({ ...m, line: back(m.line) }))
+          : null,
+      },
+    };
+  }
+
+  /** A document line to its logical row after collapsed files are replaced. */
+  private toFolded(docLine: number): number {
     return this.foldPlan().docToDisplay(docLine);
   }
 
-  /** A display row → the document line it stands for. */
+  /** A document position to its screen row. A hidden line maps to its file's
+   * summary, and a wrapped line maps to the segment containing `displayCol`. */
+  private toDisplay(docLine: number, displayCol = 0): number {
+    const fold = this.foldPlan();
+    const folded = fold.docToDisplay(docLine);
+    const col = fold.displayLines[folded] === this.currentDoc.lines[docLine]
+      ? displayCol
+      : 0;
+    return this.foldedPositionToDisplay(folded, col);
+  }
+
+  /** A folded logical line and display column to its screen row. */
+  private foldedPositionToDisplay(folded: number, displayCol = 0): number {
+    if (!this.wrapLines) return folded;
+    const plan = this.wrapPlan();
+    const first = plan.firstRow[folded] ?? 0;
+    const last = plan.lastRow[folded] ?? first;
+    return clamp(
+      first + Math.floor(Math.max(0, displayCol) / plan.rowStride),
+      first,
+      last,
+    );
+  }
+
+  /** The last screen row occupied by a document line. */
+  private toDisplayEnd(docLine: number): number {
+    const folded = this.toFolded(docLine);
+    return this.wrapLines ? this.wrapPlan().lastRow[folded] ?? 0 : folded;
+  }
+
+  /** A screen row to the document line it stands for. */
   private toDoc(displayRow: number): number {
-    return this.foldPlan().displayToDoc(displayRow);
+    let folded = displayRow;
+    if (this.wrapLines) {
+      const plan = this.wrapPlan();
+      const row = wrappedRowAt(
+        plan,
+        clamp(displayRow, 0, Math.max(0, plan.rowCount - 1)),
+      );
+      folded = row?.line ?? 0;
+    }
+    return this.foldPlan().displayToDoc(folded);
   }
 
   /** The selected node with its line range mapped into display rows (a node in a
@@ -283,17 +452,40 @@ export class Session {
   private displaySelected(): StructureNode | null {
     const node = this.selectedNode();
     if (!node || this.collapsed.size === 0) return node;
+    const fold = this.foldPlan();
+    const startLine = fold.docToDisplay(node.startLine);
+    const endLine = fold.docToDisplay(node.endLine);
+    const startSynthetic = fold.displayLines[startLine] !==
+      this.currentDoc.lines[node.startLine];
+    const endSynthetic = fold.displayLines[endLine] !==
+      this.currentDoc.lines[node.endLine];
     return {
       ...node,
-      startLine: this.toDisplay(node.startLine),
-      endLine: this.toDisplay(node.endLine),
+      startLine,
+      endLine,
+      startCol: startSynthetic ? 0 : node.startCol,
+      endCol: endSynthetic
+        ? codePointLength(fold.displayLines[endLine]?.text ?? "")
+        : node.endCol,
     };
   }
 
   /** The search matches with their line mapped into display rows. */
   private displayMatches(): Match[] {
     if (this.collapsed.size === 0) return this.matches;
-    return this.matches.map((m) => ({ ...m, line: this.toDisplay(m.line) }));
+    const fold = this.foldPlan();
+    return this.matches.map((match) => {
+      const line = fold.docToDisplay(match.line);
+      if (fold.displayLines[line] === this.currentDoc.lines[match.line]) {
+        return { ...match, line };
+      }
+      return {
+        ...match,
+        line,
+        start: 0,
+        end: codePointLength(fold.displayLines[line]?.text ?? ""),
+      };
+    });
   }
 
   /** The file currently in view: the diff file or transformed-output section
@@ -321,10 +513,61 @@ export class Session {
     return m;
   }
 
+  /** The folded line and display column at the viewport's top-left content. */
+  private viewportAnchor(): ViewportAnchor {
+    const fold = this.foldPlan();
+    let foldedLine = clamp(
+      this.top,
+      0,
+      Math.max(0, fold.displayLines.length - 1),
+    );
+    let displayCol = this.left;
+    if (this.wrapLines) {
+      const plan = this.wrapPlan();
+      const row = wrappedRowAt(
+        plan,
+        clamp(this.top, 0, Math.max(0, plan.rowCount - 1)),
+      );
+      foldedLine = row?.line ?? 0;
+      displayCol = row?.offset ?? 0;
+    }
+    return {
+      docLine: fold.displayToDoc(foldedLine),
+      foldedLine,
+      displayCol,
+    };
+  }
+
+  /** Restore an anchor after the width or display layout changes. */
+  private restoreWrappedAnchor(anchor: ViewportAnchor): void {
+    const plan = this.wrapPlan();
+    const line = clamp(
+      anchor.foldedLine,
+      0,
+      Math.max(0, plan.firstRow.length - 1),
+    );
+    const first = plan.firstRow[line] ?? 0;
+    const last = plan.lastRow[line] ?? first;
+    this.top = clamp(
+      first + Math.floor(anchor.displayCol / plan.rowStride),
+      first,
+      last,
+    );
+    this.clampScroll();
+  }
+
+  /** Source column at an anchor under the current non-printable display mode. */
+  private anchorSourceCol(anchor: ViewportAnchor): number {
+    const line = this.foldPlan().displayLines[anchor.foldedLine];
+    return line ? sourceColumnOf(line, this.displayMode, anchor.displayCol) : 0;
+  }
+
   resize(width: number, height: number): void {
+    const anchor = this.wrapLines ? this.viewportAnchor() : null;
     this.width = width;
     this.height = height;
-    this.clampScroll();
+    if (anchor) this.restoreWrappedAnchor(anchor);
+    else this.clampScroll();
   }
 
   view(): ViewState {
@@ -353,6 +596,8 @@ export class Session {
       height: this.height,
       color: this.color,
       showLineNumbers: this.lineNumberMode !== "off",
+      wrapLines: this.wrapLines,
+      wrapPlan: this.wrapLines ? this.wrapPlan() : null,
       lineNumbers: this.lineNumberMode === "off" ? null : this.gutterNumbers(),
       displayMode: this.displayMode,
       selected: this.displaySelected(),
@@ -369,10 +614,10 @@ export class Session {
       dialog: this.promptDialog(),
       overlay: ov,
       cursor: this.cursorOn && this.buffer
-        ? { line: this.toDisplay(this.buffer.row), col: this.buffer.col }
+        ? { line: this.toFolded(this.buffer.row), col: this.buffer.col }
         : null,
       editHint: this.cursorOn ? this.editHint() : null,
-      canExpand: !this.cursorOn && !!this.source?.expandContext,
+      canExpand: this.canExpand(),
       canEdit: !this.cursorOn && !!this.source?.editable,
       hasNonPrintables: this.hasNonPrintables(),
       notice: null,
@@ -387,6 +632,9 @@ export class Session {
       { key: "^S", label: "Search" },
       { key: "^R", label: "Revert" },
     ];
+    if (this.canResurrectRemovedLine()) {
+      hints.splice(1, 0, { key: "R", label: "Resurrect" });
+    }
     if (this.source?.policy) hints.push({ key: "^L", label: "Expand" });
     hints.push({ key: "^X^S", label: "Save" }, { key: "^X^F", label: "Open" });
     return hints;
@@ -395,10 +643,25 @@ export class Session {
   /** The modal dialog for whichever confirmation prompt is open, or null when no
    * prompt is up. Rebuilt each frame from the current buffer and source. */
   private promptDialog(): DialogState | null {
-    if (this.mode === "savePrompt") return this.saveDialog();
-    if (this.mode === "amendPrompt") return this.amendDialog();
-    if (this.mode === "revertPrompt") return this.revertDialog();
-    return null;
+    let dialog: DialogState | null = null;
+    if (this.mode === "savePrompt") dialog = this.saveDialog();
+    else if (this.mode === "amendPrompt") dialog = this.amendDialog();
+    else if (this.mode === "revertPrompt") dialog = this.revertDialog();
+    if (!dialog) return null;
+    // -1 means no button is focused (a prompt with no default, before Tab).
+    const focus = this.dialogFocus < 0
+      ? -1
+      : clamp(this.dialogFocus, 0, Math.max(0, dialog.buttons.length - 1));
+    return { ...dialog, focus };
+  }
+
+  /** Rest the current prompt's Tab focus on its default button, called as each
+   * prompt opens. A prompt with no default button (the diff revert) starts with
+   * no focus — an index of -1 — so Space and Enter do nothing until Tab picks a
+   * button, keeping a stray Enter from reverting. */
+  private focusDefaultButton(): void {
+    const buttons = this.promptDialog()?.buttons ?? [];
+    this.dialogFocus = buttons.findIndex((b) => b.kind === "default");
   }
 
   /** The save-changes confirmation: names what a save writes, lists the files
@@ -475,16 +738,18 @@ export class Session {
   }
 
   handleKey(key: Key): void {
-    if (this.mode === "savePrompt") {
-      this.handleSavePrompt(key);
-      return;
-    }
-    if (this.mode === "amendPrompt") {
-      this.handleAmendPrompt(key);
-      return;
-    }
-    if (this.mode === "revertPrompt") {
-      this.handleRevertPrompt(key);
+    // A reveal is animated by the driver over the frames after the key that
+    // caused it, so the next key ends it whatever it was. A message that takes
+    // itself away goes now rather than waiting out its moment, before this key
+    // has the chance to set one of its own.
+    this.pendingReveal = null;
+    this.pendingPush = null;
+    this.expireMessage();
+    if (
+      this.mode === "savePrompt" || this.mode === "amendPrompt" ||
+      this.mode === "revertPrompt"
+    ) {
+      this.handleDialogKey(key);
       return;
     }
     if (this.mode === "filePicker") {
@@ -514,7 +779,7 @@ export class Session {
 
   private clampScroll(): void {
     this.top = clamp(this.top, 0, maxTop(this.displayCount(), this.height));
-    this.left = clamp(this.left, 0, this.maxLineLen);
+    this.left = this.wrapLines ? 0 : clamp(this.left, 0, this.maxLineLen);
   }
 
   private selectedNode(): StructureNode | null {
@@ -523,16 +788,39 @@ export class Session {
       : null;
   }
 
+  /** Screen row containing the first character of a structure node. */
+  private nodeStartRow(node: StructureNode): number {
+    return this.toDisplay(
+      node.startLine,
+      this.displayCol(node.startLine, node.startCol),
+    );
+  }
+
+  /** Screen row containing the last character of a structure node. */
+  private nodeEndRow(node: StructureNode): number {
+    const fold = this.foldPlan();
+    const folded = fold.docToDisplay(node.endLine);
+    if (fold.displayLines[folded] !== this.currentDoc.lines[node.endLine]) {
+      return this.wrapLines ? this.wrapPlan().lastRow[folded] ?? 0 : folded;
+    }
+    return this.toDisplay(
+      node.endLine,
+      this.displayCol(node.endLine, Math.max(0, node.endCol - 1)),
+    );
+  }
+
   private selectNode(idx: number): void {
     if (idx < 0 || idx >= this.doc.flatStructure.length) return;
+    const viewport = this.wrapLines ? this.viewportAnchor() : null;
     this.selectedIndex = idx;
     const node = this.doc.flatStructure[idx];
+    if (viewport) this.restoreWrappedAnchor(viewport);
     // Keep the viewport stable: only scroll if the selection's anchor (its first
     // line, where the block opens) would otherwise be off screen. Horizontal
     // scroll is left untouched for the same reason. Anchors are in display rows,
     // since a collapsed file's lines share its summary row.
     this.top = scrollToAnchor(
-      this.toDisplay(node.startLine),
+      this.nodeStartRow(node),
       this.top,
       this.height,
       this.displayCount(),
@@ -722,23 +1010,30 @@ export class Session {
     if (idx < 0) idx = nodeAtLine(this.doc.flatStructure, target.destLine);
     this.selectedIndex = idx >= 0 ? idx : null;
     const node = idx >= 0 ? this.doc.flatStructure[idx] : null;
-    // Frame the whole node (centred if it fits, else its top ~1/10 down). When
-    // no node resolves, frame the single destination line.
-    this.top = node
-      ? frameTop(
-        this.toDisplay(node.startLine),
-        this.toDisplay(node.endLine),
-        this.height,
-        this.displayCount(),
-      )
-      : frameTop(
-        this.toDisplay(target.destLine),
-        this.toDisplay(target.destLine),
-        this.height,
-        this.displayCount(),
-      );
     const destCol = this.displayCol(target.destLine, target.destCol);
-    if (destCol < this.left || destCol >= this.left + this.width) {
+    const destRow = this.toDisplay(target.destLine, destCol);
+    // Frame the resolved node and destination together when they fit. Otherwise
+    // center the destination row so the referenced text is visible.
+    let start = destRow;
+    let end = destRow;
+    if (node) {
+      start = Math.min(this.nodeStartRow(node), destRow);
+      end = Math.max(this.nodeEndRow(node), destRow);
+      if (end - start + 1 > this.contentRows()) {
+        start = destRow;
+        end = destRow;
+      }
+    }
+    this.top = frameTop(
+      start,
+      end,
+      this.height,
+      this.displayCount(),
+    );
+    if (
+      !this.wrapLines &&
+      (destCol < this.left || destCol >= this.left + this.width)
+    ) {
       this.left = clamp(destCol - 4, 0, this.maxLineLen);
     }
     this.message = `→ line ${target.destLine + 1}`;
@@ -856,7 +1151,8 @@ export class Session {
   private revealMatch(): void {
     const m = this.matches[this.currentMatch];
     if (!m) return;
-    const row = this.toDisplay(m.line);
+    const col = this.displayCol(m.line, m.start);
+    const row = this.toDisplay(m.line, col);
     if (row < this.top || row >= this.top + this.contentRows()) {
       this.top = clamp(
         row - Math.floor(this.contentRows() / 2),
@@ -864,8 +1160,10 @@ export class Session {
         maxTop(this.displayCount(), this.height),
       );
     }
-    const col = this.displayCol(m.line, m.start);
-    if (col < this.left || col >= this.left + this.width) {
+    if (
+      !this.wrapLines &&
+      (col < this.left || col >= this.left + this.width)
+    ) {
       this.left = clamp(col - 4, 0, this.maxLineLen);
     }
     this.message = "";
@@ -876,7 +1174,33 @@ export class Session {
    * fewer columns than the line has source code points. */
   private displayCol(line: number, sourceCol: number): number {
     const l = this.doc.lines[line];
-    return l ? displayColumnOf(l, this.displayMode, sourceCol) : sourceCol;
+    if (!l || this.displayMode === "pictures") return sourceCol;
+    if (
+      this.displayColumnCache?.doc !== this.currentDoc ||
+      this.displayColumnCache.mode !== this.displayMode
+    ) {
+      this.displayColumnCache = {
+        doc: this.currentDoc,
+        mode: this.displayMode,
+        columns: new Map(),
+      };
+    }
+    let columns = this.displayColumnCache.columns.get(line);
+    if (!columns) {
+      columns = Uint32Array.from(
+        displayLine(l, this.displayMode),
+        (cell) => cell.col,
+      );
+      this.displayColumnCache.columns.set(line, columns);
+    }
+    let lo = 0;
+    let hi = columns.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (columns[mid] < sourceCol) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
   }
 
   private handleInputKey(key: Key): void {
@@ -955,6 +1279,13 @@ export class Session {
       case "q":
         this.closeOverlay();
         break;
+      case "Q":
+        this.requestQuit();
+        break;
+      case "t":
+        this.mode = "deflookup";
+        this.input = overlay.node?.name ?? this.selectedNode()?.name ?? "";
+        break;
       case "enter":
         // Follow the selected reference, pushing this card so Esc returns to it:
         // open the referenced node's card, or — when the definition lives in
@@ -977,7 +1308,8 @@ export class Session {
           this.closeOverlay();
         }
         break;
-      case "z": {
+      case "z":
+      case "Z": {
         // Reveal the target: an external file opens in place; an in-blob target
         // closes the card and centres the main view on it. A "… N more" line has
         // no destination to reveal.
@@ -1001,11 +1333,13 @@ export class Session {
         break;
       case "down":
       case "j":
+      case "J":
         if (hasTargets) this.moveCardSelection(1);
         else this.overlayScroll = clamp(this.overlayScroll + 1, 0, maxScroll);
         break;
       case "up":
       case "k":
+      case "K":
         if (hasTargets) this.moveCardSelection(-1);
         else this.overlayScroll = clamp(this.overlayScroll - 1, 0, maxScroll);
         break;
@@ -1013,6 +1347,8 @@ export class Session {
       case "space":
         this.overlayScroll = clamp(this.overlayScroll + 10, 0, maxScroll);
         break;
+      case "b":
+      case "B":
       case "pageup":
         this.overlayScroll = clamp(this.overlayScroll - 10, 0, maxScroll);
         break;
@@ -1050,6 +1386,7 @@ export class Session {
     const lastTop = maxTop(this.displayCount(), this.height);
     switch (key.name) {
       case "q":
+      case "Q":
       case "ctrl-c":
         this.requestQuit();
         return;
@@ -1077,16 +1414,24 @@ export class Session {
         this.stepMatch(false);
         return;
       case "j":
+      case "J":
         this.top = clamp(this.top + 1, 0, lastTop);
         return;
       case "k":
+      case "K":
         this.top = clamp(this.top - 1, 0, lastTop);
         return;
       case "h":
-        this.left = clamp(this.left - HORIZONTAL_STEP, 0, this.maxLineLen);
+      case "H":
+        this.left = this.wrapLines
+          ? 0
+          : clamp(this.left - HORIZONTAL_STEP, 0, this.maxLineLen);
         return;
       case "l":
-        this.left = clamp(this.left + HORIZONTAL_STEP, 0, this.maxLineLen);
+      case "L":
+        this.left = this.wrapLines
+          ? 0
+          : clamp(this.left + HORIZONTAL_STEP, 0, this.maxLineLen);
         return;
       case "space":
       case "pagedown":
@@ -1094,6 +1439,7 @@ export class Session {
         this.top = clamp(this.top + rows - 1, 0, lastTop);
         return;
       case "b":
+      case "B":
       case "pageup":
       case "ctrl-b":
         this.top = clamp(this.top - rows + 1, 0, lastTop);
@@ -1117,15 +1463,19 @@ export class Session {
         this.performExpand();
         return;
       case "w":
+      case "W":
         this.navigateTree(treePrevSibling);
         return;
       case "s":
+      case "S":
         this.navigateTree(treeNextSibling);
         return;
       case "a":
+      case "A":
         this.navigateTree(treeParent);
         return;
       case "d":
+      case "D":
         this.navigateTree(treeChild);
         return;
       case "tab":
@@ -1143,22 +1493,27 @@ export class Session {
         }
         return;
       }
-      case "z": {
+      case "z":
+      case "Z": {
         const node = this.selectedNode();
         if (node) {
           this.top = frameTop(
-            this.toDisplay(node.startLine),
-            this.toDisplay(node.endLine),
+            this.nodeStartRow(node),
+            this.nodeEndRow(node),
             this.height,
             this.displayCount(),
           );
         }
         return;
       }
+      case "\\":
+        this.toggleLineWrapping();
+        return;
       case "#":
         this.cycleLineNumbers();
         return;
       case "c":
+      case "C":
         this.cycleDisplayMode();
         return;
       case "f":
@@ -1173,20 +1528,50 @@ export class Session {
       case "T":
         this.collapseTestFiles();
         return;
-      case "escape":
+      case "escape": {
+        const anchor = this.wrapLines ? this.viewportAnchor() : null;
         this.selectedIndex = null;
         this.query = "";
         this.matches = [];
         this.message = "";
+        if (anchor) this.restoreWrappedAnchor(anchor);
         return;
+      }
     }
   }
 
   /** Step to the next non-printable display mode and report it. */
   private cycleDisplayMode(): void {
+    const anchor = this.viewportAnchor();
+    const sourceCol = this.anchorSourceCol(anchor);
     const i = DISPLAY_MODES.indexOf(this.displayMode);
     this.displayMode = DISPLAY_MODES[(i + 1) % DISPLAY_MODES.length];
+    const line = this.foldPlan().displayLines[anchor.foldedLine];
+    const displayCol = line
+      ? displayColumnOf(line, this.displayMode, sourceCol)
+      : 0;
+    if (this.wrapLines) {
+      this.restoreWrappedAnchor({ ...anchor, displayCol });
+    } else {
+      this.left = displayCol;
+      this.clampScroll();
+    }
     this.message = `Non-printables: ${displayModeLabel(this.displayMode)}`;
+  }
+
+  /** Toggle line wrapping while keeping the top-left content in view. */
+  private toggleLineWrapping(): void {
+    const anchor = this.viewportAnchor();
+    this.wrapLines = !this.wrapLines;
+    if (this.wrapLines) {
+      this.left = 0;
+      this.restoreWrappedAnchor(anchor);
+    } else {
+      this.top = anchor.foldedLine;
+      this.left = anchor.displayCol;
+      this.clampScroll();
+    }
+    this.message = `Line wrapping: ${this.wrapLines ? "on" : "off"}`;
   }
 
   // --- file-fold commands ----------------------------------------------------
@@ -1199,19 +1584,54 @@ export class Session {
     return true;
   }
 
-  /** The document line the fold commands anchor the viewport to: the selected
-   * node's first line, else the line at the top of the viewport. */
-  private foldAnchorLine(): number {
+  /** The document position the fold commands keep at the top of the viewport. */
+  private foldAnchor(): FoldAnchor {
     const node = this.selectedNode();
-    return node ? node.startLine : this.toDoc(this.top);
+    const anchor = this.viewportAnchor();
+    const fold = this.foldPlan();
+    if (node) {
+      const folded = fold.docToDisplay(node.startLine);
+      const synthetic = fold.displayLines[folded] !==
+        this.currentDoc.lines[node.startLine];
+      return {
+        docLine: node.startLine,
+        sourceCol: node.startCol,
+        syntheticDisplayCol: synthetic && folded === anchor.foldedLine
+          ? anchor.displayCol
+          : undefined,
+      };
+    }
+    if (
+      fold.displayLines[anchor.foldedLine] !==
+        this.currentDoc.lines[anchor.docLine]
+    ) {
+      return {
+        docLine: anchor.docLine,
+        sourceCol: 0,
+        syntheticDisplayCol: anchor.displayCol,
+      };
+    }
+    return {
+      docLine: anchor.docLine,
+      sourceCol: this.anchorSourceCol(anchor),
+    };
   }
 
-  /** After the collapsed set changes, refresh the plan and keep `anchorDoc`
-   * (a document line) at the same spot on screen. */
-  private applyFoldChange(anchorDoc: number): void {
+  /** Refresh the layout after a fold changes and restore its viewport anchor. */
+  private applyFoldChange(anchor: FoldAnchor): void {
     this.markFoldChanged();
+    const fold = this.foldPlan();
+    const folded = fold.docToDisplay(anchor.docLine);
+    const stillSynthetic = fold.displayLines[folded] !==
+      this.currentDoc.lines[anchor.docLine];
+    const row = stillSynthetic && anchor.syntheticDisplayCol !== undefined
+      ? this.foldedPositionToDisplay(folded, anchor.syntheticDisplayCol)
+      : this.toDisplay(
+        anchor.docLine,
+        this.displayCol(anchor.docLine, anchor.sourceCol),
+      );
     this.top = clamp(
-      this.toDisplay(anchorDoc),
+      row,
       0,
       maxTop(this.displayCount(), this.height),
     );
@@ -1221,7 +1641,7 @@ export class Session {
   private toggleCurrentFile(): void {
     if (!this.ensureDiffForFolding()) return;
     const files = this.foldFiles();
-    const line = this.foldAnchorLine();
+    const line = this.foldAnchor().docLine;
     const file = files.find((f) => line >= f.headerLine && line <= f.endLine) ??
       files.find((f) => f.headerLine >= line) ?? files[files.length - 1];
     if (this.collapsed.has(file.index)) {
@@ -1231,31 +1651,39 @@ export class Session {
       this.collapsed.add(file.index);
       this.message = `Hiding ${file.path}`;
     }
-    this.applyFoldChange(file.headerLine);
+    this.applyFoldChange({ docLine: file.headerLine, sourceCol: 0 });
   }
 
   /** Hide every file (collapse all to summary lines). */
   private collapseAllFiles(): void {
     if (!this.ensureDiffForFolding()) return;
-    const anchor = this.foldAnchorLine();
-    for (const f of this.foldFiles()) this.collapsed.add(f.index);
-    this.applyFoldChange(anchor);
+    const anchor = this.foldAnchor();
+    let changed = false;
+    for (const f of this.foldFiles()) {
+      if (!this.collapsed.has(f.index)) {
+        this.collapsed.add(f.index);
+        changed = true;
+      }
+    }
+    if (changed) this.applyFoldChange(anchor);
     this.message = "Hid all files.";
   }
 
   /** Show every file (expand all). */
   private expandAllFiles(): void {
     if (!this.ensureDiffForFolding()) return;
-    const anchor = this.foldAnchorLine();
-    this.collapsed.clear();
-    this.applyFoldChange(anchor);
+    const anchor = this.foldAnchor();
+    if (this.collapsed.size > 0) {
+      this.collapsed.clear();
+      this.applyFoldChange(anchor);
+    }
     this.message = "Showing all files.";
   }
 
   /** Hide every test / test-support file, leaving the rest shown. */
   private collapseTestFiles(): void {
     if (!this.ensureDiffForFolding()) return;
-    const anchor = this.foldAnchorLine();
+    const anchor = this.foldAnchor();
     let n = 0;
     for (const f of this.foldFiles()) {
       if (f.isTest && !this.collapsed.has(f.index)) {
@@ -1263,7 +1691,7 @@ export class Session {
         n++;
       }
     }
-    this.applyFoldChange(anchor);
+    if (n > 0) this.applyFoldChange(anchor);
     this.message = n > 0
       ? `Hid ${n} test file${n === 1 ? "" : "s"}.`
       : "No shown test files to hide.";
@@ -1276,9 +1704,13 @@ export class Session {
     if (name === "up") this.top = clamp(this.top - 1, 0, lastTop);
     else if (name === "down") this.top = clamp(this.top + 1, 0, lastTop);
     else if (name === "left") {
-      this.left = clamp(this.left - HORIZONTAL_STEP, 0, this.maxLineLen);
+      this.left = this.wrapLines
+        ? 0
+        : clamp(this.left - HORIZONTAL_STEP, 0, this.maxLineLen);
     } else if (name === "right") {
-      this.left = clamp(this.left + HORIZONTAL_STEP, 0, this.maxLineLen);
+      this.left = this.wrapLines
+        ? 0
+        : clamp(this.left + HORIZONTAL_STEP, 0, this.maxLineLen);
     }
   }
 
@@ -1289,19 +1721,30 @@ export class Session {
         "This view has no underlying file to edit.";
       return;
     }
+    const wasWrapped = this.wrapLines;
+    const anchor = wasWrapped ? this.viewportAnchor() : null;
+    const topDoc = anchor?.docLine ?? this.toDoc(this.top);
+    const displayedLine = anchor
+      ? this.foldPlan().displayLines[anchor.foldedLine]
+      : undefined;
+    const cursorCol = anchor && displayedLine === this.currentDoc.lines[topDoc]
+      ? this.anchorSourceCol(anchor)
+      : 0;
+    this.wrapLines = false;
     this.cursorOn = true;
     this.selectedIndex = null;
     // Editing relies on every source column mapping to one display column, which
     // only the first mode guarantees (it hides nothing and collapses nothing).
     this.displayMode = DISPLAY_MODES[0];
+    if (anchor) this.left = cursorCol;
     // Editing works on the full text, so expand every folded file; the top
     // display row becomes its document line.
-    const topDoc = this.toDoc(this.top);
     this.clearFolds();
     this.top = topDoc;
-    this.buffer.place(topDoc, 0);
+    this.buffer.place(topDoc, cursorCol);
     this.seedHighlighter();
     this.ensureCursorVisible();
+    if (wasWrapped) this.message = "Line wrapping turned off for editing.";
   }
 
   private markFoldChanged(): void {
@@ -1332,9 +1775,11 @@ export class Session {
     if (key.alt) {
       switch (key.name) {
         case "f":
+        case "F":
           b.moveWordForward();
           return this.afterMove();
         case "b":
+        case "B":
           b.moveWordBackward();
           return this.afterMove();
         case "v":
@@ -1359,18 +1804,21 @@ export class Session {
           b.yankPop();
           return this.afterEdit();
         case "l":
+        case "L":
           if (this.allowEdit(false)) {
             b.lowercaseWord();
             this.afterEdit();
           }
           return;
         case "u":
+        case "U":
           if (this.allowEdit(false)) {
             b.uppercaseWord();
             this.afterEdit();
           }
           return;
         case "c":
+        case "C":
           if (this.allowEdit(false)) {
             b.capitalizeWord();
             this.afterEdit();
@@ -1439,6 +1887,10 @@ export class Session {
       case "ctrl-c":
         this.requestQuit();
         return;
+      case "r":
+      case "R":
+        if (this.resurrectRemovedLine()) return;
+        break;
       case "delete":
       case "ctrl-d":
         if (this.guardForwardEdit()) {
@@ -1462,6 +1914,7 @@ export class Session {
         const prefix = this.source?.policy?.insertPrefix;
         if (prefix !== undefined) {
           if (this.allowEdit(false, false)) {
+            const hunkHeader = this.hunkHeaderAt(b.row);
             const start = this.editStart() ?? 1;
             const onContext = b.lines[b.row]?.[0] === " ";
             // Enter splits the line at the cursor. On a context line the result
@@ -1483,7 +1936,7 @@ export class Session {
             } else {
               b.insert(`\n${prefix}`);
             }
-            this.adjustHunkCounts(0, 1);
+            this.adjustHunkCounts(0, 1, hunkHeader);
             this.afterEdit();
           }
         } else {
@@ -1567,6 +2020,38 @@ export class Session {
     this.splitRow = b.row; // the added line, so undoing the edit can collapse it
   }
 
+  /** Whether the cursor is on a removed line in a hunk whose new side can be
+   * saved back to disk. */
+  private canResurrectRemovedLine(): boolean {
+    const pol = this.source?.policy;
+    const b = this.buffer;
+    return !!pol && !!b && b.lines[b.row]?.[0] === "-" &&
+      pol.regionKind(b.lines, b.row) === "removed";
+  }
+
+  /** Carry a removed line back onto the diff's new side as unchanged context.
+   * Its old-side count is unchanged and its new-side count grows by one. */
+  private resurrectRemovedLine(): boolean {
+    if (!this.canResurrectRemovedLine()) return false;
+    const b = this.buffer!;
+    const hunkHeader = this.hunkHeaderAt(b.row);
+    if (!this.adjustHunkCounts(0, 1, hunkHeader)) {
+      this.message = "This hunk could not be updated.";
+      return true;
+    }
+    const line = b.lines[b.row];
+    b.spliceLines(
+      b.row,
+      1,
+      [` ${line.slice(1)}`],
+      0,
+      Math.max(1, b.col),
+    );
+    this.afterEdit();
+    this.message = "Resurrected the removed line.";
+    return true;
+  }
+
   /** After editing a diff, collapse the added line a split just produced back
    * into a context line when its content again matches the removed line above it
    * — you undid the change. Scoped to the row {@link prepareContextEdit} created
@@ -1587,36 +2072,59 @@ export class Session {
     }
   }
 
-  /** After an edit changed the cursor's hunk's line count (a `+` line added or
-   * removed, a context line removed), grow or shrink that hunk header's counts
-   * to match, so the diff stays well-formed and the deferred re-parse keeps
-   * every body line in the hunk instead of dropping the overflow as plain text. */
-  private adjustHunkCounts(oldDelta: number, newDelta: number): void {
+  /** The parsed hunk containing a body row. Structural lookup keeps body text
+   * such as `--- prior` and `+++ next` from being mistaken for file headers. */
+  private hunkHeaderAt(row: number): number | null {
+    if (!this.buffer) return null;
+    const model = parseDiff(this.buffer.text());
+    for (const file of model?.files ?? []) {
+      for (const hunk of file.hunks) {
+        if (row > hunk.headerLine && row <= hunk.endLine) {
+          return hunk.headerLine;
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Grow or shrink a parsed hunk header after its body changes. A zero-count
+   * unified-diff range names the line before its insertion point, so crossing
+   * zero also moves the range start. */
+  private adjustHunkCounts(
+    oldDelta: number,
+    newDelta: number,
+    hunkHeader = this.hunkHeaderAt(this.buffer?.row ?? -1),
+  ): boolean {
     if (
       !this.source?.policy || !this.buffer || (oldDelta === 0 && newDelta === 0)
     ) {
-      return;
+      return false;
     }
     const b = this.buffer;
-    let h = Math.min(b.row, b.lines.length - 1);
-    while (h >= 0 && !b.lines[h].startsWith("@@ ")) {
-      if (/^(diff |--- |\+\+\+ )/.test(b.lines[h])) return; // not inside a hunk
-      h--;
-    }
-    if (h < 0) return;
-    const m = b.lines[h].match(
-      /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/,
+    if (hunkHeader === null) return false;
+    const m = b.lines[hunkHeader]?.match(
+      /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@([^\r]*)(\r?)$/,
     );
-    if (!m) return;
-    const oldCount = Math.max(
-      0,
-      (m[2] !== undefined ? parseInt(m[2], 10) : 1) + oldDelta,
-    );
-    const newCount = Math.max(
-      0,
-      (m[4] !== undefined ? parseInt(m[4], 10) : 1) + newDelta,
-    );
-    b.lines[h] = `@@ -${m[1]},${oldCount} +${m[3]},${newCount} @@${m[5] ?? ""}`;
+    if (!m) return false;
+    const adjust = (
+      startText: string,
+      countText: string | undefined,
+      delta: number,
+    ): { start: number; count: number } => {
+      let start = parseInt(startText, 10);
+      const count = countText === undefined ? 1 : parseInt(countText, 10);
+      const next = Math.max(0, count + delta);
+      if (count === 0 && next > 0) start++;
+      if (count > 0 && next === 0) start = Math.max(0, start - 1);
+      return { start, count: next };
+    };
+    const oldRange = adjust(m[1], m[2], oldDelta);
+    const newRange = adjust(m[3], m[4], newDelta);
+    b.lines[hunkHeader] =
+      `@@ -${oldRange.start},${oldRange.count} +${newRange.start},${newRange.count} @@${
+        m[5] ?? ""
+      }${m[6] ?? ""}`;
+    return true;
   }
 
   /** The first editable column on the cursor's line under the source's policy
@@ -1650,7 +2158,7 @@ export class Session {
     const b = this.buffer!;
     const start = this.editStart();
     if (start === null) {
-      this.message = NOT_EDITABLE_MSG;
+      this.message = this.notEditableMessage();
       return false;
     }
     if (b.col < start) b.place(b.row, start);
@@ -1666,7 +2174,7 @@ export class Session {
     const b = this.buffer!;
     const start = this.editStart();
     if (start === null) {
-      this.message = NOT_EDITABLE_MSG;
+      this.message = this.notEditableMessage();
       return false;
     }
     if (b.col < start) b.place(b.row, start);
@@ -1689,7 +2197,7 @@ export class Session {
     }
     const start = this.editStart();
     if (start === null) {
-      this.message = NOT_EDITABLE_MSG;
+      this.message = this.notEditableMessage();
       return;
     }
     if (b.col > start) {
@@ -1710,12 +2218,14 @@ export class Session {
   private removeDiffLine(markerLen: number): void {
     const b = this.buffer!;
     const marker = b.lines[b.row][0] ?? "";
+    const hunkHeader = this.hunkHeaderAt(b.row);
     b.place(b.row, 0);
     b.deleteBackward(); // join into the previous line
     for (let i = 0; i < markerLen; i++) b.deleteForward(); // drop the marker
     this.adjustHunkCounts(
       marker === " " || marker === "-" ? -1 : 0,
       marker === " " || marker === "+" ? -1 : 0,
+      hunkHeader,
     );
   }
 
@@ -1725,7 +2235,7 @@ export class Session {
     const b = this.buffer!;
     const start = this.editStart();
     if (start === null) {
-      this.message = NOT_EDITABLE_MSG;
+      this.message = this.notEditableMessage();
       return false;
     }
     if (b.col <= start) {
@@ -1752,7 +2262,7 @@ export class Session {
     }
     const start = this.editStart();
     if (start === null) {
-      this.message = NOT_EDITABLE_MSG;
+      this.message = this.notEditableMessage();
       return false;
     }
     if (Math.min(b.col, mark.col) < start) {
@@ -1761,6 +2271,12 @@ export class Session {
     }
     this.prepareContextEdit();
     return true;
+  }
+
+  private notEditableMessage(): string {
+    return this.canResurrectRemovedLine()
+      ? "This removed line isn't editable; press R to resurrect it."
+      : NOT_EDITABLE_MSG;
   }
 
   private afterMove(): void {
@@ -1787,6 +2303,15 @@ export class Session {
     }
     this.clampScroll();
     this.ensureCursorVisible();
+  }
+
+  /** Take away a message that was set to go away on its own, once the driver has
+   * left it up for its moment. Does nothing to a message that is not one of
+   * those, so a later one is never cleared out from under itself. */
+  expireMessage(): void {
+    if (!this.transientMessage) return;
+    this.transientMessage = false;
+    this.message = "";
   }
 
   /** Live re-highlight `text` into rendered lines, or null when the source has
@@ -1840,15 +2365,21 @@ export class Session {
   }
 
   private contentWidth(): number {
-    const guide = this.selectedNode() ? 1 : 0;
-    return Math.max(1, this.width - this.gutterWidth() - guide);
+    const gutterWidth = this.gutterWidth();
+    const guideWidth = this.selectedNode() ? 1 : 0;
+    const fitted = this.wrapLines
+      ? fitWrapChrome(this.width, gutterWidth, guideWidth)
+      : { gutterWidth, guideWidth };
+    return Math.max(1, this.width - fitted.gutterWidth - fitted.guideWidth);
   }
 
   /** Cycle the line-number gutter: off → input position → file/message line. */
   private cycleLineNumbers(): void {
+    const anchor = this.wrapLines ? this.viewportAnchor() : null;
     const order: LineNumberMode[] = ["off", "input", "file"];
     this.lineNumberMode =
       order[(order.indexOf(this.lineNumberMode) + 1) % order.length];
+    if (anchor) this.restoreWrappedAnchor(anchor);
     const label = this.lineNumberMode === "off"
       ? "off"
       : this.lineNumberMode === "input"
@@ -1949,6 +2480,7 @@ export class Session {
         return false;
       }
       this.mode = "amendPrompt";
+      this.focusDefaultButton();
       this.message = "";
       return false;
     }
@@ -1973,16 +2505,15 @@ export class Session {
     }
   }
 
-  private handleAmendPrompt(key: Key): void {
-    const k = (key.char ?? key.name).toLowerCase();
-    if (k === "y" || key.name === "enter") {
+  private applyAmendButton(button: DialogButton): void {
+    if (button.hotkey === "y") {
       this.amendConfirmed = true;
       const ok = this.requestSave();
       this.mode = "normal";
       this.editedFiles = [];
       if (ok && this.savePromptThen === "quit") this.quit = true;
       this.savePromptThen = null;
-    } else if (k === "n" || key.name === "escape") {
+    } else if (button.kind === "cancel") {
       this.mode = "normal";
       this.amendConfirmed = false;
       this.savePromptThen = null;
@@ -2001,6 +2532,7 @@ export class Session {
       this.mode = "savePrompt";
       this.savePromptThen = "quit";
       this.editedFiles = this.computeEditedFiles();
+      this.focusDefaultButton();
       this.message = "";
     } else {
       this.quit = true;
@@ -2034,10 +2566,66 @@ export class Session {
     return willPrompt;
   }
 
-  private handleSavePrompt(key: Key): void {
-    const k = (key.char ?? key.name).toLowerCase();
-    // Save is the default button, so Enter and either shortcut trigger it.
-    if (k === "s" || key.name === "enter") {
+  /** Keys while a modal prompt (save / amend / revert) is up. Tab and Shift-Tab
+   * move the focus ring between buttons, wrapping around; Space and Enter
+   * activate the focused button; Esc activates the cancel button; a button's
+   * shortcut letter activates it directly. Any other key leaves the prompt up. */
+  private handleDialogKey(key: Key): void {
+    // Reached only from the prompt modes, each of which builds a dialog with at
+    // least two buttons, so the dialog is present and its row is non-empty.
+    const dialog = this.promptDialog()!;
+    const buttons = dialog.buttons;
+    const n = buttons.length;
+
+    // Tab moves the ring forward, Shift-Tab back, both wrapping around. From no
+    // focus (-1) Tab lands on the first button and Shift-Tab on the last.
+    if (key.name === "tab") {
+      this.dialogFocus = this.dialogFocus < 0 ? 0 : (this.dialogFocus + 1) % n;
+      return;
+    }
+    if (key.name === "shift-tab") {
+      this.dialogFocus = this.dialogFocus < 0
+        ? n - 1
+        : (this.dialogFocus - 1 + n) % n;
+      return;
+    }
+
+    let index = -1;
+    if (key.name === "enter" || key.name === "space" || key.char === " ") {
+      // The clamped focus the dialog was drawn with, so Enter always activates
+      // the highlighted button. -1 means nothing is focused: a no-op.
+      index = dialog.focus ?? -1;
+    } else if (key.name === "escape") {
+      index = buttons.findIndex((b) => b.kind === "cancel");
+    } else {
+      const k = (key.char ?? key.name).toLowerCase();
+      index = buttons.findIndex((b) => b.hotkey.toLowerCase() === k);
+    }
+    if (index < 0 || index >= n) return; // an unbound key leaves the prompt up
+    this.activateButton(dialog, index);
+  }
+
+  /** Run a prompt button's action, first capturing the frame that shows it
+   * pushed so the driver can play the press before the result appears. The
+   * pressed button is drawn focused as well, so a shortcut-key press shows it
+   * highlighted rather than leaving the highlight on whatever Tab last chose. */
+  private activateButton(dialog: DialogState, index: number): void {
+    this.dialogFocus = index;
+    this.pendingPush = {
+      doc: this.displayDoc(),
+      view: {
+        ...this.view(),
+        dialog: { ...dialog, focus: index, pushed: index },
+      },
+    };
+    const button = dialog.buttons[index];
+    if (this.mode === "savePrompt") this.applySaveButton(button);
+    else if (this.mode === "amendPrompt") this.applyAmendButton(button);
+    else if (this.mode === "revertPrompt") this.applyRevertButton(button);
+  }
+
+  private applySaveButton(button: DialogButton): void {
+    if (button.hotkey === "s") {
       const ok = this.requestSave();
       // The save may need to confirm a commit amend first; leave that prompt up
       // (keeping the quit intent) instead of forcing back to normal mode.
@@ -2046,12 +2634,12 @@ export class Session {
       this.editedFiles = [];
       if (ok && this.savePromptThen === "quit") this.quit = true;
       this.savePromptThen = null;
-    } else if (k === "d") {
+    } else if (button.hotkey === "d") {
       this.mode = "normal";
       this.editedFiles = [];
       if (this.savePromptThen === "quit") this.quit = true;
       this.savePromptThen = null;
-    } else if (k === "c" || key.name === "escape") {
+    } else if (button.kind === "cancel") {
       this.mode = "normal";
       this.savePromptThen = null;
       this.editedFiles = [];
@@ -2068,6 +2656,7 @@ export class Session {
       return;
     }
     this.mode = "revertPrompt";
+    this.focusDefaultButton();
     this.message = "";
   }
 
@@ -2092,29 +2681,32 @@ export class Session {
     return { chunk, file, message };
   }
 
-  private handleRevertPrompt(key: Key): void {
-    const k = (key.char ?? key.name).toLowerCase();
+  private applyRevertButton(button: DialogButton): void {
+    // The dialog only offers the scopes that apply where the cursor sits, so a
+    // scope button that reached here is always valid.
     let scope: RevertScope | null = null;
-    if (this.source?.policy) {
-      // A diff offers the scopes that apply at the cursor plus Cancel; there is
-      // no default button, so Enter (and any unlisted key) does nothing.
-      const s = this.revertScopesAt();
-      if (k === "h" && s.chunk) scope = "chunk";
-      else if (k === "f" && s.file) scope = "file";
-      else if (k === "m" && s.message) scope = "message";
-      else if (k === "a") scope = "all";
-    } else if (k === "y" || key.name === "enter") {
-      // A plain file has a single scope, so Yes is the default button.
-      scope = "all";
+    switch (button.hotkey) {
+      case "h":
+        scope = "chunk";
+        break;
+      case "f":
+        scope = "file";
+        break;
+      case "m":
+        scope = "message";
+        break;
+      case "a": // a diff's all
+      case "y": // a plain file's single scope
+        scope = "all";
+        break;
     }
     if (scope) {
       this.performRevert(scope);
       this.mode = "normal";
-    } else if (k === "c" || key.name === "escape") {
+    } else if (button.kind === "cancel") {
       this.message = "Cancelled";
       this.mode = "normal";
     }
-    // Any other key does nothing: the prompt stays up.
   }
 
   /** Restore the chosen scope to its original form, keeping the dirty baseline
@@ -2161,33 +2753,70 @@ export class Session {
   }
 
   /** Reveal more of the underlying file around a hunk (Ctrl-L). When the text
-   * cursor is active the hunk is the one it sits in; in pager mode it is the
-   * selected node's hunk, or the first hunk on screen. The extra context is
-   * applied to the baseline too, so it does not count as an unsaved edit. */
+   * cursor is active the hunk is the one it sits in and the view follows the
+   * cursor; in pager mode it is the hunk at the middle of the screen, and the
+   * view holds the far edge of that hunk still so the revealed lines open a gap
+   * in front of the user. The extra context is applied to the baseline too, so
+   * it does not count as an unsaved edit. */
   private performExpand(): void {
     if (!this.source?.expandContext || !this.buffer) {
       this.message = "Expanding context isn't available here.";
       return;
     }
-    const refLine = this.cursorOn ? this.buffer.row : this.expandRefLine();
-    if (refLine === null) {
-      this.message = "Move to a hunk first, then Ctrl-L to expand its context.";
-      return;
+    let refLine: number;
+    let up: boolean | undefined;
+    if (this.cursorOn) {
+      refLine = this.buffer.row; // the cursor names a point, not an edge
+    } else {
+      const offer = this.expandOffer();
+      // Ctrl-L is not offered in any of these, so it changes nothing and there
+      // is nothing to leave the reason standing next to: say why, and take it
+      // away again once it has been read.
+      if (offer === null) {
+        this.message = "Move to a hunk's edge, then Ctrl-L to expand it.";
+        this.transientMessage = true;
+        return;
+      }
+      if ("blocked" in offer) {
+        this.message = offer.blocked === "top"
+          ? "Top of file."
+          : offer.blocked === "bottom"
+          ? "Bottom of file."
+          : "No more context to show.";
+        this.transientMessage = true;
+        return;
+      }
+      refLine = offer.line;
+      up = offer.up;
     }
     const r = this.source.expandContext(
       this.buffer.text(),
       this.buffer.baseline(),
       refLine,
+      up,
     );
     if (!r) {
       this.message = "No more context to show.";
       return;
     }
     // The node the selection denotes, captured before the reparse renumbers the
-    // structure tree under it. The viewport's document anchor is captured too,
-    // before the fold plan (which the reparse invalidates) changes.
+    // structure tree under it. The pinned line's row is captured too, before the
+    // fold plan (which the reparse invalidates) changes.
     const selected = this.cursorOn ? null : this.selectedNode();
-    const anchorDoc = this.toDoc(this.top);
+    // Where a line of the old text lands in the new one.
+    const moved = (n: number) =>
+      n + (n >= r.insertedAt ? r.inserted : 0) -
+      (r.removedAt !== null && n > r.removedAt ? 1 : 0);
+    // The line held still on screen: the one just outside the edge the revealed
+    // lines go in at, so they open a gap on the hunk's side of it. Expanding
+    // upwards holds the hunk's header and pushes the body down; expanding
+    // downwards holds what follows the hunk and lifts the body up. A join takes
+    // that very header away, so what is held is the line the other side of it —
+    // the neighbouring hunk's body, which is what is left to hold on to.
+    const pinDoc = r.removedAt !== null
+      ? (r.up ? r.removedAt - 1 : r.removedAt + 1)
+      : (r.up ? r.insertedAt - 1 : r.insertedAt);
+    const pinRow = this.toDisplay(pinDoc) - this.top;
     const col = this.cursorOn ? this.buffer.col : 0;
     this.buffer.setBaseline(r.baseline);
     this.buffer.setText(r.text, r.cursorLine, col);
@@ -2198,36 +2827,55 @@ export class Session {
       this.seedHighlighter();
       this.clampScroll();
       this.ensureCursorVisible();
-      this.message = "Expanded context.";
+      this.reportReveal(r);
       return;
     }
-    // Pager mode: re-point the selection at the same node (its line shifted),
-    // and hold the viewport on the same content. Only lines at or below the
-    // insertion point moved down, so the top shifts only when it is below it.
-    this.reselectAfterExpand(selected, r.insertedAt, r.inserted);
-    const newAnchorDoc = anchorDoc >= r.insertedAt
-      ? anchorDoc + r.inserted
-      : anchorDoc;
-    this.top = this.toDisplay(newAnchorDoc);
+    // Pager mode: re-point the selection at the same node (its line moved), and
+    // put the pinned line back on the row it was on.
+    this.reselectAfterExpand(selected, moved);
+    this.top = this.toDisplay(moved(pinDoc)) - pinRow;
     this.clampScroll();
-    this.message = "Expanded context.";
+    // The revealed lines fill the gap the insertion point opened, so the driver
+    // can walk them in from the held edge. A join is drawn in one step instead:
+    // its frames would stand the two hunks' bodies next to each other before the
+    // lines that join them had arrived, showing a file that reads nothing like
+    // the one on disk.
+    this.pendingReveal = r.removedAt !== null || this.wrapLines ? null : {
+      row: this.toDisplay(r.insertedAt),
+      count: r.inserted,
+      up: r.up,
+    };
+    this.reportReveal(r);
+  }
+
+  /** Say what a reveal showed: which way it reached, and which lines of the file
+   * came back with it. Naming the lines is the point — one run of context looks
+   * like any other, and the file's own numbers are what tie them to it. A reveal
+   * that closed the last gap between two hunks says so too, since a header
+   * disappearing is otherwise left to be puzzled over. */
+  private reportReveal(r: ExpandResult): void {
+    const { from, to } = r.revealed;
+    const lines = from === to ? `line ${from}` : `lines ${from}-${to}`;
+    const where = r.up ? "above" : "below";
+    this.message = r.removedAt !== null
+      ? `Showing ${lines} ${where} — the two hunks are now one.`
+      : `Showing ${lines} ${where} the hunk.`;
+    this.transientMessage = true;
   }
 
   /** After a pager-mode expand rebuilds the structure tree, point the selection
-   * back at the same node, whose line shifted down by `inserted` when it sat at
-   * or below the insertion point. Cleared when the node can no longer be found.
-   * A hunk is matched on its line alone — only one hunk starts at a given header
-   * line, and its label (the `@@` counts) changes as the hunk grows; other kinds
-   * keep the label, which is stable and tells apart nodes sharing a start line. */
+   * back at the same node, at wherever `moved` puts its line. Cleared when the
+   * node can no longer be found — a join takes one of the two hunks away, and
+   * there is nothing to point at. A hunk is matched on its line alone: only one
+   * hunk starts at a given header line, and its label (the `@@` counts) changes
+   * as the hunk grows; other kinds keep the label, which is stable and tells
+   * apart nodes sharing a start line. */
   private reselectAfterExpand(
     node: StructureNode | null,
-    insertedAt: number,
-    inserted: number,
+    moved: (line: number) => number,
   ): void {
     if (!node) return;
-    const startLine = node.startLine >= insertedAt
-      ? node.startLine + inserted
-      : node.startLine;
+    const startLine = moved(node.startLine);
     const idx = this.doc.flatStructure.findIndex((n) =>
       n.startLine === startLine && n.kind === node.kind &&
       (node.kind === "hunk" || n.label === node.label)
@@ -2235,38 +2883,125 @@ export class Session {
     this.selectedIndex = idx >= 0 ? idx : null;
   }
 
-  /** The reference line for an expand in pager mode: a line inside the hunk the
-   * user is focused on — the selected node's hunk when a node is selected and on
-   * screen, otherwise the first hunk overlapping the viewport. A node that spans
-   * hunks rather than sitting in one (the file node) resolves to the first hunk
-   * it covers that is on screen. Null when no hunk is in view. */
-  private expandRefLine(): number | null {
-    const rows = this.contentRows();
-    // The viewport is display rows; compare hunk (document) lines against it in
-    // document space.
-    const viewTop = this.toDoc(this.top);
-    const viewEnd = this.toDoc(this.top + rows);
-    const onScreen = (n: StructureNode) =>
-      n.endLine >= viewTop && n.startLine < viewEnd;
-    const hunks = this.doc.flatStructure.filter((n) => n.kind === "hunk");
-    if (hunks.length === 0) return null;
-    const sel = this.selectedNode();
-    if (sel && onScreen(sel)) {
-      // A selection sitting inside a hunk keeps its line, so the up/down bias
-      // follows where the user is.
-      const inHunk = hunks.some((h) =>
-        sel.startLine >= h.startLine && sel.startLine <= h.endLine
-      );
-      if (inHunk) return sel.startLine;
-      // A selection spanning hunks (the file node) expands the first hunk it
-      // covers that is on screen.
-      const covered = hunks.find((h) =>
-        h.startLine >= sel.startLine && onScreen(h)
-      );
-      if (covered) return covered.startLine;
+  /** Whether a node is on screen: its display rows overlap the viewport, and it
+   * is not inside a collapsed file. A collapsed file's inner lines all map to
+   * its summary row, which overlaps the viewport whenever that row is shown, so
+   * the hidden range is excluded by its document extent instead. */
+  private nodeOnScreen(node: StructureNode): boolean {
+    const inHiddenFile = this.foldFiles().some((f) =>
+      this.collapsed.has(f.index) &&
+      node.startLine > f.headerLine && node.startLine <= f.endLine
+    );
+    if (inHiddenFile) return false;
+    return this.nodeEndRow(node) >= this.top &&
+      this.nodeStartRow(node) < this.top + this.contentRows();
+  }
+
+  /** The middle of the content on screen, as a display row. The rows the
+   * content occupies, rather than the rows the terminal has: a document shorter
+   * than the screen ends part-way down it, and the rows past its end are not
+   * somewhere the user is looking. */
+  private middleRow(): number {
+    const last = Math.min(this.top + this.contentRows(), this.displayCount()) -
+      1;
+    return Math.floor((this.top + last) / 2);
+  }
+
+  /** How much context each hunk can still reveal, keyed by its header line.
+   * Cached against the document, which the source rebuilds on every expand. */
+  private expandRoom(): ReadonlyMap<number, HunkRoom> {
+    if (this.roomCache?.doc !== this.currentDoc) {
+      this.roomCache = {
+        doc: this.currentDoc,
+        room: this.source?.expandRoom?.(this.currentDoc.text) ?? new Map(),
+      };
     }
-    const first = hunks.find(onScreen);
-    return first ? first.startLine : null;
+    return this.roomCache.room;
+  }
+
+  /** Every hunk edge the user can see: the row it sits on, the line to expand
+   * from, which way that grows, and what the file offers there. A hunk with
+   * neither edge on screen offers nothing to aim at — its boundaries are off in
+   * the dark, and growing one would happen where it could not be watched. */
+  private visibleEdges(): {
+    row: number;
+    line: number;
+    up: boolean;
+    room: HunkRoom;
+  }[] {
+    const room = this.expandRoom();
+    const rows = this.contentRows();
+    const onScreen = (row: number) => row >= this.top && row < this.top + rows;
+    const out = [];
+    for (const h of this.doc.flatStructure) {
+      if (h.kind !== "hunk" || !this.nodeOnScreen(h)) continue;
+      const r = room.get(h.startLine);
+      if (!r) continue;
+      // The top edge is the header the revealed lines land under; the bottom is
+      // the last body line they land after.
+      for (
+        const [line, up] of [[h.startLine, true], [h.endLine, false]] as const
+      ) {
+        const row = up ? this.toDisplay(line) : this.toDisplayEnd(line);
+        if (onScreen(row)) out.push({ row, line, up, room: r });
+      }
+    }
+    return out;
+  }
+
+  /** The hunk edge Ctrl-L acts on in pager mode: the visible one nearest the
+   * middle of the screen, or nearest a selected node when one sits in a hunk.
+   * Null when no edge is on screen. The edge is returned whether or not it has
+   * room, so that the offer of Ctrl-L and what Ctrl-L does agree. */
+  private expandEdge():
+    | { line: number; up: boolean; room: HunkRoom }
+    | null {
+    const edges = this.visibleEdges();
+    if (edges.length === 0) return null;
+    // A selected node sitting in a hunk aims at that hunk, and its own row is
+    // what the edges are measured from: the user picked a place to look.
+    const sel = this.selectedNode();
+    const own = sel && this.nodeOnScreen(sel)
+      ? edges.filter((e) =>
+        this.doc.flatStructure.some((h) =>
+          h.kind === "hunk" && h.startLine <= e.line && e.line <= h.endLine &&
+          sel.startLine >= h.startLine && sel.startLine <= h.endLine
+        )
+      )
+      : [];
+    const from = own.length > 0 ? this.nodeStartRow(sel!) : this.middleRow();
+    const pool = own.length > 0 ? own : edges;
+    // Distance in display rows: a collapsed file stands on one row, and the
+    // lines it hides are not distance the eye travels.
+    let best = pool[0];
+    for (const e of pool) {
+      if (Math.abs(e.row - from) < Math.abs(best.row - from)) best = e;
+    }
+    return { line: best.line, up: best.up, room: best.room };
+  }
+
+  /** Whether Ctrl-L would reveal anything from where the user is looking, which
+   * is what the status bar offers it on. Edit mode aims with the cursor rather
+   * than the screen, and keeps its own offer. */
+  private canExpand(): boolean {
+    if (this.cursorOn || !this.source?.expandContext) return false;
+    const offer = this.expandOffer();
+    return offer !== null && !("blocked" in offer);
+  }
+
+  /** Whether Ctrl-L would reveal anything, and what stops it when it would not.
+   * Drives both the status bar's offer of Ctrl-L and the key itself. */
+  private expandOffer():
+    | { line: number; up: boolean }
+    | { blocked: "top" | "bottom" | "hunk" }
+    | null {
+    const edge = this.expandEdge();
+    if (!edge) return null;
+    if ((edge.up ? edge.room.up : edge.room.down) > 0) {
+      return { line: edge.line, up: edge.up };
+    }
+    if (edge.up) return { blocked: edge.room.atFileTop ? "top" : "hunk" };
+    return { blocked: edge.room.atFileBottom ? "bottom" : "hunk" };
   }
 
   // --- file picker (C-x C-f) -------------------------------------------------
@@ -2277,6 +3012,10 @@ export class Session {
       return;
     }
     this.cursorOn = false;
+    // Opening the picker drops the text cursor, and cancelling it returns to
+    // navigation, which reads the structure tree. Refresh it here as leaving
+    // edit mode by Esc does, so that return lands on a current tree.
+    this.reparse();
     this.overlay = null;
     this.overlayStack = [];
     this.pickerDir = this.pickerStartDir();
@@ -2521,12 +3260,30 @@ export class Session {
   private viewportNodeIndex(nodes: readonly StructureNode[]): number {
     const bottom = this.top + this.contentRows() - 1;
     for (let i = 0; i < nodes.length; i++) {
-      const row = this.toDisplay(nodes[i].startLine);
+      const row = this.nodeStartRow(nodes[i]);
       if (row >= this.top && row <= bottom) return i;
     }
-    const enclosing = nodeAtLine(nodes, this.toDoc(this.top));
-    return enclosing >= 0 ? enclosing : 0;
+    let enclosing = -1;
+    let enclosingSpan = Infinity;
+    for (let i = 0; i < nodes.length; i++) {
+      const start = this.nodeStartRow(nodes[i]);
+      const end = this.nodeEndRow(nodes[i]);
+      const span = end - start;
+      if (start <= this.top && end >= this.top && span <= enclosingSpan) {
+        enclosing = i;
+        enclosingSpan = span;
+      }
+    }
+    if (enclosing >= 0) return enclosing;
+    const onLine = nodeAtLine(nodes, this.toDoc(this.top));
+    return onLine >= 0 ? onLine : 0;
   }
+}
+
+function codePointLength(text: string): number {
+  let length = 0;
+  for (const _ of text) length++;
+  return length;
 }
 
 function isArrowName(name: string): boolean {
@@ -2566,7 +3323,7 @@ export function helpOverlay(): {
     ["  A / D", "parent / first child"],
     ["  Tab / ⇧Tab", "next / previous node (depth-first)"],
     ["  Z", "centre selected node"],
-    ["  ^L", "diff: reveal more of the file around the hunk in view"],
+    ["  ^L", "diff: reveal more of the file at the middle of the view"],
     ["  Esc", "clear selection / search"],
     ["", ""],
     ["Editing (a file or a diff)", ""],
@@ -2577,6 +3334,7 @@ export function helpOverlay(): {
     ["  ⌥L ⌥U ⌥C", "lower / upper / capitalise word"],
     ["  ^S", "search from the cursor (Enter lands there, ^S steps)"],
     ["  ^R", "revert: a diff's hunk / file / all, or a file's edits"],
+    ["  R", "diff: resurrect the removed line under the cursor"],
     ["  ^L", "diff: reveal more of the file around the cursor's hunk"],
     ["  F3  ^X^S", "save to disk"],
     ["  ^X^F", "open another file"],
@@ -2590,6 +3348,7 @@ export function helpOverlay(): {
     ["", ""],
     ["View", ""],
     ["  #", "line numbers: off / input position / file or message line"],
+    ["  \\", "wrap / unwrap long lines"],
     ["  C", "cycle non-printables: pictures / ANSI colour / hidden"],
     ["  ?", "this help   ·   Q  quit"],
   ];

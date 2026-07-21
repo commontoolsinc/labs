@@ -131,7 +131,7 @@ deno task cf test packages/patterns/my-pattern/      # all tests in a directory
 Notice what makes the subject *testable*: dual type parameters on
 `pattern<Input, Output>()` and exported `Stream<T>` actions. That's why
 Chapter 3 insisted on them. Keep assertions deterministic — no
-`safeDateNow()` or randomness inside them. Patterns that fetch external data
+`Date.now()` or randomness inside them. Patterns that fetch external data
 (`fetchJson` and friends) can still be tested deterministically: export a
 module-scope `fetchMocks` array from the test file and the harness injects
 it as the runtime's fetch (worked examples in
@@ -162,9 +162,12 @@ failures (each links to a full writeup under
    instead of changing the selection; box it: `selected.set({ item })`.
 8. **`ifElse` on a composed pattern's cell** — hangs; bridge through a local
    `computed()`.
-9. **`Date.now()` / `Math.random()` / `setTimeout` / `new Proxy()`** — not
-   available under SES; use `safeDateNow()` / `nonPrivateRandom()` in
-   handlers or one-time initialization, never in `computed()`/`lift()`.
+9. **`Date.now()` / `Math.random()` / `setTimeout` / `new Proxy()`** — `setTimeout`
+   and `new Proxy()` are not available under SES. `Date.now()`, no-argument
+   `new Date()`, and `Math.random()` are gated: call them directly in handlers or
+   one-time initialization (the clock reads at one-second resolution there), but in
+   `computed()`/`lift()` they throw a `TimeCapabilityError`. For reactive time in a
+   `computed()`, use the `#now` wish.
 10. **Unguarded scoped-cell reads while rendering** — `PerSession` cells are
     `undefined` until first sync; guard with `?? []`.
 

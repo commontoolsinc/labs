@@ -95,6 +95,16 @@ Deno.test("editor: revealing the cursor forces the first display mode", () => {
   );
 });
 
+Deno.test("editor: revealing the cursor turns line wrapping off", () => {
+  const { src } = memSource();
+  const s = editSession("x".repeat(90), src, 3);
+  press(s, "\\", "j", "e");
+  assert(!s.view().wrapLines, "editing uses one screen row per source line");
+  assertEquals(s.view().cursor, { line: 0, col: 39 });
+  assertEquals(s.view().left, 39, "the visible continuation stays at the left");
+  assertEquals(s.view().message, "Line wrapping turned off for editing.");
+});
+
 Deno.test("editor: a pipe rejects the cursor with a reason", () => {
   const reason =
     "This view is of a pipe — there is no underlying file to edit.";
@@ -215,6 +225,17 @@ Deno.test("editor: quitting dirty prompts, s saves and quits", () => {
   assertEquals(saved(), "Zabc\n");
 });
 
+Deno.test("editor: dialog shortcut letters accept either case", () => {
+  const { src, saved } = memSource();
+  const s = editSession("abc\n", src);
+  press(s, "e");
+  type(s, "Z");
+  press(s, "escape", "q");
+  press(s, "S");
+  assert(s.quit, "uppercase S activated Save");
+  assertEquals(saved(), "Zabc\n");
+});
+
 Deno.test("editor: the save prompt ignores keys that are not its buttons", () => {
   const { src, saved } = memSource();
   const s = editSession("abc\n", src);
@@ -228,6 +249,67 @@ Deno.test("editor: the save prompt ignores keys that are not its buttons", () =>
   press(s, "s"); // the Save button
   assert(s.quit);
   assertEquals(saved(), "Zabc\n");
+});
+
+Deno.test("editor: the save prompt focuses its default button; Space activates it", () => {
+  const { src, saved } = memSource();
+  const s = editSession("abc\n", src);
+  press(s, "e");
+  type(s, "Z");
+  press(s, "escape", "q");
+  assertEquals(
+    s.view().dialog?.focus,
+    0,
+    "Save, the default button, is focused",
+  );
+  press(s, "space"); // Space activates the focused button, like Enter
+  assert(s.quit, "quits after saving");
+  assertEquals(saved(), "Zabc\n");
+});
+
+Deno.test("editor: Tab moves the focus ring; Enter activates the focused button", () => {
+  const { src, saved } = memSource();
+  const s = editSession("abc\n", src);
+  press(s, "e");
+  type(s, "Z");
+  press(s, "escape", "q");
+  press(s, "tab"); // Save → Discard
+  assertEquals(s.view().dialog?.focus, 1, "Tab advanced the focus to Discard");
+  press(s, "enter"); // Enter activates whichever button is focused
+  assert(s.quit, "quits after discarding");
+  assertEquals(saved(), null, "Discard was activated, not Save");
+});
+
+Deno.test("editor: Shift-Tab wraps the focus ring to the last button", () => {
+  const { src } = memSource();
+  const s = editSession("abc\n", src);
+  press(s, "e");
+  type(s, "Z");
+  press(s, "escape", "q");
+  press(s, "shift-tab"); // Save → Cancel, wrapping backwards
+  assertEquals(s.view().dialog?.focus, 2, "Shift-Tab wrapped to Cancel");
+  press(s, "enter");
+  assertEquals(s.view().message, "Cancelled");
+});
+
+Deno.test("editor: activating a button captures the pushed frame for its press", () => {
+  const { src } = memSource();
+  const s = editSession("abc\n", src);
+  press(s, "e");
+  type(s, "Z");
+  press(s, "escape", "q");
+  press(s, "shift-tab"); // focus Cancel (index 2)
+  press(s, "enter"); // activate it
+  const push = s.pendingPush;
+  assert(push, "the press captured a pushed frame");
+  assertEquals(
+    push!.view.dialog?.pushed,
+    2,
+    "the pushed frame shows Cancel pressed",
+  );
+  assertEquals(s.view().message, "Cancelled", "and the button's action ran");
+  press(s, "s"); // any following key clears the pending press
+  assertEquals(s.pendingPush, null, "the next key drops the pending press");
 });
 
 Deno.test("editor: quitting dirty, d discards and quits", () => {

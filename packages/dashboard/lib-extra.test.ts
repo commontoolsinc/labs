@@ -1,7 +1,7 @@
-// Unit tests for the helpers lib.test.ts does not reach: the GitHub API wrapper,
-// the memo cache, and hhmm. No real network — fetch is stubbed and restored.
+// Unit tests for the helpers lib.test.ts does not reach: the GitHub API wrapper
+// and the memo cache. No real network — fetch is stubbed and restored.
 import { assert, assertEquals, assertRejects } from "@std/assert";
-import { friendlyError, github, hhmm, memo } from "./lib.ts";
+import { friendlyError, github, memo } from "./lib.ts";
 
 // Run `fn` with fetch replaced by `stub`, handing `fn` the calls made so far.
 async function withFetch(
@@ -63,6 +63,21 @@ Deno.test("github: non-OK -> throws with the status; the error body is not retur
       assertEquals(e.message, "GitHub API rate/limited failed: HTTP 429");
       assertEquals(friendlyError(e.message), "rate-limited");
     });
+    await withFetch(
+      () =>
+        Response.json(
+          { message: "API rate limit exceeded" },
+          { status: 403, headers: { "x-ratelimit-remaining": "0" } },
+        ),
+      async () => {
+        const e = await assertRejects(() => github("rate/limited"), Error);
+        assertEquals(
+          e.message,
+          "GitHub API rate/limited failed: HTTP 403 (rate-limited)",
+        );
+        assertEquals(friendlyError(e.message), "rate-limited");
+      },
+    );
   });
 });
 
@@ -135,10 +150,4 @@ Deno.test("memo: concurrent callers share the one in-flight call", async () => {
   assertEquals(await a, "v");
   assertEquals(await b, "v");
   assertEquals(n, 1);
-});
-
-Deno.test("hhmm: local wall-clock time, zero-padded, 24-hour", () => {
-  assertEquals(hhmm(new Date(2024, 0, 2, 9, 5).toISOString()), "09:05");
-  assertEquals(hhmm(new Date(2024, 0, 2, 13, 45).toISOString()), "13:45");
-  assertEquals(hhmm(new Date(2024, 0, 2, 0, 0).toISOString()), "00:00");
 });

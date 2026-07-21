@@ -192,8 +192,8 @@ nobody suggests the same place three days running.
   idiom, labelled with each visit's own date ("Tuesday, May 20").
 - Implementation notes (hard-won):
   - Visit labels derive **only from the stored `wentAt`**, never from the
-    current clock — `safeDateNow()` inside a `derive`/`computed` is
-    non-idempotent (it belongs in handlers, like the backdate parse).
+    current clock — `Date.now()` inside a `derive`/`computed` is non-idempotent
+    and throws (it belongs in handlers, like the backdate parse).
   - Interactive `onClick` handlers must live in **plain-ternary JSX**, not
     inside a `computed/lift`-returned VNode, or they mis-lower as lifts
     (`$event in inputs`). `recentVisits` is an array-shaped `computed`, so the

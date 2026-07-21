@@ -12,6 +12,7 @@ import {
   type FuseProvider,
   makeWriteEntryParam,
   type MountHandle,
+  msToTimespec,
   type StatOpts,
 } from "./platform.ts";
 
@@ -76,6 +77,19 @@ type DarwinLib = Deno.DynamicLibrary<typeof DARWIN_SYMBOLS>;
 
 const STAT_SIZE = 144;
 const STAT_ST_SIZE_OFFSET = 96;
+const STAT_ST_MTIM_OFFSET = 48;
+
+// macOS struct stat timespec offsets (64-bit inode layout):
+//   st_atimespec @ 32 (tv_sec @ 32, tv_nsec @ 40)
+//   st_mtimespec @ 48 (tv_sec @ 48, tv_nsec @ 56)
+//   st_ctimespec @ 64 (tv_sec @ 64, tv_nsec @ 72)
+function writeTimespecs(view: DataView, mtime?: number): void {
+  const { sec, nsec } = msToTimespec(mtime);
+  for (const secOffset of [32, 48, 64]) {
+    view.setBigInt64(secOffset, sec, true);
+    view.setBigInt64(secOffset + 8, nsec, true);
+  }
+}
 
 function writeStat(buf: ArrayBuffer, opts: StatOpts): void {
   const view = new DataView(buf);
@@ -85,6 +99,7 @@ function writeStat(buf: ArrayBuffer, opts: StatOpts): void {
   view.setBigUint64(8, opts.ino, true); // st_ino
   view.setUint32(16, opts.uid ?? 0, true); // st_uid
   view.setUint32(20, opts.gid ?? 0, true); // st_gid
+  writeTimespecs(view, opts.mtime); // st_atimespec/st_mtimespec/st_ctimespec
   view.setBigInt64(96, BigInt(opts.size), true); // st_size
 }
 
@@ -219,6 +234,7 @@ const darwinPlatform: FusePlatform = {
   OPS_OFFSETS,
   FUSE_ARGS_STRUCT_SIZE,
   STAT_ST_SIZE_OFFSET,
+  STAT_ST_MTIM_OFFSET,
 
   writeStat,
   writeEntryParam,

@@ -23,6 +23,47 @@ This guide covers coding standards, design principles, and build/test workflows 
 - Import either from `@commonfabric/api` (internal API) or
   `@commonfabric/api/interface` (external API), but not both.
 
+### Types for packages that ship none
+
+Some npm packages carry no type declarations of their own and are described by a
+separate `@types/*` package. Declaring that package in an import map is not what
+makes it apply. Deno looks for an `@types` package when it resolves through a
+`node_modules` directory, and this workspace does not use one, so the
+declaration alone leaves the package fetched and unused. The import then types
+as `any`, and nothing reports it: the import still resolves, and the type
+positions still fill, so a name like `ScaleBand` reads as a real type while
+standing for `any`.
+
+Point the import at its types with a `@ts-types` comment. Write the specifier
+bare so that it resolves through the import map, which keeps the version pinned
+in one place rather than repeated in every file that imports the package:
+
+```ts
+// Shown for illustration only.
+// @ts-types="@types/d3-scale"
+import { scaleBand } from "d3-scale";
+```
+
+Declare both packages in the import map of the package that imports them: the
+one supplying the code, and the one supplying its types.
+
+### Declared dependencies must be imported
+
+An import map that declares a dependency nothing imports carries dead weight: the
+package still downloads on install, and it can pin a second copy of something the
+rest of the tree already resolves. `deno outdated` never catches this, because it
+only reports packages that are behind — an unused dependency at its newest
+release is invisible to it. `deno task check-unused-deps` catches it instead. The
+check fails when an import map alias is imported by no source file in that map's
+scope, where a member's map covers only that member's files and the root map
+covers the whole workspace. It runs in CI alongside the other lockfile and lint
+checks.
+
+An `@types/*` alias reached only through a `@ts-types` comment still counts as
+imported, so wiring one up as above satisfies the check. A dependency that is
+declared without a local import on purpose goes in the allowlist in
+`tasks/check-unused-deps.ts` with a one-line reason.
+
 ## Code Design & Principles
 
 ### Error Handling
@@ -410,6 +451,38 @@ the `deno-setup` action both still read `mise.toml` rather than a hardcoded
 version, and that the action holds no version literal that disagrees with the
 pin.
 
+#### Packages that must resolve to a single copy
+
+Most packages can be resolved twice without anyone noticing. A few cannot,
+because one copy produces a value that another copy reads back:
+
+- `ai` and `@ai-sdk/provider-utils` produce the telemetry spans that
+  `@arizeai/openinference-vercel` translates into OpenInference attributes.
+- `@arizeai/openinference-semantic-conventions` defines the attribute names
+  that the same package's span processor reads back.
+
+Two copies of any of them breaks the translation, and breaks it quietly: the
+spans are still produced and still exported, they just carry the wrong
+attributes or none. Nothing throws, no test fails, and the traces keep flowing
+in the volume graphs.
+
+`@ai-sdk/otel` depends on `ai` with an exact pin rather than a peer range, so
+it resolves a second copy of `ai` as soon as its pin and the range toolshed
+asks for stop agreeing. Rolling `ai`, any `@ai-sdk/*` provider, or either
+`@arizeai/openinference-*` package on its own is enough to do it, which is why
+they are rolled as one set:
+
+```bash
+deno outdated --update --latest --recursive ai @ai-sdk/groq @ai-sdk/openai \
+  @ai-sdk/anthropic @ai-sdk/google-vertex @ai-sdk/otel \
+  @arizeai/openinference-vercel @arizeai/openinference-semantic-conventions
+```
+
+`deno task check-single-copy-deps` (also a CI step) reads `deno.lock` and fails
+when one of those packages resolves more than once. `tasks/check-single-copy-deps.ts`
+holds the list, each entry with what breaks when it is duplicated; add to it
+when a package starts carrying cross-copy state.
+
 #### SSL Certificate Issues
 
 In some CI/test environments, you may encounter SSL certificate errors when Deno downloads npm packages:
@@ -495,6 +568,133 @@ A roll can therefore change it, which is why `check-cfc-types` is part of the
 sequence above. It reports whether the committed file still matches what the new
 compiler emits. If it does not, regenerate with `deno task gen-cfc-types` and
 commit the result.
+
+### The esbuild dependency
+
+`packages/felt` is the only package that declares esbuild. Its import map holds
+two entries that have to move in step: `npm:esbuild`, which felt calls directly,
+and `jsr:@deno/esbuild-plugin`, which teaches esbuild to resolve and load
+modules the way Deno does. The plugin is what lets felt bundle a source tree
+full of `jsr:` and `npm:` specifiers.
+
+Callers reach felt two ways, and the difference matters below. `packages/shell`
+owns `packages/shell/felt.config.ts`, the only felt config file in the repo, and
+it is the only caller that minifies. Everything else calls felt's exported
+`build()` and passes its own esbuild options: `packages/deno-web-test`, which is
+the browser test runner and forwards each package's `esbuildConfig`;
+`scripts/bundle.ts`; and one shell integration test.
+
+#### Why the pin stops at 0.25.x
+
+esbuild is held at 0.25.x even though 0.28.1 has been released. The constraint
+comes from the plugin rather than from esbuild.
+
+`@deno/esbuild-plugin` declares `npm:esbuild@^0.25.5`. A caret range on a
+version below 1.0 does not let the minor version move, so that range means
+0.25.5 or newer, and older than 0.26.0. Felt declares the same range today. Both
+resolve to one shared copy, and the lockfile holds a single esbuild.
+
+Raising felt's range to 0.28.1 does not raise the plugin's. The two ranges then
+have no version in common, so the lockfile carries 0.25.12 and 0.28.1 side by
+side. The cost is more than a duplicated entry. esbuild ships its compiler as a
+native binary, in a separate package for each platform, and Deno downloads the
+binary for the platform it is running on. The graph then holds two esbuild
+binaries of roughly ten megabytes each, and only one of them ever runs. CI
+restores and saves the Deno dependency cache on every job, so the second binary
+is weight carried in that cache rather than a download repeated per job. Every
+fresh checkout fetches it once.
+
+The second copy is never executed. The plugin's only mention of esbuild is a
+type-only import, which the compiler erases, so nothing in the plugin loads the
+esbuild that import names. Deno resolves and downloads that package anyway,
+which is the only reason the duplicate exists.
+
+That alone does not make the pairing safe, because the calls run the other way:
+esbuild calls the plugin. The plugin implements esbuild's plugin API. It reads
+the resolve and load arguments esbuild hands it, and returns paths and loader
+names. What has to hold is that API rather than the version number, and none of
+the three releases since 0.25 changed it. 0.26.0 changed nothing at all. 0.27.0
+raised the operating system floors of the released binaries. 0.28.0 added an
+integrity check to a fallback download path. Felt's builder tests exercise the
+pairing.
+
+Upstream is aware and has not acted.
+[denoland/deno-esbuild-plugin#36](https://github.com/denoland/deno-esbuild-plugin/issues/36)
+reports this exact duplicate, and no maintainer has replied. The plugin's
+esbuild range has not changed once across its ten releases, while esbuild
+shipped three new minor versions. A stale range costs the maintainers nothing,
+because the import is type-only, so nothing forces them to notice it.
+
+There are two ways around the plugin, and neither pays for itself. Felt could
+drive `@deno/loader` directly, which is the loader the plugin wraps. The
+plugin's value is absorbing that loader's API changes, and the loader is still
+below 1.0 and moving, so felt would inherit that churn. Felt could instead
+switch to `@luca/esbuild-deno-loader`, which sidesteps the duplicate by
+vendoring its own copy of the esbuild type declarations rather than depending on
+the npm package. That package resolves modules by its own reimplementation
+rather than by the Rust crates Deno itself uses, and it has gone untouched about
+a year longer than the plugin has. Either route would make felt the owner of how
+modules are resolved during a build, inside the tool that builds the shell.
+
+Treat 0.25.x as a holding position. The signal to re-evaluate is
+`@deno/esbuild-plugin` widening its esbuild range, or dropping the dependency in
+favour of vendored type declarations. Vendoring the declarations is the fix that
+suits upstream, since the import is type-only, and `@luca/esbuild-deno-loader`
+already does exactly that. If a future esbuild release carries something this
+repo needs, the duplicate is worth accepting. The pairing is safe, and the price
+is cache size.
+
+#### Keep `using` lowering on while the pin stands
+
+`packages/shell/felt.config.ts` sets `supported: { using: false }`, which asks
+esbuild to lower `using` declarations into explicit disposal calls instead of
+emitting them unchanged. The setting is there for output compatibility. On
+0.25.x it also prevents a miscompilation, so it needs to stay until the pin
+moves.
+
+esbuild 0.25.12's minifier sometimes folds a `using` declaration into the next
+use of the variable, and the disposal is lost. `packages/runner/src/traverse.ts`
+has the shape that triggers it, in five places: it declares
+`using t = ...tracker.include(...)` and reads `t` on the following line.
+Disposal is what releases the entry from the cycle tracker, so losing it leaves
+the entry behind. The consequence differs by call site. Where the code tests `t`
+for null and reports a cycle, a later traversal of the same value and schema
+would be read as a cycle that is not there. Where it falls back to the tracker's
+existing entry, that entry would be a stale value.
+
+Two things keep this off the table today. The fold happens only when minifying,
+and the shell is the only caller that minifies. The shell also lowers `using`,
+and the lowered form is not folded. esbuild fixed the underlying bug in 0.28.1.
+
+### The `@types/node` dependency
+
+Nothing here imports `@types/node`, and no import map names it. It reaches the
+dependency tree only because `protobufjs`, pulled in by the OpenTelemetry proto
+exporters, depends on it with a `>=13.7.0` range. An open-ended range resolves
+to the newest release each time the lockfile is regenerated, so this package's
+version moves on its own rather than when someone decides to roll it.
+
+Whether its globals reach a given package's type graph is not something
+`deno info` will tell you. They arrive as a type-only injection rather than
+through the module graph, and which packages they reach shifts with the rest of
+the dependency tree and with the Deno version. At 26.1.1 under Deno 2.8.1 they
+reach several package graphs, and `typeof fetch` there resolves to a type whose
+`init` parameter is the union `global.RequestInit | RequestInit`. Fields such as
+`signal` and `body` are not available on that union, so reading them stops type
+checking. At 24.2.0 the same code checks clean, and so does 26.1.1 under Deno
+2.8.3.
+
+The practical trap is that `typeof fetch` is not a dependable way to name a
+fetch-shaped value. Write the signature out instead. `HarnessFetch` in
+`packages/cf-harness/src/contracts/http-fetch.ts` and `RuntimeFetch` in
+`packages/runner/src/runtime.ts` are the package-level contracts. They hold
+whichever version resolves and whichever compiler checks them.
+
+Two things make this class of breakage easy to miss. `deno task check` does not
+cover every package: `cf-harness` is type checked only by its own test task, so
+its type errors surface in a test shard rather than the Check job. And CI pins
+Deno 2.8.1 while `tasks/check.sh` accepts any 2.8.x, so a local check and CI can
+disagree about what type checks.
 
 ### Running Tests
 

@@ -783,3 +783,104 @@ Deno.test("diffedit cov: message revert is null when the baseline has no such re
     done();
   }
 });
+
+// --- expandRoom and the join helpers ----------------------------------------
+
+Deno.test("diffedit cov: expandRoom is empty when the text no longer parses", () => {
+  const { ws, done } = tempWs({ "m.ts": EXPAND_FILE });
+  try {
+    const { src } = sourceFor(EXPAND_DIFF, ws);
+    // A non-diff has no hunks to report room for.
+    assertEquals(src.expandRoom!("not a diff\n").size, 0);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit cov: expandRoom skips a hunk whose file has no new side", () => {
+  const { ws, done } = tempWs({ "m.ts": EXPAND_FILE });
+  try {
+    const { src } = sourceFor(EXPAND_DIFF, ws);
+    // A deleted file's new path is /dev/null, i.e. absent, so its hunk backs no
+    // workspace file and offers no room — hunkFooting returns null for it.
+    const del = `diff --git a/m.ts b/m.ts
+deleted file mode 100644
+--- a/m.ts
++++ /dev/null
+@@ -1,2 +0,0 @@
+-alpha
+-beta
+`;
+    assertEquals(src.expandRoom!(del).size, 0);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit cov: expandContext declines when the save map lacks the cursor's hunk", () => {
+  const { ws, done } = tempWs({ "m.ts": "a\nb\nc\nd\ne\nf\ng\nh\n" });
+  try {
+    // The source is built from a one-hunk diff, so its save map has one entry.
+    // A later `current` grows a second hunk; a cursor in it resolves to global
+    // index 1, which the save map does not have — hunkFooting finds no range.
+    const oneHunk = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,3 +1,3 @@
+ a
+-x
++b
+ c
+`;
+    const { src } = sourceFor(oneHunk, ws);
+    const current = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,3 +1,3 @@
+ a
+-x
++b
+ c
+@@ -6,3 +6,3 @@
+ f
+-y
++g
+ h
+`;
+    const cursor = current.split("\n").indexOf(" f");
+    assertEquals(src.expandContext!(current, current, cursor), null);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit cov: dropHeaderBetween declines a non-diff and a lone hunk", () => {
+  // A non-diff has no hunks to join.
+  assertEquals(_de.dropHeaderBetween("not a diff", 0), null);
+  // A single hunk has no second one to take the header off.
+  const oneHunk = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,1 +1,1 @@
+-a
++A
+`;
+  assertEquals(_de.dropHeaderBetween(oneHunk, 0), null);
+});
+
+Deno.test("diffedit cov: joinAdjacent declines when the text will not drop a header", () => {
+  // The save map claims two adjacent, verified, same-file hunks, but the text
+  // holds only one, so dropHeaderBetween finds no pair and the join backs out.
+  const oneHunk = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,1 +1,1 @@
+-a
++A
+`;
+  const hunks = [
+    { absPath: "/x", newStart: 1, newCount: 1, verified: true },
+    { absPath: "/x", newStart: 2, newCount: 1, verified: true },
+  ];
+  assertEquals(_de.joinAdjacent(oneHunk, oneHunk, hunks, 0), null);
+});

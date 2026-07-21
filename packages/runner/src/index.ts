@@ -4,6 +4,7 @@ export type {
   ErrorHandler,
   ErrorWithContext as RuntimeErrorWithContext,
   ExperimentalOptions, // Space-model feature flags; see ExperimentalOptions in runtime.ts
+  RuntimeFetch,
   RuntimeOptions,
   SpaceCellContents,
   VersionSkewHandler,
@@ -78,7 +79,10 @@ export {
   type TypeScriptHarnessProcessOptions,
 } from "./harness/index.ts";
 export {
+  PATTERN_COVERAGE_INTEGRATION_TEST_NAME,
+  PATTERN_COVERAGE_TEST_NAME,
   PatternCoverageCollector,
+  type PatternCoverageData,
   type PatternCoverageFileReport,
   type PatternCoverageKind,
   patternCoverageOutputPath,
@@ -91,6 +95,8 @@ export {
 export { addCommonIDfromObjectID } from "./data-updating.ts";
 export {
   type BlindStructuralTarget,
+  isRendererInputTx,
+  markRendererInputTx,
   markUiInputBlindWriteTx,
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,

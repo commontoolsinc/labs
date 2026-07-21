@@ -62,21 +62,18 @@ const AIRTABLE_AUTH_SOURCE = `import {
   handler,
   NAME,
   pattern,
-  safeDateNow,
   Stream,
   TILE_UI,
   UI,
   type VNode,
+  wish,
   Writable,
 } from "commonfabric";
 
 type Secret<T> = T;
 
 import { refreshOAuthToken } from "../../auth/auth-refresh.ts";
-import {
-  REFRESH_THRESHOLD_MS,
-  startReactiveClock,
-} from "../../auth/auth-reactive.ts";
+import { REFRESH_THRESHOLD_MS } from "../../auth/auth-reactive.ts";
 import type { AuthStatus } from "../../auth/auth-types.ts";
 import {
   formatTokenExpiry,
@@ -123,10 +120,10 @@ export function createPreviewUI(
   const name = auth?.user?.name;
   const isAuthenticated = !!email;
 
-  // safeDateNow() capture is intentional — createPreviewUI produces a static
+  // Date.now() capture is intentional — createPreviewUI produces a static
   // snapshot for picker display, not a live-updating component. The main
   // pattern UI uses a reactive clock (startReactiveClock) separately.
-  const now = safeDateNow();
+  const now = Date.now();
   const expiresAt = auth?.expiresAt || 0;
   const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
   const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
@@ -343,7 +340,7 @@ const bgRefreshHandler = handler<
     const expiresAt = currentAuth.expiresAt ?? 0;
     if (expiresAt <= 0) return;
 
-    const timeRemaining = expiresAt - safeDateNow();
+    const timeRemaining = expiresAt - Date.now();
     if (timeRemaining > REFRESH_THRESHOLD_MS) return;
 
     console.log(
@@ -411,17 +408,20 @@ export default pattern<Input, Output>(
       return false;
     });
 
-    const now = new Writable(safeDateNow());
-    startReactiveClock(now);
+    // Reactive clock for token-expiry display; ticks each minute so the
+    // "Expires in" countdown refreshes. Coarsened to 1s and cached.
+    const now = wish<number>({ query: "#now/60" });
 
     const isTokenExpired = computed(() => {
       if (!authValue?.accessToken || !authValue?.expiresAt) return false;
-      return authValue.expiresAt < now.get();
+      if (now.result == null) return false;
+      return authValue.expiresAt < now.result;
     });
 
-    const tokenExpiryDisplay = computed(() =>
-      formatTokenExpiry(authValue?.expiresAt || 0, now.get())
-    );
+    const tokenExpiryDisplay = computed(() => {
+      if (now.result == null) return "";
+      return formatTokenExpiry(authValue?.expiresAt || 0, now.result);
+    });
 
     const checkboxesDisabled = computed(() => !!authValue?.accessToken);
 
@@ -439,11 +439,12 @@ export default pattern<Input, Output>(
       const email = authValue?.user?.email || "";
       const name = authValue?.user?.name || "";
       const isAuthenticated = !!email;
-      const now = safeDateNow();
+      const nowMs = now.result ?? 0;
       const expiresAt = authValue?.expiresAt || 0;
-      const isExpired = isAuthenticated && expiresAt > 0 && expiresAt < now;
+      const isExpired = isAuthenticated && expiresAt > 0 && nowMs > 0 &&
+        expiresAt < nowMs;
       const isWarning = isAuthenticated && !isExpired && expiresAt > 0 &&
-        expiresAt - now < 10 * 60 * 1000;
+        nowMs > 0 && expiresAt - nowMs < 10 * 60 * 1000;
       const status: AuthStatus = !isAuthenticated
         ? "needs-login"
         : isExpired
@@ -1285,7 +1286,18 @@ export interface ListRecordsOptions {
 // HELPERS
 // ============================================================================
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+// The SES pattern sandbox endows no timers, so a real delay happens only in
+// host contexts that expose setTimeout; in-sandbox this resolves immediately
+// rather than throwing ReferenceError (retries stay ~1s apart anyway via the
+// gated fetch's grid-aligned settlement).
+const sleep = (ms: number): Promise<void> => {
+  if (ms <= 0) return Promise.resolve();
+  const timer = (globalThis as { setTimeout?: typeof setTimeout }).setTimeout;
+  if (typeof timer !== "function") return Promise.resolve();
+  return new Promise((resolve) => {
+    timer(resolve, ms);
+  });
+};
 
 function debugLog(debugMode: boolean, ...args: unknown[]) {
   if (debugMode) console.log("[AirtableClient]", ...args);
@@ -1324,6 +1336,9 @@ export function AirtableClient(
 
   /**
    * Make an authenticated API request with retry and token refresh.
+   * Call this only from handler code: the sandbox fetch is handler-only
+   * (it throws in a lift/computed or the pattern body) and its settlement
+   * is coarsened to one-second resolution.
    */
   async function request<T>(
     url: string,
@@ -2292,7 +2307,7 @@ All patterns start with:
 import {
   computed, Default, handler, NAME, pattern,
   Stream, UI, Writable, getPatternEnvironment, wish, action, navigateTo,
-  safeDateNow, nonPrivateRandom, TILE_UI, CHIP_UI, uiVariant,
+  TILE_UI, CHIP_UI, uiVariant,
 } from "commonfabric";
 
 // Local no-op type alias for marking sensitive fields
@@ -2601,7 +2616,7 @@ ${
 Main importer pattern. Follow the Airtable importer reference:
 
 - CTS transforms are enabled by default; do not add \`/// <cf-disable-transform />\`
-- Import from \`"commonfabric"\`: computed, Default, handler, NAME, pattern, UI, type VNode, Writable, safeDateNow, nonPrivateRandom (only when needed)
+- Import from \`"commonfabric"\`: computed, Default, handler, NAME, pattern, UI, type VNode, Writable (only when needed)
 - Import the auth manager and client
 - Import \`authIsReady\` from \`"../auth/auth-types.ts"\` if the importer needs a shared readiness boolean
 - Define module-scope \`handler()\` functions for each API call:

@@ -54,7 +54,7 @@ const addExpenseHandler = handler<
     description: description.trim(),
     amount,
     category: category || "Other",
-    date: date || getTodayDate(),
+    date: date || getTodayDate(Date.now()),
   });
 });
 
@@ -96,8 +96,6 @@ const removeBudgetHandler = handler<
 
 // Use single type param to avoid conflict bug when composed
 export default pattern<Input>(({ expenses, budgets }) => {
-  const todayDate = getTodayDate();
-
   // Local state for form inputs
   const newDescription = new Writable("");
   const newAmount = new Writable("");
@@ -145,7 +143,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
                   description: desc,
                   amount: amt,
                   category: cat,
-                  date: todayDate,
+                  date: getTodayDate(Date.now()),
                 });
                 // Clear form
                 newDescription.set("");

@@ -52,8 +52,11 @@ where server and clients knowingly duplicate authoritative work.
   runtime realms in one process in a test.
 - **Await runtime.settled()** when async builtin writebacks matter.
 - **Use a port offset** for every test/dev server; never assume port 8000.
-- **Preserve established runtime restrictions.** Raw fetch is unavailable to
-  pattern code in SES. Server execution does not expose it.
+- **Preserve established runtime restrictions.** Pattern code in SES has no
+  raw fetch: the injected fetch is capability-gated (handler-only, settlement
+  coarsened to the one-second grid — see the timing side-channel spec,
+  channel 7). Server execution preserves that gate and does not expose an
+  ungated fetch.
 
 ### 0.1 Definition of done for every WO
 
@@ -733,8 +736,8 @@ the client runtime.
 2. Route builtin network operations through a host broker where practical.
    A direct executor implementation is acceptable only if it enforces the same
    tested policy and exposes no raw capability to pattern code.
-3. Preserve the SES invariant: raw fetch remains unavailable inside authored
-   pattern code.
+3. Preserve the SES invariant: authored pattern code never gets an ungated
+   fetch — only the capability-gated fetch (handler-only, grid-settled).
 4. Give the broker the canonical configured serving origin. Resolve relative
    paths against that origin, preserving today's behavior. Thus a relative path
    may intentionally reach the serving host even when local development uses
@@ -767,7 +770,8 @@ the client runtime.
       an origin-changing redirect is reclassified and blocked when private.
 - [ ] Absolute localhost/private/metadata URLs are blocked, including DNS and
       redirect rebinding cases.
-- [ ] Raw fetch remains unavailable in a pattern SES test.
+- [ ] A pattern SES test confirms fetch is the gated fetch (throws outside a
+      handler; no ungated host fetch reachable).
 - [ ] Supported fetch and generate actions execute once on the claimed server
       path in a multi-client fixture.
 - [ ] A request produced by user B is never signed/executed as sticky sponsor A;
@@ -1077,7 +1081,8 @@ relying on trusted claim compliance.
 - Overlay reconciliation uses the actual consumed input basis and explicit
   settlement, including no-op; committed overlays wait for acceptedCommitSeq
   data before clearing.
-- Raw fetch remains blocked in SES. Supported fetch/generate builtins retain
+- Fetch in SES remains capability-gated (no ungated fetch). Supported
+  fetch/generate builtins retain
   relative serving-host calls while external absolute URLs follow server
   egress policy.
 - Background registry integration follows the client-driven path, not the

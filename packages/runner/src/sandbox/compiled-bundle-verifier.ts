@@ -877,13 +877,6 @@ function verifyTrustedDataCall(
     return;
   }
 
-  if (
-    (trustedName === "safeDateNow" || trustedName === "nonPrivateRandom") &&
-    argCount === 0
-  ) {
-    return;
-  }
-
   if (trustedName === "schema" && argCount === 1) {
     return;
   }

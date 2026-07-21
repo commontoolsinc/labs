@@ -15,6 +15,8 @@
  * build time).
  */
 
+import type { RuntimeFetch } from "../runtime.ts";
+
 /**
  * True only when both build versions are known AND equal. Any unknown
  * (`undefined`) side ⇒ `false` — fail safe: never auto-update against an
@@ -36,7 +38,7 @@ export function buildsMatch(
  * `gitSha`) — the gate treats every `undefined` as "unknown → do not update".
  */
 export async function fetchToolshedGitSha(
-  fetchImpl: typeof globalThis.fetch,
+  fetchImpl: RuntimeFetch,
   host: string | URL,
 ): Promise<string | undefined> {
   try {

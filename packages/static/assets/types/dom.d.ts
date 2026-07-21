@@ -263,11 +263,6 @@ interface AbortController {
     abort(reason?: any): void;
 }
 
-declare var AbortController: {
-    prototype: AbortController;
-    new(): AbortController;
-};
-
 interface AbortSignalEventMap {
     "abort": Event;
 }
@@ -296,17 +291,6 @@ interface AbortSignal extends EventTarget {
     removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void;
 }
 
-declare var AbortSignal: {
-    prototype: AbortSignal;
-    new(): AbortSignal;
-    /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/abort_static) */
-    abort(reason?: any): AbortSignal;
-    /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/any_static) */
-    any(signals: AbortSignal[]): AbortSignal;
-    /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/AbortSignal/timeout_static) */
-    timeout(milliseconds: number): AbortSignal;
-};
-
 /**
  * The **`Blob`** interface represents a blob, which is a file-like object of immutable, raw data; they can be read as text or binary data, or converted into a ReadableStream so its methods can be used for processing the data.
  *
@@ -328,11 +312,6 @@ interface Blob {
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/Blob/text) */
     text(): Promise<string>;
 }
-
-declare var Blob: {
-    prototype: Blob;
-    new(blobParts?: BlobPart[], options?: BlobPropertyBag): Blob;
-};
 
 interface Body {
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/body) */
@@ -365,11 +344,6 @@ interface ByteLengthQueuingStrategy extends QueuingStrategy<ArrayBufferView> {
     readonly size: QueuingStrategySize<ArrayBufferView>;
 }
 
-declare var ByteLengthQueuingStrategy: {
-    prototype: ByteLengthQueuingStrategy;
-    new(init: QueuingStrategyInit): ByteLengthQueuingStrategy;
-};
-
 /**
  * The **`CountQueuingStrategy`** interface of the Streams API provides a built-in chunk counting queuing strategy that can be used when constructing streams.
  *
@@ -381,11 +355,6 @@ interface CountQueuingStrategy extends QueuingStrategy {
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/CountQueuingStrategy/size) */
     readonly size: QueuingStrategySize;
 }
-
-declare var CountQueuingStrategy: {
-    prototype: CountQueuingStrategy;
-    new(init: QueuingStrategyInit): CountQueuingStrategy;
-};
 
 /**
  * The **`CustomEvent`** interface represents events initialized by an application for any purpose.
@@ -406,11 +375,6 @@ interface CustomEvent<T = any> extends Event {
      */
     initCustomEvent(type: string, bubbles?: boolean, cancelable?: boolean, detail?: T): void;
 }
-
-declare var CustomEvent: {
-    prototype: CustomEvent;
-    new<T>(type: string, eventInitDict?: CustomEventInit<T>): CustomEvent<T>;
-};
 
 /**
  * The **`DOMException`** interface represents an abnormal event (called an **exception**) that occurs as a result of calling a method or accessing a property of a web API.
@@ -455,36 +419,6 @@ interface DOMException extends Error {
     readonly DATA_CLONE_ERR: 25;
 }
 
-declare var DOMException: {
-    prototype: DOMException;
-    new(message?: string, name?: string): DOMException;
-    readonly INDEX_SIZE_ERR: 1;
-    readonly DOMSTRING_SIZE_ERR: 2;
-    readonly HIERARCHY_REQUEST_ERR: 3;
-    readonly WRONG_DOCUMENT_ERR: 4;
-    readonly INVALID_CHARACTER_ERR: 5;
-    readonly NO_DATA_ALLOWED_ERR: 6;
-    readonly NO_MODIFICATION_ALLOWED_ERR: 7;
-    readonly NOT_FOUND_ERR: 8;
-    readonly NOT_SUPPORTED_ERR: 9;
-    readonly INUSE_ATTRIBUTE_ERR: 10;
-    readonly INVALID_STATE_ERR: 11;
-    readonly SYNTAX_ERR: 12;
-    readonly INVALID_MODIFICATION_ERR: 13;
-    readonly NAMESPACE_ERR: 14;
-    readonly INVALID_ACCESS_ERR: 15;
-    readonly VALIDATION_ERR: 16;
-    readonly TYPE_MISMATCH_ERR: 17;
-    readonly SECURITY_ERR: 18;
-    readonly NETWORK_ERR: 19;
-    readonly ABORT_ERR: 20;
-    readonly URL_MISMATCH_ERR: 21;
-    readonly QUOTA_EXCEEDED_ERR: 22;
-    readonly TIMEOUT_ERR: 23;
-    readonly INVALID_NODE_TYPE_ERR: 24;
-    readonly DATA_CLONE_ERR: 25;
-};
-
 /**
  * The **`ErrorEvent`** interface represents events providing information related to errors in scripts or in files.
  *
@@ -502,11 +436,6 @@ interface ErrorEvent extends Event {
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/ErrorEvent/message) */
     readonly message: string;
 }
-
-declare var ErrorEvent: {
-    prototype: ErrorEvent;
-    new(type: string, eventInitDict?: ErrorEventInit): ErrorEvent;
-};
 
 /**
  * The **`Event`** interface represents an event which takes place on an `EventTarget`.
@@ -628,15 +557,6 @@ interface Event {
     readonly BUBBLING_PHASE: 3;
 }
 
-declare var Event: {
-    prototype: Event;
-    new(type: string, eventInitDict?: EventInit): Event;
-    readonly NONE: 0;
-    readonly CAPTURING_PHASE: 1;
-    readonly AT_TARGET: 2;
-    readonly BUBBLING_PHASE: 3;
-};
-
 interface EventListener {
     (evt: Event): void;
 }
@@ -698,14 +618,6 @@ interface EventSource extends EventTarget {
     removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void;
 }
 
-declare var EventSource: {
-    prototype: EventSource;
-    new(url: string | URL, eventSourceInitDict?: EventSourceInit): EventSource;
-    readonly CONNECTING: 0;
-    readonly OPEN: 1;
-    readonly CLOSED: 2;
-};
-
 /**
  * The **`EventTarget`** interface is implemented by objects that can receive events and may have listeners for them.
  *
@@ -743,11 +655,6 @@ interface EventTarget {
      */
     removeEventListener(type: string, callback: EventListenerOrEventListenerObject | null, options?: EventListenerOptions | boolean): void;
 }
-
-declare var EventTarget: {
-    prototype: EventTarget;
-    new(): EventTarget;
-};
 
 interface GenericTransformStream {
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/CompressionStream/readable) */
@@ -802,11 +709,6 @@ interface MessageChannel {
     readonly port2: MessagePort;
 }
 
-declare var MessageChannel: {
-    prototype: MessageChannel;
-    new(): MessageChannel;
-};
-
 /**
  * The **`MessageEvent`** interface represents a message received by a target object.
  *
@@ -846,11 +748,6 @@ interface MessageEvent<T = any> extends Event {
     /** @deprecated */
     initMessageEvent(type: string, bubbles?: boolean, cancelable?: boolean, data?: any, origin?: string, lastEventId?: string, source?: MessageEventSource | null, ports?: MessagePort[]): void;
 }
-
-declare var MessageEvent: {
-    prototype: MessageEvent;
-    new<T>(type: string, eventInitDict?: MessageEventInit<T>): MessageEvent<T>;
-};
 
 interface MessageEventTargetEventMap {
     "message": MessageEvent;
@@ -906,11 +803,6 @@ interface MessagePort extends EventTarget, MessageEventTarget<MessagePort> {
     removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void;
 }
 
-declare var MessagePort: {
-    prototype: MessagePort;
-    new(): MessagePort;
-};
-
 /**
  * The **`PromiseRejectionEvent`** interface represents events which are sent to the global script context when JavaScript Promises are rejected.
  *
@@ -922,11 +814,6 @@ interface PromiseRejectionEvent extends Event {
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent/reason) */
     readonly reason: any;
 }
-
-declare var PromiseRejectionEvent: {
-    prototype: PromiseRejectionEvent;
-    new(type: string, eventInitDict: PromiseRejectionEventInit): PromiseRejectionEvent;
-};
 
 /**
  * The **`ReadableByteStreamController`** interface of the Streams API represents a controller for a readable byte stream.
@@ -945,11 +832,6 @@ interface ReadableByteStreamController {
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableByteStreamController/error) */
     error(e?: any): void;
 }
-
-declare var ReadableByteStreamController: {
-    prototype: ReadableByteStreamController;
-    new(): ReadableByteStreamController;
-};
 
 /**
  * The `ReadableStream` interface of the Streams API represents a readable stream of byte data.
@@ -973,13 +855,6 @@ interface ReadableStream<R = any> {
     tee(): [ReadableStream<R>, ReadableStream<R>];
 }
 
-declare var ReadableStream: {
-    prototype: ReadableStream;
-    new(underlyingSource: UnderlyingByteSource, strategy?: { highWaterMark?: number }): ReadableStream<Uint8Array<ArrayBuffer>>;
-    new<R = any>(underlyingSource: UnderlyingDefaultSource<R>, strategy?: QueuingStrategy<R>): ReadableStream<R>;
-    new<R = any>(underlyingSource?: UnderlyingSource<R>, strategy?: QueuingStrategy<R>): ReadableStream<R>;
-};
-
 /**
  * The `ReadableStreamBYOBReader` interface of the Streams API defines a reader for a ReadableStream that supports zero-copy reading from an underlying byte source.
  *
@@ -991,11 +866,6 @@ interface ReadableStreamBYOBReader extends ReadableStreamGenericReader {
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBReader/releaseLock) */
     releaseLock(): void;
 }
-
-declare var ReadableStreamBYOBReader: {
-    prototype: ReadableStreamBYOBReader;
-    new(stream: ReadableStream<Uint8Array<ArrayBuffer>>): ReadableStreamBYOBReader;
-};
 
 /**
  * The **`ReadableStreamBYOBRequest`** interface of the Streams API represents a 'pull request' for data from an underlying source that will made as a zero-copy transfer to a consumer (bypassing the stream's internal queues).
@@ -1010,11 +880,6 @@ interface ReadableStreamBYOBRequest {
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBRequest/respondWithNewView) */
     respondWithNewView(view: ArrayBufferView<ArrayBuffer>): void;
 }
-
-declare var ReadableStreamBYOBRequest: {
-    prototype: ReadableStreamBYOBRequest;
-    new(): ReadableStreamBYOBRequest;
-};
 
 /**
  * The **`ReadableStreamDefaultController`** interface of the Streams API represents a controller allowing control of a ReadableStream's state and internal queue.
@@ -1032,11 +897,6 @@ interface ReadableStreamDefaultController<R = any> {
     error(e?: any): void;
 }
 
-declare var ReadableStreamDefaultController: {
-    prototype: ReadableStreamDefaultController;
-    new(): ReadableStreamDefaultController;
-};
-
 /**
  * The **`ReadableStreamDefaultReader`** interface of the Streams API represents a default reader that can be used to read stream data supplied from a network (such as a fetch request).
  *
@@ -1048,11 +908,6 @@ interface ReadableStreamDefaultReader<R = any> extends ReadableStreamGenericRead
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamDefaultReader/releaseLock) */
     releaseLock(): void;
 }
-
-declare var ReadableStreamDefaultReader: {
-    prototype: ReadableStreamDefaultReader;
-    new<R = any>(stream: ReadableStream<R>): ReadableStreamDefaultReader<R>;
-};
 
 interface ReadableStreamGenericReader {
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/ReadableStreamBYOBReader/closed) */
@@ -1249,11 +1104,6 @@ interface TextDecoderStream extends GenericTransformStream, TextDecoderCommon {
     readonly writable: WritableStream<BufferSource>;
 }
 
-declare var TextDecoderStream: {
-    prototype: TextDecoderStream;
-    new(label?: string, options?: TextDecoderOptions): TextDecoderStream;
-};
-
 /**
  * The **`TextEncoder`** interface takes a stream of code points as input and emits a stream of UTF-8 bytes.
  *
@@ -1298,11 +1148,6 @@ interface TextEncoderStream extends GenericTransformStream, TextEncoderCommon {
     readonly writable: WritableStream<string>;
 }
 
-declare var TextEncoderStream: {
-    prototype: TextEncoderStream;
-    new(): TextEncoderStream;
-};
-
 /**
  * The **`TransformStream`** interface of the Streams API represents a concrete implementation of the pipe chain _transform stream_ concept.
  *
@@ -1314,11 +1159,6 @@ interface TransformStream<I = any, O = any> {
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStream/writable) */
     readonly writable: WritableStream<I>;
 }
-
-declare var TransformStream: {
-    prototype: TransformStream;
-    new<I = any, O = any>(transformer?: Transformer<I, O>, writableStrategy?: QueuingStrategy<I>, readableStrategy?: QueuingStrategy<O>): TransformStream<I, O>;
-};
 
 /**
  * The **`TransformStreamDefaultController`** interface of the Streams API provides methods to manipulate the associated ReadableStream and WritableStream.
@@ -1335,11 +1175,6 @@ interface TransformStreamDefaultController<O = any> {
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/TransformStreamDefaultController/terminate) */
     terminate(): void;
 }
-
-declare var TransformStreamDefaultController: {
-    prototype: TransformStreamDefaultController;
-    new(): TransformStreamDefaultController;
-};
 
 /**
  * The **`URL`** interface is used to parse, construct, normalize, and encode URL.
@@ -1461,11 +1296,6 @@ interface WritableStream<W = any> {
     getWriter(): WritableStreamDefaultWriter<W>;
 }
 
-declare var WritableStream: {
-    prototype: WritableStream;
-    new<W = any>(underlyingSink?: UnderlyingSink<W>, strategy?: QueuingStrategy<W>): WritableStream<W>;
-};
-
 /**
  * The **`WritableStreamDefaultController`** interface of the Streams API represents a controller allowing control of a WritableStream's state.
  *
@@ -1477,11 +1307,6 @@ interface WritableStreamDefaultController {
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultController/error) */
     error(e?: any): void;
 }
-
-declare var WritableStreamDefaultController: {
-    prototype: WritableStreamDefaultController;
-    new(): WritableStreamDefaultController;
-};
 
 /**
  * The **`WritableStreamDefaultWriter`** interface of the Streams API is the object returned by WritableStream.getWriter() and once created locks the writer to the `WritableStream` ensuring that no other streams can write to the underlying sink.
@@ -1504,11 +1329,6 @@ interface WritableStreamDefaultWriter<W = any> {
     /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/WritableStreamDefaultWriter/write) */
     write(chunk?: W): Promise<void>;
 }
-
-declare var WritableStreamDefaultWriter: {
-    prototype: WritableStreamDefaultWriter;
-    new<W = any>(stream: WritableStream<W>): WritableStreamDefaultWriter<W>;
-};
 
 /** The **`console`** object provides access to the debugging console (e.g., the Web console in Firefox). */
 /**
@@ -1639,7 +1459,6 @@ interface WorkerGlobalScope {
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/WorkerGlobalScope/self)
  */
-declare var self: WorkerGlobalScope & typeof globalThis;
 /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/atob) */
 declare function atob(data: string): string;
 /** [MDN Reference](https://developer.mozilla.org/docs/Web/API/Window/btoa) */

@@ -1,6 +1,10 @@
 // Inline scheduler idempotency check tests.
 
-import { findDifferingWriteKeys } from "../src/scheduler/diagnosis.ts";
+import {
+  captureTransactionWrites,
+  findDifferingWriteKeys,
+  makeAddressKey,
+} from "../src/scheduler/diagnosis.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   afterEach,
@@ -232,5 +236,55 @@ describe("inline idempotency check mode", () => {
     expect(findDifferingWriteKeys(previousWrites, latestWrites)).toEqual([
       "missing-output",
     ]);
+  });
+
+  it("ignores a recheck's no-novelty materialization touch", () => {
+    // Model the multi-user `cf test` flake at the write-capture boundary. Both
+    // runs of the idempotency recheck emit the same value-carrying output, but
+    // the fresh recheck run additionally touches a cell it reads — resolving a
+    // redirect link into the replica the first time that transaction reads it.
+    // The reactivity log records that touch as a write, yet the transaction
+    // journal has no novelty for it (the read did not change committed state).
+    // The original run, which already materialized the cell, does not touch it.
+    // captureTransactionWrites must keep value-carrying writes and drop the
+    // touch, so the two runs compare equal instead of flagging a spurious
+    // non-idempotency.
+    const valueCell = runtime.getCell<number>(
+      space,
+      "novelty-value-write",
+      undefined,
+      tx,
+    );
+    const touchCell = runtime.getCell<number>(
+      space,
+      "materialization-touch",
+      undefined,
+      tx,
+    );
+    const valueAddr = toMemorySpaceAddress(valueCell.getAsNormalizedFullLink());
+    const touchAddr = toMemorySpaceAddress(touchCell.getAsNormalizedFullLink());
+
+    // Both transaction journals have novelty for the value write only; the
+    // touch never appears in journal novelty.
+    const journalWithValueOnly = {
+      getWriteDetails: (querySpace: unknown) =>
+        querySpace === space ? [{ address: valueAddr, value: 7 }] : [],
+    } as unknown as IExtendedStorageTransaction;
+
+    const originalWrites = captureTransactionWrites(journalWithValueOnly, [
+      valueAddr,
+    ]);
+    const recheckWrites = captureTransactionWrites(journalWithValueOnly, [
+      valueAddr,
+      touchAddr,
+    ]);
+
+    expect(recheckWrites.get(makeAddressKey(valueAddr))).toBe(7);
+    expect(recheckWrites.has(makeAddressKey(touchAddr))).toBe(false);
+    expect(
+      findDifferingWriteKeys(originalWrites, recheckWrites, {
+        keySet: "latest",
+      }),
+    ).toEqual([]);
   });
 });

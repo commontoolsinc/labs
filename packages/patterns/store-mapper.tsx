@@ -17,7 +17,6 @@ import {
   handler,
   NAME,
   pattern,
-  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";
@@ -2100,7 +2099,7 @@ export default pattern<Input, Output>(
                               itemName: item,
                               correctAisle: aisle,
                               incorrectAisle: "",
-                              timestamp: safeDateNow(),
+                              timestamp: Date.now(),
                             });
                             itemLocations.set(filtered);
                             newCorrectionItem.set("");

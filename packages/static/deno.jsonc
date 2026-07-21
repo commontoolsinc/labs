@@ -11,7 +11,9 @@
     "browser-test": "deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts test/*.test.ts",
     "compile-types": "./scripts/compile-type-lib.ts ../../../TypeScript/src/lib ./assets/types/es2023.d.ts",
     "gen-cfc-types": "./scripts/generate-cfc-types.ts",
-    "check-cfc-types": "./scripts/generate-cfc-types.ts --check"
+    "check-cfc-types": "./scripts/generate-cfc-types.ts --check",
+    "strip-withheld-globals": "./scripts/strip-withheld-globals.ts",
+    "check-withheld-globals": "./scripts/strip-withheld-globals.ts --check"
   },
   "imports": {
     "typescript": "npm:typescript@6.0.3"

@@ -101,6 +101,52 @@ export function displayColumnOf(
   return cells.length;
 }
 
+/** The source column represented at a display-column offset. */
+export function sourceColumnOf(
+  line: Line,
+  mode: DisplayMode,
+  displayCol: number,
+): number {
+  const at = Math.max(0, displayCol);
+  let sourceWidth = 0;
+  for (const _ of line.text) sourceWidth++;
+  if (mode === "pictures") return Math.min(at, sourceWidth);
+  const cells = displayLine(line, mode);
+  if (cells.length === 0) return 0;
+  return at < cells.length ? cells[at].col : sourceWidth;
+}
+
+/** Number of cells a line occupies in one display mode. */
+export function displayWidth(line: Line, mode: DisplayMode): number {
+  if (mode === "pictures") {
+    let width = 0;
+    for (const _ of line.text) width++;
+    return width;
+  }
+  let width = 0;
+  let hiddenRun = false;
+  for (let i = 0; i < line.text.length;) {
+    const sequence = matchTextCsi(line.text, i);
+    if (
+      sequence && (mode === "hidden" || sequence.final === "m")
+    ) {
+      i = sequence.end;
+      hiddenRun = false;
+      continue;
+    }
+    const codePoint = line.text.codePointAt(i)!;
+    if (mode === "hidden" && isNonPrintableCode(codePoint)) {
+      if (!hiddenRun) width++;
+      hiddenRun = true;
+    } else {
+      width++;
+      hiddenRun = false;
+    }
+    i += codePoint > 0xffff ? 2 : 1;
+  }
+  return width;
+}
+
 export function displayLine(
   line: Line,
   mode: DisplayMode,
@@ -182,8 +228,11 @@ function displayHidden(src: readonly SourcePoint[]): DisplayCell[] {
 
 /** A control code (C0 or DEL/C1) with no ordinary glyph of its own. */
 function isNonPrintable(cp: string): boolean {
-  const c = cp.codePointAt(0) ?? 0x20;
-  return c < 0x20 || (c >= 0x7f && c <= 0x9f);
+  return isNonPrintableCode(cp.codePointAt(0) ?? 0x20);
+}
+
+function isNonPrintableCode(codePoint: number): boolean {
+  return codePoint < 0x20 || (codePoint >= 0x7f && codePoint <= 0x9f);
 }
 
 /** Whether `text` holds any non-printable character — the display modes only
@@ -216,6 +265,22 @@ interface CsiMatch {
   readonly params: string;
 }
 
+interface TextCsiMatch {
+  readonly end: number;
+  readonly final: string;
+}
+
+function matchTextCsi(text: string, start: number): TextCsiMatch | null {
+  if (text.charCodeAt(start) !== 0x1b || text.charCodeAt(start + 1) !== 0x5b) {
+    return null;
+  }
+  let i = start + 2;
+  while (i < text.length && inCodeRange(text.charCodeAt(i), 0x30, 0x3f)) i++;
+  while (i < text.length && inCodeRange(text.charCodeAt(i), 0x20, 0x2f)) i++;
+  const final = text.charCodeAt(i);
+  return inCodeRange(final, 0x40, 0x7e) ? { end: i + 1, final: text[i] } : null;
+}
+
 /** Match a CSI sequence — `ESC [` , parameter bytes (0x30–0x3F), intermediate
  * bytes (0x20–0x2F), then a final byte (0x40–0x7E) — starting at `i`, or null. */
 function matchCsi(src: readonly SourcePoint[], i: number): CsiMatch | null {
@@ -235,7 +300,11 @@ function matchCsi(src: readonly SourcePoint[], i: number): CsiMatch | null {
 
 function inRange(cp: string, lo: number, hi: number): boolean {
   const c = cp.codePointAt(0) ?? -1;
-  return c >= lo && c <= hi;
+  return inCodeRange(c, lo, hi);
+}
+
+function inCodeRange(code: number, lo: number, hi: number): boolean {
+  return code >= lo && code <= hi;
 }
 
 function hasStyle(style: Style): boolean {

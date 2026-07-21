@@ -316,6 +316,13 @@ Deno.test({
         await p.expect("greet", "the first frame of the document");
         await p.sendExpectingRedraw("j");
         await p.sendExpectingRedraw("k");
+        await p.send("\\");
+        await p.expect("Line wrapping: on", "backslash enables line wrapping");
+        await p.send("\\");
+        await p.expect(
+          "Line wrapping: off",
+          "backslash disables line wrapping",
+        );
         await p.send("G");
         await p.expect("END", "the end-of-document position indicator");
         await p.sendExpectingRedraw("g");

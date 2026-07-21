@@ -3,11 +3,7 @@ import {
   isTrustedBuilder,
   isTrustedDataHelper,
 } from "@commonfabric/utils/sandbox-contract";
-import {
-  CF_DATA_HELPER_IDENTIFIER,
-  HelpersOnlyTransformer,
-  TransformationContext,
-} from "../core/mod.ts";
+import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 
 const CF_DATA_CONSTRUCTOR_NAMES = new Set(["Map", "Set"]);
@@ -36,13 +32,7 @@ export class ModuleScopeCfDataTransformer extends HelpersOnlyTransformer {
       return sourceFile;
     }
 
-    const statements = (
-        context.cfHelpers.sourceHasHelpers() ||
-        context.cfHelpers.sourceHasDataHelper()
-      )
-      ? transformedStatements
-      : [createCfDataHelperImport(factory), ...transformedStatements];
-    return factory.updateSourceFile(sourceFile, statements);
+    return factory.updateSourceFile(sourceFile, transformedStatements);
   }
 }
 
@@ -130,13 +120,10 @@ function wrapWithCfData(
   expression: ts.Expression,
   context: TransformationContext,
 ): ts.CallExpression {
-  const helperExpr = context.cfHelpers.sourceHasHelpers()
-    ? context.cfHelpers.getHelperExpr("__cf_data")
-    : context.cfHelpers.sourceHasDataHelper()
-    ? context.cfHelpers.getDataHelperExpr(expression)
-    : context.factory.createIdentifier(CF_DATA_HELPER_IDENTIFIER);
+  // The HelpersOnlyTransformer filter guarantees the helpers import is
+  // present; getHelperExpr throws if that invariant is ever violated.
   return context.factory.createCallExpression(
-    helperExpr,
+    context.cfHelpers.getHelperExpr("__cf_data"),
     undefined,
     [expression],
   );
@@ -152,7 +139,6 @@ function shouldWrapTopLevelExpression(
   }
 
   const expr = unwrapExpression(expression);
-  const helpersPresent = context.cfHelpers.sourceHasHelpers();
 
   if (
     ts.isArrowFunction(expr) ||
@@ -160,10 +146,6 @@ function shouldWrapTopLevelExpression(
     ts.isClassExpression(expr)
   ) {
     return false;
-  }
-
-  if (!helpersPresent) {
-    return ts.isCallExpression(expr) && isPrimitiveSnapshotCall(expr, context);
   }
 
   if (ts.isCallExpression(expr)) {
@@ -189,27 +171,6 @@ function shouldWrapTopLevelExpression(
   }
 
   return false;
-}
-
-function createCfDataHelperImport(
-  factory: ts.NodeFactory,
-): ts.ImportDeclaration {
-  return factory.createImportDeclaration(
-    undefined,
-    factory.createImportClause(
-      false,
-      undefined,
-      factory.createNamedImports([
-        factory.createImportSpecifier(
-          false,
-          factory.createIdentifier("__cf_data"),
-          factory.createIdentifier(CF_DATA_HELPER_IDENTIFIER),
-        ),
-      ]),
-    ),
-    factory.createStringLiteral("commonfabric"),
-    undefined,
-  );
 }
 
 function isTrustedBuilderCall(expression: ts.CallExpression): boolean {

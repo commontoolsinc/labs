@@ -18,7 +18,7 @@ import {
 } from "./runtime-processor.ts";
 import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
 import { cfcAtom } from "@commonfabric/api/cfc";
-import { runtimePresets } from "@commonfabric/runner";
+import { type RuntimeFetch, runtimePresets } from "@commonfabric/runner";
 import {
   type CellRef,
   type CfcLabelView,
@@ -1038,7 +1038,7 @@ describe("RuntimeProcessor blob upload IPC", () => {
     const originalFetch = globalThis.fetch;
     let requestedUrl: string | undefined;
     let requestedPayload: unknown;
-    globalThis.fetch = (input, init) => {
+    const blobFetch: RuntimeFetch = (input, init) => {
       requestedUrl = input.toString();
       requestedPayload = decodeMemoryBoundary(init?.body as string);
       return Promise.resolve(
@@ -1054,6 +1054,7 @@ describe("RuntimeProcessor blob upload IPC", () => {
         ),
       );
     };
+    globalThis.fetch = blobFetch as typeof globalThis.fetch;
     // The constructor performs full runtime initialization; this focused unit
     // test calls the handler with the fields it reads directly.
     const hostForSpaceCalls: string[] = [];
@@ -2377,6 +2378,55 @@ describe("RuntimeProcessor VDom event label-view ingress", () => {
   });
 });
 
+describe("RuntimeProcessor pattern coverage IPC", () => {
+  const report = {
+    spans: [{
+      fileName: "/main.tsx",
+      id: 1,
+      kind: "runtime" as const,
+      startLine: 1,
+      endLine: 1,
+      startColumn: 1,
+      endColumn: 2,
+    }],
+    hits: [{ fileName: "/main.tsx", id: 1, count: 3 }],
+  };
+
+  it("returns the worker collector's report", () => {
+    const processor = {
+      runtime: { patternCoverage: { toData: () => report } },
+    } as unknown as RuntimeProcessor;
+    expect(
+      RuntimeProcessor.prototype.getPatternCoverage.call(processor, {
+        type: RequestType.GetPatternCoverage,
+      }),
+    ).toEqual({ data: report });
+  });
+
+  it("reports null when the worker was built without a collector", () => {
+    const processor = { runtime: {} } as unknown as RuntimeProcessor;
+    expect(
+      RuntimeProcessor.prototype.getPatternCoverage.call(processor, {
+        type: RequestType.GetPatternCoverage,
+      }),
+    ).toEqual({ data: null });
+  });
+
+  it("routes a GetPatternCoverage request through the dispatcher", async () => {
+    const processor = {
+      runtime: { patternCoverage: { toData: () => report } },
+      // handleRequest dispatches to this.getPatternCoverage; the stub carries
+      // the real method so the routing case executes it.
+      getPatternCoverage: RuntimeProcessor.prototype.getPatternCoverage,
+    } as unknown as RuntimeProcessor;
+    expect(
+      await RuntimeProcessor.prototype.handleRequest.call(processor, {
+        type: RequestType.GetPatternCoverage,
+      }),
+    ).toEqual({ data: report });
+  });
+});
+
 describe("browserWorkerParamsFromInitializationData", () => {
   it("threads CFC initialization settings through the preset into runtime options", () => {
     const telemetry = { marker() {} } as unknown as Parameters<
@@ -2495,6 +2545,39 @@ describe("browserWorkerParamsFromInitializationData", () => {
     expect(options.spaceHostMap).toEqual({
       "did:key:federated": "http://other-host.test/",
     });
+  });
+
+  it("builds a fresh collector only when the host asks for coverage", () => {
+    const storageManager = {
+      as: { did: () => "did:key:worker" },
+    } as unknown as Parameters<
+      typeof browserWorkerParamsFromInitializationData
+    >[1];
+    const telemetry = { marker() {} } as unknown as Parameters<
+      typeof browserWorkerParamsFromInitializationData
+    >[2];
+    const params = (patternCoverage: boolean | undefined) =>
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+          ...(patternCoverage === undefined ? {} : { patternCoverage }),
+        },
+        storageManager,
+        telemetry,
+      );
+
+    // On → a real collector the GetPatternCoverage handler can read back.
+    const on = runtimePresets.browserWorker(params(true));
+    expect(on.patternCoverage).toBeDefined();
+    expect(typeof on.patternCoverage?.toData).toBe("function");
+
+    // Off / absent → omitted, so the worker runs uninstrumented.
+    expect(runtimePresets.browserWorker(params(false)).patternCoverage)
+      .toBeUndefined();
+    expect(runtimePresets.browserWorker(params(undefined)).patternCoverage)
+      .toBeUndefined();
   });
 });
 

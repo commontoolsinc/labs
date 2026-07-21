@@ -23,6 +23,7 @@ function baseView(over: Partial<ViewState> = {}): ViewState {
     height: 10,
     color: true,
     showLineNumbers: false,
+    wrapLines: false,
     displayMode: "pictures",
     selected: null,
     matches: null,
@@ -81,6 +82,25 @@ Deno.test("cursorScreenPos: maps document coords to 1-based screen coords", () =
   const pos = cursorScreenPos(doc, view);
   // r = line - top = 2; row = r + 1 = 3. col = gutter(0)+guide(0)+contentCol(4)+1
   assertEquals(pos, { row: 3, col: 5 });
+});
+
+Deno.test("cursorScreenPos: maps a wrapped continuation to its screen row", () => {
+  const doc = parseDocument("abcdefghij");
+  const view = baseView({
+    cursor: { line: 0, col: 7 },
+    width: 5,
+    height: 4,
+    wrapLines: true,
+  });
+  assertEquals(cursorScreenPos(doc, view), { row: 2, col: 4 });
+});
+
+Deno.test("cursorScreenPos: rejects a cursor outside the document", () => {
+  const doc = parseDocument("one line");
+  assertEquals(
+    cursorScreenPos(doc, baseView({ cursor: { line: 4, col: 0 } })),
+    null,
+  );
 });
 
 Deno.test("cursorScreenPos: accounts for the line-number gutter and guide bar", () => {
@@ -331,7 +351,10 @@ Deno.test("renderStatus: e / C / # hints appear only where they apply", () => {
   const neither = line({ canEdit: false, hasNonPrintables: false });
   assert(!neither.includes("e Edit"), neither);
   assert(!neither.includes("C Chars"), neither);
+  assert(neither.includes("\\ Wrap"), neither);
   assert(neither.includes("# Lines"), neither);
+  const wrapped = line({ wrapLines: true });
+  assert(wrapped.includes("\\ Unwrap"), wrapped);
 });
 
 Deno.test("renderStatus: a narrow bar drops the lowest-priority hints first", () => {
@@ -596,6 +619,128 @@ Deno.test("dialog: collapses on a terminal too narrow to frame", () => {
   assert(
     dialogBox(baseView({ width: 3, height: 12 }), dlg).boxW < 2,
     "collapses",
+  );
+});
+
+Deno.test("dialog: body sits two columns inside each border", () => {
+  const rows = renderFrame(
+    parseDocument("x\n"),
+    baseView({
+      width: 40,
+      height: 12,
+      color: false,
+      dialog: { title: "T", body: ["hello world"], buttons: [] },
+    }),
+  );
+  const bodyRow = rows.map(stripAnsi).find((r) => r.includes("hello world"))!;
+  const left = bodyRow.indexOf("║");
+  const right = bodyRow.indexOf("║", left + 1);
+  // Two blank margin columns separate the border from the content on each side.
+  assertEquals(
+    bodyRow.slice(left + 1, left + 3),
+    "  ",
+    "two blank columns after the left border",
+  );
+  assertEquals(
+    bodyRow.slice(left + 3, left + 3 + "hello world".length),
+    "hello world",
+    "content begins after the margin",
+  );
+  assertEquals(
+    bodyRow.slice(right - 2, right),
+    "  ",
+    "two blank columns before the right border",
+  );
+});
+
+Deno.test("dialog: the focused button — not just the default — is highlighted", () => {
+  const dlg: DialogState = {
+    title: "Pick",
+    body: ["Which one?"],
+    buttons: [
+      { label: "One", hotkey: "o" },
+      { label: "Two", hotkey: "t" },
+    ],
+  };
+  const render = (focus?: number) =>
+    renderFrame(
+      parseDocument("x\n"),
+      baseView({
+        width: 40,
+        height: 12,
+        color: true,
+        dialog: { ...dlg, focus },
+      }),
+    );
+  // The bright face is the default-button colour on the button-face background;
+  // it only appears where a button is highlighted.
+  const brightFace = fgCode(ui.buttonDefault.fg!) + ";" + bgCode(ui.button.bg!);
+
+  // No focus and no default kind: no button is brightened.
+  assert(
+    !render(-1).join("").includes(brightFace),
+    "nothing highlighted without focus",
+  );
+
+  // Focusing a button brightens that button, and moving focus moves the bright
+  // face to the newly focused label.
+  for (const [focus, label] of [[0, "One"], [1, "Two"]] as const) {
+    const btnRow = render(focus).find((r) => stripAnsi(r).includes("One"))!;
+    assert(btnRow.includes(brightFace), `button ${focus} is highlighted`);
+    // Read past the rest of the bright face's escape (its closing `m`) to the
+    // label text that follows it.
+    const sgrEnd = btnRow.indexOf("m", btnRow.indexOf(brightFace)) + 1;
+    const after = stripAnsi(btnRow.slice(sgrEnd)).trimStart();
+    assert(
+      after.startsWith(label),
+      `the highlight sits on ${label}: ${after}`,
+    );
+  }
+});
+
+Deno.test("dialog: a pushed button loses its shadow and shifts one column right", () => {
+  const dlg: DialogState = {
+    title: "T",
+    body: ["Go?"],
+    buttons: [{ label: "Ok", hotkey: "o", kind: "default" }],
+  };
+  const render = (over: Partial<DialogState>) =>
+    renderFrame(
+      parseDocument("x\n"),
+      baseView({
+        width: 40,
+        height: 12,
+        color: true,
+        dialog: { ...dlg, ...over },
+      }),
+    ).map(stripAnsi);
+
+  const normal = render({});
+  const pushed = render({ pushed: 0 });
+  // The half-block shadow glyphs come only from the button; a press drops them.
+  assert(
+    normal.join("\n").includes("▀"),
+    "a resting button casts a shadow band",
+  );
+  assert(
+    normal.join("\n").includes("▄"),
+    "a resting button casts a right edge",
+  );
+  assert(
+    !pushed.join("\n").includes("▀"),
+    "a pushed button casts no shadow band",
+  );
+  assert(
+    !pushed.join("\n").includes("▄"),
+    "a pushed button casts no right edge",
+  );
+  // The face slides one column into the space its shadow held.
+  const normalRow = normal.find((r) => r.includes("Ok"))!;
+  const pushedRow = pushed.find((r) => r.includes("Ok"))!;
+  assertEquals(
+    pushedRow.indexOf("Ok"),
+    normalRow.indexOf("Ok") + 1,
+    "the pressed face shifts right by one column",
   );
 });
 

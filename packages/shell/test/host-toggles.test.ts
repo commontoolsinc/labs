@@ -1,6 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { runtimeHostFlags, setupHostToggles } from "../src/lib/host-toggles.ts";
+import {
+  isPatternCoverageEnabled,
+  runtimeHostFlags,
+  setupHostToggles,
+} from "../src/lib/host-toggles.ts";
 
 class FakeStorage {
   map = new Map<string, string>();
@@ -73,6 +77,33 @@ describe("setupHostToggles", () => {
   });
 });
 
+describe("isPatternCoverageEnabled", () => {
+  it("defaults to false when reading localStorage throws", () => {
+    // Accessing localStorage throws in some environments (disabled storage,
+    // sandboxed frames). The toggle must swallow that and default off rather
+    // than break runtime construction at login.
+    const descriptor = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "localStorage",
+    );
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("localStorage is blocked");
+      },
+    });
+    try {
+      expect(isPatternCoverageEnabled()).toBe(false);
+    } finally {
+      if (descriptor) {
+        Object.defineProperty(globalThis, "localStorage", descriptor);
+      } else {
+        delete (globalThis as { localStorage?: unknown }).localStorage;
+      }
+    }
+  });
+});
+
 describe("runtimeHostFlags", () => {
   it("defaults every flag to false", () => {
     const h = setup();
@@ -80,6 +111,7 @@ describe("runtimeHostFlags", () => {
       expect(runtimeHostFlags()).toEqual({
         forwardWorkerConsole: false,
         cfcRenderCeiling: false,
+        patternCoverage: false,
       });
     } finally {
       h.restore();
@@ -93,11 +125,19 @@ describe("runtimeHostFlags", () => {
       expect(runtimeHostFlags()).toEqual({
         forwardWorkerConsole: true,
         cfcRenderCeiling: false,
+        patternCoverage: false,
       });
       h.storage.map.set("cfcRenderCeiling", "true");
       expect(runtimeHostFlags()).toEqual({
         forwardWorkerConsole: true,
         cfcRenderCeiling: true,
+        patternCoverage: false,
+      });
+      h.storage.map.set("patternCoverage", "true");
+      expect(runtimeHostFlags()).toEqual({
+        forwardWorkerConsole: true,
+        cfcRenderCeiling: true,
+        patternCoverage: true,
       });
     } finally {
       h.restore();

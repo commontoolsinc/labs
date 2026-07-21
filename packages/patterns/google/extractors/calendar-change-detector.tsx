@@ -22,9 +22,9 @@ import {
   NAME,
   pattern,
   type PatternFactory,
-  safeDateNow,
   TILE_UI,
   UI,
+  wish,
 } from "commonfabric";
 import type { Schema } from "commonfabric/schema";
 import GmailExtractor from "../core/gmail-extractor.tsx";
@@ -298,6 +298,10 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     {},
   );
 
+  // Reactive current time, ticking once a minute so the relative 7-day window
+  // and urgency classification roll over as the day advances.
+  const nowCell = wish<number>({ query: "#now/60" });
+
   // ==========================================================================
   // SCHEDULE CHANGE TRACKING
   // Process analyses and build change list
@@ -306,8 +310,12 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   const changes = computed(() => {
     const changeList: ScheduleChange[] = [];
 
+    // Until #now resolves, report no changes rather than computing the date
+    // window against the Unix epoch.
+    if (nowCell.result == null) return changeList;
+
     // Create a single reference date for ALL calculations
-    const today = new Date(safeDateNow());
+    const today = new Date(nowCell.result);
     today.setHours(0, 0, 0, 0);
 
     // Seven days from now

@@ -318,12 +318,13 @@ Key points:
 
 ## Testing Time and Randomness
 
-If a pattern uses `safeDateNow()` or `nonPrivateRandom()`, keep the assertions
-deterministic:
+If a pattern reads the clock with `Date.now()`/`new Date()` or draws entropy
+with `Math.random()` (allowed inside a handler, coarsened to one-second
+resolution for the clock), keep the assertions deterministic:
 
 - prefer asserting that a value was set, changed, or has the expected shape
-- avoid calling `safeDateNow()`, `nonPrivateRandom()`, `Date.now()`, or
-  `Math.random()` inside a test `computed()` assertion
+- avoid calling `Date.now()` or `Math.random()` inside a test `computed()`
+  assertion — those built-ins throw a `TimeCapabilityError` in a computed
 - if you need an exact value, capture it in the action under test and assert
   against the captured result rather than recomputing it in the assertion
 

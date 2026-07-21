@@ -24,7 +24,18 @@ export async function github<T = unknown>(path: string, token?: string): Promise
     },
     signal: AbortSignal.timeout(15_000),
   });
-  if (!res.ok) throw new Error(`GitHub API ${path} failed: HTTP ${res.status}`);
+  if (!res.ok) {
+    let rateLimited = false;
+    if (res.status === 403) {
+      const message = await res.text();
+      rateLimited = res.headers.get("x-ratelimit-remaining") === "0" ||
+        res.headers.has("retry-after") || /rate.?limit/i.test(message);
+    }
+    const detail = rateLimited ? " (rate-limited)" : "";
+    throw new Error(
+      `GitHub API ${path} failed: HTTP ${res.status}${detail}`,
+    );
+  }
   return await res.json() as T;
 }
 
@@ -49,11 +60,6 @@ export const STATUS_DOT: Record<Status, string> = { good: "green", warn: "amber"
 
 export const escapeHtml = (s: string) =>
   s.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]!));
-
-export const hhmm = (iso: string) => {
-  const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-};
 
 // Per-status left edge for a sparkline's fade gradient — a shade just below the
 // tile's own (status-tinted) background, so the line fades up out of the tile.

@@ -14,10 +14,8 @@ import {
   handler,
   ifElse,
   NAME,
-  nonPrivateRandom,
   pattern,
   Reactive,
-  safeDateNow,
   Stream,
   UI,
   Writable,
@@ -38,8 +36,8 @@ const onCreate = handler<
   const description = detail?.message?.trim();
   if (!description) return;
 
-  const pendingId = `pending-${safeDateNow()}-${
-    nonPrivateRandom().toString(36).slice(2)
+  const pendingId = `pending-${Date.now()}-${
+    Math.random().toString(36).slice(2)
   }`;
 
   // Optimistic: add to local state immediately

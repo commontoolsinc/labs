@@ -125,39 +125,23 @@ export const main = new Command()
         "--cfc-writeback-state <path:string>",
         "CFC writeback state path.",
       )
+      .option(
+        "--dangerously-allow-incompatible-schema",
+        "Allow incompatible source schema updates.",
+      )
       .option("--state-path <path:string>", "Mount state file to update.")
       .option(
         "--supervisor-status <path:string>",
         "Child readiness and heartbeat status file.",
       )
-      .option(
-        "--supervisor-token <token:string>",
-        "Child readiness status correlation token.",
-      )
       .option("-s, --space <name:string>", "Space(s) to connect.", {
         collect: true,
       })
       .action(async (options, mountpoint) => {
-        const { runFuseSupervisor } = await import("../lib/fuse-supervisor.ts");
-        await runFuseSupervisor({
-          mountpoint,
-          apiUrl: options.apiUrl ?? "",
-          identity: options.identity ?? "",
-          execCli: options.execCli ?? "",
-          logFile: options.logFile ?? "",
-          spaces: options.space ?? [],
-          allowOther: options.allowOther,
-          noattrcache: options.noattrcache,
-          attrcacheTimeout: options.attrcacheTimeout,
-          cfcMode: options.cfcMode,
-          cfcAnnotations: options.cfcAnnotations,
-          cfcXattrNamespace: options.cfcXattrNamespace,
-          cfcWritebackXattrs: options.cfcWritebackXattrs,
-          cfcWritebackState: options.cfcWritebackState,
-          statePath: options.statePath,
-          supervisorStatusPath: options.supervisorStatus,
-          supervisorToken: options.supervisorToken,
-        });
+        const { fuseSupervisorOptions, runFuseSupervisor } = await import(
+          "../lib/fuse-supervisor.ts"
+        );
+        await runFuseSupervisor(fuseSupervisorOptions(options, mountpoint));
       }),
   )
   .command("id", identity)

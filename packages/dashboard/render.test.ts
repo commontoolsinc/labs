@@ -2,9 +2,16 @@
 // in the page. Pure string work — no server, no network, no subprocess.
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Status, TileView } from "./types.ts";
-import { renderTile, shell } from "./render.ts";
+import {
+  FAVICON_CRY_AFTER_MS,
+  formatViewerTimes,
+  renderTile,
+  shell,
+  SHELL_VERSION,
+} from "./render.ts";
 import { humanSpan } from "./lib.ts";
 import { REPO } from "./config.ts";
+import { FAVICON_VERSION } from "./favicon.ts";
 
 function view(over: Partial<TileView> = {}): TileView {
   return { label: "labs ci", status: "good", ...over };
@@ -28,6 +35,14 @@ Deno.test("renderTile: no href -> a plain div, not a link", () => {
   assert(!html.includes(" link"), "the link class is only for tiles that link");
 });
 
+Deno.test("renderTile: a server-supplied id becomes the stable update key", () => {
+  assertStringIncludes(renderTile(view(), "labs-ci"), `data-tile-id="labs-ci"`);
+  assertStringIncludes(
+    renderTile(view({ href: "/ci" }), "labs-ci-duration"),
+    `data-tile-id="labs-ci-duration"`,
+  );
+});
+
 Deno.test("renderTile: an http href is an anchor that opens a new tab; a local one stays in place", () => {
   const external = renderTile(view({ href: "https://github.com/o/r/actions" }));
   assertStringIncludes(external, `<a class="tile good link" href="https://github.com/o/r/actions" target="_blank" rel="noopener">`);
@@ -37,8 +52,8 @@ Deno.test("renderTile: an http href is an anchor that opens a new tab; a local o
 });
 
 Deno.test("renderTile: wide adds the class the shell lays out below the grid", () => {
-  assertStringIncludes(renderTile(view({ wide: true })), `class="tile good wide"`);
-  assertStringIncludes(renderTile(view({ wide: true, href: "/x" })), `class="tile good link wide"`);
+  assertStringIncludes(renderTile(view(), undefined, true), `class="tile good wide"`);
+  assertStringIncludes(renderTile(view({ href: "/x" }), undefined, true), `class="tile good link wide"`);
   assert(!renderTile(view()).includes("wide"));
 });
 
@@ -114,24 +129,145 @@ Deno.test("renderTile: the body order is label, headline, sub, chart", () => {
 });
 
 Deno.test("shell: the grid and the wide tiles land in their own slots", () => {
-  const html = shell(`<div class="tile good">g</div>`, `<div class="tile bad wide">w</div>`, 3, 30_000);
-  assertStringIncludes(html, `<div class="grid"><div class="tile good">g</div></div>`);
+  const html = shell(
+    `<div class="tile good">g</div>`,
+    `<div class="tile bad wide">w</div>`,
+    3,
+    30_000,
+    SHELL_VERSION,
+    "bad",
+  );
+  assertStringIncludes(html, `<div class="grid" id="dashboard-grid"><div class="tile good">g</div></div>`);
+  assertStringIncludes(html, `<div id="dashboard-wide"><div class="tile bad wide">w</div></div>`);
   // Wide tiles sit after the grid, not inside it.
   assert(html.indexOf(`class="grid"`) < html.indexOf(`tile bad wide`));
   assert(html.startsWith("<!doctype html>"), "a whole page, not a fragment");
   assertStringIncludes(html, "<title>Fabric wall — LIVE</title>");
+  assertStringIncludes(
+    html,
+    `href="/favicon.png?status=bad&v=${FAVICON_VERSION}"`,
+  );
   assertStringIncludes(html, "</body></html>");
 });
 
 Deno.test("shell: the freshness age and the refresh interval reach both the text and the script", () => {
-  const html = shell("", "", 7, 45_000);
+  const html = shell("", "", 7, 45_000, SHELL_VERSION, "good");
   assertStringIncludes(html, `<span id="agotext">updated 7s ago</span>`);
   assertStringIncludes(html, "const REFRESH = 45000;");
-  assertStringIncludes(html, "const base = 7;");
-  // The client re-reads the stream rather than polling the page.
+  assertStringIncludes(html, `const SHELL_VERSION = ${SHELL_VERSION};`);
+  assertStringIncludes(html, "let base = 7;");
   assertStringIncludes(html, `new EventSource('/events')`);
+  assertStringIncludes(
+    html,
+    `es.onmessage = (e) => { if (e.data === 'reload') location.reload(); };`,
+  );
+  assertStringIncludes(html, `es.addEventListener('update'`);
+  assertStringIncludes(html, `reconcileTiles(grid, update.gridHtml)`);
+  assertStringIncludes(html, `reconcileTiles(wide, update.wideHtml)`);
+  assertStringIncludes(
+    html,
+    `if (update.shellVersion !== SHELL_VERSION) { location.reload(); return; }`,
+  );
+  assertEquals(html.match(/location\.reload\(\)/g)?.length, 2);
+  assertStringIncludes(html, `if (current.outerHTML === next.outerHTML) return current;`);
+  assertStringIncludes(html, `nextScroller.scrollTop = scrollTop`);
+});
+
+Deno.test("formatViewerTimes: the viewer's formatter replaces the UTC fallback", () => {
+  const time = { dateTime: "2024-01-02T17:05:00Z", textContent: "17:05 UTC" };
+  const viewerTime = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/Los_Angeles",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  formatViewerTimes([time], viewerTime);
+  assertEquals(time.textContent, "09:05");
+});
+
+Deno.test("shell: the browser runs the viewer-time formatter", () => {
+  const html = shell("", "", 0, 30_000, SHELL_VERSION, "good");
+  const source = formatViewerTimes.toString();
+  assertStringIncludes(source, `time[data-viewer-time][datetime]`);
+  assert(!source.includes("timeZone"), "the default formatter must use the viewer's timezone");
+  assertStringIncludes(html, source);
+  assertStringIncludes(html, "formatViewerTimes();");
+  const localizeUpdate = html.indexOf(
+    `formatViewerTimes(template.content.querySelectorAll('time[data-viewer-time][datetime]'));`,
+  );
+  const compareMarkup = html.indexOf("if (current.outerHTML === next.outerHTML)");
+  assert(localizeUpdate >= 0, "live updates localize their timestamps");
+  assert(
+    localizeUpdate < compareMarkup,
+    "live updates are localized before their markup is compared",
+  );
+});
+
+Deno.test("shell: server-measured red age changes the favicon after one hour", () => {
+  const html = shell("", "", 0, 1000, SHELL_VERSION, "good");
+  assertStringIncludes(
+    html,
+    `const FAVICON_CRY_AFTER_MS = ${FAVICON_CRY_AFTER_MS}`,
+  );
+  assertStringIncludes(html, `let faviconServerRedSince = null`);
+  assertStringIncludes(html, `let faviconServerRedAgeMs = null`);
+  const serverRedHtml = shell(
+    "",
+    "",
+    0,
+    1000,
+    SHELL_VERSION,
+    "bad",
+    1_234,
+    567,
+  );
+  assertStringIncludes(
+    serverRedHtml,
+    `let faviconServerRedSince = 1234`,
+  );
+  assertStringIncludes(
+    serverRedHtml,
+    `let faviconServerRedAgeMs = 567`,
+  );
+  assertStringIncludes(
+    html,
+    `const paintStatusFavicon = function paintStatusFavicon(`,
+  );
+  assertStringIncludes(html, `let faviconStartedAt = performance.now()`);
+  assertStringIncludes(html, `root.querySelector(".tile.bad") ? "bad"`);
+  assertStringIncludes(
+    html,
+    `face = redAge >= cryAfterMs ? "bad-crying" : "bad"`,
+  );
+  assertStringIncludes(
+    html,
+    `favicon.setAttribute("href", hrefs[face])`,
+  );
+  assertStringIncludes(
+    html,
+    `paintStatusFavicon(
+      FAVICONS,
+      FAVICON_CRY_AFTER_MS,
+      faviconServerRedSince,
+      faviconServerRedAgeMs,
+      faviconStartedAt,
+    )`,
+  );
+  assertStringIncludes(
+    html,
+    `faviconServerRedSince = update.faviconRedSince`,
+  );
+  assertStringIncludes(
+    html,
+    `faviconServerRedAgeMs = update.faviconRedAgeMs`,
+  );
+  assertStringIncludes(html, `faviconStartedAt = performance.now()`);
+  assert(!html.includes("faviconSvg"));
 });
 
 Deno.test("shell: the repo name in the header is escaped", () => {
-  assertStringIncludes(shell("", "", 0, 1000), `<span>${REPO.replace(/&/g, "&amp;")}</span>`);
+  assertStringIncludes(
+    shell("", "", 0, 1000, SHELL_VERSION, "good"),
+    `<span>${REPO.replace(/&/g, "&amp;")}</span>`,
+  );
 });

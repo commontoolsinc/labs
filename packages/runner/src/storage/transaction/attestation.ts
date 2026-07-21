@@ -23,6 +23,10 @@ import { unclaimed } from "@commonfabric/memory/fact";
 import { getLogger } from "@commonfabric/utils/logger";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { toTransactionDocumentValue } from "../v2-document.ts";
+import {
+  decodeDataURIPayloadText,
+  extractDataURIPayloadText,
+} from "../../data-uri.ts";
 
 const logger = getLogger("attestation", {
   enabled: false,
@@ -246,54 +250,34 @@ export const load = (
   >;
 
   try {
-    // Parse data URI using URL constructor
-    const url = new URL(address.id);
+    const { mediaType, text } = extractDataURIPayloadText(address.id);
 
-    if (url.protocol !== "data:") {
-      result = {
-        error: InvalidDataURIError(
-          "Invalid data URI: protocol must be 'data:'",
-        ),
-      };
-    } else {
-      const [mediaTypeAndParams, data] = url.pathname.split(",");
-
-      if (data === undefined) {
+    if (mediaType === "application/json") {
+      let value: FabricValue;
+      try {
+        // The payload encodes the cell VALUE; the document that the
+        // address grammar resolves against (`["value", ...]`-rooted and
+        // facet paths) is synthesized here, at the one reader that
+        // thinks in documents. Synthesis also guarantees payload
+        // content can never alias a document facet (`cfc`, `source`).
+        value = Object.freeze({
+          value: decodeDataURIPayloadText(text),
+        });
+        result = { ok: { address: { ...address, path: [] }, value } };
+      } catch (error) {
+        const reason = error as Error;
         result = {
           error: InvalidDataURIError(
-            "Invalid data URI format: missing comma separator",
+            `Failed to decode data URI payload: ${reason.message}`,
           ),
         };
-      } else {
-        // Parse media type and parameters
-        const params = mediaTypeAndParams.split(";");
-        const mediaType = params[0] || "text/plain";
-        const isBase64 = params.includes("base64");
-
-        // Decode data
-        const content = isBase64 ? atob(data) : decodeURIComponent(data);
-
-        if (mediaType === "application/json") {
-          let value: FabricValue;
-          try {
-            value = JSON.parse(content);
-            result = { ok: { address: { ...address, path: [] }, value } };
-          } catch (error) {
-            const reason = error as Error;
-            result = {
-              error: InvalidDataURIError(
-                `Failed to parse JSON from data URI: ${reason.message}`,
-              ),
-            };
-          }
-        } else {
-          result = {
-            error: UnsupportedMediaTypeError(
-              `Unsupported media type ${mediaType}`,
-            ),
-          };
-        }
       }
+    } else {
+      result = {
+        error: UnsupportedMediaTypeError(
+          `Unsupported media type ${mediaType}`,
+        ),
+      };
     }
   } catch (error) {
     const reason = error as Error;

@@ -4,7 +4,15 @@
 // collect(), registered under the ids the real registry uses so their views
 // reach the page.
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { broadcast, clients, handle, page, start, tick } from "./server.ts";
+import {
+  broadcast,
+  clients,
+  handle,
+  nextFaviconRedSince,
+  page,
+  start,
+  tick,
+} from "./server.ts";
 import { PORT } from "./config.ts";
 import { TILES } from "./registry.ts";
 import type { Tile, TileView } from "./types.ts";
@@ -23,13 +31,34 @@ async function chunk(r: ReadableStreamDefaultReader<Uint8Array>): Promise<string
   return dec.decode(value);
 }
 
+interface TestUpdate {
+  gridHtml: string;
+  wideHtml: string;
+  ageSeconds: number;
+  shellVersion: number;
+  faviconStatus: "good" | "warn" | "bad";
+  faviconRedSince: number | null;
+  faviconRedAgeMs: number | null;
+}
+
+function updateFromEvent(event: string): TestUpdate {
+  assertStringIncludes(event, "event: update\n");
+  return JSON.parse(event.match(/^data: (.*)$/m)?.[1] ?? "") as TestUpdate;
+}
+
 // The rendered markup for one tile, keyed off its header label. The returned
 // string starts with the tile's status classes.
-function tileHtml(label: string): string {
-  const parts = page().split(`<div class="tile `);
+function tileHtml(label: string, html = page()): string {
+  const parts = html.split(`<div class="tile `);
   const hit = parts.filter((p) => p.includes(`</span> ${label}<span class="spacer">`));
   assertEquals(hit.length, 1, `expected exactly one tile labelled "${label}"`);
   return hit[0];
+}
+
+function faviconRedSinceInPage(): string {
+  const match = page().match(/let faviconServerRedSince = ([^;]+);/);
+  assert(match, "the page includes the server red timestamp");
+  return match[1];
 }
 
 Deno.test("healthz: not ok until the board has collected something", async () => {
@@ -40,28 +69,136 @@ Deno.test("healthz: not ok until the board has collected something", async () =>
   assertEquals(await res.json(), { ok: false, at: 0 });
 });
 
-Deno.test("a tile that has never succeeded falls back to a gray tile labelled with its id", async () => {
-  await tick([fake("labs-ci", () => {
-    throw new Error("HTTP 404: Not Found");
-  })]);
-  const html = tileHtml("labs-ci"); // no view to keep, so the id stands in for the label
-  assertStringIncludes(html, `unknown">`); // gray, never a color it hasn't earned
-  assertStringIncludes(html, `<p class="big unknown">—</p>`);
-  assertStringIncludes(html, `<p class="sub">not found</p>`); // the short reason, not the raw error
+Deno.test("registered tiles render before their first collection completes", () => {
+  const html = page(new Map());
+  for (const tile of TILES) {
+    assertStringIncludes(
+      html,
+      `</span> ${tile.id}<span class="spacer"></span>`,
+    );
+  }
+  assert(tileHtml("recent-runs", html).startsWith(`unknown wide" data-tile-id="recent-runs">`));
 });
 
-Deno.test("a tile whose collect throws keeps its last good view, desaturated to gray", async () => {
-  const good: TileView = { label: "recent main runs", status: "good", value: "passing", sub: "10 runs", wide: true };
+Deno.test("favicon: serves distinct status PNGs and defaults unknown requests to green", async () => {
+  const signature = new Uint8Array([
+    0x89,
+    0x50,
+    0x4e,
+    0x47,
+    0x0d,
+    0x0a,
+    0x1a,
+    0x0a,
+  ]);
+  const encoded: string[] = [];
+  for (const status of ["good", "warn", "bad", "bad-crying"]) {
+    const res = await handle(req(`/favicon.png?status=${status}`));
+    assertEquals(res.headers.get("content-type"), "image/png");
+    assertEquals(res.headers.get("cache-control"), "public, max-age=3600");
+    const png = new Uint8Array(await res.arrayBuffer());
+    assertEquals(png.slice(0, signature.length), signature);
+    encoded.push(png.toBase64());
+  }
+  assertEquals(new Set(encoded).size, 4, "each face has its own raster icon");
+
+  const unknown = new Uint8Array(
+    await (await handle(req("/favicon.png?status=unknown"))).arrayBuffer(),
+  );
+  assertEquals(unknown.toBase64(), encoded[0], "an unsupported status stays green");
+});
+
+Deno.test("favicon: continuous red keeps its start time and recovery resets it", () => {
+  assertEquals(nextFaviconRedSince(null, "good", 1_000), null);
+  assertEquals(nextFaviconRedSince(null, "bad", 2_000), 2_000);
+  assertEquals(nextFaviconRedSince(2_000, "bad", 3_000), 2_000);
+  assertEquals(nextFaviconRedSince(2_000, "warn", 4_000), null);
+  assertEquals(nextFaviconRedSince(null, "bad", 5_000), 5_000);
+});
+
+Deno.test("per-collector updates keep a red handoff's incident age", async () => {
+  const modelBad: TileView = {
+    label: "atomic model spend",
+    status: "bad",
+    value: "failed",
+  };
+  const modelGood: TileView = {
+    label: "atomic model spend",
+    status: "good",
+    value: "passing",
+  };
+  const gcpGood: TileView = {
+    label: "atomic gcp spend",
+    status: "good",
+    value: "passing",
+  };
+  const gcpBad: TileView = {
+    label: "atomic gcp spend",
+    status: "bad",
+    value: "failed",
+  };
+  await tick([
+    fake("model-spend", () => modelBad),
+    fake("gcp-spend", () => gcpGood),
+  ]);
+  const redSince = faviconRedSinceInPage();
+  assert(redSince !== "null");
+
+  let release = (_: TileView) => {};
+  const handoff = tick([
+    fake("model-spend", () => modelGood),
+    fake("gcp-spend", () => new Promise<TileView>((resolve) => release = resolve)),
+  ]);
+  await Promise.resolve();
+  assertStringIncludes(
+    tileHtml("atomic model spend"),
+    `good" data-tile-id="model-spend">`,
+  );
+  assertStringIncludes(
+    tileHtml("atomic gcp spend"),
+    `good" data-tile-id="gcp-spend">`,
+  );
+  assertEquals(faviconRedSinceInPage(), redSince);
+
+  release(gcpBad);
+  await handoff;
+  assertStringIncludes(
+    tileHtml("atomic model spend"),
+    `good" data-tile-id="model-spend">`,
+  );
+  assertStringIncludes(
+    tileHtml("atomic gcp spend"),
+    `bad" data-tile-id="gcp-spend">`,
+  );
+  assertEquals(faviconRedSinceInPage(), redSince);
+
+  await tick([
+    fake("model-spend", () => modelGood),
+    fake("gcp-spend", () => gcpGood),
+  ]);
+  assertEquals(faviconRedSinceInPage(), "null");
+});
+
+Deno.test("a tile stays wide through failures and keeps its last good view", async () => {
+  await tick([fake("recent-runs", () => {
+    throw new Error("HTTP 404: Not Found");
+  })]);
+  const firstFailure = tileHtml("recent-runs");
+  assert(firstFailure.startsWith(`unknown wide" data-tile-id="recent-runs">`));
+  assertStringIncludes(firstFailure, `<p class="big unknown">—</p>`);
+  assertStringIncludes(firstFailure, `<p class="sub">not found</p>`);
+
+  const good: TileView = { label: "recent main runs", status: "good", value: "passing", sub: "10 runs" };
   await tick([fake("recent-runs", () => good)]);
-  assertStringIncludes(tileHtml("recent main runs"), `good wide">`);
+  assert(tileHtml("recent main runs").startsWith(`good wide" data-tile-id="recent-runs">`));
 
   await tick([fake("recent-runs", () => {
     throw new Error("error sending request for url");
   })]);
   const html = tileHtml("recent main runs");
-  assertStringIncludes(html, `unknown wide">`); // gray, and still full-width
-  assertStringIncludes(html, `<p class="big unknown">passing</p>`); // the last-known value stays on the wall
-  assertStringIncludes(html, `<p class="sub">source unreachable</p>`); // and says why it can't tell
+  assert(html.startsWith(`unknown wide" data-tile-id="recent-runs">`));
+  assertStringIncludes(html, `<p class="big unknown">passing</p>`);
+  assertStringIncludes(html, `<p class="sub">source unreachable</p>`);
 });
 
 Deno.test("the ticker leaves a tile alone until its interval has elapsed", async () => {
@@ -95,16 +232,56 @@ Deno.test("a tick that is still running makes the next tick a no-op", async () =
   await slow;
 });
 
-Deno.test("sse: /events opens a stream, tick pushes a reload, disconnect drops the client", async () => {
+Deno.test("each completed collection is published while slower tiles are still running", async () => {
+  const messages: string[] = [];
+  const client = {
+    enqueue(value: Uint8Array) {
+      messages.push(dec.decode(value));
+    },
+  } as unknown as ReadableStreamDefaultController<Uint8Array>;
+  clients.add(client);
+  let beforeSlow: string[] = [];
+  try {
+    await tick([
+      fake("labs-ci", () => ({ label: "fast", status: "good" })),
+      fake("loom-ci", async () => {
+        await Promise.resolve();
+        beforeSlow = [...messages];
+        return { label: "slow", status: "good" };
+      }),
+    ]);
+  } finally {
+    clients.delete(client);
+  }
+  assertEquals(beforeSlow.length, 1);
+  assertStringIncludes(updateFromEvent(beforeSlow[0]).gridHtml, "fast");
+  assertEquals(messages.length, 2);
+  assertStringIncludes(updateFromEvent(messages[1]).gridHtml, "slow");
+});
+
+Deno.test("sse: /events opens a stream, tick pushes new tile markup, disconnect drops the client", async () => {
   const res = await handle(req("/events"));
   assertEquals(res.headers.get("content-type"), "text/event-stream");
   assertEquals(res.headers.get("cache-control"), "no-cache");
   const reader = res.body!.getReader();
   assertEquals(await chunk(reader), ": connected\n\n");
   assertEquals(clients.size, 1);
+  const initial = updateFromEvent(await chunk(reader));
+  assert(initial.shellVersion > 0);
+  assert(initial.ageSeconds >= 0);
+  assert(["good", "warn", "bad"].includes(initial.faviconStatus));
+  assert(Object.hasOwn(initial, "faviconRedSince"));
+  assert(Object.hasOwn(initial, "faviconRedAgeMs"));
 
-  await tick([fake("labs-ci", () => ({ label: "labs ci", status: "good", value: "passing" }))]);
-  assertEquals(await chunk(reader), "data: reload\n\n");
+  await tick([fake("labs-ci", () => ({ label: "labs ci", status: "good", value: "live update" }))]);
+  const update = updateFromEvent(await chunk(reader));
+  assertStringIncludes(update.gridHtml, `data-tile-id="labs-ci"`);
+  assertStringIncludes(update.gridHtml, "live update");
+  assert(update.ageSeconds >= 0);
+  assertEquals(update.shellVersion, initial.shellVersion);
+  assert(["good", "warn", "bad"].includes(update.faviconStatus));
+  assert(Object.hasOwn(update, "faviconRedSince"));
+  assert(Object.hasOwn(update, "faviconRedAgeMs"));
 
   await reader.cancel();
   assertEquals(clients.size, 0, "a disconnected browser is not kept as a client");
@@ -115,7 +292,15 @@ Deno.test("broadcast: a client whose stream is gone is dropped rather than throw
   const dead = [...clients].at(-1)!;
   await res.body!.cancel(); // closes the stream, so enqueueing to it now throws
   clients.add(dead); // back in the set, standing for a disconnect that went unnoticed
-  broadcast("reload");
+  broadcast({
+    gridHtml: "",
+    wideHtml: "",
+    ageSeconds: 0,
+    shellVersion: 1,
+    faviconStatus: "good",
+    faviconRedSince: null,
+    faviconRedAgeMs: null,
+  });
   assertEquals(clients.size, 0);
 });
 

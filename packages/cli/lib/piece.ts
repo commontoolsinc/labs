@@ -74,6 +74,10 @@ export interface PieceConfig extends SpaceConfig {
   pieceScope?: CellScope;
 }
 
+export interface SetPiecePatternOptions {
+  dangerouslyAllowIncompatibleSchema?: boolean;
+}
+
 export interface ResolvedPieceCallable extends CallableResolution {
   commandSpec: ExecCommandSpec;
 }
@@ -540,6 +544,7 @@ export async function setPieceSlug(
 export async function setPiecePattern(
   config: PieceConfig,
   entry: EntryConfig,
+  options: SetPiecePatternOptions = {},
   deps: PieceOperationDependencies = {},
 ): Promise<void> {
   const manager = await (deps.loadManager ?? loadManager)(config);
@@ -561,7 +566,12 @@ export async function setPiecePattern(
       manager,
       entry,
     ),
-    { repository: entry.repository },
+    {
+      repository: entry.repository,
+      ...(options.dangerouslyAllowIncompatibleSchema
+        ? { dangerouslyAllowIncompatibleSchema: true }
+        : {}),
+    },
   );
 }
 

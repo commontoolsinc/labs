@@ -13,6 +13,8 @@
  *   GITHUB_REPOSITORY   - Optional, defaults to "commontoolsinc/labs".
  *   GITHUB_RUN_ID       - Required. Current workflow run ID.
  *   PR_NUMBER           - Required. Pull request number.
+ *   COVERAGE_ARTIFACTS_DIR - Optional. Directory containing downloaded
+ *                            coverage artifacts, one subdirectory per name.
  */
 
 import {
@@ -46,7 +48,7 @@ import {
   downloadAndParsePerfMetricsDetailed,
   dropColdSamples,
   extractMetrics,
-  extractTestFileMetrics,
+  extractTimingArtifactMetrics,
   fetchArtifactsForRun,
   fetchCurrentPRBody,
   fetchJobsForRun,
@@ -62,9 +64,11 @@ import {
   MIN_REGRESSION_PCT,
   MIN_SAMPLES,
   newestArtifactsByName,
+  newestTimingArtifacts,
   parseAddedLinesFromPatch,
   parseBaselineOverrides,
   parseCacheStateFiles,
+  type ParsedTimingArtifact,
   PERF_METRICS_ARTIFACT_NAME,
   PERF_METRICS_BACKFILL_ARTIFACT_NAME,
   PERF_METRICS_BACKFILL_FILE,
@@ -76,7 +80,6 @@ import {
   REPO,
   shouldGateCoverageDebtMetric,
   STDDEV_FACTOR,
-  timingArtifactLabel,
   type TimingSample,
   walkFiles,
   WORKFLOW_FILE,
@@ -745,25 +748,51 @@ function sampleForRun(run: WorkflowRun, value: number): TimingSample {
   };
 }
 
-async function copyCoverageArtifactFiles(
+export async function copyCoverageArtifactFiles(
   artifact: Artifact,
   profileDir: string,
   lcovDir: string,
+  coverageArtifactsDir?: string,
 ): Promise<{ profileFiles: number; lcovFiles: number }> {
-  const extractedDir = await downloadAndExtractArtifact(
-    artifact.id,
-    "coverage-profile-",
-  );
-  if (!extractedDir) {
-    throw new Error(
-      `Failed to download or extract coverage profile artifact ${artifact.name} (${artifact.id}).`,
+  let sourceDir: string;
+  let removeSourceDir = false;
+  if (coverageArtifactsDir) {
+    sourceDir = path.join(coverageArtifactsDir, artifact.name);
+    let sourceStat: Deno.FileInfo;
+    try {
+      sourceStat = await Deno.stat(sourceDir);
+    } catch (error) {
+      const problem = error instanceof Deno.errors.NotFound
+        ? "was not found"
+        : "could not be read";
+      throw new Error(
+        `Pre-downloaded coverage profile artifact ${artifact.name} (${artifact.id}) ${problem} at ${sourceDir}.`,
+        { cause: error },
+      );
+    }
+    if (!sourceStat.isDirectory) {
+      throw new Error(
+        `Pre-downloaded coverage profile artifact ${artifact.name} (${artifact.id}) is not a directory: ${sourceDir}.`,
+      );
+    }
+  } else {
+    const extractedDir = await downloadAndExtractArtifact(
+      artifact.id,
+      "coverage-profile-",
     );
+    if (!extractedDir) {
+      throw new Error(
+        `Failed to download or extract coverage profile artifact ${artifact.name} (${artifact.id}).`,
+      );
+    }
+    sourceDir = extractedDir;
+    removeSourceDir = true;
   }
 
   let profileFiles = 0;
   let lcovFiles = 0;
   try {
-    for await (const file of walkFiles(extractedDir)) {
+    for await (const file of walkFiles(sourceDir)) {
       const isProfile = file.endsWith(".json");
       const isLcov = file.endsWith(".lcov");
       if (!isProfile && !isLcov) continue;
@@ -784,9 +813,11 @@ async function copyCoverageArtifactFiles(
       );
     }
   } finally {
-    try {
-      await Deno.remove(extractedDir, { recursive: true });
-    } catch { /* ignore cleanup errors */ }
+    if (removeSourceDir) {
+      try {
+        await Deno.remove(sourceDir, { recursive: true });
+      } catch { /* ignore cleanup errors */ }
+    }
   }
 
   return { profileFiles, lcovFiles };
@@ -1054,6 +1085,7 @@ export function evaluateTimingMetric(
 async function extractCoverageDebtSamples(
   run: WorkflowRun,
   artifacts: Artifact[],
+  coverageArtifactsDir?: string,
 ): Promise<{ samples: Map<string, TimingSample>; lcov: string }> {
   const metrics = new Map<string, TimingSample>();
   const coverageArtifacts = newestArtifactsByName(artifacts.filter(
@@ -1085,6 +1117,7 @@ async function extractCoverageDebtSamples(
         artifact,
         profileDir,
         lcovDir,
+        coverageArtifactsDir,
       );
       profileFileCount += copied.profileFiles;
       lcovFileCount += copied.lcovFiles;
@@ -1100,6 +1133,11 @@ async function extractCoverageDebtSamples(
       ? await readCombinedLcov(lcovDir)
       : await lcovFromCoverageProfile(profileDir);
 
+    // Every coverage stream feeds the gate: V8 runtime coverage, unit pattern
+    // coverage (TN:pattern-runtime), and integration pattern coverage
+    // (TN:pattern-runtime-integration) all join here, and a line covered by any
+    // of them counts covered. So a pattern line an end-to-end flow exercises
+    // that the unit suite does not lowers the gated debt.
     const coverageMetrics = await collectCoverageDebtMetricsFromLcov({
       rootDir: Deno.cwd(),
       lcov,
@@ -1454,27 +1492,27 @@ export async function main() {
   });
   fillMissingFamiliesFromFingerprint(currentCacheStates, inferredRunState);
 
-  // Extract per-test metrics from JUnit artifacts
+  // Extract per-test metrics from JUnit artifacts.
+  const parsedTimingArtifacts: ParsedTimingArtifact[] = [];
   try {
     // Newest per name: a re-run of a flagged test job must refresh its metric.
-    const timingArtifacts = newestArtifactsByName(currentArtifacts.filter(
-      (a) => a.name.startsWith("test-timing-") && !a.expired,
-    ));
+    const timingArtifacts = newestTimingArtifacts(currentArtifacts);
     for (const artifact of timingArtifacts) {
       const suites = await downloadAndParseJUnit(artifact.id);
-      const testMetrics = extractTestFileMetrics(
-        currentRunInfo,
-        timingArtifactLabel(artifact.name),
-        suites,
-      );
-      for (const [name, sample] of testMetrics) {
-        currentMetrics.set(name, sample);
-      }
+      parsedTimingArtifacts.push({ name: artifact.name, suites });
     }
   } catch (e) {
     console.warn(
       `  Warning: could not extract timing metrics from current run artifacts: ${e}`,
     );
+  }
+  for (
+    const [name, sample] of extractTimingArtifactMetrics(
+      currentRunInfo,
+      parsedTimingArtifacts,
+    )
+  ) {
+    currentMetrics.set(name, sample);
   }
 
   // Extract coverage debt metrics from coverage profile artifacts.
@@ -1489,6 +1527,7 @@ export async function main() {
     const coverage = await extractCoverageDebtSamples(
       currentRunInfo,
       currentArtifacts,
+      Deno.env.get("COVERAGE_ARTIFACTS_DIR"),
     );
     for (const [name, sample] of coverage.samples) {
       currentMetrics.set(name, sample);
@@ -1672,29 +1711,28 @@ export async function main() {
 
         // Fetch per-test timing artifacts
         let canBackfill = true;
+        const parsedTimingArtifacts: ParsedTimingArtifact[] = [];
         try {
-          const timingArtifacts = artifacts.filter(
-            (a) => a.name.startsWith("test-timing-") && !a.expired,
-          );
+          const timingArtifacts = newestTimingArtifacts(artifacts);
           for (const artifact of timingArtifacts) {
             const suites = await downloadAndParseJUnit(artifact.id);
             if (suites.length === 0) {
               canBackfill = false;
               continue;
             }
-            const testMetrics = extractTestFileMetrics(
-              run,
-              timingArtifactLabel(artifact.name),
-              suites,
-            );
-            for (const [name, sample] of testMetrics) {
-              metrics.set(name, sample);
-              addSample(timelines, name, sample);
-            }
+            parsedTimingArtifacts.push({ name: artifact.name, suites });
           }
         } catch {
           // Artifacts may not exist for older runs
           canBackfill = false;
+        }
+        const testMetrics = extractTimingArtifactMetrics(
+          run,
+          parsedTimingArtifacts,
+        );
+        for (const [name, sample] of testMetrics) {
+          metrics.set(name, sample);
+          addSample(timelines, name, sample);
         }
 
         if (metrics.size > 0 && canBackfill) {

@@ -5371,6 +5371,27 @@ describe("piece pull materialization", () => {
     expect(await controller.result.get()).toEqual({ doubled: 4 });
   });
 
+  it("allows an explicitly authorized incompatible schema update", async () => {
+    const firstPattern = await runtime.patternManager.compilePattern(
+      compiledResultNarrowingProgram("number"),
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      firstPattern,
+      { input: 5 },
+      "allowed-incompatible-schema-update-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await controller.setPattern(
+      compiledResultNarrowingProgram("string | number"),
+      { dangerouslyAllowIncompatibleSchema: true },
+    );
+
+    expect(await controller.result.get()).toEqual({ value: 5 });
+  });
+
   it("does not hydrate an invalid partial default into an optional object", async () => {
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledOptionalPartialDefaultProgram(1),
@@ -5535,6 +5556,12 @@ describe("piece pull materialization", () => {
     ).rejects.toThrow(/input link.*schema is not compatible/);
 
     expect(getPatternIdentityRef(piece)).toEqual(previousRef);
+
+    await controller.setPattern(compiledOptionalNumberFieldProgram(2), {
+      dangerouslyAllowIncompatibleSchema: true,
+    });
+    expect(getPatternIdentityRef(piece)).not.toEqual(previousRef);
+    expect(await controller.result.get()).toEqual({ value: 4 });
   });
 
   it("does not accept a linked stream as an optional scalar during migration", async () => {

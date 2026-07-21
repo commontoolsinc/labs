@@ -4,18 +4,135 @@
 // a non-null origin is the TRUE source column; anything the engine can't
 // attribute reports null (the caller fails closed).
 
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertStringIncludes, fail } from "@std/assert";
 import { Database } from "@db/sqlite";
 import {
   columnOriginAvailable,
   columnOrigins,
   ensureColumnOriginAvailable,
+  librarySource,
+  openSource,
+  SQLITE3_RELEASE_VERSION,
 } from "../v2/sqlite/column-origin.ts";
 import { ReadConnectionPool } from "../v2/sqlite/read-pool.ts";
 
 // Bind @db/sqlite's column-origin symbols before the sync columnOrigins() calls
 // (production does this once before a labeled query via the server handler).
 await ensureColumnOriginAvailable();
+
+// The origin symbols are bound by dlopen'ing the same libsqlite3 file
+// `@db/sqlite` loaded, found by rebuilding the release URL `@db/sqlite` derives
+// from its package version. A pin the lockfile no longer resolves to names a
+// different file, which gives the process a second libsqlite3 image whose SQLite
+// globals `@db/sqlite` never initialized; the statement handles below then
+// dispatch through that zeroed state and segfault. The crash takes down the run
+// from that test onwards, so the tests that pass a handle across the boundary
+// run only when the pin matches, and this reports the mismatch instead.
+const resolved: { version?: string; problem?: string } = await (async () => {
+  let text: string;
+  try {
+    text = await Deno.readTextFile(
+      new URL("../../../deno.lock", import.meta.url),
+    );
+  } catch (e) {
+    return { problem: `deno.lock could not be read (${e})` };
+  }
+  let specifiers: Record<string, string>;
+  try {
+    specifiers = JSON.parse(text).specifiers ?? {};
+  } catch (e) {
+    return { problem: `deno.lock could not be parsed (${e})` };
+  }
+  const keys = Object.keys(specifiers).filter((k) =>
+    k.startsWith("jsr:@db/sqlite@")
+  );
+  if (keys.length !== 1) {
+    return {
+      problem: `expected exactly one jsr:@db/sqlite specifier in deno.lock, ` +
+        `found ${keys.length}${keys.length ? `: ${keys.join(", ")}` : ""}. ` +
+        `Every package declaring @db/sqlite has to resolve to one version.`,
+    };
+  }
+  return { version: specifiers[keys[0]] };
+})();
+const pinMatchesLock = resolved.version === SQLITE3_RELEASE_VERSION;
+
+Deno.test("pinned libsqlite3 release matches the resolved @db/sqlite", () => {
+  if (resolved.problem) {
+    fail(
+      `cannot check SQLITE3_RELEASE_VERSION against the lockfile: ` +
+        `${resolved.problem}`,
+    );
+  }
+  assertEquals(
+    resolved.version,
+    SQLITE3_RELEASE_VERSION,
+    `deno.lock resolves @db/sqlite to ${resolved.version}, but ` +
+      `SQLITE3_RELEASE_VERSION in v2/sqlite/column-origin.ts pins the ` +
+      `libsqlite3 release to ${SQLITE3_RELEASE_VERSION}. Set the pin to the ` +
+      `resolved version so both open the same file.`,
+  );
+});
+
+// Provenance has to be read from the same libsqlite3 image that runs the query,
+// so the only acceptable file is the one `@db/sqlite` picks. These cover the
+// picking rule and the refusal to substitute a different file for one that
+// cannot be opened.
+Deno.test("library source follows @db/sqlite's own precedence", () => {
+  const env = (vars: Record<string, string>) => (k: string) => vars[k];
+  // @db/sqlite reads DENO_SQLITE_LOCAL first, so it wins even with a path set.
+  assertEquals(
+    librarySource(
+      env({ DENO_SQLITE_LOCAL: "1", DENO_SQLITE_PATH: "/x.dylib" }),
+    ),
+    { kind: "local" },
+  );
+  // Only "1" selects the local build.
+  assertEquals(
+    librarySource(
+      env({ DENO_SQLITE_LOCAL: "0", DENO_SQLITE_PATH: "/x.dylib" }),
+    ),
+    { kind: "path", path: "/x.dylib" },
+  );
+  assertEquals(librarySource(env({ DENO_SQLITE_PATH: "/x.dylib" })), {
+    kind: "path",
+    path: "/x.dylib",
+  });
+  // @db/sqlite tests the path for truthiness, so an empty one is not a path.
+  assertEquals(librarySource(env({ DENO_SQLITE_PATH: "" })), {
+    kind: "release",
+  });
+  assertEquals(librarySource(env({})), { kind: "release" });
+});
+
+Deno.test("an override that cannot be opened reports, and binds nothing", async () => {
+  // A file that is not a library stands in for the real case: a libsqlite3 built
+  // without SQLITE_ENABLE_COLUMN_METADATA, which @db/sqlite loads happily while
+  // the origin symbols are missing from it.
+  const path = Deno.makeTempFileSync({ suffix: ".dylib" });
+  Deno.writeTextFileSync(path, "not a library");
+  try {
+    const result = await openSource({ kind: "path", path });
+    // Binding the prebuilt release here instead would be a second image.
+    assertEquals("lib" in result, false);
+    assertStringIncludes(
+      (result as { problem: string }).problem,
+      "$DENO_SQLITE_PATH",
+    );
+    assertStringIncludes((result as { problem: string }).problem, path);
+  } finally {
+    Deno.removeSync(path);
+  }
+});
+
+Deno.test("a local @db/sqlite build reports rather than binding another file", async () => {
+  const result = await openSource({ kind: "local" });
+  assertEquals("lib" in result, false);
+  assertStringIncludes(
+    (result as { problem: string }).problem,
+    "DENO_SQLITE_LOCAL",
+  );
+});
 
 function seed(path: string): void {
   const db = new Database(path); // writable for setup
@@ -53,6 +170,7 @@ Deno.test({
 Deno.test({
   name: "column origin is sound through alias / spoof / expression / join",
   sanitizeResources: false,
+  ignore: !pinMatchesLock,
 }, () => {
   const path = Deno.makeTempFileSync({ suffix: ".sqlite" });
   seed(path);
@@ -97,6 +215,7 @@ Deno.test({
   name:
     "pool.queryWithOrigins returns rows + per-column origin (real pool path)",
   sanitizeResources: false,
+  ignore: !pinMatchesLock,
 }, () => {
   const path = Deno.makeTempFileSync({ suffix: ".sqlite" });
   seed(path);
@@ -122,6 +241,7 @@ Deno.test({
   name:
     "compound/CTE/view origins are sound (true source or null, never wrong)",
   sanitizeResources: false,
+  ignore: !pinMatchesLock,
 }, () => {
   const path = Deno.makeTempFileSync({ suffix: ".sqlite" });
   seed(path);

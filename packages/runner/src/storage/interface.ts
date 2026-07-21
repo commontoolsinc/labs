@@ -996,6 +996,14 @@ export interface IExtendedStorageTransaction
   dispatchedEventId?: string;
 
   /**
+   * The wall-clock instant (ms) of the event whose dispatch opened this
+   * transaction. Set by the scheduler's event dispatch; consumed by the runner
+   * to freeze the handler frame's ambient clock (see Frame.eventTime). Carried
+   * forward unchanged onto events the handler emits.
+   */
+  dispatchedEventTime?: number;
+
+  /**
    * Commit-time preconditions attached to this transaction's commit in
    * the given space (scheduler-v2 §7.6). Violations surface as
    * IPreconditionFailedError (permanent — never retried).

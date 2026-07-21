@@ -703,6 +703,105 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     );
   });
 
+  it("round-trips JSON coverage spans and rejects unsupported stored spans", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const spans = [{
+      fileName: "/main.tsx",
+      id: 1,
+      kind: "runtime" as const,
+      startLine: 3,
+      endLine: 3,
+      startColumn: 1,
+      endColumn: 20,
+    }];
+    modules[0] = { ...modules[0]!, patternCoverageSpans: spans };
+    const wtx = runtime.edit();
+    writeCompiledDocs(runtime, spaceA, modules, entryIdentity, opts(), wtx);
+    wtx.prepareCfc();
+    await wtx.commit();
+
+    const inspectTx = runtime.edit();
+    const storedDoc = runtime.getCell(
+      spaceA,
+      compiledDocKey(RTVER, entryIdentity),
+      compiledDocWriteSchema(),
+      inspectTx,
+    ).get() as Record<string, unknown>;
+    expect(typeof storedDoc.patternCoverageSpansJson).toBe("string");
+    expect(storedDoc.patternCoverageSpans).toBeUndefined();
+    inspectTx.abort?.();
+
+    const coldLoad = async () => {
+      const rtx = runtime.edit();
+      const loaded = await loadCompiledClosure(
+        runtime,
+        spaceA,
+        entryIdentity,
+        opts(),
+        rtx,
+      );
+      rtx.abort?.();
+      return loaded;
+    };
+
+    // Valid spans survive the round trip.
+    expect((await coldLoad()).get(entryIdentity)?.patternCoverageSpans)
+      .toEqual(spans);
+
+    // Overwrite the stored doc's spans with malformed values, bypassing the
+    // write path's integrity via the compile-cache implementation identity.
+    const replaceSpans = async (
+      value: {
+        patternCoverageSpansJson?: unknown;
+        patternCoverageSpans?: unknown;
+      },
+    ) => {
+      const tx = runtime.edit();
+      const previousIdentity = tx.getCfcState().implementationIdentity;
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "compile-cache",
+      });
+      try {
+        const cell = runtime.getCell(
+          spaceA,
+          compiledDocKey(RTVER, entryIdentity),
+          compiledDocWriteSchema(),
+          tx,
+        );
+        const next = { ...(cell.get() as Record<string, unknown>) };
+        delete next.patternCoverageSpansJson;
+        delete next.patternCoverageSpans;
+        cell.set({ ...next, ...value });
+      } finally {
+        tx.setCfcImplementationIdentity(previousIdentity);
+      }
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+    };
+
+    // A span whose id is the wrong type is dropped rather than reported against
+    // malformed coordinates.
+    await replaceSpans({
+      patternCoverageSpansJson: JSON.stringify([{
+        ...spans[0],
+        id: "not-a-number",
+      }]),
+    });
+    expect((await coldLoad()).get(entryIdentity)?.patternCoverageSpans)
+      .toBeUndefined();
+
+    // Malformed JSON is dropped too.
+    await replaceSpans({ patternCoverageSpansJson: "not-json" });
+    expect((await coldLoad()).get(entryIdentity)?.patternCoverageSpans)
+      .toBeUndefined();
+
+    // The durable format accepts only the scalar JSON field.
+    await replaceSpans({ patternCoverageSpans: spans });
+    expect((await coldLoad()).get(entryIdentity)?.patternCoverageSpans)
+      .toBeUndefined();
+  });
+
   it("persists and cold-loads verified policy manifests without module evaluation", async () => {
     const { modules, entryIdentity } = toModules(PROGRAM);
     const artifact = buildCfcPolicyArtifactManifest({
@@ -1153,6 +1252,31 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
   it("replicates fabric dependencies even though source closures exclude them", async () => {
     const spaceB = "did:key:z6MkCellCacheFabricReplicationTarget";
     const { modules, importerIdentity, depIdentity } = fabricLinkedModules();
+    const coverageSpans = [{
+      fileName: "/main.tsx",
+      id: 1,
+      kind: "runtime" as const,
+      startLine: 1,
+      endLine: 1,
+      startColumn: 1,
+      endColumn: 20,
+    }];
+    const policyManifest = buildCfcPolicyArtifactManifest({
+      formatVersion: 1,
+      moduleIdentity: importerIdentity,
+      symbol: "rules",
+      template: {
+        templateVersion: 1,
+        exchangeRules: [],
+        dependencies: { authorityOnly: [], dataBearing: [] },
+        integrityRequirements: {},
+      },
+    });
+    modules[0] = {
+      ...modules[0]!,
+      patternCoverageSpans: coverageSpans,
+      policyManifests: [policyManifest],
+    };
     const replicationOpts = {
       runtimeVersion,
     };
@@ -1204,7 +1328,269 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     expect(depSource?.has(depIdentity)).toBe(true);
     expect(compiled.has(importerIdentity)).toBe(true);
     expect(compiled.has(depIdentity)).toBe(true);
+    expect(compiled.get(importerIdentity)?.patternCoverageSpans).toEqual(
+      coverageSpans,
+    );
+    expect(compiled.get(importerIdentity)?.policyManifests).toEqual([
+      policyManifest,
+    ]);
+
+    const damageTx = runtime.edit();
+    const previousIdentity = damageTx.getCfcState().implementationIdentity;
+    damageTx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: "compile-cache",
+    });
+    try {
+      runtime.getCell(
+        spaceB,
+        sourceDocKey(importerIdentity),
+        undefined,
+        damageTx,
+      ).set({ damaged: true });
+      runtime.getCell(
+        spaceB,
+        compiledDocKey(runtimeVersion, importerIdentity),
+        undefined,
+        damageTx,
+      ).set({ damaged: true });
+    } finally {
+      damageTx.setCfcImplementationIdentity(previousIdentity);
+    }
+    damageTx.prepareCfc();
+    expect((await damageTx.commit()).error).toBeUndefined();
+
+    await manager.replicateClosures(importerIdentity, spaceA, spaceB);
+    const repairedTx = runtime.edit();
+    const repairedSource = await loadVerifiedSourceClosure(
+      runtime,
+      spaceB,
+      importerIdentity,
+      repairedTx,
+    );
+    const repairedCompiled = await loadCompiledClosure(
+      runtime,
+      spaceB,
+      importerIdentity,
+      replicationOpts,
+      repairedTx,
+    );
+    repairedTx.abort?.();
+    expect(repairedSource?.has(importerIdentity)).toBe(true);
+    expect(repairedCompiled.has(importerIdentity)).toBe(true);
   });
+
+  it("distinguishes persisted closures that share an entry module", async () => {
+    const targetSpace = "did:key:z6MkCellCacheSharedEntryTarget";
+    const main = {
+      name: "/main.ts",
+      contents: "export const main = 1;",
+    };
+    const first = toModules({
+      main: main.name,
+      files: [
+        main,
+        { name: "/first.ts", contents: "export const first = 1;" },
+      ],
+    });
+    const second = toModules({
+      main: main.name,
+      files: [
+        main,
+        { name: "/second.ts", contents: "export const second = 2;" },
+      ],
+    });
+    expect(second.entryIdentity).toBe(first.entryIdentity);
+
+    const manager = runtime.patternManager as unknown as {
+      persistCompileCacheTracked(
+        space: string,
+        modules: CacheableModule[],
+        entryIdentity: string,
+        opts: { runtimeVersion: string },
+      ): Promise<void>;
+    };
+    await manager.persistCompileCacheTracked(
+      targetSpace,
+      first.modules,
+      first.entryIdentity,
+      { runtimeVersion },
+    );
+    await manager.persistCompileCacheTracked(
+      targetSpace,
+      second.modules,
+      second.entryIdentity,
+      { runtimeVersion },
+    );
+
+    const firstExtraIdentity =
+      first.modules.find((module) => module.filename === "/first.ts")!.identity;
+    const secondExtraIdentity =
+      second.modules.find((module) => module.filename === "/second.ts")!
+        .identity;
+    const readTx = runtime.edit();
+    const loaded = await loadCompiledClosure(
+      runtime,
+      targetSpace,
+      second.entryIdentity,
+      { runtimeVersion },
+      readTx,
+    );
+    readTx.abort?.();
+
+    expect(loaded.has(secondExtraIdentity)).toBe(true);
+    expect(loaded.has(firstExtraIdentity)).toBe(false);
+
+    await manager.persistCompileCacheTracked(
+      targetSpace,
+      first.modules,
+      first.entryIdentity,
+      { runtimeVersion },
+    );
+    const replayTx = runtime.edit();
+    const replayed = await loadCompiledClosure(
+      runtime,
+      targetSpace,
+      first.entryIdentity,
+      { runtimeVersion },
+      replayTx,
+    );
+    replayTx.abort?.();
+    expect(replayed.has(firstExtraIdentity)).toBe(true);
+    expect(replayed.has(secondExtraIdentity)).toBe(false);
+  });
+
+  it("tracks a queued replacement write before its predecessor completes", async () => {
+    const targetSpace = "did:key:z6MkCellCacheQueuedWriteTarget";
+    const main = {
+      name: "/main.ts",
+      contents: "export const main = 1;",
+    };
+    const first = toModules({
+      main: main.name,
+      files: [
+        main,
+        { name: "/first.ts", contents: "export const first = 1;" },
+      ],
+    });
+    const second = toModules({
+      main: main.name,
+      files: [
+        main,
+        { name: "/second.ts", contents: "export const second = 2;" },
+      ],
+    });
+    const manager = runtime.patternManager as unknown as {
+      persistCompileCacheTracked(
+        space: string,
+        modules: CacheableModule[],
+        entryIdentity: string,
+        opts: { runtimeVersion: string },
+      ): Promise<void>;
+      writeBackCompileCache(
+        space: string,
+        modules: CacheableModule[],
+        entryIdentity: string,
+        opts: { runtimeVersion: string },
+      ): Promise<void>;
+      pendingCacheWriteBacks: Set<Promise<unknown>>;
+    };
+    const originalWriteBack = manager.writeBackCompileCache;
+    const firstStarted = Promise.withResolvers<void>();
+    const releaseFirst = Promise.withResolvers<void>();
+    const secondStarted = Promise.withResolvers<void>();
+    const releaseSecond = Promise.withResolvers<void>();
+    let writeCount = 0;
+    let firstWrite: Promise<void> | undefined;
+    let secondWrite: Promise<void> | undefined;
+    manager.writeBackCompileCache = async () => {
+      writeCount++;
+      if (writeCount === 1) {
+        firstStarted.resolve();
+        await releaseFirst.promise;
+      } else {
+        secondStarted.resolve();
+        await releaseSecond.promise;
+      }
+    };
+
+    try {
+      firstWrite = manager.persistCompileCacheTracked(
+        targetSpace,
+        first.modules,
+        first.entryIdentity,
+        { runtimeVersion },
+      );
+      await firstStarted.promise;
+      secondWrite = manager.persistCompileCacheTracked(
+        targetSpace,
+        second.modules,
+        second.entryIdentity,
+        { runtimeVersion },
+      );
+
+      expect(manager.pendingCacheWriteBacks.size).toBe(2);
+      releaseFirst.resolve();
+      await secondStarted.promise;
+      releaseSecond.resolve();
+      await Promise.all([firstWrite, secondWrite]);
+      expect(writeCount).toBe(2);
+    } finally {
+      releaseFirst.resolve();
+      releaseSecond.resolve();
+      await Promise.allSettled(
+        [firstWrite, secondWrite].filter(
+          (write): write is Promise<void> => write !== undefined,
+        ),
+      );
+      manager.writeBackCompileCache = originalWriteBack;
+    }
+  });
+
+  it("retains persistence entries for the runner session", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const manager = runtime.patternManager as unknown as {
+      persistCompileCacheTracked(
+        space: string,
+        modules: CacheableModule[],
+        entryIdentity: string,
+        opts: { runtimeVersion: string },
+      ): Promise<void>;
+      writeBackCompileCache(
+        space: string,
+        modules: CacheableModule[],
+        entryIdentity: string,
+        opts: { runtimeVersion: string },
+      ): Promise<void>;
+      persistedCompileCacheClosures: Map<string, string>;
+    };
+    const originalWriteBack = manager.writeBackCompileCache;
+    manager.writeBackCompileCache = () => Promise.resolve();
+    try {
+      for (let index = 0; index <= 1000; index++) {
+        await manager.persistCompileCacheTracked(
+          `did:key:z6MkPersistenceSlot${index}`,
+          modules,
+          entryIdentity,
+          { runtimeVersion },
+        );
+      }
+    } finally {
+      manager.writeBackCompileCache = originalWriteBack;
+    }
+
+    expect(manager.persistedCompileCacheClosures.size).toBe(1001);
+    expect(
+      manager.persistedCompileCacheClosures.has(
+        JSON.stringify([
+          "did:key:z6MkPersistenceSlot0",
+          runtimeVersion,
+          entryIdentity,
+        ]),
+      ),
+    ).toBe(true);
+  });
+
   // Regression: before bd98e01a4, compiled docs were stamped with a per-user
   // `cf-compiled-by:<did>` atom. A second user's cold-compile writeback of the
   // SAME content into the same space was rejected by the CFC label merge

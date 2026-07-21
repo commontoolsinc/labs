@@ -322,8 +322,11 @@ describe("wish built-in", () => {
     const after = Date.now();
     const nowValue = result.key("nowValue").get()?.result;
     expect(typeof nowValue).toBe("number");
-    expect(nowValue).toBeGreaterThanOrEqual(before);
+    // Coarsened to 1s resolution — floor(before) to floor(after+1s) range
+    const coarsenedBefore = Math.floor(before / 1000) * 1000;
+    expect(nowValue).toBeGreaterThanOrEqual(coarsenedBefore);
     expect(nowValue).toBeLessThanOrEqual(after);
+    expect(nowValue! % 1000).toBe(0);
   });
 
   it("resolves the space cell using slash target", async () => {
@@ -675,8 +678,11 @@ describe("wish built-in", () => {
       const after = Date.now();
       const nowValue = result.key("nowValue").get()?.result;
       expect(typeof nowValue).toBe("number");
-      expect(nowValue).toBeGreaterThanOrEqual(before);
+      // Coarsened to 1s resolution — floor(before) to after range
+      const coarsenedBefore = Math.floor(before / 1000) * 1000;
+      expect(nowValue).toBeGreaterThanOrEqual(coarsenedBefore);
       expect(nowValue).toBeLessThanOrEqual(after);
+      expect(nowValue! % 1000).toBe(0);
     });
 
     it("returns error for unknown tag", async () => {
@@ -4173,6 +4179,520 @@ describe("parseWishTarget", () => {
 
   it("throws on hash-only target", () => {
     expect(() => parseWishTarget("#")).toThrow("is not recognized");
+  });
+});
+
+describe("interval #now wish", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: ReturnType<Runtime["edit"]>;
+  let wish: ReturnType<typeof createBuilder>["commonfabric"]["wish"];
+  let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+    });
+
+    tx = runtime.edit();
+
+    const { commonfabric } = createTrustedBuilder(runtime);
+    ({ wish, pattern } = commonfabric);
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime.dispose();
+    await storageManager.close();
+  });
+
+  it("#now one-shot is coarsened to 1s", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now" }) };
+    });
+
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "coarsened now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowValue = result.key("nowValue").get()?.result;
+    expect(typeof nowValue).toBe("number");
+    // Coarsened to 1s — must be divisible by 1000
+    expect(nowValue! % 1000).toBe(0);
+  });
+
+  it("#now one-shot remains stable across reruns", async () => {
+    const triggerCell = runtime.getCell<number>(
+      space,
+      "one-shot trigger",
+      undefined,
+      tx,
+    );
+    triggerCell.set(0);
+
+    const wishPattern = pattern(() => {
+      triggerCell.get();
+      return { nowValue: wish({ query: "#now" }) };
+    });
+
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "stable one-shot result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    const first = result.key("nowValue").get()?.result;
+    expect(typeof first).toBe("number");
+
+    await new Promise((r) => setTimeout(r, 1100));
+    triggerCell.withTx(tx).set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    const second = result.key("nowValue").get()?.result;
+    expect(second).toBe(first);
+  });
+
+  it("#now one-shot keeps its first-ever capture across re-instantiation", async () => {
+    const wishPattern = pattern(() => ({ nowValue: wish({ query: "#now" }) }));
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "durable one-shot result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+    const first = result.key("nowValue").get()?.result;
+    expect(typeof first).toBe("number");
+
+    // Stop and re-instantiate the pattern into the same result cell — a fresh
+    // wish-action closure, exactly what a piece stop/start or a reload in another
+    // runtime produces — after crossing the 1s coarsening boundary.
+    runtime.runner.stop(resultCell);
+    await new Promise((r) => setTimeout(r, 1100));
+
+    const result2 = runtime.run(tx, wishPattern, {}, resultCell.withTx(tx));
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result2.pull();
+    const second = result2.key("nowValue").get()?.result;
+    // Durable: the re-instantiation reads the first-ever captured time from the
+    // per-instance cell instead of re-reading the clock, so it does not jump.
+    expect(second).toBe(first);
+  });
+
+  it("#now/5 returns a cell coarsened to a 5s boundary", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/5" }) };
+    });
+
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "interval now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowValue = result.key("nowValue").get()?.result;
+    expect(typeof nowValue).toBe("number");
+    // 5 seconds — coarsened to a 5000ms boundary
+    expect(nowValue! % 5000).toBe(0);
+  });
+
+  it("#now/1 ticks at the 1s minimum", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/1" }) };
+    });
+
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "min now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowValue = result.key("nowValue").get()?.result;
+    expect(typeof nowValue).toBe("number");
+    // 1 second is the 1000ms minimum
+    expect(nowValue! % 1000).toBe(0);
+  });
+
+  it("#now/0 throws WishError (below minimum)", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/0" }) };
+    });
+
+    const resultCell = runtime.getCell<{
+      nowValue?: { result?: unknown; error?: string };
+    }>(
+      space,
+      "zero now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowState = result.key("nowValue").get();
+    expect(nowState?.error).toBeDefined();
+    expect(nowState?.error).toContain("between 1 and 86400 seconds");
+  });
+
+  it("#now/60 values are coarsened to a 60s boundary", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/60" }) };
+    });
+
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "60s now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowValue = result.key("nowValue").get()?.result;
+    expect(typeof nowValue).toBe("number");
+    // 60 seconds — coarsened to a 60000ms boundary
+    expect(nowValue! % 60000).toBe(0);
+  });
+
+  it("#now/86400 is accepted (24h maximum)", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/86400" }) };
+    });
+
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "max now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowValue = result.key("nowValue").get()?.result;
+    expect(typeof nowValue).toBe("number");
+    // 86400 seconds = 24h, coarsened to an 86_400_000ms boundary
+    expect(nowValue! % 86_400_000).toBe(0);
+  });
+
+  it("#now/86401 throws WishError (above maximum)", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/86401" }) };
+    });
+
+    const resultCell = runtime.getCell<{
+      nowValue?: { result?: unknown; error?: string };
+    }>(
+      space,
+      "over-max now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowState = result.key("nowValue").get();
+    expect(nowState?.error).toBeDefined();
+    expect(nowState?.error).toContain("between 1 and 86400 seconds");
+  });
+
+  it("#now/abc throws WishError", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/abc" }) };
+    });
+
+    const resultCell = runtime.getCell<{
+      nowValue?: { result?: unknown; error?: string };
+    }>(
+      space,
+      "invalid now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowState = result.key("nowValue").get();
+    expect(nowState?.error).toBeDefined();
+    expect(nowState?.error).toContain("whole number of seconds");
+  });
+
+  it("#now/5.5 throws WishError (non-integer rejected)", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/5.5" }) };
+    });
+
+    const resultCell = runtime.getCell<{
+      nowValue?: { result?: unknown; error?: string };
+    }>(
+      space,
+      "fractional now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowState = result.key("nowValue").get();
+    expect(nowState?.error).toBeDefined();
+    expect(nowState?.error).toContain("whole number of seconds");
+  });
+
+  it("#now/1e3 throws WishError (exponent rejected)", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/1e3" }) };
+    });
+
+    const resultCell = runtime.getCell<{
+      nowValue?: { result?: unknown; error?: string };
+    }>(
+      space,
+      "exponent now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowState = result.key("nowValue").get();
+    expect(nowState?.error).toBeDefined();
+    expect(nowState?.error).toContain("whole number of seconds");
+  });
+
+  it("#now/-1 throws WishError", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/-1" }) };
+    });
+
+    const resultCell = runtime.getCell<{
+      nowValue?: { result?: unknown; error?: string };
+    }>(
+      space,
+      "negative now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowState = result.key("nowValue").get();
+    expect(nowState?.error).toBeDefined();
+    expect(nowState?.error).toContain("whole number of seconds");
+  });
+
+  it("#now/Infinity throws WishError", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/Infinity" }) };
+    });
+
+    const resultCell = runtime.getCell<{
+      nowValue?: { result?: unknown; error?: string };
+    }>(
+      space,
+      "infinity now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowState = result.key("nowValue").get();
+    expect(nowState?.error).toBeDefined();
+    expect(nowState?.error).toContain("whole number of seconds");
+  });
+
+  it("#now/5/extra throws WishError", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/5/extra" }) };
+    });
+
+    const resultCell = runtime.getCell<{
+      nowValue?: { result?: unknown; error?: string };
+    }>(
+      space,
+      "extra path now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const nowState = result.key("nowValue").get();
+    expect(nowState?.error).toBeDefined();
+    expect(nowState?.error).toContain("is not recognized");
+  });
+
+  it("#now interval timer is cleaned up on stop", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/1" }) };
+    });
+
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "cleanup now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    // Stop the runner for this cell — should clear the timer without errors
+    runtime.runner.stop(resultCell);
+
+    // Wait briefly to confirm no timer errors after cleanup
+    await new Promise((r) => setTimeout(r, 100));
+  });
+
+  it("#now/1 ticks and updates value", async () => {
+    const wishPattern = pattern(() => {
+      return { nowValue: wish({ query: "#now/1" }) };
+    });
+
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "ticking now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const initial = result.key("nowValue").get()?.result;
+    expect(typeof initial).toBe("number");
+    expect(initial! % 1000).toBe(0);
+
+    // Poll until value changes, with a generous deadline for CI
+    const deadline = Date.now() + 5000;
+    let updated = initial;
+    while (updated === initial && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 200));
+      await result.pull();
+      updated = result.key("nowValue").get()?.result;
+    }
+    expect(updated).toBeGreaterThan(initial!);
+    expect(updated! % 1000).toBe(0);
+
+    // Clean up timer
+    runtime.runner.stop(resultCell);
+  });
+
+  it("#now interval keeps ticking when other dependencies change", async () => {
+    // Regression: re-running the wish action (here via an unrelated cell the
+    // pattern reads) must not reset or starve the shared interval timer.
+    const triggerCell = runtime.getCell<number>(
+      space,
+      "tick collision trigger",
+      undefined,
+      tx,
+    );
+    triggerCell.set(0);
+
+    const wishPattern = pattern(() => {
+      triggerCell.get();
+      return { nowValue: wish({ query: "#now/1" }) };
+    });
+
+    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
+      space,
+      "collision now result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    const initial = result.key("nowValue").get()?.result;
+    expect(typeof initial).toBe("number");
+
+    // Flip the trigger repeatedly while the 1s timer must advance regardless.
+    const deadline = Date.now() + 5000;
+    let updated = initial;
+    let flip = 0;
+    while (updated === initial && Date.now() < deadline) {
+      flip += 1;
+      triggerCell.withTx(tx).set(flip);
+      await tx.commit();
+      tx = runtime.edit();
+      await new Promise((r) => setTimeout(r, 200));
+      await result.pull();
+      updated = result.key("nowValue").get()?.result;
+    }
+    expect(updated).toBeGreaterThan(initial!);
+
+    runtime.runner.stop(resultCell);
   });
 });
 

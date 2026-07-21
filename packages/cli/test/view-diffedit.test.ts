@@ -1,8 +1,8 @@
 /**
  * Editing a diff: the new side of a verified hunk is editable in place, the
- * diff marker and removed/structural lines are protected, line count is locked,
- * and saving splices the edited lines back into the underlying files. A diff
- * matching no file on disk is read-only.
+ * diff marker and removed-line text are protected, removed lines can be
+ * resurrected, and saving splices the edited lines back into the underlying
+ * files. A diff matching no file on disk is read-only.
  */
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
@@ -371,9 +371,143 @@ Deno.test("diffedit: a removed line is not editable", () => {
     const before = s.doc.text;
     type(s, "X");
     assert(s.view().message.includes("isn't editable"), s.view().message);
+    assert(s.view().message.includes("R"), s.view().message);
     assertEquals(s.doc.text, before);
   } finally {
     done();
+  }
+});
+
+Deno.test("diffedit: R resurrects a removed line and saves it back to the file", () => {
+  const { root, ws, done } = tempWorkspace();
+  try {
+    for (const key of ["r", "R"]) {
+      const s = diffSession(ws);
+      toLine(s, 8); // the "-export const answer = 42;" line
+      assert(
+        s.view().editHint?.some((hint) =>
+          hint.key === "R" && hint.label === "Resurrect"
+        ),
+        "the edit status advertises resurrection on a removed line",
+      );
+      press(s, key);
+      const lines = s.doc.text.split("\n");
+      assertEquals(
+        lines[8],
+        " export const answer = 42;",
+        `${key} carried the removed line onto the new side as context`,
+      );
+      assertEquals(
+        lines[4],
+        "@@ -1,4 +1,6 @@ export function double",
+        "the new-side hunk count grew by one",
+      );
+      assertEquals(
+        s.view().cursor,
+        { line: 8, col: 1 },
+        "the cursor moved past the protected marker",
+      );
+      assert(s.view().message.includes("Resurrected"), s.view().message);
+      assert(
+        !s.view().editHint?.some((hint) => hint.key === "R"),
+        "the context line no longer offers resurrection",
+      );
+
+      if (key === "R") {
+        press(s, "f3");
+        assert(s.view().message.startsWith("Saved"), s.view().message);
+      }
+    }
+
+    assertEquals(
+      Deno.readTextFileSync(join(root, "m.ts")),
+      `export function double(n: number): number {
+    return n * 2;
+}
+export const answer = 42;
+export const answer = double(21);
+const extra = answer + 1;
+`,
+      "saving writes the resurrected line before the existing additions",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: a refused hunk update leaves the removed line intact", () => {
+  const { root, ws, done } = tempWorkspace();
+  try {
+    const s = diffSession(ws);
+    toLine(s, 8); // the "-export const answer = 42;" line
+    const before = s.doc.text;
+    const internals = s as unknown as {
+      adjustHunkCounts(
+        oldDelta: number,
+        newDelta: number,
+        hunkHeader?: number | null,
+      ): boolean;
+    };
+    internals.adjustHunkCounts = () => false;
+
+    press(s, "R");
+
+    assertEquals(s.doc.text, before, "the removed line was not changed");
+    assertEquals(s.view().message, "This hunk could not be updated.");
+    assertEquals(
+      Deno.readTextFileSync(join(root, "m.ts")),
+      FILE_TEXT,
+      "the workspace file was not changed",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: R remains a typed character on an editable diff line", () => {
+  const { ws, done } = tempWorkspace();
+  try {
+    const s = diffSession(ws);
+    toLine(s, 9); // the "+export const answer = double(21);" line
+    press(s, "end");
+    type(s, "R");
+    assert(
+      s.doc.lines[9].text.endsWith("double(21);R"),
+      s.doc.lines[9].text,
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: resurrects one of several consecutive removed lines", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "m.ts"), "alpha\ndelta\n");
+    const diff = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,4 +1,2 @@
+ alpha
+-beta
+-gamma
+ delta
+`;
+    const s = sessionFor(diff, stubWs(root));
+    toLine(s, 6); // the "-gamma" line
+    press(s, "R");
+    const lines = s.doc.text.split("\n");
+    assertEquals(lines[5], "-beta", "the preceding deletion remains");
+    assertEquals(lines[6], " gamma", "the chosen line becomes context");
+    assertEquals(lines[3], "@@ -1,4 +1,3 @@", "the new count grows once");
+    press(s, "f3");
+    assertEquals(
+      Deno.readTextFileSync(join(root, "m.ts")),
+      "alpha\ngamma\ndelta\n",
+      "the chosen line returns at its original position",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
   }
 });
 
@@ -710,7 +844,8 @@ Deno.test("diffedit: Ctrl-L expands context in pager mode (no text cursor)", () 
 Deno.test("diffedit: in pager mode Ctrl-L expands the selected hunk", () => {
   const root = Deno.makeTempDirSync();
   try {
-    const file = Array.from({ length: 20 }, (_, i) =>
+    // Long enough to back FAR_DIFF's second hunk, which sits at line 30.
+    const file = Array.from({ length: 40 }, (_, i) =>
       `line${i + 1}`).join("\n") +
       "\n";
     Deno.writeTextFileSync(join(root, "m.ts"), file);
@@ -724,8 +859,8 @@ Deno.test("diffedit: in pager mode Ctrl-L expands the selected hunk", () => {
         }
       },
     };
-    const model = parseDiff(MULTI_DIFF)!;
-    const { doc, edit } = buildDiffDocument(MULTI_DIFF, model, ws);
+    const model = parseDiff(FAR_DIFF)!;
+    const { doc, edit } = buildDiffDocument(FAR_DIFF, model, ws);
     const s = new Session(
       doc,
       { color: false, showLineNumbers: false },
@@ -735,6 +870,7 @@ Deno.test("diffedit: in pager mode Ctrl-L expands the selected hunk", () => {
     );
     // Select the second hunk via the structure tree (no text cursor), then
     // expand: the choice of hunk must follow the selection, not a stale buffer.
+    // Left alone the middle of the screen would reach down from the first.
     let guard = 0;
     while ((s.view().selected?.startLine ?? -1) !== 9 && guard++ < 200) {
       s.handleKey({ name: "tab" });
@@ -747,8 +883,8 @@ Deno.test("diffedit: in pager mode Ctrl-L expands the selected hunk", () => {
     assertEquals(s.view().cursor, null, "no text cursor");
     s.handleKey({ name: "ctrl-l" });
     assert(
-      s.doc.text.includes("@@ -7,7 +7,7 @@"),
-      "the selected (second) hunk expanded up",
+      s.doc.text.includes("@@ -20,13 +20,13 @@"),
+      `the selected (second) hunk expanded up: ${s.doc.text}`,
     );
     assert(
       s.doc.text.includes("@@ -4,3 +4,3 @@"),
@@ -759,7 +895,7 @@ Deno.test("diffedit: in pager mode Ctrl-L expands the selected hunk", () => {
     assertEquals(s.view().selected?.kind, "hunk", "still a hunk selected");
     assertEquals(s.view().selected?.startLine, 9, "still the second hunk");
     assert(
-      s.view().selected?.label.startsWith("@@ -7,7 +7,7"),
+      s.view().selected?.label.startsWith("@@ -20,13 +20,13"),
       `selected hunk label: ${s.view().selected?.label}`,
     );
   } finally {
@@ -783,7 +919,7 @@ Deno.test("diffedit: pager Ctrl-L keeps the hunk header in view when expanding u
   }
 });
 
-Deno.test("diffedit: pager Ctrl-L anchors the visible content when scrolled into the hunk body", () => {
+Deno.test("diffedit: pager Ctrl-L fills a short screen from the held edge", () => {
   const root = Deno.makeTempDirSync();
   try {
     const file = Array.from({ length: 40 }, (_, i) =>
@@ -820,15 +956,14 @@ Deno.test("diffedit: pager Ctrl-L anchors the visible content when scrolled into
     );
     // Scroll down so the hunk body is at the top and the header is off screen.
     for (let i = 0; i < 6; i++) s.handleKey({ name: "j" });
-    const topLine = s.doc.text.split("\n")[s.view().top];
-    s.handleKey({ name: "ctrl-l" }); // expand up: lines inserted above the body
-    // Now the top of the viewport IS below the insertion point, so it shifts to
-    // keep the same line on screen rather than letting it scroll away.
-    assertEquals(
-      s.doc.text.split("\n")[s.view().top],
-      topLine,
-      "the same line stays at the top of the screen",
-    );
+    s.handleKey({ name: "ctrl-l" });
+    // The middle of the screen sits in the hunk's lower half, so the lines come
+    // from below it and what follows the hunk is held still. Ten lines land on
+    // a five-row screen, so they fill it from that held edge: the last of them
+    // is on screen and the hunk has been pushed off the top.
+    assert(s.view().message.startsWith("Showing line"), s.view().message);
+    const rows = s.doc.text.split("\n").slice(s.view().top, s.view().top + 5);
+    assert(rows.includes(" line32"), rows.join("|"));
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -837,7 +972,8 @@ Deno.test("diffedit: pager Ctrl-L anchors the visible content when scrolled into
 Deno.test("diffedit: in pager mode Ctrl-L with the whole-file node selected still expands a hunk", () => {
   const root = Deno.makeTempDirSync();
   try {
-    const file = Array.from({ length: 20 }, (_, i) =>
+    // Long enough to back FAR_DIFF's second hunk, which sits at line 30.
+    const file = Array.from({ length: 40 }, (_, i) =>
       `line${i + 1}`).join("\n") +
       "\n";
     Deno.writeTextFileSync(join(root, "m.ts"), file);
@@ -851,8 +987,8 @@ Deno.test("diffedit: in pager mode Ctrl-L with the whole-file node selected stil
         }
       },
     };
-    const model = parseDiff(MULTI_DIFF)!;
-    const { doc, edit } = buildDiffDocument(MULTI_DIFF, model, ws);
+    const model = parseDiff(FAR_DIFF)!;
+    const { doc, edit } = buildDiffDocument(FAR_DIFF, model, ws);
     const s = new Session(
       doc,
       { color: false, showLineNumbers: false },
@@ -864,9 +1000,15 @@ Deno.test("diffedit: in pager mode Ctrl-L with the whole-file node selected stil
     // is the "diff --git" header — in no hunk.
     assertEquals(s.view().selected?.label, "▸ m.ts");
     s.handleKey({ name: "ctrl-l" });
-    // It must resolve to the file's first on-screen hunk, not report nothing.
-    assertEquals(s.view().message, "Expanded context.");
-    assert(s.doc.text.includes("@@ -1,"), "the first hunk expanded up");
+    // It must resolve to a hunk, not report nothing. The whole diff is on
+    // screen, so the middle of the content is nearest the first hunk's bottom
+    // edge and that is the one that grows.
+    assert(s.view().message.startsWith("Showing line"), s.view().message);
+    assert(s.doc.text.includes("@@ -4,13 +4,13 @@"), s.doc.text);
+    assert(
+      s.doc.text.includes("@@ -30,3 +30,3 @@"),
+      "the other hunk is untouched",
+    );
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -975,7 +1117,23 @@ index 0000000..1111111 100644
  line13
 `;
 
-Deno.test("diffedit: expanding context stops at the adjacent hunk and save stays correct", () => {
+const FAR_DIFF = `diff --git a/m.ts b/m.ts
+index 0000000..1111111 100644
+--- a/m.ts
++++ b/m.ts
+@@ -4,3 +4,3 @@
+ line4
+-OLD5
++line5
+ line6
+@@ -30,3 +30,3 @@
+ line30
+-OLD31
++line31
+ line32
+`;
+
+Deno.test("diffedit: expanding context into the next hunk joins them and save stays correct", () => {
   const root = Deno.makeTempDirSync();
   try {
     const file = Array.from({ length: 20 }, (_, i) =>
@@ -1002,11 +1160,18 @@ Deno.test("diffedit: expanding context stops at the adjacent hunk and save stays
       diffSource(ws, edit),
     );
     toLine(s, 8); // " line6", the bottom of the first hunk
-    s.handleKey({ name: "ctrl-l" }); // expand down — must stop before hunk 2
+    s.handleKey({ name: "ctrl-l" }); // expand down — the four lines to hunk 2
+    // The reveal closes the gap, so the two hunks meet and become one: the
+    // header that sat between line10 and line11 described nothing.
     assertEquals(
       s.doc.text.split("\n")[4],
-      "@@ -4,7 +4,7 @@",
-      "expansion abuts the next hunk (k=4) instead of overlapping it",
+      "@@ -4,10 +4,10 @@",
+      "the two hunks joined into one covering both ranges",
+    );
+    assertEquals(
+      parseDiff(s.doc.text)!.files.flatMap((f) => f.hunks).length,
+      1,
+      "one hunk where there were two",
     );
     // Now edit the SECOND hunk and save: the edit must survive and no line may
     // be dropped or duplicated.
@@ -1438,11 +1603,569 @@ Deno.test("diffedit: saving a git log -p diff does not absorb commit text or wri
       "",
     ].join("\n");
     const s = sessionFor(log, stubWs(root));
+    const before = s.doc.text;
+    toLine(s, 24); // the stale hunk's "-original" line
+    assert(
+      !s.view().editHint?.some((hint) => hint.key === "R"),
+      "a removed line in a stale hunk does not offer resurrection",
+    );
+    press(s, "R");
+    assertEquals(s.doc.text, before, "the stale removed line stayed protected");
+    assert(s.view().message.includes("isn't editable"), s.view().message);
     press(s, "f3"); // save with no edits at all
     assertEquals(
       Deno.readTextFileSync(join(root, "x.ts")),
       "realLine1\nrest2\nrest3\n",
       "the file is untouched: no absorbed metadata, no stale hunk written",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: a hunk with no new-side anchor cannot resurrect a line", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "a.ts"), "alpha\nbeta\n");
+    Deno.writeTextFileSync(join(root, "b.ts"), "new\n");
+    const diff = `diff --git a/a.ts b/a.ts
+--- a/a.ts
++++ b/a.ts
+@@ -2 +1,0 @@
+-old
+diff --git a/b.ts b/b.ts
+--- a/b.ts
++++ b/b.ts
+@@ -1 +1 @@
+-old
++new
+    `;
+    const s = sessionFor(diff, stubWs(root));
+    toLine(s, 4); // a.ts's removed line; b.ts makes the diff editable
+    press(s, "ctrl-l");
+    assertEquals(
+      s.doc.text.split("\n").slice(3, 6),
+      ["@@ -1,2 +1,1 @@", " alpha", "-old"],
+      "zero-count context expansion uses the insertion coordinate",
+    );
+    const before = s.doc.text;
+    assert(
+      !s.view().editHint?.some((hint) => hint.key === "R"),
+      "an unanchored removal does not offer resurrection",
+    );
+    press(s, "R");
+    assertEquals(s.doc.text, before, "the unanchored insertion was refused");
+    assert(s.view().message.includes("isn't editable"), s.view().message);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: a zero-count hunk expands down from its insertion point", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "a.ts"), "alpha\nbeta\n");
+    Deno.writeTextFileSync(join(root, "b.ts"), "new\n");
+    const diff = [
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -2 +1,0 @@",
+      "-old",
+      "diff --git a/b.ts b/b.ts",
+      "--- a/b.ts",
+      "+++ b/b.ts",
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+      "",
+    ].join("\n");
+    const ws = stubWs(root);
+    const model = parseDiff(diff)!;
+    const { edit } = buildDiffDocument(diff, model, ws);
+    const source = diffSource(ws, edit);
+    const expanded = source.expandContext?.(diff, diff, 4, false);
+    assert(expanded, "the workspace line below the insertion point is shown");
+    assertEquals(
+      expanded.text.split("\n")[3],
+      "@@ -2,2 +2,1 @@",
+      "a downward reveal advances a zero-count new-side coordinate",
+    );
+    assertEquals(
+      expanded.text.split("\n")[5],
+      " beta",
+      "the workspace line after the insertion point was revealed",
+    );
+    assertEquals(expanded.revealed, { from: 2, to: 2 });
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: an empty-file insertion point blocks a repeated blank range", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "m.ts"), "");
+    const log = [
+      "commit bbbbbbbbbbbbbbbb",
+      "diff --git a/m.ts b/m.ts",
+      "--- a/m.ts",
+      "+++ b/m.ts",
+      "@@ -1 +0,0 @@",
+      "-current",
+      "commit aaaaaaaaaaaaaaaa",
+      "diff --git a/m.ts b/m.ts",
+      "--- a/m.ts",
+      "+++ b/m.ts",
+      "@@ -1 +1 @@",
+      "-historical",
+      "+",
+      "\\ No newline at end of file",
+      "",
+    ].join("\n");
+    const s = sessionFor(log, stubWs(root));
+    toLine(s, log.split("\n").indexOf("-current"));
+    assert(
+      s.view().editHint?.some((hint) => hint.key === "R"),
+      "the first empty-file deletion owns the insertion point",
+    );
+    press(s, "R");
+    toLine(s, s.doc.text.split("\n").indexOf("-historical"));
+    assert(
+      !s.view().editHint?.some((hint) => hint.key === "R"),
+      "the repeated blank range cannot write through the insertion point",
+    );
+    press(s, "f3");
+    assertEquals(Deno.readTextFileSync(join(root, "m.ts")), "current\n");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: a zero-count range cannot overlap a claimed blank file line", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "m.ts"), "");
+    const log = [
+      "commit bbbbbbbbbbbbbbbb",
+      "diff --git a/m.ts b/m.ts",
+      "--- a/m.ts",
+      "+++ b/m.ts",
+      "@@ -1 +1 @@",
+      "-old",
+      "+",
+      "\\ No newline at end of file",
+      "commit aaaaaaaaaaaaaaaa",
+      "diff --git a/m.ts b/m.ts",
+      "--- a/m.ts",
+      "+++ b/m.ts",
+      "@@ -1 +0,0 @@",
+      "-historical",
+      "",
+    ].join("\n");
+    const s = sessionFor(log, stubWs(root));
+    toLine(s, log.split("\n").indexOf("-old"));
+    assert(
+      s.view().editHint?.some((hint) => hint.key === "R"),
+      "the verified blank new-side line claims the current range",
+    );
+    toLine(s, log.split("\n").indexOf("-historical"));
+    assert(
+      !s.view().editHint?.some((hint) => hint.key === "R"),
+      "the later zero-count range cannot overlap that claimed line",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: removing the only addition restores a zero-count coordinate", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "m.ts"), "only\n");
+    const diff = [
+      "diff --git a/m.ts b/m.ts",
+      "--- /dev/null",
+      "+++ b/m.ts",
+      "@@ -0,0 +1 @@",
+      "+only",
+      "",
+    ].join("\n");
+    const s = sessionFor(diff, stubWs(root));
+    toLine(s, 4);
+    press(s, "end");
+    for (const _ of "only") press(s, "backspace");
+    press(s, "backspace");
+    assertEquals(
+      s.doc.text.split("\n")[3],
+      "@@ -0,0 +0,0 @@",
+      "crossing to zero moves the insertion coordinate before the first line",
+    );
+    press(s, "f3");
+    assertEquals(Deno.readTextFileSync(join(root, "m.ts")), "");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: resurrects the only line of an empty file without adding a final newline", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "a.ts"), "");
+    const diff = [
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1 +0,0 @@",
+      "-only",
+      "\\ No newline at end of file",
+      "",
+    ].join("\n");
+    const s = sessionFor(diff, stubWs(root));
+    toLine(s, 4);
+    assert(
+      s.view().editHint?.some((hint) => hint.key === "R"),
+      "the empty workspace file anchors the insertion point",
+    );
+    const beforeExpand = s.doc.text;
+    press(s, "ctrl-l");
+    assertEquals(
+      s.doc.text,
+      beforeExpand,
+      "the empty file has no context to reveal",
+    );
+    press(s, "R");
+    assertEquals(
+      s.doc.text.split("\n")[3],
+      "@@ -1,1 +1,1 @@",
+      "growing a zero-count range advances its start",
+    );
+    press(s, "f3");
+    assertEquals(
+      Deno.readTextFileSync(join(root, "a.ts")),
+      "only",
+      "the resurrected EOF line keeps its missing final newline",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: a CRLF diff does not add a carriage return to a no-newline line", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "a.ts"), "");
+    const diff = [
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1 +0,0 @@",
+      "-only",
+      "\\ No newline at end of file",
+      "",
+    ].join("\r\n");
+    const s = sessionFor(diff, stubWs(root));
+    toLine(s, 4);
+    press(s, "R", "f3");
+    assertEquals(
+      Deno.readTextFileSync(join(root, "a.ts")),
+      "only",
+      "the CRLF transport ending is not part of the restored file line",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: resurrection before a later addition keeps the final newline", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "a.ts"), "new\n");
+    const diff = [
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1 +1 @@",
+      "-old",
+      "\\ No newline at end of file",
+      "+new",
+      "",
+    ].join("\n");
+    const s = sessionFor(diff, stubWs(root));
+    toLine(s, 4);
+    press(s, "R", "f3");
+    assertEquals(
+      Deno.readTextFileSync(join(root, "a.ts")),
+      "old\nnew\n",
+      "old-side metadata does not change the later new-side ending",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: old-side no-newline metadata cannot trim later workspace lines", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "a.ts"), "new\nlater\n");
+    const diff = [
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1 +1 @@",
+      "-old",
+      "\\ No newline at end of file",
+      "+new",
+      "",
+    ].join("\n");
+    const s = sessionFor(diff, stubWs(root));
+    toLine(s, 4);
+    press(s, "R", "f3");
+    assertEquals(
+      Deno.readTextFileSync(join(root, "a.ts")),
+      "old\nnew\nlater\n",
+      "metadata outside the workspace EOF does not change its ending",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: new-side no-newline metadata must match the workspace", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "a.ts"), "new\n");
+    const diff = [
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+      "\\ No newline at end of file",
+      "",
+    ].join("\n");
+    const s = sessionFor(diff, stubWs(root));
+    press(s, "e");
+    assertEquals(
+      s.view().cursor,
+      null,
+      "newline metadata that differs from disk leaves the hunk read-only",
+    );
+    press(s, "f3");
+    assertEquals(Deno.readTextFileSync(join(root, "a.ts")), "new\n");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: resurrects a removed line in a CRLF diff", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "m.ts"), "a\r\nc\r\n");
+    const diff = [
+      "diff --git a/m.ts b/m.ts",
+      "--- a/m.ts",
+      "+++ b/m.ts",
+      "@@ -1,3 +1,2 @@",
+      " a",
+      "-b",
+      " c",
+      "",
+    ].join("\r\n");
+    const s = sessionFor(diff, stubWs(root));
+    toLine(s, 5);
+    press(s, "R");
+    assertEquals(
+      s.doc.text.split("\n")[3],
+      "@@ -1,3 +1,3 @@\r",
+      "the count changes without dropping the carriage return",
+    );
+    press(s, "f3");
+    assertEquals(
+      Deno.readTextFileSync(join(root, "m.ts")),
+      "a\r\nb\r\nc\r\n",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: resurrects within a CRLF file that has no final newline", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "m.ts"), "a\r\nc");
+    const diff = [
+      "diff --git a/m.ts b/m.ts",
+      "--- a/m.ts",
+      "+++ b/m.ts",
+      "@@ -1,3 +1,2 @@",
+      " a",
+      "-b",
+      " c",
+      "\\ No newline at end of file",
+      "",
+    ].join("\r\n");
+    const s = sessionFor(diff, stubWs(root));
+    toLine(s, 5);
+    press(s, "R", "f3");
+    assertEquals(
+      Deno.readTextFileSync(join(root, "m.ts")),
+      "a\r\nb\r\nc",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: joined CRLF hunks preserve a missing final newline", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "m.ts"), "a\r\nB\r\nc\r\nd\r\nE");
+    const diff = [
+      "diff --git a/m.ts b/m.ts",
+      "--- a/m.ts",
+      "+++ b/m.ts",
+      "@@ -1,2 +1,2 @@",
+      " a",
+      "-oldB",
+      "+B",
+      "@@ -4,2 +4,2 @@",
+      " d",
+      "-oldE",
+      "+E",
+      "\\ No newline at end of file",
+      "",
+    ].join("\r\n");
+    const s = sessionFor(diff, stubWs(root));
+    toLine(s, 6); // "+B", the bottom of the first hunk
+    press(s, "ctrl-l");
+    assertEquals(
+      s.doc.text.split("\n")[3],
+      "@@ -1,5 +1,5 @@\r",
+      "joining hunks preserves the CRLF transport ending",
+    );
+    toLine(s, s.doc.text.split("\n").indexOf("-oldE\r"));
+    press(s, "R", "f3");
+    assertEquals(
+      Deno.readTextFileSync(join(root, "m.ts")),
+      "a\r\nB\r\nc\r\nd\r\noldE\r\nE",
+      "the final line does not gain a transport carriage return",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: diff body text resembling file headers does not hide its hunk", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "m.ts"), "++ sentinel\nD\n");
+    const diff = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,2 +1,2 @@
+--- prior
++++ sentinel
+-old
++D
+`;
+    const s = sessionFor(diff, stubWs(root));
+    toLine(s, 6);
+    press(s, "R");
+    assertEquals(s.doc.text.split("\n")[3], "@@ -1,2 +1,3 @@");
+    press(s, "f3");
+    assertEquals(
+      Deno.readTextFileSync(join(root, "m.ts")),
+      "++ sentinel\nold\nD\n",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: a repeated historical range cannot overwrite a resurrection", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "m.ts"), "A\n");
+    const log = [
+      "commit bbbbbbbbbbbbbbbb",
+      "diff --git a/m.ts b/m.ts",
+      "--- a/m.ts",
+      "+++ b/m.ts",
+      "@@ -1 +1 @@",
+      "-X",
+      "+A",
+      "commit aaaaaaaaaaaaaaaa",
+      "diff --git a/m.ts b/m.ts",
+      "--- a/m.ts",
+      "+++ b/m.ts",
+      "@@ -1 +1 @@",
+      "-B",
+      "+A",
+      "",
+    ].join("\n");
+    const s = sessionFor(log, stubWs(root));
+    toLine(s, log.split("\n").indexOf("-X"));
+    press(s, "R");
+    toLine(s, log.split("\n").indexOf("-B"));
+    assert(
+      !s.view().editHint?.some((hint) => hint.key === "R"),
+      "the older overlapping hunk is read-only",
+    );
+    press(s, "f3");
+    assertEquals(
+      Deno.readTextFileSync(join(root, "m.ts")),
+      "X\nA\n",
+      "the older hunk does not replace the edited current range",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: context expansion stops before a repeated writable range", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "x.ts"), "A\nB\nC\nD\nE\n");
+    Deno.writeTextFileSync(join(root, "y.ts"), "Y\n");
+    const log = [
+      "commit cccccccccccccccc",
+      "diff --git a/x.ts b/x.ts",
+      "--- a/x.ts",
+      "+++ b/x.ts",
+      "@@ -1 +1 @@",
+      "-oldA",
+      "+A",
+      "diff --git a/y.ts b/y.ts",
+      "--- a/y.ts",
+      "+++ b/y.ts",
+      "@@ -1 +1 @@",
+      "-oldY",
+      "+Y",
+      "commit bbbbbbbbbbbbbbbb",
+      "diff --git a/x.ts b/x.ts",
+      "--- a/x.ts",
+      "+++ b/x.ts",
+      "@@ -5 +5 @@",
+      "-Z",
+      "+E",
+      "",
+    ].join("\n");
+    const s = sessionFor(log, stubWs(root));
+    toLine(s, log.split("\n").indexOf("+A"));
+    press(s, "ctrl-l");
+    const removed = s.doc.text.split("\n").indexOf("-Z");
+    toLine(s, removed);
+    assert(
+      s.view().editHint?.some((hint) => hint.key === "R"),
+      "the later non-overlapping range remains writable",
+    );
+    press(s, "R", "f3");
+    assertEquals(
+      Deno.readTextFileSync(join(root, "x.ts")),
+      "A\nB\nC\nD\nZ\nE\n",
+      "expanded context does not overwrite the later resurrection",
     );
   } finally {
     Deno.removeSync(root, { recursive: true });
@@ -1904,6 +2627,44 @@ Deno.test("revert: Enter does nothing on a diff revert (no default button)", () 
     // A scope key still works afterwards.
     press(s, "a");
     assert(!s.doc.text.includes(" X"), "all reverted after Enter no-op");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("revert: with no default button, Tab focuses the first scope, Shift-Tab the last", () => {
+  const { ws, done } = tempWorkspace();
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 30, fg.git);
+    toLine(s, 17);
+    press(s, "end");
+    type(s, " X");
+
+    press(s, "ctrl-r");
+    assertEquals(
+      s.view().dialog?.focus,
+      -1,
+      "no button is focused without a default",
+    );
+    const n = s.view().dialog!.buttons.length;
+
+    // From no focus, Tab lands on the first button (a scope).
+    press(s, "tab");
+    assertEquals(s.view().dialog?.focus, 0, "Tab focused the first scope");
+    press(s, "escape"); // close it via Cancel
+
+    // Reopen and go the other way: Shift-Tab from no focus lands on the last,
+    // which is Cancel; Enter then activates it.
+    press(s, "ctrl-r");
+    press(s, "shift-tab");
+    assertEquals(
+      s.view().dialog?.focus,
+      n - 1,
+      "Shift-Tab focused the last button",
+    );
+    press(s, "enter");
+    assertEquals(s.view().message, "Cancelled");
   } finally {
     done();
   }

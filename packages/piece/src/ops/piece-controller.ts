@@ -2708,25 +2708,32 @@ export class PieceController<T = unknown> {
 
   async setPattern(
     program: RuntimeProgram,
-    options?: { repository?: string },
+    options?: {
+      repository?: string;
+      dangerouslyAllowIncompatibleSchema?: boolean;
+    },
   ): Promise<void> {
     const mutationVersion = ++this.#mutationVersion;
     await this.#runMutation(mutationVersion, async () => {
       const { pattern: previousPattern, ref: previousRef } = await this
         .#loadCurrentPattern();
       const pattern = await compileProgram(this.#manager, program);
-      assertPatternSchemasBackwardCompatible(previousPattern, pattern);
+      if (!options?.dangerouslyAllowIncompatibleSchema) {
+        assertPatternSchemasBackwardCompatible(previousPattern, pattern);
+      }
       return await execute(this.#manager, this.id, pattern, undefined, {
         start: true,
         expectedPatternIdentity: previousRef,
-        validateArgumentLinks: (argumentCell, argumentSchema) =>
-          assertSuppliedLinkSchemasCompatible(
-            suppliedLinks(argumentCell.getRaw()),
-            argumentSchema,
-            argumentCell,
-            this.#manager,
-            { priorArgumentSchema: previousPattern.argumentSchema },
-          ),
+        validateArgumentLinks: options?.dangerouslyAllowIncompatibleSchema
+          ? undefined
+          : (argumentCell, argumentSchema) =>
+            assertSuppliedLinkSchemasCompatible(
+              suppliedLinks(argumentCell.getRaw()),
+              argumentSchema,
+              argumentCell,
+              this.#manager,
+              { priorArgumentSchema: previousPattern.argumentSchema },
+            ),
         repository: options?.repository,
       }) as Cell<T>;
     });

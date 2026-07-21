@@ -75,8 +75,11 @@ one-off IDs.
 - If the logic starts becoming imperative, move the heavy lifting into
   `computed()`, module-scope `lift()`, or a module-scope helper and keep the
   action as the trigger.
-- Use `safeDateNow()` and `nonPrivateRandom()` instead of `Date.now()` and
-  `Math.random()` in authored pattern code.
+- Call `Date.now()` and `Math.random()` directly in authored pattern code.
+  These built-ins are gated by the sandbox: allowed inside an action or handler
+  (the clock is coarsened to one-second resolution), and they throw a
+  `TimeCapabilityError` in a lift/computed or at pattern-body level. For
+  reactive time in a computed, read the `#now` wish.
 - Prefer capturing time/random snapshots in the action itself rather than
   inside a `computed()` that may re-run many times.
 

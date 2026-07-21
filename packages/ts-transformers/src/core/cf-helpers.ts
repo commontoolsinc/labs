@@ -2,8 +2,6 @@ import ts from "typescript";
 import { TransformationContext } from "./mod.ts";
 
 export const CF_HELPERS_IDENTIFIER = "__cfHelpers";
-export const CF_DATA_HELPER_IDENTIFIER = "__cfDataHelper";
-const CF_DATA_HELPER_KEEP_IDENTIFIER = "__cfDataHelperKeep";
 
 const CF_HELPERS_SPECIFIER = "commonfabric";
 
@@ -12,11 +10,6 @@ const CF_HELPERS_SPECIFIER = "commonfabric";
 // patternCoverageOptionsForCompile.
 const HELPERS_STMT =
   `import { ${CF_HELPERS_IDENTIFIER} } from "${CF_HELPERS_SPECIFIER}";`;
-const CF_DATA_HELPER_STMT =
-  `import { __cf_data as ${CF_DATA_HELPER_IDENTIFIER} } from "${CF_HELPERS_SPECIFIER}";`;
-const CF_DATA_HELPER_USED_STMT = `// @ts-ignore: Internals
-const ${CF_DATA_HELPER_KEEP_IDENTIFIER} = ${CF_DATA_HELPER_IDENTIFIER};
-`;
 
 const HELPERS_USED_STMT = `// @ts-ignore: Internals
 function h(...args: any[]) { return ${CF_HELPERS_IDENTIFIER}.h.apply(null, args); }
@@ -33,7 +26,6 @@ export class CFHelpers {
   #sourceFile: ts.SourceFile;
   #factory: ts.NodeFactory;
   #helperIdent?: ts.Identifier;
-  #dataHelperIdent?: ts.Identifier;
 
   constructor(params: Pick<TransformationContext, "sourceFile" | "factory">) {
     this.#sourceFile = params.sourceFile;
@@ -44,20 +36,11 @@ export class CFHelpers {
       if (helperSymbol) {
         this.#helperIdent = helperSymbol;
       }
-
-      const dataHelperSymbol = getCFDataHelperIdentifier(stmt);
-      if (dataHelperSymbol) {
-        this.#dataHelperIdent = dataHelperSymbol;
-      }
     }
   }
 
   sourceHasHelpers(): boolean {
     return !!this.#helperIdent;
-  }
-
-  sourceHasDataHelper(): boolean {
-    return !!this.#dataHelperIdent;
   }
 
   // Returns an PropertyAccessExpression of the requested
@@ -134,22 +117,6 @@ export class CFHelpers {
     return this.#factory.createQualifiedName(
       this.#helperIdent!,
       name,
-    );
-  }
-
-  getDataHelperExpr(originalNode?: ts.Node): ts.Identifier {
-    if (!this.sourceHasDataHelper()) {
-      throw new Error("Source file does not contain __cfDataHelper.");
-    }
-
-    if (!originalNode) {
-      return this.#factory.createIdentifier(this.#dataHelperIdent!.text);
-    }
-
-    return this.preserveNodeSourceMap(
-      this.#factory.createIdentifier(this.#dataHelperIdent!.text),
-      originalNode,
-      this.#dataHelperIdent!,
     );
   }
 }
@@ -269,16 +236,6 @@ export function isLegacyInjectedEnvelope(source: string): boolean {
   return false;
 }
 
-export function injectCfDataHelper(source: string): string {
-  checkReservedHelperVar(source, CF_DATA_HELPER_IDENTIFIER);
-  checkReservedHelperVar(source, CF_DATA_HELPER_KEEP_IDENTIFIER);
-  return [
-    CF_DATA_HELPER_STMT,
-    source,
-    CF_DATA_HELPER_USED_STMT,
-  ].join("\n");
-}
-
 // Throws if `__cfHelpers` was found as an Identifier
 // in the source code.
 function checkCFHelperVar(source: string) {
@@ -321,30 +278,6 @@ function getCFHelpersIdentifier(
     if (bindingName.text === CF_HELPERS_IDENTIFIER) {
       return element.name;
     }
-  }
-  return;
-}
-
-function getCFDataHelperIdentifier(
-  statement: ts.Statement,
-): ts.Identifier | undefined {
-  if (!ts.isImportDeclaration(statement)) return;
-  const { importClause, moduleSpecifier } = statement;
-
-  if (!ts.isStringLiteral(moduleSpecifier)) return;
-  if (moduleSpecifier.text !== CF_HELPERS_SPECIFIER) return;
-
-  if (!importClause || !ts.isImportClause(importClause)) return;
-  const { namedBindings } = importClause;
-  if (!namedBindings || !ts.isNamedImports(namedBindings)) return;
-  for (const element of namedBindings.elements) {
-    if (element.name.text !== CF_DATA_HELPER_IDENTIFIER) {
-      continue;
-    }
-    if ((element.propertyName ?? element.name).text !== "__cf_data") {
-      continue;
-    }
-    return element.name;
   }
   return;
 }

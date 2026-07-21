@@ -5,12 +5,18 @@
 // failed, concerning if a failure sits within the recent window but the tip
 // recovered, else good.
 import type { Run, Status, Tile, TileView } from "../types.ts";
-import { concDot, escapeHtml, hhmm, landingHref } from "../lib.ts";
+import { concDot, escapeHtml, landingHref } from "../lib.ts";
 import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, RECENT_DISPLAY, RECENT_WINDOW, REPO } from "../config.ts";
+
+const utcFallback = (iso: string): string => {
+  const at = Date.parse(iso);
+  return Number.isFinite(at) ? `${new Date(at).toISOString().slice(11, 16)} UTC` : iso;
+};
 
 export const recentRuns: Tile = {
   id: "recent-runs",
   intervalMs: 30_000,
+  wide: true,
   async collect(ctx): Promise<TileView> {
     // Two shared bases (labs + loom), merged newest-first and cut to the most
     // recent RECENT_DISPLAY across both.
@@ -44,13 +50,14 @@ export const recentRuns: Tile = {
         : (r.conclusion ?? "done");
       const title = (r.head_commit?.message ?? r.display_title).split("\n", 1)[0];
       const href = landingHref(title, r.head_sha, repoOf(r));
-      return `<a class="ev" href="${escapeHtml(href)}" target="_blank" rel="noopener"><span class="t">${hhmm(r.run_started_at)}</span><span class="dot ${dot}"></span><span class="evtxt">${escapeHtml(`${shortRepo(r)} · ${label} · ${title}`)}</span><span class="evarrow">↗</span></a>`;
+      const startedAt = escapeHtml(r.run_started_at);
+      const fallback = escapeHtml(utcFallback(r.run_started_at));
+      return `<a class="ev" href="${escapeHtml(href)}" target="_blank" rel="noopener"><time class="t" datetime="${startedAt}" data-viewer-time>${fallback}</time><span class="dot ${dot}"></span><span class="evtxt">${escapeHtml(`${shortRepo(r)} · ${label} · ${title}`)}</span><span class="evarrow">↗</span></a>`;
     }).join("") || `<div class="ev"><span class="dot grey"></span><span>waiting for first poll…</span></div>`;
 
     return {
       label: `recent main runs · ${runs.length} in window`,
       status,
-      wide: true,
       extra: `<div class="evscroll">${rows}</div>`,
     };
   },

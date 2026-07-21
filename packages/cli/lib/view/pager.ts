@@ -12,7 +12,7 @@
 import { CSI, term } from "./ansi.ts";
 import type { Document } from "./model.ts";
 import { decodeKeys } from "./keys.ts";
-import { cursorScreenPos, renderFrame } from "./render.ts";
+import { cursorScreenPos, renderFrame, type ViewState } from "./render.ts";
 import { Session, type SessionOptions } from "./session.ts";
 import { ui } from "./theme.ts";
 import { createSemantics, type Semantics } from "./semantics.ts";
@@ -25,6 +25,18 @@ const encoder = new TextEncoder();
 /** Idle gap after the last keystroke before the deferred structure re-parse
  * runs. Highlighting is not deferred — it re-runs on every keystroke. */
 const REPARSE_DEBOUNCE_MS = 150;
+
+/** Gap between frames while the lines a Ctrl-L revealed land, one per frame. */
+const REVEAL_FRAME_MS = 16;
+
+/** How long a prompt button stays drawn pushed after it is activated, before
+ * its action's result shows. Long enough to register as a press, short enough
+ * not to hold up the answer. */
+const PUSH_FRAME_MS = 90;
+
+/** How long a status message that takes itself away stands before it goes. Long
+ * enough to read twice over, short enough not to outstay what prompted it. */
+const MESSAGE_LINGER_MS = 2000;
 
 export type PagerOptions = SessionOptions;
 
@@ -49,6 +61,10 @@ export interface PagerDeps {
   exit(code: number): never;
   /** Schedule `handler` after `ms`; returns a function that cancels it. */
   setTimer(handler: () => void, ms: number): () => void;
+  /** Resolve after `ms`. Used to hold a frame on screen for a moment on a path
+   * that then tears the screen down, where a cancellable timer has nothing left
+   * to run in. */
+  delay(ms: number): Promise<void>;
 }
 
 /** The real terminal and process operations. */
@@ -67,6 +83,7 @@ export function realPagerDeps(): PagerDeps {
       const id = setTimeout(handler, ms);
       return () => clearTimeout(id);
     },
+    delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   };
 }
 
@@ -112,9 +129,7 @@ export async function runPager(
     realFileGateway(),
   );
 
-  const draw = () => {
-    const view = session.view();
-    const doc = session.displayDoc();
+  const paint = (doc: Document, view: ViewState) => {
     const rows = renderFrame(doc, view);
     // Re-assert the padding background every frame. Some terminals drop the
     // OSC 11 default set at startup after the first repaint, so setting it once
@@ -130,6 +145,83 @@ export async function runPager(
     const cur = cursorScreenPos(doc, view);
     if (cur) out += term.moveTo(cur.row, cur.col) + term.showCursor;
     deps.write(out);
+  };
+
+  const draw = () => paint(session.displayDoc(), session.view());
+
+  // Ctrl-L leaves the session at the finished state; these frames walk the lines
+  // it revealed in one at a time so where they land is visible. Any key, or a
+  // resize, drops the frames left and the draw that follows shows the finish.
+  let cancelReveal: (() => void) | undefined;
+  const stopReveal = () => {
+    if (cancelReveal) {
+      cancelReveal();
+      cancelReveal = undefined;
+    }
+  };
+  const startReveal = (): boolean => {
+    const reveal = session.pendingReveal;
+    if (!reveal || reveal.count < 2) return false; // one line lands on its own
+    let shown = 1;
+    const step = () => {
+      const frame = shown < reveal.count ? session.revealFrame(shown) : null;
+      if (!frame) {
+        cancelReveal = undefined;
+        draw();
+        // What it says stands from when the lines finish landing, not from
+        // before they started.
+        startExpiry();
+        return;
+      }
+      paint(frame.doc, frame.view);
+      shown++;
+      cancelReveal = deps.setTimer(step, REVEAL_FRAME_MS);
+    };
+    cancelReveal = deps.setTimer(step, REVEAL_FRAME_MS);
+    return true;
+  };
+
+  // A prompt button press shows the button pushed for a moment before its result
+  // lands. The captured pushed frame is painted now; a timer then draws the real
+  // state (the dialog closed, or the next prompt up). Any key drops the wait.
+  let cancelPush: (() => void) | undefined;
+  const stopPush = () => {
+    if (cancelPush) {
+      cancelPush();
+      cancelPush = undefined;
+    }
+  };
+  const startPush = (): boolean => {
+    const push = session.pendingPush;
+    if (!push) return false;
+    paint(push.doc, push.view);
+    cancelPush = deps.setTimer(() => {
+      cancelPush = undefined;
+      session.pendingPush = null;
+      draw();
+      startExpiry();
+    }, PUSH_FRAME_MS);
+    return true;
+  };
+
+  // Ctrl-L pressed where the bar does not offer it says why, and the key changed
+  // nothing else. The reason has served its purpose once it has been read, so it
+  // stands for a moment and then goes rather than sitting in the bar describing
+  // a keypress the user has long since moved on from.
+  let cancelExpiry: (() => void) | undefined;
+  const stopExpiry = () => {
+    if (cancelExpiry) {
+      cancelExpiry();
+      cancelExpiry = undefined;
+    }
+  };
+  const startExpiry = () => {
+    if (!session.transientMessage) return;
+    cancelExpiry = deps.setTimer(() => {
+      cancelExpiry = undefined;
+      session.expireMessage();
+      draw();
+    }, MESSAGE_LINGER_MS);
   };
 
   // The session re-highlights on every keystroke but defers the full parse;
@@ -165,8 +257,14 @@ export async function runPager(
 
   const onResize = () => {
     const s = consoleSize(deps);
+    stopReveal(); // the frames left were laid out for the old size
+    stopExpiry();
+    stopPush(); // the captured pushed frame was laid out for the old size
     session.resize(s.width, s.height);
     draw();
+    // A message that takes itself away is still up after the redraw, so start
+    // its clock again — the one just cancelled would have left it there for good.
+    startExpiry();
   };
   const terminate = (code: number) => {
     cleanup();
@@ -177,6 +275,9 @@ export async function runPager(
   // unsaved edits; the read loop then handles the y/n/c answer. A second
   // interrupt, or a clean buffer, terminates.
   const onInterrupt = () => {
+    stopReveal();
+    stopExpiry();
+    stopPush();
     if (session.requestQuitFromSignal()) draw();
     else terminate(130);
   };
@@ -214,12 +315,36 @@ export async function runPager(
         session.handleKey(key);
         if (session.quit) break;
       }
-      if (!session.quit) {
-        draw();
-        if (session.needsReparse) scheduleReparse();
+      if (session.quit) {
+        stopReveal();
+        stopExpiry();
+        stopPush();
+        // A committing button (Save / Discard, and amend-Yes) sets quit as its
+        // action. Hold its pressed frame on screen for the press moment before
+        // the screen is torn down, so it depresses like any other button rather
+        // than vanishing. A bare `q` has nothing pushed and exits at once.
+        const push = session.pendingPush;
+        if (push) {
+          paint(push.doc, push.view);
+          await deps.delay(PUSH_FRAME_MS);
+        }
+        break;
       }
+      stopReveal();
+      stopExpiry();
+      stopPush();
+      // A reveal or a button press draws its own frames, ending on the finished
+      // one; otherwise draw the new state now.
+      if (!startReveal() && !startPush()) {
+        draw();
+        startExpiry(); // starts the clock on the message the draw put up
+      }
+      if (session.needsReparse) scheduleReparse();
     }
   } finally {
+    stopReveal();
+    stopExpiry();
+    stopPush();
     if (cancelReparse) {
       cancelReparse();
     }

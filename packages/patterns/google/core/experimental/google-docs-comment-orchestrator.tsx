@@ -28,6 +28,19 @@ import {
 // Debug flag for development - disable in production
 const DEBUG_ORCHESTRATOR = false;
 
+// The SES pattern sandbox endows no timers, so a real delay happens only in
+// host contexts that expose setTimeout; in-sandbox this resolves immediately
+// rather than throwing ReferenceError (retries stay ~1s apart anyway via the
+// gated fetch's grid-aligned settlement).
+function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  const timer = (globalThis as { setTimeout?: typeof setTimeout }).setTimeout;
+  if (typeof timer !== "function") return Promise.resolve();
+  return new Promise((resolve) => {
+    timer(resolve, ms);
+  });
+}
+
 // =============================================================================
 // SETUP REQUIREMENTS
 // =============================================================================
@@ -192,7 +205,7 @@ function createGoogleDocsClient(token: string) {
 
       // Add delay if we've been rate limited
       if (this.delay > 0) {
-        await new Promise((r) => setTimeout(r, this.delay));
+        await sleep(this.delay);
       }
 
       const res = await fetch(url, opts);
@@ -213,7 +226,7 @@ function createGoogleDocsClient(token: string) {
             `[GoogleDocsClient] Rate limited, waiting ${this.delay}ms...`,
           );
         }
-        await new Promise((r) => setTimeout(r, this.delay));
+        await sleep(this.delay);
         return this.request(url, options, retries - 1);
       }
 

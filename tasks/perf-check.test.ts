@@ -1,4 +1,9 @@
-import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import * as path from "@std/path";
 import {
   type Artifact,
@@ -17,6 +22,7 @@ import {
   buildBaselineRunContexts,
   buildExtraBackfillContexts,
   collectCurrentCacheStates,
+  copyCoverageArtifactFiles,
   currentWorkflowRunFromEvent,
   evaluateTimingMetric,
   fetchArtifactsForRunBestEffort,
@@ -101,6 +107,140 @@ function makeSample(run = makeRun(1)): TimingSample {
     durationSeconds: 1.5,
   };
 }
+
+Deno.test("copyCoverageArtifactFiles reads a pre-downloaded artifact in place", async () => {
+  const root = await Deno.makeTempDir({ prefix: "perf-coverage-artifact-" });
+  const artifact = makeArtifact(17, "coverage-profile-workspace-1");
+  const artifactsDir = path.join(root, "artifacts");
+  const sourceDir = path.join(artifactsDir, artifact.name);
+  const nestedSourceDir = path.join(sourceDir, "pattern-runtime");
+  const profileDir = path.join(root, "profiles");
+  const lcovDir = path.join(root, "lcov");
+
+  try {
+    await Promise.all([
+      Deno.mkdir(nestedSourceDir, { recursive: true }),
+      Deno.mkdir(profileDir),
+      Deno.mkdir(lcovDir),
+    ]);
+    await Promise.all([
+      Deno.writeTextFile(path.join(sourceDir, "runtime.lcov"), "runtime"),
+      Deno.writeTextFile(
+        path.join(nestedSourceDir, "pattern.pattern-coverage.lcov"),
+        "pattern",
+      ),
+      Deno.writeTextFile(path.join(sourceDir, "profile.json"), "profile"),
+      Deno.writeTextFile(path.join(sourceDir, "ignored.txt"), "ignored"),
+    ]);
+
+    assertEquals(
+      await copyCoverageArtifactFiles(
+        artifact,
+        profileDir,
+        lcovDir,
+        artifactsDir,
+      ),
+      { profileFiles: 1, lcovFiles: 2 },
+    );
+
+    const copiedLcov: string[] = [];
+    for await (const entry of Deno.readDir(lcovDir)) {
+      copiedLcov.push(await Deno.readTextFile(path.join(lcovDir, entry.name)));
+    }
+    assertEquals(copiedLcov.sort(), ["pattern", "runtime"]);
+    assertEquals(
+      await Deno.readTextFile(path.join(profileDir, "17-0-profile.json")),
+      "profile",
+    );
+    assert((await Deno.stat(sourceDir)).isDirectory);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("copyCoverageArtifactFiles rejects a missing pre-downloaded artifact", async () => {
+  const root = await Deno.makeTempDir({ prefix: "perf-coverage-missing-" });
+  const profileDir = path.join(root, "profiles");
+  const lcovDir = path.join(root, "lcov");
+  await Promise.all([Deno.mkdir(profileDir), Deno.mkdir(lcovDir)]);
+
+  try {
+    await assertRejects(
+      () =>
+        copyCoverageArtifactFiles(
+          makeArtifact(18, "coverage-profile-workspace-2"),
+          profileDir,
+          lcovDir,
+          path.join(root, "artifacts"),
+        ),
+      Error,
+      "Pre-downloaded coverage profile artifact coverage-profile-workspace-2 (18) was not found",
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("copyCoverageArtifactFiles rejects an empty pre-downloaded artifact", async () => {
+  const root = await Deno.makeTempDir({ prefix: "perf-coverage-empty-" });
+  const artifact = makeArtifact(19, "coverage-profile-workspace-3");
+  const artifactsDir = path.join(root, "artifacts");
+  const sourceDir = path.join(artifactsDir, artifact.name);
+  const profileDir = path.join(root, "profiles");
+  const lcovDir = path.join(root, "lcov");
+  await Promise.all([
+    Deno.mkdir(sourceDir, { recursive: true }),
+    Deno.mkdir(profileDir),
+    Deno.mkdir(lcovDir),
+  ]);
+
+  try {
+    await assertRejects(
+      () =>
+        copyCoverageArtifactFiles(
+          artifact,
+          profileDir,
+          lcovDir,
+          artifactsDir,
+        ),
+      Error,
+      "contained no profile or LCOV files",
+    );
+    assert((await Deno.stat(sourceDir)).isDirectory);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("performance check pre-downloads coverage with strict integrity checks", async () => {
+  const workflow = await Deno.readTextFile(
+    new URL("../.github/workflows/deno.yml", import.meta.url),
+  );
+  const start = workflow.indexOf("  perf-check:\n");
+  const end = workflow.indexOf("\n  attest-binaries:", start);
+  assert(start >= 0 && end > start, "Performance Check job not found");
+
+  const job = workflow.slice(start, end);
+  const downloadStart = job.indexOf("- name: 📥 Download coverage reports");
+  const checkStart = job.indexOf("- name: 📊 Run performance check");
+  assert(
+    downloadStart >= 0 && checkStart > downloadStart,
+    "coverage reports must be downloaded before Performance Check runs",
+  );
+
+  const downloadStep = job.slice(downloadStart, checkStart);
+  assertStringIncludes(downloadStep, "uses: actions/download-artifact@v8");
+  assertStringIncludes(downloadStep, "pattern: coverage-profile-*");
+  assertStringIncludes(downloadStep, "path: coverage-artifacts");
+  assertStringIncludes(downloadStep, "merge-multiple: false");
+  assertStringIncludes(downloadStep, "skip-decompress: false");
+  assertStringIncludes(downloadStep, "digest-mismatch: error");
+  assertEquals(downloadStep.includes("continue-on-error"), false);
+  assertStringIncludes(
+    job.slice(checkStart),
+    "COVERAGE_ARTIFACTS_DIR: coverage-artifacts",
+  );
+});
 
 function makePR(number: number, mergedAt: string | null = null): PRInfo {
   return {

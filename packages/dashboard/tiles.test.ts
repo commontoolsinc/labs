@@ -9,7 +9,7 @@ import { labsCiTrust, loomCiTrust } from "./tiles/ci-trust.ts";
 import { labsCiDuration, loomCiDuration } from "./tiles/ci-duration.ts";
 import { recentRuns } from "./tiles/recent-runs.ts";
 import { dau, foldSeries, parseExcludes } from "./tiles/dau.ts";
-import { yourMetric } from "./tiles/your-metric.ts";
+import { githubMembers } from "./tiles/github-members.ts";
 import { buildSnapshot, discordOnline } from "./tiles/discord-online.ts";
 import { gcpSpend } from "./tiles/gcp-spend.ts";
 import { prodErrors } from "./tiles/prod-errors.ts";
@@ -119,9 +119,19 @@ Deno.test("ci-duration: only runs that passed end to end count", async () => {
 
 Deno.test("recent-runs: wide, failure tip -> bad, rows link to the landing PR", async () => {
   const v = await recentRuns.collect(ctx([run({ conclusion: "failure", head_commit: { message: "oops (#42)" } })]));
-  assertEquals(v.wide, true);
+  assertEquals(recentRuns.wide, true);
   assertEquals(v.status, "bad");
   assertStringIncludes(v.extra ?? "", "/pull/42");
+});
+
+Deno.test("recent runs: timestamps have a UTC fallback and a viewer-local marker", async () => {
+  const startedAt = "2024-01-02T17:05:00Z";
+  const runsByRepo = (repo: string) => repo === REPO ? [run({ run_started_at: startedAt })] : [];
+  const v = await recentRuns.collect(ctx([], {}, runsByRepo));
+  assertStringIncludes(
+    v.extra ?? "",
+    `<time class="t" datetime="${startedAt}" data-viewer-time>17:05 UTC</time>`,
+  );
 });
 
 Deno.test("tile labels: the labs/loom ci family is renamed and paired", async () => {
@@ -189,13 +199,6 @@ Deno.test("dau: the exclusion list is read defensively", () => {
   assertEquals(parseExcludes("").size, 0);
 });
 
-Deno.test("your metric here: a gray placeholder that can't read as a live metric", async () => {
-  const v = await yourMetric.collect(ctx([]));
-  assertEquals(v.status, "unknown"); // never green/red
-  assertEquals(v.label, "your metric here");
-  assertStringIncludes(v.sub ?? "", "life, the universe");
-});
-
 Deno.test("gated tiles gray out cleanly without their env", async () => {
   const cases = [
     [discordOnline, "DISCORD_BOT_TOKEN"],
@@ -205,6 +208,7 @@ Deno.test("gated tiles gray out cleanly without their env", async () => {
     [modelSpend, "OPENAI_ADMIN_KEY"],
     [benchmark, "GH_TOKEN"],
     [dau, "SIGNOZ_URL"],
+    [githubMembers, "GH_TOKEN"],
   ] as const;
   for (const [tile, needle] of cases) {
     const v = await tile.collect(ctx([]));

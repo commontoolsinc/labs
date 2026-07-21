@@ -2,16 +2,16 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { JsonEncodingContext } from "@/codec-json/JsonEncodingContext.ts";
-import {
-  DEEP_FREEZE,
-  FabricInstance,
-  type FabricValue,
-  IS_DEEP_FROZEN,
-} from "@/interface.ts";
+import { FabricInstance, type FabricValue } from "@/interface.ts";
 import type { JsonWireValue } from "@/codec-json/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { BaseFabricInstance } from "@/fabric-instances/BaseFabricInstance.ts";
+import {
+  BaseFabricInstance,
+  DEEP_FREEZE,
+  IS_DEEP_FROZEN,
+  SHALLOW_UNFROZEN_CLONE,
+} from "@/fabric-instances/BaseFabricInstance.ts";
 import { FabricEpochDays } from "@/fabric-primitives/FabricEpochDays.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
@@ -43,7 +43,7 @@ class UnregisteredInstance extends BaseFabricInstance {
     return "Unregistered@1";
   }
 
-  protected shallowUnfrozenClone(): FabricInstance {
+  protected [SHALLOW_UNFROZEN_CLONE](): FabricInstance {
     return new UnregisteredInstance();
   }
 

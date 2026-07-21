@@ -261,7 +261,7 @@ exports.default = (0, commonfabric_1.lift)(() => atob("YQ=="));
     const body = `
 ${IMPORT}
 function buildYears() {
-  const currentYear = new Date((0, commonfabric_1.safeDateNow)()).getFullYear();
+  const currentYear = new Date().getFullYear();
   const years = [];
   for (let year = currentYear; year >= currentYear - 2; year--) {
     years.push(String(year));
@@ -281,8 +281,8 @@ exports.default = payload;
   it("accepts compiled nested __cfHelpers.__cf_data() runtime helper calls", () => {
     const body = `
 ${IMPORT}
-const startedAt = commonfabric_1.__cfHelpers.__cf_data((0, commonfabric_1.safeDateNow)());
-const seed = commonfabric_1.__cfHelpers.__cf_data((0, commonfabric_1.nonPrivateRandom)());
+const startedAt = commonfabric_1.__cfHelpers.__cf_data(Date.now());
+const seed = commonfabric_1.__cfHelpers.__cf_data(Math.random());
 exports.default = (0, commonfabric_1.__cf_data)({ startedAt, seed });
 `;
 

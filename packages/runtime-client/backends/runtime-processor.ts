@@ -23,7 +23,9 @@ import {
   getPatternIdentityRef,
   isCell,
   isCellResult,
+  markRendererInputTx,
   markUiInputBlindWriteTx,
+  PatternCoverageCollector,
   Runtime,
   runtimePresets,
   RuntimeTelemetry,
@@ -76,6 +78,7 @@ import {
   GetGraphSnapshotRequest,
   type GetHomeSpaceCellRequest,
   type GetLoggerCountsRequest,
+  type GetPatternCoverageRequest,
   type GetPatternSourcesRequest,
   type GetSettleStatsHistoryRequest,
   type GetSettleStatsRequest,
@@ -99,6 +102,7 @@ import {
   type PageStartRequest,
   type PageStopRequest,
   type PageSyncedRequest,
+  type PatternCoverageResponse,
   type PatternSourcesResponse,
   type RecreateSpaceRootPatternRequest,
   type RegisterSpaceHostRequest,
@@ -247,6 +251,11 @@ export function browserWorkerParamsFromInitializationData(
       : {}),
     ...(data.trustSnapshot
       ? { trustSnapshotProvider: () => data.trustSnapshot }
+      : {}),
+    // The worker owns its collector so the GetPatternCoverage handler can read
+    // it back through `runtime.patternCoverage`; the harness pulls it at teardown.
+    ...(data.patternCoverage
+      ? { patternCoverage: new PatternCoverageCollector() }
       : {}),
   };
 }
@@ -918,6 +927,10 @@ export class RuntimeProcessor {
     const value = mapCellRefsToSigilLinks(request.value);
     if (blind) {
       markUiInputBlindWriteTx(tx);
+      // Renderer-input provenance that survives to commit, so the scheduler can
+      // shape the resulting subscriber wake (timing side-channel mitigation,
+      // channels 4/5). A `blind` write is exactly a renderer `$value` input write.
+      markRendererInputTx(tx);
       // The resolved storage address of the write target; its parent is the
       // structural existence/shape precondition for the blind write.
       const link = cell.withTx(tx).resolveAsCell().getAsNormalizedFullLink();
@@ -1474,6 +1487,10 @@ export class RuntimeProcessor {
     return { result };
   }
 
+  getPatternCoverage(_: GetPatternCoverageRequest): PatternCoverageResponse {
+    return { data: this.runtime.patternCoverage?.toData() ?? null };
+  }
+
   getSettleStats(
     _request: GetSettleStatsRequest,
   ): SettleStatsResponse {
@@ -1606,6 +1623,8 @@ export class RuntimeProcessor {
         return this.getGraphSnapshot(request);
       case RequestType.GetLoggerCounts:
         return this.getLoggerCounts(request);
+      case RequestType.GetPatternCoverage:
+        return this.getPatternCoverage(request);
       case RequestType.SetLoggerLevel:
         return this.setLoggerLevel(request);
       case RequestType.SetLoggerEnabled:

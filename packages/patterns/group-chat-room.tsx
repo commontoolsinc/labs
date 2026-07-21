@@ -6,9 +6,7 @@ import {
   ifElse,
   ImageData,
   NAME,
-  nonPrivateRandom,
   pattern,
-  safeDateNow,
   UI,
   Writable,
 } from "commonfabric";
@@ -91,10 +89,10 @@ const sendMessage = handler<
   if (!content || !myName) return;
 
   messages.push({
-    id: `msg-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2)}`,
+    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     author: myName,
     content,
-    timestamp: safeDateNow(),
+    timestamp: Date.now(),
     type: "chat",
     reactions: [],
   });
@@ -116,11 +114,11 @@ const sendImageMessage = handler<
 
   const image = images[0];
   messages.push({
-    id: `msg-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2)}`,
+    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     author: myName,
     content: "",
     imageUrl: image.url,
-    timestamp: safeDateNow(),
+    timestamp: Date.now(),
     type: "image",
     reactions: [],
   });

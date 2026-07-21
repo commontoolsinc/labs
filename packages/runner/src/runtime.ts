@@ -4,6 +4,8 @@ import {
   StaticCacheHTTP,
 } from "@commonfabric/static";
 import { RuntimeTelemetry } from "@commonfabric/runner";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
+import { mintDataCellURI } from "./data-uri-mint.ts";
 import type { NonIdempotentReport } from "./telemetry.ts";
 import type {
   AnyCell,
@@ -33,6 +35,7 @@ import {
   setEagerSourceAnnotation,
 } from "./builder/module.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
+import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import type {
   ChangeGroup,
   CommitError,
@@ -288,6 +291,11 @@ export interface ModuleByteCache {
   ): void;
 }
 
+export type RuntimeFetch = (
+  input: RequestInfo | URL,
+  init?: RequestInit & { client?: Deno.HttpClient },
+) => Promise<Response>;
+
 export interface RuntimeOptions {
   apiUrl: URL;
   /**
@@ -434,12 +442,25 @@ export interface RuntimeOptions {
    */
   moduleByteCache?: ModuleByteCache;
   /**
+   * Statement-coverage collector for authored patterns. When set, every compile
+   * this runtime performs is instrumented — the transformer injects a hit call
+   * in front of each authored statement — and the collector receives the hits.
+   * The compiled-byte caches (the process byte cache and the per-space durable
+   * cell cache) key the instrumented variant separately from the ordinary one,
+   * so an instrumented and an uninstrumented compile of the same source never
+   * collide, and a runtime with coverage on never serves or stores uninstrumented
+   * bytes. A per-compile `patternCoverage` option still overrides this default.
+   * Test-and-CI only; production runtimes leave it unset. See
+   * packages/runner/src/pattern-coverage.ts and docs/development/COVERAGE.md.
+   */
+  patternCoverage?: PatternCoverageCollector;
+  /**
    * Override for the outbound `fetch` used by network builtins (`fetchJson` et al).
    * Defaults to the host `globalThis.fetch`. Scoped to this runtime instance, so
    * a test harness can inject a deterministic mock without mutating process
    * globals. (LLM calls mock separately, at the `LLMClient` layer.)
    */
-  fetch?: typeof globalThis.fetch;
+  fetch?: RuntimeFetch;
 }
 
 export interface CfcRuntimeStats {
@@ -594,6 +615,8 @@ export class Runtime {
   readonly storageManager: IStorageManager;
   /** Optional process-level compiled-module-byte cache; see RuntimeOptions. */
   readonly moduleByteCache?: ModuleByteCache;
+  /** Optional pattern statement-coverage collector; see RuntimeOptions. */
+  readonly patternCoverage?: PatternCoverageCollector;
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
   readonly telemetry: RuntimeTelemetry;
   /** Resolved experimental flags (all properties present with built-in defaults). */
@@ -610,7 +633,7 @@ export class Runtime {
    * the host `globalThis.fetch`; a test harness can inject a mock via
    * `RuntimeOptions.fetch`.
    */
-  readonly fetch: typeof globalThis.fetch;
+  readonly fetch: RuntimeFetch;
   /** Runtime-learned host hints (site table); see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
   readonly userIdentityDID: DID;
@@ -930,6 +953,7 @@ export class Runtime {
       setTelemetry?: (telemetry: RuntimeTelemetry) => void;
     }).setTelemetry?.(this.telemetry);
     this.moduleByteCache = options.moduleByteCache;
+    this.patternCoverage = options.patternCoverage;
     // Validated + digested + frozen before the trust-snapshot provider
     // default below, whose `revision` covers the config digest (a trust
     // config change must invalidate prepared digests like any other
@@ -1704,6 +1728,29 @@ export class Runtime {
     );
   }
 
+  /**
+   * Makes a read-only cell whose content is `data`, carried entirely in the
+   * cell's own `data:` URI id; there is no document in a space to fetch.
+   *
+   * **Contract note:** `data` is an arbitrary value, deliberately NOT
+   * limited to `FabricValue`. Callers pass, among other things, `Cell`
+   * objects (wish candidate lists), userland event payloads (whatever
+   * patterns and the DOM hand over, `Date`s and `Error`s included), and
+   * pattern-authored schema defaults. The body converts via
+   * `fabricFromNativeValue()`, which is the designed intake for exactly
+   * this: `Cell`s become sigil links (their `toJSON()`), native instances
+   * become their fabric counterparts, and input that is already a
+   * deep-frozen `FabricValue` passes through by identity.
+   *
+   * @param space The space the cell claims as its own (it is not stored
+   *   there; links within relate to it).
+   * @param data The value to carry. Must be acyclic.
+   * @param schema Optional schema for the resulting cell.
+   * @param tx Optional transaction for the resulting cell.
+   * @param cfcLabelView Optional CFC label view for the resulting cell.
+   * @returns A read-only cell whose value is (the fabric conversion of)
+   *   `data`.
+   */
   getImmutableCell<T>(
     space: MemorySpace,
     data: T,
@@ -1725,9 +1772,11 @@ export class Runtime {
     tx?: IExtendedStorageTransaction,
     cfcLabelView?: CfcLabelView,
   ): Cell<any> {
-    const asDataURI = `data:application/json,${
-      encodeURIComponent(JSON.stringify({ value: data }))
-    }` as const as `${string}:${string}`;
+    // Not `createDataCellURI()`: its link-rewriting walk is unwanted here
+    // (this data is immutable as given). `fabricFromNativeValue()` converts
+    // what callers actually pass -- notably `Cell`s, which become sigil
+    // links via their `toJSON()` -- into an encodable `FabricValue`.
+    const asDataURI = mintDataCellURI(fabricFromNativeValue(data));
     return createCell(
       this,
       {

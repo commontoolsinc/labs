@@ -4,7 +4,6 @@
   "exports": {
     ".": "./src/mod.ts",
     "./core/context": "./src/core/context.ts",
-    "./core/imports": "./src/core/imports.ts",
     "./runtime-registry": "./src/core/commonfabric-runtime-registry.ts",
     // Typescript-free transformer↔runtime contract values (boot-safe).
     "./runtime-contract": "./src/core/runtime-contract.ts"
@@ -13,7 +12,7 @@
     "typescript": "npm:typescript@6.0.3"
   },
   "tasks": {
-    "test": "deno test --parallel --allow-read --allow-write --allow-env test/**/*.test.ts",
+    "test": "deno test --no-check --parallel --allow-read --allow-write --allow-env test/**/*.test.ts",
     "check": "deno check src/**/*.ts",
     "fmt": "deno fmt src/ test/**/*.test.ts",
     "lint": "deno lint src/ test/"

@@ -20,7 +20,6 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   type Immutable,
   isBoolean,
-  isFiniteNumber,
   isObject,
   isRecord,
   isString,
@@ -41,12 +40,8 @@ import type {
   JSONSchemaTypes,
   SchemaScope,
 } from "./builder/types.ts";
-import {
-  addressKey,
-  createDataCellURI,
-  NormalizedFullLink,
-  parseLink,
-} from "./link-utils.ts";
+import { createDataCellURI } from "./data-uri.ts";
+import { addressKey, NormalizedFullLink, parseLink } from "./link-utils.ts";
 import { canFollowScopedLink } from "./scope.ts";
 import type {
   Activity,
@@ -2678,17 +2673,43 @@ function _combineSchemaUncached(
         ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
       };
     } else if (linkSchema.type === "array" && parentSchema.type === "array") {
-      // TODO(@ubik2): We should handle prefixItems
+      const {
+        prefixItems: parentPrefixItems,
+        ...parentSchemaWithoutPrefixItems
+      } = parentSchema;
+      const {
+        prefixItems: linkPrefixItems,
+        ...linkSchemaWithoutPrefixItems
+      } = linkSchema;
       const mergedDefs = { ...linkSchema.$defs, ...parentSchema.$defs };
       const mergedSchemaItems = parentSchema.items === undefined
         ? linkSchema.items
         : linkSchema.items === undefined
         ? parentSchema.items
         : combineSchema(parentSchema.items, linkSchema.items);
+      const prefixItemCount = Math.max(
+        parentPrefixItems?.length ?? 0,
+        linkPrefixItems?.length ?? 0,
+      );
+      const mergedPrefixItems = Array.from(
+        { length: prefixItemCount },
+        (_, index): JSONSchema => {
+          const parentItem = parentPrefixItems?.[index] ?? parentSchema.items;
+          const linkItem = linkPrefixItems?.[index] ?? linkSchema.items;
+          return parentItem === undefined
+            ? linkItem ?? true
+            : linkItem === undefined
+            ? parentItem
+            : combineSchema(parentItem, linkItem);
+        },
+      );
       return {
-        ...linkSchema,
-        ...parentSchema,
+        ...linkSchemaWithoutPrefixItems,
+        ...parentSchemaWithoutPrefixItems,
         type: "array",
+        ...(mergedPrefixItems.length > 0 && {
+          prefixItems: mergedPrefixItems,
+        }),
         ...(mergedSchemaItems !== undefined && { items: mergedSchemaItems }),
         ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
       };
@@ -3437,9 +3458,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
           this.isValidType(schemaObj, "string")
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
-    } else if (
-      typeof doc.value === "number" && isFiniteNumber(doc.value)
-    ) {
+    } else if (typeof doc.value === "number") {
+      // All numbers, including `NaN` and the infinities: they are
+      // first-class stored values, so they project like any other number.
       return isPlainTypeSchema(schemaObj, "number") ||
           this.isValidType(schemaObj, getJsonNumberType(doc.value))
         ? { ok: this.traversePrimitive(doc, schemaObj) }
@@ -4569,14 +4590,19 @@ export function canBranchMatch(
   return true;
 }
 
-/** Map JS typeof to its broad JSON Schema type, or null if unknown. */
+/**
+ * Map JS typeof to its broad JSON Schema type, or null if unknown. Every
+ * number is a `"number"`, including `NaN` and the infinities: they are
+ * first-class stored values in this system (the codec and content hash both
+ * represent them), so the schema projection must not hide them.
+ */
 function getPlainJsonType(
   value: unknown,
 ): JSONSchemaTypes | null {
   if (value === null) return "null";
   if (value === undefined) return "undefined";
   if (isString(value)) return "string";
-  if (typeof value === "number" && isFiniteNumber(value)) return "number";
+  if (typeof value === "number") return "number";
   if (isBoolean(value)) return "boolean";
   if (Array.isArray(value)) return "array";
   if (isObject(value)) return "object";
@@ -4585,7 +4611,7 @@ function getPlainJsonType(
 
 /** Refine the broad JSON Schema type so integer values can be distinguished. */
 function getJsonType(value: unknown): JSONSchemaTypes | null {
-  return (typeof value === "number" && isFiniteNumber(value))
+  return (typeof value === "number")
     ? getJsonNumberType(value)
     : getPlainJsonType(value);
 }

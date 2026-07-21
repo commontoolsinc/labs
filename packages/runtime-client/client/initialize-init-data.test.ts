@@ -60,6 +60,32 @@ describe("RuntimeClient.initialize InitializationData wiring", () => {
     expect(data.clientVersion).toBe("client-sha-xyz");
   });
 
+  it("forwards patternCoverage into the worker InitializationData", async () => {
+    // The same drop-on-the-wire failure as clientVersion above: the flag is set
+    // on RuntimeClientOptions but the hand-built InitializationData literal must
+    // copy it, or the worker is built without a coverage collector and the
+    // integration jobs collect nothing.
+    const identity = await Identity.fromPassphrase("init-data coverage test");
+    const transport = new CapturingTransport();
+
+    await RuntimeClient.initialize(transport, {
+      apiUrl: new URL("http://toolshed.test"),
+      identity,
+      spaceDid: identity.did(),
+      experimental: {},
+      patternCoverage: true,
+    });
+
+    const init = transport.sent.find(
+      (m): m is IPCClientMessage =>
+        "msgId" in m && m.data?.type === RequestType.Initialize,
+    );
+    expect(init).toBeDefined();
+    const data = (init as { data: { data: { patternCoverage?: boolean } } })
+      .data.data;
+    expect(data.patternCoverage).toBe(true);
+  });
+
   it("re-emits a worker versionSkew notification as a client event", async () => {
     const identity = await Identity.fromPassphrase("skew forward test");
     const transport = new CapturingTransport();

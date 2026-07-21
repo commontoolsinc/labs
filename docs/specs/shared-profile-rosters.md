@@ -63,8 +63,8 @@ Store a reference to the contributor's profile cell (the `result` of their
 `#profile` wish) and render it with `<cf-profile-badge $profile={p.profile} />`:
 
 ```ts
-// Shown inside a pattern body.
-participants.push({ profile: myProfile, joinedAt: safeDateNow() });
+// Shown inside a handler.
+participants.push({ profile: myProfile, joinedAt: Date.now() });
 // render: <cf-profile-badge $profile={p.profile} />
 ```
 
@@ -87,8 +87,8 @@ Copy the resolved `name` and `avatar` strings into the roster entry when the use
 joins:
 
 ```ts
-// Shown inside a pattern body.
-participants.push({ name, avatar, joinedAt: safeDateNow() });
+// Shown inside a handler.
+participants.push({ name, avatar, joinedAt: Date.now() });
 ```
 
 - **Pros:** Self-contained — every other viewer renders from plain strings
@@ -135,7 +135,7 @@ elsewhere in the repo:
 - `PerSpace` / `PerUser` roster + writable-cell aliases + a join handler that
   writes the roster — `packages/patterns/scrabble/scrabble.tsx`,
   `packages/patterns/scoped-group-chat/main-plain-inputs.tsx`.
-- `safeDateNow()` for timestamps in handlers —
+- `Date.now()` for timestamps in handlers —
   `packages/patterns/scoped-group-chat/main-plain-inputs.tsx`.
 - avatar rendering from snapshot strings — `<img src={...}>` here for
   self-containment; production patterns use `<cf-avatar src name>`
@@ -154,7 +154,6 @@ import {
   type PerSession,
   type PerSpace,
   type PerUser,
-  safeDateNow,
   Stream,
   UI,
   type VNode,
@@ -254,7 +253,7 @@ const join = handler<JoinEvent, {
       profile,
       name: trimmed,
       avatar: (avatar ?? "").trim(),
-      joinedAt: safeDateNow(),
+      joinedAt: Date.now(),
     }]);
   }
   viewer.set({ joined: true, joinedName: trimmed });

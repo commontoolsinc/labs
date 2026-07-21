@@ -1174,6 +1174,31 @@ type ImageChatOutput = {
 };
 ```
 
+## `examples/clock.tsx`
+
+Example pattern: a live wall clock driven by the reactive `#now` wish
+(`wish({ query: "#now/1" })`, ticking once per second). Shows the sanctioned way
+to read time in reactive code — the capability gate forbids `Date.now()` /
+`new Date()` in a lift/computed/pattern-body — plus the `null`-until-resolved
+load-window guard. `new Date(ms)` with an explicit argument stays fine for
+formatting.
+
+**Keywords:** now, wish, clock, time, reactive, capability-gate, timing
+
+## `examples/reactive-now.tsx`
+
+Example pattern demonstrating both pattern-facing surfaces of the timing
+side-channel mitigations. Reading time: a one-shot `#now` snapshot (load time),
+a ticking `#now/1` clock (current time), and a `#now`-derived "N seconds ago"
+elapsed label — a worked reference for migrating clock reads off the forbidden
+body-level `Date.now()` onto `#now`. Receiving input: a "Tap" button and a
+`$value` text box, so a live browser can watch the token-bucket delivery shaping
+— bursts are realtime, only sustained mashing/typing is throttled, and nothing
+is dropped.
+
+**Keywords:** now, wish, time, elapsed, relative-time, reactive,
+capability-gate, timing, delivery-shaping, token-bucket, input
+
 ## `examples/profile-aware-writer.tsx`
 
 Example pattern demonstrating how to use the `#profile` wish to personalize LLM

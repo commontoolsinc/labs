@@ -16,6 +16,9 @@ import {
   runPager,
 } from "../lib/view/pager.ts";
 import { fileSource } from "../lib/view/editsource.ts";
+import { parseDiff } from "../lib/view/diff.ts";
+import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
+import { diffSource } from "../lib/view/diffedit.ts";
 import { ViewError } from "../lib/view/errors.ts";
 import { term } from "../lib/view/ansi.ts";
 import { ui } from "../lib/view/theme.ts";
@@ -114,6 +117,9 @@ function makeFake(opts: FakeOpts = {}) {
       timers.set(id, h);
       return () => timers.delete(id);
     },
+    // Resolve at once: a test drives frames with `fireTimers`, so a real wait
+    // here would only stall the run.
+    delay: () => Promise.resolve(),
   };
   return { deps, writes, signals, removed, timers, exited };
 }
@@ -351,4 +357,298 @@ Deno.test("realPagerDeps: the wrappers reach the real primitives", () => {
   try {
     d.openTty().close();
   } catch { /* no controlling terminal in this environment */ }
+});
+
+// --- Ctrl-L reveal frames ---------------------------------------------------
+
+/** A one-file diff whose hunk has room to reveal ten lines above it. */
+function revealFixture() {
+  const root = Deno.makeTempDirSync();
+  const lines = Array.from(
+    { length: 60 },
+    (_, i) => `L${String(i + 1).padStart(2, "0")}`,
+  );
+  Deno.writeTextFileSync(join(root, "a.ts"), `${lines.join("\n")}\n`);
+  const diff = `diff --git a/a.ts b/a.ts
+index 0000000..1111111 100644
+--- a/a.ts
++++ b/a.ts
+@@ -25,20 +25,20 @@
+${lines.slice(24, 33).map((l) => ` ${l}`).join("\n")}
+-old L34
++L34
+${lines.slice(34, 44).map((l) => ` ${l}`).join("\n")}
+`;
+  const ws: DiffWorkspace = {
+    resolve: (p) => join(root, p),
+    read: (a) => {
+      try {
+        return Deno.readTextFileSync(a);
+      } catch {
+        return null;
+      }
+    },
+  };
+  const model = parseDiff(diff)!;
+  const { doc, edit } = buildDiffDocument(diff, model, ws);
+  return {
+    doc,
+    source: diffSource(ws, edit),
+    done: () => Deno.removeSync(root, { recursive: true }),
+  };
+}
+
+Deno.test("pager: Ctrl-L walks the revealed lines in a frame at a time", async () => {
+  const { doc, source, done } = revealFixture();
+  try {
+    const { deps, writes } = makeFake({
+      consoleSize: { columns: 80, rows: 13 },
+      steps: [
+        { bytes: enc("\x0c") }, // Ctrl-L: reveals L15..L24 above the hunk
+        { fireTimers: true }, // one line has landed
+        { fireTimers: true }, // two
+        { bytes: enc("q") },
+      ],
+    });
+    await runPager(doc, OPTS, undefined, source, deps);
+    // The line meeting the hunk lands first, and it lands on its own: the frame
+    // holding it does not already hold the furthest line.
+    const first = writes.findIndex((w) => w.includes("L24"));
+    assert(first > 0, "a frame drew the first revealed line");
+    assert(!writes[first].includes("L15"), "the furthest line had not landed");
+    const second = writes.findIndex((w) => w.includes("L23"));
+    assert(second > first, "the next frame drew the next line");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("pager: Ctrl-L draws no frames of its own accord", async () => {
+  const { doc, source, done } = revealFixture();
+  try {
+    const { deps, writes } = makeFake({
+      consoleSize: { columns: 80, rows: 13 },
+      steps: [{ bytes: enc("\x0c") }, { eof: true }],
+    });
+    await runPager(doc, OPTS, undefined, source, deps);
+    // Without the timers running there are no frames, so the finished reveal
+    // never reaches the screen: the walk is what draws, not the keystroke.
+    assert(!writes.some((w) => w.includes("L15")), "nothing was drawn");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("pager: a key during the reveal drops the frames left", async () => {
+  const { doc, source, done } = revealFixture();
+  try {
+    const { deps, writes } = makeFake({
+      consoleSize: { columns: 80, rows: 13 },
+      steps: [
+        { bytes: enc("\x0c") },
+        { fireTimers: true }, // one line in
+        { bytes: enc("j") }, // impatient: ends the walk
+        { fireTimers: true }, // the frames left are gone, so this draws nothing
+        { bytes: enc("q") },
+      ],
+    });
+    await runPager(doc, OPTS, undefined, source, deps);
+    const frames = writes.filter((w) => w.includes("@@"));
+    // The opening picture, the one frame that ran, and the finish the key drew.
+    assertEquals(frames.length, 3);
+    assert(frames.at(-1)!.includes("L15"), "the finish is on screen");
+  } finally {
+    done();
+  }
+});
+
+/** A diff whose only hunk runs to the last line of its file, so its bottom edge
+ * has nowhere to go. */
+function atBottomFixture() {
+  const root = Deno.makeTempDirSync();
+  const lines = Array.from({ length: 20 }, (_, i) => `line${i + 1}`);
+  Deno.writeTextFileSync(join(root, "a.ts"), `${lines.join("\n")}\n`);
+  const diff = `diff --git a/a.ts b/a.ts
+index 0000000..1111111 100644
+--- a/a.ts
++++ b/a.ts
+@@ -18,3 +18,3 @@
+ line18
+-OLD19
++line19
+ line20
+`;
+  const ws: DiffWorkspace = {
+    resolve: (p) => join(root, p),
+    read: (a) => {
+      try {
+        return Deno.readTextFileSync(a);
+      } catch {
+        return null;
+      }
+    },
+  };
+  const model = parseDiff(diff)!;
+  const { doc, edit } = buildDiffDocument(diff, model, ws);
+  return {
+    doc,
+    source: diffSource(ws, edit),
+    done: () => Deno.removeSync(root, { recursive: true }),
+  };
+}
+
+Deno.test("pager: the reason Ctrl-L did nothing stands, then takes itself away", async () => {
+  const { doc, source, done } = atBottomFixture();
+  try {
+    const { deps, writes } = makeFake({
+      // Short enough that the end of the document shows the hunk's bottom edge
+      // and not its top, so the bottom is the only edge to aim at.
+      consoleSize: { columns: 80, rows: 6 },
+      steps: [
+        { bytes: enc("G") },
+        { bytes: enc("\x0c") }, // Ctrl-L, which the bar does not offer here
+        { fireTimers: true }, // its moment is up
+        { bytes: enc("q") },
+      ],
+    });
+    await runPager(doc, OPTS, undefined, source, deps);
+    const said = writes.findIndex((w) => w.includes("Bottom of file"));
+    assert(said >= 0, "the reason was drawn");
+    // And a later frame is drawn without it, so it does not sit in the bar
+    // describing a keypress the user has moved on from.
+    const gone = writes.slice(said + 1).some((w) =>
+      w.includes("line20") && !w.includes("Bottom of file")
+    );
+    assert(gone, "the reason was taken away again");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("pager: the reason stays up until its moment is up", async () => {
+  const { doc, source, done } = atBottomFixture();
+  try {
+    const { deps, writes } = makeFake({
+      consoleSize: { columns: 80, rows: 6 },
+      // No timers fire, so nothing takes the message away.
+      steps: [{ bytes: enc("G") }, { bytes: enc("\x0c") }, { eof: true }],
+    });
+    await runPager(doc, OPTS, undefined, source, deps);
+    const last = writes.filter((w) => w.includes("line20")).at(-1)!;
+    assert(last.includes("Bottom of file"), "still up when nothing has fired");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("pager: what a reveal says takes itself away once the lines have landed", async () => {
+  const { doc, source, done } = revealFixture();
+  try {
+    const { deps, writes } = makeFake({
+      consoleSize: { columns: 80, rows: 13 },
+      steps: [
+        { bytes: enc("\x0c") }, // Ctrl-L: ten lines to walk in
+        // Nine frames walk them in; the tenth draws the finish and starts the
+        // clock, so the message stands from when the lines stop moving.
+        ...Array.from({ length: 10 }, () => ({ fireTimers: true as const })),
+        { fireTimers: true }, // the clock runs out
+        { bytes: enc("q") },
+      ],
+    });
+    await runPager(doc, OPTS, undefined, source, deps);
+    const said = writes.findIndex((w) => w.includes("Showing lines"));
+    assert(said >= 0, "the reveal said what it showed");
+    const gone = writes.slice(said + 1).some((w) =>
+      w.includes("@@") && !w.includes("Showing lines")
+    );
+    assert(gone, "and it was taken away again");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("pager: a prompt button's result waits for the press animation to finish", async () => {
+  // Open the revert prompt, then Esc to activate its Cancel button. The press
+  // is drawn at once; its result ("Cancelled") is what the push timer draws, so
+  // without the timer firing the result never reaches the screen.
+  const run = (steps: Step[]) => {
+    const { doc, source, dir } = editableDoc();
+    const { deps, writes } = makeFake({ steps });
+    return runPager(doc, OPTS, undefined, source, deps).then(() => {
+      Deno.removeSync(dir, { recursive: true });
+      return writes;
+    });
+  };
+  const openRevert: Step[] = [
+    { bytes: enc("e") }, // edit mode
+    { bytes: enc("X") }, // dirty the buffer
+    { bytes: enc("\x12") }, // Ctrl-R: open the revert prompt
+    { bytes: enc("\x1b") }, // Esc: activate Cancel — paints the pressed frame
+  ];
+
+  const held = await run([...openRevert, { eof: true }]);
+  assert(
+    held.some((w) => w.includes("Revert all edits?")),
+    "the prompt (and its pressed frame) was drawn",
+  );
+  assert(
+    !held.some((w) => w.includes("Cancelled")),
+    "the result waited for the press timer, so it never drew",
+  );
+
+  const fired = await run([...openRevert, { fireTimers: true }, { eof: true }]);
+  assert(
+    fired.some((w) => w.includes("Cancelled")),
+    "the press timer drew the result",
+  );
+});
+
+Deno.test("pager: a committing button plays its press before the pager quits", async () => {
+  const { doc, source, dir } = editableDoc();
+  try {
+    const { deps, writes } = makeFake({
+      steps: [
+        { bytes: enc("e") }, // edit mode
+        { bytes: enc("X") }, // dirty the buffer
+        { bytes: enc("\x03") }, // Ctrl-C: raise the save-and-quit prompt
+        { bytes: enc("d") }, // Discard: quits, but plays its press first
+      ],
+    });
+    await runPager(doc, OPTS, undefined, source, deps);
+    // The save dialog is drawn once as it opens and once more as the pressed
+    // frame the Discard key paints on its way out. Without the press animation
+    // the quit would tear the screen down after the single opening frame.
+    const dialogFrames = writes.filter((w) => w.includes("Save changes to"));
+    assertEquals(dialogFrames.length, 2, "the press was drawn before quitting");
+  } finally {
+    Deno.removeSync(dir, { recursive: true });
+  }
+});
+
+Deno.test("pager: a resize does not strand the reason Ctrl-L put up", async () => {
+  const { doc, source, done } = atBottomFixture();
+  try {
+    const { deps, writes } = makeFake({
+      consoleSize: { columns: 80, rows: 6 },
+      steps: [
+        { bytes: enc("G") },
+        { bytes: enc("\x0c") }, // Ctrl-L: "Bottom of file."
+        { fire: "SIGWINCH" }, // a resize redraws and would cancel the clock
+        { fireTimers: true }, // the clock the resize restarted runs out
+        { bytes: enc("q") },
+      ],
+    });
+    await runPager(doc, OPTS, undefined, source, deps);
+    // Without restarting expiry after the resize, the message would sit in the
+    // bar for good; here a later frame is drawn without it.
+    const said = writes.findIndex((w) => w.includes("Bottom of file"));
+    assert(said >= 0, "the reason was drawn");
+    const last = writes.filter((w) => w.includes("line20")).at(-1)!;
+    assert(
+      !last.includes("Bottom of file"),
+      "the resize left the reason free to expire",
+    );
+  } finally {
+    done();
+  }
 });

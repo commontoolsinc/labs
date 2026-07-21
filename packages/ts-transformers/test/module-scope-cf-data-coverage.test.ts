@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import ts from "typescript";
 import { transformSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
@@ -12,36 +12,11 @@ import {
 } from "./transformed-ast.ts";
 
 /**
- * True when the module imports `{ <imported> as <local> }` from `<module>`.
- */
-function hasNamedImport(
-  root: ts.SourceFile,
-  imported: string,
-  local: string,
-  moduleSpecifier: string,
-): boolean {
-  return collect(root, ts.isImportDeclaration).some((decl) => {
-    if (
-      !ts.isStringLiteral(decl.moduleSpecifier) ||
-      decl.moduleSpecifier.text !== moduleSpecifier
-    ) {
-      return false;
-    }
-    const bindings = decl.importClause?.namedBindings;
-    if (!bindings || !ts.isNamedImports(bindings)) return false;
-    return bindings.elements.some((element) =>
-      element.name.text === local &&
-      (element.propertyName?.text ?? element.name.text) === imported
-    );
-  });
-}
-
-/**
- * The bare-identifier argument of the sole `__cfDataHelper(...)` wrap call, or
+ * The argument text of the sole `__cfHelpers.__cf_data(...)` wrap call, or
  * undefined if there is no such call. Asserts there is at most one.
  */
-function cfDataHelperArgText(root: ts.SourceFile): string | undefined {
-  const calls = callsNamed(root, "__cfDataHelper");
+function cfDataArgText(root: ts.SourceFile): string | undefined {
+  const calls = callsNamed(root, "__cf_data");
   assert(
     calls.length <= 1,
     `expected at most one wrap call, got ${calls.length}`,
@@ -62,14 +37,17 @@ function defaultExportExpression(
 
 // The module-scope cf-data transformer wraps top-level data expressions with a
 // `__cf_data` helper call. The existing `module-scope-cf-data.test.ts` drives
-// the full pipeline, where the `__cfHelpers` import is always injected, so
-// `context.cfHelpers.sourceHasHelpers()` is always true. These tests target the
-// branches that only run when the source has NO helper import: the primitive
-// snapshot classification path (`shouldWrapTopLevelExpression` line 165-167),
-// the helper-import injection (`createCfDataHelperImport`), and the union /
-// intersection primitive-type analysis. To reach that state the transformer is
-// driven directly through `ts.transform`, bypassing the `HelpersOnlyTransformer`
-// filter that would otherwise skip a source without helpers.
+// the full pipeline; these tests drive the transformer directly through
+// `ts.transform` with a bare single-file program so the checker-dependent
+// classification arms (`isPrimitiveSnapshotCall`'s union / intersection
+// analysis) and the callable-classification walks can be pinned against
+// minimal sources. The callees are `declare const` bindings on purpose: a
+// top-level function declaration or const arrow/function-expression would
+// match `isTopLevelLocalHelperCall` first and short-circuit past the
+// primitive-snapshot arm. Driving directly also bypasses the
+// `HelpersOnlyTransformer` filter, which lets the final test pin the loud
+// invariant: wrap emission on a helpers-less source throws rather than
+// silently emitting a form the sandbox verifier does not recognize.
 
 function createProgram(source: string): {
   program: ts.Program;
@@ -102,10 +80,10 @@ function createProgram(source: string): {
   return { program, sourceFile: program.getSourceFile("/test.ts")! };
 }
 
-// Runs the cf-data transformer directly against a helper-free source. The
-// direct call bypasses the `sourceHasHelpers()` filter so the no-helpers
-// branches execute.
-function transformWithoutHelpers(source: string): string {
+// Runs the cf-data transformer directly, bypassing the pipeline (and with it
+// the `sourceHasHelpers()` filter — sources here carry their own helpers
+// import, except where the filter invariant itself is under test).
+function transformDirect(source: string): string {
   const { program, sourceFile } = createProgram(source);
   const transformer = new ModuleScopeCfDataTransformer({ mode: "transform" });
   const result = ts.transform(sourceFile, [
@@ -122,55 +100,59 @@ function transformWithoutHelpers(source: string): string {
 }
 
 Deno.test(
-  "cf-data without helpers wraps a primitive-typed call and injects the __cf_data import",
+  "cf-data wraps a bare-identifier call whose result type is primitive",
   () => {
-    const output = transformWithoutHelpers(
-      `declare function n(): number;\nconst z = n();\n`,
+    const output = transformDirect(
+      `import { __cfHelpers } from "commonfabric";\n` +
+        `declare const n: () => number;\n` +
+        `const z = n();\n`,
     );
-    // With no `__cfHelpers` import present the transformer prepends its own
-    // named import and wraps the snapshot call with the bare identifier form.
-    const root = parseModule(output);
-    assert(
-      hasNamedImport(root, "__cf_data", "__cfDataHelper", "commonfabric"),
-      "expected the injected __cf_data import",
-    );
-    assertEquals(cfDataHelperArgText(root), "n()");
+    // `n` is neither a local callable binding nor a member call, so only the
+    // checker-resolved primitive result type qualifies the call as a snapshot.
+    assertEquals(cfDataArgText(parseModule(output)), "n()");
   },
 );
 
 Deno.test(
-  "cf-data without helpers wraps a call whose type is a union of primitives",
+  "cf-data wraps a call whose type is a union of primitives",
   () => {
-    const output = transformWithoutHelpers(
-      `declare function u(): string | number;\nconst z = u();\n`,
+    const output = transformDirect(
+      `import { __cfHelpers } from "commonfabric";\n` +
+        `declare const u: () => string | number;\n` +
+        `const z = u();\n`,
     );
     // A union return type is classified as primitive-like when every member is
     // primitive-like, so the snapshot call is wrapped.
-    assertEquals(cfDataHelperArgText(parseModule(output)), "u()");
+    assertEquals(cfDataArgText(parseModule(output)), "u()");
   },
 );
 
 Deno.test(
-  "cf-data without helpers wraps a call whose type is an intersection of primitives",
+  "cf-data wraps a call whose type is an intersection of primitives",
   () => {
-    const output = transformWithoutHelpers(
-      `type A = string;\ntype B = string;\ndeclare function u(): A & B;\nconst z = u();\n`,
+    const output = transformDirect(
+      `import { __cfHelpers } from "commonfabric";\n` +
+        `type A = string;\ntype B = string;\n` +
+        `declare const u: () => A & B;\n` +
+        `const z = u();\n`,
     );
     // An intersection is primitive-like when every member is primitive-like.
-    assertEquals(cfDataHelperArgText(parseModule(output)), "u()");
+    assertEquals(cfDataArgText(parseModule(output)), "u()");
   },
 );
 
 Deno.test(
-  "cf-data without helpers leaves a call whose intersection has a non-primitive member unwrapped",
+  "cf-data leaves a call whose intersection has a non-primitive member unwrapped",
   () => {
-    const output = transformWithoutHelpers(
-      `declare function u(): string & { b: string };\nconst z = u();\n`,
+    const output = transformDirect(
+      `import { __cfHelpers } from "commonfabric";\n` +
+        `declare const u: () => string & { b: string };\n` +
+        `const z = u();\n`,
     );
     // The object member is not primitive-like, so the intersection fails the
     // `every` check and the call is not treated as a snapshot.
     assertEquals(
-      callsNamed(parseModule(output), "__cfDataHelper").length,
+      callsNamed(parseModule(output), "__cf_data").length,
       0,
       "expected the non-primitive intersection to be left unwrapped",
     );
@@ -180,15 +162,16 @@ Deno.test(
 Deno.test(
   "cf-data leaves a declared callable with no body unwrapped on default export",
   () => {
-    const output = transformWithoutHelpers(
-      `declare function helper(): number;\nexport default helper;\n`,
+    const output = transformDirect(
+      `import { __cfHelpers } from "commonfabric";\n` +
+        `declare function helper(): number;\nexport default helper;\n`,
     );
     // `callableMayReturnCallResult` returns false for a declaration without a
     // body, so the ambient callable is not classified as a default-exported
     // data callable.
     const root = parseModule(output);
     assertEquals(
-      callsNamed(root, "__cfDataHelper").length,
+      callsNamed(root, "__cf_data").length,
       0,
       "expected the body-less declared callable to be left unwrapped",
     );
@@ -201,8 +184,9 @@ Deno.test(
 Deno.test(
   "cf-data wraps a callable that returns a call-on-call result past a nested class boundary and trailing members",
   () => {
-    const output = transformWithoutHelpers(
-      `declare function factory(): () => number;\n` +
+    const output = transformDirect(
+      `import { __cfHelpers } from "commonfabric";\n` +
+        `declare function factory(): () => number;\n` +
         `const nested = () => ({ make: class {}, a: factory()(), b: 1 });\n` +
         `export default nested;\n`,
     );
@@ -212,8 +196,23 @@ Deno.test(
     const root = parseModule(output);
     const exported = defaultExportExpression(root);
     assert(exported && ts.isCallExpression(exported), "expected a wrap call");
-    assertEquals(calleeName(exported), "__cfDataHelper");
+    assertEquals(calleeName(exported), "__cf_data");
     assertEquals(exported.arguments[0]?.getText(root), "nested");
+  },
+);
+
+Deno.test(
+  "cf-data wrap emission on a helpers-less source throws (filter invariant)",
+  () => {
+    // The HelpersOnlyTransformer filter guarantees every source reaching
+    // transform() carries the helpers import. Bypassing it with a wrappable
+    // statement must fail loudly via getHelperExpr, not fall back to an
+    // alternate emission the sandbox verifier does not recognize.
+    assertThrows(
+      () => transformDirect(`const z = { a: 1 };\n`),
+      Error,
+      "does not contain helpers",
+    );
   },
 );
 

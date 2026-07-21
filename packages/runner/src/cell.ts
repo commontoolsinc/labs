@@ -107,11 +107,10 @@ import {
   type URI,
 } from "./sigil-types.ts";
 import type { Runtime } from "./runtime.ts";
+import { createDataCellURI, findAndInlineDataURILinks } from "./data-uri.ts";
 import {
   areLinksSame,
-  createDataCellURI,
   createSigilLinkFromParsedLink,
-  findAndInlineDataURILinks,
   isCellLink,
   KeepAsCell,
   type NormalizedFullLink,
@@ -1255,6 +1254,18 @@ export class CellImpl<T extends FabricValue>
     // Check if we're dealing with a stream
     if (this.isStream(resolvedToValueLink)) {
       // Stream behavior
+
+      // A lift (reactive computation) must be pure: emitting an event from a
+      // lift is a feedback loop that breaks reactive settling. Gate only the
+      // positive "lift" frame — internal/renderer event delivery and handler
+      // emits run in other frames and pass through.
+      if (getTopFrame()?.frameKind === "lift") {
+        throw new Error(
+          "Cannot emit an event from a lift/computed context: a lift must be " +
+            "pure. Send to streams from a handler instead.",
+        );
+      }
+
       const event = convertCellsToLinks(newValue) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
 
@@ -1735,7 +1746,9 @@ export class CellImpl<T extends FabricValue>
           this.runtime,
         )
       )
-      : array.indexOf(ref as ElemT);
+      // Primitives match by `Object.is` (`NaN` is findable; `0` and `-0` are
+      // distinct), unlike `indexOf`'s `===`.
+      : array.findIndex((item) => Object.is(item, ref));
     if (index === -1) {
       return;
     }
@@ -1767,7 +1780,8 @@ export class CellImpl<T extends FabricValue>
           this.tx,
           this.runtime,
         )
-        : item !== ref
+        // As in `remove()`: primitives match by `Object.is`.
+        : !Object.is(item, ref)
     ) as unknown as T;
     this.set(newArray);
   }
@@ -2633,7 +2647,12 @@ function subscribeToReferencedDocs<T>(
       const schema = link.schema;
       const needsTraversal = schema === undefined ||
         ContextualFlowControl.isTrueSchema(schema);
-      const newValue = validateAndTransform(runtime, wrappedTx, ref);
+      // sink() always kicks off sync before subscribing. Preserve that state
+      // on asCell projections created for the callback, just as get() does, so
+      // nested sinks reuse the root query instead of opening one per cut point.
+      const newValue = validateAndTransform(runtime, wrappedTx, ref, [], {
+        synced: true,
+      });
       if (needsTraversal && newValue !== undefined && newValue !== null) {
         deepTraverse(newValue);
       }
@@ -2757,7 +2776,7 @@ function maybeConvertArrayPathToDataURILink(
     return link;
   }
 
-  let rootValue: unknown;
+  let rootValue: FabricValue;
   try {
     rootValue = tx.readValueOrThrow({ ...link, path: [] }, {
       meta: ignoreReadForScheduling,
@@ -2766,11 +2785,11 @@ function maybeConvertArrayPathToDataURILink(
     return link;
   }
 
-  let current: unknown = rootValue;
+  let current: FabricValue = rootValue;
   const prefix: string[] = [];
   let candidate:
     | {
-      value: unknown;
+      value: FabricValue;
       path: string[];
       remainingPath: string[];
     }
@@ -2782,13 +2801,13 @@ function maybeConvertArrayPathToDataURILink(
     }
 
     const segment = link.path[i];
-    let next: unknown;
+    let next: FabricValue;
 
     if (Array.isArray(current)) {
       if (!isArrayIndexPropertyName(segment)) {
         break;
       }
-      next = (current as unknown as Record<string, unknown>)[segment];
+      next = (current as unknown as Record<string, FabricValue>)[segment];
       if (isRecord(next) && !isCellLink(next)) {
         candidate = {
           value: next,
@@ -2797,7 +2816,7 @@ function maybeConvertArrayPathToDataURILink(
         };
       }
     } else {
-      next = (current as Record<string, unknown>)[segment];
+      next = (current as Record<string, FabricValue>)[segment];
     }
 
     prefix.push(segment);

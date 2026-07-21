@@ -9,6 +9,7 @@ import type { TriggerIndexState } from "./trigger-index.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
 import type { NodeRegistry, SchedulerNode } from "./node-record.ts";
 import { summarizeTriggerTraceValue } from "./diagnostics.ts";
+import { shaperInstanceGroupKey } from "./wake-shaping.ts";
 import type {
   Action,
   SpaceScopeAndURI,
@@ -24,6 +25,57 @@ export function hasRegisteredTriggers(
   return state.hasRegisteredTriggers();
 }
 
+// Timing side-channel mitigation (plan B, channels 4/5). Return the token-bucket
+// group key for this change's subscriber wake when it should be shaped through the
+// cell-notification shaper — i.e. the change is a shapable real-world-timing source
+// (a renderer `$value` keystroke write, or a server push) AND the reader is a
+// pattern instance (carries a pieceId). Internal machinery (no pieceId) and
+// ordinary local computation (not a shapable source) return undefined and are
+// never deferred, so normal reactivity is untouched.
+//
+// Only interactive input (renderer `$value` keystrokes) is shaped here, under a
+// per-pattern `|input` bucket.
+//
+// Server pushes (`pull`/`integrate`) are deliberately NOT shaped, because
+// deferring them breaks incremental observation adoption
+// (docs/specs/scheduler-v2/incremental-observation-adoption.md). Adoption
+// requires the push's readers to be marked dirty SYNCHRONOUSLY: a sync delivers
+// its `integrate` notification and the writer's `scheduler-observations` in the
+// same synchronous turn, and adoption clears exactly the dirt that integrate
+// just created (see adoptRemoteObservations in facade.ts). Holding the wake
+// moves the mark-dirty to a later macrotask, so adoption finds nothing to clear
+// and the receiver re-runs every computation the writer already ran instead of
+// adopting it. The two cannot both hold at this seam — the shaper's hold IS the
+// mark-dirty — so the push path stays synchronous.
+//
+// The security cost is small and was already the design's stated position: a
+// pattern cannot drive server pushes at sub-second cadence (it has no way to
+// make the server push faster than real network traffic arrives), which is the
+// same network-bounded assumption the separate `|push` bucket already rested on.
+// See the channel-5 row in docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md.
+export function shapableWakeGroupKey(
+  state: StorageNotificationState,
+  notification: StorageNotification,
+  action: Action,
+): string | undefined {
+  // Space-qualified so two instances of one pattern in different spaces (which
+  // can share a content-addressed pieceId) don't collide into one shaper bucket
+  // (see shaperInstanceGroupKey). Undefined for internal machinery (no pieceId).
+  const instanceKey = shaperInstanceGroupKey(
+    (action as {
+      schedulerObservationIdentity?: { ownerSpace?: string; pieceId?: string };
+    }).schedulerObservationIdentity,
+  );
+  if (instanceKey === undefined) return undefined;
+  if (
+    notification.type === "commit" &&
+    state.isRendererInputSource(notification.source)
+  ) {
+    return `${instanceKey}|input`;
+  }
+  return undefined;
+}
+
 export function processStorageNotification(
   state: StorageNotificationState,
   notification: StorageNotification,
@@ -33,6 +85,11 @@ export function processStorageNotification(
   if (!("changes" in notification)) {
     return;
   }
+
+  // One charge per notification (one commit or one push): every reader wake this
+  // notification produces observes the same instant, so they share one burst token
+  // in the cell-notification shaper rather than each spending their own.
+  const commitChargeKey = {};
 
   const sourceChangeGroup = notification.type === "commit"
     ? notification.source?.changeGroup
@@ -115,12 +172,30 @@ export function processStorageNotification(
         actionChangeGroup,
         sourceChangeGroup,
       });
-      applyPullTriggeredActionPlan(
-        state,
-        action,
-        plan,
-        { ...change.address, space },
-      );
+      const cause: IMemorySpaceAddress = { ...change.address, space };
+      const shapeGroupKey = plan.operation !== "none"
+        ? shapableWakeGroupKey(state, notification, action)
+        : undefined;
+      if (shapeGroupKey !== undefined) {
+        // Defer this pattern reader's wake through the cell-notification
+        // shaper, coalesced per (reader, cell) and released with the pattern's
+        // window. The reader re-reads current cell state when it runs, so
+        // nothing is lost. Record the invalid cause now as well as at release
+        // (addInvalidCause dedups by address): an interleaved unshaped wake may
+        // run the action and consume its recorded causes before the deferred
+        // release, and the deferred rerun must still carry the "this change
+        // triggered me" flow label.
+        const record = state.nodes.get(action);
+        if (record) addInvalidCause(record, cause);
+        state.holdShapedNotification(
+          shapeGroupKey,
+          `${actionId}|${spaceAndURI}`,
+          commitChargeKey,
+          () => applyPullTriggeredActionPlan(state, action, plan, cause),
+        );
+      } else {
+        applyPullTriggeredActionPlan(state, action, plan, cause);
+      }
 
       triggerTraceEntry?.triggered.push(
         createTriggerTraceActionRecord({
@@ -374,4 +449,20 @@ export interface StorageNotificationState {
   readonly isInvalid: (action: Action) => boolean;
   readonly materializerIndex: MaterializerIndexState;
   readonly queueExecution: () => void;
+  // Timing side-channel mitigation (plan B, channels 4/5). Whether a committed
+  // change came from a renderer `$value` keystroke write — its notification
+  // `source` carries the renderer-input mark — so the resulting subscriber wake
+  // should be shaped.
+  readonly isRendererInputSource: (source: object | undefined) => boolean;
+  // Defer a shapable subscriber wake through the cell-notification shaper.
+  // groupKey identifies the observing pattern instance (so a pattern's shaped
+  // wakes share one window); itemKey is the (reader, cell) coalescing unit;
+  // deliver performs the wake once the shaping window releases. chargeKey
+  // identifies the source commit so all its reader wakes share one burst token.
+  readonly holdShapedNotification: (
+    groupKey: string,
+    itemKey: string,
+    chargeKey: object,
+    deliver: () => void,
+  ) => void;
 }

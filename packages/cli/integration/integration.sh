@@ -60,6 +60,8 @@ cf() {
 }
 
 PATTERN_SRC="$SCRIPT_DIR/pattern/main.tsx"
+SCHEMA_COMPATIBLE_PATTERN_SRC="$SCRIPT_DIR/pattern/schema-compatible.tsx"
+SCHEMA_INCOMPATIBLE_PATTERN_SRC="$SCRIPT_DIR/pattern/schema-incompatible.tsx"
 CUSTOM_EXPORT="customPatternExport" # for testing this feature
 SECTION="${CF_CLI_INTEGRATION_SECTION:-${1:-all}}"
 
@@ -196,6 +198,48 @@ run_piece_values() {
   # Check file was retrieved with modifications
   if ! grep -q "Simple counter 2" "$WORK_DIR/main.tsx"; then
     error "Retrieved source code was not modified"
+  fi
+
+  echo "Testing explicitly authorized incompatible source updates."
+  local schema_piece_id schema_identity_before schema_identity_after_rejection
+  local schema_identity_after_override schema_value
+  schema_piece_id=$(cf piece new --no-start $SPACE_ARGS "$SCHEMA_COMPATIBLE_PATTERN_SRC")
+  echo '{"value":5}' | cf piece apply $SPACE_ARGS --piece "$schema_piece_id"
+  cf piece step $SPACE_ARGS --piece "$schema_piece_id"
+  schema_identity_before=$(
+    cf piece inspect --json $SPACE_ARGS --piece "$schema_piece_id" |
+      jq -r '.patternRef.identity'
+  )
+
+  if cf piece setsrc $SPACE_ARGS --piece "$schema_piece_id" \
+    "$SCHEMA_INCOMPATIBLE_PATTERN_SRC" \
+    >"$WORK_DIR/incompatible-setsrc.out" \
+    2>"$WORK_DIR/incompatible-setsrc.err"; then
+    error "Incompatible setsrc should fail without the dangerous override."
+  fi
+  if ! grep -q "not backward compatible" "$WORK_DIR/incompatible-setsrc.err"; then
+    error "Incompatible setsrc failed for an unexpected reason."
+  fi
+  schema_identity_after_rejection=$(
+    cf piece inspect --json $SPACE_ARGS --piece "$schema_piece_id" |
+      jq -r '.patternRef.identity'
+  )
+  if [ "$schema_identity_after_rejection" != "$schema_identity_before" ]; then
+    error "Rejected incompatible setsrc changed the piece source."
+  fi
+
+  cf piece setsrc --dangerously-allow-incompatible-schema $SPACE_ARGS \
+    --piece "$schema_piece_id" "$SCHEMA_INCOMPATIBLE_PATTERN_SRC"
+  schema_identity_after_override=$(
+    cf piece inspect --json $SPACE_ARGS --piece "$schema_piece_id" |
+      jq -r '.patternRef.identity'
+  )
+  if [ "$schema_identity_after_override" = "$schema_identity_before" ]; then
+    error "Dangerously authorized setsrc did not change the piece source."
+  fi
+  schema_value=$(cf piece get $SPACE_ARGS --piece "$schema_piece_id" value)
+  if [ "$schema_value" != "5" ]; then
+    error "Dangerously authorized setsrc did not preserve the valid result."
   fi
 
   echo "Applying piece input."

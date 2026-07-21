@@ -32,6 +32,14 @@ export function resolveCellPath<T>(
 
   for (const segment of path) {
     parentValue = currentCell.get() as unknown;
+    // An asCell-schema slot surfaces its value as a live Cell (the
+    // Writable<...> result shape); read through it like the leaf below
+    // does, or the traversal inspects the Cell instance's own JS
+    // properties and reports runner internals as "available keys".
+    if (isCell(parentValue)) {
+      currentCell = parentValue as Cell<unknown>;
+      parentValue = currentCell.get() as unknown;
+    }
     if (parentValue != null && typeof parentValue !== "object") {
       throw new Error(
         `Cannot access path "${

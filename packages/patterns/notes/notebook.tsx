@@ -143,12 +143,13 @@ const handleDropOntoCurrentNotebook = handler<
     // Remove from all notebooks
     removeFromAllNotebooks(notebooks, itemsToMove);
 
-    // Add all to this notebook (deduplicated)
+    // Add all to this notebook, deduplicated by link identity on the server.
+    // The whole-list read above genuinely has to stay (it resolves the dragged
+    // index against the selection), so this write still contends on concurrent
+    // notes changes; addUnique keeps a re-add a no-op instead of a duplicate.
     for (const item of itemsToMove) {
-      if (!notesList.some((n) => equals(item, n))) {
-        notes.push(item);
-        item.key("isHidden").set(true);
-      }
+      notes.addUnique(item);
+      item.key("isHidden").set(true);
     }
     selectedNoteIndices.set([]);
   } else {
@@ -157,7 +158,9 @@ const handleDropOntoCurrentNotebook = handler<
 
     removeFromAllNotebooks(notebooks, [sourceCell]);
     sourceCell.key("isHidden").set(true);
-    notes.push(sourceCell);
+    // Deduplicated by link identity; the early return above already covers the
+    // common already-present case, and the retained read keeps this contended.
+    notes.addUnique(sourceCell);
   }
 });
 
@@ -182,9 +185,14 @@ const handleDropOntoNotebook = handler<
   if (!targetNotebook.key("isNotebook").get()) return;
 
   const targetNotesCell = targetNotebook.key("notes");
-  const targetNotesList = targetNotesCell.get() ?? [];
   const currentList = currentNotes.get();
   const selected = selectedNoteIndices.get();
+
+  // The only binding today passes the notebook's own SELF as the target, so
+  // target and current usually alias the same notes collection. In that case
+  // there is nothing to remove from "current": removing would strip or
+  // reorder the very memberships addUnique confirms below.
+  const targetIsCurrent = equals(targetNotesCell, currentNotes);
 
   // Check if dragged item is in the selection
   const draggedIndex = currentList.findIndex((n) => equals(sourceCell, n));
@@ -197,12 +205,12 @@ const handleDropOntoNotebook = handler<
       Boolean,
     );
 
-    // Add all to target (deduplicated)
+    // Add all to target, deduplicated by link identity on the server —
+    // addUnique needs no read of the target list, so concurrent drops onto the
+    // same notebook merge instead of conflicting.
     for (const item of itemsToMove) {
-      if (!targetNotesList.some((n) => equals(item, n))) {
-        targetNotesCell.push(item);
-        item.key("isHidden").set(true);
-      }
+      targetNotesCell.addUnique(item);
+      item.key("isHidden").set(true);
     }
 
     // Find target notebook index to skip it during removal
@@ -214,27 +222,40 @@ const handleDropOntoNotebook = handler<
     // Remove from all notebooks except target
     removeFromAllNotebooks(notebooks, itemsToMove, targetIndex);
 
-    // Remove from current notebook
-    currentNotes.set(
-      currentList.filter(
-        (n) => !itemsToMove.some((item) => equals(n, item)),
-      ),
-    );
+    // Remove from current notebook — unless current IS the target, where
+    // "removing" would strip the memberships this drop just confirmed. (The
+    // pre-addUnique code ran this unconditionally, so a same-notebook
+    // multi-drop silently dropped the selected notes from the notebook.)
+    if (!targetIsCurrent) {
+      currentNotes.set(
+        currentList.filter(
+          (n) => !itemsToMove.some((item) => equals(n, item)),
+        ),
+      );
+    }
     selectedNoteIndices.set([]);
   } else {
     // Single-item move
-    if (targetNotesList.some((n) => equals(sourceCell, n))) return;
-
-    // Remove from current notebook if present
-    const indexInCurrent = currentList.findIndex((n) => equals(sourceCell, n));
-    if (indexInCurrent !== -1) {
-      const copy = [...currentList];
-      copy.splice(indexInCurrent, 1);
-      currentNotes.set(copy);
+    // Remove from current notebook if present — unless current IS the
+    // target, where the removal would turn addUnique's no-op below into a
+    // move-to-tail reorder of an already-present note.
+    if (!targetIsCurrent) {
+      const indexInCurrent = currentList.findIndex((n) =>
+        equals(sourceCell, n)
+      );
+      if (indexInCurrent !== -1) {
+        const copy = [...currentList];
+        copy.splice(indexInCurrent, 1);
+        currentNotes.set(copy);
+      }
     }
 
     sourceCell.key("isHidden").set(true);
-    targetNotesCell.push(sourceCell);
+    // Deduplicated by link identity on the server, so a note the target
+    // already holds keeps a single membership with no whole-list read. For a
+    // genuinely distinct target this completes the move (the old guard
+    // skipped it entirely, leaving the note in both notebooks).
+    targetNotesCell.addUnique(sourceCell);
   }
 });
 
@@ -455,8 +476,11 @@ const createNotebookFromPrompt = handler<
       newNotebook,
     ]);
   } else {
-    // For add: just add the new notebook as sibling
-    notes.push(newNotebook);
+    // For add: append the new notebook as sibling. Its contents derive from
+    // the notes snapshot read above, so write the whole list from that same
+    // snapshot; the read stays in the conflict set and a concurrent change
+    // rejects this commit and retries against fresh state.
+    notes.set([...notesList, newNotebook]);
   }
 
   // Clean up state
