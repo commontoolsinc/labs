@@ -22,6 +22,7 @@ import {
   ifElse,
   NAME,
   pattern,
+  resultOf,
   TILE_UI,
   UI,
   wish,
@@ -127,9 +128,9 @@ export default pattern<PatternInput>(
     // Reactive #now (ticks each minute) so due-date/overdue math refreshes,
     // instead of reading the ambient clock in this lift.
     const nowCell = wish<number>({ query: "#now/60" });
+    const nowCellValue = resultOf(nowCell.result);
     const bills = computed(() => {
-      const nowMs = nowCell.result;
-      if (nowMs == null) return [];
+      const nowMs = nowCellValue;
       // Use .get() to access Writable values inside computed
       const paidKeys = manuallyPaid?.get() || [];
       const isDemoMode = demoMode?.get() ?? true;

@@ -64,6 +64,7 @@ import {
   Default,
   handler,
   pattern,
+  resultOf,
   Stream,
   wish,
   Writable,
@@ -415,11 +416,11 @@ const BillExtractor = pattern<BillExtractorInput, BillExtractorOutput>(
     // Reactive #now (ticks each minute) so due-date/overdue math refreshes as
     // the day boundary advances, instead of reading the ambient clock in a lift.
     const nowCell = wish<number>({ query: "#now/60" });
+    const nowCellValue = resultOf(nowCell.result);
 
     // Process analyses and build bill list with domain-specific logic
     const bills = computed(() => {
-      const nowMs = nowCell.result;
-      if (nowMs == null) return [];
+      const nowMs = nowCellValue;
       const billMap: Record<string, TrackedBill> = {};
       // Use .get() to access Writable values inside computed
       const paidKeys = manuallyPaid?.get() || [];

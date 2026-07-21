@@ -71,6 +71,19 @@ export interface WatchMutationResult {
   sync: SessionSync;
 }
 
+export type SessionConnectionState =
+  | { readonly status: "ready"; readonly epoch: number }
+  | {
+    readonly status: "disconnected";
+    readonly epoch: number;
+    readonly cause: Error;
+  }
+  | {
+    readonly status: "closed";
+    readonly epoch: number;
+    readonly cause: Error;
+  };
+
 const RECONNECT_BASE_DELAY_MS = 25;
 const RECONNECT_MAX_DELAY_MS = 30_000;
 const RECONNECT_JITTER_RATIO = 0.2;
@@ -109,6 +122,7 @@ export class Client {
   #serverFlags: MemoryProtocolFlags | null = null;
   #reconnecting: Promise<void> | null = null;
   #cancelReconnectDelay: (() => void) | null = null;
+  #connectionGeneration = 0;
   #connected = false;
   #closed = false;
 
@@ -134,6 +148,7 @@ export class Client {
 
   async close(): Promise<void> {
     this.#closed = true;
+    this.#connectionGeneration++;
     this.#connected = false;
     this.#cancelReconnectDelay?.();
     this.rejectPending(new Error("memory client closed"));
@@ -232,7 +247,8 @@ export class Client {
     await this.ensureConnected();
   }
 
-  private async hello(): Promise<void> {
+  private async hello(): Promise<number> {
+    const connectionGeneration = this.#connectionGeneration;
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
     await this.transport.send(encodeMemoryBoundary({
@@ -242,7 +258,16 @@ export class Client {
     }));
     try {
       await ack.promise;
+      if (
+        this.#closed ||
+        this.#connectionGeneration !== connectionGeneration
+      ) {
+        const error = new Error("memory connection changed during handshake");
+        error.name = "ConnectionError";
+        throw error;
+      }
       this.#connected = true;
+      return connectionGeneration;
     } finally {
       this.#helloPending = null;
     }
@@ -367,11 +392,13 @@ export class Client {
     if (this.#closed) {
       return;
     }
+    this.#connectionGeneration++;
     this.#connected = false;
+    const connectionError = toConnectionError(error);
     for (const session of this.#spaces) {
-      session.handleDisconnect();
+      session.handleDisconnect(connectionError);
     }
-    this.rejectPending(toConnectionError(error));
+    this.rejectPending(connectionError);
     void this.reconnect().catch(() => undefined);
   }
 
@@ -386,9 +413,22 @@ export class Client {
       let attempt = 0;
       while (!this.#closed) {
         try {
-          await this.hello();
-          for (const session of this.#spaces) {
-            await session.restore();
+          const connectionGeneration = await this.hello();
+          const restoredSessions: SpaceSession[] = [];
+          for (const session of [...this.#spaces]) {
+            if (await session.restore()) restoredSessions.push(session);
+          }
+          if (!this.isCurrentConnection(connectionGeneration)) {
+            continue;
+          }
+          for (const session of restoredSessions) {
+            if (!this.isCurrentConnection(connectionGeneration)) {
+              break;
+            }
+            session.handleRestored();
+          }
+          if (!this.isCurrentConnection(connectionGeneration)) {
+            continue;
           }
           return;
         } catch (error) {
@@ -407,6 +447,11 @@ export class Client {
     } finally {
       this.#reconnecting = null;
     }
+  }
+
+  private isCurrentConnection(connectionGeneration: number): boolean {
+    return !this.#closed && this.#connected &&
+      this.#connectionGeneration === connectionGeneration;
   }
 
   // The reconnect attempt is event-driven: `hello()` awaits the transport's
@@ -461,6 +506,13 @@ export class SpaceSession {
   #closeError: Error | null = null;
   #readyOnConnection = true;
   #restoring = false;
+  #connectionState: SessionConnectionState = {
+    status: "ready",
+    epoch: 1,
+  };
+  #connectionStateSubscribers = new Set<
+    (state: SessionConnectionState) => void
+  >();
   #caughtUpLocalSeq = 0;
   // Highest caughtUpLocalSeq already pushed into the WatchView (via a real sync
   // or a synthetic forward). Subscribers such as runner storage only advance
@@ -497,6 +549,18 @@ export class SpaceSession {
 
   get serverSeq(): number {
     return this.#serverSeq;
+  }
+
+  get connectionState(): SessionConnectionState {
+    return this.#connectionState;
+  }
+
+  subscribeConnectionState(
+    callback: (state: SessionConnectionState) => void,
+  ): () => void {
+    this.#connectionStateSubscribers.add(callback);
+    this.notifyConnectionStateSubscriber(callback, this.#connectionState);
+    return () => this.#connectionStateSubscribers.delete(callback);
   }
 
   #assertOpen(): void {
@@ -714,9 +778,9 @@ export class SpaceSession {
     this.noteCaughtUpLocalSeq(effect.caughtUpLocalSeq);
   }
 
-  async restore(): Promise<void> {
+  async restore(): Promise<boolean> {
     if (this.#closed) {
-      return;
+      return false;
     }
     this.#restoring = true;
     this.#readyOnConnection = false;
@@ -728,12 +792,12 @@ export class SpaceSession {
       } catch (error) {
         if (isSessionRevokedError(error)) {
           this.handleRevoked("taken-over");
-          return;
+          return false;
         }
         throw error;
       }
       if (this.#closed) {
-        return;
+        return false;
       }
       this.#readyOnConnection = true;
       replayedThroughLocalSeq = Math.max(
@@ -782,6 +846,7 @@ export class SpaceSession {
         }
       }
       await Promise.all(replayTasks);
+      return !this.#closed;
     } finally {
       this.#restoring = false;
       if (!this.#closed && this.#outstandingCommits.size > 0) {
@@ -797,6 +862,12 @@ export class SpaceSession {
     this.#closed = true;
     this.#closeError = new Error("memory session closed");
     this.#readyOnConnection = false;
+    this.setConnectionState({
+      status: "closed",
+      epoch: this.#connectionState.epoch,
+      cause: this.#closeError,
+    });
+    this.#connectionStateSubscribers.clear();
     this.client.forgetSession(this);
     this.rejectCaughtUpLocalSeqWaiters(this.#closeError);
     const background = [...this.#background];
@@ -820,6 +891,12 @@ export class SpaceSession {
     this.#closed = true;
     this.#closeError = error;
     this.#readyOnConnection = false;
+    this.setConnectionState({
+      status: "closed",
+      epoch: this.#connectionState.epoch,
+      cause: error,
+    });
+    this.#connectionStateSubscribers.clear();
     this.client.forgetSession(this);
     for (const pending of this.#outstandingCommits.values()) {
       pending.pending.reject(error);
@@ -831,11 +908,50 @@ export class SpaceSession {
     this.#watchView = null;
   }
 
-  handleDisconnect(): void {
+  handleDisconnect(cause: Error): void {
     if (this.#closed) {
       return;
     }
     this.#readyOnConnection = false;
+    this.setConnectionState({
+      status: "disconnected",
+      epoch: this.#connectionState.epoch,
+      cause,
+    });
+  }
+
+  handleRestored(): void {
+    if (this.#closed) {
+      return;
+    }
+    this.setConnectionState({
+      status: "ready",
+      epoch: this.#connectionState.epoch + 1,
+    });
+  }
+
+  private setConnectionState(state: SessionConnectionState): void {
+    if (
+      state.status === this.#connectionState.status &&
+      state.epoch === this.#connectionState.epoch
+    ) {
+      return;
+    }
+    this.#connectionState = state;
+    for (const callback of [...this.#connectionStateSubscribers]) {
+      this.notifyConnectionStateSubscriber(callback, state);
+    }
+  }
+
+  private notifyConnectionStateSubscriber(
+    callback: (state: SessionConnectionState) => void,
+    state: SessionConnectionState,
+  ): void {
+    try {
+      callback(state);
+    } catch (error) {
+      console.error("memory connection-state subscriber threw:", error);
+    }
   }
 
   private queueBackground(task: Promise<void>): void {

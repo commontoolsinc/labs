@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { getLogger } from "@commonfabric/utils/logger";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import type { Cell } from "../src/cell.ts";
 import type { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -57,7 +58,16 @@ class FakeCell {
   get(): unknown {
     return this.value;
   }
+  getRaw(): unknown {
+    return this.value;
+  }
+  resolveAsCell(): this {
+    return this;
+  }
   set(v: unknown): void {
+    this.setValues.push(v);
+  }
+  setRawUntyped(v: unknown): void {
     this.setValues.push(v);
   }
   sync(): Promise<unknown> {
@@ -181,6 +191,27 @@ function runsFor(
 }
 
 describe("resume-republish unit", () => {
+  it("publishes the highest-precedence unavailable contribution", async () => {
+    const inputs = [new FakeCell("e0", null), new FakeCell("e1", null)];
+    const pending = DataUnavailable.pending();
+    const error = DataUnavailable.error(new Error("element failed"));
+    const results = [new FakeCell("r0", pending), new FakeCell("r1", error)];
+    const result = new FakeCell("container", ["previous"]);
+    const { runtime, tracked } = makeRuntime();
+    const rr = makeRepublisher({
+      result,
+      inputsList: inputs,
+      elementRuns: runsFor(inputs, results),
+      runtime,
+      contribute: (value) => value as typeof pending,
+    });
+
+    rr.awaitPendingThenRepublish(results as unknown as Cell<any>[]);
+    await Promise.all(tracked);
+
+    expect(result.setValues).toEqual([error]);
+  });
+
   it("rebuilds the aggregate from confirmed per-element results", async () => {
     const inputs = [new FakeCell("e0", null), new FakeCell("e1", null)];
     // Both predicates settled truthy, so both elements are included.

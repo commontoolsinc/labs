@@ -2,8 +2,10 @@ import {
   computed,
   Default,
   handler,
+  hasError,
   NAME,
   pattern,
+  resultOf,
   type Stream,
   UI,
   type VNode,
@@ -148,8 +150,12 @@ export default pattern<
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
 
-    const profileName = computed(() => profileNameWish.result ?? "");
-    const profileAvatar = computed(() => profileAvatarWish.result ?? "");
+    const profileName = hasError(profileNameWish.result)
+      ? ""
+      : resultOf(profileNameWish.result);
+    const profileAvatar = hasError(profileAvatarWish.result)
+      ? ""
+      : resultOf(profileAvatarWish.result);
     const boundJoin = joinAs({
       users,
       myName,
@@ -165,9 +171,7 @@ export default pattern<
     // deliberately wants a one-off name). `useCustomName` reveals that input
     // even when a profile IS present.
     const useCustomName = Writable.perSession.of<boolean>(false);
-    const profileDisplayName = computed(() =>
-      trimmedName(profileNameWish.result ?? "")
-    );
+    const profileDisplayName = computed(() => trimmedName(profileName));
     const hasProfile = computed(() => profileDisplayName !== "");
     const showManualEntry = computed(() =>
       profileDisplayName === "" || useCustomName.get()

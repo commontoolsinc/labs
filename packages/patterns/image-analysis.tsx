@@ -4,8 +4,10 @@ import {
   handler,
   ifElse,
   ImageData,
+  isPending,
   NAME,
   pattern,
+  resultOf,
   UI,
   VNode,
   Writable,
@@ -72,13 +74,15 @@ export default pattern<ImageChatInput, ImageChatOutput>(
     });
 
     // Generate text from the content parts
-    const { result, pending, requestHash: _requestHash } = generateText({
+    const responseRequest = generateText({
       system: computed(() =>
         systemPrompt ||
         "You are a helpful assistant that can analyze images. Describe what you see."
       ),
       prompt: contentParts,
     });
+    const result = resultOf(responseRequest);
+    const pending = isPending(responseRequest);
 
     const ui = (
       <cf-screen>

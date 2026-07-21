@@ -171,6 +171,17 @@ export class FabricError extends FabricNativeWrapper<Error> {
     return this.#extras.get(key);
   }
 
+  /**
+   * Structured diagnostics carried by compiler and similar errors.
+   *
+   * The value remains encoded as a custom error field, but this projection
+   * makes the well-known public path directly navigable both on the wrapper
+   * and through a Cell selector.
+   */
+  get diagnostics(): FabricValue | undefined {
+    return this.#extras.get("diagnostics");
+  }
+
   /** Returns `true` if `key` is present in the extras bag. */
   hasExtra(key: string): boolean {
     return this.#extras.has(key);

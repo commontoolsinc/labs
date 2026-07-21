@@ -1,7 +1,12 @@
 import { assertEquals, assertExists } from "@std/assert";
 import ts from "typescript";
 
-import { getCellWrapperInfo } from "../../src/typescript/cell-brand.ts";
+import {
+  getCellBrand,
+  getCellWrapperInfo,
+  isCellBrand,
+  isCellType,
+} from "../../src/typescript/cell-brand.ts";
 
 function createProgram(source: string): {
   checker: ts.TypeChecker;
@@ -96,4 +101,32 @@ Deno.test("getCellWrapperInfo handles unions containing branded cells", () => {
   const nullableArg = nullableInfo.typeRef.typeArguments?.[0];
   assertExists(nullableArg);
   assertEquals(checker.typeToString(nullableArg), "string");
+});
+
+Deno.test("cell brand predicates distinguish branded and plain types", () => {
+  const source = `
+    declare const CELL_BRAND: unique symbol;
+    interface BrandedCell<T, Brand extends string> {
+      readonly [CELL_BRAND]: Brand;
+    }
+    interface Cell<T> extends BrandedCell<T, "cell"> {}
+
+    interface Schema {
+      cell: Cell<number>;
+      plain: number;
+    }
+  `;
+
+  const { checker, sourceFile } = createProgram(source);
+  const cellType = getPropertyType(checker, sourceFile, "Schema", "cell");
+  const plainType = getPropertyType(checker, sourceFile, "Schema", "plain");
+
+  assertEquals(getCellBrand(cellType, checker), "cell");
+  assertEquals(isCellType(cellType, checker), true);
+  assertEquals(isCellBrand(cellType, checker, "cell"), true);
+  assertEquals(isCellBrand(cellType, checker, "stream"), false);
+
+  assertEquals(getCellBrand(plainType, checker), undefined);
+  assertEquals(isCellType(plainType, checker), false);
+  assertEquals(isCellBrand(plainType, checker, "cell"), false);
 });

@@ -1094,60 +1094,65 @@ export class Engine extends EventTarget implements Harness {
         },
       });
 
-      let loaded: ReturnType<typeof loadModuleGraph>;
-      try {
-        loaded = loadModuleGraph(mainSpecifier, {
-          records: graph.records,
-          globals,
-          verify: false, // already verified at compile time
-        });
-      } catch (error) {
-        // Module evaluation runs outside an isolate `exec`, so errors thrown
-        // at module scope would otherwise surface with a censored (empty) or
-        // raw-coordinate stack. Materialize + source-map it here (once),
-        // matching how invoked-function errors are mapped.
-        throw this.getSESRuntime().mapThrownError(error);
-      } finally {
-        popFrame(frame);
-      }
-
-      const main = loaded.namespace as Exports;
-
       // Build the per-module export map (keyed by normalized source path) from
       // the SAME load, and map each exported value back to its RuntimeProgram
-      // for sub-pattern resolution.
+      // for sub-pattern resolution. Modules which are present only for their
+      // type information have no runtime edge from the entry, so importNow()
+      // below is their first evaluation. Keep the explicit runtime frame alive
+      // through that complete evaluation pass; relying on Runtime's ambient
+      // compatibility frame makes lazy module evaluation race runtime disposal.
       const exportMap: Record<string, Exports> = {};
       const exportsByValue = new Map<unknown, RuntimeProgram>();
       // Per-module namespaces keyed by content identity (stripped from the
       // `cf:module/<identity>` specifier) for the in-memory identity cache.
       const exportsByIdentity = new Map<string, Exports>();
       const MODULE_SPECIFIER_PREFIX = "cf:module/";
-      for (const [path, specifier] of graph.specifierByPath) {
-        const namespace = loaded.importNow(specifier) as Exports;
-        const fileName = ctx.fileNameForPath(path);
-        exportMap[fileName] = namespace;
-        if (specifier.startsWith(MODULE_SPECIFIER_PREFIX)) {
-          exportsByIdentity.set(
-            specifier.slice(MODULE_SPECIFIER_PREFIX.length),
-            namespace,
-          );
-        }
-        for (const [exportName, value] of Object.entries(namespace)) {
-          // Only object/function exports are sub-pattern candidates. Skip the
-          // `__esModule` flag and primitives, which would otherwise collide in
-          // this value-keyed map (e.g. every module's `true`).
-          if (exportName === "__esModule") continue;
-          if (typeof value !== "object" && typeof value !== "function") {
-            continue;
+      let main: Exports;
+      try {
+        const loaded = loadModuleGraph(mainSpecifier, {
+          records: graph.records,
+          globals,
+          verify: false, // already verified at compile time
+        });
+        main = loaded.namespace as Exports;
+
+        for (const [path, specifier] of graph.specifierByPath) {
+          const namespace = loaded.importNow(specifier) as Exports;
+          const fileName = ctx.fileNameForPath(path);
+          exportMap[fileName] = namespace;
+          if (specifier.startsWith(MODULE_SPECIFIER_PREFIX)) {
+            exportsByIdentity.set(
+              specifier.slice(MODULE_SPECIFIER_PREFIX.length),
+              namespace,
+            );
           }
-          if (value === null) continue;
-          exportsByValue.set(value, {
-            main: fileName,
-            mainExport: exportName,
-            files: ctx.filesForExports,
-          });
+          for (const [exportName, value] of Object.entries(namespace)) {
+            // Only object/function exports are sub-pattern candidates. Skip the
+            // `__esModule` flag and primitives, which would otherwise collide in
+            // this value-keyed map (e.g. every module's `true`).
+            if (exportName === "__esModule") continue;
+            if (typeof value !== "object" && typeof value !== "function") {
+              continue;
+            }
+            if (value === null) continue;
+            exportsByValue.set(value, {
+              main: fileName,
+              mainExport: exportName,
+              files: ctx.filesForExports,
+            });
+          }
         }
+      } catch (error) {
+        // Module evaluation runs outside an isolate `exec`, so errors thrown at
+        // module scope (including a lazily evaluated type-only dependency)
+        // would otherwise surface with a censored (empty) or raw-coordinate
+        // stack. Materialize + source-map it here (once), matching how
+        // invoked-function errors are mapped.
+        throw this.getSESRuntime().mapThrownError(error);
+      } finally {
+        popFrame(frame);
       }
+
       this.runtimeInternals?.exportsCallback(exportsByValue);
 
       // Content-addressed CFC provenance: record it HERE, where functions

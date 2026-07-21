@@ -19,6 +19,7 @@ import {
   TransactionWrapper,
 } from "../src/storage/extended-storage-transaction.ts";
 import { generateObject as rawGenerateObject } from "../src/builtins/llm.ts";
+import { generateObjectState } from "../src/builder/built-in.ts";
 
 const signer = await Identity.fromPassphrase("test generate-object outbox");
 const space = signer.did();
@@ -31,9 +32,7 @@ describe("generateObject outbox mechanism", () => {
   let tx: IExtendedStorageTransaction;
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let dummyPattern: any;
-  let generateObject: ReturnType<
-    typeof createBuilder
-  >["commonfabric"]["generateObject"];
+  let generateObject: typeof generateObjectState;
 
   beforeEach(() => {
     clearMockResponses();
@@ -45,7 +44,8 @@ describe("generateObject outbox mechanism", () => {
     tx = runtime.edit();
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({ pattern, generateObject } = commonfabric);
+    ({ pattern } = commonfabric);
+    generateObject = generateObjectState;
     dummyPattern = pattern(() => ({}), { type: "object" });
   });
 

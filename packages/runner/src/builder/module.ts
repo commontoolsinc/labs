@@ -17,6 +17,7 @@ import type {
   Stream,
   StripCell,
   toJSON,
+  UnavailableInputPolicy,
 } from "./types.ts";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { reactive, stream } from "./reactive.ts";
@@ -360,7 +361,13 @@ export function lift<T, R>(
   const resolvedResultSchema = resultSchema as JSONSchema | undefined;
 
   return createNodeFactory({
-    type: "javascript",
+    // A distinct serialized kind makes policy-bearing computations fail closed
+    // on runtimes which predate unavailable-input policy. Those runtimes reach
+    // their existing unknown-module branch instead of executing this callback
+    // as ordinary JavaScript while silently ignoring the policy.
+    type: options?.unavailableInputPolicy === undefined
+      ? "javascript"
+      : "javascript-availability",
     implementation: resolvedImplementation,
     ...(resolvedArgumentSchema !== undefined
       ? { argumentSchema: resolvedArgumentSchema }
@@ -371,6 +378,9 @@ export function lift<T, R>(
     ...(options?.materializerWriteInputPaths
       ? { materializerWriteInputPaths: options.materializerWriteInputPaths }
       : {}),
+    ...(options?.unavailableInputPolicy
+      ? { unavailableInputPolicy: options.unavailableInputPolicy }
+      : {}),
     ...(options?.completeSchedulerScopeSummary
       ? { completeSchedulerScopeSummary: true as const }
       : {}),
@@ -379,6 +389,7 @@ export function lift<T, R>(
 
 interface DeriveSchedulerOptions {
   materializerWriteInputPaths?: readonly (readonly string[])[];
+  readonly unavailableInputPolicy?: UnavailableInputPolicy;
   completeSchedulerScopeSummary?: true;
 }
 

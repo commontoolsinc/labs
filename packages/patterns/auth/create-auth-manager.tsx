@@ -17,9 +17,15 @@ import {
   computed,
   Default,
   handler,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   lift,
   navigateTo,
+  observeAvailability,
   pattern,
+  resultOf,
   type Stream,
   UI,
   type VNode,
@@ -347,20 +353,34 @@ const AuthManagerBasePattern = pattern<AuthManagerBaseInput, AuthManagerOutput>(
       query: wishTag,
       scope: [".", "~"],
     });
+    const authPiece = computed(() => {
+      const result = wishResult.result;
+      return isPending(result) || hasError(result) || isSyncing(result) ||
+          hasSchemaMismatch(result)
+        ? null
+        : result;
+    });
 
     // Ticking #now wish (one-second granularity): drives the live token-expiry
     // display and the 15-second refresh-failure timeout watcher below.
     const nowCell = wish<number>({ query: "#now/1" });
+    const nowCellValue = resultOf(nowCell.result);
 
-    // Normalize the wish-provided UI into a local render-node contract so
-    // consumers see a stable UI field even when the underlying wish result
-    // has not materialized content yet.
-    const pickerUI = <>{wishResult[UI]}</>;
+    // WishState[UI] is a legacy plain VNode boundary that can still carry
+    // propagated unavailability. Keep this rare compatibility cast local so
+    // the surrounding auth UI can continue rendering its loading state.
+    const observedPickerUI = observeAvailability(wishResult[UI]);
+    const pickerUI = computed(() =>
+      isPending(observedPickerUI) || hasError(observedPickerUI) ||
+        isSyncing(observedPickerUI) || hasSchemaMismatch(observedPickerUI)
+        ? <></>
+        : observedPickerUI
+    );
     const authState = deriveAuthState({
       descriptor,
-      piece: wishResult.result,
+      piece: authPiece,
       requiredScopes,
-      now: nowCell.result,
+      now: nowCellValue,
       debugMode,
     });
     const auth = authState.auth;
@@ -382,8 +402,7 @@ const AuthManagerBasePattern = pattern<AuthManagerBaseInput, AuthManagerOutput>(
     // Reactive watcher: detect when a refresh succeeds
     computed(() => {
       if (!refreshing.get()) return;
-      const nowMs = nowCell.result;
-      if (nowMs == null) return;
+      const nowMs = nowCellValue;
       const expiresAt = authState.tokenExpiresAt ?? 0;
       if (expiresAt > nowMs) {
         refreshing.set(false);
@@ -395,8 +414,7 @@ const AuthManagerBasePattern = pattern<AuthManagerBaseInput, AuthManagerOutput>(
     // Mark the refresh attempt as failed if no new token arrives in time.
     computed(() => {
       if (!refreshing.get()) return;
-      const nowMs = nowCell.result;
-      if (nowMs == null) return;
+      const nowMs = nowCellValue;
       const startedAt = refreshStartedAt.get();
       if (!startedAt) return;
       if (nowMs - startedAt >= REFRESH_FAILURE_TIMEOUT_MS) {

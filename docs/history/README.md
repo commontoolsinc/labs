@@ -102,6 +102,12 @@ One line per archived document; each document's header carries the fuller
 
 ### Executed plans and work orders
 
+- [data-unavailability.md](plans/data-unavailability.md) — explicit
+  DataUnavailable propagation, `AsyncResult<T>`, and `resultOf()` cutover.
+- [latest-complete.md](plans/latest-complete.md) — recursive usable-schema
+  lowering and durable atomic last-complete snapshots.
+- [async-api-availability-migration.md](plans/async-api-availability-migration.md)
+  — pending render continuity and the remaining asynchronous API migrations.
 - [2026-03-17-ct-exec-fuse-callables.md](plans/2026-03-17-ct-exec-fuse-callables.md)
   and [its test plan](plans/2026-03-17-ct-exec-fuse-callables-test-plan.md) —
   `cf exec` and mounted callable files.

@@ -5,6 +5,13 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Schema } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import {
+  DataUnavailable,
+  type DataUnavailableVariant,
+  FabricError,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
+import { selectUnavailableInput } from "../data-unavailability.ts";
 
 export const REQUEST_TIMEOUT = 1000 * 5; // 5 seconds
 
@@ -20,6 +27,71 @@ export const internalSchema = internSchema(
     required: ["requestId", "lastActivity", "inputHash"],
   },
 );
+
+/**
+ * Selects the unavailable marker controlling a raw fetch invocation.
+ * Reasons use the runner-wide precedence, with ties retaining depth-first
+ * serialized argument order. Structural lookalikes are ordinary data.
+ */
+export function selectUnavailableFetchInput(
+  value: unknown,
+  resolution?: {
+    runtime: Runtime;
+    tx: IExtendedStorageTransaction;
+    base: Cell<unknown>;
+  },
+): DataUnavailableVariant | undefined {
+  return selectUnavailableInput(value, resolution, {
+    // `result` is a top-level TypeScript/schema hint, not a request input.
+    // Keep availability selection aligned with request hashing.
+    skipTopLevelKeys: ["result"],
+  });
+}
+
+/**
+ * Reconstructs the direct marker for state persisted by the pre-AsyncResult
+ * fetch implementation. Existing usable values and already-migrated markers
+ * always win; an old terminal error takes precedence over its pending sibling.
+ */
+export function legacyFetchResultMarker(
+  currentResult: unknown,
+  currentPending: boolean,
+  currentError: unknown,
+): DataUnavailableVariant | undefined {
+  if (currentResult !== undefined) return undefined;
+  if (currentError !== undefined) {
+    if (currentError instanceof Error || currentError instanceof FabricError) {
+      return DataUnavailable.error(currentError);
+    }
+    const message = currentError !== null && typeof currentError === "object" &&
+        typeof (currentError as { message?: unknown }).message === "string"
+      ? (currentError as { message: string }).message
+      : String(currentError);
+    const error = new Error(message);
+    if (
+      currentError !== null && typeof currentError === "object" &&
+      typeof (currentError as { name?: unknown }).name === "string"
+    ) {
+      error.name = (currentError as { name: string }).name;
+    }
+    return DataUnavailable.error(error);
+  }
+  return currentPending ? DataUnavailable.pending() : undefined;
+}
+
+/** Writes a direct unavailable result while retaining legacy sibling state. */
+export function writeUnavailableFetchResult(
+  tx: IExtendedStorageTransaction,
+  pending: Cell<boolean>,
+  result: Cell<any>,
+  error: Cell<any>,
+  unavailable: DataUnavailableVariant,
+  legacyError?: unknown,
+): void {
+  pending.withTx(tx).set(unavailable.reason === "pending");
+  result.withTx(tx).setRaw(unavailable);
+  error.withTx(tx).set(legacyError ?? unavailable.error);
+}
 
 /**
  * Computes a stable string hash of fetch-style inputs, suitable for use as
@@ -82,17 +154,135 @@ export function computeInputHash<T extends Record<string, any>>(
 }
 
 /**
+ * Synchronously revalidates an approved fetch snapshot immediately before its
+ * external effect starts. The outbox release and mutex claim each validate at
+ * their own transaction boundary; this closes the remaining hand-off window
+ * where live inputs can change after those checks but before fetch begins.
+ */
+export function liveFetchInputsMatch<
+  TInputs extends Record<string, any>,
+  TSnapshot extends Record<string, any>,
+>(
+  runtime: Runtime,
+  inputsCell: Cell<TInputs>,
+  snapshotInputs: (cell: Cell<TInputs>) => TSnapshot,
+  expectedInputHash: string,
+): boolean {
+  const tx = runtime.edit();
+  try {
+    const unavailable = selectUnavailableFetchInput(
+      inputsCell.withTx(tx).getRaw(),
+      { runtime, tx, base: inputsCell },
+    );
+    if (unavailable !== undefined) return false;
+    return computeInputHashFromValue(snapshotInputs(inputsCell.withTx(tx))) ===
+      expectedInputHash;
+  } finally {
+    tx.abort();
+  }
+}
+
+/** Revalidates both live inputs and ownership of a pending mutex claim. */
+export function liveFetchClaimMatches<
+  TInputs extends Record<string, any>,
+  TSnapshot extends Record<string, any>,
+>(
+  runtime: Runtime,
+  inputsCell: Cell<TInputs>,
+  snapshotInputs: (cell: Cell<TInputs>) => TSnapshot,
+  expectedInputHash: string,
+  internal: Cell<Schema<typeof internalSchema>>,
+  result: Cell<unknown>,
+  requestId: string,
+): boolean {
+  const tx = runtime.edit();
+  try {
+    const unavailable = selectUnavailableFetchInput(
+      inputsCell.withTx(tx).getRaw(),
+      { runtime, tx, base: inputsCell },
+    );
+    if (unavailable !== undefined) return false;
+
+    const liveHash = computeInputHashFromValue(
+      snapshotInputs(inputsCell.withTx(tx)),
+    );
+    const currentInternal = internal.withTx(tx).get();
+    const currentResult = result.withTx(tx).getRaw();
+    return liveHash === expectedInputHash &&
+      currentInternal.inputHash === expectedInputHash &&
+      currentInternal.requestId === requestId &&
+      isDataUnavailable(currentResult) &&
+      currentResult.reason === "pending";
+  } finally {
+    tx.abort();
+  }
+}
+
+/**
+ * Arms recovery for a non-terminal mutex claim whose owner is not local.
+ * The exact claim is released only after its lease expires and only while
+ * live inputs and the direct pending result still match.
+ */
+export function scheduleFetchMutexClaimRetry<
+  TInputs extends Record<string, any>,
+  TSnapshot extends Record<string, any>,
+>(
+  runtime: Runtime,
+  inputsCell: Cell<TInputs>,
+  snapshotInputs: (cell: Cell<TInputs>) => TSnapshot,
+  result: Cell<unknown>,
+  internal: Cell<Schema<typeof internalSchema>>,
+  expectedInputHash: string,
+  requestId: string,
+  lastActivity: number,
+  timeout: number,
+): () => void {
+  const delay = Math.max(0, lastActivity + timeout - Date.now());
+  const timer = setTimeout(() => {
+    void runtime.editWithRetry((tx) => {
+      const unavailable = selectUnavailableFetchInput(
+        inputsCell.withTx(tx).getRaw(),
+        { runtime, tx, base: inputsCell },
+      );
+      if (unavailable !== undefined) return;
+
+      const liveHash = computeInputHashFromValue(
+        snapshotInputs(inputsCell.withTx(tx)),
+      );
+      const currentInternal = internal.withTx(tx).get();
+      const currentResult = result.withTx(tx).getRaw();
+      if (
+        liveHash === expectedInputHash &&
+        currentInternal.inputHash === expectedInputHash &&
+        currentInternal.requestId === requestId &&
+        currentInternal.lastActivity <= Date.now() - timeout &&
+        isDataUnavailable(currentResult) &&
+        currentResult.reason === "pending"
+      ) {
+        internal.withTx(tx).update({
+          requestId: "",
+          lastActivity: 0,
+        });
+      }
+    }).catch(() => {
+      // Runtime shutdown or a conflicting owner will reconcile separately.
+    });
+  }, delay + 1);
+  return () => clearTimeout(timer);
+}
+
+/**
  * Attempts to claim the mutex for a request. Only claims if no other
  * request is active or if the previous request has timed out.
- * When claiming, sets pending=true and clears result/error to maintain
- * the invariant that result/error are undefined while pending.
+ * When claiming, atomically publishes the pending marker and retains the
+ * legacy pending/error sibling cells during the API transition.
  */
 export async function tryClaimMutex<T extends Record<string, any>>(
   runtime: Runtime,
   inputsCell: Cell<T>,
   pending: Cell<boolean>,
-  _result: Cell<any>,
-  _error: Cell<any>,
+  result: Cell<any>,
+  error: Cell<any>,
   internal: Cell<Schema<typeof internalSchema>>,
   requestId: string,
   snapshotInputs: (cell: Cell<T>) => T,
@@ -113,8 +303,23 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   await runtime.idle();
 
   await runtime.editWithRetry((tx) => {
+    // Re-check availability inside the mutex transaction. The outbox release
+    // and the reactive builtin action can race: a prior request may still be
+    // published as pending when the live input has already become unavailable.
+    // Snapshot hashing alone is not a sufficient guard because schema
+    // projection can hide the marker or normalize it to the prior hash.
+    const unavailable = selectUnavailableFetchInput(
+      inputsCell.withTx(tx).getRaw(),
+      { runtime, tx, base: inputsCell },
+    );
+    if (unavailable !== undefined) {
+      claimed = false;
+      return;
+    }
+
     const currentInternal = internal.withTx(tx).get();
     const isPending = pending.withTx(tx).get();
+    const currentResult = result.withTx(tx).getRaw();
     const now = Date.now();
 
     // The caller-provided snapshotInputs receives the cell with the active
@@ -132,11 +337,23 @@ export async function tryClaimMutex<T extends Record<string, any>>(
     // Can claim if:
     // 1. Nothing is pending, OR
     // 2. Previous request timed out
-    const canClaim = !isPending ||
-      (currentInternal.lastActivity < now - timeout);
+    const hasSettledResult = currentResult !== undefined &&
+      !(isDataUnavailable(currentResult) &&
+        currentResult.reason === "pending");
+    const canClaim = !hasSettledResult &&
+      (
+        !isPending || currentInternal.requestId === "" ||
+        currentInternal.lastActivity < now - timeout
+      );
 
     if (canClaim) {
-      pending.withTx(tx).set(true);
+      writeUnavailableFetchResult(
+        tx,
+        pending,
+        result,
+        error,
+        DataUnavailable.pending(),
+      );
       internal.withTx(tx).update({
         requestId,
         lastActivity: now,
@@ -161,9 +378,22 @@ export async function tryWriteResult<T extends Record<string, any>>(
   expectedHash: string,
   action: (tx: IExtendedStorageTransaction) => void,
   snapshotInputs?: (cell: Cell<T>) => T,
+  expectedRequestId?: string,
 ): Promise<boolean> {
   let success = false;
   await runtime.editWithRetry((tx) => {
+    const unavailable = selectUnavailableFetchInput(
+      inputsCell.withTx(tx).getRaw(),
+      { runtime, tx, base: inputsCell },
+    );
+    if (unavailable !== undefined) return;
+
+    const currentInternal = internal.withTx(tx).get();
+    if (
+      expectedRequestId !== undefined &&
+      currentInternal.requestId !== expectedRequestId
+    ) return;
+
     const inputs = snapshotInputs
       ? snapshotInputs(inputsCell.withTx(tx))
       : inputsCell.getAsQueryResult([], tx);
@@ -172,9 +402,33 @@ export async function tryWriteResult<T extends Record<string, any>>(
     // Only write if inputs haven't changed since we started the request
     if (currentHash === expectedHash) {
       action(tx);
-      internal.withTx(tx).update({ inputHash: currentHash });
+      internal.withTx(tx).update({
+        inputHash: currentHash,
+        ...(expectedRequestId !== undefined && {
+          requestId: "",
+          lastActivity: 0,
+        }),
+      });
       success = true;
     }
   });
   return success;
+}
+
+/** Releases a just-acquired claim only if it still belongs to this request. */
+export async function releaseFetchMutexClaim(
+  runtime: Runtime,
+  internal: Cell<Schema<typeof internalSchema>>,
+  expectedInputHash: string,
+  requestId: string,
+): Promise<void> {
+  await runtime.editWithRetry((tx) => {
+    const current = internal.withTx(tx).get();
+    if (
+      current.inputHash === expectedInputHash &&
+      current.requestId === requestId
+    ) {
+      internal.withTx(tx).update({ requestId: "", lastActivity: 0 });
+    }
+  });
 }

@@ -3,7 +3,16 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { isCanonicalDataUnavailable } from "@/fabric-instances/data-unavailable-brand.ts";
 import { FabricInstance } from "./interface.ts";
+
+// SES replaces the host Error constructor with a tamed one that does not
+// currently expose Error.isError(). Capture the native brand check before
+// lockdown so errors minted by either side of that boundary remain
+// recognizable without relying on spoofable shape or display-tag checks.
+const nativeErrorIsError = (Error as typeof Error & {
+  isError?: (candidate: unknown) => boolean;
+}).isError?.bind(Error);
 
 /**
  * Tags identifying classes that the fabric system recognizes for dispatch.
@@ -122,8 +131,9 @@ export function tagFromNativeClass(
  * Non-object types (`null`, `undefined`, primitives) return `Primitive`.
  *
  * Dispatches via the value's constructor (O(1) switch in `tagFromNativeClass`).
- * Falls back to `Error.isError()` for exotic `Error` subclasses, `Array.isArray()`
- * for cross-realm arrays, and prototype check for null-prototype objects.
+ * Falls back to a pre-SES captured `Error.isError()` for foreign-branded
+ * errors; cross-realm arrays use `Array.isArray()`, and null-prototype objects
+ * use a prototype check.
  *
  * For tags that have pass-through handling (`Object`, `Array`) or no dedicated
  * handler (`null`), a per-instance `hasToJSON()` check upgrades the tag to
@@ -154,11 +164,22 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
 
   // Fallbacks for values whose constructor wasn't recognized (tag === null).
   if (tag === null) {
-    // Exotic `Error` subclasses (e.g. `DOMException`).
-    if (Error.isError(value)) return NATIVE_TAGS.Error;
+    // Split bundles can duplicate the FabricInstance base while sharing the
+    // canonical DataUnavailable private brand. Recognize that control value
+    // before the realm-specific base-class identity check below.
+    if (isCanonicalDataUnavailable(value)) {
+      return NATIVE_TAGS.FabricInstance;
+    }
 
-    // `FabricInstance` values (object-like protocol types).
+    // Other Fabric protocol values are already valid and must be recognized
+    // before consulting realm-specific native helpers.
     if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;
+
+    // Foreign/SES `Error` instances and exotic subclasses. Use the native
+    // intrinsic captured before SES replaced the active Error constructor.
+    if (nativeErrorIsError?.(value)) {
+      return NATIVE_TAGS.Error;
+    }
 
     // Cross-realm arrays may have a different constructor.
     if (Array.isArray(value)) tag = NATIVE_TAGS.Array;

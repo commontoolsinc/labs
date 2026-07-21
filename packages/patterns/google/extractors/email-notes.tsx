@@ -22,6 +22,7 @@ import {
   handler,
   NAME,
   pattern,
+  resultOf,
   TILE_UI,
   UI,
   wish,
@@ -213,6 +214,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
   // Reactive clock for relative date labels (Yesterday / weekday / time of day),
   // ticking every 60 seconds so the displayed labels refresh over time.
   const nowCell = wish<number>({ query: "#now/60" });
+  const nowCellValue = resultOf(nowCell.result);
 
   // Use createGoogleAuth for scopes that include gmailModify.
   const {
@@ -517,7 +519,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
                           >
                             {formatDate(
                               note.date,
-                              nowCell.result ?? new Date(note.date).getTime(),
+                              nowCellValue,
                             )}
                           </span>
                           <div style={{ display: "flex", gap: "8px" }}>

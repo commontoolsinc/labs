@@ -1,4 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import type { DataUnavailableReason } from "@commonfabric/data-model/fabric-instances";
 import { recordTrustedEventPolicyInputs } from "../cfc/ui-contract.ts";
 import type { Cancel } from "../cancel.ts";
 import { ensurePieceRunning } from "../ensure-piece-running.ts";
@@ -43,6 +44,7 @@ import type {
   Action,
   EventHandler,
   EventPreflightTraceContext,
+  HandlerInputReadiness,
   QueuedEvent,
   ReactivityLog,
 } from "./types.ts";
@@ -64,6 +66,8 @@ export function isHeadEventParked(
 
 export interface EventDependencyPreflightResult {
   shouldSkipEvent: boolean;
+  shouldParkForInputs: boolean;
+  inputUnavailableReason?: DataUnavailableReason;
   deps: ReactivityLog;
   invalidDeps: Set<Action>;
   hasInvalidDependencies: boolean;
@@ -455,6 +459,12 @@ export interface SchedulerEventExecutionState {
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
   readonly scheduleWake: (notBefore: number) => void;
+  readonly isEventWaitingForInput: (event: QueuedEvent) => boolean;
+  readonly parkEventUntilInputChanges: (
+    event: QueuedEvent,
+    dependencies: ReactivityLog,
+  ) => void;
+  readonly clearEventInputWait: (event: QueuedEvent) => void;
   readonly lineageStatus: (
     originTx: IExtendedStorageTransaction,
   ) => OriginStatus;
@@ -517,6 +527,7 @@ export function preflightQueuedEventDependencies(state: {
   let collectMs = 0;
   let scheduleMs = 0;
   let shouldSkipEvent = false;
+  let inputReadiness: HandlerInputReadiness = { ready: true };
 
   // Get the handler's dependencies (read-only, just capturing what will be read)
   const depTx = state.runtime.edit();
@@ -530,6 +541,9 @@ export function preflightQueuedEventDependencies(state: {
   );
   try {
     handler.populateDependencies?.(depTx, eventValue);
+    inputReadiness = handler.inputReadiness?.(depTx, eventValue) ?? {
+      ready: true,
+    };
   } catch (error) {
     state.handleError(error as Error, handler);
     // Dropping the event here is its final outcome — settle the commit
@@ -652,6 +666,10 @@ export function preflightQueuedEventDependencies(state: {
     scheduleMs = performance.now() - stepStart;
   }
 
+  const inputUnavailableReason = inputReadiness.ready
+    ? undefined
+    : inputReadiness.reason;
+
   // Replica-staleness gate (CT-1795): with no invalid upstream left, an
   // address the closure depends on may still have a load in flight — the
   // wish shape, where a computation settles CLEAN on a provisional value
@@ -659,16 +677,21 @@ export function preflightQueuedEventDependencies(state: {
   // (D7), so park the head until those loads complete (absent counts as
   // complete); load completion is the wake source, mirroring the lineage
   // park.
-  if (!shouldSkipEvent && !hasInvalidDependencies) {
+  if (!shouldSkipEvent && !hasInvalidDependencies && inputReadiness.ready) {
     const parkKeys = state.collectPendingLoadParkKeys(queuedEvent, deps);
     if (parkKeys.length > 0) {
       state.parkHeadEventForLoads(queuedEvent, parkKeys);
       shouldSkipEvent = true;
     }
   }
-
   return {
     shouldSkipEvent,
+    shouldParkForInputs: !shouldSkipEvent &&
+      (inputUnavailableReason === "pending" ||
+        inputUnavailableReason === "syncing"),
+    ...(inputUnavailableReason !== undefined && {
+      inputUnavailableReason,
+    }),
     deps,
     invalidDeps,
     hasInvalidDependencies,
@@ -722,6 +745,14 @@ export async function processPullQueuedEventDuringExecute(
     return;
   }
 
+  if (state.isEventWaitingForInput(queuedEvent)) {
+    return;
+  }
+
+  // A one-shot input watcher has fired and cleared its parked bit. Remove its
+  // now-empty scheduler node before rechecking readiness or dispatching.
+  state.clearEventInputWait(queuedEvent);
+
   if (
     queuedEvent.notBefore !== undefined &&
     queuedEvent.notBefore > performance.now()
@@ -735,14 +766,51 @@ export async function processPullQueuedEventDuringExecute(
   const { handler } = queuedEvent;
   const handlerId = state.getActionId(handler);
 
+  // Sync handler-only input cells before readiness preflight. Keeping this
+  // await before the queue shift means readiness is checked again after the
+  // async boundary; once preflight says ready, dispatch reaches the handler
+  // body without another await in which the input can become unavailable.
+  // Fail open so the readiness/read path surfaces the actual state.
+  if (typeof handler.presyncInputs === "function") {
+    try {
+      await handler.presyncInputs(queuedEvent.event);
+    } catch (error) {
+      logger.warn(
+        "scheduler",
+        "handler input presync failed; checking readiness anyway",
+        { error, handlerId },
+      );
+    }
+  }
+
+  // Presync is an async boundary. A speculative origin can fail while it is
+  // in flight, and its lineage callback removes this exact queue object.
+  if (
+    queuedEvent.finalOutcomeNotified ||
+    state.eventQueue[0] !== queuedEvent
+  ) {
+    return;
+  }
+  if (
+    queuedEvent.originTx !== undefined &&
+    state.lineageStatus(queuedEvent.originTx) === "failed"
+  ) {
+    state.dropEvent(
+      queuedEvent,
+      `Event dropped: lineage origin failed while ${queuedEvent.id} inputs synced`,
+    );
+    return;
+  }
+
   let shouldSkipEvent = false;
-  if (handler.populateDependencies) {
+  let preflight: EventDependencyPreflightResult | undefined;
+  if (handler.populateDependencies || handler.inputReadiness) {
     // Snapshot generations that were already in flight before preflight reads
     // can kick their own fire-and-forget loads. A later generation that existed
     // here is a genuine concurrent refresh and must re-park; one first created
     // by this preflight is the self-kick that load history suppresses.
     state.capturePendingLoadGenerations();
-    const preflight = preflightQueuedEventDependencies({
+    preflight = preflightQueuedEventDependencies({
       runtime: state.runtime,
       eventQueue: state.eventQueue,
       nodes: state.nodes,
@@ -777,10 +845,16 @@ export async function processPullQueuedEventDuringExecute(
       // intermediate that becomes invalid mid-pass joins the demand set. This
       // avoids both a full upstream-cone walk and an alternating-cycle escape
       // into unbounded execute/preflight ticks.
+      const settledPreflight = preflight;
       state.setEventPassDemandRefresh((demand) => {
         demand.clear();
         const invalidDeps = new Set<Action>();
-        if (!state.collectInvalidUpstreamForLog(preflight.deps, invalidDeps)) {
+        if (
+          !state.collectInvalidUpstreamForLog(
+            settledPreflight.deps,
+            invalidDeps,
+          )
+        ) {
           return;
         }
         const plan = planEventInvalidDependencyScheduling({
@@ -805,7 +879,11 @@ export async function processPullQueuedEventDuringExecute(
         pendingSizeBefore: preflight.pendingSizeBefore,
         dirtyDependencyCount: preflight.invalidDeps.size,
         hasDirtyDependencies: preflight.hasInvalidDependencies,
-        skipped: shouldSkipEvent,
+        skipped: shouldSkipEvent || preflight.shouldParkForInputs,
+        ...(preflight.inputUnavailableReason !== undefined && {
+          inputUnavailableReason: preflight.inputUnavailableReason,
+        }),
+        queueDepth: state.eventQueue.length,
         populateMs: preflight.populateMs,
         txToLogMs: preflight.txToLogMs,
         depCommitMs: preflight.depCommitMs,
@@ -819,6 +897,11 @@ export async function processPullQueuedEventDuringExecute(
   }
 
   if (shouldSkipEvent) return;
+
+  if (preflight?.shouldParkForInputs) {
+    state.parkEventUntilInputChanges(queuedEvent, preflight.deps);
+    return;
+  }
 
   await dispatchQueuedEvent({
     runtime: state.runtime,
@@ -877,25 +960,6 @@ export async function dispatchQueuedEvent(state: {
     handlerInfo: state.getActionTelemetryInfo(handler),
   });
 
-  // Ensure the handler's input docs are locally available before the body
-  // runs (see EventHandler.presyncInputs). Fail open: a presync error should
-  // surface as the handler's own read failure, not silently drop the event.
-  if (typeof handler.presyncInputs === "function") {
-    try {
-      await handler.presyncInputs(eventValue);
-    } catch (error) {
-      logger.warn(
-        "scheduler",
-        "handler input presync failed; dispatching anyway",
-        { error, handlerId },
-      );
-    }
-  }
-
-  // Lineage may fail while presync is awaiting I/O. Keep the event in its FIFO
-  // slot until that await completes so the lineage callback can still find and
-  // settle it. A failed origin removes the event through dropQueuedEvent; never
-  // continue into the handler or notify its final callback a second time.
   if (
     queuedEvent.finalOutcomeNotified ||
     state.eventQueue[0] !== queuedEvent
@@ -903,7 +967,6 @@ export async function dispatchQueuedEvent(state: {
     return;
   }
   state.eventQueue.shift();
-
   const tx = state.runtime.edit();
   tx.dispatchedEventId = queuedEvent.id;
   tx.dispatchedEventTime = queuedEvent.time;

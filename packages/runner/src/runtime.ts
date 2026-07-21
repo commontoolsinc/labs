@@ -9,6 +9,7 @@ import { mintDataCellURI } from "./data-uri-mint.ts";
 import type { NonIdempotentReport } from "./telemetry.ts";
 import type {
   AnyCell,
+  CellScope,
   JSONSchema,
   Module,
   NodeFactory,
@@ -44,6 +45,7 @@ import type {
   IStorageManager,
   IStorageProvider,
   MemorySpace,
+  StorageConnectionState,
   URI,
 } from "./storage/interface.ts";
 import {
@@ -54,7 +56,11 @@ import {
 } from "./cell.ts";
 import { createRef, EntityId } from "./create-ref.ts";
 import { createSession, Identity } from "@commonfabric/identity";
-import { Action, Scheduler } from "./scheduler.ts";
+import {
+  Action,
+  type ExternalDependencyActionToken,
+  Scheduler,
+} from "./scheduler.ts";
 import {
   type CommitBackpressurePolicy,
   resolveCommitBackpressure,
@@ -71,6 +77,7 @@ import {
   parseLink,
 } from "./link-utils.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   buildCfcPolicySnapshot,
   buildCfcTrustConfig,
@@ -165,6 +172,48 @@ const WriteDebugContextStorage =
 Error.stackTraceLimit = 500;
 
 export const DEFAULT_MAX_RETRIES = 5;
+
+const MISSING_DOC_RETRY_INITIAL_MS = 25;
+const MISSING_DOC_RETRY_MAX_MS = 1_000;
+const MISSING_DOC_MAX_ATTEMPTS = 3;
+
+type MissingDocLoadEntry = {
+  status:
+    | "pending"
+    | "retry-ready"
+    | "waiting-for-connection"
+    | "settled"
+    | "error";
+  space: MemorySpace;
+  connectionEpoch: number;
+  attempts: number;
+  waiters: Map<Action, ExternalDependencyActionToken>;
+  reservedDocPull?: {
+    space: MemorySpace;
+    id: URI;
+    scope: CellScope | undefined;
+  };
+  error?: Error;
+  cancelRetryDelay?: () => void;
+};
+
+export type LinkedDocLoadStatus = "pending" | "settled" | "error";
+
+/**
+ * Match the identity passed to `StorageManager.syncCell()`: scope defaults to
+ * `space`, path parts are serialized as strings, and an absent schema is the
+ * same selector as `false`. Coverage for one selector is not authoritative for
+ * another selector on the same document.
+ */
+function missingDocLoadKey(link: NormalizedFullLink): string {
+  return hashStringOf({
+    space: link.space,
+    id: link.id,
+    scope: normalizeCellScope(link.scope),
+    path: link.path.map((part) => part.toString()),
+    schema: link.schema ?? false,
+  });
+}
 
 export type { IExtendedStorageTransaction, IStorageProvider, MemorySpace };
 
@@ -1154,6 +1203,21 @@ export class Runtime {
    * should await all pending commits before calling dispose().
    */
   async dispose(): Promise<void> {
+    for (const cancel of this.storageConnectionStateCancels.values()) {
+      cancel();
+    }
+    this.storageConnectionStateCancels.clear();
+    this.storageConnectionStates.clear();
+
+    // Cancel readiness backoff timers before storage teardown. In-flight syncs
+    // observe the cleared map when they settle and exit without scheduling
+    // actions against a disposing runtime.
+    for (const entry of this.missingDocLoads.values()) {
+      entry.waiters.clear();
+      entry.cancelRetryDelay?.();
+    }
+    this.missingDocLoads.clear();
+
     // Abort any pending (not-yet-started) queued jobs so they don't start
     // after storage is torn down.
     for (const queue of this.queues.values()) {
@@ -1292,52 +1356,305 @@ export class Runtime {
     return wrapped;
   }
 
-  // (space, scope, id) triples for which a missing-link-target load has been
-  // kicked this session. The kicked sync establishes a live per-doc
-  // subscription, so a later creation of the doc still arrives — one kick per
-  // doc suffices. Scope is part of the key: scoped instances (user/session)
-  // are distinct docs, and a kick for one scope must not suppress another's.
-  private missingDocLoadKicks = new Set<string>();
+  // Readiness of missing linked documents whose selector sync was kicked this
+  // session. A settled entry means the local absence is authoritative; the
+  // sync leaves a live subscription behind so later creation still arrives.
+  private missingDocLoads = new Map<
+    string,
+    MissingDocLoadEntry
+  >();
+  private storageConnectionStates = new Map<
+    MemorySpace,
+    StorageConnectionState
+  >();
+  private storageConnectionStateCancels = new Map<MemorySpace, () => void>();
 
   /**
-   * Asynchronously load a link target that a read found absent from the
-   * local replica. Cross-space targets (CT-1667): per-space server queries
-   * cannot follow links across space boundaries, so the client must fetch
-   * such targets itself. Same-space targets (fresh-replica read asymmetry):
-   * a rejecting-selector sync delivers only the root doc, so a link can
-   * point at a doc no selector ever walked — those are fetched only when
-   * the local replica has never seen the doc (`shouldPullDoc`), so reads of
-   * genuinely absent optional values do not become repeated server queries.
-   * Fire-and-forget, but registered as a cross-space promise so
-   * `storageManager.synced()` and `Cell.pull()`'s convergence loop can await
-   * it; the absent doc is a tracked read, so the reader re-runs on arrival.
-   * Deduped per (space, id): the kicked sync leaves a live subscription
-   * behind, so repeat kicks add nothing.
+   * Establish selector coverage for a link followed only for its reference
+   * identity. Reference-only resolution is already reactive to the source link;
+   * it does not consume the target value and therefore must not subscribe the
+   * executing action to target-settlement wakeups.
+   *
+   * A later availability-aware target read reuses the same in-flight load and
+   * registers its waiter through {@link ensureLinkedDocLoaded}.
+   */
+  prefetchLinkedDoc(
+    link: NormalizedFullLink,
+    sourceSpace?: MemorySpace,
+  ): void {
+    this.ensureLinkedDocLoad(link, false, sourceSpace);
+  }
+
+  /**
+   * Asynchronously establish selector coverage for a linked target that a read
+   * found absent from the local replica. This is required across spaces and
+   * after same-space dynamic retargets to a document outside prior coverage.
+   * The status distinguishes pending replica coverage (`syncing`) from a
+   * settled, authoritative absence (`schema-mismatch`).
+   *
+   * Deduped by the full normalized selector identity: document, scope, path,
+   * and schema. The kicked sync leaves a live subscription. If a sync settles
+   * without a document update, its readers receive an explicit scheduler wake
+   * so they can replace `syncing` with `schema-mismatch`.
    */
   ensureLinkedDocLoaded(
     link: NormalizedFullLink,
     sourceSpace?: MemorySpace,
-  ): void {
-    const { space, id, scope } = link;
-    const key = `${space}\0${normalizeCellScope(scope)}\0${id}`;
-    if (this.missingDocLoadKicks.has(key)) return;
+  ): LinkedDocLoadStatus {
+    return this.ensureLinkedDocLoad(link, true, sourceSpace);
+  }
+
+  linkedDocLoadError(link: NormalizedFullLink): Error | undefined {
+    return this.missingDocLoads.get(missingDocLoadKey(link))?.error;
+  }
+
+  private ensureLinkedDocLoad(
+    link: NormalizedFullLink,
+    observeSettlement: boolean,
+    sourceSpace?: MemorySpace,
+  ): LinkedDocLoadStatus {
+    const connectionState = this.observeStorageConnection(link.space);
+    const key = missingDocLoadKey(link);
+    const token = observeSettlement
+      ? this.scheduler.getExecutingActionToken()
+      : undefined;
+    const existing = this.missingDocLoads.get(key);
+    if (existing !== undefined) {
+      // Terminal-error readers remain subscribed intentionally. A restored
+      // connection epoch invalidates the error and wakes one current token per
+      // action; repeated reads replace that action's token instead of growing
+      // the waiter set.
+      if (
+        existing.status !== "settled" && token !== undefined
+      ) {
+        existing.waiters.set(token.action, token);
+      }
+      if (existing.status === "retry-ready") {
+        this.startMissingDocLoadAttempt(key, link, existing);
+      }
+      return existing.status === "settled"
+        ? "settled"
+        : existing.status === "error"
+        ? "error"
+        : "pending";
+    }
+
     // A same-space target the replica already has state for (or a manager
-    // without lazy replication) needs no fetch.
+    // without lazy replication) needs no fetch. `shouldPullDoc` atomically
+    // reserves the first kick, preventing parallel selector reads from
+    // starting duplicate syncs for the same document.
+    const { space, scope } = link;
+    const id = link.id as URI;
     const sameSpace = sourceSpace === space;
-    const mgr = this.storageManager;
-    const reserved = sameSpace &&
-      mgr.shouldPullDoc?.(space, id, scope) === true;
-    if (sameSpace && !reserved) return;
-    this.missingDocLoadKicks.add(key);
-    mgr.trackUntilSettled(
-      this.getCellFromLink(link).sync().catch(() => {
-        // Allow a retry on failure (e.g. transient disconnect): clear this
-        // dedup set, and hand back the storage manager's reservation when
-        // THIS kick took it — a cross-space kick never reserved, and must
-        // not clear a reservation a concurrent same-space read holds.
-        this.missingDocLoadKicks.delete(key);
-        if (reserved) mgr.retractDocPullKick?.(space, id, scope);
-      }),
+    const connectionClosed = connectionState?.status === "closed";
+    const reserved = !connectionClosed && sameSpace &&
+      this.storageManager.shouldPullDoc?.(space, id, scope) === true;
+    if (sameSpace && !connectionClosed && !reserved) return "settled";
+
+    const status: MissingDocLoadEntry["status"] =
+      connectionState?.status === "disconnected"
+        ? "waiting-for-connection"
+        : connectionState?.status === "closed"
+        ? "error"
+        : "retry-ready";
+    const entry: MissingDocLoadEntry = {
+      status,
+      space,
+      connectionEpoch: connectionState?.epoch ?? 0,
+      attempts: 0,
+      waiters: new Map(
+        token === undefined ? [] : [[token.action, token]],
+      ),
+      ...(reserved ? { reservedDocPull: { space, id, scope } } : {}),
+      ...(connectionState?.status === "closed"
+        ? { error: connectionState.cause }
+        : {}),
+    };
+    this.missingDocLoads.set(key, entry);
+    if (entry.status === "retry-ready") {
+      this.startMissingDocLoadAttempt(key, link, entry);
+    }
+    return entry.status === "error" ? "error" : "pending";
+  }
+
+  private observeStorageConnection(
+    space: MemorySpace,
+  ): StorageConnectionState | undefined {
+    if (!this.storageConnectionStateCancels.has(space)) {
+      const subscribe = this.storageManager.subscribeConnectionState;
+      if (subscribe !== undefined) {
+        const cancel = subscribe.call(
+          this.storageManager,
+          space,
+          (state) => this.handleStorageConnectionState(space, state),
+        );
+        this.storageConnectionStateCancels.set(space, cancel);
+      }
+    }
+    return this.storageConnectionStates.get(space);
+  }
+
+  private handleStorageConnectionState(
+    space: MemorySpace,
+    state: StorageConnectionState,
+  ): void {
+    const previous = this.storageConnectionStates.get(space);
+    this.storageConnectionStates.set(space, state);
+
+    if (state.status === "disconnected") {
+      for (const entry of this.missingDocLoads.values()) {
+        if (
+          entry.space !== space || entry.status === "settled" ||
+          entry.status === "error"
+        ) {
+          continue;
+        }
+        entry.cancelRetryDelay?.();
+        entry.cancelRetryDelay = undefined;
+        entry.status = "waiting-for-connection";
+      }
+      return;
+    }
+
+    if (
+      state.status === "ready" && previous?.status === "disconnected" &&
+      state.epoch > previous.epoch
+    ) {
+      for (const [key, entry] of this.missingDocLoads) {
+        if (
+          entry.space !== space || entry.status === "settled" ||
+          entry.connectionEpoch >= state.epoch
+        ) {
+          continue;
+        }
+        entry.cancelRetryDelay?.();
+        entry.cancelRetryDelay = undefined;
+        this.missingDocLoads.delete(key);
+        this.releaseMissingDocPullReservation(entry);
+        this.wakeMissingDocLoadWaiters(entry);
+        entry.waiters.clear();
+      }
+      return;
+    }
+
+    if (state.status === "closed") {
+      for (const entry of this.missingDocLoads.values()) {
+        if (entry.space !== space || entry.status === "settled") continue;
+        entry.cancelRetryDelay?.();
+        entry.cancelRetryDelay = undefined;
+        entry.status = "error";
+        entry.error = state.cause;
+        this.releaseMissingDocPullReservation(entry);
+        this.wakeMissingDocLoadWaiters(entry);
+        entry.waiters.clear();
+      }
+    }
+  }
+
+  private startMissingDocLoadAttempt(
+    key: string,
+    link: NormalizedFullLink,
+    entry: MissingDocLoadEntry,
+  ): void {
+    if (
+      this.missingDocLoads.get(key) !== entry ||
+      entry.status !== "retry-ready"
+    ) {
+      return;
+    }
+    entry.status = "pending";
+    entry.attempts++;
+
+    const work = this.getCellFromLink(link).sync().then(
+      () => {
+        if (this.missingDocLoads.get(key) !== entry) return;
+        entry.status = "settled";
+        this.wakeMissingDocLoadWaiters(entry);
+        entry.waiters.clear();
+      },
+      (cause) => {
+        if (this.missingDocLoads.get(key) !== entry) return;
+        const connectionState = this.storageConnectionStates.get(entry.space);
+        if (connectionState?.status === "disconnected") {
+          entry.status = "waiting-for-connection";
+          entry.attempts = Math.max(0, entry.attempts - 1);
+          this.releaseMissingDocPullReservation(entry);
+          return;
+        }
+        if (entry.attempts >= MISSING_DOC_MAX_ATTEMPTS) {
+          // Exhaustion is terminal for this runtime. Wake every consumer so
+          // the visible value becomes an error instead of remaining an
+          // unwakeable syncing marker.
+          entry.status = "error";
+          entry.error = cause instanceof Error
+            ? cause
+            : new Error(String(cause));
+          this.releaseMissingDocPullReservation(entry);
+          this.wakeMissingDocLoadWaiters(entry);
+          entry.waiters.clear();
+          return;
+        }
+        this.scheduleMissingDocLoadRetry(key, entry);
+      },
+    );
+    this.storageManager.trackUntilSettled(work);
+  }
+
+  private scheduleMissingDocLoadRetry(
+    key: string,
+    entry: MissingDocLoadEntry,
+  ): void {
+    const retryDelayMs = Math.min(
+      MISSING_DOC_RETRY_INITIAL_MS * 2 ** (entry.attempts - 1),
+      MISSING_DOC_RETRY_MAX_MS,
+    );
+    const retryDelay = new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(finish, retryDelayMs);
+      entry.cancelRetryDelay = finish;
+    });
+    const retryWork = retryDelay.then(() => {
+      entry.cancelRetryDelay = undefined;
+      if (this.missingDocLoads.get(key) !== entry) return;
+      if (entry.status === "waiting-for-connection") return;
+      entry.status = "retry-ready";
+      const liveWaiters = this.wakeMissingDocLoadWaiters(entry);
+      if (liveWaiters === 0) {
+        // No current action still depends on this selector. Drop the retry-ready
+        // entry so an event preflight or later direct read can start afresh.
+        this.missingDocLoads.delete(key);
+        this.releaseMissingDocPullReservation(entry);
+      }
+    });
+    this.storageManager.trackUntilSettled(retryWork);
+  }
+
+  private wakeMissingDocLoadWaiters(entry: MissingDocLoadEntry): number {
+    let liveWaiters = 0;
+    for (const [action, token] of entry.waiters) {
+      if (this.scheduler.scheduleExternalDependencySettlement(token)) {
+        liveWaiters++;
+      } else {
+        entry.waiters.delete(action);
+      }
+    }
+    return liveWaiters;
+  }
+
+  private releaseMissingDocPullReservation(entry: MissingDocLoadEntry): void {
+    const reserved = entry.reservedDocPull;
+    if (reserved === undefined) return;
+    entry.reservedDocPull = undefined;
+    this.storageManager.retractDocPullKick?.(
+      reserved.space,
+      reserved.id,
+      reserved.scope,
     );
   }
 

@@ -79,6 +79,25 @@ export type {
 export type ChangeGroup = unknown;
 
 /**
+ * Per-space remote connection state. A ready epoch advances only after the
+ * memory session has reconnected and restored all of its watches and pending
+ * commits, so consumers can use a new epoch as a safe retry boundary.
+ */
+export type StorageConnectionState =
+  | { readonly status: "idle"; readonly epoch: 0 }
+  | { readonly status: "ready"; readonly epoch: number }
+  | {
+    readonly status: "disconnected";
+    readonly epoch: number;
+    readonly cause: Error;
+  }
+  | {
+    readonly status: "closed";
+    readonly epoch: number;
+    readonly cause: Error;
+  };
+
+/**
  * Base interface for storage errors. These are lightweight objects (not Error
  * instances) used in Result types for better performance. Error instances are
  * ~500x more expensive to create due to stack trace generation.
@@ -140,6 +159,17 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * space.
    */
   open(space: MemorySpace): IStorageProviderWithReplica;
+
+  /**
+   * Observe the remote connection used by one space. The callback is invoked
+   * immediately with the current state, then whenever that state changes.
+   * Implementations without a persistent remote connection may omit this
+   * optional capability.
+   */
+  subscribeConnectionState?(
+    space: MemorySpace,
+    callback: (state: StorageConnectionState) => void,
+  ): () => void;
 
   /**
    * Record a runtime-learned host hint for a space (federation site
@@ -821,7 +851,7 @@ export interface IStorageTransaction {
    * `sqlite` op; on SQL failure the whole commit aborts). Claims `space` as a
    * write target (same write-isolation rules as a cell write) and throws if the
    * tx is not writable. See
-   * docs/specs/sqlite-builtin/plans/sqlite-execute-commit-fold.md.
+   * docs/specs/sqlite-builtin/04-server-execution-and-transactions.md.
    */
   recordSqliteWrite?(space: MemorySpace, op: SqliteOperation): void;
 

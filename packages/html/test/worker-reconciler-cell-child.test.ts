@@ -7,6 +7,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime, UI } from "@commonfabric/runner";
 import type { Cell } from "@commonfabric/runner";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { opsFlushed } from "./reconciler-support.ts";
 
 /**
@@ -784,6 +785,296 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
     assertEquals(updateTextOps.length, 1, "Should emit update-text");
     assertEquals((updateTextOps[0] as any).text, "World");
   });
+
+  await t.step(
+    "marks the last usable root stale while its Cell is pending",
+    async () => {
+      const collector = createOpsCollector();
+      const errors: Error[] = [];
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+        onError: (error) => errors.push(error),
+      });
+      const rootCell = new MockCell(DataUnavailable.pending());
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(collector.getOps().length, 0);
+      assertEquals(errors, []);
+
+      rootCell.set(
+        {
+          type: "vnode",
+          name: "div",
+          props: { id: "ready" },
+          children: ["Ready"],
+        } satisfies WorkerVNode,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(
+        collector.getOpsOfType("create-element").some((op) =>
+          "tagName" in op && op.tagName === "div"
+        ),
+        true,
+      );
+      const readyRootCreate = collector.getOpsOfType("create-element")
+        .find((op) => "tagName" in op && op.tagName === "div");
+      const readyRootId = readyRootCreate && "nodeId" in readyRootCreate
+        ? readyRootCreate.nodeId
+        : undefined;
+      collector.clear();
+
+      rootCell.set(DataUnavailable.pending());
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(
+        collector.getOpsOfType("set-prop").some((op) =>
+          "nodeId" in op && op.nodeId === readyRootId && "key" in op &&
+          op.key === "data-cf-pending" && "value" in op && op.value === true
+        ),
+        true,
+      );
+      assertEquals(collector.getOpsOfType("remove-node").length, 0);
+      assertEquals(errors, []);
+      collector.clear();
+
+      rootCell.set(
+        {
+          type: "vnode",
+          name: "div",
+          props: { id: "updated" },
+          children: ["Updated"],
+        } satisfies WorkerVNode,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(
+        collector.getOpsOfType("remove-prop").some((op) =>
+          "nodeId" in op && op.nodeId === readyRootId && "key" in op &&
+          op.key === "data-cf-pending"
+        ),
+        true,
+      );
+      assertEquals(
+        collector.getOpsOfType("set-prop").some((op) =>
+          "key" in op && op.key === "id" && "value" in op &&
+          op.value === "updated"
+        ),
+        true,
+      );
+    },
+  );
+
+  await t.step(
+    "marks the last usable child stale while its Cell is pending",
+    async () => {
+      const collector = createOpsCollector();
+      const childCell = new MockCell(DataUnavailable.pending());
+      const rootCell = new MockCell(
+        {
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [childCell as unknown as WorkerRenderNode],
+        } satisfies WorkerVNode,
+      );
+      const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(
+        collector.getOpsOfType("create-text").length,
+        0,
+        "an initially unavailable child renders no marker text",
+      );
+      collector.clear();
+
+      childCell.set(
+        {
+          type: "vnode",
+          name: "button",
+          props: { id: "ready" },
+          children: ["Ready"],
+        } satisfies WorkerVNode,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const readyChildCreate = collector.getOpsOfType("create-element")
+        .find((op) => "tagName" in op && op.tagName === "button");
+      const readyChildId = readyChildCreate && "nodeId" in readyChildCreate
+        ? readyChildCreate.nodeId
+        : undefined;
+      collector.clear();
+
+      childCell.set(DataUnavailable.pending());
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(
+        collector.getOpsOfType("set-prop").some((op) =>
+          "nodeId" in op && op.nodeId === readyChildId && "key" in op &&
+          op.key === "data-cf-pending" && "value" in op && op.value === true
+        ),
+        true,
+      );
+      assertEquals(collector.getOpsOfType("remove-node").length, 0);
+      collector.clear();
+
+      childCell.set(
+        {
+          type: "vnode",
+          name: "button",
+          props: { id: "updated" },
+          children: ["Updated"],
+        } satisfies WorkerVNode,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(
+        collector.getOpsOfType("remove-prop").some((op) =>
+          "nodeId" in op && op.nodeId === readyChildId && "key" in op &&
+          op.key === "data-cf-pending"
+        ),
+        true,
+      );
+    },
+  );
+
+  await t.step(
+    "clears roots for non-pending unavailable reasons",
+    async () => {
+      const unavailableValues = [
+        DataUnavailable.error(new Error("failed")),
+        DataUnavailable.syncing(),
+        DataUnavailable.schemaMismatch(),
+      ];
+
+      for (const unavailable of unavailableValues) {
+        const collector = createOpsCollector();
+        const rootCell = new MockCell(
+          {
+            type: "vnode",
+            name: "div",
+            props: {},
+            children: ["Ready"],
+          } satisfies WorkerVNode,
+        );
+        const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+
+        reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        const rootCreate = collector.getOpsOfType("create-element")
+          .find((op) => "tagName" in op && op.tagName === "div");
+        const rootId = rootCreate && "nodeId" in rootCreate
+          ? rootCreate.nodeId
+          : undefined;
+        collector.clear();
+
+        rootCell.set(unavailable);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        assertEquals(
+          collector.getOpsOfType("remove-node").some((op) =>
+            "nodeId" in op && op.nodeId === rootId
+          ),
+          true,
+          `expected ${unavailable.reason} to clear the root`,
+        );
+      }
+    },
+  );
+
+  await t.step(
+    "does not restore an errored root during a policy re-evaluation",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+      let reEvaluatePolicy: (() => void) | undefined;
+      const policyWatch = reconciler as unknown as {
+        watchCellMembership: (
+          cell: Cell<unknown>,
+          watched: Set<string>,
+          addCancel: (cancel: () => void) => void,
+          reEvaluate: () => void,
+        ) => void;
+      };
+      policyWatch.watchCellMembership = (
+        _cell,
+        _watched,
+        _addCancel,
+        reEvaluate,
+      ) => {
+        reEvaluatePolicy = reEvaluate;
+      };
+      const rootCell = new MockCell(
+        {
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: ["Ready"],
+        } satisfies WorkerVNode,
+      );
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      rootCell.set(DataUnavailable.error(new Error("failed")));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      reEvaluatePolicy?.();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(
+        collector.getOpsOfType("create-element").length,
+        0,
+        "policy changes must re-evaluate the current error, not stale content",
+      );
+    },
+  );
+
+  await t.step(
+    "does not restore an errored child during a policy re-evaluation",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+      let reEvaluatePolicy: (() => void) | undefined;
+      const policyWatch = reconciler as unknown as {
+        watchCellMembership: (
+          cell: Cell<unknown>,
+          watched: Set<string>,
+          addCancel: (cancel: () => void) => void,
+          reEvaluate: () => void,
+        ) => void;
+      };
+      policyWatch.watchCellMembership = (
+        _cell,
+        _watched,
+        _addCancel,
+        reEvaluate,
+      ) => {
+        reEvaluatePolicy = reEvaluate;
+      };
+      const childCell = new MockCell(
+        {
+          type: "vnode",
+          name: "button",
+          props: {},
+          children: ["Ready"],
+        } satisfies WorkerVNode,
+      );
+
+      reconciler.mount({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [childCell as unknown as WorkerRenderNode],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      childCell.set(DataUnavailable.error(new Error("failed")));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      reEvaluatePolicy?.();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(
+        collector.getOpsOfType("create-element").length,
+        0,
+        "policy changes must re-evaluate the current error, not stale content",
+      );
+    },
+  );
 
   await t.step(
     "updates same-shape slotted header cell VNode children",

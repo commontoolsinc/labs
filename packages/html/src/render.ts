@@ -27,7 +27,12 @@ import {
   styleObjectToCssString,
 } from "./render-utils.ts";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { VDomRenderer } from "./main/renderer.ts";
+import {
+  applyPendingRenderAuthoredAttributeUpdate,
+  setPendingRenderState,
+} from "./pending-render.ts";
 //import { animate } from "./debug-element.ts";
 
 /** Tracks an active rendering for debug inspection. */
@@ -194,15 +199,37 @@ function renderLegacy(
 
   const optionsWithCell = rootCell ? { ...options, rootCell } : options;
 
+  let cancelRendered: Cancel | undefined;
+  let renderedRoot: HTMLElement | null = null;
   const cancelEffect = effect(view as VNode, (value: VNode | undefined) => {
-    if (!value) {
+    if (isDataUnavailable(value)) {
+      if (value.reason === "pending") {
+        setPendingRenderState(renderedRoot, true);
+        return;
+      }
+      setPendingRenderState(renderedRoot, false);
+      cancelRendered?.();
+      cancelRendered = undefined;
+      renderedRoot = null;
       return;
     }
+    setPendingRenderState(renderedRoot, false);
+    cancelRendered?.();
+    cancelRendered = undefined;
+    renderedRoot = null;
+    if (!value) return;
     const visited = new Set<object>();
     if (rootCell) {
       visited.add(rootCell);
     }
-    return renderImpl(parent, value, optionsWithCell, visited);
+    const rendered = renderImplWithRoot(
+      parent,
+      value,
+      optionsWithCell,
+      visited,
+    );
+    renderedRoot = rendered.root;
+    cancelRendered = rendered.cancel;
   });
 
   return () => {
@@ -211,26 +238,37 @@ function renderLegacy(
       activeRenders.delete(parent);
     }
     cancelEffect();
+    cancelRendered?.();
   };
 }
+
+const renderImplWithRoot = (
+  parent: HTMLElement,
+  view: VNode,
+  options: RenderOptions = {},
+  visited: Set<object> = new Set(),
+): { root: HTMLElement | null; cancel: Cancel } => {
+  const [root, cancel] = renderNode(view, options, visited);
+  if (!root) {
+    return { root, cancel };
+  }
+  parent.append(root);
+  //animate(root, "created");
+  return {
+    root,
+    cancel: () => {
+      root.remove();
+      cancel();
+    },
+  };
+};
 
 export const renderImpl = (
   parent: HTMLElement,
   view: VNode,
   options: RenderOptions = {},
   visited: Set<object> = new Set(),
-): Cancel => {
-  const [root, cancel] = renderNode(view, options, visited);
-  if (!root) {
-    return cancel;
-  }
-  parent.append(root);
-  //animate(root, "created");
-  return () => {
-    root.remove();
-    cancel();
-  };
-};
+): Cancel => renderImplWithRoot(parent, view, options, visited).cancel;
 
 export default render;
 
@@ -263,8 +301,23 @@ function renderNode(
 
   if (isCellHandle(node)) {
     const wrapper = doc.createElement("cf-internal-fill-element");
+    let cancelRendered: Cancel | undefined;
     addCancel(
       effect(node as CellHandle<VNode>, (resolvedNode) => {
+        if (isDataUnavailable(resolvedNode)) {
+          if (resolvedNode.reason === "pending") {
+            setPendingRenderState(wrapper, true);
+            return;
+          }
+          setPendingRenderState(wrapper, false);
+          cancelRendered?.();
+          cancelRendered = undefined;
+          wrapper.innerHTML = "";
+          return;
+        }
+        setPendingRenderState(wrapper, false);
+        cancelRendered?.();
+        cancelRendered = undefined;
         wrapper.innerHTML = "";
         if (!resolvedNode) return;
         const [childElement, childCancel] = renderNode(
@@ -276,9 +329,10 @@ function renderNode(
           wrapper.appendChild(childElement);
           //animate(childElement, "created");
         }
-        return childCancel;
+        cancelRendered = childCancel;
       }),
     );
+    addCancel(() => cancelRendered?.());
 
     return [wrapper, cancel];
   }
@@ -406,6 +460,7 @@ const bindChildren = (
 
 class VdomChildNode {
   private cancel: Cancel | undefined;
+  private renderedCancel: Cancel | undefined;
   private _element: ChildNode | null = null;
   private document: Document;
   private options: RenderOptions;
@@ -454,6 +509,25 @@ class VdomChildNode {
   }
 
   onEffect = (childValue: RenderNode): Cancel | undefined => {
+    if (isDataUnavailable(childValue)) {
+      if (childValue.reason === "pending") {
+        // A child must always own a DOM position synchronously. The empty text
+        // node is invisible until the first usable value and remains the stable
+        // placeholder if availability changes before then.
+        this._element ??= this.document.createTextNode("") as ChildNode;
+        setPendingRenderState(this._element, true);
+        return;
+      }
+
+      setPendingRenderState(this._element, false);
+      this.renderedCancel?.();
+      this.renderedCancel = undefined;
+      const placeholder = this.document.createTextNode("") as ChildNode;
+      if (this._element) this._element.replaceWith(placeholder);
+      this._element = placeholder;
+      return;
+    }
+    setPendingRenderState(this._element, false);
     let element;
     let cancel;
     if (isCellHandle(childValue)) {
@@ -488,13 +562,15 @@ class VdomChildNode {
       element = this.document.createTextNode(text) as ChildNode;
     }
 
+    this.renderedCancel?.();
+    this.renderedCancel = undefined;
     if (this._element && element) {
       this._element.replaceWith(element);
     } else if (this._element) {
       this._element.remove();
     }
     this._element = element;
-    return cancel;
+    this.renderedCancel = cancel;
   };
 
   element(): ChildNode {
@@ -511,6 +587,7 @@ class VdomChildNode {
 
   dispose() {
     if (this.cancel) this.cancel();
+    if (this.renderedCancel) this.renderedCancel();
     if (this._element) this._element.remove();
   }
 }
@@ -539,10 +616,17 @@ function bindProps(
   }
 
   for (const [key, value] of Object.entries(props as Props)) {
-    const setProperty = <T>(element: T, key: string, value: unknown) =>
-      key === "style" && value && typeof value === "object"
-        ? setProp(element, key, styleObjectToCssString(value))
-        : setProp(element, key, value);
+    const setProperty = (
+      element: HTMLElement,
+      key: string,
+      value: unknown,
+    ) => {
+      applyPendingRenderAuthoredAttributeUpdate(element, key, () => {
+        key === "style" && value && typeof value === "object"
+          ? setProp(element, key, styleObjectToCssString(value))
+          : setProp(element, key, value);
+      });
+    };
 
     if (!isCellHandle(value)) {
       setProperty(element, key, value);

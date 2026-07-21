@@ -13,6 +13,7 @@ import {
   lift,
   NAME,
   pattern,
+  resultOf,
   UI,
   wish,
   Writable,
@@ -281,6 +282,7 @@ export const OccurrenceTrackerModule = pattern<
 >(({ label, occurrences }) => {
   // Ticking clock for relative-time labels ("3m ago"), refreshes each minute.
   const nowCell = wish<number>({ query: "#now/60" });
+  const nowCellValue = resultOf(nowCell.result);
 
   // Computed: total count
   const totalCount = computed(() => (occurrences.get() || []).length);
@@ -361,11 +363,9 @@ export const OccurrenceTrackerModule = pattern<
                   fontWeight: "500",
                 }}
               >
-                {nowCell.result == null
-                  ? formatAbsoluteTime(last.timestamp)
-                  : `${formatRelativeTime(last.timestamp, nowCell.result)} · ${
-                    formatAbsoluteTime(last.timestamp)
-                  }`}
+                {`${formatRelativeTime(last.timestamp, nowCellValue)} · ${
+                  formatAbsoluteTime(last.timestamp)
+                }`}
               </span>
               {/* Note for last occurrence */}
               <cf-input
@@ -475,11 +475,12 @@ export const OccurrenceTrackerModule = pattern<
                   <cf-vstack gap="0" style={{ flex: "1" }}>
                     <span style={{ fontSize: "0.875rem" }}>
                       {computed(() =>
-                        nowCell.result == null
-                          ? formatHistoryTime(occ.timestamp)
-                          : `${
-                            formatRelativeTime(occ.timestamp, nowCell.result)
-                          } · ${formatHistoryTime(occ.timestamp)}`
+                        `${
+                          formatRelativeTime(
+                            occ.timestamp,
+                            nowCellValue,
+                          )
+                        } · ${formatHistoryTime(occ.timestamp)}`
                       )}
                     </span>
                     <cf-input

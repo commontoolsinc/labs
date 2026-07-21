@@ -4,10 +4,13 @@ import {
   Default,
   generateText,
   handler,
+  hasError,
   ifElse,
+  isPending,
   NAME,
   navigateTo,
   pattern,
+  resultOf,
   UI,
   Writable,
 } from "commonfabric";
@@ -84,16 +87,16 @@ ${template}
 Generate ONLY the TypeScript code, no explanations or markdown.`;
 
   // Step 1: Generate pattern source code from prompt
-  const generated = generateText({
+  const generatedRequest = generateText({
     system: systemPrompt,
     prompt,
     model: "anthropic:claude-sonnet-4-5",
   });
+  const generated = resultOf(generatedRequest);
 
   const processedResult = computed(() => {
-    const result = generated?.result ?? "";
     // Remove wrapping ```typescript``` if it exists
-    return result.replace(/^```typescript\n?/, "").replace(/\n?```$/, "");
+    return generated.replace(/^```typescript\n?/, "").replace(/\n?```$/, "");
   });
 
   // Step 2: Compile the generated code when ready
@@ -104,14 +107,19 @@ Generate ONLY the TypeScript code, no explanations or markdown.`;
     main: processedResult ? "/main.tsx" : "",
   }));
 
-  const compiled = compileAndRun(compileParams);
+  const compileRequest = compileAndRun(compileParams);
+  const compiledPiece = resultOf(compileRequest);
 
   // Compute states
-  const isGenerating = generated.pending;
-  const hasCode = computed(() => !!generated.result);
-  const hasError = computed(() => !!compiled.error);
+  const isGenerating = isPending(generatedRequest);
+  const hasCode = computed(() => !!generated);
+  const isCompiling = computed(() => isPending(compileRequest));
+  const compileFailed = computed(() => hasError(compileRequest));
+  const compileError = computed(() =>
+    hasError(compileRequest) ? compileRequest.error.message : undefined
+  );
   const isReady = computed(() =>
-    !compiled.pending && !!compiled.result && !compiled.error
+    !isPending(compileRequest) && !hasError(compileRequest)
   );
 
   return {
@@ -146,18 +154,22 @@ Generate ONLY the TypeScript code, no explanations or markdown.`;
             isGenerating,
             <span>Generating code...</span>,
             ifElse(
-              hasError,
-              <div style={{ color: "red" }}>
-                <b>Compile error:</b> {compiled.error}
-              </div>,
+              isCompiling,
+              <span>Compiling pattern...</span>,
               ifElse(
-                isReady,
-                <cf-button onClick={visit({ result: compiled.result })}>
-                  Open Generated Pattern
-                </cf-button>,
-                <span style={{ opacity: 0.6 }}>
-                  Enter a prompt to generate a pattern
-                </span>,
+                compileFailed,
+                <div style={{ color: "red" }}>
+                  <b>Compile error:</b> {compileError}
+                </div>,
+                ifElse(
+                  isReady,
+                  <cf-button onClick={visit({ result: compiledPiece })}>
+                    Open Generated Pattern
+                  </cf-button>,
+                  <span style={{ opacity: 0.6 }}>
+                    Enter a prompt to generate a pattern
+                  </span>,
+                ),
               ),
             ),
           )}
@@ -165,7 +177,7 @@ Generate ONLY the TypeScript code, no explanations or markdown.`;
 
         {ifElse(
           isReady,
-          <cf-cell-context $cell={compiled} label="Compiled Result">
+          <cf-cell-context $cell={compiledPiece} label="Compiled Result">
             <div>
               <h3>Generated Pattern</h3>
               <div
@@ -176,7 +188,7 @@ Generate ONLY the TypeScript code, no explanations or markdown.`;
                   backgroundColor: "#fff",
                 }}
               >
-                {compiled.result}
+                {compiledPiece}
               </div>
             </div>
           </cf-cell-context>,
@@ -185,11 +197,11 @@ Generate ONLY the TypeScript code, no explanations or markdown.`;
 
         {ifElse(
           hasCode,
-          <cf-cell-context $cell={generated} label="Generated Code">
+          <cf-cell-context $cell={generatedRequest} label="Generated Code">
             <div>
               <h3>Generated Code</h3>
               <cf-code-editor
-                value={generated.result}
+                value={generated}
                 language="text/x.typescript"
                 readonly
               />
@@ -200,8 +212,8 @@ Generate ONLY the TypeScript code, no explanations or markdown.`;
       </div>
     ),
     prompt,
-    generatedCode: generated.result,
-    compiledPiece: compiled.result,
-    error: compiled.error,
+    generatedCode: generated,
+    compiledPiece,
+    error: compileError,
   };
 });

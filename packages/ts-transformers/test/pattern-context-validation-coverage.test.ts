@@ -14,6 +14,258 @@ function errorsOfType(
   return getErrors(diagnostics).filter((d) => d.type === type);
 }
 
+Deno.test(
+  "wish factories inside computed callbacks are rejected",
+  async () => {
+    const source = `
+      import { computed, pattern, resultOf, wish } from "commonfabric";
+
+      export default pattern(() => {
+        const result = computed(() => {
+          const request = wish<string[]>({ query: "#items" });
+          return resultOf(request.result).length;
+        });
+        return { result };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    assertEquals(
+      errorsOfType(
+        diagnostics,
+        "compute-context:local-reactive-use",
+      ).length,
+      1,
+    );
+  },
+);
+
+Deno.test(
+  "wish factories in standalone helpers remain available for schema injection",
+  async () => {
+    const source = `
+      import { wish } from "commonfabric";
+
+      export function buildWish<T>(query: string) {
+        return wish<T>({ query });
+      }
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    assertEquals(
+      errorsOfType(
+        diagnostics,
+        "compute-context:local-reactive-use",
+      ).length,
+      0,
+    );
+  },
+);
+
+Deno.test(
+  "wish factories cannot be hidden behind runtime callbacks or helpers",
+  async () => {
+    const source = `
+      import {
+        action,
+        computed,
+        handler,
+        pattern,
+        resultOf,
+        type WishState,
+        wish,
+      } from "commonfabric";
+
+      declare function externalWish<T>(query: string): WishState<T>;
+      declare function externalWishUnion<T>(
+        query: string,
+      ): WishState<T> | null;
+
+      function buildRequest(query: string) {
+        return wish<string>({ query }).result;
+      }
+
+      function buildElementRequest(query: string) {
+        return wish<string>({ query })["result"];
+      }
+
+      const invalidHandler = handler<void, {}>(() => {
+        wish<string>({ query: "#handler" });
+      });
+
+      export default pattern(() => {
+        const invalidAction = action(() => {
+          wish<string>({ query: "#action" });
+        });
+        const invalidComputed = computed(() =>
+          resultOf(buildRequest("#computed"))
+        );
+        const invalidElement = computed(() =>
+          resultOf(buildElementRequest("#element"))
+        );
+        const invalidExternal = computed(() =>
+          resultOf(externalWish<string>("#external").result)
+        );
+        const invalidExternalUnion = computed(() =>
+          externalWishUnion<string>("#external-union")
+        );
+        return {
+          invalidAction,
+          invalidComputed,
+          invalidElement,
+          invalidExternal,
+          invalidExternalUnion,
+          invalidHandler,
+        };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    assertEquals(
+      errorsOfType(
+        diagnostics,
+        "compute-context:local-reactive-use",
+      ).length,
+      6,
+    );
+  },
+);
+
+Deno.test(
+  "methods on an existing Wish state do not create another Wish factory",
+  async () => {
+    const source = `
+      import {
+        computed,
+        pattern,
+        type WishState,
+        wish,
+      } from "commonfabric";
+
+      function getFind(request: WishState<string>) {
+        return request.candidates.find;
+      }
+
+      export default pattern(() => {
+        const request = wish<string>({ query: "#note" });
+        const registry = wish<{
+          submitQuery: (input: { query: string }) => void;
+        }>({ query: "#registry" });
+        const submitHandler = registry.result.submitQuery;
+        const match = computed(() =>
+          request.candidates.find((candidate) => candidate === "selected")
+        );
+        const labels = computed(() =>
+          request.candidates.map((candidate) => candidate.toUpperCase())
+        );
+        const helperMatch = computed(() =>
+          getFind(request)((candidate) => candidate === "selected")
+        );
+        const submitted = computed(() =>
+          submitHandler({ query: "#selected" })
+        );
+        return { match, labels, helperMatch, submitted };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    assertEquals(
+      errorsOfType(
+        diagnostics,
+        "compute-context:local-reactive-use",
+      ).length,
+      0,
+    );
+  },
+);
+
+Deno.test(
+  "wish factories returned through callable helpers are rejected",
+  async () => {
+    const source = `
+      import { computed, pattern, wish } from "commonfabric";
+
+      type Callable = (options: { query: string }) => unknown;
+
+      function makeWish(): Callable {
+        return wish as Callable;
+      }
+
+      const factories = { create: wish as Callable };
+      const elementAlias = factories["create"];
+
+      function makePropertyWish(): Callable {
+        return factories.create;
+      }
+
+      function makeElementWish(): Callable {
+        return elementAlias;
+      }
+
+      export default pattern(() => {
+        const invalid = computed(() =>
+          makeWish()({ query: "#hidden" })
+        );
+        const invalidProperty = computed(() =>
+          makePropertyWish()({ query: "#hidden-property" })
+        );
+        const invalidElement = computed(() =>
+          makeElementWish()({ query: "#hidden-element" })
+        );
+        return { invalid, invalidProperty, invalidElement };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    assertEquals(
+      errorsOfType(
+        diagnostics,
+        "compute-context:local-reactive-use",
+      ).length,
+      3,
+    );
+  },
+);
+
+Deno.test(
+  "non-Wish callable shapes and recursive helpers remain allowed",
+  async () => {
+    const source = `
+      import { computed, pattern } from "commonfabric";
+
+      function first(): number {
+        return second();
+      }
+
+      function second(): number {
+        return first();
+      }
+
+      export default pattern(() => {
+        const inline = computed(() => (() => 42)());
+        const unresolved = computed(() => missingCallable());
+        const recursive = computed(() => first());
+        return { inline, unresolved, recursive };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    assertEquals(
+      errorsOfType(
+        diagnostics,
+        "compute-context:local-reactive-use",
+      ).length,
+      0,
+    );
+  },
+);
+
 // validateComputationExpression -> findProblematicAccess: a reactive property
 // access used in a bare statement-position arithmetic computation is at a
 // restricted (non-lowerable) site, so it is rejected with

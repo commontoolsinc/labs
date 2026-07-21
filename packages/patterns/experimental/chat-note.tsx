@@ -1,11 +1,15 @@
 import {
   computed,
   type Default,
-  generateText,
+  generateTextStream,
   handler,
+  hasError,
+  isPending,
   NAME,
   navigateTo,
+  partialResultOf,
   pattern,
+  resultOf,
   SELF,
   Stream,
   UI,
@@ -346,12 +350,14 @@ const ChatNote = pattern<Input, Output>(
     model,
     [SELF]: self,
   }) => {
-    const { allPieces } = wish<{ allPieces: MinimalPiece[] | Default<[]> }>({
+    const defaultWish = wish<{ allPieces: MinimalPiece[] | Default<[]> }>({
       query: "/",
-    }).result!;
-    const mentionable = wish<MentionablePiece[] | Default<[]>>({
+    });
+    const { allPieces } = resultOf(defaultWish.result);
+    const mentionableWish = wish<MentionablePiece[] | Default<[]>>({
       query: "#mentionable",
-    }).result!;
+    });
+    const mentionable = resultOf(mentionableWish.result);
     const mentioned = new Writable<MentionablePiece[]>([]);
     const backlinks = new Writable<MentionablePiece[]>([]);
 
@@ -364,21 +370,23 @@ const ChatNote = pattern<Input, Output>(
     const llmMessages = new Writable<LLMMessage[]>([]);
 
     // LLM call - reactive based on llmMessages
-    const llmResponse = generateText({
+    const llmResponse = generateTextStream({
       system: llmSystem,
       messages: llmMessages,
       model: model,
     });
+    const llmResult = resultOf(llmResponse);
+    const llmPartial = partialResultOf(llmResponse);
 
     // Track content before AI insertion point for streaming display
     const beforeAIInsert = new Writable<string>("");
 
     // Watch for LLM streaming partial updates
     // Side-effect-only reactive computation: tracks its reactive reads
-    // (isGenerating, llmResponse.partial, beforeAIInsert) automatically.
+    // (isGenerating, llmPartial, beforeAIInsert) automatically.
     computed(() => {
       const generating = isGenerating.get();
-      const partial = llmResponse.partial;
+      const partial = llmPartial;
       const prefix = beforeAIInsert.get();
       if (generating && partial && prefix) {
         content.set(prefix + partial);
@@ -389,8 +397,19 @@ const ChatNote = pattern<Input, Output>(
     // Side-effect-only reactive computation; reactive reads tracked automatically.
     computed(() => {
       const generating = isGenerating.get();
-      const pending = llmResponse.pending;
-      const result = llmResponse.result;
+      const pending = isPending(llmResponse);
+      const result = llmResult;
+      // A terminal stream error must release the local generation latch. The
+      // request inputs are cleared as well so a later Generate action creates
+      // a fresh request instead of remaining attached to the failed one.
+      if (hasError(llmResponse)) {
+        if (generating) {
+          isGenerating.set(false);
+          llmMessages.set([]);
+          beforeAIInsert.set("");
+        }
+        return;
+      }
       // When complete, finalize with result and closing separator
       if (!pending && result && generating) {
         const prefix = beforeAIInsert.get();
@@ -419,7 +438,7 @@ const ChatNote = pattern<Input, Output>(
     });
 
     // Generation state display (reactive expression auto-wraps at use sites)
-    const showGenerating = isGenerating.get() && llmResponse.pending;
+    const showGenerating = isGenerating.get() && isPending(llmResponse);
 
     // Can generate when there's content and not already generating
     // Optimized to avoid splitting entire content on every keystroke

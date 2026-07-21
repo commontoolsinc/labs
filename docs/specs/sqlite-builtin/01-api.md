@@ -21,17 +21,21 @@ read).
 > path. A free `sqliteQuery<Row>({ db, sql, ... })` function still exists and is
 > equivalent to `db.query<Row>(sql, ...)`.
 
-The runtime's reactive I/O — `fetchJson`, `generateText`, `streamData` — is
-expressed as built-ins registered in
+The runtime's reactive I/O — `fetchJson`, `generateText`, `streamData`, and
+SQLite queries — is expressed as built-ins registered in
 [`packages/runner/src/builtins/index.ts`](../../../packages/runner/src/builtins/index.ts)
 and surfaced as builder factories in
 [`packages/runner/src/builder/built-in.ts`](../../../packages/runner/src/builder/built-in.ts).
-A reactive read returns a `Reactive<{ pending, result, error }>` and re-runs
-when its inputs change. `db.query` is the same shape and slots into the same
-machinery — read-tracking, scheduler subscription, post-commit effects, request
-hashing — but is invoked as a method on the `SqliteDb` cell rather than as a free
-factory. Writes do **not** use that machinery at all: `db.exec` records a SQLite
-op directly onto the caller's transaction (Section
+A SQLite reactive read returns
+`AsyncResult<{ rows: Row[]; withheld?: number }>` and re-runs when its inputs
+change. Like fetch and generation, ordinary consumers use `resultOf(request)`;
+guards inspect the request itself. The runtime keeps a legacy state object only
+for old compiled graphs while newly compiled queries project the direct value
+channel. `db.query` shares the existing read-tracking, scheduler subscription,
+post-commit effect, and request-hashing machinery. It is invoked as a method on
+the `SqliteDb` cell or through the equivalent free factory. Writes do **not**
+use that machinery at all: `db.exec` records a SQLite op directly onto the
+caller's transaction (Section
 [04](./04-server-execution-and-transactions.md)).
 
 The "database type" the author cares about is expressed two ways:
@@ -80,8 +84,13 @@ export interface ISqliteQueryable {
       params?: ReadonlyArray<unknown> | Record<string, unknown>;
       reactOn?: unknown;
     },
-  ): Reactive<{ pending: boolean; result?: Row[]; error?: any }>;
+  ): AsyncResult<SqliteQueryResult<Row>>;
 }
+
+export type SqliteQueryResult<Row> = {
+  rows: Row[];
+  withheld?: number;
+};
 
 /** A DB handle cell exposing the SQLite method surface (.exec/.query) instead of
  *  the general value-cell mutators. Reads back the handle ref and carries the
@@ -198,7 +207,7 @@ db.query<Row = Record<string, unknown>>(
      *  See Section 05. */
     reactOn?: unknown;
   },
-): Reactive<{ pending: boolean; result?: Row[]; error?: any }>;
+): AsyncResult<SqliteQueryResult<Row>>;
 ```
 
 `db.query` is **read-only**. The server rejects any statement that is not a
@@ -208,6 +217,8 @@ A free function is equivalent:
 
 ```ts
 // Shown at module scope.
+import type { AsyncResult, SqliteQueryResult } from "commonfabric";
+
 export type SqliteQueryParams = {
   db: Opaque<SqliteDatabase | SqliteDb>;
   sql: string;
@@ -216,11 +227,13 @@ export type SqliteQueryParams = {
 };
 export declare const sqliteQuery: <Row = Record<string, unknown>>(
   params: Opaque<SqliteQueryParams>,
-) => Reactive<{ pending: boolean; result?: Row[]; error?: any }>;
+) => AsyncResult<SqliteQueryResult<Row>>;
 ```
 
 `db.query<Row>(sql, opts)` and `sqliteQuery<Row>({ db, sql, ...opts })` lower to
-the same `sqliteQuery` node; choose whichever reads better.
+the same versioned direct-result node; choose whichever reads better. The
+successful `rows` and `withheld` fields are one atomic value, so the audit count
+always describes exactly the accompanying rows.
 
 The **`Row` type argument** carries both the author-facing return type and the
 runtime decode schema. The ts-transformer lowers `<Row>` into an injected

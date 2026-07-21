@@ -94,6 +94,18 @@ round-trip correctly.
 // Tag: "Error@1"
 // { "/Error@1": { type: string, name: string | null, message: string, stack?: string, cause?: ..., ... } }
 
+// Runtime data-unavailability control values
+// Tag: "DataUnavailable@1"
+// { "/DataUnavailable@1": { reason: "pending" } }
+// { "/DataUnavailable@1": { reason: "syncing" } }
+// { "/DataUnavailable@1": { reason: "schema-mismatch" } }
+// { "/DataUnavailable@1": {
+//     reason: "error",
+//     error: { "/Error@1": { type: string, name: string | null,
+//                             message: string, stack?: string,
+//                             cause?: ..., ... } }
+// } }
+
 // Undefined (stateless -- value is null)
 // Tag: "Undefined@1"
 // { "/Undefined@1": null }
@@ -213,6 +225,20 @@ round-trip correctly.
 // conversion gate; see `1-fabric-values.md` Section 4.9. The wire format
 // above is the encoder's contract regardless of how the value arrived.
 ```
+
+`DataUnavailable@1` state is an exact discriminated record. The three
+non-error reasons contain only `reason`; the error variant contains exactly
+`reason` and an `error` which the recursive decode walker has reconstructed as
+a `FabricError`. Extra fields, an unrecognized reason, or a non-`FabricError`
+error payload make a known `DataUnavailable@1` value a `ProblematicValue` under
+the validation rule below. The codec is part of the default registry through
+the `fabric-instances` codec list and uses the canonical
+`CODEC_TYPE_TAGS.DataUnavailable` constant.
+
+The tag version is part of codec identity. A future `DataUnavailable@2` is not
+decoded using these version-1 rules when no version-2 codec is registered; it
+becomes an `UnknownValue` retaining the future tag and state for round-trip
+preservation (Section 8).
 
 > **Deserialization validation.** Deserialization cannot assume type safety from
 > the wire. Each codec must validate the format of its state in `decode()`
@@ -391,6 +417,11 @@ escaping rather than type encoding.
 When a JSON context encounters a `/<Type>@<Version>` key it doesn't recognize,
 it wraps the data in `UnknownValue` (see `1-fabric-values.md` Section 3) to
 preserve it for round-tripping.
+
+Recognition is version-specific. For example, a runtime which registers
+`DataUnavailable@1` but not `DataUnavailable@2` decodes the latter as an
+`UnknownValue`; it does not apply the version-1 discriminator validation to
+the future state.
 
 ## 9. `/`-Key Reservation Rule
 

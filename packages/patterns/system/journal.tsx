@@ -9,6 +9,7 @@ import {
   handler,
   NAME,
   pattern,
+  resultOf,
   toIndentedDebugString,
   UI,
   wish,
@@ -90,20 +91,20 @@ export default pattern<Record<string, never>>((_) => {
   const journalResult = wish<Array<JournalEntry>>({
     query: "#journal",
   });
+  const journal = resultOf(journalResult.result);
 
   // Current time, ticking every 60 seconds so relative-time labels
   // ("just now", "5m ago", ...) refresh as time passes.
   const nowCell = wish<number>({ query: "#now/60" });
+  const nowCellValue = resultOf(nowCell.result);
 
   // Debug: stringify raw result for the debug panel
   const debugRaw = computed(() => {
-    const raw = journalResult.result;
-    return toIndentedDebugString(raw);
+    return toIndentedDebugString(journal);
   });
 
   // Most recent entries first
   const entries = computed(() => {
-    const journal = journalResult.result || [];
     return [...journal].reverse();
   });
 
@@ -124,7 +125,7 @@ export default pattern<Record<string, never>>((_) => {
           <h2 style={{ margin: "0" }}>Activity Journal</h2>
           {entryCount > 0 && (
             <cf-button
-              onClick={clearJournal({ journal: journalResult.result! })}
+              onClick={clearJournal({ journal })}
               variant="secondary"
             >
               Clear Journal
@@ -204,9 +205,10 @@ export default pattern<Record<string, never>>((_) => {
                     color: "#666",
                   }}
                 >
-                  {nowCell.result == null
-                    ? ""
-                    : formatTimestamp(entry.timestamp, nowCell.result)}
+                  {formatTimestamp(
+                    entry.timestamp,
+                    nowCellValue,
+                  )}
                 </span>
               </div>
 

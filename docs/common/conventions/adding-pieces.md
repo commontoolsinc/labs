@@ -17,17 +17,18 @@ The most common case — creating a piece in response to a user interaction:
 
 ```tsx
 // Shown for illustration only.
-import { action, pattern, wish, Stream, UI } from "commonfabric";
+import { action, pattern, resultOf, wish, Stream, UI } from "commonfabric";
 import { MentionablePiece } from "@commonfabric/piece";
 
 // Wish for the addPiece handler at pattern body level
 const defaultApp = wish<{ addPiece: Stream<{ piece: MentionablePiece }> }>({
   query: "#default",
 });
+const { addPiece } = resultOf(defaultApp.result);
 
 const createNote = action(() => {
   const note = Note({ title: "New Note", content: "", noteId: generateId() });
-  defaultApp.result.addPiece.send({ piece: note });
+  addPiece.send({ piece: note });
   return navigateTo(note);
 });
 
@@ -42,7 +43,7 @@ When you need reusable logic that can be bound to different state:
 
 ```tsx
 // Shown for illustration only.
-import { handler, Stream } from "commonfabric";
+import { handler, resultOf, Stream } from "commonfabric";
 import { MentionablePiece } from "@commonfabric/piece";
 
 // Define at module scope
@@ -59,9 +60,10 @@ const createNoteHandler = handler<
 const defaultApp = wish<{ addPiece: Stream<{ piece: MentionablePiece }> }>({
   query: "#default",
 });
+const { addPiece } = resultOf(defaultApp.result);
 
 return {
-  createNote: createNoteHandler({ addPiece: defaultApp.result.addPiece }),
+  createNote: createNoteHandler({ addPiece }),
 };
 ```
 
@@ -73,7 +75,9 @@ return {
 // Shown for illustration only.
 // BAD — direct mutation, no deduplication
 const { allPieces } =
-  wish<{ allPieces: Writable<NotePiece[]> }>({ query: "#default" }).result;
+  resultOf(
+    wish<{ allPieces: Writable<NotePiece[]> }>({ query: "#default" }).result,
+  );
 allPieces.push(newNote);
 ```
 

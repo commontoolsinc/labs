@@ -20,7 +20,10 @@ import {
 import { createCell, isCell } from "./cell.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
-import { type IExtendedStorageTransaction } from "./storage/interface.ts";
+import {
+  type IExtendedStorageTransaction,
+  toThrowable,
+} from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
 import {
@@ -919,6 +922,21 @@ export interface ValidateAndTransformOptions {
   synced?: boolean;
 }
 
+/**
+ * Status-bearing counterpart to {@link validateAndTransform}.
+ *
+ * `undefined` is a valid schema result, so callers which need to distinguish
+ * that value from traversal failure must use this result rather than inspect
+ * the transformed value.
+ */
+export type ValidateAndTransformResult =
+  | { ok: any }
+  | {
+    error: unknown;
+    unavailableReason?: "syncing" | "error";
+    unavailableError?: Error;
+  };
+
 export function validateAndTransform(
   runtime: Runtime,
   tx: IExtendedStorageTransaction | undefined,
@@ -926,6 +944,23 @@ export function validateAndTransform(
   _seen?: Array<[string, any]>,
   options?: ValidateAndTransformOptions,
 ): any {
+  const result = validateAndTransformResult(
+    runtime,
+    tx,
+    sourceRef,
+    _seen,
+    options,
+  );
+  return "ok" in result ? result.ok : undefined;
+}
+
+export function validateAndTransformResult(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction | undefined,
+  sourceRef: NormalizedFullLink | CellViewRef,
+  _seen?: Array<[string, any]>,
+  options?: ValidateAndTransformOptions,
+): ValidateAndTransformResult {
   // If the transaction is no longer open, read through the runtime's ambient
   // read path instead. Open transactions still take precedence so reads can see
   // their own uncommitted state.
@@ -945,16 +980,18 @@ export function validateAndTransform(
   // the pointed-to value.
   const asCellValues = ContextualFlowControl.getAsCellValues(resolvedSchema);
   if (ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "opaque") {
-    return new TransformObjectCreator(
-      runtime,
-      tx!,
-      options?.synced ?? false,
-      link,
-      cfcLabelView,
-    ).createObject(
-      { ...link, schema: resolvedSchema },
-      undefined,
-    );
+    return {
+      ok: new TransformObjectCreator(
+        runtime,
+        tx!,
+        options?.synced ?? false,
+        link,
+        cfcLabelView,
+      ).createObject(
+        { ...link, schema: resolvedSchema },
+        undefined,
+      ),
+    };
   }
 
   // Follow aliases, etc. to last element on path + just aliases on that last one
@@ -1005,12 +1042,15 @@ export function validateAndTransform(
     ) &&
     filteredSchema === undefined
   ) {
-    return createQueryResultProxy(runtime, tx, link, 0, false, cfcLabelView);
+    return {
+      ok: createQueryResultProxy(runtime, tx, link, 0, false, cfcLabelView),
+    };
   }
 
   // Now resolve further links until we get the actual value.
   // We'll use this for the value, and potentially merge the schema
   // This gets me the result of following all the links, so I can get the value
+  const valueResolutionSource = link;
   const valueTraceStart = tx.getCfcState().dereferenceTraces.length;
   const resolvedValueLink = resolveLink(runtime, tx, link);
   cfcLabelView = mergeCfcLabelViews([
@@ -1058,7 +1098,7 @@ export function validateAndTransform(
         : effectiveSchema!;
     }
     objectCreator.setBase(link, cfcLabelView);
-    return objectCreator.createObject(link, undefined);
+    return { ok: objectCreator.createObject(link, undefined) };
   }
 
   // Link paths don't include value, but doc address should
@@ -1067,9 +1107,46 @@ export function validateAndTransform(
   );
   // Get the full value without telling the scheduler. The traverse method will
   // notify the scheduler for shallow reads as they occur.
-  const value = tx.readOrThrow(address, {
+  const valueRead = tx.read(address, {
     meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
   });
+  if (
+    valueRead.error?.name === "NotFoundError" &&
+    valueRead.error.path.length === 0 &&
+    (
+      resolvedValueLink.space !== valueResolutionSource.space ||
+      resolvedValueLink.id !== valueResolutionSource.id ||
+      resolvedValueLink.scope !== valueResolutionSource.scope ||
+      resolvedValueLink.path.length !== valueResolutionSource.path.length ||
+      resolvedValueLink.path.some(
+        (part, index) => part !== valueResolutionSource.path[index],
+      )
+    )
+  ) {
+    const loadStatus = runtime.ensureLinkedDocLoaded(resolvedValueLink);
+    // A followed link can target replica coverage that is not established yet
+    // even within the same space after a dynamic retarget. Once the selector
+    // sync settles, an absent target falls through as a schema mismatch.
+    if (loadStatus === "pending") {
+      return { error: valueRead.error, unavailableReason: "syncing" };
+    }
+    if (loadStatus === "error") {
+      return {
+        error: valueRead.error,
+        unavailableReason: "error",
+        unavailableError: runtime.linkedDocLoadError(resolvedValueLink) ??
+          new Error("Linked document synchronization failed"),
+      };
+    }
+  }
+  if (
+    valueRead.error !== undefined &&
+    valueRead.error.name !== "NotFoundError" &&
+    valueRead.error.name !== "TypeMismatchError"
+  ) {
+    throw toThrowable(valueRead.error);
+  }
+  const value = valueRead.ok?.value;
   const doc = { address, value: value };
   const valueSelectedSchema = isRecord(effectiveSchema)
     ? asCellCompoundSchemaForValue(effectiveSchema, value)
@@ -1081,6 +1158,10 @@ export function validateAndTransform(
   };
   // TODO(@ubik2): these constructor parameters are complex enough that we should
   // use an options struct
+  let linkedDocUnavailable:
+    | { unavailableReason: "syncing" }
+    | { unavailableReason: "error"; unavailableError: Error }
+    | undefined;
   const traverser = new SchemaObjectTraverser<any>(
     tx!,
     selector,
@@ -1088,19 +1169,29 @@ export function validateAndTransform(
       options?.traverseCells ?? false,
       undefined,
       undefined,
-      // Absent link targets get an async load kicked (cross-space always;
-      // same-space only when the replica has never seen the doc); the
-      // tracked read re-runs the reader on arrival.
-      (missing, sourceSpace) =>
-        runtime.ensureLinkedDocLoaded(missing, sourceSpace),
+      // Absent linked targets establish selector coverage asynchronously.
+      (missing, sourceSpace) => {
+        const loadStatus = runtime.ensureLinkedDocLoaded(missing, sourceSpace);
+        if (loadStatus === "error") {
+          linkedDocUnavailable = {
+            unavailableReason: "error",
+            unavailableError: runtime.linkedDocLoadError(missing) ??
+              new Error("Linked document synchronization failed"),
+          };
+        } else if (
+          loadStatus === "pending" &&
+          linkedDocUnavailable?.unavailableReason !== "error"
+        ) {
+          linkedDocUnavailable = { unavailableReason: "syncing" };
+        }
+      },
     ),
     objectCreator,
   );
-  const { ok: val, error: _err } = traverser.traverse(doc, link);
-  // TODO(@ubik2): Now that undefined is a valid return value from traverse,
-  // we need some other way to indicate success to our caller. For now, I'm
-  // still just returning undefined in the error case.
-  return val;
+  const result = traverser.traverse(doc, link);
+  return "error" in result && linkedDocUnavailable !== undefined
+    ? { ...result, ...linkedDocUnavailable }
+    : result;
 }
 
 /**

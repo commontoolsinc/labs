@@ -1,4 +1,3 @@
-import { LRUCache } from "@commonfabric/utils/cache";
 import {
   type VNode,
   type WishParams,
@@ -20,12 +19,13 @@ import {
   type Pattern,
   UI,
 } from "../builder/types.ts";
-import {
-  deepFrozenCloneAndInternSchema,
-  hashSchema,
-  internSchema,
-} from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import {
+  DataUnavailable,
+  type DataUnavailableVariant,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
 import { extractHashtags } from "@commonfabric/utils/hashtags";
 import { getPatternEnvironment } from "../env.ts";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -37,6 +37,8 @@ import {
 import { setRunnableName } from "../runner-utils.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import { scopedCell } from "./scope-policy.ts";
+import { wishStateSchemaForResult } from "./wish-schema.ts";
+import { selectUnavailableInput } from "../data-unavailability.ts";
 
 const wishFlowLogger = getLogger("runner.wish-flow", {
   enabled: true,
@@ -254,10 +256,15 @@ type BaseResolution = {
 };
 
 type SharedHashtagState = {
-  result?: Cell<unknown>;
+  result: Cell<unknown> | DataUnavailableVariant;
   candidates: Cell<unknown>[];
   error?: unknown;
   [UI]?: VNode;
+};
+
+type PersistedWishState<T> = WishState<T> & {
+  /** Compatibility field for graphs compiled before result became async. */
+  error?: unknown;
 };
 
 type SharedHashtagResolver = {
@@ -1375,8 +1382,15 @@ function createSharedHashtagResolver(
         scope: sharedScope,
       });
       if (baseResolutions.length === 0) {
+        const pending = DataUnavailable.pending();
         stateCell.set({
-          result: undefined,
+          result: dataUnavailableWishCell(
+            ctx.runtime,
+            ctx.parentCell.space,
+            { kind: "shared-hashtag", query },
+            pending,
+            tx,
+          ),
           candidates: [],
           [UI]: undefined,
         });
@@ -1420,8 +1434,15 @@ function createSharedHashtagResolver(
       const errorMessage = error instanceof Error
         ? error.message
         : String(error);
+      const unavailable = DataUnavailable.error(new Error(errorMessage));
       stateCell.set({
-        result: undefined,
+        result: dataUnavailableWishCell(
+          ctx.runtime,
+          ctx.parentCell.space,
+          { kind: "shared-hashtag", query },
+          unavailable,
+          tx,
+        ),
         candidates: [],
         error: errorMessage,
         [UI]: errorUI(errorMessage),
@@ -1624,6 +1645,38 @@ function projectWishCellValue(
   return cell.asSchema(schema as JSONSchema).getAsLink({ includeSchema: true });
 }
 
+/**
+ * Adapt the legacy suggestion sidecar's optional result to Wish availability.
+ * Keep available values as cells so the outer Wish retains the same live link.
+ */
+export function projectSuggestionPatternResult(
+  resultCell: Cell<unknown>,
+): Cell<unknown> | DataUnavailableVariant {
+  const resolved = resultCell.resolveAsCell();
+  return resolved.getRaw() === undefined ? DataUnavailable.pending() : resolved;
+}
+
+function dataUnavailableWishCell(
+  runtime: Runtime,
+  space: Cell<unknown>["space"],
+  cause: unknown,
+  marker: DataUnavailableVariant,
+  tx: IExtendedStorageTransaction,
+  scope?: CellScope,
+): Cell<unknown> {
+  const base = runtime.getCell(
+    space,
+    { wish: { unavailable: cause } },
+    undefined,
+    tx,
+  );
+  const target = scope === undefined
+    ? base
+    : scopedCell(runtime, tx, base, scope);
+  target.setRaw(marker);
+  return target;
+}
+
 function createWishCandidatesCell(
   runtime: Runtime,
   space: Cell<unknown>["space"],
@@ -1635,62 +1688,6 @@ function createWishCandidatesCell(
     ? candidates
     : candidates.map((candidate) => projectWishCellValue(candidate, schema));
   return runtime.getImmutableCell(space, values, undefined, tx);
-}
-
-// asCell-wrapped schemas keyed by content hash. `hashSchema()` is one
-// unavoidable walk (through the query-result proxy when the input is one) and
-// is the cache key: it is `FabricValue`-aware, so schemas that differ only in
-// non-JSON `FabricValue` content (e.g. a `FabricBytes` default) get distinct
-// keys — a `JSON.stringify()` key would collide them. The clone-and-intern
-// repeats for the same content on every wish send, so cache it.
-const schemaAsCellCache = new LRUCache<string, JSONSchema>({ capacity: 256 });
-
-function schemaAsCell(schema: unknown): JSONSchema {
-  if (schema && typeof schema === "object") {
-    const key = hashSchema(schema as JSONSchema);
-    let result = schemaAsCellCache.get(key);
-    if (result === undefined) {
-      // `schema` may be a query-result proxy, so deep-frozen-clone rather than
-      // freeze in place; the clone de-proxies and preserves `FabricValue`
-      // leaves that a JSON round-trip would mangle.
-      result = deepFrozenCloneAndInternSchema({
-        ...(schema as Record<string, unknown>),
-        asCell: ["cell"],
-      });
-      schemaAsCellCache.put(key, result);
-    }
-    return result;
-  }
-  return { asCell: ["cell"] };
-}
-
-function wishStateSchemaForResult(schema: unknown): JSONSchema | undefined {
-  if (schema === undefined) return undefined;
-  // schemaAsCell JSON-round-trips its input, and `schema` is typically a
-  // query-result proxy where every property access during stringify pays the
-  // full cell-read machinery (~7ms for a large search schema in profiles).
-  // Materialize once and share the instance for both slots — internSchema
-  // canonicalizes the wrapper, so the duplicate reference is fine.
-  const resultSchema = schemaAsCell(schema);
-  const candidateSchema = resultSchema;
-  return internSchema({
-    type: "object",
-    properties: {
-      result: {
-        anyOf: [
-          { type: "undefined" },
-          resultSchema,
-        ],
-      },
-      candidates: {
-        type: "array",
-        items: candidateSchema,
-      },
-      error: true,
-      [UI]: true,
-    },
-    required: ["result", "candidates"],
-  });
 }
 
 function explicitWishSchemaScope(schema: unknown): CellScope | undefined {
@@ -1855,6 +1852,25 @@ export function wish(
     outputScope: CellScope,
     schema: unknown,
   ): void {
+    if (
+      value !== null && typeof value === "object" && "result" in value &&
+      isDataUnavailable((value as { result?: unknown }).result)
+    ) {
+      value = {
+        ...value,
+        // Keep successful and unavailable results behind the same link shape.
+        // The linked root stores the FabricInstance raw, so availability is
+        // selected before the authored result schema is applied.
+        result: dataUnavailableWishCell(
+          runtime,
+          parentCell.space,
+          cause,
+          (value as { result: DataUnavailableVariant }).result,
+          tx,
+          outputScope,
+        ),
+      };
+    }
     const baseCell = runtime.getCell(
       parentCell.space,
       { wish: { state: cause } },
@@ -1931,6 +1947,29 @@ export function wish(
     }
 
     return suggestionPatternResultCell;
+  }
+
+  function sendSuggestionPatternState(
+    tx: IExtendedStorageTransaction,
+    input: {
+      situation: string;
+      context: Record<string, any>;
+      initialResults?: unknown;
+    },
+    outputScope: CellScope,
+    schema: unknown,
+  ): void {
+    const state = launchSuggestionPattern(input, tx).withTx(tx);
+    sendWishState(
+      tx,
+      {
+        result: projectSuggestionPatternResult(state.key("result")),
+        candidates: state.key("candidates"),
+        [UI]: state.key(UI),
+      },
+      outputScope,
+      schema,
+    );
   }
 
   // Renders an error message into a pattern result cell in its own committed
@@ -2191,11 +2230,35 @@ export function wish(
 
     try {
       tx.resetNarrowestReadScope();
+      const inputsWithTx = inputsCell.withTx(tx);
+      const rawTarget = inputsWithTx.getRaw();
+      const unavailableInput = selectUnavailableInput(rawTarget, {
+        runtime,
+        tx,
+        base: inputsCell,
+      });
+      if (unavailableInput !== undefined) {
+        const schema = rawTarget !== null &&
+            typeof rawTarget === "object" &&
+            !Array.isArray(rawTarget)
+          ? (rawTarget as { schema?: unknown }).schema
+          : undefined;
+        sendWishState(
+          tx,
+          {
+            result: unavailableInput,
+            candidates: [],
+            [UI]: undefined,
+          } satisfies WishState<any>,
+          wishOutputScope(schema, tx.getNarrowestReadScope(), false),
+          schema,
+        );
+        return;
+      }
       const targetValue = measureWishPhase(
         "input-get",
         undefined,
         () => {
-          const inputsWithTx = inputsCell.withTx(tx);
           return inputsWithTx.asSchema(TARGET_SCHEMA).get();
         },
       );
@@ -2224,11 +2287,11 @@ export function wish(
               sendWishState(
                 tx,
                 {
-                  result: undefined,
+                  result: DataUnavailable.error(new Error(errorMsg)),
                   candidates: [],
                   error: errorMsg,
                   [UI]: errorUI(errorMsg),
-                } satisfies WishState<any>,
+                } satisfies PersistedWishState<any>,
                 outputScope,
                 schema,
               ),
@@ -2313,7 +2376,7 @@ export function wish(
                   sendWishState(
                     tx,
                     {
-                      result: undefined,
+                      result: DataUnavailable.pending(),
                       candidates: [],
                       [UI]: undefined,
                     } satisfies WishState<any>,
@@ -2453,16 +2516,15 @@ export function wish(
                   "send-suggestion",
                   queryKey,
                   () =>
-                    sendResult(
+                    sendSuggestionPatternState(
                       tx,
-                      launchSuggestionPattern(
-                        {
-                          situation: query,
-                          context: context ?? {},
-                          initialResults: candidatesCell,
-                        },
-                        tx,
-                      ),
+                      {
+                        situation: query,
+                        context: context ?? {},
+                        initialResults: candidatesCell,
+                      },
+                      outputScope,
+                      schema,
                     ),
                 );
               } else {
@@ -2517,11 +2579,11 @@ export function wish(
                 sendWishState(
                   tx,
                   {
-                    result: undefined,
+                    result: DataUnavailable.error(new Error(errorMsg)),
                     candidates: [],
                     error: errorMsg,
                     [UI]: ui,
-                  } satisfies WishState<any>,
+                  } satisfies PersistedWishState<any>,
                   wishOutputScope(
                     schema,
                     inputScope,
@@ -2540,7 +2602,7 @@ export function wish(
               sendWishState(
                 tx,
                 {
-                  result: undefined,
+                  result: DataUnavailable.pending(),
                   candidates: [],
                   [UI]: undefined,
                 } satisfies WishState<any>,
@@ -2554,12 +2616,15 @@ export function wish(
             "send-suggestion",
             queryKey,
             () =>
-              sendResult(
+              sendSuggestionPatternState(
                 tx,
-                launchSuggestionPattern(
-                  { situation: query, context: context ?? {} },
-                  tx,
+                { situation: query, context: context ?? {} },
+                wishOutputScope(
+                  schema,
+                  tx.getNarrowestReadScope(),
+                  false,
                 ),
+                schema,
               ),
           );
         }
@@ -2576,11 +2641,11 @@ export function wish(
             sendWishState(
               tx,
               {
-                result: undefined,
+                result: DataUnavailable.error(new Error(errorMsg)),
                 candidates: [],
                 error: errorMsg,
                 [UI]: errorUI(errorMsg),
-              } satisfies WishState<any>,
+              } satisfies PersistedWishState<any>,
               inputScope,
               undefined,
             ),

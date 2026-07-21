@@ -30,26 +30,36 @@ import type {
   FetchProgramFunction,
   FetchTextFunction,
   GenerateObjectFunction,
+  GenerateObjectStreamFunction,
   GenerateTextFunction,
+  GenerateTextStreamFunction,
   GetEntityIdFunction,
   GetPatternEnvironmentFunction,
   HandlerFunction,
+  HasErrorFunction,
+  HasSchemaMismatchFunction,
   HFunction,
   ID as IDSymbol,
   ID_FIELD as IDFieldSymbol,
   IfElseFunction,
   InspectConfLabelFunction,
+  IsPendingFunction,
+  IsSyncingFunction,
   JSONSchema,
   JSONValue,
   JSXElement,
+  LatestCompleteFunction,
   LiftFunction,
   LLMDialogFunction,
   LLMFunction,
   Module,
   NavigateToFunction,
+  ObserveAvailabilityFunction,
+  PartialResultOfFunction,
   Pattern,
   PatternToolFunction,
   Reactive,
+  ResultOfFunction,
   schema as schemaFunction,
   SELF as SELFSymbol,
   SqliteCfLinkFunction,
@@ -164,6 +174,8 @@ export type {
   UiActionProps,
   UiDisclosureProps,
   UiPromptSlotProps,
+  UnavailableInputPolicy,
+  UnavailableInputPolicyEntry,
   UnwrapCell,
   VNode,
 } from "@commonfabric/api";
@@ -197,7 +209,14 @@ export function isStreamValue(value: unknown): value is StreamValue {
 
 declare module "@commonfabric/api" {
   export interface Module {
-    type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
+    type:
+      | "ref"
+      | "javascript"
+      | "javascript-availability"
+      | "pattern"
+      | "raw"
+      | "isolated"
+      | "passthrough";
     implementation?: ((...args: any[]) => any) | Pattern | string;
     /**
      * Content-addressed reference to the module-scope builder artifact whose
@@ -364,6 +383,16 @@ export interface BuilderFunctionsAndConstants {
   // meant to be called from authored code.
   assertCapture: AssertCaptureFunction;
 
+  // Availability observation
+  isPending: IsPendingFunction;
+  hasError: HasErrorFunction;
+  isSyncing: IsSyncingFunction;
+  hasSchemaMismatch: HasSchemaMismatchFunction;
+  observeAvailability: ObserveAvailabilityFunction;
+  resultOf: ResultOfFunction;
+  partialResultOf: PartialResultOfFunction;
+  latestComplete: LatestCompleteFunction;
+
   // Built-in modules
   str: StrFunction;
   ifElse: IfElseFunction;
@@ -373,7 +402,9 @@ export interface BuilderFunctionsAndConstants {
   llm: LLMFunction;
   llmDialog: LLMDialogFunction;
   generateObject: GenerateObjectFunction;
+  generateObjectStream: GenerateObjectStreamFunction;
   generateText: GenerateTextFunction;
+  generateTextStream: GenerateTextStreamFunction;
   fetchBinary: FetchBinaryFunction;
   fetchText: FetchTextFunction;
   fetchJson: FetchJsonFunction;

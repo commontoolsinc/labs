@@ -48,6 +48,68 @@ type ResolvedScopeWrapper = {
   readonly node: ts.TypeReferenceNode;
 };
 
+const AVAILABILITY_TYPE_NAMES = new Set([
+  "DataUnavailable",
+  "IsPending",
+  "HasError",
+  "IsSyncing",
+  "HasSchemaMismatch",
+]);
+
+function isSyntheticAvailabilityTypeReference(
+  node: ts.TypeNode | undefined,
+): boolean {
+  return !!node && ts.isTypeReferenceNode(node) &&
+    ts.isQualifiedName(node.typeName) &&
+    ts.isIdentifier(node.typeName.left) &&
+    node.typeName.left.text === "__cfHelpers" &&
+    AVAILABILITY_TYPE_NAMES.has(node.typeName.right.text);
+}
+
+function isCommonFabricDeclaration(declaration: ts.Declaration): boolean {
+  const normalized = declaration.getSourceFile().fileName.replace(/\\/g, "/");
+  if (
+    normalized === "commonfabric.d.ts" ||
+    normalized.endsWith("/commonfabric.d.ts") ||
+    normalized.endsWith("/packages/api/index.ts") ||
+    normalized.includes("/@commonfabric/api/")
+  ) {
+    return true;
+  }
+
+  let current: ts.Node | undefined = declaration;
+  while (current) {
+    if (
+      ts.isModuleDeclaration(current) &&
+      ts.isStringLiteral(current.name) &&
+      (current.name.text === "commonfabric" ||
+        current.name.text.startsWith("@commonfabric/"))
+    ) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+function isCommonFabricAvailabilitySymbol(
+  symbol: ts.Symbol | undefined,
+): boolean {
+  return !!symbol && AVAILABILITY_TYPE_NAMES.has(symbol.name) &&
+    (symbol.getDeclarations() ?? []).some(isCommonFabricDeclaration);
+}
+
+export function isCommonFabricAvailabilityType(
+  type: ts.Type,
+  typeNode: ts.TypeNode | undefined,
+): boolean {
+  return isSyntheticAvailabilityTypeReference(typeNode) ||
+    isCommonFabricAvailabilitySymbol(
+      (type as TypeWithInternals).aliasSymbol,
+    ) ||
+    isCommonFabricAvailabilitySymbol(type.getSymbol());
+}
+
 const scopeForWrapperName = (
   name: string | undefined,
 ): SchemaScope | undefined =>
@@ -123,6 +185,10 @@ export class CommonFabricFormatter implements TypeFormatter {
   }
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
+    if (isCommonFabricAvailabilityType(type, context.typeNode)) {
+      return true;
+    }
+
     const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
     if (scopeForWrapperName(aliasName) !== undefined) {
       return true;
@@ -181,6 +247,16 @@ export class CommonFabricFormatter implements TypeFormatter {
     type: ts.Type,
     context: GenerationContext,
   ): JSONSchemaMutable {
+    // DataUnavailable is a branded FabricInstance control value. JSON Schema
+    // cannot authenticate that brand, and generic structural formatting of
+    // the public intersection aliases (`HasError`, etc.) reaches the empty
+    // FabricInstance surface and collapses to `true`. Preserve a non-absorbing
+    // object arm; runner preflight performs the authoritative class/reason and
+    // exact-path policy check before ordinary schema materialization.
+    if (isCommonFabricAvailabilityType(type, context.typeNode)) {
+      return { type: "object" };
+    }
+
     const n = context.typeNode;
     const resolvedScopeWrapper = resolveScopeWrapperNode(n);
     if (resolvedScopeWrapper) {

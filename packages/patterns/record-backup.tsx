@@ -20,6 +20,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  resultOf,
   UI,
   wish,
   Writable,
@@ -617,15 +618,20 @@ const handleFileUpload = handler<
 
 export default pattern<Input, Output>(({ importJson }) => {
   // Get all pieces in the space
-  const { allPieces } = wish<{ allPieces: RecordPiece[] }>({
+  const defaultWish = wish<{ allPieces: RecordPiece[] }>({
     query: "#default",
-  }).result!;
+  });
+  const { allPieces } = resultOf(defaultWish.result);
 
   // Current time, sourced from the reactive #now cell (coarsened to 1s).
   const nowCell = wish<number>({ query: "#now" });
+  const nowCellValue = resultOf(nowCell.result);
 
   // Build export data
-  const exportData = buildExportData({ allPieces, now: nowCell.result });
+  const exportData = buildExportData({
+    allPieces,
+    now: nowCellValue,
+  });
   const exportedJson = formatExportJson({ exportData });
   const recordCount = countRecords({ exportData });
 
@@ -681,9 +687,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                   $data={exportedJson}
                   filename={computed(() =>
                     `record-backup-${
-                      nowCell.result == null
-                        ? ""
-                        : new Date(nowCell.result).toISOString().slice(0, 10)
+                      new Date(nowCellValue).toISOString().slice(0, 10)
                     }.json`
                   )}
                   mimeType="application/json"

@@ -27,11 +27,18 @@ import {
   computed,
   Default,
   generateObject,
+  generateObjectStream,
   handler,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   type JSONSchema,
   NAME,
   navigateTo,
+  observeAvailability,
   pattern,
+  resultOf,
   Stream,
   toIndentedDebugString,
   UI,
@@ -136,6 +143,16 @@ export interface PendingSubmission {
   userApproved: boolean; // Has user approved submission
   submittedAt?: number; // When submitted (if submitted)
 }
+
+type PiiScreeningResult = {
+  hasPII: boolean;
+  piiFound: string[];
+  isGeneralizable: boolean;
+  generalizabilityIssues: string[];
+  sanitizedQuery: string;
+  confidence: number;
+  recommendation: "share" | "share_with_edits" | "do_not_share";
+};
 
 // ============================================================================
 // INPUT/OUTPUT TYPES
@@ -1166,12 +1183,12 @@ const GmailAgenticSearch = pattern<
     // Ticks every 60 seconds so the expiry warning re-evaluates as the clock
     // advances toward the token's expiresAt timestamp.
     const nowCell = wish<number>({ query: "#now/60" });
+    const nowCellValue = resultOf(nowCell.result);
 
     // Check if token may be expired based on expiresAt timestamp
     const tokenMayBeExpired = computed(() => {
       if (!authValue?.expiresAt) return false;
-      const nowMs = nowCell.result;
-      if (nowMs == null) return false;
+      const nowMs = nowCellValue;
       // Add 5 minute buffer - if within 5 min of expiry, consider it potentially expired
       const bufferMs = 5 * 60 * 1000;
       return nowMs > (authValue.expiresAt - bufferMs);
@@ -1385,7 +1402,7 @@ When you're done searching, STOP calling tools and produce your final structured
     });
 
     // Create the agent
-    const agent = generateObject({
+    const agentRequest = generateObjectStream<Record<string, any>>({
       system: fullSystemPrompt,
       prompt: agentPrompt,
       tools: allTools,
@@ -1409,11 +1426,22 @@ When you're done searching, STOP calling tools and produce your final structured
         };
       }),
     });
-
-    const { result: agentResult, pending: agentPending } = agent;
-
-    // Detect when agent completes
-    const scanCompleted = isScanning && !agentPending && !!agentResult;
+    const agentResult = resultOf(agentRequest);
+    // This presenter must emit stable booleans and UI before a scan starts, so
+    // it explicitly observes every request state instead of waiting for T.
+    const observedAgentRequest = observeAvailability(agentRequest);
+    const agentAvailability = computed(() => {
+      const pending = isPending(observedAgentRequest) ||
+        isSyncing(observedAgentRequest);
+      const failed = hasError(observedAgentRequest) ||
+        hasSchemaMismatch(observedAgentRequest);
+      return {
+        pending: isScanning && pending,
+        completed: isScanning && !pending && !failed,
+      };
+    });
+    const agentPending = agentAvailability.pending;
+    const scanCompleted = agentAvailability.completed;
 
     // Detect auth errors from agent result or token validation
     const hasAuthError = computed(() => {
@@ -2319,13 +2347,11 @@ Return a sanitized version that:
     });
 
     // Only run PII screening when there's a prompt
-    const piiScreeningResult = computed(() => {
-      if (!piiScreeningPrompt) return null;
-      return generateObject({
-        prompt: piiScreeningPrompt,
-        schema: piiScreeningSchema,
-        system:
-          `You are a privacy analyst and query curator for a community knowledge base.
+    const piiScreeningRequest = generateObject<PiiScreeningResult>({
+      prompt: piiScreeningPrompt as any,
+      schema: piiScreeningSchema,
+      system:
+        `You are a privacy analyst and query curator for a community knowledge base.
 
 Your job is to evaluate Gmail search queries for:
 1. PRIVACY: Detect and remove/sanitize PII (emails, names, specific identifiers)
@@ -2336,24 +2362,13 @@ Major hotel chains, airlines, common retailers, and widespread services are good
 Personal domains, local businesses, and hyper-specific searches should not be shared.
 
 Be conservative: when in doubt, recommend "do_not_share".`,
-      });
     });
+    const piiScreeningResult = resultOf(piiScreeningRequest);
 
     // Update pending submissions with screening results
     // This is a side effect that runs when screening completes
     computed(() => {
-      const result = piiScreeningResult as any;
-      if (!result || !result.result) return;
-
-      const screeningData = result.result as {
-        hasPII: boolean;
-        piiFound: string[];
-        isGeneralizable: boolean;
-        generalizabilityIssues: string[];
-        sanitizedQuery: string;
-        confidence: number;
-        recommendation: "share" | "share_with_edits" | "do_not_share";
-      };
+      const screeningData = piiScreeningResult;
 
       const pendingWritable: Writable<PendingSubmission[]> = pendingSubmissions;
       const submissions = (pendingWritable.get() || []).filter((

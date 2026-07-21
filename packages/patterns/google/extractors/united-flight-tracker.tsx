@@ -23,6 +23,7 @@ import {
   NAME,
   pattern,
   type PatternFactory,
+  resultOf,
   TILE_UI,
   toIndentedDebugString,
   UI,
@@ -550,6 +551,7 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
   // Reactive clock. Ticks every 60 seconds so day-based countdowns and the
   // 24-hour check-in window refresh over time.
   const nowCell = wish<number>({ query: "#now/60" });
+  const nowCellValue = resultOf(nowCell.result);
 
   // ==========================================================================
   // FLIGHT TRACKING - DEDUPLICATION AND MERGING
@@ -559,10 +561,8 @@ export default pattern<Input, Output>(({ overrideAuth }) => {
     const flightMap: Record<string, TrackedFlight> = {};
 
     // Wait for the clock before computing time-relative flight state.
-    if (nowCell.result == null) return [];
-
     // Create reference dates for calculations
-    const now = new Date(nowCell.result); // Current time for hour-based calculations
+    const now = new Date(nowCellValue); // Current time for hour-based calculations
     const today = new Date(now);
     today.setHours(0, 0, 0, 0); // Midnight for day-based calculations
 

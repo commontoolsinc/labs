@@ -168,6 +168,32 @@ const clearAll = handler<void, { items: Writable<Item[]> }>(
 clearAll({ items }).send();
 ```
 
+## Unavailable Bound Inputs
+
+A handler bound to plain reactive values waits when a captured input is
+temporarily unavailable. For `pending` and `syncing`, the original event stays
+at the head of the global FIFO queue; the handler body, event receipt, and
+`onCommit` callback do not run. When a captured dependency changes, the same
+event is checked again and dispatches once its inputs are usable.
+
+Terminal `error` and `schema-mismatch` inputs do not park the queue: they pass
+through ordinary argument validation, suppress the handler as an invalid
+invocation, and settle that event as a no-op. A malformed event payload follows
+the same settle-and-continue rule because queued immutable data cannot become
+valid later.
+
+An input-parked queue is considered scheduler-quiescent, so `runtime.idle()`
+can resolve while the handler waits. This is required for fetch and generation
+producers which await idle before publishing the value that wakes the event.
+When event-preflight telemetry is enabled, a parked preflight marker includes
+the unavailable reason and current queue depth.
+
+Binding a `Writable<T>` or other Cell capability is intentionally different.
+The handle itself is a usable capability, so the scheduler does not gate the
+handler on the pointed-to value. Read it in the handler with `.get()` and allow
+for its current value to be unavailable if the handler's contract needs that
+state. Bind a plain `T` when dispatch itself must wait for usable data.
+
 ## CLI Testing
 
 Export handlers to test them via CLI during development:

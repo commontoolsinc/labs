@@ -37,6 +37,39 @@ describe("native-type-tags", () => {
       expect(tagFromNativeValue(exotic)).toBe(NATIVE_TAGS.Error);
     });
 
+    it("returns `Error` for a branded error with a foreign constructor", () => {
+      const foreign = new Error("foreign realm");
+      Object.setPrototypeOf(foreign, {
+        constructor: class ForeignError {},
+      });
+      const errorConstructor = Error as unknown as {
+        isError?: (value: unknown) => boolean;
+      };
+      const errorIsError = errorConstructor.isError;
+      try {
+        // SES supplies a tamed Error constructor without Error.isError().
+        // Preserve the native [[ErrorData]] brand while forcing that exact
+        // fallback path instead of relying on the host's newer intrinsic.
+        errorConstructor.isError = undefined;
+        expect(foreign instanceof Error).toBe(false);
+        expect(Object.prototype.toString.call(foreign)).toBe("[object Error]");
+        expect(tagFromNativeValue(foreign)).toBe(NATIVE_TAGS.Error);
+      } finally {
+        errorConstructor.isError = errorIsError;
+      }
+    });
+
+    it("does not accept an object which only spoofs Error's display tag", () => {
+      const forged = {
+        name: "Error",
+        message: "not branded",
+        [Symbol.toStringTag]: "Error",
+      };
+
+      expect(Object.prototype.toString.call(forged)).toBe("[object Error]");
+      expect(tagFromNativeValue(forged)).toBe(NATIVE_TAGS.Object);
+    });
+
     it("returns `Map` tag for `Map` instances", () => {
       expect(tagFromNativeValue(new Map())).toBe(NATIVE_TAGS.Map);
     });

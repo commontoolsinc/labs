@@ -124,7 +124,8 @@ const canFollowLinkHop = (
  * @param tx - The storage transaction to read from.
  * @param link - The link to read.
  * @param lastNode - The last node in the path.
- * @param options - Allows you to preserve the `overwrite` field if needed
+ * @param options - Preserve `overwrite` when needed, or suppress cross-space
+ * target prefetch for a side-effect-free topology verification pass.
  * @returns The resolved link.
  */
 export function resolveLink(
@@ -132,7 +133,7 @@ export function resolveLink(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   lastNode: LastNode = "value",
-  options: { preserveOverwrite?: boolean } = {},
+  options: { preserveOverwrite?: boolean; prefetch?: boolean } = {},
 ): ResolvedFullLink {
   const seen = new Set<string>();
 
@@ -308,7 +309,6 @@ export function resolveLink(
       }
       recordDereferenceHop(tx, nextHop);
       const nextLink = nextHop.link;
-      const crossSpace = nextLink.space !== link.space;
       if (nextLink.schema === undefined && link.schema !== undefined) {
         link = {
           ...nextLink,
@@ -326,23 +326,12 @@ export function resolveLink(
       // reads mask as `undefined`, indistinguishable from absence. The kick
       // is async; one-shot reads still return the masked value, but
       // `Cell.pull()`'s convergence loop awaits the tracked sync and re-reads.
-      const mgr = runtime.storageManager;
-      const { space, id, scope } = link;
-      const reserved = !crossSpace &&
-        mgr.shouldPullDoc?.(space, id, scope) === true;
-      if (crossSpace || reserved) {
-        // Swallow sync failures: this kick is best-effort (the read still
-        // resolves from the local replica) and an unhandled rejection here
-        // would otherwise escape the resolution path. On failure, retract
-        // the shouldPullDoc reservation so a later read may retry — but only
-        // when THIS kick took it: a failed cross-space kick never reserved,
-        // and must not clear a reservation a concurrent same-space read
-        // holds for the same target (that would permit duplicate syncs).
-        mgr.trackUntilSettled(
-          runtime.getCellFromLink(link).sync().catch(() => {
-            if (reserved) mgr.retractDocPullKick?.(space, id, scope);
-          }),
-        );
+      // Reference-only resolution is reactive to the source link but does not
+      // consume the target value, so this prefetch must not subscribe the
+      // executing action to target-settlement wakeups. A later schema-aware
+      // read reuses the in-flight load and registers that waiter if needed.
+      if (options.prefetch !== false) {
+        runtime.prefetchLinkedDoc(link, nextHop.source.space);
       }
     } else {
       break;

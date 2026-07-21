@@ -7,28 +7,112 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { generateText, pattern, UI } from "commonfabric";
+import { generateTextStream, isPending, pattern, resultOf, UI, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfLift_1 = __cfHelpers.lift<{
+    text: (string & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "pending"; readonly pending: true; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "error"; readonly error: Error; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "syncing"; readonly syncing: true; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "schema-mismatch"; readonly schemaMismatch: true; } & PartialResultSource<string, string>);
+}, boolean>(({ text }) => isPending(text), {
+    type: "object",
+    properties: {
+        text: {
+            anyOf: [{
+                    type: "string"
+                }, {
+                    type: "object",
+                    properties: {
+                        reason: {
+                            type: "string",
+                            "enum": ["pending"]
+                        },
+                        pending: {
+                            type: "boolean",
+                            "enum": [true]
+                        }
+                    },
+                    required: ["reason", "pending"]
+                }, {
+                    type: "object",
+                    properties: {
+                        reason: {
+                            type: "string",
+                            "enum": ["error"]
+                        },
+                        error: {
+                            $ref: "#/$defs/Error"
+                        }
+                    },
+                    required: ["reason", "error"]
+                }, {
+                    type: "object",
+                    properties: {
+                        reason: {
+                            type: "string",
+                            "enum": ["syncing"]
+                        },
+                        syncing: {
+                            type: "boolean",
+                            "enum": [true]
+                        }
+                    },
+                    required: ["reason", "syncing"]
+                }, {
+                    type: "object",
+                    properties: {
+                        reason: {
+                            type: "string",
+                            "enum": ["schema-mismatch"]
+                        },
+                        schemaMismatch: {
+                            type: "boolean",
+                            "enum": [true]
+                        }
+                    },
+                    required: ["reason", "schemaMismatch"]
+                }]
+        }
+    },
+    required: ["text"],
+    $defs: {
+        Error: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                },
+                message: {
+                    type: "string"
+                },
+                stack: {
+                    type: "string"
+                },
+                cause: {
+                    type: "unknown"
+                }
+            },
+            required: ["name", "message"]
+        }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "boolean"
+} as const satisfies __cfHelpers.JSONSchema, { unavailableInputPolicy: [{ path: ["text"], reasons: ["pending"] }] });
 // FIXTURE: generate-text-local-ternary
 // Verifies: local reactive builder results still trigger JSX ternary lowering
-//   text.pending ? "Loading" : text.result -> __cfHelpers.ifElse(...)
-// Context: `text` is a local `generateText()` result rather than a pattern
+//   isPending(text) ? "Loading" : resultOf(text) -> __cfHelpers.ifElse(...)
+// Context: `text` is a local `generateTextStream()` result rather than a pattern
 // input binding, so this exercises expression-site lowering on local reactive
 // aliases in JSX.
 export default pattern(() => {
-    const text = generateText({ prompt: "hi" }).for("text", true);
+    const text = generateTextStream({ prompt: "hi" }).for("text", true);
     return {
-        [UI]: <div>{__cfHelpers.ifElse({
-            type: "boolean"
+        [UI]: <div>{__cfHelpers.ifElse(true as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
-            type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, text.key("pending"), "Loading", text.key("result"))}</div>,
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, __cfLift_1({ text: text }), "Loading", resultOf(text))}</div>,
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
@@ -63,3 +147,6 @@ export default pattern(() => {
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
+__cfReg({
+    __cfLift_1
+});

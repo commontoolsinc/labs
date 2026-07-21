@@ -50,10 +50,18 @@
  *
  * // Custom multimodal analysis
  * const customAnalyses = extractor.emails.map((email) => {
- *   const analysis = generateObject({
+ *   const request = generateObject({
  *     prompt: [{ type: "image", image: email.image }, ...],
  *     schema: MY_SCHEMA,
  *   });
+ *   const result = resultOf(request);
+ *   const analysis = computed(() =>
+ *     isPending(request)
+ *       ? { pending: true }
+ *       : hasError(request)
+ *       ? { pending: false, error: request.error }
+ *       : { pending: false, result }
+ *   );
  *   return { email, analysis };
  * });
  *
@@ -66,8 +74,11 @@ import {
   Default,
   generateObject,
   handler,
+  hasError,
+  isPending,
   JSONSchema,
   pattern,
+  resultOf,
   Stream,
 } from "commonfabric";
 import GmailImporter, {
@@ -454,7 +465,7 @@ const GmailExtractor = pattern<GmailExtractorInput, GmailExtractorOutput>(
     // Note: consumers can access result via item.analysis.result or item.result
     // Result type is inferred from extraction.schema by the runtime
     const rawAnalyses = emails.map((email: Email) => {
-      const analysis = generateObject({
+      const analysisRequest = generateObject<Record<string, unknown>>({
         prompt: computed(() => {
           if (!shouldRunAnalysis) return undefined;
           if (!email.markdownContent) return undefined;
@@ -465,15 +476,33 @@ const GmailExtractor = pattern<GmailExtractorInput, GmailExtractorOutput>(
         schema: extractionSchema as JSONSchema,
         model: "anthropic:claude-sonnet-4-5",
       });
+      const analysisResult = resultOf(analysisRequest);
+      const analysis = computed(() => {
+        if (isPending(analysisRequest)) {
+          return { pending: true, result: undefined, error: undefined };
+        }
+        if (hasError(analysisRequest)) {
+          return {
+            pending: false,
+            result: undefined,
+            error: analysisRequest.error.message,
+          };
+        }
+        return {
+          pending: false,
+          result: analysisResult,
+          error: undefined,
+        };
+      });
 
       return {
         email,
         emailId: email.id,
         emailDate: email.date,
         analysis,
-        result: analysis.result,
-        pending: analysis.pending,
-        error: analysis.error,
+        result: computed(() => analysis.result),
+        pending: computed(() => analysis.pending),
+        error: computed(() => analysis.error),
       };
     });
 

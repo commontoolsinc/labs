@@ -600,6 +600,12 @@ export class ContextualFlowControl {
     defaultEmptyProperties: JSONSchema,
     defaultMissingProperty: JSONSchema,
   ): JSONSchema {
+    // Recursive anyOf/oneOf branches can establish their own local definition
+    // scope even when an outer pruning pass removed the now-redundant root
+    // $defs. Adopt that scope before consuming the first path segment.
+    if (isRecord(schema) && schema.$defs !== undefined) {
+      defs = schema.$defs;
+    }
     const joined = (extraConfidentiality !== undefined)
       ? new Set<unknown>(extraConfidentiality)
       : new Set<unknown>();

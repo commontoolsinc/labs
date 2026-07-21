@@ -4,8 +4,10 @@ import {
   Default,
   generateText,
   handler,
+  isPending,
   NAME,
   pattern,
+  resultOf,
   UI,
   wish,
   Writable,
@@ -29,9 +31,10 @@ export default pattern<Input>(({ title }) => {
   const topic = new Writable("");
 
   const profile = wish<Cell<string>>({ query: "#learnedSummary" });
+  const profileCell = resultOf(profile.result);
 
   const systemPrompt = computed(() => {
-    const profileText = profile.result!.get();
+    const profileText = profileCell.get();
     const profileSection = profileText
       ? `\n\n--- About the User ---\n${profileText}\n---\n`
       : "";
@@ -39,10 +42,11 @@ export default pattern<Input>(({ title }) => {
 Write content personalized to the user when appropriate.`;
   });
 
-  const result = generateText({
+  const resultRequest = generateText({
     system: systemPrompt,
     prompt: topic,
   });
+  const result = resultOf(resultRequest);
 
   return {
     [NAME]: title,
@@ -53,7 +57,7 @@ Write content personalized to the user when appropriate.`;
         <cf-card>
           <h4 style="margin-top: 0;">Profile Context:</h4>
           <cf-code-editor
-            $value={profile.result}
+            $value={profileCell}
             style={{ maxHeight: "256px" }}
           />
         </cf-card>
@@ -80,19 +84,19 @@ Write content personalized to the user when appropriate.`;
             : null}
         </cf-cell-context>
 
-        <cf-cell-context $cell={result}>
-          {result.pending
+        <cf-cell-context $cell={resultRequest}>
+          {isPending(resultRequest)
             ? (
               <div style="margin-top: 16px;">
                 <cf-loader show-elapsed /> Generating personalized content...
               </div>
             )
-            : result.result
+            : result
             ? (
               <div style="margin-top: 16px;">
                 <h3>Generated Text:</h3>
                 <div style="white-space: pre-wrap; padding: 12px; background: #f9f9f9; border-radius: 4px; line-height: 1.6;">
-                  {result.result}
+                  {result}
                 </div>
               </div>
             )
@@ -101,6 +105,6 @@ Write content personalized to the user when appropriate.`;
       </div>
     ),
     topic,
-    response: result.result,
+    response: result,
   };
 });

@@ -10,6 +10,7 @@ import {
 } from "./engine-test-support.ts";
 import type { RuntimeProgram } from "./engine-test-support.ts";
 import { validateCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
+import { getTopFrame, popFrame } from "../src/builder/pattern.ts";
 describe("Engine.evaluateRecordGraph()", () => {
   let runtime: Runtime;
   let engine: Engine;
@@ -158,6 +159,56 @@ describe("Engine.evaluateRecordGraph()", () => {
     const utilExports = result.exportMap![utilsKey!];
     expect(typeof utilExports["double"]).toBe("function");
     expect(typeof utilExports["triple"]).toBe("function");
+  });
+
+  it("evaluates type-only dependency exports with a runtime frame", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            'import type { DependencyOutput } from "./dependency.tsx";',
+            "export const read = (_value: DependencyOutput): number => 42;",
+            "export default 42;",
+          ].join("\n"),
+        },
+        {
+          name: "/dependency.tsx",
+          contents: [
+            'import { pattern } from "commonfabric";',
+            "export type DependencyOutput = { value: number };",
+            "export const Dependency = pattern<{}, DependencyOutput>(() => ({ value: 1 }));",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { id, graph, mainSpecifier } = await engine.compileToRecordGraph(
+      program,
+    );
+    // A compiled/cached graph can contain source modules reached only for type
+    // information. They have no runtime edge from the entry and are first
+    // evaluated when evaluateRecordGraph builds its all-module export map.
+    // Make the test independent of Runtime's process-global compatibility
+    // frame: graph evaluation supplies its own explicit runtime frame.
+    const ambientFrame = getTopFrame();
+    expect(ambientFrame?.runtime).toBe(runtime);
+    popFrame(ambientFrame);
+
+    const result = engine.evaluateRecordGraph(
+      id,
+      graph,
+      mainSpecifier,
+      program.files,
+    );
+
+    expect(result.main?.default).toBe(42);
+    const dependencyPath = Object.keys(result.exportMap ?? {}).find((path) =>
+      path.endsWith("/dependency.tsx")
+    );
+    expect(dependencyPath).toBeDefined();
+    expect(result.exportMap?.[dependencyPath!].Dependency).toBeDefined();
   });
 
   it("serializes verified javascript modules by stable $implRef", async () => {

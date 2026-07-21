@@ -56,6 +56,27 @@ Implementation: see `src/schema-generator.ts` (`formatType`) and
 Implementation: see `src/formatters/object-formatter.ts` and
 `src/type-utils.ts:isFunctionLike`.
 
+## Availability Marker Union Arms
+
+When a TypeScript union includes a Common Fabric availability marker, such as
+`AsyncResult<string>`, the marker arm is emitted as the structural schema
+`{ "type": "object" }`. JSON Schema cannot authenticate a `FabricInstance`
+brand, so this arm intentionally admits arbitrary objects at the schema level.
+It is also kept inline instead of being hoisted into shared definitions, where
+its control meaning could leak into an unrelated same-named type.
+
+At runner compute boundaries this looseness is safe because availability
+preflight runs before schema traversal. Preflight authenticates the concrete
+`DataUnavailable` instance and reason against the serialized exact-path input
+policy; the structural arm only lets that already-authorized leaf survive
+materialization. The schema is not, by itself, evidence that an object is an
+availability marker.
+
+Other consumers of generated schemas, including storage validation and candidate
+matching, must not treat this object arm as authorization for a control value or
+as general FabricType brand validation. They should apply their own
+concrete-brand check when availability has semantic meaning.
+
 ## Running
 
 - Check typings: `deno task check`

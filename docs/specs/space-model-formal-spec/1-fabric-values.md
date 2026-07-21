@@ -105,7 +105,8 @@ type FabricValue =
   //       - Native object wrappers: `FabricError`, `FabricMap`,
   //         `FabricSet` (Section 1.4)
   //       - User-defined types: `Cell`, `Stream`, etc.
-  //       - System types: `UnknownValue`, `ProblematicValue`
+  //       - System types: `DataUnavailable`, `UnknownValue`,
+  //         `ProblematicValue`
   | FabricInstance
 
   // (d) Recursive containers
@@ -1221,6 +1222,54 @@ serializable content of a single cell.
 The within-document prohibition is inherited from JSON's tree structure and could
 be relaxed if a future storage format supports cyclic references natively.
 
+### 1.7 Runtime Control Values
+
+`DataUnavailable` is a runtime-owned `FabricInstance` control value indicating
+that a computation cannot currently use a value. It is not a native-object
+wrapper and is not structurally identified: plain authored objects with similar
+fields remain ordinary data. Runtime guards recognize the concrete
+`DataUnavailable` class and narrow its `reason` discriminator.
+
+One class represents four variants through exact codec state:
+
+```typescript
+import type { FabricError } from "@commonfabric/data-model/fabric-instances";
+
+type DataUnavailableState =
+  | { readonly reason: "pending" }
+  | { readonly reason: "error"; readonly error: FabricError }
+  | { readonly reason: "syncing" }
+  | { readonly reason: "schema-mismatch" };
+```
+
+The `pending`, `syncing`, and `schema-mismatch` values are deeply frozen,
+interned instances. The `error` factory returns a fresh, deeply frozen instance
+whose error is a deeply frozen `FabricError`; native `Error` input is converted
+through the normal fabric conversion path first, so `cause` and enumerable
+extra properties remain recursively representable.
+
+`DataUnavailable` participates in the ordinary `FabricInstance` protocols:
+
+- Its `[DEEP_FREEZE]`, `[IS_DEEP_FROZEN]`, shallow-clone, and deep-clone
+  implementations include the discriminated state and nested `FabricError`.
+  A requested frozen clone may reuse an already-frozen value;
+  `deepClone(true)` of a non-error variant canonicalizes to its interned
+  instance. An unfrozen clone is distinct, and an error deep clone applies the
+  requested frozenness to the nested error as well.
+- Equality and hashing use normal codec-state dispatch. The hash therefore
+  includes the `DataUnavailable@1` type tag, the `reason`, and the nested
+  `FabricError` state for the error variant; different reasons cannot collide
+  merely because they share the same class.
+- Its class codec is registered in the default `fabric-instances`
+  `codecClasses()` list under the canonical `DataUnavailable@1` tag. Unknown
+  future tags such as `DataUnavailable@2` follow the normal `UnknownValue`
+  path rather than being interpreted by the version-1 codec (Section 3).
+
+Because this is a non-native `FabricInstance`, fabric conversion accepts it as
+an existing fabric value and native conversion passes it through unchanged.
+The JSON state and validation rules are specified in
+[`3-json-encoding.md`](./3-json-encoding.md), Section 3.
+
 ---
 
 ## 2. The Fabric Protocol
@@ -1347,7 +1396,7 @@ class-side `[CODEC]` (Section 2.4).
  * The native object wrapper classes (`FabricError`, `FabricMap`,
  * `FabricSet`) extend `BaseFabricInstance`, as do
  * user-defined types (`Cell`, `Stream`) and system types (`UnknownValue`,
- * `ProblematicValue`).
+ * `DataUnavailable`, `ProblematicValue`).
  *
  * Note: `FabricPrimitive` subclasses (`FabricEpochNsec`,
  * `FabricEpochDays`, `FabricHash`, `FabricBytes`, `FabricRegExp`) do NOT
@@ -2286,6 +2335,7 @@ than implied by scattered registrations.
 | 〃 | `FabricEpochNsec` | `EpochNsec@1` | 〃 |
 | 〃 | `FabricEpochDays` | `EpochDays@1` | 〃 |
 | 〃 | `FabricRegExp` | `RegExp@1` | 〃 |
+| 〃 | `DataUnavailable` | `DataUnavailable@1` | Via `fabric-instances` `codecClasses()`; reason-discriminated runtime control value (Section 1.7). |
 | 〃 | `FabricError` | `Error@1` | Via `fabric-instances` `codecClasses()`. |
 | 〃 | `FabricMap` | `Map@1` | 〃 (implementation currently stubbed; see Section 1.4.3). |
 | 〃 | `FabricSet` | `Set@1` | 〃 (implementation currently stubbed; see Section 1.4.4). |
@@ -2728,7 +2778,7 @@ export function hashOf(value: unknown): FabricHash {
   //
   // The native object wrappers and temporal types are hashed as follows:
   //
-  // - `FabricError`, `FabricMap`, `FabricSet`,
+  // - `DataUnavailable`, `FabricError`, `FabricMap`, `FabricSet`,
   //   and other `FabricInstance`s with recursively-processable
   //   encoded state are hashed via TAG_INSTANCE:
   //     hash(TAG_INSTANCE, hashStr(codec.tagForValue(v)),
@@ -2744,6 +2794,8 @@ export function hashOf(value: unknown): FabricHash {
   // string form, so `hashStr(tag)` below expands to
   // `TAG_STRING, leb128(utf8ByteLen), utf8Bytes`):
   // - `FabricError`:      hash(TAG_INSTANCE, hashStr("Error@1"), hashOf(errorState))
+  // - `DataUnavailable`: hash(TAG_INSTANCE, hashStr("DataUnavailable@1"),
+  //                              hashOf(unavailableState))
   // - `FabricMap`:        hash(TAG_INSTANCE, hashStr("Map@1"), hashOf(entries))
   //                         where entries are hashed in insertion order
   // - `FabricSet`:        hash(TAG_INSTANCE, hashStr("Set@1"), hashOf(elements))

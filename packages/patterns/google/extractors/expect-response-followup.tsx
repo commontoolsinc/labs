@@ -23,8 +23,11 @@ import {
   computed,
   generateText,
   handler,
+  hasError,
+  isPending,
   NAME,
   pattern,
+  resultOf,
   UI,
   wish,
   Writable,
@@ -606,7 +609,10 @@ export default pattern<PatternInput, PatternOutput>(() => {
   }>({
     query: "#emailStyle",
   });
-  const emailStylePrompt = emailStyleWish.result?.stylePrompt ?? "";
+  const emailStyle = hasError(emailStyleWish.result)
+    ? undefined
+    : resultOf(emailStyleWish.result);
+  const emailStylePrompt = emailStyle?.stylePrompt ?? "";
 
   // ==========================================================================
   // CURRENT TIME
@@ -616,16 +622,17 @@ export default pattern<PatternInput, PatternOutput>(() => {
   // as time passes. Ticks every hour (granularity finer than a day is wasted
   // here since the countdown is in whole days).
   const nowTickingCell = wish<number>({ query: "#now/3600" });
+  const nowTickingCellValue = resultOf(nowTickingCell.result);
   const currentYear = computed(() => {
     // Derived from the same ticking clock as the dashboard, so year suppression
     // tracks the live year — a dashboard left open across New Year re-shows the
     // year on old dates once the clock ticks over, rather than staying frozen at
     // the one-shot load year.
-    const nowMs = nowTickingCell.result;
+    const nowMs = nowTickingCellValue;
     // During load nowMs is undefined; fall back to no-year-suppression by
     // using a year that won't match real dates, so the year is shown until
     // the clock resolves.
-    return nowMs == null ? 0 : new Date(nowMs).getFullYear();
+    return new Date(nowMs).getFullYear();
   });
 
   // ==========================================================================
@@ -655,9 +662,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
     // User email from createGoogleAuth - used to filter out threads where user sent last message
     const currentUserEmail = (currentEmail || "").toLowerCase();
     // Reactive clock for the days-waiting countdown. Undefined during load.
-    const nowMs = nowTickingCell.result;
-    if (nowMs == null) return [];
-
+    const nowMs = nowTickingCellValue;
     // Group by threadId
     const threadMap = new Map<string, Email[]>();
     for (const email of emails) {
@@ -762,7 +767,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
     ? `You are a helpful assistant that drafts follow-up emails matching the user's personal writing style.\n\n${emailStylePrompt}`
     : "You are a helpful assistant that drafts professional follow-up emails.";
 
-  const draftLlmResult = generateText({
+  const draftRequest = generateText({
     prompt: computed((): string | undefined => {
       const threadId = generatingDraftFor.get();
       if (!threadId) return undefined; // No thread selected, skip generation
@@ -817,22 +822,22 @@ Write only the email body, no subject line or greeting line (the greeting will b
     system: draftSystemPrompt,
     model: "anthropic:claude-sonnet-4-5",
   });
+  const generatedDraft = resultOf(draftRequest);
 
   // Auto-save LLM draft to drafts Writable when generation completes
   // This ensures the draft is available for the send handler
   const _autoSaveLlmDraft = computed(() => {
     const threadId = generatingDraftFor.get();
-    const result = draftLlmResult.result;
-    const isPending = draftLlmResult.pending;
+    const pending = isPending(draftRequest);
 
     // Only save when generation completes with a result
-    if (!isPending && result && threadId) {
+    if (!pending && !hasError(draftRequest) && generatedDraft && threadId) {
       const current = drafts.get();
       // Idempotent check: only mutate if value changed
-      if (current[threadId] !== result) {
+      if (current[threadId] !== generatedDraft) {
         drafts.set({
           ...current,
-          [threadId]: result,
+          [threadId]: generatedDraft,
         });
       }
     }
@@ -1060,7 +1065,7 @@ Write only the email body, no subject line or greeting line (the greeting will b
                     );
                     const isGenerating = computed(() =>
                       generatingDraftFor.get() === uiThreadId &&
-                      draftLlmResult.pending
+                      isPending(draftRequest)
                     );
                     const hasDraft = computed(() => {
                       const d = drafts.get();
@@ -1068,8 +1073,9 @@ Write only the email body, no subject line or greeting line (the greeting will b
                       const genFor = generatingDraftFor.get();
                       if (
                         genFor === uiThreadId &&
-                        !draftLlmResult.pending &&
-                        draftLlmResult.result
+                        !isPending(draftRequest) &&
+                        !hasError(draftRequest) &&
+                        generatedDraft
                       ) {
                         return true;
                       }
@@ -1080,9 +1086,10 @@ Write only the email body, no subject line or greeting line (the greeting will b
                       if (d[uiThreadId]) return String(d[uiThreadId]);
                       const genFor = generatingDraftFor.get();
                       if (genFor === uiThreadId) {
-                        const result = draftLlmResult.result;
-                        const error = draftLlmResult.error;
-                        return String(result || error || "");
+                        if (hasError(draftRequest)) {
+                          return draftRequest.error.message;
+                        }
+                        return String(generatedDraft || "");
                       }
                       return "";
                     });

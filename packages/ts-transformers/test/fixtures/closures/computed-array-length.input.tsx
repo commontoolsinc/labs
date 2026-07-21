@@ -8,7 +8,7 @@
  * The fix ensures the schema is { type: "array", items: { not: true } }
  * rather than { type: "object", properties: { length: { type: "number" } } }
  */
-import { computed, NAME, pattern, UI, wish } from "commonfabric";
+import { computed, NAME, pattern, resultOf, UI, wish } from "commonfabric";
 
 interface Piece {
   id: string;
@@ -22,7 +22,8 @@ interface Piece {
 // Context: Regression test ensuring array .length produces the correct schema
 //   shape rather than an object schema with a length property.
 export default pattern(() => {
-  const { allPieces } = wish<{ allPieces: Piece[] }>({ query: "/" }).result!;
+  const piecesWish = wish<{ allPieces: Piece[] }>({ query: "/" });
+  const { allPieces } = resultOf(piecesWish.result);
 
   return {
     [NAME]: computed(() => `Pieces (${allPieces.length})`),

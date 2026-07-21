@@ -8,6 +8,7 @@ import {
   pattern,
   type PerSpace,
   type RequiresIntegrity,
+  resultOf,
   Stream,
   UI,
   type VNode,
@@ -429,11 +430,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       ParkingAdminManagerCredential | null
     >(null);
 
-    const nowTimestamp = wish<number>({ query: "#now" });
-    const todayStr = computed(() => {
-      const nowMs = nowTimestamp.result;
-      return nowMs != null ? toLocalDateStr(nowMs) : "";
-    });
+    const nowRequest = wish<number>({ query: "#now" });
+    const nowValue = resultOf(nowRequest.result);
+    const todayStr = computed(() => toLocalDateStr(nowValue));
     const weekDatesArr = computed(() => getWeekDates(todayStr));
 
     // User/session UI state
@@ -443,9 +442,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     // defaults to today without reading the ambient clock at pattern body.
     const requestDate = new Writable.perSession("");
     computed(() => {
-      const nowMs = nowTimestamp.result;
-      if (nowMs != null && requestDate.get() === "") {
-        requestDate.set(toLocalDateStr(nowMs));
+      const today = todayStr;
+      if (today !== "" && requestDate.get() === "") {
+        requestDate.set(today);
       }
     });
     const requestResult = new Writable.perSession("");

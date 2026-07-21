@@ -94,6 +94,8 @@ import {
   resolveSchema,
   schemaHasIfc,
   validateAndTransform,
+  type ValidateAndTransformResult,
+  validateAndTransformResult,
 } from "./schema.ts";
 import {
   readStoredCfcMetadata,
@@ -145,7 +147,11 @@ import { listResultSchema } from "./builtins/list-result-schema.ts";
 import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
-import { MetaField } from "@commonfabric/api";
+import {
+  type AsyncResult,
+  MetaField,
+  type SqliteQueryResult,
+} from "@commonfabric/api";
 ensureNotRenderThread();
 
 const logger = getLogger("cell", { level: "warn" });
@@ -923,6 +929,15 @@ export class CellImpl<T extends FabricValue>
   }
 
   get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>> {
+    const result = this.getWithStatus(options);
+    return ("ok" in result ? result.ok : undefined) as Readonly<
+      StripDefaultBrand<T>
+    >;
+  }
+
+  getWithStatus(options?: {
+    traverseCells?: boolean;
+  }): ValidateAndTransformResult {
     if (!this.synced) this.sync(); // No await, just kicking this off
 
     // Per-transaction read cache: within one ready transaction, repeatedly
@@ -943,17 +958,17 @@ export class CellImpl<T extends FabricValue>
       // invalidation is load-bearing: bypass the cache so a post-prepare read
       // still goes through readOrThrow() and invalidates the prepared digest.
       tx.getCfcState().prepare.status !== "prepared";
-    const variant = `${options?.traverseCells ?? false}|${this.synced}`;
+    const variant = `${options?.traverseCells ?? false}|${this.synced}|status`;
     const cacheKey = cacheable ? this.viewRefHash() : undefined;
     if (cacheable) {
       const cached = tx.getCachedReadResult!(cacheKey!, variant);
       if (cached !== undefined) {
-        return cached.value as Readonly<StripDefaultBrand<T>>;
+        return cached.value as ValidateAndTransformResult;
       }
     }
 
     logger.timeStart("cell", "get");
-    const value = validateAndTransform(
+    const result = validateAndTransformResult(
       this.runtime,
       this.tx,
       this.viewRef,
@@ -972,9 +987,9 @@ export class CellImpl<T extends FabricValue>
       // Re-read this._link: validateAndTransform (via viewRef -> link) may have
       // run ensureLink() and replaced it with the completed link object, which
       // is the identity subsequent get()s will hash.
-      tx.setCachedReadResult!(this.viewRefHash(), variant, value);
+      tx.setCachedReadResult!(this.viewRefHash(), variant, result);
     }
-    return value;
+    return result;
   }
 
   /**
@@ -1099,7 +1114,7 @@ export class CellImpl<T extends FabricValue>
    * Only valid on a `"sqlite"`-kind cell and inside a transaction (e.g. a
    * handler). Throws on an `undefined` param (it may be a value that isn't ready
    * yet — pass a resolved value, or `null` for SQL NULL). See
-   * docs/specs/sqlite-builtin/plans/sqlitedb-cell-type-exploration.md.
+   * docs/specs/sqlite-builtin/01-api.md.
    */
   exec(
     sql: string,
@@ -2385,9 +2400,7 @@ export class CellImpl<T extends FabricValue>
       onExceed?: "fail" | "skip";
       readClearance?: boolean;
     },
-  ): Reactive<
-    { pending: boolean; result?: Row[]; error?: unknown; withheld?: number }
-  > {
+  ): Reactive<AsyncResult<SqliteQueryResult<Row>>> {
     return sqliteQueryNodeFactory({
       db: this,
       sql,
@@ -2402,9 +2415,7 @@ export class CellImpl<T extends FabricValue>
       // options object) to the node so the builtin can decode `_cf_link`
       // columns. Read loosely — it is not part of the public options type.
       rowSchema: (options as { rowSchema?: unknown } | undefined)?.rowSchema,
-    }) as Reactive<
-      { pending: boolean; result?: Row[]; error?: unknown; withheld?: number }
-    >;
+    }) as Reactive<AsyncResult<SqliteQueryResult<Row>>>;
   }
 
   map<S>(
@@ -2611,6 +2622,22 @@ export function setCellUnlinkedSpace(
   space: MemorySpace,
 ): void {
   asCellImpl(cell)?.setUnlinkedSpace(space);
+}
+
+/**
+ * Runner-internal status-bearing schema read. Kept out of the pattern-visible
+ * Cell interface because traversal failure is an execution concern, not an
+ * authoring capability.
+ */
+export function getCellWithStatus(
+  cell: Cell<unknown>,
+  options?: { traverseCells?: boolean },
+): ValidateAndTransformResult {
+  const implementation = asCellImpl(cell);
+  if (implementation === undefined) {
+    throw new TypeError("Expected a runner Cell implementation");
+  }
+  return implementation.getWithStatus(options);
 }
 
 function asCellImpl(cell: unknown): CellImpl<FabricValue> | undefined {

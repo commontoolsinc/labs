@@ -3,8 +3,10 @@ import {
   Default,
   fetchJson,
   generateText,
+  isPending,
   NAME,
   pattern,
+  resultOf,
   UI,
   Writable,
 } from "commonfabric";
@@ -45,14 +47,14 @@ export default pattern<{
   });
 
   // Fetch commits data
-  const commitsData = fetchJson<CommitResponse>({
+  const commitsRequest = fetchJson<CommitResponse>({
     url: apiUrl,
   });
-  const commits = commitsData.result;
+  const commits = resultOf(commitsRequest);
 
   // Build prompt from commits
   const prompt = computed(() => {
-    const commitList = commits ?? [];
+    const commitList = commits;
     if (commitList.length === 0) return "";
 
     const messages = commitList
@@ -64,11 +66,12 @@ export default pattern<{
   });
 
   // Generate summary
-  const summary = generateText({
+  const summaryRequest = generateText({
     system:
       "You are a concise technical writer. Summarize the recent development activity based on these commit messages. Focus on themes and notable changes. Keep it to 2-3 sentences.",
     prompt: prompt,
   });
+  const summary = resultOf(summaryRequest);
 
   const repoName = computed(() => {
     const { owner, repo } = parsed;
@@ -90,20 +93,20 @@ export default pattern<{
           />
         </div>
 
-        <cf-cell-context $cell={summary.pending}>
-          {summary.pending
+        <cf-cell-context $cell={summaryRequest}>
+          {isPending(summaryRequest)
             ? (
               <div style="margin-bottom: 16px;">
                 <cf-loader show-elapsed /> Generating summary...
               </div>
             )
-            : summary.result
+            : summary
             ? (
               <div style="margin-bottom: 16px; padding: 12px; background: #f5f5f5; border-radius: 4px;">
                 <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">
                   Activity Summary
                 </h3>
-                <p style="margin: 0; line-height: 1.5;">{summary.result}</p>
+                <p style="margin: 0; line-height: 1.5;">{summary}</p>
               </div>
             )
             : null}

@@ -18,6 +18,7 @@ import {
   handler,
   NAME,
   pattern,
+  resultOf,
   UI,
   wish,
   Writable,
@@ -245,8 +246,15 @@ function getColorForCalendar(
 // Handler to show the new event modal
 const showNewEventModal = handler<
   void,
-  { showNewEventPrompt: Writable<boolean> }
->((_, { showNewEventPrompt }) => showNewEventPrompt.set(true));
+  {
+    showNewEventPrompt: Writable<boolean>;
+    newEventDate: Writable<string>;
+    todayDate: string;
+  }
+>((_, { showNewEventPrompt, newEventDate, todayDate }) => {
+  if (!newEventDate.get()) newEventDate.set(todayDate);
+  showNewEventPrompt.set(true);
+});
 
 // Handler to create event and close modal
 const createEventHandler = handler<
@@ -259,6 +267,7 @@ const createEventHandler = handler<
     newEventColor: Writable<string>;
     showNewEventPrompt: Writable<boolean>;
     localEvents: Writable<LocalEvent[]>;
+    todayDate: string;
   }
 >((
   _,
@@ -270,13 +279,14 @@ const createEventHandler = handler<
     newEventColor,
     showNewEventPrompt,
     localEvents,
+    todayDate,
   },
 ) => {
   const title = newEventTitle.get() || "New Event";
   const newEvent: LocalEvent = {
     eventId: generateId(),
     title,
-    date: newEventDate.get(),
+    date: newEventDate.get() || todayDate,
     startTime: newEventStartTime.get(),
     endTime: newEventEndTime.get(),
     color: newEventColor.get(),
@@ -300,6 +310,7 @@ const createEventAndContinue = handler<
     newEventColor: Writable<string>;
     localEvents: Writable<LocalEvent[]>;
     usedCreateAnother: Writable<boolean>;
+    todayDate: string;
   }
 >((
   _,
@@ -311,13 +322,14 @@ const createEventAndContinue = handler<
     newEventColor,
     localEvents,
     usedCreateAnother,
+    todayDate,
   },
 ) => {
   const title = newEventTitle.get() || "New Event";
   const newEvent: LocalEvent = {
     eventId: generateId(),
     title,
-    date: newEventDate.get(),
+    date: newEventDate.get() || todayDate,
     startTime: newEventStartTime.get(),
     endTime: newEventEndTime.get(),
     color: newEventColor.get(),
@@ -348,28 +360,36 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   // ==========================================================================
   // WISH FOR CALENDAR EVENTS from Google Calendar Importer
   // ==========================================================================
-  const { events: importedEvents } = wish<{ events: CalendarEvent[] }>(
+  const calendarWish = wish<{ events: CalendarEvent[] }>(
     { query: "#calendarEvents" },
-  ).result!;
+  );
+  const { events: importedEvents } = resultOf(calendarWish.result);
 
-  // Current date sourced from the reactive #now cell (one-shot, coarsened to
-  // 1s) instead of reading the clock directly at pattern-body level. Like the
-  // #calendarEvents wish above, the result is available synchronously here.
+  // Current date sourced from the reactive #now cell instead of reading the
+  // clock directly at pattern-body level. The derived date stays unavailable
+  // until the wish resolves.
   const nowCell = wish<number>({ query: "#now" });
-  const todayDate = getTodayDate(nowCell.result!);
+  const nowCellValue = resultOf(nowCell.result);
+  const todayDate = computed(() => getTodayDate(nowCellValue));
 
-  // Navigation State (Writable so navigation buttons work)
-  const startDate = new Writable(getWeekStart(todayDate));
+  // Store navigation as a static offset and derive calendar dates from #now.
+  // This keeps date rendering and interactions unavailable until the clock is
+  // usable without mutating Writable cells from inside a computed derivation.
+  const navigationOffset = new Writable(0);
   const visibleDays = new Writable(7);
 
   // Create Form State
   const showNewEventPrompt = new Writable<boolean>(false);
   const newEventTitle = new Writable<string>("");
-  const newEventDate = new Writable<string>(todayDate);
+  const newEventDate = new Writable<string>("");
   const newEventStartTime = new Writable<string>("09:00");
   const newEventEndTime = new Writable<string>("10:00");
   const newEventColor = new Writable<string>(COLORS[0]);
   const usedCreateAnother = new Writable<boolean>(false);
+
+  const startDate = computed(() =>
+    addDays(getWeekStart(todayDate), navigationOffset.get())
+  );
 
   // Edit Form State
   const showEditModal = new Writable<boolean>(false);
@@ -387,20 +407,20 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   const importedEventCount = importedEvents?.length || 0;
   const localEventCount = localEvents.get().length;
   const eventCount = importedEventCount + localEventCount;
-  const weekDates = getWeekDates(startDate.get(), 7);
+  const weekDates = computed(() => getWeekDates(startDate, 7));
 
   // Navigation Actions
   const goPrev = action(() => {
-    startDate.set(addDays(startDate.get(), -visibleDays.get()));
+    navigationOffset.set(navigationOffset.get() - visibleDays.get());
   });
 
   const goNext = action(() => {
-    startDate.set(addDays(startDate.get(), visibleDays.get()));
+    navigationOffset.set(navigationOffset.get() + visibleDays.get());
   });
 
   const goToday = action(() => {
-    const today = getTodayDate(Date.now());
-    startDate.set(visibleDays.get() === 1 ? today : getWeekStart(today));
+    const day = new Date(todayDate + "T12:00:00-08:00").getDay();
+    navigationOffset.set(visibleDays.get() === 1 ? (day + 6) % 7 : 0);
   });
 
   // View Mode Actions
@@ -542,7 +562,11 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
             <button
               type="button"
               style={STYLES.button.primary}
-              onClick={showNewEventModal({ showNewEventPrompt })}
+              onClick={showNewEventModal({
+                showNewEventPrompt,
+                newEventDate,
+                todayDate,
+              })}
             >
               + Add
             </button>
@@ -667,6 +691,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                   newEventColor,
                   localEvents,
                   usedCreateAnother,
+                  todayDate,
                 })}
               >
                 Create Another
@@ -682,6 +707,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                   newEventColor,
                   showNewEventPrompt,
                   localEvents,
+                  todayDate,
                 })}
               >
                 Create
@@ -1066,9 +1092,8 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                   });
 
                   // Compute position/visibility once.
-                  // Note: startDate and visibleDays are new Writable(), so access with .get()
                   const styles = computed(() => {
-                    const weekStart = startDate.get();
+                    const weekStart = startDate;
                     const visibleCount = visibleDays.get();
                     const eventDate = evt
                       ? extractDate(evt.start || evt.startDateTime)
@@ -1193,7 +1218,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                 {localEvents.map((evt, evtIndex) => {
                   // Compute position and visibility
                   const styles = computed(() => {
-                    const weekStart = startDate.get();
+                    const weekStart = startDate;
                     const visibleCount = visibleDays.get();
                     const evtDate = evt.date;
 

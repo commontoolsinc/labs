@@ -834,8 +834,14 @@ describe("Memory v2 storage notifications", () => {
     const client = {
       close: () => Promise.resolve(),
     } as unknown as MemoryV2Client.Client;
+    const watchStarted = defer<void>();
+    const releaseWatch = defer<void>();
     const session = {
-      watchAddSync: () => Promise.resolve({ view, sync }),
+      watchAddSync: async () => {
+        watchStarted.resolve();
+        await releaseWatch.promise;
+        return { view, sync };
+      },
     } as unknown as MemoryV2Client.SpaceSession;
     const sessionFactory: SessionFactory = {
       create: () => Promise.resolve({ client, session }),
@@ -849,11 +855,14 @@ describe("Memory v2 storage notifications", () => {
     const provider = testStorageManager.open(space);
     const replica = provider.replica as unknown as WatchRefreshHarness;
 
-    replica.closeNow();
-    const result = await replica.refreshWatchSet([[
+    const refresh = replica.refreshWatchSet([[
       { id: "of:late-refresh" as URI, type: "application/json" as MIME },
       { path: [], schema: false },
     ]]);
+    await watchStarted.promise;
+    replica.closeNow();
+    releaseWatch.resolve();
+    const result = await refresh;
 
     expect(result.error?.message).toBe("memory replica closed");
     expect((await view.subscribeSync().next()).done).toBe(true);

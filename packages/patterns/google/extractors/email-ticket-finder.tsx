@@ -20,6 +20,7 @@ import {
   JSONSchema,
   NAME,
   pattern,
+  resultOf,
   TILE_UI,
   UI,
   wish,
@@ -584,6 +585,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   // Reactive current time, ticking each minute so the day-relative status
   // (today / days-until-event) refreshes as the day rolls over.
   const nowCell = wish<number>({ query: "#now/60" });
+  const nowCellValue = resultOf(nowCell.result);
 
   // ==========================================================================
   // TICKET TRACKING
@@ -595,10 +597,8 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
 
     // No reference time yet during load: return no tickets rather than
     // categorizing against an arbitrary date.
-    if (nowCell.result == null) return [];
-
     // Create a single reference date for deterministic calculations
-    const today = new Date(nowCell.result);
+    const today = new Date(nowCellValue);
     today.setHours(0, 0, 0, 0);
 
     // Sort emails by date (newest first) so we keep most recent data

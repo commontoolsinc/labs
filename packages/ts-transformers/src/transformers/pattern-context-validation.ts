@@ -67,6 +67,7 @@ import type {
   CallbackBoundarySemantics,
   SupportedCallbackBoundaryKind,
 } from "../policy/callback-boundary.ts";
+import { isWishFactoryExpression } from "./structural-reactive-factory.ts";
 
 const EMPTY_OPAQUE_ROOTS = new Set<string>();
 const SES_SELF_CONTAINED_CALLBACK_BOUNDARIES = new Set<
@@ -140,6 +141,26 @@ export class PatternContextValidationTransformer
       // Skip JSX element containers; expression-level handling is shared.
       if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) {
         return ts.visitEachChild(node, visit, context.tsContext);
+      }
+
+      if (ts.isCallExpression(node)) {
+        const reactiveContext = context.getReactiveContext(node);
+        const isNestedCallee = ts.isCallExpression(node.parent) &&
+          node.parent.expression === node;
+        if (
+          !isNestedCallee &&
+          reactiveContext.kind === "compute" &&
+          reactiveContext.owner !== "standalone" &&
+          isWishFactoryExpression(node, checker)
+        ) {
+          context.reportDiagnosticOnce({
+            severity: "error",
+            type: "compute-context:local-reactive-use",
+            message:
+              "Wish factories must be created in the pattern body, not inside computed(), lift(), action(), or handler() callbacks (including through helper calls). Create the Wish outside the callback and capture its request or resultOf() projection instead.",
+            node,
+          });
+        }
       }
 
       // Check for function creation in pattern context
@@ -386,6 +407,63 @@ export class PatternContextValidationTransformer
     }
 
     const diagnosticsSeen = new Set<number>();
+    const invalidObserverSymbols = new Set<ts.Symbol>();
+
+    const collectInvalidObservers = (node: ts.Node): void => {
+      if (node !== func.body && ts.isFunctionLike(node)) return;
+      if (
+        ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
+        node.initializer && ts.isCallExpression(node.initializer) &&
+        detectCallKind(node.initializer, context.checker)?.kind ===
+          "availability-observer"
+      ) {
+        const symbol = context.checker.getSymbolAtLocation(node.name);
+        if (symbol) invalidObserverSymbols.add(symbol);
+      }
+      ts.forEachChild(node, collectInvalidObservers);
+    };
+    collectInvalidObservers(func.body);
+
+    const isRootedInInvalidObserver = (expression: ts.Expression): boolean => {
+      let current = expression;
+      while (true) {
+        if (ts.isIdentifier(current)) {
+          return invalidObserverSymbols.has(
+            context.checker.getSymbolAtLocation(current) as ts.Symbol,
+          );
+        }
+        if (
+          ts.isParenthesizedExpression(current) ||
+          ts.isAsExpression(current) ||
+          ts.isTypeAssertionExpression(current) ||
+          ts.isSatisfiesExpression(current) ||
+          ts.isNonNullExpression(current)
+        ) {
+          current = current.expression;
+          continue;
+        }
+        if (
+          ts.isPropertyAccessExpression(current) ||
+          ts.isElementAccessExpression(current)
+        ) {
+          current = current.expression;
+          continue;
+        }
+        if (ts.isCallExpression(current)) {
+          const callKind = detectCallKind(current, context.checker)?.kind;
+          if (
+            (callKind === "availability-result" ||
+              callKind === "partial-result") && current.arguments[0]
+          ) {
+            current = current.arguments[0];
+          } else {
+            current = current.expression;
+          }
+          continue;
+        }
+        return false;
+      }
+    };
 
     const findProblematicUse = (
       expression: ts.Expression,
@@ -398,6 +476,8 @@ export class PatternContextValidationTransformer
 
         if (
           ts.isCallExpression(node) &&
+          detectCallKind(node, context.checker)?.kind !==
+            "availability-guard" &&
           isOpaqueSourceExpression(
             node,
             EMPTY_OPAQUE_ROOTS,
@@ -405,6 +485,10 @@ export class PatternContextValidationTransformer
             context,
           )
         ) {
+          if (isRootedInInvalidObserver(node)) {
+            ts.forEachChild(node, visit);
+            return;
+          }
           culprit = node;
           return;
         }
@@ -420,6 +504,10 @@ export class PatternContextValidationTransformer
             context,
           )
         ) {
+          if (isRootedInInvalidObserver(node)) {
+            ts.forEachChild(node, visit);
+            return;
+          }
           culprit = node;
           return;
         }
@@ -434,6 +522,13 @@ export class PatternContextValidationTransformer
             context,
           )
         ) {
+          if (
+            invalidObserverSymbols.has(
+              context.checker.getSymbolAtLocation(node) as ts.Symbol,
+            )
+          ) {
+            return;
+          }
           culprit = node;
           return;
         }

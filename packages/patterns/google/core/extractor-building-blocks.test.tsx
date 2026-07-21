@@ -7,7 +7,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/extractor-building-blocks.test.tsx --root packages/patterns/google --verbose
  */
-import { computed, pattern, wish, Writable } from "commonfabric";
+import { computed, pattern, resultOf, wish, Writable } from "commonfabric";
 import BillExtractor, { processBills } from "./bill-extractor/index.tsx";
 import { createBillKey } from "./bill-extractor/helpers.ts";
 import GmailExtractor, {
@@ -140,9 +140,10 @@ export default pattern(() => {
 
   const nowCell = wish<number>({ query: "#now" });
 
+  const nowCellValue = resultOf(nowCell.result);
+
   const assert_process_bills_applies_payment_rules = computed(() => {
-    const nowMs = nowCell.result;
-    if (nowMs == null) return false;
+    const nowMs = nowCellValue;
     const upcomingDueDate = isoDateDaysFromNow(nowMs, 10);
     const oldDueDate = isoDateDaysFromNow(nowMs, -60);
     const manualDueDate = isoDateDaysFromNow(nowMs, 20);

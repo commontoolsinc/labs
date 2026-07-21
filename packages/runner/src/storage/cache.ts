@@ -2,6 +2,7 @@ export * from "@commonfabric/memory/interface";
 import * as V2Storage from "./v2.ts";
 
 export { SelectorTracker } from "./selector-tracker.ts";
+export type { StorageConnectionState } from "./interface.ts";
 export {
   defaultSettings,
   type Options,

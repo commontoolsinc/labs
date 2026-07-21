@@ -7,11 +7,14 @@ import {
   type FsProjection,
   generateText,
   handler,
+  hasError,
+  isPending,
   NAME,
   navigateTo,
   pattern,
   patternTool,
   type PatternToolResult,
+  resultOf,
   SELF,
   type Stream,
   TILE_UI,
@@ -142,15 +145,16 @@ const translatePattern = pattern<
   { language: string; content: string },
   string | undefined
 >(({ language, content }) => {
-  const genResult = generateText({
+  const translationRequest = generateText({
     system: computed(() => `Translate the content to ${language}.`),
     prompt: computed(() => `<to_translate>${content}</to_translate>`),
   });
+  const translation = resultOf(translationRequest);
 
   return computed(() => {
-    if (genResult.pending !== false) return undefined;
-    if (genResult.result == null) return "Error occurred";
-    return genResult.result;
+    if (isPending(translationRequest)) return undefined;
+    if (hasError(translationRequest)) return "Error occurred";
+    return translation;
   });
 });
 
@@ -183,18 +187,27 @@ const Note = pattern<NoteInput, NoteOutput>(
 
     // Notebooks and "All Notes" from wish scope (must be before actions that reference them)
     const notebooks = notebookWish.candidates;
-    const allNotesPiece = allNotesWish.result;
+    const allNotesPiece = hasError(allNotesWish.result)
+      ? undefined
+      : resultOf(allNotesWish.result);
 
     // Still need allPieces for write operations (push new notes, push backlinks)
-    const { allPieces } = wish<{ allPieces: Writable<MinimalPiece[]> }>(
+    const defaultWish = wish<{ allPieces: Writable<MinimalPiece[]> }>(
       { query: "#default", headless: true },
-    ).result!;
-    const mentionable = wish<MentionablePiece[] | Default<[]>>(
+    );
+    const { allPieces } = resultOf(defaultWish.result);
+    const mentionableWish = wish<MentionablePiece[] | Default<[]>>(
       { query: "#mentionable", headless: true },
-    ).result;
-    const _recentPieces = wish<MinimalPiece[]>(
+    );
+    const mentionable = hasError(mentionableWish.result)
+      ? []
+      : resultOf(mentionableWish.result);
+    const recentWish = wish<MinimalPiece[]>(
       { query: "#recent", headless: true },
-    ).result;
+    );
+    const _recentPieces = hasError(recentWish.result)
+      ? []
+      : resultOf(recentWish.result);
     const mentioned = new Writable<MentionablePiece[]>([]);
 
     // UI state
@@ -390,12 +403,12 @@ const Note = pattern<NoteInput, NoteOutput>(
     const editorUI = (
       <cf-code-editor
         $value={content}
-        $mentionable={mentionable!}
+        $mentionable={mentionable}
         $mentioned={mentioned}
         $pattern={patternJson}
         onbacklink-click={handlePieceLinkClick}
         onbacklink-create={handleNewBacklink({
-          mentionable: mentionable!,
+          mentionable,
           allPieces,
         })}
         language="text/markdown"

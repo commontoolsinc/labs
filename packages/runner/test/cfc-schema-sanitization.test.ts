@@ -905,6 +905,35 @@ describe("cfc schema sanitization", () => {
         .toContain(`format ${format}`);
     }
   });
+
+  it("uses exact JSON Schema numeric equality and own properties", () => {
+    expect(validateSchemaValue({
+      type: "number",
+      multipleOf: 1,
+    }, 1.0000000000000004)).toContain("multiple");
+    expect(validateSchemaValue({
+      type: "number",
+      multipleOf: 0.1,
+    }, 0.3)).toBeUndefined();
+    expect(validateSchemaValue({
+      type: "array",
+      uniqueItems: true,
+    }, [-0, 0])).toContain("not unique");
+    expect(validateSchemaValue({
+      type: "array",
+      uniqueItems: true,
+    }, [{ value: -0 }, { value: 0 }])).toContain("not unique");
+    expect(validateSchemaValue({
+      type: "object",
+      required: ["toString"],
+    }, {})).toContain("missing required property toString");
+    expect(validateSchemaValue({
+      type: "object",
+      dependentRequired: { cardNumber: ["toString"] },
+    }, { cardNumber: "1234" })).toContain(
+      "dependent property toString",
+    );
+  });
 });
 
 describe("schema-based prompt injection sanitization compatibility", () => {

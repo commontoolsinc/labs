@@ -63,6 +63,7 @@ import {
   pattern,
   type PerSpace,
   type PerUser,
+  resultOf,
   Stream,
   UI,
   type VNode,
@@ -673,7 +674,7 @@ export interface CozyPollOutput {
   optionCount: number;
   voteCount: number;
   // The session's current local day ("YYYY-MM-DD") that votes are filtered
-  // to; "" until the `#now` wish resolves.
+  // to; unavailable until the `#now` wish resolves.
   todayDate: string;
   // Votes cast on the current day — the only votes the UI shows and tallies.
   todaysVotes: readonly Vote[];
@@ -737,10 +738,11 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // piece-creating session's partition, and every other session reads
     // undefined from it (see docs/development/debugging/gotchas/
     // scoped-cell-pitfalls.md #5). The body cannot read the ambient clock, so
-    // `loadedAt` reads null until the wish resolves; every downstream read
-    // guards that load window (an empty vote view and a placeholder date).
+    // `loadedAt` remains unavailable until the wish resolves, which withholds
+    // downstream day-filter values during that load window.
     const loadedAtWish = wish<number>({ query: "#now" });
-    const loadedAt = computed(() => loadedAtWish.result ?? null);
+    const loadedAtWishValue = resultOf(loadedAtWish.result);
+    const loadedAt = computed(() => loadedAtWishValue);
     // Handler-refreshed override (ms epoch) so a tab left open across
     // midnight snaps forward on the next vote interaction. 0 = "this session
     // hasn't interacted"; every read falls back to `loadedAt`. The initial is
@@ -802,9 +804,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // voter's vote entity resolves (same reason `ranked` is computed here,
     // not per-option — see the swatch comment below).
     // `|| loadedAt` (not ??) covers both the unwritten cross-session read
-    // (undefined) and the seeded 0. The combined value is null while `#now`
-    // is still resolving; for that window the day key reads "" and the
-    // current-day vote set is empty.
+    // (undefined) and the seeded 0. The combined value remains unavailable
+    // while `#now` is still resolving, withholding the day key and vote set.
     const todayKey = computed(() => {
       const ref = today.get() || loadedAt;
       return ref ? dayKeyOf(ref) : "";

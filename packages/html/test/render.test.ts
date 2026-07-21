@@ -1,5 +1,13 @@
 import { beforeEach, describe, it } from "@std/testing/bdd";
-import { UI, VNode } from "@commonfabric/runtime-client";
+import {
+  $conn,
+  CellHandle,
+  type CellRef,
+  type RuntimeClient,
+  UI,
+  VNode,
+} from "@commonfabric/runtime-client";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { render, renderImpl } from "../src/render.ts";
 import { sanitizeEvent } from "../src/render-utils.ts";
 import * as assert from "./assert.ts";
@@ -17,6 +25,42 @@ class SynthesizedEvent extends Event {
 class KeyboardEvent extends SynthesizedEvent {}
 class InputEvent extends SynthesizedEvent {}
 class MouseEvent extends SynthesizedEvent {}
+
+function reactiveChild<T>(initial: T): CellHandle<T> {
+  const [runtime, ref] = reactiveHandleParts("reactive-child");
+  return new CellHandle(runtime, ref, initial);
+}
+
+function reactiveHandleParts(id: string): [RuntimeClient, CellRef] {
+  const connection = {
+    signal: new AbortController().signal,
+    subscribe: () => {},
+    unsubscribe: () => Promise.resolve(),
+    request: () => Promise.resolve({}),
+  };
+  const runtime = {
+    [$conn]: () => connection,
+  } as unknown as RuntimeClient;
+  const ref = {
+    space: "did:key:html-test",
+    id,
+    path: [],
+    type: "application/json",
+    schema: {},
+  } as unknown as CellRef;
+  return [runtime, ref];
+}
+
+class SchemaBoundCellHandle<T> extends CellHandle<T> {
+  override asSchema<U>(): CellHandle<U> {
+    return this as unknown as CellHandle<U>;
+  }
+}
+
+function reactiveRoot<T>(initial: T): CellHandle<T> {
+  const [runtime, ref] = reactiveHandleParts("reactive-root");
+  return new SchemaBoundCellHandle(runtime, ref, initial);
+}
 
 beforeEach(() => {
   mock = new MockDoc(
@@ -60,6 +104,56 @@ describe("render", () => {
     const button = parent.getElementsByTagName("ct-button")[0]!;
     assert.equal(button.getAttribute("data-ui-action"), "SubmitDirectCommand");
     assert.equal(button.innerHTML, "Go");
+  });
+
+  it("retains only a pending legacy root and recovers when usable", async () => {
+    const { renderOptions, document } = mock;
+    const root = reactiveRoot<VNode | DataUnavailable | undefined>({
+      type: "vnode",
+      name: "button",
+      props: { id: "initial" },
+      children: ["Initial"],
+    });
+    const parent = document.getElementById("root")!;
+
+    const cancel = render(parent, root as CellHandle<VNode>, {
+      ...renderOptions,
+      useLegacyRenderer: true,
+    });
+    let button = parent.getElementsByTagName("button")[0]!;
+    assert.equal(button.innerHTML, "Initial");
+
+    await root.set(DataUnavailable.pending());
+    button = parent.getElementsByTagName("button")[0]!;
+    assert.equal(button.innerHTML, "Initial");
+    assert.equal(button.getAttribute("data-cf-pending"), "true");
+    assert.equal(button.getAttribute("inert"), "");
+    assert.equal(button.getAttribute("aria-busy"), "true");
+
+    await root.set(DataUnavailable.syncing());
+    assert.equal(parent.getElementsByTagName("button").length, 0);
+
+    await root.set({
+      type: "vnode",
+      name: "button",
+      props: { id: "recovered" },
+      children: ["Recovered"],
+    });
+    button = parent.getElementsByTagName("button")[0]!;
+    assert.equal(button.innerHTML, "Recovered");
+    assert.equal(button.getAttribute("data-cf-pending"), undefined);
+
+    await root.set(undefined);
+    assert.equal(parent.getElementsByTagName("button").length, 0);
+
+    await root.set({
+      type: "vnode",
+      name: "button",
+      props: { id: "cancelled" },
+      children: ["Cancelled"],
+    });
+    cancel();
+    assert.equal(parent.getElementsByTagName("button").length, 0);
   });
 });
 
@@ -161,6 +255,56 @@ describe("renderImpl", () => {
     // So innerHTML should be "visibletrue" (no "false")
     assert.equal(div.innerHTML, "visibletrue");
     cancel();
+  });
+
+  it("retains a pending reactive [UI] node and clears other unavailable states", async () => {
+    const { renderOptions, document } = mock;
+    const child = reactiveChild<VNode | DataUnavailable>(
+      DataUnavailable.pending(),
+    );
+    const view = { [UI]: child } as unknown as VNode;
+    const parent = document.getElementById("root")!;
+
+    const cancel = renderImpl(parent, view, renderOptions);
+    const wrapper = parent.getElementsByTagName(
+      "cf-internal-fill-element",
+    )[0]!;
+    assert.equal(wrapper.getAttribute("data-cf-pending"), "true");
+    assert.equal(wrapper.getAttribute("inert"), "");
+    assert.equal(wrapper.getAttribute("aria-busy"), "true");
+
+    await child.set({
+      type: "vnode",
+      name: "button",
+      props: { id: "ready" },
+      children: ["Ready"],
+    });
+    let button = wrapper.getElementsByTagName("button")[0]!;
+    assert.equal(button.innerHTML, "Ready");
+    assert.equal(wrapper.getAttribute("data-cf-pending"), undefined);
+
+    await child.set(DataUnavailable.pending());
+    button = wrapper.getElementsByTagName("button")[0]!;
+    assert.equal(button.innerHTML, "Ready");
+    assert.equal(wrapper.getAttribute("data-cf-pending"), "true");
+
+    await child.set(DataUnavailable.error(new Error("failed")));
+    assert.equal(wrapper.innerHTML, "");
+    assert.equal(wrapper.getAttribute("data-cf-pending"), undefined);
+
+    await child.set({
+      type: "vnode",
+      name: "button",
+      props: { id: "recovered" },
+      children: ["Recovered"],
+    });
+    assert.equal(
+      wrapper.getElementsByTagName("button")[0]!.innerHTML,
+      "Recovered",
+    );
+
+    cancel();
+    assert.equal(parent.children.length, 0);
   });
 });
 
@@ -1128,6 +1272,101 @@ describe("children rendering", () => {
   // the actual renderer. Note: Testing reactive reordering (changing children
   // after initial render) requires a runtime with CellHandles, which is covered
   // by integration tests in packages/generated-patterns/integration/.
+
+  it("marks only a pending legacy child stale and inert", async () => {
+    const { renderOptions, document } = mock;
+    const child = reactiveChild<VNode | DataUnavailable>(
+      DataUnavailable.pending(),
+    );
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {},
+      children: [child],
+    };
+    const parent = document.getElementById("root")!;
+
+    const cancel = renderImpl(parent, vnode as unknown as VNode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    assert.equal(div.innerHTML, "");
+
+    await child.set({
+      type: "vnode",
+      name: "button",
+      props: { id: "ready" },
+      children: ["Ready"],
+    });
+    let button = div.getElementsByTagName("button")[0]!;
+    assert.equal(button.innerHTML, "Ready");
+
+    await child.set(DataUnavailable.pending());
+    button = div.getElementsByTagName("button")[0]!;
+    assert.equal(button.innerHTML, "Ready");
+    assert.equal(button.getAttribute("data-cf-pending"), "true");
+    assert.equal(button.getAttribute("inert"), "");
+    assert.equal(button.getAttribute("aria-busy"), "true");
+
+    await child.set({
+      type: "vnode",
+      name: "button",
+      props: { id: "updated" },
+      children: ["Updated"],
+    });
+    button = div.getElementsByTagName("button")[0]!;
+    assert.equal(button.innerHTML, "Updated");
+    assert.equal(button.getAttribute("data-cf-pending"), undefined);
+    assert.equal(button.getAttribute("inert"), undefined);
+    assert.equal(button.getAttribute("aria-busy"), undefined);
+
+    await child.set(DataUnavailable.error(new Error("failed")));
+    assert.equal(div.innerHTML, "");
+    cancel();
+  });
+
+  it("keeps legacy reactive prop updates inert while the child is pending", async () => {
+    const { renderOptions, document } = mock;
+    const options = {
+      ...renderOptions,
+      setProp<T>(element: T, key: string, value: unknown) {
+        if (key === "inert") {
+          const node = element as unknown as HTMLElement;
+          if (value) node.setAttribute(key, "");
+          else node.removeAttribute(key);
+          return;
+        }
+        renderOptions.setProp!(element, key, value);
+      },
+    };
+    const inert = reactiveChild(true);
+    const child = reactiveChild<VNode | DataUnavailable>(
+      DataUnavailable.pending(),
+    );
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {},
+      children: [child],
+    };
+    const parent = document.getElementById("root")!;
+
+    const cancel = renderImpl(parent, vnode as unknown as VNode, options);
+    await child.set({
+      type: "vnode",
+      name: "button",
+      props: { inert },
+      children: ["Ready"],
+    });
+    const button = parent.getElementsByTagName("button")[0]!;
+    assert.equal(button.getAttribute("inert"), "");
+
+    await child.set(DataUnavailable.pending());
+    await inert.set(false);
+    assert.equal(button.getAttribute("data-cf-pending"), "true");
+    assert.equal(button.getAttribute("inert"), "");
+    assert.equal(button.getAttribute("aria-busy"), "true");
+
+    cancel();
+  });
 
   it("renders children in correct order [A, B]", () => {
     const { renderOptions, document } = mock;

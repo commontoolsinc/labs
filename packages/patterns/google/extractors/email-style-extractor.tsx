@@ -18,11 +18,16 @@
  */
 import {
   computed,
-  generateObject,
+  generateObjectStream,
   handler,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   JSONSchema,
   NAME,
   pattern,
+  resultOf,
   UI,
   type VNode,
   wish,
@@ -166,6 +171,7 @@ export default pattern<Record<PropertyKey, never>, PatternOutput>(
     const reanalyzeFlag = new Writable(0).for("reanalyzeFlag");
 
     const nowCell = wish<number>({ query: "#now" });
+    const nowCellValue = resultOf(nowCell.result);
 
     // ========================================================================
     // AUTH
@@ -235,26 +241,33 @@ ${snippets}
 Extract the writing style patterns from these emails.`;
     });
 
-    const styleResult = generateObject<EmailStyle>({
+    const styleRequest = generateObjectStream<EmailStyle>({
       prompt: analysisPrompt as any,
       schema: STYLE_SCHEMA,
       system:
         "You are an expert linguist analyzing email writing patterns. Extract consistent style patterns across all provided emails. Be specific and use examples from the actual text.",
       model: "anthropic:claude-sonnet-4-5",
     });
+    const styleState = computed(() => {
+      const pending = isPending(styleRequest) || isSyncing(styleRequest);
+      if (
+        pending || hasError(styleRequest) ||
+        hasSchemaMismatch(styleRequest)
+      ) {
+        return { pending, result: undefined };
+      }
+      return { pending: false, result: styleRequest };
+    });
 
     // Auto-save LLM result to persistent Writable
     const _autoSaveStyle = computed(() => {
-      const result = styleResult.result;
-      const isPending = styleResult.pending;
+      const pending = styleState.pending;
+      const result = styleState.result;
       const currentSavedStyle = savedStyle.get();
 
-      if (!isPending && result && result !== currentSavedStyle) {
-        savedStyle.set(result as EmailStyle);
-        const nowMs = nowCell.result;
-        if (nowMs != null) {
-          lastAnalyzedAt.set(new Date(nowMs).toISOString());
-        }
+      if (!pending && result && result !== currentSavedStyle) {
+        savedStyle.set(result);
+        lastAnalyzedAt.set(new Date(nowCellValue).toISOString());
         const emails = allEmails || [];
         emailsAnalyzedCount.set(Number(emails.length) || 0);
       }
@@ -262,7 +275,7 @@ Extract the writing style patterns from these emails.`;
       return null;
     });
 
-    const isAnalyzing = !!styleResult.pending;
+    const isAnalyzing = computed(() => styleState.pending);
 
     // Whether a style has been extracted yet
     const hasStyle = !!savedStyle.get();

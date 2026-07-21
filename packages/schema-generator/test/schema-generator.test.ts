@@ -2,7 +2,11 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import ts from "typescript";
 import { SchemaGenerator } from "../src/schema-generator.ts";
-import { createTestProgram, getTypeFromCode } from "./utils.ts";
+import {
+  createTestProgram,
+  getTypeFromCode,
+  getTypeFromFiles,
+} from "./utils.ts";
 
 describe("SchemaGenerator", () => {
   describe("formatter chain", () => {
@@ -213,6 +217,130 @@ type CalculatorRequest = {
         { type: "undefined" },
         { type: "unknown", asCell: ["opaque"] },
       ]);
+    });
+
+    it("uses a registered type for a qualified synthetic union member", async () => {
+      const generator = new SchemaGenerator();
+      const { checker, type: registeredVariant } = await getTypeFromCode(
+        `interface RegisteredVariant {
+          reason: "error";
+          error: { message: string };
+        }`,
+        "RegisteredVariant",
+      );
+      const registeredMember = ts.factory.createTypeReferenceNode(
+        ts.factory.createQualifiedName(
+          ts.factory.createIdentifier("__cfHelpers"),
+          ts.factory.createIdentifier("RegisteredVariant"),
+        ),
+        undefined,
+      );
+      const unionNode = ts.factory.createUnionTypeNode([
+        ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+        registeredMember,
+      ]);
+      const typeRegistry = new WeakMap<ts.Node, ts.Type>();
+      typeRegistry.set(registeredMember, registeredVariant);
+
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        unionNode,
+        checker,
+        typeRegistry,
+      ) as Record<string, unknown>;
+
+      expect(schema).not.toBe(true);
+      expect(Array.isArray(schema.anyOf)).toBe(true);
+      expect(schema.anyOf as unknown[]).not.toContain(true);
+    });
+
+    it("formats a synthetic availability reference as an object arm", async () => {
+      const generator = new SchemaGenerator();
+      const { checker } = await getTypeFromCode(
+        "type Dummy = unknown;",
+        "Dummy",
+      );
+      const unionNode = ts.factory.createUnionTypeNode([
+        ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+        ts.factory.createTypeReferenceNode(
+          ts.factory.createQualifiedName(
+            ts.factory.createIdentifier("__cfHelpers"),
+            ts.factory.createIdentifier("HasError"),
+          ),
+          undefined,
+        ),
+      ]);
+
+      expect(
+        generator.generateSchemaFromSyntheticTypeNode(unionNode, checker),
+      ).toEqual({
+        anyOf: [{ type: "string" }, { type: "object" }],
+      });
+    });
+
+    it("formats availability types declared by Common Fabric as object arms", async () => {
+      const generator = new SchemaGenerator();
+      const { type, checker, typeNode } = await getTypeFromFiles(
+        {
+          "/commonfabric.d.ts": `
+            interface DataUnavailable {
+              readonly reason: "pending" | "error";
+            }
+          `,
+          "/entry.ts": `type Result = string | DataUnavailable;`,
+        },
+        "/entry.ts",
+        "Result",
+      );
+
+      expect(generator.generateSchema(type, checker, typeNode)).toEqual({
+        type: ["object", "string"],
+      });
+    });
+
+    it("recognizes availability types from ambient Common Fabric modules", async () => {
+      const generator = new SchemaGenerator();
+      const { type, checker, typeNode } = await getTypeFromFiles(
+        {
+          "/vendor.d.ts": `
+            declare module "commonfabric" {
+              export interface IsPending {
+                readonly reason: "pending";
+                readonly pending: true;
+              }
+            }
+          `,
+          "/entry.ts": `
+            import type { IsPending } from "commonfabric";
+            type Result = number | IsPending;
+          `,
+        },
+        "/entry.ts",
+        "Result",
+      );
+
+      expect(generator.generateSchema(type, checker, typeNode)).toEqual({
+        type: ["number", "object"],
+      });
+    });
+
+    it("does not treat a local same-named type as an availability variant", async () => {
+      const generator = new SchemaGenerator();
+      const { type, checker, typeNode } = await getTypeFromCode(
+        `type HasError = { local: string };`,
+        "HasError",
+      );
+
+      const schema = generator.generateSchema(
+        type,
+        checker,
+        typeNode,
+      ) as Record<string, unknown>;
+
+      expect(schema).toEqual({
+        type: "object",
+        properties: { local: { type: "string" } },
+        required: ["local"],
+      });
     });
 
     it("preserves computed Common Fabric UI keys in synthetic type literals", async () => {

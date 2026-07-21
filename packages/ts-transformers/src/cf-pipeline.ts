@@ -23,6 +23,7 @@ import {
 } from "./transformers/mod.ts";
 import { ClosureTransformer } from "./closures/transformer.ts";
 import { LiftLoweringTransformer } from "./lift/transformer.ts";
+import { AvailabilityAnalysisTransformer } from "./availability/transformer.ts";
 import {
   CrossStageState,
   Pipeline,
@@ -77,6 +78,10 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
   {
     name: "AssertDiagnosticsTransformer",
     create: (options) => new AssertDiagnosticsTransformer(options),
+  },
+  {
+    name: "AvailabilityAnalysisTransformer",
+    create: (options) => new AvailabilityAnalysisTransformer(options),
   },
   {
     name: "LiftLoweringTransformer",

@@ -280,19 +280,21 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     const hashes: string[] = [];
     let current = SelectorTracker.getStandardSchema(item);
     hashes.push(hashSchema(current));
-    if (schema.$defs !== undefined) {
+    const itemOwnsDefs = isRecord(current) && current.$defs !== undefined;
+    if (!itemOwnsDefs && schema.$defs !== undefined) {
       current = SelectorTracker.getStandardSchema(
         schemaWithProperties(current, { $defs: schema.$defs }),
       );
       hashes.push(hashSchema(current));
     }
     if (isRecord(current) && current.$ref !== undefined) {
+      const refFullSchema = current.$defs !== undefined ? current : schema;
       hashes.push(
         hashSchema(
           SelectorTracker.getStandardSchema(
             ContextualFlowControl.resolveSchemaRefs(
               current,
-              schema,
+              refFullSchema,
             ) as JSONSchema,
           ),
         ),

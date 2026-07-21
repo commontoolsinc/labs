@@ -3,6 +3,7 @@ import {
   handler,
   NAME,
   pattern,
+  resultOf,
   type Stream,
   UI,
   type VNode,
@@ -19,9 +20,10 @@ import {
 //    non-idempotent). The replacement is the `#now` wish:
 //      wish({ query: "#now" })     one snapshot, captured when it first resolves
 //      wish({ query: "#now/N" })   a fresh snapshot every N seconds
-//    Both are coarse (one second) and grid-aligned, and read `null` until the
-//    wish resolves — so guard for that load window. `new Date(ms)` with an
-//    explicit argument is deterministic and is NOT gated.
+//    Both are coarse (one second) and grid-aligned. Their results are
+//    unavailable until the wish resolves, so `resultOf()` projects each
+//    timestamp and dependent values remain unavailable during that window.
+//    `new Date(ms)` with an explicit argument is deterministic and is NOT gated.
 //
 // 2. Receiving input — delivery shaping (W3 events, plan-B cell flips). Input
 //    reaches a pattern two ways, and both are shaped by the same token bucket: the
@@ -62,11 +64,11 @@ const setTyped = handler<{ value: string }, { typed: Writable<string> }>(
 export interface ReactiveNowOutput {
   [NAME]: string;
   [UI]: VNode;
-  /** The one-shot load time, "HH:MM:SS" (or "…" before #now resolves). */
+  /** The one-shot load time, "HH:MM:SS"; unavailable before #now resolves. */
   loadedAt: string;
-  /** The ticking current time, "HH:MM:SS" (or "…"). */
+  /** The ticking current time, "HH:MM:SS"; unavailable while loading. */
   now: string;
-  /** Whole seconds since load, e.g. "12s ago" (or "…"). */
+  /** Whole seconds since load, e.g. "12s ago"; unavailable while loading. */
   sinceLoad: string;
   /** How many times the tap handler has actually been delivered. */
   taps: number;
@@ -87,22 +89,21 @@ export interface ReactiveNowOutput {
 export const ReactiveNow = pattern<void, ReactiveNowOutput>(() => {
   // One-shot: resolves once, then holds — a stable "when this instance loaded".
   const loadedAtCell = wish<number>({ query: "#now" });
+  const loadedAtCellValue = resultOf(loadedAtCell.result);
   // Ticking: a fresh coarse timestamp every second.
   const nowCell = wish<number>({ query: "#now/1" });
+  const nowCellValue = resultOf(nowCell.result);
 
-  const loadedAt = computed(() =>
-    loadedAtCell.result == null ? "…" : formatClock(loadedAtCell.result)
-  );
-  const now = computed(() =>
-    nowCell.result == null ? "…" : formatClock(nowCell.result)
-  );
+  const loadedAt = computed(() => formatClock(loadedAtCellValue));
+  const now = computed(() => formatClock(nowCellValue));
   // Elapsed since load. Both operands are #now-derived, so the subtraction stays
   // reactive and idempotent — no raw clock read anywhere.
   const sinceLoad = computed(() => {
-    if (loadedAtCell.result == null || nowCell.result == null) return "…";
     const seconds = Math.max(
       0,
-      Math.round((nowCell.result - loadedAtCell.result) / 1000),
+      Math.round(
+        (nowCellValue - loadedAtCellValue) / 1000,
+      ),
     );
     return `${seconds}s ago`;
   });

@@ -22,8 +22,11 @@ import {
   Default,
   generateObject,
   handler,
+  hasError,
+  isPending,
   NAME,
   pattern,
+  resultOf,
   schema,
   Stream,
   TILE_UI,
@@ -464,11 +467,12 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   const sortNewestFirst = new Writable(true).for("sortNewestFirst");
 
   // Get all pieces for note discovery
-  const { allPieces } = wish<{ allPieces: NotePiece[] }>({ query: "#default" })
-    .result!;
+  const defaultWish = wish<{ allPieces: NotePiece[] }>({ query: "#default" });
+  const { allPieces } = resultOf(defaultWish.result);
 
   // Reactive clock for relative-date display; ticks every 60s so labels refresh.
   const nowCell = wish<number>({ query: "#now/60" });
+  const nowCellValue = resultOf(nowCell.result);
 
   // Use createGoogleAuth for scopes that include gmailModify
   const {
@@ -551,7 +555,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
 
   // Analyze each task email with LLM
   const analyses = taskEmails.map((email: TaskEmail) => {
-    const llmAnalysis = generateObject<SuggestionResult>({
+    const analysisRequest = generateObject<SuggestionResult>({
       prompt: computed(() => {
         // Build notes context directly from availableNotes
         const notes = availableNotes || [];
@@ -590,14 +594,21 @@ Respond with the most appropriate action.`;
       schema: SUGGESTION_SCHEMA,
       model: "anthropic:claude-sonnet-4-5",
     });
+    const analysisResult = resultOf(analysisRequest);
+    const result = computed(() => {
+      if (isPending(analysisRequest) || hasError(analysisRequest)) {
+        return undefined;
+      }
+      return analysisResult;
+    });
 
-    // Return the cells directly without wrapping in computed;
-    // reactive reads unwrap them at the consuming sites.
     return {
       email,
-      pending: llmAnalysis.pending,
-      result: llmAnalysis.result,
-      error: llmAnalysis.error,
+      pending: isPending(analysisRequest),
+      result,
+      error: hasError(analysisRequest)
+        ? analysisRequest.error.message
+        : undefined,
     };
   });
 
@@ -921,8 +932,10 @@ Respond with the most appropriate action.`;
                                 marginBottom: "4px",
                               }}
                             >
-                              {analysis.email.from} •{" "}
-                              {formatDate(analysis.email.date, nowCell.result!)}
+                              {analysis.email.from} • {formatDate(
+                                analysis.email.date,
+                                nowCellValue!,
+                              )}
                             </div>
                             <div
                               style={{

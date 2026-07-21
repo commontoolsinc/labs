@@ -162,19 +162,31 @@ export const setPropDefault = <T>(target: T, key: string, value: unknown) => {
     return;
   }
 
-  // Handle data-* attributes specially - they need to be set as HTML attributes
-  // to populate the dataset property correctly
-  if (key.startsWith("data-") && target instanceof Element) {
-    // If value is null or undefined, remove the attribute
+  // data-* and aria-* names are attributes, not JavaScript property names.
+  // Using properties for aria-* would create an expando such as
+  // element["aria-busy"] and leave the accessibility tree unchanged.
+  const attributeTarget = target as T & {
+    getAttribute?: (name: string) => string | null;
+    hasAttribute?: (name: string) => boolean;
+    removeAttribute?: (name: string) => void;
+    setAttribute?: (name: string, value: string) => void;
+  };
+  if (
+    (key.startsWith("data-") || key.startsWith("aria-")) &&
+    typeof attributeTarget.getAttribute === "function" &&
+    typeof attributeTarget.hasAttribute === "function" &&
+    typeof attributeTarget.removeAttribute === "function" &&
+    typeof attributeTarget.setAttribute === "function"
+  ) {
     if (value == null) {
-      if (target.hasAttribute(key)) {
-        target.removeAttribute(key);
+      if (attributeTarget.hasAttribute(key)) {
+        attributeTarget.removeAttribute(key);
       }
     } else {
-      const currentValue = target.getAttribute(key);
+      const currentValue = attributeTarget.getAttribute(key);
       const newValue = String(value);
       if (currentValue !== newValue) {
-        target.setAttribute(key, newValue);
+        attributeTarget.setAttribute(key, newValue);
       }
     }
   } else if (!Object.is(target[key as keyof T], value)) {

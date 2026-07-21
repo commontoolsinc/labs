@@ -5,6 +5,8 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
 import { parseLink } from "../link-utils.ts";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
+import { readAvailabilityAwareCell } from "../data-unavailability.ts";
 
 /**
  * unless(condition, fallback) - || semantics
@@ -32,7 +34,16 @@ export function unless(
     const resultWithLog = result.withTx(tx);
     const inputsWithLog = inputsCell.withTx(tx);
 
-    const condition = inputsWithLog.key("condition").get();
+    const condition = readAvailabilityAwareCell(
+      tx,
+      inputsWithLog.key("condition"),
+      { surfaceReplicaSyncing: true },
+    );
+
+    if (isDataUnavailable(condition)) {
+      resultWithLog.setRawUntyped(condition, true);
+      return;
+    }
 
     // || semantics: if truthy, return condition; if falsy, return fallback
     const ref = condition

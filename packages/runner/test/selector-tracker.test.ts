@@ -6,6 +6,8 @@ import {
   StorageManager,
 } from "@commonfabric/runner/storage/cache.deno";
 import { ContextualFlowControl, type JSONSchema } from "@commonfabric/runner";
+import { hashSchema } from "@commonfabric/data-model/schema-hash";
+import { getLogger } from "@commonfabric/utils/logger";
 import type { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import { Runtime } from "../src/runtime.ts";
 import type { Result, Unit } from "../src/storage/interface.ts";
@@ -266,6 +268,35 @@ describe("SelectorTracker", () => {
         type: "object",
       });
       expect(second).not.toBe(first);
+    });
+  });
+
+  describe("checkAnyOf", () => {
+    it("resolves refs against definitions owned by the branch", () => {
+      const jsxElement = {
+        type: "object",
+        properties: {
+          type: { type: "string" },
+        },
+      } as const satisfies JSONSchema;
+      const schema = {
+        anyOf: [
+          { type: "undefined" },
+          {
+            $defs: { JSXElement: jsxElement },
+            $ref: "#/$defs/JSXElement",
+          },
+        ],
+      } as const satisfies JSONSchema;
+      const resolvedHash = hashSchema(SelectorTracker.getStandardSchema({
+        ...jsxElement,
+        $defs: { JSXElement: jsxElement },
+      }));
+      const logger = getLogger("cfc");
+      const warningCount = logger.counts.warn;
+
+      expect(SelectorTracker.checkAnyOf(schema, resolvedHash)).toBe(true);
+      expect(logger.counts.warn).toBe(warningCount);
     });
   });
 });
