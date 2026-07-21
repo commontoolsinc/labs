@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -94,22 +95,10 @@ function opRuns(
 }
 
 // The subscription push is timer-batched server-side (5ms default) and the
-// integrate lands asynchronously; poll the receiving replica (plain local
-// reads — pull() would fetch out-of-band and mask a missing push).
-async function waitForLocalValue(
-  runtime: Runtime,
-  read: () => unknown,
-  expected: unknown,
-  timeoutMs = 5_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    await runtime.idle();
-    if (JSON.stringify(read()) === JSON.stringify(expected)) return;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  expect(read()).toEqual(expected);
-}
+// integrate lands asynchronously, so a receiving replica reaches the value
+// after the sending runtime has already settled. The waits below therefore sink
+// on the receiver's own cell through `waitForCellValue`, which reads it locally
+// with get(); pull() would fetch out-of-band and mask a missing push.
 
 describe("incremental observation adoption (live)", () => {
   let server: MemoryV2Server.Server;
@@ -190,11 +179,13 @@ describe("incremental observation adoption (live)", () => {
       await rt1.idle();
       await rt1.storageManager.synced();
 
-      await waitForLocalValue(
-        rt2,
-        () => resultCell2.key("doubled").getAsQueryResult(),
-        20,
-      );
+      expect(
+        await waitForCellValue<number>(
+          rt2,
+          resultCell2.key("doubled"),
+          (v) => v === 20,
+        ),
+      ).toBe(20);
       const liveTrace = rt2.scheduler.getActionRunTrace();
       expect(opRuns(liveTrace)).toEqual([]);
       expect(adoptOkCount()).toBeGreaterThan(adoptedBefore);
@@ -209,11 +200,13 @@ describe("incremental observation adoption (live)", () => {
       expect((await txRepeated.commit()).error).toBeUndefined();
       await rt1.idle();
       await rt1.storageManager.synced();
-      await waitForLocalValue(
-        rt2,
-        () => resultCell2.key("doubled").getAsQueryResult(),
-        22,
-      );
+      expect(
+        await waitForCellValue<number>(
+          rt2,
+          resultCell2.key("doubled"),
+          (v) => v === 22,
+        ),
+      ).toBe(22);
       expect(
         opRuns(
           rt2.scheduler.getActionRunTrace().slice(beforeRepeated),
@@ -235,17 +228,21 @@ describe("incremental observation adoption (live)", () => {
       expect(
         opRuns(rt2.scheduler.getActionRunTrace().slice(beforeLocal)).length,
       ).toBeGreaterThan(0);
-      await waitForLocalValue(
-        rt2,
-        () => resultCell2.key("doubled").getAsQueryResult(),
-        14,
-      );
+      expect(
+        await waitForCellValue<number>(
+          rt2,
+          resultCell2.key("doubled"),
+          (v) => v === 14,
+        ),
+      ).toBe(14);
 
-      await waitForLocalValue(
-        rt1,
-        () => r1.key("doubled").getAsQueryResult(),
-        14,
-      );
+      expect(
+        await waitForCellValue<number>(
+          rt1,
+          r1.key("doubled"),
+          (v) => v === 14,
+        ),
+      ).toBe(14);
 
       cancelSink1();
       cancelSink2();

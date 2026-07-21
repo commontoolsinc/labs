@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import type { RuntimeProgram } from "../src/harness/types.ts";
@@ -67,21 +68,6 @@ const newRuntime = (storageManager: SharedServerStorageManager) =>
     apiUrl: new URL(import.meta.url),
     storageManager,
   });
-
-async function waitForProjectedResult(
-  runtime: Runtime,
-  read: () => unknown,
-  expected: unknown,
-): Promise<void> {
-  for (let attempt = 0; attempt < 20; attempt++) {
-    await runtime.idle();
-    if (JSON.stringify(read()) === JSON.stringify(expected)) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-
-  await runtime.idle();
-  expect(read()).toEqual(expected);
-}
 
 describe("scheduler cold-replica startup", () => {
   let server: MemoryV2Server.Server;
@@ -167,11 +153,12 @@ describe("scheduler cold-replica startup", () => {
       await writerTx.commit();
       await writer.storageManager.synced();
 
-      await waitForProjectedResult(
+      const projected = await waitForCellValue<{ observed: string }>(
         reader,
-        () => resultCell.getAsQueryResult(),
-        { observed: "arrived" },
+        resultCell,
+        (value) => value?.observed === "arrived",
       );
+      expect(projected).toEqual({ observed: "arrived" });
       cancelSink();
       expect(seen.at(-1)).toEqual({ observed: "arrived" });
     } finally {

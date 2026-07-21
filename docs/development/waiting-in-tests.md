@@ -350,6 +350,13 @@ control, and there is no single "it converged" promise to await.
   point. These are race checkpoints the surrounding interleaving depends on;
   bounded polling expresses "wait until the sabotage/replay happened" without
   coupling test control to the race window.
+- `packages/runner/test/memory-v2-stacked-commit.test.ts` — the wait for a
+  conflict rejection to reach the runner, read as the `commit-conflict` logger
+  count. `pushCommit`'s catch moves that count synchronously before it calls
+  `finalizeRejection`, and the logger exposes counts through readers only, with
+  no subscription, so nothing fires when one moves. The commit the test is
+  watching must not settle — that is the assertion — so its own promise is not
+  the signal either.
 - `packages/runner/integration/sqlite-cfc-commit-eval.test.ts` — the predicates
   read derived pattern result cells that settle only after a full server round
   trip (handler send, scheduler run, server commit, server-side re-derivation,
