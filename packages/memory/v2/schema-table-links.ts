@@ -20,7 +20,7 @@ const isPlainRecord = (value: FabricValue): value is FabricPlainObject =>
 /**
  * Maps schemas only in link-payload and legacy `$alias` schema positions.
  *
- * Link recognition and reconstruction go through the `cell-rep` chokepoint
+ * Link recognition and reconstruction use the cell-rep link API
  * ({@link isLinkRef} / {@link linkRefPayload} / {@link linkRefFrom}), so both
  * `modernCellRep` regimes are handled transparently — legacy envelope or
  * `FabricLink` instance alike. The `$alias` form is recognized locally here:
