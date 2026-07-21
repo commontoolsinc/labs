@@ -31,6 +31,13 @@ Deno.test("buildView: a pipe with no file is a read-only source", () => {
   assertEquals(r.editSource.editable, false);
 });
 
+Deno.test("buildView: blank input remains a read-only source", () => {
+  const r = buildView(" \n\t\n");
+
+  assertEquals(r.editSource.isDiff, undefined);
+  assertEquals(r.editSource.editable, false);
+});
+
 Deno.test("buildView: a diff takes the diff branch and a diff-semantics closure", () => {
   const r = buildView(DIFF);
   r.semantics(); // runs createDiffSemantics (the diff closure body)
@@ -38,6 +45,150 @@ Deno.test("buildView: a diff takes the diff branch and a diff-semantics closure"
     r.doc.lines.some((l) => l.text.startsWith("@@")),
     "rendered as a diff",
   );
+});
+
+Deno.test("buildView: commit output with no file diff takes the commit-editing branch", () => {
+  const commit = [
+    "commit 0123456789abcdef0123456789abcdef01234567",
+    "Author: A B <a@b.example>",
+    "Date:   Wed Jul 1 12:00:00 2026 -0700",
+    "",
+    "    Empty commit subject",
+    "",
+  ].join("\n");
+  const r = buildView(commit);
+  assertEquals(r.editSource.isDiff, true);
+  assertEquals(r.editSource.label, null);
+});
+
+Deno.test("buildView: a commit with no message takes the commit branch", () => {
+  const commit = [
+    "commit 0123456789abcdef0123456789abcdef01234567",
+    "Author: A B <a@b.example>",
+    "Date:   Wed Jul 1 12:00:00 2026 -0700",
+    "",
+  ].join("\n");
+  const r = buildView(commit);
+  assertEquals(r.editSource.isDiff, true);
+  assertEquals(r.editSource.label, null);
+});
+
+Deno.test("buildView: commit-looking prose without Git metadata stays a source file", () => {
+  const text = [
+    "commit 0123456789abcdef0123456789abcdef01234567",
+    "",
+    "    Ordinary prose",
+    "",
+  ].join("\n");
+  const named = buildView(text, "notes.txt");
+  const piped = buildView(text);
+
+  assertEquals(named.editSource.isDiff, undefined);
+  assertEquals(named.editSource.editable, true);
+  assertEquals(piped.editSource.isDiff, undefined);
+  assertEquals(piped.editSource.editable, false);
+});
+
+Deno.test("buildView: a commit token followed by ordinary text stays a source file", () => {
+  const r = buildView("commit deadbee\nordinary text\n", "notes.txt");
+
+  assertEquals(r.editSource.isDiff, undefined);
+  assertEquals(r.editSource.editable, true);
+});
+
+Deno.test("buildView: a standard commit header without its separator stays source", () => {
+  const text = [
+    "commit 0123456789abcdef0123456789abcdef01234567",
+    "Author: A B <a@b.example>",
+    "Date:   Wed Jul 1 12:00:00 2026 -0700",
+  ].join("\n");
+  const r = buildView(text, "notes.txt");
+
+  assertEquals(r.editSource.isDiff, undefined);
+  assertEquals(r.editSource.editable, true);
+});
+
+Deno.test("buildView: an email commit header without its separator stays source", () => {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  const text = [
+    `From ${sha} Mon Sep 17 00:00:00 2001`,
+    "From: A B <a@b.example>",
+    "Date: Wed, 1 Jul 2026 12:00:00 -0700",
+    "Subject: [PATCH] Subject",
+  ].join("\n");
+  const r = buildView(text, "notes.txt");
+
+  assertEquals(r.editSource.isDiff, undefined);
+  assertEquals(r.editSource.editable, true);
+});
+
+Deno.test("buildView: Git's built-in commit header formats take the commit branch", () => {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  const formats = [
+    ["short", "Author: A B <a@b.example>"],
+    ["full", "Author: A B <a@b.example>\nCommit: C D <c@d.example>"],
+    [
+      "fuller",
+      "Author: A B <a@b.example>\nAuthorDate: Wed Jul 1 12:00:00 2026 -0700\n" +
+      "Commit: C D <c@d.example>\nCommitDate: Wed Jul 1 12:00:00 2026 -0700",
+    ],
+    [
+      "raw",
+      `tree ${"a".repeat(40)}\nauthor A B <a@b.example> 1782932400 -0700\n` +
+      "committer C D <c@d.example> 1782932400 -0700",
+    ],
+  ];
+
+  for (const [format, headers] of formats) {
+    const text = `commit ${sha}\n${headers}\n\n    Subject\n`;
+    assertEquals(
+      buildView(text).editSource.isDiff,
+      true,
+      `${format} output is a commit view`,
+    );
+  }
+});
+
+Deno.test("buildView: compact and email commit formats retain diff ownership", () => {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  const formats = [
+    ["oneline", `${sha} Subject\n${DIFF}`],
+    ["reference", `0123 (Subject, 2026-07-20)\n${DIFF}`],
+    [
+      "email",
+      [
+        `From ${sha} Mon Sep 17 00:00:00 2001`,
+        "From: A B <a@b.example>",
+        "Date: Wed, 1 Jul 2026 12:00:00 -0700",
+        "Subject: [PATCH] Subject",
+        "",
+        "Body",
+        "",
+        DIFF,
+      ].join("\n"),
+    ],
+  ];
+
+  for (const [format, text] of formats) {
+    assertEquals(
+      buildView(text).editSource.isDiff,
+      true,
+      `${format} output retains commit-aware diff handling`,
+    );
+  }
+});
+
+Deno.test("buildView: CRLF commit-only output takes the commit branch", () => {
+  const text = [
+    "commit 0123456789abcdef0123456789abcdef01234567",
+    "Author: A B <a@b.example>",
+    "Date:   Wed Jul 1 12:00:00 2026 -0700",
+    "",
+    "    Subject",
+    "",
+  ].join("\r\n");
+
+  assertEquals(buildView(text).editSource.isDiff, true);
 });
 
 Deno.test("buildView: forceDiff pins diff mode even on non-diff text", () => {
