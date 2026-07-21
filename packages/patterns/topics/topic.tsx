@@ -83,10 +83,15 @@ export interface TopicPiece {
   lastActivityAt: number;
   /** This topic's own place in the board's prose graph, derived read-side
    * from `mentionable` (the sibling pieces it links, resolved from the
-   * board's own list). Both sets stay empty until `mentionable` is wired. */
-  crossrefs:
+   * board's own list). Both sets stay empty until `mentionable` is wired.
+   * Optional (2026-07-21 deploy): pieces healed before their `mentionable`
+   * link exists carry a session-scoped crossrefs indirection that resolves
+   * undefined outside the minting session; the list projection must accept
+   * that rather than fail argument validation. */
+  crossrefs?:
     | { refsOut: TopicPiece[]; referencedBy: TopicPiece[] }
-    | Default<{ refsOut: []; referencedBy: [] }>;
+    | Default<{ refsOut: []; referencedBy: [] }>
+    | undefined;
   addComment: Stream<{ body: string }>;
   addLink: Stream<{ kind: TopicLinkKind; url: string; label: string }>;
   setBody: Stream<{ body: string }>;
