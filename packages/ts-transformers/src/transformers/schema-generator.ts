@@ -5,6 +5,7 @@ import {
   TransformationContext,
 } from "../core/mod.ts";
 import { createSchemaTransformerV2 } from "@commonfabric/schema-generator";
+import { numberFromExpression } from "@commonfabric/schema-generator/numeric-expression";
 import {
   getNodeText,
   getTypeFromTypeNodeWithFallback,
@@ -544,7 +545,8 @@ function evaluateExpression(
   checker: ts.TypeChecker,
 ): unknown {
   if (ts.isStringLiteral(node)) return node.text;
-  if (ts.isNumericLiteral(node)) return Number(node.text);
+  const numeric = numberFromExpression(node, checker);
+  if (numeric !== undefined) return numeric;
   if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
   if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
   if (node.kind === ts.SyntaxKind.NullKeyword) return null;

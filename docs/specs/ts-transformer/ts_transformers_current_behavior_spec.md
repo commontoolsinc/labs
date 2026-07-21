@@ -1338,7 +1338,11 @@ Recognized call forms:
 Behavior:
 
 1. resolve type from `typeRegistry` (preferred) or checker fallback
-2. evaluate literal options object
+2. evaluate literal options object — string, boolean and `null` literals,
+   object and array literals, enum constants, and numbers in any of their
+   spellings (bare literal, sign-prefixed, or the `NaN` / `Infinity` globals,
+   the latter only where the name is not shadowed). A property whose value is
+   none of these is dropped from the options object.
 3. extract `widenLiterals` generation option
 4. generate schema via `createSchemaTransformerV2`
 5. merge non-generation options into resulting schema object
