@@ -306,8 +306,10 @@ boundary the test can await without adding one to production code.
 - `packages/shell/integration/piece.test.ts` — the one poll that reads a freshly
   reloaded piece (`cc.get(pieceId, true)`) has no registered sink, so it stays a
   bounded poll on its own sync round trip. The other result-cell reads in this
-  file, and every such read in `counter.test.ts` and `nested-counter.test.ts`,
-  resolve a `defer()` from the existing `resultCell.sink(...)`.
+  file wait through `waitForCellValue`, which sinks on the result cell and reads
+  it at quiescence. The equivalent reads in `counter.test.ts` and
+  `nested-counter.test.ts` resolve a `defer()` from an existing
+  `resultCell.sink(...)`.
 
 ### A pull that drives its own loading
 
