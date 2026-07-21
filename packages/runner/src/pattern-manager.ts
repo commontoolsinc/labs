@@ -41,7 +41,7 @@ import {
   type SourceDoc,
   sourceDocKey,
   WRITE_TARGET_EDGE_SYNC_SCHEMA,
-  writeCompiledDocs,
+  writeSourceAndCompiledDocs,
   writeSourceDocs,
 } from "./compilation-cache/cell-cache.ts";
 import {
@@ -1770,8 +1770,9 @@ export class PatternManager {
   ): Promise<void> {
     const writebackStart = performance.now();
     await this.syncSourceCacheWriteTargets(space, modules);
+    let committedModuleDelegations = moduleDelegations;
     const { error } = await this.runtime.editWithRetry((tx) => {
-      writeSourceDocs(
+      committedModuleDelegations = writeSourceDocs(
         this.runtime,
         space,
         modules,
@@ -1788,7 +1789,7 @@ export class PatternManager {
       ]);
       throw throwableStorageError(error);
     }
-    this.runtime.registerModuleDelegations(moduleDelegations);
+    this.runtime.registerModuleDelegations(committedModuleDelegations);
   }
 
   /**
@@ -1824,16 +1825,9 @@ export class PatternManager {
     // recovery after a compiler-version bump.
     const importEdges = modules.reduce((n, m) => n + m.imports.length, 0);
     const writebackMaxRetries = Math.max(16, 2 * importEdges + 8);
+    let committedModuleDelegations = moduleDelegations;
     const { error } = await this.runtime.editWithRetry((tx) => {
-      writeSourceDocs(
-        this.runtime,
-        space,
-        modules,
-        entryIdentity,
-        tx,
-        moduleDelegations,
-      );
-      writeCompiledDocs(
+      committedModuleDelegations = writeSourceAndCompiledDocs(
         this.runtime,
         space,
         modules,
@@ -1850,7 +1844,7 @@ export class PatternManager {
       ]);
       throw throwableStorageError(error);
     }
-    this.runtime.registerModuleDelegations(moduleDelegations);
+    this.runtime.registerModuleDelegations(committedModuleDelegations);
   }
 
   // Write-target pre-syncs carry the one-hop edge selector (CT-1848): a

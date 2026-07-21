@@ -382,10 +382,12 @@ current module may exercise. Since content-addressing does not authenticate
 that mutable field, source documents carry the compiler integrity stamp on the
 delegation field alone; compiled documents authenticate it with their existing
 root compiler stamp. Loaders discard delegation metadata without the applicable
-stamp. The general source/compiled save path merges newly derived entries only
-with authenticated stored entries under `editWithRetry`; it never replaces
-entries, because one content-addressed successor can be shared by patterns
-updated from different predecessors. Because
+stamp. The general source/compiled save path computes one union of newly derived
+entries and authenticated entries already stored in either document set under
+`editWithRetry`, writes that same union to both sets, and registers the union
+from the successful commit in the active runtime. It never replaces entries,
+because one content-addressed successor can be shared by patterns updated from
+different predecessors. Because
 `identity` is a one-way Merkle hash, the `imports` links are load-bearing (stored
 explicitly), but the parent hash commits to its children's identities, so the
 graph wiring is verifiable on load by recomputing identities and checking each
@@ -418,7 +420,9 @@ and binding path must still match exactly. A rename does not inherit authority.
 Ambiguous canonical filenames and unauthenticated metadata fail closed by
 receiving no delegation. If a runtime-version miss recompiles from source, the
 compiled-cache repair carries the authenticated map forward so later warm loads
-retain the same authority chain.
+retain the same authority chain. When multiple patterns converge on one
+successor across restarts, save-time unioning preserves every predecessor in
+both cache sets and in the runtime that performed the later update.
 
 ## Verifiable Execution Implications
 

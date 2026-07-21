@@ -734,7 +734,8 @@ export const WRITE_TARGET_EDGE_SYNC_SCHEMA = {
  * Write every emitted module as a `pattern:<identity>` cell into `space`, each
  * import a sigil link to its dependency cell (the entry additionally linking any
  * otherwise-unreachable module). Idempotent (content-addressed keys). The caller
- * owns the transaction's commit.
+ * owns the transaction's commit. Returns the authenticated delegation union
+ * actually staged by this write.
  */
 export function writeSourceDocs(
   runtime: Runtime,
@@ -743,9 +744,21 @@ export function writeSourceDocs(
   entryIdentity: string,
   tx: IExtendedStorageTransaction,
   moduleDelegations: ModuleDelegationMap = EMPTY_MODULE_DELEGATIONS,
-): void {
+): ModuleDelegationMap {
   assertNoUnpinnedFabricImports(modules);
-  const docs = buildSourceDocs(modules, entryIdentity, moduleDelegations);
+  const effectiveModuleDelegations = effectiveModuleDelegationsForWrite(
+    runtime,
+    space,
+    modules,
+    tx,
+    moduleDelegations,
+    { source: true },
+  );
+  const docs = buildSourceDocs(
+    modules,
+    entryIdentity,
+    effectiveModuleDelegations,
+  );
   withCompileCacheBuiltin(tx, () => {
     for (const [identity, doc] of docs) {
       const baseCell = runtime.getCell<StoredSourceDoc>(
@@ -761,21 +774,9 @@ export function writeSourceDocs(
       const existingAnnotations = identity === entryIdentity
         ? existing?.annotations
         : undefined;
-      // Never turn arbitrary mutable source metadata into trusted authority:
-      // only merge predecessor entries carrying the compiler's field label.
-      const authenticatedExistingDelegations = cellCarriesIntegrity(
-          baseCell,
-          COMPILED_INTEGRITY_ATOM,
-          tx,
-          SOURCE_DELEGATION_PATH,
-        )
-        ? existing?.delegatedModuleIdentities
-        : undefined;
-      const delegatedModuleIdentities = validDelegatedModuleIdentities(
-        identity,
-        authenticatedExistingDelegations,
-        doc.delegatedModuleIdentities,
-      );
+      const delegatedModuleIdentities = [
+        ...(doc.delegatedModuleIdentities ?? []),
+      ];
       // A source document without delegation metadata remains an ordinary,
       // self-verifying cache write. Attaching an addIntegrity schema even when
       // the field is absent would make every legacy/direct source-cache write
@@ -806,6 +807,7 @@ export function writeSourceDocs(
       } as StoredSourceDoc);
     }
   });
+  return effectiveModuleDelegations;
 }
 
 /**
@@ -1109,12 +1111,89 @@ function cellCarriesIntegrity(
 }
 
 /**
+ * Compute the authority that a cache write may persist. Requested delegations
+ * are unioned with only compiler-authenticated metadata already stored at the
+ * selected source/compiled targets. Combined source+compiled saves use both
+ * targets so the two document sets cannot diverge when shared successors are
+ * updated by different patterns.
+ */
+function effectiveModuleDelegationsForWrite(
+  runtime: Runtime,
+  space: MemorySpace,
+  modules: readonly CacheableModule[],
+  tx: IExtendedStorageTransaction,
+  requested: ModuleDelegationMap,
+  targets: {
+    source?: boolean;
+    compiledRuntimeVersion?: string;
+  },
+): Map<string, ReadonlySet<string>> {
+  const effective = new Map<string, ReadonlySet<string>>();
+  for (const module of modules) {
+    const candidates: unknown[] = [
+      [...(requested.get(module.identity) ?? [])],
+    ];
+    if (targets.source) {
+      const sourceCell = runtime.getCell<StoredSourceDoc>(
+        space,
+        sourceDocKey(module.identity),
+        undefined,
+        tx,
+      );
+      const existing = sourceCell.get();
+      // Mutable source metadata is authority only when the compiler attested
+      // this exact field; the source code/import graph verifies separately.
+      if (
+        cellCarriesIntegrity(
+          sourceCell,
+          COMPILED_INTEGRITY_ATOM,
+          tx,
+          SOURCE_DELEGATION_PATH,
+        )
+      ) {
+        candidates.push(existing?.delegatedModuleIdentities);
+      }
+    }
+    if (targets.compiledRuntimeVersion !== undefined) {
+      const compiledCell = runtime.getCell<StoredCompiledDoc>(
+        space,
+        compiledDocKey(
+          targets.compiledRuntimeVersion,
+          module.identity,
+        ),
+        undefined,
+        tx,
+      );
+      const existing = compiledCell.get();
+      if (
+        cellCarriesIntegrity(
+          compiledCell,
+          COMPILED_INTEGRITY_ATOM,
+          tx,
+        )
+      ) {
+        candidates.push(existing?.delegatedModuleIdentities);
+      }
+    }
+    const delegated = validDelegatedModuleIdentities(
+      module.identity,
+      ...candidates,
+    );
+    if (delegated.length > 0) {
+      effective.set(module.identity, new Set(delegated));
+    }
+  }
+  return effective;
+}
+
+/**
  * Write every emitted module's compiled body as a
  * `compileCache:<runtimeVersion>/<identity>` cell into `space`, stamped with the
  * compiler integrity atom, imports linked to dependency compiled cells (the
  * entry additionally linking any otherwise-unreachable module). The caller must
  * `prepareCfc()` + commit the tx under an enforcing CFC mode for the integrity
- * label to persist.
+ * label to persist. Returns the authenticated delegation union actually staged
+ * by this write.
  */
 export function writeCompiledDocs(
   runtime: Runtime,
@@ -1126,8 +1205,16 @@ export function writeCompiledDocs(
     moduleDelegations?: ModuleDelegationMap;
   },
   tx: IExtendedStorageTransaction,
-): void {
+): ModuleDelegationMap {
   assertNoUnpinnedFabricImports(modules);
+  const effectiveModuleDelegations = effectiveModuleDelegationsForWrite(
+    runtime,
+    space,
+    modules,
+    tx,
+    opts.moduleDelegations ?? EMPTY_MODULE_DELEGATIONS,
+    { compiledRuntimeVersion: opts.runtimeVersion },
+  );
   const extraRoots = unreachedRoots(modules, entryIdentity);
   const schema = compiledDocWriteSchema();
   withCompileCacheBuiltin(tx, () => {
@@ -1141,18 +1228,9 @@ export function writeCompiledDocs(
       // Fix B: derive the record surface from the compiled body once, here, so
       // the boot-time record build reads it instead of re-parsing per load.
       const derived = deriveModuleRecordFields(module.js);
-      const existing = cell.get() as StoredCompiledDoc | undefined;
-      const authenticatedExistingDelegations = cellCarriesIntegrity(
-          cell,
-          COMPILED_INTEGRITY_ATOM,
-          tx,
-        )
-        ? existing?.delegatedModuleIdentities
-        : undefined;
       const delegatedModuleIdentities = validDelegatedModuleIdentities(
         module.identity,
-        authenticatedExistingDelegations,
-        [...(opts.moduleDelegations?.get(module.identity) ?? [])],
+        [...(effectiveModuleDelegations.get(module.identity) ?? [])],
       );
       const policyManifests = module.policyManifests?.map((input) => {
         const artifact = validateCfcPolicyArtifactManifest(input);
@@ -1200,6 +1278,56 @@ export function writeCompiledDocs(
       } as StoredCompiledDoc);
     }
   });
+  return effectiveModuleDelegations;
+}
+
+/**
+ * Save matching source and compiled document sets with one authenticated
+ * delegation union. This is the cache write path for compilation and repair:
+ * an authority chain already present in either set is preserved in both, and
+ * the returned map is the exact committed authority the caller must install in
+ * its runtime after the transaction succeeds.
+ */
+export function writeSourceAndCompiledDocs(
+  runtime: Runtime,
+  space: MemorySpace,
+  modules: readonly CacheableModule[],
+  entryIdentity: string,
+  opts: {
+    runtimeVersion: string;
+    moduleDelegations?: ModuleDelegationMap;
+  },
+  tx: IExtendedStorageTransaction,
+): ModuleDelegationMap {
+  assertNoUnpinnedFabricImports(modules);
+  const effectiveModuleDelegations = effectiveModuleDelegationsForWrite(
+    runtime,
+    space,
+    modules,
+    tx,
+    opts.moduleDelegations ?? EMPTY_MODULE_DELEGATIONS,
+    {
+      source: true,
+      compiledRuntimeVersion: opts.runtimeVersion,
+    },
+  );
+  writeSourceDocs(
+    runtime,
+    space,
+    modules,
+    entryIdentity,
+    tx,
+    effectiveModuleDelegations,
+  );
+  writeCompiledDocs(
+    runtime,
+    space,
+    modules,
+    entryIdentity,
+    { ...opts, moduleDelegations: effectiveModuleDelegations },
+    tx,
+  );
+  return effectiveModuleDelegations;
 }
 
 /**

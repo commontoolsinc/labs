@@ -9,7 +9,6 @@ import {
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   loadCompiledClosure,
-  loadSourceClosure,
   loadVerifiedSourceClosure,
   setCompileCacheRuntimeVersionForTesting,
 } from "../../runner/src/compilation-cache/cell-cache.ts";
@@ -113,17 +112,19 @@ describe("setsrc module delegation", () => {
     expect(await invokeSetName(first, "middle")).toBe("v2:middle");
     await first.setPattern(authorizedWriterProgram("v3"));
     expect(await invokeSetName(first, "after")).toBe("v3:after");
-    await second.setPattern(authorizedWriterProgram("v3"));
+    const successorRef = getPatternIdentityRef(first.getCell())!;
 
-    const successorRef = getPatternIdentityRef(second.getCell())!;
-    expect(getPatternIdentityRef(first.getCell())).toEqual(successorRef);
+    await runtime.patternManager.flushCompileCacheWrites();
+    await manager.synced();
+    const patternSpace = manager.getSpace();
+    const patternSpaceName = manager.getSpaceName()!;
 
-    const loadClosure = async (identity: string) => {
-      const tx = runtime.edit();
+    const loadClosure = async (targetRuntime: Runtime, identity: string) => {
+      const tx = targetRuntime.edit();
       try {
         return await loadVerifiedSourceClosure(
-          runtime,
-          manager.getSpace(),
+          targetRuntime,
+          patternSpace,
           identity,
           tx,
         );
@@ -131,30 +132,6 @@ describe("setsrc module delegation", () => {
         tx.abort();
       }
     };
-    const firstClosure = await loadClosure(firstRef.identity);
-    const intermediateClosure = await loadClosure(intermediateRef.identity);
-    const secondClosure = await loadClosure(secondRef.identity);
-    const successorClosure = await loadClosure(successorRef.identity);
-
-    const byName = (closure: NonNullable<typeof firstClosure>) =>
-      new Map([...closure].map(([identity, doc]) => [doc.filename, identity]));
-    const firstByName = byName(firstClosure!);
-    const intermediateByName = byName(intermediateClosure!);
-    const secondByName = byName(secondClosure!);
-
-    for (const [identity, doc] of successorClosure!) {
-      if (!doc.filename.startsWith("/")) continue;
-      const delegated = (doc as typeof doc & {
-        delegatedModuleIdentities?: readonly string[];
-      }).delegatedModuleIdentities ?? [];
-      expect(delegated).toContain(firstByName.get(doc.filename));
-      expect(delegated).toContain(intermediateByName.get(doc.filename));
-      expect(delegated).toContain(secondByName.get(doc.filename));
-      expect(delegated).not.toContain(identity);
-    }
-
-    await runtime.patternManager.flushCompileCacheWrites();
-    await manager.synced();
     const freshRuntimes: Runtime[] = [];
     try {
       const createFreshRuntime = () => {
@@ -171,80 +148,105 @@ describe("setsrc module delegation", () => {
       const createFreshManager = async (freshRuntime: Runtime) => {
         const freshSession = await createSession({
           identity: signer,
-          spaceName: manager.getSpaceName()!,
+          spaceName: patternSpaceName,
         });
         const freshManager = new PieceManager(freshSession, freshRuntime);
         await freshManager.synced();
         return freshManager;
       };
 
-      // The ordinary compiled-cache cold start still exercises delegation at
-      // the authorization boundary.
-      const coldRuntime = createFreshRuntime();
-      const coldManager = await createFreshManager(coldRuntime);
-      const coldPiece = await new PiecesController(coldManager).get(
-        first.id,
-        true,
-      );
-      expect(await invokeSetName(coldPiece, "cold")).toBe("v3:cold");
-
-      const bumpedRuntimeVersion = "setsrc-delegation-version-b";
+      // Restart before the second pattern converges on the already-stored
+      // successor. Use a fresh compiled-cache variant so the source document
+      // contributes the first pattern's chain while the second update
+      // contributes the new chain. Both sets must persist their authenticated
+      // union, and that committed union must be installed in this runtime.
+      const bumpedRuntimeVersion = "setsrc-delegation-shared-successor";
       const restoreRuntimeVersion = setCompileCacheRuntimeVersionForTesting(
         bumpedRuntimeVersion,
       );
       try {
-        const repairRuntime = createFreshRuntime();
-        const inspectTx = repairRuntime.edit();
-        let authenticatedSourceClosure: Awaited<
-          ReturnType<typeof loadSourceClosure>
-        >;
-        try {
-          authenticatedSourceClosure = await loadSourceClosure(
-            repairRuntime,
-            manager.getSpace(),
-            successorRef.identity,
-            inspectTx,
+        const mergeRuntime = createFreshRuntime();
+        const mergeManager = await createFreshManager(mergeRuntime);
+        const mergePieces = new PiecesController(mergeManager);
+        const mergeSecond = await mergePieces.get(second.id, true);
+        await mergeSecond.setPattern(authorizedWriterProgram("v3"));
+        expect(getPatternIdentityRef(mergeSecond.getCell())).toEqual(
+          successorRef,
+        );
+
+        const registeredTx = mergeRuntime.edit();
+        const registeredDelegations = registeredTx.getCfcState()
+          .moduleDelegations.get(successorRef.identity) ?? [];
+        registeredTx.abort();
+        expect(registeredDelegations).toContain(firstRef.identity);
+        expect(registeredDelegations).toContain(intermediateRef.identity);
+        expect(registeredDelegations).toContain(secondRef.identity);
+
+        // This resolves through the successor module already evaluated for
+        // mergeSecond. It therefore depends on save-time registration of the
+        // complete A+B union; reloading a closure cannot rescue a partial map.
+        const mergeFirst = await mergePieces.get(first.id, true);
+        expect(await invokeSetName(mergeFirst, "merged")).toBe("v3:merged");
+
+        await mergeRuntime.patternManager.flushCompileCacheWrites();
+        await mergeManager.synced();
+
+        const firstClosure = await loadClosure(mergeRuntime, firstRef.identity);
+        const intermediateClosure = await loadClosure(
+          mergeRuntime,
+          intermediateRef.identity,
+        );
+        const secondClosure = await loadClosure(
+          mergeRuntime,
+          secondRef.identity,
+        );
+        const successorClosure = await loadClosure(
+          mergeRuntime,
+          successorRef.identity,
+        );
+        const byName = (closure: NonNullable<typeof firstClosure>) =>
+          new Map(
+            [...closure].map(([identity, doc]) => [doc.filename, identity]),
           );
-          expect(
-            authenticatedSourceClosure?.get(successorRef.identity)
-              ?.delegatedModuleIdentities?.length,
-          ).toBeGreaterThan(0);
-        } finally {
-          inspectTx.abort();
+        const firstByName = byName(firstClosure!);
+        const intermediateByName = byName(intermediateClosure!);
+        const secondByName = byName(secondClosure!);
+
+        for (const [identity, doc] of successorClosure!) {
+          if (!doc.filename.startsWith("/")) continue;
+          const delegated = doc.delegatedModuleIdentities ?? [];
+          expect(delegated).toContain(firstByName.get(doc.filename));
+          expect(delegated).toContain(intermediateByName.get(doc.filename));
+          expect(delegated).toContain(secondByName.get(doc.filename));
+          expect(delegated).not.toContain(identity);
         }
 
-        const repairManager = await createFreshManager(repairRuntime);
-        await new PiecesController(repairManager).get(
-          first.id,
-          true,
-        );
-        const delegationTx = repairRuntime.edit();
-        expect(
-          delegationTx.getCfcState().moduleDelegations.get(
-            successorRef.identity,
-          )?.length,
-        ).toBeGreaterThan(0);
-        delegationTx.abort();
-        await repairRuntime.patternManager.flushCompileCacheWrites();
-        await repairManager.synced();
-
-        const compiledTx = repairRuntime.edit();
+        const compiledTx = mergeRuntime.edit();
         try {
-          const repairedClosure = await loadCompiledClosure(
-            repairRuntime,
-            manager.getSpace(),
+          const compiledClosure = await loadCompiledClosure(
+            mergeRuntime,
+            patternSpace,
             successorRef.identity,
             { runtimeVersion: bumpedRuntimeVersion },
             compiledTx,
           );
-          for (const [identity, sourceDoc] of authenticatedSourceClosure!) {
-            expect(
-              repairedClosure.get(identity)?.delegatedModuleIdentities,
-            ).toEqual(sourceDoc.delegatedModuleIdentities);
+          for (const [identity, sourceDoc] of successorClosure!) {
+            expect(compiledClosure.get(identity)?.delegatedModuleIdentities)
+              .toEqual(sourceDoc.delegatedModuleIdentities);
           }
         } finally {
           compiledTx.abort();
         }
+
+        // A later cold runtime can warm-hit only the repaired compiled set;
+        // both predecessor chains still have to authorize the first pattern.
+        const coldRuntime = createFreshRuntime();
+        const coldManager = await createFreshManager(coldRuntime);
+        const coldPiece = await new PiecesController(coldManager).get(
+          first.id,
+          true,
+        );
+        expect(await invokeSetName(coldPiece, "cold")).toBe("v3:cold");
       } finally {
         restoreRuntimeVersion();
       }
