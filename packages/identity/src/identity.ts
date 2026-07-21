@@ -6,6 +6,7 @@ import {
   Ed25519Verifier,
 } from "./ed25519/index.ts";
 import { AsBytes, DIDKey, KeyPairRaw, Signer, Verifier } from "./interface.ts";
+import { fromPEM, pkcs8ToEd25519Raw } from "./ed25519/utils.ts";
 import { hash } from "./utils.ts";
 
 const textEncoder = new TextEncoder();
@@ -118,25 +119,20 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return new Identity(signer);
   }
 
-  // Derive an identity from BIP39 *entropy* — the 32 bytes a 24-word mnemonic
-  // encodes — rather than from the words themselves.
+  // Recover the raw seed for this identity — the same 32 bytes that
+  // `fromMnemonic` derives from a BIP39 phrase.
   //
-  // This names a contract that is currently implicit: `fromMnemonic` maps the
-  // phrase to entropy and uses those bytes DIRECTLY as the ed25519 seed, with
-  // no KDF in between. Callers that carry the entropy instead of the words
-  // (a QR code, for instance, where 24 words do not fit but 32 bytes do) can
-  // therefore reach the same identity without depending on bip39 themselves.
+  // The inverse of `fromRaw`, and the reason it is useful: `fromMnemonic` maps
+  // the phrase to BIP39 entropy and uses those bytes DIRECTLY as the ed25519
+  // seed, with no KDF in between. So the seed of an EXISTING key is valid BIP39
+  // entropy, and a key that was never generated from a phrase can still be
+  // re-encoded as one (`entropyToMnemonic(identity.toEntropy())`) without
+  // anyone having to re-key.
   //
-  // Deliberately a named alias for `fromRaw` rather than new capability: the
-  // point is that the equivalence is a promise this package makes, so that if
-  // a KDF is ever introduced into `fromMnemonic`, this stays correct (and
-  // `identity.test.ts` fails loudly rather than callers silently deriving a
-  // different DID).
-  static fromEntropy<ID extends DIDKey>(
-    entropy: Uint8Array,
-    config: IdentityCreateConfig = {},
-  ): Promise<Identity<ID>> {
-    return Identity.fromRaw<ID>(entropy, config);
+  // Like `toPkcs8`, only "noble" implementations can do this — WebCrypto hides
+  // the private key material — and it throws otherwise.
+  toEntropy(): Uint8Array {
+    return pkcs8ToEd25519Raw(fromPEM(this.toPkcs8()));
   }
 
   static async fromPassphrase<ID extends DIDKey>(

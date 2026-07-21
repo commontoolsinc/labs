@@ -1,5 +1,4 @@
 import { Identity, KeyStore } from "@commonfabric/identity";
-import { createPassphraseCredential, saveCredential } from "./credentials.ts";
 import { ROOT_KEY } from "../../shared/mod.ts";
 import "../views/DeviceLinkView.ts";
 
@@ -22,22 +21,52 @@ export type DeviceLinkOutcome =
   | "cancelled"
   | "invalid";
 
-async function confirmWithUser(
+export async function confirmWithUser(
   incomingDid: string,
   currentDid: string | null,
 ): Promise<boolean> {
   const view = document.createElement("x-device-link-view");
   view.incomingDid = incomingDid;
   view.currentDid = currentDid;
+  // Listen BEFORE inserting. Nothing can dispatch in between today (the
+  // Promise executor is synchronous and Lit's first update is a microtask),
+  // but relying on that is accidental rather than defended.
+  const answered = new Promise<boolean>((resolve) => {
+    view.addEventListener(
+      "device-link-result",
+      (event) => resolve(Boolean((event as CustomEvent).detail?.accepted)),
+      { once: true },
+    );
+  });
   document.body.appendChild(view);
   try {
-    return await new Promise<boolean>((resolve) => {
-      view.addEventListener(
-        "device-link-result",
-        (event) => resolve(Boolean((event as CustomEvent).detail?.accepted)),
-        { once: true },
-      );
+    return await answered;
+  } finally {
+    view.remove();
+  }
+}
+
+/**
+ * Tell the user a scan failed, and why they cannot simply retry the same URL.
+ *
+ * Reuses the confirm view's shape with no accept path — the point is only that
+ * a failed scan is never silent. Without this, an undecodable payload boots to
+ * an ordinary login screen and looks like the scan never happened, while the
+ * scrub has already made "refresh once and rescan" impossible.
+ */
+export async function reportDeviceLinkFailure(
+  reason: "unreadable",
+): Promise<void> {
+  const view = document.createElement("x-device-link-view");
+  view.failure = reason;
+  const dismissed = new Promise<void>((resolve) => {
+    view.addEventListener("device-link-result", () => resolve(), {
+      once: true,
     });
+  });
+  document.body.appendChild(view);
+  try {
+    await dismissed;
   } finally {
     view.remove();
   }
@@ -58,13 +87,19 @@ export async function runDeviceLinkLogin(
   // Injected so the flow is testable off-browser: KeyStore is IndexedDB-backed
   // and `deno test` has no indexedDB, which would otherwise leave the
   // confirm/replace logic — the security-critical part — uncovered.
-  openKeyStore: () => Promise<KeyStore> = () => KeyStore.open(),
+  // Narrowed to the two methods used, so a test double satisfies it without an
+  // `any` cast (KeyStore has a private field, so the full type never can).
+  openKeyStore: () => Promise<Pick<KeyStore, "get" | "set">> = () =>
+    KeyStore.open(),
 ): Promise<DeviceLinkOutcome> {
   let identity: Identity;
   try {
-    // BIP39 entropy is the ed25519 seed directly — `Identity.fromEntropy` names
-    // that contract, and the identity package pins it against `fromMnemonic`.
-    identity = await Identity.fromEntropy(entropy);
+    // `fromRaw`, not a bip39 round trip: BIP39 maps a phrase to entropy and
+    // uses those bytes DIRECTLY as the ed25519 seed, with no KDF between, so
+    // entropy IS the raw key. `identity.test.ts` pins that equivalence against
+    // `fromMnemonic`, which is what keeps the shell and the pairing device
+    // deriving the same DID. Throws on any length but 32.
+    identity = await Identity.fromRaw(entropy);
   } catch {
     return "invalid";
   }
@@ -79,7 +114,12 @@ export async function runDeviceLinkLogin(
   // needless churn of the stored key.
   if (currentDid !== identity.did()) {
     await keyStore.set(ROOT_KEY, identity);
-    saveCredential(createPassphraseCredential());
+    // Deliberately NOT saveCredential(createPassphraseCredential()): that mints
+    // a fresh UUID over `storedCredential`, and if this device had a passkey
+    // its descriptor id is destroyed — quick-unlock then offers a passphrase
+    // form that a device-paired phone can never satisfy, since it received
+    // entropy and never saw the 24 words. `initializeKeys` adopts ROOT_KEY on
+    // its own, so nothing here needs the credential record.
   }
   return "accepted";
 }

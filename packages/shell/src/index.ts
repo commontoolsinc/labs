@@ -13,7 +13,7 @@ import "./globals.ts";
 // Read and scrubbed FIRST, synchronously, before any await — so the secret
 // never survives into session history, a bookmark, or iCloud tab sync.
 // Interim pre-key-delegation pairing flow; delete when delegation lands.
-const deviceLinkEntropy = consumeDeviceLinkFragment();
+const deviceLink = consumeDeviceLinkFragment();
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js");
@@ -37,9 +37,32 @@ if (ENVIRONMENT !== "production") {
 // KeyStore so the normal boot below picks the new identity up. Routing it
 // through App.setIdentity instead would throw whenever a DIFFERENT identity is
 // already active — which is precisely the re-pair case this exists for.
-if (deviceLinkEntropy) {
-  const { runDeviceLinkLogin } = await import("./lib/device-link-login.ts");
-  await runDeviceLinkLogin(deviceLinkEntropy);
+//
+// Wrapped because this is a TOP-LEVEL await in the entry module: an uncaught
+// throw here (KeyStore.open rejecting, an insecure context) would skip
+// initializeKeys and Navigation entirely, stranding the user on the login
+// screen with no error and no clue. A failed pairing must degrade to a normal
+// boot, not a broken one.
+if (deviceLink.kind !== "absent") {
+  try {
+    const { runDeviceLinkLogin, reportDeviceLinkFailure } = await import(
+      "./lib/device-link-login.ts"
+    );
+    if (deviceLink.kind === "malformed") {
+      // The scrub already removed it, so "refresh once and rescan" — the
+      // documented recovery — cannot work. Say so rather than booting to a
+      // normal screen as though nothing was scanned.
+      await reportDeviceLinkFailure("unreadable");
+    } else {
+      const outcome = await runDeviceLinkLogin(deviceLink.entropy);
+      if (outcome === "invalid") await reportDeviceLinkFailure("unreadable");
+    }
+  } catch (error) {
+    console.error(
+      "[device-link] pairing failed; continuing normal boot",
+      error,
+    );
+  }
 }
 
 await app.initializeKeys();

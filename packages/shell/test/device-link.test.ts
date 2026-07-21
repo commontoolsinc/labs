@@ -28,6 +28,16 @@ const ZERO_ENTROPY = new Uint8Array(32);
 const ZERO_ENTROPY_DID =
   "did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp";
 
+// A deliberately ASYMMETRIC vector (0x00..0x1f). The all-zero vector is a fixed
+// point of reversal, rotation and XOR-with-zero, so pinning ONLY against it
+// lets a whole class of byte-mangling bugs through — a mutation reversing the
+// seed passed the entire suite when this was the only vector.
+const COUNTING_ENTROPY = new Uint8Array(
+  Array.from({ length: 32 }, (_, i) => i),
+);
+const COUNTING_ENTROPY_DID =
+  "did:key:z6MkehRgf7yJbgaGfYsdoAsKdBPE3dj2CYhowQdcjqSJgvVd";
+
 describe("parseDeviceLinkFragment", () => {
   it("decodes a well-formed device link to 32 bytes", () => {
     const entropy = crypto.getRandomValues(new Uint8Array(32));
@@ -123,7 +133,10 @@ describe("consumeDeviceLinkFragment", () => {
     const entropy = crypto.getRandomValues(new Uint8Array(32));
     const ctx = withLocation("#k=" + toBase64Url(entropy));
     try {
-      assertEquals(consumeDeviceLinkFragment(), entropy);
+      assertEquals(consumeDeviceLinkFragment(), {
+        kind: "entropy",
+        entropy,
+      });
       assertEquals(ctx.replaced, ["/loom-jun-12/home"]);
     } finally {
       ctx.restore();
@@ -150,7 +163,10 @@ describe("consumeDeviceLinkFragment", () => {
   it("scrubs even when the payload is malformed", () => {
     const ctx = withLocation("#k=not-valid-entropy");
     try {
-      assertEquals(consumeDeviceLinkFragment(), null);
+      // "malformed", NOT "absent": the scrub already removed it, so the
+      // documented "refresh once and rescan" recovery cannot work and the
+      // failure has to be surfaced rather than booting as if nothing happened.
+      assertEquals(consumeDeviceLinkFragment(), { kind: "malformed" });
       assertEquals(ctx.replaced, ["/loom-jun-12/home"]);
     } finally {
       ctx.restore();
@@ -160,7 +176,7 @@ describe("consumeDeviceLinkFragment", () => {
   it("leaves unrelated fragments completely alone", () => {
     const ctx = withLocation("#some-anchor");
     try {
-      assertEquals(consumeDeviceLinkFragment(), null);
+      assertEquals(consumeDeviceLinkFragment(), { kind: "absent" });
       assertEquals(ctx.replaced, []);
     } finally {
       ctx.restore();
@@ -172,18 +188,51 @@ describe("device-link derivation", () => {
   it("derives the pinned DID from the all-zero entropy vector", async () => {
     // Pins that the shell and the pairing device agree on the derivation. If
     // this DID ever moves, a scanned code signs the phone in as somebody else.
-    const identity = await Identity.fromEntropy(ZERO_ENTROPY);
+    const identity = await Identity.fromRaw(ZERO_ENTROPY);
     assertEquals(identity.did(), ZERO_ENTROPY_DID);
+  });
+
+  it("derives the pinned DID from an ASYMMETRIC vector", async () => {
+    // The all-zero vector alone is worthless as a pin: it survives reversal,
+    // rotation and XOR-with-zero unchanged, so a seed-mangling bug passes.
+    // This vector does not.
+    const identity = await Identity.fromRaw(COUNTING_ENTROPY);
+    assertEquals(identity.did(), COUNTING_ENTROPY_DID);
+  });
+
+  it("byte order matters — a reversed seed is a different identity", async () => {
+    const reversed = new Uint8Array([...COUNTING_ENTROPY].reverse());
+    const forward = await Identity.fromRaw(COUNTING_ENTROPY);
+    const backward = await Identity.fromRaw(reversed);
+    assert(
+      forward.did() !== backward.did(),
+      "reversal must change the identity, or the pins above prove nothing",
+    );
+  });
+
+  it("rejects any entropy length but 32", async () => {
+    for (const length of [0, 16, 31, 33, 64]) {
+      let threw = false;
+      try {
+        await Identity.fromRaw(new Uint8Array(length));
+      } catch {
+        threw = true;
+      }
+      assert(
+        threw,
+        `length ${length} must be rejected, not silently truncated`,
+      );
+    }
   });
 
   it("round-trips a fragment to the identity it names", async () => {
     // The whole path a scan takes: entropy -> QR text -> fragment -> identity.
     const entropy = crypto.getRandomValues(new Uint8Array(32));
-    const expected = await Identity.fromEntropy(entropy);
+    const expected = await Identity.fromRaw(entropy);
 
     const parsed = parseDeviceLinkFragment("#k=" + toBase64Url(entropy));
     assert(parsed);
-    assertEquals((await Identity.fromEntropy(parsed)).did(), expected.did());
+    assertEquals((await Identity.fromRaw(parsed)).did(), expected.did());
   });
 
   it("produces a payload that fits the pairing QR's byte budget", () => {
@@ -227,7 +276,7 @@ describe("runDeviceLinkLogin", () => {
   });
 
   it("does not touch the KeyStore when the user cancels", async () => {
-    const existing = await Identity.fromEntropy(
+    const existing = await Identity.fromRaw(
       crypto.getRandomValues(new Uint8Array(32)),
     );
     const { store, entries } = fakeKeyStore(existing);
@@ -244,7 +293,7 @@ describe("runDeviceLinkLogin", () => {
     // The case a LoginView-only handler would silently no-op on, and the one
     // App.setIdentity refuses outright ("Cannot change identity while logged
     // in") — which is why this writes ROOT_KEY directly, pre-initializeKeys.
-    const stale = await Identity.fromEntropy(
+    const stale = await Identity.fromRaw(
       crypto.getRandomValues(new Uint8Array(32)),
     );
     const { store, entries } = fakeKeyStore(stale);
@@ -261,7 +310,7 @@ describe("runDeviceLinkLogin", () => {
     // The confirm screen is the ONLY defence against a donated-identity link,
     // so it must be handed the DIDs a user can cross-check against the Pair
     // screen — not a truncation or a placeholder.
-    const stale = await Identity.fromEntropy(
+    const stale = await Identity.fromRaw(
       crypto.getRandomValues(new Uint8Array(32)),
     );
     const { store } = fakeKeyStore(stale);
@@ -292,7 +341,7 @@ describe("runDeviceLinkLogin", () => {
   });
 
   it("re-scanning the same code is a no-op write", async () => {
-    const same = await Identity.fromEntropy(ZERO_ENTROPY);
+    const same = await Identity.fromRaw(ZERO_ENTROPY);
     const { store, entries } = fakeKeyStore(same);
     let wrote = false;
     store.set = () => {
@@ -326,5 +375,302 @@ describe("runDeviceLinkLogin", () => {
     assertEquals(outcome, "invalid");
     assert(!prompted, "must not prompt for undecodable entropy");
     assert(!opened, "must not open the KeyStore for undecodable entropy");
+  });
+});
+
+// ── the confirm gate itself ────────────────────────────────────────────────
+//
+// Previously uncovered: every test above injects its own `confirm`, so the
+// production path and the whole view were unexercised. Two mutations passed the
+// entire suite as a result — `confirmWithUser` hardcoded to true, and the Cancel
+// button rewired to accept. For the screen the design calls the only defence
+// against a donated-identity link, those are the mutations that matter most.
+//
+// Follows the repo's view-test idiom (see login-view.test.ts): install fake
+// browser globals, instantiate the element, and inspect what render() produces.
+
+function installBrowserGlobals(): () => void {
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  function setGlobal(name: string, value: unknown): void {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, {
+      configurable: true,
+      writable: true,
+      value,
+    });
+  }
+  class TestHTMLElement extends EventTarget {}
+  setGlobal("window", globalThis);
+  setGlobal("HTMLElement", TestHTMLElement);
+  setGlobal("customElements", {
+    define() {},
+    get() {},
+    whenDefined: () => Promise.resolve(),
+  });
+  setGlobal("document", {
+    documentElement: { style: {} },
+    body: { appendChild() {} },
+    createElement: () => ({
+      style: {},
+      setAttribute() {},
+      append() {},
+      appendChild() {},
+    }),
+    createTreeWalker: () => ({}),
+  });
+  setGlobal("devicePixelRatio", 1);
+  setGlobal("screen", { deviceXDPI: 1, logicalXDPI: 1 });
+  setGlobal("navigator", { platform: "", userAgent: "deno" });
+  return () => {
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  };
+}
+
+// deno-lint-ignore no-explicit-any
+function templateText(value: any): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(templateText).join("");
+  if (typeof value !== "object") return "";
+  return [
+    ...(value.strings ?? []),
+    ...((value.values ?? []).map(templateText)),
+  ].join("");
+}
+
+/** Click handlers in template order: [accept, cancel]. */
+// deno-lint-ignore no-explicit-any
+function handlersOf(value: any): Array<() => void> {
+  if (value == null || typeof value !== "object") return [];
+  if (Array.isArray(value)) return value.flatMap(handlersOf);
+  const out: Array<() => void> = [];
+  for (const v of value.values ?? []) {
+    if (typeof v === "function") out.push(v as () => void);
+    else out.push(...handlersOf(v));
+  }
+  return out;
+}
+
+describe("DeviceLinkView", () => {
+  async function makeView(state: Record<string, unknown>) {
+    const { XDeviceLinkView } = await import("../src/views/DeviceLinkView.ts");
+    const view = new XDeviceLinkView();
+    // `guarded` defaults true (tap-through protection); tests opt out unless
+    // they are specifically exercising the guard.
+    Object.assign(view, { guarded: false, ...state });
+    const answers: boolean[] = [];
+    view.addEventListener(
+      "device-link-result",
+      (e) => answers.push(Boolean((e as CustomEvent).detail?.accepted)),
+    );
+    return { view, answers };
+  }
+
+  it("shows the incoming DID verbatim so it can be cross-checked", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { view } = await makeView({ incomingDid: COUNTING_ENTROPY_DID });
+      const text = templateText(view.render());
+      assert(
+        text.includes(COUNTING_ENTROPY_DID),
+        "the full DID must be on screen, not truncated",
+      );
+      assert(
+        text.includes("Pair screen"),
+        "anti-phishing copy must be present",
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("shows BOTH DIDs and replace wording when replacing", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { view } = await makeView({
+        incomingDid: COUNTING_ENTROPY_DID,
+        currentDid: ZERO_ENTROPY_DID,
+      });
+      const text = templateText(view.render());
+      assert(text.includes(COUNTING_ENTROPY_DID));
+      assert(text.includes(ZERO_ENTROPY_DID));
+      assert(text.includes("Replace"), "must say it replaces an identity");
+    } finally {
+      restore();
+    }
+  });
+
+  it("CANCEL answers no — the button wiring, not just finish()", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { view, answers } = await makeView({
+        incomingDid: COUNTING_ENTROPY_DID,
+      });
+      const [accept, cancel] = handlersOf(view.render());
+      assert(accept && cancel, "expected an accept and a cancel handler");
+      cancel();
+      assertEquals(answers, [false], "Cancel must answer NO");
+    } finally {
+      restore();
+    }
+  });
+
+  it("the primary button answers yes", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { view, answers } = await makeView({
+        incomingDid: COUNTING_ENTROPY_DID,
+      });
+      handlersOf(view.render())[0]();
+      assertEquals(answers, [true]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("ignores an accept that lands inside the tap-through guard", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { view, answers } = await makeView({
+        incomingDid: COUNTING_ENTROPY_DID,
+        guarded: true, // as it is for the first moments on screen
+      });
+      handlersOf(view.render())[0]();
+      assertEquals(answers, [], "a tap in flight must not accept");
+    } finally {
+      restore();
+    }
+  });
+
+  it("still allows CANCEL during the guard", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { view, answers } = await makeView({
+        incomingDid: COUNTING_ENTROPY_DID,
+        guarded: true,
+      });
+      handlersOf(view.render())[1]();
+      assertEquals(answers, [false], "the guard must never trap the user");
+    } finally {
+      restore();
+    }
+  });
+
+  it("answers exactly once, even on a double tap", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { view, answers } = await makeView({
+        incomingDid: COUNTING_ENTROPY_DID,
+      });
+      const [accept, cancel] = handlersOf(view.render());
+      accept();
+      cancel();
+      accept();
+      assertEquals(answers, [true], "only the first answer counts");
+    } finally {
+      restore();
+    }
+  });
+
+  it("the already-signed-in screen cannot answer anything but yes", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { view, answers } = await makeView({
+        incomingDid: COUNTING_ENTROPY_DID,
+        currentDid: COUNTING_ENTROPY_DID,
+      });
+      const text = templateText(view.render());
+      assert(text.includes("Already signed in"));
+      handlersOf(view.render())[0]();
+      assertEquals(answers, [true]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("the failure screen explains why a refresh will not help", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { view, answers } = await makeView({ failure: "unreadable" });
+      const text = templateText(view.render());
+      assert(text.includes("could not be read"));
+      // The scrub has already removed the code, so the design's documented
+      // "refresh once and rescan" cannot work — the copy must say so.
+      // Whitespace-normalized: the template is line-wrapped by the formatter.
+      assert(
+        text.replace(/\s+/g, " ").includes("Reloading this page will not help"),
+        text,
+      );
+      handlersOf(view.render())[0]();
+      assertEquals(answers, [false], "the failure screen never accepts");
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe("confirmWithUser (the production confirm path)", () => {
+  it("resolves false when the view answers no", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      // A stand-in element that the real confirmWithUser can drive.
+      class FakeView extends EventTarget {
+        incomingDid = "";
+        currentDid: string | null = null;
+        failure: string | null = null;
+        remove() {}
+      }
+      const created: FakeView[] = [];
+      // deno-lint-ignore no-explicit-any
+      (globalThis as any).document.createElement = () => {
+        const el = new FakeView();
+        created.push(el);
+        return el;
+      };
+      const { confirmWithUser } = await import(
+        "../src/lib/device-link-login.ts"
+      );
+      const pending = confirmWithUser(COUNTING_ENTROPY_DID, null);
+      const el = created[0];
+      assertEquals(el.incomingDid, COUNTING_ENTROPY_DID);
+      el.dispatchEvent(
+        new CustomEvent("device-link-result", { detail: { accepted: false } }),
+      );
+      assertEquals(await pending, false);
+    } finally {
+      restore();
+    }
+  });
+
+  it("resolves true only when the view says so", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      class FakeView extends EventTarget {
+        incomingDid = "";
+        currentDid: string | null = null;
+        remove() {}
+      }
+      const created: FakeView[] = [];
+      // deno-lint-ignore no-explicit-any
+      (globalThis as any).document.createElement = () => {
+        const el = new FakeView();
+        created.push(el);
+        return el;
+      };
+      const { confirmWithUser } = await import(
+        "../src/lib/device-link-login.ts"
+      );
+      const pending = confirmWithUser(COUNTING_ENTROPY_DID, ZERO_ENTROPY_DID);
+      assertEquals(created[0].currentDid, ZERO_ENTROPY_DID);
+      created[0].dispatchEvent(
+        new CustomEvent("device-link-result", { detail: { accepted: true } }),
+      );
+      assertEquals(await pending, true);
+    } finally {
+      restore();
+    }
   });
 });

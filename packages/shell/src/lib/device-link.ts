@@ -11,12 +11,31 @@
 // antipattern, and the confirm screen is the only thing standing between a
 // user and a link that would sign them in as somebody else.
 //
-// SECURITY: the fragment is scrubbed from the URL SYNCHRONOUSLY, before any
-// await, so the secret never survives into session history, a bookmark, or
-// iCloud tab/bookmark sync. `pathname + search` is preserved because the
-// pairing QR targets a deep link — after the confirm, the normal boot must
-// continue to that path so the flow ends inside a logged-in app the user can
-// bookmark, and the scrubbed URL is exactly what gets bookmarked.
+// SECURITY — what the scrub does and does NOT do. It runs synchronously,
+// before any await, and removes the secret from the address bar, from what a
+// bookmark or a tab-sync would capture, and from the session history entry.
+//
+// It does NOT erase these, so do not write code that assumes it did:
+//   * `performance.getEntriesByType("navigation")[0].name` keeps the FULL
+//     original URL, secret included, for the document's lifetime. There is no
+//     API to clear it (`clearResourceTimings()` does not). This matters
+//     concretely: `@opentelemetry/instrumentation-document-load` reads that
+//     entry and reports it as `http.url`. Wiring document-load instrumentation
+//     into this shell would ship the private key to the OTLP collector. It is
+//     not wired today — keep it that way, or filter the attribute.
+//   * The visit is committed to the browser's persistent history database
+//     before any script runs; replaceState amends the session entry, not that.
+//   * The secret sits in the address bar from navigation commit until this
+//     bundle has been fetched, parsed and evaluated — unbounded, and on a cold
+//     mobile load over a VPN, easily seconds.
+// These are accepted for an interim flow; they are the reason the payload is
+// opaque entropy rather than the words, and the reason pairing is reveal-gated
+// on the other end.
+//
+// `pathname + search` is preserved because the pairing QR targets a deep link —
+// after the confirm, the normal boot must continue to that path so the flow
+// ends inside a logged-in app the user can bookmark, and the scrubbed URL is
+// exactly what gets bookmarked.
 
 /** Fragment param name. Short because QR payload bytes are scarce. */
 const DEVICE_LINK_PREFIX = "#k=";
@@ -63,6 +82,20 @@ export function looksLikeDeviceLink(hash: string): boolean {
   return hash.startsWith(DEVICE_LINK_PREFIX);
 }
 
+/** What the URL turned out to contain. */
+export type DeviceLinkFragment =
+  /** No device link present — boot normally, say nothing. */
+  | { kind: "absent" }
+  /** A well-formed device link. */
+  | { kind: "entropy"; entropy: Uint8Array }
+  /**
+   * Shaped like a device link but undecodable. Distinct from "absent" on
+   * purpose: the scrub has already removed it, so the documented recovery
+   * ("refresh once and rescan") can no longer work, and silently booting to a
+   * normal screen would leave the user with no idea the scan failed.
+   */
+  | { kind: "malformed" };
+
 /**
  * Read the device-link entropy out of the current URL and scrub it.
  *
@@ -71,9 +104,21 @@ export function looksLikeDeviceLink(hash: string): boolean {
  * secret, and leaving it in the address bar to be bookmarked or synced would be
  * the same leak with none of the benefit.
  */
-export function consumeDeviceLinkFragment(): Uint8Array | null {
+export function consumeDeviceLinkFragment(): DeviceLinkFragment {
   const location = globalThis.location;
-  if (!location || !looksLikeDeviceLink(location.hash)) return null;
+  if (!location || !looksLikeDeviceLink(location.hash)) {
+    return { kind: "absent" };
+  }
+
+  // Never act on a device link inside a frame. The parent controls the URL, so
+  // a framed shell turns this into a one-click identity swap the user cannot
+  // see the address bar for. Storage partitioning already blunts it, but the
+  // flow has no legitimate reason to run framed.
+  //
+  // `top` is only meaningful in a browsing context — outside one (tests, SSR)
+  // it is undefined, and a bare `top !== self` would then reject everything.
+  const top = globalThis.top;
+  if (top && top !== globalThis.self) return { kind: "absent" };
 
   const entropy = parseDeviceLinkFragment(location.hash);
 
@@ -86,9 +131,8 @@ export function consumeDeviceLinkFragment(): Uint8Array | null {
     );
   } catch {
     // A sandboxed/unsupported history is not a reason to abandon the login;
-    // the secret is merely more exposed than we'd like, which the confirm
-    // screen's bookmark guidance already covers.
+    // the secret is merely more exposed than we'd like.
   }
 
-  return entropy;
+  return entropy ? { kind: "entropy", entropy } : { kind: "malformed" };
 }

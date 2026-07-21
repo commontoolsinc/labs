@@ -10,38 +10,57 @@ import { property, state } from "lit/decorators.js";
 // their own session is gone. Scanning steals nothing directly (there is no
 // exfiltration channel; the payload gives away the attacker's own key), which
 // makes this screen the entire defence. Hence the DID shown prominently for
-// cross-checking against the Pair screen, and copy that tells the user what
-// the code is supposed to have come from.
+// cross-checking against the Pair screen, and copy naming where the code was
+// supposed to have come from.
+//
+// Rendered into the TOP LAYER via <dialog>.showModal() rather than a z-index
+// gamble: this shell already has fixed elements at z-index 2000 and 9999, and
+// the top layer also brings a focus trap and an inert background for free —
+// the login view behind this must not be tab-reachable while it is up.
 //
 // INTERIM: delete this along with the rest of the device-link flow when key
 // delegation lands.
+
+/**
+ * How long the accept button stays inert after the dialog appears.
+ *
+ * The overlay materialises mid-boot on a phone the user has just pointed at a
+ * QR code, and the accept button is the primary control — a tap already in
+ * flight would land on it. For the screen that is the only defence against a
+ * donated-identity link, that is worth a beat.
+ */
+export const TAP_THROUGH_GUARD_MS = 500;
+
 export class XDeviceLinkView extends LitElement {
   static override styles = css`
     :host {
-      position: fixed;
-      inset: 0;
-      z-index: 1000;
-      display: grid;
-      place-items: center;
-      background: var(--bg, #fff);
-      color: var(--text, #111);
-      font: 16px/1.5 system-ui, sans-serif;
+      display: contents;
+    }
+    dialog {
+      border: 1px solid var(--border-color, #000);
+      border-radius: 0.5rem;
+      background: var(--shell-surface, #fff);
+      color: var(--font-color, #000);
+      font-family: var(--font-primary, system-ui, sans-serif);
+      font-size: 1rem;
+      line-height: 1.5;
       padding: 1.5rem;
+      max-width: 30rem;
+      width: calc(100vw - 2rem);
       box-sizing: border-box;
     }
-    .card {
-      max-width: 30rem;
-      width: 100%;
+    dialog::backdrop {
+      background: rgba(0, 0, 0, 0.6);
     }
     h1 {
       font-size: 1.25rem;
       margin: 0 0 0.75rem;
     }
     .did {
-      font-family: ui-monospace, monospace;
+      font-family: var(--font-primary, ui-monospace, monospace);
       font-size: 0.95rem;
       word-break: break-all;
-      background: rgba(127, 127, 127, 0.12);
+      background: var(--bg-secondary, rgba(127, 127, 127, 0.12));
       border-radius: 0.375rem;
       padding: 0.6rem 0.75rem;
       margin: 0.5rem 0 1rem;
@@ -63,19 +82,17 @@ export class XDeviceLinkView extends LitElement {
     }
     button {
       font: inherit;
+      font-family: inherit;
       padding: 0.55rem 1.1rem;
       border-radius: 0.375rem;
-      border: 1px solid currentColor;
-      background: transparent;
+      border: 1px solid var(--border-color, currentColor);
+      background: var(--bg-primary, transparent);
       color: inherit;
       cursor: pointer;
     }
-    button.primary {
-      background: currentColor;
-      border-color: transparent;
-    }
-    button.primary span {
-      color: var(--bg, #fff);
+    button[disabled] {
+      opacity: 0.5;
+      cursor: default;
     }
   `;
 
@@ -83,46 +100,97 @@ export class XDeviceLinkView extends LitElement {
   @property({ attribute: false })
   accessor incomingDid = "";
 
-  /** DID already signed in on this device, when different. */
+  /** DID already signed in on this device, or null on a fresh one. */
   @property({ attribute: false })
   accessor currentDid: string | null = null;
 
+  /** Set instead of the DIDs to report a scan that could not be read at all. */
+  @property({ attribute: false })
+  accessor failure: "unreadable" | null = null;
+
   @state()
-  private accessor busy = false;
+  private accessor accepting = false;
+
+  @state()
+  private accessor guarded = true;
+
+  #answered = false;
+  // `setTimeout` is typed as Node's `Timeout` under this config, not `number`.
+  #guardTimer: ReturnType<typeof setTimeout> | undefined;
+
+  override firstUpdated() {
+    const dialog = this.renderRoot.querySelector("dialog");
+    dialog?.showModal();
+    // Escape / the backdrop must mean "no", never a silent accept.
+    dialog?.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      this.finish(false);
+    });
+    this.#guardTimer = setTimeout(() => {
+      this.guarded = false;
+    }, TAP_THROUGH_GUARD_MS);
+  }
+
+  override disconnectedCallback() {
+    clearTimeout(this.#guardTimer);
+    super.disconnectedCallback();
+  }
 
   private finish(accepted: boolean) {
-    if (this.busy) return;
-    this.busy = true;
+    // Exactly one answer, ever: a double-tap must not dispatch twice.
+    if (this.#answered) return;
+    if (accepted && this.guarded) return;
+    this.#answered = true;
+    this.accepting = accepted;
     this.dispatchEvent(
       new CustomEvent("device-link-result", { detail: { accepted } }),
     );
   }
 
   override render() {
+    if (this.failure) {
+      return html`
+        <dialog aria-labelledby="device-link-title">
+          <h1 id="device-link-title">Pairing code could not be read</h1>
+          <p class="warn">
+            The code in this link is incomplete or damaged. Reloading this page will not
+            help — the code is removed from the address bar as soon as it is read.
+            Reveal the code again on the Pair screen and rescan it.
+          </p>
+          <div class="actions">
+            <button @click="${() => this.finish(false)}">Continue</button>
+          </div>
+        </dialog>
+      `;
+    }
+
     const replacing = this.currentDid !== null &&
       this.currentDid !== this.incomingDid;
     const alreadySignedIn = this.currentDid === this.incomingDid;
 
     if (alreadySignedIn) {
       return html`
-        <div class="card">
-          <h1>Already signed in</h1>
+        <dialog aria-labelledby="device-link-title">
+          <h1 id="device-link-title">Already signed in</h1>
           <div class="label">Identity</div>
           <div class="did">${this.incomingDid}</div>
           <div class="actions">
-            <button class="primary" @click="${() => this.finish(true)}">
-              <span>Continue</span>
+            <button
+              @click="${() => this.finish(true)}"
+              ?disabled="${this.guarded}"
+            >
+              Continue
             </button>
           </div>
-        </div>
+        </dialog>
       `;
     }
 
     return html`
-      <div class="card">
-        <h1>${replacing
-          ? "Replace current identity?"
-          : "Use this identity?"}</h1>
+      <dialog aria-labelledby="device-link-title">
+        <h1 id="device-link-title">
+          ${replacing ? "Replace current identity?" : "Use this identity?"}
+        </h1>
         ${replacing
           ? html`
             <div class="label">Currently signed in as</div>
@@ -139,12 +207,15 @@ export class XDeviceLinkView extends LitElement {
             : ""}
         </p>
         <div class="actions">
-          <button class="primary" @click="${() => this.finish(true)}">
-            <span>${replacing ? "Replace identity" : "Continue"}</span>
+          <button
+            @click="${() => this.finish(true)}"
+            ?disabled="${this.guarded}"
+          >
+            ${replacing ? "Replace identity" : "Continue"}
           </button>
           <button @click="${() => this.finish(false)}">Cancel</button>
         </div>
-      </div>
+      </dialog>
     `;
   }
 }
