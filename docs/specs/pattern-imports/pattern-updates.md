@@ -12,9 +12,10 @@ Phase 1 shipped: the `systemPatternAutoUpdate` flag is on in the shell for
 non-home default-app roots (`systemPatternAutoUpdateHome` stays off pending the
 home.tsx stable-addressing audit). URL-based creation and recreation stamp
 update provenance; verified legacy system roots can recover missing provenance;
-and an unloadable tracked root is repaired by compiling its source directly
-when the client and toolshed attest the same build. The executed milestone map
-and the corrections found during implementation are archived at
+and an unloadable stale root is repaired before bootstrap through the same
+`?identity`-driven update path when the client and toolshed attest the same
+build. The executed milestone map and the corrections found during
+implementation are archived at
 [`docs/history/specs/pattern-imports/system-pattern-updates-implementation-plan.md`](../../history/specs/pattern-imports/system-pattern-updates-implementation-plan.md).
 Home root and published-pattern updates remain design (Phases 2–4).
 
@@ -114,8 +115,8 @@ Dispatched by the `cf:` prefix:
   updates); a bare slug **tracks**. Immutability is just a pinned ref.
 - **non-`cf:` toolshed source path** (system, e.g.
   `/api/patterns/system/default-app.tsx`) → after the build-version gate, use
-  `?identity` against the space's host for a loadable root; for an unloadable
-  root, fetch and compile the source directly under the matched runtime (below).
+  `?identity` against the space's host, then fetch and compile only when that
+  identity differs from the persisted one.
 
 **Born-from determinism.** The *string* is frozen at birth (which source); the
 *resolved identity* is live (which version). A non-home space's root
@@ -209,28 +210,21 @@ transaction, and only then start it:
    pinned. `host` = `mappedHostFor(space) ?? apiUrl`. Only same-origin toolshed
    sources participate in this v1 loop.
 2. **Version gate** (§ below). Compare the client build to this space's
-   toolshed build before loading the stored pattern, querying the current
-   identity, compiling a replacement, or mutating the root. Unknown or
-   mismatched builds leave it untouched; signal the shell only on a proven
-   mismatch (both SHAs known).
-3. Probe whether the stored `patternIdentity` can load in the current runtime
-   (for example, aged source may import a runtime API removed by the new build).
-4. **Broken-root repair.** If it cannot load (including a thrown cold-load
-   failure), fetch and compile `{host}{url}` directly. The compiler-produced
-   entry ref is authoritative: write it in place if it differs and back-fill
-   verified legacy provenance. This path skips `?identity`, but remains behind
-   the build gate. Fetch or compile failure performs no metadata write; the
-   subsequent root start retains its normal loud failure.
-5. For a loadable root, `currentId` = **cached**
-   `GET {host}{url}?identity` (cache keyed by
+   toolshed build before querying the current identity, compiling a
+   replacement, or mutating the root. Unknown or mismatched builds leave it
+   untouched; signal the shell only on a proven mismatch (both SHAs known).
+3. `currentId` = **cached** `GET {host}{url}?identity` (cache keyed by
    `(host, url)`; cleared on socket reset — the identity is fixed for the
    toolshed's lifetime, and a socket reset is the proxy for "maybe a restarted
    or different toolshed"). Steady state is an in-memory compare, no request.
-6. `currentId === running patternIdentity.identity` → done (after stamping
+   This step never loads the persisted pattern, so an obsolete identity that
+   cannot start does not block reconciliation. An identity failure performs no
+   metadata write; the subsequent root start retains its normal loud failure.
+4. `currentId === running patternIdentity.identity` → done (after stamping
    provenance if this is a verified legacy root).
-7. Else fetch `{host}{url}` source, `compilePattern(program, { space })`, and
+5. Else fetch `{host}{url}` source, `compilePattern(program, { space })`, and
    write the compiler-produced `{ identity, symbol }` entry ref.
-8. Start the reconciled root. A newly created root skips the check because it
+6. Start the reconciled root. A newly created root skips the check because it
    was compiled from the current source in the same ensure operation; a root
    discovered after a creation race is treated as persisted and reconciled.
 
@@ -238,10 +232,8 @@ transaction, and only then start it:
 
 The light `?identity` is only comparable to the worker's identity when
 **toolshed and worker are the same build** (then `computeModuleIdentities` is
-literally the same function). Directly compiling a replacement does not remove
-that safety requirement: source served by one build must not mutate durable
-state under a different build. The version check is therefore a precondition
-for every system-root update or repair:
+literally the same function). The version check is therefore a precondition for
+every system-root update or repair:
 
 - Compare the client's `gitSha` to the space's toolshed `gitSha` (`/api/meta`,
   cached per host).
@@ -296,9 +288,8 @@ so no build-dependence and no gate.
 - **Runtime worker**: an update-check step at space open, next to
   `handleGetSpaceRootPattern` / `ensureDefaultPattern`
   (`runtime-client/backends/runtime-processor.ts`, `pieces-controller.ts`):
-  per-space host resolution, verified legacy-provenance recovery, broken-root
-  direct compilation behind the version gate, `?identity` cache, and an
-  in-place `patternIdentity` swap.
+  per-space host resolution, verified legacy-provenance recovery, version gate,
+  `?identity` cache, and an in-place `patternIdentity` swap before bootstrap.
 - **Piece**: `patternSource` meta getter/setter; stamped by URL-based creation
   and recreation from the applicable source (system path, or a `cf:` ref derived
   from `defaultAppUrl`). Custom `RuntimeProgram` recreation remains unstamped;

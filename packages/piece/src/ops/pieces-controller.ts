@@ -687,19 +687,17 @@ export class PiecesController<T = unknown> {
         return "repaired-provenance";
       };
 
-      // The version gate (step 4) validates `host`'s build, and any replacement
-      // compiled from its source is only safe under that same build — so only
-      // act on a source served BY `host`. A cross-origin patternSource (a
-      // published / custom-app source on another host) would be gated against
-      // the wrong build; defer it to the cross-host published-pattern flow.
+      // The version gate (step 4) validates `host`'s build, and ?identity is
+      // only comparable within that build — so only act on a source served BY
+      // `host`. A cross-origin patternSource (a published / custom-app source
+      // on another host) would be gated against the wrong build; defer it to
+      // the cross-host published-pattern flow.
       const target = new URL(url, host);
       if (target.origin !== new URL(host).origin) {
         return "current";
       }
 
-      // 4. Version gate. This is a precondition for every mutation, including
-      // direct repair of an unloadable root. Falling back from ?identity to
-      // compilation does not make cross-build replacement safe.
+      // 4. Version gate. This is a precondition for every update.
       const toolshedVersion = await runtime.toolshedGitSha(host);
       if (!buildsMatch(runtime.clientVersion, toolshedVersion)) {
         // An unknown sha on either side proves nothing — skip silently. The
@@ -718,50 +716,23 @@ export class PiecesController<T = unknown> {
         return "skipped-skew";
       }
 
-      // 5. Determine whether the persisted root is loadable under the matched
-      // build. A failed load takes the direct compile-and-repair path below.
+      // 5. Current identity from the toolshed (cached). This does not load the
+      // persisted pattern, so a stale identity that cannot start can still be
+      // replaced before bootstrap.
       const runningRef = getPatternIdentityRef(root);
-      let runningPatternIsLoadable = false;
-      if (runningRef !== undefined) {
-        try {
-          runningPatternIsLoadable =
-            await runtime.patternManager.loadPatternByIdentity(
-              runningRef.identity,
-              runningRef.symbol,
-              space,
-            ) !== undefined;
-        } catch (error) {
-          // A thrown cold-load failure is just as broken as an undefined result:
-          // continue into direct compilation so ensure() can repair before start.
-          pieceUpdateLogger.warn(
-            "stored-root-load-failed",
-            () => [
-              "checkAndUpdateDefaultPattern: stored root could not load",
-              space,
-              error,
-            ],
-          );
-        }
-      }
-      let currentId: string | undefined;
+      const currentId = await runtime.cachedPatternIdentity(host, url);
+      if (currentId === undefined) return "current"; // unresolved → skip
 
-      if (runningPatternIsLoadable) {
-        // 6. Current identity from the toolshed (cached).
-        currentId = await runtime.cachedPatternIdentity(host, url);
-        if (currentId === undefined) return "current"; // unresolved → skip
-
-        // 7. Compare to the running identity. A verified legacy root that is
-        //    already current needs only the missing provenance write.
-        if (currentId === runningRef?.identity) {
-          if (storedSource !== undefined) return "current";
-          return await repairInferredProvenance();
-        }
+      // 6. Compare to the persisted identity. A verified legacy root that is
+      // already current needs only the missing provenance write.
+      if (currentId === runningRef?.identity) {
+        if (storedSource !== undefined) return "current";
+        return await repairInferredProvenance();
       }
 
-      // 8. Apply/repair. For an unloadable root, fetch and compile its proven
-      //    source directly under the already-matched build, making the
-      //    compiler-produced entry ref authoritative instead of depending on
-      //    ?identity. Compilation failure leaves the stored root untouched.
+      // 7. Apply. Fetch and compile only after ?identity proves that the
+      // toolshed serves a different pattern. Compilation failure leaves the
+      // persisted root untouched.
       const program = await runtime.harness.resolve(
         new HttpProgramResolver(target.href),
       );
@@ -769,12 +740,7 @@ export class PiecesController<T = unknown> {
         space,
       });
       const entryRef = runtime.patternManager.getArtifactEntryRef(pattern) ??
-        (currentId === undefined
-          ? undefined
-          : { identity: currentId, symbol: "default" });
-      if (entryRef === undefined) {
-        throw new Error("Compiled system pattern has no entry identity");
-      }
+        { identity: currentId, symbol: "default" };
       if (
         entryRef.identity === runningRef?.identity &&
         entryRef.symbol === runningRef.symbol

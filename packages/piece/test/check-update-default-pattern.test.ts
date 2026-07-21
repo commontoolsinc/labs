@@ -411,8 +411,9 @@ describe("checkAndUpdateDefaultPattern", () => {
 
     // Model the 2026-07-21 Loom incident: the verified authored source closure
     // still identifies the official system root, but the current runtime can no
-    // longer load that old identity. Matching build attestations make it safe
-    // to compile the tracked source directly without relying on ?identity.
+    // longer load that old identity. The updater must resolve the new identity
+    // without loading the old one, then compile and install the newer source
+    // before ensure() starts the root.
     const originalLoad = runtime.patternManager.loadPatternByIdentity;
     runtime.patternManager.loadPatternByIdentity =
       ((identity, symbol, space) =>
@@ -439,14 +440,14 @@ describe("checkAndUpdateDefaultPattern", () => {
       expect(getPatternSource(repaired.getCell())).toBe(
         DEFAULT_APP_PATTERN_URL,
       );
-      expect(stub.identityFetches()).toBe(0);
+      expect(stub.identityFetches()).toBe(1);
       expect(versionSkews).toEqual([]);
     } finally {
       runtime.patternManager.loadPatternByIdentity = originalLoad;
     }
   });
 
-  it("does not inspect or repair an unloadable root when builds differ", async () => {
+  it("leaves a stale root untouched when replacement compilation fails", async () => {
     await setup({ systemPatternAutoUpdate: true });
     const piece = await controller.recreateDefaultPattern({
       customProgram: {
@@ -456,103 +457,10 @@ describe("checkAndUpdateDefaultPattern", () => {
     });
     const root = piece.getCell();
     const oldRef = getPatternIdentityRef(root)!;
-    const originalLoad = runtime.patternManager.loadPatternByIdentity;
     const originalCompile = runtime.patternManager.compilePattern;
-    let loads = 0;
-    let compiles = 0;
-    runtime.patternManager.loadPatternByIdentity = ((..._args: unknown[]) => {
-      loads++;
-      return Promise.reject(new Error("must not inspect mismatched build"));
-    }) as typeof runtime.patternManager.loadPatternByIdentity;
-    runtime.patternManager.compilePattern = ((..._args: unknown[]) => {
-      compiles++;
-      return Promise.reject(new Error("must not compile mismatched build"));
-    }) as typeof runtime.patternManager.compilePattern;
-    stub.setGitSha("a-different-build");
-    stub.setSource(SOURCE_V2);
-
-    try {
-      expect(await controller.checkAndUpdateDefaultPattern()).toBe(
-        "skipped-skew",
-      );
-      expect(getPatternIdentityRef(root)).toEqual(oldRef);
-      expect(getPatternSource(root)).toBeUndefined();
-      expect(loads).toBe(0);
-      expect(compiles).toBe(0);
-      expect(stub.identityFetches()).toBe(0);
-      expect(versionSkews.length).toBe(1);
-    } finally {
-      runtime.patternManager.loadPatternByIdentity = originalLoad;
-      runtime.patternManager.compilePattern = originalCompile;
-    }
-  });
-
-  it("does not inspect or repair an unloadable root when builds are unknown", async () => {
-    await setup({ systemPatternAutoUpdate: true }, undefined);
-    stub.setGitSha(null);
-    const piece = await controller.recreateDefaultPattern({
-      customProgram: {
-        main: DEFAULT_APP_PATTERN_URL,
-        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: SOURCE_V1 }],
-      },
-    });
-    const root = piece.getCell();
-    const oldRef = getPatternIdentityRef(root)!;
-    const originalLoad = runtime.patternManager.loadPatternByIdentity;
-    const originalCompile = runtime.patternManager.compilePattern;
-    let loads = 0;
-    let compiles = 0;
-    runtime.patternManager.loadPatternByIdentity = ((..._args: unknown[]) => {
-      loads++;
-      return Promise.reject(new Error("must not inspect unknown build"));
-    }) as typeof runtime.patternManager.loadPatternByIdentity;
-    runtime.patternManager.compilePattern = ((..._args: unknown[]) => {
-      compiles++;
-      return Promise.reject(new Error("must not compile unknown build"));
-    }) as typeof runtime.patternManager.compilePattern;
-    stub.setSource(SOURCE_V2);
-
-    try {
-      expect(await controller.checkAndUpdateDefaultPattern()).toBe(
-        "skipped-unknown-build",
-      );
-      expect(getPatternIdentityRef(root)).toEqual(oldRef);
-      expect(getPatternSource(root)).toBeUndefined();
-      expect(loads).toBe(0);
-      expect(compiles).toBe(0);
-      expect(stub.identityFetches()).toBe(0);
-      expect(versionSkews).toEqual([]);
-    } finally {
-      runtime.patternManager.loadPatternByIdentity = originalLoad;
-      runtime.patternManager.compilePattern = originalCompile;
-    }
-  });
-
-  it("leaves an unloadable root untouched when repair compilation fails", async () => {
-    await setup({ systemPatternAutoUpdate: true });
-    const piece = await controller.recreateDefaultPattern({
-      customProgram: {
-        main: DEFAULT_APP_PATTERN_URL,
-        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: SOURCE_V1 }],
-      },
-    });
-    const root = piece.getCell();
-    const oldRef = getPatternIdentityRef(root)!;
-    const originalLoad = runtime.patternManager.loadPatternByIdentity;
-    const originalCompile = runtime.patternManager.compilePattern;
-    runtime.patternManager.loadPatternByIdentity =
-      ((identity, symbol, space) =>
-        identity === oldRef.identity
-          ? Promise.resolve(undefined)
-          : originalLoad.call(
-            runtime.patternManager,
-            identity,
-            symbol,
-            space,
-          )) as typeof runtime.patternManager.loadPatternByIdentity;
     runtime.patternManager.compilePattern = (() =>
       Promise.reject(
-        new Error("repair compilation failed"),
+        new Error("replacement compilation failed"),
       )) as typeof runtime.patternManager.compilePattern;
     stub.setSource(SOURCE_V2);
 
@@ -562,10 +470,9 @@ describe("checkAndUpdateDefaultPattern", () => {
       const unchanged = (await manager.getDefaultPattern(false))!;
       expect(getPatternIdentityRef(unchanged)).toEqual(oldRef);
       expect(getPatternSource(unchanged)).toBeUndefined();
-      expect(stub.identityFetches()).toBe(0);
+      expect(stub.identityFetches()).toBe(1);
       expect(versionSkews).toEqual([]);
     } finally {
-      runtime.patternManager.loadPatternByIdentity = originalLoad;
       runtime.patternManager.compilePattern = originalCompile;
     }
   });
