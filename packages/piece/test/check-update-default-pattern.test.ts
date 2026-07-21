@@ -884,11 +884,8 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(stub.identityFetches()).toBe(1);
   });
 
-  it("skips a custom home root with both update flags on", async () => {
-    await setupHome({
-      systemPatternAutoUpdate: true,
-      systemPatternAutoUpdateHome: true,
-    });
+  it("skips a custom home root with the update flag on", async () => {
+    await setupHome({ systemPatternAutoUpdate: true });
     await controller.recreateDefaultPattern({
       customProgram: {
         main: "/custom-home.tsx",
@@ -906,16 +903,25 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(stub.identityFetches()).toBe(1);
   });
 
-  it("holds the home root behind its own flag (M4.2)", async () => {
-    // A home space (session space == the identity DID), with the base flag on
-    // but the home flag off, must not auto-update — it short-circuits before
-    // any fetch.
+  it("rolls the home root forward under the one update flag", async () => {
+    // A home space (session space == the identity DID) auto-updates under the
+    // same single flag as every other tracked system root — the home-specific
+    // second gate is gone. Same in-place semantics: no new piece minted.
     await setupHome({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const rootLinkBefore = JSON.stringify(piece.getCell().getAsLink());
+    const idV1 = getPatternIdentityRef(piece.getCell())?.identity;
 
-    expect(await controller.checkAndUpdateDefaultPattern()).toBe(
-      "skipped-disabled",
-    );
-    expect(stub.identityFetches()).toBe(0);
+    stub.setSource(SOURCE_V2);
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
+    await runtime.idle();
+
+    const root = (await manager.getDefaultPattern(false))!;
+    expect(JSON.stringify(root.getAsLink())).toBe(rootLinkBefore);
+    const idV2 = getPatternIdentityRef(root)?.identity;
+    // The home root compiles at HOME_PATTERN_URL — identity includes the entry.
+    expect(idV2).toBe(await identityForSource(SOURCE_V2, {}, HOME_PATTERN_URL));
+    expect(idV2).not.toBe(idV1);
   });
 
   describe("recreateDefaultPattern provenance (CT-1890)", () => {

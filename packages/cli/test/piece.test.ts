@@ -2,9 +2,11 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { cf, checkStderr, stripAnsi } from "./utils.ts";
 import {
+  getCellValue,
   inspectPiece,
   listPieces,
   newPiece,
+  PieceResultProjectionError,
   recreateSpaceRootPattern,
   resolveLinkEndpointAddress,
   resolvePieceConfig,
@@ -465,6 +467,228 @@ describe("cli piece parsing", () => {
     expect(optionFlags("setsrc")).toContain(
       "--dangerously-allow-incompatible-schema",
     );
+  });
+
+  it("offers a one-session step option for piece result reads", () => {
+    const getFlags = piece.getCommand("get")!.getOptions().flatMap((option) =>
+      option.flags
+    );
+    expect(getFlags).toContain("--step");
+  });
+
+  it("steps, reads, syncs, and stops in one get operation", async () => {
+    const order: string[] = [];
+    const controller = {
+      get: (
+        id: string,
+        runIt: boolean,
+        _schema: unknown,
+        scope: string | undefined,
+      ) => {
+        order.push(`get:${id}:${runIt}:${scope}`);
+        return Promise.resolve({
+          input: { get: () => Promise.resolve(undefined) },
+          getCell: () => ({
+            pull: () => {
+              order.push("piece.pull");
+              return Promise.resolve();
+            },
+          }),
+          result: {
+            getCell: () =>
+              Promise.resolve({
+                key: (segment: string) => {
+                  order.push(`result.key:${segment}`);
+                  return {
+                    pull: () => {
+                      order.push("result.pull");
+                      return Promise.resolve();
+                    },
+                  };
+                },
+              }),
+            get: () => {
+              order.push("result.get");
+              return Promise.resolve("ready");
+            },
+          },
+        });
+      },
+      stop: (id: string) => {
+        order.push(`stop:${id}`);
+        return Promise.resolve();
+      },
+    };
+    const manager = {
+      runtime: {
+        idle: () => {
+          order.push("runtime.idle");
+          return Promise.resolve();
+        },
+      },
+      synced: () => {
+        order.push("manager.synced");
+        return Promise.resolve();
+      },
+    };
+
+    const value = await getCellValue(
+      {
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: ID,
+        piece: PIECE,
+        pieceScope: "session",
+      },
+      ["value"],
+      { step: true },
+      {
+        loadManager: () => Promise.resolve(manager as any),
+        resolvePieceAddress: (_manager, id) => Promise.resolve(id),
+        createController: () => controller as any,
+      },
+    );
+
+    expect(value).toBe("ready");
+    expect(order).toEqual([
+      `get:${PIECE}:true:session`,
+      "piece.pull",
+      "result.key:value",
+      "result.pull",
+      "manager.synced",
+      "runtime.idle",
+      "manager.synced",
+      "result.get",
+      `stop:${PIECE}`,
+    ]);
+  });
+
+  it("reports schema projection failure when raw result data exists", async () => {
+    const rawCell = {
+      schema: { type: "object" },
+      getRaw: () => ({ value: { "/": "missing-session-value" } }),
+    };
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          input: { get: () => Promise.resolve(undefined) },
+          result: {
+            get: () => Promise.resolve(undefined),
+            getCell: () => Promise.resolve(rawCell),
+          },
+        }),
+    };
+
+    const error = await getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      [],
+      {},
+      {
+        loadManager: () => Promise.resolve({} as any),
+        resolvePieceAddress: (_manager, id) => Promise.resolve(id),
+        createController: () => controller as any,
+      },
+    ).catch((error) => error);
+    expect(error).toBeInstanceOf(PieceResultProjectionError);
+    expect((error as Error).message).toContain("Use --step");
+  });
+
+  it("preserves undefined when no raw result data exists", async () => {
+    const rawCell = {
+      schema: { type: "object" },
+      getRaw: () => undefined,
+    };
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          input: { get: () => Promise.resolve(undefined) },
+          result: {
+            get: () => Promise.resolve(undefined),
+            getCell: () => Promise.resolve(rawCell),
+          },
+        }),
+    };
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      [],
+      {},
+      {
+        loadManager: () => Promise.resolve({} as any),
+        resolvePieceAddress: (_manager, id) => Promise.resolve(id),
+        createController: () => controller as any,
+      },
+    )).resolves.toBeUndefined();
+  });
+
+  it("reports a missing path backed by an unresolved raw link", async () => {
+    const childCell = {
+      schema: { type: "number" },
+      getRaw: () => ({ "/": "missing-session-count" }),
+    };
+    const rootCell = {
+      schema: {
+        type: "object",
+        properties: { count: { type: "number" } },
+        required: ["count"],
+      },
+      getRaw: () => ({ count: { "/": "missing-session-count" } }),
+      key: () => childCell,
+    };
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          input: { get: () => Promise.resolve(undefined) },
+          result: {
+            get: () =>
+              Promise.reject(
+                new Error('Cannot access path "count" - property not found'),
+              ),
+            getCell: () => Promise.resolve(rootCell),
+          },
+        }),
+    };
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["count"],
+      {},
+      {
+        loadManager: () => Promise.resolve({} as any),
+        resolvePieceAddress: (_manager, id) => Promise.resolve(id),
+        createController: () => controller as any,
+      },
+    )).rejects.toThrow(PieceResultProjectionError);
+  });
+
+  it("preserves schema-valid undefined over present raw data", async () => {
+    const rawCell = {
+      schema: {
+        anyOf: [{ type: "object" }, { type: "undefined" }],
+      },
+      getRaw: () => ({ "/": "optional-session-value" }),
+    };
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          input: { get: () => Promise.resolve(undefined) },
+          result: {
+            get: () => Promise.resolve(undefined),
+            getCell: () => Promise.resolve(rawCell),
+          },
+        }),
+    };
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      [],
+      {},
+      {
+        loadManager: () => Promise.resolve({} as any),
+        resolvePieceAddress: (_manager, id) => Promise.resolve(id),
+        createController: () => controller as any,
+      },
+    )).resolves.toBeUndefined();
   });
 
   it("rejects repository metadata when resetting the home pattern", async () => {

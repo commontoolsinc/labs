@@ -215,8 +215,7 @@ export function postVersionSkew(info: VersionSkewInfo): void {
 export function shouldReconcileHomeRoot(
   runtime: Pick<Runtime, "experimental">,
 ): boolean {
-  return runtime.experimental?.systemPatternAutoUpdate === true &&
-    runtime.experimental?.systemPatternAutoUpdateHome === true;
+  return runtime.experimental?.systemPatternAutoUpdate === true;
 }
 
 /**

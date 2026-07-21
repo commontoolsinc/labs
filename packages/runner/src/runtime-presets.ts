@@ -206,7 +206,6 @@ export const EXPERIMENTAL_ENV_VARS = {
   // override while the flag exists; no environment exposure is needed.
   commitPreconditions: null,
   systemPatternAutoUpdate: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
-  systemPatternAutoUpdateHome: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME",
   computedCellIds: "EXPERIMENTAL_COMPUTED_CELL_IDS",
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
 

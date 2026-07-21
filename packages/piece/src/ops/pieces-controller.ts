@@ -604,13 +604,11 @@ export class PiecesController<T = unknown> {
     const runtime = this.#manager.runtime;
     const space = this.#manager.getSpace();
 
-    // 1. Flag gate. Home is held behind a second flag until its durable state
-    //    is verified stable-key-addressed (spec § open question 4).
+    // 1. Flag gate. One flag governs every tracked system root, home included:
+    //    home state survival across an in-place roll is pinned by
+    //    home-golden-replay.test.ts, so the home root no longer needs a
+    //    separate opt-in.
     if (!runtime.experimental?.systemPatternAutoUpdate) {
-      return "skipped-disabled";
-    }
-    const isHomeSpace = space === runtime.userIdentityDID;
-    if (isHomeSpace && !runtime.experimental?.systemPatternAutoUpdateHome) {
       return "skipped-disabled";
     }
 

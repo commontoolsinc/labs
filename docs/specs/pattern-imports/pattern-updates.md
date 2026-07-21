@@ -8,9 +8,9 @@ later phase) on demand for **published** patterns. Companion to `README.md`
 
 ## Status
 
-Phase 1 shipped: the `systemPatternAutoUpdate` flag is on in the shell for
-non-home default-app roots (`systemPatternAutoUpdateHome` stays off pending the
-home.tsx stable-addressing audit). URL-based creation and recreation stamp
+Phase 1 shipped: the `systemPatternAutoUpdate` flag is on in the shell for all
+tracked system roots, home included (the home-specific second flag was removed
+once home-golden-replay pinned state survival across an in-place roll). URL-based creation and recreation stamp
 update provenance; a pre-provenance root can recover it only when its stored ref
 exactly equals the build-attested current official entry; and an unloadable
 tracked root is repaired before bootstrap through the same `?identity`-driven
@@ -18,7 +18,8 @@ update path. Identity, source, imports, and the compiled entry must agree on one
 build and content identity. The executed milestone map and corrections found
 during implementation are archived at
 [`docs/history/specs/pattern-imports/system-pattern-updates-implementation-plan.md`](../../history/specs/pattern-imports/system-pattern-updates-implementation-plan.md).
-Home root and published-pattern updates remain design (Phases 2–4).
+The home root (Phase 2) rides the shipped Phase 1 machinery since the second
+flag's removal; published-pattern updates remain design (Phases 3–4).
 
 ## Last Updated
 
@@ -342,4 +343,7 @@ so no build-dependence and no gate.
    user-reload? Start with a banner; auto-restart is a follow-up.
 4. **Home-data stable addressing** — verify `home.tsx` addresses its durable
    state by stable key/cause before enabling always-update on the home root
-   (Phase 2 gate).
+   (Phase 2 gate). Resolved 2026-07-21: `home-golden-replay.test.ts` pins state
+   survival across an in-place N→N+1 roll over representative favorites /
+   journal / spaces data, and the home-specific flag was removed on its
+   strength (with the estuary home-brick incident as the forcing event).

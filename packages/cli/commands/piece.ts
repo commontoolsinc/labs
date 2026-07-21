@@ -16,6 +16,7 @@ import {
   MapFormat,
   newPiece,
   PieceConfig,
+  PieceResultProjectionError,
   recreateSpaceRootPattern,
   removePiece,
   resetHomePattern,
@@ -784,8 +785,16 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     cliText(`cf piece get ${EX_ID} ${EX_COMP_PIECE}`),
     `Get the full result of piece "${RAW_EX_COMP.piece!}".`,
   )
+  .example(
+    cliText(`cf piece get ${EX_ID} ${EX_COMP_PIECE} --step`),
+    `Start, recompute, and get the result in one CLI session.`,
+  )
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option("--input", "Read from the piece's input cell instead of result cell")
+  .option(
+    "--step",
+    "Start and recompute the piece in this session before reading",
+  )
   .arguments("[path:string]")
   .action(async (options, pathString) => {
     const pieceConfig = parsePieceOptions(options);
@@ -793,10 +802,12 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     try {
       const value = await getCellValue(pieceConfig, pathSegments, {
         input: options.input,
+        step: options.step,
       });
       render(value, { json: true });
     } catch (error) {
       if (
+        error instanceof PieceResultProjectionError ||
         error instanceof Error && error.message.startsWith("Cannot access path")
       ) {
         throw new ValidationError(error.message, { exitCode: 1 });
