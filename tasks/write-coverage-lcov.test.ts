@@ -1,7 +1,10 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { dirname, fromFileUrl, join } from "@std/path";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
-import { normalizeLcovInstancePaths } from "./write-coverage-lcov.ts";
+import {
+  collectCoverageProfileFiles,
+  normalizeLcovInstancePaths,
+} from "./write-coverage-lcov.ts";
 
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 const SCRIPT = join(REPO_ROOT, "tasks/write-coverage-lcov.ts");
@@ -156,6 +159,68 @@ Deno.test("write-coverage-lcov converts real profiles to a normalized LCOV repor
       "instance query survived normalization",
     );
     assertStringIncludes(result.stdout, "Wrote LCOV");
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+function dirEntry(name: string, isDirectory: boolean): Deno.DirEntry {
+  return { name, isDirectory, isFile: !isDirectory, isSymlink: false };
+}
+
+// A full coverage run can leave far more profile files in one directory than
+// the number of arguments V8 lets a single call take (a ceiling near 130,000).
+// Present the collector a directory that large through an injected reader — no
+// real files — and confirm it gathers every profile. A collector that merged a
+// subdirectory's list into its parent with a spread would overflow here; a
+// walk that appends into one shared array does not, whatever the stack size.
+Deno.test("collectCoverageProfileFiles gathers a directory larger than the argument limit", async () => {
+  const COUNT = 200_000;
+  const root = "/coverage-root";
+  const sub = join(root, "sub");
+  const readDir = (dir: string): AsyncIterable<Deno.DirEntry> => {
+    async function* entries(): AsyncGenerator<Deno.DirEntry> {
+      if (dir === root) {
+        yield dirEntry("sub", true);
+      } else if (dir === sub) {
+        for (let i = 0; i < COUNT; i++) yield dirEntry(`p${i}.json`, false);
+      }
+    }
+    return entries();
+  };
+
+  const files = await collectCoverageProfileFiles(root, readDir);
+
+  assertEquals(files.length, COUNT);
+  assertEquals(files[0], join(sub, "p0.json"));
+  assertEquals(files.at(-1), join(sub, `p${COUNT - 1}.json`));
+});
+
+Deno.test("collectCoverageProfileFiles walks nested directories and keeps only .json", async () => {
+  const root = await Deno.makeTempDir({ prefix: "write-lcov-collect-" });
+  try {
+    await Deno.writeTextFile(join(root, "top.json"), "{}");
+    await Deno.writeTextFile(join(root, "ignored.txt"), "");
+    const nested = join(root, "nested", "deeper");
+    await Deno.mkdir(nested, { recursive: true });
+    await Deno.writeTextFile(join(nested, "leaf.json"), "{}");
+    await Deno.writeTextFile(join(nested, "notes.md"), "");
+
+    const files = await collectCoverageProfileFiles(root);
+
+    assertEquals(files.sort(), [
+      join(root, "nested", "deeper", "leaf.json"),
+      join(root, "top.json"),
+    ]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("collectCoverageProfileFiles returns empty for a missing directory", async () => {
+  const root = await Deno.makeTempDir({ prefix: "write-lcov-collect-" });
+  try {
+    assertEquals(await collectCoverageProfileFiles(join(root, "missing")), []);
   } finally {
     await Deno.remove(root, { recursive: true });
   }
