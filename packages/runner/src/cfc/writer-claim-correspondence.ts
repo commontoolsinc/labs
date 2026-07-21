@@ -25,8 +25,10 @@
  * reconcile-adoption edge, a hostile verified module whose forged path
  * differs from a stored unstamped claim's by one leading segment is accepted
  * where before it needed the exact spelling — a marginal widening of the
- * pre-existing path-forgeability that mint-time identity binding /
- * authenticated `piece setsrc` delegation now closes for legitimate updates.
+ * pre-existing path-forgeability that #4871's mint-time identity binding closes
+ * at the source for newly engine-minted claims (aged unstamped claims remain
+ * compatibility state), with authenticated `piece setsrc` delegation carrying
+ * authority across legitimate updates (this PR).
  *
  * The correspondence is deliberately no wider than the divergence the
  * toolchain actually produced: equal after slash-normalization, or exactly

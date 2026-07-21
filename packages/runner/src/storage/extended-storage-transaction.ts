@@ -658,13 +658,23 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // it once at transaction creation: later module loads affect future
   // transactions, never an authorization decision already in flight.
   setCfcModuleDelegations(
-    delegations: ReadonlyMap<string, readonly string[]>,
+    delegations: ReadonlyMap<
+      MemorySpace,
+      ReadonlyMap<string, readonly string[]>
+    >,
   ): void {
     if (this.#cfcModuleDelegationsPinned) return;
     this.#cfcModuleDelegationsPinned = true;
-    const snapshot = new Map<string, readonly string[]>();
-    for (const [identity, predecessors] of delegations) {
-      snapshot.set(identity, [...predecessors]);
+    const snapshot = new Map<
+      MemorySpace,
+      ReadonlyMap<string, readonly string[]>
+    >();
+    for (const [space, spaceDelegations] of delegations) {
+      const spaceSnapshot = new Map<string, readonly string[]>();
+      for (const [identity, predecessors] of spaceDelegations) {
+        spaceSnapshot.set(identity, [...predecessors]);
+      }
+      if (spaceSnapshot.size > 0) snapshot.set(space, spaceSnapshot);
     }
     this.#cfcState.moduleDelegations = snapshot;
   }
@@ -1245,12 +1255,24 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       ...(this.#cfcState.moduleDelegations.size > 0
         ? {
           moduleDelegations: [...this.#cfcState.moduleDelegations]
-            .map(([moduleIdentity, delegatedModuleIdentities]) => ({
-              moduleIdentity,
-              delegatedModuleIdentities: [...delegatedModuleIdentities].sort(),
-            }))
+            .flatMap(([space, spaceDelegations]) =>
+              [...spaceDelegations].map(([
+                moduleIdentity,
+                delegatedModuleIdentities,
+              ]) => ({
+                space,
+                moduleIdentity,
+                delegatedModuleIdentities: [
+                  ...delegatedModuleIdentities,
+                ].sort(),
+              }))
+            )
             .sort((left, right) =>
-              left.moduleIdentity < right.moduleIdentity
+              left.space < right.space
+                ? -1
+                : left.space > right.space
+                ? 1
+                : left.moduleIdentity < right.moduleIdentity
                 ? -1
                 : left.moduleIdentity > right.moduleIdentity
                 ? 1

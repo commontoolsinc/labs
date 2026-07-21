@@ -176,7 +176,8 @@ describe("setsrc module delegation", () => {
 
         const registeredTx = mergeRuntime.edit();
         const registeredDelegations = registeredTx.getCfcState()
-          .moduleDelegations.get(successorRef.identity) ?? [];
+          .moduleDelegations.get(patternSpace)?.get(successorRef.identity) ??
+          [];
         registeredTx.abort();
         expect(registeredDelegations).toContain(firstRef.identity);
         expect(registeredDelegations).toContain(intermediateRef.identity);

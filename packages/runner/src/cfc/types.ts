@@ -382,6 +382,7 @@ export type TrustSnapshot = {
 };
 
 export type ModuleDelegationSnapshotEntry = {
+  readonly space: MemorySpace;
   readonly moduleIdentity: string;
   readonly delegatedModuleIdentities: readonly string[];
 };
@@ -687,9 +688,13 @@ export type CfcTxState = {
     identity?: ImplementationIdentity;
   };
   trustSnapshot?: TrustSnapshot;
-  // Transitive successor -> predecessor writer-authority aliases, snapshotted
-  // from the Runtime when the transaction is created and write-once pinned.
-  moduleDelegations: ReadonlyMap<string, readonly string[]>;
+  // Attesting space -> transitive successor -> predecessor writer-authority
+  // aliases, snapshotted from the Runtime when the transaction is created and
+  // write-once pinned. Authorization consults only the target document's space.
+  moduleDelegations: ReadonlyMap<
+    MemorySpace,
+    ReadonlyMap<string, readonly string[]>
+  >;
   implementationIdentity?: ImplementationIdentity;
   outbox: PostCommitSideEffect[];
   diagnostics: string[];

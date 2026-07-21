@@ -11,6 +11,7 @@ import {
   resolveModuleImports,
 } from "../src/harness/module-identity.ts";
 import type { CacheableModule, RuntimeProgram } from "../src/harness/types.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 
 import {
   buildSourceDocs,
@@ -508,6 +509,75 @@ describe("cell-cache: source-set store (per space, link-following)", () => {
       { specifier: "./child.ts", identity: childIdentity },
       { specifier: "./again.ts", identity: childIdentity },
     ]);
+  });
+
+  it("rejects a source closure linked to another space's attestation", async () => {
+    const attackerSpace = "did:key:z6MkSourceClosureAttacker";
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const utilIdentity = identityOf(PROGRAM, "/util.ts");
+    const predecessorIdentity = "victim-source-predecessor";
+    const delegations = new Map([
+      [utilIdentity, new Set([predecessorIdentity])],
+    ]);
+
+    const attackerTx = runtime.edit();
+    writeSourceDocs(
+      runtime,
+      attackerSpace,
+      modules,
+      entryIdentity,
+      attackerTx,
+      delegations,
+    );
+    runtime.prepareTxForCommit(attackerTx);
+    expect((await attackerTx.commit()).error).toBeUndefined();
+
+    const victimTx = runtime.edit();
+    writeSourceDocs(runtime, spaceA, modules, entryIdentity, victimTx);
+    runtime.prepareTxForCommit(victimTx);
+    expect((await victimTx.commit()).error).toBeUndefined();
+
+    const entryModule = modules.find((module) =>
+      module.identity === entryIdentity
+    )!;
+    const rewireTx = runtime.edit();
+    runtime.getCell(
+      spaceA,
+      sourceDocKey(entryIdentity),
+      undefined,
+      rewireTx,
+    ).set({
+      kind: "source",
+      identity: entryIdentity,
+      code: entryModule.source,
+      filename: entryModule.filename,
+      imports: entryModule.imports.map((imp) => ({
+        specifier: imp.specifier,
+        link: runtime.getCell(
+          imp.targetIdentity === utilIdentity ? attackerSpace : spaceA,
+          sourceDocKey(imp.targetIdentity),
+          undefined,
+          rewireTx,
+        ).getAsLink(),
+      })),
+    });
+    runtime.prepareTxForCommit(rewireTx);
+    expect((await rewireTx.commit()).error).toBeUndefined();
+
+    const loadTx = runtime.edit();
+    const loaded = await loadVerifiedSourceClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      loadTx,
+    );
+    loadTx.abort?.("mixed-space source closure rejected");
+    expect(loaded).toBeUndefined();
+
+    const snapshotTx = runtime.edit();
+    expect(snapshotTx.getCfcState().moduleDelegations.get(spaceA))
+      .toBeUndefined();
+    snapshotTx.abort?.("mixed-space source snapshot inspected");
   });
 
   it("skips source imports that do not point to source documents", async () => {
@@ -1017,6 +1087,90 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     ]);
   });
 
+  it("rejects a compiled closure linked to another space's attestation", async () => {
+    const attackerSpace = "did:key:z6MkCompiledClosureAttacker";
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const utilIdentity = identityOf(PROGRAM, "/util.ts");
+    const predecessorIdentity = "victim-compiled-predecessor";
+    const delegations = new Map([
+      [utilIdentity, new Set([predecessorIdentity])],
+    ]);
+
+    const attackerTx = runtime.edit();
+    writeCompiledDocs(
+      runtime,
+      attackerSpace,
+      modules,
+      entryIdentity,
+      { ...opts(), moduleDelegations: delegations },
+      attackerTx,
+    );
+    attackerTx.prepareCfc();
+    expect((await attackerTx.commit()).error).toBeUndefined();
+
+    const victimTx = runtime.edit();
+    writeCompiledDocs(
+      runtime,
+      spaceA,
+      modules,
+      entryIdentity,
+      opts(),
+      victimTx,
+    );
+    victimTx.prepareCfc();
+    expect((await victimTx.commit()).error).toBeUndefined();
+
+    const entryModule = modules.find((module) =>
+      module.identity === entryIdentity
+    )!;
+    const rewireTx = runtime.edit();
+    const previousIdentity = rewireTx.getCfcState().implementationIdentity;
+    rewireTx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: "compile-cache",
+    });
+    try {
+      const entryCell = runtime.getCell<Record<string, unknown>>(
+        spaceA,
+        compiledDocKey(RTVER, entryIdentity),
+        compiledDocWriteSchema(),
+        rewireTx,
+      );
+      entryCell.set({
+        ...entryCell.get(),
+        imports: entryModule.imports.map((imp) => ({
+          specifier: imp.specifier,
+          link: runtime.getCell(
+            imp.targetIdentity === utilIdentity ? attackerSpace : spaceA,
+            compiledDocKey(RTVER, imp.targetIdentity),
+            undefined,
+            rewireTx,
+          ).getAsLink(),
+        })),
+      });
+    } finally {
+      rewireTx.setCfcImplementationIdentity(previousIdentity);
+    }
+    rewireTx.prepareCfc();
+    expect((await rewireTx.commit()).error).toBeUndefined();
+
+    const loadTx = runtime.edit();
+    const loaded = await loadCompiledClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      opts(),
+      loadTx,
+    );
+    loadTx.abort?.("mixed-space compiled closure rejected");
+    expect(loaded.size).toBe(0);
+
+    const snapshotTx = runtime.edit();
+    expect(snapshotTx.getCfcState().moduleDelegations.get(spaceA))
+      .toBeUndefined();
+    snapshotTx.abort?.("mixed-space compiled snapshot inspected");
+  });
+
   it("skips compiled import links without integrity", async () => {
     const entryIdentity = "compiled-entry-with-unstamped-import";
     const missingIdentity = "compiled-unstamped-child";
@@ -1295,7 +1449,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     }
   });
 
-  it("replicates fabric dependencies even though source closures exclude them", async () => {
+  it("replicates fabric dependencies without importing authority", async () => {
     const spaceB = "did:key:z6MkCellCacheFabricReplicationTarget";
     const { modules, importerIdentity, depIdentity } = fabricLinkedModules();
     const coverageSpans = [{
@@ -1392,10 +1546,65 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
       policyManifest,
     ]);
     expect(importerSource?.get(importerIdentity)?.delegatedModuleIdentities)
-      .toEqual([predecessorIdentity]);
-    expect(compiled.get(importerIdentity)?.delegatedModuleIdentities).toEqual([
-      predecessorIdentity,
-    ]);
+      .toBeUndefined();
+    expect(compiled.get(importerIdentity)?.delegatedModuleIdentities)
+      .toBeUndefined();
+
+    const snapshotTx = runtime.edit();
+    expect(
+      snapshotTx.getCfcState().moduleDelegations.get(spaceA)?.get(
+        importerIdentity,
+      ),
+    ).toEqual([predecessorIdentity]);
+    expect(snapshotTx.getCfcState().moduleDelegations.get(spaceB))
+      .toBeUndefined();
+    snapshotTx.abort?.("cross-space replication snapshot inspected");
+
+    const protectedSchema = {
+      type: "object",
+      properties: {
+        value: {
+          type: "string",
+          ifc: {
+            writeAuthorizedBy: {
+              __ctWriterIdentityOf: {
+                moduleIdentity: predecessorIdentity,
+                file: "/main.tsx",
+                path: ["setValue"],
+              },
+            },
+          },
+        },
+      },
+      required: ["value"],
+    } as unknown as JSONSchema;
+    const protectedCell = runtime.getCell<{ value: string }>(
+      spaceB,
+      "cell-cache-cross-space-replication-authority",
+      protectedSchema,
+    );
+    const seed = await runtime.editWithRetry((tx) => {
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        moduleIdentity: predecessorIdentity,
+        sourceFile: "/main.tsx",
+        bindingPath: ["setValue"],
+      });
+      protectedCell.withTx(tx).set({ value: "seed" });
+    });
+    expect(seed.error).toBeUndefined();
+
+    const denied = await runtime.editWithRetry((tx) => {
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        moduleIdentity: importerIdentity,
+        sourceFile: "/main.tsx",
+        bindingPath: ["setValue"],
+      });
+      protectedCell.withTx(tx).set({ value: "replicated" });
+    }, 0);
+    expect(denied.error?.message).toContain("writeAuthorizedBy failed");
+    expect(protectedCell.get()).toEqual({ value: "seed" });
 
     const damageTx = runtime.edit();
     const previousIdentity = damageTx.getCfcState().implementationIdentity;

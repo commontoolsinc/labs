@@ -385,9 +385,9 @@ root compiler stamp. Loaders discard delegation metadata without the applicable
 stamp. The general source/compiled save path computes one union of newly derived
 entries and authenticated entries already stored in either document set under
 `editWithRetry`, writes that same union to both sets, and registers the union
-from the successful commit in the active runtime. It never replaces entries,
-because one content-addressed successor can be shared by patterns updated from
-different predecessors. Because
+from the successful commit under the attesting space in the active runtime. It
+never replaces entries, because one content-addressed successor can be shared by
+patterns updated from different predecessors. Because
 `identity` is a one-way Merkle hash, the `imports` links are load-bearing (stored
 explicitly), but the parent hash commits to its children's identities, so the
 graph wiring is verifiable on load by recomputing identities and checking each
@@ -413,18 +413,26 @@ cold-reload-stable.
 
 Verified source loads register only field-integrity-authenticated lists;
 integrity-valid compiled-cache loads register lists from their root-authenticated
-documents. Each transaction snapshots the resulting successor-to-predecessor
-map's transitive closure. `writeAuthorizedBy` may then match the live writer's
-module hash directly or through that snapshot, while its binding path must still
-match exactly. Source-file spelling is diagnostic at verification because it is
+documents. Registration and transitive closure are scoped by the space carrying
+that attestation. Each transaction snapshots the resulting per-space maps, and
+`writeAuthorizedBy` consults only the map for the target document's space. It may
+then match the live writer's module hash directly or through that space's
+snapshot, while its binding path must still match exactly. Delegation metadata
+loaded from another space grants no authority. Source and compiled closure
+loaders reject a cache graph containing any cross-space import link, so a child
+document's local attestation cannot be flattened into the root's space.
+Source-file spelling is diagnostic at verification because it is
 resolver-dependent; a rename still receives no delegation because old and new
 modules no longer match by canonical authored filename.
 Ambiguous canonical filenames and unauthenticated metadata fail closed by
 receiving no delegation. If a runtime-version miss recompiles from source, the
 compiled-cache repair carries the authenticated map forward so later warm loads
-retain the same authority chain. When multiple patterns converge on one
-successor across restarts, save-time unioning preserves every predecessor in
-both cache sets and in the runtime that performed the later update.
+retain the same authority chain. Cross-space closure replication copies code and
+imports but omits the origin space's delegation metadata; the destination save
+preserves only authority already authenticated in the destination. When multiple
+patterns converge on one successor within a space across restarts, save-time
+unioning preserves every predecessor in both cache sets and in the runtime that
+performed the later update.
 
 ## Verifiable Execution Implications
 
@@ -490,8 +498,11 @@ The cache is designed around this:
   independently loadable there (`PatternManager.replicatePatternToSpace`).
   Chain-of-custody holds — compiled docs are read through the integrity-gated
   loader (only docs already carrying the compiler stamp replicate) and
-  re-stamped on the child-space write by a legitimate child-space writer. Note
-  for the server-compilation end state: a client can then no longer stamp
+  re-stamped on the child-space write by a legitimate child-space writer.
+  Module-update authority does not cross that boundary:
+  `delegatedModuleIdentities` from the origin is omitted during replication,
+  while any entries already authenticated in the destination are preserved.
+  Note for the server-compilation end state: a client can then no longer stamp
   replicated compiled docs, so child spaces will need server-side replication
   or by-identity source recovery instead.
 - **CFC verified-source derives from the source set, not the cached JS.** A

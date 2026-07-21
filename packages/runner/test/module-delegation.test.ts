@@ -78,30 +78,48 @@ describe("module identity delegation", () => {
   });
 
   it("filters invalid identities and pins each transaction's trust snapshot", () => {
+    const otherSpace = "did:key:z6MkModuleDelegationOtherSpace";
     runtime.registerModuleDelegations(
+      space,
       new Map([
         ["", new Set(["ignored-predecessor"])],
         ["successor", new Set(["predecessor"])],
+        ["predecessor", new Set(["ancestor"])],
       ]),
+    );
+    runtime.registerModuleDelegations(
+      otherSpace,
+      new Map([["predecessor", new Set(["attacker"])]]),
     );
 
     const tx = runtime.edit();
-    expect(tx.getCfcState().moduleDelegations.has("")).toBe(false);
-    expect(tx.getCfcState().moduleDelegations.get("successor")).toEqual([
+    const spaceDelegations = tx.getCfcState().moduleDelegations.get(space)!;
+    expect(spaceDelegations.has("")).toBe(false);
+    expect(spaceDelegations.get("successor")).toEqual([
+      "ancestor",
       "predecessor",
     ]);
+    expect(
+      tx.getCfcState().moduleDelegations.get(otherSpace)?.get("predecessor"),
+    ).toEqual(["attacker"]);
 
     // The Runtime pins this trust snapshot when it creates the transaction.
     // Code that reaches the concrete transaction must not replace it later.
     const delegationSetter = tx as unknown as {
       setCfcModuleDelegations(
-        delegations: ReadonlyMap<string, readonly string[]>,
+        delegations: ReadonlyMap<
+          string,
+          ReadonlyMap<string, readonly string[]>
+        >,
       ): void;
     };
     delegationSetter.setCfcModuleDelegations(
-      new Map([["successor", ["attacker"]]]),
+      new Map([[space, new Map([["successor", ["attacker"]]])]]),
     );
-    expect(tx.getCfcState().moduleDelegations.get("successor")).toEqual([
+    expect(
+      tx.getCfcState().moduleDelegations.get(space)?.get("successor"),
+    ).toEqual([
+      "ancestor",
       "predecessor",
     ]);
     tx.abort?.("module-delegation snapshot pin test complete");
@@ -356,5 +374,76 @@ describe("module identity delegation", () => {
       "writeAuthorizedBy failed",
     );
     expect(protectedCell.get()).toEqual({ value: "different-file" });
+  });
+
+  it("does not import module authority from another space", async () => {
+    const attacker = await Identity.fromPassphrase(
+      "module delegation attacker space",
+    );
+    const attackerSpace = attacker.did();
+    const oldIdentity = computeModuleHashes(moduleProgram("old")).get(
+      "/writer.ts",
+    )!;
+    const successor = moduleFor(moduleProgram("new"));
+
+    const sourceTx = runtime.edit();
+    writeSourceDocs(
+      runtime,
+      attackerSpace,
+      [successor],
+      successor.identity,
+      sourceTx,
+      new Map([[successor.identity, new Set([oldIdentity])]]),
+    );
+    runtime.prepareTxForCommit(sourceTx);
+    expect((await sourceTx.commit()).error).toBeUndefined();
+
+    const loadTx = runtime.edit();
+    const closure = await loadVerifiedSourceClosure(
+      runtime,
+      attackerSpace,
+      successor.identity,
+      loadTx,
+    );
+    loadTx.abort?.("cross-space module-delegation source load complete");
+    expect(closure?.get(successor.identity)).toBeDefined();
+
+    const snapshotTx = runtime.edit();
+    expect(
+      snapshotTx.getCfcState().moduleDelegations.get(attackerSpace)?.get(
+        successor.identity,
+      ),
+    ).toEqual([oldIdentity]);
+    expect(snapshotTx.getCfcState().moduleDelegations.get(space))
+      .toBeUndefined();
+    snapshotTx.abort?.("cross-space module-delegation snapshot inspected");
+
+    const protectedCell = runtime.getCell<{ value: string }>(
+      space,
+      "module-delegation-cross-space-value",
+      protectedSchema,
+    );
+    const seed = await runtime.editWithRetry((tx) => {
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        moduleIdentity: oldIdentity,
+        sourceFile: "/writer.ts",
+        bindingPath: ["setValue"],
+      });
+      protectedCell.withTx(tx).set({ value: "seed" });
+    });
+    expect(seed.error).toBeUndefined();
+
+    const denied = await runtime.editWithRetry((tx) => {
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        moduleIdentity: successor.identity,
+        sourceFile: "/writer.ts",
+        bindingPath: ["setValue"],
+      });
+      protectedCell.withTx(tx).set({ value: "cross-space" });
+    }, 0);
+    expect(denied.error?.message).toContain("writeAuthorizedBy failed");
+    expect(protectedCell.get()).toEqual({ value: "seed" });
   });
 });

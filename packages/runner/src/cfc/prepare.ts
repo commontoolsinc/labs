@@ -507,6 +507,7 @@ const writeAuthorizedByReason = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
   path: readonly string[],
+  targetSpace: MemorySpace,
   targetIdentity?: ImplementationIdentity,
 ): string | undefined => {
   if (!isRecord(schema) || !isRecord(schema.ifc)) {
@@ -568,9 +569,9 @@ const writeAuthorizedByReason = (
     typeof writerModuleIdentity === "string" &&
     writerModuleIdentity.length > 0 &&
     (writerModuleIdentity === claimedModuleIdentity ||
-      tx.getCfcState().moduleDelegations.get(writerModuleIdentity)?.includes(
-          claimedModuleIdentity,
-        ) === true);
+      tx.getCfcState().moduleDelegations.get(targetSpace)?.get(
+          writerModuleIdentity,
+        )?.includes(claimedModuleIdentity) === true);
   if (
     !identityArmMatches ||
     !arraysEqual(identity.bindingPath, bindingIdentity.path)
@@ -3457,6 +3458,7 @@ const verifyInputRequirements = (
       tx,
       entry.schema,
       entry.path,
+      target.space,
       identityForPath(entry.path),
     );
     const setupProjection = setupProjectionSourceMatchesValue(

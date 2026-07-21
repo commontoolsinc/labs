@@ -333,13 +333,18 @@ export const canonicalizePreparedDigestInput = (
     ? {
       moduleDelegations: [...input.moduleDelegations]
         .map((entry) => ({
+          space: entry.space,
           moduleIdentity: entry.moduleIdentity,
           delegatedModuleIdentities: [
             ...entry.delegatedModuleIdentities,
           ].sort(),
         }))
         .sort((left, right) =>
-          left.moduleIdentity < right.moduleIdentity
+          left.space < right.space
+            ? -1
+            : left.space > right.space
+            ? 1
+            : left.moduleIdentity < right.moduleIdentity
             ? -1
             : left.moduleIdentity > right.moduleIdentity
             ? 1

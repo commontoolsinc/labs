@@ -818,7 +818,7 @@ export function writeSourceDocs(
  * already-loaded linked cells synchronously — no per-cell `sync()`. Returns the
  * raw documents keyed by their **stored** identity (verify with
  * {@link verifySourceDocs} before trusting). Resolves to `undefined` if the
- * entry document is absent.
+ * entry document is absent or any cache import link crosses out of `space`.
  */
 export async function loadSourceClosure(
   runtime: Runtime,
@@ -851,7 +851,12 @@ export async function loadSourceClosure(
       // `link` is already a loaded Cell (the entry sync pulled it). View it
       // under the recursive schema so its own links resolve as cells too.
       if (!isCell(imp.link)) continue;
-      const childCell = (imp.link as Cell<unknown>).asSchema(
+      const linkedCell = imp.link as Cell<unknown>;
+      // Cache attestations are space-local. A cross-space child may be validly
+      // compiler-stamped in its own space, but must never be flattened into
+      // the requested space's verified closure (and delegation registry).
+      if (linkedCell.space !== space) return undefined;
+      const childCell = linkedCell.asSchema(
         SOURCE_DOC_SCHEMA,
       );
       const child = childCell.get() as StoredSourceDoc | undefined;
@@ -935,7 +940,10 @@ export async function loadVerifiedSourceClosure(
     ]);
     return undefined;
   }
-  runtime.registerModuleDelegations(moduleDelegationsFromDocs(closure));
+  runtime.registerModuleDelegations(
+    space,
+    moduleDelegationsFromDocs(closure),
+  );
   return closure;
 }
 
@@ -1341,10 +1349,11 @@ export function writeSourceAndCompiledDocs(
  * (never re-deriving a cell from a stored `identity` field), and a cell's stored
  * doc is used only after its own persisted CFC label is confirmed to carry the
  * compiler integrity atom. So every document in the result — and every import
- * edge — came from an integrity-stamped cell that the parent's sigil link
- * actually points at; an unstamped/tampered child is dropped along with the edge
- * to it (treated as a cache miss, so the caller recompiles). The entry is the
- * one cell looked up by key, from the caller's trusted `entryIdentity`.
+ * edge — came from an integrity-stamped cell in `space` that the parent's sigil
+ * link actually points at; an unstamped/tampered child is dropped along with
+ * the edge to it (treated as a cache miss, so the caller recompiles), while a
+ * mixed-space link rejects the whole closure. The entry is the one cell looked
+ * up by key, from the caller's trusted `entryIdentity`.
  *
  * Resolves to the valid documents keyed by their stored identity (empty map if
  * the entry itself is missing/unstamped).
@@ -1416,9 +1425,12 @@ export async function loadCompiledClosure(
       // `link` is an already-loaded Cell (the entry sync pulled it). View it
       // under the recursive schema so its own links resolve as cells too, then
       // integrity-check + read synchronously — no re-lookup by id, no sync.
-      const child = verifiedDoc(
-        (imp.link as Cell<unknown>).asSchema(COMPILED_DOC_SCHEMA),
-      );
+      const linkedCell = imp.link as Cell<unknown>;
+      // Compiled-cache integrity and module delegation authority are attested
+      // only in the linked cell's space. Mixed-space cache graphs fail closed
+      // instead of rebasing a child space's attestation onto `space`.
+      if (linkedCell.space !== space) return new Map();
+      const child = verifiedDoc(linkedCell.asSchema(COMPILED_DOC_SCHEMA));
       if (child === undefined) continue;
       imports.push({ specifier: imp.specifier, identity: child.identity });
       if (!visited.has(child.identity)) queue.push({ doc: child });
@@ -1455,6 +1467,6 @@ export async function loadCompiledClosure(
       imports,
     });
   }
-  runtime.registerModuleDelegations(moduleDelegationsFromDocs(out));
+  runtime.registerModuleDelegations(space, moduleDelegationsFromDocs(out));
   return out;
 }

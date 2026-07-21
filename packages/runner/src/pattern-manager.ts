@@ -422,7 +422,10 @@ export class PatternManager {
    * `toSpace`, rebuilding the emitted-module shape the write functions expect.
    * All-or-nothing: a partial compiled closure can never be served (the loaders
    * require a full, integrity-valid hit), so an incomplete origin set throws
-   * instead of persisting an unservable copy.
+   * instead of persisting an unservable copy. Delegation metadata is deliberately
+   * not copied across spaces: it carries writer authority and is valid only in
+   * the space whose cache documents attest it. The ordinary save path still
+   * preserves any authenticated delegation already present in `toSpace`.
    */
   private async replicateClosures(
     entryIdentity: string,
@@ -489,7 +492,6 @@ export class PatternManager {
       throw new Error("coverage spans unavailable in origin space");
     }
     const modules: CacheableModule[] = [];
-    const moduleDelegations = new Map<string, ReadonlySet<string>>();
     const fabricDependencies = new Set<string>();
     for (const [identity, doc] of sourceDocs) {
       const compiled = compiledDocs?.get(identity);
@@ -497,11 +499,6 @@ export class PatternManager {
         throw new Error(`compiled doc missing for ${identity}`);
       }
       const fabricImports = fabricImportRefsFromSource(doc);
-      const delegated = new Set([
-        ...(doc.delegatedModuleIdentities ?? []),
-        ...(compiled?.delegatedModuleIdentities ?? []),
-      ].filter((candidate) => candidate !== identity));
-      if (delegated.size > 0) moduleDelegations.set(identity, delegated);
       for (const imp of fabricImports) {
         fabricDependencies.add(imp.targetIdentity);
       }
@@ -537,7 +534,6 @@ export class PatternManager {
         toSpace,
         modules,
         entryIdentity,
-        moduleDelegations,
       );
     } else {
       await this.persistCompileCacheTracked(
@@ -545,7 +541,6 @@ export class PatternManager {
         modules,
         entryIdentity,
         { runtimeVersion },
-        moduleDelegations,
       );
     }
 
@@ -1789,7 +1784,7 @@ export class PatternManager {
       ]);
       throw throwableStorageError(error);
     }
-    this.runtime.registerModuleDelegations(committedModuleDelegations);
+    this.runtime.registerModuleDelegations(space, committedModuleDelegations);
   }
 
   /**
@@ -1844,7 +1839,7 @@ export class PatternManager {
       ]);
       throw throwableStorageError(error);
     }
-    this.runtime.registerModuleDelegations(committedModuleDelegations);
+    this.runtime.registerModuleDelegations(space, committedModuleDelegations);
   }
 
   // Write-target pre-syncs carry the one-hop edge selector (CT-1848): a
