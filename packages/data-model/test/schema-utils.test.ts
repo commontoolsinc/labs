@@ -1052,6 +1052,23 @@ describe("schema-utils", () => {
       expect(a).not.toBe(b);
     });
 
+    it("keeps live entries when the path cache sweeps", () => {
+      // The per-schema path map sweeps collected entries once it passes its
+      // threshold (2048). Holding every returned selector alive means the
+      // sweep runs with nothing to collect, which is the case that must not
+      // lose canonical instances: dropping a live entry would silently break
+      // canonicalization for that path.
+      const schema = uniqueSchema();
+      const held: SchemaPathSelector[] = [];
+      for (let i = 0; i <= 2048; i++) {
+        held.push(internPathSelector({ path: [`p${i}`], schema }));
+      }
+
+      // Every path still canonicalizes to the instance interned for it.
+      expect(internPathSelector({ path: ["p0"], schema })).toBe(held[0]);
+      expect(internPathSelector({ path: ["p2048"], schema })).toBe(held[2048]);
+    });
+
     it("handles selectors whose `schema` is undefined", () => {
       const selector: SchemaPathSelector = { path: ["p"] };
       // Must not throw — `internSchema(undefined)` would, and the guard
