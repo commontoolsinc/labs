@@ -83,10 +83,15 @@ export class HttpProgramResolver implements ProgramResolver {
   #fetchImpl: typeof globalThis.fetch;
   constructor(
     main: string | URL,
-    fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+    fetchImpl?: typeof globalThis.fetch,
   ) {
     this.#mainUrl = !(main instanceof URL) ? new URL(main) : main;
-    this.#fetchImpl = fetchImpl;
+    // Keep the host receiver for browser fetch. Capturing a fetch function and
+    // later calling it as a resolver field makes WorkerGlobalScope reject the
+    // call with `Illegal invocation`.
+    this.#fetchImpl = fetchImpl
+      ? (input, init) => fetchImpl.call(globalThis, input, init)
+      : (input, init) => globalThis.fetch(input, init);
   }
 
   main(): Promise<Source> {
