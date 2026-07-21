@@ -51,10 +51,22 @@ const isPoint = (p: unknown): p is Point =>
 export async function loadHistory(): Promise<void> {
   try {
     const data = JSON.parse(await Deno.readTextFile(HISTORY_FILE));
-    if (Array.isArray(data)) {
-      history.push(...data.filter(isPoint));
+    if (!Array.isArray(data)) {
+      throw new Error("history is not an array of samples");
     }
-  } catch { /* no file yet or unreadable: start from an empty history */ }
+    const points = data.filter(isPoint);
+    if (data.length > 0 && points.length === 0) {
+      throw new Error("history contains no valid samples");
+    }
+    if (points.length !== data.length) {
+      console.error(`discord: discarded ${data.length - points.length} invalid history samples`);
+    }
+    history.push(...points);
+  } catch (e) {
+    if (e instanceof Deno.errors.NotFound) return;
+    const reason = e instanceof Error ? e.message : String(e);
+    throw new Error(`could not load Discord history: ${reason}`, { cause: e });
+  }
 }
 
 // Load the persisted history once, on first use.
