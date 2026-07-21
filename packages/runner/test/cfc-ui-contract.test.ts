@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
-import { dataUriFromValue } from "../src/data-uri-codec.ts";
+import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";

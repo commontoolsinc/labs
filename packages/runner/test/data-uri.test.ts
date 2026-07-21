@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { jsonFromValue } from "@commonfabric/data-model/codec-json";
-import {
-  fromBase64url,
-  toUnpaddedBase64url,
-} from "@commonfabric/utils/base64url";
+import { fromBase64url } from "@commonfabric/utils/base64url";
 import {
   linkRefFrom,
   linkRefPayload,
@@ -15,11 +11,7 @@ import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { UnknownValue } from "@commonfabric/data-model/fabric-instances";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
-import {
-  DATA_URI_MEDIA_TYPE,
-  valueFromDataUri,
-  valueFromDataUriPayloadText,
-} from "../src/data-uri-codec.ts";
+import { valueFromDataUri } from "@commonfabric/data-model/data-uri-codec";
 import { isSigilLink, type NormalizedLink } from "../src/link-utils.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -333,175 +325,6 @@ describe("data-uri", () => {
       } finally {
         resetModernCellRepConfig();
       }
-    });
-  });
-
-  describe("valueFromDataUriPayloadText", () => {
-    it("decodes encoded payload text of every top-level shape", () => {
-      expect(valueFromDataUriPayloadText(jsonFromValue({ b: 1, a: [true] })))
-        .toEqual({ b: 1, a: [true] });
-      expect(valueFromDataUriPayloadText(jsonFromValue([1, 2, 3])))
-        .toEqual([1, 2, 3]);
-      expect(valueFromDataUriPayloadText(jsonFromValue("plain"))).toBe(
-        "plain",
-      );
-      expect(valueFromDataUriPayloadText(jsonFromValue(null))).toBe(null);
-    });
-
-    it("rejects historical bare-JSON payload text", () => {
-      expect(() => valueFromDataUriPayloadText('{"value":{"x":1}}')).toThrow();
-      expect(() => valueFromDataUriPayloadText("[1,2,3]")).toThrow();
-    });
-
-    it("rejects invalid payload text", () => {
-      expect(() => valueFromDataUriPayloadText("{nope")).toThrow();
-    });
-
-    it("rejects empty payload text", () => {
-      expect(() => valueFromDataUriPayloadText("")).toThrow();
-    });
-
-    it("decodes encoded-`FabricValue` (`fvj1:`) payload text", () => {
-      const value = { value: { b: 1, a: [true, null, "x"] } };
-      expect(valueFromDataUriPayloadText(jsonFromValue(value))).toEqual(value);
-    });
-
-    it("rejects invalid payload text past the `fvj1:` tag", () => {
-      expect(() => valueFromDataUriPayloadText("fvj1:{nope")).toThrow();
-    });
-  });
-
-  describe("valueFromDataUri", () => {
-    /** `data:` cell URI (base64url payload) with the given payload text. */
-    const uriOf = (payload: string): string =>
-      `data:${DATA_URI_MEDIA_TYPE},${
-        toUnpaddedBase64url(new TextEncoder().encode(payload))
-      }`;
-
-    it("rejects a URI whose media type is not the data-cell type", () => {
-      expect(() => valueFromDataUri("data:text/plain,aGVsbG8")).toThrow(
-        /Invalid URI/,
-      );
-    });
-
-    // Exactly one media type is accepted; the historical `application/json`
-    // form is not.
-    it("rejects the `application/json` media type", () => {
-      const payload = toUnpaddedBase64url(
-        new TextEncoder().encode(jsonFromValue({ a: 1 })),
-      );
-      expect(() => valueFromDataUri(`data:application/json,${payload}`))
-        .toThrow(/Invalid URI/);
-    });
-
-    // There are no header parameters in this format; a header carrying any
-    // fails the media-type check.
-    it("rejects header parameters (charset, base64)", () => {
-      const payload = toUnpaddedBase64url(
-        new TextEncoder().encode(jsonFromValue({})),
-      );
-      expect(() =>
-        valueFromDataUri(
-          `data:${DATA_URI_MEDIA_TYPE};charset=utf-8,${payload}`,
-        )
-      ).toThrow(/Invalid URI/);
-      expect(() =>
-        valueFromDataUri(
-          `data:${DATA_URI_MEDIA_TYPE};base64,${payload}`,
-        )
-      ).toThrow(/Invalid URI/);
-    });
-
-    it("rejects a URI with no comma", () => {
-      expect(() => valueFromDataUri(`data:${DATA_URI_MEDIA_TYPE}`))
-        .toThrow(
-          /Invalid data URI format/,
-        );
-    });
-
-    it("rejects a percent-encoded payload", () => {
-      const payload = encodeURIComponent(jsonFromValue({ a: 1 }));
-      expect(() =>
-        valueFromDataUri(
-          `data:${DATA_URI_MEDIA_TYPE},${payload}`,
-        )
-      ).toThrow(/not base64url/);
-    });
-
-    // Both `data:` URI payload readers (this one and attestation `load()`)
-    // reject an empty payload uniformly; see `valueFromDataUriPayloadText()`.
-    it("rejects an empty payload", () => {
-      expect(() => valueFromDataUri(`data:${DATA_URI_MEDIA_TYPE},`))
-        .toThrow();
-    });
-
-    describe("historical bare-JSON payloads", () => {
-      it("rejects one", () => {
-        expect(() => valueFromDataUri(uriOf('{"value":{"b":1}}')))
-          .toThrow();
-      });
-    });
-
-    describe("encoded-`FabricValue` (`fvj1:`) payloads", () => {
-      it("decodes a payload", () => {
-        const value = { value: { b: 1, a: [true, null, "x"] } };
-        expect(valueFromDataUri(uriOf(jsonFromValue(value)))).toEqual(
-          value,
-        );
-      });
-
-      it("decodes non-ASCII text", () => {
-        const value = { value: "città" };
-        expect(valueFromDataUri(uriOf(jsonFromValue(value))))
-          .toEqual(value);
-      });
-
-      it("decodes a non-object payload", () => {
-        expect(valueFromDataUri(uriOf(jsonFromValue([1, 2, 3]))))
-          .toEqual([1, 2, 3]);
-        expect(valueFromDataUri(uriOf(jsonFromValue("plain"))))
-          .toBe("plain");
-      });
-
-      it("preserves non-finite numbers and negative zero", () => {
-        const uri = uriOf(jsonFromValue({ value: [NaN, -0, Infinity] }));
-        const result = valueFromDataUri(uri);
-        expect(Object.is(result.value[0], NaN)).toBe(true);
-        expect(Object.is(result.value[1], -0)).toBe(true);
-        expect(Object.is(result.value[2], Infinity)).toBe(true);
-      });
-
-      // Sigil links are plain objects with a `/`-prefixed key, which the codec
-      // escapes on encode (spec section 5.6); they must come back as the same
-      // plain objects, since link recognition downstream depends on that shape.
-      it("round-trips a plain object with a `/`-prefixed key", () => {
-        const value = {
-          value: { "/": { "link@1": { id: "of:xyz", path: ["a"] } } },
-        };
-        expect(valueFromDataUri(uriOf(jsonFromValue(value)))).toEqual(
-          value,
-        );
-      });
-
-      it("returns deep-frozen results", () => {
-        const uri = uriOf(jsonFromValue({ value: { nested: { deep: [1] } } }));
-        const result = valueFromDataUri(uri);
-        expect(Object.isFrozen(result)).toBe(true);
-        expect(Object.isFrozen(result.value)).toBe(true);
-        expect(Object.isFrozen(result.value.nested.deep)).toBe(true);
-      });
-
-      it("stops the payload at a raw query or fragment delimiter", () => {
-        // base64url never contains `?` or `#`; raw ones delimit a
-        // query/fragment per the URL grammar.
-        const uri = uriOf(jsonFromValue({ a: 1 }));
-        expect(valueFromDataUri(`${uri}#frag`)).toEqual({ a: 1 });
-        expect(valueFromDataUri(`${uri}?q=1`)).toEqual({ a: 1 });
-      });
-
-      it("rejects a malformed payload past the tag", () => {
-        expect(() => valueFromDataUri(uriOf("fvj1:{nope"))).toThrow();
-      });
     });
   });
 });
