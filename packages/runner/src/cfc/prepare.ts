@@ -555,11 +555,15 @@ const writeAuthorizedByReason = (
   // must match the live identity's. The legacy bundleId-only arm (stored
   // pre-#4009 claims) retired with the legacy read path (identity E5,
   // data-wipe decision): a claim without a moduleIdentity is rejected.
-  const identityArmMatches =
-    typeof bindingIdentity.moduleIdentity === "string" &&
-    typeof identity.moduleIdentity === "string" &&
-    identity.moduleIdentity.length > 0 &&
-    identity.moduleIdentity === bindingIdentity.moduleIdentity;
+  const claimedModuleIdentity = bindingIdentity.moduleIdentity;
+  const writerModuleIdentity = identity.moduleIdentity;
+  const identityArmMatches = typeof claimedModuleIdentity === "string" &&
+    typeof writerModuleIdentity === "string" &&
+    writerModuleIdentity.length > 0 &&
+    (writerModuleIdentity === claimedModuleIdentity ||
+      tx.getCfcState().moduleDelegations.get(writerModuleIdentity)?.includes(
+          claimedModuleIdentity,
+        ) === true);
   if (
     !identityArmMatches ||
     normalizeIdentitySource(identity.sourceFile) !==

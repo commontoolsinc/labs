@@ -2,6 +2,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 import { CFC_COMPILED_BY_ATOM } from "@commonfabric/api/cfc";
 import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
+import { normalize } from "@std/path/posix";
 import { computeModuleHashes } from "../harness/module-identity.ts";
 import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
 import { deriveModuleRecordFields } from "../sandbox/module-record-compiler.ts";
@@ -52,6 +53,19 @@ export interface ModuleImportRef {
   readonly identity: string;
 }
 
+/**
+ * Per-module update authority: a module identity maps to the predecessor
+ * identities whose writer authority it may exercise. Values are cumulative;
+ * save paths merge them with the document already stored under the
+ * content-addressed key.
+ */
+export type ModuleDelegationMap = ReadonlyMap<
+  string,
+  ReadonlySet<string>
+>;
+
+const EMPTY_MODULE_DELEGATIONS: ModuleDelegationMap = new Map();
+
 interface ModuleDocBase {
   /** Module code: authored TS (source set) or compiled JS (compiled set). */
   readonly code: string;
@@ -59,6 +73,8 @@ interface ModuleDocBase {
   readonly filename: string;
   /** Resolved internal imports; each points at another document by identity. */
   readonly imports: readonly ModuleImportRef[];
+  /** Predecessor module identities whose writer authority this module inherits. */
+  readonly delegatedModuleIdentities?: readonly string[];
 }
 
 /** A source-set document (`pattern:<identity>`). */
@@ -100,6 +116,91 @@ export interface CompiledDoc extends ModuleDocBase {
    * reports nothing.
    */
   readonly patternCoverageSpans?: readonly PatternCoverageSpan[];
+}
+
+const canonicalModuleFilename = (filename: string): string =>
+  normalize(filename.replaceAll("\\", "/"));
+
+const validDelegatedModuleIdentities = (
+  identity: string,
+  ...values: readonly unknown[]
+): string[] => {
+  const merged = new Set<string>();
+  for (const value of values) {
+    if (!Array.isArray(value)) continue;
+    for (const candidate of value) {
+      if (
+        typeof candidate === "string" && candidate.length > 0 &&
+        candidate !== identity
+      ) {
+        merged.add(candidate);
+      }
+    }
+  }
+  return [...merged].sort();
+};
+
+/**
+ * Match a previous verified source closure to a newly emitted module set by
+ * canonical full filename. Matching deliberately uses the whole normalized
+ * path, never a basename: `../shared/writer.ts` has already resolved to the
+ * stored module filename, while two different `writer.ts` files remain
+ * distinct. Ambiguous duplicate canonical names are skipped fail-closed.
+ *
+ * Each successor inherits both its direct predecessor and that predecessor's
+ * cumulative delegation list, preserving update chains across a cold reload.
+ */
+export function deriveModuleDelegations(
+  previous: ReadonlyMap<string, SourceDoc>,
+  next: readonly CacheableModule[],
+): Map<string, ReadonlySet<string>> {
+  const previousByName = new Map<
+    string,
+    { identity: string; doc: SourceDoc }[]
+  >();
+  for (const [identity, doc] of previous) {
+    const name = canonicalModuleFilename(doc.filename);
+    const entries = previousByName.get(name) ?? [];
+    entries.push({ identity, doc });
+    previousByName.set(name, entries);
+  }
+
+  const nextNameCounts = new Map<string, number>();
+  for (const module of next) {
+    const name = canonicalModuleFilename(module.filename);
+    nextNameCounts.set(name, (nextNameCounts.get(name) ?? 0) + 1);
+  }
+
+  const delegations = new Map<string, ReadonlySet<string>>();
+  for (const module of next) {
+    const name = canonicalModuleFilename(module.filename);
+    const matches = previousByName.get(name);
+    if (matches?.length !== 1 || nextNameCounts.get(name) !== 1) continue;
+    const predecessor = matches[0];
+    const inherited = validDelegatedModuleIdentities(
+      module.identity,
+      predecessor.identity === module.identity ? [] : [predecessor.identity],
+      predecessor.doc.delegatedModuleIdentities,
+    );
+    if (inherited.length > 0) {
+      delegations.set(module.identity, new Set(inherited));
+    }
+  }
+  return delegations;
+}
+
+function delegationMapFromDocs(
+  docs: ReadonlyMap<string, ModuleDocBase>,
+): Map<string, ReadonlySet<string>> {
+  const result = new Map<string, ReadonlySet<string>>();
+  for (const [identity, doc] of docs) {
+    const delegated = validDelegatedModuleIdentities(
+      identity,
+      doc.delegatedModuleIdentities,
+    );
+    if (delegated.length > 0) result.set(identity, new Set(delegated));
+  }
+  return result;
 }
 
 /**
@@ -330,10 +431,15 @@ function storedImportRefs(
 export function buildSourceDocs(
   modules: readonly CacheableModule[],
   entryIdentity: string,
+  moduleDelegations: ModuleDelegationMap = EMPTY_MODULE_DELEGATIONS,
 ): Map<string, SourceDoc> {
   const extraRoots = unreachedRoots(modules, entryIdentity);
   const out = new Map<string, SourceDoc>();
   for (const module of modules) {
+    const delegatedModuleIdentities = validDelegatedModuleIdentities(
+      module.identity,
+      [...(moduleDelegations.get(module.identity) ?? [])],
+    );
     out.set(module.identity, {
       kind: "source",
       code: module.source,
@@ -341,6 +447,9 @@ export function buildSourceDocs(
       imports: storedImportRefs(module, entryIdentity, extraRoots, {
         includeFabricEdges: false,
       }),
+      ...(delegatedModuleIdentities.length > 0
+        ? { delegatedModuleIdentities }
+        : {}),
     });
   }
   return out;
@@ -480,6 +589,7 @@ interface StoredSourceDoc {
   code: string;
   filename: string;
   imports: { specifier: string; link: unknown }[];
+  delegatedModuleIdentities?: string[];
   // Optional product annotations — see {@link SourceDoc.annotations}. Stored
   // verbatim; never part of the content identity.
   annotations?: Record<string, unknown>;
@@ -511,6 +621,10 @@ export const SOURCE_DOC_SCHEMA = {
             },
           },
         },
+        delegatedModuleIdentities: {
+          type: "array",
+          items: { type: "string" },
+        },
         // Optional, non-normative product annotations (see SourceDoc).
         annotations: { type: "object" },
       },
@@ -539,6 +653,10 @@ export const SOURCE_DOC_SCHEMA = {
 export const WRITE_TARGET_EDGE_SYNC_SCHEMA = {
   type: "object",
   properties: {
+    delegatedModuleIdentities: {
+      type: "array",
+      items: { type: "string" },
+    },
     imports: {
       type: "array",
       items: {
@@ -564,9 +682,10 @@ export function writeSourceDocs(
   modules: readonly CacheableModule[],
   entryIdentity: string,
   tx: IExtendedStorageTransaction,
+  moduleDelegations: ModuleDelegationMap = EMPTY_MODULE_DELEGATIONS,
 ): void {
   assertNoUnpinnedFabricImports(modules);
-  const docs = buildSourceDocs(modules, entryIdentity);
+  const docs = buildSourceDocs(modules, entryIdentity, moduleDelegations);
   for (const [identity, doc] of docs) {
     // Write with an untyped cell (the recursive read schema would over-constrain
     // `set`); reads address the same entity via SOURCE_DOC_SCHEMA.
@@ -579,9 +698,15 @@ export function writeSourceDocs(
     // Preserve product annotations on the entry doc only. Annotations are only
     // written there; reading every dependency doc here turns unrelated stale
     // cache cells into writeback conflict preconditions.
+    const existing = cell.get();
     const existingAnnotations = identity === entryIdentity
-      ? cell.get()?.annotations
+      ? existing?.annotations
       : undefined;
+    const delegatedModuleIdentities = validDelegatedModuleIdentities(
+      identity,
+      existing?.delegatedModuleIdentities,
+      doc.delegatedModuleIdentities,
+    );
     cell.set({
       kind: "source",
       identity,
@@ -592,6 +717,9 @@ export function writeSourceDocs(
         link: runtime.getCell(space, sourceDocKey(imp.identity), undefined, tx)
           .getAsLink(),
       })),
+      ...(delegatedModuleIdentities.length > 0
+        ? { delegatedModuleIdentities }
+        : {}),
       ...(isRecord(existingAnnotations)
         ? { annotations: existingAnnotations }
         : {}),
@@ -649,6 +777,15 @@ export async function loadSourceClosure(
       code: doc.code,
       filename: doc.filename,
       imports,
+      ...(() => {
+        const delegatedModuleIdentities = validDelegatedModuleIdentities(
+          doc.identity,
+          doc.delegatedModuleIdentities,
+        );
+        return delegatedModuleIdentities.length > 0
+          ? { delegatedModuleIdentities }
+          : {};
+      })(),
       ...(isRecord(doc.annotations) ? { annotations: doc.annotations } : {}),
     });
     for (const child of childDocs) {
@@ -706,6 +843,7 @@ export async function loadVerifiedSourceClosure(
     ]);
     return undefined;
   }
+  runtime.registerModuleDelegations(delegationMapFromDocs(closure));
   return closure;
 }
 
@@ -735,6 +873,10 @@ const compiledDocProperties = {
   policyManifests: {
     type: "array",
     items: { type: "object", additionalProperties: true },
+  },
+  delegatedModuleIdentities: {
+    type: "array",
+    items: { type: "string" },
   },
   imports: {
     type: "array",
@@ -771,6 +913,10 @@ export const COMPILED_DOC_SCHEMA = {
         policyManifests: {
           type: "array",
           items: { type: "object", additionalProperties: true },
+        },
+        delegatedModuleIdentities: {
+          type: "array",
+          items: { type: "string" },
         },
         imports: {
           type: "array",
@@ -811,6 +957,7 @@ interface StoredCompiledDoc {
   importSpecs?: readonly string[];
   patternCoverageSpansJson?: string;
   policyManifests?: readonly unknown[];
+  delegatedModuleIdentities?: string[];
   imports: { specifier: string; link: unknown }[];
 }
 
@@ -893,7 +1040,10 @@ export function writeCompiledDocs(
   space: MemorySpace,
   modules: readonly CacheableModule[],
   entryIdentity: string,
-  opts: { runtimeVersion: string },
+  opts: {
+    runtimeVersion: string;
+    moduleDelegations?: ModuleDelegationMap;
+  },
   tx: IExtendedStorageTransaction,
 ): void {
   assertNoUnpinnedFabricImports(modules);
@@ -919,6 +1069,12 @@ export function writeCompiledDocs(
       // Fix B: derive the record surface from the compiled body once, here, so
       // the boot-time record build reads it instead of re-parsing per load.
       const derived = deriveModuleRecordFields(module.js);
+      const existing = cell.get() as StoredCompiledDoc | undefined;
+      const delegatedModuleIdentities = validDelegatedModuleIdentities(
+        module.identity,
+        existing?.delegatedModuleIdentities,
+        [...(opts.moduleDelegations?.get(module.identity) ?? [])],
+      );
       const policyManifests = module.policyManifests?.map((input) => {
         const artifact = validateCfcPolicyArtifactManifest(input);
         if (artifact.manifest.moduleIdentity !== module.identity) {
@@ -948,6 +1104,9 @@ export function writeCompiledDocs(
           ),
         }),
         ...(policyManifests === undefined ? {} : { policyManifests }),
+        ...(delegatedModuleIdentities.length > 0
+          ? { delegatedModuleIdentities }
+          : {}),
         imports: storedImportRefs(module, entryIdentity, extraRoots, {
           includeFabricEdges: true,
         }).map((ref) => ({
@@ -1079,8 +1238,18 @@ export async function loadCompiledClosure(
       ...(doc.policyManifests !== undefined
         ? { policyManifests: doc.policyManifests }
         : {}),
+      ...(() => {
+        const delegatedModuleIdentities = validDelegatedModuleIdentities(
+          doc.identity,
+          doc.delegatedModuleIdentities,
+        );
+        return delegatedModuleIdentities.length > 0
+          ? { delegatedModuleIdentities }
+          : {};
+      })(),
       imports,
     });
   }
+  runtime.registerModuleDelegations(delegationMapFromDocs(out));
   return out;
 }

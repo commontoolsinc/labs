@@ -2717,7 +2717,9 @@ export class PieceController<T = unknown> {
     await this.#runMutation(mutationVersion, async () => {
       const { pattern: previousPattern, ref: previousRef } = await this
         .#loadCurrentPattern();
-      const pattern = await compileProgram(this.#manager, program);
+      const pattern = await compileProgram(this.#manager, program, {
+        previousEntryIdentity: previousRef.identity,
+      });
       if (!options?.dangerouslyAllowIncompatibleSchema) {
         assertPatternSchemasBackwardCompatible(previousPattern, pattern);
       }

@@ -381,6 +381,11 @@ export type TrustSnapshot = {
   revision?: string;
 };
 
+export type ModuleDelegationSnapshotEntry = {
+  readonly moduleIdentity: string;
+  readonly delegatedModuleIdentities: readonly string[];
+};
+
 // `WritePolicyInput` is field-level `readonly` rather than `Immutable<>`
 // because its `link-write` variant carries a `CfcLabelView` whose
 // implementation-side helpers (`cloneCfcLabelView()`,
@@ -477,6 +482,8 @@ export type PreparedDigestInput = {
   readonly writePolicyInputs: readonly WritePolicyInput[];
   readonly implementationIdentity?: ImplementationIdentity;
   readonly trustSnapshot?: TrustSnapshot;
+  /** Update-authority aliases consulted by writeAuthorizedBy verification. */
+  readonly moduleDelegations?: readonly ModuleDelegationSnapshotEntry[];
   // Digest of the policy snapshot the boundary decisions evaluated under
   // (Epic B5): anything that can change a boundary decision must be in the
   // digest, so a decision made under one rule set cannot be committed under
@@ -680,6 +687,9 @@ export type CfcTxState = {
     identity?: ImplementationIdentity;
   };
   trustSnapshot?: TrustSnapshot;
+  // Transitive successor -> predecessor writer-authority aliases, snapshotted
+  // from the Runtime when the transaction is created and write-once pinned.
+  moduleDelegations: ReadonlyMap<string, readonly string[]>;
   implementationIdentity?: ImplementationIdentity;
   outbox: PostCommitSideEffect[];
   diagnostics: string[];

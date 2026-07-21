@@ -23,6 +23,10 @@ deno task cf piece link ... editor-id/items viewer-id/items
 **Tips:**
 - Use `check` first to catch TypeScript errors
 - Deploy once, then use `setsrc` for updates
+- `setsrc` preserves `WriteAuthorizedBy` authority across changed modules when
+  the old and new recursive source closures contain the same normalized module
+  path. Renaming or moving a module intentionally does not inherit that
+  authority.
 - `setsrc` rejects backward-incompatible argument or result schema changes
   before updating the piece. Existing fields must keep compatible types; new
   fields must be optional or have defaults. Input `anyOf` and type-array unions

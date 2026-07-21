@@ -328,6 +328,25 @@ export const canonicalizePreparedDigestInput = (
   ).sort(compareWritePolicyInput),
   implementationIdentity: input.implementationIdentity,
   trustSnapshot: input.trustSnapshot,
+  ...(input.moduleDelegations !== undefined &&
+      input.moduleDelegations.length > 0
+    ? {
+      moduleDelegations: [...input.moduleDelegations]
+        .map((entry) => ({
+          moduleIdentity: entry.moduleIdentity,
+          delegatedModuleIdentities: [
+            ...entry.delegatedModuleIdentities,
+          ].sort(),
+        }))
+        .sort((left, right) =>
+          left.moduleIdentity < right.moduleIdentity
+            ? -1
+            : left.moduleIdentity > right.moduleIdentity
+            ? 1
+            : 0
+        ),
+    }
+    : {}),
   // Already canonical: a digest-only projection of the frozen policy
   // snapshot (Epic B5). Absent (no policies configured) stays absent so
   // pre-B5 digests are unchanged.

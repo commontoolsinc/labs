@@ -373,8 +373,15 @@ under a schema loads the whole import closure transitively from a single request
    upgrade rolls `runtimeVersion`, recompiling this set while the source set
    persists.
 
-Each document holds `{ code, filename, imports: [{ specifier, link }] }`, where
-`link` is a sigil link to the dependency's document in the same set. Because
+Each document holds
+`{ code, filename, imports: [{ specifier, link }], delegatedModuleIdentities? }`,
+where `link` is a sigil link to the dependency's document in the same set.
+`delegatedModuleIdentities` is mutable metadata, excluded from the Merkle
+identity, that records predecessor module hashes whose writer authority the
+current module may exercise. The general source/compiled save path merges this
+set with the stored document under `editWithRetry`; it never replaces entries,
+because one content-addressed successor can be shared by patterns updated from
+different predecessors. Because
 `identity` is a one-way Merkle hash, the `imports` links are load-bearing (stored
 explicitly), but the parent hash commits to its children's identities, so the
 graph wiring is verifiable on load by recomputing identities and checking each
@@ -386,6 +393,25 @@ This replaces the whole-program `PatternMeta` store after the flag flip (the two
 coexist behind the flag until then). The compiler-version `fingerprint` and
 `sesValidated` gating carry over: `runtimeVersion` is the fingerprint, and the
 compiled set is only ever written from verified output (see the threat model).
+
+### Module update delegation (`piece setsrc`)
+
+`piece setsrc` is the temporary authority handoff while pattern files remain
+local, content-addressed modules. Before compiling the replacement it loads the
+current entry's verified recursive source closure. After compilation it matches
+old and new modules by their canonical full authored filename (resolved relative
+imports therefore meet at the same stored path; basenames are never matched).
+For every unambiguous match, the successor records the direct predecessor plus
+the predecessor's cumulative delegation list. This makes an update chain
+cold-reload-stable.
+
+Both verified source loads and integrity-valid compiled-cache loads register the
+stored lists in the runtime as a successor-to-predecessor map. Each transaction
+snapshots its transitive closure. `writeAuthorizedBy` may then match the live
+writer's module hash directly or through that snapshot, while its normalized
+source file and binding path must still match exactly. A rename does not inherit
+authority. Ambiguous canonical filenames fail closed by receiving no
+delegation.
 
 ## Verifiable Execution Implications
 
