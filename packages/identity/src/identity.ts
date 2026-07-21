@@ -118,6 +118,27 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return new Identity(signer);
   }
 
+  // Derive an identity from BIP39 *entropy* — the 32 bytes a 24-word mnemonic
+  // encodes — rather than from the words themselves.
+  //
+  // This names a contract that is currently implicit: `fromMnemonic` maps the
+  // phrase to entropy and uses those bytes DIRECTLY as the ed25519 seed, with
+  // no KDF in between. Callers that carry the entropy instead of the words
+  // (a QR code, for instance, where 24 words do not fit but 32 bytes do) can
+  // therefore reach the same identity without depending on bip39 themselves.
+  //
+  // Deliberately a named alias for `fromRaw` rather than new capability: the
+  // point is that the equivalence is a promise this package makes, so that if
+  // a KDF is ever introduced into `fromMnemonic`, this stays correct (and
+  // `identity.test.ts` fails loudly rather than callers silently deriving a
+  // different DID).
+  static fromEntropy<ID extends DIDKey>(
+    entropy: Uint8Array,
+    config: IdentityCreateConfig = {},
+  ): Promise<Identity<ID>> {
+    return Identity.fromRaw<ID>(entropy, config);
+  }
+
   static async fromPassphrase<ID extends DIDKey>(
     passphrase: string,
     config: IdentityCreateConfig = {},
