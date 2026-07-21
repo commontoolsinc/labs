@@ -233,8 +233,9 @@ export function extractDataURIPayloadText(
   }
 
   try {
-    // Note that `textDecoder` is non-fatal, so its `decode()` never throws;
-    // only the base64url decode can land in the `catch`.
+    // Note that `textDecoder` uses the default configuration of
+    // `fatal: false`, so its `decode()` never throws; only the base64url
+    // decode can land in the `catch`.
     const bytes = fromBase64url(data);
     return { mediaType, text: textDecoder.decode(bytes) };
   } catch {
