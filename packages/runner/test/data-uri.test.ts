@@ -16,6 +16,7 @@ import { UnknownValue } from "@commonfabric/data-model/fabric-instances";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   createDataCellURI,
+  DATA_CELL_MEDIA_TYPE,
   decodeDataURIPayloadText,
   getJSONFromDataURI,
 } from "../src/data-uri.ts";
@@ -242,6 +243,8 @@ describe("data-uri", () => {
 
     it("mints the data-cell media type and the standard encoding", () => {
       const dataURI = createDataCellURI({ x: 1 });
+      // Deliberately a literal (not the imported constant): changing the
+      // minted media type must be a conscious test change.
       expect(dataURI.startsWith("data:application/vnd.common-fabric.data,"))
         .toBe(true);
       const payload = new TextDecoder().decode(
@@ -355,7 +358,7 @@ describe("data-uri", () => {
   describe("getJSONFromDataURI", () => {
     /** `data:` cell URI (base64url payload) with the given payload text. */
     const uriOf = (payload: string): string =>
-      `data:application/vnd.common-fabric.data,${
+      `data:${DATA_CELL_MEDIA_TYPE},${
         toUnpaddedBase64url(new TextEncoder().encode(payload))
       }`;
 
@@ -383,20 +386,18 @@ describe("data-uri", () => {
       );
       expect(() =>
         getJSONFromDataURI(
-          `data:application/vnd.common-fabric.data;charset=utf-8,${payload}`,
+          `data:${DATA_CELL_MEDIA_TYPE};charset=utf-8,${payload}`,
         )
       ).toThrow(/Invalid URI/);
       expect(() =>
         getJSONFromDataURI(
-          `data:application/vnd.common-fabric.data;base64,${payload}`,
+          `data:${DATA_CELL_MEDIA_TYPE};base64,${payload}`,
         )
       ).toThrow(/Invalid URI/);
     });
 
     it("rejects a URI with no comma", () => {
-      expect(() =>
-        getJSONFromDataURI("data:application/vnd.common-fabric.data")
-      ).toThrow(
+      expect(() => getJSONFromDataURI(`data:${DATA_CELL_MEDIA_TYPE}`)).toThrow(
         /Invalid data URI format/,
       );
     });
@@ -405,7 +406,7 @@ describe("data-uri", () => {
       const payload = encodeURIComponent(jsonFromValue({ a: 1 }));
       expect(() =>
         getJSONFromDataURI(
-          `data:application/vnd.common-fabric.data,${payload}`,
+          `data:${DATA_CELL_MEDIA_TYPE},${payload}`,
         )
       ).toThrow(/not base64url/);
     });
@@ -413,9 +414,8 @@ describe("data-uri", () => {
     // Both `data:` URI payload readers (this one and attestation `load()`)
     // reject an empty payload uniformly; see `decodeDataURIPayloadText()`.
     it("rejects an empty payload", () => {
-      expect(() =>
-        getJSONFromDataURI("data:application/vnd.common-fabric.data,")
-      ).toThrow();
+      expect(() => getJSONFromDataURI(`data:${DATA_CELL_MEDIA_TYPE},`))
+        .toThrow();
     });
 
     describe("historical bare-JSON payloads", () => {
