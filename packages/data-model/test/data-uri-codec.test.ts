@@ -85,10 +85,26 @@ describe("data-uri-codec", () => {
       expect(dataUriFromValue(NaN)).not.toBe(dataUriFromValue(-Infinity));
     });
 
-    it("mints one URI for every `NaN`", () => {
-      expect(dataUriFromValue(NaN)).toBe(dataUriFromValue(0 / 0));
-      expect(dataUriFromValue({ n: NaN })).toBe(
-        dataUriFromValue({ n: Number("x") }),
+    // Arithmetic only ever yields one `NaN` bit pattern, so `NaN` and `0 / 0`
+    // are the same value and comparing them proves only determinism. A
+    // distinct payload has to be built through a typed-array view, which is
+    // also how one reaches a caller in practice.
+    it("mints one URI for every `NaN`, whatever its payload", () => {
+      const buffer = new ArrayBuffer(8);
+      const bytes = new Uint8Array(buffer);
+      const doubles = new Float64Array(buffer);
+      bytes.set([0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf8, 0x7f]);
+      const payloadNan = doubles[0];
+
+      // Guard the premise: if this ever stops holding, the case below is
+      // vacuous and should fail loudly rather than pass for free.
+      doubles[0] = 0 / 0;
+      expect(Number.isNaN(payloadNan)).toBe(true);
+      expect(bytes[0]).not.toBe(0x01);
+
+      expect(dataUriFromValue(payloadNan)).toBe(dataUriFromValue(0 / 0));
+      expect(dataUriFromValue({ n: payloadNan })).toBe(
+        dataUriFromValue({ n: NaN }),
       );
     });
 
