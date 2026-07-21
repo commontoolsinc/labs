@@ -44,6 +44,7 @@
     "check": "./tasks/check.sh",
     "check-docs": "deno run --allow-read --allow-write --allow-run --allow-env ./docs/check.ts",
     "check-no-waitfor": "deno run --allow-read ./tasks/check-no-waitfor.ts",
+    "check-json-ok": "deno run --allow-read --allow-write --allow-env --allow-run=deno ./tasks/check-json-ok.ts",
     "check-unused-deps": "deno run --allow-read --allow-run=git ./tasks/check-unused-deps.ts",
     "check-deno-pins": "deno run --allow-read ./tasks/check-deno-pins.ts",
     "check-single-copy-deps": "deno run --allow-read ./tasks/check-single-copy-deps.ts",
@@ -87,6 +88,9 @@
     "**/.doccheck*"
   ],
   "lint": {
+    "plugins": [
+      "./tasks/json-ok-lint-plugin.ts"
+    ],
     "exclude": [
       ".agents/",
       ".claude/",

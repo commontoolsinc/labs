@@ -56,6 +56,9 @@ jobs:
       - name: 🚧 Guard against new polling waitFor in integration tests
         run: deno task check-no-waitfor
 
+      - name: 🚧 Check the json-ok baseline is accurate in both directions
+        run: deno task check-json-ok
+
       - name: 🔎 Check for unused import map dependencies
         run: deno task check-unused-deps
 

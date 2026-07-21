@@ -64,6 +64,51 @@ imported, so wiring one up as above satisfies the check. A dependency that is
 declared without a local import on purpose goes in the allowlist in
 `tasks/check-unused-deps.ts` with a one-line reason.
 
+## Justifying `JSON.parse()` and `JSON.stringify()`
+
+Both functions are lossy against the values this runtime moves around.
+`JSON.stringify()` renders `NaN` and `±Infinity` as `null`, drops `undefined`
+members, emits keys in insertion order rather than a canonical one, and rebuilds
+a `FabricInstance` as a plain record, stripping the class identity a
+`FabricError`, `FabricBytes`, or `FabricLink` carries. `JSON.parse()` inverts
+none of that. Each loss has already produced a live defect.
+
+Plenty of call sites are fine all the same — a config file read off disk, a log
+line, a test fixture, a wire format whose contract genuinely is JSON. A linter
+cannot tell those apart from the dangerous ones, so the rule
+`cf-lint/require-json-ok` asks the author to say which this one is:
+
+```ts
+// Shown at module scope.
+const text = await Deno.readTextFile("config.json");
+
+// json-ok: reading a config file this repository writes itself.
+export const config = JSON.parse(text);
+```
+
+The marker is `json-ok:` followed by a non-empty reason. It may sit at the end
+of the call's own line, in the run of whole-line comments directly above the
+call, or in the run directly above the statement holding it — in each case with
+no blank line in between. Both `//` and `/* */` comments carry it, and a leading
+`*` is ignored so it reads naturally inside a doc comment.
+
+If the value can carry Fabric data, the marker is the wrong answer: use the
+codecs in `@commonfabric/data-model` instead of a plain-JSON round trip.
+
+### The baseline
+
+The repository predates the rule by some sixteen hundred call sites, recorded
+per file in `tasks/json-ok-baseline.json`. A file at or under its recorded
+budget reports nothing; a file over it reports every unjustified call it holds,
+since a count cannot say which one is new. A file absent from the baseline has a
+budget of zero, so new files are held to the rule in full.
+
+The budget only ratchets down. `deno task check-json-ok` fails both when a file
+exceeds its budget and when a file comes in under it — the latter asking for
+`deno task check-json-ok --update`, so that ground gained cannot quietly be
+given back. Justify a call as you touch it, and regenerate the baseline in the
+same change.
+
 ## Code Design & Principles
 
 ### Error Handling
