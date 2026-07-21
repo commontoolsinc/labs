@@ -696,10 +696,12 @@ jobs:
       - name: 🛡️ Disable AppArmor for browser tests
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
-      # These tests run with `deno test`, so they collect V8 runtime coverage
-      # (DENO_COVERAGE_DIR) but not authored-pattern coverage. Pattern coverage
-      # is only collected by `cf test` via CF_PATTERN_COVERAGE_DIR, set on the
-      # pattern-unit-test job. See docs/development/COVERAGE.md.
+      # Both kinds of coverage: V8 runtime coverage via DENO_COVERAGE_DIR, and
+      # authored-pattern coverage via CF_PATTERN_COVERAGE_DIR, which the shell
+      # integration harness reads to turn on the browser worker's collector and
+      # to place the LCOV it pulls back at teardown. Absolute, because the
+      # harness resolves it against a working directory that differs between the
+      # two integration jobs. See docs/development/COVERAGE.md.
       - name: 🧩 Run end-to-end patterns integration tests
         working-directory: packages/patterns
         run: |
@@ -713,6 +715,7 @@ jobs:
           API_URL=http://localhost:8000/ \
           PATTERN_INTEGRATION_SHARD="${{ matrix.shard }}/${{ matrix.total }}" \
           CF_COMPILE_CACHE_FILE="${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json" \
+          CF_PATTERN_COVERAGE_DIR="${{ github.workspace }}/coverage/lcov/pattern-runtime/pattern-integration-${{ matrix.shard }}" \
           DENO_COVERAGE_DIR=../../coverage/raw/pattern-integration-${{ matrix.shard }} \
           deno test --no-check --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
             --junit-path=../../test-results/patterns-${{ matrix.shard }}.xml \
@@ -722,12 +725,15 @@ jobs:
         if: always()
         run: deno run --allow-read --allow-write --allow-run tasks/write-coverage-lcov.ts coverage/raw/pattern-integration-${{ matrix.shard }} coverage/lcov/pattern-integration-${{ matrix.shard }}.lcov
 
+      # The whole directory: the V8 report plus the authored-pattern LCOV the
+      # harness wrote under pattern-runtime/. perf-check joins every .lcov in
+      # the artifact, so both streams reach the gate.
       - name: 📤 Upload coverage report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: coverage-profile-pattern-integration-${{ matrix.shard }}
-          path: coverage/lcov/pattern-integration-${{ matrix.shard }}.lcov
+          path: coverage/lcov/
           retention-days: 90
           if-no-files-found: error
 
@@ -759,16 +765,14 @@ jobs:
       - name: 🛡️ Disable AppArmor for browser tests
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
-      # These tests run with `deno test`, so they collect V8 runtime coverage
-      # (DENO_COVERAGE_DIR) but not authored-pattern coverage. Pattern coverage
-      # is only collected by `cf test` via CF_PATTERN_COVERAGE_DIR, set on the
-      # pattern-unit-test job. See docs/development/COVERAGE.md.
+      # Both kinds of coverage — see the note on pattern-integration-test above.
       - name: 🧩 Run pattern reload integration tests
         run: |
           mkdir -p test-results
           HEADLESS=1 \
           EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true \
           CF_EXPECT_PERSISTENT_SCHEDULER_STATE=1 \
+          CF_PATTERN_COVERAGE_DIR="${{ github.workspace }}/coverage/lcov/pattern-runtime/pattern-reload" \
           DENO_COVERAGE_DIR=coverage/raw/pattern-reload \
           deno task integration --junit-dir=test-results patterns-reload
 
@@ -776,12 +780,13 @@ jobs:
         if: always()
         run: deno run --allow-read --allow-write --allow-run tasks/write-coverage-lcov.ts coverage/raw/pattern-reload coverage/lcov/pattern-reload.lcov
 
+      # The whole directory — see the note on pattern-integration-test above.
       - name: 📤 Upload coverage report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: coverage-profile-pattern-reload
-          path: coverage/lcov/pattern-reload.lcov
+          path: coverage/lcov/
           retention-days: 90
           if-no-files-found: error
 
@@ -910,8 +915,18 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
+      - name: 📥 Download coverage reports
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-profile-*
+          path: coverage-artifacts
+          merge-multiple: false
+          skip-decompress: false
+          digest-mismatch: error
+
       - name: 📊 Run performance check
         env:
+          COVERAGE_ARTIFACTS_DIR: coverage-artifacts
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           PR_NUMBER: ${{ github.event.pull_request.number }}

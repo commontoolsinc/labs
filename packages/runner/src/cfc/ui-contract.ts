@@ -531,9 +531,6 @@ const eventEnvelopePayloads = (
     if (eventLink?.id?.startsWith("data:application/json")) {
       const decoded = getJSONFromDataURI(eventLink.id);
       addPayload(decoded, eventLink.space);
-      if (isRecord(decoded) && "value" in decoded) {
-        addPayload(decoded.value, eventLink.space);
-      }
     }
   } catch {
     // Invalid data URI links cannot provide authoring context.

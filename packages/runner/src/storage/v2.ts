@@ -1323,11 +1323,7 @@ export class StorageManager implements IStorageManager {
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
   ): Promise<Cell<T>> {
-    const json = getJSONFromDataURI(id);
-    if (!isRecord(json)) {
-      return cell;
-    }
-    let value = json["value"];
+    let value: unknown = getJSONFromDataURI(id);
     for (const segment of [...cell.path.map(String)]) {
       if (!isRecord(value) && !Array.isArray(value)) {
         return cell;

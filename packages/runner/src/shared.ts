@@ -64,3 +64,10 @@ export type {
   WriteStackTraceMatcher,
   WriteStackTraceMatchMode,
 } from "./storage/write-stack-trace.ts";
+// Type-only: the plain-JSON shape the worker returns for a pattern-coverage
+// dump. No runtime import (the module's value exports never load here).
+export type {
+  PatternCoverageData,
+  PatternCoverageKind,
+  PatternCoverageSpan,
+} from "./pattern-coverage.ts";

@@ -24,7 +24,18 @@ export async function github<T = unknown>(path: string, token?: string): Promise
     },
     signal: AbortSignal.timeout(15_000),
   });
-  if (!res.ok) throw new Error(`GitHub API ${path} failed: HTTP ${res.status}`);
+  if (!res.ok) {
+    let rateLimited = false;
+    if (res.status === 403) {
+      const message = await res.text();
+      rateLimited = res.headers.get("x-ratelimit-remaining") === "0" ||
+        res.headers.has("retry-after") || /rate.?limit/i.test(message);
+    }
+    const detail = rateLimited ? " (rate-limited)" : "";
+    throw new Error(
+      `GitHub API ${path} failed: HTTP ${res.status}${detail}`,
+    );
+  }
   return await res.json() as T;
 }
 

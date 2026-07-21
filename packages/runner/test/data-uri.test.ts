@@ -95,11 +95,11 @@ describe("data-uri", () => {
       // Decode the data URI using getJSONFromDataURI
       const parsed = getJSONFromDataURI(dataURI);
 
-      expect(parsed.value.link["/"][LINK_V1_TAG].path).toEqual([
+      expect(parsed.link["/"][LINK_V1_TAG].path).toEqual([
         "nested",
         "value",
       ]);
-      expect(parsed.value.link["/"][LINK_V1_TAG].id).toBe(baseId);
+      expect(parsed.link["/"][LINK_V1_TAG].id).toBe(baseId);
     });
 
     it("should rewrite relative links with base scope", () => {
@@ -124,8 +124,8 @@ describe("data-uri", () => {
       );
       const parsed = getJSONFromDataURI(dataURI);
 
-      expect(parsed.value.link["/"][LINK_V1_TAG].id).toBe(baseId);
-      expect(parsed.value.link["/"][LINK_V1_TAG].scope).toBe("session");
+      expect(parsed.link["/"][LINK_V1_TAG].id).toBe(baseId);
+      expect(parsed.link["/"][LINK_V1_TAG].scope).toBe("session");
     });
 
     it("should rewrite nested relative links with base id", () => {
@@ -160,8 +160,8 @@ describe("data-uri", () => {
       // Decode the data URI using getJSONFromDataURI
       const parsed = getJSONFromDataURI(dataURI);
 
-      expect(parsed.value.items[0]["/"][LINK_V1_TAG].id).toBe(baseId);
-      expect(parsed.value.items[1].nested.link["/"][LINK_V1_TAG].id).toBe(
+      expect(parsed.items[0]["/"][LINK_V1_TAG].id).toBe(baseId);
+      expect(parsed.items[1].nested.link["/"][LINK_V1_TAG].id).toBe(
         baseId,
       );
     });
@@ -186,8 +186,8 @@ describe("data-uri", () => {
       const parsed = getJSONFromDataURI(dataURI);
 
       // Should remain unchanged
-      expect(parsed.value.link["/"][LINK_V1_TAG].id).toBe(otherId);
-      expect(parsed.value.link["/"][LINK_V1_TAG].path).toEqual([
+      expect(parsed.link["/"][LINK_V1_TAG].id).toBe(otherId);
+      expect(parsed.link["/"][LINK_V1_TAG].path).toEqual([
         "some",
         "path",
       ]);
@@ -209,9 +209,9 @@ describe("data-uri", () => {
       // Decode and verify using getJSONFromDataURI
       const parsed = getJSONFromDataURI(dataURI);
 
-      expect(parsed.value.first.value).toBe(42);
-      expect(parsed.value.second.value).toBe(42);
-      expect(parsed.value.nested.third.value).toBe(42);
+      expect(parsed.first.value).toBe(42);
+      expect(parsed.second.value).toBe(42);
+      expect(parsed.nested.third.value).toBe(42);
     });
 
     it("should handle UTF-8 characters (emojis, special characters)", () => {
@@ -229,11 +229,11 @@ describe("data-uri", () => {
       // Decode and verify using getJSONFromDataURI
       const parsed = getJSONFromDataURI(dataURI);
 
-      expect(parsed.value.emoji).toBe("🚀 Hello World! 🌍");
-      expect(parsed.value.chinese).toBe("你好世界");
-      expect(parsed.value.arabic).toBe("مرحبا بالعالم");
-      expect(parsed.value.special).toBe("Ñoño™©®");
-      expect(parsed.value.mixed).toBe("Test 🎉 with ñ and 中文");
+      expect(parsed.emoji).toBe("🚀 Hello World! 🌍");
+      expect(parsed.chinese).toBe("你好世界");
+      expect(parsed.arabic).toBe("مرحبا بالعالم");
+      expect(parsed.special).toBe("Ñoño™©®");
+      expect(parsed.mixed).toBe("Test 🎉 with ñ and 中文");
     });
 
     it("mints a payload in the standard encoding (`fvj1:` tag)", () => {
@@ -256,24 +256,24 @@ describe("data-uri", () => {
     it("preserves non-finite numbers and negative zero", () => {
       const dataURI = createDataCellURI({ n: NaN, z: -0, i: -Infinity });
       const parsed = getJSONFromDataURI(dataURI);
-      expect(Object.is(parsed.value.n, NaN)).toBe(true);
-      expect(Object.is(parsed.value.z, -0)).toBe(true);
-      expect(Object.is(parsed.value.i, -Infinity)).toBe(true);
+      expect(Object.is(parsed.n, NaN)).toBe(true);
+      expect(Object.is(parsed.z, -0)).toBe(true);
+      expect(Object.is(parsed.i, -Infinity)).toBe(true);
     });
 
-    // `undefined` is a `FabricValue`, so it encodes as a present-`undefined`
-    // document value, not as an absent property.
-    it("encodes an `undefined` value as a present `undefined`", () => {
-      const parsed = getJSONFromDataURI(createDataCellURI(undefined));
-      expect("value" in parsed).toBe(true);
-      expect(parsed.value).toBeUndefined();
+    // `undefined` is a `FabricValue` and round-trips as itself; the
+    // present-`undefined` document property is the reader's synthesis
+    // (see attestation `load()`), not part of the payload.
+    it("round-trips an `undefined` value", () => {
+      expect(getJSONFromDataURI(createDataCellURI(undefined)))
+        .toBeUndefined();
     });
 
     it("represents a `FabricPrimitive` leaf correctly", () => {
       const h = hashOf({ some: "value" });
       const parsed = getJSONFromDataURI(createDataCellURI({ h }));
-      expect(parsed.value.h).toBeInstanceOf(FabricHash);
-      expect(parsed.value.h.toString()).toBe(h.toString());
+      expect(parsed.h).toBeInstanceOf(FabricHash);
+      expect(parsed.h.toString()).toBe(h.toString());
     });
 
     // Link-free content on purpose: for an instance whose state carries no
@@ -283,9 +283,9 @@ describe("data-uri", () => {
     it("represents a link-free `FabricInstance` via its codec", () => {
       const inst = new UnknownValue("zzz@1", { a: 1 });
       const parsed = getJSONFromDataURI(createDataCellURI({ inst }));
-      expect(parsed.value.inst).toBeInstanceOf(UnknownValue);
-      expect(parsed.value.inst.wireTypeTag).toBe("zzz@1");
-      expect(parsed.value.inst.state).toEqual({ a: 1 });
+      expect(parsed.inst).toBeInstanceOf(UnknownValue);
+      expect(parsed.inst.wireTypeTag).toBe("zzz@1");
+      expect(parsed.inst.state).toEqual({ a: 1 });
     });
 
     it("rewrites relative links in the modern regime (`FabricLink`)", () => {
@@ -303,8 +303,8 @@ describe("data-uri", () => {
         const dataURI = createDataCellURI({ link: relativeLink }, base);
         const parsed = getJSONFromDataURI(dataURI);
 
-        expect(isSigilLink(parsed.value.link)).toBe(true);
-        const payload = linkRefPayload(parsed.value.link) as any;
+        expect(isSigilLink(parsed.link)).toBe(true);
+        const payload = linkRefPayload(parsed.link) as any;
         expect(payload.id).toBe(baseId);
         expect(payload.path).toEqual(["nested", "value"]);
       } finally {
@@ -314,12 +314,18 @@ describe("data-uri", () => {
   });
 
   describe("decodeDataURIPayloadText", () => {
-    it("decodes JSON payload text", () => {
-      expect(decodeDataURIPayloadText('{"value":{"b":1,"a":[true,null]}}'))
-        .toEqual({ value: { b: 1, a: [true, null] } });
-      expect(decodeDataURIPayloadText("[1,2,3]")).toEqual([1, 2, 3]);
-      expect(decodeDataURIPayloadText('"plain"')).toBe("plain");
-      expect(decodeDataURIPayloadText("null")).toBe(null);
+    it("decodes encoded payload text of every top-level shape", () => {
+      expect(decodeDataURIPayloadText(jsonFromValue({ b: 1, a: [true] })))
+        .toEqual({ b: 1, a: [true] });
+      expect(decodeDataURIPayloadText(jsonFromValue([1, 2, 3])))
+        .toEqual([1, 2, 3]);
+      expect(decodeDataURIPayloadText(jsonFromValue("plain"))).toBe("plain");
+      expect(decodeDataURIPayloadText(jsonFromValue(null))).toBe(null);
+    });
+
+    it("rejects historical bare-JSON payload text", () => {
+      expect(() => decodeDataURIPayloadText('{"value":{"x":1}}')).toThrow();
+      expect(() => decodeDataURIPayloadText("[1,2,3]")).toThrow();
     });
 
     it("rejects invalid payload text", () => {
@@ -371,8 +377,10 @@ describe("data-uri", () => {
     });
 
     it("accepts an explicit UTF-8 charset", () => {
-      expect(getJSONFromDataURI("data:application/json;charset=utf-8,{}"))
-        .toEqual({});
+      const payload = encodeURIComponent(jsonFromValue({}));
+      expect(
+        getJSONFromDataURI(`data:application/json;charset=utf-8,${payload}`),
+      ).toEqual({});
     });
 
     // Both `data:` URI payload readers (this one and attestation `load()`)
@@ -381,26 +389,15 @@ describe("data-uri", () => {
       expect(() => getJSONFromDataURI("data:application/json,")).toThrow();
     });
 
-    describe("bare-JSON payloads", () => {
-      it("decodes a percent-encoded payload", () => {
-        const uri = uriOf('{"value":{"b":1,"a":[true,null,"x"]}}');
-        expect(getJSONFromDataURI(uri)).toEqual({
-          value: { b: 1, a: [true, null, "x"] },
-        });
+    describe("historical bare-JSON payloads", () => {
+      it("rejects a percent-encoded payload", () => {
+        expect(() => getJSONFromDataURI(uriOf('{"value":{"b":1}}')))
+          .toThrow();
       });
 
-      it("decodes a Base64 payload, including non-ASCII text", () => {
-        const uri = base64UriOf('{"value":"città"}');
-        expect(getJSONFromDataURI(uri)).toEqual({ value: "città" });
-      });
-
-      it("decodes a non-object payload", () => {
-        expect(getJSONFromDataURI(uriOf("[1,2,3]"))).toEqual([1, 2, 3]);
-        expect(getJSONFromDataURI(uriOf('"plain"'))).toBe("plain");
-      });
-
-      it("rejects an invalid JSON payload", () => {
-        expect(() => getJSONFromDataURI(uriOf("{nope"))).toThrow();
+      it("rejects a Base64 payload", () => {
+        expect(() => getJSONFromDataURI(base64UriOf('{"value":"x"}')))
+          .toThrow();
       });
     });
 
@@ -414,6 +411,13 @@ describe("data-uri", () => {
         const value = { value: "città" };
         expect(getJSONFromDataURI(base64UriOf(jsonFromValue(value))))
           .toEqual(value);
+      });
+
+      it("decodes a non-object payload", () => {
+        expect(getJSONFromDataURI(uriOf(jsonFromValue([1, 2, 3]))))
+          .toEqual([1, 2, 3]);
+        expect(getJSONFromDataURI(uriOf(jsonFromValue("plain"))))
+          .toBe("plain");
       });
 
       it("preserves non-finite numbers and negative zero", () => {
@@ -440,6 +444,16 @@ describe("data-uri", () => {
         expect(Object.isFrozen(result)).toBe(true);
         expect(Object.isFrozen(result.value)).toBe(true);
         expect(Object.isFrozen(result.value.nested.deep)).toBe(true);
+      });
+
+      it("stops the payload at a raw query or fragment delimiter", () => {
+        // Minted payloads percent-escape `?` and `#`; raw ones delimit a
+        // query/fragment per the URL grammar (externally-sourced ids).
+        const payload = encodeURIComponent(jsonFromValue({ a: 1 }));
+        expect(getJSONFromDataURI(`data:application/json,${payload}#frag`))
+          .toEqual({ a: 1 });
+        expect(getJSONFromDataURI(`data:application/json,${payload}?q=1`))
+          .toEqual({ a: 1 });
       });
 
       it("rejects a malformed payload past the tag", () => {
