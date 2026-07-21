@@ -292,11 +292,14 @@ export class ContextualFlowControl {
     // The LUB must union the atoms of every subschema a value could validate
     // against — one (anyOf/oneOf) or all (allOf) branches, every property,
     // every tuple slot, items and additionalProperties alike; a skipped
-    // keyword is branch-local confidentiality silently dropped
-    // (under-tainting fail-open, audit 1.6). `not` is unioned too: usually
-    // its atoms describe values the data must NOT contain — a conservative
-    // over-taint — but a nested `not` (not-of-not) re-selects values that DO
-    // match the inner subschema, so skipping `not` could under-taint.
+    // keyword is branch-local confidentiality silently dropped (under-tainting
+    // fail-open, audit 1.6). The default walk excludes the keywords we never
+    // emit (`if`/`then`/`else`, `patternProperties`, ...) — ifc flags in
+    // those unused schema fields are deliberately not collected. `not` is
+    // unioned too: usually its atoms describe values the data must NOT
+    // contain — a conservative over-taint — but a nested `not` (not-of-not)
+    // re-selects values that DO match the inner subschema, so skipping `not`
+    // could under-taint.
     forEachSubschema(schema, (child) => {
       ContextualFlowControl.joinSchema(
         joined,
