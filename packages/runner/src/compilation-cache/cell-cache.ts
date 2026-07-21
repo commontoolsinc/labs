@@ -748,25 +748,23 @@ export function writeSourceDocs(
   const docs = buildSourceDocs(modules, entryIdentity, moduleDelegations);
   withCompileCacheBuiltin(tx, () => {
     for (const [identity, doc] of docs) {
-      // Flat write schema: source recursion is a read concern; the delegation
-      // field alone receives compiler integrity.
-      const cell = runtime.getCell<StoredSourceDoc>(
+      const baseCell = runtime.getCell<StoredSourceDoc>(
         space,
         sourceDocKey(identity),
-        sourceDocWriteSchema(),
+        undefined,
         tx,
       );
       // Preserve product annotations on the entry doc only. Annotations are
       // only written there; reading every dependency doc here turns unrelated
       // stale cache cells into writeback conflict preconditions.
-      const existing = cell.get();
+      const existing = baseCell.get();
       const existingAnnotations = identity === entryIdentity
         ? existing?.annotations
         : undefined;
       // Never turn arbitrary mutable source metadata into trusted authority:
       // only merge predecessor entries carrying the compiler's field label.
       const authenticatedExistingDelegations = cellCarriesIntegrity(
-          cell,
+          baseCell,
           COMPILED_INTEGRITY_ATOM,
           tx,
           SOURCE_DELEGATION_PATH,
@@ -778,6 +776,13 @@ export function writeSourceDocs(
         authenticatedExistingDelegations,
         doc.delegatedModuleIdentities,
       );
+      // A source document without delegation metadata remains an ordinary,
+      // self-verifying cache write. Attaching an addIntegrity schema even when
+      // the field is absent would make every legacy/direct source-cache write
+      // CFC-relevant and require an otherwise-unnecessary prepare step.
+      const cell = delegatedModuleIdentities.length > 0
+        ? baseCell.asSchema(sourceDocWriteSchema())
+        : baseCell;
       cell.set({
         kind: "source",
         identity,
