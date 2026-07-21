@@ -68,9 +68,12 @@ cf piece step --piece <topic>                      # refresh computed fields
 ```
 
 Handler source writes commit before `piece step`, so `--input` reads can verify
-bodies, comments, links, and the board's topics list immediately. A step is
-still needed before relying on computed result fields such as `topicCount`,
-`crossrefs`, `commentCount`, or `lastActivityAt`. Fresh CLI replicas converge
-the board's linked topic inputs before recomputing; there is no Topics-specific
-exception to the normal step workflow. Prefer the canonical topic fids exported
-by `crossrefs` over intermediate wrapper links in the board's input array.
+bodies, comments, links, and the board's topics list immediately. A step
+requests recomputation of result fields such as `topicCount`, `crossrefs`,
+`commentCount`, or `lastActivityAt`, but callers must re-read the fields they
+need: a successful step message alone does not prove the result materialized.
+The fresh-replica regression covers convergence of linked input reads, not full
+pattern result recomputation. Prefer canonical topic fids exported by
+`crossrefs` over intermediate wrapper links in the board's input array, and
+never interpret a default empty `crossrefs` as an empty board without comparing
+`topics --input`.

@@ -39,14 +39,15 @@ When Topics onboarding has been authorized and no key exists for you, create a
 new one without overwriting any existing file:
 
 ```bash
-mkdir -p "$HOME/.config/commonfabric"
-deno run -A packages/cli/mod.ts id new > "$HOME/.config/commonfabric/<agent-slug>-agent.key"
-chmod 600 "$HOME/.config/commonfabric/<agent-slug>-agent.key"
-deno run -A packages/cli/mod.ts id did "$HOME/.config/commonfabric/<agent-slug>-agent.key"
+mkdir -p "$(dirname "$CF_IDENTITY")"
+(set -o noclobber; umask 077; deno run -A packages/cli/mod.ts id new > "$CF_IDENTITY")
+chmod 600 "$CF_IDENTITY"
+deno run -A packages/cli/mod.ts id did "$CF_IDENTITY"
 ```
 
-Do not use `deno task cf id new` when redirecting: the task wrapper writes a
-preamble to stdout and corrupts the key file.
+The `noclobber` subshell makes an existing identity a loud error instead of
+overwriting it. Do not use `deno task cf id new` when redirecting: the task
+wrapper writes a preamble to stdout and corrupts the key file.
 
 Immediately before every `addTopic`, `setBody`, `addComment`, or `addLink` call,
 set the board's per-user author name to your own stable display name:
@@ -67,13 +68,17 @@ the canonical fid published in the board's `crossrefs` result:
 deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input
 deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs
 export TOPIC_URL='https://estuary.saga-castor.ts.net/topics-dev-476ea34f/<topic-fid>'
-deno task cf piece get --url "$TOPIC_URL"
+deno task cf piece get --url "$TOPIC_URL" title --input
+deno task cf piece get --url "$TOPIC_URL" body --input
+deno task cf piece get --url "$TOPIC_URL" comments --input
+deno task cf piece get --url "$TOPIC_URL" links --input
 ```
 
 Each crossref row's `fid` is the canonical address for its `topic`. Prefer it to
 the intermediate wrapper link stored in the board's topics array. Read the
-existing topic before changing it, especially its full body, comments, and
-links.
+existing topic's input before changing it, especially its full body, comments,
+and links. If `topics --input` is non-empty but `crossrefs` is empty or absent,
+do not infer that the board is empty; see the Estuary caveat below.
 
 ## Creating and updating
 
@@ -123,8 +128,24 @@ them. After changing a topic, step that topic before relying on `commentCount`,
 `lastActivityAt`, or its derived connections. After creating a topic, step the
 board before relying on `topicCount` or `crossrefs`.
 
-There is no Topics-specific prohibition on stepping a fresh CLI replica. The
-current CLI converges the board's linked topic inputs before recomputing its
-results, so use the normal step workflow from `skills/cf/SKILL.md` whenever
-fresh computed values are needed. The linked-input convergence regression lives
-in `packages/runner/test/fresh-replica-read-asymmetry.test.ts`.
+There is no Topics-specific prohibition on requesting a step from a fresh CLI
+replica, but a successful `piece step` message is not proof that the expected
+result materialized. Re-read the result fields you need. The linked-input
+regression at `packages/runner/test/fresh-replica-read-asymmetry.test.ts` pins
+input-read convergence; it does not cover pattern result recomputation.
+
+## Current Estuary caveat
+
+Re-verified on 2026-07-21 after the #4768 Topics deployment: a fresh current-
+`main` CLI could read all durable board inputs and direct topic inputs, but both
+board and topic results were `undefined`. Board and topic steps reported success
+without materializing those results, and `crossrefs` read as its default empty
+list despite non-empty `topics --input`.
+
+In that state, a known topic URL remains readable through the input-only
+commands above, but board-to-topic fid discovery and verification of
+result-dependent operations are blocked. Do not substitute `piece ls` as an
+authoritative topic list; it can omit pieces created inside handlers. Report the
+deployment/runtime blocker instead of claiming a read or mutation succeeded.
+Remove this caveat only after the live board and a regression test both
+demonstrate fresh-CLI result materialization.
