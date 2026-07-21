@@ -122,11 +122,11 @@ comments, and link URLs, so do not add manual `kind: "topic"` links.
 ## Persistence and computed results
 
 Topics handler writes commit durably before `piece step`: verify source fields
-such as bodies, comments, and links with `piece get ... --input`. Computed
-result fields remain stale until the piece is stepped or a renderer materializes
-them. After changing a topic, step that topic before relying on `commentCount`,
-`lastActivityAt`, or its derived connections. After creating a topic, step the
-board before relying on `topicCount` or `crossrefs`.
+such as bodies, comments, and links with `piece get ... --input`. Do not expect
+computed result fields to refresh without a step or renderer materialization.
+After changing a topic, request a topic step before checking `commentCount`,
+`lastActivityAt`, or derived connections. After creating a topic, request a
+board step before checking `topicCount` or `crossrefs`.
 
 There is no Topics-specific prohibition on requesting a step from a fresh CLI
 replica, but a successful `piece step` message is not proof that the expected
