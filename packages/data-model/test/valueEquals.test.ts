@@ -153,6 +153,31 @@ describe("valueEqual()", () => {
       expect(valueEqual({ a: { b: [NaN] } }, { a: { b: [NaN] } })).toBe(true);
     });
 
+    // Every case above uses the literal `NaN` on both sides, which pins that a
+    // `NaN` equals itself through the hash path but not that distinct `NaN`
+    // payloads unify. That unification is a deliberate step -- the hash feeds a
+    // canonical byte sequence for any `NaN` rather than the value's own bits --
+    // and arithmetic never produces a second payload, so reaching one takes a
+    // typed-array view.
+    it("holds distinct `NaN` payloads equal inside a container", () => {
+      const buffer = new ArrayBuffer(8);
+      const bytes = new Uint8Array(buffer);
+      const doubles = new Float64Array(buffer);
+      bytes.set([0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf8, 0x7f]);
+      const payloadNan = doubles[0];
+
+      // Guard the premise: if this stops holding, the cases below compare a
+      // value against itself and should fail rather than pass for free.
+      doubles[0] = NaN;
+      expect(Number.isNaN(payloadNan)).toBe(true);
+      expect(bytes[0]).not.toBe(0x01);
+
+      expect(valueEqual({ a: payloadNan }, { a: NaN })).toBe(true);
+      expect(valueEqual([payloadNan], [NaN])).toBe(true);
+      expect(valueEqual({ a: { b: [payloadNan] } }, { a: { b: [NaN] } }))
+        .toBe(true);
+    });
+
     it("holds the infinities distinct inside a container", () => {
       expect(valueEqual({ a: Infinity }, { a: -Infinity })).toBe(false);
       expect(valueEqual([Infinity], [Infinity])).toBe(true);
