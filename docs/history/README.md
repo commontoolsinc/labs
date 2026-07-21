@@ -194,6 +194,11 @@ One line per archived document; each document's header carries the fuller
 
 ### Investigations, journals, and working notes
 
+- [bug3-suggestion-alias-verification-2026-07.md](packages/patterns/bug3-suggestion-alias-verification-2026-07.md)
+  — verification that the December 2025 survey's Bug 3 (Counter values
+  rendering as raw `$alias` objects when instantiated via `fetchAndRunPattern`)
+  does not reproduce; the dynamically-compiled render path resolves reactive and
+  computed values correctly, July 2026.
 - [reverse-invalidation-deadlock.md](packages/fuse/reverse-invalidation-deadlock.md)
   — root cause of the FUSE daemon hang that flaked the CLI FUSE integration
   suite: synchronous reverse invalidation deadlocking the request thread,
