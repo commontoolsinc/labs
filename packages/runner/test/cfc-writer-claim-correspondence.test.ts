@@ -13,11 +13,12 @@ import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
  * `bindingPath`; the claim's file SPELLING is resolver-dependent (the same
  * module spells `/api/patterns/system/x.tsx` from a piece-deploy compile and
  * `/patterns/system/x.tsx` from an HTTP-resolved one) and must not shear
- * authorization. These tests pin the tolerant correspondence at all three
- * sites — verification, stamping (rebind), and stored-claim reconciliation —
- * and pin that identity and path stay fail-closed (claim rotation across
- * module versions remains a conflict pending the setsrc-history delegation
- * design; see the board topic).
+ * authorization. These tests pin the spelling tolerance at the two sites
+ * that read EXISTING stamps (verification, stored-claim reconciliation), pin
+ * that stamp MINTING stays exact (rebind — the tolerance never widens who
+ * can create authority), and pin that identity and path stay fail-closed
+ * (claim rotation across module versions remains a conflict pending the
+ * setsrc-history delegation design; see the board topic).
  */
 
 const MODULE_IDENTITY = "profile-home-module-identity";
@@ -144,17 +145,15 @@ describe("writeAuthorizedBy across resolver spellings (labs#4772)", () => {
     expect(result.error).toBeUndefined();
   });
 
-  it("an UNSTAMPED claim is stamped by the owning binding under the other spelling, then verifies", async () => {
-    // The bricked-store shape: the claim persisted unstamped (seeded by a
-    // foreign writer — CT-1740 leaves it unstamped on purpose) under the
-    // piece spelling; the genuine bound writer arrives via the HTTP compile.
-    // Rebind must recognize the correspondence, stamp, and the write commits.
+  it("an UNSTAMPED claim is stamped by the owning binding under the SAME spelling, then verifies", async () => {
+    // Stamp minting is exact by design: a claim being stamped rides a schema
+    // emitted by the same compile as the writer, so their spellings agree.
     const rt = makeRuntime("ts-spelling-stamp");
     const tx = rt.edit();
     const cell = rt.getCell(
       signer.did(),
       "wab-spelling-stamp",
-      claimSchema({ file: PIECE_SPELLING, path: ["setBio"] }),
+      claimSchema({ file: HTTP_SPELLING, path: ["setBio"] }),
       tx,
     );
     tx.setCfcImplementationIdentity({
@@ -163,12 +162,40 @@ describe("writeAuthorizedBy across resolver spellings (labs#4772)", () => {
       sourceFile: HTTP_SPELLING,
       bindingPath: ["setBio"],
     });
-    cell.set({ bio: "healed" });
+    cell.set({ bio: "stamped in-universe" });
 
     const digest = tx.prepareCfc();
     expect(digest).not.toBe("");
     const result = await tx.commit();
     expect(result.error).toBeUndefined();
+  });
+
+  it("an UNSTAMPED claim is NOT stamped across spellings — minting stays exact", async () => {
+    // The reviewers' scenario (PR #4852 P1): a verified module whose path
+    // differs from the unstamped claim's by one leading segment must not
+    // mint the first stamp via the tolerance. Minting requires exact
+    // spelling; cross-spelling healing happens only at reconcile-adoption,
+    // where the stamp was already minted exactly by the owning compile.
+    const rt = makeRuntime("ts-spelling-no-fuzzy-mint");
+    const tx = rt.edit();
+    const cell = rt.getCell(
+      signer.did(),
+      "wab-spelling-no-fuzzy-mint",
+      claimSchema({ file: PIECE_SPELLING, path: ["setBio"] }),
+      tx,
+    );
+    tx.setCfcImplementationIdentity({
+      kind: "verified",
+      moduleIdentity: "would-be-thief-module-identity",
+      sourceFile: HTTP_SPELLING,
+      bindingPath: ["setBio"],
+    });
+    cell.set({ bio: "must not land" });
+
+    const digest = tx.prepareCfc();
+    expect(digest).toBe("");
+    const result = await tx.commit();
+    expect(result.error).toBeDefined();
   });
 
   it("a different moduleIdentity still fails closed even with corresponding spellings", async () => {
@@ -324,6 +351,92 @@ describe("stored-claim reconciliation across spellings", () => {
         envelope({ file: "/attacker.tsx", path: ["setBio"] }),
       )
     ).toThrow("writeAuthorizedBy must remain stable");
+  });
+});
+
+describe("the labs#4772 heal end-to-end: exact mint + tolerant adoption + identity verify", () => {
+  const signer2 = signer;
+  let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
+  let runtime: Runtime | undefined;
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+    storageManager = undefined;
+    runtime = undefined;
+  });
+
+  it("a bricked store (unstamped piece-spelled claim) heals through a cold-session write", async () => {
+    // The full bio-save shape with minting kept exact: the cold session's
+    // candidate schema carries the claim in the WRITER's own spelling
+    // (same compile universe), so rebind stamps it exactly; the merge then
+    // adopts that stamp onto the stored piece-spelled claim; verification
+    // passes on moduleIdentity + bindingPath.
+    const stored = {
+      type: "object",
+      properties: {
+        bio: {
+          type: "string",
+          ifc: {
+            writeAuthorizedBy: {
+              __ctWriterIdentityOf: { file: PIECE_SPELLING, path: ["setBio"] },
+            },
+          },
+        },
+      },
+    } as unknown as JSONSchemaObj;
+    const candidate = {
+      type: "object",
+      properties: {
+        bio: {
+          type: "string",
+          ifc: {
+            writeAuthorizedBy: {
+              __ctWriterIdentityOf: {
+                moduleIdentity: MODULE_IDENTITY,
+                file: HTTP_SPELLING,
+                path: ["setBio"],
+              },
+            },
+          },
+        },
+      },
+    } as unknown as JSONSchemaObj;
+    const merged = mergeCfcSchemaEnvelopes(stored, candidate);
+    // deno-lint-ignore no-explicit-any
+    const healedClaim = (merged as any).properties.bio.ifc.writeAuthorizedBy
+      .__ctWriterIdentityOf;
+    expect(healedClaim.moduleIdentity).toBe(MODULE_IDENTITY);
+
+    storageManager = StorageManager.emulate({ as: signer2 });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      trustSnapshotProvider: () => ({
+        id: "ts-heal-e2e",
+        actingPrincipal: signer2.did(),
+      }),
+    });
+    const tx = runtime.edit();
+    const cell = runtime.getCell(
+      signer2.did(),
+      "wab-heal-e2e",
+      merged as unknown as JSONSchema,
+      tx,
+    );
+    tx.setCfcImplementationIdentity({
+      kind: "verified",
+      moduleIdentity: MODULE_IDENTITY,
+      sourceFile: HTTP_SPELLING,
+      bindingPath: ["setBio"],
+    });
+    cell.set({ bio: "healed and committed" });
+
+    const digest = tx.prepareCfc();
+    expect(digest).not.toBe("");
+    const result = await tx.commit();
+    expect(result.error).toBeUndefined();
   });
 });
 

@@ -13,13 +13,26 @@
  * (labs#4772 / CT-1886).
  *
  * Authorization therefore anchors on `moduleIdentity` + `bindingPath`; the
- * file spelling is diagnostic. Where a file comparison still participates —
- * establishing which claim a writer's binding corresponds to before a stamp
- * exists — it must tolerate exactly the historical divergence: two spellings
- * correspond when they are equal or differ by one leading path segment (the
- * transformer's strip). Stored claims keep their mint-time spelling forever,
- * so this tolerance is permanent aged-store compat, deliberately no wider
- * than the divergence the toolchain actually produced.
+ * file spelling is diagnostic. The tolerant correspondence below is consumed
+ * in exactly one place — `reconcileWriterClaimStamp` (schema-merge.ts), where
+ * a stamp minted under the current compile's spelling meets a stored claim
+ * carrying an aged spelling of the same binding. It deliberately does NOT
+ * gate stamp MINTING (`rebindWriteAuthorizedByClaims` requires exact
+ * slash-normalized equality: a claim being stamped rides a schema emitted by
+ * the same compile as the writer, so exact holds wherever stamping is
+ * genuine), so the tolerance never widens who can create authority — only
+ * how an already-minted stamp meets an aged spelling. Residual: at the
+ * reconcile-adoption edge, a hostile verified module whose forged path
+ * differs from a stored unstamped claim's by one leading segment is accepted
+ * where before it needed the exact spelling — a marginal widening of the
+ * pre-existing path-forgeability that mint-time identity binding /
+ * setsrc-history delegation closes for real (board topic, index 38).
+ *
+ * The correspondence is deliberately no wider than the divergence the
+ * toolchain actually produced: equal after slash-normalization, or exactly
+ * one leading path segment apart (the transformer's strip). Stored claims
+ * keep their mint-time spelling forever, so this is permanent aged-store
+ * compat.
  */
 
 /** Leading-slash-normalize a claim/identity source-file spelling. */
