@@ -23,8 +23,11 @@ const isPlainRecord = (value: FabricValue): value is FabricPlainObject =>
  * Link recognition and reconstruction go through the `cell-rep` chokepoint
  * ({@link isLinkRef} / {@link linkRefPayload} / {@link linkRefFrom}), so both
  * `modernCellRep` regimes are handled transparently — legacy envelope or
- * `FabricLink` instance alike. The `$alias` form predates the chokepoint and
- * is never regime-dispatched, so it is recognized locally here.
+ * `FabricLink` instance alike. The `$alias` form is recognized locally here:
+ * cell-rep doesn't know it, and it can't be dropped — saved patterns still
+ * persist binding aliases whose optional `schema` field the runner fills in
+ * (see `LegacyAlias` in packages/runner/src/sigil-types.ts), so sync frames
+ * carry them. It stays until the runner stops persisting alias schemas.
  *
  * Schema VALUES are opaque to this walk: after a schema position is mapped,
  * the traversal does not descend into the schema (or its mapped

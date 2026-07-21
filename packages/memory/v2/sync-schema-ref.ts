@@ -36,8 +36,9 @@ const payloadSchemaRef = (
  * Finds a reserved wire reference in a schema position, or undefined.
  *
  * Visits exactly the schema positions {@link mapLinkSchemas} interprets —
- * link payloads (via the cell-rep chokepoint, both `modernCellRep` regimes)
- * and legacy `$alias` payloads — with the same blindness: schema subtrees
+ * link payloads (via cell-rep, both `modernCellRep` regimes) and `$alias`
+ * payloads (still persisted with schemas in saved patterns — see
+ * schema-table-links.ts) — with the same blindness: schema subtrees
  * are opaque, and non-link `FabricInstance` contents are not walked. The
  * traversal engine is deliberately ITERATIVE (explicit stack) so
  * adversarially deep documents cannot overflow the call stack; position
