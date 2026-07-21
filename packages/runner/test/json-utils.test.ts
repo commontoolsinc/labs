@@ -4,6 +4,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 import {
   createJsonSchema,
@@ -772,6 +773,18 @@ describe("json-utils", () => {
           scope: "space",
         },
       });
+    });
+
+    it("passes a nested FabricPrimitive through as an atomic value", () => {
+      // A `FabricBytes` (a `FabricPrimitive`) keeps its state in private fields
+      // and exposes zero enumerable own-props, so the `for...in` copy branch
+      // flattens it to `{}`, silently dropping its bytes. It is atomic and must
+      // pass through unchanged.
+      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+      const result = toJSONWithLegacyAliases({ payload: bytes } as any) as any;
+
+      expect(result.payload).toBe(bytes);
     });
   });
 });
