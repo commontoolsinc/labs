@@ -629,29 +629,41 @@ export class PiecesController<T = unknown> {
       const runningRef = getPatternIdentityRef(root);
       if (runningRef === undefined) return "current";
       const storedSource = getPatternSource(root);
-      if (
-        storedSource === undefined && getPatternRepository(root) !== undefined
-      ) {
+      const storedRepository = getPatternRepository(root);
+      if (storedSource === undefined && storedRepository !== undefined) {
         return "current";
       }
       const url = storedSource ?? deriveSystemPatternUrl(space, runtime);
       const host = runtime.mappedHostFor(space) ?? runtime.apiUrl.href;
+      // Async identity/load/compile work must not authorize a later write to a
+      // root another client has replaced in the meantime. Reading all captured
+      // metadata inside each transaction makes both writes compare-and-swap;
+      // editWithRetry re-runs this predicate after every conflict.
+      const rootStillMatches = (candidate: Cell<NameSchema>): boolean => {
+        const candidateRef = getPatternIdentityRef(candidate);
+        return candidateRef?.identity === runningRef.identity &&
+          candidateRef.symbol === runningRef.symbol &&
+          getPatternSource(candidate) === storedSource &&
+          getPatternRepository(candidate) === storedRepository;
+      };
       const repairProvenance = async (): Promise<UpdateOutcome> => {
-        const { error } = await runtime.editWithRetry((tx) => {
+        const result = await runtime.editWithRetry((tx) => {
+          if (!rootStillMatches(root.withTx(tx))) return false;
           setPatternSource(root, tx, url);
+          return true;
         });
-        if (error) {
+        if (result.error) {
           pieceUpdateLogger.warn(
             "provenance-repair-failed",
             () => [
               "checkAndUpdateDefaultPattern: provenance repair failed",
               space,
-              error,
+              result.error,
             ],
           );
           return "current";
         }
-        return "repaired-provenance";
+        return result.ok ? "repaired-provenance" : "current";
       };
 
       // The version gate (step 4) validates `host`'s build, and ?identity is
@@ -770,21 +782,27 @@ export class PiecesController<T = unknown> {
         }
         return "current";
       }
-      const { error } = await runtime.editWithRetry((tx) => {
+      const result = await runtime.editWithRetry((tx) => {
+        if (!rootStillMatches(root.withTx(tx))) return false;
         root.withTx(tx).setMetaRaw("patternIdentity", {
           identity: entryRef.identity,
           symbol: entryRef.symbol,
         });
         setPatternSource(root, tx, url); // back-fill provenance
+        return true;
       });
-      if (error) {
+      if (result.error) {
         pieceUpdateLogger.warn(
           "swap-failed",
-          () => ["checkAndUpdateDefaultPattern: swap failed", space, error],
+          () => [
+            "checkAndUpdateDefaultPattern: swap failed",
+            space,
+            result.error,
+          ],
         );
         return "current";
       }
-      return "updated";
+      return result.ok ? "updated" : "current";
     } catch (error) {
       pieceUpdateLogger.warn(
         "check-failed",

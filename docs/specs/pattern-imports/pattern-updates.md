@@ -232,6 +232,9 @@ transaction, and only then start it:
    carry the same build header. Compile with `compilePattern(program, { space })`.
    Apply only when the compiler supplies an entry ref whose identity exactly
    equals `currentId`; never synthesize a ref or fall back around `?identity`.
+   Provenance repair and identity replacement are transactional
+   compare-and-swap writes: the captured identity, source, and repository must
+   still match on every retry, so a concurrent custom-root replacement wins.
 7. Start the reconciled root. A newly created root skips the check because it
    was compiled from the current source in the same ensure operation; a root
    discovered after a creation race is treated as persisted and reconciled.

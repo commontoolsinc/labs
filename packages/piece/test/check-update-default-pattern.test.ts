@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   getPatternIdentityRef,
+  getPatternRepository,
   getPatternSource,
   PATTERN_RESPONSE_BUILD_HEADER,
   resolveEntryIdentity,
@@ -59,6 +60,7 @@ interface StubControls {
   failIdentity(fail: boolean): void;
   identityFetches(): number;
   sourceFetches(): number;
+  requestedHrefs(): string[];
   restore(): void;
 }
 
@@ -74,6 +76,7 @@ function installFetchStub(): StubControls {
   let failIdentityFetch = false;
   let identityFetchCount = 0;
   let sourceFetchCount = 0;
+  const requestedHrefs: string[] = [];
 
   const patternHeaders = (
     contentType: string,
@@ -90,6 +93,7 @@ function installFetchStub(): StubControls {
       ? input.href
       : input.url;
     const url = new URL(href);
+    requestedHrefs.push(url.href);
 
     if (url.pathname === "/api/meta") {
       return new Response(JSON.stringify({ did: "did:x", gitSha }), {
@@ -140,6 +144,7 @@ function installFetchStub(): StubControls {
     failIdentity: (f) => (failIdentityFetch = f),
     identityFetches: () => identityFetchCount,
     sourceFetches: () => sourceFetchCount,
+    requestedHrefs: () => [...requestedHrefs],
     restore: () => (globalThis.fetch = original),
   };
 }
@@ -228,6 +233,21 @@ describe("checkAndUpdateDefaultPattern", () => {
     const after = getPatternIdentityRef(piece.getCell())?.identity;
     expect(after).toBe(before);
     expect(after).toBe(await identityForSource(SOURCE_V1));
+  });
+
+  it("leaves a root without a pattern identity untouched", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const identityFetchesBefore = stub.identityFetches();
+    const { error } = await runtime.editWithRetry((tx) => {
+      piece.getCell().withTx(tx).setMetaRaw("patternIdentity", "missing");
+    });
+    expect(error).toBeUndefined();
+    const root = (await manager.getDefaultPattern(false))!;
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    expect(getPatternIdentityRef(root)).toBeUndefined();
+    expect(stub.identityFetches()).toBe(identityFetchesBefore);
   });
 
   it("rolls the root forward in place on a changed identity", async () => {
@@ -549,6 +569,211 @@ describe("checkAndUpdateDefaultPattern", () => {
     );
   });
 
+  it("keeps a legacy root unchanged when provenance repair cannot commit", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const { error } = await runtime.editWithRetry((tx) => {
+      piece.getCell().withTx(tx).setMetaRaw("patternSource", undefined);
+    });
+    expect(error).toBeUndefined();
+    const root = (await manager.getDefaultPattern(false))!;
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    runtime.editWithRetry = (() =>
+      Promise.resolve({
+        error: {
+          name: "StorageTransactionAborted" as const,
+          message: "provenance repair rejected",
+          reason: new Error("test rejection"),
+        },
+      })) as typeof runtime.editWithRetry;
+
+    try {
+      expect(await controller.checkAndUpdateDefaultPattern(root)).toBe(
+        "current",
+      );
+      expect(getPatternSource(root)).toBeUndefined();
+    } finally {
+      runtime.editWithRetry = originalEditWithRetry;
+    }
+  });
+
+  it("repairs provenance through the source path when loading the current artifact throws", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const { error } = await runtime.editWithRetry((tx) => {
+      piece.getCell().withTx(tx).setMetaRaw("patternSource", undefined);
+    });
+    expect(error).toBeUndefined();
+
+    const originalLoad = runtime.patternManager.loadPatternByIdentity;
+    const sourceFetchesBefore = stub.sourceFetches();
+    let firstLoad = true;
+    runtime.patternManager.loadPatternByIdentity =
+      ((identity, symbol, space) => {
+        if (firstLoad) {
+          firstLoad = false;
+          throw new Error("persisted artifact is unreadable");
+        }
+        return originalLoad.call(
+          runtime.patternManager,
+          identity,
+          symbol,
+          space,
+        );
+      }) as typeof runtime.patternManager.loadPatternByIdentity;
+
+    try {
+      expect(await controller.checkAndUpdateDefaultPattern()).toBe(
+        "repaired-provenance",
+      );
+      expect(stub.sourceFetches()).toBe(sourceFetchesBefore + 1);
+      expect(getPatternSource(piece.getCell())).toBe(DEFAULT_APP_PATTERN_URL);
+    } finally {
+      runtime.patternManager.loadPatternByIdentity = originalLoad;
+    }
+  });
+
+  it("does not stamp provenance after a concurrent custom-root replacement", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    await manager.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternSource", undefined);
+    });
+    expect(error).toBeUndefined();
+    const legacyRoot = (await manager.getDefaultPattern(false))!;
+
+    const loadStarted = Promise.withResolvers<void>();
+    const releaseLoad = Promise.withResolvers<void>();
+    const originalLoad = runtime.patternManager.loadPatternByIdentity;
+    runtime.patternManager.loadPatternByIdentity = (async () => {
+      loadStarted.resolve();
+      await releaseLoad.promise;
+      return undefined;
+    }) as typeof runtime.patternManager.loadPatternByIdentity;
+
+    try {
+      const update = controller.checkAndUpdateDefaultPattern(legacyRoot);
+      await loadStarted.promise;
+
+      const customRef = {
+        identity: await identityForSource(patternSource("concurrent-custom")),
+        symbol: "default",
+      };
+      const repository = "https://github.com/example/concurrent-pattern";
+      const replacement = await runtime.editWithRetry((tx) => {
+        const txRoot = legacyRoot.withTx(tx);
+        txRoot.setMetaRaw("patternIdentity", customRef);
+        txRoot.setMetaRaw("patternRepository", repository);
+      });
+      expect(replacement.error).toBeUndefined();
+
+      releaseLoad.resolve();
+      expect(await update).toBe("current");
+
+      const current = (await manager.getDefaultPattern(false))!;
+      expect(getPatternIdentityRef(current)).toEqual(customRef);
+      expect(getPatternRepository(current)).toBe(repository);
+      expect(getPatternSource(current)).toBeUndefined();
+    } finally {
+      releaseLoad.resolve();
+      runtime.patternManager.loadPatternByIdentity = originalLoad;
+    }
+  });
+
+  it("does not swap identity after a concurrent custom-root replacement", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    await manager.stopPiece(root);
+
+    const compileStarted = Promise.withResolvers<void>();
+    const releaseCompile = Promise.withResolvers<void>();
+    const originalCompile = runtime.patternManager.compilePattern;
+    runtime.patternManager.compilePattern = (async (input, cacheCtx) => {
+      compileStarted.resolve();
+      await releaseCompile.promise;
+      return await originalCompile.call(
+        runtime.patternManager,
+        input,
+        cacheCtx,
+      );
+    }) as typeof runtime.patternManager.compilePattern;
+    stub.setSource(SOURCE_V2);
+
+    try {
+      const update = controller.checkAndUpdateDefaultPattern(root);
+      await compileStarted.promise;
+
+      const customRef = {
+        identity: await identityForSource(patternSource("concurrent-custom")),
+        symbol: "default",
+      };
+      const repository = "https://github.com/example/concurrent-pattern";
+      const replacement = await runtime.editWithRetry((tx) => {
+        const txRoot = root.withTx(tx);
+        txRoot.setMetaRaw("patternIdentity", customRef);
+        txRoot.setMetaRaw("patternSource", undefined);
+        txRoot.setMetaRaw("patternRepository", repository);
+      });
+      expect(replacement.error).toBeUndefined();
+
+      releaseCompile.resolve();
+      expect(await update).toBe("current");
+
+      const current = (await manager.getDefaultPattern(false))!;
+      expect(getPatternIdentityRef(current)).toEqual(customRef);
+      expect(getPatternRepository(current)).toBe(repository);
+      expect(getPatternSource(current)).toBeUndefined();
+    } finally {
+      releaseCompile.resolve();
+      runtime.patternManager.compilePattern = originalCompile;
+    }
+  });
+
+  it("leaves a repository-pinned sourceless root untouched", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/repository-root.tsx",
+        files: [{ name: "/repository-root.tsx", contents: SOURCE_V1 }],
+      },
+      repository: "https://github.com/example/patterns",
+    });
+    const before = getPatternIdentityRef(piece.getCell());
+    const identityFetchesBefore = stub.identityFetches();
+    expect(getPatternSource(piece.getCell())).toBeUndefined();
+
+    stub.setSource(SOURCE_V2);
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    expect(getPatternIdentityRef(piece.getCell())).toEqual(before);
+    expect(stub.identityFetches()).toBe(identityFetchesBefore);
+  });
+
+  it("leaves a cross-origin tracked root untouched", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const before = getPatternIdentityRef(piece.getCell());
+    const identityFetchesBefore = stub.identityFetches();
+    const externalSource = "https://patterns.example/root.tsx";
+    const { error } = await runtime.editWithRetry((tx) => {
+      piece.getCell().withTx(tx).setMetaRaw("patternSource", externalSource);
+    });
+    expect(error).toBeUndefined();
+    const root = (await manager.getDefaultPattern(false))!;
+    expect(getPatternSource(root)).toBe(externalSource);
+
+    stub.setSource(SOURCE_V2);
+    expect(await controller.checkAndUpdateDefaultPattern(root)).toBe("current");
+    expect(getPatternIdentityRef(root)).toEqual(before);
+    expect(getPatternSource(root)).toBe(externalSource);
+    expect(stub.identityFetches()).toBe(identityFetchesBefore);
+    expect(
+      stub.requestedHrefs().some((href) => href.startsWith(externalSource)),
+    ).toBe(false);
+  });
+
   it("does not infer provenance from an official-looking filename", async () => {
     await setup({ systemPatternAutoUpdate: true });
     const piece = await controller.recreateDefaultPattern({
@@ -591,6 +816,27 @@ describe("checkAndUpdateDefaultPattern", () => {
       expect(versionSkews).toEqual([]);
     } finally {
       runtime.patternManager.compilePattern = originalCompile;
+    }
+  });
+
+  it("leaves the current root untouched when the identity swap cannot commit", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    await controller.ensureDefaultPattern();
+    const root = (await manager.getDefaultPattern(false))!;
+    const before = getPatternIdentityRef(root);
+    const originalWithTx = root.withTx;
+    root.withTx = (() => {
+      throw new Error("pattern identity swap rejected");
+    }) as typeof root.withTx;
+    stub.setSource(SOURCE_V2);
+
+    try {
+      expect(await controller.checkAndUpdateDefaultPattern(root)).toBe(
+        "current",
+      );
+      expect(getPatternIdentityRef(root)).toEqual(before);
+    } finally {
+      root.withTx = originalWithTx;
     }
   });
 
