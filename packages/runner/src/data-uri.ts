@@ -1,9 +1,9 @@
 /**
  * Cell-side integration of the `data:` cell URI codec. The dividing line
- * between this module and `data-uri-codec.ts` is the need for the
- * cell/link machinery: everything that can be expressed against
- * `data-model` alone lives in the codec (a leaf module); this module holds
- * the two operations that cannot -- {@link dataUriFromValueWithResolvedLinks},
+ * between this module and `data-model`'s `data-uri-codec.ts` is the need
+ * for the cell/link machinery: everything that can be expressed against
+ * `data-model` alone lives in the codec (in that package); this module
+ * holds the two operations that cannot -- {@link dataUriFromValueWithResolvedLinks},
  * which rewrites relative links against a base before encoding, and
  * {@link findAndInlineDataUriLinks}, which dissolves `data:` URI links
  * back into the values they carry.
@@ -39,7 +39,10 @@ import {
 } from "./link-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { URI } from "./sigil-types.ts";
-import { dataUriFromValue, valueFromDataUri } from "./data-uri-codec.ts";
+import {
+  dataUriFromValue,
+  valueFromDataUri,
+} from "@commonfabric/data-model/data-uri-codec";
 
 /**
  * Makes a `data:` URI that names a cell whose content is carried in the id

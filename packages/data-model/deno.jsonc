@@ -36,6 +36,7 @@
     "./frozen-builtins": "./src/frozen-builtins.ts",
     "./interface": "./src/interface.ts",
     "./codec-json": "./src/codec-json/index.ts",
+    "./data-uri-codec": "./src/data-uri-codec.ts",
     "./native-type-tags": "./src/native-type-tags.ts",
     "./schema-hash": "./src/schema-hash.ts",
     "./schema-utils": "./src/schema-utils.ts",
