@@ -53,7 +53,7 @@ export const gcpSpend: Tile = {
       label,
       status: budgetStatus(cost, readBudget(ctx.env("GCP_DAILY_BUDGET"))),
       value: `${usd(cost)}/day`,
-      sub: "yesterday · project spend",
+      sub: "yesterday · billing account spend",
     };
   },
 };
