@@ -319,21 +319,30 @@ describe("stored-claim reconciliation across spellings", () => {
     });
   });
 
-  it("still conflicts on two different stamps (no silent cross-version rotation)", () => {
-    expect(() =>
-      mergeCfcSchemaEnvelopes(
-        envelope({
-          moduleIdentity: "profile-home-module-identity-v1",
-          file: PIECE_SPELLING,
-          path: ["setBio"],
-        }),
-        envelope({
-          moduleIdentity: "profile-home-module-identity-v2",
-          file: HTTP_SPELLING,
-          path: ["setBio"],
-        }),
-      )
-    ).toThrow("writeAuthorizedBy must remain stable");
+  it("keeps the stored stamp on two different stamps (version boundary: no rotation, no abort)", () => {
+    // Claims are minted born stamped, so a republished module re-presents
+    // this binding under its new moduleIdentity on every envelope write.
+    // The stored stamp wins — the new version's field writes fail closed at
+    // verification (pending setsrc-history delegation) while the envelope's
+    // sibling writes keep committing; a merge-time conflict abort here
+    // would brick the whole envelope on every pattern update.
+    const merged = mergeCfcSchemaEnvelopes(
+      envelope({
+        moduleIdentity: "profile-home-module-identity-v1",
+        file: PIECE_SPELLING,
+        path: ["setBio"],
+      }),
+      envelope({
+        moduleIdentity: "profile-home-module-identity-v2",
+        file: HTTP_SPELLING,
+        path: ["setBio"],
+      }),
+    );
+    expect(claimOf(merged)).toEqual({
+      moduleIdentity: "profile-home-module-identity-v1",
+      file: PIECE_SPELLING,
+      path: ["setBio"],
+    });
   });
 
   it("still conflicts on different binding paths", () => {

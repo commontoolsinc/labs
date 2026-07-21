@@ -547,7 +547,14 @@ describe("mergeCfcSchemaEnvelopes", () => {
     }
   });
 
-  it("rejects writeAuthorizedBy claims with conflicting identity stamps", () => {
+  it("keeps the stored stamp when identity stamps conflict (version boundary, no rotation)", () => {
+    // Same binding, two different stamps: a version boundary, not a merge
+    // conflict. Claims are minted born stamped, so a republished module
+    // re-presents this binding under its new moduleIdentity on every
+    // envelope write — the stored stamp wins (never rotated; the new
+    // version's field writes stay fail-closed at verification pending
+    // setsrc-history delegation) and the envelope's sibling writes keep
+    // committing instead of aborting the whole transaction.
     const claimFor = (moduleIdentity: string) => ({
       __ctWriterIdentityOf: {
         file: "/system/profile-home.tsx",
@@ -555,25 +562,26 @@ describe("mergeCfcSchemaEnvelopes", () => {
         moduleIdentity,
       },
     });
-    expect(() =>
-      mergeCfcSchemaEnvelopes({
-        type: "object",
-        properties: {
-          elements: {
-            type: "array",
-            ifc: { writeAuthorizedBy: claimFor("fid1:left") },
-          },
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "object",
+      properties: {
+        elements: {
+          type: "array",
+          ifc: { writeAuthorizedBy: claimFor("fid1:left") },
         },
-      }, {
-        type: "object",
-        properties: {
-          elements: {
-            type: "array",
-            ifc: { writeAuthorizedBy: claimFor("fid1:right") },
-          },
+      },
+    }, {
+      type: "object",
+      properties: {
+        elements: {
+          type: "array",
+          ifc: { writeAuthorizedBy: claimFor("fid1:right") },
         },
-      })
-    ).toThrow(/writeAuthorizedBy must remain stable/);
+      },
+    });
+    // deno-lint-ignore no-explicit-any
+    expect((merged as any).properties.elements.ifc.writeAuthorizedBy)
+      .toEqual(claimFor("fid1:left"));
   });
 
   it("rejects writeAuthorizedBy claims with different bindings", () => {

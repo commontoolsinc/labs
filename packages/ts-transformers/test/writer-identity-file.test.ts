@@ -80,3 +80,37 @@ Deno.test("claim spelling: engine-prefixed compile canonicalizes to the same aut
     "/api/patterns/system/profile-embed.tsx",
   );
 });
+
+Deno.test("claim minting: born stamped with the module's identity when the compiler knows it", async () => {
+  // Mint-time identity binding (labs#4772 follow-up): with moduleIdentities
+  // supplied (the engine computes them from pristine sources before the TS
+  // compile), the emitted claim carries its own module's content-addressed
+  // identity — the capturable unstamped state is never minted.
+  const fileName = "/api/patterns/system/profile-embed.tsx";
+  const output = await transformFiles({ [fileName]: CLAIM_SOURCE }, {
+    types: COMMONFABRIC_TYPES,
+    moduleIdentities: new Map([[fileName, "profile-embed-module-identity"]]),
+  });
+  const at = output[fileName]!.indexOf("__ctWriterIdentityOf");
+  assert(at >= 0, "expected a writer-identity marker");
+  const marker = output[fileName]!.slice(at, at + 400);
+  const match = marker.match(/moduleIdentity:\s*"([^"]+)"/);
+  assert(match, "expected a mint-time moduleIdentity stamp in the marker");
+  assertEquals(match[1], "profile-embed-module-identity");
+});
+
+Deno.test("claim minting: stays unstamped when no module identities are supplied", async () => {
+  // Direct compiles without an identity map (older callers, unit harnesses)
+  // keep minting unstamped claims; the runner's reconcile-adoption remains
+  // their healing path.
+  const fileName = "/api/patterns/system/profile-embed.tsx";
+  const output = await transformFiles({ [fileName]: CLAIM_SOURCE }, {
+    types: COMMONFABRIC_TYPES,
+  });
+  const at = output[fileName]!.indexOf("__ctWriterIdentityOf");
+  assert(at >= 0, "expected a writer-identity marker");
+  assertEquals(
+    output[fileName]!.slice(at, at + 400).includes("moduleIdentity"),
+    false,
+  );
+});

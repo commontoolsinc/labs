@@ -33,6 +33,14 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
           typeArg,
           sourceFile.fileName,
           context.options.canonicalWriterIdentityFile,
+          // Mint-time identity binding: when the compiler knows the module
+          // identities (the engine computes them from pristine sources BEFORE
+          // the TS compile), the claim is born stamped with its own module's
+          // content-addressed identity — the unstamped state, whose first
+          // stamp is capturable by whoever writes first (labs#4772 residual),
+          // is never minted. The lookup is by this file's own compile name:
+          // claims always name a binding in the minting module.
+          context.options.moduleIdentities?.get(sourceFile.fileName),
         );
         let schemaTypeArg: ts.TypeNode = typeArg;
         if (
@@ -318,7 +326,7 @@ function createNumericAst(
 
 function attachWriteAuthorizedByMarker(
   schema: boolean | Record<string, unknown>,
-  identity: { file: string; path: string[] },
+  identity: { file: string; path: string[]; moduleIdentity?: string },
 ): boolean | Record<string, unknown> {
   if (typeof schema === "boolean") return schema;
   const ifc = schema.ifc && typeof schema.ifc === "object"
@@ -441,7 +449,8 @@ function extractWriteAuthorizedByIdentity(
   typeNode: ts.TypeNode,
   sourceFileName: string,
   canonicalize?: (fileName: string) => string,
-): { file: string; path: string[] } | undefined {
+  moduleIdentity?: string,
+): { file: string; path: string[]; moduleIdentity?: string } | undefined {
   if (!isWriteAuthorizedByType(typeNode)) {
     return undefined;
   }
@@ -455,6 +464,7 @@ function extractWriteAuthorizedByIdentity(
   return {
     file: normalizeWriterIdentityFile(sourceFileName, canonicalize),
     path: [bindingNode.exprName.text],
+    ...(moduleIdentity ? { moduleIdentity } : {}),
   };
 }
 
@@ -491,25 +501,40 @@ function isWriterIdentityPayload(
 }
 
 function createWriteAuthorizedByMarkerAst(
-  schema: { __ctWriterIdentityOf: { file: string; path: string[] } },
+  schema: {
+    __ctWriterIdentityOf: {
+      file: string;
+      path: string[];
+      moduleIdentity?: string;
+    };
+  },
   factory: ts.NodeFactory,
 ): ts.Expression {
+  const identity = schema.__ctWriterIdentityOf;
   return factory.createObjectLiteralExpression([
     factory.createPropertyAssignment(
       createPropertyName("__ctWriterIdentityOf", factory),
       factory.createObjectLiteralExpression([
         factory.createPropertyAssignment(
           createPropertyName("file", factory),
-          factory.createStringLiteral(schema.__ctWriterIdentityOf.file),
+          factory.createStringLiteral(identity.file),
         ),
         factory.createPropertyAssignment(
           createPropertyName("path", factory),
           factory.createArrayLiteralExpression(
-            schema.__ctWriterIdentityOf.path.map((segment) =>
+            identity.path.map((segment) =>
               factory.createStringLiteral(segment)
             ),
           ),
         ),
+        ...(typeof identity.moduleIdentity === "string"
+          ? [
+            factory.createPropertyAssignment(
+              createPropertyName("moduleIdentity", factory),
+              factory.createStringLiteral(identity.moduleIdentity),
+            ),
+          ]
+          : []),
       ], true),
     ),
   ], true);

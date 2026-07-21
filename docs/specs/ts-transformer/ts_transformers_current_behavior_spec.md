@@ -1381,7 +1381,9 @@ Special path:
   `AnyOf<...>` becomes an IFC `anyOf` atom, and `PolicyOf<typeof policy>`
   becomes a policy-reference marker that `SchemaGeneratorTransformer`
   resolves to module identity, symbol, and digest. `WriteAuthorizedBy`
-  rehydrates as `ifc.writeAuthorizedBy.__ctWriterIdentityOf = { file, path }`,
+  rehydrates as `ifc.writeAuthorizedBy.__ctWriterIdentityOf = { file, path }`
+  (plus a mint-time `moduleIdentity` stamp when the compiler was given
+  `moduleIdentities` — see §17.3 file normalization),
   and router-seeded `cfcUiContract` hints emit as `ifc.uiContract`. See §6.8;
   pinned by `test/cfc-authoring.test.ts`,
   `packages/schema-generator/test/schema/cfc-authoring.test.ts`, and
@@ -2549,7 +2551,12 @@ the annotated value itself and, when the value carries a function-valued
 (`src/utils/writer-identity-file.ts`, shared with
 `src/transformers/schema-generator.ts`, which emits the matching claim into
 schemas as `ifc: { writeAuthorizedBy: { __ctWriterIdentityOf: { file, path
-} } }` — `attachWriteAuthorizedByMarker` / `extractWriteAuthorizedByIdentity`)
+} } }`, plus `moduleIdentity` when `TransformerOptions.moduleIdentities` maps
+this compile name — claims are then *born stamped* with their own module's
+content-addressed identity, so the capturable unstamped state is never minted
+(labs#4772 residual); the engine supplies the map, computed from pristine
+sources before the TS compile — `attachWriteAuthorizedByMarker` /
+`extractWriteAuthorizedByIdentity`)
 normalizes backslashes → slashes and then applies the caller-supplied
 `canonicalWriterIdentityFile` option (`TransformerOptions`), the compile-name →
 authored-name unmapping. The runner's engine passes its `storedFilenameFor`
@@ -2576,10 +2583,15 @@ CFC's implementation identity surfaces it as `sourceFile`/`bindingPath`
 moduleIdentity to equal the claim's directly or name an authenticated
 `piece setsrc` predecessor, plus an equal binding path — the file SPELLING is
 deliberately not load-bearing at verification (it is resolver-dependent;
-labs#4772). Stamp MINTING (`rebindWriteAuthorizedByClaims`) still requires exact
-slash-normalized file equality, and stored-claim reconciliation tolerates
-spellings one leading segment apart
-(`packages/runner/src/cfc/writer-claim-correspondence.ts`). The
+labs#4772). Stamp MINTING (`rebindWriteAuthorizedByClaims`) still requires
+exact slash-normalized file equality, and stored-claim reconciliation
+tolerates spellings one leading segment apart
+(`packages/runner/src/cfc/writer-claim-correspondence.ts`); when both sides
+of a reconcile carry stamps for the same binding, the STORED stamp always
+wins — a republished module's born-stamped claim never rotates the stored
+one at merge time (its field writes are authorized at verification by
+authenticated `piece setsrc` module delegation, or fail closed loudly
+without one), and the envelope's sibling writes keep committing. The
 non-exported case reaches provenance through the `__cfReg` registration sink
 — the gap guarded by
 `packages/runner/test/cfc-nonexported-binding-identity.test.ts`.
