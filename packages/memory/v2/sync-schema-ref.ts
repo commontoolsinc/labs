@@ -14,15 +14,16 @@ const isReservedSchemaRef = (value: string): boolean =>
 /**
  * Whether serialized text contains a reserved reference prefix anywhere.
  * Serializations of documents and patches embed every string value they
- * carry verbatim, so a negative answer proves the serialized value cannot
- * introduce a reserved reference — the cheap gate in front of the deep
- * walks below.
+ * carry verbatim — see the note on `encodeMemoryBoundary` in ../v2.ts, which
+ * names this gate as a dependent — so a negative answer proves the
+ * serialized value cannot introduce a reserved reference. This is the cheap
+ * gate in front of the deep walks below.
  */
 export const containsReservedSchemaRefSubstring = (value: string): boolean =>
   value.includes(SYNC_SCHEMA_REF_PREFIX) ||
   value.includes(REQUEST_SCHEMA_CAS_REF_PREFIX);
 
-const schemaRefIn = (
+const payloadSchemaRef = (
   payload: Record<string, unknown>,
 ): string | undefined => {
   const schema = payload.schema;
@@ -32,13 +33,18 @@ const schemaRefIn = (
 };
 
 /**
- * Finds reserved wire references only in link-payload and legacy `$alias`
- * schema positions.
+ * Finds a reserved wire reference in a schema position, or undefined.
  *
- * Link recognition goes through the `cell-rep` chokepoint ({@link isLinkRef}
- * / {@link linkRefPayload}), covering both `modernCellRep` regimes — legacy
- * envelope or `FabricLink` instance. The `$alias` form predates the
- * chokepoint and is never regime-dispatched, so it is recognized locally.
+ * Visits exactly the schema positions {@link mapLinkSchemas} interprets —
+ * link payloads (via the cell-rep chokepoint, both `modernCellRep` regimes)
+ * and legacy `$alias` payloads — with the same blindness: schema subtrees
+ * are opaque, and non-link `FabricInstance` contents are not walked. The
+ * traversal engine is deliberately ITERATIVE (explicit stack) so
+ * adversarially deep documents cannot overflow the call stack; position
+ * parity with the recursive mapper is enforced mechanically by the
+ * walker-agreement test in test/v2-sync-schema-table-test.ts — teach both
+ * (and `containsSyncSchemaRefString`) in the same change or that test
+ * fails.
  */
 export const findSyncSchemaRef = (value: unknown): string | undefined => {
   const pending: unknown[] = [value];
@@ -53,8 +59,8 @@ export const findSyncSchemaRef = (value: unknown): string | undefined => {
     }
 
     if (isLinkRef(current)) {
-      const payload = linkRefPayload(current) as Record<string, unknown>;
-      const ref = schemaRefIn(payload);
+      const payload = linkRefPayload(current);
+      const ref = payloadSchemaRef(payload);
       if (ref !== undefined) {
         return ref;
       }
@@ -73,7 +79,7 @@ export const findSyncSchemaRef = (value: unknown): string | undefined => {
     const legacyAlias = current.$alias;
     const hasLegacyAlias = isPlainRecord(legacyAlias);
     if (hasLegacyAlias) {
-      const ref = schemaRefIn(legacyAlias);
+      const ref = payloadSchemaRef(legacyAlias);
       if (ref !== undefined) {
         return ref;
       }
@@ -98,7 +104,17 @@ export const findSyncSchemaRef = (value: unknown): string | undefined => {
   return undefined;
 };
 
-/** Checks arbitrary input for a string that could introduce a wire reference. */
+/**
+ * Checks plain containers (arrays, plain records) and link payloads for a
+ * string that could introduce a wire reference. The logical contents of
+ * non-link `FabricInstance`s are NOT walked — they live in private slots,
+ * not enumerable own-properties. That blindness is sound because the
+ * compressor, expander, and {@link findSyncSchemaRef} share it (a reference
+ * inside an instance can be neither produced nor interpreted), and the
+ * engine's serialized substring gate sees instance contents verbatim. If
+ * {@link mapLinkSchemas} ever learns to descend into an instance type, this
+ * scanner must be taught in the same change.
+ */
 export const containsSyncSchemaRefString = (value: unknown): boolean => {
   const pending: unknown[] = [value];
 

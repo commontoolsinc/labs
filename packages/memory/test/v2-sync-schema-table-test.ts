@@ -42,6 +42,7 @@ import {
   containsSyncSchemaRefString,
   findSyncSchemaRef,
 } from "../v2/sync-schema-ref.ts";
+import { mapLinkSchemas } from "../v2/schema-table-links.ts";
 import { testSessionOpenServerOptions } from "./v2-auth-test-helpers.ts";
 
 const textEncoder = new TextEncoder();
@@ -933,4 +934,168 @@ Deno.test("schema table and reserved-ref detection handle modern cell-rep links"
     setModernCellRepConfig(false);
     resetModernCellRepConfig();
   }
+});
+
+Deno.test("schema subtrees are opaque: nested link shapes inside schemas are data", () => {
+  // A schema whose `default` embeds a link-shaped structure with a reserved
+  // ref string: the whole schema is one position. Compression swallows it
+  // wholesale, expansion restores it byte-identically without interpreting
+  // the nested shape, and the validator does not flag it.
+  const schemaWithNestedLink: JSONSchema = {
+    type: "object",
+    default: {
+      "/": {
+        [LINK_V1_TAG]: {
+          id: "of:inner",
+          path: [],
+          schema: "schema-ref@2:fid1:nested-as-data",
+        },
+      },
+    },
+  } as unknown as JSONSchema;
+  const sync: SessionSync = {
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [{
+      branch: "",
+      id: "of:opaque-schema",
+      scope: "space",
+      seq: 1,
+      doc: {
+        value: {
+          ref: linkRefFrom({
+            id: "of:target",
+            path: [],
+            schema: schemaWithNestedLink,
+          }),
+        },
+      },
+    }],
+    removes: [],
+  };
+
+  assertEquals(findSyncSchemaRef(sync.upserts[0].doc), undefined);
+
+  const compressed = compressSessionSyncSchemas(sync) as SchemaTableSessionSync;
+  assertExists(compressed.schemaTable);
+  const canonical = internSchema(schemaWithNestedLink, true);
+  assertEquals(
+    compressed.schemaTable![canonical.taggedHashString],
+    canonical.schema,
+  );
+  const expanded = expandSessionSyncSchemas(compressed);
+  assertEquals(expanded, sync);
+});
+
+Deno.test("validator and mapper agree on schema positions across shapes", () => {
+  // Drift guard: findSyncSchemaRef is iterative (stack-safe) while
+  // mapLinkSchemas is recursive; this corpus mechanically enforces that
+  // both walkers see exactly the same schema positions. If either learns a
+  // new position or prunes one, this fails until the other is taught.
+  const planted = "schema-ref@2:fid1:planted";
+  const probe = (value: unknown): string | undefined => {
+    let found: string | undefined;
+    mapLinkSchemas(value as never, (schema) => {
+      if (
+        found === undefined && typeof schema === "string" &&
+        schema.startsWith("schema-ref@2:")
+      ) {
+        found = schema;
+      }
+      return schema;
+    });
+    return found;
+  };
+
+  const corpus: Array<{ label: string; value: unknown }> = [
+    {
+      label: "legacy link payload",
+      value: {
+        "/": { [LINK_V1_TAG]: { id: "of:a", path: [], schema: planted } },
+      },
+    },
+    {
+      label: "alias payload",
+      value: { $alias: { id: "of:b", path: [], schema: planted } },
+    },
+    {
+      label: "nested in array",
+      value: [1, [{ $alias: { id: "of:c", path: [], schema: planted } }]],
+    },
+    {
+      label: "sibling'd envelope is not a link",
+      value: {
+        "/": { [LINK_V1_TAG]: { id: "of:d", path: [], schema: planted } },
+        sibling: true,
+      },
+    },
+    {
+      label: "inside a schema subtree is data",
+      value: {
+        $alias: {
+          id: "of:e",
+          path: [],
+          schema: { type: "object", default: { deep: planted } },
+        },
+      },
+    },
+    {
+      label: "harmless string position",
+      value: { note: planted },
+    },
+    {
+      label: "alias sibling fields still walked",
+      value: {
+        $alias: {
+          id: "of:f",
+          path: [],
+          extra: { $alias: { id: "of:g", path: [], schema: planted } },
+        },
+      },
+    },
+  ];
+
+  for (const { label, value } of corpus) {
+    assertEquals(
+      findSyncSchemaRef(value),
+      probe(value),
+      `walker disagreement on: ${label}`,
+    );
+  }
+
+  // Modern regime: same agreement through FabricLink instances.
+  setModernCellRepConfig(true);
+  try {
+    const modern = {
+      wrapped: linkRefFrom({ id: "of:m", path: [], schema: planted }),
+    };
+    assertEquals(findSyncSchemaRef(modern), probe(modern));
+    assertEquals(findSyncSchemaRef(modern), planted);
+  } finally {
+    setModernCellRepConfig(false);
+    resetModernCellRepConfig();
+  }
+});
+
+Deno.test("encodeMemoryBoundary embeds reserved prefixes verbatim", () => {
+  // Pins the property the substring gates depend on (see the note on
+  // encodeMemoryBoundary): strings serialize byte-verbatim, so a payload's
+  // text contains a reserved prefix iff some string value carries it.
+  const withRefs = encodeMemoryBoundary({
+    doc: {
+      value: {
+        a: "schema-ref@2:fid1:x",
+        b: { nested: ["schema-cas@1:fid1:y"] },
+      },
+    },
+  });
+  assert(withRefs.includes("schema-ref@2:"));
+  assert(withRefs.includes("schema-cas@1:"));
+
+  const withoutRefs = encodeMemoryBoundary({
+    doc: { value: { a: "plain", b: { nested: [1, true, null] } } },
+  });
+  assert(!withoutRefs.includes("schema-ref@2:"));
+  assert(!withoutRefs.includes("schema-cas@1:"));
 });

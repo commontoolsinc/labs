@@ -335,7 +335,9 @@ payload or legacy `$alias` payload, it:
 
 1. computes the canonical tagged schema hash
 2. replaces the inline schema with `schema-ref@2:<tagged-hash>`
-3. adds the canonical schema to a frame-local `schemaTable` keyed by that hash
+3. adds the interned schema to a frame-local `schemaTable` keyed by that
+   hash (structurally equal to the inline schema; its serialized key order is
+   not guaranteed canonical — only the hash is)
 
 For example, the compact wire form can contain:
 

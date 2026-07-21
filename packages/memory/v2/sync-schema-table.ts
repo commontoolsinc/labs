@@ -1,4 +1,4 @@
-import type { JSONSchema } from "@commonfabric/api";
+import type { FabricValue, JSONSchema } from "@commonfabric/api";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type {
@@ -74,9 +74,9 @@ const expandSchemaRef = (
 };
 
 const rewriteSchemaValue = (
-  value: unknown,
+  value: FabricValue,
   state: RewriteState,
-): unknown => {
+): FabricValue => {
   if (isCompressibleSchema(value)) {
     state.changed = true;
     return schemaRefFor(value, state);
@@ -85,19 +85,19 @@ const rewriteSchemaValue = (
 };
 
 const expandSchemaValue = (
-  value: unknown,
+  value: FabricValue,
   schemas: SchemaTable | undefined,
   onSchema?: (schema: JSONSchema) => void,
-): unknown => expandSchemaRef(value, schemas, onSchema) ?? value;
+): FabricValue => expandSchemaRef(value, schemas, onSchema) ?? value;
 
-const rewriteValue = (value: unknown, state: RewriteState): unknown =>
+const rewriteValue = (value: FabricValue, state: RewriteState): FabricValue =>
   mapLinkSchemas(value, (schema) => rewriteSchemaValue(schema, state));
 
 const expandValue = (
-  value: unknown,
+  value: FabricValue,
   schemas: SchemaTable | undefined,
   onSchema?: (schema: JSONSchema) => void,
-): unknown =>
+): FabricValue =>
   mapLinkSchemas(
     value,
     (schema) => expandSchemaValue(schema, schemas, onSchema),

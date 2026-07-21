@@ -3,7 +3,7 @@ import {
   linkRefFrom,
   linkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
-import type { FabricPlainObject } from "@commonfabric/api";
+import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 export const REQUEST_SCHEMA_CAS_REF_PREFIX = "schema-cas@1:";
@@ -14,7 +14,7 @@ export interface LinkSchemaTraversal {
   visitSchemaPosition(): void;
 }
 
-const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+const isPlainRecord = (value: FabricValue): value is FabricPlainObject =>
   isPlainObject(value);
 
 /**
@@ -25,19 +25,37 @@ const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
  * `modernCellRep` regimes are handled transparently — legacy envelope or
  * `FabricLink` instance alike. The `$alias` form predates the chokepoint and
  * is never regime-dispatched, so it is recognized locally here.
+ *
+ * Schema VALUES are opaque to this walk: after a schema position is mapped,
+ * the traversal does not descend into the schema (or its mapped
+ * replacement), so link-shaped structures inside a schema — for example in a
+ * `default` — are data, never positions. This keeps compression and
+ * expansion inverse, and means a table entry delivered under hash
+ * verification is never rewritten afterwards.
+ *
+ * Non-link `FabricInstance`s are not walked: their contents live in private
+ * slots, not enumerable own-properties. That blindness is sound because
+ * every consumer of these positions — the compressor, the expander, and the
+ * reserved-ref validator (a probe over this same walk) — shares it, so a
+ * reference inside an instance can be neither produced nor interpreted; the
+ * engine's serialized substring gate still sees instance contents verbatim.
+ * INVARIANT: any instance type this walk learns to descend into is
+ * inherited by the probe-based validator automatically, but the string
+ * scanner `containsSyncSchemaRefString` in sync-schema-ref.ts must be
+ * taught in the same change.
  */
 export const mapLinkSchemas = (
-  value: unknown,
-  mapSchema: (schema: unknown) => unknown,
+  value: FabricValue,
+  mapSchema: (schema: FabricValue) => FabricValue,
   traversal?: LinkSchemaTraversal,
   depth = 0,
-): unknown => {
+): FabricValue => {
   traversal?.visitNode(depth);
   if (Array.isArray(value)) {
     let changed = false;
     const mapped = value.map((item) => {
       const next = mapLinkSchemas(item, mapSchema, traversal, depth + 1);
-      changed ||= next !== item;
+      changed ||= !Object.is(next, item);
       return next;
     });
     return changed ? mapped : value;
@@ -45,70 +63,93 @@ export const mapLinkSchemas = (
 
   if (isLinkRef(value)) {
     const payload = linkRefPayload(value);
-    let mappedPayload: FabricPlainObject = payload;
-    let changed = false;
-    if (Object.hasOwn(payload, "schema")) {
-      traversal?.visitSchemaPosition();
-      const schema = mapSchema(payload.schema);
-      if (schema !== payload.schema) {
-        mappedPayload = { ...payload, schema } as FabricPlainObject;
-        changed = true;
-      }
-    }
-    const walked = mapRecordChildren(
-      mappedPayload as Record<string, unknown>,
+    const mappedPayload = mapPayloadSchemas(
+      payload,
       mapSchema,
       traversal,
       depth,
     );
-    if (walked !== mappedPayload) {
-      mappedPayload = walked as FabricPlainObject;
-      changed = true;
-    }
-    return changed ? linkRefFrom(mappedPayload) : value;
+    return mappedPayload === payload ? value : linkRefFrom(mappedPayload);
   }
 
   if (!isPlainRecord(value)) return value;
 
   let mappedValue = value;
-  let changed = false;
   const alias = value.$alias;
-  if (isPlainRecord(alias) && Object.hasOwn(alias, "schema")) {
-    traversal?.visitSchemaPosition();
-    const schema = mapSchema(alias.schema);
-    if (schema !== alias.schema) {
-      mappedValue = { ...mappedValue, $alias: { ...alias, schema } };
-      changed = true;
+  const hasAlias = isPlainRecord(alias);
+  if (hasAlias) {
+    const mappedAlias = mapPayloadSchemas(alias, mapSchema, traversal, depth);
+    if (mappedAlias !== alias) {
+      mappedValue = { ...mappedValue, $alias: mappedAlias };
     }
   }
 
-  const walked = mapRecordChildren(mappedValue, mapSchema, traversal, depth);
+  // The alias payload was walked above; do not descend into it again.
+  const walked = mapRecordChildren(
+    mappedValue,
+    mapSchema,
+    traversal,
+    depth,
+    hasAlias ? "$alias" : undefined,
+  );
   if (walked !== mappedValue) return walked;
-  return changed ? mappedValue : value;
+  return mappedValue === value ? value : mappedValue;
 };
 
-/** Walks every own entry of a record, allocating a copy only on change.
- *  Plain assignment is safe for every key except "__proto__", whose
- *  assignment would hit the prototype accessor instead of creating an own
- *  property. */
-const mapRecordChildren = (
-  record: Record<string, unknown>,
-  mapSchema: (schema: unknown) => unknown,
+/** Maps the `schema` position of one link/alias payload — without descending
+ *  into the schema value — and walks the payload's other entries. */
+const mapPayloadSchemas = (
+  payload: FabricPlainObject,
+  mapSchema: (schema: FabricValue) => FabricValue,
   traversal: LinkSchemaTraversal | undefined,
   depth: number,
-): Record<string, unknown> => {
+): FabricPlainObject => {
+  let mappedPayload = payload;
+  if (Object.hasOwn(payload, "schema")) {
+    traversal?.visitSchemaPosition();
+    const schema = mapSchema(payload.schema);
+    // Object.is: a NaN-valued leaf returned unchanged must not count as a
+    // change (see the data-model Object.is sweep).
+    if (!Object.is(schema, payload.schema)) {
+      mappedPayload = { ...payload, schema };
+    }
+  }
+  return mapRecordChildren(
+    mappedPayload,
+    mapSchema,
+    traversal,
+    depth,
+    "schema",
+  );
+};
+
+/** Walks every own entry of a record except `skippedKey`, allocating a copy
+ *  only on change. Plain assignment is safe for every key except
+ *  "__proto__", whose assignment would hit the prototype accessor instead of
+ *  creating an own property. */
+const mapRecordChildren = (
+  record: FabricPlainObject,
+  mapSchema: (schema: FabricValue) => FabricValue,
+  traversal: LinkSchemaTraversal | undefined,
+  depth: number,
+  skippedKey?: string,
+): FabricPlainObject => {
   const entries = Object.entries(record);
-  const mappedChildren: unknown[] = new Array(entries.length);
+  const mappedChildren: FabricValue[] = new Array(entries.length);
   let childChanged = false;
   for (let index = 0; index < entries.length; index += 1) {
-    const child = entries[index][1];
+    const [key, child] = entries[index];
+    if (key === skippedKey) {
+      mappedChildren[index] = child;
+      continue;
+    }
     const next = mapLinkSchemas(child, mapSchema, traversal, depth + 1);
     mappedChildren[index] = next;
-    childChanged ||= next !== child;
+    childChanged ||= !Object.is(next, child);
   }
   if (!childChanged) return record;
 
-  const mapped: Record<string, unknown> = {};
+  const mapped: FabricPlainObject = {};
   for (let index = 0; index < entries.length; index += 1) {
     const key = entries[index][0];
     const next = mappedChildren[index];
