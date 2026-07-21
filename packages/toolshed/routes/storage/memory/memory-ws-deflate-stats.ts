@@ -74,6 +74,10 @@ export const createMemoryWsDeflateStatsRecorder = (
       if (flushed) return;
       flushed = true;
       try {
+        // Plain JSON.stringify on purpose: this is a diagnostic JSONL line
+        // of scalar counters, not wire data — the memory codec
+        // (encodeMemoryBoundary) is for protocol payloads and would be the
+        // wrong tool here.
         Deno.writeTextFileSync(
           file,
           JSON.stringify({
