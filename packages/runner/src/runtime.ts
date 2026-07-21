@@ -1772,7 +1772,7 @@ export class Runtime {
     tx?: IExtendedStorageTransaction,
     cfcLabelView?: CfcLabelView,
   ): Cell<any> {
-    // Not `dataCellURIWithResolvedLinks()`: its link-rewriting walk is unwanted here
+    // Not `dataURIFromValueWithResolvedLinks()`: its link-rewriting walk is unwanted here
     // (this data is immutable as given). `fabricFromNativeValue()` converts
     // what callers actually pass -- notably `Cell`s, which become sigil
     // links via their `toJSON()` -- into an encodable `FabricValue`.

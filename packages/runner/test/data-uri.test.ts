@@ -14,7 +14,7 @@ import {
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { UnknownValue } from "@commonfabric/data-model/fabric-instances";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { dataCellURIWithResolvedLinks } from "../src/data-uri.ts";
+import { dataURIFromValueWithResolvedLinks } from "../src/data-uri.ts";
 import {
   DATA_URI_MEDIA_TYPE,
   valueFromDataURI,
@@ -51,12 +51,12 @@ describe("data-uri", () => {
     await storageManager?.close();
   });
 
-  describe("dataCellURIWithResolvedLinks", () => {
+  describe("dataURIFromValueWithResolvedLinks", () => {
     it("should throw on circular data", () => {
       const circular: any = { name: "test" };
       circular.self = circular;
 
-      expect(() => dataCellURIWithResolvedLinks(circular)).toThrow(
+      expect(() => dataURIFromValueWithResolvedLinks(circular)).toThrow(
         "Cycle detected when creating data URI",
       );
     });
@@ -66,7 +66,7 @@ describe("data-uri", () => {
       const obj2: any = { name: "obj2", ref: obj1 };
       obj1.ref = obj2;
 
-      expect(() => dataCellURIWithResolvedLinks(obj1)).toThrow(
+      expect(() => dataURIFromValueWithResolvedLinks(obj1)).toThrow(
         "Cycle detected when creating data URI",
       );
     });
@@ -75,7 +75,7 @@ describe("data-uri", () => {
       const circular: any = { items: [] };
       circular.items.push(circular);
 
-      expect(() => dataCellURIWithResolvedLinks(circular)).toThrow(
+      expect(() => dataURIFromValueWithResolvedLinks(circular)).toThrow(
         "Cycle detected when creating data URI",
       );
     });
@@ -92,7 +92,7 @@ describe("data-uri", () => {
         },
       };
 
-      const dataURI = dataCellURIWithResolvedLinks(
+      const dataURI = dataURIFromValueWithResolvedLinks(
         { link: relativeLink },
         baseCell,
       );
@@ -123,7 +123,7 @@ describe("data-uri", () => {
         },
       };
 
-      const dataURI = dataCellURIWithResolvedLinks(
+      const dataURI = dataURIFromValueWithResolvedLinks(
         { link: relativeLink },
         scopedBaseCell,
       );
@@ -160,7 +160,7 @@ describe("data-uri", () => {
         ],
       };
 
-      const dataURI = dataCellURIWithResolvedLinks(data, baseCell);
+      const dataURI = dataURIFromValueWithResolvedLinks(data, baseCell);
 
       // Decode the data URI using valueFromDataURI
       const parsed = valueFromDataURI(dataURI);
@@ -185,7 +185,7 @@ describe("data-uri", () => {
         },
       };
 
-      const dataURI = dataCellURIWithResolvedLinks(
+      const dataURI = dataURIFromValueWithResolvedLinks(
         { link: absoluteLink },
         baseCell,
       );
@@ -212,7 +212,7 @@ describe("data-uri", () => {
       };
 
       // Should not throw even though sharedObject is referenced multiple times
-      const dataURI = dataCellURIWithResolvedLinks(data);
+      const dataURI = dataURIFromValueWithResolvedLinks(data);
 
       // Decode and verify using valueFromDataURI
       const parsed = valueFromDataURI(dataURI);
@@ -232,7 +232,7 @@ describe("data-uri", () => {
       };
 
       // Should not throw with UTF-8 characters
-      const dataURI = dataCellURIWithResolvedLinks(data);
+      const dataURI = dataURIFromValueWithResolvedLinks(data);
 
       // Decode and verify using valueFromDataURI
       const parsed = valueFromDataURI(dataURI);
@@ -245,7 +245,7 @@ describe("data-uri", () => {
     });
 
     it("mints the data-cell media type and the standard encoding", () => {
-      const dataURI = dataCellURIWithResolvedLinks({ x: 1 });
+      const dataURI = dataURIFromValueWithResolvedLinks({ x: 1 });
       // Deliberately a literal (not the imported constant): changing the
       // minted media type must be a conscious test change.
       expect(dataURI.startsWith("data:application/vnd.common-fabric.data,"))
@@ -262,13 +262,13 @@ describe("data-uri", () => {
     it("mints the same URI regardless of key insertion order", () => {
       const inOrder = { alpha: 1, beta: [2, 3], gamma: { delta: 4 } };
       const scrambled = { gamma: { delta: 4 }, beta: [2, 3], alpha: 1 };
-      expect(dataCellURIWithResolvedLinks(scrambled)).toBe(
-        dataCellURIWithResolvedLinks(inOrder),
+      expect(dataURIFromValueWithResolvedLinks(scrambled)).toBe(
+        dataURIFromValueWithResolvedLinks(inOrder),
       );
     });
 
     it("preserves non-finite numbers and negative zero", () => {
-      const dataURI = dataCellURIWithResolvedLinks({
+      const dataURI = dataURIFromValueWithResolvedLinks({
         n: NaN,
         z: -0,
         i: -Infinity,
@@ -283,13 +283,13 @@ describe("data-uri", () => {
     // present-`undefined` document property is the reader's synthesis
     // (see attestation `load()`), not part of the payload.
     it("round-trips an `undefined` value", () => {
-      expect(valueFromDataURI(dataCellURIWithResolvedLinks(undefined)))
+      expect(valueFromDataURI(dataURIFromValueWithResolvedLinks(undefined)))
         .toBeUndefined();
     });
 
     it("represents a `FabricPrimitive` leaf correctly", () => {
       const h = hashOf({ some: "value" });
-      const parsed = valueFromDataURI(dataCellURIWithResolvedLinks({ h }));
+      const parsed = valueFromDataURI(dataURIFromValueWithResolvedLinks({ h }));
       expect(parsed.h).toBeInstanceOf(FabricHash);
       expect(parsed.h.toString()).toBe(h.toString());
     });
@@ -301,7 +301,7 @@ describe("data-uri", () => {
     it("represents a link-free `FabricInstance` via its codec", () => {
       const inst = new UnknownValue("zzz@1", { a: 1 });
       const parsed = valueFromDataURI(
-        dataCellURIWithResolvedLinks({ inst }),
+        dataURIFromValueWithResolvedLinks({ inst }),
       );
       expect(parsed.inst).toBeInstanceOf(UnknownValue);
       expect(parsed.inst.wireTypeTag).toBe("zzz@1");
@@ -320,7 +320,7 @@ describe("data-uri", () => {
         };
         const relativeLink = linkRefFrom({ path: ["nested", "value"] });
 
-        const dataURI = dataCellURIWithResolvedLinks(
+        const dataURI = dataURIFromValueWithResolvedLinks(
           { link: relativeLink },
           base,
         );

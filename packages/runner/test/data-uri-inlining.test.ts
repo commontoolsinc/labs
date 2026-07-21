@@ -5,7 +5,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { dataCellURIWithResolvedLinks } from "../src/data-uri.ts";
+import { dataURIFromValueWithResolvedLinks } from "../src/data-uri.ts";
 import { findAndInlineDataURILinks } from "../src/data-uri.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
@@ -46,7 +46,7 @@ describe("data URI inlining", () => {
     });
 
     it("should inline simple data URI links", () => {
-      const dataURI = dataCellURIWithResolvedLinks("test data");
+      const dataURI = dataURIFromValueWithResolvedLinks("test data");
       const link = {
         "/": {
           [LINK_V1_TAG]: {
@@ -61,7 +61,9 @@ describe("data URI inlining", () => {
     });
 
     it("should inline data URI links with paths", () => {
-      const dataURI = dataCellURIWithResolvedLinks({ nested: { value: 42 } });
+      const dataURI = dataURIFromValueWithResolvedLinks({
+        nested: { value: 42 },
+      });
       const link = {
         "/": {
           [LINK_V1_TAG]: {
@@ -76,8 +78,8 @@ describe("data URI inlining", () => {
     });
 
     it("should inline data URI links in arrays", () => {
-      const dataURI1 = dataCellURIWithResolvedLinks("first");
-      const dataURI2 = dataCellURIWithResolvedLinks("second");
+      const dataURI1 = dataURIFromValueWithResolvedLinks("first");
+      const dataURI2 = dataURIFromValueWithResolvedLinks("second");
 
       const array = [
         {
@@ -103,7 +105,7 @@ describe("data URI inlining", () => {
     });
 
     it("should inline data URI links in objects", () => {
-      const dataURI = dataCellURIWithResolvedLinks("nested value");
+      const dataURI = dataURIFromValueWithResolvedLinks("nested value");
       const obj = {
         key1: "regular value",
         key2: {
@@ -127,7 +129,7 @@ describe("data URI inlining", () => {
       const innerCell = runtime.getCell(space, "inner", undefined, tx);
       innerCell.set({ value: "inner data" });
 
-      const dataURI = dataCellURIWithResolvedLinks(innerCell.getAsLink());
+      const dataURI = dataURIFromValueWithResolvedLinks(innerCell.getAsLink());
       const link = {
         "/": {
           [LINK_V1_TAG]: {
@@ -152,7 +154,7 @@ describe("data URI inlining", () => {
       const innerCell = runtime.getCell(space, "inner", undefined, tx);
       innerCell.set({ nested: { value: "inner data" } });
 
-      const dataURI = dataCellURIWithResolvedLinks(innerCell.getAsLink());
+      const dataURI = dataURIFromValueWithResolvedLinks(innerCell.getAsLink());
       const link = {
         "/": {
           [LINK_V1_TAG]: {
@@ -173,7 +175,7 @@ describe("data URI inlining", () => {
     });
 
     it("should return undefined for data URIs with invalid paths", () => {
-      const dataURI = dataCellURIWithResolvedLinks({ a: 1 });
+      const dataURI = dataURIFromValueWithResolvedLinks({ a: 1 });
       const link = {
         "/": {
           [LINK_V1_TAG]: {
@@ -211,7 +213,7 @@ describe("data URI inlining", () => {
     });
 
     it("should preserve unchanged branches when inlining nested data URI links", () => {
-      const dataURI = dataCellURIWithResolvedLinks("inline me");
+      const dataURI = dataURIFromValueWithResolvedLinks("inline me");
       const untouched = {
         keep: true,
         nested: { count: 1 },
@@ -242,7 +244,7 @@ describe("data URI inlining", () => {
     });
 
     it("should deeply traverse nested structures", () => {
-      const dataURI = dataCellURIWithResolvedLinks("deep value");
+      const dataURI = dataURIFromValueWithResolvedLinks("deep value");
       const complex = {
         level1: {
           level2: [
@@ -265,7 +267,7 @@ describe("data URI inlining", () => {
     });
 
     it("should handle data URIs with schema", () => {
-      const dataURI = dataCellURIWithResolvedLinks(42);
+      const dataURI = dataURIFromValueWithResolvedLinks(42);
       const link = {
         "/": {
           [LINK_V1_TAG]: {
@@ -284,7 +286,7 @@ describe("data URI inlining", () => {
       const innerCell = runtime.getCell(space, "inner", undefined, tx);
       innerCell.set({ nested: { value: "data" } });
 
-      const dataURI = dataCellURIWithResolvedLinks(innerCell.getAsLink({
+      const dataURI = dataURIFromValueWithResolvedLinks(innerCell.getAsLink({
         includeSchema: true,
       }));
       const link = {
@@ -310,7 +312,7 @@ describe("data URI inlining", () => {
 
   describe("setRaw with data URI inlining", () => {
     it("should inline data URIs when using setRaw", () => {
-      const dataURI = dataCellURIWithResolvedLinks("inlined value");
+      const dataURI = dataURIFromValueWithResolvedLinks("inlined value");
       const targetCell = runtime.getCell(space, "target", undefined, tx);
 
       const link = {
@@ -327,8 +329,8 @@ describe("data URI inlining", () => {
     });
 
     it("should inline nested data URIs in objects", () => {
-      const dataURI1 = dataCellURIWithResolvedLinks("value1");
-      const dataURI2 = dataCellURIWithResolvedLinks("value2");
+      const dataURI1 = dataURIFromValueWithResolvedLinks("value1");
+      const dataURI2 = dataURIFromValueWithResolvedLinks("value2");
       const targetCell = runtime.getCell(space, "target", undefined, tx);
 
       targetCell.setRaw({
@@ -357,7 +359,7 @@ describe("data URI inlining", () => {
     });
 
     it("should inline data URIs in arrays", () => {
-      const dataURI = dataCellURIWithResolvedLinks("array item");
+      const dataURI = dataURIFromValueWithResolvedLinks("array item");
       const targetCell = runtime.getCell(space, "target", undefined, tx);
 
       targetCell.setRaw([
@@ -378,7 +380,7 @@ describe("data URI inlining", () => {
 
   describe("diffAndUpdate with data URI inlining", () => {
     it("should inline data URIs during diffAndUpdate", () => {
-      const dataURI = dataCellURIWithResolvedLinks("updated value");
+      const dataURI = dataURIFromValueWithResolvedLinks("updated value");
       const targetCell = runtime.getCell(space, "target", undefined, tx);
       targetCell.set({ initial: "value" });
 
@@ -396,7 +398,7 @@ describe("data URI inlining", () => {
     });
 
     it("should handle data URIs with complex nested structures", () => {
-      const dataURI = dataCellURIWithResolvedLinks({
+      const dataURI = dataURIFromValueWithResolvedLinks({
         nested: {
           array: [1, 2, 3],
           obj: { key: "value" },
@@ -423,7 +425,7 @@ describe("data URI inlining", () => {
     });
 
     it("should not write data URIs to storage", () => {
-      const dataURI = dataCellURIWithResolvedLinks("test");
+      const dataURI = dataURIFromValueWithResolvedLinks("test");
       const targetCell = runtime.getCell(space, "target", undefined, tx);
 
       const link = {
@@ -456,7 +458,7 @@ describe("data URI inlining", () => {
           },
         },
       };
-      const dataURI = dataCellURIWithResolvedLinks({
+      const dataURI = dataURIFromValueWithResolvedLinks({
         link: relativeLink,
         other: { path: "success" },
       });
@@ -516,7 +518,7 @@ describe("data URI inlining", () => {
       };
 
       // Embed the link in a data URI at some intermediate level
-      const dataURI = dataCellURIWithResolvedLinks({
+      const dataURI = dataURIFromValueWithResolvedLinks({
         intermediate: linkToOtherDoc,
       });
 
@@ -570,7 +572,7 @@ describe("data URI inlining", () => {
           },
         },
       };
-      const dataURI = dataCellURIWithResolvedLinks(relativeLink);
+      const dataURI = dataURIFromValueWithResolvedLinks(relativeLink);
 
       // Link with additional path that goes beyond the relative link
       const link = {
@@ -610,7 +612,9 @@ describe("data URI inlining", () => {
       const linkToTarget = targetCell.getAsLink();
 
       // Wrap it in a data URI
-      const dataURI1 = dataCellURIWithResolvedLinks({ wrapped: linkToTarget });
+      const dataURI1 = dataURIFromValueWithResolvedLinks({
+        wrapped: linkToTarget,
+      });
 
       // Create a link to first data URI
       const linkToDataURI1 = {
@@ -623,7 +627,7 @@ describe("data URI inlining", () => {
       };
 
       // Wrap that in another data URI
-      const dataURI2 = dataCellURIWithResolvedLinks({
+      const dataURI2 = dataURIFromValueWithResolvedLinks({
         doubleWrapped: linkToDataURI1,
       });
 
@@ -678,7 +682,7 @@ describe("data URI inlining", () => {
         },
       };
 
-      const dataURI = dataCellURIWithResolvedLinks(linkWithSchema);
+      const dataURI = dataURIFromValueWithResolvedLinks(linkWithSchema);
 
       // Path extends into the linked document
       const link = {

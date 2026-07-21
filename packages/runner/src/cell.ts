@@ -108,7 +108,7 @@ import {
 } from "./sigil-types.ts";
 import type { Runtime } from "./runtime.ts";
 import {
-  dataCellURIWithResolvedLinks,
+  dataURIFromValueWithResolvedLinks,
   findAndInlineDataURILinks,
 } from "./data-uri.ts";
 import {
@@ -2837,7 +2837,7 @@ function maybeConvertArrayPathToDataURILink(
 
   return {
     ...link,
-    id: dataCellURIWithResolvedLinks(candidate.value, baseLink),
+    id: dataURIFromValueWithResolvedLinks(candidate.value, baseLink),
     path: candidate.remainingPath,
   };
 }

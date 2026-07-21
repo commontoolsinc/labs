@@ -1,6 +1,6 @@
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { dataCellURIWithResolvedLinks } from "../src/data-uri.ts";
+import { dataURIFromValueWithResolvedLinks } from "../src/data-uri.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -46,7 +46,7 @@ const cleanup = async (
 
 Deno.bench("Immutable cell - create data URI only (100x)", () => {
   for (let index = 0; index < 100; index += 1) {
-    dataCellURIWithResolvedLinks(makeData(index));
+    dataURIFromValueWithResolvedLinks(makeData(index));
   }
 });
 

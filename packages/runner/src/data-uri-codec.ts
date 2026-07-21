@@ -45,7 +45,7 @@ export function isDataURI(id: string): boolean {
  * Assembles a `data:` URI carrying (the encoding of) `value` -- the
  * single place the URI shape is put together: scheme, media type, and the
  * base64url-of-UTF-8 `fvj1:` payload. Unlike
- * `data-uri.ts`'s `dataCellURIWithResolvedLinks()`, this does no link rewriting or
+ * `data-uri.ts`'s `dataURIFromValueWithResolvedLinks()`, this does no link rewriting or
  * other preparation of `value`; callers hand it a ready `FabricValue`.
  */
 export function dataURIFromValue(value: FabricValue): URI {

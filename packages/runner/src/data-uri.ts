@@ -3,7 +3,7 @@
  * between this module and `data-uri-codec.ts` is the need for the
  * cell/link machinery: everything that can be expressed against
  * `data-model` alone lives in the codec (a leaf module); this module holds
- * the two operations that cannot -- {@link dataCellURIWithResolvedLinks},
+ * the two operations that cannot -- {@link dataURIFromValueWithResolvedLinks},
  * which rewrites relative links against a base before encoding, and
  * {@link findAndInlineDataURILinks}, which dissolves `data:` URI links
  * back into the values they carry.
@@ -70,7 +70,7 @@ import { dataURIFromValue, valueFromDataURI } from "./data-uri-codec.ts";
  * @returns A `data:` URI naming a cell whose content is `data`.
  * @throws If `data` contains a reference cycle.
  */
-export function dataCellURIWithResolvedLinks(
+export function dataURIFromValueWithResolvedLinks(
   data: FabricValue,
   base?: Cell | NormalizedLink,
 ): URI {

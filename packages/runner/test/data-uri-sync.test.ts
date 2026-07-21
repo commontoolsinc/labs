@@ -4,7 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { dataCellURIWithResolvedLinks } from "../src/data-uri.ts";
+import { dataURIFromValueWithResolvedLinks } from "../src/data-uri.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -31,7 +31,7 @@ describe("data URI sync", () => {
   });
 
   it("sync on a data: URI cell with no links resolves without error", async () => {
-    const dataURI = dataCellURIWithResolvedLinks({ simple: "value" });
+    const dataURI = dataURIFromValueWithResolvedLinks({ simple: "value" });
     const cell = runtime.getCellFromEntityId(
       space,
       dataURI,
@@ -60,7 +60,7 @@ describe("data URI sync", () => {
     };
 
     // Create a data: URI whose value contains that link
-    const dataURI = dataCellURIWithResolvedLinks({ ref: sigilLink });
+    const dataURI = dataURIFromValueWithResolvedLinks({ ref: sigilLink });
     const dataCell = runtime.getCellFromEntityId(
       space,
       dataURI,
@@ -94,7 +94,7 @@ describe("data URI sync", () => {
     linkedCell.set({ value: "target data" });
     const linkedId = linkedCell.getAsNormalizedFullLink().id;
 
-    const dataURI = dataCellURIWithResolvedLinks({
+    const dataURI = dataURIFromValueWithResolvedLinks({
       ref: {
         "/": {
           [LINK_V1_TAG]: {
@@ -135,7 +135,7 @@ describe("data URI sync", () => {
     const id1 = cell1.getAsNormalizedFullLink().id;
     const id2 = cell2.getAsNormalizedFullLink().id;
 
-    const dataURI = dataCellURIWithResolvedLinks({
+    const dataURI = dataURIFromValueWithResolvedLinks({
       a: {
         "/": {
           [LINK_V1_TAG]: { id: id1, path: [] },
@@ -179,7 +179,7 @@ describe("data URI sync", () => {
     const id1 = cell1.getAsNormalizedFullLink().id;
     const id2 = cell2.getAsNormalizedFullLink().id;
 
-    const dataURI = dataCellURIWithResolvedLinks([
+    const dataURI = dataURIFromValueWithResolvedLinks([
       { "/": { [LINK_V1_TAG]: { id: id1, path: [] } } },
       { "/": { [LINK_V1_TAG]: { id: id2, path: [] } } },
     ]);
@@ -207,7 +207,10 @@ describe("data URI sync", () => {
   });
 
   it("sync on a data: URI cell with no links does not call provider.sync", async () => {
-    const dataURI = dataCellURIWithResolvedLinks({ plain: "data", count: 42 });
+    const dataURI = dataURIFromValueWithResolvedLinks({
+      plain: "data",
+      count: 42,
+    });
     const dataCell = runtime.getCellFromEntityId(
       space,
       dataURI,
@@ -234,7 +237,7 @@ describe("data URI sync", () => {
     linkedCell.set("cached");
     const linkedId = linkedCell.getAsNormalizedFullLink().id;
 
-    const dataURI = dataCellURIWithResolvedLinks({
+    const dataURI = dataURIFromValueWithResolvedLinks({
       ref: { "/": { [LINK_V1_TAG]: { id: linkedId, path: [] } } },
     });
 
@@ -266,8 +269,8 @@ describe("data URI sync", () => {
   it("sync on a data: URI cell with nested data: URI links does not crash", async () => {
     // A data URI containing another data URI link — the inner data: link
     // should be skipped (not synced as a storage cell)
-    const innerDataURI = dataCellURIWithResolvedLinks("inner");
-    const dataURI = dataCellURIWithResolvedLinks({
+    const innerDataURI = dataURIFromValueWithResolvedLinks("inner");
+    const dataURI = dataURIFromValueWithResolvedLinks({
       nested: { "/": { [LINK_V1_TAG]: { id: innerDataURI, path: [] } } },
     });
 
@@ -290,7 +293,7 @@ describe("data URI sync", () => {
     const linkedId = linkedCell.getAsNormalizedFullLink().id;
 
     // The link is nested under "level1" > "level2"
-    const dataURI = dataCellURIWithResolvedLinks({
+    const dataURI = dataURIFromValueWithResolvedLinks({
       level1: {
         level2: {
           ref: {
