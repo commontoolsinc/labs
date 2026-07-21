@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   getPatternIdentityRef,
+  PATTERN_RESPONSE_BUILD_HEADER,
   resolveEntryIdentity,
   Runtime,
 } from "@commonfabric/runner";
@@ -92,11 +93,17 @@ function installFetchStub(): StubControls {
     if (url.pathname === DEFAULT_APP_PATTERN_URL) {
       if (url.searchParams.has("identity")) {
         return new Response(await identityForSource(source), {
-          headers: { "content-type": "text/plain" },
+          headers: {
+            "content-type": "text/plain",
+            [PATTERN_RESPONSE_BUILD_HEADER]: BUILD_SHA,
+          },
         });
       }
       return new Response(source, {
-        headers: { "content-type": "text/typescript-jsx" },
+        headers: {
+          "content-type": "text/typescript-jsx",
+          [PATTERN_RESPONSE_BUILD_HEADER]: BUILD_SHA,
+        },
       });
     }
 

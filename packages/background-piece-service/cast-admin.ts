@@ -1,6 +1,7 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { PieceManager } from "@commonfabric/piece";
 import {
+  clientVersionFromEnv,
   compileAndSavePattern,
   experimentalOptionsFromEnv,
   Runtime,
@@ -64,6 +65,7 @@ export function createRuntime(
       memoryHost: new URL(toolshedUrl),
     }),
     experimental: experimentalOptionsFromEnv(envGet),
+    clientVersion: clientVersionFromEnv(envGet),
   }));
 }
 

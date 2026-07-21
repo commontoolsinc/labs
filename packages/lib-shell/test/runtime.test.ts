@@ -660,6 +660,15 @@ describe("RuntimeInternals", () => {
       expect(url.pathname).toBe("/scripts/worker-runtime.js");
       expect(url.searchParams.has("v")).toBe(false);
     });
+
+    it("keeps the local worker URL with an attested client version", async () => {
+      const url = await workerUrlFromCreate({
+        clientVersion: "source-checkout-sha",
+        getBuildHash: () => Promise.resolve("local-worker-hash"),
+      });
+      expect(url.pathname).toBe("/scripts/worker-runtime.js");
+      expect(url.searchParams.get("v")).toBe("local-worker-hash");
+    });
   });
 
   // CT-1623: starting a piece is expensive (pattern instantiation + eager

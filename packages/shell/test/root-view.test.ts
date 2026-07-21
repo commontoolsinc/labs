@@ -180,9 +180,11 @@ describe("XRootView", () => {
     const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const originalCreate = RuntimeInternals.create;
     let capturedOnError: ((event: ErrorNotification) => void) | undefined;
+    let capturedWorkerUrl: URL | undefined;
     const fakeRuntime = {};
     RuntimeInternals.create = ((options) => {
       capturedOnError = options.onError;
+      capturedWorkerUrl = options.workerUrl;
       return Promise.resolve({
         runtime: () => fakeRuntime,
         dispose: () => Promise.resolve(),
@@ -208,6 +210,7 @@ describe("XRootView", () => {
       task.run([view.app]);
       await task.taskComplete;
       expect(capturedOnError).toBeDefined();
+      expect(capturedWorkerUrl?.pathname).toBe("/scripts/worker-runtime.js");
 
       const event: ErrorNotification = {
         type: NotificationType.ErrorReport,

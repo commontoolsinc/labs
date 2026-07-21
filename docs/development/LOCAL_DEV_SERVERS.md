@@ -19,6 +19,22 @@
 ./scripts/share-pattern-via-tailscale.sh --down                                 # Tear that down
 ```
 
+To exercise version-gated system-pattern updates with source-run processes,
+attest one Labs revision for the whole launch:
+
+```bash
+COMMIT_SHA="$(git rev-parse HEAD)" ./scripts/start-local-dev.sh --bg-updater
+```
+
+The script's children inherit the value: toolshed exposes it through
+`/api/meta` and pattern responses, shell bakes it into the browser runtime, and
+the optional background-piece-service forwards it to its workers. The
+source-run shell still loads its mutable worker graph from `/scripts`; the SHA
+attests the client build but does not redirect local development to the
+deployed `/builds/<sha>` namespace. Pass the same value to standalone `cf`
+commands. Only use a revision that actually describes all launched Labs
+sources; a shared but false value defeats the safety gate.
+
 To let teammates interact with a locally-hosted pattern (e.g. "host latest-main
 `<pattern>` locally with `--inspect` and export it over Tailscale"), use
 `share-pattern-via-tailscale.sh`. It starts an isolated toolshed (with

@@ -2,6 +2,7 @@ import { createSession, isDID, Session } from "@commonfabric/identity";
 import { loadIdentity } from "./identity.ts";
 import {
   ACLManager,
+  clientVersionFromEnv,
   experimentalOptionsFromEnv,
   Runtime,
   runtimePresets,
@@ -50,6 +51,7 @@ export async function createRuntime(
       spaceIdentity: session.spaceIdentity,
     }),
     experimental: experimentalOptionsFromEnv(Deno.env.get),
+    clientVersion: clientVersionFromEnv(Deno.env.get),
   }));
 
   if (!(await runtime.healthCheck())) {
