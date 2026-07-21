@@ -495,9 +495,21 @@ describe("cli piece parsing", () => {
             },
           }),
           result: {
+            getCell: () =>
+              Promise.resolve({
+                key: (segment: string) => {
+                  order.push(`result.key:${segment}`);
+                  return {
+                    pull: () => {
+                      order.push("result.pull");
+                      return Promise.resolve();
+                    },
+                  };
+                },
+              }),
             get: () => {
               order.push("result.get");
-              return Promise.resolve({ value: "ready" });
+              return Promise.resolve("ready");
             },
           },
         });
@@ -508,6 +520,12 @@ describe("cli piece parsing", () => {
       },
     };
     const manager = {
+      runtime: {
+        idle: () => {
+          order.push("runtime.idle");
+          return Promise.resolve();
+        },
+      },
       synced: () => {
         order.push("manager.synced");
         return Promise.resolve();
@@ -522,7 +540,7 @@ describe("cli piece parsing", () => {
         piece: PIECE,
         pieceScope: "session",
       },
-      [],
+      ["value"],
       { step: true },
       {
         loadManager: () => Promise.resolve(manager as any),
@@ -531,10 +549,14 @@ describe("cli piece parsing", () => {
       },
     );
 
-    expect(value).toEqual({ value: "ready" });
+    expect(value).toBe("ready");
     expect(order).toEqual([
       `get:${PIECE}:true:session`,
       "piece.pull",
+      "result.key:value",
+      "result.pull",
+      "manager.synced",
+      "runtime.idle",
       "manager.synced",
       "result.get",
       `stop:${PIECE}`,

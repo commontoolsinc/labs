@@ -88,7 +88,7 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
     sessionResultPieceId = await newPiece(spaceConfig, {
       mainPath: SESSION_RESULT_PATTERN,
       rootPath: REPO_ROOT,
-    });
+    }, { start: false });
     await callPieceHandler(
       { ...spaceConfig, piece: pieceId },
       "setTitle",
@@ -147,10 +147,10 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
   it("steps and reads session-scoped computed results atomically", async () => {
     const sessionFlags =
       `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${sessionResultPieceId}`;
-    const { code, stdout } = await integrationCf(
+    const { code, stdout, stderr } = await integrationCf(
       `piece get ${sessionFlags} --step`,
     );
-    expect(code).toBe(0);
+    expect(code, stderr.join("\n")).toBe(0);
     expect(JSON.parse(stdout.join(""))).toEqual({ value: "session-ready" });
   });
 

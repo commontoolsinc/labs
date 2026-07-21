@@ -1400,6 +1400,15 @@ export async function getCellValue(
   try {
     if (shouldStep) {
       await piece.getCell().pull();
+      const rootCell =
+        await (options.input ? piece.input.getCell() : piece.result.getCell());
+      let targetCell = rootCell;
+      for (const segment of path) {
+        targetCell = targetCell.key(segment as keyof unknown) as Cell<unknown>;
+      }
+      await targetCell.pull();
+      await manager.synced();
+      await manager.runtime.idle();
       await manager.synced();
     }
 

@@ -1,7 +1,8 @@
-import { computed, pattern, Writable } from "commonfabric";
+import { computed, Default, pattern, Writable } from "commonfabric";
 
-export default pattern(() => {
-  const sessionValue = new Writable.perSession("session-ready");
-  const value = computed(() => sessionValue.get());
+export default pattern<{
+  values: Writable<string[] | Default<["session-ready"]>>;
+}>(({ values }) => {
+  const value = computed(() => values.get()[0] ?? "");
   return { value };
 });
