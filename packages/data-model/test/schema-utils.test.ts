@@ -1003,6 +1003,55 @@ describe("schema-utils", () => {
       expect(result.schema).toBe(interned);
     });
 
+    it("interns a selector with an empty path", () => {
+      const schema = uniqueSchema();
+      const selector: SchemaPathSelector = { path: [], schema };
+      const result = internPathSelector(selector);
+
+      expect(result.path).toEqual([]);
+      expect(Object.isFrozen(result.path)).toBe(true);
+      expect(isInternedSchema(result.schema as JSONSchemaObj)).toBe(true);
+    });
+
+    it("keeps an empty path distinct from a non-empty one", () => {
+      const schema = uniqueSchema();
+      const empty = internPathSelector({ path: [], schema });
+      const nonEmpty = internPathSelector({ path: ["a"], schema });
+
+      expect(empty).not.toBe(nonEmpty);
+      expect(empty.path).toEqual([]);
+      expect(nonEmpty.path).toEqual(["a"]);
+    });
+
+    it("canonicalizes to one instance when a frozen path array is reused", () => {
+      const schema = uniqueSchema();
+      const first = internPathSelector({ path: ["a", "b"], schema });
+
+      // Interning froze the path in place, so the same array identity can be
+      // handed back in a fresh selector -- the repeat case the path-key cache
+      // exists for. The cache is only populated once the path is frozen, so
+      // it takes a third pass to serve one; all three must agree.
+      const second = internPathSelector({
+        path: first.path,
+        schema: first.schema,
+      });
+      const third = internPathSelector({
+        path: first.path,
+        schema: first.schema,
+      });
+
+      expect(second).toBe(first);
+      expect(third).toBe(first);
+    });
+
+    it("keeps paths distinct when a component contains the separator", () => {
+      const schema = uniqueSchema();
+      const a = internPathSelector({ path: ["a:b"], schema });
+      const b = internPathSelector({ path: ["a", "b"], schema });
+
+      expect(a).not.toBe(b);
+    });
+
     it("handles selectors whose `schema` is undefined", () => {
       const selector: SchemaPathSelector = { path: ["p"] };
       // Must not throw — `internSchema(undefined)` would, and the guard
