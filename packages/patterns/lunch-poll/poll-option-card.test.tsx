@@ -1,4 +1,5 @@
 import {
+  action,
   computed,
   handler,
   pattern,
@@ -6,7 +7,13 @@ import {
   UI,
   Writable,
 } from "commonfabric";
-import { findNode, propsOf, readValue } from "../test/vnode-helpers.ts";
+import {
+  findElementByExactText,
+  findNode,
+  hasText,
+  propsOf,
+  readValue,
+} from "../test/vnode-helpers.ts";
 import PollOptionCard from "./poll-option-card.tsx";
 import type {
   CastVoteEvent,
@@ -52,7 +59,11 @@ const votes: Vote[] = [
 ];
 
 export default pattern(() => {
-  const removeConfirmTarget = new Writable<string | null>(null);
+  const removeConfirmTarget = new Writable<string | null | undefined>(
+    undefined,
+  );
+  const rank = new Writable<number | undefined>(undefined);
+  const reactiveRank = computed(() => rank.get());
 
   const castVote: Stream<CastVoteEvent> = noopCastVote({});
   const removeOption: Stream<RemoveOptionEvent> = noopRemoveOption({});
@@ -60,7 +71,7 @@ export default pattern(() => {
 
   const card = PollOptionCard({
     option: STORED_OPTION,
-    rank: 1,
+    rank: reactiveRank,
     me: "Alex",
     isJoined: true,
     isAdmin: true,
@@ -77,6 +88,22 @@ export default pattern(() => {
       "aria-label",
       "Clear my green vote",
     ) !== undefined
+  );
+
+  const assert_unset_rank_renders_placeholder = computed(() =>
+    hasText(card[UI], "—") && !hasText(card[UI], "#0")
+  );
+
+  const action_resolve_rank = action(() => rank.set(1));
+
+  const assert_resolved_rank_renders = computed(() =>
+    hasText(card[UI], "#1") && !hasText(card[UI], "—")
+  );
+
+  const action_set_zero_rank = action(() => rank.set(0));
+
+  const assert_zero_rank_renders_placeholder = computed(() =>
+    hasText(card[UI], "—") && !hasText(card[UI], "#0")
   );
 
   const assert_my_green_vote_styles_buttons = computed(() => {
@@ -97,25 +124,70 @@ export default pattern(() => {
       propValue(red, "style") === "opacity: 0.4;";
   });
 
-  const assert_host_controls_render = computed(() => {
-    const remove = findNodeByProp(
-      card[UI],
-      "aria-label",
-      "Remove option (host)",
-    );
-    const logVisit = findNodeByProp(
+  const assert_remove_control_contains_only_link_text = computed(() => {
+    const remove = findElementByExactText(card[UI], "button", "remove");
+    return remove !== undefined &&
+      propValue(remove, "aria-label") === "Remove option (host)";
+  });
+
+  const assert_remove_control_is_clickable = computed(() => {
+    const remove = findElementByExactText(card[UI], "button", "remove");
+    return propsOf(remove)?.onClick !== undefined;
+  });
+
+  const assert_remove_control_is_underlined = computed(() => {
+    const remove = findElementByExactText(card[UI], "button", "remove");
+    const removeStyle = propValue(remove, "style");
+    return typeof removeStyle === "object" && removeStyle !== null &&
+      readValue(
+          (removeStyle as Record<PropertyKey, unknown>).textDecoration,
+        ) === "underline";
+  });
+
+  const assert_remove_separator_is_plain = computed(() => {
+    const separator = findElementByExactText(card[UI], "span", "·");
+    const separatorAriaHidden = propValue(separator, "aria-hidden");
+    const separatorStyle = propValue(separator, "style");
+    const separatorStyleRecord =
+      typeof separatorStyle === "object" && separatorStyle !== null
+        ? separatorStyle as Record<PropertyKey, unknown>
+        : undefined;
+    const separatorTextDecoration = separatorStyleRecord
+      ? readValue(separatorStyleRecord.textDecoration)
+      : undefined;
+    const separatorTextDecorationLine = separatorStyleRecord
+      ? readValue(separatorStyleRecord.textDecorationLine)
+      : undefined;
+    return separator !== undefined &&
+      (separatorAriaHidden === true || separatorAriaHidden === "true") &&
+      propsOf(separator)?.onClick === undefined &&
+      separatorTextDecoration === "none" &&
+      (separatorTextDecorationLine === undefined ||
+        separatorTextDecorationLine === "none");
+  });
+
+  const assert_log_visit_control_renders = computed(() =>
+    findNodeByProp(
       card[UI],
       "aria-label",
       "Log that we went here (host)",
-    );
-    return remove !== undefined && logVisit !== undefined;
-  });
+    ) !== undefined
+  );
 
   return {
     tests: [
       { assertion: assert_my_green_vote_label_renders },
+      { assertion: assert_unset_rank_renders_placeholder },
+      { action: action_resolve_rank },
+      { assertion: assert_resolved_rank_renders },
+      { action: action_set_zero_rank },
+      { assertion: assert_zero_rank_renders_placeholder },
       { assertion: assert_my_green_vote_styles_buttons },
-      { assertion: assert_host_controls_render },
+      { assertion: assert_remove_control_contains_only_link_text },
+      { assertion: assert_remove_control_is_clickable },
+      { assertion: assert_remove_control_is_underlined },
+      { assertion: assert_remove_separator_is_plain },
+      { assertion: assert_log_visit_control_renders },
     ],
     card,
   };
