@@ -1517,21 +1517,15 @@ export abstract class BaseObjectTraverser {
       }
       return arrayResult;
     } else if (doc.value instanceof FabricPrimitive) {
-      // A `FabricPrimitive` is a fully-opaque leaf (state in private
-      // `#fields`, zero enumerable own-props): return it intact rather than
-      // letting it fall into the record branch below, whose `Object.entries`
-      // walk would decompose it to `{}`. Placed after the array arm so array
-      // reads skip the `instanceof`.
+      // An opaque leaf: return it intact ahead of the record branch below.
+      // Placed after the array arm so array reads skip the `instanceof`.
       return doc.value;
     } else if (doc.value instanceof FabricInstance) {
-      // A `FabricInstance` is not a fully-opaque leaf: it can have
-      // model-visible outgoing references, and correct traversal descends it
-      // by its codec contents -- which does not exist yet. Unlike the
-      // schema-`default` paths (which fail loudly), this path carries live
-      // instance traffic today -- the fetch builtins store a `FabricError`
-      // result value, which the query path reads back through here -- so it
-      // leafs the instance whole rather than throwing.
-      // TODO(danfuzz): descend by codec contents, not own-props.
+      // TODO(danfuzz): a `FabricInstance` should be descended by its codec
+      // contents, which does not exist yet. This path carries live instance
+      // traffic today (the fetch builtins store a `FabricError` result value
+      // that is read back through here), so unlike the schema-`default`
+      // paths it cannot fail loudly yet: the instance leafs through whole.
       return doc.value;
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling

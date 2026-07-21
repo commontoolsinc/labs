@@ -679,17 +679,14 @@ export function processDefaultValue(
     }
   }
 
-  // A `FabricPrimitive` default is a fully-opaque leaf (state in private
-  // `#fields`, zero enumerable own-props): the object-type rebuild below
-  // would decompose it to `{}`. Return it as-is; it takes no back-to-cell
-  // annotation (see `annotateWithBackToCellSymbols`).
+  // A `FabricPrimitive` default is an opaque leaf; return it as-is ahead of
+  // the object-type rebuild below (it takes no back-to-cell annotation --
+  // see `annotateWithBackToCellSymbols`).
   if (defaultValue instanceof FabricPrimitive) {
     return defaultValue;
   }
-  // A `FabricInstance` default is not a fully-opaque leaf: it can have
-  // model-visible outgoing references, so neither the object-type rebuild
-  // below nor returning it whole handles it correctly. Fail loudly until
-  // instances can be processed by their codec contents.
+  // TODO(danfuzz): a `FabricInstance` default is not yet handled -- it needs
+  // processing by its codec contents. Fail loudly until that exists.
   if (defaultValue instanceof FabricInstance) {
     throw new Error(
       `Cannot yet handle \`${defaultValue.constructor.name}\` (a ` +
@@ -903,18 +900,14 @@ function annotateWithBackToCellSymbols(
     value instanceof FabricPrimitive
   ) {
     // We only possibly annotate plain objects or arrays that _aren't_ cells.
-    // A `FabricPrimitive` is a fully-opaque leaf and takes no back-to-cell
-    // annotation, exactly like a plain `number` or `string` leaf: it is
-    // always frozen (`defineProperty` would throw "object is not
-    // extensible"), and cloning-or-freezing-to-annotate would misrepresent
-    // it. It passes through untouched.
+    // A `FabricPrimitive` passes through untouched, exactly like a plain
+    // `number` or `string` leaf.
     return value;
   }
   if (value instanceof FabricInstance) {
-    // Unlike a primitive, a `FabricInstance` can have model-visible outgoing
-    // references, so skipping annotation is not obviously right for it — and
-    // the generic record annotation below would be wrong. Fail loudly until
-    // the back-to-cell story for instances exists.
+    // TODO(danfuzz): the back-to-cell story for a `FabricInstance` (which,
+    // unlike a primitive, can have model-visible outgoing references) does
+    // not exist yet. Fail loudly until it does.
     throw new Error(
       `Cannot yet handle \`${value.constructor.name}\` (a ` +
         "`FabricInstance`) in back-to-cell annotation.",
