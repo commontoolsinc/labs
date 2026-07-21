@@ -9,7 +9,7 @@ import { labsCiTrust, loomCiTrust } from "./tiles/ci-trust.ts";
 import { labsCiDuration, loomCiDuration } from "./tiles/ci-duration.ts";
 import { recentRuns } from "./tiles/recent-runs.ts";
 import { dau, foldSeries, parseExcludes } from "./tiles/dau.ts";
-import { yourMetric } from "./tiles/your-metric.ts";
+import { githubMembers } from "./tiles/github-members.ts";
 import { buildSnapshot, discordOnline } from "./tiles/discord-online.ts";
 import { gcpSpend } from "./tiles/gcp-spend.ts";
 import { prodErrors } from "./tiles/prod-errors.ts";
@@ -199,13 +199,6 @@ Deno.test("dau: the exclusion list is read defensively", () => {
   assertEquals(parseExcludes("").size, 0);
 });
 
-Deno.test("your metric here: a static gray placeholder", async () => {
-  const v = await yourMetric.collect(ctx([]));
-  assertEquals(v.status, "unknown"); // never green/red
-  assertEquals(v.label, "your metric here");
-  assertStringIncludes(v.sub ?? "", "life, the universe");
-});
-
 Deno.test("gated tiles gray out cleanly without their env", async () => {
   const cases = [
     [discordOnline, "DISCORD_BOT_TOKEN"],
@@ -215,6 +208,7 @@ Deno.test("gated tiles gray out cleanly without their env", async () => {
     [modelSpend, "OPENAI_ADMIN_KEY"],
     [benchmark, "GH_TOKEN"],
     [dau, "SIGNOZ_URL"],
+    [githubMembers, "GH_TOKEN"],
   ] as const;
   for (const [tile, needle] of cases) {
     const v = await tile.collect(ctx([]));
