@@ -2,12 +2,7 @@
  * The `data:` URI codec, complete and self-contained: the media-type
  * facts, the mint half ({@link dataUriFromValue}), and the read half
  * ({@link valueFromDataUri}, {@link extractDataUriPayloadText},
- * {@link valueFromDataUriPayloadText}). This is a leaf module -- its only
- * dependencies are sibling `data-model` modules and `utils` -- so any
- * module, however graph-entangled, can use the codec without importing
- * the cell/link machinery. (That leafness is load-bearing: see the
- * runner's `data-uri.ts` module doc for the dividing line, and #4846 for
- * the module-evaluation bug that a cycle-cluster import edge can trip.)
+ * {@link valueFromDataUriPayloadText}).
  */
 
 import {
@@ -20,8 +15,7 @@ import type { FabricValue } from "./fabric-value.ts";
 
 /**
  * A URI in string form. Structurally identical to (and hence
- * interchangeable with) the `URI` type in `memory/interface`, which this
- * package does not depend on.
+ * interchangeable with) the `URI` type in `memory/interface`.
  */
 type UriString = `${string}:${string}`;
 
