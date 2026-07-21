@@ -6,7 +6,7 @@ import {
   linkProbeSubPath,
 } from "@commonfabric/data-model/cell-rep";
 import { type CellLinkRefPayload } from "./sigil-types.ts";
-import { createDataCellURI } from "./data-uri.ts";
+import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
 import {
   type CellLink,
   type NormalizedFullLink,
@@ -80,7 +80,7 @@ const schemaScopeForLink = (
 
 const undefinedDataLink = (link: NormalizedFullLink): NormalizedFullLink => ({
   ...link,
-  id: createDataCellURI(undefined, link),
+  id: dataUriFromValueWithResolvedLinks(undefined, link),
   path: [],
 });
 

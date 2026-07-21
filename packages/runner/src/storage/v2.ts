@@ -55,7 +55,7 @@ import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
-import { getJSONFromDataURI } from "../data-uri.ts";
+import { valueFromDataUri } from "@commonfabric/data-model/data-uri-codec";
 import {
   isPrimitiveCellLink,
   type NormalizedLink,
@@ -1323,7 +1323,7 @@ export class StorageManager implements IStorageManager {
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
   ): Promise<Cell<T>> {
-    let value: unknown = getJSONFromDataURI(id);
+    let value: unknown = valueFromDataUri(id);
     for (const segment of [...cell.path.map(String)]) {
       if (!isRecord(value) && !Array.isArray(value)) {
         return cell;

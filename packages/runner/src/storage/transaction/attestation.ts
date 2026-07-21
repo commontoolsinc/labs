@@ -24,11 +24,11 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { toTransactionDocumentValue } from "../v2-document.ts";
 import {
-  decodeDataURIPayloadText,
-  extractDataURIPayloadText,
-  isDataCellMediaType,
-  isDataCellURI,
-} from "../../data-uri.ts";
+  extractDataUriPayloadText,
+  isDataUri,
+  isDataUriMediaType,
+  valueFromDataUriPayloadText,
+} from "@commonfabric/data-model/data-uri-codec";
 
 const logger = getLogger("attestation", {
   enabled: false,
@@ -252,7 +252,7 @@ export const load = (
   >;
 
   try {
-    if (!isDataCellURI(address.id)) {
+    if (!isDataUri(address.id)) {
       result = {
         error: UnsupportedMediaTypeError(
           `Unsupported media type in data URI: ${address.id.slice(0, 64)}`,
@@ -262,9 +262,9 @@ export const load = (
       return result;
     }
 
-    const { mediaType, text } = extractDataURIPayloadText(address.id);
+    const { mediaType, text } = extractDataUriPayloadText(address.id);
 
-    if (isDataCellMediaType(mediaType)) {
+    if (isDataUriMediaType(mediaType)) {
       let value: FabricValue;
       try {
         // The payload encodes the cell VALUE; the document that the
@@ -273,7 +273,7 @@ export const load = (
         // thinks in documents. Synthesis also guarantees payload
         // content can never alias a document facet (`cfc`, `source`).
         value = Object.freeze({
-          value: decodeDataURIPayloadText(text),
+          value: valueFromDataUriPayloadText(text),
         });
         result = { ok: { address: { ...address, path: [] }, value } };
       } catch (error) {

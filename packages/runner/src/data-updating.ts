@@ -38,7 +38,7 @@ import {
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
-import { findAndInlineDataURILinks } from "./data-uri.ts";
+import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import {
   type CfcCellLinkRefPayload,
   linkCfcLabelView,
@@ -695,7 +695,7 @@ export function normalizeAndDiff(
       runtime,
       tx,
       link,
-      findAndInlineDataURILinks(newValue),
+      findAndInlineDataUriLinks(newValue),
       context,
       options,
       seen,
