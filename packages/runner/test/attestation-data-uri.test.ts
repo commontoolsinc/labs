@@ -2,12 +2,13 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { jsonFromValue } from "@commonfabric/data-model/codec-json";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
+import { DATA_CELL_MEDIA_TYPE } from "../src/data-uri.ts";
 import { load } from "../src/storage/transaction/attestation.ts";
 import type { URI } from "../src/sigil-types.ts";
 
 /** `data:` cell URI (base64url payload) with the given payload text. */
 const uriOf = (payload: string): URI =>
-  `data:application/vnd.common-fabric.data,${
+  `data:${DATA_CELL_MEDIA_TYPE},${
     toUnpaddedBase64url(new TextEncoder().encode(payload))
   }` as URI;
 
@@ -72,7 +73,7 @@ describe("attestation `load()` of `data:` URIs", () => {
 
   it("errors on an empty payload", () => {
     const { ok, error } = load({
-      id: "data:application/vnd.common-fabric.data," as URI,
+      id: `data:${DATA_CELL_MEDIA_TYPE},` as URI,
     });
     expect(ok).toBeUndefined();
     expect(error?.name).toBe("InvalidDataURIError");
