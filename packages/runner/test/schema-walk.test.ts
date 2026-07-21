@@ -7,9 +7,10 @@ import {
   ARRAY_SUBSCHEMA_KEYS,
   findSchema,
   forEachSubschema,
+  mapSubschemas,
   RECORD_SUBSCHEMA_KEYS,
-  SINGLE_SUBSCHEMA_KEYS,
   type SchemaNode,
+  SINGLE_SUBSCHEMA_KEYS,
   subschemaEdges,
   type SubschemaKeyword,
   walkSchema,
@@ -148,7 +149,9 @@ describe("subschemaEdges (generator form)", () => {
     const cb = edgesOf(schema);
     expect(gen.length).toBe(cb.length);
     expect(gen.map((e) => `${e.keyword}:${e.key ?? e.index ?? ""}`).toSorted())
-      .toEqual(cb.map((e) => `${e.keyword}:${e.key ?? e.index ?? ""}`).toSorted());
+      .toEqual(
+        cb.map((e) => `${e.keyword}:${e.key ?? e.index ?? ""}`).toSorted(),
+      );
   });
 
   it("honors includeDefs / includeUnused like the callback", () => {
@@ -171,6 +174,35 @@ describe("subschemaEdges (generator form)", () => {
       break;
     }
     expect(count).toBe(1);
+  });
+});
+
+describe("mapSubschemas", () => {
+  it("maps definitions and unused keywords when both tiers are enabled", () => {
+    const patternChild: JSONSchema = { type: "string" };
+    const conditionalChild: JSONSchema = { type: "number" };
+    const definitionChild: JSONSchema = { type: "boolean" };
+    const schema = {
+      patternProperties: { ".*": patternChild },
+      if: conditionalChild,
+      $defs: { Flag: definitionChild },
+    } as const;
+    const mapped = mapSubschemas(
+      schema,
+      (child) =>
+        typeof child === "boolean" ? child : { ...child, title: "mapped" },
+      { includeDefs: true, includeUnused: true },
+    );
+
+    expect(mapped.patternProperties?.[".*"]).toEqual({
+      type: "string",
+      title: "mapped",
+    });
+    expect(mapped.if).toEqual({ type: "number", title: "mapped" });
+    expect(mapped.$defs?.Flag).toEqual({
+      type: "boolean",
+      title: "mapped",
+    });
   });
 });
 

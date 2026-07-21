@@ -194,7 +194,14 @@ export function forEachSubschema(
     const record = node[keyword];
     if (isRecord(record)) {
       for (const key of Object.keys(record)) {
-        if (visit((record as Record<string, JSONSchema>)[key], keyword, key, undefined)) {
+        if (
+          visit(
+            (record as Record<string, JSONSchema>)[key],
+            keyword,
+            key,
+            undefined,
+          )
+        ) {
           return true;
         }
       }
@@ -409,7 +416,9 @@ export function walkSchema(
       if (stopped) return;
       // `$ref` target (opt-in): walked at the ref site's own path so a label on
       // the target counts. The on-path guard above covers ref cycles.
-      if (opts.resolveRef && typeof (schema as JSONSchemaObj).$ref === "string") {
+      if (
+        opts.resolveRef && typeof (schema as JSONSchemaObj).$ref === "string"
+      ) {
         const resolved = opts.resolveRef(schema as JSONSchemaObj);
         if (resolved !== undefined && resolved !== schema) {
           recurse(resolved, path, { viaRef: true }, schema as JSONSchemaObj);
