@@ -14,7 +14,7 @@
  *
  * Run: deno task cf test packages/patterns/scoped-user-directory/main.test.tsx
  */
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, assert, pattern, Writable } from "commonfabric";
 import ScopedUserDirectory, {
   type Directory,
   type UserPointer,
@@ -39,26 +39,26 @@ export default pattern(() => {
   // === Assertions ===
 
   // Initial state
-  const assert_users_empty = computed(() => subject.userCount === 0);
-  const assert_me_undefined = computed(() => me.get().user === undefined);
+  const assert_users_empty = assert(() => subject.userCount === 0);
+  const assert_me_undefined = assert(() => me.get().user === undefined);
 
   // After joining as "Alex"
-  const assert_one_user = computed(() => subject.userCount === 1);
-  const assert_me_is_alex = computed(() =>
+  const assert_one_user = assert(() => subject.userCount === 1);
+  const assert_me_is_alex = assert(() =>
     subject.me.user?.displayName === "Alex"
   );
   // Note: reactive traversal through subject.directory.users[0]?.displayName
   // returns undefined (PerSpace array element reactive traversal does not work).
   // Raw .get() on the underlying cell works correctly:
-  const assert_directory_first_is_alex = computed(() =>
+  const assert_directory_first_is_alex = assert(() =>
     directory.get().users[0]?.displayName === "Alex"
   );
 
   // After renaming via me.user link (proves it's a link, not a copy)
-  const assert_directory_first_is_alexander = computed(() =>
+  const assert_directory_first_is_alexander = assert(() =>
     directory.get().users[0]?.displayName === "Alexander"
   );
-  const assert_me_is_alexander = computed(() =>
+  const assert_me_is_alexander = assert(() =>
     subject.me.user?.displayName === "Alexander"
   );
 

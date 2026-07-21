@@ -6,7 +6,15 @@
  *
  * Run: deno task cf test packages/patterns/gideon-tests/wish-default.test.tsx --verbose
  */
-import { action, computed, NAME, pattern, wish, Writable } from "commonfabric";
+import {
+  action,
+  assert,
+  computed,
+  NAME,
+  pattern,
+  wish,
+  Writable,
+} from "commonfabric";
 
 interface MinimalPiece {
   [NAME]?: string;
@@ -32,12 +40,12 @@ export default pattern(() => {
   });
 
   // Assertions
-  const assert_allPieces_exists = computed(() => !!allPieces);
-  const assert_initial_empty = computed(() => initialLength === 0);
-  const assert_after_push_one = computed(
+  const assert_allPieces_exists = assert(() => !!allPieces);
+  const assert_initial_empty = assert(() => initialLength === 0);
+  const assert_after_push_one = assert(
     () => allPieces?.get?.()?.length === 1,
   );
-  const assert_after_push_two = computed(
+  const assert_after_push_two = assert(
     () => allPieces?.get?.()?.length === 2,
   );
 

@@ -1,4 +1,4 @@
-import { action, computed, Default, pattern, UI, Writable } from "commonfabric";
+import { action, assert, Default, pattern, UI, Writable } from "commonfabric";
 import {
   findNodeById,
   findNodeByProp,
@@ -159,11 +159,11 @@ export default pattern(() => {
     });
   });
 
-  const assert_initially_empty = computed(() =>
+  const assert_initially_empty = assert(() =>
     (myProfile.get() as MyProfileValue | undefined)?.profile === undefined &&
     (messages.get()?.length ?? 0) === 0
   );
-  const assert_admin_view_waits_for_profile = computed(() => {
+  const assert_admin_view_waits_for_profile = assert(() => {
     const managerChip = findNodeById(chat[UI], "group-chat-manager-chip");
     const panelStatus = findNodeById(
       chat[UI],
@@ -173,20 +173,20 @@ export default pattern(() => {
       propValue(panelStatus, "label") ===
         "Save a profile to manage admins";
   });
-  const assert_profile_created = computed(() =>
+  const assert_profile_created = assert(() =>
     chat.currentProfileName === "Alice"
   );
-  const assert_profile_bootstraps_admin = computed(() =>
+  const assert_profile_bootstraps_admin = assert(() =>
     chat.currentUserIsAdmin === true &&
     chat.currentUserCanManageAdmins === true &&
     chatAdminRolesValue(adminRegistry).length === 0
   );
-  const assert_alice_sees_bob_without_bob_message = computed(() => {
+  const assert_alice_sees_bob_without_bob_message = assert(() => {
     const participants = participantClaimsValue(profiles, myProfile, messages);
     return participants.some((participant) => participant.name === "Alice") &&
       participants.some((participant) => participant.name === "Bob");
   });
-  const assert_admin_view_everyone_enabled = computed(() => {
+  const assert_admin_view_everyone_enabled = assert(() => {
     const toggleButton = findNodeByProp(
       chat[UI],
       "data-ui-control",
@@ -208,20 +208,20 @@ export default pattern(() => {
       propValue(toggleButton, "disabled") === true &&
       nodeIncludesText(toggleButton, "Admin via everyone");
   });
-  const assert_bootstrap_admin_can_add_room = computed(() => {
+  const assert_bootstrap_admin_can_add_room = assert(() => {
     const roomList = roomsValue(rooms);
     return roomList.length === 1 &&
       roomList[0]?.name === "Ops" &&
       roomDraft.get() === "";
   });
-  const assert_everyone_disabled_seeds_alice = computed(() =>
+  const assert_everyone_disabled_seeds_alice = assert(() =>
     chat.currentUserIsAdmin === true &&
     bobChat.currentUserIsAdmin !== true &&
     chatAdminRolesValue(adminRegistry).length === 1 &&
     (adminRegistry.get() as { everyoneIsAdmin?: boolean }).everyoneIsAdmin ===
       false
   );
-  const assert_admin_view_explicit_alice = computed(() => {
+  const assert_admin_view_explicit_alice = assert(() => {
     const toggleButton = findNodeByProp(
       chat[UI],
       "data-ui-control",
@@ -234,61 +234,61 @@ export default pattern(() => {
         "Admin",
       );
   });
-  const assert_admin_view_lists_bob_after_lockdown = computed(() => {
+  const assert_admin_view_lists_bob_after_lockdown = assert(() => {
     const userList = findNodeById(chat[UI], "trusted-admin-user-list");
     return nodeIncludesText(userList, "Bob") &&
       nodeIncludesText(userList, "Make admin");
   });
-  const assert_last_admin_removal_blocked = computed(() =>
+  const assert_last_admin_removal_blocked = assert(() =>
     chat.currentUserIsAdmin === true &&
     bobChat.currentUserIsAdmin !== true &&
     chatAdminRolesValue(adminRegistry).length === 1 &&
     (adminRegistry.get() as { everyoneIsAdmin?: boolean }).everyoneIsAdmin ===
       false
   );
-  const assert_bob_cannot_add_room_after_lockdown = computed(() =>
+  const assert_bob_cannot_add_room_after_lockdown = assert(() =>
     roomsValue(rooms).length === 1
   );
-  const assert_bob_admin_enabled = computed(() =>
+  const assert_bob_admin_enabled = assert(() =>
     bobChat.currentUserIsAdmin === true &&
     bobChat.currentUserCanManageAdmins === true &&
     chatAdminRolesValue(adminRegistry).length === 2 &&
     (adminRegistry.get() as { everyoneIsAdmin?: boolean }).everyoneIsAdmin ===
       false
   );
-  const assert_bob_can_add_room = computed(() => {
+  const assert_bob_can_add_room = assert(() => {
     const roomList = roomsValue(rooms);
     return roomList.length === 2 &&
       roomList[1]?.name === "Bob room" &&
       bobRoomDraft.get() === "";
   });
-  const assert_alice_can_still_add_room = computed(() => {
+  const assert_alice_can_still_add_room = assert(() => {
     const roomList = roomsValue(rooms);
     return roomList.length === 3 &&
       roomList[2]?.name === "Ops 2" &&
       roomDraft.get() === "";
   });
-  const assert_message_sent_and_draft_cleared = computed(() =>
+  const assert_message_sent_and_draft_cleared = assert(() =>
     messages.get().length === 1 &&
     messages.get()[0]?.origin === "sent" &&
     messages.get()[0]?.authorName === "Alice" &&
     messages.get()[0]?.body === "Hello from Alice" &&
     messageDraft.get() === ""
   );
-  const assert_profile_renamed = computed(() =>
+  const assert_profile_renamed = assert(() =>
     chat.currentProfileName === "Alice Renamed"
   );
-  const assert_message_snapshot_stable = computed(() =>
+  const assert_message_snapshot_stable = assert(() =>
     messages.get().length >= 1 &&
     messages.get()[0]?.authorName === "Alice"
   );
-  const assert_second_message_uses_current_name = computed(() =>
+  const assert_second_message_uses_current_name = assert(() =>
     messages.get().length === 2 &&
     messages.get()[1]?.origin === "sent" &&
     messages.get()[1]?.authorName === "Alice Renamed" &&
     messages.get()[1]?.body === "After rename"
   );
-  const assert_imported_messages_injected = computed(() => {
+  const assert_imported_messages_injected = assert(() => {
     const messageList = Array.from(messages.get() as SharedChatMessage[]);
     const importedMessages = messageList.filter((message) =>
       message.origin === "imported"
@@ -301,25 +301,25 @@ export default pattern(() => {
         message.authorProfile !== undefined
       );
   });
-  const assert_thread_order_sortable = computed(() => {
+  const assert_thread_order_sortable = assert(() => {
     const ordered = sortDisplayMessages(messages.get() as SharedChatMessage[]);
     return ordered.length === 4 &&
       ordered.every((message, index) =>
         index === 0 || ordered[index - 1]!.timestamp <= message.timestamp
       );
   });
-  const assert_verified_imports_do_not_duplicate_participants = computed(() =>
+  const assert_verified_imports_do_not_duplicate_participants = assert(() =>
     participantClaimsValue(profiles, myProfile, messages).filter((
       participant,
     ) => participant.name === "Alice Renamed").length === 1
   );
-  const assert_same_name_unverified_imports_are_distinct = computed(() => {
+  const assert_same_name_unverified_imports_are_distinct = assert(() => {
     const participants = participantClaimsValue(profiles, myProfile, messages);
     return participants.filter((participant) =>
       participant.name === "Sam" && participant.profile === undefined
     ).length === 2;
   });
-  const assert_messages_and_rooms_do_not_store_ids = computed(() =>
+  const assert_messages_and_rooms_do_not_store_ids = assert(() =>
     (messages.get() as SharedChatMessage[]).every((message) =>
       !("id" in message)
     ) &&

@@ -10,7 +10,7 @@
  *
  * Run: deno task cf test packages/patterns/counter/counter.test.tsx --verbose
  */
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, pattern } from "commonfabric";
 import Counter from "./counter.tsx";
 
 export default pattern(() => {
@@ -59,36 +59,34 @@ export default pattern(() => {
   // ==========================================================================
 
   // Initial state assertions
-  const assert_initial_value_is_0 = computed(() => counter.value === 0);
-  const assert_initial_value_is_5 = computed(() =>
+  const assert_initial_value_is_0 = assert(() => counter.value === 0);
+  const assert_initial_value_is_5 = assert(() =>
     counterStartingAt5.value === 5
   );
 
   // After first increment
-  const assert_value_is_1 = computed(() => counter.value === 1);
+  const assert_value_is_1 = assert(() => counter.value === 1);
 
   // After second increment
-  const assert_value_is_2 = computed(() => counter.value === 2);
+  const assert_value_is_2 = assert(() => counter.value === 2);
 
   // After decrement (back to 1)
-  const assert_value_is_1_again = computed(() => counter.value === 1);
+  const assert_value_is_1_again = assert(() => counter.value === 1);
 
   // After decrementing twice more (goes to -1)
-  const assert_value_is_negative_1 = computed(() => counter.value === -1);
+  const assert_value_is_negative_1 = assert(() => counter.value === -1);
 
   // Counter starting at 5: after decrement should be 4
-  const assert_from_5_is_4 = computed(() => counterStartingAt5.value === 4);
+  const assert_from_5_is_4 = assert(() => counterStartingAt5.value === 4);
 
   // Counter starting at 5: after increment should be 5 again
-  const assert_from_5_back_to_5 = computed(() =>
-    counterStartingAt5.value === 5
-  );
+  const assert_from_5_back_to_5 = assert(() => counterStartingAt5.value === 5);
 
   // After another increment should be 6
   const action_increment_to_6 = action(() => {
     counterStartingAt5.increment.send();
   });
-  const assert_from_5_is_6 = computed(() => counterStartingAt5.value === 6);
+  const assert_from_5_is_6 = assert(() => counterStartingAt5.value === 6);
 
   // ==========================================================================
   // Test Sequence

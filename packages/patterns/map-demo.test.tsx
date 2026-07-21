@@ -10,7 +10,7 @@
  *
  * Run: deno task cf test packages/patterns/map-demo.test.tsx --root packages/patterns --verbose
  */
-import { action, computed, pattern, UI } from "commonfabric";
+import { action, assert, pattern, UI } from "commonfabric";
 import { findElementByText, propsOf } from "./test/vnode-helpers.ts";
 import MapDemo from "./map-demo.tsx";
 
@@ -54,11 +54,11 @@ export default pattern(() => {
     }
   });
 
-  const assert_no_areas_initially = computed(() =>
+  const assert_no_areas_initially = assert(() =>
     [...subject.areasOfInterest].length === 0
   );
 
-  const assert_first_area = computed(() => {
+  const assert_first_area = assert(() => {
     const areas = [...subject.areasOfInterest];
     if (areas.length !== 1) return false;
     const area = areas[0];
@@ -70,7 +70,7 @@ export default pattern(() => {
 
   // With no centre tracked yet the handler falls back to its own default rather
   // than leaving the area without a position.
-  const assert_first_area_uses_default_center = computed(() => {
+  const assert_first_area_uses_default_center = assert(() => {
     const areas = [...subject.areasOfInterest];
     return areas.length === 1 &&
       areas[0].center.lat === 37.6 &&
@@ -79,21 +79,21 @@ export default pattern(() => {
 
   // The second add reads a one-entry list, so it titles itself "Area 2" and
   // takes the next colour. Both have to match the slot it appends into.
-  const assert_second_area = computed(() => {
+  const assert_second_area = assert(() => {
     const areas = [...subject.areasOfInterest];
     if (areas.length !== 2) return false;
     return areas[1].title === "Area 2" && areas[1].color === COLORS[1];
   });
 
   // The first area is untouched by the second add.
-  const assert_first_area_unchanged = computed(() => {
+  const assert_first_area_unchanged = assert(() => {
     const areas = [...subject.areasOfInterest];
     return areas.length === 2 &&
       areas[0].title === "Area 1" &&
       areas[0].color === COLORS[0];
   });
 
-  const assert_third_area = computed(() => {
+  const assert_third_area = assert(() => {
     const areas = [...subject.areasOfInterest];
     if (areas.length !== 3) return false;
     return areas[2].title === "Area 3" && areas[2].color === COLORS[2];
@@ -101,21 +101,21 @@ export default pattern(() => {
 
   // Every area's title numbers the slot it sits in, which is what the append
   // has to preserve.
-  const assert_titles_match_positions = computed(() => {
+  const assert_titles_match_positions = assert(() => {
     const areas = [...subject.areasOfInterest];
     return areas.every((area, index) => area.title === `Area ${index + 1}`);
   });
 
-  const assert_area_count_tracks_list = computed(() =>
+  const assert_area_count_tracks_list = assert(() =>
     [...subject.areasOfInterest].length === 3
   );
 
   // The map component watches this counter rather than taking a call, so the
   // button's only job is to move it.
-  const assert_fit_bounds_not_triggered = computed(() =>
+  const assert_fit_bounds_not_triggered = assert(() =>
     subject.fitBoundsTrigger === 0
   );
-  const assert_fit_bounds_triggered = computed(() =>
+  const assert_fit_bounds_triggered = assert(() =>
     subject.fitBoundsTrigger === 1
   );
 

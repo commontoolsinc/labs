@@ -16,7 +16,7 @@
  * instead of action() closures to avoid "reactive reference outside
  * reactive context" errors when accessing reactive proxy objects.
  */
-import { Cell, computed, handler, pattern, Stream } from "commonfabric";
+import { assert, Cell, handler, pattern, Stream } from "commonfabric";
 import AggregatorPattern from "./folksonomy-aggregator.tsx";
 
 export interface TagEvent {
@@ -383,7 +383,7 @@ export default pattern(() => {
   // ========================================================================
 
   // --- Initial state ---
-  const assert_initial_empty = computed(() => {
+  const assert_initial_empty = assert(() => {
     const suggs = (aggregator.suggestions || {}) as Record<
       string,
       CommunityTagSuggestion[]
@@ -396,7 +396,7 @@ export default pattern(() => {
   });
 
   // --- Test 1: Basic correctness ---
-  const assert_basic_has_typescript = computed(() => {
+  const assert_basic_has_typescript = assert(() => {
     const suggs = (aggregator.suggestions || {}) as Record<
       string,
       CommunityTagSuggestion[]
@@ -408,7 +408,7 @@ export default pattern(() => {
   });
 
   // --- Test 2: Multi-scope isolation ---
-  const assert_scope_a_has_alpha = computed(() => {
+  const assert_scope_a_has_alpha = assert(() => {
     const suggs = (aggregator.suggestions || {}) as Record<
       string,
       CommunityTagSuggestion[]
@@ -416,7 +416,7 @@ export default pattern(() => {
     return (suggs["scope-a"] || []).some((s) => s.tag === "alpha");
   });
 
-  const assert_scope_a_has_beta = computed(() => {
+  const assert_scope_a_has_beta = assert(() => {
     const suggs = (aggregator.suggestions || {}) as Record<
       string,
       CommunityTagSuggestion[]
@@ -424,7 +424,7 @@ export default pattern(() => {
     return (suggs["scope-a"] || []).some((s) => s.tag === "beta");
   });
 
-  const assert_scope_b_has_gamma = computed(() => {
+  const assert_scope_b_has_gamma = assert(() => {
     const suggs = (aggregator.suggestions || {}) as Record<
       string,
       CommunityTagSuggestion[]
@@ -432,7 +432,7 @@ export default pattern(() => {
     return (suggs["scope-b"] || []).some((s) => s.tag === "gamma");
   });
 
-  const assert_scope_a_no_gamma = computed(() => {
+  const assert_scope_a_no_gamma = assert(() => {
     const suggs = (aggregator.suggestions || {}) as Record<
       string,
       CommunityTagSuggestion[]
@@ -440,7 +440,7 @@ export default pattern(() => {
     return !(suggs["scope-a"] || []).some((s) => s.tag === "gamma");
   });
 
-  const assert_scope_b_no_alpha = computed(() => {
+  const assert_scope_b_no_alpha = assert(() => {
     const suggs = (aggregator.suggestions || {}) as Record<
       string,
       CommunityTagSuggestion[]
@@ -448,7 +448,7 @@ export default pattern(() => {
     return !(suggs["scope-b"] || []).some((s) => s.tag === "alpha");
   });
 
-  const assert_scope_a_alpha_count_5 = computed(() => {
+  const assert_scope_a_alpha_count_5 = assert(() => {
     const suggs = (aggregator.suggestions || {}) as Record<
       string,
       CommunityTagSuggestion[]
@@ -458,7 +458,7 @@ export default pattern(() => {
   });
 
   // --- Test 3: Preferential attachment ---
-  const assert_popular_first = computed(() => {
+  const assert_popular_first = assert(() => {
     const suggs = (aggregator.suggestions || {}) as Record<
       string,
       CommunityTagSuggestion[]
@@ -467,7 +467,7 @@ export default pattern(() => {
     return pSuggs.length >= 2 && pSuggs[0].tag === "popular";
   });
 
-  const assert_popular_count_higher = computed(() => {
+  const assert_popular_count_higher = assert(() => {
     const suggs = (aggregator.suggestions || {}) as Record<
       string,
       CommunityTagSuggestion[]
@@ -479,7 +479,7 @@ export default pattern(() => {
   });
 
   // --- Test 4: Remove handling ---
-  const assert_removable_count_2 = computed(() => {
+  const assert_removable_count_2 = assert(() => {
     const suggs = (aggregator.suggestions || {}) as Record<
       string,
       CommunityTagSuggestion[]
@@ -490,7 +490,7 @@ export default pattern(() => {
     return removable?.count === 2; // 5 adds - 3 removes = 2
   });
 
-  const assert_permanent_count_1 = computed(() => {
+  const assert_permanent_count_1 = assert(() => {
     const suggs = (aggregator.suggestions || {}) as Record<
       string,
       CommunityTagSuggestion[]
@@ -502,7 +502,7 @@ export default pattern(() => {
   });
 
   // --- Test 5: Large batch ---
-  const assert_batch_multiple_scopes = computed(() => {
+  const assert_batch_multiple_scopes = assert(() => {
     const suggs = (aggregator.suggestions || {}) as Record<
       string,
       CommunityTagSuggestion[]
@@ -516,7 +516,7 @@ export default pattern(() => {
     return scopeCount >= 5; // Should have all 10 batch scopes populated
   });
 
-  const assert_batch_has_tags = computed(() => {
+  const assert_batch_has_tags = assert(() => {
     const suggs = (aggregator.suggestions || {}) as Record<
       string,
       CommunityTagSuggestion[]
@@ -526,7 +526,7 @@ export default pattern(() => {
   });
 
   // --- Test 6: Invalid events ---
-  const assert_empty_after_invalid = computed(() => {
+  const assert_empty_after_invalid = assert(() => {
     const suggs = (aggregator.suggestions || {}) as Record<
       string,
       CommunityTagSuggestion[]
@@ -537,7 +537,7 @@ export default pattern(() => {
     return true;
   });
 
-  const assert_recovery_after_invalid = computed(() => {
+  const assert_recovery_after_invalid = assert(() => {
     const suggs = (aggregator.suggestions || {}) as Record<
       string,
       CommunityTagSuggestion[]
@@ -548,7 +548,7 @@ export default pattern(() => {
   });
 
   // --- Test 7: Dense scope ---
-  const assert_dense_100_tags = computed(() => {
+  const assert_dense_100_tags = assert(() => {
     const suggs = (aggregator.suggestions || {}) as Record<
       string,
       CommunityTagSuggestion[]
@@ -556,7 +556,7 @@ export default pattern(() => {
     return (suggs["cookbook"] || []).length === 100;
   });
 
-  const assert_dense_sorted = computed(() => {
+  const assert_dense_sorted = assert(() => {
     const suggs = (aggregator.suggestions || {}) as Record<
       string,
       CommunityTagSuggestion[]
