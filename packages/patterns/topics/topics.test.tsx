@@ -76,6 +76,17 @@ export default pattern(() => {
   const profileLinkUrlDraft = new Writable("https://example.com/profile-link");
   const profileLinkLabelDraft = new Writable("profile link");
   const profileLinkKindDraft = new Writable<TopicLinkKind>("session");
+  // Render the same cells the deterministic Profile handlers mutate. This
+  // keeps their behavior and the detail UI in one end-to-end test path without
+  // inventing a fallback identity for the pattern-test runtime.
+  const profileTopic = Topic({
+    title: "Profile-authored topic",
+    body: profileBody,
+    comments: profileComments,
+    links: profileLinks,
+    bodyUpdatedBy: profileBodyUpdatedBy,
+    bodyUpdatedAt: profileBodyUpdatedAt,
+  });
 
   const profileSubmitTopic = submitProfileTopic({
     topics: profileTopics,
@@ -189,6 +200,9 @@ export default pattern(() => {
   });
   const action_submit_profile_link = action(() => {
     profileSubmitLink.send();
+  });
+  const action_start_profile_body_edit = action(() => {
+    profileTopic.startEditBody.send();
   });
 
   // --- UI-affordance flows (the same paths the rendered controls drive) ---
@@ -575,6 +589,11 @@ export default pattern(() => {
       { assertion: assert_profile_body_saved },
       { action: action_submit_profile_link },
       { assertion: assert_profile_link_submitted },
+      // Render the Profile-authored rows after their mutations land, then the
+      // edit state whose Save control is disabled until #profile resolves.
+      { render: profileTopic[UI] },
+      { action: action_start_profile_body_edit },
+      { render: profileTopic[UI] },
       { action: action_add_blank_topic },
       { assertion: assert_still_empty },
       { action: action_add_unsigned_topic },
