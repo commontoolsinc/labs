@@ -170,7 +170,7 @@ function buildTestSpace(
   const state: SpaceState = {
     manager: null as unknown as SpaceState["manager"],
     pieces: {
-      getAllPieces: () => Promise.resolve(fakePieces),
+      getRegisteredPieces: () => Promise.resolve(fakePieces),
     } as unknown as SpaceState["pieces"],
     spaceIno,
     piecesIno,
@@ -2539,7 +2539,7 @@ Deno.test("CellBridge.syncPieceListOnce adds a new piece to the tree", async () 
     .addPieceToSpace.bind(bridge);
   await addPiece(state, existingPiece, "home");
 
-  // Now the getAllPieces mock already returns both pieces; sync should add p2
+  // The registry mock now returns both pieces, so sync should add p2.
   await (bridge as unknown as { syncPieceListOnce: SyncPieceListOnce })
     .syncPieceListOnce.call(bridge, state, "home");
 
@@ -2583,9 +2583,9 @@ Deno.test("CellBridge.syncPieceListOnce removes a deleted piece from the tree", 
     "Piece should exist before sync",
   );
 
-  // Now getAllPieces returns empty — piece was deleted
+  // The registry mock now returns empty because the piece was deleted.
   state.pieces = {
-    getAllPieces: () => Promise.resolve([]),
+    getRegisteredPieces: () => Promise.resolve([]),
   } as unknown as SpaceState["pieces"];
 
   await (bridge as unknown as { syncPieceListOnce: SyncPieceListOnce })

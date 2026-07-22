@@ -23,7 +23,7 @@ const addPieceOf = (subject: Record<string, unknown>, piece: unknown) =>
   (subject.addPiece as AddPieceStream).send({ piece });
 
 const piecesLengthOf = (subject: Record<string, unknown>) =>
-  [...((subject.allPieces as unknown[]) ?? [])].length;
+  [...((subject.pieceRegistry as unknown[]) ?? [])].length;
 
 export default pattern(() => {
   const subject = DefaultApp();

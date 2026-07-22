@@ -1127,7 +1127,7 @@ export async function runTestPattern(
     // 3. Set up defaultPattern so wish({ query: "#default" }) resolves.
     // In production, default-app.tsx provides this. The test harness must
     // create a minimal equivalent so patterns that use wish("#default") to
-    // access allPieces, recentPieces, etc. work correctly.
+    // access pieceRegistry, recentPieces, etc. work correctly.
     await withPhase(["runTestPattern", "defaultPatternSetup"], async () => {
       const setupTx = runtime.edit();
       const spaceCell = runtime.getCell(space, space, undefined, setupTx);
@@ -1137,7 +1137,8 @@ export async function runTestPattern(
         undefined,
         setupTx,
       );
-      (defaultPatternCell as any).key("allPieces").set([]);
+      const pieceRegistry = (defaultPatternCell as any).key("pieceRegistry");
+      pieceRegistry.set([]);
       (defaultPatternCell as any).key("recentPieces").set([]);
       (defaultPatternCell as any).key("backlinksIndex").set({
         mentionable: [],

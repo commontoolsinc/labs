@@ -124,6 +124,7 @@ export {
   extractDefaultValues,
   getPatternIdentityRef,
   getPatternRepository,
+  getPatternSetupIdentityRef,
   getPatternSource,
   mergeSchemaDefaults,
   patternIdentityKey,

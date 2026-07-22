@@ -802,7 +802,7 @@ describe("cli piece parsing", () => {
       },
     };
     const controller = {
-      getAllPieces: () =>
+      getRegisteredPieces: () =>
         Promise.resolve([
           { id: "of:readable" },
           { id: "of:unreadable" },

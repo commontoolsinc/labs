@@ -7,8 +7,8 @@ import ProfileHome from "./profile-home.tsx";
  *
  * WISH LIMITATION (documented): `ProfileEmbed` resolves the viewer's profile via
  * `wish({ query: "#profile" })`. The lane-2 test harness only seeds the
- * `#default` pattern (allPieces/recentPieces), never a `profiles` roster, and a
- * valid profile MUST live in its own (cross-)space — seeding one would drive the
+ * `#default` pattern (pieceRegistry/recentPieces), never a `profiles` roster,
+ * and a valid profile MUST live in its own (cross-)space — seeding one would drive the
  * exact cross-space create surface the pattern-unit lane forbids (it fails a
  * file on ANY console error). So `#profile` stays unresolved here and we test:
  *   (1) the fallback branch — `result ?? fallback` — via the exported

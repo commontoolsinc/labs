@@ -34,42 +34,43 @@ export type WritableBacklinks = {
 };
 
 type Input = {
-  allPieces: MentionableCell[];
+  pieceRegistry: MentionableCell[];
 };
 
 export type Output = {
   mentionable: MentionableCell[];
 };
 
-const computeIndex = lift<{ allPieces: MentionableCell[] | undefined }, void>(
-  ({ allPieces }) => {
-    const cs = allPieces ?? [];
+const computeIndex = lift<
+  { pieceRegistry: MentionableCell[] | undefined },
+  void
+>(({ pieceRegistry }) => {
+  const cs = pieceRegistry ?? [];
 
-    // Reset backlinks for pieces that support it.
-    // Many pieces don't have backlinks (e.g., auth pieces, google patterns),
-    // so we safely skip them with optional chaining.
-    // Also skip undefined/null entries that may exist in the array.
-    for (const c of cs) {
-      if (!c) continue;
-      const value = c.get();
-      if (!value || !("backlinks" in value)) continue;
-      c.key("backlinks").set([]);
-    }
+  // Reset backlinks for pieces that support it.
+  // Many pieces don't have backlinks (e.g., auth pieces, google patterns),
+  // so we safely skip them with optional chaining.
+  // Also skip undefined/null entries that may exist in the array.
+  for (const c of cs) {
+    if (!c) continue;
+    const value = c.get();
+    if (!value || !("backlinks" in value)) continue;
+    c.key("backlinks").set([]);
+  }
 
-    // Populate backlinks from mentioned references.
-    // Again, use optional chaining since not all pieces support backlinks.
-    for (const c of cs) {
-      if (!c) continue;
-      const mentions = c.key("mentioned").get() ?? [];
-      for (let i = 0; i < mentions.length; i++) {
-        const m = c.key("mentioned").key(i);
-        const target = m?.get();
-        if (!target || !("backlinks" in target)) continue;
-        m.key("backlinks").push(c);
-      }
+  // Populate backlinks from mentioned references.
+  // Again, use optional chaining since not all pieces support backlinks.
+  for (const c of cs) {
+    if (!c) continue;
+    const mentions = c.key("mentioned").get() ?? [];
+    for (let i = 0; i < mentions.length; i++) {
+      const m = c.key("mentioned").key(i);
+      const target = m?.get();
+      if (!target || !("backlinks" in target)) continue;
+      m.key("backlinks").push(c);
     }
-  },
-);
+  }
+});
 
 /**
  * BacklinksIndex builds a map of backlinks across all pieces and exposes a
@@ -79,7 +80,7 @@ const computeIndex = lift<{ allPieces: MentionableCell[] | undefined }, void>(
  * - Backlinks are computed by scanning each piece's `mentioned` list and
  *   mapping mention target -> list of source pieces.
  * - Mentionable list is a union of:
- *   - every piece in `allPieces`
+ *   - every piece in `pieceRegistry`
  *   - any items a piece exports via a `mentionable` property
  *     (either an array of pieces or a Cell of such an array)
  *
@@ -90,9 +91,9 @@ const computeIndex = lift<{ allPieces: MentionableCell[] | undefined }, void>(
 const MAX_MENTIONABLE_DEPTH = 5;
 
 const computeMentionable = lift<
-  { allPieces: MentionableCell[] },
+  { pieceRegistry: MentionableCell[] },
   MentionableCell[]
->(({ allPieces: pieceList }) => {
+>(({ pieceRegistry: pieceList }) => {
   const cs = pieceList ?? [];
   const out: MentionableCell[] = [];
 
@@ -155,14 +156,14 @@ const EntryRow = pattern<Entry, { [UI]: VNode }>(({ piece, backlinks }) => {
   };
 });
 
-const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
-  const allPieceCells: MentionableCell[] = allPieces;
+const BacklinksIndex = pattern<Input, Output>(({ pieceRegistry }) => {
+  const registeredPieceCells: MentionableCell[] = pieceRegistry;
 
-  computeIndex({ allPieces: allPieceCells });
+  computeIndex({ pieceRegistry: registeredPieceCells });
 
-  // Compute mentionable list from allPieces reactively
+  // Compute the mentionable list from the registry reactively.
   const mentionable: MentionableCell[] = computeMentionable({
-    allPieces: allPieceCells,
+    pieceRegistry: registeredPieceCells,
   });
 
   const query = new Writable("");

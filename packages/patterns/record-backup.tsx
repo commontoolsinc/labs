@@ -5,7 +5,7 @@
  * Designed for data survival after server wipes.
  *
  * Features:
- * - Discovers all Records using wish({ query: "#default" })
+ * - Discovers all Records using wish({ query: "#pieceRegistry" })
  * - Extracts module data using registry's fieldMapping
  * - Preserves wiki-links in notes as-is
  * - Includes trashed modules in export
@@ -171,10 +171,13 @@ function extractModuleData(
  */
 const buildExportData = lift(
   (
-    { allPieces, now }: { allPieces: RecordPiece[]; now: number | undefined },
+    { pieceRegistry, now }: {
+      pieceRegistry: RecordPiece[];
+      now: number | undefined;
+    },
   ): ExportData => {
     // Filter to only Record patterns
-    const records = (allPieces || []).filter(
+    const records = (pieceRegistry || []).filter(
       (piece) => piece?.["#record"] === true,
     );
 
@@ -415,10 +418,10 @@ const importRecords = handler<
   Record<string, never>,
   {
     importJson: Writable<string>;
-    allPieces: Writable<RecordPiece[]>;
+    pieceRegistry: Writable<RecordPiece[]>;
     importResult: Writable<ImportResult | null>;
   }
->((_, { importJson, allPieces, importResult }) => {
+>((_, { importJson, pieceRegistry, importResult }) => {
   const jsonText = importJson.get();
   const parseResult = parseImportJson(jsonText);
 
@@ -542,8 +545,8 @@ const importRecords = handler<
         trashedSubPieces: trashedSubPieces,
       });
 
-      // Push to allPieces to persist
-      allPieces.push(record as RecordPiece);
+      // Register the imported record.
+      pieceRegistry.push(record as RecordPiece);
       createdRecords.push(record);
       result.imported++;
     } catch (e) {
@@ -617,15 +620,15 @@ const handleFileUpload = handler<
 
 export default pattern<Input, Output>(({ importJson }) => {
   // Get all pieces in the space
-  const { allPieces } = wish<{ allPieces: RecordPiece[] }>({
-    query: "#default",
+  const pieceRegistry = wish<RecordPiece[]>({
+    query: "#pieceRegistry",
   }).result!;
 
   // Current time, sourced from the reactive #now cell (coarsened to 1s).
   const nowCell = wish<number>({ query: "#now" });
 
   // Build export data
-  const exportData = buildExportData({ allPieces, now: nowCell.result });
+  const exportData = buildExportData({ pieceRegistry, now: nowCell.result });
   const exportedJson = formatExportJson({ exportData });
   const recordCount = countRecords({ exportData });
 
@@ -742,7 +745,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                 <cf-button
                   onClick={importRecords({
                     importJson,
-                    allPieces,
+                    pieceRegistry,
                     importResult,
                   })}
                   variant="primary"
