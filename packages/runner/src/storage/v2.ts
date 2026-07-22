@@ -1104,6 +1104,11 @@ export class StorageManager implements IStorageManager {
     waiters: Set<(failure: unknown) => void>;
   }>();
   #nextPendingLoadGeneration = 1;
+  // Sync failures already logged, keyed by (space, error identity). A denied
+  // space repeats the identical failure for every doc pulled from it; one line
+  // per distinct failure keeps the surfacing readable. Bounded: at the cap the
+  // set resets, trading a repeated line for an unbounded set.
+  #loggedSyncFailures = new Set<string>();
 
   private registerPendingLoad(
     address: { space: MemorySpace; scope: CellScope; id: URI },
@@ -1127,6 +1132,32 @@ export class StorageManager implements IStorageManager {
       for (const waiter of entry.waiters) waiter(entry.failure);
       entry.waiters.clear();
     };
+  }
+
+  /** Log a sync failure that would otherwise resolve silently, once per
+   * distinct (space, error) pair. The error name and message are the wire
+   * server's own words — for an ACL denial that includes the principal and
+   * space (`Principal <did> lacks READ on space <did>`), which is exactly
+   * what a caller staring at an unexplained `undefined` needs. */
+  private logSyncLoadFailure(
+    space: MemorySpace,
+    id: URI,
+    failure: unknown,
+  ): void {
+    // Pull errors arrive as plain result objects (IConnectionError et al.),
+    // not Error instances — read the fields structurally.
+    const named = failure as { name?: unknown; message?: unknown } | undefined;
+    const name = typeof named?.name === "string" ? named.name : "Error";
+    const message = typeof named?.message === "string"
+      ? named.message
+      : String(failure);
+    const key = `${space}|${name}|${message}`;
+    if (this.#loggedSyncFailures.has(key)) return;
+    if (this.#loggedSyncFailures.size >= 256) this.#loggedSyncFailures.clear();
+    this.#loggedSyncFailures.add(key);
+    logger.error("sync-load-failure", () => [
+      `sync completed without data for ${id} in ${space}: ${name}: ${message}`,
+    ]);
   }
 
   pendingLoadAddresses(): readonly {
@@ -1220,6 +1251,14 @@ export class StorageManager implements IStorageManager {
         }).get?.(id, scope),
       );
       loadFailure ??= schemaFailure;
+      // A pull that "succeeds" while carrying an error (an ACL denial, a
+      // transport failure) otherwise resolves this sync() normally and the
+      // caller reads the doc as absent — deny, error, and absent all collapse
+      // into the same silent undefined. Surface the failure; the pending-load
+      // ledger below still carries it to scheduler waiters.
+      if (loadFailure !== undefined) {
+        this.logSyncLoadFailure(space, id, loadFailure);
+      }
       return cell;
     } catch (error) {
       loadFailure = error;
@@ -1259,6 +1298,11 @@ export class StorageManager implements IStorageManager {
     }
     return work.then(
       (result) => {
+        // Same silent-collapse hazard as syncCell: a link-target pull that
+        // resolves while carrying an error reads as an absent target.
+        if (result.error !== undefined) {
+          this.logSyncLoadFailure(address.space, address.id, result.error);
+        }
         releaseLoad(result.error);
         return result;
       },
