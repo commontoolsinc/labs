@@ -29,27 +29,35 @@ These were settled in the spec + design review. Implement as stated:
    to an entry-module identity.
 2. **Pin-in-source** (rewrite the import specifier at pin time). No lockfile
    side-table. No pin resolution at compile time for stored programs.
-3. **Imported subtrees keep their published identities.** Mounted files hash
+3. **Type-only fabric references are pinned.** Supported ESM-style
+   `import type`, type-only named imports and exports, and inline
+   `import("cf:…").Type` references follow the same deploy-time rewrite and
+   frozen-compile rules as value imports. The transformer uses imported types
+   to generate runtime schemas, so an unpinned type could change executable
+   behavior under unchanged stored source. Reject the unsupported CommonJS-style
+   `import type Alias = require("cf:…")` form before resolution or identity
+   calculation.
+4. **Imported subtrees keep their published identities.** Mounted files hash
    with their original authored paths and each source document's effective
    identity fingerprint. Identities, cache docs, and live modules therefore
    dedupe with the already-deployed pattern. This is Strategy A; the "fresh
    identities per importer" variant (A′) was considered and rejected (no
    dedupe, divergent CFC provenance).
-4. **Self-contained bundles**: imported modules ARE compiled and emitted as
+5. **Self-contained bundles**: imported modules ARE compiled and emitted as
    part of the importer's record graph (no lazy cross-bundle loading at
    evaluation time). Dedup happens via identity (cache hits, idempotent
    write-back, `modulesByIdentity`), not via emission-skipping.
-5. **Source set stays per-program**: an importer's source docs do NOT link to
+6. **Source set stays per-program**: an importer's source docs do NOT link to
    the imported subtree's source docs (the `cf:` specifier itself carries the
    target identity; loaders parse it). The **compiled** set DOES link across
    the boundary (it has no Merkle-union verification, and the link gives the
    warm loader the full closure for free).
-6. **No service endpoints.** All resolution and fetch are cell reads through
+7. **No service endpoints.** All resolution and fetch are cell reads through
    the compiling runtime's storage session.
-7. **v1 limitation**: an imported subtree whose modules use root-absolute
+8. **v1 limitation**: an imported subtree whose modules use root-absolute
    internal imports (`import … from "/utils.ts"`) is rejected at fetch time
    with a clear error. Relative (`./`, `../`) imports only inside subtrees.
-8. **CFC provenance of fetched source is follow-up work** (spec § Security).
+9. **CFC provenance of fetched source is follow-up work** (spec § Security).
    Do not build label propagation now; do not silently strip it either —
    the write-back path reuses existing write machinery so labels flow (or
    fail) exactly as any cell write does today.
@@ -629,7 +637,7 @@ export class FabricAwareResolver implements ProgramResolver {
       `ROOT_LINK_SPECIFIER` retention links. Mount only that entry view. This
       prevents unreachable documents and sibling retained generations from
       becoming executable mount files.
-   f. **Root-absolute import check** (decision 7): for every document in that
+   f. **Root-absolute import check** (decision 8): for every document in that
       entry view, run `collectImportSpecifiers` (from
       `@commonfabric/js-compiler`). Any specifier starting with `"/"` throws
       `"imported pattern <hash> uses root-absolute imports; not supported"`.
@@ -846,7 +854,7 @@ File: `packages/runner/src/compilation-cache/cell-cache.ts`.
    `unreachedRoots` (line 96) stays UNTOUCHED — it must keep seeing fabric
    edges as reachability (otherwise every mounted module gets a synthetic
    root link from the importer's entry, dragging subtrees back into the
-   importer's source closure — the exact thing decision 5 forbids).
+   importer's source closure — the exact thing decision 6 forbids).
 2. **Compiled side**: `writeCompiledDocs`, compiled synthetic roots, and
    compiled import links consume only the emitted set. Direct compiled links
    come only from runtime imports extracted from emitted JavaScript. A
@@ -1055,11 +1063,19 @@ on the original string. Skip non-fabric specifiers; skip refs where
 `import()` expression? — dynamic imports are unsupported by the compiler
 (resolver.ts comment) so they cannot occur in valid programs; ignore.
 
+Detect an `ImportEqualsDeclaration` whose external module reference is a
+`cf:` string and reject it with
+`"fabric import-equals syntax is unsupported; use an ESM import type"`.
+Apply the same validation in graph discovery and identity collection so this
+syntax cannot bypass the pin or become an unhashed runtime dependency.
+
 Tests: fixtures with weird-but-valid formatting (multiline imports, comments
 between clause and specifier, `export * from`, `import type`, single vs
 double quotes — PRESERVE the original quote character: detect from the
 literal's raw text). Assert byte-identity outside the replaced spans
-(compare prefix/suffix slices, not just "compiles").
+(compare prefix/suffix slices, not just "compiles"). Add a rejection test for
+`import type Alias = require("cf:dep")` in rewriting, graph discovery, and
+identity calculation.
 
 ### M2.4 Engine: unpinned refs in dev mode
 
@@ -1074,7 +1090,7 @@ literal's raw text). Assert byte-identity outside the replaced spans
     `resolvedPins()` accessor.
   - cross-space (`ref.space` a DID ≠ compiling space): fetch via
     `loadVerifiedSourceClosure(runtime, refSpace, …)` — the storage session
-    routes; CFC caveat is documented follow-up (decision 8). The write-back
+    routes; CFC caveat is documented follow-up (decision 9). The write-back
     then copies the docs into the compiling space (this is `replicateClosures`
     semantics through the normal compile path — no extra code, but ADD a test
     asserting it happens, and a `logger.info` naming source space → dest
@@ -1091,13 +1107,17 @@ the slug cell after pinning, recompile → still works).
 Read `packages/cli/` command structure first (mirror an existing command's
 file layout, e.g. how `dev.ts` registers).
 
-- **Deploy pinning**: find the deploy path (`cf` skill docs:
-  `pattern-deploy`; the CLI command that writes a pattern's program to the
-  pattern meta). Before writing the program: run `rewriteFabricPins` over
-  every file, with `resolvePin` = M2.2 chase via the connected runtime; if
-  any rewrite happened, print each (`pinned cf:/did:key:z6Mk…/todo-list →
-  @AvcnyZ…`). The STORED program is the pinned one. Deploying with an
-  unresolvable ref fails the deploy with the chase's error.
+- **Deploy pinning**: `getPinnedProgramFromFile()` currently calls
+  `getProgramFromFile()`. Its ordinary harness resolver has no fabric-aware
+  layer, so it rejects every fabric import or export declaration before
+  `pinProgramFabricImports()` runs. An already-pinned declaration fails too,
+  and an unpinned declaration never reaches the rewriter. Replace that ordering
+  with the `cf deps update` pattern: call `collectLocalProgram()` with fabric
+  imports allowed, run `pinProgramFabricImports()` over every collected file,
+  then pass the pinned program through the frozen compile path. If any rewrite
+  happened, print each (`pinned cf:/did:key:z6Mk…/todo-list → @AvcnyZ…`). The
+  stored program is the pinned one. Deploying with an unresolvable reference
+  fails with the chase's error.
 - **`cf deps update [file] [--import <specifier>]`**: new command; operates
   on the local working files (filesystem), not deployed state: parse, chase
   every mutable fabric ref (or just `--import`), rewrite pins in place,
@@ -1109,7 +1129,12 @@ file layout, e.g. how `dev.ts` registers).
 
 Tests: CLI-level tests follow whatever harness existing cli tests use (look
 in `packages/cli` for test conventions; if commands are thin over lib
-functions, test the lib functions and add one smoke test per command).
+functions, test the lib functions and add one smoke test per command). Add
+pin-on-deploy regressions for an unpinned value import, `import type`, a
+type-only export, and an inline import type. Each unpinned reference must reach
+the rewriter before the frozen compile. Add an already-pinned import regression
+that reaches the frozen compile without local-resolution failure. Keep the
+existing `cf deps update` coverage.
 
 ### M2.6 End-to-end snapshot-semantics test (the spec's core scenario)
 
@@ -1207,6 +1232,6 @@ One integration test (runner-level, in-process, two "deploys"):
   applies the ordinary compile-time helper transform exactly once. Preserve the
   existing tolerance for source stored in the legacy envelope.
 - Do NOT thread a space through globals/singletons — it rides options.
-- Do NOT touch CFC label code paths in this work (decision 8); if a test
+- Do NOT touch CFC label code paths in this work (decision 9); if a test
   fails on labels, stop and escalate rather than loosening a check.
 - Do NOT introduce new CLI flags beyond `cf deps update`'s listed ones.
