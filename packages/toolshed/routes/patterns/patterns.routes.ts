@@ -15,16 +15,17 @@ export const getPattern = createRoute({
     }),
     query: z.object({
       identity: z.string().optional().describe(
-        "When present, return the file's content-addressed identity as " +
-          "text/plain instead of its source.",
+        "When present, return the complete authored pattern closure's " +
+          "content-addressed identity as text/plain instead of the entry " +
+          "file's source.",
       ),
     }),
   },
   responses: {
     200: {
       description:
-        "Pattern file content, or the file's content identity when `identity` " +
-        "is present.",
+        "Pattern file content, or the complete authored pattern closure's " +
+        "content identity when `identity` is present.",
       content: {
         "text/typescript-jsx": {
           schema: z.string(),
