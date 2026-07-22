@@ -15,16 +15,16 @@ const logger = getLogger("runner.pattern-update", {
   level: "warn",
 });
 
-async function abortableFetch(
-  request: () => Promise<Response>,
+async function abortable<T>(
+  operation: () => Promise<T>,
   signal: AbortSignal,
-): Promise<Response> {
+): Promise<T> {
   signal.throwIfAborted();
   const aborted = Promise.withResolvers<never>();
   const onAbort = () => aborted.reject(signal.reason);
   signal.addEventListener("abort", onAbort, { once: true });
   try {
-    return await Promise.race([request(), aborted.promise]);
+    return await Promise.race([operation(), aborted.promise]);
   } finally {
     signal.removeEventListener("abort", onAbort);
   }
@@ -223,7 +223,7 @@ export class PatternUpdater {
       // browser may reuse unchanged bytes after a 304, but never without asking
       // the source host whether they are still current.
       const revalidatingFetch: typeof globalThis.fetch = (input, init) =>
-        abortableFetch(
+        abortable(
           () =>
             runtime.fetch(input, {
               ...init,
@@ -236,7 +236,9 @@ export class PatternUpdater {
       identityUrl.searchParams.set("identity", "");
       const identityResponse = await revalidatingFetch(identityUrl);
       if (!identityResponse.ok) return "current";
-      const advertisedIdentity = (await identityResponse.text()).trim();
+      const advertisedIdentity = (
+        await abortable(() => identityResponse.text(), signal)
+      ).trim();
       if (advertisedIdentity.length === 0) return "current";
 
       // The only sourceless roots admitted to the default-root update path are

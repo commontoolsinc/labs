@@ -283,38 +283,45 @@ describe("lazy system-pattern auto-update", () => {
     ignoredFetch.resolve(new Response("late response"));
   });
 
-  it("does not resolve source after disposal aborts a completed identity fetch", async () => {
-    const v2Identity = await identityFor(source("v2"));
+  it("disposes when a completed identity response body never settles", async () => {
     const identityRequested = defer<AbortSignal | undefined>();
+    const bodyRead = defer();
     let bodyController:
       | ReadableStreamDefaultController<Uint8Array>
       | undefined;
-    const piece = await preparePiece((_input, init) => {
-      const signal = init?.signal ?? undefined;
-      identityRequested.resolve(signal);
-      return Promise.resolve(
-        new Response(
+    class StuckBodyResponse extends Response {
+      constructor() {
+        super(
           new ReadableStream<Uint8Array>({
             start(controller) {
               bodyController = controller;
             },
           }),
-        ),
-      );
+        );
+      }
+
+      override text(): Promise<string> {
+        bodyRead.resolve();
+        return super.text();
+      }
+    }
+    const piece = await preparePiece((_input, init) => {
+      const signal = init?.signal ?? undefined;
+      identityRequested.resolve(signal);
+      return Promise.resolve(new StuckBodyResponse());
     });
 
     const start = runtime.start(piece);
     const signal = await identityRequested.promise;
     expect(signal).toBeDefined();
     expect(await start).toBe(true);
-    const dispose = runtime.patternUpdater.dispose();
-    expect(signal!.aborted).toBe(true);
-    bodyController!.enqueue(new TextEncoder().encode(v2Identity));
-    bodyController!.close();
-    await dispose;
+    await bodyRead.promise;
+    await runtime.patternUpdater.dispose();
 
+    expect(signal!.aborted).toBe(true);
     expect(getPatternSource(piece)).toBeUndefined();
     expect((await piece.pull())?.marker).toBe("v1");
+    bodyController!.close();
   });
 
   it("skips a sourceless pattern whose compiled source cannot be recovered", async () => {
