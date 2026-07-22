@@ -3,6 +3,27 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { type MemorySpace, type Signer } from "@commonfabric/memory/interface";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import { MEMORY_PROTOCOL } from "@commonfabric/memory/v2";
+import {
+  deflateWirePayload,
+  inflateWirePayload,
+  MEMORY_WS_DEFLATE_MIN_BYTES,
+  MEMORY_WS_DEFLATE_SUBPROTOCOL,
+  MEMORY_WS_MAX_PENDING_INFLATE_BYTES,
+  memoryWsDeflateEnabled,
+  memoryWsDeflateSupported,
+  SerialTaskQueue,
+} from "@commonfabric/memory/v2/transport-deflate";
+
+const TEXT_ENCODER = new TextEncoder();
+
+/** Close, tolerating a socket already racing the peer's close. */
+const safeClose = (socket: WebSocket): void => {
+  try {
+    socket.close();
+  } catch {
+    // Ignore close races with the peer.
+  }
+};
 
 export interface SessionFactory {
   /** Opt in to StorageManager's ACL genesis handshake. Scripted factories used
@@ -96,6 +117,17 @@ export class WebSocketTransport implements MemoryClient.Transport {
   #closeReceiver: (error?: Error) => void = () => {};
   #socket: WebSocket | null = null;
   #opening: Promise<WebSocket> | null = null;
+  // outbound ordering queue for the async deflate hop on a negotiated
+  // connection. One queue per transport is safe across reconnects because
+  // each task captures its own socket and no-ops once that socket closes.
+  #outbound = new SerialTaskQueue();
+  // While a closed socket's queued frames drain toward the close
+  // notification, a re-dial must wait — otherwise a send() could open a new
+  // socket before the consumer learns the old one closed.
+  #draining: Promise<void> | null = null;
+  // Once close() is called nothing may dial again: a late send must not
+  // leak a brand-new live socket that nothing owns.
+  #closed = false;
 
   constructor(private readonly address: URL) {}
 
@@ -107,16 +139,57 @@ export class WebSocketTransport implements MemoryClient.Transport {
     this.#closeReceiver = receiver;
   }
 
-  async send(payload: string): Promise<void> {
+  async send(
+    payload: string,
+    hints?: MemoryClient.TransportSendHints,
+  ): Promise<void> {
+    if (this.#draining !== null) {
+      // The connection is turning over: its close notification is still
+      // queued behind pending inflates, so the caller does not yet know the
+      // socket dropped. Sending now would dial the next socket and put a
+      // stale payload ahead of the client's fresh handshake. Callers treat
+      // this like any other transport failure and replay via the reconnect
+      // machinery (which only runs after the close notification lands, when
+      // the drain is already cleared).
+      const error = new Error(
+        "memory websocket transport reconnected during send",
+      );
+      error.name = "ConnectionError";
+      throw error;
+    }
     const socket = await this.open();
-    socket.send(payload);
+    if (socket.protocol !== MEMORY_WS_DEFLATE_SUBPROTOCOL) {
+      socket.send(payload);
+      return;
+    }
+    // Negotiated: every send funnels through the queue — a small text frame
+    // must not overtake an earlier payload still being compressed. Frames
+    // with the noCompress hint (auth-bearing) stay text but keep their
+    // position in the same order.
+    await this.#outbound.enqueue(async () => {
+      const bytes = TEXT_ENCODER.encode(payload).byteLength;
+      if (
+        hints?.noCompress === true || bytes < MEMORY_WS_DEFLATE_MIN_BYTES
+      ) {
+        if (socket.readyState === WebSocket.OPEN) socket.send(payload);
+        return;
+      }
+      const compressed = await deflateWirePayload(payload);
+      // Mirrors the uncompressed path: sending on a socket that closed
+      // after open() resolved is a silent drop, recovered by reconnect.
+      if (socket.readyState === WebSocket.OPEN) socket.send(compressed);
+    });
   }
 
   async close(): Promise<void> {
+    this.#closed = true;
     const socket = this.#socket;
     this.#socket = null;
     this.#opening = null;
     if (!socket || socket.readyState === WebSocket.CLOSED) {
+      // A drain may still be delivering frames from an already-closed socket;
+      // close() returning must mean nothing fires afterwards.
+      if (this.#draining !== null) await this.#draining;
       return;
     }
     const closed = new Promise<void>((resolve) => {
@@ -130,9 +203,15 @@ export class WebSocketTransport implements MemoryClient.Transport {
       socket.close();
     }
     await closed;
+    if (this.#draining !== null) await this.#draining;
   }
 
   private async open(): Promise<WebSocket> {
+    if (this.#closed) {
+      const error = new Error("memory websocket transport is closed");
+      error.name = "ConnectionError";
+      throw error;
+    }
     if (this.#socket?.readyState === WebSocket.OPEN) {
       return this.#socket;
     }
@@ -141,17 +220,96 @@ export class WebSocketTransport implements MemoryClient.Transport {
     }
     const address = toWebSocketAddress(this.address);
     const opening = new Promise<WebSocket>((resolve, reject) => {
-      const socket = new WebSocket(address);
+      // offer the deflate subprotocol when this runtime can actually
+      // inflate (offering is a commitment) and it is not opted out via
+      // CF_MEMORY_WS_DEFLATE=0. Servers that predate the subprotocol will
+      // fail this connection per RFC 6455, so server support deploys first.
+      const socket = new WebSocket(
+        address,
+        memoryWsDeflateEnabled() && memoryWsDeflateSupported()
+          ? [MEMORY_WS_DEFLATE_SUBPROTOCOL]
+          : [],
+      );
+      socket.binaryType = "arraybuffer";
       this.#socket = socket;
       let opened = false;
+      // inbound ordering queue, per socket — async inflation must not
+      // let a later text frame overtake an earlier compressed frame. A failed
+      // inflate poisons the queue: delivering frames past a transport-level
+      // gap would let the session ack and resume beyond messages it never
+      // saw. Only the close notification may follow a poisoned frame.
+      const inbound = new SerialTaskQueue();
+      let poisoned = false;
+      let pendingInflateBytes = 0;
+      const deliver = (payload: string) => {
+        if (poisoned) return;
+        try {
+          this.#receiver(payload);
+        } catch (error) {
+          // A frame the consumer failed to apply is a gap: continuing would
+          // let the session ack past it from inconsistent state. Poison this
+          // socket and close so the client's reconnect machinery restores a
+          // consistent view from the server.
+          console.error(
+            "memory websocket receiver failed; reconnecting",
+            error,
+          );
+          poisoned = true;
+          safeClose(socket);
+        }
+      };
       socket.addEventListener("open", () => {
         opened = true;
         resolve(socket);
       }, { once: true });
       socket.addEventListener("message", (event) => {
-        if (typeof event.data === "string") {
-          this.#receiver(event.data);
+        const data: unknown = event.data;
+        if (typeof data === "string") {
+          if (socket.protocol !== MEMORY_WS_DEFLATE_SUBPROTOCOL) {
+            deliver(data);
+            return;
+          }
+          void inbound.enqueue(() => deliver(data));
+          return;
         }
+        if (
+          socket.protocol === MEMORY_WS_DEFLATE_SUBPROTOCOL &&
+          (data instanceof ArrayBuffer || ArrayBuffer.isView(data))
+        ) {
+          if (
+            pendingInflateBytes + data.byteLength >
+              MEMORY_WS_MAX_PENDING_INFLATE_BYTES
+          ) {
+            // The server outpaced local inflation past any legitimate burst:
+            // treat it as a transport failure rather than buffering without
+            // bound.
+            poisoned = true;
+            safeClose(socket);
+            return;
+          }
+          pendingInflateBytes += data.byteLength;
+          void inbound.enqueue(async () => {
+            try {
+              if (poisoned) return;
+              let payload: string;
+              try {
+                payload = await inflateWirePayload(data);
+              } catch (error) {
+                poisoned = true;
+                throw error;
+              }
+              deliver(payload);
+            } finally {
+              pendingInflateBytes -= data.byteLength;
+            }
+          }).catch(() => {
+            // A malformed compressed frame is a transport failure: close so
+            // the client's reconnect machinery takes over and replays.
+            safeClose(socket);
+          });
+          return;
+        }
+        // Binary frames on a non-negotiated socket are ignored.
       });
       socket.addEventListener("close", () => {
         if (this.#socket === socket) {
@@ -160,7 +318,18 @@ export class WebSocketTransport implements MemoryClient.Transport {
         if (this.#opening === opening) {
           this.#opening = null;
         }
-        this.#closeReceiver();
+        // the close notification queues behind pending inflates so
+        // every frame that arrived before the close is delivered first —
+        // the client's reconnect must not race a stale frame (and nothing
+        // may be delivered after the close notification).
+        const drained = inbound.enqueue(() => {
+          // Dial-able again the instant the consumer learns of the close:
+          // clear before notifying so a reconnect issued inside the
+          // notification is not rejected by the draining guard.
+          if (this.#draining === drained) this.#draining = null;
+          this.#closeReceiver();
+        }).catch(() => {});
+        this.#draining = drained;
         if (!opened) {
           reject(new Error("memory websocket transport closed before opening"));
         }
@@ -172,11 +341,15 @@ export class WebSocketTransport implements MemoryClient.Transport {
         if (this.#opening === opening) {
           this.#opening = null;
         }
-        this.#closeReceiver(
+        const error =
           event instanceof ErrorEvent && event.error instanceof Error
             ? event.error
-            : new Error("memory websocket transport error"),
-        );
+            : new Error("memory websocket transport error");
+        const drained = inbound.enqueue(() => {
+          if (this.#draining === drained) this.#draining = null;
+          this.#closeReceiver(error);
+        }).catch(() => {});
+        this.#draining = drained;
         reject(event);
       }, { once: true });
     });

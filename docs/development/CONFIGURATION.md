@@ -170,6 +170,8 @@ The toolshed-embedded memory service has two modes:
 | `MEMORY_URL` | `http://localhost:8000` | Where other components reach the memory service. |
 | `MEMORY_ACL_MODE` | `enforce` | Space ACL policy: `off`, `observe`, or `enforce`. `observe` logs ordinary access shortfalls, while malformed ACLs and fresh-space genesis violations still fail closed. |
 | `MEMORY_SERVICE_DIDS` | _(empty)_ | Comma-separated DIDs with implicit OWNER on every space. These identities may initialize ACLs but still cannot make an ordinary first write before genesis. |
+| `CF_MEMORY_WS_DEFLATE` | _(unset — enabled)_ | `0`/`false` stops this process compressing outbound memory-websocket frames (and Deno clients offering the subprotocol); servers always select an offered subprotocol regardless. See [`memoryWsDeflate`](EXPERIMENTAL_OPTIONS.md#memorywsdeflate). |
+| `CF_MEMORY_WS_DEFLATE_STATS_FILE` | _(unset — disabled)_ | Diagnostic: append one JSON line of per-connection deflate byte accounting (no payload contents) on each memory websocket close. |
 
 With ACL policy active, a fresh space is read-only until its space identity or a
 configured service DID writes a valid ACL with a concrete OWNER. A populated

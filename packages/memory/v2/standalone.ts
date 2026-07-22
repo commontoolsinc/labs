@@ -12,9 +12,17 @@
  * bundles.
  */
 
-import { encodeMemoryBoundary } from "../v2.ts";
 import * as MemoryServer from "./server.ts";
 import { verifySessionOpenAuthorization } from "./session-open-auth.ts";
+import {
+  MEMORY_WS_SERVER_INFLATE_MAX_BYTES,
+  memoryWsDeflateEnabled,
+  selectMemoryWsDeflateProtocol,
+} from "./transport-deflate.ts";
+import {
+  encodeMemoryWireFrameSync,
+  inflateWirePayloadSync,
+} from "./transport-deflate-sync.ts";
 import { Identity } from "@commonfabric/identity";
 
 const standaloneMemoryAudience = (await Identity.fromPassphrase(
@@ -68,32 +76,85 @@ export class StandaloneMemoryServer {
       if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
         return new Response("memory websocket endpoint", { status: 200 });
       }
-      const { socket, response } = Deno.upgradeWebSocket(request);
+      // mirror toolshed's deflate subprotocol so in-repo clients that
+      // offer it keep working against the standalone harness server. The
+      // offer is always selected (refusal fails the connection per RFC 6455);
+      // the env switch only gates this server's outbound compression.
+      const deflateProtocol = selectMemoryWsDeflateProtocol(
+        request.headers.get("sec-websocket-protocol"),
+      );
+      const { socket, response } = Deno.upgradeWebSocket(
+        request,
+        deflateProtocol !== undefined ? { protocol: deflateProtocol } : {},
+      );
+      socket.binaryType = "arraybuffer";
       const connectionTag = nextConnectionTag++;
+      const deflateOutbound = deflateProtocol !== undefined &&
+        memoryWsDeflateEnabled();
       const connection = memory.connect((message) => {
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.send(encodeMemoryBoundary(message));
+        if (socket.readyState !== WebSocket.OPEN) {
+          return;
+        }
+        // Shared sender policy (auth exemption, threshold) lives in
+        // encodeMemoryWireFrameSync; teardown stays per-site.
+        try {
+          socket.send(encodeMemoryWireFrameSync(message, deflateOutbound));
+        } catch {
+          socket.close(1011, "memory websocket send failure");
+          connection.close();
         }
       });
       const debugWrites = Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";
-      socket.addEventListener("message", (event) => {
-        if (typeof event.data !== "string") {
-          socket.close(1003, "memory websocket expects text frames");
-          connection.close();
-          return;
-        }
+      // Closing drops chained-but-unstarted receives; frames already handed
+      // to receive() must settle before the connection closes.
+      let lastReceive: Promise<unknown> = Promise.resolve();
+      const closeConnection = () => {
+        void lastReceive.catch(() => undefined).finally(() =>
+          connection.close()
+        );
+      };
+      const handleText = (text: string) => {
         if (debugWrites) {
-          logCommitOperations(connectionTag, event.data);
+          logCommitOperations(connectionTag, text);
         }
-        connection.receive(event.data).catch(() => {
+        const received = connection.receive(text);
+        lastReceive = received;
+        received.catch(() => {
           if (socket.readyState === WebSocket.OPEN) {
             socket.close(1011, "memory websocket receive failure");
           }
-          connection.close();
+          closeConnection();
         });
+      };
+      socket.addEventListener("message", (event) => {
+        const data: unknown = event.data;
+        if (typeof data === "string") {
+          handleText(data);
+          return;
+        }
+        if (
+          deflateProtocol !== undefined &&
+          (data instanceof ArrayBuffer || ArrayBuffer.isView(data))
+        ) {
+          let text: string;
+          try {
+            text = inflateWirePayloadSync(
+              data,
+              MEMORY_WS_SERVER_INFLATE_MAX_BYTES,
+            );
+          } catch {
+            socket.close(1007, "memory websocket inflate failure");
+            closeConnection();
+            return;
+          }
+          handleText(text);
+          return;
+        }
+        socket.close(1003, "memory websocket expects text frames");
+        closeConnection();
       });
-      socket.addEventListener("close", () => connection.close());
-      socket.addEventListener("error", () => connection.close());
+      socket.addEventListener("close", () => closeConnection());
+      socket.addEventListener("error", () => closeConnection());
       return response;
     });
     return new StandaloneMemoryServer(memory, http);

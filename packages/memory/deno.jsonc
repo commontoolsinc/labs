@@ -34,6 +34,8 @@
     "./v2/engine": "./v2/engine.ts",
     "./v2/server": "./v2/server.ts",
     "./v2/standalone": "./v2/standalone.ts",
+    "./v2/transport-deflate": "./v2/transport-deflate.ts",
+    "./v2/transport-deflate-sync": "./v2/transport-deflate-sync.ts",
     "./v2/session-open-auth": "./v2/session-open-auth.ts",
     "./v2/storage-path": "./v2/storage-path.ts",
     "./v2/dump": "./v2/dump.ts",
@@ -47,6 +49,7 @@
   },
   "imports": {
     "@db/sqlite": "jsr:@db/sqlite@0.13.0",
+    "builtin-zlib": "node:zlib",
     "@denosaurs/plug": "jsr:@denosaurs/plug@^1.1.0",
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.1"
   }

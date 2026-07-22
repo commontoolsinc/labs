@@ -214,6 +214,10 @@ One line per archived document; each document's header carries the fuller
   and
   [pattern-integration-compile-bound.md](development/performance/pattern-integration-compile-bound.md)
   — June 2026 profiling snapshots.
+- [memory-ws-deflate-spike-2026-07-16.md](development/performance/memory-ws-deflate-spike-2026-07-16.md)
+  — spike record for the memory websocket per-message deflate transport
+  (design decisions, Lunch Poll measurements, hardening ledger); the feature
+  productionized in PR #4770.
 - [2026-07-pattern-capability-ci-duration-increase.md](development/performance/2026-07-pattern-capability-ci-duration-increase.md)
   — root cause of the July 2026 labs CI duration increase: two unsharded
   pattern time-capability sweeps, especially the 56-pattern sweep on shard 3.
