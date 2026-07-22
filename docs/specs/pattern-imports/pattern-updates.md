@@ -232,17 +232,24 @@ cf:[[//toolshed.url]/space/][slug]
   some point"* — a bootstrap hint for when the runtime does not already know
   where a space is hosted (we have not built host-discovery-without-hints yet;
   this is a first step toward it).
-- **On ingest**, a host-bearing ref is normalized: extract the host →
-  `runtime.registerSpaceHost(space, host)` (feeds the learned site-table) →
-  store the **canonical host-less form** `cf:/<space-did>/<slug>`. The host is
-  routing, not identity; it is never smeared across every provenance ref.
+- **On ingest**, a host-bearing resolver input registers the host with
+  `runtime.registerSpaceHost(space, host)`, which changes only the live runtime.
+  The lifecycle operation separately writes the accepted space DID to host
+  route into the home-space site table before it commits a canonical host-less
+  target. A template may then keep the form `cf:/<space-did>/<ref>`. The
+  revision also retains the supplied `cf://` URL. A lifecycle follow resolves
+  an unpinned slug once and stores the stable entity. A pinned ref normalizes to
+  exact pattern source. The host is routing, not identity; it is not copied
+  into every canonical target.
 - Host **hints belong to the space**, not to each cross-space link — a
-  per-space host-hint store is the right long-term home (and the seed of
-  host-discovery). Deferred; v1 needs none.
-- **Optional slug**: `cf://toolshed/space/` (no slug) = *that space's root
-  pattern* (resolve via the space cell's `defaultPattern` → its
-  `patternIdentity`). This is how a template like `defaultAppUrl` says "point
-  at another space and track whatever it runs as its root."
+  home-space site table is the current durable store and the seed of later host
+  discovery. The runtime processor hydrates its entries on startup. Writing it
+  from a host-qualified lifecycle operation remains required work.
+- **Optional ref**: `cf://toolshed/space/` with no ref resolves that space's
+  current root pattern through the space cell's `defaultPattern` and then its
+  `patternIdentity`. Static resolution pins that result. A lifecycle operation
+  that starts from this form stores the resolved root piece as its stable
+  origin; later relinking of the space root does not redirect the follower.
 - Space is a **DID** (names still require name→DID resolution — README open
   question).
 
@@ -457,8 +464,17 @@ binary populates from baked build metadata; the updater does not consult it.
    [`../piece-source-lifecycle.md`](../piece-source-lifecycle.md). Retire the
    specialized root lifecycle path after migration. Validate the root-interface
    contract whenever `defaultPattern` is created or relinked.
-5. **Cross-host origins.** Persist accepted space-to-host hints and enforce CFC
-   provenance labels on fetched source.
+5. **Cross-host origins.** Validate and register the supplied space-to-host hint
+   through the ordinary per-space storage manager before opening the origin
+   space. After registration accepts it, persist it before committing a
+   hostless canonical origin, and hydrate it before later resolution. Do not
+   create a secondary session. A seeded route can only be confirmed. Once a
+   late hint is accepted, a different hint is a conflict even before the space
+   opens. After the space opens, only the hint already in effect can be
+   confirmed. Any other route attempt fails the transition. Add ordinary
+   authorization checks. Cross-host routing uses the same provenance checks as
+   a source flow between spaces on one toolshed. Reliable recovery from an
+   unavailable host or a moved space remains open design work.
 
 ## Resolved questions
 

@@ -28,10 +28,11 @@ distinction evaporates at pin time — both freeze to the same kind of hash.
 
 **Implemented for content-addressed and same-toolshed references** (`#4081`):
 parsing, slug and piece resolution, deploy-time pinning, and mounting. Dynamic
-host-qualified routing, `cf publish`, and source subpaths remain planned as
-listed under Phasing. This remains the design of record; for the as-built
-pointer model note that the patternId + pattern **meta cell** this document
-originally leaned on were **retired** in `#4156`
+per-space route registration and home-site-table hydration are implemented as
+foundations. Applying a host supplied by a `cf://` import remains planned, as
+do `cf publish` and source subpaths. This remains the design of record; for the
+as-built pointer model note that the patternId + pattern **meta cell** this
+document originally leaned on were **retired** in `#4156`
 (`docs/specs/pattern-id-retirement.md`) — a piece now carries only
 `patternIdentity = { identity, symbol }`, and a pattern's source lives in the
 `pattern:<identity>` source-doc closure. References below are updated to match.
@@ -40,7 +41,7 @@ general piece origin model is described in `../piece-source-lifecycle.md`.
 
 ## Last Updated
 
-2026-07-21
+2026-07-22
 
 ## Motivation
 
@@ -91,7 +92,7 @@ general piece origin model is described in `../piece-source-lifecycle.md`.
 | Slug cells: generic **redirect link to any cell** (`setSlugLink` is target-agnostic; only `resolvePieceAddress` layers a "must be a piece" check) | `packages/piece/src/slugs.ts` | Slugs can name pieces *or* patterns today, mechanically |
 | Slug ids: `hashOf({causal:{space, slug}})`; slug grammar `[a-z0-9]+(-[a-z0-9]+)*`, ≤80 chars; **`isSlugAddress(t) = !t.includes(":")`** | `packages/runner/src/slugs.ts` | The existing slug-vs-URI discriminator the grammar reuses |
 | `loadPatternByIdentity(entryIdentity, symbol, space)` | `packages/runner/src/pattern-manager.ts` | Existing by-identity load path the resolver builds on |
-| Per-space host routing: `spaceHostMap` resolves each space to its memory host; foreign-host sessions are ordinary authenticated memory sessions (#3947) | `packages/runner/src/storage/v2-remote-session.ts` | Reads work for a foreign space whose route is already known; applying a host from an explicit `cf://` reference remains planned |
+| Per-space host routing: `spaceHostMap` seeds routes, `registerSpaceHost` adds a route before a space opens, and the home-space site table hydrates durable hints; foreign-host sessions are ordinary authenticated memory sessions | `packages/runner/src/storage/v2-remote-session.ts`, `packages/runner/src/storage/v2.ts`, and `packages/runtime-client/backends/runtime-processor.ts` | Reads work for a foreign space whose route is already known. A seeded route can only be confirmed. A later hint currently replaces an earlier late hint while the space remains unopened. After the space opens, only its previously registered matching hint can be confirmed. Applying a host from an explicit `cf://` reference remains planned |
 
 ### The two "pattern by hash" handles, explicitly
 
@@ -500,19 +501,20 @@ the provenance-relevant flow flagged under § Security.)
 
 ### 4. Cross-host references: no service surface at all
 
-A runtime is no longer bound to one memory host: `spaceHostMap`
-(`storage/v2-remote-session.ts:createStorageAddressResolver`, PR #3947)
-routes each space to its host, and a foreign-host session is an ordinary
-authenticated memory session. (`spaceHostMap` itself is an **interim
-mechanism** — per-space host resolution will evolve; this design depends only
-on the property "a space's cells are readable wherever the space lives", not
-on the map's current shape.) So a `cf://host/space/ref` reference resolves
-exactly like a local one — slug chase, piece/meta hops, and `pattern:<identity>`
-source-doc reads are all cell reads in a space that happens to live on
-another host, under that host's normal authz. No resolve endpoint, no
-content endpoint; nothing re-implements space authorization in an HTTP
-route, and hash verification of fetched sources is unchanged (it never
-depended on the transport).
+A runtime is no longer bound to one memory host. `spaceHostMap` seeds known
+routes when storage is constructed. `registerSpaceHost` can register a later
+hint before that space opens, and the home-space site table hydrates durable
+hints into a new runtime. A foreign-host connection is an ordinary
+authenticated memory session. These mechanisms remain interim. This design
+depends only on the property that a space's cells are readable wherever the
+space lives, not on the current map or site-table shape.
+
+Once a route is in effect, a `cf://host/space/ref` reference resolves exactly
+like a local one. Slug chase, piece metadata, and `pattern:<identity>` source
+reads are ordinary cell reads in a space that happens to live on another host.
+The runtime does not use a separate resolver endpoint, content endpoint, or
+short-lived secondary session. The destination host applies its ordinary
+authorization, and source hash verification remains independent of transport.
 
 Consequences:
 
@@ -526,11 +528,15 @@ Consequences:
   source-read authorization, destination-write authorization, and a permitted
   CFC flow. Whoever can read the target space can import its replica; nobody
   else can.
-- **The host segment maps to a `spaceHostMap` entry.** One mechanical work
-  item: the map is fixed at storage construction today
-  (`v2.ts` options), while a host-qualified ref is discovered mid-compile —
-  the resolver needs either dynamic registration of a space→host route on the
-  live session or a short-lived secondary session for the foreign space.
+- **The host segment supplies a late-bound route hint.** The resolver must
+  register that hint on the ordinary storage manager before it opens the
+  referenced space. A seeded route wins for the current session. An accepted
+  late hint must also remain stable before the first open; a different hint is
+  a conflict. After the space opens, registration can only confirm the hint
+  that was already in effect. Any other registration attempt fails rather than
+  opening a second connection for the same space. The current registry still
+  replaces a different late hint before the first open. Host-qualified import
+  resolution must add this conflict guard when it adopts the registration path.
 - A cacheable, anonymous HTTP mirror for published patterns (CDN-style
   distribution to readers with no fabric identity) remains *possible* later.
   It would need an explicit anonymous visibility policy that covers the whole
@@ -567,7 +573,8 @@ unchanged.
    `cf deps update`. (Resolution = the compiling runtime's storage reads
    throughout — no phase adds a service endpoint.)
 3. **`cf publish` + host-qualified refs** — cross-host reads via
-   `spaceHostMap` routing, incl. the dynamic-route work item above.
+   ordinary per-space routing, including registration of the supplied host
+   before the referenced space opens.
 4. **Subpaths; `npm:`/esm.sh vendoring** on the same rails.
 
 ## Security considerations
@@ -660,6 +667,19 @@ unchanged.
    another space is different: it creates an ACL-scoped replica under the
    destination space's visibility and requires destination write authorization
    plus a permitted CFC flow.
+2. **Registration of a known space-to-host hint, within the current routing
+   model.** Use the ordinary per-space storage session rather than a short-lived
+   secondary session. A host-qualified operation registers its accepted hint
+   before opening the space. An operation that removes the host from its
+   canonical reference must persist the route in the home-space site table
+   after live registration accepts it and before committing the hostless
+   reference. A seeded route can only be confirmed. Once a late hint is
+   accepted, a different hint is a conflict even before the space opens. After
+   the space opens, only the hint already in effect can be confirmed. Any other
+   attempt fails rather than silently changing the route. The current registry
+   still needs the pre-open conflict guard. This settles how a known hint enters
+   the current session. It does not settle host discovery, availability,
+   failover, or space relocation.
 
 ## Open questions
 
@@ -693,7 +713,10 @@ unchanged.
    source. It could serve only patterns copied under that policy after CFC
    allows unrestricted disclosure. A URL or content identity alone must never
    qualify a pattern for either form of distribution.
-7. **Dynamic space→host routes.** `spaceHostMap` is fixed at storage
-   construction; host-qualified refs discovered mid-compile need dynamic
-   route registration (or a short-lived secondary session). Small, but it
-   touches session lifecycle — design alongside phase 3.
+7. **Host-route reliability and relocation.** The known-hint registration rule
+   does not say what to do when a recorded host is unavailable, a space moves,
+   or more than one host can serve the same space. Revisit how route changes
+   are authenticated, how stale site-table entries are replaced, whether
+   failover is allowed, and how an open session closes and reconnects without
+   losing or duplicating work. The site-table watcher currently races the first
+   space open, so reliable bootstrap ordering also remains part of this topic.

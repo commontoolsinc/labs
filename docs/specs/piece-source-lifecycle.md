@@ -92,8 +92,13 @@ its slug.
 A host in `cf://...` is a routing hint, not target identity. The transition
 retains the supplied URL in history and must persist the space DID to host route
 before it commits a hostless canonical target. If the route cannot be persisted,
-the origin transition fails without changing the piece. A later load hydrates
-that durable route before resolving the canonical fabric target.
+the origin transition fails without changing the piece. The transition also
+registers the accepted hint on the ordinary storage manager before opening the
+origin space. It does not create a secondary session. A conflicting seeded
+route or previously accepted late hint fails the transition. After the origin
+space opens, only the hint that was already registered can be confirmed. Any
+other route attempt fails the transition. A later load hydrates the durable
+route before resolving the canonical fabric target.
 
 An origin is not proof of the bytes currently running. The content-addressed
 `patternIdentity` is that proof. A fabric URL that names a content-addressed
@@ -373,6 +378,42 @@ granted the HTTPS endpoint permission to change the piece's code. Content
 addressing detects substitution after acceptance; it does not turn a new
 response from that endpoint into publisher-signed code.
 
+## Fabric route registration
+
+A host-qualified fabric URL supplies a route hint for a space DID. A lifecycle
+operation first validates the hint and registers it with the runtime's ordinary
+per-space storage manager. After registration accepts the route, the operation
+durably records it in the home-space site table. It then opens and resolves the
+origin space. The operation may commit a hostless canonical origin only after
+registration and persistence succeed.
+
+If persistence fails after registration, the transition leaves the piece
+unchanged. The accepted hint may remain available in that runtime until it
+stops. A retry can confirm the same hint and attempt the durable write again.
+The operation never persists a hint that the live registry has already
+rejected.
+
+The runtime does not open a short-lived secondary session for origin
+resolution. A configured route and an existing live connection remain stable
+for the current session. A seeded route can only be confirmed. Once a late hint
+is accepted, a different hint is a conflict even before the space opens. After
+the space opens, only the hint already in effect can be confirmed. Any other
+attempt fails without changing the piece. It does not silently reconnect or
+allow two live connections to disagree about where the same space resides.
+
+This policy settles ingestion of a known host hint. It does not yet make route
+discovery reliable. Host unavailability, replicated hosts, failover, stale
+site-table entries, authenticated space relocation, and closing and reopening
+an affected live session remain open design work.
+
+| Capability | Repository status | Remaining work |
+|---|---|---|
+| Register a late host hint before a space opens | **Implemented** | `StorageManager.registerSpaceHost` adds the route. A seed can only be confirmed, and an opened space accepts only its previously registered matching hint |
+| Keep an accepted late hint stable before opening | **Conflict guard required** | `StorageManager.registerSpaceHost` currently replaces a different late hint while the space remains unopened |
+| Hydrate durable hints in a new runtime | **Implemented** | The runtime processor watches the home-space site table and registers its entries. Callers that need ordering must also register through IPC before the first open |
+| Accept a host-qualified piece origin | **Origin integration required** | No source lifecycle operation persists and registers a `cf://` hint before resolving and committing the origin |
+| Recover from host failure or space movement | **Reliability design required** | There is no authoritative route-change, failover, or live close-and-reopen protocol |
+
 ## Reconciliation when a piece loads
 
 Loading a piece with an active origin performs these steps before starting its
@@ -568,6 +609,12 @@ The implementation evidence for this table is concentrated in:
   same-toolshed system-source patterns are checked in the background. This is a
   transitional implementation and migration input, not a target lifecycle
   exception.
+- Storage supports late registration of a space-to-host hint before that space
+  opens. The runtime processor hydrates durable hints from the home-space site
+  table. A seeded route can only be confirmed. An opened space accepts only its
+  previously registered matching hint. Before a space opens, however, a new
+  late hint currently replaces the previous one. Piece-origin operations do
+  not yet use this machinery.
 - Tooling exposes the immutable source ref, optional repository locator,
   authored entry path, and optional current `patternSource` origin separately.
 
@@ -596,9 +643,13 @@ The implementation evidence for this table is concentrated in:
    stable, fully qualified mutable entity or the exact content-addressed pattern
    reference. Make a trailing pin override the mutable target. Persist an
    accepted space-to-host route before removing the host from the canonical
-   target. Keep the supplied URL in history. Keep `patternRepository` separate
-   and clear it when newly generated or directly edited code no longer belongs
-   to that repository.
+   target. Validate and register the route before writing it to the site table,
+   then open the origin space. Fail a conflicting seeded route or previously
+   accepted late hint, including before the first open. Once the space opens,
+   fail any hint that was not already registered and matching. Do not create a
+   secondary session. Keep the supplied URL in history. Keep
+   `patternRepository` separate and clear it when newly generated or directly
+   edited code no longer belongs to that repository.
 4. Add origin reconciliation to the ordinary piece start path. Add an
    event-driven subscription while an unpinned mutable fabric origin is
    running. Do not subscribe for a content-addressed or explicitly pinned
@@ -628,8 +679,11 @@ The implementation evidence for this table is concentrated in:
    contents.
 8. Enforce CFC provenance on every cross-space source flow, including spaces
    on the same toolshed. Preserve ordinary read authorization and verify every
-   replicated source closure by content identity. Complete dynamic
-   space-to-host routing for origins in other toolsheds.
+   replicated source closure by content identity. Connect host-qualified origin
+   ingestion to the implemented late-bound route registry and durable site
+   table. Design reliable discovery, authenticated route replacement, host
+   failover, and explicit close-and-reopen behavior for unavailable or moved
+   spaces.
 9. Add CI golden replays that carry representative durable state from each
    supported prior source to its proposed replacement. These tests cover
    stable keys and causes, intended migration, and behavior that schemas cannot
@@ -640,10 +694,11 @@ The implementation evidence for this table is concentrated in:
    subscription cancellation, authorization loss, source unavailability,
    cross-space authorization and provenance, web and fabric URL policy,
    mutable versus content-addressed fabric targets, explicit pins, durable host
-   routing after reload, space-root creation from a default, changes to a
-   default after root creation, tracked and detached root baseline migration,
-   source-less legacy roots, relative-path normalization, root-interface
-   rejection, and reload behavior.
+   routing after reload, conflicts between late hints before a target opens,
+   route conflicts after a target opens, space-root creation from a default,
+   changes to a default after root creation, tracked and detached root baseline
+   migration, source-less legacy roots, relative-path normalization,
+   root-interface rejection, and reload behavior.
    Tests must prove the current source, active origin, revision head, retained
    closure, and revision log after each operation.
 
