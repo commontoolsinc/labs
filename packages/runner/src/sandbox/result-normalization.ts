@@ -41,17 +41,11 @@ const hasToJSON = (value: object): boolean =>
   "toJSON" in value &&
   typeof (value as { toJSON?: unknown }).toJSON === "function";
 
-/**
- * Returns whether a value is a plain container from this or another realm.
- * A foreign `Object.prototype` is not identity-equal to the host prototype,
- * but (like the host prototype) its own prototype is `null`. A custom class's
- * prototype instead inherits from that realm's `Object.prototype`.
- */
+/** Returns whether a value is an ordinary object or null-prototype record. */
 function isPlainRealmObject(value: object): boolean {
   if (hasToJSON(value)) return false;
   const proto = Object.getPrototypeOf(value);
-  return proto === null || proto === Object.prototype ||
-    Object.getPrototypeOf(proto) === null;
+  return proto === null || proto === Object.prototype;
 }
 
 function isSandboxResultContainer(

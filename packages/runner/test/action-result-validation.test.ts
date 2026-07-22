@@ -66,14 +66,15 @@ describe("normalizeSandboxResult", () => {
     expect(value.first).not.toBe(shared);
   });
 
-  it("copies a foreign-realm-shaped plain object onto the host prototype", () => {
-    const foreignObjectPrototype = Object.create(null);
-    const foreign = Object.assign(Object.create(foreignObjectPrototype), {
-      value: 1,
-    });
-    const normalized = normalizeSandboxResult(foreign);
-    expect(Object.getPrototypeOf(normalized.value)).toBe(Object.prototype);
-    expect((normalized.value as { value: number }).value).toBe(1);
+  it("rejects custom instances with null-rooted prototypes", () => {
+    class NullRooted {
+      value = 1;
+    }
+    Object.setPrototypeOf(NullRooted.prototype, null);
+
+    expect(() => normalizeSandboxResult(new NullRooted())).toThrow(
+      /Action returned a NullRooted/,
+    );
   });
 
   it("rejects enumerable state on realm-native leaves", () => {
