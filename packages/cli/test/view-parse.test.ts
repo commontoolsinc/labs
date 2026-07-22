@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import ts from "typescript";
-import { parseDocument, SAMPLE } from "./view-helpers.ts";
+import { parseDocument, SAMPLE, TS_PARSER_REGRESSION } from "./view-helpers.ts";
 import { highlightDocument } from "../lib/view/parse.ts";
 import type { Document, TokenClass } from "../lib/view/model.ts";
 
@@ -264,6 +264,40 @@ export default pattern((_) => {
       n.kind === "statement" && n.label.includes("cf-vstack")
     ),
     "no JSX fragment leaked as a statement node",
+  );
+});
+
+Deno.test("parse: .ts files use the TypeScript parser", () => {
+  const doc = parseDocument(TS_PARSER_REGRESSION, "fixture.ts");
+  assert(
+    doc.flatStructure.some((node) =>
+      node.kind === "closure" && node.name === "identity"
+    ),
+    "the generic arrow function is parsed as TypeScript",
+  );
+  assert(
+    classesOf(doc, "value").has("parameter"),
+    "the generic arrow function parameter is classified",
+  );
+});
+
+Deno.test("parse: a parser failure falls back to verbatim plain text", () => {
+  const doc = parseDocument(TS_PARSER_REGRESSION, "fixture.tsx");
+  assertEquals(doc.flatStructure, []);
+  assertEquals(doc.definitions.size, 0);
+  assertEquals(
+    doc.lines.map((line) => line.text).join("\n"),
+    TS_PARSER_REGRESSION,
+  );
+  for (const line of doc.lines) {
+    assertEquals(
+      line.spans,
+      line.text.length === 0 ? [] : [{ col: 0, text: line.text, cls: "plain" }],
+    );
+  }
+  assertEquals(
+    highlightDocument(TS_PARSER_REGRESSION, "fixture.tsx"),
+    doc.lines,
   );
 });
 

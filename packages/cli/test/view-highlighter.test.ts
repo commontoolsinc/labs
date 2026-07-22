@@ -11,7 +11,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { createHighlighter, highlightDocument } from "../lib/view/parse.ts";
 import type { Line } from "../lib/view/model.ts";
-import { SAMPLE } from "./view-helpers.ts";
+import { SAMPLE, TS_PARSER_REGRESSION } from "./view-helpers.ts";
 
 /** The index of the first line that differs in text or spans, or -1. Spans are
  * compared on every field the renderer reads. */
@@ -136,5 +136,48 @@ Deno.test("highlighter: an edit re-baselines correctly across a multi-line comme
     firstDiff(hl.update(closed), highlightDocument(closed, "m.ts")),
     -1,
     "closing the comment restores the lines below",
+  );
+});
+
+Deno.test("highlighter: parser failures fall back and later edits recover", () => {
+  const valid = "const view = <div>ready</div>;\n";
+
+  const highlighter = createHighlighter(valid, "fixture.tsx");
+  assertEquals(
+    firstDiff(
+      highlighter.update(TS_PARSER_REGRESSION),
+      highlightDocument(TS_PARSER_REGRESSION, "fixture.tsx"),
+    ),
+    -1,
+    "an incremental parse failure uses the full-parse fallback",
+  );
+  assertEquals(
+    firstDiff(
+      highlighter.update(valid),
+      highlightDocument(valid, "fixture.tsx"),
+    ),
+    -1,
+    "a later valid edit restores syntax highlighting",
+  );
+
+  const failedInitially = createHighlighter(
+    TS_PARSER_REGRESSION,
+    "fixture.tsx",
+  );
+  assertEquals(
+    firstDiff(
+      failedInitially.lines,
+      highlightDocument(TS_PARSER_REGRESSION, "fixture.tsx"),
+    ),
+    -1,
+    "an initial parse failure uses the full-parse fallback",
+  );
+  assertEquals(
+    firstDiff(
+      failedInitially.update(valid),
+      highlightDocument(valid, "fixture.tsx"),
+    ),
+    -1,
+    "an initially failed highlighter recovers",
   );
 });

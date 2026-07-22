@@ -4,10 +4,9 @@
  *
  * Parsing reuses `npm:typescript` — the exact parser the ts-transformers and
  * js-compiler packages run — so token boundaries, block extents, closures and
- * type positions match what the compiler sees. Nothing here type-checks; it is
- * a pure syntactic pass (`ts.createSourceFile`), which is robust against the
- * concatenated multi-file blobs that `--show-transformed` emits (duplicate
- * declarations across sections are fine for a parser).
+ * type positions match what the compiler sees. Nothing here type-checks. The
+ * filename selects TypeScript or TSX syntax. A parser failure returns verbatim
+ * plain text so the pager remains usable.
  *
  * Three products come out of one parse:
  *   1. Per-line coloured {@link Span}s (full-fidelity: every character is
@@ -40,6 +39,7 @@ import {
 import { isBuilderName, isCallName, isSyntheticName } from "./vocab.ts";
 
 const SK = ts.SyntaxKind;
+const DEFAULT_FILE_NAME = "transformed.tsx";
 
 const STORAGE_KEYWORDS = new Set<ts.SyntaxKind>([
   SK.ConstKeyword,
@@ -141,18 +141,20 @@ interface GlobalSpan {
   bracketDepth?: number;
 }
 
-/** Parse `text` into the document model. `fileName` only affects diagnostics. */
+/** Parse `text` into the document model. */
 export function parseDocument(
   text: string,
-  fileName = "transformed.ts",
+  fileName = DEFAULT_FILE_NAME,
 ): Document {
-  // A Markdown file is coloured as Markdown, not parsed as TypeScript.
-  if (isMarkdownPath(fileName)) return markdownDocument(text);
-  // Parse as TSX: transformed pattern output keeps its JSX (`<cf-vstack>`,
-  // `<p>…</p>`), and in plain-TS mode the parser reads `<` as a comparison and
-  // shreds every statement from the first tag onward. The transformer emits
-  // `as` casts, never `<T>` prefix casts, so TSX has no ambiguity to lose on
-  // the non-JSX sections.
+  try {
+    if (isMarkdownPath(fileName)) return markdownDocument(text);
+    return parseTypeScriptDocument(text, fileName);
+  } catch {
+    return plainDocument(text);
+  }
+}
+
+function parseTypeScriptDocument(text: string, fileName: string): Document {
   const sf = parseSourceFile(text, fileName);
   const lineStarts = computeLineStarts(text);
   const lineOf = (offset: number) => lineIndexOf(lineStarts, offset);
@@ -200,31 +202,59 @@ export function parseDocument(
  */
 export function highlightDocument(
   text: string,
-  fileName = "transformed.ts",
+  fileName = DEFAULT_FILE_NAME,
 ): Line[] {
-  if (isMarkdownPath(fileName)) return highlightMarkdownLines(text);
-  const sf = parseSourceFile(text, fileName);
-  const lineStarts = computeLineStarts(text);
-  return highlightFromSourceFile(
-    sf,
-    text,
-    lineStarts,
-    collectSchemaObjects(sf),
-  );
+  try {
+    if (isMarkdownPath(fileName)) return highlightMarkdownLines(text);
+    const sf = parseSourceFile(text, fileName);
+    const lineStarts = computeLineStarts(text);
+    return highlightFromSourceFile(
+      sf,
+      text,
+      lineStarts,
+      collectSchemaObjects(sf),
+    );
+  } catch {
+    return plainLines(text);
+  }
 }
 
 function parseSourceFile(text: string, fileName: string): ts.SourceFile {
-  // Parse as TSX: transformed pattern output keeps its JSX, and in plain-TS mode
-  // the parser reads `<` as a comparison and shreds every statement from the
-  // first tag onward. The transformer emits `as` casts, never `<T>` prefix
-  // casts, so TSX has no ambiguity to lose on the non-JSX sections.
   return ts.createSourceFile(
     fileName,
     text,
     ts.ScriptTarget.Latest,
     /* setParentNodes */ true,
-    ts.ScriptKind.TSX,
+    scriptKindFor(fileName),
   );
+}
+
+function scriptKindFor(fileName: string): ts.ScriptKind {
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith(".tsx")) return ts.ScriptKind.TSX;
+  if (/\.[cm]?ts$/.test(lower)) return ts.ScriptKind.TS;
+  // Inputs without a TypeScript extension can still be transformed output
+  // containing JSX.
+  return ts.ScriptKind.TSX;
+}
+
+function plainLines(text: string): Line[] {
+  return text.split("\n").map((line) => ({
+    text: line,
+    spans: line.length === 0
+      ? []
+      : [{ col: 0, text: line, cls: "plain" as const }],
+  }));
+}
+
+function plainDocument(text: string): Document {
+  return {
+    text,
+    lines: plainLines(text),
+    structure: [],
+    flatStructure: [],
+    definitions: new Map(),
+  };
 }
 
 function highlightFromSourceFile(
@@ -256,10 +286,54 @@ export interface Highlighter {
  * top-level statement boundary is at bracket depth zero and outside any
  * multi-line token (comment, template), so a bounded rebuild from there is
  * identical to a full parse of the whole document.
+ *
+ * A parsing or highlighting failure returns exact plain-text lines. The next
+ * edit builds a fresh parser and restores syntax highlighting when it succeeds.
  */
 export function createHighlighter(
   initial: string,
-  fileName = "transformed.ts",
+  fileName = DEFAULT_FILE_NAME,
+): Highlighter {
+  let text = initial;
+  let highlighter = tryCreateTypeScriptHighlighter(initial, fileName);
+  let lines: readonly Line[] = highlighter?.lines ?? plainLines(initial);
+
+  return {
+    get lines() {
+      return lines;
+    },
+    update(next: string): readonly Line[] {
+      if (next === text) return lines;
+      text = next;
+      if (highlighter) {
+        try {
+          lines = highlighter.update(next);
+          return lines;
+        } catch {
+          highlighter = undefined;
+        }
+      }
+      highlighter = tryCreateTypeScriptHighlighter(next, fileName);
+      lines = highlighter?.lines ?? plainLines(next);
+      return lines;
+    },
+  };
+}
+
+function tryCreateTypeScriptHighlighter(
+  initial: string,
+  fileName: string,
+): Highlighter | undefined {
+  try {
+    return createTypeScriptHighlighter(initial, fileName);
+  } catch {
+    return undefined;
+  }
+}
+
+function createTypeScriptHighlighter(
+  initial: string,
+  fileName: string,
 ): Highlighter {
   let sf = parseSourceFile(initial, fileName);
   let text = initial;

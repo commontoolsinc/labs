@@ -126,7 +126,7 @@ export function buildView(
       editSource: diffSource(ws, edit, cache, realGit(safeCwd())),
     };
   }
-  const doc = parseDocument(text, file ?? "transformed.ts");
+  const doc = parseDocument(text, file ?? "transformed.tsx");
   return {
     doc,
     semantics: () =>
