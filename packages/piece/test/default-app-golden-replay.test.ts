@@ -13,14 +13,12 @@ import {
   PiecesController,
 } from "../src/ops/pieces-controller.ts";
 
-// Golden replay: the state-survival gate the flag flip (#4619) is waiting on.
+// Golden replay for non-home root state across an in-place update.
 //
-// The other swap tests prove the ENTITY and patternIdentity swap in place; this
-// one proves the thing those don't: durable state seeded under version N is
-// still there, intact, after the root rolls to N+1 — no crash, no loss. It
-// stands in for "open a real non-home space, add some notes, ship a new
-// default-app, reopen" — the scenario both reviewers asked to see mechanically
-// verified before this defaults on.
+// The other swap tests prove that patternIdentity changes while the piece
+// entity stays the same. This test seeds representative durable state under
+// version N and updates the running root to version N+1. It verifies that the
+// state remains intact and that the new code runs over it.
 
 const signer = await Identity.fromPassphrase("default-app golden replay");
 

@@ -256,6 +256,11 @@ propagate](#how-flags-propagate).
   identity/source/import revisions fails closed at the compiled-identity
   comparison. See
   [`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md).
+  Golden replays are release tests for semantic state continuity. The updater
+  does not try to infer stable-key, stable-cause, migration, or behavioral
+  compatibility during deployment. The target general lifecycle separately
+  rejects known structural schema incompatibilities before an unattended
+  source transition.
 - **Current default and planned end state.** The runner built-in default is off
   like every flag in this category; the shell build injects `true` unless the
   define is set to `"false"`, so the deployed product (and local shell dev
