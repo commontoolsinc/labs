@@ -384,12 +384,12 @@ interpret must fail the frame rather than reach the session cache as data.
 After expansion, downstream consumers observe the historical `SessionSync`
 shape with inline schemas and no `schemaTable` field.
 
-Earlier revisions of this encoding also interned the `schema` field of legacy
-`$alias` bindings still present in stored documents. Current servers leave
-alias schemas inline (the runner is retiring `$alias` from persisted data),
-but clients deployed against the earlier revision continue to expand
-references at alias schema positions, so those positions remain covered by
-the reservation rule below.
+Earlier revisions of this encoding also interned the `schema` field of
+`$alias` records. Those records are Pattern-binding vocabulary, not links —
+their `schema` field is binding metadata — and saved patterns continue to
+carry them, so current servers leave alias schemas inline. Clients deployed
+against the earlier revision continue to expand references at alias schema
+positions, so those positions remain covered by the reservation rule below.
 
 The `schema-ref@2:` prefix is reserved in the `schema` field of `link@1` and
 legacy `$alias` payloads. Link recognition follows the canonical cell-rep

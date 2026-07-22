@@ -25,15 +25,15 @@ const isPlainRecord = (value: FabricValue): value is FabricPlainObject =>
  * `modernCellRep` regimes are handled transparently — legacy envelope or
  * `FabricLink` instance alike.
  *
- * Legacy `$alias` bindings are ordinary data to this walk: their `schema`
- * field is not a position, so it is never interned and never expanded. The
- * runner is retiring `$alias` from persisted data, and stored docs that
- * still carry it just travel with their alias schemas inline (transport
- * compression absorbs most of the byte cost). Clients shipped BEFORE this
- * change do interpret alias schema positions, so the reserved-ref validator
- * keeps refusing refs there — see {@link findSyncSchemaRef} in
- * sync-schema-ref.ts, which deliberately checks a superset of this walk's
- * positions.
+ * `$alias` records are Pattern-binding vocabulary, not links (#4895):
+ * their `schema` field is binding metadata, not a link-schema position, so
+ * this walk never interns or expands it. Saved patterns keep emitting
+ * alias bindings until a sigil binding encoding replaces them, so those
+ * schemas travel inline indefinitely (transport compression absorbs most
+ * of the byte cost). Clients shipped BEFORE this change do interpret alias
+ * schema positions, so the reserved-ref validator keeps refusing refs
+ * there — see {@link findSyncSchemaRef} in sync-schema-ref.ts, which
+ * deliberately checks a superset of this walk's positions.
  *
  * Schema VALUES are opaque to this walk: after a schema position is mapped,
  * the traversal does not descend into the schema (or its mapped

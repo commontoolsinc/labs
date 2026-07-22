@@ -214,10 +214,10 @@ Deno.test("sync schema table preserves own __proto__ fields", () => {
 });
 
 Deno.test("sync schema table leaves legacy alias schemas inline", () => {
-  // The mapper no longer treats `$alias.schema` as a schema position: the
-  // runner is retiring `$alias` from persisted data, and docs that still
-  // carry it travel with their alias schemas inline. The alias record IS
-  // ordinary data, though — a link nested inside its schema value is a
+  // The mapper no longer treats `$alias.schema` as a schema position:
+  // `$alias` records are Pattern-binding vocabulary, not links, and their
+  // schema field is binding metadata that travels inline. The alias record
+  // IS ordinary data, though — a link nested inside its schema value is a
   // live position and interns normally.
   const aliasSchema: JSONSchema = {
     type: "object",
