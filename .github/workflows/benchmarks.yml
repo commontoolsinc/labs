@@ -39,7 +39,8 @@ jobs:
             packages/utils/test/deep-equal.bench.ts \
             packages/fuse/entity-projection.bench.ts \
             packages/memory/test/v2-entity-id-list.bench.ts \
-            > bench-results/results.json
+            > bench-results/results.json \
+            2> >(tee bench-results/diagnostics.log >&2)
 
       # Fail the run if any bench file wrote non-JSON to stdout, or if the
       # report lists no benches. The dashboard samples successful runs only,
