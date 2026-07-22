@@ -5,7 +5,11 @@ import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
-import { jsonFromValue } from "@/codec-json/index.ts";
+import {
+  JsonEncodingContext,
+  jsonFromValue,
+  seemsLikeJsonEncodedFabricValue,
+} from "@/codec-json/index.ts";
 import {
   DATA_URI_MEDIA_TYPE,
   dataUriFromValue,
@@ -41,7 +45,7 @@ describe("data-uri-codec", () => {
       const payload = new TextDecoder().decode(
         fromBase64url(uri.slice(uri.indexOf(",") + 1)),
       );
-      expect(payload.startsWith("fvj1:")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue(payload)).toBe(true);
     });
 
     // The standard encoding canonicalizes key order, so the minted id is a
@@ -138,13 +142,17 @@ describe("data-uri-codec", () => {
       expect(() => valueFromDataUriPayloadText("")).toThrow();
     });
 
-    it("decodes encoded-`FabricValue` (`fvj1:`) payload text", () => {
+    it("decodes encoded-`FabricValue` payload text", () => {
       const value = { value: { b: 1, a: [true, null, "x"] } };
       expect(valueFromDataUriPayloadText(jsonFromValue(value))).toEqual(value);
     });
 
-    it("rejects invalid payload text past the `fvj1:` tag", () => {
-      expect(() => valueFromDataUriPayloadText("fvj1:{nope")).toThrow();
+    it("rejects invalid payload text past the codec tag", () => {
+      expect(() =>
+        valueFromDataUriPayloadText(
+          JsonEncodingContext.wrapEncodedValueForTesting("{nope", true),
+        )
+      ).toThrow();
     });
   });
 
@@ -219,7 +227,7 @@ describe("data-uri-codec", () => {
       });
     });
 
-    describe("encoded-`FabricValue` (`fvj1:`) payloads", () => {
+    describe("encoded-`FabricValue` payloads", () => {
       it("decodes a payload", () => {
         const value = { value: { b: 1, a: [true, null, "x"] } };
         expect(valueFromDataUri(uriOf(jsonFromValue(value)))).toEqual(
@@ -277,7 +285,13 @@ describe("data-uri-codec", () => {
       });
 
       it("rejects a malformed payload past the tag", () => {
-        expect(() => valueFromDataUri(uriOf("fvj1:{nope"))).toThrow();
+        expect(() =>
+          valueFromDataUri(
+            uriOf(
+              JsonEncodingContext.wrapEncodedValueForTesting("{nope", true),
+            ),
+          )
+        ).toThrow();
       });
     });
   });
