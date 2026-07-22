@@ -78,6 +78,22 @@ export type GeneratedArtFetchState =
   | "requested"
   | "";
 
+export const deriveGeneratedArtFetchState = (
+  prompt: string | undefined,
+  sourceUrl: string | undefined,
+  shouldGenerate: boolean | undefined,
+  hasGeneratedImage: boolean,
+  pending: boolean,
+  hasError: boolean,
+): GeneratedArtFetchState => {
+  if (!(prompt ?? "").trim()) return "";
+  if (safeImageUrl(sourceUrl)) return "stored";
+  if (shouldGenerate === false) return "";
+  if (hasGeneratedImage) return "generated";
+  if (pending) return "pending";
+  return hasError ? "error" : "requested";
+};
+
 /**
  * Inputs for the generated thumbnail sub-pattern.
  *
@@ -166,14 +182,16 @@ export default pattern<GeneratedArtInput, GeneratedArtOutput>(
     });
     const hasSourceUrl = computed(() => safeImageUrl(sourceUrl) !== "");
     const hasGeneratedImage = computed(() => !!generatedArt.result?.bytes);
-    const fetchState = computed(() => {
-      if (!(prompt ?? "").trim()) return "";
-      if (safeImageUrl(sourceUrl)) return "stored";
-      if (shouldGenerate === false) return "";
-      if (generatedArt.result?.bytes) return "generated";
-      if (generatedArt.pending) return "pending";
-      return generatedArt.error ? "error" : "requested";
-    });
+    const fetchState = computed(() =>
+      deriveGeneratedArtFetchState(
+        prompt,
+        sourceUrl,
+        shouldGenerate,
+        !!generatedArt.result?.bytes,
+        !!generatedArt.pending,
+        !!generatedArt.error,
+      )
+    );
 
     return {
       [NAME]: "Generated lunch art",

@@ -1,5 +1,9 @@
 import { computed, pattern, UI } from "commonfabric";
-import GeneratedArt from "./generated-art.tsx";
+import GeneratedArt, {
+  deriveGeneratedArtFetchState,
+  generatedImageUrlFor,
+  safeImageUrl,
+} from "./generated-art.tsx";
 
 const isRecord = (value: unknown): value is Record<PropertyKey, unknown> =>
   typeof value === "object" && value !== null;
@@ -136,8 +140,83 @@ export default pattern(() => {
     findNodeByName(generating[UI], "cf-image") !== undefined
   );
 
+  const assert_safe_image_url_accepts_web_urls = computed(() =>
+    safeImageUrl(" https://example.com/art.png ") ===
+      "https://example.com/art.png" &&
+    safeImageUrl("http://example.com/art.png") ===
+      "http://example.com/art.png"
+  );
+
+  const assert_safe_image_url_rejects_unsafe_or_invalid_urls = computed(() =>
+    safeImageUrl("javascript:alert(1)") === "" &&
+    safeImageUrl("not a URL") === ""
+  );
+
+  const assert_generated_url_encodes_title_and_size = computed(() => {
+    const url = generatedImageUrlFor("Tacos & Tea");
+    return url.includes("Tacos%20%26%20Tea") &&
+      url.endsWith("&width=128&height=128");
+  });
+
+  const assert_fetch_state_lifecycle = computed(() =>
+    deriveGeneratedArtFetchState("", undefined, true, false, false, false) ===
+      "" &&
+    deriveGeneratedArtFetchState(
+        "Sushi",
+        STORED_IMAGE,
+        true,
+        false,
+        false,
+        false,
+      ) === "stored" &&
+    deriveGeneratedArtFetchState(
+        "Sushi",
+        undefined,
+        false,
+        false,
+        false,
+        false,
+      ) === "" &&
+    deriveGeneratedArtFetchState(
+        "Sushi",
+        undefined,
+        true,
+        true,
+        false,
+        false,
+      ) === "generated" &&
+    deriveGeneratedArtFetchState(
+        "Sushi",
+        undefined,
+        true,
+        false,
+        true,
+        false,
+      ) === "pending" &&
+    deriveGeneratedArtFetchState(
+        "Sushi",
+        undefined,
+        true,
+        false,
+        false,
+        true,
+      ) === "error" &&
+    deriveGeneratedArtFetchState(
+        "Sushi",
+        undefined,
+        true,
+        false,
+        false,
+        false,
+      ) === "requested"
+  );
+
   return {
     tests: [
+      { assertion: assert_safe_image_url_accepts_web_urls },
+      { assertion: assert_safe_image_url_rejects_unsafe_or_invalid_urls },
+      { assertion: assert_generated_url_encodes_title_and_size },
+      { assertion: assert_fetch_state_lifecycle },
       { assertion: assert_stored_image_renders_directly },
       { assertion: assert_gated_instance_shows_fallback_only },
       { assertion: assert_empty_prompt_shows_fallback_only },
