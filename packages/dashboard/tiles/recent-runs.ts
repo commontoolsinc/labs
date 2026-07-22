@@ -4,7 +4,13 @@
 // Full-width. The tile's aggregate status is bad if the latest completed run
 // failed, concerning if a failure sits within the recent window but the tip
 // recovered, else good.
-import type { Run, Status, Tile, TileView } from "../types.ts";
+import {
+  runSource,
+  type Run,
+  type Status,
+  type Tile,
+  type TileView,
+} from "../types.ts";
 import { concDot, escapeHtml, landingHref } from "../lib.ts";
 import {
   CI_WORKFLOW,
@@ -80,8 +86,8 @@ export const recentRuns: Tile = {
   intervalMs: 30_000,
   wide: true,
   runSources: [
-    { repo: REPO, workflow: CI_WORKFLOW },
-    { repo: LOOM_REPO, workflow: LOOM_CI_WORKFLOW },
+    runSource(REPO, CI_WORKFLOW),
+    runSource(LOOM_REPO, LOOM_CI_WORKFLOW),
   ],
   async collect(ctx): Promise<TileView> {
     // Two shared bases (labs + loom), merged newest-first and cut to the most

@@ -2,7 +2,7 @@
 // hand-made Ctx. No server, no network, no subprocess — the CI tiles get canned
 // runs and the token-gated tiles get an empty env (their gray-out contract).
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import type { Ctx, Run } from "./types.ts";
+import { runSource, type Ctx, type Run } from "./types.ts";
 import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO } from "./config.ts";
 import { labsCi, loomCi } from "./tiles/main-build.ts";
 import { labsCiTrust, loomCiTrust } from "./tiles/ci-trust.ts";
@@ -297,6 +297,13 @@ Deno.test("tile labels: the labs/loom ci family is renamed and paired", async ()
   assertEquals((await loomCiTrust.collect(one)).label, "loom ci trust");
   assertEquals((await labsCiDuration.collect(one)).label, "labs ci duration");
   assertEquals((await loomCiDuration.collect(one)).label, "loom ci duration");
+});
+
+Deno.test("runSource creates workflow snapshot metadata", () => {
+  assertEquals(runSource(REPO, CI_WORKFLOW), {
+    repo: REPO,
+    workflow: CI_WORKFLOW,
+  });
 });
 
 Deno.test("CI tiles declare the workflow snapshots that drive them", () => {

@@ -2,7 +2,7 @@
 // unknown before the first completed run is known. A newer in-flight run is a
 // minor secondary facet. Drills through to the main commit history. One factory
 // builds both the labs and loom instances against their own repo + workflow.
-import type { Status, Tile, TileView } from "../types.ts";
+import { runSource, type Status, type Tile, type TileView } from "../types.ts";
 import { escapeHtml, humanDur } from "../lib.ts";
 import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO } from "../config.ts";
 
@@ -11,7 +11,7 @@ function makeBuildTile(opts: { id: string; label: string; repo: string; workflow
   return {
     id: opts.id,
     intervalMs: 30_000,
-    runSources: [{ repo: opts.repo, workflow: opts.workflow }],
+    runSources: [runSource(opts.repo, opts.workflow)],
     async collect(ctx): Promise<TileView> {
       const runs = await ctx.runsFor(opts.repo, opts.workflow);
       const completed = runs.filter((r) => r.status === "completed" && r.conclusion);

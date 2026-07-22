@@ -24,10 +24,11 @@ export interface Route {
   handler(req: Request, url: URL): Response | Promise<Response>;
 }
 
-export interface RunSource {
-  repo: string;
-  workflow: string;
+export function runSource(repo: string, workflow: string) {
+  return { repo, workflow } as const;
 }
+
+export type RunSource = ReturnType<typeof runSource>;
 
 export interface Tile {
   id: string; // unique, stable key for this tile's scheduling + latest-view state

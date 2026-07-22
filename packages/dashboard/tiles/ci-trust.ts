@@ -2,7 +2,13 @@
 // flakiness signal), with a history strip for every run in the fetched window.
 // One factory builds both the labs and loom instances against their own repo +
 // workflow.
-import type { Run, Status, Tile, TileView } from "../types.ts";
+import {
+  runSource,
+  type Run,
+  type Status,
+  type Tile,
+  type TileView,
+} from "../types.ts";
 import { strip } from "../lib.ts";
 import { CI_RUNS_MAX, CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO, TRUST_COLS, TRUST_GOOD, TRUST_WARN } from "../config.ts";
 
@@ -18,7 +24,7 @@ function makeCiTrust(opts: { id: string; label: string; repo: string; workflow: 
   return {
     id: opts.id,
     intervalMs: 30_000,
-    runSources: [{ repo: opts.repo, workflow: opts.workflow }],
+    runSources: [runSource(opts.repo, opts.workflow)],
     async collect(ctx): Promise<TileView> {
       const runs = await ctx.runsFor(opts.repo, opts.workflow);
       const scored = runs.slice(0, CI_RUNS_MAX).map((run) => ({
