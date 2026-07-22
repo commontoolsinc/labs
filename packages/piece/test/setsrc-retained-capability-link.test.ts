@@ -1,6 +1,14 @@
 /**
- * TEMPORARY end-to-end verification (tmp-e2e-*): `cf piece setsrc` over a
- * piece holding a LIVE, LINKED injected SQLite capability input.
+ * End-to-end: `cf piece setsrc` over a piece holding a LIVE, LINKED injected
+ * SQLite capability input.
+ *
+ * Regression coverage for the restore path rejecting every retained link into
+ * an `asCell`-declaring input slot ("sqlite capability cannot be exposed as an
+ * ordinary alias"): raw storage holds SERIALIZED links, which are never
+ * `isCell()`, so a piece with a linked capability input could be deployed but
+ * never source-updated again. The fix is the `linksPreservedVerbatim` option
+ * on `assertSuppliedLinkSchemasCompatible`, set at the `setPattern` call site;
+ * removing it there fails this test with exactly that error.
  *
  * Everything here is real except the network hop: the emulated StorageManager
  * is a loopback client against a real MemoryV2Server, so
@@ -19,6 +27,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
+  type Cell,
   createRef,
   entityIdFrom,
   isLink,
@@ -27,15 +36,22 @@ import {
 } from "@commonfabric/runner";
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-// The piece package's import map has no `@db/sqlite` entry (and this scratch
-// file must not edit the tracked deno.jsonc), so pin the same JSR version the
-// rest of the workspace pins.
+// Test-only dependency; pinned in this package's deno.jsonc (see the comment
+// on the entry there).
 import { Database } from "@db/sqlite";
 import { PieceManager } from "../src/manager.ts";
 import { PieceController } from "../src/ops/piece-controller.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
-const signer = await Identity.fromPassphrase("tmp-e2e-setsrc-sqlite");
+const signer = await Identity.fromPassphrase("setsrc-e2e-sqlite");
+
+type Row = { k: string; v: string };
+
+/** The result shape every version of the test pattern below produces. */
+interface PanelResult {
+  version: string;
+  rows: { pending: boolean; result?: Row[]; error?: unknown };
+}
 
 /** Byte-for-byte the derivation in packages/cli/lib/sqlite-source.ts. */
 function deriveDiskHandleId(space: string, absPath: string): string {
@@ -58,7 +74,7 @@ function seedDiskDb(path: string): void {
  * A genuinely different program per version: different NAME, different
  * `version` literal, and a different LIMIT so the query itself changes (the
  * read-through assertion can then tell v1 from v2 by row COUNT, not just by a
- * string the pattern echoes).
+ * string the pattern echoes). Produces {@link PanelResult}.
  */
 function panelProgram(version: string, limit: number): RuntimeProgram {
   return {
@@ -105,7 +121,7 @@ describe("setsrc over a retained injected sqlite capability link", () => {
     });
     const session = await createSession({
       identity: signer,
-      spaceName: "tmp-e2e-setsrc-" + crypto.randomUUID(),
+      spaceName: "setsrc-e2e-" + crypto.randomUUID(),
     });
     manager = new PieceManager(session, runtime);
     await manager.synced();
@@ -132,7 +148,7 @@ describe("setsrc over a retained injected sqlite capability link", () => {
     const piece = await manager.runPersistent(
       v1,
       {},
-      "tmp-e2e-setsrc-piece-" + crypto.randomUUID(),
+      "setsrc-e2e-piece-" + crypto.randomUUID(),
       { start: true },
     );
     const pieceId = entityRefToString(piece.entityId);
@@ -160,15 +176,10 @@ describe("setsrc over a retained injected sqlite capability link", () => {
     await runtime.idle();
     await manager.synced();
 
-    const result = manager.getResult(piece);
+    const result = manager.getResult(piece) as Cell<PanelResult>;
     const cancel = result.sink(() => {});
     try {
-      const rowsOf = (): { k: string; v: string }[] | undefined => {
-        const raw = result.key("rows").key("result").get() as
-          | { k: string; v: string }[]
-          | undefined;
-        return raw;
-      };
+      const rowsOf = () => result.key("rows").key("result").get();
       const waitFor = async (
         desc: string,
         pred: () => boolean,
@@ -251,11 +262,6 @@ describe("setsrc over a retained injected sqlite capability link", () => {
           (rowsOf()?.length ?? -1) === 1,
       );
       expect(rowsOf()).toEqual([{ k: "a", v: "1" }]);
-
-      console.log(
-        "SETSRC_E2E_OK version=" + result.key("version").get() +
-          " rows=" + JSON.stringify(rowsOf()),
-      );
     } finally {
       cancel();
     }
@@ -277,7 +283,9 @@ describe("setsrc over a retained injected sqlite capability link", () => {
       await freshManager.synced();
       const freshPieces = new PiecesController(freshManager);
       const freshPiece = await freshPieces.get(pieceId, true);
-      const freshResult = freshManager.getResult(freshPiece.getCell());
+      const freshResult = freshManager.getResult(
+        freshPiece.getCell(),
+      ) as Cell<PanelResult>;
       const stop = freshResult.sink(() => {});
       try {
         const deadline = Date.now() + 20_000;
@@ -291,7 +299,6 @@ describe("setsrc over a retained injected sqlite capability link", () => {
         }
         expect(freshResult.key("version").get()).toBe("v3");
         expect(rows).toEqual([{ k: "a", v: "1" }]);
-        console.log("SETSRC_E2E_RELOAD_OK rows=" + JSON.stringify(rows));
       } finally {
         stop();
       }
