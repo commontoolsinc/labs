@@ -41,6 +41,10 @@ import {
   encodeFuseComponent,
   encodeFusePathSegments,
 } from "./path-codec.ts";
+import {
+  collectVirtualDirectorySnapshot,
+  type DirectorySnapshotEntry,
+} from "./directory-handles.ts";
 import type { JSONSchema } from "@commonfabric/api";
 import type { PieceManager } from "@commonfabric/piece";
 import type {
@@ -165,6 +169,7 @@ type ResolveLink = (value: unknown, depth: number) => string | null;
 
 export interface CellBridgeOptions {
   cfcAnnotations?: boolean;
+  maxEntityProjections?: number;
   projectionGeneration?: string;
   statusProvider?: () => Record<string, unknown>;
   onCfcProjectionRebuilt?: () => void;
@@ -222,8 +227,7 @@ export interface SpaceState {
   pieceControllers: Map<string, PieceController>; // name → controller
   entityControllers: Map<string, PieceController>; // entity ID → controller
   allPieceIds: Set<string>;
-  entityIds: Set<string>;
-  hasCompleteEntityList: boolean;
+  entityIds: Set<string>; // entity IDs with cached exact projections
   piecesHydrated: boolean;
   piecesMaterializing: boolean;
   pieceListSubscribed: boolean;
@@ -261,6 +265,9 @@ interface UnhydratedEntityRootInfo {
   spaceName: string;
   entityId: string;
 }
+
+const ENTITY_ID_PAGE_SIZE = 1_000;
+export const DEFAULT_MAX_ENTITY_PROJECTIONS = 128;
 
 interface ScheduledPropRebuild {
   cell: Cell<unknown>;
@@ -324,6 +331,7 @@ export class CellBridge {
     UnhydratedEntityRootInfo
   >();
   private pendingEntityHydrations = new Map<bigint, Promise<boolean>>();
+  private entityProjectionLru = new Map<bigint, UnhydratedEntityRootInfo>();
   private piecePropRoots = new Map<bigint, PiecePropRootInfo>();
   private hydratedPieceProps = new Map<bigint, Set<"input" | "result">>();
   /** In-flight hydration promises keyed by `${pieceIno}-${propName}`. */
@@ -341,6 +349,7 @@ export class CellBridge {
   private statusProvider: (() => Record<string, unknown>) | undefined;
   private onCfcProjectionRebuilt: (() => void) | undefined;
   private managerLoader: CellBridgeOptions["loadManager"];
+  private maxEntityProjections: number;
 
   private startedAt = new Date().toISOString();
   /**
@@ -396,7 +405,8 @@ export class CellBridge {
           if (state.piecesHydrated) {
             await state.pieces.getAllPieces();
           } else {
-            await manager.listEntityIds();
+            const page = await manager.listEntityIdPage?.({ limit: 1 });
+            if (page === undefined) await manager.listEntityIds();
           }
           this._disconnected = false;
           this._disconnectCount = 0;
@@ -437,6 +447,14 @@ export class CellBridge {
     this.statusProvider = options.statusProvider;
     this.onCfcProjectionRebuilt = options.onCfcProjectionRebuilt;
     this.managerLoader = options.loadManager;
+    this.maxEntityProjections = options.maxEntityProjections ??
+      DEFAULT_MAX_ENTITY_PROJECTIONS;
+    if (
+      !Number.isSafeInteger(this.maxEntityProjections) ||
+      this.maxEntityProjections < 1
+    ) {
+      throw new RangeError("maxEntityProjections must be a positive integer");
+    }
   }
 
   init(config: {
@@ -755,10 +773,8 @@ export class CellBridge {
     let state: SpaceState | undefined;
     try {
       manager = await this.createSpaceManager(spaceName);
-      const listedIds = await manager.listEntityIds();
       state = await this.buildSpaceTree(spaceName, manager);
 
-      this.applyEntityList(state, spaceName, listedIds, state.allPieceIds);
       this.updateIndexJson(state);
       this.updatePiecesJson(state);
       this.spaces.set(spaceName, state);
@@ -802,6 +818,7 @@ export class CellBridge {
     for (const [, ino] of this.tree.getChildren(state.entitiesIno)) {
       this.unhydratedEntityRoots.delete(ino);
       this.pendingEntityHydrations.delete(ino);
+      this.entityProjectionLru.delete(ino);
       this.unregisterPieceRoot(ino);
     }
     this.pendingPieceHydrations.delete(spaceName);
@@ -899,6 +916,17 @@ export class CellBridge {
     return { ...info, state: this.spaces.get(info.spaceName) };
   }
 
+  private isEntityProjectionRoot(ino: bigint): boolean {
+    return this.unhydratedEntityRoots.has(ino) ||
+      this.pieceRoots.get(ino)?.rootKind === "entities";
+  }
+
+  private isEntityProjectionDirectory(ino: bigint): boolean {
+    if (this.isEntityProjectionRoot(ino)) return true;
+    const prop = this.piecePropRoots.get(ino);
+    return prop !== undefined && this.isEntityProjectionRoot(prop.pieceIno);
+  }
+
   shouldPrepareLookup(parentIno: bigint, name: string): boolean {
     if (this.stateForPiecesDir(parentIno)) return true;
     if (name.startsWith(".") && name !== ".handlers") return false;
@@ -917,6 +945,8 @@ export class CellBridge {
 
   shouldSynchronizeLookup(parentIno: bigint): boolean {
     return this.stateForPiecesDir(parentIno) !== undefined ||
+      this.isEntitiesDir(parentIno) ||
+      this.isEntityProjectionDirectory(parentIno) ||
       this.piecePropRoots.has(parentIno);
   }
 
@@ -948,7 +978,7 @@ export class CellBridge {
         await this.hydratePieceProp(parentIno, "result");
         return true;
       }
-      return false;
+      return this.tree.lookup(parentIno, name) !== undefined;
     }
 
     const propInfo = this.piecePropRoots.get(parentIno);
@@ -969,16 +999,11 @@ export class CellBridge {
 
     const entities = this.stateForEntitiesDir(ino);
     if (entities) {
-      await this.syncEntityListOnce(
-        entities.state,
-        entities.spaceName,
-        entities.state.allPieceIds,
-      );
       return true;
     }
 
-    if (this.unhydratedEntityRoots.has(ino)) {
-      if (!await this.hydrateEntityRoot(ino)) return false;
+    if (this.isEntityProjectionDirectory(ino)) {
+      return true;
     }
 
     const pieceInfo = this.getPieceInfo(ino);
@@ -995,6 +1020,28 @@ export class CellBridge {
     }
 
     return false;
+  }
+
+  async prepareDirectorySnapshot(
+    ino: bigint,
+  ): Promise<readonly DirectorySnapshotEntry[] | undefined> {
+    const entities = this.stateForEntitiesDir(ino);
+    if (entities) {
+      const ids = await this.listEntityIdsForSnapshot(entities.state);
+      this.pruneEntityProjections(entities.state, ids);
+      return collectVirtualDirectorySnapshot(
+        this.tree,
+        ino,
+        ids.map((id) => encodeFuseComponent(id)),
+      );
+    }
+
+    if (this.isEntityProjectionDirectory(ino)) {
+      return collectVirtualDirectorySnapshot(this.tree, ino, []);
+    }
+
+    await this.prepareDirectory(ino);
+    return undefined;
   }
 
   /**
@@ -2207,7 +2254,6 @@ export class CellBridge {
       entityControllers: new Map(),
       allPieceIds: new Set(),
       entityIds: new Set(),
-      hasCompleteEntityList: false,
       piecesHydrated: false,
       piecesMaterializing: false,
       pieceListSubscribed: false,
@@ -2285,21 +2331,20 @@ export class CellBridge {
     state.pieceListSubscribed = true;
   }
 
-  private ensureEntityStub(
+  private ensureEntityProjection(
     state: SpaceState,
     spaceName: string,
     entityId: string,
   ): bigint {
     const entityName = encodeFuseComponent(entityId);
+    const info = { state, spaceName, entityId };
     const existingIno = this.tree.lookup(state.entitiesIno, entityName);
     if (existingIno !== undefined) {
       if (!this.pieceRoots.has(existingIno)) {
-        this.unhydratedEntityRoots.set(existingIno, {
-          state,
-          spaceName,
-          entityId,
-        });
+        this.unhydratedEntityRoots.set(existingIno, info);
       }
+      state.entityIds.add(entityId);
+      this.touchEntityProjection(existingIno, info);
       return existingIno;
     }
 
@@ -2313,71 +2358,155 @@ export class CellBridge {
     });
     annotator?.annotateJsonDirectory(entityIno, [], {});
     annotator?.annotateEntry(state.entitiesIno, entityName, entityIno);
-    this.unhydratedEntityRoots.set(entityIno, {
-      state,
-      spaceName,
-      entityId,
-    });
+    this.unhydratedEntityRoots.set(entityIno, info);
+    state.entityIds.add(entityId);
+    this.touchEntityProjection(entityIno, info);
     return entityIno;
   }
 
-  private async syncEntityListOnce(
-    state: SpaceState,
-    spaceName: string,
-    requiredIds: Iterable<string>,
-  ): Promise<boolean> {
-    const listedIds = await state.manager.listEntityIds();
-    return this.applyEntityList(state, spaceName, listedIds, requiredIds);
+  private touchEntityProjection(
+    ino: bigint,
+    info: UnhydratedEntityRootInfo,
+  ): void {
+    this.entityProjectionLru.delete(ino);
+    this.entityProjectionLru.set(ino, info);
+    this.trimEntityProjectionCache();
   }
 
-  private applyEntityList(
+  private trimEntityProjectionCache(): void {
+    if (this.entityProjectionLru.size <= this.maxEntityProjections) return;
+    for (const [ino, info] of this.entityProjectionLru) {
+      if (this.entityProjectionLru.size <= this.maxEntityProjections) break;
+      if (this.pendingEntityHydrations.has(ino)) continue;
+      this.removeEntityProjection(info.state, info.entityId);
+    }
+  }
+
+  private removeEntityProjection(
     state: SpaceState,
-    spaceName: string,
-    listedIds: string[] | undefined,
-    requiredIds: Iterable<string>,
-  ): boolean {
-    const hasCompleteEntityList = listedIds !== undefined;
-    const liveIds = new Set([...(listedIds ?? []), ...requiredIds].sort());
-    const invalidatedNames: string[] = [];
-
-    for (const entityId of liveIds) {
-      const entityName = encodeFuseComponent(entityId);
-      if (this.tree.lookup(state.entitiesIno, entityName) === undefined) {
-        this.ensureEntityStub(state, spaceName, entityId);
-        invalidatedNames.push(entityName);
-      }
-    }
-
-    for (const entityId of state.entityIds) {
-      if (liveIds.has(entityId)) continue;
-      const entityName = encodeFuseComponent(entityId);
-      const entityIno = this.tree.lookup(state.entitiesIno, entityName);
-      if (entityIno !== undefined) {
-        this.unhydratedEntityRoots.delete(entityIno);
-        this.unregisterPieceRoot(entityIno);
-        this.fsProjectionEntries.delete(entityIno);
-        this.tree.removeChild(state.entitiesIno, entityName);
-        invalidatedNames.push(entityName);
-      }
+    entityId: string,
+    invalidate = true,
+  ): string | undefined {
+    const entityName = encodeFuseComponent(entityId);
+    const entityIno = this.tree.lookup(state.entitiesIno, entityName);
+    if (entityIno === undefined) {
+      state.entityIds.delete(entityId);
       state.entityControllers.delete(entityId);
+      return undefined;
     }
 
-    state.entityIds = liveIds;
-    state.hasCompleteEntityList = hasCompleteEntityList;
-    if (invalidatedNames.length > 0) {
+    this.entityProjectionLru.delete(entityIno);
+    this.unhydratedEntityRoots.delete(entityIno);
+    this.unregisterPieceRoot(entityIno);
+    this.fsProjectionEntries.delete(entityIno);
+    this.tree.removeChild(state.entitiesIno, entityName);
+    state.entityIds.delete(entityId);
+    state.entityControllers.delete(entityId);
+    if (invalidate) {
       this.tree.touch(state.entitiesIno);
-      this.onInvalidate?.(state.entitiesIno, invalidatedNames);
+      this.onInvalidate?.(state.entitiesIno, [entityName]);
       this.onInvalidateInode?.(state.entitiesIno);
     }
-    return hasCompleteEntityList;
+    return entityName;
+  }
+
+  private pruneEntityProjections(
+    state: SpaceState,
+    sortedLiveIds: readonly string[],
+  ): void {
+    const removed: string[] = [];
+    for (const entityId of [...state.entityIds]) {
+      if (this.sortedEntityIdsInclude(sortedLiveIds, entityId)) continue;
+      const entityIno = this.tree.lookup(
+        state.entitiesIno,
+        encodeFuseComponent(entityId),
+      );
+      if (
+        entityIno !== undefined &&
+        this.pendingEntityHydrations.has(entityIno)
+      ) {
+        continue;
+      }
+      const name = this.removeEntityProjection(state, entityId, false);
+      if (name !== undefined) removed.push(name);
+    }
+    if (removed.length > 0) {
+      this.tree.touch(state.entitiesIno);
+      this.onInvalidate?.(state.entitiesIno, removed);
+      this.onInvalidateInode?.(state.entitiesIno);
+    }
+  }
+
+  private sortedEntityIdsInclude(
+    sortedIds: readonly string[],
+    target: string,
+  ): boolean {
+    let low = 0;
+    let high = sortedIds.length - 1;
+    while (low <= high) {
+      const middle = low + Math.floor((high - low) / 2);
+      const candidate = sortedIds[middle];
+      if (candidate === target) return true;
+      if (candidate < target) low = middle + 1;
+      else high = middle - 1;
+    }
+    return false;
+  }
+
+  private async listEntityIdsForSnapshot(state: SpaceState): Promise<string[]> {
+    if (typeof state.manager.listEntityIdPage !== "function") {
+      return await state.manager.listEntityIds() ?? [];
+    }
+
+    const ids: string[] = [];
+    let after: string | undefined;
+    let expectedServerSeq: number | undefined;
+    let previousId: string | undefined;
+    for (;;) {
+      const page = await state.manager.listEntityIdPage({
+        ...(after === undefined ? {} : { after }),
+        limit: ENTITY_ID_PAGE_SIZE,
+        ...(expectedServerSeq === undefined ? {} : { expectedServerSeq }),
+      });
+      if (page === undefined) {
+        return await state.manager.listEntityIds() ?? [];
+      }
+      if (expectedServerSeq === undefined) {
+        expectedServerSeq = page.serverSeq;
+      } else if (page.serverSeq !== expectedServerSeq) {
+        throw new Error(
+          `entity identifier snapshot changed from server sequence ${expectedServerSeq} to ${page.serverSeq}`,
+        );
+      }
+      for (const id of page.ids) {
+        if (previousId !== undefined && id <= previousId) {
+          throw new Error("entity identifier pages are not strictly sorted");
+        }
+        ids.push(id);
+        previousId = id;
+      }
+      if (page.nextAfter === undefined) return ids;
+      if (
+        page.ids.length === 0 || page.nextAfter === after ||
+        page.ids.at(-1) !== page.nextAfter
+      ) {
+        throw new Error("entity identifier page did not advance");
+      }
+      after = page.nextAfter;
+    }
   }
 
   private hydrateEntityRoot(entityIno: bigint): Promise<boolean> {
-    if (this.pieceRoots.has(entityIno)) return Promise.resolve(true);
+    if (this.pieceRoots.has(entityIno)) {
+      const info = this.entityProjectionLru.get(entityIno);
+      if (info) this.touchEntityProjection(entityIno, info);
+      return Promise.resolve(true);
+    }
     const existing = this.pendingEntityHydrations.get(entityIno);
     if (existing) return existing;
     const info = this.unhydratedEntityRoots.get(entityIno);
     if (!info) return Promise.resolve(false);
+    this.touchEntityProjection(entityIno, info);
 
     const pending = (async () => {
       const piece = info.state.entityControllers.get(info.entityId) ??
@@ -2398,6 +2527,7 @@ export class CellBridge {
       if (this.pendingEntityHydrations.get(entityIno) === pending) {
         this.pendingEntityHydrations.delete(entityIno);
       }
+      this.trimEntityProjectionCache();
     });
     this.pendingEntityHydrations.set(entityIno, pending);
     return pending;
@@ -2405,9 +2535,8 @@ export class CellBridge {
 
   /**
    * Resolve an entity ID under a space's entities/ directory on demand.
-   * Existing identifier stubs resolve without loading their entity values.
-   * Missing entries refresh the complete identifier list. Servers without
-   * identifier listing use the known piece controllers.
+   * Point lookup checks identifier liveness without loading entity values.
+   * Servers without point lookup use an existing projection or known piece.
    * Returns true if resolved successfully.
    */
   async resolveEntity(
@@ -2419,40 +2548,50 @@ export class CellBridge {
       return false;
     }
 
-    if (this.tree.lookup(entitiesIno, entityId) !== undefined) {
+    const entities = this.stateForEntitiesDir(entitiesIno);
+    if (!entities) return false;
+    const existingIno = this.tree.lookup(entitiesIno, entityId);
+    const exists = typeof entities.state.manager.entityIdExists === "function"
+      ? await entities.state.manager.entityIdExists(decodedEntityId)
+      : undefined;
+    if (exists === false) {
+      if (
+        existingIno !== undefined &&
+        this.pendingEntityHydrations.has(existingIno)
+      ) {
+        await this.pendingEntityHydrations.get(existingIno)?.catch(() => false);
+      }
+      this.removeEntityProjection(entities.state, decodedEntityId);
+      return false;
+    }
+    if (exists === true) {
+      this.ensureEntityProjection(
+        entities.state,
+        entities.spaceName,
+        decodedEntityId,
+      );
       return true;
     }
 
-    const entities = this.stateForEntitiesDir(entitiesIno);
-    if (!entities) return false;
-    const hasCompleteEntityList = await this.syncEntityListOnce(
-      entities.state,
-      entities.spaceName,
-      entities.state.allPieceIds,
-    );
-    if (this.tree.lookup(entitiesIno, entityId) !== undefined) return true;
-    if (hasCompleteEntityList) return false;
+    if (existingIno !== undefined) {
+      this.touchEntityProjection(existingIno, {
+        state: entities.state,
+        spaceName: entities.spaceName,
+        entityId: decodedEntityId,
+      });
+      return true;
+    }
 
     const piece = [...entities.state.pieceControllers.values()].find(
       (candidate) => candidate.id === decodedEntityId,
     );
     if (!piece || encodeFuseComponent(piece.id) !== entityId) return false;
-    const entityIno = this.ensureEntityStub(
+    this.ensureEntityProjection(
       entities.state,
       entities.spaceName,
       piece.id,
     );
-    this.unhydratedEntityRoots.delete(entityIno);
-    entities.state.entityIds.add(piece.id);
     entities.state.entityControllers.set(piece.id, piece);
-    await this.loadPieceTree(
-      piece,
-      entitiesIno,
-      entityId,
-      entities.spaceName,
-      entityIno,
-      "entities",
-    );
     return true;
   }
 
@@ -2531,24 +2670,8 @@ export class CellBridge {
     );
     state.pieceSubs.set(name, subs);
 
-    // Keep the entity path stable while input and result values remain lazy.
-    const entityName = encodeFuseComponent(piece.id);
-    const entityStubIno = this.ensureEntityStub(state, spaceName, piece.id);
-    this.unhydratedEntityRoots.delete(entityStubIno);
-    state.entityIds.add(piece.id);
-    state.entityControllers.set(piece.id, piece);
-    await this.loadPieceTree(
-      piece,
-      state.entitiesIno,
-      entityName,
-      spaceName,
-      entityStubIno,
-      "entities",
-    );
-
-    // The pieces and entities directories gained an entry.
+    // The pieces directory gained an entry.
     this.tree.touch(state.piecesIno);
-    this.tree.touch(state.entitiesIno);
 
     return name;
   }
@@ -2574,25 +2697,6 @@ export class CellBridge {
     // Remove tree nodes
     if (this.tree.removeChild(state.piecesIno, name) !== undefined) {
       this.tree.touch(state.piecesIno);
-    }
-
-    // Clean up the entity tree when the entity itself is no longer live.
-    if (
-      pieceId &&
-      (!state.hasCompleteEntityList || !state.entityIds.has(pieceId))
-    ) {
-      const entityName = encodeFuseComponent(pieceId);
-      const entityIno = this.tree.lookup(state.entitiesIno, entityName);
-      if (entityIno !== undefined) {
-        this.unhydratedEntityRoots.delete(entityIno);
-        this.unregisterPieceRoot(entityIno);
-        this.fsProjectionEntries.delete(entityIno);
-      }
-      if (this.tree.removeChild(state.entitiesIno, entityName) !== undefined) {
-        this.tree.touch(state.entitiesIno);
-      }
-      state.entityIds.delete(pieceId);
-      state.entityControllers.delete(pieceId);
     }
 
     state.pieceMap.delete(name);
@@ -2654,11 +2758,6 @@ export class CellBridge {
     this.debugLog(
       `[${spaceName}] syncPieceListOnce: live=${allPieces.length} tracked=${state.pieceMap.size}`,
     );
-    await this.syncEntityListOnce(
-      state,
-      spaceName,
-      state.allPieceIds,
-    );
 
     if (!state.piecesHydrated && !state.piecesMaterializing) return;
 
@@ -2676,11 +2775,6 @@ export class CellBridge {
     const toAdd = allPieces.filter((p) => !knownIds.has(p.id));
 
     if (toRemove.length === 0 && toAdd.length === 0) return;
-
-    // Capture removed entity IDs before removePieceFromSpace deletes them from pieceMap
-    const removedEntityIds = toRemove.map((n) => state.pieceMap.get(n)).filter(
-      (id): id is string => id !== undefined,
-    );
 
     for (const name of toRemove) {
       this.removePieceFromSpace(state, name);
@@ -2711,16 +2805,6 @@ export class CellBridge {
       this.onInvalidate(state.piecesIno, invalidNames);
       // Also invalidate "pieces" entry on the space dir so readdir refreshes
       this.onInvalidate(state.spaceIno, ["pieces"]);
-    }
-    // Invalidate added and removed entity dirs
-    if (this.onInvalidate) {
-      const entityInvalidIds = [
-        ...removedEntityIds,
-        ...toAdd.map((p) => p.id),
-      ].map((id) => encodeFuseComponent(id));
-      if (entityInvalidIds.length > 0) {
-        this.onInvalidate(state.entitiesIno, entityInvalidIds);
-      }
     }
     // Invalidate cached inode data for pieces dir (forces readdir refresh)
     if (this.onInvalidateInode) {
