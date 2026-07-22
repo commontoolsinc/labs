@@ -4,12 +4,14 @@ import { defer, type Deferred } from "@commonfabric/utils/defer";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import {
+  type Cell,
   getPatternIdentityRef,
   getPatternSource,
   resolveEntryIdentity,
   Runtime,
   type RuntimeFetch,
   type RuntimeProgram,
+  setPatternSource,
 } from "../src/index.ts";
 
 const signer = await Identity.fromPassphrase("lazy system pattern updates");
@@ -71,13 +73,23 @@ describe("lazy system-pattern auto-update", () => {
     await runtime?.dispose();
   });
 
-  async function preparePiece(fetch: RuntimeFetch) {
+  function createRuntime(
+    fetch: RuntimeFetch,
+    systemPatternAutoUpdate = true,
+  ): Runtime {
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
       fetch,
-      experimental: { systemPatternAutoUpdate: true },
+      experimental: systemPatternAutoUpdate
+        ? { systemPatternAutoUpdate: true }
+        : { systemPatternAutoUpdate: false },
     });
+    return runtime;
+  }
+
+  async function preparePiece(fetch: RuntimeFetch) {
+    createRuntime(fetch);
     const space = signer.did();
     const initialIdentity = await identityFor(source("v1"));
     const initial = await runtime.patternManager.compilePattern(
@@ -98,6 +110,279 @@ describe("lazy system-pattern auto-update", () => {
     });
     return piece;
   }
+
+  it("honors disabled and disposed updater lifecycle gates", async () => {
+    createRuntime(
+      () => Promise.reject(new Error("disabled updater fetched source")),
+      false,
+    );
+    const cell = runtime.getCell(signer.did(), crypto.randomUUID());
+
+    expect(
+      await runtime.patternUpdater.checkDefaultPattern(cell, PARENT_PATH),
+    ).toBe("skipped-disabled");
+
+    runtime.experimental.systemPatternAutoUpdate = true;
+    await runtime.patternUpdater.dispose();
+    expect(
+      await runtime.patternUpdater.checkDefaultPattern(cell, PARENT_PATH),
+    ).toBe("current");
+  });
+
+  it("contains synchronous and asynchronous scheduling failures", async () => {
+    createRuntime(() => Promise.reject(new Error("unexpected fetch")));
+    const space = signer.did();
+    const synchronousFailure = {
+      space,
+      getAsNormalizedFullLink: () => {
+        throw new Error("link unavailable");
+      },
+    } as unknown as Cell<unknown>;
+    expect(() => runtime.patternUpdater.schedule(synchronousFailure)).not
+      .toThrow();
+
+    let spaceReads = 0;
+    const asynchronousFailure = {
+      get space() {
+        spaceReads++;
+        if (spaceReads === 1) throw new Error("space unavailable");
+        return space;
+      },
+      getAsNormalizedFullLink: () => ({
+        space,
+        id: "of:async-pattern-update-schedule-failure",
+      }),
+    } as unknown as Cell<unknown>;
+    runtime.patternUpdater.schedule(asynchronousFailure);
+    await runtime.patternUpdater.idle();
+
+    expect(spaceReads).toBe(2);
+  });
+
+  it("shares one in-flight check for duplicate schedules", async () => {
+    const v1Identity = await identityFor(source("v1"));
+    const identityRequested = defer();
+    identityGate = defer();
+    let identityFetches = 0;
+    const piece = await preparePiece(async (input) => {
+      const url = new URL(
+        input instanceof Request
+          ? input.url
+          : input instanceof URL
+          ? input.href
+          : input,
+      );
+      if (url.searchParams.has("identity")) {
+        identityFetches++;
+        identityRequested.resolve();
+        await identityGate!.promise;
+        return new Response(v1Identity);
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    const start = runtime.start(piece);
+    await identityRequested.promise;
+    expect(await start).toBe(true);
+    runtime.patternUpdater.schedule(piece);
+    expect(identityFetches).toBe(1);
+
+    identityGate.resolve();
+    await runtime.patternUpdater.idle();
+    expect(identityFetches).toBe(1);
+    expect(getPatternSource(piece)).toBe(PARENT_PATH);
+  });
+
+  it("aborts an in-flight identity request during disposal", async () => {
+    const identityRequested = defer<AbortSignal | undefined>();
+    const abortObserved = defer();
+    const piece = await preparePiece((_input, init) => {
+      const signal = init?.signal ?? undefined;
+      identityRequested.resolve(signal);
+      if (signal === undefined) {
+        return Promise.reject(
+          new Error("identity request had no abort signal"),
+        );
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          abortObserved.resolve();
+          reject(new DOMException("aborted", "AbortError"));
+        }, { once: true });
+      });
+    });
+
+    const start = runtime.start(piece);
+    const signal = await identityRequested.promise;
+    expect(signal).toBeDefined();
+    expect(await start).toBe(true);
+    const dispose = runtime.patternUpdater.dispose();
+    await abortObserved.promise;
+    await dispose;
+
+    expect(signal!.aborted).toBe(true);
+    expect(getPatternSource(piece)).toBeUndefined();
+    expect(
+      await runtime.patternUpdater.checkDefaultPattern(piece, PARENT_PATH),
+    ).toBe("current");
+  });
+
+  it("does not resolve source after disposal aborts a completed identity fetch", async () => {
+    const v2Identity = await identityFor(source("v2"));
+    const identityRequested = defer<AbortSignal | undefined>();
+    let bodyController:
+      | ReadableStreamDefaultController<Uint8Array>
+      | undefined;
+    const piece = await preparePiece((_input, init) => {
+      const signal = init?.signal ?? undefined;
+      identityRequested.resolve(signal);
+      return Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              bodyController = controller;
+            },
+          }),
+        ),
+      );
+    });
+
+    const start = runtime.start(piece);
+    const signal = await identityRequested.promise;
+    expect(signal).toBeDefined();
+    expect(await start).toBe(true);
+    const dispose = runtime.patternUpdater.dispose();
+    expect(signal!.aborted).toBe(true);
+    bodyController!.enqueue(new TextEncoder().encode(v2Identity));
+    bodyController!.close();
+    await dispose;
+
+    expect(getPatternSource(piece)).toBeUndefined();
+    expect((await piece.pull())?.marker).toBe("v1");
+  });
+
+  it("skips a sourceless pattern whose compiled source cannot be recovered", async () => {
+    let fetches = 0;
+    const piece = await preparePiece(() => {
+      fetches++;
+      return Promise.resolve(new Response("unexpected"));
+    });
+    const originalGetSource = runtime.patternManager
+      .getPatternSourceProgramByIdentity;
+    runtime.patternManager.getPatternSourceProgramByIdentity =
+      (() => Promise.resolve(undefined)) as typeof originalGetSource;
+
+    try {
+      runtime.patternUpdater.schedule(piece);
+      await runtime.patternUpdater.idle();
+    } finally {
+      runtime.patternManager.getPatternSourceProgramByIdentity =
+        originalGetSource;
+    }
+
+    expect(fetches).toBe(0);
+    expect(getPatternSource(piece)).toBeUndefined();
+  });
+
+  it("leaves cf sources to their own resolver", async () => {
+    let fetches = 0;
+    const piece = await preparePiece(() => {
+      fetches++;
+      return Promise.resolve(new Response("unexpected"));
+    });
+    const update = await runtime.editWithRetry((tx) => {
+      setPatternSource(piece, tx, "cf:published-pattern");
+    });
+    expect(update.error).toBeUndefined();
+
+    runtime.patternUpdater.schedule(piece);
+    await runtime.patternUpdater.idle();
+
+    expect(fetches).toBe(0);
+    expect(getPatternSource(piece)).toBe("cf:published-pattern");
+  });
+
+  it("does not repair provenance after the piece becomes the default", async () => {
+    const v1Identity = await identityFor(source("v1"));
+    const identityRequested = defer();
+    identityGate = defer();
+    const piece = await preparePiece(async (input) => {
+      const url = new URL(
+        input instanceof Request
+          ? input.url
+          : input instanceof URL
+          ? input.href
+          : input,
+      );
+      if (url.searchParams.has("identity")) {
+        identityRequested.resolve();
+        await identityGate!.promise;
+        return new Response(v1Identity);
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    const start = runtime.start(piece);
+    await identityRequested.promise;
+    expect(await start).toBe(true);
+    const promoted = await runtime.editWithRetry((tx) => {
+      runtime.getSpaceCell(piece.space).withTx(tx).key("defaultPattern")
+        .set(piece.withTx(tx));
+    });
+    expect(promoted.error).toBeUndefined();
+
+    identityGate.resolve();
+    await runtime.patternUpdater.idle();
+
+    expect(getPatternSource(piece)).toBeUndefined();
+    expect(getPatternIdentityRef(piece)?.symbol).toBe(SYMBOL);
+  });
+
+  it("does not swap identity after the piece becomes the default", async () => {
+    const v2Identity = await identityFor(source("v2"));
+    const identityRequested = defer();
+    identityGate = defer();
+    const piece = await preparePiece(async (input) => {
+      const url = new URL(
+        input instanceof Request
+          ? input.url
+          : input instanceof URL
+          ? input.href
+          : input,
+      );
+      if (url.pathname === PARENT_PATH && url.searchParams.has("identity")) {
+        identityRequested.resolve();
+        await identityGate!.promise;
+        return new Response(v2Identity);
+      }
+      const contents = url.pathname === PARENT_PATH
+        ? parentSource
+        : url.pathname === SOURCE_PATH
+        ? source("v2")
+        : undefined;
+      return new Response(contents ?? "not found", {
+        status: contents === undefined ? 404 : 200,
+      });
+    });
+    const originalRef = getPatternIdentityRef(piece);
+
+    const start = runtime.start(piece);
+    await identityRequested.promise;
+    expect(await start).toBe(true);
+    const promoted = await runtime.editWithRetry((tx) => {
+      runtime.getSpaceCell(piece.space).withTx(tx).key("defaultPattern")
+        .set(piece.withTx(tx));
+    });
+    expect(promoted.error).toBeUndefined();
+
+    identityGate.resolve();
+    await runtime.patternUpdater.idle();
+    await runtime.idle();
+
+    expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+    expect(getPatternSource(piece)).toBeUndefined();
+    expect((await piece.pull())?.marker).toBe("v1");
+  });
 
   it("starts immediately, then updates a non-root pattern in the background", async () => {
     const v2Identity = await identityFor(source("v2"));

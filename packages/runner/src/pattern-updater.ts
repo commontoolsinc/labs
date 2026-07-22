@@ -1,6 +1,7 @@
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Cell } from "./cell.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   getPatternIdentityRef,
   getPatternRepository,
@@ -181,9 +182,21 @@ export class PatternUpdater {
           getPatternSource(candidate) === storedSource &&
           getPatternRepository(candidate) === storedRepository;
       };
+      const canWrite = (tx: IExtendedStorageTransaction): boolean => {
+        const candidate = resultCell.withTx(tx);
+        if (!stillMatches(candidate)) return false;
+        if (mode.kind === "default-root") return true;
+        // The default link is independently mutable. Re-read it in the same
+        // transaction as the pointer write so promotion while this generic
+        // check is in flight participates in OCC and fails closed.
+        const defaultPattern = runtime.getSpaceCell(space).withTx(tx)
+          .key("defaultPattern").get();
+        return defaultPattern === undefined ||
+          !defaultPattern.resolveAsCell().equals(candidate.resolveAsCell());
+      };
       const repairProvenance = async (): Promise<PatternUpdateOutcome> => {
         const result = await runtime.editWithRetry((tx) => {
-          if (!stillMatches(resultCell.withTx(tx))) return false;
+          if (!canWrite(tx)) return false;
           setPatternSource(resultCell, tx, source);
           return true;
         });
@@ -304,7 +317,7 @@ export class PatternUpdater {
       }
 
       const result = await runtime.editWithRetry((tx) => {
-        if (!stillMatches(resultCell.withTx(tx))) return false;
+        if (!canWrite(tx)) return false;
         if (staleSourcelessRoot) {
           resultCell.withTx(tx).setMetaRaw("displacedPattern", {
             identity: runningRef.identity,

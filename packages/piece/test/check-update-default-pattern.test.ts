@@ -233,6 +233,29 @@ describe("checkAndUpdateDefaultPattern", () => {
     );
   });
 
+  it("returns current when the space has no default pattern", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    expect(stub.identityFetches()).toBe(0);
+  });
+
+  it("contains failures while resolving the default pattern", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const originalGetDefaultPattern = manager.getDefaultPattern;
+    manager.getDefaultPattern = (() =>
+      Promise.reject(
+        new Error("default-pattern lookup failed"),
+      )) as typeof manager.getDefaultPattern;
+
+    try {
+      expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+      expect(stub.identityFetches()).toBe(0);
+    } finally {
+      manager.getDefaultPattern = originalGetDefaultPattern;
+    }
+  });
+
   it("returns current when the identity is unchanged (no write)", async () => {
     await setup({ systemPatternAutoUpdate: true });
     const piece = await controller.ensureDefaultPattern();
