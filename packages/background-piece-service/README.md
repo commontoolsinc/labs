@@ -91,8 +91,7 @@ This model enables:
 Start the service:
 
 ```sh
-COMMIT_SHA=<labs-revision> \
-  API_URL=http://localhost:8000 \
+API_URL=http://localhost:8000 \
   OPERATOR_PASS=your-passphrase \
   deno task start
 ```
@@ -103,9 +102,6 @@ COMMIT_SHA=<labs-revision> \
 - `OPERATOR_PASS`: Passphrase for the operator identity (default:
   `implicit trust`)
 - `IDENTITY`: (Optional) Path to an identity keyfile
-- `COMMIT_SHA`: (Optional) Labs revision passed to worker runtimes for the
-  system-pattern update version gate. It must match the target toolshed's
-  reported revision.
 
 ### Monitoring
 

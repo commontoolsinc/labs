@@ -1,8 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  CLIENT_VERSION_ENV_VAR,
-  clientVersionFromEnv,
   EXPERIMENTAL_ENV_VARS,
   experimentalOptionsFromEnv,
   RUNTIME_OPTION_KEYS,
@@ -86,8 +84,6 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   // Everything below rides the constructor default unless a preset's
   // declared delta param supplies it (covered by the routing tests).
   spaceHostMap: { treat: "absent" },
-  clientVersion: { treat: "absent" },
-  onVersionSkew: { treat: "absent" },
   consoleHandler: { treat: "absent" },
   errorHandlers: { treat: "absent" },
   navigateCallback: { treat: "absent" },
@@ -194,8 +190,6 @@ describe("runtimePresets conformance (CT-1814)", () => {
     } as unknown as NonNullable<RuntimeOptions["telemetry"]>;
     const commitBackpressure = { retryWindowMs: 100 };
     const spaceHostMap = { "did:key:zSpace": "https://host.example" };
-    const clientVersion = "build-sha-x";
-    const onVersionSkew = () => {};
 
     it("productionServer", () => {
       const patternApiUrl = new URL("https://public.example/api");
@@ -205,14 +199,12 @@ describe("runtimePresets conformance (CT-1814)", () => {
         consoleHandler,
         errorHandlers,
         telemetry,
-        clientVersion,
       })).toEqual({
         ...minimalOutputs.productionServer,
         patternEnvironment: { apiUrl: patternApiUrl },
         consoleHandler,
         errorHandlers,
         telemetry,
-        clientVersion,
       });
     });
 
@@ -224,7 +216,6 @@ describe("runtimePresets conformance (CT-1814)", () => {
         moduleByteCache,
         trustSnapshotProvider,
         patternCoverage,
-        clientVersion,
       })).toEqual({
         ...minimalOutputs.remoteClient,
         errorHandlers,
@@ -232,7 +223,6 @@ describe("runtimePresets conformance (CT-1814)", () => {
         moduleByteCache,
         trustSnapshotProvider,
         patternCoverage,
-        clientVersion,
       });
     });
 
@@ -260,7 +250,6 @@ describe("runtimePresets conformance (CT-1814)", () => {
       expect(runtimePresets.browserWorker({
         ...minimalCore,
         spaceHostMap,
-        clientVersion,
         cfcEnforcementMode: "observe",
         cfcFlowLabels: "observe",
         trustSnapshotProvider,
@@ -269,12 +258,10 @@ describe("runtimePresets conformance (CT-1814)", () => {
         errorHandlers,
         navigateCallback,
         pieceCreatedCallback,
-        onVersionSkew,
         patternCoverage,
       })).toEqual({
         ...minimalOutputs.browserWorker,
         spaceHostMap,
-        clientVersion,
         cfcEnforcementMode: "observe",
         cfcFlowLabels: "observe",
         trustSnapshotProvider,
@@ -283,7 +270,6 @@ describe("runtimePresets conformance (CT-1814)", () => {
         errorHandlers,
         navigateCallback,
         pieceCreatedCallback,
-        onVersionSkew,
         patternCoverage,
       });
     });
@@ -355,23 +341,6 @@ describe("runtimePresets conformance (CT-1814)", () => {
       }
       expect(warnings.length).toBe(1);
       expect(String(warnings[0][0])).toContain("EXPERIMENTAL_MODERN_CELL_REP");
-    });
-  });
-
-  describe("clientVersionFromEnv", () => {
-    it("reads and trims the shared COMMIT_SHA", () => {
-      const consulted: string[] = [];
-      expect(clientVersionFromEnv((name) => {
-        consulted.push(name);
-        return "  build-sha-x  ";
-      })).toBe("build-sha-x");
-      expect(consulted).toEqual([CLIENT_VERSION_ENV_VAR]);
-      expect(CLIENT_VERSION_ENV_VAR).toBe("COMMIT_SHA");
-    });
-
-    it("treats unset and blank values as unknown", () => {
-      expect(clientVersionFromEnv(() => undefined)).toBeUndefined();
-      expect(clientVersionFromEnv(() => "   ")).toBeUndefined();
     });
   });
 

@@ -28,22 +28,26 @@ Deno.test("normalize", async (t) => {
 });
 
 Deno.test("resolveGitShaFrom", async (t) => {
-  await t.step("env var wins over baked value", () => {
+  await t.step("explicit override wins over baked value", () => {
     assertEquals(
-      resolveGitShaFrom("env-sha", "baked-sha", "runtime-sha"),
-      "env-sha",
+      resolveGitShaFrom("override-sha", "baked-sha", "source-run-sha"),
+      "override-sha",
     );
   });
-  await t.step("trims env var before precedence check", () => {
+  await t.step("trims the explicit override before precedence check", () => {
     assertEquals(
-      resolveGitShaFrom("  env-sha  ", "baked-sha", "runtime-sha"),
-      "env-sha",
+      resolveGitShaFrom(
+        "  override-sha  ",
+        "baked-sha",
+        "source-run-sha",
+      ),
+      "override-sha",
     );
   });
   await t.step("falls through to baked when env is unset/empty", () => {
     for (const explicit of [undefined, null, "", "   "]) {
       assertEquals(
-        resolveGitShaFrom(explicit, "baked-sha", "runtime-sha"),
+        resolveGitShaFrom(explicit, "baked-sha", "source-run-sha"),
         "baked-sha",
       );
     }
@@ -52,8 +56,8 @@ Deno.test("resolveGitShaFrom", async (t) => {
     "uses COMMIT_SHA when explicit and baked values are absent",
     () => {
       assertEquals(
-        resolveGitShaFrom(undefined, null, "  runtime-sha  "),
-        "runtime-sha",
+        resolveGitShaFrom(undefined, null, "  source-run-sha  "),
+        "source-run-sha",
       );
     },
   );

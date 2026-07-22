@@ -11,7 +11,6 @@ export type InitializationData = {
   did: string;
   toolshedUrl: string;
   rawIdentity: KeyPairRaw;
-  clientVersion?: string;
   experimental?: {
     modernCellRep?: boolean;
     persistentSchedulerState?: boolean;
@@ -24,8 +23,6 @@ export function isInitializationData(
   return !!(isRecord(value) &&
     typeof value.did === "string" &&
     typeof value.toolshedUrl === "string" &&
-    (value.clientVersion === undefined ||
-      typeof value.clientVersion === "string") &&
     isKeyPairRaw(value.rawIdentity));
 }
 

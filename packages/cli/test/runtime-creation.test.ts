@@ -6,14 +6,14 @@ import { createRuntime as createAclRuntime } from "../lib/acl.ts";
 import { loadManager } from "../lib/piece.ts";
 import { withEnv } from "./utils.ts";
 
-const TEST_COMMIT_SHA = "cli-runtime-version-test-sha";
+const AUTO_UPDATE_ENV = "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE";
 
-describe("CLI runtime client version", () => {
-  it("passes COMMIT_SHA through the ACL runtime", async () => {
-    const identity = await Identity.fromPassphrase("acl runtime version test");
+describe("CLI runtime creation", () => {
+  it("applies deployed-client options to the ACL runtime", async () => {
+    const identity = await Identity.fromPassphrase("acl runtime creation test");
     const session = await createSession({
       identity,
-      spaceName: "acl-runtime-version",
+      spaceName: "acl-runtime-creation",
     });
     const originalHealthCheck = Runtime.prototype.healthCheck;
     let created: Runtime | undefined;
@@ -22,15 +22,15 @@ describe("CLI runtime client version", () => {
       return Promise.resolve(false);
     };
 
-    await withEnv("COMMIT_SHA", TEST_COMMIT_SHA, async () => {
+    await withEnv(AUTO_UPDATE_ENV, "true", async () => {
       try {
         await expect(createAclRuntime({
           apiUrl: new URL("https://toolshed.test"),
           identityPath: "unused",
           space: "unused",
         }, session)).rejects.toThrow("Could not connect");
-        expect(created).toBeDefined();
-        expect(created!.clientVersion).toBe(TEST_COMMIT_SHA);
+        expect(created?.apiUrl.href).toBe("https://toolshed.test/");
+        expect(created?.experimental.systemPatternAutoUpdate).toBe(true);
       } finally {
         Runtime.prototype.healthCheck = originalHealthCheck;
         if (created) {
@@ -43,9 +43,9 @@ describe("CLI runtime client version", () => {
     });
   });
 
-  it("passes COMMIT_SHA through the piece manager runtime", async () => {
+  it("applies deployed-client options to the piece-manager runtime", async () => {
     const identity = await Identity.fromPassphrase(
-      "piece runtime version test",
+      "piece runtime creation test",
       { implementation: "noble" },
     );
     const keyPath = await Deno.makeTempFile();
@@ -57,15 +57,15 @@ describe("CLI runtime client version", () => {
       return Promise.resolve(false);
     };
 
-    await withEnv("COMMIT_SHA", TEST_COMMIT_SHA, async () => {
+    await withEnv(AUTO_UPDATE_ENV, "true", async () => {
       try {
         await expect(loadManager({
           apiUrl: "https://toolshed.test",
           identity: keyPath,
-          space: "piece-runtime-version",
+          space: "piece-runtime-creation",
         })).rejects.toThrow("Could not connect");
-        expect(created).toBeDefined();
-        expect(created!.clientVersion).toBe(TEST_COMMIT_SHA);
+        expect(created?.apiUrl.href).toBe("https://toolshed.test/");
+        expect(created?.experimental.systemPatternAutoUpdate).toBe(true);
       } finally {
         Runtime.prototype.healthCheck = originalHealthCheck;
         await Deno.remove(keyPath);

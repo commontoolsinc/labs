@@ -18,14 +18,7 @@ describe("isWorkerIPCRequest", () => {
       isWorkerIPCRequest({
         msgId: 1,
         type: "initialize",
-        data: { did, toolshedUrl, rawIdentity, clientVersion: "build-sha" },
-      }),
-    );
-    assert(
-      !isWorkerIPCRequest({
-        msgId: 1,
-        type: "initialize",
-        data: { did, toolshedUrl, rawIdentity, clientVersion: 42 },
+        data: { did, toolshedUrl, rawIdentity },
       }),
     );
     assert(!isWorkerIPCRequest({ msgId: 1, type: "initialize" }));
