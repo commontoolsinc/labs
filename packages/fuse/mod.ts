@@ -47,7 +47,6 @@ import {
   shouldEnableCfcAnnotations,
 } from "./cfc-writeback.ts";
 import {
-  DIR_MODE,
   EACCES,
   EFBIG,
   EINVAL,
@@ -75,8 +74,8 @@ import {
   validateVirtualFileRange,
 } from "./handles.ts";
 import {
+  collectDirectorySnapshot,
   DirectoryHandleMap,
-  type DirectorySnapshotEntry,
   prepareDirectoryForHandle,
 } from "./directory-handles.ts";
 import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
@@ -85,7 +84,7 @@ import {
   type MountCacheOptions,
   resolveMountCacheOptions,
 } from "./mount-options.ts";
-import { buildNodeStat, getMountOwnership, nodeMode } from "./stat.ts";
+import { buildNodeStat, getMountOwnership } from "./stat.ts";
 import { ReverseInvalidationQueue } from "./invalidation.ts";
 
 const encoder = new TextEncoder();
@@ -1546,31 +1545,15 @@ export async function main(argv: string[] = Deno.args) {
         const startOffset = Number(offset);
 
         const entries = directoryHandles.snapshot(fh, inode, () => {
-          const snapshot: DirectorySnapshotEntry[] = [
-            { name: ".", ino: inode, mode: DIR_MODE },
-            {
-              name: "..",
-              ino: tree.parents.get(inode) ?? 1n,
-              mode: DIR_MODE,
-            },
-          ];
-
-          for (const [childName, childIno] of tree.getChildren(inode)) {
-            const childNode = tree.getNode(childIno);
-            if (!childNode) continue;
-            snapshot.push({
-              name: childName,
-              ino: childIno,
-              mode: nodeMode(
-                childNode,
-                Boolean(
-                  bridge?.resolveWritePath(childIno) ||
-                    bridge?.resolveSourceWritePath(childIno),
-                ),
+          return collectDirectorySnapshot(
+            tree,
+            inode,
+            (childIno) =>
+              Boolean(
+                bridge?.resolveWritePath(childIno) ||
+                  bridge?.resolveSourceWritePath(childIno),
               ),
-            });
-          }
-          return snapshot;
+          );
         });
 
         const buf = new Uint8Array(bufSize);

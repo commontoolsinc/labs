@@ -161,11 +161,11 @@ revision path and are not selected, decoded, or returned by ID enumeration.
 ## Measured Baseline
 
 The scheduled benchmark workflow runs these diagnostic benchmarks. Their
-results show trends but do not gate changes:
+results show trends but do not cause changes to fail CI:
 
 - `packages/fuse/entity-projection.bench.ts` measures identifier-stub
-  construction, repeated refresh, CFC annotation overhead, and recursive
-  hydration with a fake manager; and
+  construction, the first open directory view, repeated refresh, CFC
+  annotation overhead, and recursive hydration with a fake manager; and
 - `packages/memory/test/v2-entity-id-list.bench.ts` measures the SQLite list
   query across live-count, payload-size, and tombstone-count fixtures, and
   compares it with the live-head index.
@@ -181,49 +181,69 @@ The workflow's JSON artifact records only the operations named by each
 benchmark. Fixture construction, forced garbage collection, and diagnostic
 measurement happen outside those timers. Heap, request-count, response-size,
 and independently measured wall-time diagnostics go to stderr. The workflow
-stores them in `diagnostics.log` beside the JSON results.
+stores them in `diagnostics.log` beside the JSON results. Each FUSE diagnostic
+includes an invocation number and labels Deno's first invocation as `warmup`.
+Later `measured` invocations correspond to the samples summarized in JSON.
 
 The measurements below were collected on 2026-07-22 with Deno 2.8.x. Ranges
-come from repeated local runs. They are evidence about scaling and relative
-cost, not portable latency budgets.
+come from the measured invocations in a local run. They are evidence about
+scaling and relative cost, not portable latency budgets.
 
 ### FUSE projection
 
-With CFC annotations disabled:
+Connection obtains the initial ID list and creates the stub tree. With CFC
+annotations disabled:
 
-| Live IDs | Build time | Retained V8 heap | ID response | Final inodes |
+| Live IDs | Stub build | Retained V8 heap | ID response | Final inodes |
 | ---: | ---: | ---: | ---: | ---: |
-| 1,000 | 2.1–2.7 ms | 0.5 MiB | about 0.06 MiB | 1,008 |
-| 10,000 | 22.9–24.6 ms | 6.4–6.5 MiB | about 0.6 MiB | 10,008 |
-| 100,000 | 269–321 ms | 58.6 MiB | about 5.5 MiB | 100,008 |
+| 1,000 | 2.4–2.8 ms | 0.6 MiB | about 0.06 MiB | 1,008 |
+| 10,000 | 24.3–24.6 ms | 6.9 MiB | about 0.6 MiB | 10,008 |
+| 100,000 | 288–293 ms | 62.1 MiB | about 5.5 MiB | 100,008 |
 
-The result is linear but material: enumerating 100,000 IDs retains roughly
-59 MiB in the V8 heap before any entity value is loaded. The retained-memory
+The result is linear but material: connecting with 100,000 IDs retains roughly
+62 MiB in the V8 heap before any entity value is loaded. The retained-memory
 baseline already contains the fixture's source ID array, so this delta covers
-the projection rather than counting the source IDs again. The benchmark's fake
-transport excludes database time, network framing, JSON decoding, and FUSE
-buffer-copy cost.
+the stub projection rather than counting the source IDs again.
+
+The first `entities/` directory read on a handle refreshes the identifier set
+and retains a stable entry snapshot for continuation offsets. The snapshot has
+one object per entry and remains live until `releasedir`. Concurrent handles
+retain independent snapshots. The measurements below report the complete
+refresh-and-snapshot operation and its incremental retained heap:
+
+| Live IDs | First directory view | Added V8 heap | ID response | Entries |
+| ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 1.3–1.7 ms | 0.1 MiB | about 0.06 MiB | 1,002 |
+| 10,000 | 13.6–14.2 ms | 0.5 MiB | about 0.6 MiB | 10,002 |
+| 100,000 | 144–157 ms | 5.5 MiB | about 5.5 MiB | 100,002 |
+
+`FsTree` keeps an inode-to-name map for path classification while building the
+snapshot. This keeps the child loop linear. Scanning the parent directory once
+for every child makes the operation quadratic.
+
+The benchmark's fake transport excludes database time, network framing, JSON
+decoding, and FUSE buffer-copy cost.
 
 CFC annotations amplify stub-construction cost because annotations derive and
 retain additional metadata per node:
 
 | Live IDs | Build time with CFC annotations |
 | ---: | ---: |
-| 1,000 | 22.9–24.1 ms |
-| 5,000 | 384–393 ms |
-| 10,000 | 1.40–1.57 s |
-| 20,000 | 5.75–6.07 s |
+| 1,000 | 23.3–23.5 ms |
+| 5,000 | 356 ms |
+| 10,000 | 1.37 s |
+| 20,000 | 5.94–6.60 s |
 
 Repeated refreshes confirmed why per-handle preparation matters. Ten refreshes
-of 10,000 IDs took 70.5–70.6 ms and made 11 list requests including connection;
-three refreshes of 100,000 IDs took 266–273 ms and made four requests. Each
+of 10,000 IDs took 79–82 ms and made 11 list requests including connection.
+Three refreshes of 100,000 IDs took 281–288 ms and made four requests. Each
 100,000-ID response was about 5.5 MiB even though the identifier set had not
 changed.
 
 The recursive-walk fixture descended into 1,000 stubs. It performed exactly
 1,000 entity gets, 1,000 input gets, and 1,000 result gets. About 3 MiB of
-source JSON expanded to 64.5–65 MiB of retained heap and 106,008 inodes in
-475–516 ms. This quantifies the crawler boundary: identifier-only top-level
+source JSON expanded to 71.5–71.6 MiB of retained heap and 106,008 inodes in
+228–232 ms. This quantifies the crawler boundary: identifier-only top-level
 listing is cheap relative to projecting every value, but directory shape can
 invite the latter.
 
@@ -248,10 +268,10 @@ join scaled with 100,000 lifetime heads even when only 1,000 were live.
 and then searched `revision` by its primary-key index for every row. The
 live-head form searches only `idx_head_live_entity_ids` by branch and scope.
 The index reduced the 100,000-live fixture by roughly 3.4x and the
-tombstone-heavy fixture by over two orders of magnitude. Migrating a local
-100,000-head tombstone-heavy database to the live-head schema took about
-293 ms; this is a one-time, open-time write-lock cost rather than steady-state
-listing work.
+tombstone-heavy fixture by over two orders of magnitude. Rebuilding a local
+100,000-head tombstone-heavy database with the current migration took about
+93 ms in one run. This is a one-time, open-time write-lock cost rather than
+steady-state listing work.
 
 ## Acceptance Invariants
 

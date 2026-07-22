@@ -7,6 +7,11 @@ import type {
   PiecesController,
 } from "@commonfabric/piece/ops";
 import { CellBridge, type SpaceState } from "./cell-bridge.ts";
+import {
+  collectDirectorySnapshot,
+  DirectoryHandleMap,
+  type DirectorySnapshotEntry,
+} from "./directory-handles.ts";
 import { FsTree } from "./tree.ts";
 
 const encoder = new TextEncoder();
@@ -54,10 +59,20 @@ function mib(bytes: number): number {
   return Math.round(bytes / 104_857.6) / 10;
 }
 
-function diagnostic(label: string, value: object): void {
-  // The JSON reporter captures console output from benchmark bodies. Direct
-  // stderr writes remain available to the workflow's diagnostics artifact.
-  const bytes = encoder.encode(`${JSON.stringify({ label, ...value })}\n`);
+function diagnostic(
+  label: string,
+  invocation: number,
+  value: object,
+): void {
+  // Diagnostics written to stderr are stored in the workflow artifact.
+  const bytes = encoder.encode(`${
+    JSON.stringify({
+      label,
+      invocation,
+      phase: invocation === 0 ? "warmup" : "measured",
+      ...value,
+    })
+  }\n`);
   const written = Deno.stderr.writeSync(bytes);
   if (written !== bytes.length) {
     throw new Error(`wrote ${written} of ${bytes.length} diagnostic bytes`);
@@ -136,7 +151,65 @@ async function measureConstruction(
   return measurement;
 }
 
+function createEntityDirectorySnapshot(
+  fixture: ConnectedFixture,
+  handles: DirectoryHandleMap,
+  fh: bigint,
+): readonly DirectorySnapshotEntry[] {
+  const inode = fixture.state.entitiesIno;
+  return handles.snapshot(
+    fh,
+    inode,
+    () =>
+      collectDirectorySnapshot(
+        fixture.tree,
+        inode,
+        (childIno) =>
+          Boolean(
+            fixture.bridge.resolveWritePath(childIno) ||
+              fixture.bridge.resolveSourceWritePath(childIno),
+          ),
+      ),
+  );
+}
+
+async function measureDirectoryOpen(
+  benchmark: Deno.BenchContext,
+  ids: string[],
+): Promise<Measurement & { entries: number }> {
+  const fixture = await connect(ids, false);
+  const handles = new DirectoryHandleMap();
+  const fh = handles.open(fixture.state.entitiesIno);
+  forceGc();
+  const before = Deno.memoryUsage();
+  const { value: entries, wallMs } = await measureOperation(
+    benchmark,
+    async () => {
+      await fixture.bridge.prepareDirectory(fixture.state.entitiesIno);
+      return createEntityDirectorySnapshot(fixture, handles, fh);
+    },
+  );
+  forceGc();
+  const after = Deno.memoryUsage();
+  const measurement = {
+    entries: entries.length,
+    heapMiB: mib(after.heapUsed - before.heapUsed),
+    inodes: fixture.tree.inodes.size,
+    listRequests: fixture.listRequests(),
+    rssMiB: mib(after.rss - before.rss),
+    wallMs: Math.round(wallMs * 10) / 10,
+    wireMiB: mib(encoder.encode(JSON.stringify({ ids: fixture.ids })).length),
+  };
+  if (
+    handles.snapshot(fh, fixture.state.entitiesIno, () => []) !== entries
+  ) {
+    throw new Error("directory handle did not retain its entry snapshot");
+  }
+  return measurement;
+}
+
 for (const count of [1_000, 10_000, 100_000]) {
+  let invocation = 0;
   Deno.bench({
     name: `stubs-${count}`,
     group: "entity projection cfc off",
@@ -145,6 +218,7 @@ for (const count of [1_000, 10_000, 100_000]) {
       const ids = entityIds(count);
       diagnostic(
         `construction-cfc-off-${count}`,
+        invocation++,
         await measureConstruction(benchmark, ids, false),
       );
     },
@@ -152,6 +226,7 @@ for (const count of [1_000, 10_000, 100_000]) {
 }
 
 for (const count of [1_000, 5_000, 10_000, 20_000]) {
+  let invocation = 0;
   Deno.bench({
     name: `stubs-${count}`,
     group: "entity projection cfc on",
@@ -160,7 +235,25 @@ for (const count of [1_000, 5_000, 10_000, 20_000]) {
       const ids = entityIds(count);
       diagnostic(
         `construction-cfc-on-${count}`,
+        invocation++,
         await measureConstruction(benchmark, ids, true),
+      );
+    },
+  });
+}
+
+for (const count of [1_000, 10_000, 100_000]) {
+  let invocation = 0;
+  Deno.bench({
+    name: `ids-${count}`,
+    group: "entity projection directory open",
+    n: 1,
+    fn: async (benchmark) => {
+      const ids = entityIds(count);
+      diagnostic(
+        `directory-open-${count}`,
+        invocation++,
+        await measureDirectoryOpen(benchmark, ids),
       );
     },
   });
@@ -172,6 +265,7 @@ for (
     { count: 100_000, refreshes: 3 },
   ]
 ) {
+  let invocation = 0;
   Deno.bench({
     name: `${count}-ids-${refreshes}-refreshes`,
     group: "entity projection refresh",
@@ -187,7 +281,7 @@ for (
       });
       forceGc();
       const after = Deno.memoryUsage();
-      diagnostic(`refresh-${count}-${refreshes}`, {
+      diagnostic(`refresh-${count}-${refreshes}`, invocation++, {
         heapMiB: mib(after.heapUsed - before.heapUsed),
         listRequests: fixture.listRequests(),
         rssMiB: mib(after.rss - before.rss),
@@ -212,6 +306,7 @@ function fakeCell(value: unknown): FakeCell {
   };
 }
 
+let hydrationInvocation = 0;
 Deno.bench({
   name: "1000-entity-recursive-walk",
   group: "entity projection hydration",
@@ -268,7 +363,7 @@ Deno.bench({
     });
     forceGc();
     const after = Deno.memoryUsage();
-    diagnostic("recursive-hydration-1000", {
+    diagnostic("recursive-hydration-1000", hydrationInvocation++, {
       entityGets,
       heapMiB: mib(after.heapUsed - before.heapUsed),
       inodes: fixture.tree.inodes.size,

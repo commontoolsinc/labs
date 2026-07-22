@@ -1,10 +1,13 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import {
+  collectDirectorySnapshot,
   DirectoryHandleMap,
   type DirectoryPreparer,
   type DirectorySnapshotEntry,
   prepareDirectoryForHandle,
 } from "./directory-handles.ts";
+import { DIR_MODE, DIR_MODE_RW } from "./platform.ts";
+import { FsTree } from "./tree.ts";
 
 function countingPreparer(
   calls: bigint[],
@@ -111,6 +114,23 @@ Deno.test("directory entries remain stable for continuation offsets", () => {
   assertEquals(
     handles.snapshot(nextFh, ino, readEntries).map(({ name }) => name),
     ["second", "third"],
+  );
+});
+
+Deno.test("directory snapshots capture entry modes", () => {
+  const tree = new FsTree(() => 0);
+  const parent = tree.addDir(tree.rootIno, "parent");
+  const readOnly = tree.addDir(parent, "read-only");
+  const writable = tree.addDir(parent, "writable");
+
+  assertEquals(
+    collectDirectorySnapshot(tree, parent, (ino) => ino === writable),
+    [
+      { name: ".", ino: parent, mode: DIR_MODE },
+      { name: "..", ino: tree.rootIno, mode: DIR_MODE },
+      { name: "read-only", ino: readOnly, mode: DIR_MODE },
+      { name: "writable", ino: writable, mode: DIR_MODE_RW },
+    ],
   );
 });
 
