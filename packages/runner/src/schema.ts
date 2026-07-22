@@ -12,6 +12,10 @@ import {
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import {
+  FabricInstance,
+  FabricPrimitive,
+} from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   isNontrivialSchema,
@@ -675,6 +679,21 @@ export function processDefaultValue(
     }
   }
 
+  // A `FabricPrimitive` default is an opaque leaf; return it as-is ahead of
+  // the object-type rebuild below (it takes no back-to-cell annotation --
+  // see `annotateWithBackToCellSymbols`).
+  if (defaultValue instanceof FabricPrimitive) {
+    return defaultValue;
+  }
+  // TODO(danfuzz): a `FabricInstance` default is not yet handled -- it needs
+  // processing by its codec contents. Fail loudly until that exists.
+  if (defaultValue instanceof FabricInstance) {
+    throw new Error(
+      `Cannot yet handle \`${defaultValue.constructor.name}\` (a ` +
+        "`FabricInstance`) as a schema default.",
+    );
+  }
+
   // Handle object type defaults
   if (
     resolvedSchema?.type === "object" && isRecord(defaultValue) &&
@@ -876,9 +895,23 @@ function annotateWithBackToCellSymbols(
   synced = false,
   cfcLabelView?: CfcLabelView,
 ) {
-  if (!isRecord(value) || isCell(value)) {
-    // We only possibly annotate objects or arrays that _aren't_ cells.
+  if (
+    !isRecord(value) || isCell(value) ||
+    value instanceof FabricPrimitive
+  ) {
+    // We only possibly annotate plain objects or arrays that _aren't_ cells.
+    // A `FabricPrimitive` passes through untouched, exactly like a plain
+    // `number` or `string` leaf.
     return value;
+  }
+  if (value instanceof FabricInstance) {
+    // TODO(danfuzz): the back-to-cell story for a `FabricInstance` (which,
+    // unlike a primitive, can have model-visible outgoing references) does
+    // not exist yet. Fail loudly until it does.
+    throw new Error(
+      `Cannot yet handle \`${value.constructor.name}\` (a ` +
+        "`FabricInstance`) in back-to-cell annotation.",
+    );
   }
 
   const extensible = Object.isExtensible(value);
