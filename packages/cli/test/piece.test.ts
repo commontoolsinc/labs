@@ -1,5 +1,22 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import {
+  type Cell,
+  getCellOrThrow,
+  ID as FABRIC_ID,
+  isCell,
+  isCellResult,
+  type JSONSchema,
+  Runtime,
+} from "@commonfabric/runner";
+import {
+  EmulatedStorageManager,
+  StorageManager,
+} from "@commonfabric/runner/storage/cache.deno";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { cf, checkStderr, stripAnsi } from "./utils.ts";
 import {
   getCellValue,
@@ -10,12 +27,14 @@ import {
   recreateSpaceRootPattern,
   resolveLinkEndpointAddress,
   resolvePieceConfig,
+  searchPieces,
   setHomePattern,
   setPiecePattern,
   type SpaceConfig,
   withRuntimeCleanupOnFailure,
 } from "../lib/piece.ts";
-import { SlugResolutionError } from "@commonfabric/piece";
+import { pieceId, SlugResolutionError } from "@commonfabric/piece";
+import { setResultCell } from "../../runner/src/result-utils.ts";
 import {
   formatPatternIdentity,
   formatPatternRef,
@@ -377,6 +396,19 @@ describe("cli piece parsing", () => {
       "Recreate the root pattern for the explicitly targeted space.",
     );
     expect(output).toContain("--space <space>");
+    expect(code).toBe(0);
+  });
+
+  it("shows search as a space-scoped command with JSON output", async () => {
+    const { code, stdout, stderr } = await cf("piece search --help");
+    checkStderr(stderr);
+    const output = stripAnsi(stdout.join("\n"));
+    expect(output).toContain(
+      "Search readable input and result data in every piece.",
+    );
+    expect(output).toContain("<query>");
+    expect(output).toContain("--space <space>");
+    expect(output).toContain("--json");
     expect(code).toBe(0);
   });
 
@@ -797,6 +829,1132 @@ describe("cli piece parsing", () => {
       { id: "of:readable", name: "Readable", patternRef },
       { id: "of:unreadable", error: "not readable" },
     ]);
+  });
+
+  it("searches nested input and result data without matching metadata", async () => {
+    const patternRef = {
+      identity: "S".repeat(43),
+      symbol: "default",
+      source: { ref: `cf:pattern:${"S".repeat(43)}` },
+    };
+    const cyclicInput: Record<string, unknown> = {
+      nested: { message: "A NeEdLe in the input" },
+    };
+    cyclicInput.self = cyclicInput;
+    class InternalObject {
+      needleInternalField = "not piece data";
+    }
+    const fabricHash = new FabricHash(
+      new Uint8Array([1, 2, 3, 4]),
+      "fid1",
+    );
+
+    const searchablePiece = (
+      id: string,
+      name: string,
+      input: unknown,
+      result: unknown,
+    ) => {
+      const cell = (value: unknown) => ({
+        pull: () => Promise.resolve(value),
+      });
+      return {
+        id,
+        name: () => name,
+        getPatternRef: () => Promise.resolve(patternRef),
+        input: { getCell: () => Promise.resolve(cell(input)) },
+        result: { getCell: () => Promise.resolve(cell(result)) },
+      };
+    };
+    const controller = {
+      getAllPieces: () =>
+        Promise.resolve([
+          searchablePiece(
+            "of:input-match",
+            "Input match",
+            cyclicInput,
+            {},
+          ),
+          searchablePiece(
+            "of:key-match",
+            "Key match",
+            {},
+            { nested: { needleStatus: false } },
+          ),
+          searchablePiece(
+            "of:needle-metadata-only",
+            "Needle appears only in metadata",
+            { content: "haystack" },
+            { $NAME: "Needle appears only in metadata" },
+          ),
+          searchablePiece(
+            "of:class-internals",
+            "Class internals",
+            new InternalObject(),
+            {},
+          ),
+          searchablePiece(
+            "of:internal-symbol",
+            "Internal symbol metadata",
+            { [FABRIC_ID]: "Needle in internal identity metadata" },
+            {},
+          ),
+          searchablePiece(
+            "of:fabric-special-object",
+            "Fabric special object",
+            new FabricError({
+              type: "Error",
+              name: "Error",
+              message: "Needle in encoded Fabric data",
+              stack: undefined,
+              cause: undefined,
+            }),
+            {},
+          ),
+          searchablePiece(
+            "of:fabric-hash",
+            "Fabric hash",
+            fabricHash,
+            {},
+          ),
+        ]),
+    };
+    const config = { apiUrl: API_URL, space: SPACE, identity: ID };
+    const deps = {
+      loadManager: () => Promise.resolve({} as any),
+      createController: () => controller as any,
+    };
+
+    const matches = await searchPieces(config, "NEEDLE", deps);
+
+    expect(matches).toEqual([
+      { id: "of:input-match", name: "Input match", patternRef },
+      { id: "of:key-match", name: "Key match", patternRef },
+      {
+        id: "of:fabric-special-object",
+        name: "Fabric special object",
+        patternRef,
+      },
+    ]);
+    expect(await searchPieces(config, fabricHash.toString(), deps)).toEqual([{
+      id: "of:fabric-hash",
+      name: "Fabric hash",
+      patternRef,
+    }]);
+  });
+
+  it("searches scalar data and rejects an empty query", async () => {
+    const cell = (value: unknown) => ({
+      pull: () => Promise.resolve(value),
+    });
+    const controller = {
+      getAllPieces: () =>
+        Promise.resolve([{
+          id: "of:number-match",
+          name: () => "Number match",
+          getPatternRef: () => Promise.resolve(undefined),
+          input: { getCell: () => Promise.resolve(cell(2048)) },
+          result: { getCell: () => Promise.resolve(cell(null)) },
+        }]),
+    };
+    const config = { apiUrl: API_URL, space: SPACE, identity: ID };
+    const deps = {
+      loadManager: () => Promise.resolve({} as any),
+      createController: () => controller as any,
+    };
+
+    expect(await searchPieces(config, "048", deps)).toEqual([{
+      id: "of:number-match",
+      name: "Number match",
+      patternRef: undefined,
+    }]);
+    await expect(searchPieces(config, "", deps)).rejects.toThrow(
+      "Search query must not be empty.",
+    );
+  });
+
+  it("uses full Unicode case folding and canonical normalization", async () => {
+    const cell = (value: unknown) => ({
+      pull: () => Promise.resolve(value),
+    });
+    const piece = (id: string, input: unknown) => ({
+      id,
+      name: () => id,
+      getPatternRef: () => Promise.resolve(undefined),
+      input: { getCell: () => Promise.resolve(cell(input)) },
+      result: { getCell: () => Promise.resolve(cell({})) },
+    });
+    const controller = {
+      getAllPieces: () =>
+        Promise.resolve([
+          piece("of:full-fold", "Maße"),
+          piece("of:canonical-equivalence", "café"),
+          piece("of:indic-substring", "क्ष"),
+          piece("of:unicode-17", "\u{16EA0}"),
+          piece("of:unrelated", "needle"),
+        ]),
+    };
+    const config = { apiUrl: API_URL, space: SPACE, identity: ID };
+    const deps = {
+      loadManager: () => Promise.resolve({} as any),
+      createController: () => controller as any,
+    };
+
+    expect(await searchPieces(config, "MASSE", deps)).toEqual([{
+      id: "of:full-fold",
+      name: "of:full-fold",
+      patternRef: undefined,
+    }]);
+    expect(await searchPieces(config, "CAFE\u0301", deps)).toEqual([{
+      id: "of:canonical-equivalence",
+      name: "of:canonical-equivalence",
+      patternRef: undefined,
+    }]);
+    expect(await searchPieces(config, "\u{16EBB}", deps)).toEqual([{
+      id: "of:unicode-17",
+      name: "of:unicode-17",
+      patternRef: undefined,
+    }]);
+    expect(await searchPieces(config, "ष", deps)).toEqual([{
+      id: "of:indic-substring",
+      name: "of:indic-substring",
+      patternRef: undefined,
+    }]);
+    expect(await searchPieces(config, "s", deps)).toEqual([]);
+    expect(await searchPieces(config, "CAFE", deps)).toEqual([]);
+  });
+
+  it("materializes nested runtime cells without searching cell internals", async () => {
+    const signer = await Identity.fromPassphrase(
+      "cf piece search nested cell test",
+    );
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+    });
+
+    try {
+      const space = signer.did();
+      const nestedSchema = {
+        type: "object",
+        properties: { text: { type: "string" } },
+        required: ["text"],
+        additionalProperties: false,
+      } as const;
+      const inputSchema = {
+        type: "object",
+        properties: {
+          nested: { ...nestedSchema, asCell: ["cell"] },
+          hidden: { ...nestedSchema, asCell: ["opaque"] },
+        },
+        required: ["nested", "hidden"],
+        additionalProperties: false,
+      } as const;
+      const tx = runtime.edit();
+      const nested = runtime.getCell(
+        space,
+        "piece-search-nested-visible",
+        nestedSchema,
+        tx,
+      );
+      nested.set({ text: "needle in a nested runtime cell" });
+      const hidden = runtime.getCell(
+        space,
+        "piece-search-nested-hidden",
+        nestedSchema,
+        tx,
+      );
+      hidden.set({ text: "opaque-search-secret" });
+      const input = runtime.getCell(
+        space,
+        "piece-search-input",
+        inputSchema,
+        tx,
+      );
+      input.set({ nested, hidden });
+      const result = runtime.getCell(
+        space,
+        "piece-search-result",
+        undefined,
+        tx,
+      );
+      result.set({ $NAME: "needle only in the piece name" });
+      await tx.commit();
+      await runtime.idle();
+
+      const inputValue = await input.pull();
+      expect(isCell(inputValue.nested)).toBe(true);
+      if (!isCell(inputValue.nested)) {
+        throw new Error("Expected nested input data to remain a Cell");
+      }
+      expect(await inputValue.nested.pull()).toEqual({
+        text: "needle in a nested runtime cell",
+      });
+
+      const controller = {
+        getAllPieces: () =>
+          Promise.resolve([{
+            id: "of:runtime-cell-piece",
+            name: () => "needle only in the piece name",
+            getPatternRef: () => Promise.resolve(undefined),
+            input: { getCell: () => Promise.resolve(input) },
+            result: { getCell: () => Promise.resolve(result) },
+          }]),
+      };
+      const config = { apiUrl: API_URL, space: SPACE, identity: ID };
+      const deps = {
+        loadManager: () => Promise.resolve({} as any),
+        createController: () => controller as any,
+      };
+
+      expect(await searchPieces(config, "nested runtime", deps)).toEqual([{
+        id: "of:runtime-cell-piece",
+        name: "needle only in the piece name",
+        patternRef: undefined,
+      }]);
+      expect(await searchPieces(config, "opaque-search-secret", deps)).toEqual(
+        [],
+      );
+      expect(await searchPieces(config, "_link", deps)).toEqual([]);
+      expect(await searchPieces(config, "unique to the context", deps))
+        .toEqual([]);
+      expect(await searchPieces(config, "piece name", deps)).toEqual([]);
+
+      const narrowView = runtime.getCell(
+        space,
+        "piece-search-nested-visible",
+        {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        },
+      );
+      const wideView = runtime.getCell(
+        space,
+        "piece-search-nested-visible",
+        nestedSchema,
+      );
+      const viewController = {
+        getAllPieces: () =>
+          Promise.resolve([{
+            id: "of:multiple-runtime-cell-views",
+            name: () => "Multiple runtime cell views",
+            getPatternRef: () => Promise.resolve(undefined),
+            input: {
+              getCell: () =>
+                Promise.resolve({
+                  pull: () => Promise.resolve([narrowView, wideView]),
+                }),
+            },
+            result: {
+              getCell: () =>
+                Promise.resolve({ pull: () => Promise.resolve({}) }),
+            },
+          }]),
+      };
+      expect(
+        await searchPieces(config, "nested runtime cell", {
+          loadManager: () => Promise.resolve({} as any),
+          createController: () => viewController as any,
+        }),
+      ).toEqual([{
+        id: "of:multiple-runtime-cell-views",
+        name: "Multiple runtime cell views",
+        patternRef: undefined,
+      }]);
+
+      const brokenNested = runtime.getCell(
+        space,
+        "piece-search-broken-nested",
+        nestedSchema,
+      );
+      Object.defineProperty(brokenNested, "pull", {
+        value: () => Promise.reject(new Error("nested cell unavailable")),
+      });
+      const nestedErrors: unknown[] = [];
+      const partialController = {
+        getAllPieces: () =>
+          Promise.resolve([{
+            id: "of:partial-runtime-cell-piece",
+            name: () => "Partial runtime cell piece",
+            getPatternRef: () => Promise.resolve(undefined),
+            input: {
+              getCell: () =>
+                Promise.resolve({
+                  pull: () =>
+                    Promise.resolve([
+                      brokenNested,
+                      "surviving nested cell data",
+                    ]),
+                }),
+            },
+            result: {
+              getCell: () =>
+                Promise.resolve({ pull: () => Promise.resolve({}) }),
+            },
+          }]),
+      };
+      expect(
+        await searchPieces(config, "surviving nested", {
+          loadManager: () => Promise.resolve({} as any),
+          createController: () => partialController as any,
+          reportSearchError: (_pieceId, _source, error) =>
+            nestedErrors.push(error),
+        }),
+      ).toEqual([{
+        id: "of:partial-runtime-cell-piece",
+        name: "Partial runtime cell piece",
+        patternRef: undefined,
+      }]);
+      expect(nestedErrors).toEqual([new Error("nested cell unavailable")]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("attributes linked data to its owner and preserves ownerless data", async () => {
+    const signer = await Identity.fromPassphrase(
+      "cf piece search linked cell owner test",
+    );
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+    });
+
+    try {
+      const space = signer.did();
+      const sharedSchema = {
+        type: "object",
+        properties: { text: { type: "string" } },
+        required: ["text"],
+        additionalProperties: false,
+      } as const;
+      const scalarSchema = { type: "string" } as const;
+      const emptySchema = {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      } as const;
+      const inputSchema = {
+        type: "object",
+        properties: {
+          sharedCell: { ...sharedSchema, asCell: ["cell"] },
+          sharedValue: sharedSchema,
+          sharedScalar: scalarSchema,
+          ownerlessCell: { ...sharedSchema, asCell: ["cell"] },
+          ownerlessValue: sharedSchema,
+          unregisteredPieceValue: sharedSchema,
+          unregisteredKeylessValue: sharedSchema,
+        },
+        required: [
+          "sharedCell",
+          "sharedValue",
+          "sharedScalar",
+          "ownerlessCell",
+          "ownerlessValue",
+          "unregisteredPieceValue",
+          "unregisteredKeylessValue",
+        ],
+        additionalProperties: false,
+      } as const;
+      const tx = runtime.edit();
+      const sharedCell = runtime.getCell(
+        space,
+        "piece-search-owned-cell-data",
+        sharedSchema,
+        tx,
+      );
+      const sharedValue = runtime.getCell(
+        space,
+        "piece-search-owned-proxy-data",
+        sharedSchema,
+        tx,
+      );
+      const sharedScalar = runtime.getCell(
+        space,
+        "piece-search-owned-scalar-data",
+        scalarSchema,
+        tx,
+      );
+      const ownerlessCell = runtime.getCell(
+        space,
+        "piece-search-ownerless-cell-data",
+        sharedSchema,
+        tx,
+      );
+      const ownerlessValue = runtime.getCell(
+        space,
+        "piece-search-ownerless-proxy-data",
+        sharedSchema,
+        tx,
+      );
+      const unregisteredPieceValue = runtime.getCell(
+        space,
+        "piece-search-unregistered-piece-data",
+        sharedSchema,
+        tx,
+      );
+      const unregisteredKeylessValue = runtime.getCell(
+        space,
+        "piece-search-unregistered-keyless-data",
+        sharedSchema,
+        tx,
+      );
+      const unregisteredKeylessArgument = runtime.getCell(
+        space,
+        "piece-search-unregistered-keyless-argument",
+        emptySchema,
+        tx,
+      );
+      const ownerResult = runtime.getCell(
+        space,
+        "piece-search-owner-result",
+        emptySchema,
+        tx,
+      );
+      const ownerInput = runtime.getCell(
+        space,
+        "piece-search-owner-input",
+        inputSchema,
+        tx,
+      );
+      const referrerResult = runtime.getCell(
+        space,
+        "piece-search-referrer-result",
+        emptySchema,
+        tx,
+      );
+      const referrerInput = runtime.getCell(
+        space,
+        "piece-search-referrer-input",
+        inputSchema,
+        tx,
+      );
+      const aliasInput = runtime.getCell(
+        space,
+        "piece-search-alias-input",
+        emptySchema,
+        tx,
+      );
+      const aliasResult = runtime.getCell(
+        space,
+        "piece-search-alias-result",
+        sharedSchema,
+        tx,
+      );
+
+      sharedCell.set({ text: "explicit ownership match" });
+      sharedValue.set({ text: "proxy ownership match" });
+      sharedScalar.set("scalar ownership match");
+      ownerlessCell.set({ text: "ownerless explicit match" });
+      ownerlessValue.set({ text: "ownerless proxy match" });
+      unregisteredPieceValue.set({ text: "unregistered piece match" });
+      unregisteredPieceValue.setMetaRaw("patternIdentity", {
+        identity: "P".repeat(43),
+        symbol: "default",
+      });
+      unregisteredKeylessValue.set({ text: "unregistered keyless match" });
+      unregisteredKeylessArgument.set({});
+      unregisteredKeylessValue.setMetaRaw(
+        "argument",
+        unregisteredKeylessArgument.getAsWriteRedirectLink(),
+      );
+      ownerResult.set({});
+      ownerInput.set({
+        sharedCell,
+        sharedValue,
+        sharedScalar,
+        ownerlessCell,
+        ownerlessValue,
+        unregisteredPieceValue,
+        unregisteredKeylessValue,
+      });
+      referrerResult.set({});
+      referrerInput.set({
+        sharedCell,
+        sharedValue,
+        sharedScalar,
+        ownerlessCell,
+        ownerlessValue,
+        unregisteredPieceValue,
+        unregisteredKeylessValue,
+      });
+      aliasInput.set({});
+      aliasResult.set(sharedValue);
+      setResultCell(sharedCell, ownerResult);
+      setResultCell(sharedValue, ownerResult);
+      setResultCell(sharedScalar, ownerResult);
+      setResultCell(ownerInput, ownerResult);
+      setResultCell(ownerResult, referrerResult);
+      setResultCell(referrerInput, referrerResult);
+      setResultCell(aliasInput, aliasResult);
+      await tx.commit();
+      await runtime.idle();
+
+      const referrerInputValue = await referrerInput.pull();
+      expect(isCell(referrerInputValue.sharedCell)).toBe(true);
+      expect(isCellResult(referrerInputValue.sharedValue)).toBe(true);
+      expect(referrerInputValue.sharedScalar).toBe("scalar ownership match");
+      expect(isCell(referrerInputValue.ownerlessCell)).toBe(true);
+      expect(isCellResult(referrerInputValue.ownerlessValue)).toBe(true);
+      expect(isCellResult(referrerInputValue.unregisteredPieceValue)).toBe(
+        true,
+      );
+      expect(isCellResult(referrerInputValue.unregisteredKeylessValue)).toBe(
+        true,
+      );
+      const linkedValueCell = getCellOrThrow(referrerInputValue.sharedValue);
+      expect(pieceId(linkedValueCell)).toBe(pieceId(referrerInput));
+      expect(pieceId(linkedValueCell.resolveAsCell())).toBe(
+        pieceId(sharedValue),
+      );
+
+      const ownerId = pieceId(ownerResult);
+      const referrerId = pieceId(referrerResult);
+      const aliasId = pieceId(aliasResult);
+      if (
+        ownerId === undefined || referrerId === undefined ||
+        aliasId === undefined
+      ) {
+        throw new Error("Expected result cells to have piece IDs");
+      }
+      const piece = (
+        id: string,
+        name: string,
+        input: Cell<unknown>,
+        result: Cell<unknown>,
+      ) => ({
+        id,
+        name: () => name,
+        getPatternRef: () => Promise.resolve(undefined),
+        input: { getCell: () => Promise.resolve(input) },
+        result: { getCell: () => Promise.resolve(result) },
+      });
+      const controller = {
+        getAllPieces: () =>
+          Promise.resolve([
+            piece(referrerId, "Referrer", referrerInput, referrerResult),
+            piece(aliasId, "Top-level alias", aliasInput, aliasResult),
+            piece(ownerId, "Owner", ownerInput, ownerResult),
+          ]),
+      };
+      const config = { apiUrl: API_URL, space: SPACE, identity: ID };
+      const deps = {
+        loadManager: () => Promise.resolve({} as any),
+        createController: () => controller as any,
+      };
+
+      expect(
+        await searchPieces(config, "explicit ownership", deps),
+      ).toEqual([{
+        id: ownerId,
+        name: "Owner",
+        patternRef: undefined,
+      }]);
+      expect(
+        await searchPieces(config, "proxy ownership", deps),
+      ).toEqual([{
+        id: ownerId,
+        name: "Owner",
+        patternRef: undefined,
+      }]);
+      expect(
+        await searchPieces(config, "scalar ownership", deps),
+      ).toEqual([{
+        id: ownerId,
+        name: "Owner",
+        patternRef: undefined,
+      }]);
+      const referrerAndOwner = [
+        { id: referrerId, name: "Referrer", patternRef: undefined },
+        { id: ownerId, name: "Owner", patternRef: undefined },
+      ];
+      expect(
+        await searchPieces(config, "ownerless explicit", deps),
+      ).toEqual(referrerAndOwner);
+      expect(
+        await searchPieces(config, "ownerless proxy", deps),
+      ).toEqual(referrerAndOwner);
+      expect(
+        await searchPieces(config, "unregistered piece", deps),
+      ).toEqual([]);
+      expect(
+        await searchPieces(config, "unregistered keyless", deps),
+      ).toEqual([]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("reports cyclic Cell ownership without attributing the data", async () => {
+    const signer = await Identity.fromPassphrase(
+      "cf piece search cyclic cell owner test",
+    );
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+    });
+
+    try {
+      const space = signer.did();
+      const schema = {
+        type: "object",
+        properties: { text: { type: "string" } },
+        required: ["text"],
+        additionalProperties: false,
+      } as const;
+      const tx = runtime.edit();
+      const first = runtime.getCell(
+        space,
+        "piece-search-owner-cycle-first",
+        schema,
+        tx,
+      );
+      const second = runtime.getCell(
+        space,
+        "piece-search-owner-cycle-second",
+        schema,
+        tx,
+      );
+      first.set({ text: "cyclic ownership match" });
+      second.set({ text: "other cycle value" });
+      setResultCell(first, second);
+      setResultCell(second, first);
+      await tx.commit();
+      await runtime.idle();
+
+      const cell = (value: unknown) => ({
+        pull: () => Promise.resolve(value),
+      });
+      const controller = {
+        getAllPieces: () =>
+          Promise.resolve([{
+            id: "of:cycle-referrer",
+            name: () => "Cycle referrer",
+            getPatternRef: () => Promise.resolve(undefined),
+            input: {
+              getCell: () => Promise.resolve(cell({ linked: first })),
+            },
+            result: { getCell: () => Promise.resolve(cell({})) },
+          }]),
+      };
+      const errors: unknown[] = [];
+
+      expect(
+        await searchPieces(
+          { apiUrl: API_URL, space: SPACE, identity: ID },
+          "cyclic ownership",
+          {
+            loadManager: () => Promise.resolve({} as any),
+            createController: () => controller as any,
+            reportSearchError: (_pieceId, _source, error) => errors.push(error),
+          },
+        ),
+      ).toEqual([]);
+      expect(errors).toHaveLength(1);
+      expect(String(errors[0])).toContain(
+        "Cycle found while resolving piece ownership",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("loads nested cells from a cold runtime before searching them", async () => {
+    const signer = await Identity.fromPassphrase(
+      "cf piece search cold runtime test",
+    );
+    const space = signer.did();
+    const audience = "did:key:z6Mk-runner-emulated-memory";
+    const server = new MemoryV2Server.Server({
+      authorizeSessionOpen(message) {
+        const principal = (message.authorization as { principal?: unknown })
+          ?.principal;
+        return typeof principal === "string" ? principal : undefined;
+      },
+      sessionOpenAuth: { audience },
+    });
+
+    class SharedStorage extends EmulatedStorageManager {
+      static connect(server: MemoryV2Server.Server): SharedStorage {
+        const manager = new SharedStorage(
+          { as: signer, memoryHost: new URL("memory://") } as any,
+          () => server,
+        );
+        manager.#server = server;
+        return manager;
+      }
+
+      #server!: MemoryV2Server.Server;
+
+      protected override server(): MemoryV2Server.Server {
+        return this.#server;
+      }
+    }
+
+    const leafSchema = {
+      type: "object",
+      properties: { text: { type: "string" } },
+      required: ["text"],
+    } as const satisfies JSONSchema;
+    const middleSchema = {
+      type: "object",
+      properties: { leaf: { ...leafSchema, asCell: ["cell"] } },
+      required: ["leaf"],
+    } as const satisfies JSONSchema;
+    const rootSchema = {
+      type: "object",
+      properties: { middle: { ...middleSchema, asCell: ["cell"] } },
+      required: ["middle"],
+    } as const satisfies JSONSchema;
+    const writerStorage = SharedStorage.connect(server);
+    const writer = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager: writerStorage,
+    });
+    const writeTx = writer.edit();
+    const leaf = writer.getCell(
+      space,
+      "piece-search-cold-leaf",
+      leafSchema,
+      writeTx,
+    );
+    const middle = writer.getCell(
+      space,
+      "piece-search-cold-middle",
+      middleSchema,
+      writeTx,
+    );
+    const root = writer.getCell(
+      space,
+      "piece-search-cold-root",
+      rootSchema,
+      writeTx,
+    );
+    leaf.set({ text: "cold-cache-needle" });
+    middle.set({ leaf });
+    root.set({ middle });
+    await writeTx.commit();
+    await writerStorage.synced();
+
+    const readerStorage = SharedStorage.connect(server);
+    const reader = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager: readerStorage,
+    });
+    try {
+      const readerRoot = reader.getCell(
+        space,
+        "piece-search-cold-root",
+        rootSchema,
+      );
+      const empty = reader.getCell(space, "piece-search-cold-empty", true);
+      const controller = {
+        getAllPieces: () =>
+          Promise.resolve([{
+            id: "of:cold-runtime-piece",
+            name: () => "Cold runtime piece",
+            getPatternRef: () => Promise.resolve(undefined),
+            input: { getCell: () => Promise.resolve(readerRoot) },
+            result: { getCell: () => Promise.resolve(empty) },
+          }]),
+      };
+
+      expect(
+        await searchPieces(
+          {
+            apiUrl: API_URL,
+            space: SPACE,
+            identity: ID,
+          },
+          "cold-cache-needle",
+          {
+            loadManager: () => Promise.resolve({} as any),
+            createController: () => controller as any,
+          },
+        ),
+      ).toEqual([{
+        id: "of:cold-runtime-piece",
+        name: "Cold runtime piece",
+        patternRef: undefined,
+      }]);
+    } finally {
+      await reader.dispose();
+      await readerStorage.close();
+      await writer.dispose();
+      await writerStorage.close();
+      await server.close();
+    }
+  });
+
+  it("searches arrays with a large sparse length", async () => {
+    const values: unknown[] = [];
+    values.length = 0xffff_ffff;
+    values[0xffff_fffe] = "large-array-needle";
+    const cell = (value: unknown) => ({
+      pull: () => Promise.resolve(value),
+    });
+    const controller = {
+      getAllPieces: () =>
+        Promise.resolve([{
+          id: "of:large-array",
+          name: () => "Large array",
+          getPatternRef: () => Promise.resolve(undefined),
+          input: { getCell: () => Promise.resolve(cell(values)) },
+          result: { getCell: () => Promise.resolve(cell({})) },
+        }]),
+    };
+
+    expect(
+      await searchPieces(
+        {
+          apiUrl: API_URL,
+          space: SPACE,
+          identity: ID,
+        },
+        "large-array-needle",
+        {
+          loadManager: () => Promise.resolve({} as any),
+          createController: () => controller as any,
+        },
+      ),
+    ).toEqual([{
+      id: "of:large-array",
+      name: "Large array",
+      patternRef: undefined,
+    }]);
+  });
+
+  it("searches current data after a query proxy changes shape", async () => {
+    const signer = await Identity.fromPassphrase(
+      "cf piece search stale array proxy test",
+    );
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+    });
+
+    try {
+      const tx = runtime.edit();
+      const arrayToObjectSource = runtime.getCell<unknown>(
+        signer.did(),
+        "piece-search-array-to-object-proxy",
+        undefined,
+        tx,
+      );
+      arrayToObjectSource.set(["old array value"]);
+      const arrayToObjectProxy = arrayToObjectSource.getAsQueryResult();
+      arrayToObjectSource.set({
+        changedShape: "shape-change-value",
+        length: "hidden-length-value",
+      });
+
+      const arrayToScalarSource = runtime.getCell<unknown>(
+        signer.did(),
+        "piece-search-array-to-scalar-proxy",
+        undefined,
+        tx,
+      );
+      arrayToScalarSource.set(["other old array value"]);
+      const arrayToScalarProxy = arrayToScalarSource.getAsQueryResult();
+      arrayToScalarSource.set("scalar-shape-value");
+
+      const objectToArraySource = runtime.getCell<unknown>(
+        signer.did(),
+        "piece-search-object-to-array-proxy",
+        undefined,
+        tx,
+      );
+      objectToArraySource.set({ oldObjectValue: true });
+      const objectToArrayProxy = objectToArraySource.getAsQueryResult();
+      objectToArraySource.set(["array-shape-value"]);
+      await tx.commit();
+      await runtime.idle();
+
+      const cell = (value: unknown) => ({
+        pull: () => Promise.resolve(value),
+      });
+      const controller = {
+        getAllPieces: () =>
+          Promise.resolve([{
+            id: "of:stale-array-proxy",
+            name: () => "Stale array proxy",
+            getPatternRef: () => Promise.resolve(undefined),
+            input: {
+              getCell: () =>
+                Promise.resolve(cell({
+                  arrayToObject: arrayToObjectProxy,
+                  arrayToScalar: arrayToScalarProxy,
+                  objectToArray: objectToArrayProxy,
+                })),
+            },
+            result: { getCell: () => Promise.resolve(cell({})) },
+          }]),
+      };
+      const config = { apiUrl: API_URL, space: SPACE, identity: ID };
+      const deps = {
+        loadManager: () => Promise.resolve({} as any),
+        createController: () => controller as any,
+      };
+      const match = [{
+        id: "of:stale-array-proxy",
+        name: "Stale array proxy",
+        patternRef: undefined,
+      }];
+
+      expect(
+        await searchPieces(config, "changedShape", deps),
+      ).toEqual(match);
+      expect(
+        await searchPieces(config, "shape-change-value", deps),
+      ).toEqual(match);
+      expect(
+        await searchPieces(config, "hidden-length-value", deps),
+      ).toEqual(match);
+      expect(
+        await searchPieces(config, "scalar-shape-value", deps),
+      ).toEqual(match);
+      expect(
+        await searchPieces(config, "array-shape-value", deps),
+      ).toEqual(match);
+      expect(
+        await searchPieces(config, "0", deps),
+      ).toEqual([]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("continues after an unreadable piece and preserves match order", async () => {
+    const errors: Array<{
+      pieceId: string;
+      source: "input data" | "result data" | "metadata";
+      error: unknown;
+    }> = [];
+    const cell = (value: unknown) => ({
+      pull: () => Promise.resolve(value),
+    });
+    const matchingPiece = (id: string) => ({
+      id,
+      name: () => id,
+      getPatternRef: () => Promise.resolve(undefined),
+      input: { getCell: () => Promise.resolve(cell("needle")) },
+      result: { getCell: () => Promise.resolve(cell({})) },
+    });
+    const partiallyReadableObject = {
+      get broken(): unknown {
+        throw new Error("object property not readable");
+      },
+      survives: "needle after unreadable object property",
+    };
+    const partiallyReadableArray = [undefined, "needle after unreadable array"];
+    Object.defineProperty(partiallyReadableArray, 0, {
+      enumerable: true,
+      get: () => {
+        throw new Error("array element not readable");
+      },
+    });
+    const controller = {
+      getAllPieces: () =>
+        Promise.resolve([
+          matchingPiece("of:first-match"),
+          {
+            id: "of:unreadable",
+            name: () => "Result-only match",
+            getPatternRef: () => Promise.resolve(undefined),
+            input: {
+              getCell: () => Promise.reject(new Error("not readable")),
+            },
+            result: { getCell: () => Promise.resolve(cell("needle")) },
+          },
+          {
+            id: "of:partial-object",
+            name: () => "Partial object",
+            getPatternRef: () => Promise.resolve(undefined),
+            input: {
+              getCell: () => Promise.resolve(cell(partiallyReadableObject)),
+            },
+            result: { getCell: () => Promise.resolve(cell({})) },
+          },
+          {
+            id: "of:partial-array",
+            name: () => "Partial array",
+            getPatternRef: () => Promise.resolve(undefined),
+            input: {
+              getCell: () => Promise.resolve(cell(partiallyReadableArray)),
+            },
+            result: { getCell: () => Promise.resolve(cell({})) },
+          },
+          matchingPiece("of:second-match"),
+        ]),
+    };
+
+    expect(
+      await searchPieces(
+        {
+          apiUrl: API_URL,
+          space: SPACE,
+          identity: ID,
+        },
+        "needle",
+        {
+          loadManager: () => Promise.resolve({} as any),
+          createController: () => controller as any,
+          reportSearchError: (pieceId, source, error) =>
+            errors.push({ pieceId, source, error }),
+        },
+      ),
+    ).toEqual([
+      {
+        id: "of:first-match",
+        name: "of:first-match",
+        patternRef: undefined,
+      },
+      {
+        id: "of:unreadable",
+        name: "Result-only match",
+        patternRef: undefined,
+      },
+      {
+        id: "of:partial-object",
+        name: "Partial object",
+        patternRef: undefined,
+      },
+      {
+        id: "of:partial-array",
+        name: "Partial array",
+        patternRef: undefined,
+      },
+      {
+        id: "of:second-match",
+        name: "of:second-match",
+        patternRef: undefined,
+      },
+    ]);
+    expect(errors).toHaveLength(3);
+    expect(errors).toContainEqual({
+      pieceId: "of:unreadable",
+      source: "input data",
+      error: new Error("not readable"),
+    });
+    expect(errors).toContainEqual({
+      pieceId: "of:partial-object",
+      source: "input data",
+      error: new Error("object property not readable"),
+    });
+    expect(errors).toContainEqual({
+      pieceId: "of:partial-array",
+      source: "input data",
+      error: new Error("array element not readable"),
+    });
   });
 
   it("forwards repository metadata through piece creation and updates", async () => {

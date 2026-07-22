@@ -167,6 +167,7 @@
     "multiformats": "npm:multiformats@^14.0.4",
     "ses": "npm:ses@^2.2.0",
     "turndown": "npm:turndown@^7.2.4",
+    "unicode-case-folding": "npm:unicode-case-folding@1.1.1",
     "zod": "npm:zod@^4.4.3"
   }
 }

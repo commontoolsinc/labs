@@ -56,7 +56,12 @@ export {
   summarizeTransaction,
   type TransactionSummary,
 } from "./storage/transaction-summary.ts";
-export { convertCellsToLinks, isCell, isStream } from "./cell.ts";
+export {
+  convertCellsToLinks,
+  isCell,
+  isReadableCell,
+  isStream,
+} from "./cell.ts";
 export {
   getCellOrThrow,
   isCellResult,
