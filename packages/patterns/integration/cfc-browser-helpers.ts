@@ -329,7 +329,7 @@ const markTrustedAction = async (
 // Resolve once the shell's reactive view has caught up to runtime state and is
 // interactive, so a click lands on a bound handler. Waits for the shell to
 // expose `viewSettled` (notification-driven), then awaits the settle.
-async function settleView(
+export async function settleView(
   page: Page,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ): Promise<void> {

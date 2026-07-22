@@ -3,6 +3,7 @@ import {
   type ProbeApi,
   waitForCondition,
 } from "@commonfabric/integration";
+import { settleView } from "./cfc-browser-helpers.ts";
 
 // Find-and-click-a-button-by-text helpers shared by the default-app
 // integration tests. A click predicate stamps the button it resolved with a
@@ -67,23 +68,22 @@ async function clearNoteButtonMark(
   }, { args: [token, NOTE_BUTTON_CLICK_TARGET_ATTR] }).catch(() => {});
 }
 
-// Wait for a matching button to be present and interactive, then dispatch a
-// single trusted click on it. Throws if no matching button becomes clickable.
+// Settle the view, tag a matching button, and dispatch a single trusted click
+// on it. Throws if no matching button becomes clickable.
 async function settleAndClickNoteButton(
   page: Page,
   selector: string,
   match: "includes" | "exact" | "title",
   needle: string,
 ): Promise<void> {
-  const markTarget = async (token: string) => {
+  // Settle before tagging so the tagged button is the final rendered node, laid
+  // out and still attached when the click resolves its box model.
+  await settleView(page);
+  const token = `cfc-note-button-${crypto.randomUUID()}`;
+  try {
     await waitForCondition(page, markNoteButton, {
       args: [selector, match, needle, token, NOTE_BUTTON_CLICK_TARGET_ATTR],
     });
-  };
-
-  let token = `cfc-note-button-${crypto.randomUUID()}`;
-  try {
-    await markTarget(token);
   } catch (cause) {
     throw new Error(
       `Unable to find a ${
@@ -92,35 +92,15 @@ async function settleAndClickNoteButton(
       { cause },
     );
   }
-
-  let lastCause: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const clickTarget = await page.waitForSelector(
-        `[${NOTE_BUTTON_CLICK_TARGET_ATTR}="${token}"]`,
-        { strategy: "pierce" },
-      );
-      await clickTarget.click();
-      return;
-    } catch (cause) {
-      lastCause = cause;
-      const retryable = cause instanceof Error &&
-        cause.message.includes("stable box model");
-      if (!retryable || attempt === 2) break;
-    } finally {
-      await clearNoteButtonMark(page, token);
-    }
-
-    // A root-pattern hot swap can replace the marked button after discovery
-    // but before Astral resolves its box. Re-mark the current rendered node and
-    // retry the coordinate click; only the successful attempt dispatches.
-    token = `cfc-note-button-${crypto.randomUUID()}`;
-    await markTarget(token);
+  try {
+    const clickTarget = await page.waitForSelector(
+      `[${NOTE_BUTTON_CLICK_TARGET_ATTR}="${token}"]`,
+      { strategy: "pierce" },
+    );
+    await clickTarget.click();
+  } finally {
+    await clearNoteButtonMark(page, token);
   }
-
-  throw new Error(`Unable to click the stable "${needle}" button`, {
-    cause: lastCause,
-  });
 }
 
 // The click helpers resolve `true` once the single click has landed (they throw
