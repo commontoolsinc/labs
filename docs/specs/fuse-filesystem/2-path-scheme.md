@@ -316,8 +316,8 @@ every entity directory requests every entity value. The complete cost model,
 directory-handle semantics, measured scaling, and older-server contract are in
 [Entity Lookup, Enumeration, and Performance](./11-entity-lookup-enumeration.md).
 
-Entity IDs are truncated in the directory listing but can be accessed by prefix
-match (the filesystem resolves the shortest unambiguous prefix).
+Each directory name is the complete, canonically encoded entity ID. The
+filesystem does not truncate IDs or resolve prefixes.
 
 Mounted callable paths accepted by `cf exec` are limited to the top-level
 callable forms:

@@ -49,8 +49,9 @@ subscribes lazily:
    supports it. Identifier stubs do not subscribe to entity values.
 2. Opening `pieces/` for the first time materializes and subscribes to
    `allPieces`; a mount that only uses `entities/` does not load it.
-3. Access below an entity or piece stub loads the requested entity and
-   subscribes to the projected input and result cells.
+3. Access below an entity stub loads and projects the requested entity's
+   current input and result values. Named projections under `pieces/`
+   subscribe to their projected input and result cells.
 4. Identifier discovery is refreshed when a new `entities/` directory handle
    is prepared. Continuation reads on one handle do not poll the server.
 
