@@ -477,6 +477,13 @@ Deno.test("memory v2 entity identifier listing transfers identifiers without ent
     const response = listResponses[0];
     assertEquals(Object.keys(response.ok ?? {}).sort(), ["ids", "serverSeq"]);
 
+    const serverFlags = client.serverFlags;
+    assertExists(serverFlags);
+    serverFlags.entityIdPagination = false;
+    const legacyResult = await space.listEntityIds({ limit: 1 });
+    assertEquals(legacyResult?.ids, ["of:fid1:first", "of:fid1:second"]);
+    serverFlags.entityIdPagination = true;
+
     const firstPage = await space.listEntityIds({ limit: 1 });
     assertEquals(firstPage?.ids, ["of:fid1:first"]);
     assertEquals(firstPage?.nextAfter, "of:fid1:first");
@@ -517,6 +524,29 @@ Deno.test("memory v2 entity identifier listing transfers identifiers without ent
   } finally {
     await client.close();
     await server.close();
+  }
+});
+
+Deno.test("memory v2 client fails closed without entity identifier capabilities", async () => {
+  const client = await connect({
+    transport: handshakeTransport({
+      ...HELLO_OK,
+      flags: {
+        modernCellRep: getMemoryProtocolFlags().modernCellRep,
+      },
+    } as FabricValue),
+  });
+  const space = await client.mount(
+    "did:key:z6Mk-memory-v2-client-legacy-entity-identifiers",
+    {},
+    testSessionOpenAuthFactory,
+  );
+
+  try {
+    assertEquals(await space.listEntityIds(), undefined);
+    assertEquals(await space.entityIdExists("of:fid1:first"), undefined);
+  } finally {
+    await client.close();
   }
 });
 

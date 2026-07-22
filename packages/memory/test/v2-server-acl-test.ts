@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertExists, assertRejects } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
-import { Server } from "../v2/server.ts";
+import { Server, SessionRegistry } from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
@@ -1432,6 +1432,52 @@ Deno.test("acl enforce: auxiliary read and operator surfaces honor capabilities"
   } finally {
     await server.close();
     await Deno.remove(diskPath);
+  }
+});
+
+Deno.test("acl enforce: entity identifier reads require READ capability", async () => {
+  const sessions = new SessionRegistry();
+  const server = new Server({
+    sessions,
+    store: new URL("memory://acl-entity-identifiers-denied"),
+    subscriptionRefreshDelayMs: 0,
+    authorizeSessionOpen: (message) => {
+      const iss = message.invocation?.iss;
+      return typeof iss === "string" ? iss : undefined;
+    },
+    sessionOpenAuth: { audience: TEST_AUDIENCE },
+    acl: { mode: "enforce" },
+  });
+  const space = "did:key:z6Mk-acl-entity-identifiers-denied";
+
+  try {
+    await initializeSpaceAcl(server, space, { [ALICE]: "OWNER" });
+    sessions.open(
+      space,
+      { sessionId: "session:entity-identifiers-denied" },
+      1,
+      "entity-identifiers-denied",
+      BOB,
+    );
+
+    const list = await server.listEntityIds({
+      type: "entity-id.list",
+      requestId: nextRequestId("acl-entity-identifiers-denied"),
+      space,
+      sessionId: "session:entity-identifiers-denied",
+    });
+    assertEquals(list.error?.name, "AuthorizationError");
+
+    const lookup = await server.entityIdExists({
+      type: "entity-id.exists",
+      requestId: nextRequestId("acl-entity-exists-denied"),
+      space,
+      sessionId: "session:entity-identifiers-denied",
+      id: `of:${space}`,
+    });
+    assertEquals(lookup.error?.name, "AuthorizationError");
+  } finally {
+    await server.close();
   }
 });
 
