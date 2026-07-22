@@ -71,6 +71,7 @@ import {
 } from "commonfabric";
 import PollOptionCard from "./poll-option-card.tsx";
 import ParticipantIdentityCard from "./participant-identity-card.tsx";
+import { safeImageUrl } from "./generated-art.tsx";
 
 export interface User {
   name: string;
@@ -84,6 +85,12 @@ export interface Option {
   id: string;
   title: string;
   addedByName: string;
+  /**
+   * Persisted generated-art data URL (`""` until the host's client generates
+   * and syncs it). Every viewer renders this stored value; generation only
+   * runs on the host's client for options where it is still empty.
+   */
+  imageUrl?: string;
 }
 
 export type VoteColor = "green" | "yellow" | "red";
@@ -117,6 +124,17 @@ export interface RemoveOptionEvent {
 export interface CastVoteEvent {
   optionId: string;
   voteType: VoteColor;
+}
+
+/**
+ * Art persistence event: the host keeps a generated thumbnail by storing its
+ * data URL onto the option. Sent by the option card's host-only keep action,
+ * which reads the GeneratedArt sub-pattern's `imageDataUrl` output directly
+ * (fetch-derived child outputs materialize for parents since CT-1836).
+ */
+export interface SetOptionImageEvent {
+  optionId: string;
+  imageUrl: string;
 }
 
 export type ResetVotesEvent = Record<PropertyKey, never>;
@@ -504,9 +522,31 @@ const addOption = handler<AddOptionEvent, {
     id,
     title: trimmed,
     addedByName: me,
+    imageUrl: "",
   });
   options.addUnique(option);
   optionDraft.set("");
+});
+
+// Host persists the generated cuisine thumbnail (a data URL read from the
+// GeneratedArt sub-pattern by the card's keep action) onto its option.
+// Idempotent on the stored value, keyed-collection addressed, and admin-gated
+// like every other mutation — only the host's client generates, but the gate
+// holds regardless.
+const setOptionImage = handler<SetOptionImageEvent, {
+  options: OptionsCell;
+  myName: NameCell;
+  adminName: NameCell;
+}>(({ optionId, imageUrl }, { options, myName, adminName }) => {
+  const me = trimmedName(myName.get());
+  const admin = trimmedName(adminName.get());
+  if (!me || me !== admin) return;
+  const option = options.elementById(optionId);
+  const current = option.get();
+  if (!current) return;
+  const safe = safeImageUrl(imageUrl);
+  if (!safe || trimmedName(current.imageUrl) === safe) return;
+  option.key("imageUrl").set(safe);
 });
 
 const removeOption = handler<RemoveOptionEvent, {
@@ -861,6 +901,7 @@ export interface CozyPollOutput {
   castVote: Stream<CastVoteEvent>;
   clearMyVote: Stream<ClearVoteEvent>;
   resetVotes: Stream<ResetVotesEvent>;
+  setOptionImage: Stream<SetOptionImageEvent>;
   logVisit: Stream<LogVisitEvent>;
   removeHistoryEntry: Stream<RemoveHistoryEntryEvent>;
   clearHistory: Stream<ClearHistoryEvent>;
@@ -934,6 +975,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       adminName,
     });
     const boundCastVote = castVote({ votes, myName, today, loadedAt });
+    const boundSetOptionImage = setOptionImage({ options, myName, adminName });
     const boundClearMyVote = clearMyVote({ votes, myName });
     const boundResetVotes = resetVotes({ votes, myName, adminName });
     const boundLogVisit = logVisit({
@@ -1391,6 +1433,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     id: option.id,
                     title: option.title,
                     addedByName: option.addedByName,
+                    ...(option.imageUrl === undefined
+                      ? {}
+                      : { imageUrl: option.imageUrl }),
                   };
                   const rank = computed(() => {
                     const idx = ranked.findIndex(
@@ -1410,6 +1455,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       castVote={boundCastVote}
                       removeOption={boundRemoveOption}
                       logVisit={boundLogVisit}
+                      setOptionImage={boundSetOptionImage}
                     />
                   );
                 })}
@@ -1779,6 +1825,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       castVote: boundCastVote,
       clearMyVote: boundClearMyVote,
       resetVotes: boundResetVotes,
+      setOptionImage: boundSetOptionImage,
       logVisit: boundLogVisit,
       removeHistoryEntry: boundRemoveHistoryEntry,
       clearHistory: boundClearHistory,

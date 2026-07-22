@@ -2387,16 +2387,17 @@ describe("runner utils", () => {
         undefined,
         tx,
       );
-      const obj1 = { a: { $alias: { path: [] } } };
+      const redirect = testCell.key("a").getAsWriteRedirectLink();
+      const obj1 = { a: redirect };
       const obj2 = { a: 2, b: { c: testCell.getAsLink() } };
       const obj3 = {
-        a: testCell.key("a").getAsWriteRedirectLink(),
+        a: testCell.getAsWriteRedirectLink(),
         b: { c: 4 },
       };
 
       const result = mergeObjects<unknown>(obj1, obj2, obj3);
       expect(result).toEqual({
-        a: { $alias: { path: [] } },
+        a: redirect,
         b: { c: testCell.getAsLink() },
       });
     });

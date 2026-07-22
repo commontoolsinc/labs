@@ -22,7 +22,7 @@ jobs:
   # ---------------------------------------------------------------------------
   check:
     name: "Check"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
@@ -75,7 +75,7 @@ jobs:
 
   cfcheck:
     name: "CFC Pattern Check (${{ matrix.shard }}/${{ matrix.total }})"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -99,7 +99,7 @@ jobs:
 
   test:
     name: "Test (${{ matrix.shard }}/${{ matrix.total }})"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -124,8 +124,15 @@ jobs:
 
       # For deno-web-test browser tests
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
-      - name: 🛡️ Disable AppArmor for browser tests
-        run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+      - name: 🛡️ Disable AppArmor restriction for browser tests
+        shell: bash
+        run: |
+          sysctl_path=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [[ -e "$sysctl_path" ]]; then
+            printf '0\n' | sudo tee "$sysctl_path" >/dev/null
+          else
+            echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
+          fi
 
       - name: 🧪 Run parallel workspace tests
         run: deno task test
@@ -149,7 +156,7 @@ jobs:
 
   runner-test:
     name: "Runner Tests (${{ matrix.shard }}/${{ matrix.total }})"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -207,7 +214,7 @@ jobs:
 
   build-toolshed:
     name: "Build Binary (toolshed)"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
@@ -233,7 +240,7 @@ jobs:
 
   build-bg-piece-service:
     name: "Build Binary (bg-piece-service)"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
@@ -257,7 +264,7 @@ jobs:
 
   build-cf:
     name: "Build Binary (cf)"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
@@ -281,7 +288,7 @@ jobs:
 
   generated-patterns-integration-test:
     name: "Generated Patterns Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -364,7 +371,7 @@ jobs:
 
   package-integration-test:
     name: "Package Integration Tests (${{ matrix.suite_name }})"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     needs: ["build-toolshed"]
     strategy:
@@ -413,8 +420,15 @@ jobs:
 
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
-      - name: 🛡️ Disable AppArmor for browser tests
-        run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+      - name: 🛡️ Disable AppArmor restriction for browser tests
+        shell: bash
+        run: |
+          sysctl_path=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [[ -e "$sysctl_path" ]]; then
+            printf '0\n' | sudo tee "$sysctl_path" >/dev/null
+          else
+            echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
+          fi
 
       - name: 🧪 Run ${{ matrix.step_name }}
         working-directory: ${{ matrix.package_dir }}
@@ -456,7 +470,7 @@ jobs:
 
   cli-integration-test:
     name: "CLI Integration Tests (${{ matrix.suite_name }})"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: ${{ matrix.timeout_minutes }}
     needs: ["build-toolshed", "build-cf"]
     strategy:
@@ -615,7 +629,7 @@ jobs:
 
   pattern-integration-test:
     name: "Pattern Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     needs: ["build-toolshed"]
     strategy:
@@ -689,8 +703,15 @@ jobs:
 
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
-      - name: 🛡️ Disable AppArmor for browser tests
-        run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+      - name: 🛡️ Disable AppArmor restriction for browser tests
+        shell: bash
+        run: |
+          sysctl_path=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [[ -e "$sysctl_path" ]]; then
+            printf '0\n' | sudo tee "$sysctl_path" >/dev/null
+          else
+            echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
+          fi
 
       # Both kinds of coverage: V8 runtime coverage via DENO_COVERAGE_DIR, and
       # authored-pattern coverage via CF_PATTERN_COVERAGE_DIR, which the shell
@@ -744,7 +765,7 @@ jobs:
 
   pattern-reload-integration-test:
     name: "Pattern Reload Integration Tests"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
@@ -758,8 +779,15 @@ jobs:
 
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
-      - name: 🛡️ Disable AppArmor for browser tests
-        run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+      - name: 🛡️ Disable AppArmor restriction for browser tests
+        shell: bash
+        run: |
+          sysctl_path=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [[ -e "$sysctl_path" ]]; then
+            printf '0\n' | sudo tee "$sysctl_path" >/dev/null
+          else
+            echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
+          fi
 
       # Both kinds of coverage — see the note on pattern-integration-test above.
       - name: 🧩 Run pattern reload integration tests
@@ -797,7 +825,7 @@ jobs:
 
   pattern-unit-test:
     name: "Pattern Unit Tests (${{ matrix.chunk }}/${{ matrix.total }})"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     needs: ["build-cf"]
     strategy:
@@ -879,7 +907,7 @@ jobs:
   perf-check:
     name: "Performance Check"
     if: (github.event_name == 'pull_request') || (github.ref_name == 'main')
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     needs:
       - check
@@ -958,7 +986,7 @@ jobs:
   attest-binaries:
     name: "Attest and Upload Binaries"
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     needs:
       [
@@ -1204,7 +1232,7 @@ jobs:
     name: "Deploy to Toolshed (Staging)"
     if: github.ref == 'refs/heads/main'
     needs: ["attest-binaries"]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: toolshed
     steps:
       - name: 📥 Checkout repository
@@ -1228,7 +1256,7 @@ jobs:
     name: "Deploy to Rapids (Staging)"
     if: github.ref == 'refs/heads/main'
     needs: ["attest-binaries"]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: toolshed
     steps:
       - name: 📥 Checkout repository
@@ -1261,7 +1289,7 @@ jobs:
         "package-integration-test",
         "cli-integration-test",
       ]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: ci
     steps:
       - name: 📥 Checkout repository

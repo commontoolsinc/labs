@@ -20,6 +20,7 @@ import type {
   LogVisitEvent,
   Option,
   RemoveOptionEvent,
+  SetOptionImageEvent,
   Vote,
 } from "./main.tsx";
 
@@ -43,12 +44,40 @@ const propValue = (node: unknown, prop: string): unknown => {
 const noopCastVote = handler<CastVoteEvent, EmptyState>(() => {});
 const noopRemoveOption = handler<RemoveOptionEvent, EmptyState>(() => {});
 const noopLogVisit = handler<LogVisitEvent, EmptyState>(() => {});
+const recordSetOptionImage = handler<
+  SetOptionImageEvent,
+  { lastEvent: Writable<SetOptionImageEvent | undefined> }
+>((event, { lastEvent }) => lastEvent.set(event));
 
+// Carries a stored image so this admin-viewer card takes the stored-art path
+// (no generation request).
 const STORED_OPTION: Option = {
   id: "opt-sushi",
   title: "Sushi Place",
   addedByName: "Alex",
+  imageUrl:
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ",
 };
+
+// Nothing stored: the admin card generates via the mocked endpoint below.
+const GENERATING_OPTION: Option = {
+  id: "opt-tacos",
+  title: "Taco Truck",
+  addedByName: "Alex",
+  imageUrl: "",
+};
+
+export const fetchMocks = [
+  {
+    urlIncludes: "/api/ai/img",
+    contentType: "image/png",
+    base64Body:
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  },
+];
+
+const GENERATED_IMAGE_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
 const votes: Vote[] = [
   {
@@ -68,6 +97,12 @@ export default pattern(() => {
   const castVote: Stream<CastVoteEvent> = noopCastVote({});
   const removeOption: Stream<RemoveOptionEvent> = noopRemoveOption({});
   const logVisit: Stream<LogVisitEvent> = noopLogVisit({});
+  const lastSetOptionImage = new Writable<SetOptionImageEvent | undefined>(
+    undefined,
+  );
+  const setOptionImage: Stream<SetOptionImageEvent> = recordSetOptionImage({
+    lastEvent: lastSetOptionImage,
+  });
 
   const card = PollOptionCard({
     option: STORED_OPTION,
@@ -80,6 +115,7 @@ export default pattern(() => {
     castVote,
     removeOption,
     logVisit,
+    setOptionImage,
   });
 
   const assert_my_green_vote_label_renders = computed(() =>
@@ -174,6 +210,62 @@ export default pattern(() => {
     ) !== undefined
   );
 
+  // Stored art ⇒ artSyncState "stored" ⇒ no keep affordance.
+  const assert_no_keep_button_when_stored = computed(() =>
+    readValue(card.artSyncState) === "stored" &&
+    findNodeByProp(
+        card[UI],
+        "aria-label",
+        "Keep this art (host)",
+      ) === undefined
+  );
+
+  // The generation path: an admin card with nothing stored generates (mocked
+  // endpoint), surfaces the live fetch state through `artSyncState` (a direct
+  // fetch-derived read — post-CT-1836), and shows the keep affordance.
+  const generatingCard = PollOptionCard({
+    option: GENERATING_OPTION,
+    rank: 2,
+    me: "Alex",
+    isJoined: true,
+    isAdmin: true,
+    votes,
+    removeConfirmTarget,
+    castVote,
+    removeOption,
+    logVisit,
+    setOptionImage,
+  });
+
+  const assert_keep_button_when_generated = computed(() =>
+    readValue(generatingCard.artSyncState) === "generated" &&
+    findNodeByProp(
+        generatingCard[UI],
+        "aria-label",
+        "Keep this art (host)",
+      ) !== undefined
+  );
+
+  const action_keep_generated_art = action(() => {
+    const button = findNodeByProp(
+      generatingCard[UI],
+      "aria-label",
+      "Keep this art (host)",
+    );
+    const onClick = propsOf(button)?.onClick;
+    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
+      (onClick as { send: (event: Record<string, never>) => void }).send({});
+    }
+  });
+
+  const assert_keep_sends_generated_image = computed(() => {
+    const event = readValue(lastSetOptionImage);
+    return typeof event === "object" && event !== null &&
+      readValue((event as SetOptionImageEvent).optionId) === "opt-tacos" &&
+      readValue((event as SetOptionImageEvent).imageUrl) ===
+        GENERATED_IMAGE_DATA_URL;
+  });
+
   return {
     tests: [
       { assertion: assert_my_green_vote_label_renders },
@@ -188,7 +280,15 @@ export default pattern(() => {
       { assertion: assert_remove_control_is_underlined },
       { assertion: assert_remove_separator_is_plain },
       { assertion: assert_log_visit_control_renders },
+      // Drives the generating card's mocked fetch to completion (and gives
+      // both cards' art state a settle beat before it is read directly).
+      { settle: true },
+      { assertion: assert_no_keep_button_when_stored },
+      { assertion: assert_keep_button_when_generated },
+      { action: action_keep_generated_art },
+      { assertion: assert_keep_sends_generated_image },
     ],
     card,
+    generatingCard,
   };
 });
