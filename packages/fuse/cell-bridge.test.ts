@@ -24,7 +24,9 @@ import {
 import {
   collectDirectorySnapshot,
   DirectoryHandleMap,
+  FuseOperationState,
   prepareDirectoryForHandle,
+  visitDirectoryEntries,
 } from "./directory-handles.ts";
 import {
   CFC_COMPAT_XATTR_PREFIX,
@@ -420,7 +422,7 @@ Deno.test("CellBridge materializes /pieces from pieceRegistry", async () => {
   }
 });
 
-Deno.test("mounted /entities recursive directory listing transfers fids without entity bytes", async () => {
+Deno.test("CellBridge entity directory snapshots do not hydrate values", async () => {
   const tree = new FsTree();
   const allPiecesEntityId = "of:fid1:piece-in-all-pieces";
   const entityIds = [
@@ -994,7 +996,7 @@ Deno.test("CellBridge status reports /pieces loaded only after materialization",
   );
 });
 
-Deno.test("CellBridge real manager mount and /entities listing transfer only identifiers", async () => {
+Deno.test("FUSE callback traversal of mounted /entities transfers only identifiers", async () => {
   const signer = await Identity.fromPassphrase(
     "fuse real manager identifier listing",
   );
@@ -1007,6 +1009,11 @@ Deno.test("CellBridge real manager mount and /entities listing transfer only ide
   const hiddenId = "of:fid1:fuse-real-manager-hidden";
   const rootPayload = "FUSE_ROOT_ENTITY_BYTES_0fb29de4".repeat(20);
   const hiddenPayload = "FUSE_HIDDEN_ENTITY_BYTES_6c6dfbec".repeat(20);
+  const fillerPayloadMarker = "FUSE_FILLER_ENTITY_BYTES_7d23cbe1";
+  const fillerIds = Array.from(
+    { length: 1_000 },
+    (_, index) => `of:fid1:fuse-filler-${index.toString().padStart(4, "0")}`,
+  );
   const audience = "did:key:z6Mk-fuse-entity-list-test-audience";
   const server = new MemoryV2Server.Server({
     authorizeSessionOpen: () => signer.did(),
@@ -1045,6 +1052,11 @@ Deno.test("CellBridge real manager mount and /entities listing transfer only ide
           id: hiddenId,
           value: { value: { payload: hiddenPayload } },
         },
+        ...fillerIds.map((id, index) => ({
+          op: "set" as const,
+          id,
+          value: { value: { payload: `${fillerPayloadMarker}-${index}` } },
+        })),
       ],
     });
 
@@ -1084,6 +1096,11 @@ Deno.test("CellBridge real manager mount and /entities listing transfer only ide
     }
 
     const storageManager = new RecordingStorageManager(signer);
+    const expectedIds = [rootId, hiddenId, ...fillerIds].toSorted();
+    assertEquals(
+      await storageManager.open(space).listEntityIds?.(),
+      expectedIds,
+    );
     runtime = new Runtime({
       apiUrl: new URL("https://example.invalid"),
       storageManager,
@@ -1098,18 +1115,67 @@ Deno.test("CellBridge real manager mount and /entities listing transfer only ide
     bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
 
     const state = await bridge.connectSpace("home");
-    const entries = await openDirectorySnapshot(bridge, state.entitiesIno);
+    const fuseOperations = new FuseOperationState(tree, bridge);
+    const entitiesFh = fuseOperations.openDirectory(state.entitiesIno);
+    assertNotEquals(entitiesFh, undefined);
+    const preparation = fuseOperations.prepareDirectory(
+      entitiesFh!,
+      state.entitiesIno,
+    );
+    assertNotEquals(preparation, undefined);
+    const entries = fuseOperations.directorySnapshot(
+      entitiesFh!,
+      state.entitiesIno,
+      await preparation,
+    );
+
+    const traversedEntries = [] as typeof entries[number][];
+    let offset = 0;
+    while (offset < entries.length) {
+      const previousOffset = offset;
+      let entriesInReply = 0;
+      visitDirectoryEntries(entries, offset, (entry, nextOffset) => {
+        if (entriesInReply === 2) return false;
+        traversedEntries.push(entry);
+        entriesInReply++;
+        offset = nextOffset;
+        return true;
+      });
+      assertNotEquals(offset, previousOffset);
+    }
+
+    assertEquals(traversedEntries, entries);
     const entryNames = new Set(entries.slice(2).map(({ name }) => name));
+    assertEquals(entryNames.size, expectedIds.length);
     assertEquals(entryNames.has(encodeFuseComponent(rootId)), true);
     assertEquals(entryNames.has(encodeFuseComponent(hiddenId)), true);
+    assertEquals(entries.slice(2).every(({ ino }) => ino === 0n), true);
     assertEquals(tree.getChildren(state.entitiesIno), []);
     for (const { name } of entries.slice(2)) {
-      assertEquals(await bridge.prepareLookup(state.entitiesIno, name), true);
-      assertEquals(
-        tree.getNode(tree.lookup(state.entitiesIno, name)!)?.kind,
-        "dir",
+      const entityIno = await fuseOperations.prepareLookup(
+        state.entitiesIno,
+        name,
       );
+      assertNotEquals(entityIno, undefined);
+      fuseOperations.retainLookup(entityIno!);
+      assertEquals(tree.getNode(entityIno!)?.kind, "dir");
+
+      const entityFh = fuseOperations.openDirectory(entityIno!);
+      assertNotEquals(entityFh, undefined);
+      const entityPreparation = fuseOperations.prepareDirectory(
+        entityFh!,
+        entityIno!,
+      );
+      const entityEntries = fuseOperations.directorySnapshot(
+        entityFh!,
+        entityIno!,
+        entityPreparation === undefined ? undefined : await entityPreparation,
+      );
+      assertEquals(entityEntries.map(({ name }) => name), [".", ".."]);
+      fuseOperations.closeDirectory(entityFh!, entityIno!);
+      fuseOperations.forget(entityIno!, 1n);
     }
+    fuseOperations.closeDirectory(entitiesFh!, state.entitiesIno);
 
     assertEquals(
       serverPayloads.some((payload) => payload.includes(rootPayload)),
@@ -1120,9 +1186,23 @@ Deno.test("CellBridge real manager mount and /entities listing transfer only ide
       false,
     );
     assertEquals(
-      serverPayloads.some((payload) =>
-        payload.includes(rootId) && payload.includes(hiddenId)
-      ),
+      serverPayloads.some((payload) => payload.includes(fillerPayloadMarker)),
+      false,
+    );
+    assertEquals(
+      serverPayloads.some((payload) => payload.includes(rootId)),
+      true,
+    );
+    assertEquals(
+      serverPayloads.some((payload) => payload.includes(hiddenId)),
+      true,
+    );
+    assertEquals(
+      serverPayloads.some((payload) => payload.includes(fillerIds[0])),
+      true,
+    );
+    assertEquals(
+      serverPayloads.some((payload) => payload.includes(fillerIds.at(-1)!)),
       true,
     );
     assertEquals(state.pieceMap.size, 0);

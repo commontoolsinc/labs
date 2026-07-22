@@ -74,10 +74,9 @@ import {
   validateVirtualFileRange,
 } from "./handles.ts";
 import {
-  collectDirectorySnapshot,
-  DirectoryHandleMap,
   type DirectorySnapshotEntry,
-  prepareDirectoryForHandle,
+  FuseOperationState,
+  visitDirectoryEntries,
 } from "./directory-handles.ts";
 import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
 import {
@@ -726,7 +725,14 @@ export async function main(argv: string[] = Deno.args) {
 
   // File handle tracking for write support
   const handles = new HandleMap();
-  const directoryHandles = new DirectoryHandleMap();
+  const fuseOperations = new FuseOperationState(
+    tree,
+    bridge,
+    (ino) =>
+      Boolean(
+        bridge?.resolveWritePath(ino) || bridge?.resolveSourceWritePath(ino),
+      ),
+  );
 
   function closeKernelFileHandle(fh: bigint): void {
     const closed = handles.close(fh);
@@ -1123,7 +1129,7 @@ export async function main(argv: string[] = Deno.args) {
       attrTimeout: timeout,
       entryTimeout: timeout,
     });
-    bridge?.retainEntityProjectionLookup(ino);
+    fuseOperations.retainLookup(ino);
     fuse.symbols.fuse_reply_entry(
       req,
       Deno.UnsafePointer.of(new Uint8Array(entryBuf)),
@@ -1135,7 +1141,7 @@ export async function main(argv: string[] = Deno.args) {
     parent: bigint,
     name: string,
   ): boolean {
-    const ino = tree.lookup(parent, name);
+    const ino = fuseOperations.lookup(parent, name);
     if (ino === undefined) return false;
     const node = tree.getNode(ino);
     if (!node) return false;
@@ -1191,9 +1197,11 @@ export async function main(argv: string[] = Deno.args) {
         }
         // Slow path: entry not in tree, must hydrate before replying.
         const finishPendingReply = trackPendingFuseReply();
-        bridge.prepareLookup(parent, name).then((prepared) => {
-          if (!prepared || !replyLookupFromTree(req, parent, name)) {
+        fuseOperations.prepareLookup(parent, name).then((ino) => {
+          if (ino === undefined) {
             fuse.symbols.fuse_reply_err(req, ENOENT);
+          } else {
+            replyEntry(req, ino, tree.getNode(ino));
           }
           finishPendingReply();
         }).catch(() => {
@@ -1221,7 +1229,7 @@ export async function main(argv: string[] = Deno.args) {
       nlookup: number | bigint,
     ) => {
       logOp("forget", ino.toString());
-      bridge?.releaseEntityProjectionLookup(BigInt(ino), BigInt(nlookup));
+      fuseOperations.forget(BigInt(ino), BigInt(nlookup));
       fuse.symbols.fuse_reply_none(req);
     },
   );
@@ -1515,14 +1523,12 @@ export async function main(argv: string[] = Deno.args) {
       fi: Deno.PointerValue,
     ) => {
       logOp("opendir", ino.toString());
-      const node = tree.getNode(BigInt(ino));
-      if (!node || node.kind !== "dir") {
+      const inode = BigInt(ino);
+      const fh = fuseOperations.openDirectory(inode);
+      if (fh === undefined) {
         fuse.symbols.fuse_reply_err(req, ENOENT);
         return;
       }
-      const inode = BigInt(ino);
-      const fh = directoryHandles.open(inode);
-      bridge?.retainEntityProjectionOpen(inode);
       writeFileInfo(fi, fh);
       fuse.symbols.fuse_reply_open(req, fi);
     },
@@ -1557,24 +1563,16 @@ export async function main(argv: string[] = Deno.args) {
         const bufSize = Number(size);
         const startOffset = Number(offset);
 
-        const entries = preparedEntries ??
-          directoryHandles.snapshot(fh, inode, () => {
-            return collectDirectorySnapshot(
-              tree,
-              inode,
-              (childIno) =>
-                Boolean(
-                  bridge?.resolveWritePath(childIno) ||
-                    bridge?.resolveSourceWritePath(childIno),
-                ),
-            );
-          });
+        const entries = fuseOperations.directorySnapshot(
+          fh,
+          inode,
+          preparedEntries,
+        );
 
         const buf = new Uint8Array(bufSize);
         let pos = 0;
 
-        for (let i = startOffset; i < entries.length; i++) {
-          const entry = entries[i];
+        visitDirectoryEntries(entries, startOffset, (entry, nextOffset) => {
           const nameBuf = encoder.encode(entry.name + "\0");
           const statBuf = new ArrayBuffer(STAT_SIZE);
           writeStat(statBuf, {
@@ -1593,12 +1591,13 @@ export async function main(argv: string[] = Deno.args) {
             BigInt(remaining),
             nameBuf,
             Deno.UnsafePointer.of(new Uint8Array(statBuf)),
-            BigInt(i + 1),
+            BigInt(nextOffset),
           );
 
-          if (Number(entrySize) > remaining) break;
+          if (Number(entrySize) > remaining) return false;
           pos += Number(entrySize);
-        }
+          return true;
+        });
 
         fuse.symbols.fuse_reply_buf(
           req,
@@ -1607,12 +1606,7 @@ export async function main(argv: string[] = Deno.args) {
         );
       };
 
-      const preparation = prepareDirectoryForHandle(
-        directoryHandles,
-        fh,
-        inode,
-        bridge,
-      );
+      const preparation = fuseOperations.prepareDirectory(fh, inode);
       if (preparation) {
         const finishPendingReply = trackPendingFuseReply();
         preparation.then((entries) => {
@@ -2375,8 +2369,7 @@ export async function main(argv: string[] = Deno.args) {
     (req: Deno.PointerValue, ino: number | bigint, fi: Deno.PointerValue) => {
       logOp("releasedir", ino.toString());
       if (fi) {
-        directoryHandles.close(readFileInfo(fi).fh);
-        bridge?.releaseEntityProjectionOpen(BigInt(ino));
+        fuseOperations.closeDirectory(readFileInfo(fi).fh, BigInt(ino));
       }
       fuse.symbols.fuse_reply_err(req, 0); // success
     },

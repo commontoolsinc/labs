@@ -52,9 +52,19 @@ the projection cache.
 
 A successful lookup creates one empty projected directory. The bridge keeps a
 least-recently-used cache of at most 128 exact entity projections by default.
-The limit includes hydrated projections. Eviction removes the projected tree,
-its controller, and its CFC entry metadata. Enumeration remains complete
-because its names live in the open directory handle rather than this cache.
+The limit includes hydrated projections. Projections with kernel lookup
+references, open file handles, open directory handles, or in-flight hydration
+remain pinned. The cache may exceed its configured limit by the number of
+pinned projections and returns to the limit as those references close.
+Eviction removes the projected tree, its controller, subscriptions, and CFC
+entry metadata. Enumeration remains complete because its names live in the
+open directory handle rather than this cache.
+
+Deletion and eviction remove the directory entry immediately. A referenced
+inode subtree remains available by inode until its final lookup and open
+references close. This matches the FUSE lifetime rule and prevents an open
+directory or file from changing to `ENOENT` because unrelated entity lookups
+filled the projection cache.
 
 Mount connection creates only the space's fixed synthetic files and
 directories. It does not request identifiers, the space root, the default
@@ -77,6 +87,10 @@ child, such as `meta.json`, `result.json`, or `result/title`, crosses the
 hydration boundary. The bridge loads only that entity through
 `PiecesController.get()` and then prepares the named projection. Hydration can
 transfer and retain bytes proportional to that entity value.
+
+Once hydrated, an entity-only projection subscribes to its input, result, and
+pattern metadata. External changes rebuild the retained projection in place.
+Eviction or deletion cancels these subscriptions.
 
 ### Recursive crawlers
 
@@ -298,8 +312,9 @@ Changes to the entity projection must preserve all of the following:
 8. **Capability-safe compatibility.** A client never sends paginated list or
    point-lookup requests unless the server advertises their capabilities.
 9. **Bounded retained projection state.** Enumeration does not add permanent
-   identifier inodes. Exact and hydrated entity projections obey the configured
-   cache limit.
+   identifier inodes. Unreferenced exact and hydrated entity projections obey
+   the configured cache limit. Referenced projections are removed after their
+   lookup and open references close.
 
 Performance tests should prefer deterministic counters and query-plan
 assertions over wall-clock CI thresholds. Useful scale fixtures are 1,000,
@@ -314,12 +329,13 @@ An older Memory v2 server may omit `entityIdListing`, `entityIdPagination`, or
 unknown request. Connecting the space never falls back to reading the space
 root, default pattern, or `allPieces`.
 
-A server with identifier listing but without pagination returns its complete
-sorted list through the compatibility path. A server without identifier
-listing yields an empty `entities/` enumeration. A server without point lookup
-can resolve only exact projections already cached in the bridge or known piece
-controllers. It does not refresh the complete identifier list for one missing
-name.
+FUSE enumeration requires both identifier listing and pagination. Opening
+`entities/` fails when either capability is absent. It does not accept one
+unbounded response. The separate compatibility list API remains available to
+legacy callers, but the server rejects an unpaginated result larger than 1,000
+IDs. A server without point lookup can resolve only exact projections already
+cached in the bridge or known piece controllers. It does not refresh the
+complete identifier list for one missing name.
 
 If the caller later opens `pieces/`, the legacy `allPieces` projection is
 materialized. Its known controllers can support exact entity access, but they

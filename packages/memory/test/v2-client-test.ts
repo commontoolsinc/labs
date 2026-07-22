@@ -480,8 +480,9 @@ Deno.test("memory v2 entity identifier listing transfers identifiers without ent
     const serverFlags = client.serverFlags;
     assertExists(serverFlags);
     serverFlags.entityIdPagination = false;
-    const legacyResult = await space.listEntityIds({ limit: 1 });
-    assertEquals(legacyResult, undefined);
+    const legacyResult = await space.listEntityIds();
+    assertEquals(legacyResult?.ids, ["of:fid1:first", "of:fid1:second"]);
+    assertEquals(await space.listEntityIds({ limit: 1 }), undefined);
     serverFlags.entityIdPagination = true;
 
     const firstPage = await space.listEntityIds({ limit: 1 });

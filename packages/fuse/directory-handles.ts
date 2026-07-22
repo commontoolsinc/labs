@@ -11,6 +11,16 @@ export interface DirectoryPreparer {
   ): Promise<readonly DirectorySnapshotEntry[] | undefined>;
 }
 
+/** Bridge operations used directly by the FUSE lookup and directory callbacks. */
+export interface FuseOperationPreparer extends DirectoryPreparer {
+  shouldPrepareLookup(parentIno: bigint, name: string): boolean;
+  prepareLookup(parentIno: bigint, name: string): Promise<boolean>;
+  retainEntityProjectionLookup?(ino: bigint, count?: bigint): void;
+  releaseEntityProjectionLookup?(ino: bigint, count?: bigint): void;
+  retainEntityProjectionOpen?(ino: bigint): void;
+  releaseEntityProjectionOpen?(ino: bigint): void;
+}
+
 export interface DirectorySnapshotEntry {
   readonly name: string;
   readonly ino: bigint;
@@ -149,6 +159,95 @@ export class DirectoryHandleMap {
   ): void {
     const state = this.#handles.get(fh);
     if (state?.ino === ino) state.entries = entries;
+  }
+}
+
+/**
+ * Shared state transitions for the FUSE lookup, forget, opendir, readdir, and
+ * releasedir callbacks. Tests use this class without loading libfuse.
+ */
+export class FuseOperationState {
+  readonly directoryHandles = new DirectoryHandleMap();
+
+  constructor(
+    private readonly tree: FsTree,
+    private readonly preparer: FuseOperationPreparer | null | undefined,
+    private readonly isWritable: (ino: bigint) => boolean = () => false,
+  ) {}
+
+  lookup(parentIno: bigint, name: string): bigint | undefined {
+    const ino = this.tree.lookup(parentIno, name);
+    return ino !== undefined && this.tree.getNode(ino) !== undefined
+      ? ino
+      : undefined;
+  }
+
+  async prepareLookup(
+    parentIno: bigint,
+    name: string,
+  ): Promise<bigint | undefined> {
+    if (!this.preparer?.shouldPrepareLookup(parentIno, name)) {
+      return this.lookup(parentIno, name);
+    }
+    if (!await this.preparer.prepareLookup(parentIno, name)) return undefined;
+    return this.lookup(parentIno, name);
+  }
+
+  retainLookup(ino: bigint): void {
+    this.preparer?.retainEntityProjectionLookup?.(ino);
+  }
+
+  forget(ino: bigint, nlookup: bigint): void {
+    this.preparer?.releaseEntityProjectionLookup?.(ino, nlookup);
+  }
+
+  openDirectory(ino: bigint): bigint | undefined {
+    if (this.tree.getNode(ino)?.kind !== "dir") return undefined;
+    const fh = this.directoryHandles.open(ino);
+    this.preparer?.retainEntityProjectionOpen?.(ino);
+    return fh;
+  }
+
+  prepareDirectory(
+    fh: bigint,
+    ino: bigint,
+  ): Promise<readonly DirectorySnapshotEntry[] | undefined> | undefined {
+    return prepareDirectoryForHandle(
+      this.directoryHandles,
+      fh,
+      ino,
+      this.preparer,
+    );
+  }
+
+  directorySnapshot(
+    fh: bigint,
+    ino: bigint,
+    preparedEntries?: readonly DirectorySnapshotEntry[],
+  ): readonly DirectorySnapshotEntry[] {
+    return preparedEntries ??
+      this.directoryHandles.snapshot(
+        fh,
+        ino,
+        () => collectDirectorySnapshot(this.tree, ino, this.isWritable),
+      );
+  }
+
+  closeDirectory(fh: bigint, ino: bigint): void {
+    if (!this.directoryHandles.has(fh, ino)) return;
+    this.directoryHandles.close(fh);
+    this.preparer?.releaseEntityProjectionOpen?.(ino);
+  }
+}
+
+/** Visit directory entries using the continuation offsets passed to libfuse. */
+export function visitDirectoryEntries(
+  entries: readonly DirectorySnapshotEntry[],
+  startOffset: number,
+  visit: (entry: DirectorySnapshotEntry, nextOffset: number) => boolean,
+): void {
+  for (let index = startOffset; index < entries.length; index++) {
+    if (!visit(entries[index], index + 1)) return;
   }
 }
 

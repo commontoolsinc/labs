@@ -5,7 +5,10 @@ import {
   DirectoryHandleMap,
   type DirectoryPreparer,
   type DirectorySnapshotEntry,
+  type FuseOperationPreparer,
+  FuseOperationState,
   prepareDirectoryForHandle,
+  visitDirectoryEntries,
 } from "./directory-handles.ts";
 import { DIR_MODE, DIR_MODE_RW } from "./platform.ts";
 import { FsTree } from "./tree.ts";
@@ -175,4 +178,82 @@ Deno.test("untracked directory reads use the current entries", () => {
   assertEquals(handles.snapshot(0n, ino, readEntries)[0].name, "first");
   name = "second";
   assertEquals(handles.snapshot(0n, ino, readEntries)[0].name, "second");
+});
+
+Deno.test("FuseOperationState follows lookup and directory callback lifetimes", async () => {
+  const tree = new FsTree();
+  const directory = tree.addDir(tree.rootIno, "directory");
+  const staticFile = tree.addFile(directory, "static", "value", "string");
+  const dynamicFile = tree.addFile(directory, "dynamic", "value", "string");
+  const lookupRefs: Array<["retain" | "forget", bigint, bigint]> = [];
+  const openRefs: Array<["retain" | "release", bigint]> = [];
+  const preparer: FuseOperationPreparer = {
+    shouldPrepareDirectory: () => false,
+    prepareDirectory: () => Promise.resolve(true),
+    shouldPrepareLookup: (_parentIno, name) => name !== "static",
+    prepareLookup: (_parentIno, name) => Promise.resolve(name === "dynamic"),
+    retainEntityProjectionLookup: (ino, count = 1n) => {
+      lookupRefs.push(["retain", ino, count]);
+    },
+    releaseEntityProjectionLookup: (ino, count = 1n) => {
+      lookupRefs.push(["forget", ino, count]);
+    },
+    retainEntityProjectionOpen: (ino) => openRefs.push(["retain", ino]),
+    releaseEntityProjectionOpen: (ino) => openRefs.push(["release", ino]),
+  };
+  const operations = new FuseOperationState(tree, preparer);
+
+  assertEquals(await operations.prepareLookup(directory, "static"), staticFile);
+  assertEquals(
+    await operations.prepareLookup(directory, "dynamic"),
+    dynamicFile,
+  );
+  assertEquals(await operations.prepareLookup(directory, "missing"), undefined);
+  operations.retainLookup(dynamicFile);
+  operations.forget(dynamicFile, 2n);
+
+  assertEquals(operations.openDirectory(staticFile), undefined);
+  const fh = operations.openDirectory(directory);
+  assertEquals(typeof fh, "bigint");
+  assertEquals(operations.prepareDirectory(fh!, directory), undefined);
+  assertEquals(
+    operations.directorySnapshot(fh!, directory).map(({ name }) => name),
+    [".", "..", "static", "dynamic"],
+  );
+  operations.closeDirectory(999n, directory);
+  operations.closeDirectory(fh!, directory);
+
+  assertEquals(lookupRefs, [
+    ["retain", dynamicFile, 1n],
+    ["forget", dynamicFile, 2n],
+  ]);
+  assertEquals(openRefs, [
+    ["retain", directory],
+    ["release", directory],
+  ]);
+});
+
+Deno.test("directory callback helpers skip stale children and stop at buffer boundaries", () => {
+  const tree = new FsTree();
+  const directory = tree.addDir(tree.rootIno, "directory");
+  const stale = tree.addFile(directory, "stale", "value", "string");
+  tree.inodes.delete(stale);
+  assertEquals(
+    collectDirectorySnapshot(tree, directory).map(({ name }) => name),
+    [".", ".."],
+  );
+
+  const visited: string[] = [];
+  visitDirectoryEntries(
+    [
+      { name: "first", ino: 2n, mode: DIR_MODE },
+      { name: "second", ino: 3n, mode: DIR_MODE },
+    ],
+    0,
+    (entry) => {
+      visited.push(entry.name);
+      return false;
+    },
+  );
+  assertEquals(visited, ["first"]);
 });
