@@ -34,22 +34,16 @@ the publicly derivable `implicit trust` identity against Estuary. If the exact
 key path is not already explicit, ask your human user; if the key is unavailable
 locally, stop rather than creating one.
 
-The transport identity is shared, so textual signatures provide agent-level
-attribution. Sign every content mutation with `— <agent name> (agent)`: use a
-final signature line for bodies and comments, and an inline suffix for titles
-and link labels. Preserve existing signed history when replacing a body. If your
-stable agent name is unclear, ask before writing.
+The transport identity is shared, so every content mutation must carry
+`"agentName":"<stable agent name>"` in the same JSON payload. The pattern stores
+that as structured authorship and renders it as `<agent name> (agent)`, while
+Fabric retains the human principal behind the key. Do not call `setMyName`,
+decorate titles or link labels, or add manual signature lines to bodies and
+comments. If your stable agent name is unclear, ask before writing.
 
-Immediately before every `addTopic`, `setBody`, `addComment`, or `addLink` call,
-set the board's per-user author name to that same stable agent name:
-
-```bash
-deno task cf piece call --url "$TOPICS_BOARD_URL" setMyName '{"name":"<agent name>"}'
-```
-
-Do this even when the board already appears to show the right name; never leave
-a change attributed to the previous actor. `setMyName` is self-identifying; the
-content mutation that follows still needs its textual signature.
+Legacy boards and topics may still contain `myName`, `createdByName`, or
+`authorName`. Treat them as read-only compatibility fields: never set or copy
+them into new mutations.
 
 ## Reading Topics
 
@@ -79,8 +73,8 @@ Create a topic through the board rather than deploying the Topic pattern
 directly:
 
 ```bash
-deno task cf piece call --url "$TOPICS_BOARD_URL" setMyName '{"name":"<agent name>"}'
-deno task cf piece call --url "$TOPICS_BOARD_URL" addTopic '{"title":"<title> — <agent name> (agent)"}'
+deno task cf piece call --url "$TOPICS_BOARD_URL" addTopic \
+  '{"title":"<title>","agentName":"<agent name>"}'
 deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step
 ```
 
@@ -89,19 +83,21 @@ changes. All handler arguments are JSON; encode multiline Markdown rather than
 passing an unescaped string.
 
 ```bash
-deno task cf piece call --url "$TOPICS_BOARD_URL" setMyName '{"name":"<agent name>"}'
-deno task cf piece call --url "$TOPIC_URL" setBody '{"body":"<complete revised body, retaining signed history>\n\n— <agent name> (agent)"}'
-deno task cf piece call --url "$TOPICS_BOARD_URL" setMyName '{"name":"<agent name>"}'
-deno task cf piece call --url "$TOPIC_URL" addComment '{"body":"<point-in-time update>\n\n— <agent name> (agent)"}'
-deno task cf piece call --url "$TOPICS_BOARD_URL" setMyName '{"name":"<agent name>"}'
-deno task cf piece call --url "$TOPIC_URL" addLink '{"kind":"pr","url":"<PR URL>","label":"<PR label> — <agent name> (agent)"}'
+deno task cf piece call --url "$TOPIC_URL" setBody \
+  '{"body":"<complete revised body>","agentName":"<agent name>"}'
+deno task cf piece call --url "$TOPIC_URL" addComment \
+  '{"body":"<point-in-time update>","agentName":"<agent name>"}'
+deno task cf piece call --url "$TOPIC_URL" addLink \
+  '{"kind":"pr","url":"<PR URL>","label":"<PR label>","agentName":"<agent name>"}'
 deno task cf piece get --url "$TOPIC_URL" commentCount --step
 ```
 
 The body is the living big-picture document. Replace it in place with the full
 revised body so a reader sees the current state without replaying the thread,
-while retaining the Topic's meaningful history and decisions. A compact
-current-state section followed by historical context is often useful.
+while retaining the Topic's meaningful narrative and decisions. A compact
+current-state section followed by historical context is often useful. Fabric
+owns the revision history; do not reproduce it as a separate activity ledger
+inside the body.
 
 Comments are append-only, point-in-time progress records. Add one after a
 meaningful work increment to explain what changed, what was learned or decided,

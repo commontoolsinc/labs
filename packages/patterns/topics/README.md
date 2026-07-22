@@ -56,29 +56,16 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
 
 ## Headless / agent use
 
-Agents are first-class participants. For now, an agent uses the exact same
-Estuary identity key as its human user rather than minting an agent-specific
-key. Because that transport identity is shared, set `myName` immediately before
-each mutation and sign the mutation's text with `— <agent name> (agent)`. Use a
-final signature line for bodies and comments, and an inline suffix for titles
-and link labels.
-
-Against a deployed board piece:
+Agents are first-class participants. Against a deployed board piece:
 
 ```bash
 cf piece call --piece <board> setMyName '{"name":"Fable"}'
-cf piece call --piece <board> addTopic '{"title":"... — Fable (agent)"}'
-cf piece get  --piece <board> crossrefs --step     # recompute + canonical fids
-cf piece call --piece <board> setMyName '{"name":"Fable"}'
-cf piece call --piece <topic> addComment '{"body":"...\n\n— Fable (agent)"}'
-cf piece get  --piece <topic> commentCount --step  # recompute + verify
+cf piece call --piece <board> addTopic '{"title":"..."}'
+cf piece get  --piece <board> topics --input      # then address a topic piece
+cf piece call --piece <topic> addComment '{"body":"..."}'
 ```
 
-Handler source writes commit before result recomputation, so `--input` reads can
-verify bodies, comments, links, and the board's topics list immediately. For
-computed result fields such as `topicCount`, `crossrefs`, `commentCount`, or
-`lastActivityAt`, use `piece get --step`: start, recomputation, and the read
-must share one CLI runtime when derived cells are session-scoped. Prefer the
-canonical topic fids exported by `crossrefs` over intermediate wrapper links in
-the board's input array. Never interpret an empty `crossrefs` as an empty board
-without comparing `topics --input`; a failed result projection is not absence.
+Do **not** run `cf piece step` from a fresh CLI replica: a replica with a
+partial view persists deriveds computed from that partial view. Writes commit
+fine on their own; renderers derive for themselves. Verify writes via a renderer
+or post-materialization fid reads.
