@@ -9,6 +9,8 @@ import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
   type EntityDocument,
+  type EntityIdListRequest,
+  type EntityIdListResult,
   getPersistentSchedulerStateConfig,
   type GraphQuery,
   type GraphQueryRequest,
@@ -650,6 +652,26 @@ class Connection {
         }
         {
           const response = await this.server.graphQuery(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
+        return;
+      case "entity-id.list":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        {
+          const response = await this.server.listEntityIds(parsed);
           this.sendSessionResponse(
             parsed.space,
             parsed.sessionId,
@@ -2251,6 +2273,49 @@ export class Server {
     }
   }
 
+  async listEntityIds(
+    message: EntityIdListRequest,
+  ): Promise<ResponseMessage<EntityIdListResult>> {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
+      return respondTypedError<EntityIdListResult>(
+        message.requestId,
+        toError("SessionError", "Unknown session for space"),
+      );
+    }
+
+    try {
+      const engine = await this.openEngine(message.space);
+      const deny = this.#authorizeCurrentSessionWithEngine(
+        engine,
+        message.space,
+        message.sessionId,
+        session,
+        "READ",
+      );
+      if (deny) {
+        return respondTypedError<EntityIdListResult>(message.requestId, deny);
+      }
+
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: {
+          serverSeq: Engine.serverSeq(engine),
+          ids: Engine.listEntityIds(engine),
+        },
+      };
+    } catch (error) {
+      return respondTypedError<EntityIdListResult>(
+        message.requestId,
+        toError(
+          "QueryError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
   async listSchedulerActionSnapshots(
     message: SchedulerSnapshotListRequest,
   ): Promise<ResponseMessage<SchedulerSnapshotListResult>> {
@@ -3592,6 +3657,20 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       query: parsed.query as unknown as GraphQueryRequest["query"],
+    };
+  }
+
+  if (
+    parsed.type === "entity-id.list" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string"
+  ) {
+    return {
+      type: "entity-id.list",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
     };
   }
 

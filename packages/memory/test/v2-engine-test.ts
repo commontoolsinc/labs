@@ -19,6 +19,7 @@ import {
   deleteBranch,
   type Engine,
   listBranches,
+  listEntityIds,
   open,
   ProtocolError,
   read,
@@ -85,6 +86,59 @@ const toEntityDocument = (
   }
   return document as EntityDocument;
 };
+
+Deno.test("memory v2 engine lists live space-scoped entity identifiers", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: "of:fid1:second",
+            value: toEntityDocument({ payload: "second" }),
+          },
+          {
+            op: "set",
+            id: "of:fid1:first",
+            value: toEntityDocument({ payload: "first" }),
+          },
+          {
+            op: "set",
+            id: "of:fid1:user-only",
+            scope: "user",
+            value: toEntityDocument({ payload: "private" }),
+          },
+        ],
+      },
+    });
+
+    assertEquals(listEntityIds(engine), [
+      "of:fid1:first",
+      "of:fid1:second",
+    ]);
+
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "delete", id: "of:fid1:first" }],
+      },
+    });
+
+    assertEquals(listEntityIds(engine), ["of:fid1:second"]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
 
 Deno.test("memory v2 engine stores independent scoped instances for the same id", async () => {
   const { engine, path } = await createEngine();

@@ -28,7 +28,7 @@ rewrite. In particular:
 - route-level `Origin` enforcement remains deferred
 - session resume remains keyed by caller-supplied `(space, sessionId)` rather
   than a server-issued, principal-bound identifier
-- the public one-shot read surface is currently `graph.query`
+- the public one-shot read surfaces are `graph.query` and `entity-id.list`
 - watch-set mutations return inline `sync` payloads, and steady-state topology
   shrink does not yet guarantee automatic `removes`
 
@@ -50,7 +50,8 @@ The client MUST declare its protocol version in the first WebSocket message:
   "protocol": "memory/v2",
   "flags": {
     "modernCellRep": true,
-    "persistentSchedulerState": true
+    "persistentSchedulerState": true,
+    "entityIdListing": true
   }
 }
 ```
@@ -63,7 +64,8 @@ If the server accepts the protocol, it returns:
   "protocol": "memory/v2",
   "flags": {
     "modernCellRep": true,
-    "persistentSchedulerState": true
+    "persistentSchedulerState": true,
+    "entityIdListing": true
   },
   "sessionOpen": {
     "audience": "did:key:z6Mk...",
@@ -127,6 +129,10 @@ rows exist in the database. This flag is negotiated as an optional capability:
 a client and server may connect when their scheduler-state flags differ, and
 the server's flag controls the scheduler-observation data plane for that
 connection.
+
+`entityIdListing` advertises support for `entity-id.list`. It defaults to
+`false` when absent. A client must not send the request unless the server
+advertises the capability.
 
 ### 4.1.2 Logical Sessions and Resume
 
@@ -233,6 +239,7 @@ interface HelloMessage {
   flags: {
     modernCellRep: boolean;
     persistentSchedulerState?: boolean;
+    entityIdListing?: boolean;
   };
 }
 
@@ -241,6 +248,7 @@ interface RequestMessage {
     | "session.open"
     | "transact"
     | "graph.query"
+    | "entity-id.list"
     | "session.watch.set"
     | "session.watch.add"
     | "session.ack";
@@ -413,7 +421,31 @@ The selector path is relative to `document.value`, not the full stored document
 root. The server converts it to a document path by prepending `"value"` before
 running shared traversal.
 
-### 4.3.4 `session.watch.set` — Replace the Session Watch Set
+### 4.3.4 `entity-id.list` — List Live Entity Identifiers
+
+`entity-id.list` returns the identifiers of live entities in the default branch
+and space scope. The server reads the current entity index and does not select
+or return stored entity values. The result is sorted by identifier.
+
+```typescript
+// Shown at module scope.
+interface EntityIdListRequest {
+  type: "entity-id.list";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+}
+
+interface EntityIdListResult {
+  serverSeq: number;
+  ids: EntityId[];
+}
+```
+
+The command requires `READ` access to the space. Deleted entities, user-scoped
+entities, and session-scoped entities do not appear in the result.
+
+### 4.3.5 `session.watch.set` — Replace the Session Watch Set
 
 The watch set defines the union of queries whose results the session wants kept
 up to date.
@@ -448,7 +480,7 @@ Semantics:
   line with the new interest set
 - later committed changes continue to arrive via `session/effect`
 
-### 4.3.5 `session.watch.add` — Extend the Session Watch Set
+### 4.3.6 `session.watch.add` — Extend the Session Watch Set
 
 `session.watch.add` incrementally adds new watch specs into the existing
 session watch set by `id`.
@@ -488,7 +520,7 @@ Semantics:
 - watch mutations are applied in order per session; clients must serialize
   `session.watch.set` and `session.watch.add`
 
-### 4.3.6 Branch Lifecycle Commands
+### 4.3.7 Branch Lifecycle Commands
 
 Branch create / delete / merge lifecycle commands are not currently exposed on
 the v2 wire. The engine already carries branch state internally, but public wire

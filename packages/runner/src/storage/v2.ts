@@ -1484,6 +1484,10 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.synced();
   }
 
+  listEntityIds(): Promise<string[] | undefined> {
+    return this.replica.listEntityIds();
+  }
+
   listSchedulerActionSnapshots(
     query: SchedulerActionSnapshotQuery = {},
   ): Promise<SchedulerSnapshotListResult> {
@@ -1724,6 +1728,14 @@ class SpaceReplica implements ISpaceReplica {
   ): Promise<SqliteQueryResult> {
     const { session } = await this.sessionHandle();
     return await session.sqliteQuery(db, sql, params);
+  }
+
+  async listEntityIds(): Promise<string[] | undefined> {
+    const { client, session } = await this.sessionHandle();
+    if (client.serverFlags?.entityIdListing !== true) {
+      return undefined;
+    }
+    return (await session.listEntityIds())?.ids;
   }
 
   /**

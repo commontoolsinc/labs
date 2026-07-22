@@ -38,7 +38,7 @@ cf fuse unmount /tmp/cf
 ```
 /tmp/cf/                              # mount root
   home/                               # space (connected on demand)
-    pieces/
+    pieces/                            # named projections load on first access
       todo-app/                       # piece directory
         result.json                   # full result cell as JSON
         result/                       # exploded JSON tree
@@ -61,7 +61,7 @@ cf fuse unmount /tmp/cf
         meta.json                     # piece ID, entity, running pattern ref
       .index.json                     # piece name → entity ID mapping
       pieces.json                     # discovery manifest with pattern refs
-    entities/                         # access cells by entity ID
+    entities/                         # all live space entities, loaded lazily by ID
     space.json                        # { did, name }
   .spaces.json                        # known space name → DID mapping
 ```
@@ -392,8 +392,10 @@ avoid FUSE-T crashes from `notify_inval_entry` during callbacks).
 ### The `.status` file
 
 `.status` at the mount root reports the daemon's API URL, debug flag, connection
-state, per-space piece counts, subtree rebuild metrics, write statistics, and a
-`cfc` section carrying writeback phase counts and recent diagnostics.
+state, per-space materialized piece counts, subtree rebuild metrics, write
+statistics, and a `cfc` section carrying writeback phase counts and recent
+diagnostics. Each space has a `piecesLoaded` flag. Its piece count remains zero
+until the named `pieces/` projection is first accessed.
 
 The file is generated rather than written. `CellBridge.initStatus` registers it
 with `FsTree.addGeneratedFile`, giving the tree a function that renders the JSON
