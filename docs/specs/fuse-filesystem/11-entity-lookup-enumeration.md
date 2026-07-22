@@ -10,12 +10,11 @@ It separates three operations that have very different costs:
 Keeping those operations separate is the central constraint. Identifier-only
 enumeration must never turn into an implicit read of every entity value.
 
-The per-directory-handle preparation rule and the live-head storage index in
-this document describe the implementation on this branch. Cold exact lookup
-still refreshes the complete ID list, and entity IDs are still exposed as
-traversable directories. Point-existence lookup, a crawler-safe namespace, and
-wire-level list pagination are explicitly identified below as follow-ups; they
-are not current behavior.
+The implementation keeps these operations separate at the storage protocol,
+FUSE directory-handle, and in-memory projection layers. Mounting does not list
+identifiers. Enumeration uses stable protocol pages owned by one directory
+handle. Exact lookup uses a point-existence request. Directory enumeration
+below an entity ID does not hydrate its value.
 
 ## Addressing and Discovery
 
@@ -26,14 +25,16 @@ An exact path has the form:
 ```
 
 The full entity ID is the address. Directory enumeration is a discovery aid,
-not a prerequisite for interpreting that address. The implementation may keep
-identifier stubs in the in-memory filesystem tree so a known name can resolve
-without loading its value.
+not a prerequisite for interpreting that address. An open `entities/` handle
+owns virtual directory entries for the identifiers it discovered. Those
+entries do not create one permanent inode per identifier.
 
 The Memory v2 `entity-id.list` operation is the complete discovery source for
 servers that advertise `entityIdListing`. It returns sorted, live entity IDs
 from the default branch and space scope. It excludes deleted, user-scoped, and
 session-scoped entities. The operation is authorized as a space `READ`.
+Servers that advertise `entityIdPagination` accept a cursor, a capped page
+size, and the server sequence from the first page.
 
 The operation deliberately returns IDs rather than entity documents. Complete
 discovery is still inherently linear in the number and encoded length of live
@@ -41,56 +42,53 @@ IDs: the server must produce them, the wire must carry them, and FUSE must
 represent their names. "Identifier-only" means that this work is independent
 of entity value size; it does not mean enumeration is constant-cost.
 
-### Exact lookup versus a missing stub
+### Exact lookup
 
-An ID already present as an identifier stub resolves from the in-memory tree.
-The current implementation refreshes the complete identifier list when a name
-is missing from that tree. That preserves freshness but means a cold exact
-lookup is not yet an O(1) storage operation. A future point-existence operation
-may remove that coupling. Until then, callers that need predictable point-read
-cost should reuse a mounted space's identifier snapshot rather than repeatedly
-probing unrelated, absent names.
+`entity-id.exists` checks one canonical ID against the same live-head index as
+enumeration. It returns liveness and the current server sequence without
+selecting a revision or entity document. A cold exact lookup therefore does
+not list unrelated identifiers. A missing ID returns missing without changing
+the projection cache.
 
-Mount connection also obtains the initial identifier set on a capable server.
-It does not read the space root, default pattern, `allPieces`, or any entity
-value. The cost of connecting a space is therefore O(number and length of live
-IDs), plus construction of one empty FUSE directory stub per ID.
+A successful lookup creates one empty projected directory. The bridge keeps a
+least-recently-used cache of at most 128 exact entity projections by default.
+The limit includes hydrated projections. Eviction removes the projected tree,
+its controller, and its CFC entry metadata. Enumeration remains complete
+because its names live in the open directory handle rather than this cache.
+
+Mount connection creates only the space's fixed synthetic files and
+directories. It does not request identifiers, the space root, the default
+pattern, `allPieces`, or any entity value. Its storage and inode cost is
+independent of the number of live entities.
 
 ## Hydration Boundary
 
-An identifier stub is an empty synthetic directory. These operations remain
+An exact projection starts as an empty synthetic directory. These operations remain
 identifier-only:
 
 - connecting the space;
 - listing `entities/`;
-- looking up or stating an existing entity-ID stub; and
-- refreshing the live-ID set to add or remove stubs.
+- looking up or stating an exact entity-ID projection; and
+- opening exact entity-ID directories discovered by a recursive walker.
 
-Reading the entity directory crosses the hydration boundary. The bridge loads
-that entity through `PiecesController.get()`, constructs its entity projection,
-and hydrates both its `input` and `result` projections for the directory read.
-Hydration can transfer and retain bytes proportional to the entity value.
+Directory reads of an entity root and its `input` and `result` roots return
+only `.` and `..`. They do not load the entity. A direct lookup of a named
+child, such as `meta.json`, `result.json`, or `result/title`, crosses the
+hydration boundary. The bridge loads only that entity through
+`PiecesController.get()` and then prepares the named projection. Hydration can
+transfer and retain bytes proportional to that entity value.
 
 ### Recursive crawlers
 
-A recursive walker that opens every entity directory crosses the hydration
-boundary once per entity. Tools such as `find`, IDE indexers, backup scanners,
-and agents must not be assumed to stop after the top-level identifier listing.
-On the current directory-shaped projection, a crawler that descends into all
-stubs can request all entity values and materialize all of their projected
-nodes.
+A recursive walker may look up and open every entity-ID directory, but it sees
+no child names to follow. This makes `find`, IDE indexers, backup scanners, and
+other metadata crawlers identifier-only. They can issue one point-existence
+request per ID, but they do not issue entity, input, or result value reads.
 
-This is an exposed behavior, not an optimization detail. Consumers that only
-need discovery must stop at `entities/` and treat its child names as opaque
-IDs. They must not recurse into each child. A crawler-safe namespace in which
-enumerated IDs are non-followed links, or in which exact lookup lives below a
-non-enumerable `by-id/` directory, remains a possible follow-up; it would move
-the opt-in boundary into the filesystem shape itself.
-
-The acceptance invariant is strict even before such a namespace exists:
-listing `entities/` alone performs zero entity-value requests. Tests and
-benchmarks must count value requests directly rather than inferring this from
-the absence of a familiar payload string.
+Directly named access remains available for callers that know the projection
+path. Tests and benchmarks count entity, input, and result requests directly
+rather than inferring the boundary from the absence of a familiar payload
+string.
 
 ## Directory Handles and FUSE Pagination
 
@@ -104,8 +102,8 @@ The daemon tracks preparation per directory file handle:
 
 1. `opendir` allocates a directory handle.
 2. The first `readdir` for that handle prepares the dynamic directory. For
-   `entities/`, preparation requests the live identifier set and reconciles
-   identifier stubs.
+   `entities/`, preparation requests stable identifier pages and stores virtual
+   directory entries on the handle.
 3. Continuation `readdir` calls for the same handle read the already prepared
    in-memory directory and do not issue another identifier-list request.
 4. `releasedir` discards the handle state.
@@ -123,11 +121,23 @@ new opens can observe additions and deletions. Subscription-driven updates may
 still invalidate live tree entries as described in
 [Reactivity and Caching](./6-reactivity.md).
 
-Memory v2 currently returns the identifier set in one response rather than
-protocol pages. If identifier counts grow enough to require wire pagination,
-pages must share a fixed `serverSeq` (or fail with a typed changed-snapshot
-error), use a server-capped page size, and still prepare only once per FUSE
-directory handle. Silent restart loops are not acceptable.
+The first page fixes `serverSeq`. Every later page sends that value as
+`expectedServerSeq`. A change fails with `SnapshotChangedError`; the bridge
+does not restart or retry the scan. The server caps each page at 1,000 IDs.
+The FUSE handle publishes no partial listing when any page fails.
+
+## CFC Entry Metadata
+
+Virtual enumeration entries do not create CFC-annotated inodes. Exact
+projections receive the same CFC node and directory-entry annotations as other
+projected trees, and their count is bounded by the projection cache.
+
+`FsTree` also batches CFC directory-entry ordering for wide projected JSON
+objects. Adding or replacing an entry updates a parent-local name index and
+appends to its pending entry array. Reading the CFC annotation sorts the array
+once by name digest and rebuilds the index. Removing an entry uses the same
+index. Building a directory with many annotated children therefore avoids
+copying and sorting the complete entry array after every child insertion.
 
 ## Storage Live-ID Index
 
@@ -163,9 +173,10 @@ revision path and are not selected, decoded, or returned by ID enumeration.
 The scheduled benchmark workflow runs these diagnostic benchmarks. Their
 results show trends but do not cause changes to fail CI:
 
-- `packages/fuse/entity-projection.bench.ts` measures identifier-stub
-  construction, the first open directory view, repeated refresh, CFC
-  annotation overhead, and recursive hydration with a fake manager; and
+- `packages/fuse/entity-projection.bench.ts` measures bounded exact-projection
+  churn, the first paginated directory view, repeated refresh, batched CFC
+  directory annotations, and a recursive metadata walk with a fake manager;
+  and
 - `packages/memory/test/v2-entity-id-list.bench.ts` measures the SQLite list
   query across live-count, payload-size, and tombstone-count fixtures, and
   compares it with the live-head index.
@@ -191,61 +202,49 @@ scaling and relative cost, not portable latency budgets.
 
 ### FUSE projection
 
-Connection obtains the initial ID list and creates the stub tree. With CFC
-annotations disabled:
+Mount construction now creates eight fixed inodes, transfers no identifiers,
+and makes no list request. The historical `stubs-*` benchmark series now
+measures a stream of targeted exact lookups so the chart keeps its existing
+series names while exercising bounded projection churn:
 
-| Live IDs | Stub build | Retained V8 heap | ID response | Final inodes |
+| Exact lookups | CFC off | CFC on | Final inodes | List requests |
 | ---: | ---: | ---: | ---: | ---: |
-| 1,000 | 2.4–2.8 ms | 0.6 MiB | about 0.06 MiB | 1,008 |
-| 10,000 | 24.3–24.6 ms | 6.9 MiB | about 0.6 MiB | 10,008 |
-| 100,000 | 288–293 ms | 62.1 MiB | about 5.5 MiB | 100,008 |
+| 1,000 | 6.2–7.4 ms | 9.4–9.9 ms | 136 | 0 |
+| 10,000 | 62.6–66.3 ms | 91.9–92.9 ms | 136 | 0 |
+| 100,000 | 603.5–630.3 ms | — | 136 | 0 |
 
-The result is linear but material: connecting with 100,000 IDs retains roughly
-62 MiB in the V8 heap before any entity value is loaded. The retained-memory
-baseline already contains the fixture's source ID array, so this delta covers
-the stub projection rather than counting the source IDs again.
+Each row issued one point-existence request per lookup. The final inode count
+stayed fixed because only the 128 most recently used exact projections
+remained. CFC annotations add work per projection but no longer make retained
+state proportional to the space's live-entity count.
 
-The first `entities/` directory read on a handle refreshes the identifier set
-and retains a stable entry snapshot for continuation offsets. The snapshot has
-one object per entry and remains live until `releasedir`. Concurrent handles
-retain independent snapshots. The measurements below report the complete
-refresh-and-snapshot operation and its incremental retained heap:
+The first `entities/` directory read retains one virtual entry object per ID on
+the open handle. It does not add those entries to `FsTree`:
 
-| Live IDs | First directory view | Added V8 heap | ID response | Entries |
+| Live IDs | First directory view | Protocol pages | ID response | Tree inodes |
 | ---: | ---: | ---: | ---: | ---: |
-| 1,000 | 1.3–1.7 ms | 0.1 MiB | about 0.06 MiB | 1,002 |
-| 10,000 | 13.6–14.2 ms | 0.5 MiB | about 0.6 MiB | 10,002 |
-| 100,000 | 144–157 ms | 5.5 MiB | about 5.5 MiB | 100,002 |
+| 1,000 | 0.8–1.4 ms | 1 | about 0.1 MiB | 8 |
+| 10,000 | 12.4–12.7 ms | 10 | about 0.6 MiB | 8 |
+| 100,000 | 119.7–120.3 ms | 100 | about 5.5 MiB | 8 |
 
-`FsTree` keeps an inode-to-name map for path classification while building the
-snapshot. This keeps the child loop linear. Scanning the parent directory once
-for every child makes the operation quadratic.
+The snapshot remains live until `releasedir`, and concurrent handles own
+independent snapshots. This memory is linear in the listing size but has the
+same lifetime as the directory handle. No permanent identifier-inode tree
+remains after the handle closes.
 
-The benchmark's fake transport excludes database time, network framing, JSON
-decoding, and FUSE buffer-copy cost.
+The recursive-walk fixture listed and opened 1,000 entity directories. It made
+one paginated list request and 1,000 point-existence requests. It made zero
+entity gets, zero input gets, and zero result gets. The exact-projection cache
+left 136 total inodes. Measured walks took 4.9–6.0 ms with the fake manager.
 
-CFC annotations amplify stub-construction cost because annotations derive and
-retain additional metadata per node:
+The CFC batching benchmark built wide annotated directories and forced one
+metadata read at the end. A 1,000-entry directory took 3.7–4.7 ms, and a
+10,000-entry directory took 39.0–40.9 ms. This replaces the prior repeated
+copy-and-sort behavior, which took more than a second at 10,000 entries.
 
-| Live IDs | Build time with CFC annotations |
-| ---: | ---: |
-| 1,000 | 23.3–23.5 ms |
-| 5,000 | 356 ms |
-| 10,000 | 1.37 s |
-| 20,000 | 5.94–6.60 s |
-
-Repeated refreshes confirmed why per-handle preparation matters. Ten refreshes
-of 10,000 IDs took 79–82 ms and made 11 list requests including connection.
-Three refreshes of 100,000 IDs took 281–288 ms and made four requests. Each
-100,000-ID response was about 5.5 MiB even though the identifier set had not
-changed.
-
-The recursive-walk fixture descended into 1,000 stubs. It performed exactly
-1,000 entity gets, 1,000 input gets, and 1,000 result gets. About 3 MiB of
-source JSON expanded to 71.5–71.6 MiB of retained heap and 106,008 inodes in
-228–232 ms. This quantifies the crawler boundary: identifier-only top-level
-listing is cheap relative to projecting every value, but directory shape can
-invite the latter.
+The fake transport excludes database time, network framing, JSON decoding,
+and FUSE buffer-copy cost. The measurements establish scaling shape rather
+than deployment latency.
 
 ### Storage query
 
@@ -277,9 +276,9 @@ steady-state listing work.
 
 Changes to the entity projection must preserve all of the following:
 
-1. **No value transfer during discovery.** Space connection and top-level
-   `entities/` preparation issue zero per-entity reads and transfer no entity
-   document values.
+1. **No value transfer during discovery.** Space connection, top-level
+   `entities/` preparation, and recursive directory-only traversal issue zero
+   entity-value reads.
 2. **One preparation per handle.** FUSE continuation offsets for one open
    directory do not repeat identifier discovery. A new handle may refresh.
 3. **Linear, live-set storage work.** The query plan uses the live-head index,
@@ -287,16 +286,20 @@ Changes to the entity projection must preserve all of the following:
 4. **Value-size independence.** Increasing entity payload size does not change
    the logical list result or cause payload decoding. Tests should inspect
    response structure and request counts as well as payload sentinels.
-5. **Explicit hydration.** Access below one entity stub hydrates at most that
-   entity. Top-level enumeration hydrates none.
+5. **Explicit hydration.** Only direct lookup of a named projected child
+   hydrates an entity. Opening entity, input, or result directories hydrates
+   none.
 6. **Deletion correctness.** A refreshed identifier snapshot removes deleted
-   stubs and all indexes associated with their projected subtrees. New opens
-   can observe the removal without a sleep or polling loop.
-7. **Bounded failure behavior.** A failed list does not publish a partially
-   connected space or poison a directory handle. Callers may retry the failed
+   cached projections and their indexes. Point lookup rejects a cached ID once
+   the live-head index reports it missing.
+7. **Bounded failure behavior.** A failed page publishes no partial directory
+   snapshot and does not poison its handle. Callers may retry the failed
    operation; the daemon does not run a hidden retry loop.
-8. **Capability-safe compatibility.** A client never sends `entity-id.list`
-   unless the server positively advertises `entityIdListing`.
+8. **Capability-safe compatibility.** A client never sends paginated list or
+   point-lookup requests unless the server advertises their capabilities.
+9. **Bounded retained projection state.** Enumeration does not add permanent
+   identifier inodes. Exact and hydrated entity projections obey the configured
+   cache limit.
 
 Performance tests should prefer deterministic counters and query-plan
 assertions over wall-clock CI thresholds. Useful scale fixtures are 1,000,
@@ -306,18 +309,23 @@ must report entity, input, and result request counts explicitly.
 
 ## Older Servers
 
-An older Memory v2 server omits `entityIdListing`; omission parses as `false`.
-The client does not send the unknown request. Connecting the space therefore
-does not fall back to reading the space root, default pattern, or `allPieces`,
-and `entities/` begins empty.
+An older Memory v2 server may omit `entityIdListing`, `entityIdPagination`, or
+`entityIdLookup`; each omission parses as `false`. The client does not send an
+unknown request. Connecting the space never falls back to reading the space
+root, default pattern, or `allPieces`.
+
+A server with identifier listing but without pagination returns its complete
+sorted list through the compatibility path. A server without identifier
+listing yields an empty `entities/` enumeration. A server without point lookup
+can resolve only exact projections already cached in the bridge or known piece
+controllers. It does not refresh the complete identifier list for one missing
+name.
 
 If the caller later opens `pieces/`, the legacy `allPieces` projection is
-materialized. Those known piece IDs may then appear under `entities/`, but this
-is an incomplete view: entities outside `allPieces` cannot be discovered from
-an older server. Exact access is correspondingly limited to already known piece
-controllers in the current implementation. Compatibility must remain explicit
-and fail closed; absence of the capability must never trigger a hidden
-space-wide value scan.
+materialized. Its known controllers can support exact entity access, but they
+do not change the `entities/` enumeration. Compatibility remains explicit and
+fail closed; absence of a capability never triggers a hidden space-wide value
+scan.
 
 ---
 

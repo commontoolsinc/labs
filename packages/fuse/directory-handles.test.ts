@@ -1,6 +1,7 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import {
   collectDirectorySnapshot,
+  collectVirtualDirectorySnapshot,
   DirectoryHandleMap,
   type DirectoryPreparer,
   type DirectorySnapshotEntry,
@@ -114,6 +115,35 @@ Deno.test("directory entries remain stable for continuation offsets", () => {
   assertEquals(
     handles.snapshot(nextFh, ino, readEntries).map(({ name }) => name),
     ["second", "third"],
+  );
+});
+
+Deno.test("prepared virtual entries become the open handle snapshot", async () => {
+  const tree = new FsTree();
+  const ino = tree.addDir(tree.rootIno, "entities");
+  const handles = new DirectoryHandleMap();
+  const fh = handles.open(ino);
+  const virtual = collectVirtualDirectorySnapshot(tree, ino, [
+    "first",
+    "second",
+  ]);
+  const preparer: DirectoryPreparer = {
+    shouldPrepareDirectory: () => true,
+    prepareDirectory: () => Promise.resolve(true),
+    prepareDirectorySnapshot: () => Promise.resolve(virtual),
+  };
+
+  assertEquals(
+    await prepareDirectoryForHandle(handles, fh, ino, preparer),
+    virtual,
+  );
+  assertEquals(
+    handles.snapshot(fh, ino, () => []),
+    virtual,
+  );
+  assertEquals(
+    prepareDirectoryForHandle(handles, fh, ino, preparer),
+    undefined,
   );
 });
 

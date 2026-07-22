@@ -45,13 +45,13 @@ without requiring the process to close and reopen files.
 Not every cell in the space needs an active subscription. The Deno service
 subscribes lazily:
 
-1. Connecting a space obtains only the identifier snapshot when the server
-   supports it. Identifier stubs do not subscribe to entity values.
+1. Connecting a space creates only its fixed synthetic tree. Identifier
+   discovery begins when an `entities/` directory handle is read.
 2. Opening `pieces/` for the first time materializes and subscribes to
    `allPieces`; a mount that only uses `entities/` does not load it.
-3. Access below an entity stub loads and projects the requested entity's
-   current input and result values. Named projections under `pieces/`
-   subscribe to their projected input and result cells.
+3. Opening an exact entity directory remains identifier-only. Direct lookup of
+   a named projected child loads that entity. Named projections under
+   `pieces/` subscribe to their projected input and result cells.
 4. Identifier discovery is refreshed when a new `entities/` directory handle
    is prepared. Continuation reads on one handle do not poll the server.
 
@@ -82,6 +82,12 @@ type FsNode =
 
 This tree is updated when cell subscriptions fire. FUSE callbacks read
 directly from it — no IPC, no async hop for cached data.
+
+Entity enumeration names live in per-handle snapshots rather than this tree.
+Exact and hydrated entity projections use a least-recently-used cache with a
+default limit of 128 roots. Eviction removes the complete projected subtree
+and its controller state. The open enumeration handle remains complete because
+its virtual entries are independent of the projection cache.
 
 ### Kernel Cache Settings
 

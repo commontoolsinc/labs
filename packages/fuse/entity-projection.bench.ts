@@ -6,15 +6,19 @@ import type {
   PieceController,
   PiecesController,
 } from "@commonfabric/piece/ops";
+import { CfcProjectionAnnotator } from "./annotations.ts";
 import { CellBridge, type SpaceState } from "./cell-bridge.ts";
 import {
   collectDirectorySnapshot,
   DirectoryHandleMap,
   type DirectorySnapshotEntry,
+  prepareDirectoryForHandle,
 } from "./directory-handles.ts";
+import { encodeFuseComponent } from "./path-codec.ts";
 import { FsTree } from "./tree.ts";
 
 const encoder = new TextEncoder();
+const PAGE_SIZE = 1_000;
 
 interface FakeCell {
   schema: Record<string, unknown> | undefined;
@@ -26,13 +30,16 @@ interface FakeCell {
 
 interface ConnectedFixture {
   bridge: CellBridge;
+  existenceRequests: () => number;
   ids: string[];
   listRequests: () => number;
   state: SpaceState;
   tree: FsTree;
+  wireBytes: () => number;
 }
 
 interface Measurement {
+  existenceRequests: number;
   heapMiB: number;
   inodes: number;
   listRequests: number;
@@ -64,7 +71,6 @@ function diagnostic(
   invocation: number,
   value: object,
 ): void {
-  // Diagnostics written to stderr are stored in the workflow artifact.
   const bytes = encoder.encode(`${
     JSON.stringify({
       label,
@@ -79,16 +85,50 @@ function diagnostic(
   }
 }
 
+function firstIndexAfter(ids: readonly string[], after?: string): number {
+  if (after === undefined) return 0;
+  let low = 0;
+  let high = ids.length;
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2);
+    if (ids[middle] <= after) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
 async function connect(
   ids: string[],
   cfcAnnotations: boolean,
 ): Promise<ConnectedFixture> {
   let requests = 0;
+  let lookups = 0;
+  let transferredBytes = 0;
   const manager = {
     getSpace: () => "did:key:zFuseEntityProjectionBenchmark",
-    listEntityIds: () => {
+    listEntityIdPage: (options: {
+      after?: string;
+      limit?: number;
+      expectedServerSeq?: number;
+    }) => {
       requests++;
-      return Promise.resolve(ids.slice());
+      const start = firstIndexAfter(ids, options.after);
+      const pageIds = ids.slice(start, start + (options.limit ?? PAGE_SIZE));
+      const hasMore = start + pageIds.length < ids.length;
+      const result = {
+        serverSeq: 1,
+        ids: pageIds,
+        ...(hasMore ? { nextAfter: pageIds.at(-1)! } : {}),
+      };
+      transferredBytes += encoder.encode(JSON.stringify(result)).length;
+      return Promise.resolve(result);
+    },
+    entityIdExists: (id: string) => {
+      lookups++;
+      const index = firstIndexAfter(ids, id);
+      const exists = index > 0 && ids[index - 1] === id;
+      transferredBytes += encoder.encode(JSON.stringify({ exists })).length;
+      return Promise.resolve(exists);
     },
     runtime: { dispose: () => Promise.resolve() },
   } as unknown as PieceManager;
@@ -102,10 +142,12 @@ async function connect(
   const state = await bridge.connectSpace("home");
   return {
     bridge,
+    existenceRequests: () => lookups,
     ids,
     listRequests: () => requests,
     state,
     tree,
+    wireBytes: () => transferredBytes,
   };
 }
 
@@ -132,44 +174,54 @@ async function measureConstruction(
   const before = Deno.memoryUsage();
   const { value: fixture, wallMs } = await measureOperation(
     benchmark,
-    () => connect(ids, cfcAnnotations),
+    async () => {
+      const connected = await connect(ids, cfcAnnotations);
+      for (const id of ids) {
+        await connected.bridge.prepareLookup(
+          connected.state.entitiesIno,
+          encodeFuseComponent(id),
+        );
+      }
+      return connected;
+    },
   );
   forceGc();
   const after = Deno.memoryUsage();
-  const measurement = {
+  const expectedProjections = Math.min(ids.length, 128);
+  if (
+    fixture.state.entityIds.size !== expectedProjections ||
+    fixture.listRequests() !== 0 ||
+    fixture.existenceRequests() !== ids.length
+  ) {
+    throw new Error("targeted lookup did not keep a bounded projection cache");
+  }
+  return {
+    existenceRequests: fixture.existenceRequests(),
     heapMiB: mib(after.heapUsed - before.heapUsed),
     inodes: fixture.tree.inodes.size,
     listRequests: fixture.listRequests(),
     rssMiB: mib(after.rss - before.rss),
     wallMs: Math.round(wallMs * 10) / 10,
-    wireMiB: mib(encoder.encode(JSON.stringify({ ids: fixture.ids })).length),
+    wireMiB: mib(fixture.wireBytes()),
   };
-  // Keep the fixture live through the post-construction memory snapshot.
-  if (fixture.state.entityIds.size !== ids.length) {
-    throw new Error("entity projection did not retain every ID");
-  }
-  return measurement;
 }
 
-function createEntityDirectorySnapshot(
+async function createEntityDirectorySnapshot(
   fixture: ConnectedFixture,
   handles: DirectoryHandleMap,
   fh: bigint,
-): readonly DirectorySnapshotEntry[] {
+): Promise<readonly DirectorySnapshotEntry[]> {
   const inode = fixture.state.entitiesIno;
-  return handles.snapshot(
+  const prepared = await prepareDirectoryForHandle(
+    handles,
     fh,
     inode,
-    () =>
-      collectDirectorySnapshot(
-        fixture.tree,
-        inode,
-        (childIno) =>
-          Boolean(
-            fixture.bridge.resolveWritePath(childIno) ||
-              fixture.bridge.resolveSourceWritePath(childIno),
-          ),
-      ),
+    fixture.bridge,
+  );
+  return prepared ?? handles.snapshot(
+    fh,
+    inode,
+    () => collectDirectorySnapshot(fixture.tree, inode),
   );
 }
 
@@ -184,28 +236,26 @@ async function measureDirectoryOpen(
   const before = Deno.memoryUsage();
   const { value: entries, wallMs } = await measureOperation(
     benchmark,
-    async () => {
-      await fixture.bridge.prepareDirectory(fixture.state.entitiesIno);
-      return createEntityDirectorySnapshot(fixture, handles, fh);
-    },
+    () => createEntityDirectorySnapshot(fixture, handles, fh),
   );
   forceGc();
   const after = Deno.memoryUsage();
-  const measurement = {
+  if (entries.length !== ids.length + 2) {
+    throw new Error("entity directory snapshot omitted identifiers");
+  }
+  if (handles.snapshot(fh, fixture.state.entitiesIno, () => []) !== entries) {
+    throw new Error("directory handle did not retain its entry snapshot");
+  }
+  return {
     entries: entries.length,
+    existenceRequests: fixture.existenceRequests(),
     heapMiB: mib(after.heapUsed - before.heapUsed),
     inodes: fixture.tree.inodes.size,
     listRequests: fixture.listRequests(),
     rssMiB: mib(after.rss - before.rss),
     wallMs: Math.round(wallMs * 10) / 10,
-    wireMiB: mib(encoder.encode(JSON.stringify({ ids: fixture.ids })).length),
+    wireMiB: mib(fixture.wireBytes()),
   };
-  if (
-    handles.snapshot(fh, fixture.state.entitiesIno, () => []) !== entries
-  ) {
-    throw new Error("directory handle did not retain its entry snapshot");
-  }
-  return measurement;
 }
 
 for (const count of [1_000, 10_000, 100_000]) {
@@ -215,11 +265,10 @@ for (const count of [1_000, 10_000, 100_000]) {
     group: "entity projection cfc off",
     n: 1,
     fn: async (benchmark) => {
-      const ids = entityIds(count);
       diagnostic(
         `construction-cfc-off-${count}`,
         invocation++,
-        await measureConstruction(benchmark, ids, false),
+        await measureConstruction(benchmark, entityIds(count), false),
       );
     },
   });
@@ -232,11 +281,10 @@ for (const count of [1_000, 5_000, 10_000, 20_000]) {
     group: "entity projection cfc on",
     n: 1,
     fn: async (benchmark) => {
-      const ids = entityIds(count);
       diagnostic(
         `construction-cfc-on-${count}`,
         invocation++,
-        await measureConstruction(benchmark, ids, true),
+        await measureConstruction(benchmark, entityIds(count), true),
       );
     },
   });
@@ -249,11 +297,10 @@ for (const count of [1_000, 10_000, 100_000]) {
     group: "entity projection directory open",
     n: 1,
     fn: async (benchmark) => {
-      const ids = entityIds(count);
       diagnostic(
         `directory-open-${count}`,
         invocation++,
-        await measureDirectoryOpen(benchmark, ids),
+        await measureDirectoryOpen(benchmark, entityIds(count)),
       );
     },
   });
@@ -276,7 +323,9 @@ for (
       const before = Deno.memoryUsage();
       const { wallMs } = await measureOperation(benchmark, async () => {
         for (let iteration = 0; iteration < refreshes; iteration++) {
-          await fixture.bridge.prepareDirectory(fixture.state.entitiesIno);
+          await fixture.bridge.prepareDirectorySnapshot(
+            fixture.state.entitiesIno,
+          );
         }
       });
       forceGc();
@@ -286,9 +335,7 @@ for (
         listRequests: fixture.listRequests(),
         rssMiB: mib(after.rss - before.rss),
         wallMs: Math.round(wallMs * 10) / 10,
-        wireMiBPerRequest: mib(
-          encoder.encode(JSON.stringify({ ids: fixture.ids })).length,
-        ),
+        wireMiB: mib(fixture.wireBytes()),
       });
     },
   });
@@ -355,25 +402,69 @@ Deno.bench({
     forceGc();
     const before = Deno.memoryUsage();
     const { wallMs } = await measureOperation(benchmark, async () => {
-      for (
-        const [, ino] of fixture.tree.getChildren(fixture.state.entitiesIno)
-      ) {
-        await fixture.bridge.prepareDirectory(ino);
+      const entries = await fixture.bridge.prepareDirectorySnapshot(
+        fixture.state.entitiesIno,
+      );
+      for (const { name } of entries?.slice(2) ?? []) {
+        await fixture.bridge.prepareLookup(fixture.state.entitiesIno, name);
+        const ino = fixture.tree.lookup(fixture.state.entitiesIno, name)!;
+        await fixture.bridge.prepareDirectorySnapshot(ino);
       }
     });
     forceGc();
     const after = Deno.memoryUsage();
+    if (entityGets !== 0 || inputGets !== 0 || resultGets !== 0) {
+      throw new Error("recursive directory walk hydrated entity values");
+    }
     diagnostic("recursive-hydration-1000", hydrationInvocation++, {
       entityGets,
+      existenceRequests: fixture.existenceRequests(),
       heapMiB: mib(after.heapUsed - before.heapUsed),
       inodes: fixture.tree.inodes.size,
       inputGets,
+      listRequests: fixture.listRequests(),
       resultGets,
       rssMiB: mib(after.rss - before.rss),
-      sourcePayloadMiB: mib(
-        encoder.encode(JSON.stringify(payload)).length * count * 2,
-      ),
       wallMs: Math.round(wallMs * 10) / 10,
     });
   },
 });
+
+for (const count of [1_000, 5_000, 10_000]) {
+  let invocation = 0;
+  Deno.bench({
+    name: `entries-${count}`,
+    group: "CFC directory annotation batching",
+    n: 1,
+    fn: async (benchmark) => {
+      const tree = new FsTree(() => 0);
+      const parentIno = tree.addDir(tree.rootIno, "entities");
+      const annotator = new CfcProjectionAnnotator(tree, {
+        space: "did:key:zFuseEntityProjectionBenchmark",
+        generation: "entity-projection-review",
+        labelView: { version: 1, entries: [] },
+      });
+      annotator.annotateJsonDirectory(parentIno, [], {});
+      forceGc();
+      const before = Deno.memoryUsage();
+      const { wallMs } = await measureOperation(benchmark, () => {
+        for (let index = 0; index < count; index++) {
+          const name = `entity-${index.toString().padStart(8, "0")}`;
+          const childIno = tree.addDir(parentIno, name);
+          annotator.annotateJsonDirectory(childIno, [name], {});
+          annotator.annotateEntry(parentIno, name, childIno);
+        }
+        tree.getCfcAnnotation(parentIno);
+        return Promise.resolve();
+      });
+      forceGc();
+      const after = Deno.memoryUsage();
+      diagnostic(`cfc-entry-batch-${count}`, invocation++, {
+        heapMiB: mib(after.heapUsed - before.heapUsed),
+        inodes: tree.inodes.size,
+        rssMiB: mib(after.rss - before.rss),
+        wallMs: Math.round(wallMs * 10) / 10,
+      });
+    },
+  });
+}

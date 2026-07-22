@@ -6,6 +6,9 @@ import { FsTree } from "./tree.ts";
 export interface DirectoryPreparer {
   shouldPrepareDirectory(ino: bigint): boolean;
   prepareDirectory(ino: bigint): Promise<boolean>;
+  prepareDirectorySnapshot?(
+    ino: bigint,
+  ): Promise<readonly DirectorySnapshotEntry[] | undefined>;
 }
 
 export interface DirectorySnapshotEntry {
@@ -40,10 +43,31 @@ export function collectDirectorySnapshot(
   return entries;
 }
 
+/** Capture virtual directory names without adding them to the inode tree. */
+export function collectVirtualDirectorySnapshot(
+  tree: FsTree,
+  ino: bigint,
+  names: readonly string[],
+): DirectorySnapshotEntry[] {
+  return [
+    { name: ".", ino, mode: DIR_MODE },
+    {
+      name: "..",
+      ino: tree.parents.get(ino) ?? tree.rootIno,
+      mode: DIR_MODE,
+    },
+    ...names.map((name) => ({
+      name,
+      ino: tree.lookup(ino, name) ?? 0n,
+      mode: DIR_MODE,
+    })),
+  ];
+}
+
 interface DirectoryHandleState {
   entries?: readonly DirectorySnapshotEntry[];
   ino: bigint;
-  pending?: Promise<void>;
+  pending?: Promise<readonly DirectorySnapshotEntry[] | undefined>;
   prepared: boolean;
 }
 
@@ -71,17 +95,28 @@ export class DirectoryHandleMap {
     }
   }
 
-  pending(fh: bigint, ino: bigint): Promise<void> | undefined {
+  pending(
+    fh: bigint,
+    ino: bigint,
+  ): Promise<readonly DirectorySnapshotEntry[] | undefined> | undefined {
     const state = this.#handles.get(fh);
     return state?.ino === ino ? state.pending : undefined;
   }
 
-  trackPending(fh: bigint, ino: bigint, pending: Promise<void>): void {
+  trackPending(
+    fh: bigint,
+    ino: bigint,
+    pending: Promise<readonly DirectorySnapshotEntry[] | undefined>,
+  ): void {
     const state = this.#handles.get(fh);
     if (state?.ino === ino) state.pending = pending;
   }
 
-  clearPending(fh: bigint, ino: bigint, pending: Promise<void>): void {
+  clearPending(
+    fh: bigint,
+    ino: bigint,
+    pending: Promise<readonly DirectorySnapshotEntry[] | undefined>,
+  ): void {
     const state = this.#handles.get(fh);
     if (state?.ino === ino && state.pending === pending) {
       state.pending = undefined;
@@ -106,6 +141,15 @@ export class DirectoryHandleMap {
     state.entries ??= create();
     return state.entries;
   }
+
+  setSnapshot(
+    fh: bigint,
+    ino: bigint,
+    entries: readonly DirectorySnapshotEntry[],
+  ): void {
+    const state = this.#handles.get(fh);
+    if (state?.ino === ino) state.entries = entries;
+  }
 }
 
 /**
@@ -118,7 +162,7 @@ export function prepareDirectoryForHandle(
   fh: bigint,
   ino: bigint,
   preparer: DirectoryPreparer | null | undefined,
-): Promise<void> | undefined {
+): Promise<readonly DirectorySnapshotEntry[] | undefined> | undefined {
   if (handles.isPrepared(fh, ino)) return undefined;
 
   const tracked = handles.has(fh, ino);
@@ -129,8 +173,16 @@ export function prepareDirectoryForHandle(
     return undefined;
   }
 
-  const preparation = preparer.prepareDirectory(ino).then(() => {
-    if (tracked) handles.markPrepared(fh, ino);
+  const preparation = (
+    preparer.prepareDirectorySnapshot
+      ? preparer.prepareDirectorySnapshot(ino)
+      : preparer.prepareDirectory(ino).then(() => undefined)
+  ).then((entries) => {
+    if (tracked) {
+      if (entries) handles.setSnapshot(fh, ino, entries);
+      handles.markPrepared(fh, ino);
+    }
+    return entries;
   });
   if (!tracked) return preparation;
 
