@@ -4,7 +4,14 @@ export interface DirectoryPreparer {
   prepareDirectory(ino: bigint): Promise<boolean>;
 }
 
+export interface DirectorySnapshotEntry {
+  readonly name: string;
+  readonly ino: bigint;
+  readonly mode: number;
+}
+
 interface DirectoryHandleState {
+  entries?: readonly DirectorySnapshotEntry[];
   ino: bigint;
   pending?: Promise<void>;
   prepared: boolean;
@@ -57,6 +64,17 @@ export class DirectoryHandleMap {
 
   has(fh: bigint, ino: bigint): boolean {
     return this.#handles.get(fh)?.ino === ino;
+  }
+
+  snapshot(
+    fh: bigint,
+    ino: bigint,
+    create: () => DirectorySnapshotEntry[],
+  ): readonly DirectorySnapshotEntry[] {
+    const state = this.#handles.get(fh);
+    if (state?.ino !== ino) return create();
+    state.entries ??= create();
+    return state.entries;
   }
 }
 
