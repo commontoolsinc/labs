@@ -157,15 +157,16 @@ export class PatternUpdater {
         if (storedRepository !== undefined) return "current";
         if (mode.kind === "default-root") {
           source = mode.officialSource;
-        } else {
+        }
+        if (mode.kind === "instantiated") {
           // A sourceless default root remains under the stricter, awaited root
           // policy. In particular, do not turn an author-controlled filename
           // into provenance and bypass its legacy/custom-root admission rules.
           const program = await runtime.patternManager
             .getPatternSourceProgramByIdentity(runningRef.identity, space);
           source = program?.main;
-          if (source === undefined) return "current";
         }
+        if (source === undefined) return "current";
       }
 
       // Published `cf:` refs have a different resolver. This pass is exactly
