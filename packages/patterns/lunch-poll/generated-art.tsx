@@ -149,10 +149,8 @@ export default pattern<GeneratedArtInput, GeneratedArtOutput>(
       },
     });
 
-    // NOTE: no computed here (or anywhere) returns the raw `FabricBytes` —
-    // the action-return validator rejects special objects as lift results
-    // (runner-utils `validateAndCheckReactives`); the UI below links the
-    // fetch node's `result.bytes` path directly instead.
+    const imageBytes = computed(() => generatedArt.result?.bytes);
+    const imageMediaType = computed(() => generatedArt.result?.mediaType ?? "");
     const imageDataUrl = computed(() => {
       const bytes = generatedArt.result?.bytes;
       const mediaType = generatedArt.result?.mediaType;
@@ -212,8 +210,8 @@ export default pattern<GeneratedArtInput, GeneratedArtOutput>(
             : hasGeneratedImage
             ? (
               <cf-image
-                bytes={generatedArt.result!.bytes}
-                mediaType={generatedArt.result!.mediaType}
+                bytes={imageBytes}
+                mediaType={imageMediaType}
                 alt=""
                 style={{
                   width: "100%",
