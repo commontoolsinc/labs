@@ -659,6 +659,17 @@ export default pattern(() => {
       undefined
   );
 
+  // Options saved before generated art was introduced have no `imageUrl`
+  // property. They must still satisfy the card's map/pattern contract and
+  // render normally rather than passing a present-but-undefined value.
+  const assert_legacy_option_without_image_renders = computed(() =>
+    findNodeByProp(
+      stalePoll[UI],
+      "data-option-title",
+      SEEDED_OPTION.title,
+    ) !== undefined
+  );
+
   const action_stale_join_as_stan = action(() => {
     stalePoll.joinAs.send({ name: "Stan" });
   });
@@ -789,6 +800,7 @@ export default pattern(() => {
       { assertion: assert_colliding_initials_are_disambiguated },
       { assertion: assert_vote_swatches_have_accessible_names },
       // Seeded stale (yesterday) vote: stored but hidden everywhere.
+      { assertion: assert_legacy_option_without_image_renders },
       { assertion: assert_stale_vote_hidden },
       // Same-color click on the stale vote re-casts it for today…
       { action: action_stale_join_as_stan },

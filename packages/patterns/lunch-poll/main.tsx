@@ -1403,7 +1403,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     id: option.id,
                     title: option.title,
                     addedByName: option.addedByName,
-                    imageUrl: option.imageUrl,
+                    ...(option.imageUrl === undefined
+                      ? {}
+                      : { imageUrl: option.imageUrl }),
                   };
                   const rank = computed(() => {
                     const idx = ranked.findIndex(
