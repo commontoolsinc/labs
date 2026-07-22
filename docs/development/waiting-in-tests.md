@@ -69,8 +69,11 @@ keep a bound whose early fire fails the run. They exist because no event reports
 the condition they wait on, so a large-enough clock jump can trip one on a
 healthy run and fail it. That is a fragility we accept for want of an
 alternative, sized so only a multi-minute jump reaches it — not one we have
-designed away. When an event boundary does exist, use it, and neither kind of
-exception arises.
+designed away. The deno-web-test per-test stuck detector
+([below](#browser-hosted-unit-tests-have-a-harness-backstop)) is another bound of
+this kind, and the most exposed: a competing ceiling keeps it from being sized
+that high, as its own section explains. When an event boundary does exist, use
+it, and neither kind of exception arises.
 
 ## The primitives to use instead
 
@@ -199,6 +202,61 @@ probe is such a client. It disposes its controller once the wait returns, which
 also keeps a finished wait from holding the loop open for the rest of the
 suite.
 
+### Browser-hosted unit tests have a harness backstop
+
+That fail-fast is Deno's, and the browser-hosted unit tests that
+`packages/deno-web-test` runs do not get it — `iframe-sandbox`, `identity`,
+`static`, and the `ui` browser tests. Their waits are the
+`defer()`-from-a-callback shape described above, but they run inside a page,
+whose event loop the page itself holds open, so a wait that never resolves hangs
+rather than failing.
+
+One bound at the harness level covers them. `deno-web-test` stops waiting on a
+test after `testTimeout` — 40 seconds by default, set per suite in
+`deno-web-test.config.ts` — and fails that test with a message naming it and
+saying how long it waited, leaving the rest of the run to report as usual.
+Without it a stuck test ran until astral's retried deadline on `page.evaluate`
+ran out of attempts, 53 to 57 seconds later, and threw a `RetryError` that named
+no test, printed no summary, and abandoned every test file still queued.
+
+This is the distinction `waitForCondition`'s `timeout` draws, one level up: a
+stuck-condition safety net rather than a bound at the call site. It is why a
+wait inside one of these tests still takes no timeout of its own — adding one
+per call site would cap what each wait can observe, which is the thing being
+avoided, while the harness bound only decides when to stop believing a test will
+ever finish.
+
+By the test in [Wall-clock time is not a measure of
+progress](#wall-clock-time-is-not-a-measure-of-progress), its early fire is not
+safe: it fails a passing test. So it is a bound kept for want of an alternative,
+alongside the polling waits and the FUSE teardown bound — there is no event for
+"this test will never finish." It is the worst-placed member of that group, and
+the reason is worth stating plainly. Those other bounds sit so far above their
+work that only a multi-minute clock jump reaches them. This one cannot: astral's
+own deadline runs out around fifty seconds and takes the run down unnamed, so
+the bound has to fire below that, and a clock jump between the bound and fifty
+seconds fails a healthy test. Astral's retry would have ridden that jump out — it
+re-wraps the same evaluate across five attempts, so a test that finishes late is
+still returned — where this single timer does not. The bound is kept only
+because astral's un-named, whole-run failure is the worse outcome on a genuine
+hang, not because it escapes the clock-jump fault.
+
+That trade is what sets the default, and it sets it high rather than low. The
+window in which this bound fires but astral would not is exactly the gap between
+the bound and astral's floor, so the bound wants to sit as close under that
+floor as reliable naming allows — the opposite of the "leave a wide margin"
+instinct, which here only widens the exposure. Astral's floor is a hard fifty
+seconds, five ten-second timers that no machine runs through faster, so forty
+seconds clears it with room for the retry's backoff on top while keeping the
+clock-jump window down to about ten seconds. The slowest healthy test in any of
+these suites is about a second, and that one is deliberately waiting out a timer,
+so real work never approaches forty. A suite that somehow needs more should raise
+`testTimeout`, and keep it under the fifty-second floor.
+
+`packages/deno-web-test/README.md` records what the bound does not cover: a test
+blocking the event loop outright, and the stuck test's own work, which goes on
+running in the page afterwards.
+
 ## Waiting for the scheduler and for the worker reconciler
 
 Two pieces of machinery come up often enough in unit tests, and dispatch
@@ -238,6 +296,59 @@ no later batch can falsify the absence. Those tests need it. A wait on the
 `onOps` callback would never return for them, since a change that emits no ops
 produces no batch, and they pass vacuously when nothing has flushed at all —
 their teeth come from the wait being long enough to have seen an unwanted op.
+
+## Proving a negative
+
+A test that asserts something never happens has no event of its own to wait for.
+Waiting a fixed interval and then declaring success is the shape to avoid. It
+puts a floor under what the test costs and a ceiling on what it can catch, since
+whatever arrives after the interval is missed, and it reports the same pass
+either way — the assertion never depends on the wait having been long enough.
+
+Send something that must arrive after the thing being ruled out, wait for that,
+then assert the thing never came. Any channel that preserves order carries this.
+A `postMessage` between a fixed pair of windows does, and so does a chain of
+them: `packages/iframe-sandbox/test/iframe-csp.test.ts` has each guest document
+write a marker back to the host once its load event fires, and a CSP error from
+the same guest travels the same two hops — guest to outer frame, outer frame to
+host — so a test holding the marker holds any error that fired. The "subscribes"
+and "cancels subscriptions between documents" tests in
+`packages/iframe-sandbox/test/iframe.test.ts` use the same idea against the
+update stream: write to a key that is still subscribed, and once the guest
+reports it, an update for the unsubscribed key would already have arrived had
+one been sent.
+
+Two things decide whether this works, and both are worth checking rather than
+assuming.
+
+The barrier has to be genuinely ordered after the event, which is a claim about
+the specific mechanism and not about elapsed time. The CSP suite is a good
+illustration of how far that varies for one browser and one policy: a blocked
+`<img>` or `<link rel=stylesheet>` reports its violation before the document's
+load event, while a blocked `<script src>`, an image a stylesheet asks for, and a
+`fetch()` all report theirs after it. A `fetch()` is the extreme — its violation
+lands a macrotask turn after the request has already rejected, so no marker the
+page can post is ordered after it. Where no such ordering exists, say so and
+leave the case on its interval rather than inventing a barrier that only looks
+like one; `unbarrierable` in that file records the cases that stay.
+
+A barrier that is not really ordered after the event fails silently: the test
+goes on passing while asserting nothing. Pair the conversion with a control — the
+same fixture and the same wait against input that does trigger the event, which
+must observe it by the time the barrier lands. `barrierControls` in the CSP suite
+is that check. Moving its barrier earlier leaves every negative case green while
+the controls that can speak to ordering go red, which is the point of having
+them.
+
+Which controls those are is worth working out rather than assuming, because a
+control can be written so that it cannot fail. Only an event that can arrive
+after the page's own scripts have run tests the ordering at all. Two of that
+suite's eight controls are of that kind; the other six raise their error from a
+synchronous throw while the document parses, which no barrier could be posted
+before, so they stay green however early the barrier moves. They still earn
+their place — they show the error channel is live for their fixture's shape —
+but they are evidence of that and not of ordering. Sort them deliberately and
+say which is which, or the group reads as proof it does not supply.
 
 ## Guard against new usage
 
