@@ -76,6 +76,7 @@ import {
 import {
   type DirectorySnapshotEntry,
   FuseOperationState,
+  replyWithRetainedState,
   visitDirectoryEntries,
 } from "./directory-handles.ts";
 import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
@@ -1110,7 +1111,14 @@ export async function main(argv: string[] = Deno.args) {
     req: Deno.PointerValue,
     ino: bigint,
     node: ReturnType<typeof tree.getNode>,
+    lookupRetained = false,
   ) {
+    if (!lookupRetained) fuseOperations.retainLookup(ino);
+    if (!node) {
+      fuseOperations.forget(ino, 1n);
+      fuse.symbols.fuse_reply_err(req, ENOENT);
+      return;
+    }
     // These timeouts govern the Linux kernel's entry and attribute caches.
     // Piece content inodes (under pieces/ and entities/) and generated files
     // (.status) use 0 so every read hits our callbacks. Static inodes (root,
@@ -1129,10 +1137,13 @@ export async function main(argv: string[] = Deno.args) {
       attrTimeout: timeout,
       entryTimeout: timeout,
     });
-    fuseOperations.retainLookup(ino);
-    fuse.symbols.fuse_reply_entry(
-      req,
-      Deno.UnsafePointer.of(new Uint8Array(entryBuf)),
+    replyWithRetainedState(
+      () =>
+        fuse.symbols.fuse_reply_entry(
+          req,
+          Deno.UnsafePointer.of(new Uint8Array(entryBuf)),
+        ),
+      () => fuseOperations.forget(ino, 1n),
     );
   }
 
@@ -1201,7 +1212,7 @@ export async function main(argv: string[] = Deno.args) {
           if (ino === undefined) {
             fuse.symbols.fuse_reply_err(req, ENOENT);
           } else {
-            replyEntry(req, ino, tree.getNode(ino));
+            replyEntry(req, ino, tree.getNode(ino), true);
           }
           finishPendingReply();
         }).catch(() => {
@@ -1364,7 +1375,10 @@ export async function main(argv: string[] = Deno.args) {
         }
         bridge?.retainEntityProjectionOpen(inode);
         writeFileInfo(fi, fh);
-        fuse.symbols.fuse_reply_open(req, fi);
+        replyWithRetainedState(
+          () => fuse.symbols.fuse_reply_open(req, fi),
+          () => closeKernelFileHandle(fh),
+        );
         return;
       }
 
@@ -1443,7 +1457,10 @@ export async function main(argv: string[] = Deno.args) {
       }
       bridge?.retainEntityProjectionOpen(inode);
       writeFileInfo(fi, fh);
-      fuse.symbols.fuse_reply_open(req, fi);
+      replyWithRetainedState(
+        () => fuse.symbols.fuse_reply_open(req, fi),
+        () => closeKernelFileHandle(fh),
+      );
     },
   );
   callbacks.push(openCb);
@@ -1530,7 +1547,10 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
       writeFileInfo(fi, fh);
-      fuse.symbols.fuse_reply_open(req, fi);
+      replyWithRetainedState(
+        () => fuse.symbols.fuse_reply_open(req, fi),
+        () => fuseOperations.closeDirectory(fh, inode),
+      );
     },
   );
   callbacks.push(opendirCb);
@@ -2606,10 +2626,17 @@ export async function main(argv: string[] = Deno.args) {
           attrTimeout: 0,
           entryTimeout: 0,
         });
-        fuse.symbols.fuse_reply_create(
-          req,
-          Deno.UnsafePointer.of(new Uint8Array(entryBuf)),
-          fi,
+        replyWithRetainedState(
+          () =>
+            fuse.symbols.fuse_reply_create(
+              req,
+              Deno.UnsafePointer.of(new Uint8Array(entryBuf)),
+              fi,
+            ),
+          () => {
+            bridge.releaseEntityProjectionLookup(ino);
+            closeKernelFileHandle(fh);
+          },
         );
         return;
       }
@@ -2666,10 +2693,17 @@ export async function main(argv: string[] = Deno.args) {
         entryTimeout: 1.0,
       });
 
-      fuse.symbols.fuse_reply_create(
-        req,
-        Deno.UnsafePointer.of(new Uint8Array(entryBuf)),
-        fi,
+      replyWithRetainedState(
+        () =>
+          fuse.symbols.fuse_reply_create(
+            req,
+            Deno.UnsafePointer.of(new Uint8Array(entryBuf)),
+            fi,
+          ),
+        () => {
+          bridge.releaseEntityProjectionLookup(ino);
+          closeKernelFileHandle(fh);
+        },
       );
 
       // Fire-and-forget write to cell

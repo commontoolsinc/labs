@@ -568,6 +568,40 @@ Deno.test("CellBridge keeps a newly resolved projection while older hydration is
   );
 });
 
+Deno.test("FUSE operations reserve concurrent exact entity lookups", async () => {
+  const ids = ["of:fid1:concurrent-first", "of:fid1:concurrent-second"];
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: () =>
+      Promise.resolve(
+        {
+          getSpace: () => "did:key:zConcurrentEntitySpace",
+          entityIdExists: (id: string) => Promise.resolve(ids.includes(id)),
+        } as unknown as SpaceState["manager"],
+      ),
+    maxEntityProjections: 1,
+  });
+  bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
+  const state = await bridge.connectSpace("home");
+  const operations = new FuseOperationState(tree, bridge);
+
+  const [firstIno, secondIno] = await Promise.all(
+    ids.map((id) =>
+      operations.prepareLookup(state.entitiesIno, encodeFuseComponent(id))
+    ),
+  );
+
+  assertNotEquals(firstIno, undefined);
+  assertNotEquals(secondIno, undefined);
+  assertNotEquals(tree.getNode(firstIno!), undefined);
+  assertNotEquals(tree.getNode(secondIno!), undefined);
+
+  operations.forget(firstIno!, 1n);
+  assertEquals(tree.getNode(firstIno!), undefined);
+  assertNotEquals(tree.getNode(secondIno!), undefined);
+  operations.forget(secondIno!, 1n);
+});
+
 Deno.test("CellBridge defers projection eviction until lookup and open references close", async () => {
   const ids = [
     "of:fid1:referenced-entity",
@@ -612,6 +646,46 @@ Deno.test("CellBridge defers projection eviction until lookup and open reference
   assertEquals(tree.getNode(firstIno), undefined);
   assertNotEquals(tree.getNode(latestIno), undefined);
   bridge.releaseEntityProjectionLookup(latestIno);
+});
+
+Deno.test("CellBridge releases descendant references after reactive removal", async () => {
+  const ids = ["of:fid1:removed-child", "of:fid1:replacement-root"];
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: () =>
+      Promise.resolve(
+        {
+          getSpace: () => "did:key:zRemovedChildSpace",
+          entityIdExists: (id: string) => Promise.resolve(ids.includes(id)),
+        } as unknown as SpaceState["manager"],
+      ),
+    maxEntityProjections: 1,
+  });
+  bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
+  const state = await bridge.connectSpace("home");
+
+  await bridge.prepareLookup(state.entitiesIno, encodeFuseComponent(ids[0]));
+  const firstIno = tree.lookup(
+    state.entitiesIno,
+    encodeFuseComponent(ids[0]),
+  )!;
+  const childIno = tree.addFile(firstIno, "child", "value", "string");
+  bridge.retainEntityProjectionLookup(firstIno);
+  bridge.retainEntityProjectionLookup(childIno);
+  bridge.retainEntityProjectionOpen(childIno);
+  tree.removeChild(firstIno, "child");
+
+  await bridge.prepareLookup(state.entitiesIno, encodeFuseComponent(ids[1]));
+  assertNotEquals(tree.getNode(firstIno), undefined);
+  bridge.releaseEntityProjectionLookup(childIno);
+  assertNotEquals(tree.getNode(firstIno), undefined);
+  bridge.releaseEntityProjectionLookup(childIno);
+  bridge.releaseEntityProjectionOpen(childIno);
+  await bridge.prepareLookup(state.entitiesIno, encodeFuseComponent(ids[1]));
+  assertNotEquals(tree.getNode(firstIno), undefined);
+  bridge.releaseEntityProjectionLookup(firstIno);
+  await bridge.prepareLookup(state.entitiesIno, encodeFuseComponent(ids[1]));
+  assertEquals(tree.getNode(firstIno), undefined);
 });
 
 Deno.test("CellBridge removes an entity deleted during root hydration", async () => {
@@ -805,20 +879,12 @@ Deno.test("CellBridge connects before an entity directory snapshot finishes", as
   );
 });
 
-Deno.test("CellBridge reconnect keeps an unmaterialized /pieces view identifier-only", async () => {
+Deno.test("CellBridge reconnect does not require entity listing support", async () => {
   const tree = new FsTree();
-  let identifierRequests = 0;
   let pieceListRequests = 0;
   let disposedManagers = 0;
   const reconnectManager = {
     synced: () => Promise.resolve(),
-    listEntityIdPage: () => {
-      identifierRequests++;
-      return Promise.resolve({
-        serverSeq: 1,
-        ids: ["of:fid1:reconnect-entity"],
-      });
-    },
     runtime: {
       dispose: () => {
         disposedManagers++;
@@ -846,7 +912,6 @@ Deno.test("CellBridge reconnect keeps an unmaterialized /pieces view identifier-
   await reconnectable._attemptReconnect();
 
   assertEquals(reconnectable._disconnected, false);
-  assertEquals(identifierRequests, 1);
   assertEquals(pieceListRequests, 0);
   assertEquals(disposedManagers, 1);
 });
@@ -1042,7 +1107,6 @@ Deno.test("FUSE callback traversal of mounted /entities transfers only identifie
         name,
       );
       assertNotEquals(entityIno, undefined);
-      fuseOperations.retainLookup(entityIno!);
       assertEquals(tree.getNode(entityIno!)?.kind, "dir");
 
       const entityFh = fuseOperations.openDirectory(entityIno!);
