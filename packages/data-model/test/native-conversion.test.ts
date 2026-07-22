@@ -1076,7 +1076,7 @@ describe("native-conversion", () => {
       it("recursively processes nested arrays", () => {
         const date = new Date("2024-01-15T12:00:00.000Z");
         const result = fabricFromNativeValue([[date]]) as unknown[][];
-        expect(result[0][0]).toBeInstanceOf(FabricEpochNsec);
+        expect(result[0]![0]).toBeInstanceOf(FabricEpochNsec);
       });
     });
 
@@ -1449,7 +1449,7 @@ describe("native-conversion", () => {
         sparse[0] = 1;
         sparse[2] = 3;
         const result = fabricFromNativeValue([[sparse]]) as unknown[][][];
-        const inner = result[0][0];
+        const inner = result[0]![0]!;
         expect(inner[0]).toBe(1);
         expect(1 in inner).toBe(false); // hole preserved
         expect(inner[2]).toBe(3);
@@ -1698,7 +1698,7 @@ describe("native-conversion", () => {
           Record<string, unknown>
         >;
         expect(Object.getPrototypeOf(result.nested)).toBe(null);
-        expect(result.nested.val).toBe(42);
+        expect(result.nested!.val).toBe(42);
       });
     });
   });

@@ -71,7 +71,7 @@ export function encode5To8Bytes(value: bigint, negative: boolean): Uint8Array {
   // because by virtue of the caller's up-front check, there's definitely a
   // non-skipped byte).
   for (let i = 0; true; i++) {
-    const byte = dv64Bytes[i];
+    const byte = dv64Bytes[i]!;
     if (byte !== skipByte) {
       // Adjust starting index backwards if the non-skipped byte would flip
       // the sign of the result.
