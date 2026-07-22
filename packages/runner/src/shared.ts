@@ -5,7 +5,7 @@
  */
 
 export {
-  isLegacyAlias,
+  isAliasBinding,
   isSigilLink,
   type NormalizedFullLink,
   parseLLMFriendlyLink,

@@ -49,16 +49,48 @@ describe("createProxy", () => {
     expect(proxy.a.b.c).toBe(42);
   });
 
-  it("should handle $alias in objects", () => {
+  it("treats $alias records in data as plain data", () => {
     const c = runtime.getCell(
       space,
-      "should handle $alias in objects",
+      "treats $alias records in data as plain data",
+      undefined,
+      tx,
+    );
+    // `$alias` is only meaningful inside Pattern objects; in data it is not
+    // followed as a link.
+    c.setRaw({ x: { $alias: { path: ["y"] } }, y: 42 });
+    const proxy = c.getAsQueryResult();
+    expect(proxy.x).toEqual({ $alias: { path: ["y"] } });
+  });
+
+  it("does not record legacy $alias probe reads for $alias-shaped data", async () => {
+    const c = runtime.getCell<{ x: any; y: number }>(
+      space,
+      "does not record legacy $alias probe reads",
       undefined,
       tx,
     );
     c.setRaw({ x: { $alias: { path: ["y"] } }, y: 42 });
-    const proxy = c.getAsQueryResult();
-    expect(proxy.x).toBe(42);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const proxy = c.getAsQueryResult([], tx);
+    const x = proxy.x;
+    expect(proxy.y).toBe(42);
+
+    // Snapshot the read log before traversing `x`: the removed legacy alias
+    // resolver used to probe `[...path, "$alias", "path"]` on every read,
+    // adding those paths to the read set. No read may end that way now.
+    const readPaths = txToReactivityLog(tx).reads.map((r) => r.path);
+    expect(readPaths.length).toBeGreaterThan(0);
+    expect(
+      readPaths.some((p) =>
+        p[p.length - 2] === "$alias" && p[p.length - 1] === "path"
+      ),
+    ).toBe(false);
+
+    // The record itself comes back as plain data.
+    expect(x).toEqual({ $alias: { path: ["y"] } });
   });
 
   it("should handle nested cells", () => {

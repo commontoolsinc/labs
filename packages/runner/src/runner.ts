@@ -52,11 +52,13 @@ import {
   getDerivedInternalCellLink,
   getMetaCell,
   getMetaLink,
+  isAliasBinding,
   isCellLink,
   isSigilLink,
   isWriteRedirectLink,
   KeepAsCell,
   type NormalizedFullLink,
+  parseAliasBinding,
   parseLink,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
@@ -244,8 +246,11 @@ const recordOutputSchemaPolicyInputs = (
     return;
   }
 
-  if (isWriteRedirectLink(outputBinding)) {
-    const bindingLink = parseLink(outputBinding, resultCell);
+  if (isWriteRedirectLink(outputBinding) || isAliasBinding(outputBinding)) {
+    const bindingBase = resultCell.getAsNormalizedFullLink();
+    const bindingLink = isAliasBinding(outputBinding)
+      ? parseAliasBinding(outputBinding, bindingBase)
+      : parseLink(outputBinding, bindingBase);
     // Output-redirect resolution is result-plumbing machinery
     // (machineryRead, same family as sendValueToBinding's walk): its reads
     // must not consume `*`-path membership templates (bot review on this
@@ -335,8 +340,11 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
   processCell: Cell<any>,
   outputBinding: unknown,
 ): void => {
-  if (isWriteRedirectLink(outputBinding)) {
-    const bindingLink = parseLink(outputBinding, processCell);
+  if (isWriteRedirectLink(outputBinding) || isAliasBinding(outputBinding)) {
+    const bindingBase = processCell.getAsNormalizedFullLink();
+    const bindingLink = isAliasBinding(outputBinding)
+      ? parseAliasBinding(outputBinding, bindingBase)
+      : parseLink(outputBinding, bindingBase);
     // Result-plumbing machinery, as in recordOutputSchemaPolicyInputs.
     const link = tx.runWithAmbientReadMeta(
       machineryRead,
@@ -384,10 +392,13 @@ const schemaForRawBuiltinRootOutputBinding = (
   processCell: Cell<any>,
   outputBinding: unknown,
 ): JSONSchema | undefined => {
-  if (!isWriteRedirectLink(outputBinding)) {
+  if (!isWriteRedirectLink(outputBinding) && !isAliasBinding(outputBinding)) {
     return undefined;
   }
-  const bindingLink = parseLink(outputBinding, processCell);
+  const bindingBase = processCell.getAsNormalizedFullLink();
+  const bindingLink = isAliasBinding(outputBinding)
+    ? parseAliasBinding(outputBinding, bindingBase)
+    : parseLink(outputBinding, bindingBase);
   // Result-plumbing machinery, as in recordOutputSchemaPolicyInputs.
   const link = tx.runWithAmbientReadMeta(
     machineryRead,
@@ -449,11 +460,14 @@ function firstResolvedOutputRedirect(
   binding: unknown,
   baseCell: Cell<any>,
 ): NormalizedFullLink | undefined {
-  if (isWriteRedirectLink(binding)) {
+  if (isWriteRedirectLink(binding) || isAliasBinding(binding)) {
+    const bindingBase = baseCell.getAsNormalizedFullLink();
     return resolveLink(
       runtime,
       tx,
-      parseLink(binding, baseCell),
+      isAliasBinding(binding)
+        ? parseAliasBinding(binding, bindingBase)
+        : parseLink(binding, bindingBase),
       "writeRedirect",
     );
   }
@@ -492,9 +506,18 @@ const recordSetupProjectionPolicyInputs = (
     return;
   }
 
+  // Sigil redirects only, deliberately NOT paired with `isAliasBinding`: the
+  // projection is about to be STORED (argument via diffAndUpdate, result via
+  // setRawUntyped), and in stored data only sigil links function as
+  // redirects — a residual `$alias` record (e.g. a still-deferred binding of
+  // an embedded pattern) is inert there. The prepare gate agrees: marker
+  // verification requires the stored value to be a sigil redirect
+  // (`setupProjectionSourceMatchesValue`), and recording a marker for an
+  // alias would wrongly widen `writeIsPatternSetupInitialization`'s
+  // trusted-initialization exemption to a path nothing redirects to.
   if (isWriteRedirectLink(projection)) {
     const target = resultCell.getAsNormalizedFullLink();
-    const source = parseLink(projection, resultCell);
+    const source = parseLink(projection, target);
     tx.recordCfcWritePolicyInput({
       kind: "structural-provenance",
       target: {
@@ -2634,22 +2657,70 @@ export class Runner {
     // scanned after the main sync wave (see below).
     const argumentCells: Cell<any>[] = [];
 
-    // Sync all the inputs and outputs of the pattern nodes.
-    for (const node of pattern.nodes) {
-      const inputs = findAllWriteRedirectCells(node.inputs, resultCell);
-      const outputs = findAllWriteRedirectCells(node.outputs, resultCell);
-
-      // TODO(seefeld): This ignores schemas provided by modules, so it might
-      // still fetch a lot.
-      [...inputs, ...outputs].forEach((link) => {
-        cells.push(this.runtime.getCellFromLink(link));
-      });
-      inputs.forEach((link) => {
-        argumentCells.push(this.runtime.getCellFromLink(link));
-      });
-    }
+    // Sync all the inputs and outputs of the pattern nodes. Bindings are
+    // unwrapped (bound to the argument/result documents) first, so named-cell
+    // and partialCause aliases resolve to the documents they actually denote;
+    // findAllWriteRedirectCells itself only walks sigil links. Without the
+    // argument meta link the bindings cannot be bound, so the node walk is
+    // skipped — the pre-sync is best-effort, and binding against a substitute
+    // document would pre-sync the wrong cells (see CT-1897 for the same
+    // defaulting bug in collectResumeOwnedCells).
     const argumentMetaLink = getMetaLink(resultCell, "argument");
-    if (argumentMetaLink) {
+    if (argumentMetaLink === undefined) {
+      // Instrumentation for how often the meta link is missing here (fresh
+      // first runs are expected to hit this; resumes should not).
+      logger.warn("resume-pre-sync", () => [
+        "argument meta link missing; skipping node pre-sync",
+        {
+          resultCell: resultCell.getAsNormalizedFullLink().id,
+          nodes: pattern.nodes.length,
+        },
+      ]);
+    } else {
+      for (const node of pattern.nodes) {
+        let inputs: NormalizedFullLink[];
+        let outputs: NormalizedFullLink[];
+        try {
+          inputs = findAllWriteRedirectCells(
+            unwrapOneLevelAndBindtoDoc(
+              this.runtime.cfc,
+              node.inputs,
+              argumentMetaLink,
+              resultCell,
+              { derivedInternalCells: pattern.derivedInternalCells },
+            ),
+            resultCell,
+          );
+          outputs = findAllWriteRedirectCells(
+            unwrapOneLevelAndBindtoDoc(
+              this.runtime.cfc,
+              node.outputs,
+              argumentMetaLink,
+              resultCell,
+              { derivedInternalCells: pattern.derivedInternalCells },
+            ),
+            resultCell,
+          );
+        } catch (error) {
+          // A node whose bindings cannot be bound contributes nothing rather
+          // than breaking the pre-sync walk; log it so a resume that silently
+          // skips a node's pre-sync is diagnosable.
+          logger.warn("resume-pre-sync", () => [
+            "skipping a node whose bindings did not unwrap",
+            error,
+          ]);
+          continue;
+        }
+
+        // TODO(seefeld): This ignores schemas provided by modules, so it might
+        // still fetch a lot.
+        [...inputs, ...outputs].forEach((link) => {
+          cells.push(this.runtime.getCellFromLink(link));
+        });
+        inputs.forEach((link) => {
+          argumentCells.push(this.runtime.getCellFromLink(link));
+        });
+      }
       argumentCells.push(this.runtime.getCellFromLink(argumentMetaLink));
     }
 
@@ -3083,7 +3154,7 @@ export class Runner {
         default:
           throw new Error(`Unknown module type: ${module.type}`);
       }
-    } else if (isWriteRedirectLink(module)) {
+    } else if (isWriteRedirectLink(module) || isAliasBinding(module)) {
       // TODO(seefeld): Implement, a dynamic node
     } else {
       throw new Error(`Unknown module: ${toCompactDebugString(module)}`);
@@ -3383,6 +3454,11 @@ export class Runner {
     };
 
     const visit = (schema: unknown, currentValue: unknown): void => {
+      // Sigil-only, deliberately NOT paired with `isAliasBinding`: the value
+      // is post-unwrap, where the only `$alias` records left belong to
+      // embedded Pattern values (their `defer` bookkeeping resolves them at
+      // that pattern's own instantiation) — parsing one here would read it at
+      // the wrong nesting level.
       if (isWriteRedirectLink(currentValue)) {
         const link = parseLink(currentValue, processCell);
         links.push({
@@ -3580,6 +3656,9 @@ export class Runner {
   } {
     if (!isRecord(inputs) || !("$event" in inputs)) return {};
 
+    // Sigil-only: `$event` is builder-generated and always unwraps to a sigil
+    // link; a residual `$alias` here could only be an embedded pattern's
+    // binding, which must not be followed at this level.
     let value: FabricValue = inputs.$event as FabricValue;
     let lastLink: NormalizedFullLink | undefined;
     while (isWriteRedirectLink(value)) {
