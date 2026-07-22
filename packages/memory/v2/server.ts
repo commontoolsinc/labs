@@ -47,6 +47,7 @@ import {
   type WatchSpec,
   type WireMemoryProtocolFlags,
 } from "../v2.ts";
+import { classifyCommitTelemetry } from "./commit-telemetry.ts";
 import * as Engine from "./engine.ts";
 import {
   ANYONE_USER,
@@ -1967,6 +1968,20 @@ export class Server {
         if (message.commit.localSeq !== undefined) {
           span.setAttribute("commit.local_seq", message.commit.localSeq);
         }
+        // Classify the request before any await or validation so conflicts and
+        // rejected attempts remain visible in the same dashboard breakdowns as
+        // successful transactions. `entity.count` keeps its existing meaning.
+        const commitTelemetry = classifyCommitTelemetry(message.commit);
+        span.setAttribute("commit.kind", commitTelemetry.kind);
+        span.setAttribute("entity.count", commitTelemetry.entityCount);
+        span.setAttribute(
+          "scheduler.observation.count",
+          commitTelemetry.schedulerObservationCount,
+        );
+        span.setAttribute(
+          "sqlite.operation.count",
+          commitTelemetry.sqliteOperationCount,
+        );
         try {
           const engine = await this.openEngine(message.space);
           // The session may be revoked or replaced while openEngine awaits.
@@ -2119,12 +2134,6 @@ export class Server {
             },
           );
           span.setAttribute("commit.seq", commit.seq);
-          span.setAttribute(
-            "entity.count",
-            message.commit.operations.filter((operation) =>
-              operation.op !== "sqlite"
-            ).length,
-          );
           return {
             type: "response",
             requestId: message.requestId,
