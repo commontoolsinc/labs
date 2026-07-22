@@ -45,11 +45,18 @@ without requiring the process to close and reopen files.
 Not every cell in the space needs an active subscription. The Deno service
 subscribes lazily:
 
-1. On first access to a piece (readdir or read), subscribe to that piece's
-   input and result cells.
-2. Unsubscribe after a period of inactivity (no FUSE operations touching
-   that piece for N minutes).
-3. The piece list itself (`allPieces`) is always subscribed.
+1. Connecting a space obtains only the identifier snapshot when the server
+   supports it. Identifier stubs do not subscribe to entity values.
+2. Opening `pieces/` for the first time materializes and subscribes to
+   `allPieces`; a mount that only uses `entities/` does not load it.
+3. Access below an entity or piece stub loads the requested entity and
+   subscribes to the projected input and result cells.
+4. Identifier discovery is refreshed when a new `entities/` directory handle
+   is prepared. Continuation reads on one handle do not poll the server.
+
+The distinction between identifier refresh and entity-value subscription is
+specified in
+[Entity Lookup, Enumeration, and Performance](./11-entity-lookup-enumeration.md).
 
 ## Caching Strategy
 

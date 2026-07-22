@@ -295,9 +295,11 @@ entities/
 ```
 
 The directory contains every live entity in the space scope, including
-entities that are not present in `allPieces`. Mounting the space and reading
-the `entities/` directory requests only the entity identifiers from memory.
-Each identifier begins as an empty directory entry. Reading inside an entity
+entities that are not present in `allPieces`. Connecting the space and opening
+a fresh `entities/` directory handle request only entity identifiers from
+memory. Continuation reads for that handle reuse its prepared view rather than
+requesting the complete identifier set for every FUSE output buffer. Each
+identifier begins as an empty directory entry. Reading inside an entity
 directory loads that entity's value and builds its projected contents.
 
 Mounting does not read the space root, its default pattern, or `allPieces`.
@@ -307,6 +309,12 @@ listing path, including values for the space root and entities that also appear
 in `allPieces`. When the memory server does not support identifier listing,
 `entities/` remains empty until `pieces/` is accessed and supplies the older
 `allPieces`-only view.
+
+The hydration boundary matters for recursive tools: listing only the top-level
+`entities/` directory is identifier-only, but a crawler that descends into
+every entity directory requests every entity value. The complete cost model,
+directory-handle semantics, measured scaling, and older-server contract are in
+[Entity Lookup, Enumeration, and Performance](./11-entity-lookup-enumeration.md).
 
 Entity IDs are truncated in the directory listing but can be accessed by prefix
 match (the filesystem resolves the shortest unambiguous prefix).
