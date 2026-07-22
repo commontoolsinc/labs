@@ -1565,6 +1565,20 @@ export class Runner {
             schedulerRehydration,
           );
         }
+        if (!doNotUpdateOnPatternChange) {
+          // Source reconciliation is lazy for ordinary pieces: the current
+          // pattern is fully instantiated first, and only a successful commit
+          // launches the fire-and-forget check. An aborted setup must neither
+          // fetch nor mutate a piece that never came into existence.
+          actualTx.addCommitCallback((_tx, result) => {
+            if (
+              !result.error && active &&
+              startLifecycleEpoch === this.lifecycleEpoch
+            ) {
+              this.runtime.patternUpdater.schedule(resultCell);
+            }
+          });
+        }
       } finally {
         if (shouldCommit) {
           this.runtime.prepareTxForCommit(actualTx);

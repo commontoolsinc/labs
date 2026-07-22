@@ -296,7 +296,10 @@ describe("checkAndUpdateDefaultPattern", () => {
     const { error } = await runtime.editWithRetry((tx) => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: staleIdentity,
-        symbol: "default",
+        // The obsolete runtime selected an export the current system source no
+        // longer has. Dead-root recovery must select the official entry's
+        // default export, rather than trying to preserve this broken symbol.
+        symbol: "removed-export",
       });
     });
     expect(error).toBeUndefined();
@@ -314,6 +317,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(getPatternIdentityRef(updated.getCell())?.identity).toBe(
       await identityForSource(SOURCE_V2),
     );
+    expect(getPatternIdentityRef(updated.getCell())?.symbol).toBe("default");
   });
 
   it("repairs persisted artifacts when the served identity is unchanged", async () => {
