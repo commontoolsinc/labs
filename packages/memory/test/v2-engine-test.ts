@@ -1097,6 +1097,78 @@ Deno.test("memory v2 engine backfills current head operations", async () => {
       `).get(),
       { name: "idx_head_live_entity_ids" },
     );
+    assertEquals(
+      (engine.database.prepare(`PRAGMA table_info("head")`).all() as Array<{
+        name: string;
+        dflt_value: string | null;
+      }>).find(({ name }) => name === "op")?.dflt_value,
+      null,
+    );
+    assertThrows(
+      () =>
+        engine.database.prepare(`
+          INSERT INTO head (branch, id, scope_key, seq, op_index)
+          VALUES ('', 'entity:migrated-live', 'space', 1, 0)
+          ON CONFLICT (branch, id, scope_key) DO UPDATE
+          SET seq = excluded.seq, op_index = excluded.op_index
+        `).run(),
+      Error,
+      "NOT NULL constraint failed: head.op",
+    );
+  } finally {
+    close(engine);
+  }
+
+  const defaultedDb = new Database(path);
+  try {
+    defaultedDb.exec(`
+      DROP INDEX idx_head_live_entity_ids;
+      DROP INDEX idx_head_branch;
+      ALTER TABLE head RENAME TO head_defaulted_migration;
+      CREATE TABLE head (
+        branch    TEXT    NOT NULL,
+        id        TEXT    NOT NULL,
+        scope_key TEXT    NOT NULL DEFAULT 'space',
+        seq       INTEGER NOT NULL,
+        op_index  INTEGER NOT NULL,
+        op        TEXT    NOT NULL DEFAULT 'set'
+          CHECK (op IN ('set', 'patch', 'delete')),
+        PRIMARY KEY (branch, id, scope_key)
+      );
+      CREATE INDEX idx_head_branch ON head (branch);
+      INSERT INTO head (branch, id, scope_key, seq, op_index)
+      SELECT branch, id, scope_key, seq, op_index
+      FROM head_defaulted_migration;
+      DROP TABLE head_defaulted_migration;
+    `);
+    assertEquals(
+      defaultedDb.prepare(`
+        SELECT op FROM head
+        WHERE id = 'entity:migrated-deleted' AND scope_key = 'space'
+      `).get(),
+      { op: "set" },
+    );
+  } finally {
+    defaultedDb.close();
+  }
+
+  engine = await open({ url });
+  try {
+    assertEquals(listEntityIds(engine), ["entity:migrated-live"]);
+    assertEquals(
+      engine.database.prepare(`
+        SELECT op FROM head
+        WHERE id = 'entity:migrated-deleted' AND scope_key = 'space'
+      `).get(),
+      { op: "delete" },
+    );
+    assertEquals(
+      (engine.database.prepare(`PRAGMA table_info("head")`).all() as Array<{
+        name: string;
+        dflt_value: string | null;
+      }>).find(({ name }) => name === "op")?.dflt_value,
+      null,
+    );
   } finally {
     close(engine);
     await Deno.remove(path);
