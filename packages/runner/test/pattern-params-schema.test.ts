@@ -93,7 +93,6 @@ describe("compiler-only pattern params schema", () => {
         $alias: {
           cell: "argument",
           path: ["value"],
-          scope: "space",
           schema: { type: "number" },
         },
       },
@@ -101,7 +100,6 @@ describe("compiler-only pattern params schema", () => {
         $alias: {
           cell: "params",
           path: ["value"],
-          scope: "space",
           schema: { type: "string" },
         },
       },

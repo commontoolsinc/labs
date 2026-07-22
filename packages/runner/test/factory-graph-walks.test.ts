@@ -21,7 +21,7 @@ import {
   recursivelyAddIDIfNeeded,
 } from "../src/cell.ts";
 import { applyInputIfcToOutput } from "../src/builder/node-utils.ts";
-import { toJSONWithLegacyAliases } from "../src/builder/json-utils.ts";
+import { toJSONWithAliasBindings } from "../src/builder/json-utils.ts";
 import { traverseValue } from "../src/builder/traverse-utils.ts";
 import {
   deriveFactoryStateCopy,
@@ -238,7 +238,7 @@ describe("factory-aware graph and static walks", () => {
     const factory = bindPattern({ bytes });
 
     const traversed = traverseValue(factory, () => undefined);
-    const serialized = toJSONWithLegacyAliases({ factory }) as unknown as {
+    const serialized = toJSONWithAliasBindings({ factory }) as unknown as {
       factory: typeof factory;
     };
 

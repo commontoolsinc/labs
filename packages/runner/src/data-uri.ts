@@ -34,7 +34,7 @@ import {
 import { isRecord } from "@commonfabric/utils/types";
 import { type Cell, isCell } from "./cell.ts";
 import {
-  isLegacyAlias,
+  isAliasBinding,
   isPrimitiveCellLink,
   type NormalizedLink,
 } from "./link-types.ts";
@@ -123,7 +123,7 @@ export function dataUriFromValueWithResolvedLinks(
     }
     // Structural legacy aliases are executable graph metadata, not references
     // relative to whichever inline document happens to transport the graph.
-    if (insideLegacyPatternGraph && isLegacyAlias(value)) {
+    if (insideLegacyPatternGraph && isAliasBinding(value)) {
       return value as FabricValue;
     }
     // Modern links are Fabric instances, so recognize links before the generic

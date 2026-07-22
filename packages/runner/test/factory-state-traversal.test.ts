@@ -16,11 +16,11 @@ import {
 } from "../src/builder/pattern-metadata.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { reactive as createReactive } from "../src/builder/reactive.ts";
-import { toJSONWithLegacyAliases } from "../src/builder/json-utils.ts";
+import { toJSONWithAliasBindings } from "../src/builder/json-utils.ts";
 import { traverseValue } from "../src/builder/traverse-utils.ts";
 import { getCellOrThrow } from "../src/query-result-proxy.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { LegacyAlias } from "../src/sigil-types.ts";
+import type { AliasBinding } from "../src/sigil-types.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -172,11 +172,11 @@ describe("hidden factory-state traversal", () => {
     const reactive = createReactive<string>();
     const cell = getCellOrThrow(reactive);
     const factory = bindPattern({ nested: { cell, reactive } }, reactive);
-    const alias: LegacyAlias = {
+    const alias: AliasBinding = {
       $alias: { cell: "argument", path: ["capture"] },
     };
 
-    const serialized = toJSONWithLegacyAliases(
+    const serialized = toJSONWithAliasBindings(
       { factory },
       () => alias,
     ) as unknown as { factory: typeof factory };

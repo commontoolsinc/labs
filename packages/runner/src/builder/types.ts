@@ -78,7 +78,7 @@ import {
 } from "../storage/interface.ts";
 import { type Runtime } from "../runtime.ts";
 import type { FactoryContract } from "../factory-contract.ts";
-import type { LegacyAlias, SigilWriteRedirectLink } from "../sigil-types.ts";
+import type { AliasBinding, SigilWriteRedirectLink } from "../sigil-types.ts";
 
 // Define runtime constants here - actual runtime values
 export const ID: typeof IDSymbol = Symbol("ID, unique to the context") as any;
@@ -256,7 +256,7 @@ export function isModule(value: unknown): value is Module {
 export type Node = {
   description?: string;
   /** Static module metadata or the serialized link for a dynamic factory. */
-  module: Module | LegacyAlias | SigilWriteRedirectLink;
+  module: Module | AliasBinding | SigilWriteRedirectLink;
   inputs: GraphValue;
   outputs: GraphValue;
   /** Trusted call-site contract; never sourced from the selected factory. */

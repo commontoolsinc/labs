@@ -433,7 +433,7 @@ export function moduleToJSON(module: Module) {
   let implementation = module.implementation;
 
   if (isAdmittedFabricFactory(implementation)) {
-    implementation = toJSONWithLegacyAliases(
+    implementation = toJSONWithAliasBindings(
       implementation,
       undefined,
       false,

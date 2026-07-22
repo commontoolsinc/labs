@@ -71,7 +71,6 @@ function argumentAlias(
     $alias: {
       cell: "argument",
       path: [path],
-      scope: "space",
       schema,
     },
   };

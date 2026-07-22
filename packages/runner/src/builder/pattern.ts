@@ -53,7 +53,6 @@ import {
 import {
   type CellAliasResolver,
   patternToJSON,
-  serializePatternGraph,
   toJSONWithAliasBindings,
 } from "./json-utils.ts";
 import { traverseValue } from "./traverse-utils.ts";
@@ -713,15 +712,8 @@ function factoryFromPattern<T, R>(
       false,
       isAdmittedFabricFactory(node.module) ? ["module"] : [],
     ) as unknown as Module;
-    const inputsForSerialization = usesLegacyListPatternOp(node.module) &&
-        isRecord(node.inputs) && isPattern(node.inputs.op)
-      ? {
-        ...node.inputs,
-        op: serializePatternGraph(node.inputs.op),
-      }
-      : node.inputs;
     const inputs = toJSONWithAliasBindings(
-      inputsForSerialization,
+      node.inputs,
       resolveCellAlias,
       false,
     )! as unknown as JSONValue;

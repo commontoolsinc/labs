@@ -3482,7 +3482,7 @@ export class Runner {
         schedulerRehydration,
         factorySelectionLink,
       );
-    } else if (isWriteRedirectLink(module)) {
+    } else if (isWriteRedirectLink(module) || isAliasBinding(module)) {
       if (expectedFactory === undefined) {
         throw new Error(
           "Dynamic factory node is missing its call-site contract",
