@@ -1,0 +1,77 @@
+{
+  "properties": {
+    "nonFinite": {
+      "default": {
+        "inf": {
+          "/SpecialNumber@1": "+Infinity"
+        },
+        "nan": {
+          "/SpecialNumber@1": "NaN"
+        },
+        "ninf": {
+          "/SpecialNumber@1": "-Infinity"
+        }
+      },
+      "properties": {
+        "inf": {
+          "type": "number"
+        },
+        "nan": {
+          "type": "number"
+        },
+        "ninf": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "inf",
+        "nan",
+        "ninf"
+      ],
+      "type": "object"
+    },
+    "offsets": {
+      "default": [
+        -1,
+        2,
+        -3
+      ],
+      "items": {
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "sentinels": {
+      "default": {
+        "ratio": -0.5,
+        "selected": -1,
+        "zero": {
+          "/SpecialNumber@1": "-0"
+        }
+      },
+      "properties": {
+        "ratio": {
+          "type": "number"
+        },
+        "selected": {
+          "type": "number"
+        },
+        "zero": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "ratio",
+        "selected",
+        "zero"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "nonFinite",
+    "offsets",
+    "sentinels"
+  ],
+  "type": "object"
+}

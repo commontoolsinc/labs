@@ -196,11 +196,13 @@ describe("brand-payload recovery on the expanded path (no typeNode)", () => {
 // The payloads above are all literal TYPES, which the checker hands over
 // directly. A `typeof SOME_CONST` payload naming an object or array cannot be
 // carried that way — the values are recovered by reading the const's
-// INITIALIZER off the AST. That reader has to cope with the two spellings a
-// number can take beyond a bare literal: a sign prefix, and the non-finite
-// globals. Both are ordinary values under the system-wide `Object.is` leaf
-// contract, so both must arrive intact. (Node-based path: the property keeps
-// its authored typeNode, which is what reaches the initializer reader.)
+// INITIALIZER off the AST.
+//
+// That reader's handling of numbers in their non-literal spellings is pinned by
+// the `default-typeof-const-numbers` fixture, whose golden can hold `-0`, `NaN`
+// and the infinities directly. What stays here is the one case a golden cannot
+// state: that a shadowed global is NOT folded, which is an assertion about what
+// does not happen.
 describe("defaults recovered from a `typeof CONST` initializer", () => {
   const transformer = createSchemaTransformerV2();
 
@@ -213,50 +215,6 @@ describe("defaults recovered from a `typeof CONST` initializer", () => {
     return (schema.properties?.x as Record<string, unknown> | undefined)
       ?.default;
   }
-
-  it("recovers negative numbers in an object initializer", async () => {
-    const value = await defaultOfX(`
-      const D = { sentinel: -1, ratio: -0.5, positive: 2 };
-      interface S {
-        x: Default<
-          { sentinel: number; ratio: number; positive: number },
-          typeof D
-        >;
-      }
-    `);
-
-    expect(value).toEqual({ sentinel: -1, ratio: -0.5, positive: 2 });
-  });
-
-  it("recovers negative numbers in an array initializer", async () => {
-    // Positional damage is the risk here: an element the reader cannot
-    // evaluate does not drop out, it becomes a hole in place.
-    const value = await defaultOfX(`
-      const D = [-1, 2, -3];
-      interface S { x: Default<number[], typeof D>; }
-    `);
-
-    expect(value).toEqual([-1, 2, -3]);
-  });
-
-  it("recovers non-finite numbers and signed zero", async () => {
-    const value = await defaultOfX(`
-      const D = { nan: NaN, inf: Infinity, ninf: -Infinity, nzero: -0 };
-      interface S {
-        x: Default<
-          { nan: number; inf: number; ninf: number; nzero: number },
-          typeof D
-        >;
-      }
-    `) as Record<string, number>;
-
-    // Asserted leaf-by-leaf with Object.is: a structural comparison would let
-    // -0 pass as 0, which is the very conflation under test.
-    expect(Number.isNaN(value.nan)).toBe(true);
-    expect(value.inf).toBe(Infinity);
-    expect(value.ninf).toBe(-Infinity);
-    expect(Object.is(value.nzero, -0)).toBe(true);
-  });
 
   it("declines to fold a shadowed non-finite global", async () => {
     // `NaN` here names a local binding, not the global. Folding it to the
