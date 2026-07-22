@@ -921,10 +921,17 @@ One integration test (runner-level, in-process, two "deploys"):
   source closure, creates a lightweight patternIdentity-bearing publication
   cell, and optionally assigns a slug in the target space. It does not copy the
   source piece or its state. The resulting replica uses the destination space's
-  ACL. Host-qualified refs need dynamic space→host routes (`spaceHostMap` is
-  interim) and CFC label propagation for fetched source (spec § Security). A
-  possible public-pattern HTTP endpoint remains open under the public
-  distribution question in the spec.
+  ACL. Host-qualified refs register their accepted hint through the ordinary
+  per-space storage manager before opening the target space. Do not use a
+  secondary session. A seeded route can only be confirmed. Once a late hint is
+  accepted, a different hint is a conflict even before the space opens. After
+  the space opens, only the hint already in effect can be confirmed. The
+  current registry still needs the pre-open conflict guard. Dynamic
+  registration and site-table hydration exist as foundations, but
+  import-resolver integration, host failure, and space relocation remain work.
+  Cross-host publication also needs CFC label propagation for fetched source
+  (spec § Security). A possible public-pattern HTTP endpoint remains open under
+  the public distribution question in the spec.
 - **M4 subpaths + npm vendoring**: subpath = alias to a non-entry mounted
   file (grammar already parses it); `npm:` = fetch via esm.sh → vendor as a
   content-addressed source set → same rails.
