@@ -1911,20 +1911,29 @@ export class Runtime {
     patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
+    options?: { schedulePatternUpdate?: boolean },
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    options?: { schedulePatternUpdate?: boolean },
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    options: { schedulePatternUpdate?: boolean } = {},
   ): Cell<R> {
-    return this.runner.run<T, R>(tx, patternOrModule, argument, resultCell);
+    return this.runner.run<T, R>(
+      tx,
+      patternOrModule,
+      argument,
+      resultCell,
+      options,
+    );
   }
 
   runSynced(
@@ -1943,8 +1952,11 @@ export class Runtime {
     return this.runner.runSynced(resultCell, pattern, inputs, options);
   }
 
-  start<T = any>(resultCell: Cell<T>): Promise<boolean> {
-    return this.runner.start(resultCell);
+  start<T = any>(
+    resultCell: Cell<T>,
+    options: { schedulePatternUpdate?: boolean } = {},
+  ): Promise<boolean> {
+    return this.runner.start(resultCell, options);
   }
 
   /**

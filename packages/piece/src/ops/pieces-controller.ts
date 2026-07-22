@@ -34,6 +34,12 @@ const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
 export const HOME_PATTERN_URL = "/api/patterns/system/home.tsx";
 export const DEFAULT_APP_PATTERN_URL = "/api/patterns/system/default-app.tsx";
 
+// Default roots have a stronger update policy than ordinary pieces: an
+// existing root is reconciled before start, while a new root is compiled from
+// the current source immediately before creation. Keep the runner's watcher,
+// but do not schedule its duplicate fire-and-forget source check.
+const DEFAULT_ROOT_RUN_OPTIONS = { schedulePatternUpdate: false } as const;
+
 /**
  * The official system space-root pattern URL for a space type — the home DID
  * gets home.tsx, every other space gets the default app. This derivation only
@@ -359,7 +365,13 @@ export class PiecesController<T = unknown> {
       );
 
       // Run pattern setup within same transaction
-      this.#manager.runtime.run(tx, pattern, {}, pieceCell);
+      this.#manager.runtime.run(
+        tx,
+        pattern,
+        {},
+        pieceCell,
+        DEFAULT_ROOT_RUN_OPTIONS,
+      );
 
       // Stamp the provenance the piece tracks for updates, mirroring
       // ensureDefaultPattern (CT-1890). Without this, every recreated root
@@ -399,7 +411,7 @@ export class PiecesController<T = unknown> {
     }
 
     // Start the piece
-    await this.#manager.startPiece(finalPattern);
+    await this.#manager.startPiece(finalPattern, DEFAULT_ROOT_RUN_OPTIONS);
     await this.#manager.runtime.idle();
     await this.#manager.synced();
 
@@ -511,7 +523,13 @@ export class PiecesController<T = unknown> {
           );
 
           // Run pattern setup within same transaction
-          this.#manager.runtime.run(tx, pattern, {}, pieceCell);
+          this.#manager.runtime.run(
+            tx,
+            pattern,
+            {},
+            pieceCell,
+            DEFAULT_ROOT_RUN_OPTIONS,
+          );
 
           // Stamp the provenance the piece tracks for updates (the source it
           // was born from) — the same transaction, one extra meta write.
@@ -562,7 +580,7 @@ export class PiecesController<T = unknown> {
 
     await timePiecesPhase(
       "ensureDefaultPattern.startPiece",
-      () => this.#manager.startPiece(rootToStart),
+      () => this.#manager.startPiece(rootToStart, DEFAULT_ROOT_RUN_OPTIONS),
     );
     await timePiecesPhase(
       "ensureDefaultPattern.runtime.idle",

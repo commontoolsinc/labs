@@ -240,6 +240,15 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(stub.identityFetches()).toBe(0);
   });
 
+  it("does not duplicate the update check for a newly created root", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+
+    await controller.ensureDefaultPattern();
+    await runtime.patternUpdater.idle();
+
+    expect(stub.identityFetches()).toBe(0);
+  });
+
   it("contains failures while resolving the default pattern", async () => {
     await setup({ systemPatternAutoUpdate: true });
     const originalGetDefaultPattern = manager.getDefaultPattern;

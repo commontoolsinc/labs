@@ -1,6 +1,6 @@
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { getLogger } from "@commonfabric/utils/logger";
-import { type Cell, createCell } from "./cell.ts";
+import type { Cell } from "./cell.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   getPatternIdentityRef,
@@ -141,14 +141,6 @@ export class PatternUpdater {
     try {
       const runningRef = getPatternIdentityRef(resultCell);
       if (runningRef === undefined) return "current";
-      // Default roots keep their stronger, awaited reconciliation policy. A
-      // fresh root was compiled from the source immediately before start, and
-      // a persisted root was checked before start; scheduling the generic pass
-      // here would only duplicate its identity request.
-      if (
-        mode.kind === "instantiated" &&
-        this.#isDefaultPattern(resultCell)
-      ) return "current";
       const storedSource = getPatternSource(resultCell);
       const storedRepository = getPatternRepository(resultCell);
 
@@ -348,23 +340,5 @@ export class PatternUpdater {
       ]);
       return "current";
     }
-  }
-
-  #isDefaultPattern(resultCell: Cell<unknown>): boolean {
-    const defaultPatternSlot = this.#runtime.getSpaceCell(resultCell.space)
-      .key("defaultPattern");
-    // Root resolution has already loaded this link before start. Read that
-    // local replica without kicking off another storage sync: this is only an
-    // early duplicate-check gate, while canWrite() transactionally rechecks
-    // the role before either metadata mutation.
-    const localDefaultPatternSlot = createCell<Cell<unknown> | undefined>(
-      this.#runtime,
-      defaultPatternSlot.getAsNormalizedFullLink(),
-      undefined,
-      true,
-    );
-    const defaultPattern = localDefaultPatternSlot.get();
-    return defaultPattern !== undefined &&
-      defaultPattern.resolveAsCell().equals(resultCell.resolveAsCell());
   }
 }

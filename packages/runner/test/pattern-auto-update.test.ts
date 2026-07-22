@@ -193,7 +193,7 @@ describe("lazy system-pattern auto-update", () => {
     expect(getPatternSource(piece)).toBe(PARENT_PATH);
   });
 
-  it("checks the locally known default role without a storage round trip", async () => {
+  it("does not schedule a generic check for an explicitly handled root", async () => {
     let fetches = 0;
     const piece = await preparePiece(() => {
       fetches++;
@@ -216,7 +216,9 @@ describe("lazy system-pattern auto-update", () => {
     }) as typeof storageManager.syncCell;
 
     try {
-      expect(await runtime.start(piece)).toBe(true);
+      expect(
+        await runtime.start(piece, { schedulePatternUpdate: false }),
+      ).toBe(true);
       await runtime.patternUpdater.idle();
     } finally {
       storageManager.syncCell = originalSyncCell;
