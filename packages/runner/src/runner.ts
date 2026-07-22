@@ -52,11 +52,13 @@ import {
   getDerivedInternalCellLink,
   getMetaCell,
   getMetaLink,
+  isAliasBinding,
   isCellLink,
   isSigilLink,
   isWriteRedirectLink,
   KeepAsCell,
   type NormalizedFullLink,
+  parseAliasBinding,
   parseLink,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
@@ -243,8 +245,11 @@ const recordOutputSchemaPolicyInputs = (
     return;
   }
 
-  if (isWriteRedirectLink(outputBinding)) {
-    const bindingLink = parseLink(outputBinding, resultCell);
+  if (isWriteRedirectLink(outputBinding) || isAliasBinding(outputBinding)) {
+    const bindingBase = resultCell.getAsNormalizedFullLink();
+    const bindingLink = isAliasBinding(outputBinding)
+      ? parseAliasBinding(outputBinding, bindingBase)
+      : parseLink(outputBinding, bindingBase);
     // Output-redirect resolution is result-plumbing machinery
     // (machineryRead, same family as sendValueToBinding's walk): its reads
     // must not consume `*`-path membership templates (bot review on this
@@ -334,8 +339,11 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
   processCell: Cell<any>,
   outputBinding: unknown,
 ): void => {
-  if (isWriteRedirectLink(outputBinding)) {
-    const bindingLink = parseLink(outputBinding, processCell);
+  if (isWriteRedirectLink(outputBinding) || isAliasBinding(outputBinding)) {
+    const bindingBase = processCell.getAsNormalizedFullLink();
+    const bindingLink = isAliasBinding(outputBinding)
+      ? parseAliasBinding(outputBinding, bindingBase)
+      : parseLink(outputBinding, bindingBase);
     // Result-plumbing machinery, as in recordOutputSchemaPolicyInputs.
     const link = tx.runWithAmbientReadMeta(
       machineryRead,
@@ -383,10 +391,13 @@ const schemaForRawBuiltinRootOutputBinding = (
   processCell: Cell<any>,
   outputBinding: unknown,
 ): JSONSchema | undefined => {
-  if (!isWriteRedirectLink(outputBinding)) {
+  if (!isWriteRedirectLink(outputBinding) && !isAliasBinding(outputBinding)) {
     return undefined;
   }
-  const bindingLink = parseLink(outputBinding, processCell);
+  const bindingBase = processCell.getAsNormalizedFullLink();
+  const bindingLink = isAliasBinding(outputBinding)
+    ? parseAliasBinding(outputBinding, bindingBase)
+    : parseLink(outputBinding, bindingBase);
   // Result-plumbing machinery, as in recordOutputSchemaPolicyInputs.
   const link = tx.runWithAmbientReadMeta(
     machineryRead,
@@ -448,11 +459,14 @@ function firstResolvedOutputRedirect(
   binding: unknown,
   baseCell: Cell<any>,
 ): NormalizedFullLink | undefined {
-  if (isWriteRedirectLink(binding)) {
+  if (isWriteRedirectLink(binding) || isAliasBinding(binding)) {
+    const bindingBase = baseCell.getAsNormalizedFullLink();
     return resolveLink(
       runtime,
       tx,
-      parseLink(binding, baseCell),
+      isAliasBinding(binding)
+        ? parseAliasBinding(binding, bindingBase)
+        : parseLink(binding, bindingBase),
       "writeRedirect",
     );
   }
@@ -491,9 +505,11 @@ const recordSetupProjectionPolicyInputs = (
     return;
   }
 
-  if (isWriteRedirectLink(projection)) {
+  if (isWriteRedirectLink(projection) || isAliasBinding(projection)) {
     const target = resultCell.getAsNormalizedFullLink();
-    const source = parseLink(projection, resultCell);
+    const source = isAliasBinding(projection)
+      ? parseAliasBinding(projection, target)
+      : parseLink(projection, target);
     tx.recordCfcWritePolicyInput({
       kind: "structural-provenance",
       target: {
@@ -3051,7 +3067,7 @@ export class Runner {
         default:
           throw new Error(`Unknown module type: ${module.type}`);
       }
-    } else if (isWriteRedirectLink(module)) {
+    } else if (isWriteRedirectLink(module) || isAliasBinding(module)) {
       // TODO(seefeld): Implement, a dynamic node
     } else {
       throw new Error(`Unknown module: ${toCompactDebugString(module)}`);

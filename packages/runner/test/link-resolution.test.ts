@@ -9,7 +9,7 @@ import { resolveLink } from "../src/link-resolution.ts";
 import { Runtime } from "../src/runtime.ts";
 import { areNormalizedLinksSame, isSigilLink } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { parseLink } from "../src/link-utils.ts";
+import { parseAliasBinding, parseLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -100,7 +100,7 @@ describe("link-resolution", () => {
       const result = resolveLink(
         runtime,
         tx,
-        parseLink(binding, testCell)!,
+        parseAliasBinding(binding, testCell.getAsNormalizedFullLink()),
         "writeRedirect",
       );
       expect(tx.readValueOrThrow(result)).toBe(42);
@@ -127,7 +127,7 @@ describe("link-resolution", () => {
       const result = resolveLink(
         runtime,
         tx,
-        parseLink(binding, outerCell)!,
+        parseAliasBinding(binding, outerCell.getAsNormalizedFullLink()),
         "writeRedirect",
       );
       expect(
@@ -148,14 +148,19 @@ describe("link-resolution", () => {
         undefined,
         tx,
       );
+      // Redirects stored in data must be sigil links; a `$alias` record in
+      // data is plain data and is no longer followed.
       testCell.setRaw({
-        a: { a: { $alias: { path: ["a", "b"] } }, b: { c: 1 } },
+        a: {
+          a: testCell.key("a").key("b").getAsWriteRedirectLink(),
+          b: { c: 1 },
+        },
       });
       const binding = { $alias: { path: ["a", "a", "c"] } };
       const result = resolveLink(
         runtime,
         tx,
-        parseLink(binding, testCell)!,
+        parseAliasBinding(binding, testCell.getAsNormalizedFullLink()),
         "writeRedirect",
       );
       expect(

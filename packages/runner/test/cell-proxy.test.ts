@@ -49,16 +49,18 @@ describe("createProxy", () => {
     expect(proxy.a.b.c).toBe(42);
   });
 
-  it("should handle $alias in objects", () => {
+  it("treats $alias records in data as plain data", () => {
     const c = runtime.getCell(
       space,
-      "should handle $alias in objects",
+      "treats $alias records in data as plain data",
       undefined,
       tx,
     );
+    // `$alias` is only meaningful inside Pattern objects; in data it is not
+    // followed as a link.
     c.setRaw({ x: { $alias: { path: ["y"] } }, y: 42 });
     const proxy = c.getAsQueryResult();
-    expect(proxy.x).toBe(42);
+    expect(proxy.x).toEqual({ $alias: { path: ["y"] } });
   });
 
   it("should handle nested cells", () => {

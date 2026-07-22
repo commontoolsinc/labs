@@ -109,23 +109,20 @@ export type SigilWriteRedirectLink = LinkRef<
   CellLinkRefPayload & { overwrite: "redirect" }
 >;
 
-/****************
- * Legacy types *
- ****************/
-
 /**
- * Legacy alias.
+ * `$alias` Pattern binding.
  *
- * These are used in intermediate bindings at runtime.
- * They are persisted in saved patterns, like the map op.
+ * These are used in intermediate bindings at runtime and are persisted in
+ * saved patterns, like the map op. They are not links: in data, an `$alias`
+ * record is a plain value.
  */
-type LegacyAliasBase = {
+type AliasBindingBase = {
   path: readonly string[];
   scope?: LinkScope;
   schema?: JSONSchema;
 };
 
-type LegacyAliasNamedCell = LegacyAliasBase & {
+type AliasBindingNamedCell = AliasBindingBase & {
   cell?: "result" | "argument";
   partialCause?: never;
   defer?: number;
@@ -138,14 +135,14 @@ type LegacyAliasNamedCell = LegacyAliasBase & {
  * current pattern, and we can generate real cells based ont the combination
  * of the pattern's result (parent) and the partialCause.
  */
-type LegacyAliasPartialCause = LegacyAliasBase & {
+type AliasBindingPartialCause = AliasBindingBase & {
   cell?: never;
   partialCause: JSONValue;
   defer?: number;
 };
 
-export type LegacyAlias = {
+export type AliasBinding = {
   $alias:
-    | LegacyAliasNamedCell
-    | LegacyAliasPartialCause;
+    | AliasBindingNamedCell
+    | AliasBindingPartialCause;
 };

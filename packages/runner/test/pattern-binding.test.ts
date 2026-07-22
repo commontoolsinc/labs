@@ -14,7 +14,7 @@ import {
   areNormalizedLinksSame,
   getDerivedInternalCellLink,
   getMetaCell,
-  isLegacyAlias,
+  isAliasBinding,
   parseLink,
 } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -427,7 +427,7 @@ describe("pattern-binding", () => {
         });
 
         const nameBinding = (Root.result as { name: unknown }).name;
-        expect(isLegacyAlias(nameBinding)).toBe(true);
+        expect(isAliasBinding(nameBinding)).toBe(true);
         expect(nameBinding).toEqual({
           $alias: {
             partialCause: "name",

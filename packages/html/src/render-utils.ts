@@ -326,15 +326,11 @@ export function stringifyText(
     return "";
   } else if (typeof value === "object") {
     // Handle unresolved alias objects gracefully - render empty until resolved
-    if (value && "$alias" in value) {
-      return "";
-    } else {
-      console.warn(
-        "unexpected object when value was expected",
-        value,
-      );
-      return JSON.stringify(value);
-    }
+    console.warn(
+      "unexpected object when value was expected",
+      value,
+    );
+    return JSON.stringify(value);
   }
   return value.toString();
 }

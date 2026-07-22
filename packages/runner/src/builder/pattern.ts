@@ -38,7 +38,7 @@ import {
   type CellAliasResolver,
   moduleToJSON,
   patternToJSON,
-  toJSONWithLegacyAliases,
+  toJSONWithAliasBindings,
 } from "./json-utils.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import {
@@ -50,7 +50,7 @@ import {
   KeepAsCell,
   sanitizeSchemaForLinks,
 } from "../link-utils.ts";
-import { type LegacyAlias } from "../sigil-types.ts";
+import { type AliasBinding } from "../sigil-types.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -400,7 +400,7 @@ function factoryFromPattern<T, R>(
 
   const cellReferenceForCell = (
     cell: ICell<unknown> | OpaqueCell<any> | Reactive<any>,
-  ): LegacyAlias["$alias"] | undefined => {
+  ): AliasBinding["$alias"] | undefined => {
     const { cell: top, path, external, scope, schema } = cell.export();
     // If we have an external id, don't bother with all this
     if (external) return undefined;
@@ -513,7 +513,7 @@ function factoryFromPattern<T, R>(
     }
   };
   // Creates a query (i.e. aliases) into the cells for the result
-  const result = toJSONWithLegacyAliases(
+  const result = toJSONWithAliasBindings(
     outputs ?? {},
     resolveCellAlias,
     true,
@@ -536,17 +536,17 @@ function factoryFromPattern<T, R>(
     applyArgumentIfcToResult(argumentSchema, resultSchemaArg) ?? {};
 
   const serializedNodes = Array.from(allNodes).map((node) => {
-    const module = toJSONWithLegacyAliases(
+    const module = toJSONWithAliasBindings(
       node.module,
       resolveCellAlias,
       false,
     ) as unknown as Module;
-    const inputs = toJSONWithLegacyAliases(
+    const inputs = toJSONWithAliasBindings(
       node.inputs,
       resolveCellAlias,
       false,
     )!;
-    const outputs = toJSONWithLegacyAliases(
+    const outputs = toJSONWithAliasBindings(
       node.outputs,
       resolveCellAlias,
       false,

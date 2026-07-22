@@ -439,9 +439,10 @@ describe("data-updating", () => {
         undefined,
         tx,
       );
+      // Redirects in data are sigil links; `$alias` in data is plain data.
       testCell.setRaw({
         value: 42,
-        alias: { $alias: { path: ["value"] } },
+        alias: testCell.key("value").getAsWriteRedirectLink(),
       });
       const current = testCell.key("alias").getAsNormalizedFullLink();
       const changes = normalizeAndDiff(runtime, tx, current, 100);
@@ -471,7 +472,7 @@ describe("data-updating", () => {
       testCell.setRaw({
         value: 42,
         value2: 200,
-        alias: { $alias: { path: ["value"] } },
+        alias: testCell.key("value").getAsWriteRedirectLink(),
       });
       const current = testCell.key("alias").getAsNormalizedFullLink();
       const changes = normalizeAndDiff(runtime, tx, current, 100);
@@ -488,9 +489,8 @@ describe("data-updating", () => {
 
       applyChangeSet(tx, changes);
 
-      const changes2 = normalizeAndDiff(runtime, tx, current, {
-        $alias: { path: ["value2"] },
-      });
+      const redirectToValue2 = testCell.key("value2").getAsWriteRedirectLink();
+      const changes2 = normalizeAndDiff(runtime, tx, current, redirectToValue2);
 
       applyChangeSet(tx, changes2);
 
@@ -501,7 +501,7 @@ describe("data-updating", () => {
           testCell.key("alias").getAsNormalizedFullLink(),
         ),
       ).toBe(true);
-      expect(changes2[0].value).toEqual({ $alias: { path: ["value2"] } });
+      expect(changes2[0].value).toEqual(redirectToValue2);
 
       const changes3 = normalizeAndDiff(runtime, tx, current, 300);
 

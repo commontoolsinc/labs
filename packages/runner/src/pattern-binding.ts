@@ -14,11 +14,12 @@ import {
   createSigilLinkFromParsedLink,
   getDerivedInternalCellLink,
   getMetaLink,
+  isAliasBinding,
   isCellLink,
-  isLegacyAlias,
   isWriteRedirectLink,
   KeepAsCell,
   type NormalizedFullLink,
+  parseAliasBinding,
   parseLink,
   sanitizeSchemaForLinks,
 } from "./link-utils.ts";
@@ -217,9 +218,11 @@ function sendValueToBindingInner<T>(
   if (argumentCellLink === undefined) {
     argumentCellLink = getMetaLink(cell as Cell<unknown>, "argument")!;
   }
-  // Handle both legacy $alias format and new sigil link format
-  if (isWriteRedirectLink(binding)) {
-    if (isLegacyAlias(binding)) {
+  // Handle both legacy $alias format and new sigil link format. `$alias` is
+  // only meaningful here because `binding` comes from a Pattern object;
+  // `isWriteRedirectLink` itself no longer matches it.
+  if (isWriteRedirectLink(binding) || isAliasBinding(binding)) {
+    if (isAliasBinding(binding)) {
       const alias = binding.$alias;
       if ((alias.defer ?? 0) > 0) {
         throw new Error(
@@ -412,7 +415,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
     binding: unknown,
     targetSchema: JSONSchema | undefined,
   ): unknown {
-    if (isLegacyAlias(binding)) {
+    if (isAliasBinding(binding)) {
       const { defer: optDefer, ...aliasRest } = { ...binding.$alias };
       const defer = optDefer ?? 0;
       if (defer > 0) {
@@ -573,9 +576,9 @@ export function findAllWriteRedirectCells<T>(
   // redirect-chain recursion re-base onto the resolved `linkCell` (a
   // `Cell<unknown>`) rather than the original typed base.
   function find(binding: unknown, baseCell: AnyCell<unknown>): void {
-    if (isLegacyAlias(binding) && (binding.$alias.defer ?? 0) > 0) {
+    if (isAliasBinding(binding) && (binding.$alias.defer ?? 0) > 0) {
       return;
-    } else if (isWriteRedirectLink(binding)) {
+    } else if (isWriteRedirectLink(binding) || isAliasBinding(binding)) {
       // Follow a *chain* of write redirects: record this redirect, then if its
       // target value is ITSELF a write redirect, follow that too (one string of
       // redirects). We stop as soon as the target is a non-redirect value — we
@@ -586,7 +589,10 @@ export function findAllWriteRedirectCells<T>(
       // documents — and was the dominant reload instantiation cost: resolving a
       // cell + walking its entire value per link. Following only direct redirect
       // chains keeps the cases that matter without the deep dive.)
-      const link = parseLink(binding, baseCell);
+      const bindingBase = baseCell.getAsNormalizedFullLink();
+      const link = isAliasBinding(binding)
+        ? parseAliasBinding(binding, bindingBase)
+        : parseLink(binding, bindingBase);
       if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
       seen.push(link);
       const linkCell = baseCell.runtime.getCellFromLink(
@@ -618,7 +624,7 @@ export function findAllWriteRedirectCells<T>(
   }
   if (
     skipTopLevelKeys !== undefined && skipTopLevelKeys.size > 0 &&
-    isRecord(binding) && !isCellLink(binding) && !isLegacyAlias(binding)
+    isRecord(binding) && !isCellLink(binding) && !isAliasBinding(binding)
   ) {
     // Drop the named top-level argument keys (opaque forwarded references)
     // before traversing — they must not contribute to declared reads.

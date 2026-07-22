@@ -8,12 +8,13 @@ import {
   createSigilLinkFromParsedLink,
   decodeJsonPointer,
   encodeJsonPointer,
+  isAliasBinding,
   isCellLink,
-  isLegacyAlias,
   isSigilLink,
   isWriteRedirectLink,
   KeepAsCell,
   type NormalizedLink,
+  parseAliasBinding,
   parseLink,
   parseLinkOrThrow,
   parseLLMFriendlyLink,
@@ -24,7 +25,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type { JSONSchema } from "../src/builder/types.ts";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { type AliasBinding, LINK_V1_TAG } from "../src/sigil-types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -128,9 +129,12 @@ describe("link-utils", () => {
   });
 
   describe("isWriteRedirectLink", () => {
-    it("should identify legacy aliases as write redirect links", () => {
+    it("should not identify legacy aliases as write redirect links", () => {
+      // `$alias` is only meaningful as a Pattern binding, not as a link in
+      // data; the binding predicate still matches it.
       const legacyAlias = { $alias: { path: ["test"] } };
-      expect(isWriteRedirectLink(legacyAlias)).toBe(true);
+      expect(isWriteRedirectLink(legacyAlias)).toBe(false);
+      expect(isAliasBinding(legacyAlias)).toBe(true);
     });
 
     it("should identify sigil links with overwrite redirect as write redirect links", () => {
@@ -157,22 +161,22 @@ describe("link-utils", () => {
     });
   });
 
-  describe("isLegacyAlias", () => {
+  describe("isAliasBinding", () => {
     it("should identify legacy aliases", () => {
       const legacyAlias = { $alias: { path: ["test"] } };
-      expect(isLegacyAlias(legacyAlias)).toBe(true);
+      expect(isAliasBinding(legacyAlias)).toBe(true);
     });
 
     it("should identify legacy aliases with cell", () => {
       const cell = runtime.getCell(space, "test");
       const legacyAlias = { $alias: { cell: cell.entityId, path: ["test"] } };
-      expect(isLegacyAlias(legacyAlias)).toBe(true);
+      expect(isAliasBinding(legacyAlias)).toBe(true);
     });
 
     it("should not identify non-legacy aliases", () => {
-      expect(isLegacyAlias({ notAlias: "value" })).toBe(false);
-      expect(isLegacyAlias({ $alias: "not object" })).toBe(false);
-      expect(isLegacyAlias({ $alias: { notPath: "value" } })).toBe(false);
+      expect(isAliasBinding({ notAlias: "value" })).toBe(false);
+      expect(isAliasBinding({ $alias: "not object" })).toBe(false);
+      expect(isAliasBinding({ $alias: { notPath: "value" } })).toBe(false);
     });
   });
 
@@ -358,7 +362,7 @@ describe("link-utils", () => {
       });
     });
 
-    it("should parse legacy aliases to normalized links", () => {
+    it("should not parse alias bindings (those parse via parseAliasBinding)", () => {
       const cell = runtime.getCell(space, "test");
       const legacyAlias = {
         $alias: {
@@ -367,9 +371,17 @@ describe("link-utils", () => {
           schema: { type: "number" },
         },
       };
-      const result = parseLink(legacyAlias, cell);
+      // As data, `$alias` is not a link.
+      expect(parseLink(legacyAlias, cell)).toBeUndefined();
 
-      expect(result).toEqual({
+      // As a Pattern binding, it still parses via the binding-side parser
+      // (which ignores the doubly-legacy `cell` ref and resolves to base).
+      expect(
+        parseAliasBinding(
+          legacyAlias as unknown as AliasBinding,
+          cell.getAsNormalizedFullLink(),
+        ),
+      ).toEqual({
         id: expect.stringContaining("of:"),
         path: ["nested", "value"],
         space: space,
@@ -379,15 +391,19 @@ describe("link-utils", () => {
       });
     });
 
-    it("should handle legacy aliases without cell using base", () => {
+    it("should handle legacy alias bindings without cell using base", () => {
       const baseCell = runtime.getCell(space, "base");
       const legacyAlias = {
         $alias: {
           path: ["nested", "value"],
         },
       };
-      const result = parseLink(legacyAlias, baseCell);
+      expect(parseLink(legacyAlias, baseCell)).toBeUndefined();
 
+      const result = parseAliasBinding(
+        legacyAlias,
+        baseCell.getAsNormalizedFullLink(),
+      );
       expect(result).toEqual({
         id: expect.stringContaining("of:"),
         path: ["nested", "value"],
