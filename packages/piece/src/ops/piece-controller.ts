@@ -1431,37 +1431,6 @@ function withoutMissingFlag(
   return contract;
 }
 
-/**
- * The capability a source declares at its outermost level, when that kind is
- * a true capability rather than an ordinary `cell`/`stream` and every contract
- * agrees on it.
- *
- * Used only to decide whether an already-durable link may be restored as-is.
- * Returns undefined for anything ambiguous — disagreeing contracts, a
- * localization issue, an ordinary value — so the caller falls through to the
- * full validation below, which reports each of those in its own words rather
- * than having them silently swallowed here.
- */
-function restorableCapabilityKind(
-  contracts: readonly PathSchemaContract[],
-): CellKind | undefined {
-  const localized = contracts.map((contract) =>
-    localizeOuterCellContract(contract)
-  );
-  if (localized.some((entry) => entry.issue !== undefined)) return undefined;
-  const outers = localized.flatMap((entry) =>
-    entry.outer === undefined ? [] : [entry.outer]
-  );
-  const outer = outers[0];
-  if (outer === undefined) return undefined;
-  if (!outers.every((other) => outerCellShapesMatch(outer, other))) {
-    return undefined;
-  }
-  return outer.kind === "cell" || outer.kind === "stream"
-    ? undefined
-    : outer.kind;
-}
-
 /** @internal Exported for focused durable-link contract tests. */
 export function assertSuppliedLinkSchemasCompatible(
   links: readonly SuppliedLink[],
@@ -1484,6 +1453,20 @@ export function assertSuppliedLinkSchemasCompatible(
      * so a fresh link to an arbitrary contract-less document is still refused.
      */
     priorArgumentSchema?: JSONSchema;
+    /**
+     * The caller writes each supplied link's ORIGINAL envelope back, rather
+     * than rebuilding it from a materialized read.
+     *
+     * This is a statement about the caller's WRITE PLAN, not about its
+     * authority — authority is `isCell` below, which is real evidence that the
+     * caller held a live handle. Only the caller knows its own plan, so it has
+     * to say. `setPattern` is the case that has one: `applySetupState` carries
+     * the argument over from `previousArgumentCell.getRaw()`, so every
+     * retained link survives byte for byte by construction and there is no
+     * rebuild for the ordinary-alias rules below to police. Left unset (every
+     * other flow), those rules apply exactly as before.
+     */
+    linksPreservedVerbatim?: boolean;
   } = {},
 ): Set<SuppliedLink> {
   const preservedDirectHandles = new Set<SuppliedLink>();
@@ -1579,9 +1562,29 @@ export function assertSuppliedLinkSchemasCompatible(
         );
       }
     }
+    // Does the original envelope survive? Two independent ways to know it
+    // does: the caller declared it for every link it supplied, or this value
+    // is a live Cell the caller demonstrably holds.
+    //
+    // These answer different questions and must not be conflated. `isCell` is
+    // PROVENANCE — a live Cell is a capability the caller possesses, whereas a
+    // serialized sigil link is just bytes it wrote. The rules below are about
+    // the WRITE PLAN: every one of them polices a rebuild that is about to
+    // happen. Inferring the plan from the provenance is sound wherever the
+    // caller actually rebuilds, and false at `setPattern`, which rebuilds
+    // nothing — it discards this function's return value and lets
+    // `applySetupState` carry the argument over from `getRaw()`. That is why
+    // an injected capability input (Loom's `db: SqliteDb`, `asCell:
+    // ["sqlite"]`) could never be carried across a source update: raw storage
+    // holds serialized links, which are never `isCell()`, so the restore was
+    // always judged to be exposing the capability as an ordinary alias — a
+    // laundering that the caller was not in fact performing.
+    const preservesDirectHandle = targetOuter !== undefined &&
+      (options.linksPreservedVerbatim === true || isCell(suppliedLink.value));
+    if (preservesDirectHandle) preservedDirectHandles.add(suppliedLink);
+
     let sourceContracts: PathSchemaContract[];
     let rawSourceContracts: PathSchemaContract[];
-    let preservesDirectHandle = false;
     try {
       rawSourceContracts = durableSource.schemas.flatMap((source) =>
         linkPathContracts(
@@ -1590,29 +1593,6 @@ export function assertSuppliedLinkSchemasCompatible(
           { trackSourcePresence: true, preserveMissingFlag: true },
         )
       );
-      // Whether the ORIGINAL link value survives verbatim — keeping whatever
-      // capability it carries — or is rebuilt below as a plain alias.
-      //
-      // A live Cell handed in by a caller qualifies outright. So does a link
-      // being RESTORED over an unchanged capability declaration: `setPattern`
-      // re-applies the piece's retained links from `argumentCell.getRaw()`,
-      // and raw storage holds SERIALIZED links, which are never `isCell()`.
-      // Keying only on `isCell` therefore made every capability-kind input
-      // permanently un-updatable — the restore was always judged to be
-      // exposing the capability as an ordinary alias, even when the incoming
-      // pattern declared that exact capability at that exact path. Preserving
-      // a capability into a destination that asks for the same capability is
-      // not exposure; it is the identity case.
-      //
-      // Deliberately narrow: ordinary `cell`/`stream` sources keep their
-      // existing sanitize-and-rebuild path untouched, so this only reaches
-      // true capabilities (e.g. an injected `sqlite` handle).
-      const restoredCapability = restorableCapabilityKind(rawSourceContracts);
-      preservesDirectHandle = targetOuter !== undefined &&
-        (isCell(suppliedLink.value) ||
-          restoredCapability === targetOuter.kind);
-      if (preservesDirectHandle) preservedDirectHandles.add(suppliedLink);
-
       sourceContracts = durableSource.schemas.flatMap((source) => {
         const root = preservesDirectHandle
           ? source.root
@@ -1697,6 +1677,34 @@ export function assertSuppliedLinkSchemasCompatible(
     }
 
     if (preservesDirectHandle) {
+      // A SERIALIZED link carries its own `schema` envelope, and that envelope
+      // is caller-written bytes. The rebuild branch checks it below ("link
+      // carries a non-durable Cell wrapper"); this branch could previously
+      // skip it because `isCell` was the only way in, and a live Cell has no
+      // separate envelope to forge. A caller declaring it preserves serialized
+      // links verbatim reopens that gap, so re-assert it here: a carried
+      // wrapper has to match the source's own durable contract, never widen
+      // it. (Loom's injected links carry none — `PieceManager.link` serializes
+      // with `KeepAsCell.OnlyStream` — so the real restore case is unaffected.)
+      if (!isCell(suppliedLink.value)) {
+        const carried = ContextualFlowControl.getAsCellValues(link.schema);
+        if (carried.length > 0) {
+          const carriedSchema = link.schema === undefined
+            ? undefined
+            : linkPathContracts(
+              [{ schema: link.schema, root: link.schema }],
+              [],
+            )[0]?.schema;
+          const matchesDurableContract = sourceContracts.some((contract) =>
+            asCellShapesMatch(carriedSchema, contract.schema)
+          );
+          if (!matchesDurableContract) {
+            throw new Error(
+              `input link at ${displayPath} schema is not compatible: link carries a non-durable Cell wrapper`,
+            );
+          }
+        }
+      }
       const localizedSources = sourceContracts.map((contract) =>
         localizeOuterCellContract(contract)
       );
@@ -2785,7 +2793,13 @@ export class PieceController<T = unknown> {
               argumentSchema,
               argumentCell,
               this.#manager,
-              { priorArgumentSchema: previousPattern.argumentSchema },
+              {
+                priorArgumentSchema: previousPattern.argumentSchema,
+                // `applySetupState` rewrites the argument from `getRaw()`, so
+                // every retained link's envelope is written back unchanged and
+                // nothing here is rebuilt as an alias.
+                linksPreservedVerbatim: true,
+              },
             ),
         repository: options?.repository,
       }) as Cell<T>;
