@@ -126,6 +126,57 @@ Deno.test("memory v2 client rejects malformed async hello session.open metadata"
   );
 });
 
+Deno.test("memory v2 client does not send a request after close begins", async () => {
+  let receiver = (_payload: string) => {};
+  let lateRequestId: string | undefined;
+  let lateRequestCount = 0;
+  const transport: Transport = {
+    send(payload: string): Promise<void> {
+      const message = decodeMemoryBoundary(payload) as {
+        type?: string;
+        requestId?: string;
+      };
+      if (message.type === "hello") {
+        receiver(encodeMemoryBoundary(HELLO_OK));
+      } else {
+        lateRequestCount++;
+        lateRequestId = message.requestId;
+      }
+      return Promise.resolve();
+    },
+    close(): Promise<void> {
+      // Keep the pre-fix failure finite: if a request escaped the client's
+      // pending-request rejection sweep, synthesize its terminal response.
+      if (lateRequestId !== undefined) {
+        receiver(encodeMemoryBoundary({
+          type: "response",
+          requestId: lateRequestId,
+          error: { name: "ConnectionError", message: "transport closed" },
+        }));
+      }
+      return Promise.resolve();
+    },
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver() {},
+  };
+  const client = await connect({ transport });
+
+  const request = client.request({
+    type: "test.request",
+    requestId: "request-after-close",
+  }).then(
+    () => "resolved" as const,
+    () => "rejected" as const,
+  );
+  const close = client.close();
+
+  assertEquals(await request, "rejected");
+  await close;
+  assertEquals(lateRequestCount, 0);
+});
+
 Deno.test("memory v2 client rejects malformed hello session.open metadata", async () => {
   const cases: {
     name: string;
