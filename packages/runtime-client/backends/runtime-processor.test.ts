@@ -8,13 +8,11 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
   browserWorkerParamsFromInitializationData,
-  postVersionSkew,
   renderConfidentialityResolverFor,
   renderMembershipProviderFor,
   RuntimeProcessor,
   sanitizeForPostMessage,
   shouldReconcileHomeRoot,
-  versionSkewNotification,
 } from "./runtime-processor.ts";
 import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
 import { cfcAtom } from "@commonfabric/api/cfc";
@@ -23,7 +21,6 @@ import {
   type CellRef,
   type CfcLabelView,
   ClientNotificationType,
-  NotificationType,
   RequestType,
 } from "../protocol/mod.ts";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
@@ -1237,39 +1234,6 @@ describe("RuntimeProcessor home pattern IPC", () => {
 });
 
 describe("system-pattern update wiring", () => {
-  it("versionSkewNotification builds the worker→shell payload", () => {
-    expect(
-      versionSkewNotification({
-        space: "did:key:z6Mk",
-        clientVersion: "c",
-        toolshedVersion: "t",
-      }),
-    ).toEqual({
-      type: NotificationType.VersionSkew,
-      space: "did:key:z6Mk",
-      clientVersion: "c",
-      toolshedVersion: "t",
-    });
-  });
-
-  it("postVersionSkew posts the notification to the shell", () => {
-    const posted: unknown[] = [];
-    const orig = self.postMessage;
-    (self as { postMessage: unknown }).postMessage = (m: unknown) =>
-      posted.push(m);
-    try {
-      postVersionSkew({ space: "did:key:z6Mk", toolshedVersion: "t" });
-    } finally {
-      (self as { postMessage: unknown }).postMessage = orig;
-    }
-    expect(posted).toEqual([{
-      type: NotificationType.VersionSkew,
-      space: "did:key:z6Mk",
-      clientVersion: undefined,
-      toolshedVersion: "t",
-    }]);
-  });
-
   it("handleGetSpaceRootPattern returns the root ensured by the controller", async () => {
     const ref: CellRef = {
       id: "of:root-result" as CellRef["id"],
@@ -2458,45 +2422,6 @@ describe("browserWorkerParamsFromInitializationData", () => {
     });
     // The preset pins patterns to the host's own API base.
     expect(options.patternEnvironment?.apiUrl.href).toBe("http://worker.test/");
-  });
-
-  it("threads clientVersion through to the runtime options", () => {
-    const telemetry = { marker() {} } as unknown as Parameters<
-      typeof browserWorkerParamsFromInitializationData
-    >[2];
-    const storageManager = {
-      as: { did: () => "did:key:worker" },
-    } as unknown as Parameters<
-      typeof browserWorkerParamsFromInitializationData
-    >[1];
-
-    const withVersion = runtimePresets.browserWorker(
-      browserWorkerParamsFromInitializationData(
-        {
-          apiUrl: "http://worker.test/",
-          identity: {} as never,
-          spaceDid: "did:key:space",
-          clientVersion: "build-sha-xyz",
-        },
-        storageManager,
-        telemetry,
-      ),
-    );
-    expect(withVersion.clientVersion).toBe("build-sha-xyz");
-
-    // Absent → omitted (rides the constructor default of undefined).
-    const withoutVersion = runtimePresets.browserWorker(
-      browserWorkerParamsFromInitializationData(
-        {
-          apiUrl: "http://worker.test/",
-          identity: {} as never,
-          spaceDid: "did:key:space",
-        },
-        storageManager,
-        telemetry,
-      ),
-    );
-    expect(withoutVersion.clientVersion).toBe(undefined);
   });
 
   it("falls back to the shared CFC pin when the host sends no dial", () => {

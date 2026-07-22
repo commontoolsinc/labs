@@ -281,8 +281,8 @@ describe("checkAndUpdateDefaultPattern", () => {
     const staleRoot = (await manager.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(staleRoot)?.identity).toBe(staleIdentity);
 
-    // A newer system root is available from the matching toolshed build. The
-    // ensure path must install this identity before start() sees the stale one.
+    // The toolshed advertises a newer system-root identity. The ensure path
+    // must install it before start() sees the stale one.
     stub.setSource(SOURCE_V2);
 
     const updated = await controller.ensureDefaultPattern();

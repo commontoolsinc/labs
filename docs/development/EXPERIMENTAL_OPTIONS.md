@@ -218,17 +218,18 @@ propagate](#how-flags-propagate).
 - **Purpose.** At space open, rolls a space's root system pattern (default-app,
   and the home root — the home-specific second gate was retired on the strength
   of home-golden-replay state-survival coverage) forward in place when its
-  toolshed serves a newer content identity. Every tracked root uses the client/toolshed version gate and cached
-  `?identity` comparison before an in-place `patternIdentity` swap. The
-  identity response, every fetched source/import, and the compiler-produced
-  entry must all agree with the same client build and identity. Equal identities
-  take the fast path only after the persisted artifact loads; an unloadable root
-  is rebuilt through that same identity-authorized source path before bootstrap.
-  Source-run toolsheds, CLI, and daemon processes can receive the shared Labs
-  revision through `COMMIT_SHA`. Persisted roots are resolved without starting.
-  A pre-provenance root may be back-filled only when its stored
-  `{ identity, symbol }` exactly equals the build-attested current official
-  entry; stale, custom, and repository-pinned sourceless roots remain pinned —
+  toolshed serves a newer content identity. Every attempt fetches `?identity`.
+  Before replacing or repairing a root, it downloads and compiles the complete
+  authored closure and permits an in-place `patternIdentity` swap only when the
+  compiler-produced entry has exactly the advertised identity. Fetch, compile,
+  evaluation, and identity-mismatch failures leave the original root pointer
+  untouched. Equal identities take the fast path only after the persisted
+  artifact loads; an unloadable root is rebuilt through that same
+  identity-authorized source path before bootstrap.
+  Persisted roots are resolved without starting. A pre-provenance root may be
+  back-filled only when its stored `{ identity, symbol }` exactly equals the
+  current official entry's advertised content identity; stale, custom, and
+  repository-pinned sourceless roots remain pinned —
   except a stale sourceless root whose stored pattern the current runtime
   explicitly cannot load (probe resolves `undefined`; a probe error stays
   pinned, and `cfcEnforcementMode: "disabled"` — where the probe is
@@ -239,19 +240,19 @@ propagate](#how-flags-propagate).
   URL-based creation and recreation stamp provenance; custom `RuntimeProgram`
   recreation does not. The check remains best-effort; if identity lookup or
   replacement compilation is unavailable, the subsequent root start retains
-  its normal loud failure behavior. An unknown build SHA skips silently; the
-  `versionSkew` IPC
-  signal—which raises the shell's reload banner—fires only on a proven mismatch
-  (both SHAs known and different). See
+  its normal loud failure behavior. The update path does not consult build SHA
+  metadata; a rolling deployment that mixes identity/source/import revisions
+  fails closed at the compiled-identity comparison. See
   [`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md).
 - **Current default and planned end state.** The runner built-in default is off
   like every flag in this category; the shell build injects `true` unless the
   define is set to `"false"`, so the deployed product (and local shell dev
-  builds) run it on for non-home roots. Server-side processes (toolshed, CLI,
-  background piece service) leave it off unless the env var is set. End state:
+  builds) run it on for all tracked system roots. Server-side processes
+  (toolshed, CLI, background piece service) leave it off unless the env var is
+  set. End state:
   graduate to always-on for system roots once golden-replay coverage has
   soaked, then delete the flag.
-- **Status on 2026-07-21.** Implemented; on in the shell for all tracked system
+- **Status on 2026-07-22.** Implemented; on in the shell for all tracked system
   roots, home included ([`systemPatternAutoUpdateHome`](#appendix-a-removed-and-never-shipped-flags)
   removed), off elsewhere. Root reconciliation and broken-root repair run
   before bootstrap.

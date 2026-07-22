@@ -7,7 +7,6 @@ type MockRuntimeClientEvents = {
   navigaterequest: [{ cell: { id(): string; space(): DID } }];
   error: [unknown];
   telemetry: [unknown];
-  versionskew: [unknown];
 };
 
 class MockRuntimeClient {
@@ -217,26 +216,6 @@ describe("RuntimeInternals", () => {
       });
       expect(client.idleCalls).toBe(1);
       expect(client.syncedCalls).toBe(1);
-    } finally {
-      await runtime.dispose();
-    }
-  });
-
-  it("forwards a client versionskew event to the onVersionSkew callback", async () => {
-    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
-    const client = new MockRuntimeClient();
-    const received: unknown[] = [];
-    const runtime = new RuntimeInternals(client as any, {
-      onVersionSkew: (event) => received.push(event),
-    });
-    try {
-      const event = {
-        space: "did:key:z6Mk-skew",
-        clientVersion: "c",
-        toolshedVersion: "t",
-      };
-      client.emit("versionskew", event);
-      expect(received).toEqual([event]);
     } finally {
       await runtime.dispose();
     }
@@ -661,7 +640,7 @@ describe("RuntimeInternals", () => {
       expect(url.searchParams.has("v")).toBe(false);
     });
 
-    it("keeps the local worker URL with an attested client version", async () => {
+    it("keeps an explicit local worker URL with a build identifier", async () => {
       const url = await workerUrlFromCreate({
         clientVersion: "source-checkout-sha",
         getBuildHash: () => Promise.resolve("local-worker-hash"),

@@ -1,6 +1,5 @@
 import {
   type Cell,
-  clientVersionFromEnv,
   entityIdFrom,
   type EnvReader,
   experimentalOptionsFromEnv,
@@ -229,7 +228,6 @@ export class PiecesController<T = unknown> {
         spaceIdentity: session.spaceIdentity,
       }),
       experimental: experimentalOptionsFromEnv(readEnv),
-      clientVersion: clientVersionFromEnv(readEnv),
       moduleByteCache,
       patternCoverage,
       trustSnapshotProvider: () => ({
@@ -763,7 +761,7 @@ export class PiecesController<T = unknown> {
       const entryRef = runtime.patternManager.getArtifactEntryRef(pattern);
       if (entryRef === undefined || entryRef.identity !== currentId) {
         pieceUpdateLogger.warn(
-          "identity-attestation-mismatch",
+          "compiled-identity-mismatch",
           () => [
             "checkAndUpdateDefaultPattern: compiled source did not match " +
             "the advertised identity",

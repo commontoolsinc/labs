@@ -4,10 +4,10 @@
 // it in the binary via `deno compile --include`. At runtime we read it
 // (synchronously, once) to surface the deployed commit on `/api/meta`.
 //
-// In non-compiled runs (e.g. `deno task production` from a checkout) the
-// file does not exist and `commitSha` is null — `resolveGitSha()` then
-// returns an operator-set attestation if any, then falls back to the shared
-// source-run COMMIT_SHA, otherwise null.
+// In non-compiled runs (e.g. `deno task production` from a checkout) the file
+// does not exist and `commitSha` is null. `resolveGitSha()` then uses an
+// explicit toolshed override if present, otherwise the source-run COMMIT_SHA
+// fallback, so `/api/meta` presents the same field as a compiled binary.
 
 import env from "@/env.ts";
 
@@ -54,11 +54,12 @@ export const buildInfo: BuildInfo = readBuildInfoFrom(COMPILED_PATH);
  * tested without manipulating env or filesystem state.
  */
 export function resolveGitShaFrom(
-  envValue: string | null | undefined,
+  explicitValue: string | null | undefined,
   baked: string | null,
-  runtimeValue: string | null | undefined,
+  sourceRunValue: string | null | undefined,
 ): string | null {
-  return normalize(envValue) ?? normalize(baked) ?? normalize(runtimeValue);
+  return normalize(explicitValue) ?? normalize(baked) ??
+    normalize(sourceRunValue);
 }
 
 /**
@@ -66,11 +67,11 @@ export function resolveGitShaFrom(
  * the deployed commit.
  *
  * Precedence:
- *   1. `TOOLSHED_GIT_SHA` env var — operator attestation, useful for
- *      hot-patched binaries where you want to declare a different commit
- *      than what was compiled.
+ *   1. `TOOLSHED_GIT_SHA` env var — explicit override, useful for hot-patched
+ *      binaries where you want to report a different commit than what was
+ *      compiled.
  *   2. SHA baked into the binary at build time (read above).
- *   3. Shared `COMMIT_SHA` env var — source-run attestation, used only when
+ *   3. `COMMIT_SHA` env var — source-run metadata fallback, used only when
  *      there is no explicit toolshed override or compiled build metadata.
  *   4. `null` — `/api/meta` reports null.
  *

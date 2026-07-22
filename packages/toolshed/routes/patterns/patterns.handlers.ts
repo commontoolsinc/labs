@@ -1,24 +1,18 @@
 import type { Context } from "@hono/hono";
-import { PATTERN_RESPONSE_BUILD_HEADER } from "@commonfabric/runner";
-import { resolveGitSha } from "@/lib/build-info.ts";
 import { PatternsServer } from "./patterns-server.ts";
 
 // Create a single server instance to be reused across requests
 const patternsServer = new PatternsServer();
-const PATTERN_BUILD = resolveGitSha();
 
 /** Headers shared by source and `?identity` responses from this process. */
 export function patternResponseHeaders(
   contentType: string,
-  build: string | null = PATTERN_BUILD,
 ): Record<string, string> {
   return {
     "Content-Type": contentType,
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Expose-Headers": PATTERN_RESPONSE_BUILD_HEADER,
-    ...(build === null ? {} : { [PATTERN_RESPONSE_BUILD_HEADER]: build }),
   };
 }
 
@@ -50,8 +44,8 @@ export const getPattern = async (
     }
 
     // `?identity`: return the file's content-addressed identity (the value the
-    // runtime would store as patternIdentity.identity for this source at this
-    // build) as plain text, instead of the source itself.
+    // runtime would store as patternIdentity.identity for this authored import
+    // closure) as plain text, instead of the source itself.
     if (new URL(c.req.url).searchParams.has("identity")) {
       const identity = await patternsServer.identity(filename);
       return new Response(identity, {

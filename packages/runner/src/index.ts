@@ -7,13 +7,9 @@ export type {
   RuntimeFetch,
   RuntimeOptions,
   SpaceCellContents,
-  VersionSkewHandler,
-  VersionSkewInfo,
 } from "./runtime.ts";
 export {
   type BrowserWorkerPresetParams,
-  CLIENT_VERSION_ENV_VAR,
-  clientVersionFromEnv,
   type EnvReader,
   EXPERIMENTAL_ENV_VARS,
   experimentalOptionsFromEnv,
@@ -69,15 +65,11 @@ export {
 export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export {
-  buildsMatch,
   computeEntryIdentity,
   Console,
   type ConsoleEvent,
   ConsoleMethod,
   Engine,
-  fetchToolshedGitSha,
-  PATTERN_RESPONSE_BUILD_HEADER,
-  patternResponseBuild,
   resolveEntryIdentity,
   type RuntimeProgram,
   type TypeScriptHarnessProcessOptions,

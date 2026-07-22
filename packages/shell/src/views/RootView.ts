@@ -62,35 +62,6 @@ export class XRootView extends BaseView {
       height: 100%;
       width: 100%;
     }
-
-    /* Anchored to the BOTTOM edge: an overlay pinned to the top covers the
-      header breadcrumbs and steals their (hit-tested) clicks, breaking
-      space navigation until dismissed. Nothing interactive is shell-owned
-      at the bottom edge. */
-    #version-skew-banner {
-      position: fixed;
-      inset-block-end: 0;
-      inset-inline: 0;
-      z-index: 2000;
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      justify-content: center;
-      padding: 8px 16px;
-      font: 500 14px/1.4 system-ui, sans-serif;
-      color: #1a1a1a;
-      background: #ffe8a3;
-      box-shadow: 0 -1px 4px rgba(0, 0, 0, 0.2);
-    }
-
-    #version-skew-banner button {
-      font: inherit;
-      cursor: pointer;
-      border: 1px solid rgba(0, 0, 0, 0.3);
-      border-radius: 4px;
-      padding: 2px 10px;
-      background: rgba(255, 255, 255, 0.6);
-    }
   `;
 
   @state()
@@ -99,24 +70,10 @@ export class XRootView extends BaseView {
   @state()
   private accessor _themePreference: ThemePreference = getThemePreference();
 
-  // Set when the worker reports a version-skew (a space's toolshed build differs
-  // from this client build). Surfaces a non-blocking "reload to update" banner.
-  @state()
-  private accessor _versionSkew = false;
-
   // Invalidates callbacks from replaced workers. A coded compiler-load error
   // can arrive through either a request reply or an asynchronous runtime error;
   // only the currently-owned worker may trigger one replacement.
   private _runtimeGeneration = 0;
-
-  // Handler for the worker's versionSkew IPC — raises the banner.
-  readonly _handleVersionSkew = (event: unknown): void => {
-    console.warn(
-      "[shell] version skew — a newer build is available",
-      event,
-    );
-    this._versionSkew = true;
-  };
 
   readonly _handleRuntimeError = (
     event: ErrorNotification,
@@ -197,17 +154,16 @@ export class XRootView extends BaseView {
           identity: app.identity,
           apiUrl: app.apiUrl,
           experimental: EXPERIMENTAL,
-          // This client build's git sha, for the system-pattern auto-update
-          // version-skew gate (compared to a space's toolshed /api/meta).
+          // Select the deployed shell's immutable worker asset graph. Source
+          // runs keep the explicit mutable /scripts URL below.
           clientVersion: COMMIT_SHA,
           // A source-run shell serves its worker graph from /scripts even when
-          // COMMIT_SHA attests the checkout. Only deployed builds use the
+          // COMMIT_SHA identifies the checkout. Only deployed builds use the
           // immutable /builds/<sha>/ namespace selected by RuntimeInternals.
           workerUrl: ENVIRONMENT === "development"
             ? new URL("/scripts/worker-runtime.js", globalThis.location.href)
             : undefined,
           onError: (event) => this._handleRuntimeError(event, generation),
-          onVersionSkew: this._handleVersionSkew,
           // Per-profile dogfood toggles: worker-console forwarding and the
           // Epic H3a render ceiling (see lib/host-toggles.ts).
           ...runtimeHostFlags(),
@@ -379,19 +335,6 @@ export class XRootView extends BaseView {
 
   override render() {
     return html`
-      ${this._versionSkew
-        ? html`
-          <div id="version-skew-banner" role="status">
-            <span>A newer version is available.</span>
-            <button @click="${() => globalThis.location.reload()}">
-              Reload
-            </button>
-            <button @click="${() => (this._versionSkew = false)}">
-              Dismiss
-            </button>
-          </div>
-        `
-        : null}
       <cf-theme .theme="${{ colorScheme: this._themePreference }}">
         <x-app-view
           .app="${this.app}"
