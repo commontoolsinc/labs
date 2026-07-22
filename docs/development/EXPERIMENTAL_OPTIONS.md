@@ -228,7 +228,13 @@ propagate](#how-flags-propagate).
   revision through `COMMIT_SHA`. Persisted roots are resolved without starting.
   A pre-provenance root may be back-filled only when its stored
   `{ identity, symbol }` exactly equals the build-attested current official
-  entry; stale, custom, and repository-pinned sourceless roots remain pinned.
+  entry; stale, custom, and repository-pinned sourceless roots remain pinned —
+  except a stale sourceless **home** root whose stored pattern the current
+  runtime explicitly cannot load (probe resolves `undefined`; a probe error
+  stays pinned, and `cfcEnforcementMode: "disabled"` — where the probe is
+  unsupported — stays pinned too): that root is replaced with the official
+  home.tsx, recording the displaced ref under `displacedPattern` meta (see
+  pattern-updates.md for the full exception semantics).
   URL-based creation and recreation stamp provenance; custom `RuntimeProgram`
   recreation does not. The check remains best-effort; if identity lookup or
   replacement compilation is unavailable, the subsequent root start retains

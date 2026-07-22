@@ -205,6 +205,7 @@ describe("checkAndUpdateDefaultPattern", () => {
   async function setupHome(
     experimental: Record<string, boolean>,
     clientVersion: string | undefined = BUILD_SHA,
+    extraRuntimeOptions: { cfcEnforcementMode?: "disabled" } = {},
   ) {
     versionSkews = [];
     storageManager = StorageManager.emulate({ as: signer });
@@ -214,6 +215,7 @@ describe("checkAndUpdateDefaultPattern", () => {
       clientVersion,
       experimental,
       onVersionSkew: (info) => versionSkews.push(info),
+      ...extraRuntimeOptions,
     });
     const session = await createSession({
       identity: signer,
@@ -922,6 +924,156 @@ describe("checkAndUpdateDefaultPattern", () => {
     // The home root compiles at HOME_PATTERN_URL — identity includes the entry.
     expect(idV2).toBe(await identityForSource(SOURCE_V2, {}, HOME_PATTERN_URL));
     expect(idV2).not.toBe(idV1);
+  });
+
+  // The unloadability tiebreak. A stale sourceless root is ambiguous between
+  // an obsolete system root and a deliberate custom program (custom recreation
+  // stamps no provenance), so a LOADABLE one stays pinned — the test above.
+  // One that cannot cold-load is a dead page under either reading: replace it
+  // with the official system root and record the displaced ref for recovery.
+  // (The 2026-07-21 estuary migration bricked every pre-provenance home root;
+  // the pin alone kept them bricked after the update flag opened.)
+  function shadowLoadProbe(
+    staleIdentity: string,
+    outcome: "undefined" | "reject",
+  ): () => void {
+    const pm = runtime.patternManager as unknown as {
+      loadPatternByIdentity: (
+        identity: string,
+        symbol: string,
+        space: unknown,
+      ) => Promise<unknown>;
+    };
+    const original = pm.loadPatternByIdentity.bind(runtime.patternManager);
+    // The harness compiled the stale program for real, so the probe outcome
+    // (on estuary: a runtime migration invalidated the stored source) is
+    // injected at the probe seam itself.
+    pm.loadPatternByIdentity = (identity, symbol, space) =>
+      identity !== staleIdentity
+        ? original(identity, symbol, space)
+        : outcome === "undefined"
+        ? Promise.resolve(undefined)
+        : Promise.reject(new Error("probe backend unavailable"));
+    return () => {
+      pm.loadPatternByIdentity = original;
+    };
+  }
+
+  it("replaces an unloadable stale sourceless home root", async () => {
+    await setupHome({ systemPatternAutoUpdate: true });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    const staleRef = getPatternIdentityRef(root)!;
+    expect(getPatternSource(root)).toBeUndefined();
+
+    stub.setSource(SOURCE_V2);
+    const restore = shadowLoadProbe(staleRef.identity, "undefined");
+    try {
+      expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
+    } finally {
+      restore();
+    }
+    await runtime.idle();
+
+    const after = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(
+      await identityForSource(SOURCE_V2, {}, HOME_PATTERN_URL),
+    );
+    // Provenance back-filled: the root now tracks the official URL.
+    expect(getPatternSource(after)).toBe(HOME_PATTERN_URL);
+    // The displaced ref is the only record of the replaced sourceless root.
+    const displaced = (after as unknown as {
+      getMetaRaw: (key: string) => unknown;
+    }).getMetaRaw("displacedPattern") as {
+      identity?: string;
+      symbol?: string;
+      displacedAt?: number;
+    };
+    expect(displaced?.identity).toBe(staleRef.identity);
+    expect(displaced?.symbol).toBe(staleRef.symbol);
+    expect(typeof displaced?.displacedAt).toBe("number");
+  });
+
+  it("keeps a non-home stale sourceless root pinned even when unloadable", async () => {
+    // The destructive fallback is scoped to home spaces: fleet evidence
+    // exists for pre-provenance system HOME roots; an arbitrary space's
+    // sourceless root is more plausibly a deliberate custom program.
+    await setup({ systemPatternAutoUpdate: true });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-app.tsx",
+        files: [{ name: "/custom-app.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    const staleRef = getPatternIdentityRef(root)!;
+    expect(getPatternSource(root)).toBeUndefined();
+
+    stub.setSource(SOURCE_V2);
+    const restore = shadowLoadProbe(staleRef.identity, "undefined");
+    try {
+      expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    } finally {
+      restore();
+    }
+    expect(getPatternIdentityRef(root)).toEqual(staleRef);
+    expect(getPatternSource(root)).toBeUndefined();
+  });
+
+  it("keeps the home root pinned when the load probe fails", async () => {
+    // A thrown probe is a failed CHECK, not evidence of a dead root — a
+    // transient storage/backend failure must not authorize replacing an
+    // ambiguous sourceless root. Fail closed, mutate nothing.
+    await setupHome({ systemPatternAutoUpdate: true });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    const staleRef = getPatternIdentityRef(root)!;
+
+    stub.setSource(SOURCE_V2);
+    const restore = shadowLoadProbe(staleRef.identity, "reject");
+    try {
+      expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    } finally {
+      restore();
+    }
+    expect(getPatternIdentityRef(root)).toEqual(staleRef);
+    expect(getPatternSource(root)).toBeUndefined();
+    const displaced = (root as unknown as {
+      getMetaRaw: (key: string) => unknown;
+    }).getMetaRaw("displacedPattern");
+    expect(displaced).toBeUndefined();
+  });
+
+  it("keeps the home root pinned when by-identity recovery is disabled", async () => {
+    // Under cfcEnforcementMode "disabled" the probe returns undefined
+    // unconditionally — "probe unsupported" must not read as "artifact
+    // dead". No shadow here: the real probe short-circuits.
+    await setupHome({ systemPatternAutoUpdate: true }, BUILD_SHA, {
+      cfcEnforcementMode: "disabled",
+    });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    const staleRef = getPatternIdentityRef(root)!;
+
+    stub.setSource(SOURCE_V2);
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    expect(getPatternIdentityRef(root)).toEqual(staleRef);
+    expect(getPatternSource(root)).toBeUndefined();
   });
 
   describe("recreateDefaultPattern provenance (CT-1890)", () => {
