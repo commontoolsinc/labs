@@ -54,7 +54,7 @@ into the same active-origin and revision model.
   background and lets the existing pattern watcher apply a verified move. The
   current instantiation never waits for network or compilation.
 - **Two hazard cases to handle explicitly.** (1) We shipped a broken system
-  pattern — once a fix ships, recovery must be automatic. (2) An
+  pattern — once a fix ships, recovery must be automatic. (2) A
   schema-incompatible update slips through — the damage must be *bounded*
   (fast rollback), because the schema-valid-but-semantically-wrong case is not
   reliably detectable.
@@ -257,13 +257,23 @@ the piece is already running, the
 watcher cancels its old reactive nodes and re-instantiates the new pattern onto
 the **same result cell**.
 
-- **Survives**: the result cell's entity and inbound links; any state cells the
-  new pattern still reads (addressed by stable key/cause).
-- **Does not survive**: data under keys the new pattern drops or renames — the
-  **schema-compat crux**, and the boundary between the two hazard cases
-  ("missing data" vs "stuck/wrong"). The mitigating discipline is an authoring
-  one: durable state addressed by stable key/cause, not positionally. We do
-  **not** gate on a pre-apply schema dry-run in v1.
+- **Survives**: the result cell's entity and inbound links. State remains
+  reachable when the new pattern reads it through the same stable keys and
+  causes.
+- **Can become unreachable**: data under keys the new pattern drops or
+  renames. This continuity is a semantic contract. CI and golden replay tests
+  must exercise representative prior state and verify that the proposed source
+  still reads and preserves it. The deployment runtime does not try to infer
+  stable-key or stable-cause compatibility.
+
+The specialized system-source updater does not perform the complete pre-apply
+structural comparison specified for the general piece lifecycle. Automatic
+origin updates in that lifecycle reject known argument, result, or
+retained-input incompatibilities and keep the last accepted source. A manual
+source replacement reports a known incompatibility as a warning and can proceed
+only after explicit acceptance. Neither structural check proves semantic state
+continuity. The root-interface contract remains mandatory in both cases. See
+the [`Compatibility policy`](../piece-source-lifecycle.md#compatibility-policy).
 
 ## System-source patterns — the loop
 
@@ -387,7 +397,10 @@ binary populates from baked build metadata; the updater does not consult it.
 
 - **CI golden replay** against the short, controlled system list before
   shipping — the primary defense (feasible precisely because the list is short
-  and we own the source).
+  and we own the source). Synthetic home-shaped and default-app-shaped replays
+  prove that the update mechanism preserves representative stable-key state.
+  Broader release coverage still needs fixtures for each supported
+  version-to-version transition.
 - **Self-heal from a borked ship**: fix source → new identity → a root's next
   space open compiles and swaps it before bootstrap; an ordinary pattern's next
   instantiation starts its current graph and then rolls it forward in place.
@@ -426,8 +439,10 @@ binary populates from baked build metadata; the updater does not consult it.
 1. **Default (non-home) space root, always-update.** Least risky —
    `default-app.tsx` carries little durable state. `patternSource` field +
    in-place swap + toolshed `?identity` + local compiled-identity check.
-2. **Home root.** Carries real user data (favorites/journal/spaces) → depends
-   on the stable-addressing discipline and golden coverage of `home.tsx`.
+2. **Home root.** Carries real user data (favorites/journal/spaces). A
+   representative golden replay enabled its rollout with the other system
+   roots. Broader version-to-version CI coverage remains release discipline,
+   not a deployment-time semantic check.
 3. **Other system-source patterns.** Recover a non-root's verified authored
    entry path at instantiation, recognize a system source by its same-toolshed
    `?identity` route, and check it without delaying the current graph.
@@ -461,12 +476,17 @@ binary populates from baked build metadata; the updater does not consult it.
    migration, update, detach, follow, fork, revert, and repoint use the ordinary
    piece rules. Assigning the root role separately requires root-interface
    compatibility.
-
-## Open questions
-
-3. **Home-data stable addressing** — verify `home.tsx` addresses its durable
-   state by stable key/cause before enabling always-update on the home root
-   (Phase 2 gate). Resolved 2026-07-21: `home-golden-replay.test.ts` pins state
-   survival across an in-place N→N+1 roll over representative favorites /
-   journal / spaces data, and the home-specific flag was removed on its
-   strength (with the estuary home-brick incident as the forcing event).
+3. **Home-data stable addressing.** `home-golden-replay.test.ts` pins
+   representative favorites, journal, and spaces state across an in-place
+   update. That evidence allowed the home root to use the same updater as other
+   system roots. Future supported source transitions need CI fixtures using
+   representative prior state.
+4. **Compatibility checks and deployment boundary.** Publishing or uploading
+   pattern source does not compare it with an existing piece. A manual
+   replacement compares argument, result, and retained-input schemas, warns on
+   a known incompatibility, and requires explicit acceptance to continue. An
+   automatic origin update blocks the same known structural incompatibility
+   because no user is present to accept it. The root-interface contract remains
+   mandatory. Stable keys, stable causes, intended migration, and behavior are
+   verified by CI audits and golden replays. The runtime does not try to infer
+   those semantic contracts during deployment.
