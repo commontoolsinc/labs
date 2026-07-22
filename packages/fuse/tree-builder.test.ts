@@ -845,24 +845,41 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
   const tree = new FsTree();
   const bridge = new CellBridge(tree);
   const calls: Array<{
+    source: "piece" | "entity";
     channel: "input" | "result";
     path: (string | number)[] | undefined;
     value: unknown;
   }> = [];
-  const makeChannel = (channel: "input" | "result") => ({
+  const makeChannel = (
+    source: "piece" | "entity",
+    channel: "input" | "result",
+  ) => ({
     key: (key: string) => ({
       send: (value: unknown) => {
-        calls.push({ channel, value, path: [key] });
+        calls.push({ source, channel, value, path: [key] });
       },
     }),
   });
   const piece = {
     id: "of:entity-123",
     input: {
-      getCell: () => Promise.resolve(makeChannel("input")),
+      getCell: () => Promise.resolve(makeChannel("piece", "input")),
     },
     result: {
-      getCell: () => Promise.resolve(makeChannel("result")),
+      getCell: () => Promise.resolve(makeChannel("piece", "result")),
+    },
+    manager: () => ({
+      runtime: { idle: () => Promise.resolve() },
+      synced: () => Promise.resolve(),
+    }),
+  };
+  const hiddenEntity = {
+    id: "of:hidden-456",
+    input: {
+      getCell: () => Promise.resolve(makeChannel("entity", "input")),
+    },
+    result: {
+      getCell: () => Promise.resolve(makeChannel("entity", "result")),
     },
     manager: () => ({
       runtime: { idle: () => Promise.resolve() },
@@ -875,7 +892,7 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
   const entitiesIno = tree.addDir(spaceIno, "entities");
   const pieceIno = tree.addDir(piecesIno, "notes");
   const pieceResultIno = tree.addDir(pieceIno, "result", "object");
-  const entityIno = tree.addDir(entitiesIno, "entity-123");
+  const entityIno = tree.addDir(entitiesIno, "hidden-456");
   const entityResultIno = tree.addDir(entityIno, "result", "object");
   const script = buildCallableScript("/tmp/cf-exec");
 
@@ -905,6 +922,13 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
     pieceMap: new Map([["notes", "of:entity-123"]]),
     pieceInos: new Map([["notes", pieceIno]]),
     pieceControllers: new Map([["notes", piece as never]]),
+    entityControllers: new Map([["of:hidden-456", hiddenEntity as never]]),
+    allPieceIds: new Set(["of:entity-123"]),
+    entityIds: new Set(["of:entity-123", "of:hidden-456"]),
+    hasCompleteEntityList: false,
+    piecesHydrated: true,
+    piecesMaterializing: false,
+    pieceListSubscribed: true,
     pieceManifest: new Map(),
     pieceSubs: new Map(),
     did: "did:key:home",
@@ -918,8 +942,18 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
   await bridge.sendToHandler(entitiesHandlerIno, { count: 2 });
 
   assertEquals(calls, [
-    { channel: "result", value: { count: 1 }, path: ["add"] },
-    { channel: "result", value: { count: 2 }, path: ["add"] },
+    {
+      source: "piece",
+      channel: "result",
+      value: { count: 1 },
+      path: ["add"],
+    },
+    {
+      source: "entity",
+      channel: "result",
+      value: { count: 2 },
+      path: ["add"],
+    },
   ]);
 });
 
@@ -977,6 +1011,13 @@ Deno.test("CellBridge.sendToHandlerTarget survives callable inode rebuilds", asy
     pieceMap: new Map([["notes", "of:entity-123"]]),
     pieceInos: new Map([["notes", pieceIno]]),
     pieceControllers: new Map([["notes", piece as never]]),
+    entityControllers: new Map([["of:entity-123", piece as never]]),
+    allPieceIds: new Set(["of:entity-123"]),
+    entityIds: new Set(["of:entity-123"]),
+    hasCompleteEntityList: false,
+    piecesHydrated: true,
+    piecesMaterializing: false,
+    pieceListSubscribed: true,
     pieceManifest: new Map(),
     pieceSubs: new Map(),
     did: "did:key:home",

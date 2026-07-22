@@ -132,6 +132,31 @@ Deno.test("memory v2 server parser ignores transact invocation and authorization
   );
 });
 
+Deno.test("memory v2 server parses entity identifier listing requests", () => {
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      type: "entity-id.list",
+      requestId: "entity-list-1",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:1",
+    })),
+    {
+      type: "entity-id.list",
+      requestId: "entity-list-1",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:1",
+    },
+  );
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      type: "entity-id.list",
+      requestId: "entity-list-2",
+      space: "did:key:z6Mk-space",
+    })),
+    null,
+  );
+});
+
 Deno.test("memory v2 scheduler listing rejects arbitrary context selectors", () => {
   assertEquals(
     parseClientMessage(encodeMemoryBoundary({

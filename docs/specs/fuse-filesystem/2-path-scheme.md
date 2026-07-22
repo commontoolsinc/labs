@@ -294,6 +294,20 @@ entities/
         text          # Leaf value
 ```
 
+The directory contains every live entity in the space scope, including
+entities that are not present in `allPieces`. Mounting the space and reading
+the `entities/` directory requests only the entity identifiers from memory.
+Each identifier begins as an empty directory entry. Reading inside an entity
+directory loads that entity's value and builds its projected contents.
+
+Mounting does not read the space root, its default pattern, or `allPieces`.
+The named projections under `pieces/` are built when that directory is first
+accessed. This keeps every entity value out of the mount and `entities/`
+listing path, including values for the space root and entities that also appear
+in `allPieces`. When the memory server does not support identifier listing,
+`entities/` remains empty until `pieces/` is accessed and supplies the older
+`allPieces`-only view.
+
 Entity IDs are truncated in the directory listing but can be accessed by prefix
 match (the filesystem resolves the shortest unambiguous prefix).
 

@@ -402,6 +402,86 @@ Deno.test("memory v2 client rotates session.open challenges between protected mo
   }
 });
 
+Deno.test("memory v2 entity identifier listing transfers identifiers without entity values", async () => {
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL("memory://memory-v2-client-entity-identifiers"),
+  });
+  const serverPayloads: string[] = [];
+  let captureServerPayloads = false;
+  let receiver = (_payload: string) => {};
+  const connection = server.connect((message) => {
+    const payload = encodeMemoryBoundary(message);
+    if (captureServerPayloads) serverPayloads.push(payload);
+    receiver(payload);
+  });
+  const transport: Transport = {
+    async send(payload) {
+      await connection.receive(payload);
+    },
+    close() {
+      connection.close();
+      return Promise.resolve();
+    },
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver() {},
+  };
+  const client = await connect({ transport });
+  const space = await client.mount(
+    "did:key:z6Mk-memory-v2-client-entity-identifiers",
+    {},
+    testSessionOpenAuthFactory,
+  );
+  const firstPayload = "ENTITY_BYTES_FIRST_5f35ca36".repeat(20);
+  const secondPayload = "ENTITY_BYTES_SECOND_f62831b5".repeat(20);
+
+  try {
+    await space.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [
+        {
+          op: "set",
+          id: "of:fid1:first",
+          value: { value: { payload: firstPayload } },
+        },
+        {
+          op: "set",
+          id: "of:fid1:second",
+          value: { value: { payload: secondPayload } },
+        },
+      ],
+    });
+
+    captureServerPayloads = true;
+    const result = await space.listEntityIds();
+    captureServerPayloads = false;
+
+    assertEquals(result?.ids, ["of:fid1:first", "of:fid1:second"]);
+    assertEquals(
+      serverPayloads.some((payload) => payload.includes(firstPayload)),
+      false,
+    );
+    assertEquals(
+      serverPayloads.some((payload) => payload.includes(secondPayload)),
+      false,
+    );
+    const listResponses = serverPayloads.map((payload) =>
+      decodeMemoryBoundary(payload) as {
+        ok?: Record<string, unknown>;
+      }
+    ).filter((message) => Array.isArray(message.ok?.ids));
+    assertEquals(listResponses.length, 1);
+    const response = listResponses[0];
+    assertEquals(Object.keys(response.ok ?? {}).sort(), ["ids", "serverSeq"]);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 Deno.test("memory v2 client watch sets expand to previously hidden graph nodes", async () => {
   const server = new Server({
     ...testSessionOpenServerOptions,
@@ -3051,6 +3131,7 @@ Deno.test("memory v2 client stores the server's advertised flags (capability han
   });
   try {
     assertEquals(current.serverFlags?.sqliteCommitRowLabelEval, true);
+    assertEquals(current.serverFlags?.entityIdListing, true);
   } finally {
     await current.close();
   }
@@ -3062,6 +3143,7 @@ Deno.test("memory v2 client stores the server's advertised flags (capability han
   });
   try {
     assertEquals(legacy.serverFlags?.sqliteCommitRowLabelEval, false);
+    assertEquals(legacy.serverFlags?.entityIdListing, false);
   } finally {
     await legacy.close();
   }
