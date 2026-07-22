@@ -125,6 +125,13 @@ Deno.test("numberFromExpression: sees through parentheses", () => {
   assertEquals(Object.is(evaluateExpr("-(0)"), -0), true);
   assertEquals(Number.isNaN(evaluateExpr("(NaN)")), true);
   assertStrictEquals(evaluateExpr("-(Infinity)"), -Infinity);
+  // Unwrapping must not widen what counts as a number. A parenthesized
+  // non-number is still a non-number.
+  assertStrictEquals(evaluateExpr(`("5")`), undefined);
+  assertStrictEquals(evaluateExpr(`-("5")`), undefined);
+  assertStrictEquals(evaluateExpr("(true)"), undefined);
+  assertStrictEquals(evaluateExpr("(someName)"), undefined);
+  assertStrictEquals(evaluateExpr("(1 + 1)"), undefined);
   // A shadowed global stays unresolvable through parentheses too.
   assertStrictEquals(
     evaluate("const NaN = 111; const v = (NaN);", "v"),
