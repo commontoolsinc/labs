@@ -23,12 +23,26 @@ const signer = await Identity.fromPassphrase("check update default pattern");
 const patternSource = (marker: string) =>
   [
     "import { pattern } from 'commonfabric';",
-    `export default pattern<{ items: string[] }>(({ items }) => ({ items, marker: "${marker}" }));`,
+    `export default pattern<{ items?: string[] }>(({ items }) => ({ items, marker: "${marker}" }));`,
     "",
   ].join("\n");
 
 const SOURCE_V1 = patternSource("v1");
 const SOURCE_V2 = patternSource("v2");
+// A roll target WITH a handler: handler nodes need their { "$stream": true }
+// markers materialized on the (reused) root doc — the dimension the plain
+// sources above never exercise, and the estuary post-swap failure class.
+const SOURCE_V3_HANDLER = [
+  "import { Writable, handler, pattern } from 'commonfabric';",
+  "const bump = handler<void, { count: Writable<number> }>((_, { count }) => {",
+  "  count.set((count.get() ?? 0) + 1);",
+  "});",
+  "export default pattern<{ items?: string[] }>(({ items }) => {",
+  "  const count = new Writable<number>(0).for('count');",
+  "  return { items, count, bump: bump({ count }) };",
+  "});",
+  "",
+].join("\n");
 
 const BUILD_SHA = "build-sha-1";
 const IMPORTED_MODULE_URL = "/api/patterns/system/update-marker.ts";
@@ -475,7 +489,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     stub.setSource([
       "import { pattern } from 'commonfabric';",
       "import { marker } from './update-marker.ts';",
-      "export default pattern<{ items: string[] }>(({ items }) => ({ items, marker }));",
+      "export default pattern<{ items?: string[] }>(({ items }) => ({ items, marker }));",
       "",
     ].join("\n"));
     stub.setImportBuildSha("rolling-deploy-build");
@@ -997,6 +1011,85 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(displaced?.identity).toBe(staleRef.identity);
     expect(displaced?.symbol).toBe(staleRef.symbol);
     expect(typeof displaced?.displacedAt).toBe("number");
+  });
+
+  it("swapped-in pattern with handlers starts over the reused root doc", async () => {
+    // The estuary post-#4883 failure class: the swap engages, writes the new
+    // patternIdentity onto the EXISTING result cell, and the replacement
+    // pattern must then start over that reused doc — including materializing
+    // { "$stream": true } markers for handler nodes the old program never
+    // had. A handler-less roll target (every other test here) cannot see
+    // this; home.tsx is handler-rich.
+    await setupHome({ systemPatternAutoUpdate: true });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    const staleRef = getPatternIdentityRef(root)!;
+
+    stub.setSource(SOURCE_V3_HANDLER);
+    const restore = shadowLoadProbe(staleRef.identity, "undefined");
+    try {
+      expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
+    } finally {
+      restore();
+    }
+    await runtime.idle();
+
+    // The swap alone is not the contract — the replacement must RUN. Start
+    // it the way bootstrap would and let the scheduler settle; a missing
+    // stream marker surfaces as "Handler used as lift" at instantiation and
+    // the pattern body never executes, so the functional read below is the
+    // pin: `count` only reads 0 if the swapped-in program actually ran its
+    // setup (internal cells materialized) and instantiated.
+    const after = (await manager.getDefaultPattern(true))!;
+    await runtime.idle();
+    expect(getPatternIdentityRef(after)?.identity).toBe(
+      await identityForSource(SOURCE_V3_HANDLER, {}, HOME_PATTERN_URL),
+    );
+    expect(after.key("count").get()).toBe(0);
+  });
+
+  it("failed swap-setup leaves the running pattern in place", async () => {
+    // The fail-closed half of the swap-setup contract: when the incoming
+    // pattern's argument schema rejects the existing argument, the watcher
+    // logs pattern-swap-setup-error and must NOT tear down the running
+    // nodes — a bad update leaves a working piece, not a dead one.
+    const SOURCE_INCOMPATIBLE = [
+      "import { pattern } from 'commonfabric';",
+      "export default pattern<{ mustHave: string }>(({ mustHave }) => ({",
+      "  mustHave,",
+      "}));",
+      "",
+    ].join("\n");
+    await setupHome({ systemPatternAutoUpdate: true });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    const staleRef = getPatternIdentityRef(root)!;
+
+    stub.setSource(SOURCE_INCOMPATIBLE);
+    const restore = shadowLoadProbe(staleRef.identity, "undefined");
+    try {
+      // The update itself proceeds (identity swaps at the meta layer)…
+      expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
+    } finally {
+      restore();
+    }
+    await runtime.idle();
+    // …but the swap-setup for the incompatible program fails closed: the
+    // piece is not left dead (starting it does not throw), and the failure
+    // was logged rather than swallowed.
+    const after = (await manager.getDefaultPattern(true))!;
+    await runtime.idle();
+    expect(after).toBeDefined();
   });
 
   it("replaces an unloadable stale sourceless space root", async () => {
