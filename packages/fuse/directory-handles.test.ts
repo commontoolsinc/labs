@@ -2,6 +2,7 @@ import { assertEquals, assertRejects } from "@std/assert";
 import {
   DirectoryHandleMap,
   type DirectoryPreparer,
+  type DirectorySnapshotEntry,
   prepareDirectoryForHandle,
 } from "./directory-handles.ts";
 
@@ -85,4 +86,43 @@ Deno.test("failed directory preparation can be retried", async () => {
   );
   await prepareDirectoryForHandle(handles, fh, ino, preparer);
   assertEquals(attempts, 2);
+});
+
+Deno.test("directory entries remain stable for continuation offsets", () => {
+  const handles = new DirectoryHandleMap();
+  const ino = 42n;
+  const fh = handles.open(ino);
+  let liveEntries: DirectorySnapshotEntry[] = [
+    { name: "first", ino: 100n, mode: 1 },
+    { name: "second", ino: 101n, mode: 1 },
+    { name: "third", ino: 102n, mode: 1 },
+  ];
+  const readEntries = () => liveEntries.slice();
+
+  const firstPage = handles.snapshot(fh, ino, readEntries).slice(0, 2);
+  liveEntries = liveEntries.slice(1);
+  const continuation = handles.snapshot(fh, ino, readEntries).slice(2);
+
+  assertEquals(firstPage.map(({ name }) => name), ["first", "second"]);
+  assertEquals(continuation.map(({ name }) => name), ["third"]);
+
+  handles.close(fh);
+  const nextFh = handles.open(ino);
+  assertEquals(
+    handles.snapshot(nextFh, ino, readEntries).map(({ name }) => name),
+    ["second", "third"],
+  );
+});
+
+Deno.test("untracked directory reads use the current entries", () => {
+  const handles = new DirectoryHandleMap();
+  const ino = 42n;
+  let name = "first";
+  const readEntries = (): DirectorySnapshotEntry[] => [
+    { name, ino: 100n, mode: 1 },
+  ];
+
+  assertEquals(handles.snapshot(0n, ino, readEntries)[0].name, "first");
+  name = "second";
+  assertEquals(handles.snapshot(0n, ino, readEntries)[0].name, "second");
 });
