@@ -127,10 +127,16 @@ pieces; it does not generate pattern source.
    piece does not make imports in that piece or in another pattern live.
 9. Creation and every later transition use ordinary authorization for the
    target piece's space. Following grants no write access to the origin piece.
-10. Moving source between spaces is an information flow, not just a read. The
+10. Within a space, every cell and document that makes a pattern resolvable,
+    including its verified source closure, uses that space's ACL. The source
+    therefore has the same visibility as the pattern in that space. Anyone
+    authorized to resolve the pattern there may read its source. A fabric URL,
+    slug, or content identity does not grant access by itself. The same content
+    identity can have replicas in spaces with different ACLs.
+11. Moving source between spaces is an information flow, not just a read. The
     operation propagates CFC provenance labels and fails closed before copying
     source when those labels do not permit the destination flow.
-11. A content-addressed or explicitly pinned fabric URL never reports an
+12. A content-addressed or explicitly pinned fabric URL never reports an
     update. Reconciliation verifies and loads the named source, but the URL
     cannot resolve to a different pattern identity later.
 
@@ -369,10 +375,23 @@ content-addressed or explicitly pinned fabric origin cannot change. The content
 identity proves which bytes were accepted and detects corrupted transfer. It
 does not prove that a publisher, piece owner, or URL owner made a safe change.
 
+Within a space, every cell and document that makes a pattern resolvable,
+including its verified source closure, is protected by that space's ACL. The
+source therefore has the same visibility as the pattern in that space. There
+is no separate source-publication permission. Naming a pattern with a slug or
+revealing its URL or content identity does not broaden the space's ACL.
+
 Forking or following across spaces also moves authored source into the target
 space. Read authorization alone does not authorize that information flow. CFC
 provenance checks run before replication on the same toolshed as well as
 across toolsheds.
+
+After an allowed copy, the accepted closure and its history revision live under
+the destination space's ACL. The same content identity can therefore have
+different visibility in its origin and destination spaces. If access to a
+mutable origin is later revoked, the follower keeps its last accepted source
+and retained revisions. The revocation prevents reconciliation and future
+updates; it does not erase already accepted history.
 
 The UI must distinguish detached pieces, immutable fabric-origin pieces, and
 pieces that update automatically. It shows the active source URL and whether
