@@ -380,10 +380,20 @@ scheme (identity PRs E1–E4; `docs/specs/content-addressed-action-identity.md`
 in the labs repo): implementation identity is the pair **(content hash of the
 verified code artifact, symbol/binding path within it)**. Same artifact hash
 + same symbol = same identity wherever the artifact is loaded; any code
-change changes the hash and with it every identity within the artifact —
-rebinding is re-authorization, not inheritance; `writeAuthorizedBy`
-references resolve against this pair. Replace §8.15.6's "no separate naming
-scheme" claim with the pair definition and state the rebinding rule.
+change changes the hash and with it every identity within the artifact.
+Rebinding does not inherit authority by default. The narrow temporary exception
+is an explicit `piece setsrc` update: canonical-filename matches in the old and
+new recursive module closures persist a cumulative successor-to-predecessor
+delegation. `writeAuthorizedBy` accepts the current module hash or a predecessor
+reachable through the delegation map authenticated in the target document's
+space, but still requires the same symbol/binding path. A delegation loaded from
+another space grants no authority. Source-file spelling remains diagnostic at
+verification; canonical authored filenames govern whether `setsrc` derives a
+delegation in the first place. Because the delegation list is mutable and
+outside the source Merkle identity, it is authority-bearing only when protected
+by the compiler's integrity attestation (field-level in source documents,
+root-level in compiled documents). Replace §8.15.6's "no separate naming
+scheme" claim with the pair definition and this explicit delegation rule.
 
 **SC-23 [interpretation] Per-write read-prefix provenance classed as
 decomposition-grade precision — §8.9.1/§8.9.2 (Epic D4).** The runner's

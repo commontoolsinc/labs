@@ -101,9 +101,10 @@ const writerClaimWithoutStampAndFile = (
  * stamp (`moduleIdentity`, or a legacy `bundleId` on pre-migration claims),
  * the existing side when neither does or both carry the SAME stamp (stored
  * spelling wins — stability), and `undefined` when the claims genuinely
- * conflict (different bindings, or two different stamps — claim rotation
- * across module versions stays fail-closed pending the setsrc-history
- * delegation design).
+ * conflict (different bindings, or two different stamps). A legitimate
+ * `setsrc` update does not rotate this stamp: the stored claim keeps its
+ * predecessor identity, and authenticated module delegation authorizes the
+ * successor at verification time.
  */
 const reconcileWriterClaimStamp = (
   existing: unknown,

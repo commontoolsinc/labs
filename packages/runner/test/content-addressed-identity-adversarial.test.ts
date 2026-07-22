@@ -343,7 +343,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       });
       cell.set({ owned: "stolen" });
 
-      // moduleIdentity, file, AND path must all match; none do → fail closed.
+      // moduleIdentity and path must match; neither does. File is diagnostic.
       const digest = tx.prepareCfc();
       expect(digest).toBe("");
       const result = await tx.commit();
@@ -548,7 +548,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       return { digest, result };
     };
 
-    it("a claim with moduleIdentity matching but file/path NOT fails closed", async () => {
+    it("a claim with moduleIdentity matching but bindingPath different fails closed", async () => {
       const { digest, result } = await driveClaim(
         {
           __ctWriterIdentityOf: {
@@ -560,7 +560,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
         {
           kind: "verified",
           moduleIdentity: "m1", // matches
-          sourceFile: "/attacker.tsx", // does NOT
+          sourceFile: "/attacker.tsx", // diagnostic at verification time
           bindingPath: ["attackerHandler"], // does NOT
         },
         "attack5-id-match-pathmismatch",

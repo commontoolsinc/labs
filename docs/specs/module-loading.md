@@ -31,7 +31,7 @@ compilation cache were deleted.
 
 ## Last Updated
 
-2026-06-10
+2026-07-21
 
 ## Summary
 
@@ -373,8 +373,21 @@ under a schema loads the whole import closure transitively from a single request
    upgrade rolls `runtimeVersion`, recompiling this set while the source set
    persists.
 
-Each document holds `{ code, filename, imports: [{ specifier, link }] }`, where
-`link` is a sigil link to the dependency's document in the same set. Because
+Each document holds
+`{ code, filename, imports: [{ specifier, link }], delegatedModuleIdentities? }`,
+where `link` is a sigil link to the dependency's document in the same set.
+`delegatedModuleIdentities` is mutable metadata, excluded from the Merkle
+identity, that records predecessor module hashes whose writer authority the
+current module may exercise. Since content-addressing does not authenticate
+that mutable field, source documents carry the compiler integrity stamp on the
+delegation field alone; compiled documents authenticate it with their existing
+root compiler stamp. Loaders discard delegation metadata without the applicable
+stamp. The general source/compiled save path computes one union of newly derived
+entries and authenticated entries already stored in either document set under
+`editWithRetry`, writes that same union to both sets, and registers the union
+from the successful commit under the attesting space in the active runtime. It
+never replaces entries, because one content-addressed successor can be shared by
+patterns updated from different predecessors. Because
 `identity` is a one-way Merkle hash, the `imports` links are load-bearing (stored
 explicitly), but the parent hash commits to its children's identities, so the
 graph wiring is verifiable on load by recomputing identities and checking each
@@ -386,6 +399,40 @@ This replaces the whole-program `PatternMeta` store after the flag flip (the two
 coexist behind the flag until then). The compiler-version `fingerprint` and
 `sesValidated` gating carry over: `runtimeVersion` is the fingerprint, and the
 compiled set is only ever written from verified output (see the threat model).
+
+### Module update delegation (`piece setsrc`)
+
+`piece setsrc` is the temporary authority handoff while pattern files remain
+local, content-addressed modules. Before compiling the replacement it loads the
+current entry's verified recursive source closure. After compilation it matches
+old and new modules by their canonical full authored filename (resolved relative
+imports therefore meet at the same stored path; basenames are never matched).
+For every unambiguous match, the successor records the direct predecessor plus
+the predecessor's cumulative delegation list. This makes an update chain
+cold-reload-stable.
+
+Verified source loads register only field-integrity-authenticated lists;
+integrity-valid compiled-cache loads register lists from their root-authenticated
+documents. Registration and transitive closure are scoped by the space carrying
+that attestation. Each transaction snapshots the resulting per-space maps, and
+`writeAuthorizedBy` consults only the map for the target document's space. It may
+then match the live writer's module hash directly or through that space's
+snapshot, while its binding path must still match exactly. Delegation metadata
+loaded from another space grants no authority. Source and compiled closure
+loaders reject a cache graph containing any cross-space import link, so a child
+document's local attestation cannot be flattened into the root's space.
+Source-file spelling is diagnostic at verification because it is
+resolver-dependent; a rename still receives no delegation because old and new
+modules no longer match by canonical authored filename.
+Ambiguous canonical filenames and unauthenticated metadata fail closed by
+receiving no delegation. If a runtime-version miss recompiles from source, the
+compiled-cache repair carries the authenticated map forward so later warm loads
+retain the same authority chain. Cross-space closure replication copies code and
+imports but omits the origin space's delegation metadata; the destination save
+preserves only authority already authenticated in the destination. When multiple
+patterns converge on one successor within a space across restarts, save-time
+unioning preserves every predecessor in both cache sets and in the runtime that
+performed the later update.
 
 ## Verifiable Execution Implications
 
@@ -410,7 +457,10 @@ The cache is designed around this:
   its own contents, so a reader self-checks `hash(content) === <identity>`. A
   tampered source document fails the check; a poisoned-but-different source would
   not hash to the requested identity. Recompiling a source document also re-runs
-  the SES verifier, so a malformed source is rejected on the compile path.
+  the SES verifier, so a malformed source is rejected on the compile path. The
+  one exception is mutable delegation metadata, which is deliberately outside
+  that hash and therefore requires its own field-level compiler integrity stamp
+  before a loader can use it as authority.
 - **Compiled set integrity is a CFC label.** `compileCache:<runtimeVersion>/<identity>`
   is keyed by the *source* identity, which does not bind the *JS* bytes.
   The compiled document therefore carries a **CFC integrity label**, written with
@@ -448,8 +498,11 @@ The cache is designed around this:
   independently loadable there (`PatternManager.replicatePatternToSpace`).
   Chain-of-custody holds — compiled docs are read through the integrity-gated
   loader (only docs already carrying the compiler stamp replicate) and
-  re-stamped on the child-space write by a legitimate child-space writer. Note
-  for the server-compilation end state: a client can then no longer stamp
+  re-stamped on the child-space write by a legitimate child-space writer.
+  Module-update authority does not cross that boundary:
+  `delegatedModuleIdentities` from the origin is omitted during replication,
+  while any entries already authenticated in the destination are preserved.
+  Note for the server-compilation end state: a client can then no longer stamp
   replicated compiled docs, so child spaces will need server-side replication
   or by-identity source recovery instead.
 - **CFC verified-source derives from the source set, not the cached JS.** A
