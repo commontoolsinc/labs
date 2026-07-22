@@ -8,7 +8,7 @@ import {
 import { Manifest } from "./manifest.ts";
 import { tsToJs } from "./utils.ts";
 import { TestResult } from "./interface.ts";
-import { extractAstralConfig } from "./config.ts";
+import { DEFAULT_TEST_TIMEOUT_MS, extractAstralConfig } from "./config.ts";
 import { sleep } from "@commonfabric/utils/sleep";
 
 const LAUNCH_RETRY_ATTEMPTS = 5;
@@ -61,8 +61,10 @@ export class BrowserController extends EventTarget {
   async load(filePath: string) {
     const rootUrl = `http://localhost:${this.serverPort}`;
     const jsTestPath = tsToJs(filePath);
-    const testUrl = `${rootUrl}/?test=/${jsTestPath}`;
     const config = this.manifest.config;
+    const testTimeout = config.testTimeout ?? DEFAULT_TEST_TIMEOUT_MS;
+    const testUrl =
+      `${rootUrl}/?test=/${jsTestPath}&testTimeout=${testTimeout}`;
 
     if (this.page) {
       await this.page.goto(testUrl);
