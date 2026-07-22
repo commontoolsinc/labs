@@ -405,12 +405,16 @@ binary populates from baked build metadata; the updater does not consult it.
 5. **Cross-host origins.** Persist accepted space-to-host hints and enforce CFC
    provenance labels on fetched source.
 
+## Resolved questions
+
+1. **System-pattern identity query.** Keep the implemented `GET …?identity`
+   application protocol. It returns the identity of the complete authored
+   pattern closure, so neither a raw source-file `ETag` nor a `HEAD` request can
+   replace it. Strong `ETag`s and conditional revalidation apply independently
+   to each HTTP representation and complement the closure identity.
+
 ## Open questions
 
-1. **`?identity` vs ETag/HEAD.** Resolved 2026-07-22: they are complementary.
-   `?identity` remains the explicit closure-identity value used for update
-   authorization; checksum `ETag`s plus mandatory conditional revalidation keep
-   its body and every source module cacheable without allowing stale replay.
 2. **Where the root's `patternSource` lives** — the root piece meta (general;
    recommended) vs the space cell (co-located with `defaultPattern`). Recommend
    the piece; the space cell holds only the `defaultAppUrl` template.
