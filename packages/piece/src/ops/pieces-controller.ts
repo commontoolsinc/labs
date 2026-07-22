@@ -721,12 +721,13 @@ export class PiecesController<T = unknown> {
       const staleSourceless = storedSource === undefined &&
         (runningRef.identity !== currentId || runningRef.symbol !== "default");
       if (staleSourceless) {
-        // Home only: the fleet evidence is pre-provenance system HOME roots
-        // bricked by a runtime migration. An arbitrary space's sourceless
-        // root is more plausibly a deliberate custom program; widening the
-        // destructive fallback needs its own evidence and a tested
-        // restoration path.
-        if (space !== runtime.userIdentityDID) return "current";
+        // Applies to every space's DEFAULT pattern (this function is only
+        // ever invoked on the root the space cell's `defaultPattern` ref
+        // names): a root that cannot load is a dead space regardless of
+        // space kind, and the displaced ref recorded below preserves the
+        // recovery pointer for a replaced custom program. Widened from
+        // home-only by the flag owner's call after a non-home field report
+        // (loom vendor update bricked on a stale sourceless space root).
         // The probe is only meaningful where by-identity recovery is
         // supported: under cfcEnforcementMode "disabled" it returns
         // `undefined` unconditionally, which must not read as "dead".
