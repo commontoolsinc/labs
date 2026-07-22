@@ -354,6 +354,9 @@ export interface EntityIdListResult {
   nextAfter?: EntityId;
 }
 
+/** Maximum number of entity identifiers carried by one protocol response. */
+export const MAX_ENTITY_ID_PAGE_SIZE = 1_000;
+
 export interface EntityIdListOptions {
   after?: EntityId;
   limit?: number;

@@ -455,6 +455,23 @@ export class FsTree {
     return childIno;
   }
 
+  /**
+   * Remove a directory entry while retaining its inode subtree.
+   *
+   * FUSE can keep an inode alive after its final directory entry disappears.
+   * The caller clears the detached subtree after the kernel releases its
+   * lookup and open references.
+   */
+  detachChild(parentIno: bigint, name: string): bigint | undefined {
+    const parent = this.inodes.get(parentIno);
+    if (!parent || parent.kind !== "dir") return undefined;
+    const childIno = parent.children.get(name);
+    if (childIno === undefined) return undefined;
+    parent.children.delete(name);
+    this.removeCfcEntryAnnotation(parentIno, name);
+    return childIno;
+  }
+
   /** Recursively remove an inode and all its descendants from tracking maps. */
   private clearSubtree(ino: bigint): void {
     const node = this.inodes.get(ino);
