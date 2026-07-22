@@ -72,22 +72,48 @@ this document includes both web URLs and fabric-internal URLs:
   applies to another stable, mutable cell that carries `patternIdentity`, such
   as the planned lightweight publication pointer. A URL that directly names a
   content-addressed pattern is immutable and stores the selected export symbol.
-  A trailing `@<identity>` pin also makes any fabric URL immutable, even when
-  the unpinned text names a piece or publication pointer.
+  A trailing `@<identity>` pin also makes an accepted entity-FID URL immutable,
+  even when the unpinned text names a piece or publication pointer. The
+  tentative policy below does not accept a slug-shaped piece origin, even when
+  the slug carries a pin.
 
 For example, a host-qualified fabric URL can resolve through
-`cf://toolshed.example/<space>/of:fid1:<piece-id>` to a piece, or through
-`cf://toolshed.example/<space>/pattern:<identity>` to exact pattern source.
+`cf://toolshed.example/<space-did>/of:fid1:<piece-id>` to a piece, or through
+`cf://toolshed.example/<space-did>/pattern:<identity>` to exact pattern source.
 The shorter `cf:<ref>` and `cf:/<space>/<ref>` forms use the same fabric URL
-grammar. A user can supply a slug or host routing hint, but durable metadata
-normalizes it to the stable piece entity or content-addressed pattern it
-resolved to.
+grammar.
 
-Classification happens before the origin is stored. An explicit pin wins over
-the target's mutable shape and normalizes to `cf:pattern:<identity>` plus the
-selected export symbol. An unpinned URL that resolves to a mutable
-`patternIdentity`-bearing entity normalizes to that stable entity rather than
-its slug.
+The tentative durable fabric-URL policy admits stable identifiers, not names,
+into the lifecycle resolver. In current repository terminology, a canonical
+URL uses a DID for an explicit space, an entity FID for a mutable piece or
+publication pointer, or a content identity for an immutable pattern. A
+current-space shorthand for an unpinned mutable entity is expanded to the
+target space's DID before it becomes origin state. A direct pattern identity or
+an explicit pin on an entity-FID URL instead normalizes to the space-free
+content identity form. A host remains a routing hint under the rules below.
+
+The fabric parser is shared with static imports and may parse a slug-shaped
+reference such as `cf:/<space-did>/<slug>`. The tentative piece-origin
+validator rejects that form, including when it has a trailing pin. It also
+rejects a space-root shorthand with no entity reference. An outer authoring
+layer may resolve a slug or root shorthand, but it must pass the lifecycle a
+canonical piece FID or pattern content identity. Static imports keep their
+existing alias-and-pin behavior because the deployed source records the
+terminal content identity.
+
+A future shortlink service may accept a custom string and return a canonical
+identifier URL before the lifecycle operation begins. The shortlink is not the
+active origin or a repoint target. Whether a revision retains it in a separate
+optional provenance field remains open. The active origin contains only the
+identifier URL. This answer remains tentative while the identifier vocabulary
+and shortlink ownership, reassignment, and history semantics receive further
+study.
+
+Classification happens before the origin is stored. An explicit pin on an
+accepted entity-FID URL wins over the target's mutable shape. It normalizes to
+`cf:pattern:<identity>` plus the selected export symbol. An unpinned URL that
+resolves to a mutable `patternIdentity`-bearing entity normalizes to that stable
+entity rather than its slug.
 
 A host in `cf://...` is a routing hint, not target identity. The transition
 retains the supplied URL in history and must persist the space DID to host route
@@ -246,11 +272,11 @@ and link that new piece as the space root.
 |---|---|---|---|
 | Create from local code with the command line | The pushed local program | None | Append a local-create revision |
 | Create from LLM-generated code | The generated program | None | Append a generated-create revision |
-| Create from a source URL with the command line | The program resolved from the `https://` or fabric `cf:` URL, including `cf://` | The normalized URL and any required export selector | Append a web URL create, follow, or fabric pattern create revision according to what the URL resolves to |
-| Create from a known source URL in the UI | The program resolved from the `https://` or fabric `cf:` URL, including `cf://` | The normalized URL and any required export selector | Append a web URL create, follow, or fabric pattern create revision according to what the URL resolves to |
+| Create from a source URL with the command line | The program resolved from the `https://` URL or identifier-only fabric `cf:` URL, including `cf://` | The normalized URL and any required export selector | Append a web URL create, follow, or fabric pattern create revision according to what the URL resolves to |
+| Create from a known source URL in the UI | The program resolved from the `https://` URL or identifier-only fabric `cf:` URL, including `cf://`; an outer authoring layer resolves any alias first | The normalized URL and any required export selector | Append a web URL create, follow, or fabric pattern create revision according to what the URL resolves to |
 | Create the root for a new space | The program resolved from the system-selected default source | Whatever origin the ordinary source-creation rules derive from that source | Append the same creation revision that the equivalent user-created piece would receive |
 | Refresh from an external web URL | The newly fetched program, if its identity or export symbol changed and it passed validation | The same `https://` URL and entry export | Append an automatic-update revision only when the identity or export symbol changes |
-| Load from a content-addressed or explicitly pinned fabric URL | The exact program named by the identity or trailing pin | The normalized fabric pattern URL and export symbol | Do not append an automatic-update revision because the resolved identity cannot change |
+| Load from a content-addressed URL or a pinned entity-FID URL | The exact program named by the identity or trailing pin | The normalized fabric pattern URL and export symbol | Do not append an automatic-update revision because the resolved identity cannot change |
 | Fork a piece | The source currently used by the selected piece | None | Append a fork revision with `forkedFrom`; do not copy the source piece's log |
 | Follow a piece through an unpinned fabric URL | The source currently used by the selected piece | A normalized fabric URL containing a stable reference to that piece | Append a follow revision |
 | Refresh from a mutable fabric entity | The entity's current source, if its identity or export symbol changed and it passed validation | The same stable fabric entity URL | Append an automatic-update revision only when the identity or export symbol changes |
@@ -311,22 +337,24 @@ of a schema warning does not waive this root-interface contract.
 For an unpinned fabric URL that resolves to a mutable entity, the stored
 reference names the stable entity, not a slug. A piece is the product case in
 this lifecycle. A lightweight publication pointer uses the same resolution and
-subscription rule if that feature is added. If a user begins with a slug, the
-operation resolves it once and stores a fully qualified reference containing
-the space DID and stable entity. Reassigning the slug must not redirect
-existing followers to a different entity. Self-following is rejected. Follow
-creation walks the active-origin chain and rejects a cycle. If an origin in
-that chain cannot be read, creation fails closed rather than accepting a
-relationship whose cycle status is unknown.
+subscription rule if that feature is added. Under the tentative identifier-only
+policy, a shortlink or other human-readable alias resolves outside the
+lifecycle and supplies a fully qualified reference containing the space DID and
+stable entity. Reassigning that alias must not redirect existing followers to a
+different entity. Self-following is rejected. Follow creation walks the
+active-origin chain and rejects a cycle. If an origin in that chain cannot be
+read, creation fails closed rather than accepting a relationship whose cycle
+status is unknown.
 
-For a fabric URL that directly names content-addressed pattern source, or that
-contains a trailing pin, the stored reference names that exact pattern
-identity. Slug reassignment, piece updates, and publication changes cannot move
-it. The selected export symbol is stored beside the URL because one pattern
-source can expose more than one export. A pin fixes the pattern identity, not
-the export symbol. The operation therefore stores an explicit selector or
-loads the pinned source and chooses its normal entry export. It does not copy a
-symbol from a mutable target unless that export exists in the pinned source.
+For an accepted fabric URL that directly names content-addressed pattern
+source, or that contains a trailing pin on an entity FID, the stored reference
+names that exact pattern identity. Slug reassignment, piece updates, and
+publication changes cannot move it. The selected export symbol is stored beside
+the URL because one pattern source can expose more than one export. A pin fixes
+the pattern identity, not the export symbol. The operation therefore stores an
+explicit selector or loads the pinned source and chooses its normal entry
+export. It does not copy a symbol from a mutable target unless that export
+exists in the pinned source.
 
 An external web URL is an absolute, canonical fetch location. Its origin record
 also stores the resolved entry export name. An omitted export uses the
@@ -428,9 +456,9 @@ pattern:
    - For an unpinned fabric URL that names a mutable entity, read that entity's
      current `patternIdentity` and make its verified source closure available
      in the following piece's space.
-   - For a fabric URL that names a content-addressed pattern or contains an
-     explicit pin, load and verify that exact source closure and select the
-     stored export symbol.
+   - For a fabric origin normalized from a direct content identity or an
+     accepted entity-FID URL with a pin, load and verify that exact source
+     closure and select the stored export symbol.
    - Before any cross-space copy, enforce the source's CFC provenance labels
      for the destination and fail closed when the flow is not permitted.
 3. If the resolved identity and symbol equal the current values, start the
@@ -536,7 +564,7 @@ updates; it does not erase already accepted history.
 The UI must distinguish detached pieces, immutable fabric-origin pieces, and
 pieces that update automatically. It shows the active source URL and whether
 that URL resolved to a web endpoint, mutable fabric entity, or exact fabric
-pattern. It also shows when a trailing pin made a piece-looking URL immutable.
+pattern. It also shows when a trailing pin made an entity-FID input immutable.
 It offers detach and revert actions near mutable-origin controls. The revision
 log provides an exact rollback target after a bad but valid update.
 
@@ -548,7 +576,7 @@ log provides an exact rollback target after a bad but valid update.
 | Wish a new pattern into being with an LLM-backed UI | **Partial** | The `write-and-run` example asks an LLM for pattern code and passes it to `compileAndRun`, whose callback lets the browser worker register the new piece in a space. It is not a general product affordance and does not record a source revision. The runtime `wish()` builtin is discovery, not code generation. |
 | Manually push code from a source URL and create a piece that remembers it | **CLI URL flow required** | The command-line `new` and `setsrc` commands accept local filesystem entries. `RuntimeClient.createPage(URL)` and `HttpProgramResolver` can fetch `http:` and `https:` source. Fabric resolution can resolve content-addressed patterns and same-toolshed piece references to a source identity, but its result does not carry the export symbol as origin state. Neither path gives the command line a general `https://` or `cf://` source-origin operation. `--repository` is descriptive metadata and is not an origin. |
 | Use a UI affordance to push a known source URL into an owned space | **Partial** | `fetchProgram` with `compileAndRun`, the omnibox's `fetchAndRunPattern`, and `RuntimeClient.createPage(URL)` can fetch and run indexed web programs. The resulting piece does not receive a general active source URL or a source revision. There is no corresponding fabric URL affordance. |
-| Load or create from an immutable fabric URL | **Immutable URL flow required** | The source cache and fabric resolver can load verified `cf:pattern:<identity>` source and honor a trailing pin, but no product operation normalizes that URL and export symbol into immutable piece origin metadata or appends the required revision. |
+| Load or create from an immutable fabric URL | **Immutable URL flow required** | The source cache and fabric resolver can load verified `cf:pattern:<identity>` source and honor a trailing pin on an entity-FID reference. No product operation normalizes that URL and export symbol into immutable piece origin metadata or appends the required revision. |
 | Automatically refresh a mutable URL-origin piece when loaded | **Partial** | The shell reconciles system roots before bootstrap and checks other successfully instantiated same-toolshed system-source patterns in the background. The specialized updater changes `patternIdentity` without the complete pre-apply structural comparison. A running pattern's setup can refuse an incompatible argument shape and keep the old graph, but the metadata pointer has already changed. External web URLs and mutable fabric entity URLs do not use this path. A content-addressed or explicitly pinned fabric URL intentionally has nothing to refresh. |
 | Manage a space root through the ordinary piece lifecycle | **Lifecycle unification required** | A root is already a piece and the specialized updater can replace its pattern in place. Creation still stamps a raw `patternSource`, reconciliation bypasses revision history, and update authority is not durable per piece. Root updates still use a separate controller path. The creation template currently lives on the mutable home root, relative source paths are not ordinary origins, and root linking does not validate a root interface. New-root creation, legacy-root migration, and later transitions do not yet use the ordinary lifecycle path. |
 | Fork an existing piece and detach it | **Fork operation required** | Tooling can recover a piece's verified source closure, and the runtime can create another piece from a program. There is no fork operation or UI, no `forkedFrom` history, and no atomic detach contract. |
@@ -622,11 +650,11 @@ The implementation evidence for this table is concentrated in:
 
 1. Define a discriminated origin schema for external web URLs, stable mutable
    fabric-entity URLs, and immutable fabric URLs created by a direct pattern
-   identity or trailing pin. Add a source-state schema with a stable revision
-   head. Define immutable revision records, including durable source retention
-   and the compatibility descriptors needed without executing an old pattern.
-   Replace the unused lineage declarations or remove them rather than treating
-   dead declarations as a shipped feature.
+   identity or a pin on an entity FID. Add a source-state schema with a stable
+   revision head. Define immutable revision records, including durable source
+   retention and the compatibility descriptors needed without executing an old
+   pattern. Replace the unused lineage declarations or remove them rather than
+   treating dead declarations as a shipped feature.
 2. Provide one atomic source-transition API used by every caller. It must wait
    for failure-propagating closure persistence and compare the expected
    revision head, current pattern, and active origin. Add baseline revision
@@ -639,17 +667,24 @@ The implementation evidence for this table is concentrated in:
    historical provenance.
 3. Make local edits explicitly clear active origin metadata. Make source URL
    creation accept and normalize both `https://` and fabric `cf:` inputs,
-   including `cf://`. Resolve an unpinned fabric slug once, then store either a
-   stable, fully qualified mutable entity or the exact content-addressed pattern
-   reference. Make a trailing pin override the mutable target. Persist an
+   including `cf://`. Under the tentative identifier-only policy, produce a
+   durable mutable origin with an explicit space DID and a stable entity FID.
+   Produce a durable immutable origin with a space-free content identity.
+   Normalize current-space shorthand for an unpinned mutable entity to the
+   explicit space DID and entity FID. Normalize a direct pattern identity or a
+   pin on an entity FID to its space-free content identity. Keep human-readable
+   alias resolution outside the lifecycle resolver. Persist an
    accepted space-to-host route before removing the host from the canonical
    target. Validate and register the route before writing it to the site table,
    then open the origin space. Fail a conflicting seeded route or previously
    accepted late hint, including before the first open. Once the space opens,
    fail any hint that was not already registered and matching. Do not create a
-   secondary session. Keep the supplied URL in history. Keep
-   `patternRepository` separate and clear it when newly generated or directly
-   edited code no longer belongs to that repository.
+   secondary session. Keep the supplied canonical URL in history. Do not make
+   shortlink retention part of the lifecycle contract until the open provenance
+   question is settled. Any later alias provenance must remain separate from
+   active origins and repoint targets. Keep `patternRepository` separate and
+   clear it when newly generated or directly edited code no longer belongs to
+   that repository.
 4. Add origin reconciliation to the ordinary piece start path. Add an
    event-driven subscription while an unpinned mutable fabric origin is
    running. Do not subscribe for a content-addressed or explicitly pinned
@@ -710,8 +745,8 @@ pin when source is deployed. The deployed importer does not track later
 changes. The same fabric URL used as piece-origin metadata stays live when it
 is unpinned and resolves to a mutable `patternIdentity`-bearing entity. The
 piece can then follow that entity's current pattern. A fabric origin that
-resolves to `pattern:<identity>` or carries a trailing pin is immutable and has
-no later update to discover.
+resolves to `pattern:<identity>`, or that was supplied as an entity-FID URL with
+a trailing pin, is immutable and has no later update to discover.
 
 Piece-origin metadata remains outside authored source. Mutable web and fabric
 entity origins are checked when that piece loads. A content-addressed or pinned

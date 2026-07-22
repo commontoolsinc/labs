@@ -93,7 +93,8 @@ Reload paths:
 ## Glossary (use these exact terms in code comments)
 
 - **fabric ref / fabric specifier** — an authored import specifier under the
-  `cf:` grammar (`cf:pattern:<hash>`, `cf:/kitchen/todo-list@<hash>`, …).
+  `cf:` grammar
+  (`cf:pattern:<hash>`, `cf:/did:key:z6Mk…/todo-list@<hash>`, …).
 - **pin** — the trailing `@<hash>` entry-module identity on a mutable ref.
 - **hash** — 43 base64url chars (`[A-Za-z0-9_-]`, case-SENSITIVE, no
   padding), the unprefixed output of `hashStringOf`/`hashOf`
@@ -769,9 +770,11 @@ export async function resolveFabricRefToIdentity(
 Algorithm (spec § Resolution rule — implement hops exactly):
 
 1. Space: `ref.space` undefined → `compilingSpace`; a DID → use as-is; a name
-   → M2 throws `"space names require name→DID resolution; use a DID"` (names
-   are NOT in M2 scope — the space-name resolution question remains open in
-   the spec).
+   → M2 throws
+   `"space names are currently unsupported; resolve the name to a DID first"`.
+   The tentative identifier-only policy keeps name resolution outside the
+   fabric resolver. README Open question 1 retains that policy for further
+   study and places human-readable aliases in a future shortlink service.
 2. Start cell:
    - slug → M2.1 resolver (wrap `SlugResolutionError` with the chain so far).
    - `of:` URI → reconstruct the entity id from the parsed hash via the
@@ -876,7 +879,7 @@ file layout, e.g. how `dev.ts` registers).
   `pattern-deploy`; the CLI command that writes a pattern's program to the
   pattern meta). Before writing the program: run `rewriteFabricPins` over
   every file, with `resolvePin` = M2.2 chase via the connected runtime; if
-  any rewrite happened, print each (`pinned cf:/kitchen/todo-list →
+  any rewrite happened, print each (`pinned cf:/did:key:z6Mk…/todo-list →
   @AvcnyZ…`). The STORED program is the pinned one. Deploying with an
   unresolvable ref fails the deploy with the chase's error.
 - **`cf deps update [file] [--import <specifier>]`**: new command; operates
