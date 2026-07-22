@@ -5,7 +5,10 @@ import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
-import { jsonFromValue } from "@/codec-json/index.ts";
+import {
+  jsonFromValue,
+  seemsLikeJsonEncodedFabricValue,
+} from "@/codec-json/index.ts";
 import {
   DATA_URI_MEDIA_TYPE,
   dataUriFromValue,
@@ -41,7 +44,7 @@ describe("data-uri-codec", () => {
       const payload = new TextDecoder().decode(
         fromBase64url(uri.slice(uri.indexOf(",") + 1)),
       );
-      expect(payload.startsWith("fvj1:")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue(payload)).toBe(true);
     });
 
     // The standard encoding canonicalizes key order, so the minted id is a

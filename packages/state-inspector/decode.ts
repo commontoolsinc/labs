@@ -12,13 +12,18 @@
 // walking + recognition (no live runtime/Cell needed). In the fvj1 form embedded
 // links are `/quote`-escaped literals, so a context-less decode is inert.
 
-import { valueFromJson } from "@commonfabric/data-model/codec-json";
+import {
+  seemsLikeJsonEncodedFabricValue,
+  valueFromJson,
+} from "@commonfabric/data-model/codec-json";
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 /** Decode a stored payload string, routing the `fvj1:` codec envelope. */
 export function decodeStored(data: string): unknown {
-  return data.startsWith("fvj1:") ? valueFromJson(data) : JSON.parse(data);
+  return seemsLikeJsonEncodedFabricValue(data)
+    ? valueFromJson(data)
+    : JSON.parse(data);
 }
 
 export interface DecodedLink {
