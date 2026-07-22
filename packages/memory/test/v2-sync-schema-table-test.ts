@@ -213,13 +213,19 @@ Deno.test("sync schema table preserves own __proto__ fields", () => {
   assertEquals(compressedValue.__proto__, { safe: true });
 });
 
-Deno.test("sync schema table round-trips legacy aliases nested in arrays", () => {
-  const schema: JSONSchema = {
+Deno.test("sync schema table leaves legacy alias schemas inline", () => {
+  // The mapper no longer treats `$alias.schema` as a schema position: the
+  // runner is retiring `$alias` from persisted data, and docs that still
+  // carry it travel with their alias schemas inline. The alias record IS
+  // ordinary data, though — a link nested inside its schema value is a
+  // live position and interns normally.
+  const aliasSchema: JSONSchema = {
     type: "object",
     properties: {
       title: { type: "string" },
     },
   };
+  const nestedLinkSchema: JSONSchema = { type: "string" };
   const sync: SessionSync = {
     type: "sync",
     fromSeq: 0,
@@ -236,7 +242,7 @@ Deno.test("sync schema table round-trips legacy aliases nested in arrays", () =>
               $alias: {
                 id: "of:legacy-target",
                 path: [],
-                schema,
+                schema: aliasSchema,
               },
             },
             {
@@ -247,10 +253,20 @@ Deno.test("sync schema table round-trips legacy aliases nested in arrays", () =>
               },
             },
             {
-              "/": {
-                [LINK_V1_TAG]: {
-                  id: "of:no-schema-target",
-                  path: [],
+              $alias: {
+                id: "of:alias-with-nested-link",
+                path: [],
+                schema: {
+                  type: "object",
+                  default: {
+                    "/": {
+                      [LINK_V1_TAG]: {
+                        id: "of:inside-alias-schema",
+                        path: [],
+                        schema: nestedLinkSchema,
+                      },
+                    },
+                  },
                 },
               },
             },
@@ -262,29 +278,31 @@ Deno.test("sync schema table round-trips legacy aliases nested in arrays", () =>
   };
 
   const compressed = compressSessionSyncSchemas(sync) as SchemaTableSessionSync;
+  const nestedHash = internSchema(nestedLinkSchema, true).taggedHashString;
+
+  assertExists(compressed.schemaTable);
+  assertEquals(Object.keys(compressed.schemaTable), [nestedHash]);
+
   const compressedAliases =
     (compressed.upserts[0].doc?.value as Record<string, unknown>)
       .aliases as Record<string, unknown>[];
-  const schemaHash = internSchema(schema, true).taggedHashString;
-
-  assertExists(compressed.schemaTable);
-  assertEquals(Object.keys(compressed.schemaTable), [schemaHash]);
   assertEquals(
     (compressedAliases[0].$alias as Record<string, unknown>).schema,
-    `schema-ref@2:${schemaHash}`,
+    aliasSchema,
   );
   assertEquals(
     (compressedAliases[1].$alias as Record<string, unknown>).schema,
     "opaque-schema-name",
   );
+  const nestedEnvelope = ((
+    (compressedAliases[2].$alias as Record<string, unknown>)
+      .schema as Record<string, unknown>
+  ).default as Record<string, unknown>)["/"] as Record<string, unknown>;
   assertEquals(
-    (
-      (compressedAliases[2]["/"] as Record<string, unknown>)[
-        LINK_V1_TAG
-      ] as Record<string, unknown>
-    ).schema,
-    undefined,
+    (nestedEnvelope[LINK_V1_TAG] as Record<string, unknown>).schema,
+    `schema-ref@2:${nestedHash}`,
   );
+
   const expandedSchemas: JSONSchema[] = [];
   assertEquals(
     expandSessionSyncSchemas(compressed, (expanded) => {
@@ -292,11 +310,52 @@ Deno.test("sync schema table round-trips legacy aliases nested in arrays", () =>
     }),
     sync,
   );
-  assertEquals(expandedSchemas, [internSchema(schema, true).schema]);
+  assertEquals(expandedSchemas, [
+    internSchema(nestedLinkSchema, true).schema,
+  ]);
+});
+
+Deno.test("sync schema table expansion rejects refs at uninterpreted positions", () => {
+  // An older server may still intern legacy `$alias` schema positions.
+  // This expander no longer interprets them; delivering the surviving ref
+  // string as data would silently corrupt the doc, so expansion fails
+  // loudly even when the table carries the referenced schema.
+  const schema: JSONSchema = { type: "object" };
+  const interned = internSchema(schema, true);
+  const sync: SchemaTableSessionSync = {
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [{
+      branch: "",
+      id: "of:old-server-alias",
+      scope: "space",
+      seq: 1,
+      doc: {
+        value: {
+          bound: {
+            $alias: {
+              id: "of:target",
+              path: [],
+              schema: `schema-ref@2:${interned.taggedHashString}`,
+            },
+          },
+        },
+      },
+    }],
+    removes: [],
+    schemaTable: { [interned.taggedHashString]: interned.schema },
+  };
+
+  assertThrows(
+    () => expandSessionSyncSchemas(sync),
+    Error,
+    "Unexpanded sync schema table reference",
+  );
 });
 
 Deno.test("sync schema table interns only strict link envelopes", () => {
-  // Link recognition goes through the cell-rep chokepoint, which defines a
+  // Link recognition goes through the cell-rep link API, which defines a
   // legacy link as the single-key `{ "/": { "link@1": ... } }` envelope. An
   // envelope with sibling keys is NOT a link: its inner "schema" is inert
   // user data — uniformly for compression, expansion, and the reserved-ref
@@ -988,11 +1047,15 @@ Deno.test("schema subtrees are opaque: nested link shapes inside schemas are dat
   assertEquals(expanded, sync);
 });
 
-Deno.test("validator and mapper agree on schema positions across shapes", () => {
+Deno.test("validator covers mapper schema positions plus legacy aliases", () => {
   // Drift guard: findSyncSchemaRef is iterative (stack-safe) while
-  // mapLinkSchemas is recursive; this corpus mechanically enforces that
-  // both walkers see exactly the same schema positions. If either learns a
-  // new position or prunes one, this fails until the other is taught.
+  // mapLinkSchemas is recursive. The validator must see every position the
+  // mapper interprets — equal on link positions — plus exactly one extra
+  // family: legacy `$alias` schema positions, which clients shipped before
+  // the mapper stopped interpreting them still expand (see
+  // sync-schema-ref.ts). If either walker learns or prunes a position,
+  // this corpus fails until the other (and its expectation here) is
+  // updated.
   const planted = "schema-ref@2:fid1:planted";
   const probe = (value: unknown): string | undefined => {
     let found: string | undefined;
@@ -1008,20 +1071,31 @@ Deno.test("validator and mapper agree on schema positions across shapes", () => 
     return found;
   };
 
-  const corpus: Array<{ label: string; value: unknown }> = [
+  const corpus: Array<{
+    label: string;
+    value: unknown;
+    validator: string | undefined;
+    mapper: string | undefined;
+  }> = [
     {
       label: "legacy link payload",
       value: {
         "/": { [LINK_V1_TAG]: { id: "of:a", path: [], schema: planted } },
       },
+      validator: planted,
+      mapper: planted,
     },
     {
-      label: "alias payload",
+      label: "alias payload is validator-only",
       value: { $alias: { id: "of:b", path: [], schema: planted } },
+      validator: planted,
+      mapper: undefined,
     },
     {
       label: "nested in array",
       value: [1, [{ $alias: { id: "of:c", path: [], schema: planted } }]],
+      validator: planted,
+      mapper: undefined,
     },
     {
       label: "sibling'd envelope is not a link",
@@ -1029,9 +1103,11 @@ Deno.test("validator and mapper agree on schema positions across shapes", () => 
         "/": { [LINK_V1_TAG]: { id: "of:d", path: [], schema: planted } },
         sibling: true,
       },
+      validator: undefined,
+      mapper: undefined,
     },
     {
-      label: "inside a schema subtree is data",
+      label: "plain strings inside an alias schema value are data",
       value: {
         $alias: {
           id: "of:e",
@@ -1039,10 +1115,45 @@ Deno.test("validator and mapper agree on schema positions across shapes", () => 
           schema: { type: "object", default: { deep: planted } },
         },
       },
+      validator: undefined,
+      mapper: undefined,
+    },
+    {
+      label: "link nested in an alias schema value is live for both",
+      value: {
+        $alias: {
+          id: "of:h",
+          path: [],
+          schema: {
+            type: "object",
+            default: {
+              "/": { [LINK_V1_TAG]: { id: "of:i", path: [], schema: planted } },
+            },
+          },
+        },
+      },
+      validator: planted,
+      mapper: planted,
+    },
+    {
+      label: "link schema subtree stays opaque",
+      value: {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "of:j",
+            path: [],
+            schema: { type: "object", default: { deep: planted } },
+          },
+        },
+      },
+      validator: undefined,
+      mapper: undefined,
     },
     {
       label: "harmless string position",
       value: { note: planted },
+      validator: undefined,
+      mapper: undefined,
     },
     {
       label: "alias sibling fields still walked",
@@ -1053,15 +1164,14 @@ Deno.test("validator and mapper agree on schema positions across shapes", () => 
           extra: { $alias: { id: "of:g", path: [], schema: planted } },
         },
       },
+      validator: planted,
+      mapper: undefined,
     },
   ];
 
-  for (const { label, value } of corpus) {
-    assertEquals(
-      findSyncSchemaRef(value),
-      probe(value),
-      `walker disagreement on: ${label}`,
-    );
+  for (const { label, value, validator, mapper } of corpus) {
+    assertEquals(findSyncSchemaRef(value), validator, `validator on: ${label}`);
+    assertEquals(probe(value), mapper, `mapper on: ${label}`);
   }
 
   // Modern regime: same agreement through FabricLink instances.

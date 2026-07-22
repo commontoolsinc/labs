@@ -35,17 +35,27 @@ const payloadSchemaRef = (
 /**
  * Finds a reserved wire reference in a schema position, or undefined.
  *
- * Visits exactly the schema positions {@link mapLinkSchemas} interprets —
- * link payloads (via cell-rep, both `modernCellRep` regimes) and `$alias`
- * payloads (still persisted with schemas in saved patterns — see
- * schema-table-links.ts) — with the same blindness: schema subtrees
- * are opaque, and non-link `FabricInstance` contents are not walked. The
- * traversal engine is deliberately ITERATIVE (explicit stack) so
- * adversarially deep documents cannot overflow the call stack; position
- * parity with the recursive mapper is enforced mechanically by the
- * walker-agreement test in test/v2-sync-schema-table-test.ts — teach both
- * (and `containsSyncSchemaRefString`) in the same change or that test
- * fails.
+ * Visits a SUPERSET of the schema positions {@link mapLinkSchemas}
+ * interprets:
+ *
+ * - Link payloads (via cell-rep, both `modernCellRep` regimes), with the
+ *   mapper's blindness — link schema subtrees are opaque, and non-link
+ *   `FabricInstance` contents are not walked.
+ * - Legacy `$alias` schema positions, which the mapper no longer
+ *   interprets. Clients shipped before that removal still expand refs
+ *   there, so stored data must not be able to deliver one to them; this
+ *   stays until pre-removal clients are out of circulation. Unlike a link
+ *   payload's, an alias's `schema` value is also walked as ordinary data,
+ *   because that is how the mapper now sees it — link positions inside it
+ *   are live.
+ *
+ * The traversal engine is deliberately ITERATIVE (explicit stack) so
+ * adversarially deep documents cannot overflow the call stack. The
+ * superset relationship with the recursive mapper — equal on link
+ * positions, wider by exactly the legacy alias positions — is enforced
+ * mechanically by the walker-agreement test in
+ * test/v2-sync-schema-table-test.ts; teach both (and
+ * `containsSyncSchemaRefString`) in the same change or that test fails.
  */
 export const findSyncSchemaRef = (value: unknown): string | undefined => {
   const pending: unknown[] = [value];
@@ -84,8 +94,10 @@ export const findSyncSchemaRef = (value: unknown): string | undefined => {
       if (ref !== undefined) {
         return ref;
       }
+      // Every alias child — the schema value included — is walked as data,
+      // mirroring the mapper's view of the alias record.
       for (const key in legacyAlias) {
-        if (key !== "schema" && Object.hasOwn(legacyAlias, key)) {
+        if (Object.hasOwn(legacyAlias, key)) {
           pending.push(legacyAlias[key]);
         }
       }

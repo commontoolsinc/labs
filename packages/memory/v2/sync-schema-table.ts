@@ -154,6 +154,14 @@ export const expandSessionSyncSchemas = (
       return upsert;
     }
     const doc = expandValue(upsert.doc, schemas, onSchema);
+    // A ref surviving expansion sits at a position this expander does not
+    // interpret — e.g. a legacy `$alias` schema position interned by an
+    // older server. Delivering it would hand the session cache a ref
+    // string as data; fail loudly instead.
+    const leftover = findSyncSchemaRef(doc);
+    if (leftover !== undefined) {
+      throw new Error(`Unexpanded sync schema table reference: ${leftover}`);
+    }
     return doc === upsert.doc ? upsert : {
       ...upsert,
       doc: doc as typeof upsert.doc,

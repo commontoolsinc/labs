@@ -18,16 +18,22 @@ const isPlainRecord = (value: FabricValue): value is FabricPlainObject =>
   isPlainObject(value);
 
 /**
- * Maps schemas only in link-payload and legacy `$alias` schema positions.
+ * Maps schemas only in link-payload schema positions.
  *
  * Link recognition and reconstruction use the cell-rep link API
  * ({@link isLinkRef} / {@link linkRefPayload} / {@link linkRefFrom}), so both
  * `modernCellRep` regimes are handled transparently — legacy envelope or
- * `FabricLink` instance alike. The `$alias` form is recognized locally here:
- * cell-rep doesn't know it, and it can't be dropped — saved patterns still
- * persist binding aliases whose optional `schema` field the runner fills in
- * (see `LegacyAlias` in packages/runner/src/sigil-types.ts), so sync frames
- * carry them. It stays until the runner stops persisting alias schemas.
+ * `FabricLink` instance alike.
+ *
+ * Legacy `$alias` bindings are ordinary data to this walk: their `schema`
+ * field is not a position, so it is never interned and never expanded. The
+ * runner is retiring `$alias` from persisted data, and stored docs that
+ * still carry it just travel with their alias schemas inline (transport
+ * compression absorbs most of the byte cost). Clients shipped BEFORE this
+ * change do interpret alias schema positions, so the reserved-ref validator
+ * keeps refusing refs there — see {@link findSyncSchemaRef} in
+ * sync-schema-ref.ts, which deliberately checks a superset of this walk's
+ * positions.
  *
  * Schema VALUES are opaque to this walk: after a schema position is mapped,
  * the traversal does not descend into the schema (or its mapped
@@ -77,29 +83,10 @@ export const mapLinkSchemas = (
 
   if (!isPlainRecord(value)) return value;
 
-  let mappedValue = value;
-  const alias = value.$alias;
-  const hasAlias = isPlainRecord(alias);
-  if (hasAlias) {
-    const mappedAlias = mapPayloadSchemas(alias, mapSchema, traversal, depth);
-    if (mappedAlias !== alias) {
-      mappedValue = { ...mappedValue, $alias: mappedAlias };
-    }
-  }
-
-  // The alias payload was walked above; do not descend into it again.
-  const walked = mapRecordChildren(
-    mappedValue,
-    mapSchema,
-    traversal,
-    depth,
-    hasAlias ? "$alias" : undefined,
-  );
-  if (walked !== mappedValue) return walked;
-  return mappedValue === value ? value : mappedValue;
+  return mapRecordChildren(value, mapSchema, traversal, depth);
 };
 
-/** Maps the `schema` position of one link/alias payload — without descending
+/** Maps the `schema` position of one link payload — without descending
  *  into the schema value — and walks the payload's other entries. */
 const mapPayloadSchemas = (
   payload: FabricPlainObject,

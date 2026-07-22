@@ -331,7 +331,7 @@ Semantics:
 When both peers advertise `syncSchemaTableV2`, the server MAY compact a
 server-to-client `SessionSync` carried by `response.ok.sync` or
 `session/effect.effect`. For each JSON Schema attached to a modern `link@1`
-payload or legacy `$alias` payload, it:
+payload, it:
 
 1. computes the canonical tagged schema hash
 2. replaces the inline schema with `schema-ref@2:<tagged-hash>`
@@ -377,9 +377,19 @@ For example, the compact wire form can contain:
 The table is scoped to one sync payload, not to a connection or logical
 session. A client MUST resolve every `schema-ref@2:` before exposing the sync to
 the session cache. It MUST reject a reference when the table is missing the key
-or when hashing the referenced table value does not reproduce the key. After
-expansion, downstream consumers observe the historical `SessionSync` shape with
-inline schemas and no `schemaTable` field.
+or when hashing the referenced table value does not reproduce the key. It MUST
+also reject a sync whose documents still carry a reserved reference at a
+recognized schema position after expansion — a reference the client does not
+interpret must fail the frame rather than reach the session cache as data.
+After expansion, downstream consumers observe the historical `SessionSync`
+shape with inline schemas and no `schemaTable` field.
+
+Earlier revisions of this encoding also interned the `schema` field of legacy
+`$alias` bindings still present in stored documents. Current servers leave
+alias schemas inline (the runner is retiring `$alias` from persisted data),
+but clients deployed against the earlier revision continue to expand
+references at alias schema positions, so those positions remain covered by
+the reservation rule below.
 
 The `schema-ref@2:` prefix is reserved in the `schema` field of `link@1` and
 legacy `$alias` payloads. Link recognition follows the canonical cell-rep
