@@ -161,11 +161,8 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     // been severed, or one from another realm. An ordinary subclass (including
     // `DOMException`) never gets here: `tagFromNativeClass()` matches it via
     // `prototype instanceof Error`. The internal slot survives either way,
-    // which is what `Error.isError()` reads where the runtime implements it.
-    const isError = (Error as ErrorConstructor & {
-      isError?: (candidate: unknown) => boolean;
-    }).isError;
-    if (isError?.(value)) return NATIVE_TAGS.Error;
+    // which is what `Error.isError()` reads.
+    if (Error.isError(value)) return NATIVE_TAGS.Error;
 
     // `FabricInstance` values (object-like protocol types).
     if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;

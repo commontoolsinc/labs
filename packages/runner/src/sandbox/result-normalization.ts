@@ -33,16 +33,18 @@ const regexpFlagsGetter = Object.getOwnPropertyDescriptor(
   RegExp.prototype,
   "flags",
 )!.get!;
-const errorIsError = (Error as ErrorConstructor & {
-  isError?: (candidate: unknown) => boolean;
-}).isError;
+const errorIsError = Error.isError;
 
 const hasToJSON = (value: object): boolean =>
   "toJSON" in value &&
   typeof (value as { toJSON?: unknown }).toJSON === "function";
 
-/** Returns whether a value is an ordinary object or null-prototype record. */
-function isPlainRealmObject(value: object): boolean {
+/**
+ * SES compartments share the host's hardened `Object.prototype` identity.
+ * Deliberately do not infer a foreign `Object.prototype` from a null-rooted
+ * parent: custom instance prototypes can be null-rooted too.
+ */
+function isPlainResultObject(value: object): boolean {
   if (hasToJSON(value)) return false;
   const proto = Object.getPrototypeOf(value);
   return proto === null || proto === Object.prototype;
@@ -52,7 +54,7 @@ function isSandboxResultContainer(
   value: unknown,
 ): value is unknown[] | Record<string, unknown> {
   return value !== null && typeof value === "object" &&
-    (Array.isArray(value) || isPlainRealmObject(value));
+    (Array.isArray(value) || isPlainResultObject(value));
 }
 
 function rejectExtraProperties(value: object, typeName: string): void {
@@ -108,7 +110,7 @@ function normalizeSandboxNativeLeaf(value: unknown): unknown {
     return new FabricBytes(new Uint8Array(value as Uint8Array));
   }
 
-  if (errorIsError?.(value)) {
+  if (errorIsError(value)) {
     return FabricError.fromNativeError(value as Error);
   }
 
@@ -142,7 +144,7 @@ function formatActionResultError(
   const actionStr = actionName ? `\n  in action: ${actionName}` : "";
   const hint = hintForActionResult(value);
   const hintStr = hint ? ` ${hint}` : "";
-  const causeIsError = errorIsError?.(cause) || cause instanceof Error;
+  const causeIsError = errorIsError(cause) || cause instanceof Error;
   const causeStr = causeIsError ? `\n${(cause as Error).message}` : "";
   return new Error(
     `Action returned a ${typeNameForActionResult(value)}${pathStr}.` +
