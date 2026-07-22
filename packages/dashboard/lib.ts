@@ -414,13 +414,13 @@ export function thin<T>(arr: T[], max: number): T[] {
   return out;
 }
 
-// A grid of small pass/fail cells (one per run, oldest first) laid out in `cols`
-// fixed columns; each cell links to that run's CI results. The caller sizes the
-// cells to a whole number of rows, so the grid is always complete (no half-empty
-// final row). Cells shrink to fit width.
+// A grid of small run-outcome cells (one per run, oldest first) laid out in
+// `cols` fixed columns. Each cell links to that run's CI results. Cells shrink
+// to fit width.
 export function strip(cells: { outcome: string; href: string }[], cols: number): string {
   if (!cells.length) return "";
-  const col = (d: string) => d === "green" ? "#43c574" : d === "red" ? "#e2504a" : "#7c828c";
+  const col = (d: string) =>
+    d === "green" ? "#43c574" : d === "red" ? "#e2504a" : d === "run" ? "#6ea8fe" : "#7c828c";
   const html = cells.map((c) =>
     `<a class="cell" href="${escapeHtml(c.href)}" target="_blank" rel="noopener" style="background:${col(c.outcome)}"></a>`
   ).join("");
