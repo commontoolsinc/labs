@@ -134,6 +134,37 @@ Deno.test("memory v2 engine lists live space-scoped entity identifiers", async (
     });
 
     assertEquals(listEntityIds(engine), ["of:fid1:second"]);
+    assertEquals(
+      engine.database.prepare(`
+        SELECT id, scope_key, op
+        FROM head
+        ORDER BY id, scope_key
+      `).all(),
+      [
+        { id: "of:fid1:first", scope_key: "space", op: "delete" },
+        { id: "of:fid1:second", scope_key: "space", op: "set" },
+        {
+          id: "of:fid1:user-only",
+          scope_key: "user:did%3Akey%3Aalice",
+          op: "set",
+        },
+      ],
+    );
+
+    const plan = engine.database.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT id
+      FROM head
+      WHERE branch = :branch
+        AND scope_key = :scope_key
+        AND op <> 'delete'
+      ORDER BY id ASC
+    `).all({ branch: "", scope_key: "space" }) as Array<{ detail: string }>;
+    assertEquals(plan.length, 1);
+    assertMatch(
+      plan[0].detail,
+      /^SEARCH head USING COVERING INDEX idx_head_live_entity_ids /,
+    );
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -518,6 +549,103 @@ Deno.test("memory v2 engine migrates pre-scope entity tables to space scope", as
     assertEquals(read(engine, { id: "entity:legacy", scope: "space" }), {
       value: { migrated: true },
     });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine backfills current head operations", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const url = toFileUrl(path);
+  let engine = await open({ url });
+  try {
+    applyCommit(engine, {
+      sessionId: "session:migration",
+      principal: "did:key:migration",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: "entity:migrated-live",
+            value: toEntityDocument({ live: true }),
+          },
+          {
+            op: "set",
+            id: "entity:migrated-deleted",
+            value: toEntityDocument({ live: false }),
+          },
+          {
+            op: "set",
+            id: "entity:migrated-user",
+            scope: "user",
+            value: toEntityDocument({ private: true }),
+          },
+        ],
+      },
+    });
+    applyCommit(engine, {
+      sessionId: "session:migration",
+      principal: "did:key:migration",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "delete", id: "entity:migrated-deleted" }],
+      },
+    });
+  } finally {
+    close(engine);
+  }
+
+  const legacyDb = new Database(path);
+  try {
+    legacyDb.exec(`
+      DROP INDEX idx_head_live_entity_ids;
+      ALTER TABLE head DROP COLUMN op;
+    `);
+    assertEquals(
+      legacyDb.prepare(`PRAGMA table_info("head")`).all().some(
+        (row) => (row as { name: string }).name === "op",
+      ),
+      false,
+    );
+  } finally {
+    legacyDb.close();
+  }
+
+  engine = await open({ url });
+  try {
+    assertEquals(listEntityIds(engine), ["entity:migrated-live"]);
+    assertEquals(
+      engine.database.prepare(`
+        SELECT id, scope_key, op
+        FROM head
+        ORDER BY id, scope_key
+      `).all(),
+      [
+        {
+          id: "entity:migrated-deleted",
+          scope_key: "space",
+          op: "delete",
+        },
+        { id: "entity:migrated-live", scope_key: "space", op: "set" },
+        {
+          id: "entity:migrated-user",
+          scope_key: "user:did%3Akey%3Amigration",
+          op: "set",
+        },
+      ],
+    );
+    assertEquals(
+      engine.database.prepare(`
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'index' AND name = 'idx_head_live_entity_ids'
+      `).get(),
+      { name: "idx_head_live_entity_ids" },
+    );
   } finally {
     close(engine);
     await Deno.remove(path);

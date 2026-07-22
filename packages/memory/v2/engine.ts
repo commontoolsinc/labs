@@ -372,6 +372,7 @@ CREATE TABLE IF NOT EXISTS head (
   scope_key TEXT    NOT NULL DEFAULT 'space',
   seq       INTEGER NOT NULL,
   op_index  INTEGER NOT NULL,
+  op        TEXT    NOT NULL CHECK (op IN ('set', 'patch', 'delete')),
   PRIMARY KEY (branch, id, scope_key)
 );
 CREATE INDEX IF NOT EXISTS idx_head_branch ON head (branch);
@@ -469,10 +470,10 @@ VALUES (
 `;
 
 const UPSERT_HEAD = `
-INSERT INTO head (branch, id, scope_key, seq, op_index)
-VALUES (:branch, :id, :scope_key, :seq, :op_index)
+INSERT INTO head (branch, id, scope_key, seq, op_index, op)
+VALUES (:branch, :id, :scope_key, :seq, :op_index, :op)
 ON CONFLICT (branch, id, scope_key) DO UPDATE
-SET seq = :seq, op_index = :op_index
+SET seq = :seq, op_index = :op_index, op = :op
 `;
 
 const INSERT_SNAPSHOT = `
@@ -524,18 +525,12 @@ WHERE h.branch = :branch AND h.id = :id AND h.scope_key = :scope_key
 `;
 
 const SELECT_CURRENT_ENTITY_IDS = `
-SELECT h.id
-FROM head h
-JOIN revision r
- ON r.branch = h.branch
- AND r.id = h.id
- AND r.scope_key = h.scope_key
- AND r.seq = h.seq
- AND r.op_index = h.op_index
-WHERE h.branch = :branch
-  AND h.scope_key = :scope_key
-  AND r.op <> 'delete'
-ORDER BY h.id ASC
+SELECT id
+FROM head
+WHERE branch = :branch
+  AND scope_key = :scope_key
+  AND op <> 'delete'
+ORDER BY id ASC
 `;
 
 const SELECT_AT_SEQ_LOCAL = `
@@ -1365,6 +1360,7 @@ CREATE TABLE head (
   scope_key TEXT    NOT NULL DEFAULT 'space',
   seq       INTEGER NOT NULL,
   op_index  INTEGER NOT NULL,
+  op        TEXT    NOT NULL CHECK (op IN ('set', 'patch', 'delete')),
   PRIMARY KEY (branch, id, scope_key)
 );
 CREATE INDEX idx_head_branch ON head (branch);
@@ -1384,9 +1380,15 @@ INSERT INTO revision (branch, id, scope_key, seq, op_index, op, data, commit_seq
 SELECT branch, id, 'space', seq, op_index, op, data, commit_seq
 FROM revision_unscoped_migration;
 
-INSERT INTO head (branch, id, scope_key, seq, op_index)
-SELECT branch, id, 'space', seq, op_index
-FROM head_unscoped_migration;
+INSERT INTO head (branch, id, scope_key, seq, op_index, op)
+SELECT h.branch, h.id, 'space', h.seq, h.op_index, r.op
+FROM head_unscoped_migration h
+JOIN revision r
+  ON r.branch = h.branch
+  AND r.id = h.id
+  AND r.scope_key = 'space'
+  AND r.seq = h.seq
+  AND r.op_index = h.op_index;
 
 INSERT INTO snapshot (branch, id, scope_key, seq, value)
 SELECT branch, id, 'space', seq, value
@@ -1397,6 +1399,37 @@ DROP TABLE head_unscoped_migration;
 DROP TABLE snapshot_unscoped_migration;
 
 COMMIT;
+`);
+};
+
+const migrateHeadCurrentOp = (database: Database): void => {
+  if (!hasColumn(database, "head", "op")) {
+    database.exec(`
+BEGIN TRANSACTION;
+
+ALTER TABLE head
+ADD COLUMN op TEXT NOT NULL DEFAULT 'set'
+CHECK (op IN ('set', 'patch', 'delete'));
+
+UPDATE head
+SET op = (
+  SELECT r.op
+  FROM revision r
+  WHERE r.branch = head.branch
+    AND r.id = head.id
+    AND r.scope_key = head.scope_key
+    AND r.seq = head.seq
+    AND r.op_index = head.op_index
+);
+
+COMMIT;
+`);
+  }
+
+  database.exec(`
+CREATE INDEX IF NOT EXISTS idx_head_live_entity_ids
+  ON head (branch, scope_key, id, op)
+  WHERE op <> 'delete';
 `);
 };
 
@@ -2213,6 +2246,7 @@ export const open = async (
   `).get() !== undefined;
   database.exec(INIT(!schedulerSchemaExists));
   migrateScopedEntityTables(database);
+  migrateHeadCurrentOp(database);
   const completeSchedulerSchema = CORE_SCHEDULER_TABLES.every((table) =>
     hasTable(database, table)
   );
@@ -5258,6 +5292,7 @@ const writeOperation = (
         scope_key: scopeKey,
         seq,
         op_index: opIndex,
+        op: "set",
       });
       return {
         id: operation.id,
@@ -5287,6 +5322,7 @@ const writeOperation = (
         scope_key: scopeKey,
         seq,
         op_index: opIndex,
+        op: "patch",
       });
       return {
         id: operation.id,
@@ -5316,6 +5352,7 @@ const writeOperation = (
         scope_key: scopeKey,
         seq,
         op_index: opIndex,
+        op: "delete",
       });
       return {
         id: operation.id,
