@@ -1,7 +1,18 @@
 // cell-bridge.test.ts — Integration tests for CellBridge using fake piece objects
-import { assertEquals, assertNotEquals } from "@std/assert";
+import { assertEquals, assertNotEquals, assertRejects } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { defer } from "@commonfabric/utils/defer";
+import { createSession, Identity } from "@commonfabric/identity";
+import type { Signer } from "@commonfabric/memory/interface";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import { PieceManager } from "@commonfabric/piece";
+import { Runtime } from "@commonfabric/runner";
+import {
+  type Options as V2StorageOptions,
+  type SessionFactory,
+  StorageManager as V2StorageManager,
+} from "../runner/src/storage/v2.ts";
 import { FsTree } from "./tree.ts";
 import {
   CellBridge,
@@ -168,7 +179,10 @@ function buildTestSpace(
   const entitiesIno = tree.addDir(spaceIno, "entities");
 
   const state: SpaceState = {
-    manager: null as unknown as SpaceState["manager"],
+    manager: {
+      listEntityIds: () => Promise.resolve(undefined),
+      getPieces: () => Promise.resolve({ sink: () => () => {} }),
+    } as unknown as SpaceState["manager"],
     pieces: {
       getAllPieces: () => Promise.resolve(fakePieces),
     } as unknown as SpaceState["pieces"],
@@ -178,6 +192,13 @@ function buildTestSpace(
     pieceMap: new Map(),
     pieceInos: new Map(),
     pieceControllers: new Map(),
+    entityControllers: new Map(),
+    allPieceIds: new Set(),
+    entityIds: new Set(),
+    hasCompleteEntityList: false,
+    piecesHydrated: true,
+    piecesMaterializing: false,
+    pieceListSubscribed: true,
     pieceManifest: new Map(),
     pieceSubs: new Map(),
     did: "did:key:zTest",
@@ -258,6 +279,550 @@ type WriteFsFile = (
   writePath: unknown,
   text: string,
 ) => Promise<boolean>;
+
+Deno.test("CellBridge mount and /entities listing transfer identifiers without entity values", async () => {
+  const tree = new FsTree();
+  const allPiecesEntityId = "of:fid1:piece-in-all-pieces";
+  const entityIds = [
+    allPiecesEntityId,
+    "of:fid1:entity-alpha",
+    "of:fid1:entity-beta",
+    "of:fid1:entity-gamma",
+  ];
+  let identifierRequests = 0;
+  let entityValueRequests = 0;
+  let pieceListRequests = 0;
+  const rejectEntityValueRequest = () => {
+    entityValueRequests++;
+    throw new Error("entity values must not be requested while listing");
+  };
+  const listedPieceCell = {
+    entityId: { "/": allPiecesEntityId },
+    asSchema() {
+      return this;
+    },
+    get: rejectEntityValueRequest,
+    getRaw: rejectEntityValueRequest,
+    sync: rejectEntityValueRequest,
+  };
+  const piecesCell = { sink: () => () => {} };
+  const manager = {
+    getSpace: () => "did:key:zEntityListSpace",
+    getPieces: () => {
+      pieceListRequests++;
+      return Promise.resolve(piecesCell);
+    },
+    syncPieces: () => {
+      pieceListRequests++;
+      return Promise.resolve([listedPieceCell]);
+    },
+    listEntityIds: () => {
+      identifierRequests++;
+      return Promise.resolve([...entityIds]);
+    },
+    get: rejectEntityValueRequest,
+  } as unknown as SpaceState["manager"];
+  let deferredSpaceCellSync = false;
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: (config) => {
+      deferredSpaceCellSync = config.deferSpaceCellSync === true;
+      return Promise.resolve(manager);
+    },
+  });
+  bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
+  bridge.initStatus();
+
+  const state = await bridge.connectSpace("home");
+  assertEquals(JSON.parse(readStatusFile(tree)).spaces.home, {
+    did: "did:key:zEntityListSpace",
+    pieces: 0,
+    piecesLoaded: false,
+  });
+  assertEquals(await bridge.prepareDirectory(state.entitiesIno), true);
+
+  const entries = tree.getChildren(state.entitiesIno);
+  assertEquals(
+    entries.map(([name]) => name).sort(),
+    entityIds.map((id) => encodeFuseComponent(id)).sort(),
+  );
+  for (const [name, ino] of entries) {
+    assertEquals(tree.getNode(ino)?.kind, "dir");
+    assertEquals(tree.getChildren(ino), []);
+    assertEquals(await bridge.prepareLookup(state.entitiesIno, name), true);
+  }
+
+  assertEquals(identifierRequests, 2);
+  assertEquals(entityValueRequests, 0);
+  assertEquals(pieceListRequests, 0);
+  assertEquals(deferredSpaceCellSync, true);
+  assertEquals(state.pieceMap.size, 0);
+  assertEquals(state.allPieceIds, new Set());
+});
+
+Deno.test("CellBridge retries a space after identifier listing fails", async () => {
+  const tree = new FsTree();
+  const entityId = "of:fid1:retry-entity";
+  let managerLoads = 0;
+  let disposedManagers = 0;
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: () => {
+      managerLoads++;
+      const attempt = managerLoads;
+      return Promise.resolve(
+        {
+          getSpace: () => "did:key:zRetrySpace",
+          listEntityIds: () =>
+            attempt === 1
+              ? Promise.reject(new Error("identifier list unavailable"))
+              : Promise.resolve([entityId]),
+          runtime: {
+            dispose: () => {
+              disposedManagers++;
+              return Promise.resolve();
+            },
+          },
+        } as unknown as SpaceState["manager"],
+      );
+    },
+  });
+  bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
+
+  await assertRejects(
+    () => bridge.connectSpace("home"),
+    Error,
+    "identifier list unavailable",
+  );
+  assertEquals(
+    tree.lookup(tree.rootIno, encodeFuseComponent("home")),
+    undefined,
+  );
+  assertEquals(bridge.isConnecting("home"), false);
+  assertEquals(disposedManagers, 1);
+
+  const state = await bridge.connectSpace("home");
+  assertEquals(managerLoads, 2);
+  assertEquals(
+    tree.getChildren(state.entitiesIno).map(([name]) => name),
+    [encodeFuseComponent(entityId)],
+  );
+});
+
+Deno.test("CellBridge hides a space until shared identifier discovery finishes", async () => {
+  const tree = new FsTree();
+  const discoveryStarted = defer();
+  const identifiers = defer<string[]>();
+  const entityId = "of:fid1:delayed-entity";
+  let managerLoads = 0;
+  const manager = {
+    getSpace: () => "did:key:zDelayedSpace",
+    listEntityIds: () => {
+      discoveryStarted.resolve();
+      return identifiers.promise;
+    },
+  } as unknown as SpaceState["manager"];
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: () => {
+      managerLoads++;
+      return Promise.resolve(manager);
+    },
+  });
+  bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
+
+  const firstConnection = bridge.connectSpace("home");
+  await discoveryStarted.promise;
+  assertEquals(bridge.isConnecting("home"), true);
+  assertEquals(
+    tree.lookup(tree.rootIno, encodeFuseComponent("home")),
+    undefined,
+  );
+
+  const secondConnection = bridge.connectSpace("home");
+  assertEquals(managerLoads, 1);
+  identifiers.resolve([entityId]);
+  const [firstState, secondState] = await Promise.all([
+    firstConnection,
+    secondConnection,
+  ]);
+
+  assertEquals(firstState.spaceIno, secondState.spaceIno);
+  assertEquals(bridge.isConnecting("home"), false);
+  assertEquals(
+    tree.lookup(tree.rootIno, encodeFuseComponent("home")),
+    firstState.spaceIno,
+  );
+  assertEquals(
+    tree.getChildren(firstState.entitiesIno).map(([name]) => name),
+    [encodeFuseComponent(entityId)],
+  );
+});
+
+Deno.test("CellBridge reconnect keeps an unmaterialized /pieces view identifier-only", async () => {
+  const tree = new FsTree();
+  let identifierRequests = 0;
+  let pieceListRequests = 0;
+  let disposedManagers = 0;
+  const reconnectManager = {
+    synced: () => Promise.resolve(),
+    listEntityIds: () => {
+      identifierRequests++;
+      return Promise.resolve(["of:fid1:reconnect-entity"]);
+    },
+    runtime: {
+      dispose: () => {
+        disposedManagers++;
+        return Promise.resolve();
+      },
+    },
+  } as unknown as SpaceState["manager"];
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: () => Promise.resolve(reconnectManager),
+  });
+  const state = buildTestSpace(bridge, "home", []);
+  state.piecesHydrated = false;
+  state.pieces = {
+    getAllPieces: () => {
+      pieceListRequests++;
+      return Promise.resolve([]);
+    },
+  } as unknown as SpaceState["pieces"];
+
+  const reconnectable = bridge as unknown as {
+    _disconnected: boolean;
+    _attemptReconnect(): Promise<void>;
+  };
+  reconnectable._disconnected = true;
+  await reconnectable._attemptReconnect();
+
+  assertEquals(reconnectable._disconnected, false);
+  assertEquals(identifierRequests, 1);
+  assertEquals(pieceListRequests, 0);
+  assertEquals(disposedManagers, 1);
+});
+
+Deno.test("CellBridge status reports /pieces loaded only after materialization", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+  const pieces = defer<unknown[]>();
+  state.piecesHydrated = false;
+  state.piecesMaterializing = false;
+  state.pieceListSubscribed = false;
+  state.pieces = {
+    getAllPieces: () => pieces.promise,
+  } as unknown as SpaceState["pieces"];
+  bridge.initStatus();
+
+  const preparing = bridge.prepareDirectory(state.piecesIno);
+  assertEquals(state.piecesMaterializing, true);
+  assertEquals(
+    JSON.parse(readStatusFile(tree)).spaces.home.piecesLoaded,
+    false,
+  );
+
+  pieces.resolve([]);
+  assertEquals(await preparing, true);
+  assertEquals(state.piecesMaterializing, false);
+  assertEquals(state.piecesHydrated, true);
+  assertEquals(
+    JSON.parse(readStatusFile(tree)).spaces.home.piecesLoaded,
+    true,
+  );
+});
+
+Deno.test("CellBridge real manager mount and /entities listing transfer only identifiers", async () => {
+  const signer = await Identity.fromPassphrase(
+    "fuse real manager identifier listing",
+  );
+  const session = await createSession({
+    identity: signer,
+    spaceDid: signer.did(),
+  });
+  const space = session.space;
+  const rootId = `of:${space}`;
+  const hiddenId = "of:fid1:fuse-real-manager-hidden";
+  const rootPayload = "FUSE_ROOT_ENTITY_BYTES_0fb29de4".repeat(20);
+  const hiddenPayload = "FUSE_HIDDEN_ENTITY_BYTES_6c6dfbec".repeat(20);
+  const audience = "did:key:z6Mk-fuse-entity-list-test-audience";
+  const server = new MemoryV2Server.Server({
+    authorizeSessionOpen: () => signer.did(),
+    sessionOpenAuth: { audience },
+    store: new URL(`memory://fuse-entity-list-${crypto.randomUUID()}`),
+  });
+  const sessionOpenAuth: MemoryV2Client.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: {},
+  });
+  const writerClient = await MemoryV2Client.connect({
+    transport: MemoryV2Client.loopback(server),
+  });
+  let runtime: Runtime | undefined;
+
+  try {
+    const writer = await writerClient.mount(space, {}, sessionOpenAuth);
+    await writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [
+        {
+          op: "set",
+          id: rootId,
+          value: { value: { payload: rootPayload } },
+        },
+        {
+          op: "set",
+          id: hiddenId,
+          value: { value: { payload: hiddenPayload } },
+        },
+      ],
+    });
+
+    const serverPayloads: string[] = [];
+    class RecordingSessionFactory implements SessionFactory {
+      async create(spaceId: string, _signer?: Signer) {
+        const inner = MemoryV2Client.loopback(server);
+        const transport: MemoryV2Client.Transport = {
+          send: (payload) => inner.send(payload),
+          close: () => inner.close(),
+          setReceiver: (receiver) => {
+            inner.setReceiver((payload) => {
+              serverPayloads.push(payload);
+              receiver(payload);
+            });
+          },
+          setCloseReceiver: (receiver) => {
+            inner.setCloseReceiver?.(receiver);
+          },
+        };
+        const client = await MemoryV2Client.connect({ transport });
+        const mounted = await client.mount(spaceId, {}, sessionOpenAuth);
+        return { client, session: mounted };
+      }
+    }
+    class RecordingStorageManager extends V2StorageManager {
+      constructor(as: Identity) {
+        super(
+          { as, memoryHost: new URL("memory://") } as V2StorageOptions,
+          new RecordingSessionFactory(),
+        );
+      }
+
+      override registerSpaceHost(): boolean {
+        return false;
+      }
+    }
+
+    const storageManager = new RecordingStorageManager(signer);
+    runtime = new Runtime({
+      apiUrl: new URL("https://example.invalid"),
+      storageManager,
+    });
+    const manager = new PieceManager(session, runtime, {
+      deferSpaceCellSync: true,
+    });
+    const tree = new FsTree();
+    const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+      loadManager: () => Promise.resolve(manager),
+    });
+    bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
+
+    const state = await bridge.connectSpace("home");
+    assertEquals(await bridge.prepareDirectory(state.entitiesIno), true);
+    const entries = tree.getChildren(state.entitiesIno);
+    const entryNames = new Set(entries.map(([name]) => name));
+    assertEquals(entryNames.has(encodeFuseComponent(rootId)), true);
+    assertEquals(entryNames.has(encodeFuseComponent(hiddenId)), true);
+    for (const [name, ino] of entries) {
+      assertEquals(tree.getNode(ino)?.kind, "dir");
+      assertEquals(await bridge.prepareLookup(state.entitiesIno, name), true);
+    }
+
+    assertEquals(
+      serverPayloads.some((payload) => payload.includes(rootPayload)),
+      false,
+    );
+    assertEquals(
+      serverPayloads.some((payload) => payload.includes(hiddenPayload)),
+      false,
+    );
+    assertEquals(
+      serverPayloads.some((payload) =>
+        payload.includes(rootId) && payload.includes(hiddenId)
+      ),
+      true,
+    );
+    assertEquals(state.pieceMap.size, 0);
+    assertEquals(state.pieceListSubscribed, false);
+  } finally {
+    await runtime?.dispose();
+    await writerClient.close();
+    await server.close();
+  }
+});
+
+Deno.test("CellBridge materializes allPieces when /pieces is first read", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const piece = {
+    id: "of:lazy-piece",
+    name: () => "Lazy Piece",
+    getPatternMeta: () => Promise.resolve({}),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+  };
+  const state = buildTestSpace(bridge, "home", [piece]);
+  state.allPieceIds = new Set([piece.id]);
+  state.piecesHydrated = false;
+  state.pieceListSubscribed = false;
+
+  assertEquals(bridge.shouldPrepareDirectory(state.piecesIno), true);
+  assertEquals(
+    bridge.shouldPrepareLookup(state.piecesIno, "pieces.json"),
+    true,
+  );
+  assertEquals(bridge.shouldSynchronizeLookup(state.piecesIno), true);
+  assertEquals(tree.lookup(state.piecesIno, "Lazy-Piece"), undefined);
+
+  assertEquals(
+    await bridge.prepareLookup(state.piecesIno, "pieces.json"),
+    true,
+  );
+  assertEquals(state.piecesHydrated, true);
+  assertEquals(state.pieceListSubscribed, true);
+  assertEquals(
+    tree.lookup(state.piecesIno, "Lazy-Piece") !== undefined,
+    true,
+  );
+});
+
+Deno.test("CellBridge refreshes /entities from the complete identifier list", async () => {
+  const tree = new FsTree();
+  let entityIds = ["of:fid1:original"];
+  const piecesCell = { sink: () => () => {} };
+  const manager = {
+    getSpace: () => "did:key:zEntityRefreshSpace",
+    getPieces: () => Promise.resolve(piecesCell),
+    syncPieces: () => Promise.resolve([]),
+    listEntityIds: () => Promise.resolve([...entityIds]),
+  } as unknown as SpaceState["manager"];
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: () => Promise.resolve(manager),
+  });
+  bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
+  const state = await bridge.connectSpace("home");
+
+  entityIds = ["of:fid1:replacement"];
+  assertEquals(await bridge.prepareDirectory(state.entitiesIno), true);
+  assertEquals(
+    tree.getChildren(state.entitiesIno).map(([name]) => name),
+    entityIds.map((id) => encodeFuseComponent(id)),
+  );
+});
+
+Deno.test("CellBridge removes property indexes with a deleted entity", async () => {
+  const tree = new FsTree();
+  const entityId = "of:fid1:removed-entity";
+  let entityIds = [entityId];
+  const piece = {
+    id: entityId,
+    name: () => "Removed Entity",
+    getPatternMeta: () => Promise.resolve({}),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+  };
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+  state.manager = {
+    listEntityIds: () => Promise.resolve([...entityIds]),
+  } as unknown as SpaceState["manager"];
+  state.pieces = {
+    get: () => Promise.resolve(piece),
+  } as unknown as SpaceState["pieces"];
+
+  assertEquals(await bridge.prepareDirectory(state.entitiesIno), true);
+  const entityIno = tree.lookup(
+    state.entitiesIno,
+    encodeFuseComponent(entityId),
+  )!;
+  assertEquals(await bridge.prepareDirectory(entityIno), true);
+  const inputIno = tree.lookup(entityIno, "input")!;
+  const resultIno = tree.lookup(entityIno, "result")!;
+  assertEquals(bridge.shouldPrepareDirectory(inputIno), true);
+  assertEquals(bridge.shouldPrepareDirectory(resultIno), true);
+
+  entityIds = [];
+  assertEquals(await bridge.prepareDirectory(state.entitiesIno), true);
+  assertEquals(tree.getNode(inputIno), undefined);
+  assertEquals(tree.getNode(resultIno), undefined);
+  assertEquals(bridge.shouldPrepareDirectory(inputIno), false);
+  assertEquals(bridge.shouldPrepareDirectory(resultIno), false);
+});
+
+Deno.test("CellBridge does not load allPieces without identifier-list support", async () => {
+  const tree = new FsTree();
+  const entityId = "of:fid1:legacy-piece";
+  let entityValueRequests = 0;
+  const rejectEntityValueRequest = () => {
+    entityValueRequests++;
+    throw new Error("legacy fallback must not load the entity value");
+  };
+  const listedPieceCell = {
+    entityId: { "/": entityId },
+    asSchema() {
+      return this;
+    },
+    get: rejectEntityValueRequest,
+    getRaw: rejectEntityValueRequest,
+    sync: rejectEntityValueRequest,
+  };
+  let pieceListRequests = 0;
+  const manager = {
+    getSpace: () => "did:key:zLegacyEntityListSpace",
+    getPieces: () => {
+      pieceListRequests++;
+      return Promise.resolve({ sink: () => () => {} });
+    },
+    syncPieces: () => {
+      pieceListRequests++;
+      return Promise.resolve([listedPieceCell]);
+    },
+    listEntityIds: () => Promise.resolve(undefined),
+    get: rejectEntityValueRequest,
+  } as unknown as SpaceState["manager"];
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: () => Promise.resolve(manager),
+  });
+  bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
+
+  const state = await bridge.connectSpace("home");
+  assertEquals(await bridge.prepareDirectory(state.entitiesIno), true);
+
+  assertEquals(
+    tree.getChildren(state.entitiesIno).map(([name]) => name),
+    [],
+  );
+  assertEquals(state.hasCompleteEntityList, false);
+  assertEquals(entityValueRequests, 0);
+  assertEquals(pieceListRequests, 0);
+});
 
 // ---------------------------------------------------------------------------
 // Group 1: loadPieceTree — initial tree structure

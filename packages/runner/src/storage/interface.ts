@@ -365,6 +365,9 @@ export interface IStorageProvider {
 export interface IStorageProviderWithReplica extends IStorageProvider {
   replica: ISpaceReplica;
 
+  /** List live space-scoped entity identifiers without loading their values. */
+  listEntityIds?(): Promise<string[] | undefined>;
+
   /**
    * Internal scheduler persistence query. Memory v2 providers implement this
    * so the runner can rebuild scheduler indexes from persisted observations.
