@@ -1347,10 +1347,12 @@ Behavior:
    these is dropped from the options object.
 
    The code carries a `checker.getConstantValue()` fallback intended to recover
-   a named constant or enum member, but it does not fire at this point in the
-   pipeline: `{ maxProperties: K }` and `{ maxProperties: E.One }` are both
-   dropped where `{ maxProperties: 1 }` survives. Treat only literal values as
-   supported here.
+   a named constant or enum member. It runs, but the call returns `undefined`
+   for these nodes here (verified for both an `Identifier` and a
+   `PropertyAccessExpression`), so `{ maxProperties: K }` and
+   `{ maxProperties: E.One }` are both dropped where `{ maxProperties: 1 }`
+   survives. Why the checker recovers no constant value at this stage is not
+   established here; treat only literal values as supported.
 3. extract `widenLiterals` generation option
 4. generate schema via `createSchemaTransformerV2`
 5. merge non-generation options into resulting schema object
