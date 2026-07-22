@@ -82,6 +82,35 @@ Deno.test("findJsonUnfaithfulValues: catches a symbol-keyed property", () => {
   assertEquals(found[0]!.reason.includes("symbol-keyed"), true);
 });
 
+Deno.test("findJsonUnfaithfulValues: catches a non-index property on an array", () => {
+  // `JSON.stringify` serializes an array's indices only; an extra own property
+  // is dropped. The indices themselves stay faithful.
+  const withExtra = Object.assign([1, 2], { foo: 3 });
+  const found = findJsonUnfaithfulValues({ default: withExtra });
+  assertEquals(found.length, 1);
+  assertEquals(found[0]!.pointer, "/default/foo");
+  assertEquals(found[0]!.reason.includes("non-index"), true);
+});
+
+Deno.test("findJsonUnfaithfulValues: catches a toJSON hook, even non-enumerable", () => {
+  // `toJSON` replaces the value before JSON sees its contents, so the walk
+  // cannot certify what would be sent.
+  assertEquals(
+    findJsonUnfaithfulValues({ a: 1, toJSON: () => 5 }).length,
+    1,
+  );
+
+  const hidden: Record<string, unknown> = { a: 1 };
+  Object.defineProperty(hidden, "toJSON", {
+    value: () => 5,
+    enumerable: false,
+  });
+  const found = findJsonUnfaithfulValues({ default: hidden });
+  assertEquals(found.length, 1);
+  assertEquals(found[0]!.pointer, "/default");
+  assertEquals(found[0]!.reason.includes("toJSON"), true);
+});
+
 Deno.test("findJsonUnfaithfulValues: catches a non-plain object (a class instance)", () => {
   // A `FabricBytes` keeps its data in private fields, so `JSON.stringify` finds
   // nothing to emit. Any class instance is rejected, no data-model import

@@ -14,9 +14,11 @@
 // and plain objects whose values are accepted. Everything else is reported:
 // `undefined` (dropped from an object, `null` in an array), `NaN` / `±Infinity`
 // (become `null`), `-0` (loses its sign), `bigint` / `symbol` / `function`
-// (not representable), array holes (`null`), symbol-keyed properties (dropped),
-// non-plain objects such as a `FabricBytes` (flattened -- `JSON.stringify`
-// finds no data in its private fields), and cycles (`JSON.stringify` throws).
+// (not representable), array holes (`null`), a non-index property on an array
+// (dropped), symbol-keyed properties (dropped), a `toJSON` hook (replaces the
+// value before JSON sees it), non-plain objects such as a `FabricBytes`
+// (flattened -- `JSON.stringify` finds no data in its private fields), and
+// cycles (`JSON.stringify` throws).
 //
 // A blacklist that only hunted bad numbers would pass every one of those: they
 // leave no offending numeric leaf, yet JSON still alters them. Whitelisting is
@@ -95,7 +97,39 @@ function walk(
   }
   ancestors.add(obj);
   try {
+    // A `toJSON` hook (own, even non-enumerable) replaces this value before
+    // JSON sees its contents, so what the provider receives is whatever it
+    // returns -- not the value walked here. Refuse: this check cannot certify
+    // something it does not get to look at.
+    const toJson = Object.getOwnPropertyDescriptor(obj, "toJSON");
+    if (toJson !== undefined && typeof toJson.value === "function") {
+      out.push({
+        pointer,
+        reason: "toJSON method (JSON.stringify would replace this value)",
+      });
+      return;
+    }
+
+    // Symbol-keyed properties carry data JSON silently drops, on an array or a
+    // plain object alike.
+    if (Object.getOwnPropertySymbols(obj).length > 0) {
+      out.push({ pointer, reason: "symbol-keyed properties (dropped)" });
+    }
+
     if (Array.isArray(obj)) {
+      // JSON serializes an array's indices only; any other own property is
+      // dropped. `Object.keys` yields the present indices plus those extras.
+      for (const key of Object.keys(obj)) {
+        const index = Number(key);
+        const isIndex = Number.isInteger(index) && index >= 0 &&
+          index < obj.length && String(index) === key;
+        if (!isIndex) {
+          out.push({
+            pointer: pointerChild(pointer, key),
+            reason: "non-index array property (dropped)",
+          });
+        }
+      }
       for (let i = 0; i < obj.length; i++) {
         if (!(i in obj)) {
           out.push({
@@ -118,10 +152,6 @@ function walk(
       return;
     }
 
-    // A plain object. Symbol-keyed properties carry data JSON silently drops.
-    if (Object.getOwnPropertySymbols(obj).length > 0) {
-      out.push({ pointer, reason: "symbol-keyed properties (dropped)" });
-    }
     for (const [key, child] of Object.entries(obj)) {
       walk(child, pointerChild(pointer, key), ancestors, out);
     }
