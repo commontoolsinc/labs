@@ -463,7 +463,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           scopedLinkForPath(cfc, link, path, targetSchema ?? sourceSchema),
           { includeSchema: true, overwrite: "redirect" },
         );
-      } else if (typeof alias.cell === "string") {
+      } else {
         // Resolve the special values for "argument" and "result".
         const link = alias.cell === "argument"
           ? argumentCellLink
@@ -494,8 +494,6 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           { includeSchema: true, overwrite: "redirect" },
         );
       }
-      // TODO(@ubik2) - we may never get here -- see if this can be removed
-      return { $alias: alias };
     } else if (Array.isArray(binding)) {
       return binding.map((value, index) =>
         convert(
