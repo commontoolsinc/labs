@@ -50,6 +50,10 @@ export type {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "./storage/interface.ts";
+export type {
+  EntityIdListOptions,
+  EntityIdListResult,
+} from "@commonfabric/memory/v2";
 export {
   debugTransactionWrites,
   formatTransactionSummary,

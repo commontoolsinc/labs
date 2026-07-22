@@ -263,6 +263,10 @@ export interface MemoryProtocolFlags {
   sqliteCommitRowLabelEval: boolean;
   /** The server can list live space-scoped entity identifiers without values. */
   entityIdListing: boolean;
+  /** The server can page one stable entity-identifier snapshot. */
+  entityIdPagination: boolean;
+  /** The server can test one entity identifier without loading its value. */
+  entityIdLookup: boolean;
 }
 
 /**
@@ -276,6 +280,8 @@ export type WireMemoryProtocolFlags = {
   syncSchemaTableV2?: boolean;
   sqliteCommitRowLabelEval?: boolean;
   entityIdListing?: boolean;
+  entityIdPagination?: boolean;
+  entityIdLookup?: boolean;
 };
 
 export interface HelloMessage {
@@ -345,6 +351,18 @@ export interface GraphQueryResult {
 export interface EntityIdListResult {
   serverSeq: number;
   ids: EntityId[];
+  nextAfter?: EntityId;
+}
+
+export interface EntityIdListOptions {
+  after?: EntityId;
+  limit?: number;
+  expectedServerSeq?: number;
+}
+
+export interface EntityIdLookupResult {
+  serverSeq: number;
+  exists: boolean;
 }
 
 export interface QueryWatchSpec {
@@ -429,6 +447,17 @@ export interface EntityIdListRequest {
   requestId: string;
   space: string;
   sessionId: SessionId;
+  after?: EntityId;
+  limit?: number;
+  expectedServerSeq?: number;
+}
+
+export interface EntityIdLookupRequest {
+  type: "entity-id.exists";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  id: EntityId;
 }
 
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
@@ -671,6 +700,7 @@ export type ClientMessage =
   | TransactRequest
   | GraphQueryRequest
   | EntityIdListRequest
+  | EntityIdLookupRequest
   | SqliteQueryRequest
   | SqliteRegisterDiskSourceRequest
   | WatchSetRequest
@@ -759,6 +789,8 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // The engine answers this request from its identifier index without
   // selecting stored entity values.
   entityIdListing: true,
+  entityIdPagination: true,
+  entityIdLookup: true,
   syncSchemaTableV2: getSyncSchemaTableConfig(),
 });
 
@@ -840,6 +872,22 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const entityIdPagination = value.entityIdPagination;
+  if (
+    entityIdPagination !== undefined &&
+    typeof entityIdPagination !== "boolean"
+  ) {
+    return null;
+  }
+
+  const entityIdLookup = value.entityIdLookup;
+  if (
+    entityIdLookup !== undefined &&
+    typeof entityIdLookup !== "boolean"
+  ) {
+    return null;
+  }
+
   return {
     modernCellRep: modernCellRep === true,
     persistentSchedulerState: persistentSchedulerState === true,
@@ -850,6 +898,8 @@ export const parseMemoryProtocolFlags = (
     // POSITIVELY advertised for the runner to relax its write gate.
     sqliteCommitRowLabelEval: sqliteCommitRowLabelEval === true,
     entityIdListing: entityIdListing === true,
+    entityIdPagination: entityIdPagination === true,
+    entityIdLookup: entityIdLookup === true,
   };
 };
 
@@ -866,6 +916,8 @@ export const wireMemoryProtocolFlags = (
   syncSchemaTableV2: flags.syncSchemaTableV2,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
   entityIdListing: flags.entityIdListing,
+  entityIdPagination: flags.entityIdPagination,
+  entityIdLookup: flags.entityIdLookup,
 });
 
 /**

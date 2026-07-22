@@ -3,7 +3,10 @@ import {
   compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
+  type EntityId,
+  type EntityIdListOptions,
   type EntityIdListResult,
+  type EntityIdLookupResult,
   type EntitySnapshot,
   getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
@@ -575,16 +578,39 @@ export class SpaceSession {
     return result;
   }
 
-  async listEntityIds(): Promise<EntityIdListResult | undefined> {
+  async listEntityIds(
+    options: EntityIdListOptions = {},
+  ): Promise<EntityIdListResult | undefined> {
     this.#assertOpen();
     if (this.client.serverFlags?.entityIdListing !== true) {
       return undefined;
     }
+    const pagination = this.client.serverFlags.entityIdPagination === true;
     const result = await this.client.request<EntityIdListResult>({
       type: "entity-id.list",
       requestId: crypto.randomUUID(),
       space: this.space,
       sessionId: this.#sessionId,
+      ...(pagination ? options : {}),
+    });
+
+    this.noteResult(result.serverSeq);
+    return result;
+  }
+
+  async entityIdExists(
+    id: EntityId,
+  ): Promise<EntityIdLookupResult | undefined> {
+    this.#assertOpen();
+    if (this.client.serverFlags?.entityIdLookup !== true) {
+      return undefined;
+    }
+    const result = await this.client.request<EntityIdLookupResult>({
+      type: "entity-id.exists",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      id,
     });
 
     this.noteResult(result.serverSeq);

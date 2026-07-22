@@ -538,6 +538,37 @@ WHERE branch = :branch
 ORDER BY id ASC
 `;
 
+const SELECT_CURRENT_ENTITY_ID_PAGE = `
+SELECT id
+FROM head
+WHERE branch = :branch
+  AND scope_key = :scope_key
+  AND op <> 'delete'
+ORDER BY id ASC
+LIMIT :limit
+`;
+
+const SELECT_CURRENT_ENTITY_ID_PAGE_AFTER = `
+SELECT id
+FROM head
+WHERE branch = :branch
+  AND scope_key = :scope_key
+  AND op <> 'delete'
+  AND id > :after
+ORDER BY id ASC
+LIMIT :limit
+`;
+
+const SELECT_CURRENT_ENTITY_ID = `
+SELECT 1 AS present
+FROM head
+WHERE branch = :branch
+  AND scope_key = :scope_key
+  AND id = :id
+  AND op <> 'delete'
+LIMIT 1
+`;
+
 const SELECT_AT_SEQ_LOCAL = `
 SELECT seq, op_index, op, data
 FROM revision
@@ -738,7 +769,10 @@ interface PreparedStatements {
   selectBranchStatus: PreparedStatement;
   selectCommitRevisions: PreparedStatement;
   selectCurrentLocal: PreparedStatement;
+  selectCurrentEntityId: PreparedStatement;
   selectCurrentEntityIds: PreparedStatement;
+  selectCurrentEntityIdPage: PreparedStatement;
+  selectCurrentEntityIdPageAfter: PreparedStatement;
   selectExistingCommit: PreparedStatement;
   selectHead: PreparedStatement;
   selectLatestBase: PreparedStatement;
@@ -1189,7 +1223,12 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   selectBranchStatus: database.prepare(SELECT_BRANCH_STATUS),
   selectCommitRevisions: database.prepare(SELECT_COMMIT_REVISIONS),
   selectCurrentLocal: database.prepare(SELECT_CURRENT_LOCAL),
+  selectCurrentEntityId: database.prepare(SELECT_CURRENT_ENTITY_ID),
   selectCurrentEntityIds: database.prepare(SELECT_CURRENT_ENTITY_IDS),
+  selectCurrentEntityIdPage: database.prepare(SELECT_CURRENT_ENTITY_ID_PAGE),
+  selectCurrentEntityIdPageAfter: database.prepare(
+    SELECT_CURRENT_ENTITY_ID_PAGE_AFTER,
+  ),
   selectExistingCommit: database.prepare(SELECT_EXISTING_COMMIT),
   selectHead: database.prepare(SELECT_HEAD),
   selectLatestBase: database.prepare(SELECT_LATEST_BASE),
@@ -2366,6 +2405,41 @@ export const listEntityIds = (
     branch,
     scope_key: DEFAULT_SCOPE_KEY,
   }) as { id: EntityId }[]).map(({ id }) => id);
+};
+
+export interface EntityIdPageOptions {
+  after?: EntityId;
+  limit: number;
+  branch?: BranchName;
+}
+
+export const listEntityIdPage = (
+  engine: Engine,
+  { after, limit, branch = DEFAULT_BRANCH }: EntityIdPageOptions,
+): EntityId[] => {
+  ensureReadableBranch(engine, branch);
+  const statement = after === undefined
+    ? engine.statements.selectCurrentEntityIdPage
+    : engine.statements.selectCurrentEntityIdPageAfter;
+  return (statement.all({
+    branch,
+    scope_key: DEFAULT_SCOPE_KEY,
+    limit,
+    ...(after === undefined ? {} : { after }),
+  }) as { id: EntityId }[]).map(({ id }) => id);
+};
+
+export const entityIdExists = (
+  engine: Engine,
+  id: EntityId,
+  branch: BranchName = DEFAULT_BRANCH,
+): boolean => {
+  ensureReadableBranch(engine, branch);
+  return engine.statements.selectCurrentEntityId.get({
+    branch,
+    scope_key: DEFAULT_SCOPE_KEY,
+    id,
+  }) !== undefined;
 };
 
 export const read = (
