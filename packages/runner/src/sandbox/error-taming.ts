@@ -44,26 +44,32 @@ const FERAL_IS_ERROR: unknown = (Error as { isError?: unknown }).isError;
 
 /**
  * Reinstall `Error.isError` on both post-repair error constructors. Must be
- * called after `repairIntrinsics()` and before `hardenIntrinsics()`; a no-op
- * on a runtime whose `Error` never had the method.
+ * called after `repairIntrinsics()` and before `hardenIntrinsics()`.
+ *
+ * Installs nothing unless handed a function, which is how a runtime whose
+ * `Error` never had the method declines: `FERAL_IS_ERROR` is `undefined` there
+ * and the default carries it in. Defining the property as `undefined` instead
+ * would fail SES's `isError: fn` permit, so the harden pass would strip it
+ * right back out and report an unpermitted intrinsic on every lockdown.
+ *
+ * `isError` is a parameter only so that path is reachable from a test; callers
+ * pass nothing.
  */
-export function restoreErrorIsError(): void {
-  if (typeof FERAL_IS_ERROR !== "function") return;
+export function restoreErrorIsError(isError: unknown = FERAL_IS_ERROR): void {
+  if (typeof isError !== "function") return;
 
-  // `%SharedError%` — the constructor compartments get — is not a global, but
-  // repair leaves it as the shared `Error.prototype.constructor`.
-  const initialError: object = Error;
-  const sharedError: unknown = Error.prototype.constructor;
-  const constructors = sharedError === initialError
-    ? [initialError]
-    : [initialError, sharedError as object];
-
-  for (const constructor of constructors) {
+  // Both constructors, and they are always distinct: repair mints
+  // `%InitialError%` for the host realm and the powerless `%SharedError%` for
+  // compartments. Only the first is a global; repair leaves the second as the
+  // shared `Error.prototype.constructor`.
+  for (
+    const constructor of [Error, Error.prototype.constructor as object]
+  ) {
     // Matches the descriptor a standard built-in method carries. Harden makes
     // it non-writable and non-configurable a moment later, as it does for the
     // stack-surface properties SES itself defines here.
     Object.defineProperty(constructor, "isError", {
-      value: FERAL_IS_ERROR,
+      value: isError,
       writable: true,
       enumerable: false,
       configurable: true,

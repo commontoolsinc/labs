@@ -17,6 +17,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { tagFromNativeValue } from "@commonfabric/data-model/native-type-tags";
+import { restoreErrorIsError } from "../src/sandbox/error-taming.ts";
 import {
   ensureSESLockdown,
   evaluateFunctionSourceInSES,
@@ -54,6 +55,25 @@ describe("Error.isError under SES lockdown", () => {
       expect(descriptor?.writable).toBe(false);
       expect(descriptor?.configurable).toBe(false);
       expect(descriptor?.enumerable).toBe(false);
+    });
+
+    it("installs nothing when handed a non-function", () => {
+      // How a runtime without `Error.isError` declines. Every runtime we run
+      // on has it, but an older browser would not, and there the shim must
+      // define nothing rather than define the property as `undefined` — which
+      // fails SES's `isError: fn` permit and gets stripped back out with an
+      // unpermitted-intrinsic report on every lockdown.
+      //
+      // `null` rather than the `undefined` a real such runtime would supply:
+      // an explicit `undefined` argument re-triggers the parameter default and
+      // would install the method after all. Production passes no argument, so
+      // it gets the default honestly; the guard under test is the same one.
+      //
+      // That the call is a no-op is also what makes it safe here at all —
+      // `Error` is frozen by now, and defining onto it throws.
+      ensureSESLockdown();
+      restoreErrorIsError(null);
+      expect(typeof (Error as { isError?: unknown }).isError).toBe("function");
     });
   });
 

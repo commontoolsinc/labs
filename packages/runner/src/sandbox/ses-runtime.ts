@@ -336,14 +336,13 @@ function ensureSESInitialized(lockdownEnabled: boolean): void {
   repairFn(DEFAULT_LOCKDOWN_OPTIONS);
   // Vetted shim — must sit between the two phases; see error-taming.ts.
   restoreErrorIsError();
-  const globalWithPhases = globalThis as {
-    hardenIntrinsics?: () => void;
-  };
-  const hardenFn = globalWithPhases.hardenIntrinsics;
-  if (typeof hardenFn !== "function") {
-    throw new Error("SES hardenIntrinsics() is unavailable");
-  }
-  hardenFn();
+  // Asserted, not guarded: the repair call above is what reveals
+  // `hardenIntrinsics`, so its absence is not an environment question the way
+  // `repairIntrinsics` itself is — it would mean ses broke its own contract.
+  // Were that ever to happen this throws, which is the outcome that matters;
+  // the one thing lockdown must never do is quietly skip the harden.
+  const globalWithPhases = globalThis as { hardenIntrinsics?: () => void };
+  globalWithPhases.hardenIntrinsics!();
   // `lockdown()` never reveals `hardenIntrinsics`, so drop it again: the host
   // realm's global surface should differ from the one-call form only by the
   // restored `Error.isError`. It is spent either way — the phases have run —
