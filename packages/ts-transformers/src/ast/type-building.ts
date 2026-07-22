@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { isCommonFabricSymbol as isTrustedCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import type { CaptureTreeNode } from "../utils/capture-tree.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
@@ -55,22 +56,14 @@ export function qualifyCommonFabricTypeRefs(
 ): ts.TypeNode {
   const { factory } = context;
 
-  // Module symbol names are stored with surrounding double quotes for
-  // external modules (e.g. `"commonfabric"`). Match either form.
-  const isCommonFabricModuleName = (name: string | undefined): boolean =>
-    name === "commonfabric" || name === '"commonfabric"';
-
   const buildHelperQualifiedName = (leafName: string): ts.QualifiedName =>
     factory.createQualifiedName(
       factory.createIdentifier("__cfHelpers"),
       factory.createIdentifier(leafName),
     );
 
-  const isCommonFabricSymbol = (sym: ts.Symbol | undefined): boolean => {
-    if (!sym) return false;
-    const parent = (sym as unknown as { parent?: ts.Symbol }).parent;
-    return isCommonFabricModuleName(parent?.name) && !!sym.name;
-  };
+  const isTrustedExportSymbol = (sym: ts.Symbol | undefined): boolean =>
+    !!sym && isTrustedCommonFabricSymbol(sym, context.checker);
 
   // From a Type, find the export name in commonfabric (if any).
   //
@@ -92,11 +85,11 @@ export function qualifyCommonFabricTypeRefs(
   ): string | undefined => {
     if (!type) return undefined;
     if (type.aliasSymbol) {
-      return isCommonFabricSymbol(type.aliasSymbol)
+      return isTrustedExportSymbol(type.aliasSymbol)
         ? type.aliasSymbol.name
         : undefined;
     }
-    return isCommonFabricSymbol(type.symbol) ? type.symbol.name : undefined;
+    return isTrustedExportSymbol(type.symbol) ? type.symbol.name : undefined;
   };
 
   // For a union/intersection member TypeNode, find the constituent Type to
@@ -189,18 +182,20 @@ export function qualifyCommonFabricTypeRefs(
   // paired info isn't available — in that case nested ImportType
   // recognition still works (it's purely syntactic), but bare-identifier
   // commonfabric-ref detection is skipped (no false-positive risk).
-  const walk = (
+  const walkNode = (
     node: ts.TypeNode,
     pairedType: ts.Type | undefined,
   ): ts.TypeNode => {
-    // `import("commonfabric").X<...>` → `__cfHelpers.X<...>` (syntactic).
+    // `import("commonfabric").X<...>` is rewritten only when its paired type
+    // resolves to a compiler-trusted Common Fabric declaration.
     if (ts.isImportTypeNode(node) && !node.isTypeOf) {
       const arg = node.argument;
       if (
         ts.isLiteralTypeNode(arg) &&
         ts.isStringLiteral(arg.literal) &&
         arg.literal.text === "commonfabric" &&
-        node.qualifier
+        node.qualifier &&
+        commonFabricExportName(pairedType)
       ) {
         const leafName = ts.isIdentifier(node.qualifier)
           ? node.qualifier.text
@@ -336,6 +331,21 @@ export function qualifyCommonFabricTypeRefs(
     return node;
   };
 
+  // Every lockstep-walked descendant is consumed later by identity through the
+  // shared type registry. Register the complete walk, not only the root:
+  // detached child nodes cannot recover exact aliases or generic instantiations
+  // from checker source positions after emission transforms.
+  function walk(
+    node: ts.TypeNode,
+    pairedType: ts.Type | undefined,
+  ): ts.TypeNode {
+    const result = walkNode(node, pairedType);
+    if (pairedType && context.typeRegistry) {
+      context.typeRegistry.set(result, pairedType);
+    }
+    return result;
+  }
+
   const result = walk(typeNode, rootType);
 
   // Carry the registry association forward. The walk returns a fresh node when
@@ -445,6 +455,11 @@ export function expressionToTypeNode(
   );
   if (declaredTypeNode) {
     const type = context.checker.getTypeFromTypeNode(declaredTypeNode);
+    registerSourceTypeNodeTree(
+      declaredTypeNode,
+      context.checker,
+      context.options.state?.typeRegistry,
+    );
     // Deep position-stripped clone: the declaration may live in another
     // source file, and a shallow clone keeps child positions — the printer
     // would slice the EMIT file's text at those offsets, corrupting literal
@@ -469,6 +484,27 @@ export function expressionToTypeNode(
     context,
     context.options.state?.typeRegistry,
   );
+}
+
+function registerSourceTypeNodeTree(
+  root: ts.TypeNode,
+  checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): void {
+  if (!typeRegistry) return;
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isTypeNode(node) && !typeRegistry.has(node)) {
+      try {
+        typeRegistry.set(node, checker.getTypeFromTypeNode(node));
+      } catch {
+        // A source child that the checker cannot resolve stays unregistered;
+        // downstream node analysis will retain its conservative fallback.
+      }
+    }
+    node.forEachChild(visit);
+  };
+  visit(root);
 }
 
 function getDestructuredBindingDeclaredTypeNode(
@@ -663,7 +699,7 @@ export function cloneTypeNodeDeepForEmission<T extends ts.TypeNode>(
  *
  * Both reactive-input sites share this: closure-captured inputs (the capture
  * leaves below — `computed`/`lift`, `handler`/`action`, reactive array methods,
- * `patternTool`) and the condition of `ifElse`/`when`/`unless` (checked where
+ * `pattern`) and the condition of `ifElse`/`when`/`unless` (checked where
  * their schemas are built). `reportDiagnosticOnce` keeps the same value from
  * being reported twice when more than one stage walks it.
  */

@@ -2,6 +2,7 @@
 
 import {
   type CallableKind,
+  encodeFactoryProjection,
   isHandlerCell,
   isStreamValue,
   transformCallableValues,
@@ -35,6 +36,14 @@ export function safeStringify(value: unknown, indent = 2): string {
   return JSON.stringify(
     value,
     function (this: unknown, _key, val) {
+      // JSON.stringify calls a value's toJSON() before invoking the replacer.
+      // Read the holder's original property so live factories are projected
+      // canonically instead of being replaced by their legacy graph view.
+      const original = typeof this === "object" && this !== null
+        ? Reflect.get(this, _key)
+        : val;
+      const factoryProjection = encodeFactoryProjection(original);
+      if (factoryProjection !== undefined) return factoryProjection;
       if (val !== null && typeof val === "object") {
         while (
           ancestors.length > 0 &&

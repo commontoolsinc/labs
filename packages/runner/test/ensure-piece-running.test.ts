@@ -107,6 +107,53 @@ describe("ensurePieceRunning", () => {
     expect(result).toBe(false);
   });
 
+  it("does not start a piece after its load continuation is aborted", async () => {
+    const resultCell = runtime.getCell(
+      space,
+      "aborted-load-test-result",
+      undefined,
+      tx,
+    );
+    resultCell.set({ value: 1 });
+    resultCell.setMetaRaw("patternIdentity", {
+      identity: "aborted-load-pattern",
+      symbol: "default",
+    });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const loadRequested = Promise.withResolvers<void>();
+    const loadResult = Promise.withResolvers<Pattern | undefined>();
+    const patternManager = runtime.patternManager as unknown as {
+      loadPatternByIdentity: () => Promise<Pattern | undefined>;
+    };
+    patternManager.loadPatternByIdentity = () => {
+      loadRequested.resolve();
+      return loadResult.promise;
+    };
+    let startCalls = 0;
+    const startableRuntime = runtime as unknown as {
+      start: () => Promise<boolean>;
+    };
+    startableRuntime.start = () => {
+      startCalls++;
+      return Promise.resolve(true);
+    };
+
+    const controller = new AbortController();
+    const attempt = ensurePieceRunning(
+      runtime,
+      resultCell.getAsNormalizedFullLink(),
+      controller.signal,
+    );
+    await loadRequested.promise;
+    controller.abort();
+    loadResult.resolve({} as Pattern);
+
+    expect(await attempt).toBe(false);
+    expect(startCalls).toBe(0);
+  });
+
   it("should start a piece with valid result metadata", async () => {
     // Create a simple pattern
     let patternRan = false;
@@ -390,8 +437,10 @@ describe("queueEvent with auto-start", () => {
     await storageManager?.close();
   });
 
-  it("should start piece when event sent to result cell path, but not retry if no handler", async () => {
-    // Create a pattern with a reactive lift (to prove it starts) but NO event handler
+  it("keeps a queued event until its exact handler registers during startup", async () => {
+    // Create a pattern with a reactive lift (to prove it starts) but no handler
+    // in the root graph. This is indistinguishable from a nested handler that
+    // will register after root startup, so the event must remain parked.
     let liftRunCount = 0;
 
     const pattern: Pattern = {
@@ -432,7 +481,7 @@ describe("queueEvent with auto-start", () => {
           inputs: { $alias: { cell: "argument", path: ["value"] } },
           outputs: { $alias: { partialCause: "doubled", path: [] } },
         },
-        // Note: NO handler node for events - this is intentional
+        // No root handler node for events — registration arrives below.
       ],
     };
 
@@ -490,26 +539,27 @@ describe("queueEvent with auto-start", () => {
     const eventsLink = eventsCell.getAsNormalizedFullLink();
     runtime.scheduler.queueEvent(eventsLink, { type: "click" });
 
-    // Wait for auto-start, then demand the output written by the started piece.
+    let handlerRunCount = 0;
+    const cancelHandler = runtime.scheduler.addEventHandler(() => {
+      handlerRunCount++;
+    }, eventsLink);
+    const doubled = doubledCell.pull();
     await runtime.idle();
-    await doubledCell.pull();
-
-    // The piece should have been started (lift ran)
+    await doubled;
+    expect(runtime.runner.cancels.size).toBe(1);
     expect(liftRunCount).toBe(1);
-
-    // The result should show the lift's output
     expect(resultCell.getAsQueryResult()).toMatchObject({ doubled: 10 });
+    expect(handlerRunCount).toBe(1);
 
-    // Send another event - ensurePieceRunning may be called again but
-    // runSynced is idempotent so the piece won't restart
+    // A later event uses the live registration directly and does not restart
+    // the already-running piece.
     runtime.scheduler.queueEvent(eventsLink, { type: "click" });
 
     await runtime.idle();
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    await runtime.idle();
 
-    // Lift should still only have run once because runSynced is idempotent
+    expect(handlerRunCount).toBe(2);
     expect(liftRunCount).toBe(1);
+    cancelHandler();
   });
 
   it("should start piece and process event when handler is defined", async () => {

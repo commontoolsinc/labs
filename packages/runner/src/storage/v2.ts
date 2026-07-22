@@ -3,6 +3,11 @@ import {
   cloneWithoutValueAtPath,
   cloneWithValueAtPath,
 } from "@commonfabric/data-model/fabric-value";
+import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+  mapFactoryStateValues,
+} from "@commonfabric/data-model/fabric-factory";
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import type { Entity } from "@commonfabric/memory/interface";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
@@ -23,6 +28,7 @@ import {
   type ClientCommit,
   type CommitPrecondition,
   type DocumentPath,
+  type EnsureOperation,
   type EntityDocument,
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
@@ -77,6 +83,7 @@ import type {
   IStorageSubscription,
   IStorageTransaction,
   NativeStorageCommit,
+  NativeStorageCommitOperation,
   PullError,
   PushError,
   Result,
@@ -1407,6 +1414,26 @@ export class StorageManager implements IStorageManager {
     if (value === null || value === undefined || seen.has(value)) {
       return;
     }
+
+    if (isAdmittedFabricFactory(value)) {
+      seen.add(value);
+      const state = factoryStateOf(value);
+      mapFactoryStateValues(state, (nested, field) => {
+        this.collectLinkedCellSyncs(
+          nested,
+          base,
+          field === "params" && state.kind === "pattern"
+            ? state.paramsSchema
+            : undefined,
+          cfc,
+          promises,
+          seen,
+        );
+        return nested;
+      });
+      return;
+    }
+
     if (typeof value !== "object") {
       return;
     }
@@ -1627,6 +1654,40 @@ type NativeCommitOperation =
   }
   | { op: "delete"; id: URI; scope?: CellScope };
 
+type WireOnlyOperation = EnsureOperation;
+
+const isPromiseLike = <T>(value: T | Promise<T>): value is Promise<T> =>
+  typeof (value as { then?: unknown })?.then === "function";
+
+const normalizeWireOnlyOperations = (
+  operations: readonly NativeStorageCommitOperation[],
+): WireOnlyOperation[] =>
+  operations
+    .filter((operation) => operation.type === DOCUMENT_MIME)
+    .map((operation) => {
+      if (operation.op !== "ensure") {
+        throw new Error(
+          `native commit preparation may only produce ensure operations, got ${operation.op}`,
+        );
+      }
+      return {
+        op: "ensure" as const,
+        id: operation.id,
+        scope: operation.scope,
+        value: toExplicitDocument(operation.value),
+        ...(operation.ignore?.length ? { ignore: [...operation.ignore] } : {}),
+        ...(operation.addUnique?.length
+          ? { addUnique: [...operation.addUnique] }
+          : {}),
+      };
+    });
+
+interface WireSendReservation {
+  readonly predecessor: Promise<void> | undefined;
+  readonly releaseTurn: () => void;
+  readonly releaseTurnInOrder: () => Promise<void>;
+}
+
 type SchedulerObservationBatchEntry = {
   commit: SchedulerObservationCommit;
   pending: PromiseWithResolvers<Result<Unit, StorageTransactionRejected>>;
@@ -1690,6 +1751,9 @@ class SpaceReplica implements ISpaceReplica {
   #queuedWatchRefresh: WatchRefreshBatch | null = null;
   #queuedWatchRefreshScheduled = false;
   #watchRefreshFlushing = false;
+  // Wire sends are released in localSeq order. A cold artifact preparation may
+  // hold one turn without delaying later transactions' optimistic local apply.
+  #wireSendTail: Promise<void> | undefined;
 
   constructor(options: ProviderOptions) {
     this.#space = options.space;
@@ -2136,56 +2200,126 @@ class SpaceReplica implements ISpaceReplica {
       ? transaction.schedulerObservation
       : undefined;
     const preconditions = activeCommitPreconditions(transaction.preconditions);
-    const operations = withCommitTiming(
+    const { operations, wireOperations } = withCommitTiming(
       ["commitNative", "normalize"],
-      () =>
-        transaction.operations
-          .filter((operation) => operation.type === DOCUMENT_MIME)
-          .map((operation) =>
-            operation.op === "delete"
-              ? {
-                op: "delete" as const,
-                id: operation.id,
-                scope: operation.scope,
-              }
-              : operation.op === "patch"
-              ? {
-                op: "patch" as const,
-                id: operation.id,
-                scope: operation.scope,
-                patches: operation.patches,
-                value: toExplicitDocument(operation.value),
-              }
-              : {
-                op: "set" as const,
-                id: operation.id,
-                scope: operation.scope,
-                value: toExplicitDocument(operation.value),
-              }
-          ),
+      () => {
+        const operations: NativeCommitOperation[] = [];
+        const wireOperations: WireOnlyOperation[] = [];
+        for (const operation of transaction.operations) {
+          if (operation.type !== DOCUMENT_MIME) continue;
+          if (operation.op === "ensure") {
+            wireOperations.push(...normalizeWireOnlyOperations([operation]));
+          } else if (operation.op === "delete") {
+            operations.push({
+              op: "delete",
+              id: operation.id,
+              scope: operation.scope,
+            });
+          } else if (operation.op === "patch") {
+            operations.push({
+              op: "patch",
+              id: operation.id,
+              scope: operation.scope,
+              patches: operation.patches,
+              value: toExplicitDocument(operation.value),
+            });
+          } else {
+            operations.push({
+              op: "set",
+              id: operation.id,
+              scope: operation.scope,
+              value: toExplicitDocument(operation.value),
+            });
+          }
+        }
+        return { operations, wireOperations };
+      },
     );
+
+    const deferredWireOperations: Promise<WireOnlyOperation[]>[] = [];
+    for (const preparation of transaction.preparations ?? []) {
+      try {
+        const prepared = preparation.prepare();
+        if (isPromiseLike(prepared)) {
+          deferredWireOperations.push(
+            Promise.resolve(prepared).then(normalizeWireOnlyOperations),
+          );
+        } else {
+          wireOperations.push(...normalizeWireOnlyOperations(prepared));
+        }
+      } catch (error) {
+        deferredWireOperations.push(Promise.reject(error));
+      }
+    }
+    const wirePreparation = deferredWireOperations.length === 0
+      ? undefined
+      : Promise.all(deferredWireOperations).then((groups) => groups.flat());
+    // Preparation starts before this semantic commit reserves and reaches its
+    // wire turn. Attach a handler immediately so a fast rejection cannot
+    // become an unhandled promise while an earlier causal turn is still held;
+    // pushCommit awaits the original promise and owns the actual rejection.
+    void wirePreparation?.catch(() => {});
+    const confirmationCallbacks = (transaction.preparations ?? []).flatMap(
+      (preparation) =>
+        preparation.onConfirmed === undefined ? [] : [preparation.onConfirmed],
+    );
+    const rejectionCallbacks = (transaction.preparations ?? []).flatMap(
+      (preparation) =>
+        preparation.onRejected === undefined ? [] : [preparation.onRejected],
+    );
+    const rejectPreparations = (reason: unknown) => {
+      for (const callback of rejectionCallbacks) {
+        try {
+          callback(reason);
+        } catch (error) {
+          logger.warn("commit-rejection-callback-failed", () => [
+            String(error),
+          ]);
+        }
+      }
+    };
 
     const sqliteOps = transaction.sqliteOps ?? [];
 
     if (
-      operations.length === 0 && schedulerObservation === undefined &&
+      operations.length === 0 && wireOperations.length === 0 &&
+      wirePreparation === undefined && schedulerObservation === undefined &&
       !preconditions?.length &&
       sqliteOps.length === 0
     ) {
+      for (const callback of confirmationCallbacks) {
+        try {
+          callback();
+        } catch (error) {
+          logger.warn("commit-confirmation-callback-failed", () => [
+            String(error),
+          ]);
+        }
+      }
       return { ok: {} };
     }
 
-    return await withCommitTiming(
-      ["commitNative", "commitOperations"],
-      () =>
-        this.commitOperations(
-          operations,
-          source,
-          schedulerObservation,
-          preconditions,
-          sqliteOps,
-        ),
-    );
+    try {
+      const result = await withCommitTiming(
+        ["commitNative", "commitOperations"],
+        () =>
+          this.commitOperations(
+            operations,
+            source,
+            schedulerObservation,
+            preconditions,
+            sqliteOps,
+            wireOperations,
+            wirePreparation,
+            confirmationCallbacks,
+          ),
+      );
+      if (result.error !== undefined) rejectPreparations(result.error);
+      return result;
+    } catch (error) {
+      rejectPreparations(error);
+      throw error;
+    }
   }
 
   reset(): void {
@@ -2424,27 +2558,20 @@ class SpaceReplica implements ISpaceReplica {
       operations: [],
       schedulerObservationBatch: entries.map((entry) => entry.commit),
     };
-    const promise = (async (): Promise<
-      Result<Unit, StorageTransactionRejected>
-    > => {
-      // Persistent scheduler state is an OPTIONAL capability negotiated at
-      // hello (memory/v2.ts `compatibleMemoryProtocolFlags`): peers with
-      // different scheduler flags must still share memory data. A server that
-      // did not advertise it strips scheduler payloads at `transact`, so this
-      // observation-only commit would arrive as zero operations and be
-      // TERMINALLY rejected ("memory v2 commit requires at least one
-      // operation") — and the flush-before-semantic-commit ordering in
-      // pushCommit would then spread that rejection to every subsequent
-      // semantic commit (event handlers drop their writes without retry;
-      // the whole session's writes starve). Fail closed instead: drop the
-      // observations — the feature degrades to flag-off semantics (resumes
-      // re-run fresh) while semantic traffic proceeds untouched.
-      const { client } = await this.sessionHandle();
-      if (client.serverFlags?.persistentSchedulerState !== true) {
-        return { ok: {} };
-      }
-      return await this.pushCommit(localSeq, [], commit, undefined);
-    })()
+    // Reserve this observation flush's wire turn synchronously. A following
+    // semantic commit awaits this promise as a prerequisite; deferring the
+    // reservation until after session negotiation would let that dependent
+    // commit reserve first and create a causal wait cycle.
+    const promise = this.pushCommit(
+      localSeq,
+      [],
+      commit,
+      undefined,
+      undefined,
+      undefined,
+      [],
+      true,
+    )
       .then((result) => {
         for (const entry of entries) {
           entry.pending.resolve(result);
@@ -2475,10 +2602,14 @@ class SpaceReplica implements ISpaceReplica {
     schedulerObservation?: unknown,
     preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
+    wireOperations: readonly WireOnlyOperation[] = [],
+    wirePreparation?: Promise<readonly WireOnlyOperation[]>,
+    confirmationCallbacks: readonly (() => void)[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const activePreconditions = activeCommitPreconditions(preconditions);
     if (
-      operations.length === 0 && sqliteOps.length === 0 &&
+      operations.length === 0 && wireOperations.length === 0 &&
+      wirePreparation === undefined && sqliteOps.length === 0 &&
       activePreconditions.length === 0
     ) {
       if (schedulerObservation === undefined) {
@@ -2490,103 +2621,158 @@ class SpaceReplica implements ISpaceReplica {
       );
     }
 
+    // Kick the existing observation prerequisite before allocating this
+    // semantic commit's localSeq / wire turn. It still settles asynchronously,
+    // so the containing value remains synchronously optimistic.
+    const schedulerFlushPrerequisite = operations.length > 0 &&
+        (this.#schedulerObservationBatch.length > 0 ||
+          this.#schedulerObservationFlushPromise)
+      ? (this.#schedulerObservationFlushPromise ??
+        this.startSchedulerObservationBatchFlush())
+      : undefined;
+
     const localSeq = this.#nextLocalSeq++;
-    if (source !== undefined) {
-      recordCommitLocalSeq(source, this.#space, localSeq);
-    }
-    const commit = withCommitTiming(
-      ["commitOperations", "buildCommit"],
-      (): ClientCommit => ({
-        localSeq,
-        reads: this.buildReads(source, localSeq),
-        // Cell ops first, folded SQLite ops last (applied in array order by the
-        // engine; sqlite ops are not entity revisions and carry no id/scope).
-        operations: [
-          ...operations.map((operation) => {
-            switch (operation.op) {
-              case "delete":
-                return operation;
-              case "patch":
-                return {
-                  op: "patch" as const,
-                  id: operation.id,
-                  scope: operation.scope,
-                  patches: operation.patches,
-                };
-              case "set":
-                return {
-                  op: "set" as const,
-                  id: operation.id,
-                  scope: operation.scope,
-                  value: operation.value,
-                };
-            }
-          }),
-          ...sqliteOps,
-        ],
-        ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
-        ...(activePreconditions.length > 0
-          ? { preconditions: [...activePreconditions] }
-          : {}),
-      }),
-    );
-    const touched = operations.map((operation) => ({
-      id: operation.id,
-      scope: operation.scope,
-    }));
-    const hasSemanticOperations = operations.length > 0;
-    const shouldNotifySubscribers = hasSemanticOperations &&
-      this.hasNotificationSubscribers();
-    const shouldNotifySinks = hasSemanticOperations &&
-      this.hasSinkSubscribers(touched);
-    const before = withCommitTiming(
-      ["commitOperations", "snapshotBefore"],
-      () =>
-        shouldNotifySubscribers
-          ? Differential.checkout(
-            this,
-            touched.map(({ id, scope }) => snapshotState(this, id, scope)),
-          )
-          : undefined,
-    );
-
-    withCommitTiming(["commitOperations", "applyPending"], () => {
-      for (const operation of operations) {
-        this.applyPending(operation, localSeq);
+    // Reserve this localSeq's causal wire position before any user-observable
+    // optimistic notification. A synchronous subscriber may commit again; that
+    // reentrant higher localSeq must queue behind this one, even while artifact
+    // preparation keeps the actual send pending.
+    const wireSendReservation = this.reserveWireSendTurn();
+    let pushStarted = false;
+    try {
+      if (source !== undefined) {
+        recordCommitLocalSeq(source, this.#space, localSeq);
       }
-    });
-
-    withCommitTiming(["commitOperations", "notifyOptimistic"], () => {
-      if (before !== undefined) {
-        const optimistic = before.compare(this);
-        this.#subscription.next({
-          type: "commit",
-          space: this.#space,
-          changes: optimistic,
-          source,
-        });
-        if (shouldNotifySinks) {
-          this.notifySinks(optimistic);
-        }
-      } else if (shouldNotifySinks) {
-        this.notifySinksForIds(touched);
-      }
-    });
-
-    const promise = withCommitTiming(
-      ["commitOperations", "pushCommitStart"],
-      () =>
-        this.pushCommit(
+      const commit = withCommitTiming(
+        ["commitOperations", "buildCommit"],
+        (): ClientCommit => ({
           localSeq,
-          operations,
-          commit,
-          source,
-        ),
-    );
-    this.#commitPromises.add(promise);
-    const result = await promise;
-    this.#commitPromises.delete(promise);
-    return result;
+          reads: this.buildReads(source, localSeq),
+          // Artifact ensures first, containing cell ops next, folded SQLite ops
+          // last. The server applies the complete array atomically; ensures are
+          // wire-only and never enter the optimistic local replica.
+          operations: [
+            ...wireOperations,
+            ...operations.map((operation) => {
+              switch (operation.op) {
+                case "delete":
+                  return operation;
+                case "patch":
+                  return {
+                    op: "patch" as const,
+                    id: operation.id,
+                    scope: operation.scope,
+                    patches: operation.patches,
+                  };
+                case "set":
+                  return {
+                    op: "set" as const,
+                    id: operation.id,
+                    scope: operation.scope,
+                    value: operation.value,
+                  };
+              }
+            }),
+            ...sqliteOps,
+          ],
+          ...(schedulerObservation !== undefined
+            ? { schedulerObservation }
+            : {}),
+          ...(activePreconditions.length > 0
+            ? { preconditions: [...activePreconditions] }
+            : {}),
+        }),
+      );
+      const touched = operations.map((operation) => ({
+        id: operation.id,
+        scope: operation.scope,
+      }));
+      const hasSemanticOperations = operations.length > 0;
+      const shouldNotifySubscribers = hasSemanticOperations &&
+        this.hasNotificationSubscribers();
+      const shouldNotifySinks = hasSemanticOperations &&
+        this.hasSinkSubscribers(touched);
+      const before = withCommitTiming(
+        ["commitOperations", "snapshotBefore"],
+        () =>
+          shouldNotifySubscribers
+            ? Differential.checkout(
+              this,
+              touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+            )
+            : undefined,
+      );
+
+      withCommitTiming(["commitOperations", "applyPending"], () => {
+        for (const operation of operations) {
+          this.applyPending(operation, localSeq);
+        }
+      });
+
+      withCommitTiming(["commitOperations", "notifyOptimistic"], () => {
+        if (before !== undefined) {
+          const optimistic = before.compare(this);
+          this.#subscription.next({
+            type: "commit",
+            space: this.#space,
+            changes: optimistic,
+            source,
+          });
+          if (shouldNotifySinks) {
+            this.notifySinks(optimistic);
+          }
+        } else if (shouldNotifySinks) {
+          this.notifySinksForIds(touched);
+        }
+      });
+
+      const promise = withCommitTiming(
+        ["commitOperations", "pushCommitStart"],
+        () =>
+          this.pushCommit(
+            localSeq,
+            operations,
+            commit,
+            source,
+            wirePreparation,
+            schedulerFlushPrerequisite,
+            confirmationCallbacks,
+            false,
+            wireSendReservation,
+          ),
+      );
+      pushStarted = true;
+      this.#commitPromises.add(promise);
+      try {
+        return await promise;
+      } finally {
+        this.#commitPromises.delete(promise);
+      }
+    } finally {
+      // Once pushCommit starts it owns every release path. Failures while
+      // building, staging, or notifying must release the pre-reserved turn in
+      // predecessor order so later localSeq commits cannot wedge or overtake.
+      if (!pushStarted) await wireSendReservation.releaseTurnInOrder();
+    }
+  }
+
+  private reserveWireSendTurn(): WireSendReservation {
+    const predecessor = this.#wireSendTail;
+    const turn = Promise.withResolvers<void>();
+    this.#wireSendTail = turn.promise;
+    let turnReleased = false;
+    const releaseTurn = () => {
+      if (turnReleased) return;
+      turnReleased = true;
+      turn.resolve();
+      if (this.#wireSendTail === turn.promise) {
+        this.#wireSendTail = undefined;
+      }
+    };
+    const releaseTurnInOrder = async () => {
+      if (predecessor !== undefined) await predecessor;
+      releaseTurn();
+    };
+    return { predecessor, releaseTurn, releaseTurnInOrder };
   }
 
   private async pushCommit(
@@ -2594,35 +2780,70 @@ class SpaceReplica implements ISpaceReplica {
     operations: NativeCommitOperation[],
     commit: ClientCommit,
     source?: IStorageTransaction,
+    wirePreparation?: Promise<readonly WireOnlyOperation[]>,
+    schedulerFlushPrerequisite?: Promise<
+      Result<Unit, StorageTransactionRejected>
+    >,
+    confirmationCallbacks: readonly (() => void)[] = [],
+    requiresPersistentSchedulerState = false,
+    wireSendReservation: WireSendReservation = this.reserveWireSendTurn(),
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    // Strategy 1: a commit whose read set lands on a still-catching-up id.
-    const admissionMode = conflictAdmissionMode();
-    if (admissionMode !== "off") {
-      const threshold = this.preemptThreshold(commit);
-      if (threshold !== undefined) {
-        if (admissionMode === "hold") {
-          const rejection = this.makePreemptRejection(commit, threshold);
-          // Precise mode: hold until the catch-up is applied, then run the
-          // server's stale-read check locally. Revert only the genuinely stale
-          // commits; fall through to send the ones whose reads still hold.
-          try {
-            await this.waitForCaughtUpLocalSeq(threshold);
-          } catch {
-            // Session/replica closing or reset: do not open/send a new session
-            // while shutdown is in progress. Finalize the held rejection so the
-            // optimistic write is dropped and close can drain promptly.
-            return await this.finalizeRejection(
-              localSeq,
-              operations,
-              source,
-              rejection,
-            );
-          }
-          if (!this.#closed && this.commitReadsStaleLocally(commit)) {
-            logger.debug("commit-held-revert", () => [
-              `held commit reverted (locally stale) at caughtUpLocalSeq>=${threshold}`,
+    const { predecessor, releaseTurn, releaseTurnInOrder } =
+      wireSendReservation;
+    // Every operation after reserving the causal turn must release it on an
+    // unexpected admission/preflight throw, or later localSeq commits wedge.
+    let admissionMode = "off" as ReturnType<typeof conflictAdmissionMode>;
+    try {
+      // Strategy 1: a commit whose read set lands on a still-catching-up id.
+      admissionMode = conflictAdmissionMode();
+      if (admissionMode !== "off") {
+        const threshold = this.preemptThreshold(commit);
+        if (threshold !== undefined) {
+          if (admissionMode === "hold") {
+            const rejection = this.makePreemptRejection(commit, threshold);
+            // Precise mode: hold until the catch-up is applied, then run the
+            // server's stale-read check locally. Revert only the genuinely stale
+            // commits; fall through to send the ones whose reads still hold.
+            try {
+              await this.waitForCaughtUpLocalSeq(threshold);
+            } catch {
+              // Session/replica closing or reset: do not open/send a new session
+              // while shutdown is in progress. Finalize the held rejection so the
+              // optimistic write is dropped and close can drain promptly.
+              await releaseTurnInOrder();
+              return await this.finalizeRejection(
+                localSeq,
+                operations,
+                source,
+                rejection,
+              );
+            }
+            if (!this.#closed && this.commitReadsStaleLocally(commit)) {
+              logger.debug("commit-held-revert", () => [
+                `held commit reverted (locally stale) at caughtUpLocalSeq>=${threshold}`,
+                { localSeq, operations: operations.length },
+              ]);
+              await releaseTurnInOrder();
+              return await this.finalizeRejection(
+                localSeq,
+                operations,
+                source,
+                rejection,
+              );
+            }
+            logger.debug("commit-held-sent", () => [
+              `held commit sent after catch-up (reads still valid)`,
               { localSeq, operations: operations.length },
             ]);
+            // fall through to send
+          } else {
+            // Coarse mode: assume conflict and pre-empt without sending.
+            const rejection = this.makePreemptRejection(commit, threshold);
+            logger.debug("commit-preempted", () => [
+              `commit preempted: stale until caughtUpLocalSeq>=${threshold}`,
+              { localSeq, operations: operations.length },
+            ]);
+            await releaseTurnInOrder();
             return await this.finalizeRejection(
               localSeq,
               operations,
@@ -2630,26 +2851,11 @@ class SpaceReplica implements ISpaceReplica {
               rejection,
             );
           }
-          logger.debug("commit-held-sent", () => [
-            `held commit sent after catch-up (reads still valid)`,
-            { localSeq, operations: operations.length },
-          ]);
-          // fall through to send
-        } else {
-          // Coarse mode: assume conflict and pre-empt without sending.
-          const rejection = this.makePreemptRejection(commit, threshold);
-          logger.debug("commit-preempted", () => [
-            `commit preempted: stale until caughtUpLocalSeq>=${threshold}`,
-            { localSeq, operations: operations.length },
-          ]);
-          return await this.finalizeRejection(
-            localSeq,
-            operations,
-            source,
-            rejection,
-          );
         }
       }
+    } catch (error) {
+      await releaseTurnInOrder();
+      throw error;
     }
     // The push marker window covers observation flush + (re)dial + send +
     // confirm: the full client-side cost of durably landing this commit.
@@ -2663,13 +2869,10 @@ class SpaceReplica implements ISpaceReplica {
       localSeq,
       spaceDid: this.#space,
     });
+    let submittedCommit = commit;
     try {
-      if (
-        operations.length > 0 &&
-        (this.#schedulerObservationBatch.length > 0 ||
-          this.#schedulerObservationFlushPromise)
-      ) {
-        const flushResult = await this.flushSchedulerObservationBatch();
+      if (schedulerFlushPrerequisite !== undefined) {
+        const flushResult = await schedulerFlushPrerequisite;
         const rejection = flushResult.error;
         if (rejection !== undefined) {
           const error = new Error(rejection.message);
@@ -2677,9 +2880,50 @@ class SpaceReplica implements ISpaceReplica {
           throw error;
         }
       }
-      const { session } = await this.sessionHandle();
-      const applied = await session.transact(commit);
+      if (wirePreparation !== undefined) {
+        const prepared = await wirePreparation;
+        if (prepared.length > 0) {
+          submittedCommit = {
+            ...commit,
+            operations: [...prepared, ...commit.operations],
+          };
+        }
+      }
+      const { client, session } = await this.sessionHandle();
+      // Persistent scheduler state is an OPTIONAL capability negotiated at
+      // hello. Servers that do not advertise it strip scheduler payloads, so
+      // an observation-only commit would otherwise become an invalid empty
+      // transaction. Release its already-reserved causal turn and degrade to
+      // flag-off semantics without blocking later semantic traffic.
+      if (
+        requiresPersistentSchedulerState &&
+        client.serverFlags?.persistentSchedulerState !== true
+      ) {
+        await releaseTurnInOrder();
+        telemetry?.submit({
+          type: "storage.push.complete",
+          id: pushOpId,
+          sessionId: session.sessionId,
+        });
+        return { ok: {} };
+      }
+      if (predecessor !== undefined) await predecessor;
+      const submitted = session.transact(submittedCommit);
+      // Release the next localSeq as soon as this commit has entered the
+      // session's causal chain; confirmation is intentionally not serialized.
+      releaseTurn();
+      const applied = await submitted;
       this.confirmPending(localSeq, operations, applied);
+      for (const callback of confirmationCallbacks) {
+        try {
+          callback();
+        } catch (error) {
+          logger.warn("commit-confirmation-callback-failed", () => [
+            `commit ${localSeq} was accepted but its local confirmation callback failed`,
+            String(error),
+          ]);
+        }
+      }
       telemetry?.submit({
         type: "storage.push.complete",
         id: pushOpId,
@@ -2687,7 +2931,8 @@ class SpaceReplica implements ISpaceReplica {
       });
       return { ok: {} };
     } catch (error) {
-      const rejection = toRejectedError(error, commit, this.#space);
+      await releaseTurnInOrder();
+      const rejection = toRejectedError(error, submittedCommit, this.#space);
       telemetry?.submit({
         type: "storage.push.error",
         id: pushOpId,
@@ -2695,7 +2940,7 @@ class SpaceReplica implements ISpaceReplica {
       });
       this.attachProviderReadyToRetry(rejection, localSeq);
       if (admissionMode !== "off" && rejection.name === "ConflictError") {
-        this.recordStaleFloor(commit, localSeq);
+        this.recordStaleFloor(submittedCommit, localSeq);
       }
       // Counted (even while silent) so multi-writer churn can be read back via
       // getLoggerCounts(): "commit-conflict" is a stale-seq-basis rejection that

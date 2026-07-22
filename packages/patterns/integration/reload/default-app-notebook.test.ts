@@ -12,6 +12,7 @@ import { Identity } from "@commonfabric/identity";
 import { assert, assertEquals } from "@std/assert";
 import {
   collectSchedulerLoadSummary,
+  vdomHasButton,
   waitForActiveSpaceRoot,
   waitForRuntimeIdle,
   waitForRuntimeSynced,
@@ -64,6 +65,12 @@ describe("default-app notebook reload integration test", () => {
 
     await waitForActiveSpaceRoot(page, notebookSpaceDid);
     await waitForRuntimeIdle(page);
+    // Runtime idle can precede the replacement worker VDOM mount. The retired
+    // DOM remains visible briefly, but its numeric handler IDs are no longer
+    // valid for the active reconciler. Require Notes in the current worker
+    // tree and drain that mount before interacting with it.
+    await waitFor(async () => await vdomHasButton(page, "Notes"));
+    await awaitViewSettled(page);
     await clickButtonWithText(page, "Notes");
     await awaitViewSettled(page);
     await clickButtonWithText(page, "New Notebook");

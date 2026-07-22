@@ -704,8 +704,8 @@ File: `packages/runner/src/pattern-manager.ts`.
 4. Eviction/`addressableByIdentity`: no changes — but add one test: after
    importer evaluation, `artifactFromIdentitySync(<P-entry>, <symbol>)`
    resolves (proves imported modules registered under their published
-   identities → op-by-identity / `$patternRef` referencing imported patterns
-   works).
+   identities → op-by-identity / `Factory@1` references to imported patterns
+   work).
 
 ### M1.8 CLI surfacing
 

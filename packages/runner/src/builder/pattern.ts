@@ -1,13 +1,21 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { addRequiredSchemaPaths } from "@commonfabric/data-model/schema-utils";
+import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+  registerFabricFactory,
+} from "@commonfabric/data-model/fabric-factory";
 import {
   type CellScope,
   type DerivedInternalCellDescriptor,
   type FactoryInput,
   type Frame,
   type ICell,
+  type InternalPatternFactory,
   isModule,
   isReactive,
   JSONObject,
@@ -28,7 +36,15 @@ import {
   type UnsafeBinding,
 } from "./types.ts";
 import { reactive } from "./reactive.ts";
-import { brandTrustedPattern, noteDerivedCopy } from "./pattern-metadata.ts";
+import {
+  bindFactoryRootToken,
+  brandTrustedPattern,
+  type FrameworkProvidedPath,
+  getDurableArtifactRefForRootToken,
+  noteDerivedCopy,
+  registerFactoryStateDeriver,
+  setFrameworkProvidedPaths,
+} from "./pattern-metadata.ts";
 import {
   applyArgumentIfcToResult,
   applyInputIfcToOutput,
@@ -36,7 +52,6 @@ import {
 } from "./node-utils.ts";
 import {
   type CellAliasResolver,
-  moduleToJSON,
   patternToJSON,
   toJSONWithAliasBindings,
 } from "./json-utils.ts";
@@ -66,6 +81,103 @@ import {
   MemorySpace,
 } from "../storage/interface.ts";
 import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
+import { assertValidPatternParams } from "./factory-params.ts";
+
+type CompilerPatternCallback = (...args: any[]) => unknown;
+
+// Compiler-only capability: transformed callbacks receive their private
+// closure schema through this side table. Keeping the association off the
+// function object makes the metadata non-forgeable by serialized values and
+// lets the helper return the original callback without changing pattern()'s
+// public arity.
+const patternParamsSchemas = new WeakMap<CompilerPatternCallback, JSONSchema>();
+const callbackFrameworkProvidedPaths = new WeakMap<
+  CompilerPatternCallback,
+  readonly FrameworkProvidedPath[]
+>();
+
+export function withPatternParamsSchema<T extends CompilerPatternCallback>(
+  callback: T,
+  schema: JSONSchema,
+): T {
+  patternParamsSchemas.set(callback, schema);
+  return callback;
+}
+
+function readPatternParamsSchema(
+  callback: CompilerPatternCallback,
+): JSONSchema | undefined {
+  const hasParamsSlot = patternParamsSchemas.has(callback);
+  if (!hasParamsSlot && callback.length > 1) {
+    throw new Error(
+      "Pattern second callback parameter requires compiler metadata",
+    );
+  }
+  return hasParamsSlot ? patternParamsSchemas.get(callback)! : undefined;
+}
+
+export function withFrameworkProvidedPaths<
+  T extends CompilerPatternCallback,
+>(
+  callback: T,
+  paths: readonly FrameworkProvidedPath[],
+): T {
+  callbackFrameworkProvidedPaths.set(callback, normalizeFrameworkPaths(paths));
+  return callback;
+}
+
+export function readFrameworkProvidedPaths(
+  callback: unknown,
+): readonly FrameworkProvidedPath[] {
+  return typeof callback === "function"
+    ? callbackFrameworkProvidedPaths.get(
+      callback as CompilerPatternCallback,
+    ) ?? []
+    : [];
+}
+
+function normalizeFrameworkPaths(
+  paths: readonly FrameworkProvidedPath[],
+): readonly FrameworkProvidedPath[] {
+  const normalized: string[][] = [];
+  const seen = new Set<string>();
+  for (const path of paths) {
+    if (!Array.isArray(path) || path.length === 0) {
+      throw new TypeError("FrameworkProvided paths must be non-empty arrays");
+    }
+    const copy = path.map((segment) => {
+      if (
+        typeof segment !== "string" || segment.length === 0 ||
+        segment === "*" || segment === "[]" ||
+        segment === "__proto__" || segment === "prototype" ||
+        segment === "constructor"
+      ) {
+        throw new TypeError("Invalid FrameworkProvided path segment");
+      }
+      return segment;
+    });
+    const key = JSON.stringify(copy);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(copy);
+  }
+  normalized.sort((left, right) =>
+    utf8Compare(JSON.stringify(left), JSON.stringify(right))
+  );
+  return normalized;
+}
+
+function addFrameworkPathsToSchema(
+  schema: JSONSchema,
+  paths: readonly FrameworkProvidedPath[],
+): JSONSchema {
+  return addRequiredSchemaPaths(schema, normalizeFrameworkPaths(paths));
+}
+
+type PatternParamsRoot = {
+  value: Reactive<unknown>;
+  schema: JSONSchema;
+};
 
 /** Declare a pattern
  *
@@ -134,6 +246,8 @@ export function pattern<T, R>(
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
 ): PatternFactory<T, R> {
+  const paramsSchema = readPatternParamsSchema(fn);
+  const declaredFrameworkPaths = readFrameworkProvidedPaths(fn);
   hardenVerifiedFunction(fn);
 
   // The pattern graph is created by calling `fn` which populates for `inputs`
@@ -155,11 +269,24 @@ export function pattern<T, R>(
   // Attach SELF to the underlying cell so the proxy can return it
   getCellOrThrow(inputs).setSelfRef(selfRef);
 
+  const paramsRoot: PatternParamsRoot | undefined = paramsSchema === undefined
+    ? undefined
+    : {
+      value: reactive<unknown>(undefined, paramsSchema),
+      schema: paramsSchema,
+    };
+
   let result;
   try {
-    const outputs = fn!(
-      inputs as Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
-    );
+    const argument = inputs as Reactive<RequireDefaults<T>> & {
+      [SELF]: Reactive<R>;
+    };
+    const outputs = paramsRoot === undefined
+      ? fn!(argument)
+      : (fn as unknown as (
+        argument: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
+        params: Reactive<unknown>,
+      ) => FactoryInput<R>)(argument, paramsRoot.value);
 
     applyInputIfcToOutput(inputs, outputs);
 
@@ -168,6 +295,8 @@ export function pattern<T, R>(
       resultSchema,
       inputs,
       outputs,
+      paramsRoot,
+      declaredFrameworkPaths,
     );
   } finally {
     popFrame(frame);
@@ -183,6 +312,8 @@ export function patternFromFrame<T, R>(
   argumentSchema?: JSONSchema,
   resultSchema?: JSONSchema,
 ): PatternFactory<T, R> {
+  const paramsSchema = readPatternParamsSchema(fn);
+  const declaredFrameworkPaths = readFrameworkProvidedPaths(fn);
   const inputs = reactive<RequireDefaults<T>>(
     undefined,
     argumentSchema as JSONSchema | undefined,
@@ -194,14 +325,27 @@ export function patternFromFrame<T, R>(
   // Attach SELF to the underlying cell so the proxy can return it
   getCellOrThrow(inputs).setSelfRef(selfRef);
 
-  const outputs = fn(
-    inputs as Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
-  );
+  const paramsRoot: PatternParamsRoot | undefined = paramsSchema === undefined
+    ? undefined
+    : {
+      value: reactive<unknown>(undefined, paramsSchema),
+      schema: paramsSchema,
+    };
+
+  const argument = inputs as Reactive<RequireDefaults<T>> & {
+    [SELF]: Reactive<R>;
+  };
+  const outputs = paramsRoot === undefined ? fn(argument) : (fn as unknown as (
+    argument: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
+    params: Reactive<unknown>,
+  ) => FactoryInput<R>)(argument, paramsRoot.value);
   return factoryFromPattern<T, R>(
     argumentSchema,
     resultSchema,
     inputs,
     outputs,
+    paramsRoot,
+    declaredFrameworkPaths,
   );
 }
 
@@ -240,11 +384,16 @@ function factoryFromPattern<T, R>(
   resultSchemaArg: JSONSchema | undefined,
   inputs: Reactive<RequireDefaults<T>>,
   outputs: FactoryInput<R>,
+  paramsRoot?: PatternParamsRoot,
+  frameworkProvidedPaths: readonly FrameworkProvidedPath[] = [],
 ): PatternFactory<T, R> {
   // Capture selfRef before collectCellsAndNodes transforms inputs from Reactive to Cell
   // (collectCellsAndNodes replaces Reactive proxies with their underlying Cells,
   // and SELF access only works through the Reactive proxy)
   const selfRef = (inputs as unknown as { [SELF]: Reactive<any> })[SELF];
+  const paramsRootCell = paramsRoot === undefined
+    ? undefined
+    : getCellOrThrow(paramsRoot.value).export().cell;
 
   // Traverse the value, collect all mentioned nodes and cells
   const allCells = new Set<ICell<unknown>>();
@@ -270,6 +419,11 @@ function factoryFromPattern<T, R>(
         nodes.forEach((node: NodeRef) => {
           if (!allNodes.has(node)) {
             allNodes.add(node);
+            if (isReactive(node.module)) {
+              node.module = collectCellsAndNodes(
+                node.module as FactoryInput<unknown>,
+              );
+            }
             node.inputs = collectCellsAndNodes(node.inputs);
             node.outputs = collectCellsAndNodes(node.outputs);
           }
@@ -278,6 +432,9 @@ function factoryFromPattern<T, R>(
       return value;
     });
   inputs = collectCellsAndNodes(inputs);
+  if (paramsRoot !== undefined) {
+    collectCellsAndNodes(paramsRoot.value);
+  }
   outputs = collectCellsAndNodes(outputs);
 
   applyInputIfcToOutput(inputs, outputs);
@@ -335,12 +492,14 @@ function factoryFromPattern<T, R>(
   const selfRefRootCell = selfRefCell.export().cell;
   const cellNameForCell = (
     cell: ICell<unknown> | OpaqueCell<any> | Reactive<any>,
-  ): "argument" | "result" | undefined => {
+  ): "argument" | "params" | "result" | undefined => {
     const rootCell = cell.export().cell;
     return rootCell === inputRootCell
       ? "argument"
       : rootCell === selfRefRootCell
       ? "result"
+      : rootCell === paramsRootCell
+      ? "params"
       : undefined;
   };
 
@@ -443,8 +602,8 @@ function factoryFromPattern<T, R>(
   >();
   allCellsAndInternalRoots.forEach((cell) => {
     // Only process roots of extra cells:
-    if (cell === (inputs as unknown)) return;
-    const { cell: top, path, value, schema, external } = cell.export();
+    const { cell: top, path, value, schema, scope, external } = cell.export();
+    if (top === inputRootCell || top === paramsRootCell) return;
     if (path.length > 0 || external) return;
 
     const cellReference = cellReferenceForCell(cell);
@@ -459,6 +618,7 @@ function factoryFromPattern<T, R>(
       derivedInternalCells.push({
         partialCause,
         ...(descriptorSchema !== undefined && { schema: descriptorSchema }),
+        ...(scope !== undefined && { scope }),
       });
     }
   });
@@ -472,7 +632,7 @@ function factoryFromPattern<T, R>(
     if (cellReference === undefined) return undefined;
     if (cellReference.cell !== undefined) {
       // make up a fake path that looks like cell type followed by the path
-      // this can only match argument and result aliases, since internal
+      // this can only match argument, params, and result aliases, since internal
       // aliases link directly to their target cell.
       const cellPath = [cellReference.cell, ...cellReference.path];
       if (
@@ -507,7 +667,9 @@ function factoryFromPattern<T, R>(
         },
       };
     } else if (
-      cellReference.cell === "argument" || cellReference.cell === "result"
+      cellReference.cell === "argument" ||
+      cellReference.cell === "params" ||
+      cellReference.cell === "result"
     ) {
       return {
         $alias: {
@@ -522,7 +684,7 @@ function factoryFromPattern<T, R>(
     outputs ?? {},
     resolveCellAlias,
     true,
-  )!;
+  )! as unknown as JSONValue;
 
   // Pattern modules are evaluated under a runtime-carrying builder frame.
   // Read the flag from that runtime so constructing or disposing another
@@ -535,7 +697,10 @@ function factoryFromPattern<T, R>(
     );
   }
 
-  const argumentSchema: JSONSchema = argumentSchemaArg ?? true;
+  const argumentSchema: JSONSchema = addFrameworkPathsToSchema(
+    argumentSchemaArg ?? true,
+    frameworkProvidedPaths,
+  );
 
   const resultSchema =
     applyArgumentIfcToResult(argumentSchema, resultSchemaArg) ?? {};
@@ -545,18 +710,29 @@ function factoryFromPattern<T, R>(
       node.module,
       resolveCellAlias,
       false,
+      isAdmittedFabricFactory(node.module) ? ["module"] : [],
     ) as unknown as Module;
     const inputs = toJSONWithAliasBindings(
       node.inputs,
       resolveCellAlias,
       false,
-    )!;
+    )! as unknown as JSONValue;
     const outputs = toJSONWithAliasBindings(
       node.outputs,
       resolveCellAlias,
       false,
-    )!;
-    return { module, inputs, outputs } satisfies Node;
+    )! as unknown as JSONValue;
+    // WP1.5's later graph-payload audit widens Node/Pattern fields to admit
+    // first-class factories. Keep that static type change separate; the
+    // visitor already preserves the callable value at runtime.
+    return {
+      module,
+      inputs,
+      outputs,
+      ...(node.expectedFactory === undefined
+        ? {}
+        : { expectedFactory: node.expectedFactory }),
+    } satisfies Node;
   });
 
   const pattern: Pattern & toJSON = {
@@ -570,32 +746,58 @@ function factoryFromPattern<T, R>(
     toJSON: () => patternToJSON(patternFactory),
   };
 
+  const factoryRootToken = {};
+
+  type PatternFactoryOptions = {
+    defaultScope?: CellScope;
+    spaceSelector?: unknown;
+    paramsSchema?: JSONSchema;
+    params?: unknown;
+  };
+
   const makePatternFactory = (
-    defaultScope?: CellScope,
-    defaultSpace?: string | unknown,
+    options: PatternFactoryOptions = {},
   ): PatternFactory<T, R> => {
+    const { defaultScope, spaceSelector, paramsSchema, params } = options;
     const factory = Object.assign(
       (inputs: FactoryInput<T>): Reactive<R> => {
-        const module: Module & toJSON = {
-          type: "pattern",
-          implementation: factory,
-          ...(factory.defaultScope !== undefined
-            ? { defaultScope: factory.defaultScope }
-            : {}),
-          toJSON: () => moduleToJSON(module),
-        };
-
+        if (
+          Object.hasOwn(options, "paramsSchema") &&
+          !Object.hasOwn(options, "params")
+        ) {
+          throw new Error("Bound pattern params require callback binding");
+        }
+        // The result Cell is an execution view, not the authored public
+        // contract. Attaching the full result schema here makes downstream
+        // whole-result captures merge that contract into the live value and
+        // can make opaque payloads such as VNodes unreadable. Contract checks
+        // derive the exact schema from the producing Factory@1 instead.
         const outputs = reactive<R>();
         const frame = getTopFrame();
-        if (defaultSpace !== undefined) {
-          const targetSpace = resolveInSpaceTargetSpace(defaultSpace, frame);
+        let nodeFactory: PatternFactory<T, R> = factory;
+        if (spaceSelector !== undefined) {
+          const targetSpace = resolveInSpaceTargetSpace(spaceSelector, frame);
           if (targetSpace !== undefined) {
             setCellUnlinkedSpace(outputs, targetSpace);
-            module.targetSpace = targetSpace;
+            // Named and anonymous selectors resolve during graph construction.
+            // Pin that resolved DID on this invocation's derived factory so the
+            // directly branded node retains the same execution target after
+            // serialization; the authored selector remains on the reusable
+            // base factory.
+            if (
+              typeof spaceSelector === "string" &&
+              !/^did:[^:]+:.+/.test(spaceSelector)
+            ) {
+              nodeFactory = makePatternFactory({
+                ...options,
+                spaceSelector: targetSpace,
+              });
+              noteDerivedCopy(nodeFactory, factory);
+            }
           }
         }
         const node: NodeRef = {
-          module,
+          module: nodeFactory,
           inputs,
           outputs,
           frame,
@@ -611,7 +813,25 @@ function factoryFromPattern<T, R>(
         ...(defaultScope !== undefined ? { defaultScope } : {}),
         toJSON: () => patternToJSON(factory),
       } as Pattern & toJSON,
-    ) as PatternFactory<T, R>;
+    ) as InternalPatternFactory<T, R>;
+
+    factory.curry = function (params: unknown): InternalPatternFactory<T, R> {
+      if (arguments.length !== 1) {
+        throw new TypeError("Pattern curry requires exactly one argument");
+      }
+      if (Object.hasOwn(options, "params")) {
+        throw new TypeError("Pattern factory params are already bound");
+      }
+      if (!Object.hasOwn(options, "paramsSchema")) {
+        throw new TypeError(
+          "Pattern factory has no compiler-declared params slot",
+        );
+      }
+      assertValidPatternParams(params, paramsSchema!);
+      const derived = makePatternFactory({ ...options, params });
+      noteDerivedCopy(derived, factory);
+      return derived as InternalPatternFactory<T, R>;
+    };
 
     // `asScope` / `inSpace` mint fresh factory objects; record them as
     // derivation copies so identity facts resolve through to the root factory
@@ -619,12 +839,15 @@ function factoryFromPattern<T, R>(
     // lets an `inSpace(...)` child piece carry `patternIdentity` meta and have
     // its closures replicated into its own space (CT-1687).
     factory.asScope = (scope: CellScope) => {
-      const derived = makePatternFactory(scope, defaultSpace);
+      const derived = makePatternFactory({ ...options, defaultScope: scope });
       noteDerivedCopy(derived, factory);
       return derived;
     };
     factory.inSpace = (space?: string | unknown) => {
-      const derived = makePatternFactory(defaultScope, space ?? "");
+      const derived = makePatternFactory({
+        ...options,
+        spaceSelector: space ?? "",
+      });
       noteDerivedCopy(derived, factory);
       return derived;
     };
@@ -632,10 +855,51 @@ function factoryFromPattern<T, R>(
     // sites check `isTrustedPattern` so a `__cf_data`-forged pattern-shaped
     // object cannot acquire program / verified-load-id metadata.
     brandTrustedPattern(factory);
+    setFrameworkProvidedPaths(factory, frameworkProvidedPaths);
+    bindFactoryRootToken(factory, factoryRootToken);
+    registerFabricFactory(factory, "pattern", () => {
+      const ref = getDurableArtifactRefForRootToken(factoryRootToken);
+      return {
+        kind: "pattern",
+        rootToken: factoryRootToken,
+        ...(ref === undefined ? {} : { ref }),
+        argumentSchema: pattern.argumentSchema,
+        // The graph artifact strips non-stream asCell markers because result
+        // cells store links. Factory@1 instead carries the authored public call
+        // contract, which must match the transformer-emitted asFactory schema.
+        resultSchema,
+        ...(Object.hasOwn(options, "paramsSchema") ? { paramsSchema } : {}),
+        ...(Object.hasOwn(options, "params") ? { params } : {}),
+        ...(defaultScope === undefined ? {} : { defaultScope }),
+        ...(Object.hasOwn(options, "spaceSelector") ? { spaceSelector } : {}),
+      };
+    });
+    registerFactoryStateDeriver(factory, (state) => {
+      if (state.kind !== "pattern") {
+        throw new Error("Pattern factory state deriver received another kind");
+      }
+      if ("rootToken" in state && state.rootToken !== factoryRootToken) {
+        throw new Error("Factory derivation cannot change its root token");
+      }
+      return makePatternFactory({
+        ...(Object.hasOwn(state, "paramsSchema")
+          ? { paramsSchema: state.paramsSchema }
+          : {}),
+        ...(Object.hasOwn(state, "params") ? { params: state.params } : {}),
+        ...(Object.hasOwn(state, "defaultScope")
+          ? { defaultScope: state.defaultScope }
+          : {}),
+        ...(Object.hasOwn(state, "spaceSelector")
+          ? { spaceSelector: state.spaceSelector }
+          : {}),
+      });
+    });
     return factory;
   };
 
-  const patternFactory = makePatternFactory();
+  const patternFactory = makePatternFactory(
+    paramsRoot === undefined ? {} : { paramsSchema: paramsRoot.schema },
+  );
 
   return patternFactory;
 }
@@ -782,6 +1046,14 @@ function assignComputedCellKinds(
   // of its input binding to its outputs (runner.ts,
   // `instantiatePassthroughNode`), with no code that could write elsewhere.
   const writerDisqualifies = (module: NodeRef["module"]): boolean => {
+    // First-class pattern factories replace the legacy `{ type: "pattern" }`
+    // module wrapper on static sub-pattern nodes. Their instantiation is still
+    // a deterministic replay of the factory inputs, so preserve the same
+    // computed-cell classification as the legacy wrapper. Other factory kinds
+    // are not valid static node modules and fail closed here.
+    if (isAdmittedFabricFactory(module)) {
+      return factoryStateOf(module).kind !== "pattern";
+    }
     if (!isModule(module)) return true; // Opaque module value: assume the worst.
     if (module.wrapper === "handler" || module.writableProxy === true) {
       return true;

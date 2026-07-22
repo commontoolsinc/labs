@@ -9,7 +9,8 @@
     "./type-traversal": "./src/typescript/type-traversal.ts",
     "./property-optionality": "./src/typescript/property-optionality.ts",
     "./property-name": "./src/typescript/property-name.ts",
-    "./numeric-expression": "./src/typescript/numeric-expression.ts"
+    "./numeric-expression": "./src/typescript/numeric-expression.ts",
+    "./common-fabric-symbols": "./src/typescript/common-fabric-symbols.ts"
   },
   "imports": {
     "typescript": "npm:typescript@6.0.3"

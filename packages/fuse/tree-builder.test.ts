@@ -1,10 +1,18 @@
 // tree-builder.test.ts — Unit tests for JSON-to-tree conversion and symlink parsing
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertStrictEquals, assertThrows } from "@std/assert";
+import {
+  createFactoryShell,
+  factoryStateOf,
+  registerFabricFactory,
+} from "@commonfabric/data-model/fabric-factory";
 import { FsTree } from "./tree.ts";
 import {
   buildCallableScript,
   classifyCallableEntry,
-  isPatternToolValue,
+  decodeFactoryProjection,
+  decodeFactoryProjections,
+  decodeHandlerWritePayload,
+  isPatternFactoryValue,
 } from "./callables.ts";
 import {
   buildJsonTree,
@@ -19,6 +27,25 @@ import {
 import { CellBridge } from "./cell-bridge.ts";
 
 const decoder = new TextDecoder();
+
+const patternArgumentSchema = {
+  type: "object",
+  properties: { query: { type: "string" } },
+  required: ["query"],
+} as const;
+const patternResultSchema = {
+  type: "object",
+  properties: { answer: { type: "string" } },
+} as const;
+const patternFactory = createFactoryShell({
+  kind: "pattern",
+  ref: {
+    identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    symbol: "search",
+  },
+  argumentSchema: patternArgumentSchema,
+  resultSchema: patternResultSchema,
+});
 
 function getFileContent(tree: FsTree, parentIno: bigint, name: string): string {
   const ino = tree.lookup(parentIno, name);
@@ -622,6 +649,93 @@ Deno.test("classifyCallableEntry does not treat ordinary data as a tool when lin
   assertEquals(classifyCallableEntry(value, schema), null);
 });
 
+Deno.test("classifyCallableEntry admits direct and metadata-wrapped PatternFactories", () => {
+  assertEquals(classifyCallableEntry(patternFactory), "tool");
+  assertEquals(
+    classifyCallableEntry({
+      pattern: patternFactory,
+      description: "Search stored notes",
+    }),
+    "tool",
+  );
+});
+
+Deno.test("classifyCallableEntry rejects arbitrary functions and non-pattern factories", () => {
+  const moduleFactory = createFactoryShell({
+    kind: "module",
+    ref: {
+      identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      symbol: "lift",
+    },
+  });
+  assertEquals(classifyCallableEntry(() => ({ ok: true })), null);
+  assertEquals(classifyCallableEntry(moduleFactory), null);
+});
+
+Deno.test("safeStringify projects factories through the tagged Fabric codec", () => {
+  const parsed = JSON.parse(safeStringify({ search: patternFactory }));
+  assertEquals(typeof parsed.search, "string");
+  assertEquals(parsed.search.startsWith("fvj1:"), true);
+  assertEquals(parsed.search.includes("Factory@1"), true);
+  assertEquals(parsed.search.includes("function"), false);
+});
+
+Deno.test("safeStringify projects live factories before their legacy toJSON", () => {
+  const liveFactory = registerFabricFactory(
+    Object.assign(() => undefined, {
+      toJSON: () => ({ legacyGraph: true }),
+    }),
+    "pattern",
+    factoryStateOf(patternFactory),
+  );
+
+  const parsed = JSON.parse(safeStringify({ search: liveFactory }));
+  assertEquals(typeof parsed.search, "string");
+  assertEquals(parsed.search.startsWith("fvj1:"), true);
+  assertEquals(parsed.search.includes("Factory@1"), true);
+  assertEquals(parsed.search.includes("legacyGraph"), false);
+});
+
+Deno.test("decodeFactoryProjection returns an inert callable shell", () => {
+  const encoded = JSON.parse(safeStringify({ search: patternFactory })).search;
+  const decoded = decodeFactoryProjection(encoded);
+  assertEquals(factoryStateOf(decoded), factoryStateOf(patternFactory));
+  assertThrows(
+    () =>
+      (decoded as (...args: unknown[]) => unknown)({
+        query: "milk",
+      }),
+    Error,
+    "requires runner materialization",
+  );
+});
+
+Deno.test("decodeFactoryProjections restores nested factory leaves", () => {
+  const projected = JSON.parse(safeStringify({ nested: [patternFactory] }));
+  const decoded = decodeFactoryProjections(projected) as {
+    nested: unknown[];
+  };
+  assertEquals(
+    factoryStateOf(decoded.nested[0]),
+    factoryStateOf(patternFactory),
+  );
+});
+
+Deno.test("decodeFactoryProjections preserves ordinary JSON container identity", () => {
+  const object = { nested: { value: 1 }, list: [1, 2, 3] };
+  assertStrictEquals(decodeFactoryProjections(object), object);
+});
+
+Deno.test("handler payload decoding does not downgrade a malformed factory tag to text", () => {
+  assertEquals(
+    decodeHandlerWritePayload("plain shell text\n"),
+    "plain shell text",
+  );
+  assertThrows(
+    () => decodeHandlerWritePayload(JSON.stringify("fvj1:not-a-factory")),
+  );
+});
+
 Deno.test("buildJsonTree - nested .json siblings keep ordinary pattern-shaped objects intact", () => {
   const tree = new FsTree();
   const data = {
@@ -738,15 +852,7 @@ Deno.test("buildJsonTree - .tool callables appear beside ordinary fields", () =>
   const tree = new FsTree();
   const data = {
     count: 3,
-    search: {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "items" },
-    },
+    search: patternFactory,
   };
 
   const resultIno = buildJsonTree(
@@ -757,7 +863,7 @@ Deno.test("buildJsonTree - .tool callables appear beside ordinary fields", () =>
     undefined,
     undefined,
     0,
-    (value) => isPatternToolValue(value),
+    (value) => isPatternFactoryValue(value),
   );
   const script = buildCallableScript("/tmp/cf-exec");
   const callableIno = tree.addCallable(
@@ -787,15 +893,7 @@ Deno.test("buildJsonTree - .json siblings replace handlers and tools with sigils
   const data = {
     count: 3,
     addItem: { $stream: true },
-    search: {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "items" },
-    },
+    search: patternFactory,
   };
 
   buildJsonTree(
@@ -806,10 +904,10 @@ Deno.test("buildJsonTree - .json siblings replace handlers and tools with sigils
     undefined,
     undefined,
     0,
-    (value) => isHandlerCell(value) || isPatternToolValue(value),
+    (value) => isHandlerCell(value) || isPatternFactoryValue(value),
     (_key, value) => {
       if (isHandlerCell(value) || isStreamValue(value)) return "handler";
-      return isPatternToolValue(value) ? "tool" : null;
+      return isPatternFactoryValue(value) ? "tool" : null;
     },
   );
 
@@ -1032,18 +1130,14 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
   }
 
   const handlerCell = makeCell(undefined, undefined, {}, { isStream: true });
-  const toolCell = makeCell(
-    {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "bound-source" },
+  const toolCell = makeCell(patternFactory, undefined);
+  const directToolCell = makeCell(undefined, {
+    asFactory: {
+      kind: "pattern",
+      argumentSchema: patternArgumentSchema,
+      resultSchema: patternResultSchema,
     },
-    undefined,
-  );
+  });
   const resultCell = makeCell(
     undefined,
     {
@@ -1051,11 +1145,13 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
       properties: {
         recordMessage: { type: "object" },
         search: { type: "object" },
+        directSearch: { type: "object" },
       },
     },
     {
       recordMessage: handlerCell,
       search: toolCell,
+      directSearch: directToolCell,
     },
   );
 
@@ -1113,6 +1209,21 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
     tree.lookup(resultIno!, "recordMessage.handler") !== undefined,
     true,
   );
+  const directToolIno = tree.lookup(resultIno!, "directSearch.tool");
+  assertEquals(directToolIno !== undefined, true);
+  const directToolNode = tree.getNode(directToolIno!);
+  assertEquals(directToolNode?.kind, "callable");
+  if (directToolNode?.kind === "callable") {
+    const script = decoder.decode(directToolNode.script);
+    const schemaLine = script.split("\n").find((line) =>
+      line.startsWith("# schema: ")
+    );
+    assertEquals(schemaLine !== undefined, true);
+    assertEquals(
+      JSON.parse(schemaLine!.slice("# schema: ".length)),
+      patternArgumentSchema,
+    );
+  }
   assertEquals(tree.lookup(resultIno!, "search.tool") !== undefined, true);
 
   const resultJson = JSON.parse(getFileContent(tree, pieceIno, "result.json"));
@@ -1155,18 +1266,7 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
 
   const titleCell = makeCell("hello", { type: "string" });
   const handlerCell = makeCell(undefined, undefined, {}, { isStream: true });
-  const toolCell = makeCell(
-    {
-      pattern: {
-        argumentSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-        },
-      },
-      extraParams: { source: "bound-source" },
-    },
-    undefined,
-  );
+  const toolCell = makeCell(patternFactory, undefined);
   const resultCell = makeCell(
     { title: "hello" },
     {

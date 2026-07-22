@@ -636,7 +636,6 @@ function shouldAddReactiveFor(
       case "runtime-call":
         return options.includeRuntimeCalls && callKind.reactiveOrigin;
       case "cell-for":
-      case "pattern-tool":
         return false;
     }
   }
@@ -776,7 +775,10 @@ function shouldPreserveStructuralCallArgumentReferences(
   call: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
-  return isPatternFactoryCalleeExpression(call.expression, context.checker) ||
+  return isPatternFactoryCalleeExpression(
+    call.expression,
+    context.checker,
+  ) ||
     isPatternFactoryHelperExpression(call.expression, context.checker);
 }
 

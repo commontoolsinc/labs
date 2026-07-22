@@ -69,6 +69,16 @@ export type EventHandler =
   };
 export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
 
+/** One independently cancelable handler registration for one stream. */
+export interface EventHandlerRegistration {
+  ref: NormalizedFullLink;
+  handler: EventHandler;
+  generation: number;
+  /** Finalizers for events parked outside the queue on async readiness. */
+  readonly readinessCancels: Set<(reason: string) => void>;
+  active: boolean;
+}
+
 /**
  * Reactivity log.
  *
@@ -190,11 +200,16 @@ export type QueuedEvent = {
    * reads the instant of the event that actually dispatches.
    */
   time?: number;
+  /** Monotonic enqueue order, preserved across every retry/readiness park. */
+  readonly sequence: number;
   /** The transaction whose handler sent this event, when transactional. */
   readonly originTx?: IExtendedStorageTransaction;
   eventLink: NormalizedFullLink;
   action: Action;
   handler: EventHandler;
+  /** Registration captured when this event was queued; never re-resolved. */
+  handlerRegistration: EventHandlerRegistration;
+  handlerGeneration: number;
   event: any;
   /**
    * The FIFO slot was reserved before its handler's piece finished loading.
@@ -202,6 +217,15 @@ export type QueuedEvent = {
    * handlers cannot overtake it.
    */
   handlerLoadPending?: boolean;
+  /**
+   * Control for the asynchronous piece-start attempt that owns this pending
+   * slot. Registering the exact handler releases only the scheduler's wait;
+   * terminal event cancellation also aborts the underlying load continuation.
+   */
+  handlerLoadControl?: {
+    releaseSchedulerWait(): void;
+    abortLoad(reason: string): void;
+  };
   /** Internal exactly-once guard for terminal pre-dispatch drops. */
   finalOutcomeNotified?: boolean;
   /**
@@ -229,4 +253,6 @@ export type QueuedEvent = {
    * failure and carried across backoff retries.
    */
   retryDeadline?: number;
+  /** Settles an intent temporarily parked outside `eventQueue`. */
+  cancelPending?: (reason: string) => void;
 };

@@ -8,9 +8,14 @@ import {
   type StorageNotificationState,
 } from "../src/scheduler/invalidation.ts";
 import { processStorageNotification } from "../src/scheduler/invalidation.ts";
-import { watchReactiveActionCommit } from "../src/scheduler/run.ts";
+import {
+  runSchedulerAction,
+  type SchedulerActionRunState,
+  watchReactiveActionCommit,
+} from "../src/scheduler/run.ts";
 import { MAX_RETRIES_FOR_REACTIVE } from "../src/scheduler/constants.ts";
 import { NodeRegistry } from "../src/scheduler/node-record.ts";
+import { RetryWhenReady } from "../src/scheduler/retry-when-ready.ts";
 import type { Action } from "../src/scheduler/types.ts";
 import type {
   ChangeGroup,
@@ -230,6 +235,7 @@ describe("trigger reads survive failed runs", () => {
     );
     watchReactiveActionCommit({
       action,
+      generation: 0,
       tx,
       log: { reads: [], shallowReads: [], writes: [] },
       retries: args.retries ?? new WeakMap(),
@@ -239,6 +245,7 @@ describe("trigger reads survive failed runs", () => {
       markInvalid: () => args.onMarkInvalid?.(),
       queueExecution: () => args.onQueueExecution?.(),
       restoreInvalidCauses: args.onRestore,
+      isActionGenerationCurrent: () => true,
     });
     return commitPromise.then(async () => {
       await Promise.resolve();
@@ -381,6 +388,67 @@ describe("trigger reads survive failed runs", () => {
       onRestore: () => restored++,
     });
     expect(restored).toBe(0);
+  });
+});
+
+describe("trigger reads survive readiness parking", () => {
+  it("restores CFC provenance when reactive dependencies are coalesced", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+    });
+    try {
+      const readiness = Promise.withResolvers<void>();
+      const action: Action = () => {
+        throw new RetryWhenReady(
+          readiness.promise,
+          "coalesce ordinary dependencies without dropping CFC provenance",
+          { keepDependenciesWhileWaiting: false },
+        );
+      };
+      const scheduler = runtime.scheduler as unknown as {
+        createActionRunState(): SchedulerActionRunState;
+      };
+      const baseState = scheduler.createActionRunState();
+      const triggerRead: IMemorySpaceAddress = {
+        space,
+        scope: "space",
+        id: "of:readiness-trigger",
+        path: ["value"],
+      };
+      const nodes = new NodeRegistry();
+      const record = nodes.register(action, "effect");
+      markInvalid(nodes, action, triggerRead);
+      let running: Promise<unknown> | undefined;
+      const state: SchedulerActionRunState = {
+        ...baseState,
+        nodes,
+        getRunningPromise: () => running,
+        setRunningPromise: (promise) => {
+          running = promise;
+        },
+        markActionHasRun: () => {},
+        markNodeHasRun: () => {},
+        resubscribe: () => {},
+        clearDirty: () => {},
+        markInvalid: (target) => markInvalid(nodes, target),
+        pending: new Set(),
+        queueExecution: () => {},
+      };
+
+      await runSchedulerAction(state, action);
+      expect(record.invalidCauses).toEqual([]);
+
+      readiness.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(record.invalidCauses).toEqual([triggerRead]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
   });
 });
 

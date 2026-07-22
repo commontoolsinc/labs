@@ -219,7 +219,7 @@ Deno.test("Cast Validation", async (t) => {
   });
 
   await t.step(
-    "errors on wrappers from framework module declarations",
+    "allows wrappers from authored framework-looking module declarations",
     async () => {
       const source = `
         import { Cell } from "@commonfabric/local-test";
@@ -240,13 +240,18 @@ Deno.test("Cast Validation", async (t) => {
         },
       });
       const errors = getErrors(diagnostics);
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "cast-validation:cell-cast");
+      assertEquals(
+        errors.length,
+        0,
+        "Authored module names must not confer Common Fabric provenance",
+      );
     },
   );
 
-  await t.step("errors on qualified framework import types", async () => {
-    const source = `
+  await t.step(
+    "allows qualified import types from authored framework-looking modules",
+    async () => {
+      const source = `
       declare module "@commonfabric/local-test" {
         export namespace wrappers {
           export interface Cell<T> {
@@ -258,13 +263,17 @@ Deno.test("Cast Validation", async (t) => {
       const data: any = { value: 42 };
       const cell = data as import("@commonfabric/local-test").wrappers.Cell<number>;
     `;
-    const { diagnostics } = await validateSource(source, {
-      types: COMMONFABRIC_TYPES,
-    });
-    const errors = getErrors(diagnostics);
-    assertGreater(errors.length, 0, "Expected at least one error");
-    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
-  });
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Authored ambient module strings must not confer Common Fabric provenance",
+      );
+    },
+  );
 
   await t.step("allows import types from non-framework modules", async () => {
     const source = `
@@ -3815,6 +3824,11 @@ Deno.test("Standalone Function Validation", async (t) => {
         true,
         "Error should mention computed()",
       );
+      assertEquals(
+        errors.some((error) => error.message.includes("patternTool")),
+        false,
+        "Canonical guidance must not recommend the deprecated writer",
+      );
     },
   );
 
@@ -3894,11 +3908,16 @@ Deno.test("Standalone Function Validation", async (t) => {
         true,
         "Error should suggest explicit .get().map(...) workaround",
       );
+      assertEquals(
+        errors.some((error) => error.message.includes("patternTool")),
+        false,
+        "Canonical guidance must not recommend the deprecated writer",
+      );
     },
   );
 
   await t.step(
-    "allows reactive operations in the pattern passed to patternTool()",
+    "points deprecated writer imports to inline pattern factories",
     async () => {
       const source =
         `      import { pattern, patternTool, computed, Cell } from "commonfabric";
@@ -3913,58 +3932,10 @@ Deno.test("Standalone Function Validation", async (t) => {
         types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
+      assertHasErrorType(errors, "factory-authoring:legacy-pattern-tool");
       assertEquals(
-        errors.length,
-        0,
-        "Reactive operations inside a patternTool's pattern should be allowed",
-      );
-    },
-  );
-
-  await t.step(
-    "errors when patternTool's first argument is a bare callback",
-    async () => {
-      const source =
-        `      import { patternTool, computed, Cell } from "commonfabric";
-
-      declare const multiplier: Cell<number>;
-
-      const tool = patternTool(({ query }: { query: string }) => {
-        return computed(() => query.length * multiplier.get());
-      });
-    `;
-      const { diagnostics } = await validateSource(source, {
-        types: COMMONFABRIC_TYPES,
-      });
-      const errors = getErrors(diagnostics);
-      assertHasErrorType(
-        errors,
-        "pattern-context:patterntool-requires-pattern",
-      );
-    },
-  );
-
-  await t.step(
-    "keeps unresolved patternTool callbacks in compute context",
-    async () => {
-      const source = `      const helpers: Record<string, unknown> = {};
-
-      const tool = (helpers.patternTool as (fn: (input: { value?: string }) => string | undefined) => unknown)(
-        (input) => input?.value,
-      );
-      tool;
-    `;
-      const { diagnostics } = await validateSource(source, {
-        types: COMMONFABRIC_TYPES,
-      });
-      const errors = getErrors(diagnostics);
-      const optionalErrors = errors.filter((error) =>
-        error.type === "pattern-context:optional-chaining"
-      );
-      assertEquals(
-        optionalErrors.length,
-        0,
-        "Callbacks passed to name-matched patternTool should not be treated as restricted pattern context",
+        errors.some((error) => error.message.includes("pattern(...)")),
+        true,
       );
     },
   );
@@ -4183,28 +4154,6 @@ Deno.test("SES Callback Self-Containment Validation", async (t) => {
           return <button onClick={() => helper("x")}>Click</button>;
         });
         return <div>{button}</div>;
-      });
-    `;
-      const { diagnostics } = await validateSource(source, {
-        types: COMMONFABRIC_TYPES,
-      });
-      const errors = getErrors(diagnostics);
-      assertHasErrorType(errors, "ses-callback:callable-capture");
-    },
-  );
-
-  await t.step(
-    "errors when patternTool callback captures enclosing helper function",
-    async () => {
-      const source =
-        `      import { computed, pattern, patternTool } from "commonfabric";
-
-      export default pattern(() => {
-        const tool = computed(() => {
-          const helper = (value: string) => value.toUpperCase();
-          return patternTool(({ query }: { query: string }) => helper(query));
-        });
-        return { tool };
       });
     `;
       const { diagnostics } = await validateSource(source, {

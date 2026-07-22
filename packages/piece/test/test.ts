@@ -16,8 +16,9 @@ describe("PieceManager.get", () => {
         pieceSynced = true;
         return Promise.resolve();
       },
-      // A non-wrapper piece resolves to itself; get() canonicalizes the address
-      // (value-link slot -> result cell) before syncing + starting.
+      // An identity-less non-wrapper resolves to itself; get() canonicalizes
+      // identity-less addresses before starting them.
+      getMetaRaw: () => undefined,
       resolveAsCell: () => piece,
       asSchema: () => piece,
     };

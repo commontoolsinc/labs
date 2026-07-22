@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { stub } from "@std/testing/mock";
 import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
+import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   type JSONSchema,
@@ -1253,7 +1254,7 @@ describe("storage subscription", () => {
     await storageManager?.close();
   });
 
-  it("clears cached patterns when storage notifies of changes", () => {
+  it("retains structural selections across result writes", () => {
     const internals = runtime.runner as unknown as {
       resultPatternCache: Map<string, string>;
       createStorageSubscription(): IStorageSubscription;
@@ -1282,7 +1283,7 @@ describe("storage subscription", () => {
     const subscription = internals.createStorageSubscription();
     subscription.next(notification);
 
-    expect(internals.resultPatternCache.has(key)).toBe(false);
+    expect(internals.resultPatternCache.has(key)).toBe(true);
   });
 });
 
@@ -1336,6 +1337,72 @@ describe("setup/start", () => {
     runtime.start(resultCell);
     cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 1 });
+  });
+
+  it("retries startup after a raw node's factory input replicates", async () => {
+    const ref = {
+      identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      symbol: "coldFactory",
+    } as const;
+    const factory = createFactoryShell({ kind: "module", ref });
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: { type: "object", properties: {} },
+      result: {},
+      nodes: [{
+        module: {
+          type: "raw",
+          implementation: () => () => undefined,
+        },
+        inputs: { factory },
+        outputs: {},
+      }],
+    };
+    const resultCell = runtime.getCell(
+      space,
+      "start retries cold raw factory input",
+    );
+    setupTrusted(runtime, undefined, pattern, {}, resultCell);
+
+    const sourceSpace = (await Identity.fromPassphrase(
+      "cold raw factory source",
+    )).did();
+    const manager = runtime.patternManager;
+    const originalIsAvailable = manager.isArtifactAvailableInSpace;
+    const originalSourceSpace = manager.artifactSourceSpace;
+    const originalEnsure = manager.ensureArtifactClosureInSpace;
+    let available = false;
+    let replications = 0;
+    manager.isArtifactAvailableInSpace = (identity, artifactSpace) =>
+      identity === ref.identity && artifactSpace === space
+        ? available
+        : originalIsAvailable.call(manager, identity, artifactSpace);
+    manager.artifactSourceSpace = (identity, destination) =>
+      identity === ref.identity && destination === space
+        ? sourceSpace
+        : originalSourceSpace.call(manager, identity, destination);
+    manager.ensureArtifactClosureInSpace = (
+      identity,
+      fromSpace,
+      toSpace,
+    ) => {
+      if (identity !== ref.identity) {
+        return originalEnsure.call(manager, identity, fromSpace, toSpace);
+      }
+      expect([fromSpace, toSpace]).toEqual([sourceSpace, space]);
+      replications++;
+      return Promise.resolve().then(() => {
+        available = true;
+      });
+    };
+    try {
+      expect(await runtime.start(resultCell)).toBe(true);
+      expect(replications).toBe(1);
+    } finally {
+      manager.isArtifactAvailableInSpace = originalIsAvailable;
+      manager.artifactSourceSpace = originalSourceSpace;
+      manager.ensureArtifactClosureInSpace = originalEnsure;
+    }
   });
 
   it("reports a missing stream marker when a handler's $event reads undefined", async () => {

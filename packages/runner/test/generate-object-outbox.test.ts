@@ -11,7 +11,10 @@ import {
 import { LLMClient } from "@commonfabric/llm";
 import type { BuiltInGenerateObjectParams } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  installTestPatternArtifact,
+} from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
@@ -46,7 +49,10 @@ describe("generateObject outbox mechanism", () => {
 
     const { commonfabric } = createTrustedBuilder(runtime);
     ({ pattern, generateObject } = commonfabric);
-    dummyPattern = pattern(() => ({}), { type: "object" });
+    dummyPattern = installTestPatternArtifact(
+      runtime,
+      pattern(() => ({}), { type: "object" }),
+    );
   });
 
   afterEach(async () => {
@@ -370,7 +376,10 @@ describe("generateObject outbox mechanism", () => {
       tools: {
         dummy: {
           description: "A dummy tool to force tool-calling path",
-          pattern: dummyPattern,
+          // This test writes the legacy BuiltInLLMTool shape directly to a
+          // Cell. Store its Pattern graph, not the keyless live factory: a
+          // keyless factory deliberately has no durable Factory@1 ref.
+          pattern: dummyPattern.toJSON(),
         },
       },
     });

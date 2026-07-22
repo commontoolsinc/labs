@@ -9,6 +9,12 @@ import {
 import type { FabricValue } from "@/interface.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { factoryStateOf, registerFabricFactory } from "@/fabric-factory.ts";
+
+const FACTORY_REF = {
+  identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  symbol: "__cfFactory_1",
+} as const;
 
 describe("deep-freeze", () => {
   describe("isDeepFrozen", () => {
@@ -315,6 +321,65 @@ describe("deep-freeze", () => {
         // (FabricError no longer has a wrapped Error slot to check directly;
         // the native projection is lazy, and any built projection is frozen.)
       });
+    });
+  });
+
+  describe("Fabric factories", () => {
+    it("fails before freezing a live factory whose artifact ref is unavailable", () => {
+      const factory = registerFabricFactory(() => undefined, "module", {
+        kind: "module",
+        rootToken: {},
+      });
+
+      expect(() => deepFreeze(factory)).toThrow("artifact ref");
+      expect(Object.isFrozen(factory)).toBe(false);
+    });
+
+    it("seals canonical state before freezing the callable and memoizes it", () => {
+      let accessorCalls = 0;
+      let frozenWhenStateWasRead: boolean | undefined;
+      const factory = registerFabricFactory(
+        () => undefined,
+        "pattern",
+        () => {
+          accessorCalls++;
+          frozenWhenStateWasRead = Object.isFrozen(factory);
+          return {
+            kind: "pattern",
+            rootToken: {},
+            ref: FACTORY_REF,
+            argumentSchema: { type: "object" },
+            resultSchema: { type: "object" },
+            paramsSchema: { type: "object" },
+            params: { nested: { value: 1 } },
+          };
+        },
+      );
+
+      expect(isDeepFrozen(factory)).toBe(false);
+      expect(deepFreeze(factory)).toBe(factory);
+      expect(frozenWhenStateWasRead).toBe(false);
+      expect(accessorCalls).toBe(1);
+      expect(Object.isFrozen(factory)).toBe(true);
+
+      const canonical = factoryStateOf(factory);
+      expect(Object.hasOwn(canonical, "rootToken")).toBe(false);
+      expect(Object.isFrozen(canonical)).toBe(true);
+      expect(isDeepFrozen(factory)).toBe(true);
+      expect(isDeepFrozenFabricValue(factory)).toBe(true);
+
+      expect(deepFreeze(factory)).toBe(factory);
+      expect(factoryStateOf(factory)).toBe(canonical);
+      expect(accessorCalls).toBe(1);
+    });
+
+    it("rejects an arbitrary function inside an otherwise frozen container", () => {
+      const value = Object.freeze({
+        callback: Object.freeze(() => undefined),
+      });
+
+      expect(isDeepFrozen(value)).toBe(true);
+      expect(isDeepFrozenFabricValue(value)).toBe(false);
     });
   });
 

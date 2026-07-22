@@ -9,6 +9,7 @@
 import type { JSONSchema } from "commonfabric";
 import { ContextualFlowControl } from "./cfc.ts";
 import { AsCellType } from "@commonfabric/api";
+import { isRecord } from "@commonfabric/utils/types";
 
 export interface SchemaFormatOptions {
   /** Definitions map for resolving $ref references */
@@ -65,17 +66,6 @@ export interface SchemaFormatOptions {
  * // Enums as union literals
  * schemaToTypeString({ enum: ["open", "closed"] })
  * // → '"open" | "closed"'
- *
- * @example
- * // PatternToolResult schemas (from patternTool())
- * schemaToTypeString({
- *   type: "object",
- *   properties: {
- *     pattern: { type: "object" },
- *     extraParams: { properties: { content: { type: "string" } } }
- *   }
- * })
- * // → "(e: { content?: string }) => void"
  *
  * @example
  * // With $defs resolution
@@ -158,18 +148,23 @@ function schemaToTypeStringInner(
     return innerType;
   }
 
-  // Handle PatternToolResult - objects with { pattern, extraParams } structure
-  // These represent callable handlers created via patternTool()
-  // Format as (e: ExtraParamsType) => void for LLM readability
-  if (s.type === "object" || s.properties) {
-    const props = s.properties as Record<string, JSONSchema> | undefined;
-    if (props && "pattern" in props && "extraParams" in props) {
-      // This is a PatternToolResult schema - format as a handler
-      const extraParamsSchema = props.extraParams;
-      if (depth >= maxDepth) return "(e: {...}) => void";
-      const paramType = schemaToTypeString(extraParamsSchema, nextOpts);
-      return `(e: ${paramType}) => void`;
-    }
+  if (isRecord(s.asFactory)) {
+    const contract = s.asFactory;
+    const input = contract.kind === "handler"
+      ? contract.contextSchema
+      : contract.argumentSchema;
+    const output = contract.kind === "handler"
+      ? contract.eventSchema
+      : contract.resultSchema;
+    const inputType = schemaToTypeString(
+      (input ?? true) as JSONSchema,
+      nextOpts,
+    );
+    const outputType = schemaToTypeString(
+      (output ?? true) as JSONSchema,
+      nextOpts,
+    );
+    return `(e: ${inputType}) => ${outputType}`;
   }
 
   // Handle enum - show as union of literals

@@ -185,6 +185,22 @@ Deno.test("handler<E, S> injects two schemas and marks a written Cell state fiel
   assertEquals((state.properties as Obj).total.asCell, ["writeonly"]);
 });
 
+Deno.test("handler state schema propagates Cell writes from same-file helpers", async () => {
+  const source = [
+    "/// <cts-enable />",
+    'import { handler, Cell } from "commonfabric";',
+    "const writeTotal = (total: Cell<number>, value: number) => { total.set(value); };",
+    "export const h = handler<{ amount: number }, { total: Cell<number> }>(",
+    "  (event, ctx) => { writeTotal(ctx.total, event.amount); },",
+    ");",
+  ].join("\n");
+  const output = await t(source);
+  const [, state] = callSchemas(parseModule(output), "handler");
+  // Passing the Cell to the helper observes its identity while the helper
+  // writes it, so the least-authority contract must retain both capabilities.
+  assertEquals((state.properties as Obj).total.asCell, ["cell"]);
+});
+
 Deno.test("handler inline form injects the event schema from the annotated parameter", async () => {
   const source = [
     "/// <cts-enable />",
@@ -514,6 +530,62 @@ Deno.test("handler(fn) with an underscore-prefixed unused event param yields a f
   // emitted as the first satisfies-marked argument.
   const values = allEmittedSchemaValues(parseModule(output));
   assertEquals(values[0], false);
+});
+
+for (
+  const [label, declaration] of [
+    [
+      "arrow",
+      "const callback = (input: { value: number }) => ({ result: input.value });",
+    ],
+    [
+      "function expression",
+      "const callback = function (input: { value: number }) { return { result: input.value }; };",
+    ],
+  ] as const
+) {
+  Deno.test(`lift resolves a referenced ${label} callback`, async () => {
+    const output = await t([
+      "/// <cts-enable />",
+      'import { lift } from "commonfabric";',
+      declaration,
+      "export const operation = lift(callback);",
+    ].join("\n"));
+    const [input, result] = callSchemas(parseModule(output), "lift");
+
+    assertEquals((input.properties as Obj).value.type, "number");
+    assertEquals((result.properties as Obj).result.type, "number");
+  });
+}
+
+Deno.test("handler resolves a referenced function declaration callback", async () => {
+  const output = await t([
+    "/// <cts-enable />",
+    'import { handler, Cell } from "commonfabric";',
+    "function callback(event: { delta: number }, ctx: { count: Cell<number> }) {",
+    "  ctx.count.set(event.delta);",
+    "}",
+    "export const action = handler(callback);",
+  ].join("\n"));
+  const [event, state] = callSchemas(parseModule(output), "handler");
+
+  assertEquals((event.properties as Obj).delta.type, "number");
+  assert(Object.keys(state.properties as Obj).includes("count"));
+});
+
+Deno.test("pattern resolves a referenced function declaration callback", async () => {
+  const output = await t([
+    "/// <cts-enable />",
+    'import { pattern } from "commonfabric";',
+    "function callback(input: { value: number }) {",
+    "  return { result: input.value };",
+    "}",
+    "export const operation = pattern(callback);",
+  ].join("\n"));
+  const [input, result] = callSchemas(parseModule(output), "pattern");
+
+  assertEquals((input.properties as Obj).value.type, "number");
+  assertEquals((result.properties as Obj).result.type, "number");
 });
 
 // ---------------------------------------------------------------------------
@@ -1151,4 +1223,26 @@ Deno.test("lift-applied untyped callback using Cell.get on a Cell input recovers
   const [input] = callSchemas(parseModule(output), "lift");
   assertEquals((input.properties as Obj).n.type, "number");
   assertEquals(input.asCell, ["readonly"]);
+});
+
+Deno.test("lift-applied cell-like recovery traverses local object method bodies", async () => {
+  const source = [
+    "/// <cts-enable />",
+    'import { cell, lift } from "commonfabric";',
+    "const c = cell({ n: 5 });",
+    "type Cellish = { n: number; get(): { n: number } };",
+    "const read: (x: Cellish) => number = (x) => {",
+    "  const reader = { read() { return x.get().n; } };",
+    "  return reader.read();",
+    "};",
+    "const d = lift(read)(c);",
+  ].join("\n");
+  const output = await t(source);
+  const [input] = callSchemas(parseModule(output), "lift");
+
+  assertEquals((input.properties as Obj).n.type, "number");
+  // Capability analysis deliberately treats local method bodies as a nested
+  // boundary, so this remains conservatively opaque. The cell-like recovery
+  // pass must still traverse the method and preserve the Cell wrapper.
+  assertEquals(input.asCell, ["opaque"]);
 });

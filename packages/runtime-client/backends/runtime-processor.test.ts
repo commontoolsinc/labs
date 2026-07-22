@@ -13,6 +13,7 @@ import {
   RuntimeProcessor,
   sanitizeForPostMessage,
   shouldReconcileHomeRoot,
+  telemetryNotification,
 } from "./runtime-processor.ts";
 import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
 import { cfcAtom } from "@commonfabric/api/cfc";
@@ -26,6 +27,11 @@ import {
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
+  createFactoryShell,
+  factoryStateOf,
+  isAdmittedFabricFactory,
+} from "@commonfabric/data-model/fabric-factory";
+import {
   cellRefToSigilLink,
   getCell,
   mapCellRefsToSigilLinks,
@@ -34,6 +40,7 @@ import { Runtime } from "@commonfabric/runner";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import * as V2Storage from "../../runner/src/storage/v2.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
+import { decodeFactoryAwareIPCValue } from "../fabric-value-ipc.ts";
 
 const cfcSigner = await Identity.fromPassphrase(
   "runtime-processor-cfc-label-tests",
@@ -838,6 +845,91 @@ describe("sanitizeForPostMessage", () => {
         },
       });
     });
+  });
+});
+
+describe("Factory@1 cell IPC", () => {
+  it("round-trips get and subscription values through context-free codec projection", async () => {
+    const ref: CellRef = {
+      id: "of:factory-ipc-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const factory = createFactoryShell({
+      kind: "pattern",
+      ref: { identity: "A".repeat(43), symbol: "factory" },
+      argumentSchema: true,
+      resultSchema: true,
+    });
+    const processor = {
+      subscriptions: new Map(),
+      runtime: {
+        getCellFromLink: () => ({
+          get: () => ({ factory }),
+          sink: (callback: (value: unknown) => void) => {
+            callback({ factory });
+            return () => {};
+          },
+        }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    const response = RuntimeProcessor.prototype.handleCellGet.call(
+      processor,
+      { type: RequestType.CellGet, cell: ref },
+    );
+
+    expect(() => structuredClone(response)).not.toThrow();
+    expect(response.valueEncoding).toBe("fabric-json");
+    const decoded = decodeFactoryAwareIPCValue(
+      response.value,
+      response.valueEncoding,
+    ) as { factory: unknown };
+    expect(isAdmittedFabricFactory(decoded.factory)).toBe(true);
+    expect(factoryStateOf(decoded.factory)).toEqual(factoryStateOf(factory));
+    expect(() => (decoded.factory as () => void)()).toThrow(
+      "factory requires runner materialization",
+    );
+
+    const posted: unknown[] = [];
+    const originalPostMessage = self.postMessage;
+    (self as { postMessage: unknown }).postMessage = (message: unknown) => {
+      posted.push(message);
+    };
+    try {
+      RuntimeProcessor.prototype.handleCellSubscribe.call(processor, {
+        type: RequestType.CellSubscribe,
+        cell: ref,
+      });
+      await Promise.resolve();
+    } finally {
+      (self as { postMessage: unknown }).postMessage = originalPostMessage;
+    }
+    expect(posted).toHaveLength(1);
+    expect(() => structuredClone(posted[0])).not.toThrow();
+    expect(posted[0]).toMatchObject({ valueEncoding: "fabric-json" });
+  });
+
+  it("projects factory-bearing telemetry markers before postMessage", () => {
+    const factory = createFactoryShell({
+      kind: "module",
+      ref: { identity: `${"E".repeat(42)}A`, symbol: "telemetryFactory" },
+      argumentSchema: true,
+      resultSchema: true,
+    });
+    const notification = telemetryNotification({
+      type: "scheduler.invocation",
+      factory,
+    } as never);
+
+    expect(notification.markerEncoding).toBe("fabric-json");
+    expect(() => structuredClone(notification)).not.toThrow();
+    const decoded = decodeFactoryAwareIPCValue(
+      notification.encodedMarker,
+      notification.markerEncoding,
+    ) as { factory: unknown };
+    expect(isAdmittedFabricFactory(decoded.factory)).toBe(true);
   });
 });
 
@@ -2821,6 +2913,81 @@ describe("RuntimeProcessor vdom mount render policy", () => {
   it("keeps mounts unbounded when no ceiling is configured", async () => {
     const policy = await mountAndGetRootPolicy(undefined);
     expect(policy.maxConfidentiality).toBeUndefined();
+  });
+
+  it("posts structured-cloneable VDOM batches with factory props", async () => {
+    const { runtime } = createRuntime();
+    const tx = runtime.edit();
+    const cell = runtime.getCell<string>(
+      cfcSigner.did(),
+      "vdom-factory-prop",
+      undefined,
+      tx,
+    );
+    cell.set("hello");
+    expect((await tx.commit()).ok).toBeDefined();
+    const state = {
+      runtime,
+      vdomMounts: new Map(),
+      vdomBatchIdCounter: 0,
+      renderDeclassificationPolicy: "allow",
+      handleVDomUnmount,
+    };
+    const posted: unknown[] = [];
+    const originalPostMessage = (globalThis as { postMessage?: unknown })
+      .postMessage;
+    (globalThis as { postMessage: unknown }).postMessage = (
+      message: unknown,
+    ) => {
+      posted.push(structuredClone(message));
+    };
+    try {
+      handleVDomMount.call(state, {
+        type: RequestType.VDomMount,
+        mountId: 7,
+        cell: cell.getAsNormalizedFullLink() as unknown as CellRef,
+      });
+      const reconciler = (state.vdomMounts.get(7) as {
+        reconciler: { onOps(ops: unknown[]): number };
+      }).reconciler;
+      const factory = createFactoryShell({
+        kind: "pattern",
+        ref: { identity: "A".repeat(43), symbol: "vdomFactory" },
+        argumentSchema: true,
+        resultSchema: true,
+      });
+
+      expect(() =>
+        reconciler.onOps([{
+          op: "set-prop",
+          nodeId: 1,
+          key: "factory",
+          value: factory,
+        }])
+      ).not.toThrow();
+    } finally {
+      handleVDomUnmount.call(state, {
+        type: RequestType.VDomUnmount,
+        mountId: 7,
+      });
+      await runtime.dispose();
+      if (originalPostMessage === undefined) {
+        delete (globalThis as { postMessage?: unknown }).postMessage;
+      } else {
+        (globalThis as { postMessage: unknown }).postMessage =
+          originalPostMessage;
+      }
+    }
+    expect(posted.length).toBeGreaterThan(0);
+    const encodedBatch = posted.find((message) =>
+      (message as { opsEncoding?: unknown }).opsEncoding === "fabric-json"
+    ) as { encodedOps: string; opsEncoding: "fabric-json" } | undefined;
+    expect(encodedBatch).toBeDefined();
+    const decodedOps = decodeFactoryAwareIPCValue(
+      encodedBatch!.encodedOps,
+      encodedBatch!.opsEncoding,
+    ) as Array<{ value?: unknown }>;
+    expect(isAdmittedFabricFactory(decodedOps[0].value)).toBe(true);
   });
 });
 

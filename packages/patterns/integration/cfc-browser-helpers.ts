@@ -34,19 +34,23 @@ const textAbsent = (
     probe.deepText(element).includes(text)
   );
 
-const buttonDisabledIs = (
+export const buttonDisabledIs = (
   probe: ProbeApi,
   selector: string,
   disabled: boolean,
 ): boolean => {
-  const element = probe.collect(selector)[0];
-  if (!element) return false;
-  const button = element instanceof HTMLButtonElement
-    ? element
-    : element.shadowRoot?.querySelector("button");
-  return button instanceof HTMLButtonElement
-    ? button.disabled === disabled
-    : false;
+  for (const element of probe.collect(selector)) {
+    const button = element instanceof HTMLButtonElement
+      ? element
+      : element.shadowRoot?.querySelector("button");
+    if (
+      button instanceof HTMLButtonElement && probe.isRendered(element) &&
+      probe.isRendered(button) && button.disabled === disabled
+    ) {
+      return true;
+    }
+  }
+  return false;
 };
 
 const runtimeIdle = async (): Promise<boolean> => {
@@ -102,6 +106,51 @@ const viewSettledReady = (): boolean =>
   typeof (globalThis as typeof globalThis & {
     commonfabric?: { viewSettled?: () => Promise<void> };
   }).commonfabric?.viewSettled === "function";
+
+/**
+ * Check the active worker's VDOM tree, not the possibly stale DOM left by a
+ * retired reconciler during worker replacement.
+ */
+export async function vdomHasButton(
+  page: Page,
+  label: string,
+): Promise<boolean> {
+  return await page.evaluate(async (needle) => {
+    const tree = await (globalThis as typeof globalThis & {
+      commonfabric?: { vdom?: { tree?: () => Promise<unknown> } };
+    }).commonfabric?.vdom?.tree?.();
+    const seen = new Set<object>();
+    const textOf = (value: unknown): string => {
+      if (typeof value === "string") return value;
+      if (Array.isArray(value)) return value.map(textOf).join("");
+      if (value === null || typeof value !== "object") return "";
+      return Object.values(value as Record<string, unknown>).map(textOf).join(
+        "",
+      );
+    };
+    let found = false;
+    const visit = (value: unknown): void => {
+      if (found || value === null || typeof value !== "object") return;
+      if (seen.has(value as object)) return;
+      seen.add(value as object);
+      if (Array.isArray(value)) {
+        value.forEach(visit);
+        return;
+      }
+      const record = value as Record<string, unknown>;
+      if (
+        record.type === "vnode" && record.name === "cf-button" &&
+        textOf(record.children).replace(/\s+/g, " ").trim().includes(needle)
+      ) {
+        found = true;
+        return;
+      }
+      Object.values(record).forEach(visit);
+    };
+    visit(tree);
+    return found;
+  }, { args: [label] });
+}
 
 // Fill the input behind `selector`, then report whether the value took. Mirrors
 // the prior poll predicate: a not-yet-ready field (absent, hidden, disabled,
@@ -206,29 +255,36 @@ const fillAndVerify = async (
   return verified;
 };
 
-// Tag the inner click target of the cf-button behind `selector` so the test can
-// resolve and click exactly that element. A click target that is still
-// detached, or not rendered — laid out, and not display:none or
-// visibility:hidden — is left untagged, so a re-check on the next DOM mutation
-// retries the mark once the control renders. The check is viewport-independent:
-// the click scrolls the element into view itself, so a control below the fold
-// is markable. It reads the click target alone because hiding the host or any
-// ancestor reaches the inner button either way: display:none zeroes its box,
-// and visibility:hidden inherits into its computed visibility.
-const markForClick = (
+// Tag the inner click target of the current rendered, enabled cf-button behind
+// `selector`. A retired render can briefly leave an earlier matching node in
+// the DOM, so never assume the first match is the live interactive control. The
+// rendered check is viewport-independent: the trusted click scrolls the target
+// into view itself, so a live control below the fold remains markable.
+export const markForClick = (
   probe: ProbeApi,
   selector: string,
   token: string,
   attr: string,
 ): boolean => {
-  const target = probe.collect(selector)[0] as HTMLElement | undefined;
-  if (!target) return false;
-  const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
-    | HTMLElement
-    | null) ?? target;
-  if (!clickTarget.isConnected || !probe.isRendered(clickTarget)) return false;
-  clickTarget.setAttribute(attr, token);
-  return true;
+  const isDisabled = (element: HTMLElement): boolean =>
+    element.hasAttribute("disabled") ||
+    element.getAttribute("aria-disabled") === "true";
+
+  for (const element of probe.collect(selector)) {
+    const target = element as HTMLElement;
+    const clickTarget = (target.shadowRoot?.querySelector(
+      "[data-cf-button]",
+    ) as HTMLElement | null) ?? target;
+    if (
+      target.isConnected && clickTarget.isConnected &&
+      probe.isRendered(target) && probe.isRendered(clickTarget) &&
+      !isDisabled(target) && !isDisabled(clickTarget)
+    ) {
+      clickTarget.setAttribute(attr, token);
+      return true;
+    }
+  }
+  return false;
 };
 
 // Tag the `index`-th element matching `selector` once it is rendered. Unlike

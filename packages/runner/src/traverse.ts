@@ -15,6 +15,7 @@ import {
   FabricSpecialObject,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 // TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
@@ -1448,6 +1449,11 @@ export abstract class BaseObjectTraverser {
         { ...doc.address, scope: doc.address.scope ?? "space" },
         defaultValue,
       );
+    } else if (isAdmittedFabricFactory(doc.value)) {
+      // Factory@1 is an atomic codec value. Its callable shell is the decoded
+      // surface; hidden state is traversed by codec/storage graph walkers, not
+      // by enumerating the JavaScript function here.
+      return doc.value as Immutable<FabricValue>;
     } else if (isPrimitive(doc.value)) {
       return doc.value;
     } else if (Array.isArray(doc.value)) {
@@ -3406,7 +3412,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
     }
     if (
       ContextualFlowControl.isTrueSchema(resolved) &&
-      !SchemaObjectTraverser.hasAsCell(resolved)
+      !SchemaObjectTraverser.hasAsCell(resolved) &&
+      !(isRecord(resolved) && "asFactory" in resolved)
     ) {
       const defaultValue = isRecord(resolved) ? resolved["default"] : undefined;
       // A value of true or {} means we match anything.
@@ -3451,6 +3458,23 @@ export class SchemaObjectTraverser<V extends FabricValue>
         schemaObj,
       );
       return { ok: this.objectCreator.createObject(newLink, doc.value) };
+    }
+    if (isAdmittedFabricFactory(doc.value)) {
+      // Only an explicit factory schema (or the true-schema fast path above)
+      // admits a callable Fabric value. Let the runner-owned object creator
+      // choose between dependency-only shell preservation and warm executable
+      // exposure; the codec state remains atomic either way.
+      if (!("asFactory" in schemaObj)) {
+        return fail(TRAVERSE_FAILURES.invalidType);
+      }
+      this.tx.read(doc.address, READ_FOR_SCHEDULING);
+      const factoryLink = link ?? getNormalizedLink(doc.address, schemaObj);
+      return {
+        ok: this.objectCreator.createObject(
+          { ...factoryLink, schema: schemaObj },
+          doc.value,
+        ),
+      };
     }
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it

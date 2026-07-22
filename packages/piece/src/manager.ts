@@ -335,16 +335,22 @@ export class PieceManager {
     // makes both the slot and the canonical cell (with its metadata) local.
     await timePiecePhase("get.piece.sync", () => addressed.sync());
 
-    // Canonicalize the value-link "slot" to the piece's canonical result cell.
-    // A piece created inside a handler and stored into a list/object (e.g. the
-    // topics board's `addTopic` doing `topics.push(Topic({...}))`) is addressed
-    // by a plain value-link that redirects to the result cell, where setup wrote
-    // `patternIdentity` and the `argument` meta-link. start() needs that identity
-    // and reads need that metadata, so resolving here makes start / read / stop
-    // operate on the real piece rather than the wrapper. The sync above already
-    // made the canonical cell local, so this resolves over local links with no
-    // further sync. Idempotent for a normal top-level piece.
-    const piece = addressed.resolveAsCell();
+    // Canonicalize an identity-less value-link "slot" to the piece's canonical
+    // result cell. A piece created inside a handler and stored into a list/object
+    // (e.g. the topics board's `addTopic` doing `topics.push(Topic({...}))`) is
+    // addressed by a plain value-link that redirects to the result cell, where
+    // setup wrote `patternIdentity` and the `argument` meta-link. start() needs
+    // that identity and reads need that metadata, so resolving the slot makes
+    // start / read / stop operate on the real piece rather than the wrapper.
+    //
+    // A canonical result cell may itself contain a top-level value link while
+    // carrying its own pattern identity. Keep that outer cell: dereferencing it
+    // would discard the identity that start() needs. The sync above already made
+    // an identity-less slot's target local, so that case resolves without a
+    // second sync.
+    const piece = getPatternIdentityRef(addressed) === undefined
+      ? addressed.resolveAsCell()
+      : addressed;
 
     if (runIt) {
       // start() handles pattern loading and running. It's idempotent - no

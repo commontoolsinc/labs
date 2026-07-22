@@ -160,6 +160,7 @@ import type {
   Action,
   ActionRunTraceEntry,
   EventHandler,
+  EventHandlerRegistration,
   EventPreflightTraceContext,
   QueuedEvent,
   ReactivityLog,
@@ -403,6 +404,7 @@ export type {
   TriggerTraceValueSummary,
 } from "./types.ts";
 export { txToReactivityLog } from "./reactivity.ts";
+export { RetryWhenReady } from "./retry-when-ready.ts";
 
 export {
   allowMutableTransactionRead,
@@ -412,7 +414,9 @@ export {
 
 export class Scheduler {
   private eventQueue: QueuedEvent[] = [];
-  private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
+  private eventHandlers: EventHandlerRegistration[] = [];
+  private eventHandlerGeneration = 0;
+  private eventSequence = 0;
   readonly lineage = new SpeculationLineage({
     dropQueuedEvent: (event, reason) => this.dropEvent(event, reason),
     queueExecution: () => this.queueExecution(),
@@ -425,6 +429,8 @@ export class Scheduler {
   private triggerIndex = new SchedulerTriggerIndex();
   private actionChangeGroups = new WeakMap<Action, ChangeGroup>();
   private retries = new WeakMap<Action, number>();
+  private actionGenerations = new WeakMap<Action, number>();
+  private actionReadinessAttempts = new WeakMap<Action, symbol>();
 
   // Effect/computation tracking for pull-based scheduling
   private nodes = new NodeRegistry();
@@ -554,6 +560,7 @@ export class Scheduler {
   // $value writes and server pushes. See
   // docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md.
   private wakeShaper = new WakeShaper();
+  private pendingDurableEventReadiness = new Set<Promise<void>>();
   // Head event parked on in-flight document loads (CT-1795). Keyed by event
   // id; released by loadsSettled, which either re-queues execution on success
   // or drops the at-most-once event on an explicit load failure.
@@ -681,6 +688,7 @@ export class Scheduler {
       | SchedulerRegisterOptions,
     maybeOptions: SchedulerRegisterOptions = {},
   ): Cancel {
+    const generation = this.advanceActionGeneration(action);
     const { dependencies, options } = normalizeRegistrationArgs(
       dependenciesOrOptions,
       maybeOptions,
@@ -747,7 +755,11 @@ export class Scheduler {
     if (!rehydrated && options.awaitSyncBeforeInitialRun) {
       this.holdInitialRunUntilSynced(action, options.awaitSyncBeforeInitialRun);
     }
-    return cancel;
+    return () => {
+      if (this.isActionGenerationCurrent(action, generation)) {
+        cancel();
+      }
+    };
   }
 
   // Hold a resumed action's initial run until its space finishes syncing. The
@@ -1166,6 +1178,7 @@ export class Scheduler {
     action: Action,
     options: { preserveChangeGroup?: boolean } = {},
   ): void {
+    this.advanceActionGeneration(action);
     unsubscribeSchedulerAction(this.unsubscribeState, action, options);
     this.materializers.clearAction(action);
     // Drop the adoption index entry only if it still points at this action
@@ -1179,6 +1192,39 @@ export class Scheduler {
     ) {
       this.actionsByObservationIdentity.delete(identityKey);
     }
+  }
+
+  private advanceActionGeneration(action: Action): number {
+    const generation = (this.actionGenerations.get(action) ?? 0) + 1;
+    this.actionGenerations.set(action, generation);
+    this.retries.delete(action);
+    return generation;
+  }
+
+  private getActionGeneration(action: Action): number {
+    return this.actionGenerations.get(action) ?? 0;
+  }
+
+  private beginActionReadinessAttempt(action: Action): symbol {
+    const attempt = Symbol("scheduler-action-readiness-attempt");
+    this.actionReadinessAttempts.set(action, attempt);
+    return attempt;
+  }
+
+  private isActionGenerationCurrent(
+    action: Action,
+    generation: number,
+  ): boolean {
+    return this.getActionGeneration(action) === generation;
+  }
+
+  private isActionReadinessAttemptCurrent(
+    action: Action,
+    generation: number,
+    attempt: symbol,
+  ): boolean {
+    return this.isActionGenerationCurrent(action, generation) &&
+      this.actionReadinessAttempts.get(action) === attempt;
   }
 
   async run(action: Action): Promise<any> {
@@ -1241,6 +1287,16 @@ export class Scheduler {
         // terminal failure) and then re-check: a landed commit can dirty
         // readers and re-trigger scheduler work.
         this.runtime.storageManager.pendingCommitsSettled().then(recheck);
+      } else if (
+        awaitPendingCommits && this.pendingDurableEventReadiness.size > 0
+      ) {
+        // A user event whose handler is waiting for cold factory code is still
+        // an unprocessed durable intent. Plain idle stays available to
+        // unrelated work, but the client-facing safe-reload barrier must wait
+        // until that intent is requeued, canceled, or rejected.
+        Promise.allSettled([...this.pendingDurableEventReadiness]).then(
+          recheck,
+        );
       } else if (
         this.gates.hasWakeTimer() &&
         ((this.eventQueue.length > 0 &&
@@ -1383,10 +1439,13 @@ export class Scheduler {
   private pieceIdForEventLink(
     eventLink: NormalizedFullLink,
   ): string | undefined {
-    for (const [link, handler] of this.eventHandlers) {
-      if (areNormalizedLinksSame(link, eventLink)) {
+    for (const registration of this.eventHandlers) {
+      if (
+        registration.active &&
+        areNormalizedLinksSame(registration.ref, eventLink)
+      ) {
         return shaperInstanceGroupKey(
-          (handler as {
+          (registration.handler as {
             schedulerObservationIdentity?: SchedulerObservationIdentity;
           }).schedulerObservationIdentity,
         );
@@ -1451,6 +1510,9 @@ export class Scheduler {
   ): Cancel {
     return addSchedulerEventHandler({
       eventHandlers: this.eventHandlers,
+      nextEventHandlerGeneration: () => ++this.eventHandlerGeneration,
+      eventQueue: this.eventQueue,
+      queueExecution: () => this.queueExecution(),
     }, {
       handler,
       ref,
@@ -1464,6 +1526,13 @@ export class Scheduler {
 
   onError(fn: ErrorHandler): void {
     this.errorHandlers.add(fn);
+  }
+
+  reportError(error: unknown, action: unknown = { name: "runner" }): void {
+    this.handleError(
+      error instanceof Error ? error : new Error(String(error)),
+      action,
+    );
   }
 
   setEventPreflightTelemetryEnabled(enabled: boolean): void {
@@ -1808,6 +1877,21 @@ export class Scheduler {
       this.diagnosisTimeout = null;
     }
     this.diagnosisEnabled = false;
+  }
+
+  /**
+   * Settle events whose exact handler registration is still pending before
+   * runtime teardown waits for scheduler quiescence. Live runtimes keep these
+   * intents parked indefinitely; teardown is the terminal owner cancellation.
+   */
+  cancelHandlerLoadPendingEvents(reason: string): void {
+    let dropped = false;
+    for (const event of [...this.eventQueue]) {
+      if (event.handlerLoadPending !== true) continue;
+      this.dropEvent(event, reason);
+      dropped = true;
+    }
+    if (dropped) this.queueExecution();
   }
 
   // ============================================================
@@ -2421,6 +2505,7 @@ export class Scheduler {
       eventHandlers: this.eventHandlers,
       eventQueue: this.eventQueue,
       backgroundTasks: this.backgroundTasks,
+      nextEventSequence: () => ++this.eventSequence,
       queueExecution: () => this.queueExecution(),
       recordLineageEvent: (originTx, queuedEvent) => {
         this.lineage.recordEvent(originTx, queuedEvent);
@@ -2437,6 +2522,7 @@ export class Scheduler {
     return {
       runtime: this.runtime,
       eventQueue: this.eventQueue,
+      pendingDurableEventReadiness: this.pendingDurableEventReadiness,
       backpressure: this.runtime.commitBackpressure,
       collectPendingLoadParkKeys: (event, deps) =>
         this.collectPendingLoadParkKeys(event, deps),
@@ -2501,6 +2587,13 @@ export class Scheduler {
       retries: this.retries,
       pending: this.pending,
       actionRunTrace: this.actionRunTrace,
+      getActionGeneration: (target) => this.getActionGeneration(target),
+      beginActionReadinessAttempt: (target) =>
+        this.beginActionReadinessAttempt(target),
+      isActionGenerationCurrent: (target, generation) =>
+        this.isActionGenerationCurrent(target, generation),
+      isActionReadinessAttemptCurrent: (target, generation, attempt) =>
+        this.isActionReadinessAttemptCurrent(target, generation, attempt),
       nodes: this.nodes,
       diagnosisHistory: this.diagnosisHistory,
       diagnosisNonIdempotent: this.diagnosisNonIdempotent,
@@ -2528,6 +2621,7 @@ export class Scheduler {
       handleError: (error, target) => this.handleError(error, target),
       resubscribe: (target, log) => this.resubscribe(target, log),
       markInvalid: (target) => this.markActionInvalid(target),
+      clearDirty: (target) => this.clearInvalidAction(target),
       queueExecution: () => this.queueExecution(),
       setExecutingAction: (target, targetActionId) => {
         this.executingAction = target;

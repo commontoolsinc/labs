@@ -3,6 +3,7 @@ import {
   type CellPath,
   ContextualFlowControl,
   extractDefaultValues,
+  FactoryArtifactUnavailableError,
   formatFabricRef,
   getMetaLink,
   getPatternIdentityRef,
@@ -2085,9 +2086,33 @@ class PiecePropIo implements PieceCellIo {
   }
 
   async get(path?: CellPath) {
+    const manager = this.#cc.manager();
     const targetCell = await this.#getTargetCell();
-    await targetCell.pull();
-    return resolveCellPath(targetCell, path ?? []);
+    const targetPath = path ?? [];
+    let pullCell = targetCell;
+    for (const segment of targetPath) {
+      pullCell = pullCell.key(segment as keyof unknown) as Cell<unknown>;
+    }
+    await pullCell.pull();
+    const attemptedArtifacts = new Set<string>();
+    for (;;) {
+      try {
+        return resolveCellPath(targetCell, targetPath);
+      } catch (error) {
+        if (!(error instanceof FactoryArtifactUnavailableError)) throw error;
+        const key =
+          `${error.artifactSpace}\0${error.ref.identity}\0${error.ref.symbol}`;
+        if (attemptedArtifacts.has(key)) throw error;
+        attemptedArtifacts.add(key);
+        const loaded = await manager.runtime.patternManager
+          .loadArtifactByIdentity(
+            error.ref.identity,
+            error.ref.symbol,
+            error.artifactSpace,
+          );
+        if (loaded === undefined) throw error;
+      }
+    }
   }
 
   getCell(): Promise<Cell<unknown>> {

@@ -1,4 +1,4 @@
-import type { Pattern } from "../builder/types.ts";
+import { type Pattern } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 
 // Presence probe for the result container: slots resolve as cells, so the
@@ -29,15 +29,15 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { RawBuiltinReturnType } from "../module.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { listResultSchema } from "./list-result-schema.ts";
-import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import {
+  boundPatternFactoryScope,
   cellIdentityKey,
   narrowestCellScope,
   outputSpotFromBinding,
   scopedCell,
 } from "./scope-policy.ts";
-import { resolveOpPattern } from "./op-pattern-ref.ts";
+import { narrowestScope } from "../scope.ts";
 import { createResumeRepublisher } from "./resume-republish.ts";
 import { createResumeRecovery } from "./resume-recover.ts";
 import {
@@ -47,6 +47,7 @@ import {
 import { resolveLink } from "../link-resolution.ts";
 import { listElementLink } from "./list-element-link.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { createListPatternFactorySupervisor } from "./list-factory-materialization.ts";
 
 const logger = getLogger("runner.flatmap", { enabled: true, level: "warn" });
 
@@ -74,7 +75,6 @@ export function flatMap(
   inputsCell: Cell<{
     list: any[];
     op: Pattern;
-    params?: Record<string, any>;
   }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   addCancel: AddCancel,
@@ -90,8 +90,17 @@ export function flatMap(
   // resultCell holds the per-element result array.
   const elementRuns = new Map<
     string,
-    { resultCell: Cell<any>; lastIndex: number }
+    { resultCell: Cell<any>; lastIndex: number; runGeneration?: number }
   >();
+  const factorySupervisor = createListPatternFactorySupervisor(
+    runtime,
+    addCancel,
+    () => {
+      for (const entry of elementRuns.values()) {
+        runtime.runner.stop(entry.resultCell);
+      }
+    },
+  );
 
   // Only the initial (resume) reconcile defers its per-element sub-pattern runs
   // until sync completes; elements from later (post-resume) reconciles are fresh
@@ -183,8 +192,7 @@ export function flatMap(
     // container's STRUCTURE label even when membership does not depend on element
     // content (spec §8.5.6.1, SC-8). Membership taint now rides the op-result
     // reads below + the structure re-stamp (see recordCfcStructureContainer).
-    const op = inputsCell.asSchema(FLATMAP_INPUT_SCHEMA).withTx(tx).key("op")
-      .get();
+    inputsCell.asSchema(FLATMAP_INPUT_SCHEMA).withTx(tx).key("op").get();
     const sourceListCell = inputsCell.key("list");
     const listCell = sourceListCell.withTx(tx).resolveAsCell();
     const rawList = listCell.withTx(tx).getRaw() as unknown;
@@ -199,13 +207,26 @@ export function flatMap(
         return runtime.getCellFromLink(resolved, undefined, tx);
       });
 
-    const opPattern = resolveOpPattern(runtime, op.getRaw(), "flatMap");
-    const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
-    const outputScope = narrowestCellScope(runtime, tx, [
-      inputsCell.key("list"),
-      ...(Array.isArray(list) && argumentUsage.usesElement ? list : []),
-      argumentUsage.usesArray ? inputsCell.key("list") : undefined,
-      argumentUsage.usesParams ? inputsCell.key("params") : undefined,
+    const selection = factorySupervisor.materialize(
+      tx,
+      inputsCell.key("op"),
+      "flatMap",
+    );
+    const opPattern = selection.pattern;
+    const factoryGeneration = selection.generation;
+    const factorySelectionLink = selection.factorySelectionLink;
+    const factorySourceLink = selection.factorySourceLink;
+    const outputScope = narrowestScope([
+      narrowestCellScope(runtime, tx, [
+        inputsCell.key("list"),
+        ...(Array.isArray(list) ? list : []),
+      ]),
+      factorySourceLink === undefined ? undefined : boundPatternFactoryScope(
+        runtime,
+        tx,
+        opPattern,
+        factorySourceLink,
+      ),
     ]);
 
     if (!result || result.getAsNormalizedFullLink().scope !== outputScope) {
@@ -259,10 +280,9 @@ export function flatMap(
         fn,
       );
     const createRunInput = (element: Cell<any>, index: number) => ({
-      ...(argumentUsage.usesElement ? { element } : {}),
-      ...(argumentUsage.usesIndex ? { index } : {}),
-      ...(argumentUsage.usesArray ? { array: inputsCell.key("list") } : {}),
-      ...(argumentUsage.usesParams ? { params: inputsCell.key("params") } : {}),
+      element,
+      index,
+      array: inputsCell.key("list"),
     });
 
     // Resume against confirmed state, not the not-yet-loaded value: on the
@@ -365,7 +385,9 @@ export function flatMap(
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
-        if (argumentUsage.usesIndex && existing.lastIndex !== i) {
+        const staleFactoryGeneration = factoryGeneration !== undefined &&
+          existing.runGeneration !== factoryGeneration;
+        if (staleFactoryGeneration || existing.lastIndex !== i) {
           runtime.runner.run(
             tx,
             opPattern,
@@ -374,8 +396,12 @@ export function flatMap(
             {
               doNotUpdateOnPatternChange: true,
               awaitSyncBeforeInitialRun: elementAwaitSync,
+              ...(factorySelectionLink === undefined
+                ? {}
+                : { factorySelectionLink }),
             },
           );
+          existing.runGeneration = factoryGeneration;
         }
         existing.lastIndex = i;
       } else {
@@ -393,12 +419,19 @@ export function flatMap(
           {
             doNotUpdateOnPatternChange: true,
             awaitSyncBeforeInitialRun: elementAwaitSync,
+            ...(factorySelectionLink === undefined
+              ? {}
+              : { factorySelectionLink }),
           },
         );
         // Link the new result cells to the pattern cell too
         setPatternCell(resultCell, parentCell.key("pattern"));
         addCancel(() => runtime.runner.stop(resultCell));
-        elementRuns.set(elementKey, { resultCell, lastIndex: i });
+        elementRuns.set(elementKey, {
+          resultCell,
+          lastIndex: i,
+          runGeneration: factoryGeneration,
+        });
 
         // An element first seen after the resume batch cleared, while the space
         // may still be syncing: its inline op write rode on this reconcile's

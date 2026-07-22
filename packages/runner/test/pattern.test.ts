@@ -11,6 +11,7 @@ import {
 } from "../src/builder/types.ts";
 import { lift } from "../src/builder/module.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { installTestPatternArtifact } from "./support/trusted-builder.ts";
 import { reactive } from "../src/builder/reactive.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -83,10 +84,12 @@ describe("pattern", () => {
     expect(doublePattern.derivedInternalCells).toEqual([
       {
         partialCause: "double",
+        scope: "space",
       },
       {
         partialCause: "x",
         schema: { default: 1 },
+        scope: "space",
       },
     ]);
   });
@@ -102,9 +105,11 @@ describe("pattern", () => {
     expect(testPattern.derivedInternalCells).toEqual([
       {
         partialCause: { $generated: 0 },
+        scope: "space",
       },
       {
         partialCause: "doubled",
+        scope: "space",
       },
     ]);
     expect(testPattern.nodes[0].outputs).toMatchObject({
@@ -140,6 +145,7 @@ describe("pattern", () => {
       {
         partialCause: "isSelected",
         schema: { type: "boolean" },
+        scope: "space",
       },
       {
         partialCause: {
@@ -147,6 +153,7 @@ describe("pattern", () => {
           $generated: 0,
         },
         schema: { type: "boolean" },
+        scope: "space",
       },
     ]);
   });
@@ -353,13 +360,15 @@ describe("pattern", () => {
     const doubleArray = pattern<{ values: { x: number }[] }>(
       ({ values }) => {
         const doubled = (values as any).mapWithPattern(
-          pattern(({ element, index, array }: FactoryInput<any>) =>
-            ((({ x }: any) => {
-              const double = lift<number>((x) => x * 2);
-              return { doubled: double(x) };
-            }) as any)(element, index, array)
+          installTestPatternArtifact(
+            runtime,
+            pattern(({ element, index, array }: FactoryInput<any>) =>
+              ((({ x }: any) => {
+                const double = lift<number>((x) => x * 2);
+                return { doubled: double(x) };
+              }) as any)(element, index, array)
+            ),
           ),
-          {},
         );
         return { doubled };
       },

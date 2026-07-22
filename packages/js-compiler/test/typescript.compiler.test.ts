@@ -60,6 +60,32 @@ async function resolveAndCompileToModules(
 }
 
 describe("TypeScriptCompiler", () => {
+  it("keeps trusted Common Fabric source authority bound to exact bytes", () => {
+    const compiler = new TypeScriptCompiler(types);
+    const trusted = {
+      name: "commonfabric.d.ts",
+      contents: "export declare function pattern(): 'trusted';",
+    };
+    const artifact = {
+      main: "/main.ts",
+      files: [
+        { name: "/main.ts", contents: "export default 1;" },
+        {
+          name: trusted.name,
+          contents: "export declare function pattern(): 'attacker';",
+        },
+      ],
+    };
+
+    expect(() =>
+      compiler.compileToModules(artifact, {
+        trustedCommonFabricTypeSources: [trusted],
+      })
+    ).toThrow(
+      "Program conflicts with trusted Common Fabric type source 'commonfabric.d.ts'",
+    );
+  });
+
   it("compileToModules emits per-module CommonJS for each source", async () => {
     const compiler = new TypeScriptCompiler(types);
     const program = new InMemoryProgram("/main.tsx", {

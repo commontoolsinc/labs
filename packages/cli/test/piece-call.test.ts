@@ -1,8 +1,23 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { JSONSchema } from "@commonfabric/api";
+import { registerFabricFactory } from "@commonfabric/data-model/fabric-factory";
 import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
 import { executePieceCallable } from "../lib/piece.ts";
+import { brandTrustedBuilderArtifact } from "../../runner/src/builder/pattern-metadata.ts";
+
+function livePatternFactory(
+  argumentSchema: JSONSchema,
+  resultSchema: JSONSchema,
+): unknown {
+  const factory = brandTrustedBuilderArtifact(() => undefined);
+  return registerFabricFactory(factory, "pattern", {
+    kind: "pattern",
+    rootToken: {},
+    argumentSchema,
+    resultSchema,
+  });
+}
 
 describe("executePieceCallable", () => {
   it("invokes handlers from schema-derived flags", async () => {
@@ -80,9 +95,6 @@ describe("executePieceCallable", () => {
         required: ["query"],
       },
       pattern: toolPattern,
-      extraParams: {
-        source: "bound-source",
-      },
       toolResult: {
         summary: "bound-source:tea",
         source: "bound-source",
@@ -106,11 +118,10 @@ describe("executePieceCallable", () => {
     );
 
     expect(result.resolved.callableKind).toBe("tool");
-    expect(harness.tracker.toolRunPattern).toBe(toolPattern);
+    expect(typeof harness.tracker.toolRunPattern).toBe("function");
     expect(harness.tracker.toolRunInput).toEqual({
       query: "tea",
       help: "",
-      source: "bound-source",
     });
     expect(JSON.parse(result.outputText!)).toEqual({
       summary: "bound-source:tea",
@@ -154,7 +165,7 @@ describe("executePieceCallable", () => {
     expect(resolvedScope).toBe("session");
   });
 
-  it("creates pattern tool result cells with the callable scope", async () => {
+  it("creates factory tool result cells with the callable scope", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "tool",
       cellKey: "search",
@@ -584,7 +595,6 @@ function createPieceCallableHarness(options: {
     argumentSchema: JSONSchema;
     resultSchema?: JSONSchema;
   } & Record<string, unknown>;
-  extraParams?: Record<string, unknown>;
   toolResult?: unknown;
   handlerFailureMessage?: string;
   callableScope?: "space" | "user" | "session";
@@ -601,25 +611,13 @@ function createPieceCallableHarness(options: {
   };
 
   const callableSchema: JSONSchema = options.callableKind === "tool"
-    ? {
-      type: "object",
-      properties: {
-        pattern: {
-          type: "object",
-          properties: {
-            argumentSchema: { type: "object" },
-            resultSchema: { type: "object" },
-          },
-        },
-        extraParams: { type: "object" },
-      },
-    }
+    ? true
     : options.inputSchema;
   const callableValue = options.callableKind === "tool"
-    ? {
-      pattern: options.pattern,
-      extraParams: options.extraParams ?? {},
-    }
+    ? livePatternFactory(
+      options.inputSchema,
+      options.pattern?.resultSchema ?? true,
+    )
     : { $stream: true };
   const runtimeErrors: Array<{ message: string }> = [];
   const callableCell = createMockCell(

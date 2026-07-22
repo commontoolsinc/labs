@@ -7,7 +7,6 @@ import {
   llmDialog,
   NAME,
   pattern,
-  patternTool,
   toIndentedDebugString,
   UI,
   Writable,
@@ -28,6 +27,7 @@ import {
   sendMailInputSchema,
   type SendMailResult,
   sendMailTool,
+  type SubAgentInput,
   subAgentPattern,
   trustedAgentKernelAtom,
   userSurfaceInputAtom,
@@ -66,6 +66,7 @@ type SentEmail = {
 
 type ReadRawBriefingResult = ReadResourceResult<any>;
 type DemoTool = PromptInjectionTool;
+type SubAgentToolInput = Pick<SubAgentInput, "prompt" | "resultSchema">;
 
 const USER_EMAIL_RECIPIENT = "john@example.org";
 const EVIL_EMAIL_RECIPIENT = "bob@evil.org";
@@ -373,9 +374,10 @@ export default pattern<Record<string, never>>(() => {
   const unsafeSubAgentTool = {
     description:
       "Run a higher-clearance worker with the raw briefing in context. Input: { prompt, resultSchema }. Use this when a tool result contains an opaque link or redacted field you cannot directly inspect. The worker must return JSON matching resultSchema.",
-    ...patternTool(
-      subAgentPattern,
-      {
+    pattern: pattern<SubAgentToolInput, any>(({ prompt, resultSchema }) =>
+      subAgentPattern({
+        prompt,
+        resultSchema,
         model: subAgentModel,
         maxTokens: 512,
         system: SUB_AGENT_SYSTEM_PROMPT,
@@ -385,16 +387,17 @@ export default pattern<Record<string, never>>(() => {
           PROMPT_INFLUENCE_ATOM,
         ],
         schemaSanitizePromptInjection: true,
-      },
+      })
     ),
   } satisfies DemoTool;
 
   const safeSubAgentTool = {
     description:
       "Run a higher-clearance worker with the raw briefing in context. Input: { prompt, resultSchema }. Use this when a tool result contains an opaque link or redacted field you cannot directly inspect. The worker must return JSON matching resultSchema.",
-    ...patternTool(
-      subAgentPattern,
-      {
+    pattern: pattern<SubAgentToolInput, any>(({ prompt, resultSchema }) =>
+      subAgentPattern({
+        prompt,
+        resultSchema,
         model: subAgentModel,
         maxTokens: 512,
         system: SUB_AGENT_SYSTEM_PROMPT,
@@ -404,7 +407,7 @@ export default pattern<Record<string, never>>(() => {
           PROMPT_INFLUENCE_ATOM,
         ],
         schemaSanitizePromptInjection: true,
-      },
+      })
     ),
   } satisfies DemoTool;
 

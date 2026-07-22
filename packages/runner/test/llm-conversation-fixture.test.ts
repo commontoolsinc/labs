@@ -22,7 +22,10 @@ import type {
   JSONSchema,
 } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  installTestPatternArtifact,
+} from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
@@ -52,9 +55,6 @@ describe("conversation fixtures", () => {
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
   let Cell: ReturnType<typeof createBuilder>["commonfabric"]["Cell"];
-  let patternTool: ReturnType<
-    typeof createBuilder
-  >["commonfabric"]["patternTool"];
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let generateObject: ReturnType<
     typeof createBuilder
@@ -71,7 +71,7 @@ describe("conversation fixtures", () => {
     tx = runtime.edit();
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({ pattern, generateObject, llmDialog, Cell, patternTool } = commonfabric);
+    ({ pattern, generateObject, llmDialog, Cell } = commonfabric);
   });
 
   afterEach(async () => {
@@ -137,17 +137,20 @@ describe("conversation fixtures", () => {
       join(FIXTURES_DIR, "multi-turn-dialog.json"),
     );
 
-    const getWeatherTool = pattern(
-      ({ location: _location }: any) => {
-        return "Sunny, 72°F";
-      },
-      {
-        description: "Get current weather for a location",
-        type: "object",
-        properties: { location: { type: "string" } },
-        required: ["location"],
-      } as const satisfies JSONSchema,
-      { type: "string" },
+    const getWeatherTool = installTestPatternArtifact(
+      runtime,
+      pattern(
+        ({ location: _location }: any) => {
+          return "Sunny, 72°F";
+        },
+        {
+          description: "Get current weather for a location",
+          type: "object",
+          properties: { location: { type: "string" } },
+          required: ["location"],
+        } as const satisfies JSONSchema,
+        { type: "string" },
+      ),
     );
 
     const testPattern = pattern(
@@ -156,9 +159,7 @@ describe("conversation fixtures", () => {
         const dialog = llmDialog({
           messages,
           tools: {
-            getWeather: patternTool(
-              getWeatherTool,
-            ) as unknown as BuiltInLLMTool,
+            getWeather: getWeatherTool as unknown as BuiltInLLMTool,
           },
         });
         return {

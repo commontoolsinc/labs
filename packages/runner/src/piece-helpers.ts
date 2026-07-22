@@ -28,34 +28,50 @@ export function resolveCellPath<T>(
   path: CellPath,
 ): unknown {
   let currentCell = cell as Cell<unknown>;
-  let parentValue: unknown = undefined;
-
-  for (const segment of path) {
-    parentValue = currentCell.get() as unknown;
-    // An asCell-schema slot surfaces its value as a live Cell (the
-    // Writable<...> result shape); read through it like the leaf below
-    // does, or the traversal inspects the Cell instance's own JS
-    // properties and reports runner internals as "available keys".
-    if (isCell(parentValue)) {
-      currentCell = parentValue as Cell<unknown>;
-      parentValue = currentCell.get() as unknown;
-    }
-    if (parentValue != null && typeof parentValue !== "object") {
-      throw new Error(
-        `Cannot access path "${
-          path.join("/")
-        }" - encountered non-object at "${segment}"`,
-      );
-    }
+  for (const [index, segment] of path.entries()) {
     currentCell = currentCell.key(segment as keyof unknown) as Cell<unknown>;
+    if (index < path.length - 1) {
+      // An asCell-schema slot surfaces its value as a live Cell (the
+      // Writable<...> result shape). Follow only that selected child; reading
+      // the root here could materialize unrelated cold factory siblings.
+      const selectedValue = currentCell.get();
+      if (isCell(selectedValue)) {
+        currentCell = selectedValue as Cell<unknown>;
+      }
+    }
   }
 
   const resolvedValue = currentCell.get();
+  if (path.length === 0) {
+    return isCell(resolvedValue) ? resolvedValue.get() : resolvedValue;
+  }
+  if (resolvedValue !== undefined) {
+    return isCell(resolvedValue) ? resolvedValue.get() : resolvedValue;
+  }
+
+  // Only inspect the parent on an unresolved path. Successful child reads must
+  // not materialize unrelated siblings (which may include a cold Factory@1).
+  let parentCell = cell as Cell<unknown>;
+  for (const segment of path.slice(0, -1)) {
+    parentCell = parentCell.key(segment as keyof unknown) as Cell<unknown>;
+    const selectedValue = parentCell.get();
+    if (isCell(selectedValue)) {
+      parentCell = selectedValue as Cell<unknown>;
+    }
+  }
+  const parentValue = parentCell.get() as unknown;
   const segment = path[path.length - 1];
+  if (parentValue != null && typeof parentValue !== "object") {
+    throw new Error(
+      `Cannot access path "${
+        path.join("/")
+      }" - encountered non-object at "${segment}"`,
+    );
+  }
   const keyMissing = parentValue != null && typeof parentValue === "object"
     ? !(segment in (parentValue as object))
-    : resolvedValue === undefined;
-  if (path.length > 0 && keyMissing) {
+    : true;
+  if (keyMissing) {
     const availableKeys = parentValue != null && typeof parentValue === "object"
       ? Object.keys(parentValue as Record<string, unknown>)
         .filter((k) => !k.startsWith("$"))
@@ -71,7 +87,7 @@ export function resolveCellPath<T>(
     );
   }
 
-  return isCell(resolvedValue) ? resolvedValue.get() : resolvedValue;
+  return undefined;
 }
 
 export function cellEntityIdString(cell: Cell<unknown>): string | undefined {

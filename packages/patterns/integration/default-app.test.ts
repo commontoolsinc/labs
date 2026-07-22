@@ -10,6 +10,7 @@ import {
 } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import {
+  vdomHasButton,
   waitForActiveSpaceRoot,
   waitForRuntimeIdle,
   waitForRuntimeSynced,
@@ -696,17 +697,21 @@ describe("default-app flow test", () => {
 
     console.log("Await runtime idle for notebook regression...");
     await waitForRuntimeIdle(page);
-    // Runtime idle can precede the page renderer's Lit update. Wait for the
-    // freshly navigated default-app view to bind its menu handlers before the
-    // first trusted click, just as the notebook toolbar does below.
+    // Runtime idle can precede the new worker VDOM mount and the page
+    // renderer's Lit update. Wait for the current worker tree and its DOM
+    // handlers before the first trusted click.
     await waitForCondition(
       page,
       () => typeof globalThis.commonfabric?.viewSettled === "function",
     );
+    await waitFor(async () => await vdomHasButton(page, "Notes"));
     await awaitViewSettled(page);
 
     try {
       await clickButtonWithExactText(page, "Notes ▾");
+      // Opening the menu is itself reactive state. Let its VDOM replacement
+      // finish before resolving the newly visible button; otherwise the marked
+      // element can be replaced between discovery and the trusted click.
       await awaitViewSettled(page);
       await clickButtonWithText(page, "New Notebook");
       try {
@@ -3320,22 +3325,22 @@ async function collectNavigationDiagnostics(page: Page): Promise<unknown> {
     const renderedButtonTexts: string[] = [];
 
     function collectButtonTexts(root: Document | ShadowRoot): void {
-      for (const el of root.querySelectorAll("cf-button, button, a")) {
-        const text = (el.textContent ?? "").trim().replace(/\s+/g, " ");
-        if (text) {
-          buttonTexts.push(text);
-          const style = getComputedStyle(el);
-          const rect = el.getBoundingClientRect();
-          if (
-            style.display !== "none" && style.visibility !== "hidden" &&
-            rect.width > 0 && rect.height > 0
-          ) {
-            renderedButtonTexts.push(text);
+      for (const el of root.querySelectorAll("*")) {
+        if (el.matches("cf-button, button, a")) {
+          const text = (el.textContent ?? "").trim().replace(/\s+/g, " ");
+          if (text) {
+            buttonTexts.push(text);
+            const style = getComputedStyle(el);
+            const rect = el.getBoundingClientRect();
+            if (
+              style.display !== "none" && style.visibility !== "hidden" &&
+              rect.width > 0 && rect.height > 0
+            ) {
+              renderedButtonTexts.push(text);
+            }
           }
         }
-        if ((el as HTMLElement).shadowRoot) {
-          collectButtonTexts((el as HTMLElement).shadowRoot!);
-        }
+        if (el.shadowRoot) collectButtonTexts(el.shadowRoot);
       }
     }
 

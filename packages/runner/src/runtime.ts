@@ -43,6 +43,7 @@ import type {
   IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
+  IStorageTransaction,
   MemorySpace,
   URI,
 } from "./storage/interface.ts";
@@ -50,11 +51,13 @@ import {
   type Cell,
   createCell,
   internCellLinkSchema,
+  isCell,
   schemaCellScope,
 } from "./cell.ts";
 import { createRef, EntityId } from "./create-ref.ts";
 import { createSession, Identity } from "@commonfabric/identity";
 import { Action, Scheduler } from "./scheduler.ts";
+import { RetryWhenReady } from "./scheduler/retry-when-ready.ts";
 import {
   type CommitBackpressurePolicy,
   resolveCommitBackpressure,
@@ -69,6 +72,17 @@ import {
   NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
+import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+  mapFactoryStateValues,
+} from "@commonfabric/data-model/fabric-factory";
+import {
+  FabricInstance,
+  FabricSpecialObject,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
+import { codecOf } from "@commonfabric/data-model/codec-common";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   buildCfcPolicySnapshot,
@@ -101,10 +115,16 @@ import {
 } from "./cfc/policy.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { commitPreconditionValueHash } from "@commonfabric/memory/v2";
-import { snapshotQueryResult } from "./query-result-proxy.ts";
+import {
+  isCellResultForDereferencing,
+  snapshotQueryResult,
+} from "./query-result-proxy.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import { PatternUpdater } from "./pattern-updater.ts";
-import type { CompiledModuleArtifact } from "./harness/types.ts";
+import type {
+  CacheableModule,
+  CompiledModuleArtifact,
+} from "./harness/types.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
@@ -151,6 +171,187 @@ const isFullNormalizedLinkShape = (
     typeof link.space === "string" &&
     Array.isArray(link.path) &&
     (link.scope === undefined || isCellScope(link.scope));
+};
+
+const collectFactoryArtifactIdentities = (
+  value: unknown,
+  identities: Map<string, object[]>,
+  seen: Set<object> = new Set(),
+): void => {
+  if (value === null || value === undefined) return;
+  if (typeof value !== "object" && typeof value !== "function") return;
+  const object = value as object;
+  if (seen.has(object)) return;
+  seen.add(object);
+
+  if (isAdmittedFabricFactory(value)) {
+    const state = factoryStateOf(value);
+    if (state.ref === undefined) {
+      throw new Error("Factory has no durable artifact ref");
+    }
+    const factories = identities.get(state.ref.identity);
+    if (factories === undefined) {
+      identities.set(state.ref.identity, [object]);
+    } else {
+      factories.push(object);
+    }
+    mapFactoryStateValues(state, (nested) => {
+      collectFactoryArtifactIdentities(nested, identities, seen);
+      return nested;
+    });
+    return;
+  }
+
+  // Cells, query-result proxies, and link wrappers are symbolic aliases at a
+  // write boundary. Their implementation objects can retain the whole
+  // runtime graph, including unrelated keyless builder factories, but only
+  // the eventual link is stored. Do not mistake those internals for by-value
+  // factory payloads that need publication.
+  if (
+    isCell(value) || isCellResultForDereferencing(value) || isCellLink(value)
+  ) {
+    return;
+  }
+
+  if (value instanceof FabricInstance) {
+    collectFactoryArtifactIdentities(
+      codecOf(value).encode(value as FabricValue),
+      identities,
+      seen,
+    );
+    return;
+  }
+
+  if (value instanceof FabricSpecialObject) return;
+
+  for (const nested of Object.values(value)) {
+    collectFactoryArtifactIdentities(nested, identities, seen);
+  }
+};
+
+type PendingFactoryArtifactPublication = {
+  readonly owners: Map<symbol, readonly CacheableModule[] | undefined>;
+  readonly promise: Promise<readonly CacheableModule[] | undefined>;
+  readonly resolve: (modules?: readonly CacheableModule[]) => void;
+  readonly reject: (reason?: unknown) => void;
+};
+
+type FactoryArtifactPublicationRegistration = {
+  readonly sourceDependency?: Promise<
+    readonly CacheableModule[] | undefined
+  >;
+  readonly onPrepared: (modules: readonly CacheableModule[]) => void;
+  readonly onConfirmed: () => void;
+  readonly onRejected: (reason: unknown) => void;
+};
+
+type FactoryArtifactPublicationRegistrationRecord = {
+  readonly identity: string;
+  readonly source: MemorySpace;
+  readonly destination: MemorySpace;
+  readonly preparationKey: string;
+  readonly registration: FactoryArtifactPublicationRegistration;
+};
+
+// Runtime-private coordination for Runtimes that share one speculative
+// StorageManager. The key is content identity in one containing space; wire
+// Factory@1 state never names, creates, or settles these gates.
+const pendingFactoryArtifactPublications = new WeakMap<
+  IStorageManager,
+  Map<string, PendingFactoryArtifactPublication>
+>();
+
+const factoryArtifactPublicationKey = (
+  space: MemorySpace,
+  identity: string,
+): string => `${space}\0${identity}`;
+
+const factoryArtifactPublicationMap = (
+  storageManager: IStorageManager,
+): Map<string, PendingFactoryArtifactPublication> => {
+  let publications = pendingFactoryArtifactPublications.get(storageManager);
+  if (publications === undefined) {
+    publications = new Map();
+    pendingFactoryArtifactPublications.set(storageManager, publications);
+  }
+  return publications;
+};
+
+const registerFactoryArtifactPublication = (
+  storageManager: IStorageManager,
+  identity: string,
+  source: MemorySpace,
+  destination: MemorySpace,
+): FactoryArtifactPublicationRegistration => {
+  const publications = factoryArtifactPublicationMap(storageManager);
+  const precedingSourcePublication = publications.get(
+    factoryArtifactPublicationKey(source, identity),
+  );
+  const sourceDependency = precedingSourcePublication?.promise;
+  const destinationKey = factoryArtifactPublicationKey(destination, identity);
+  let publication = publications.get(destinationKey);
+  // A same-space follow-up must wait for the preceding generation without
+  // joining the very gate it awaits. Replace the map entry with its own
+  // generation; the prior owner's callbacks still settle the captured promise
+  // but cannot delete this newer entry.
+  if (
+    source === destination && publication === precedingSourcePublication
+  ) {
+    publication = undefined;
+  }
+  if (publication === undefined) {
+    const pending = Promise.withResolvers<
+      readonly CacheableModule[] | undefined
+    >();
+    // A publication may have no dependent copy. Own the rejection immediately
+    // so a rejected containing commit cannot become an unhandled promise.
+    void pending.promise.catch(() => {});
+    publication = {
+      owners: new Map(),
+      promise: pending.promise,
+      resolve: pending.resolve,
+      reject: pending.reject,
+    };
+    publications.set(destinationKey, publication);
+  }
+  const owner = Symbol(destinationKey);
+  publication.owners.set(owner, undefined);
+
+  return {
+    sourceDependency,
+    onPrepared: (modules) => {
+      if (!publication.owners.has(owner)) return;
+      publication.owners.set(owner, modules);
+    },
+    onConfirmed: () => {
+      if (!publication.owners.has(owner)) return;
+      const modules = publication.owners.get(owner);
+      publication.owners.delete(owner);
+      if (publications.get(destinationKey) === publication) {
+        publications.delete(destinationKey);
+      }
+      publication.owners.clear();
+      publication.resolve(modules);
+    },
+    onRejected: (reason) => {
+      if (!publication.owners.has(owner)) return;
+      publication.owners.delete(owner);
+      if (publication.owners.size > 0) return;
+      if (publications.get(destinationKey) === publication) {
+        publications.delete(destinationKey);
+      }
+      const message = typeof reason === "object" && reason !== null &&
+          "message" in reason &&
+          typeof (reason as { message?: unknown }).message === "string"
+        ? (reason as { message: string }).message
+        : String(reason);
+      publication.reject(
+        reason instanceof Error
+          ? reason
+          : new Error(message, { cause: reason }),
+      );
+    },
+  };
 };
 
 // Deno/Node `AsyncLocalStorage` when available, the promise-aware fallback
@@ -604,6 +805,16 @@ export class Runtime {
   private defaultFrame?: Frame;
   private queues = new Map<string, AsyncSemaphoreQueue>();
   private writeDebugContext = new WriteDebugContextStorage<string>();
+  // Runner-private provenance for context-free Factory@1 shells read from a
+  // containing cell. Never serialized into Factory@1 state.
+  private factoryArtifactSources = new WeakMap<object, Set<MemorySpace>>();
+  // `prepareTxForCommit()` is an eager, repeatable seam and `commit()` invokes
+  // the same preparation again. Reuse one publication owner per transaction so
+  // an overwritten keyed native preparation cannot leave an orphaned gate.
+  private factoryArtifactPublicationRegistrations = new WeakMap<
+    IStorageTransaction,
+    Map<string, FactoryArtifactPublicationRegistrationRecord>
+  >();
   private cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
   readonly #policyManifests = new Map<string, PolicyArtifactManifestV1>();
   readonly #policyManifestSpaces = new Map<string, Set<MemorySpace>>();
@@ -1188,6 +1399,9 @@ export class Runtime {
     this.queues.clear();
     // Stop all running docs
     this.runner.stopAll();
+    this.scheduler.cancelHandlerLoadPendingEvents(
+      "Event dropped: runtime disposed before its handler registered",
+    );
 
     // Background source checks are deliberately outside the scheduler. Abort
     // and settle them before the storage sessions they may write through close.
@@ -1307,7 +1521,7 @@ export class Runtime {
           },
         }
         : {}),
-    });
+    }, (preparedTx) => this.prepareFactoryArtifactPublications(preparedTx));
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
     wrapped.setCfcFlowLabelsMode(this.cfcFlowLabels);
     wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
@@ -1528,6 +1742,7 @@ export class Runtime {
   }
 
   prepareTxForCommit(tx: IExtendedStorageTransaction): void {
+    this.prepareFactoryArtifactPublications(tx);
     const state = tx.getCfcState();
     if (state.enforcementMode === "disabled") {
       // A vouched ingest still needs its provenance mark minted even where CFC
@@ -1569,6 +1784,208 @@ export class Runtime {
     if (state.prepare.status === "unprepared") {
       tx.prepareCfc();
     }
+  }
+
+  assertFactoryArtifactsPublishableForWrite(
+    value: unknown,
+    destination: MemorySpace,
+  ): void {
+    const identities = new Map<string, object[]>();
+    collectFactoryArtifactIdentities(value, identities);
+    for (const [identity, factories] of identities) {
+      if (
+        !this.patternManager.isArtifactAvailableInSpace(
+          identity,
+          destination,
+        ) &&
+        this.factoryArtifactSourceFor(factories) === undefined &&
+        this.patternManager.artifactSourceSpace(identity, destination) ===
+          undefined
+      ) {
+        this.patternManager.assertArtifactAvailableInSpace(
+          identity,
+          destination,
+        );
+      }
+    }
+  }
+
+  noteFactoryArtifactSource(value: unknown, source: MemorySpace): void {
+    const identities = new Map<string, object[]>();
+    collectFactoryArtifactIdentities(value, identities);
+    for (const factories of identities.values()) {
+      for (const factory of factories) {
+        let sources = this.factoryArtifactSources.get(factory);
+        if (sources === undefined) {
+          sources = new Set();
+          this.factoryArtifactSources.set(factory, sources);
+        }
+        sources.add(source);
+      }
+    }
+  }
+
+  private factoryArtifactSourceFor(
+    factories: readonly object[],
+  ): MemorySpace | undefined {
+    for (const factory of factories) {
+      for (const source of this.factoryArtifactSources.get(factory) ?? []) {
+        return source;
+      }
+    }
+    return undefined;
+  }
+
+  private prepareFactoryArtifactPublications(
+    tx: IExtendedStorageTransaction,
+  ): void {
+    const desiredRegistrations = new Set<string>();
+    let registrations = this.factoryArtifactPublicationRegistrations.get(
+      tx.tx,
+    );
+    const spaces = new Set<MemorySpace>();
+    for (const attempt of tx.getWriteAttemptLog?.() ?? []) {
+      spaces.add(attempt.space);
+    }
+    for (const write of tx.getReactivityLog?.().writes ?? []) {
+      spaces.add(write.space);
+    }
+
+    for (const destination of spaces) {
+      const native = tx.tx.getNativeCommit?.(destination);
+      if (native === undefined) continue;
+      const identities = new Map<string, object[]>();
+      for (const operation of native.operations) {
+        if (operation.op === "set" || operation.op === "patch") {
+          collectFactoryArtifactIdentities(operation.value, identities);
+        }
+      }
+
+      for (const [identity, factories] of identities) {
+        if (
+          this.patternManager.isArtifactAvailableInSpace(identity, destination)
+        ) {
+          continue;
+        }
+        // Prefer already-verified runner authority over a Cell-read candidate.
+        // The candidate may name an intermediate destination whose containing
+        // publication is still only speculative; using the verified origin
+        // lets a causally dependent copy prepare without racing that earlier
+        // commit's wire confirmation. Candidate provenance remains the cold
+        // fallback and must still pass complete source verification.
+        const source =
+          this.patternManager.artifactSourceSpace(identity, destination) ??
+            this.factoryArtifactSourceFor(factories);
+        if (source === undefined) {
+          this.patternManager.assertArtifactAvailableInSpace(
+            identity,
+            destination,
+          );
+        }
+        if (tx.tx.addNativeCommitPreparation === undefined) {
+          throw new Error(
+            "storage transaction does not support atomic factory artifact publication",
+          );
+        }
+        const registrationKey = factoryArtifactPublicationKey(
+          destination,
+          identity,
+        );
+        if (registrations === undefined) {
+          registrations = new Map();
+          this.factoryArtifactPublicationRegistrations.set(
+            tx.tx,
+            registrations,
+          );
+        }
+        const preparationKey = `factory-artifact:${identity}`;
+        desiredRegistrations.add(registrationKey);
+        let record = registrations.get(registrationKey);
+        if (record !== undefined && record.source !== source) {
+          this.removeFactoryArtifactPublicationRegistration(
+            tx.tx,
+            registrationKey,
+            record,
+            new Error(
+              `factory artifact publication source changed before commit for ${identity}`,
+            ),
+          );
+          record = undefined;
+        }
+        if (record === undefined) {
+          const registration = registerFactoryArtifactPublication(
+            this.storageManager,
+            identity,
+            source!,
+            destination,
+          );
+          record = {
+            identity,
+            source: source!,
+            destination,
+            preparationKey,
+            registration,
+          };
+          registrations.set(registrationKey, record);
+        }
+        const activeRecord = record;
+        tx.tx.addNativeCommitPreparation(destination, {
+          key: preparationKey,
+          prepare: () =>
+            this.patternManager.prepareArtifactPublication(
+              identity,
+              source!,
+              destination,
+              activeRecord.registration.sourceDependency,
+              activeRecord.registration.onPrepared,
+            ),
+          onConfirmed: () => {
+            try {
+              this.patternManager.noteArtifactPublicationConfirmed(
+                identity,
+                destination,
+              );
+            } finally {
+              activeRecord.registration.onConfirmed();
+            }
+          },
+          onRejected: activeRecord.registration.onRejected,
+        });
+      }
+    }
+
+    for (const [key, record] of registrations ?? []) {
+      if (desiredRegistrations.has(key)) continue;
+      this.removeFactoryArtifactPublicationRegistration(
+        tx.tx,
+        key,
+        record,
+        new Error(
+          `factory artifact publication was removed before commit for ${record.identity}`,
+        ),
+      );
+    }
+  }
+
+  private removeFactoryArtifactPublicationRegistration(
+    tx: IStorageTransaction,
+    registrationKey: string,
+    record: FactoryArtifactPublicationRegistrationRecord,
+    reason: Error,
+  ): void {
+    if (tx.removeNativeCommitPreparation === undefined) {
+      throw new Error(
+        "storage transaction does not support reconciling atomic factory artifact publication",
+      );
+    }
+    tx.removeNativeCommitPreparation(
+      record.destination,
+      record.preparationKey,
+    );
+    this.factoryArtifactPublicationRegistrations.get(tx)?.delete(
+      registrationKey,
+    );
+    record.registration.onRejected(reason);
   }
 
   /**
@@ -1788,6 +2205,7 @@ export class Runtime {
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
     cfcLabelView?: CfcLabelView,
+    factoryArtifactPolicy?: "assert" | "retry",
   ): Cell<T>;
   getImmutableCell<S extends JSONSchema = JSONSchema>(
     space: MemorySpace,
@@ -1795,6 +2213,7 @@ export class Runtime {
     schema: S,
     tx?: IExtendedStorageTransaction,
     cfcLabelView?: CfcLabelView,
+    factoryArtifactPolicy?: "assert" | "retry",
   ): Cell<Schema<S>>;
   getImmutableCell(
     space: MemorySpace,
@@ -1802,12 +2221,37 @@ export class Runtime {
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
     cfcLabelView?: CfcLabelView,
+    factoryArtifactPolicy: "assert" | "retry" = "assert",
   ): Cell<any> {
-    // Not `dataUriFromValueWithResolvedLinks()`: its link-rewriting walk is unwanted here
-    // (this data is immutable as given). `fabricFromNativeValue()` converts
-    // what callers actually pass -- notably `Cell`s, which become sigil
-    // links via their `toJSON()` -- into an encodable `FabricValue`.
-    const asDataURI = dataUriFromValue(fabricFromNativeValue(data));
+    // Preserve main's immutable-value semantics: convert exactly what the
+    // caller supplied and do not resolve relative links against a containing
+    // document. Factory values additionally require exact-space artifact
+    // availability because this inline cell has no later containing commit in
+    // which an artifact closure could be published atomically.
+    const fabricData = fabricFromNativeValue(data);
+    const identities = new Map<string, object[]>();
+    collectFactoryArtifactIdentities(fabricData, identities);
+    for (const identity of identities.keys()) {
+      if (this.patternManager.isArtifactAvailableInSpace(identity, space)) {
+        continue;
+      }
+      const sourceSpace = this.patternManager.artifactSourceSpace(
+        identity,
+        space,
+      );
+      if (sourceSpace !== undefined && factoryArtifactPolicy === "retry") {
+        throw new RetryWhenReady(
+          this.patternManager.ensureArtifactClosureInSpace(
+            identity,
+            sourceSpace,
+            space,
+          ),
+          `Factory artifact ${identity} is waiting for replication into ${space}`,
+        );
+      }
+      this.patternManager.assertArtifactAvailableInSpace(identity, space);
+    }
+    const asDataURI = dataUriFromValue(fabricData);
     return createCell(
       this,
       {

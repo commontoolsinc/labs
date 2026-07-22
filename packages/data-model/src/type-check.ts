@@ -7,12 +7,13 @@ import {
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
+import { isAdmittedFabricFactory } from "./fabric-factory.ts";
 
 /**
  * Indicates whether the value is a fabric value, accepting `FabricInstance`
- * values, `undefined`, and arrays with `undefined` elements or sparse holes
- * -- in addition to the base fabric types (`null`, `boolean`, `number`,
- * `string`, plain objects, dense arrays).
+ * values, admitted `FabricFactory` callables, `undefined`, and arrays with
+ * `undefined` elements or sparse holes -- in addition to the base fabric types
+ * (`null`, `boolean`, `number`, `string`, plain objects, dense arrays).
  *
  * This function is a TypeScript type guard for `FabricValueLayer`.
  */
@@ -52,7 +53,10 @@ export function isFabricValueLayer(
       return Symbol.keyFor(value) !== undefined;
     }
 
-    case "function":
+    case "function": {
+      return isAdmittedFabricFactory(value);
+    }
+
     default: {
       return false;
     }

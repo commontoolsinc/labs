@@ -6,9 +6,15 @@ import {
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
+import {
+  type FabricFactory,
+  FabricSpecialObject,
+} from "@commonfabric/data-model/fabric-value";
 import { type AliasBinding } from "../sigil-types.ts";
 import {
   type FactoryInput,
+  isModule,
   isPattern,
   type JSONSchema,
   type JSONValue,
@@ -31,6 +37,11 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { isCell } from "../cell.ts";
+import {
+  createFactoryTraversalContext,
+  type FactoryTraversalContext,
+  mapFactoryForTraversal,
+} from "./factory-traversal.ts";
 
 export type CellAliasResolver = (
   cell: Reactive<any>,
@@ -44,9 +55,20 @@ export function toJSONWithAliasBindings(
   ignoreSelfAliases: boolean = false,
   path: readonly PropertyKey[] = [],
   seen?: WeakMap<object, number>,
-): JSONValue | undefined {
+  factoryContext: FactoryTraversalContext = createFactoryTraversalContext(),
+  insideFactoryState = false,
+): JSONValue | FabricFactory | undefined {
   // Turn strongly typed builder values into legacy JSON structures while
   // preserving alias metadata for consumers that still rely on it.
+
+  if (
+    insideFactoryState && typeof value === "function" &&
+    !isAdmittedFabricFactory(value)
+  ) {
+    throw new TypeError(
+      "Arbitrary functions are not valid factory state values",
+    );
+  }
 
   // Convert regular cells and results from Cell.get() to opaque refs
   if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
@@ -108,13 +130,60 @@ export function toJSONWithAliasBindings(
     }
   }
 
+  // Factory values are callable, so their serializable captures live in the
+  // hidden Factory@1 state rather than in enumerable function properties.
+  if (isAdmittedFabricFactory(value)) {
+    // This helper's root-pattern form is the explicit legacy INTERNAL graph
+    // serializer. Durable Fabric boundaries encode the callable directly as
+    // Factory@1; only this root form retains the embedded graph fallback.
+    if (path.length === 0 && isPattern(value)) {
+      return toJSONWithAliasBindings(
+        serializePatternGraph(value),
+        resolveCellAlias,
+        ignoreSelfAliases,
+        path,
+        seen,
+        factoryContext,
+        insideFactoryState,
+      );
+    }
+    return mapFactoryForTraversal(
+      value,
+      (nested, field) =>
+        toJSONWithAliasBindings(
+          nested as FactoryInput<any>,
+          resolveCellAlias,
+          ignoreSelfAliases,
+          [...path, field],
+          seen,
+          factoryContext,
+          true,
+        ),
+      factoryContext,
+    );
+  }
+
+  // Fabric-special values are encoded atomically by their registered codec;
+  // enumerable implementation details are not serialized graph state.
+  if (value instanceof FabricSpecialObject) {
+    return value as unknown as JSONValue;
+  }
+
   // If this is an array, process each element recursively.
   if (Array.isArray(value)) {
     return (value as FactoryInput<any>).map((v: FactoryInput<any>, i: number) =>
-      toJSONWithAliasBindings(v, resolveCellAlias, ignoreSelfAliases, [
-        ...path,
-        i,
-      ], seen)
+      toJSONWithAliasBindings(
+        v,
+        resolveCellAlias,
+        ignoreSelfAliases,
+        [
+          ...path,
+          i,
+        ],
+        seen,
+        factoryContext,
+        insideFactoryState,
+      )
     );
   }
 
@@ -135,10 +204,8 @@ export function toJSONWithAliasBindings(
     if (depth > 0) return {}; // Actually circular
     seen.set(value as object, depth + 1);
 
-    // If this is a pattern, serialize it through the INTERNAL graph
-    // serializer (its toJSON under the internal-serialization context): this
-    // function builds the in-memory node representation, so embedded
-    // sub-pattern graphs must stay bare — no boundary `$patternRef`.
+    // If this is a compatibility pattern object, serialize its full graph.
+    // Admitted factories are handled by the factory branch above.
     const valueToProcess = (isPattern(value) &&
         typeof (value as unknown as toJSON).toJSON === "function")
       ? serializePatternGraph(value as unknown as Pattern) as Record<
@@ -148,20 +215,25 @@ export function toJSONWithAliasBindings(
       : (value as Record<string, any>);
 
     const result: any = {};
-    // TODO(danfuzz): A `FabricPrimitive` is now returned atomically above, but
-    // the other special-object type, `FabricInstance` (a container), still
-    // reaches this `for...in` copy and is walked by its internal slots (zero
-    // enumerable own-props) instead of its codec contents. Unlike a primitive it
-    // *does* need descending into — but by its actual contents, which this walk
-    // won't do correctly. This site will need attention once FabricInstances see
-    // real use.
     for (const key in valueToProcess as any) {
+      const nestedValue = valueToProcess[key];
+      // A pattern node's module implementation is the other explicit legacy
+      // INTERNAL graph fallback. The current runner instantiates this graph;
+      // ordinary pattern factories carried as data stay callable Factory@1
+      // values and take the factory-first branch above.
+      const valueForTraversal = key === "implementation" &&
+          isModule(valueToProcess) && valueToProcess.type === "pattern" &&
+          isPattern(nestedValue) && !isAdmittedFabricFactory(nestedValue)
+        ? serializePatternGraph(nestedValue)
+        : nestedValue;
       const jsonValue = toJSONWithAliasBindings(
-        valueToProcess[key],
+        valueForTraversal,
         resolveCellAlias,
         ignoreSelfAliases,
         [...path, key],
         seen,
+        factoryContext,
+        insideFactoryState,
       );
       if (jsonValue !== undefined) {
         result[key] = jsonValue;
@@ -360,6 +432,16 @@ export function moduleToJSON(module: Module) {
   };
   let implementation = module.implementation;
 
+  if (isAdmittedFabricFactory(implementation)) {
+    implementation = toJSONWithAliasBindings(
+      implementation,
+      undefined,
+      false,
+      ["implementation"],
+    ) as FabricFactory;
+    return { ...rest, implementation };
+  }
+
   // CT-1230 WORKAROUND: Preserve pattern structure when serializing pattern modules.
   //
   // Problem: When a subpattern is passed to .map(), the pattern's implementation
@@ -379,7 +461,7 @@ export function moduleToJSON(module: Module) {
     module.type === "pattern" && implementation && isPattern(implementation)
   ) {
     implementation = toJSONWithAliasBindings(
-      implementation as unknown as FactoryInput<any>,
+      serializePatternGraph(implementation),
     ) as unknown as Pattern;
     return {
       ...rest,
@@ -456,24 +538,10 @@ export function moduleToJSON(module: Module) {
   };
 }
 
-// Ambient context: true while serializing the runtime-INTERNAL graph
-// representation (builder-time node serialization via
-// `toJSONWithAliasBindings`, and through it the `$opFallback` eviction
-// fallback graphs). The JSON boundary (`Pattern.toJSON()`, fired by
-// JSON.stringify and by cell writes via native-conversion's HasToJSON) adds
-// the content-addressed `$patternRef` on top of the graph; internal
-// serialization must NOT, or in-memory `Pattern.nodes` would grow refs for
-// any sub-pattern whose module is already indexed (e.g. builder calls inside
-// a running action referencing an imported, already-evaluated pattern) and
-// the eviction fallback would silently become a ref (design §7's $opFallback
-// trap). Synchronous push/pop — serialization never awaits.
-let internalGraphSerialization = false;
-
 /**
- * Serialize a pattern's full node-graph — the runtime-internal representation
- * (design §7: the graph is internal; the boundary speaks refs-first). Used by
- * `toJSONWithAliasBindings` (builder-time node serialization, which the
- * `$opFallback` graphs descend from) and debug tooling.
+ * Serialize a pattern's full node graph for builder internals, debug tooling,
+ * and the retained direct `Pattern.toJSON()` compatibility surface. Fabric
+ * boundaries encode first-class factories through registered codec dispatch.
  *
  * Calls the pattern's own `toJSON` rather than `patternToJSON` directly:
  * factory `toJSON` closures deliberately serialize the ROOT factory (which
@@ -483,16 +551,10 @@ let internalGraphSerialization = false;
 export function serializePatternGraph(
   pattern: Pattern,
 ): Record<string, unknown> {
-  const previous = internalGraphSerialization;
-  internalGraphSerialization = true;
-  try {
-    const withToJSON = pattern as unknown as Partial<toJSON>;
-    return (typeof withToJSON.toJSON === "function"
-      ? withToJSON.toJSON()
-      : patternToJSON(pattern)) as Record<string, unknown>;
-  } finally {
-    internalGraphSerialization = previous;
-  }
+  const withToJSON = pattern as unknown as Partial<toJSON>;
+  return (typeof withToJSON.toJSON === "function"
+    ? withToJSON.toJSON()
+    : patternToJSON(pattern)) as Record<string, unknown>;
 }
 
 export function patternToJSON(pattern: Pattern) {
@@ -525,23 +587,5 @@ export function patternToJSON(pattern: Pattern) {
     nodes: pattern.nodes,
     ...(programIdentity ? { program: programIdentity } : {}),
   };
-  if (internalGraphSerialization) return graph;
-  // JSON boundary (cell writes, JSON.stringify): REFS-ONLY (design §7,
-  // identity E4). The ref is content-derived, so identical bytes re-emit the
-  // identical ref across sessions. Schemas ride along so consumers can read
-  // them without resolving (llm-dialog tool schemas). Rehydration goes by
-  // identity: the session-lifetime artifact index covers every module
-  // evaluated in the reading session (any authored op, by construction), and
-  // async readers fall back to the storage-backed `loadPatternByIdentity` —
-  // compiled artifacts persist in-space as an expected part of compilation.
-  // A pattern with NO entry ref (manually constructed / dynamic) still
-  // serializes its full graph: nothing could ever resolve its ref.
-  const entryRef = getArtifactEntryRef(pattern);
-  return entryRef
-    ? {
-      $patternRef: { identity: entryRef.identity, symbol: entryRef.symbol },
-      argumentSchema: pattern.argumentSchema,
-      resultSchema: pattern.resultSchema,
-    }
-    : graph;
+  return graph;
 }

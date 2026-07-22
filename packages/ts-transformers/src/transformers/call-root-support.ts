@@ -30,8 +30,7 @@ export type ExpressionSiteHelperBoundaryKind =
   | "ifElse"
   | "when"
   | "unless"
-  | "builder"
-  | "pattern-tool";
+  | "builder";
 
 export type ExpressionSiteCallRootKind =
   | "conditional-helper"

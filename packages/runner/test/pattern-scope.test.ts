@@ -7,10 +7,14 @@ import {
   parseLink,
   toMemorySpaceAddress,
 } from "../src/link-utils.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  installTestPatternArtifact,
+} from "./support/trusted-builder.ts";
 import { type Cell, createCell } from "../src/cell.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
-import { type FactoryInput } from "../src/builder/types.ts";
+import { type FactoryInput, type JSONSchema } from "../src/builder/types.ts";
+import { getCellOrThrow } from "../src/query-result-proxy.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -67,6 +71,32 @@ Deno.test("Cell.key keeps base scope; schema carries the scope", async () => {
       (cell.key("selectedRoom").getAsNormalizedFullLink().schema as any)?.scope,
       "session",
     );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("pattern invocation keeps authored result schemas off the live view", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+
+  try {
+    const { pattern } = createTrustedBuilder(runtime).commonfabric;
+    const resultSchema = {
+      type: "array",
+      unevaluatedItems: { type: "object", scope: "user" },
+    } as unknown as JSONSchema;
+    const Child = pattern(() => [], true, resultSchema);
+
+    pattern(() => {
+      const child = Child({});
+      assertEquals(getCellOrThrow(child).export().schema, undefined);
+      return {};
+    });
   } finally {
     await runtime.dispose();
     await storageManager.close();
@@ -1426,10 +1456,12 @@ Deno.test("map keeps outer list scope and narrows per-element result cells", asy
     );
     const Root = pattern<{ values: number[] }>(({ values }) => ({
       mapped: (values as any).mapWithPattern(
-        pattern(({ element, index, array }: FactoryInput<any>) =>
-          (((value: any) => increment(value)) as any)(element, index, array)
+        installTestPatternArtifact(
+          runtime,
+          pattern(({ element, index, array }: FactoryInput<any>) =>
+            (((value: any) => increment(value)) as any)(element, index, array)
+          ),
         ),
-        {},
       ),
     }));
 
@@ -1537,15 +1569,17 @@ Deno.test("map updates when derived list is narrowed by session input", async ()
         ) => current.conversation.rooms[current.selectedRoom] ?? [],
       )({ conversation, selectedRoom });
       const bodies = (messages as any).mapWithPattern(
-        pattern(({ element, index, array }: FactoryInput<any>) =>
-          (((message: any) =>
-            lift((current: Message) => current.body)(message)) as any)(
-              element,
-              index,
-              array,
-            )
+        installTestPatternArtifact(
+          runtime,
+          pattern(({ element, index, array }: FactoryInput<any>) =>
+            (((message: any) =>
+              lift((current: Message) => current.body)(message)) as any)(
+                element,
+                index,
+                array,
+              )
+          ),
         ),
-        {},
       );
       return {
         messages,
@@ -1642,15 +1676,17 @@ Deno.test("map materializes initially populated list selected by session input",
         ) => current.conversation.rooms[current.selectedRoom] ?? [],
       )({ conversation, selectedRoom });
       const bodies = (messages as any).mapWithPattern(
-        pattern(({ element, index, array }: FactoryInput<any>) =>
-          (((message: any) =>
-            lift((current: Message) => current.body)(message)) as any)(
-              element,
-              index,
-              array,
-            )
+        installTestPatternArtifact(
+          runtime,
+          pattern(({ element, index, array }: FactoryInput<any>) =>
+            (((message: any) =>
+              lift((current: Message) => current.body)(message)) as any)(
+                element,
+                index,
+                array,
+              )
+          ),
         ),
-        {},
       );
       return { messages, bodies };
     });
@@ -1735,15 +1771,17 @@ Deno.test("ifElse selected branch materializes map over session-derived list", a
         isEmpty,
         [],
         (messages as any).mapWithPattern(
-          pattern(({ element, index, array }: FactoryInput<any>) =>
-            (((message: any) =>
-              lift((current: Message) => current.body)(message)) as any)(
-                element,
-                index,
-                array,
-              )
+          installTestPatternArtifact(
+            runtime,
+            pattern(({ element, index, array }: FactoryInput<any>) =>
+              (((message: any) =>
+                lift((current: Message) => current.body)(message)) as any)(
+                  element,
+                  index,
+                  array,
+                )
+            ),
           ),
-          {},
         ),
       );
       return { rendered };
@@ -1832,15 +1870,17 @@ Deno.test("ifElse selected VNode branch materializes map over session-derived li
           "div",
           null,
           (messages as any).mapWithPattern(
-            pattern(({ element, index, array }: FactoryInput<any>) =>
-              (((message: any) =>
-                h(
-                  "span",
-                  null,
-                  lift((current: Message) => current.body)(message),
-                )) as any)(element, index, array)
+            installTestPatternArtifact(
+              runtime,
+              pattern(({ element, index, array }: FactoryInput<any>) =>
+                (((message: any) =>
+                  h(
+                    "span",
+                    null,
+                    lift((current: Message) => current.body)(message),
+                  )) as any)(element, index, array)
+              ),
             ),
-            {},
           ),
         ),
       );
@@ -2001,15 +2041,17 @@ Deno.test("map materializes list through session boxed space-scoped reference", 
               selectedRoomRefInputSchema,
               { type: "unknown" } as const,
             )({ selectedRoomRef }) as any).mapWithPattern(
-              pattern(({ element, index, array }: FactoryInput<any>) =>
-                (((message: any) =>
-                  h(
-                    "span",
-                    null,
-                    lift((current: Message) => current.body)(message),
-                  )) as any)(element, index, array)
+              installTestPatternArtifact(
+                runtime,
+                pattern(({ element, index, array }: FactoryInput<any>) =>
+                  (((message: any) =>
+                    h(
+                      "span",
+                      null,
+                      lift((current: Message) => current.body)(message),
+                    )) as any)(element, index, array)
+                ),
               ),
-              {},
             ),
           ),
         );
@@ -2081,10 +2123,12 @@ Deno.test("filter narrows output list when scoped element controls cardinality",
     );
     const Root = pattern<{ values: number[] }>(({ values }) => ({
       filtered: (values as any).filterWithPattern(
-        pattern(({ element, index, array }: FactoryInput<any>) =>
-          (((value: any) => positive(value)) as any)(element, index, array)
+        installTestPatternArtifact(
+          runtime,
+          pattern(({ element, index, array }: FactoryInput<any>) =>
+            (((value: any) => positive(value)) as any)(element, index, array)
+          ),
         ),
-        {},
       ),
     }));
 
@@ -2144,10 +2188,12 @@ Deno.test("flatMap narrows output list when scoped element controls cardinality"
     );
     const Root = pattern<{ values: number[] }>(({ values }) => ({
       expanded: (values as any).flatMapWithPattern(
-        pattern(({ element, index, array }: FactoryInput<any>) =>
-          (((value: any) => expand(value)) as any)(element, index, array)
+        installTestPatternArtifact(
+          runtime,
+          pattern(({ element, index, array }: FactoryInput<any>) =>
+            (((value: any) => expand(value)) as any)(element, index, array)
+          ),
         ),
-        {},
       ),
     }));
 

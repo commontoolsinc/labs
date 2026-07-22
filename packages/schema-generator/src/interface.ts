@@ -7,6 +7,33 @@ import { type Mutable } from "@commonfabric/utils/types";
  */
 export type SchemaDefinition = Mutable<JSONSchema>;
 
+/** Compiler-owned metadata for schema generation, keyed by TypeNode. */
+export interface SchemaHint {
+  readonly items?: unknown;
+  readonly factoryContracts?: readonly {
+    readonly kind: "pattern" | "module" | "handler";
+    /** Exact trusted factory type that supplied this semantic contract. */
+    readonly factoryType?: ts.Type;
+    readonly inputTypeNode: ts.TypeNode;
+    readonly inputType?: ts.Type;
+    readonly inputSchema?: unknown;
+    readonly outputTypeNode: ts.TypeNode;
+    readonly outputType?: ts.Type;
+    readonly outputSchema?: unknown;
+    /** Compiler-only authority metadata; schema formatters do not emit it. */
+    readonly frameworkProvidedPaths?: readonly (readonly string[])[];
+  }[];
+  readonly cfcUiContract?: {
+    readonly helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
+    readonly action?: string;
+    readonly surface?: string;
+    readonly role?: string;
+    readonly kind?: string;
+    readonly trustedPattern?: string;
+    readonly requiredEventIntegrity?: readonly string[];
+  };
+}
+
 /**
  * Unified context for schema generation - contains all state in one place
  */
@@ -43,21 +70,7 @@ export interface GenerationContext {
   /** Widen literal types to base types during schema generation */
   widenLiterals?: boolean;
   /** Schema hints for overriding default behavior (keyed by TypeNode) */
-  schemaHints?: WeakMap<
-    ts.Node,
-    {
-      items?: unknown;
-      cfcUiContract?: {
-        helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-        action?: string;
-        surface?: string;
-        role?: string;
-        kind?: string;
-        trustedPattern?: string;
-        requiredEventIntegrity?: string[];
-      };
-    }
-  >;
+  schemaHints?: WeakMap<ts.Node, SchemaHint>;
   /** Override for array items schema, propagated from wrapper types */
   arrayItemsOverride?: JSONSchema;
 }
@@ -92,22 +105,9 @@ export interface SchemaGenerator {
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
     options?: { widenLiterals?: boolean },
-    schemaHints?: WeakMap<
-      ts.Node,
-      {
-        items?: unknown;
-        cfcUiContract?: {
-          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-          action?: string;
-          surface?: string;
-          role?: string;
-          kind?: string;
-          trustedPattern?: string;
-          requiredEventIntegrity?: string[];
-        };
-      }
-    >,
+    schemaHints?: WeakMap<ts.Node, SchemaHint>,
     sourceFile?: ts.SourceFile,
+    typeRegistry?: WeakMap<ts.Node, ts.Type>,
   ): SchemaDefinition;
 
   /**
@@ -123,21 +123,7 @@ export interface SchemaGenerator {
     typeNode: ts.TypeNode,
     checker: ts.TypeChecker,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
-    schemaHints?: WeakMap<
-      ts.Node,
-      {
-        items?: unknown;
-        cfcUiContract?: {
-          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-          action?: string;
-          surface?: string;
-          role?: string;
-          kind?: string;
-          trustedPattern?: string;
-          requiredEventIntegrity?: string[];
-        };
-      }
-    >,
+    schemaHints?: WeakMap<ts.Node, SchemaHint>,
     sourceFile?: ts.SourceFile,
   ): SchemaDefinition;
 }

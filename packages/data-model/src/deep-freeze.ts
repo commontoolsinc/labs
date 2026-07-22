@@ -8,6 +8,11 @@ import {
   IS_DEEP_FROZEN,
 } from "./fabric-instances/BaseFabricInstance.ts";
 import { BaseFabricPrimitive } from "./fabric-primitives/BaseFabricPrimitive.ts";
+import {
+  isAdmittedFabricFactory,
+  sealFactoryState,
+  trySealedFactoryState,
+} from "./fabric-factory.ts";
 
 /**
  * Cache of confirmed deep-frozen objects.
@@ -95,7 +100,12 @@ function isNecessarilyOrKnownDeepFrozen(value: unknown): boolean {
 export function isDeepFrozen(value: unknown): boolean {
   // Fast leaf paths first, so a primitive or already-cached value answers
   // without allocating the cycle-tracking set or the recursion closure below.
-  if (isNecessarilyOrKnownDeepFrozen(value)) {
+  if (isAdmittedFabricFactory(value)) {
+    if (isInDeepFrozenCache(value as object)) return true;
+    if (!Object.isFrozen(value) || trySealedFactoryState(value) === undefined) {
+      return false;
+    }
+  } else if (isNecessarilyOrKnownDeepFrozen(value)) {
     return true;
   } else if (!Object.isFrozen(value)) {
     return false;
@@ -106,7 +116,20 @@ export function isDeepFrozen(value: unknown): boolean {
   // layer rather than allocating an equivalent `(v) => …` per descent.
   const inProgress = new Set<object>();
   const check = (value: unknown): boolean => {
-    if (isNecessarilyOrKnownDeepFrozen(value)) {
+    if (isAdmittedFabricFactory(value)) {
+      const obj = value as object;
+      if (isInDeepFrozenCache(obj)) return true;
+      if (!Object.isFrozen(value)) return false;
+      const state = trySealedFactoryState(value);
+      if (state === undefined) return false;
+
+      if (inProgress.has(obj)) return true;
+      inProgress.add(obj);
+      const result = check(state);
+      inProgress.delete(obj);
+      if (result) addToDeepFrozenCache(obj);
+      return result;
+    } else if (isNecessarilyOrKnownDeepFrozen(value)) {
       return true;
     } else if (!Object.isFrozen(value)) {
       return false;
@@ -164,19 +187,21 @@ export function isDeepFrozen(value: unknown): boolean {
 }
 
 /**
- * Recursively freezes the given value in place. Dispatches on four arms, in
+ * Recursively freezes the given value in place. Dispatches on five arms, in
  * order:
  *
- * 1. Necessarily- or already-known-deep-frozen value (primitives and cached
+ * 1. Admitted factory: seal and recursively freeze its canonical state, then
+ *    freeze the callable.
+ * 2. Necessarily- or already-known-deep-frozen value (primitives and cached
  *    objects): short-circuit unchanged.
- * 2. `FabricPrimitive` instance: short-circuit unchanged -- these self-freeze
+ * 3. `FabricPrimitive` instance: short-circuit unchanged -- these self-freeze
  *    at construction and have no outbound references.
- * 3. Fabric instance: delegate generically to its `[DEEP_FREEZE]` protocol
+ * 4. Fabric instance: delegate generically to its `[DEEP_FREEZE]` protocol
  *    member, handing recursion through as the `subFreeze` callback. The
  *    dispatch gates via `BaseFabricInstance.isInstance()` (where the member is
  *    declared) -- it operates generically and does not enumerate concrete
  *    subclasses.
- * 4. Plain object or array: recursively freeze children, then freeze the
+ * 5. Plain object or array: recursively freeze children, then freeze the
  *    container.
  *
  * Arrays and plain objects are frozen after their children are recursively
@@ -191,13 +216,17 @@ export function isDeepFrozen(value: unknown): boolean {
  * recursing infinitely.
  */
 export function deepFreeze<T>(value: T): T {
-  // Arm 1: necessarily- or already-known-deep-frozen.
-  if (isNecessarilyOrKnownDeepFrozen(value)) {
+  // Fast paths: already-hardened factories, primitives, and cached objects.
+  if (
+    isAdmittedFabricFactory(value)
+      ? isInDeepFrozenCache(value as object)
+      : isNecessarilyOrKnownDeepFrozen(value)
+  ) {
     return value;
   }
 
-  // Arm 2: `FabricPrimitive`s are by definition frozen (they self-freeze at
-  // construction) and have no outbound references. Handling arms 1 and 2 here,
+  // Arm 3: `FabricPrimitive`s are by definition frozen (they self-freeze at
+  // construction) and have no outbound references. Handling leaf arms here,
   // before allocating the cycle-tracking set or the recursion closure below,
   // keeps primitives and `FabricPrimitive`s off the heavyweight path.
   if (BaseFabricPrimitive.isInstance(value)) {
@@ -216,6 +245,22 @@ export function deepFreeze<T>(value: T): T {
   // cycle-arrival defers to it.
   const inProgress = new Set<object>();
   const freeze = <U>(value: U): U => {
+    // Callable factories are logical Fabric atoms whose hidden state must be
+    // sealed and recursively frozen before the callable itself is hardened.
+    // This precedes the primitive shortcut because `typeof fn !== "object"`.
+    if (isAdmittedFabricFactory(value)) {
+      const obj = value as object;
+      if (isInDeepFrozenCache(obj)) return value;
+      if (inProgress.has(obj)) return value;
+      inProgress.add(obj);
+
+      const state = sealFactoryState(value, freeze);
+      freeze(state);
+      if (!Object.isFrozen(value)) Object.freeze(value);
+      addToDeepFrozenCache(obj);
+      return value;
+    }
+
     // Leaf short-circuits, repeated for nested values reached by recursion.
     if (isNecessarilyOrKnownDeepFrozen(value)) {
       return value;
@@ -235,7 +280,7 @@ export function deepFreeze<T>(value: T): T {
     }
     inProgress.add(obj);
 
-    // Arm 3: a fabric instance freezes itself in place via its `[DEEP_FREEZE]`
+    // Arm 4: a fabric instance freezes itself in place via its `[DEEP_FREEZE]`
     // protocol member. `freeze` is handed in as the `subFreeze` callback: it
     // closes over `inProgress`, so the impl's recursion into nested
     // `FabricValue`s shares cycle state with this call -- the participating
@@ -243,12 +288,12 @@ export function deepFreeze<T>(value: T): T {
     if (BaseFabricInstance.isInstance(value)) {
       const result = value[DEEP_FREEZE](freeze) as U;
       // Cache the now-deep-frozen result so subsequent `isDeepFrozen()` checks
-      // short-circuit in O(1), mirroring arm 4's cache-write below.
+      // short-circuit in O(1), mirroring arm 5's cache-write below.
       addToDeepFrozenCache(result as object);
       return result;
     }
 
-    // Arm 4: plain object or array -- recurse into children, then freeze.
+    // Arm 5: plain object or array -- recurse into children, then freeze.
     const alreadyFrozen = Object.isFrozen(value);
 
     if (Array.isArray(value)) {
@@ -287,7 +332,7 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
 
   switch (typeof value) {
     case "function": {
-      return false;
+      return isAdmittedFabricFactory(value) && isDeepFrozen(value);
     }
 
     case "object": {
@@ -314,9 +359,10 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
   const seen = new Set<object>();
   let cacheableByIdentity = true;
   const checkValue = (item: unknown): boolean => {
-    if (typeof item === "function") return false;
-    if (item === null || typeof item !== "object") {
-      // It's a non-function primitive.
+    if (typeof item === "function") {
+      return isAdmittedFabricFactory(item) && isDeepFrozen(item);
+    } else if (item === null || typeof item !== "object") {
+      // It's a primitive.
       return true;
     } else if (seen.has(item)) {
       return true;

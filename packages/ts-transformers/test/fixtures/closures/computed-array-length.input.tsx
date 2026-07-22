@@ -18,7 +18,7 @@ interface Piece {
 // FIXTURE: computed-array-length
 // Verifies: computed(() => expr) with .length access on a Reactive<T[]> is closure-extracted
 //   computed(() => allPieces.length) → lift(({ allPieces }) => allPieces.length)({ allPieces: { length: allPieces.length } })
-//   allPieces.map(fn) → allPieces.mapWithPattern(pattern(fn, ...schemas), {})
+//   allPieces.map(fn) → allPieces.mapWithPattern(pattern(fn, ...schemas))
 // Context: Regression test ensuring array .length produces the correct schema
 //   shape rather than an object schema with a length property.
 export default pattern(() => {

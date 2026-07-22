@@ -77,6 +77,8 @@ wrapper classes (Section 1.4).
 // Shown at module scope.
 // file: packages/data-model/fabric-value.ts
 
+import type { FabricFactory } from "@commonfabric/api";
+
 /**
  * The complete set of values that can flow through the runtime, be stored
  * persistently, or be transmitted across boundaries. This is the "middle
@@ -100,7 +102,10 @@ type FabricValue =
   | FabricBytes
   | FabricRegExp
 
-  // (c) Branded fabric types (custom types implementing the fabric protocol)
+  // (c) Narrow admitted callable protocol
+  | FabricFactory
+
+  // (d) Branded fabric types (custom types implementing the fabric protocol)
   //     This arm covers:
   //       - Native object wrappers: `FabricError`, `FabricMap`,
   //         `FabricSet` (Section 1.4)
@@ -108,7 +113,7 @@ type FabricValue =
   //       - System types: `UnknownValue`, `ProblematicValue`
   | FabricInstance
 
-  // (d) Recursive containers
+  // (e) Recursive containers
   | FabricValue[]
   | { [key: string]: FabricValue };
 ```
@@ -125,30 +130,37 @@ type FabricValue =
 >   conversion, hashing, and serialization boundaries (Sections 4.9, 6,
 >   and 5). Symbol-keyed *properties* on plain objects are a separate
 >   matter — see Section 1.5 (Recursive Containers / Objects).
-> - `function` — Functions are opaque closures with no portable
->   representation. They are explicitly **not** representable as fabric
->   values, eliciting a thrown error from `fabricFromNativeValue()` and a
->   `false` return value from `isFabricCompatible()`. (`FabricInstance`s
->   are not functions in this sense — they are class instances whose
->   serialization is handled by their class's `[CODEC]`.)
+> - `function` — Functions are opaque closures with no general portable
+>   representation. Arbitrary functions are explicitly **not** representable
+>   as fabric values, eliciting a thrown error from
+>   `fabricFromNativeValue()` and a `false` return value from
+>   `isFabricCompatible()`. (`FabricInstance`s are not functions in this
+>   sense — they are class instances whose serialization is handled by their
+>   class's `[CODEC]`.)
 >
->   A proposed, deliberately narrow exception adds a `FabricFactory` arm for
->   builder-created factories and codec-decoded factory shells admitted to the
->   internal data-model brand table. The function itself is the Fabric value
->   and encodes through `Factory@1`; there is no non-callable wrapper class.
->   This data-type brand does not grant executable trust, which is established
->   separately by resolving a content-addressed builder artifact. The exception
->   is not automatic under the current protocol: it requires branded-function
->   dispatch before generic function rejection, plus factory-state handling in
->   conversion, freezing, cloning, equality, hashing, and traversal. Every
->   unbranded function remains rejected. See
+>   The deliberately narrow exception is `FabricFactory`: a directly callable
+>   pattern, module/lift, or handler factory admitted by the internal data-model
+>   table, or an inert callable shell created by the `Factory@1` codec. The
+>   function itself is the Fabric value; there is no non-callable wrapper
+>   class. Admission makes the value serializable but does not grant execution
+>   trust. A context-free decode therefore returns an inert shell, and only a
+>   runner-owned materializer may resolve its content-addressed builder artifact
+>   and return an executable factory. Conversion, freezing, cloning, equality,
+>   hashing, and traversal all dispatch admitted factories before generic
+>   function rejection. Admission alone is not sufficient while a trusted live
+>   builder factory still lacks its complete artifact ref: conversion fails and
+>   `isFabricCompatible()` returns `false` until the same canonical state can be
+>   sealed. The compatibility probe uses conversion's deep hardener, so mutable
+>   but hardenable `FabricInstance` values in canonical factory state are
+>   accepted and frozen rather than reported as incompatible. Every unadmitted
+>   function remains rejected. See
 >   [First-Class Serializable Factories](../pattern-construction/node-factory-shipping.md).
 >
 > Of the two JS primitive types whose `typeof` results (`"symbol"` and
-> `"function"`) describe non-data values, `symbol` has a corresponding
-> `FabricValue` arm (with the runtime interned-vs-unique restriction
-> above) and `"function"` does not **in the current model**. The proposal above
-> adds only the branded `FabricFactory` function arm. All other `typeof` results
+> `"function"`) usually describe non-data values, `symbol` has a corresponding
+> `FabricValue` arm (with the runtime interned-vs-unique restriction above),
+> while the `"function"` arm admits only branded `FabricFactory` callables.
+> All other `typeof` results
 > (`"undefined"`, `"boolean"`, `"number"`, `"string"`, `"bigint"`,
 > `"object"`) have unconditional `FabricValue` arms.
 
@@ -2725,6 +2737,10 @@ export function hashOf(value: unknown): FabricHash {
   //                        where `codec` is `codecOf(v)` -- the class's
   //                        `[CODEC]` (Section 2.4), the same source of
   //                        truth the serialization layer uses.
+  // - `FabricFactory`:   hash(TAG_INSTANCE, hashStr("Factory@1"),
+  //                              hashOf(canonicalFactoryState))
+  //                        using the same codec-instance byte arm; no
+  //                        factory-specific hash tag exists.
   //
   // The native object wrappers and temporal types are hashed as follows:
   //
@@ -2748,6 +2764,8 @@ export function hashOf(value: unknown): FabricHash {
   //                         where entries are hashed in insertion order
   // - `FabricSet`:        hash(TAG_INSTANCE, hashStr("Set@1"), hashOf(elements))
   //                         where elements are hashed in insertion order
+  // - `FabricFactory`:    hash(TAG_INSTANCE, hashStr("Factory@1"),
+  //                              hashOf(canonicalFactoryState))
   // - `FabricEpochNsec`:  hash(TAG_EPOCH_NSEC, leb128(byteLen), twosComplementBytes)
   // - `FabricEpochDays`:  hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
   // - `FabricHash`:  hash(TAG_HASH, hashStr(algTag), leb128(hashByteLen), hashBytes)
@@ -3013,6 +3031,7 @@ export function fabricFromNativeValue(
 |------------|--------|
 | `null`, `boolean`, `number`, `string`, `undefined`, `bigint` | Returned as-is (primitives are `FabricValue` directly). All numbers pass through unchanged, including `-0`, `NaN`, and `±Infinity`. See Section 1.3 callout for layer-by-layer details. |
 | `symbol` | Registry-interned symbols (`Symbol.keyFor(s)` returns a string) returned as-is; unique symbols (`Symbol(desc)`) throw with the message `"Cannot store unique (uninterned) symbol"`. See Section 1.3 callout for layer-by-layer details. |
+| Admitted `FabricFactory` callable | Returned as the callable Fabric value. Deep conversion seals and recursively hardens its canonical `Factory@1` state before freezing the callable. `isFabricCompatible()` seals through the same deep hardener: it accepts and freezes hardenable `FabricInstance` state, while returning `false` for a live builder factory whose artifact ref is not available yet. An arbitrary function, copied protocol symbol, or malformed state is rejected. A codec-decoded shell remains inert; conversion never grants runner execution trust. |
 | `FabricPrimitive` (`FabricEpochNsec`, `FabricEpochDays`, `FabricHash`, `FabricBytes`) | Returned as-is. Always-frozen: the `freeze` option has no effect on these types (see Section 1.4.6). |
 | `FabricInstance` (including wrapper classes) | Returned as-is (already `FabricValue`). |
 | `Error` | Wrapped into `FabricError`. Before wrapping, `cause` and custom enumerable properties are recursively converted to `FabricValue` (deep variant) or left as-is (shallow variant). Extra enumerable properties are preserved (see Section 1.4.1). This ensures that by the time the `FabricError` codec's `encode()` runs, all nested values are already valid `FabricValue`. |
@@ -3162,6 +3181,8 @@ if the value is:
   Section 1.3 callout.
 - A registry-interned `symbol` (one for which `Symbol.keyFor(s)` returns a
   string). Unique symbols return `false`; see the Section 1.3 callout.
+- An admitted `FabricFactory` whose complete canonical state is valid. Every
+  other function returns `false`.
 - A `FabricInstance` (including the native object wrapper classes)
 - A `FabricNativeObject` (`Error`, `Map`, `Set`, `Date`, `RegExp`,
   `Uint8Array`, or an object with a `toJSON()` method — legacy)
@@ -3369,22 +3390,26 @@ The `subFreeze` / `subIsDeepFrozen` callbacks (rather than direct utility
 imports) keep the protocol layering clean and let the outer utility thread
 its shared cycle-detection state through implementations transparently.
 
-#### `deepFreeze()` and the 4-arm dispatch
+#### `deepFreeze()` and the 5-arm dispatch
 
 The generic top-level utility (`packages/data-model/deep-freeze.ts`)
-recursively freezes a `FabricValue` in place. It dispatches on four arms
+recursively freezes a `FabricValue` in place. It dispatches on five arms
 in order:
 
-1. **Necessarily- or already-known-deep-frozen value** — primitives
+1. **Admitted `FabricFactory`** — Seals the exact canonical `Factory@1` state,
+   recursively freezes that state, then freezes the callable. An arbitrary
+   function is never accepted by this arm.
+
+2. **Necessarily- or already-known-deep-frozen value** — primitives
    (`null` and `typeof !== "object"`) and objects already recorded in the
    internal deep-frozen cache. Short-circuits unchanged.
 
-2. **`FabricPrimitive` instance** — `FabricPrimitive` subclasses
+3. **`FabricPrimitive` instance** — `FabricPrimitive` subclasses
    (`FabricEpochNsec`, `FabricEpochDays`, `FabricHash`, `FabricBytes`;
    Section 1.4.6) self-freeze at construction and have no outbound
    references. Short-circuits unchanged.
 
-3. **`FabricInstance`** — Delegates to the instance's `[DEEP_FREEZE]`
+4. **`FabricInstance`** — Delegates to the instance's `[DEEP_FREEZE]`
    member with a `subFreeze` callback that recurses back through the same
    utility, threading the shared cycle-detection state. The dispatch
    gates on `instanceof` against the abstract base; it does not enumerate
@@ -3392,7 +3417,7 @@ in order:
    deep-frozen cache so subsequent `isDeepFrozen()` checks short-circuit
    in O(1).
 
-4. **Plain object or array** — Recurses into children, then freezes the
+5. **Plain object or array** — Recurses into children, then freezes the
    container with `Object.freeze()`. Arrays preserve sparse holes. The
    container is recorded in the deep-frozen cache.
 
@@ -3402,17 +3427,19 @@ into participating `FabricInstance`s' `[DEEP_FREEZE]` impls via the
 to a value the outer call is already deep-freezing short-circuits rather
 than recursing.
 
-#### `isDeepFrozenFabricValue()` and the 4-arm type guard
+#### `isDeepFrozenFabricValue()` and the 5-arm type guard
 
 The type guard (`isDeepFrozenFabricValue`) is the side-effect-free sibling
 of `deepFreeze()`. It mirrors the same arm shape:
 
-1. Primitives are accepted directly.
-2. `FabricPrimitive` instances are accepted directly.
-3. `FabricInstance` instances delegate to their `[IS_DEEP_FROZEN]` member
+1. Admitted factories require a frozen callable and already-sealed,
+   recursively deep-frozen canonical state; arbitrary functions fail.
+2. Primitives are accepted directly.
+3. `FabricPrimitive` instances are accepted directly.
+4. `FabricInstance` instances delegate to their `[IS_DEEP_FROZEN]` member
    with a `subIsDeepFrozen` callback that recurses back through the same
    guard.
-4. Plain objects and arrays must be `Object.isFrozen` and have every
+5. Plain objects and arrays must be `Object.isFrozen` and have every
    child accepted by the guard.
 
 Visited objects are tracked in a per-call `Set` for cycle safety.

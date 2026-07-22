@@ -153,6 +153,21 @@ export interface FabricBytesConstructor {
 export declare const FabricBytes: FabricBytesConstructor;
 
 /**
+ * Type-only brand for the narrow callable arm of `FabricValue`. Runtime
+ * admission is owned by the data-model factory protocol.
+ */
+declare const FABRIC_FACTORY_TYPE: unique symbol;
+
+/** A branded pattern, module, or handler factory callable. */
+export interface FabricFactory<
+  Args extends unknown[] = [never],
+  Result = unknown,
+> {
+  (...args: Args): Result;
+  readonly [FABRIC_FACTORY_TYPE]: true;
+}
+
+/**
  * The full set of values that the fabric storage layer can represent.
  */
 export type FabricValue =
@@ -161,6 +176,7 @@ export type FabricValue =
   | number
   | string
   | bigint
+  | FabricFactory
   | FabricSpecialObject
   | FabricArray
   | FabricPlainObject
@@ -349,11 +365,13 @@ export interface IReadable<T> {
 export type MetaLinkField =
   | "pattern"
   | "argument"
+  | "params"
   | "result";
 
 /**
  * The `pattern` field links a result cell to its pattern
  * The `argument` field links a result cell to its argument cell
+ * The `params` field links a result cell to compiler-owned closure params
  * The `internal` field contains a manifest with links to derived internal cells.
  * The `schema` field stores the schema for a result cell
  * The `result` field lets a result cell link to its parent result cell,
@@ -975,6 +993,12 @@ export interface IEquatable {
  * The WithPattern variants accept pre-defined patterns for per-element
  * operations.
  */
+type ListPatternCallbackInput<T> = {
+  element: T extends Array<infer U> ? U : T;
+  index: number;
+  array: T;
+};
+
 export interface IDerivable<T> {
   map<S>(
     this: IsThisObject,
@@ -986,8 +1010,7 @@ export interface IDerivable<T> {
   ): Reactive<S[]>;
   mapWithPattern<S>(
     this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
-    params: Record<string, any>,
+    op: PatternFactory<ListPatternCallbackInput<T>, S>,
   ): Reactive<S[]>;
   reduce<S>(
     this: IsThisObject,
@@ -1017,8 +1040,7 @@ export interface IDerivable<T> {
   ): Reactive<(T extends Array<infer U> ? U : T)[]>;
   filterWithPattern<S>(
     this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
-    params: Record<string, any>,
+    op: PatternFactory<ListPatternCallbackInput<T>, S>,
   ): Reactive<(T extends Array<infer U> ? U : T)[]>;
   flatMap<S>(
     this: IsThisObject,
@@ -1030,8 +1052,7 @@ export interface IDerivable<T> {
   ): Reactive<S[]>;
   flatMapWithPattern<S>(
     this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,
-    params: Record<string, any>,
+    op: PatternFactory<ListPatternCallbackInput<T>, S[]>,
   ): Reactive<S[]>;
 }
 
@@ -1476,6 +1497,7 @@ export type Handler<T = any, R = any> = Module & {
 
 export type NodeFactory<T, R> =
   & ((inputs: FactoryInput<T>) => Reactive<R>)
+  & FabricFactory<[FactoryInput<T>], Reactive<R>>
   & (Module | Handler | Pattern)
   & toJSON
   & {
@@ -1484,6 +1506,7 @@ export type NodeFactory<T, R> =
 
 export type PatternFactory<T, R> =
   & ((inputs: FactoryInput<T>) => Reactive<R>)
+  & FabricFactory<[FactoryInput<T>], Reactive<R>>
   & Pattern
   & toJSON
   & {
@@ -1493,6 +1516,7 @@ export type PatternFactory<T, R> =
 
 export type ModuleFactory<T, R> =
   & ((inputs: FactoryInput<T>) => Reactive<R>)
+  & FabricFactory<[FactoryInput<T>], Reactive<R>>
   & Module
   & toJSON
   & {
@@ -1501,6 +1525,7 @@ export type ModuleFactory<T, R> =
 
 export type HandlerFactory<T, R> =
   & ((inputs: FactoryInput<StripCell<T>>) => Stream<R>)
+  & FabricFactory<[FactoryInput<StripCell<T>>], Stream<R>>
   & Handler<T, R>
   & toJSON;
 
@@ -1561,6 +1586,51 @@ export type JSONSchemaTypes =
 // While this is currently tightly coupled to the CellKind type, we can restrict it
 // to a subset
 export type AsCellType = AsCellEntry;
+
+/**
+ * Serializable schema document nested inside factory metadata.
+ *
+ * Keeping this boundary JSON-shaped avoids recursively expanding three more
+ * complete `JSONSchemaObj` branches in every schema consumer. Concrete schema
+ * literals retain their exact type for `Schema<T>` inference, while runtime
+ * validation still checks that each document is a JSON Schema.
+ */
+export type EmbeddedFactorySchema =
+  | boolean
+  | (Readonly<Record<string, JSONValue>> & IDFields);
+
+/**
+ * Describes the public call contract carried by a first-class factory value.
+ *
+ * A factory schema has one type meaning but two runtime exposures: eager
+ * pattern construction receives a symbolic binding, while scheduled lift and
+ * handler callbacks receive a runner-materialized callable.
+ */
+export interface PatternFactorySchema
+  extends Readonly<Record<string, JSONValue>> {
+  readonly kind: "pattern";
+  readonly argumentSchema: EmbeddedFactorySchema;
+  readonly resultSchema: EmbeddedFactorySchema;
+}
+
+export interface ModuleFactorySchema
+  extends Readonly<Record<string, JSONValue>> {
+  readonly kind: "module";
+  readonly argumentSchema: EmbeddedFactorySchema;
+  readonly resultSchema: EmbeddedFactorySchema;
+}
+
+export interface HandlerFactorySchema
+  extends Readonly<Record<string, JSONValue>> {
+  readonly kind: "handler";
+  readonly contextSchema: EmbeddedFactorySchema;
+  readonly eventSchema: EmbeddedFactorySchema;
+}
+
+export type AsFactoryType =
+  | PatternFactorySchema
+  | ModuleFactorySchema
+  | HandlerFactorySchema;
 
 // See https://json-schema.org/draft/2020-12/json-schema-core
 // See https://json-schema.org/draft/2020-12/json-schema-validation
@@ -1648,6 +1718,8 @@ export type JSONSchemaObj = {
   readonly tags?: readonly string[];
   // makes it so that your handler gets a Cell object for that property. So you can call .set()/.update()/.push()/etc on it.
   readonly asCell?: readonly AsCellType[];
+  // Describes a first-class pattern, module, or handler factory callable.
+  readonly asFactory?: AsFactoryType;
   // temporarily used to assign labels like "confidential"
   readonly ifc?: {
     readonly confidentiality?: readonly ImmutableJSONValue[];
@@ -1696,7 +1768,9 @@ export type JSONSchemaObj = {
  * should be unified; see that module for the canonical version.
  */
 type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
-  : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
+  : T extends object ? ({
+      -readonly [P in keyof T]: P extends "asFactory" ? T[P] : Mutable<T[P]>;
+    })
   : T;
 
 /**
@@ -1841,16 +1915,18 @@ export interface ImageData {
 }
 
 export type BuiltInLLMTool =
-  & { description?: string }
-  & (
-    | {
-      pattern: Pattern;
-      handler?: never;
-      extraParams?: Record<string, any>;
-      useResultSchemaForObservation?: boolean;
-    }
-    | { handler: Stream<any> | Reactive<any>; pattern?: never }
-  );
+  | PatternFactory<any, any>
+  | {
+    pattern: PatternFactory<any, any>;
+    handler?: never;
+    description?: string;
+    useResultSchemaForObservation?: boolean;
+  }
+  | {
+    handler: Stream<any> | Reactive<any>;
+    pattern?: never;
+    description?: string;
+  };
 
 /**
  * A web source surfaced by a native search/grounding tool (e.g.
@@ -2119,61 +2195,17 @@ export interface PatternFunction {
   ): PatternFactory<StripCell<T>, R>;
 }
 
-/**
- * Result of patternTool() - an LLM tool definition with a pattern and optional pre-filled params.
- * This is the actual runtime return type, not a cast.
- */
-export interface PatternToolResult<E = Record<PropertyKey, never>> {
-  pattern: Pattern;
-  extraParams: E;
-  useResultSchemaForObservation?: boolean;
-}
-
 // Marker branding a tool-input field as framework-provided: the runtime fills
-// it (e.g. the bash tool's `sandboxId`), and `patternTool` rejects any attempt
-// to pre-fill it through extraParams. Compile-time only; at runtime a
+// it (e.g. the bash tool's `sandboxId`). Compile-time only; at runtime a
 // `FrameworkProvided<T>` value is just a `T`. The brand is a symbol-keyed
 // property, so schema generation emits the inner type's schema unchanged.
 //
 // Shaped as `(T & brand) | T` (like Default<>): the bare `| T` arm keeps the
-// type nameable in emitted declarations, while the branded arm is what
-// FrameworkProvidedKeys<> detects.
+// type nameable in emitted declarations while compiler metadata can still
+// recognize the branded arm.
 export declare const FRAMEWORK_PROVIDED_MARKER: unique symbol;
 type FrameworkProvidedMarker = { readonly [FRAMEWORK_PROVIDED_MARKER]: true };
 export type FrameworkProvided<T> = (T & FrameworkProvidedMarker) | T;
-
-// Distributes over the union members of V (naked param) so it sees the brand in
-// the `(T & brand) | T` shape: `true` for the branded arm, `false` for the bare
-// one, hence `boolean` for the whole union. `any` is excluded — `any extends X`
-// is `boolean`, which would otherwise flag every loosely-typed field.
-type _HasFrameworkBrand<V> = IsAny<V> extends true ? false
-  : V extends FrameworkProvidedMarker ? true
-  : false;
-
-// The keys of T whose value is `FrameworkProvided<...>` — the fields an author
-// must not pre-fill. `NonNullable` lets it see the brand through an optional
-// `field?: FrameworkProvided<...>`.
-type FrameworkProvidedKeys<T> = {
-  [K in keyof T]-?: true extends _HasFrameworkBrand<NonNullable<T[K]>> ? K
-    : never;
-}[keyof T];
-
-export type PatternToolFunction = <
-  T,
-  E extends object = Record<PropertyKey, never>,
->(
-  // CT-1655: the first argument must be an explicit `pattern(...)`. Passing a
-  // bare callback (and letting the runtime wrap it / a transformer auto-capture
-  // its closure) is no longer supported — wrap it yourself:
-  // `patternTool(pattern(fn), extraParams?)`.
-  pattern: PatternFactory<T, any>,
-  // Reject pre-filling a framework-provided field (e.g. the bash tool's
-  // `sandboxId`); otherwise validate that E (after stripping cells) is a subset
-  // of T.
-  extraParams?: [keyof E & FrameworkProvidedKeys<T>] extends [never]
-    ? (StripCell<E> extends Partial<T> ? FactoryInput<E> : never)
-    : never,
-) => PatternToolResult<E>;
 
 // Public (schema-light) surface, matching PatternFunction's index.ts shape: the
 // callback is the only argument and the types come from the callback itself. The
@@ -2204,6 +2236,7 @@ export interface LiftFunction {
 export type HandlerState<T> = T extends Cell<any> ? T
   : T extends Stream<any> ? T
   : T extends SqliteDb<any> ? T
+  : T extends FabricFactory<any, any> ? T
   : T extends Array<infer U> ? ReadonlyArray<HandlerState<U>>
   : T extends object ? { readonly [K in keyof T]: HandlerState<T[K]> }
   : T;
@@ -2983,7 +3016,6 @@ export interface MultiUserTestDescriptor {
 // Re-export all function types as values for destructuring imports
 // These will be implemented by the factory
 export declare const pattern: PatternFunction;
-export declare const patternTool: PatternToolFunction;
 export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
 export declare const action: ActionFunction;

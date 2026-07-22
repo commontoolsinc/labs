@@ -265,7 +265,6 @@ export function createSigilLinkFromParsedLink(
 
   return sigil;
 }
-
 /**
  * Controls which `asCell` schema entries survive {@link sanitizeSchemaForLinks}.
  */
@@ -396,6 +395,26 @@ interface SanitizeContext {
   keepAsCell: KeepAsCell;
 }
 
+function cloneSchemaMetadata(
+  value: unknown,
+  seen: Map<object, unknown> = new Map(),
+): unknown {
+  if (value === null || typeof value !== "object") return value;
+  const cached = seen.get(value);
+  if (cached !== undefined) return cached;
+  const clone: unknown[] | Record<PropertyKey, unknown> = Array.isArray(value)
+    ? []
+    : {};
+  seen.set(value, clone);
+  for (const key of Reflect.ownKeys(value)) {
+    (clone as Record<PropertyKey, unknown>)[key] = cloneSchemaMetadata(
+      (value as Record<PropertyKey, unknown>)[key],
+      seen,
+    );
+  }
+  return clone;
+}
+
 /**
  * Recursively strips asCell flags from a JSON schema.
  * This also ensures there are no circular references in the output schema
@@ -480,6 +499,15 @@ function recursiveStripAsCellFromSchema(
   for (const [key, value] of Object.entries(result)) {
     // Skip $ref - it's just a string pointer, not a schema to process
     if (key === "$ref") continue;
+
+    // `asFactory` carries an exact public call contract. Its nested schemas are
+    // metadata about a different invocation boundary, so stripping their cell
+    // wrappers would silently change the factory type. Copy the extension as a
+    // unit while allowing the enclosing link schema to be sanitized normally.
+    if (key === "asFactory") {
+      result[key] = cloneSchemaMetadata(value);
+      continue;
+    }
 
     if (value && typeof value === "object") {
       if (key === "$defs") {
@@ -592,7 +620,7 @@ function removeStrippedStreamPropertiesFromRequired(
 /** Get or create a cell using the resultCell as the cause. */
 export function getMetaCell(
   resultCell: AnyCell<unknown>,
-  type: "internal" | "argument",
+  type: "internal" | "argument" | "params",
   tx: IExtendedStorageTransaction,
   schema?: JSONSchema,
 ): Cell {

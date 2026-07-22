@@ -56,6 +56,9 @@ export async function runDenoCommandWithTemporaryLock(
     if (options.env) {
       commandOptions.env = options.env;
     }
+    // Invoke through the command name so package tasks can grant only
+    // `--allow-run=deno`. `Deno.execPath()` resolves Homebrew-style symlinks to
+    // a versioned absolute path, which cannot be named portably in the task.
     return await new Deno.Command("deno", commandOptions).output();
   } finally {
     await removeIfPresent(tempDir, { recursive: true });

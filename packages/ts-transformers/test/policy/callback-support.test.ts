@@ -7,6 +7,11 @@ import {
   classifyCallbackBoundary,
   getCallbackBoundarySemantics,
 } from "../../src/policy/callback-boundary.ts";
+import {
+  registerTrustedCommonFabricTestSources,
+  TRUSTED_COMMONFABRIC_GLOBALS,
+  TRUSTED_COMMONFABRIC_GLOBALS_SOURCE_NAME,
+} from "../trusted-commonfabric-sources.ts";
 
 function createProgramAndContext(source: string): {
   sourceFile: ts.SourceFile;
@@ -30,19 +35,43 @@ function createProgramAndContext(source: string): {
     true,
     ts.ScriptKind.TSX,
   );
+  const commonFabricSourceFile = ts.createSourceFile(
+    TRUSTED_COMMONFABRIC_GLOBALS_SOURCE_NAME,
+    TRUSTED_COMMONFABRIC_GLOBALS,
+    compilerOptions.target!,
+    true,
+  );
 
   const host = ts.createCompilerHost(compilerOptions, true);
-  host.getSourceFile = (name) => name === fileName ? sourceFile : undefined;
+  host.getSourceFile = (name) =>
+    name === fileName
+      ? sourceFile
+      : name === TRUSTED_COMMONFABRIC_GLOBALS_SOURCE_NAME
+      ? commonFabricSourceFile
+      : undefined;
   host.getCurrentDirectory = () => "/";
   host.getDirectories = () => [];
-  host.fileExists = (name) => name === fileName;
-  host.readFile = (name) => name === fileName ? source : undefined;
+  host.fileExists = (name) =>
+    name === fileName || name === TRUSTED_COMMONFABRIC_GLOBALS_SOURCE_NAME;
+  host.readFile = (name) =>
+    name === fileName
+      ? source
+      : name === TRUSTED_COMMONFABRIC_GLOBALS_SOURCE_NAME
+      ? TRUSTED_COMMONFABRIC_GLOBALS
+      : undefined;
   host.writeFile = () => {};
   host.useCaseSensitiveFileNames = () => true;
   host.getCanonicalFileName = (name) => name;
   host.getNewLine = () => "\n";
 
-  const program = ts.createProgram([fileName], compilerOptions, host);
+  const program = ts.createProgram(
+    [fileName, TRUSTED_COMMONFABRIC_GLOBALS_SOURCE_NAME],
+    compilerOptions,
+    host,
+  );
+  registerTrustedCommonFabricTestSources(program, [
+    TRUSTED_COMMONFABRIC_GLOBALS_SOURCE_NAME,
+  ]);
   const context = new TransformationContext({
     program,
     sourceFile,
@@ -345,7 +374,85 @@ Deno.test(
 );
 
 Deno.test(
-  "Callback boundary policy: unresolved property-access patternTool fallback stays compute-owned",
+  "Callback boundary policy: compiler params-schema carrier stays pattern-owned",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare function pattern<T>(callback: T): T;
+      declare const __cfHelpers: {
+        withPatternParamsSchema<T>(callback: T, schema: unknown): T;
+      };
+      const value = pattern(__cfHelpers.withPatternParamsSchema(
+        (input: unknown, params: unknown) => ({ input, params }),
+        { type: "object", properties: {} },
+      ));
+    `);
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    assertEquals(classifyCallbackBoundary(callback, checker, context), {
+      kind: "supported",
+      boundaryKind: "pattern-builder",
+      bodyContext: {
+        strategy: "explicit",
+        kind: "pattern",
+        owner: "pattern",
+      },
+    });
+    assertEquals(classifyReactiveContext(callback.body, checker, context), {
+      kind: "pattern",
+      owner: "pattern",
+      inJsxExpression: false,
+    });
+    const callbackContext = context.getEnclosingCallbackContext(callback.body);
+    assertEquals(
+      callbackContext && ts.isIdentifier(callbackContext.call.expression)
+        ? callbackContext.call.expression.text
+        : undefined,
+      "pattern",
+    );
+    context.markAsArrayMethodCallback(callback);
+    assertEquals(classifyCallbackBoundary(callback, checker, context), {
+      kind: "supported",
+      boundaryKind: "reactive-array-method",
+      bodyContext: {
+        strategy: "explicit",
+        kind: "pattern",
+        owner: "array-method",
+      },
+    });
+  },
+);
+
+Deno.test(
+  "Callback boundary policy: nested pattern callbacks are allowed in pattern context",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare function pattern<T>(callback: T): T;
+      const value = pattern(() => ({
+        child: pattern((input: unknown) => input),
+      }));
+    `);
+
+    const callbacks: ts.ArrowFunction[] = [];
+    const visit = (node: ts.Node): void => {
+      if (ts.isArrowFunction(node)) callbacks.push(node);
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+    const nested = callbacks[1];
+    if (!nested) throw new Error("Expected nested pattern callback");
+
+    const semantics = getCallbackBoundarySemantics(
+      nested,
+      checker,
+      context,
+    );
+    assertEquals(semantics.decision.kind, "supported");
+    assertEquals(semantics.allowsRestrictedContextFunctionCallback, true);
+  },
+);
+
+Deno.test(
+  "Callback boundary policy: unresolved property-access patternTool has no privileged fallback",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`
       const helpers = {} as any;
@@ -356,12 +463,11 @@ Deno.test(
     const decision = classifyCallbackBoundary(callback, checker, context);
 
     assertEquals(decision, {
-      kind: "supported",
-      boundaryKind: "pattern-tool",
+      kind: "unsupported",
+      boundaryKind: "unsupported-container",
+      boundaryDiagnostic: "function-creation",
       bodyContext: {
-        strategy: "explicit",
-        kind: "compute",
-        owner: "unknown",
+        strategy: "inherit-parent",
       },
     });
   },

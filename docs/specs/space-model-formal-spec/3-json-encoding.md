@@ -212,7 +212,79 @@ round-trip correctly.
 // Whether a symbol value reaches this encoder depends on the fabric-value
 // conversion gate; see `1-fabric-values.md` Section 4.9. The wire format
 // above is the encoder's contract regardless of how the value arrived.
+
+// Admitted callable pattern, module/lift, and handler factories.
+// Tag: "Factory@1"
+// { "/Factory@1": FactoryStateV1 }
 ```
+
+### 3.1 `Factory@1`
+
+`Factory@1` is the one callable Fabric-value encoding. The callable itself is
+the value; the wire format does not introduce a wrapper object or a separate
+factory-class tag. Its state is exactly one of these discriminated forms:
+
+```typescript
+import type {
+  FabricPlainObject,
+  FabricValue,
+  JSONSchema,
+} from "@commonfabric/api";
+
+type FactoryArtifactRef = {
+  identity: string; // canonical unpadded base64url of exactly 32 bytes
+  symbol: string; // non-empty module export or __cfReg name
+};
+
+type FactoryStateV1 =
+  | {
+    kind: "pattern";
+    ref: FactoryArtifactRef;
+    argumentSchema: JSONSchema;
+    resultSchema: JSONSchema;
+    paramsSchema?: JSONSchema;
+    params?: FabricPlainObject;
+    defaultScope?: "space" | "user" | "session";
+    spaceSelector?: FabricValue;
+  }
+  | {
+    kind: "module";
+    ref: FactoryArtifactRef;
+    argumentSchema?: JSONSchema;
+    resultSchema?: JSONSchema;
+    defaultScope?: "space" | "user" | "session";
+  }
+  | {
+    kind: "handler";
+    ref: FactoryArtifactRef;
+    contextSchema?: JSONSchema;
+    eventSchema?: JSONSchema;
+  };
+```
+
+Validation is exact and fail-closed:
+
+- `identity` is the complete content-addressed builder artifact identity. It is
+  never `$implRef`, a host/session pseudo-ref, or an implementation-function
+  identity.
+- Every object admits only the fields shown for its discriminant. Required
+  fields must be present; optional fields with an `undefined` value are invalid
+  and must instead be omitted.
+- Schemas are canonical JSON values. `defaultScope` is one of the three literal
+  values shown. `params` must be a plain Fabric-value object and requires
+  `paramsSchema`.
+- Nested `params` and `spaceSelector` values are recursively encoded, so a
+  nested admitted factory receives another `/Factory@1` tag. Arbitrary
+  JavaScript functions remain invalid at every depth.
+- The wire state never carries an artifact source space, execution authority,
+  or trusted `FrameworkProvided` paths. Those are runner/compiler provenance.
+
+Context-free decode validates and freezes the complete state, then returns an
+inert branded callable shell. Calling that shell throws. Deserialization alone
+does not execute code or establish execution trust; only the runner-owned
+materialization boundary may resolve `ref` against a trusted artifact source
+space and produce an executable factory. Re-encoding an inert shell yields the
+same canonical state.
 
 > **Deserialization validation.** Deserialization cannot assume type safety from
 > the wire. Each codec must validate the format of its state in `decode()`

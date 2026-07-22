@@ -72,6 +72,7 @@ import {
 import { popFrame, pushFrame } from "../builder/pattern.ts";
 import type { PatternCoverageCollector } from "../pattern-coverage.ts";
 import {
+  CommonFabricRuntimeTypeIdentifiers,
   ensureSESLockdown,
   getRuntimeModuleExports,
   getRuntimeModuleTypes,
@@ -100,6 +101,10 @@ const logger = getLogger("engine");
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {
   private runtimeModuleTypes: Record<string, string> | undefined;
+  private readonly trustedCommonFabricTypeSourcesByName = new Map<
+    string,
+    Source
+  >();
   private cache: StaticCache;
   constructor(program: Program, cache: StaticCache) {
     const modules = program.files.reduce((mod, file) => {
@@ -124,10 +129,12 @@ export class EngineProgramResolver extends InMemoryProgram {
       identifier in this.runtimeModuleTypes &&
       this.runtimeModuleTypes[identifier]
     ) {
-      return {
+      const source = {
         name: identifier,
         contents: this.runtimeModuleTypes[identifier],
       };
+      this.recordTrustedCommonFabricTypeSource(identifier, source);
+      return source;
     }
     if (identifier.endsWith(".d.ts")) {
       const origSource = identifier.substring(0, identifier.length - 5);
@@ -138,15 +145,123 @@ export class EngineProgramResolver extends InMemoryProgram {
           origSource in this.runtimeModuleTypes &&
           this.runtimeModuleTypes[origSource]
         ) {
-          return {
+          const source = {
             name: identifier,
             contents: this.runtimeModuleTypes[origSource],
           };
+          this.recordTrustedCommonFabricTypeSource(origSource, source);
+          return source;
         }
       }
     }
     return super.resolveSource(identifier);
   }
+
+  /** Exact sources supplied from the trusted runtime type cache. */
+  trustedCommonFabricTypeSources(): readonly Source[] {
+    return [...this.trustedCommonFabricTypeSourcesByName.values()];
+  }
+
+  private recordTrustedCommonFabricTypeSource(
+    runtimeTypeIdentifier: string,
+    source: Source,
+  ): void {
+    if (
+      (CommonFabricRuntimeTypeIdentifiers as readonly string[]).includes(
+        runtimeTypeIdentifier,
+      )
+    ) {
+      const existing = this.trustedCommonFabricTypeSourcesByName.get(
+        source.name,
+      );
+      if (existing && existing.contents !== source.contents) {
+        throw new Error(
+          `Conflicting trusted Common Fabric type source '${source.name}'`,
+        );
+      }
+      this.trustedCommonFabricTypeSourcesByName.set(source.name, source);
+    }
+  }
+}
+
+export interface ResolvedProgramBatch {
+  readonly files: readonly Source[];
+  readonly trustedSources: readonly Source[];
+}
+
+/** Keep resolver-granted trust tied to the exact bytes in the program. */
+export function validateTrustedCommonFabricTypeSources(
+  files: readonly Source[],
+  trustedSources: readonly Source[],
+): Source[] {
+  for (const trusted of trustedSources) {
+    const matches = files.filter((file) => file.name === trusted.name);
+    if (
+      matches.length === 0 ||
+      matches.some((file) => file.contents !== trusted.contents)
+    ) {
+      throw new Error(
+        `Resolved program conflicts with trusted Common Fabric type source '${trusted.name}'`,
+      );
+    }
+  }
+  return [...trustedSources];
+}
+
+/** Merge resolved programs without detaching trusted names from their bytes. */
+export function mergeResolvedProgramBatches(
+  batches: readonly ResolvedProgramBatch[],
+): { files: Source[]; trustedSources: Source[] } {
+  const unioned = new Map<string, Source>();
+  const trustedByName = new Map<string, Source>();
+
+  for (const batch of batches) {
+    validateTrustedCommonFabricTypeSources(batch.files, batch.trustedSources);
+    const batchTrustedByName = new Map(
+      batch.trustedSources.map((source) => [source.name, source]),
+    );
+
+    for (const file of batch.files) {
+      const incomingTrusted = batchTrustedByName.get(file.name);
+      const establishedTrusted = trustedByName.get(file.name);
+      const existing = unioned.get(file.name);
+
+      if (establishedTrusted && !incomingTrusted) {
+        throw new Error(
+          `Authored source collides with trusted Common Fabric type source '${file.name}'`,
+        );
+      }
+      if (incomingTrusted) {
+        if (
+          establishedTrusted &&
+          establishedTrusted.contents !== incomingTrusted.contents
+        ) {
+          throw new Error(
+            `Conflicting trusted Common Fabric type source '${file.name}'`,
+          );
+        }
+        if (existing && !establishedTrusted) {
+          throw new Error(
+            `Authored source collides with trusted Common Fabric type source '${file.name}'`,
+          );
+        }
+        trustedByName.set(file.name, incomingTrusted);
+      }
+
+      if (existing) {
+        if (existing.contents !== file.contents) {
+          throw new Error(`Conflicting resolved source '${file.name}'`);
+        }
+      } else {
+        unioned.set(file.name, file);
+      }
+    }
+  }
+
+  return {
+    files: [...unioned.values()],
+    trustedSources: [...trustedByName.values()],
+  };
 }
 
 interface RuntimeInternals {
@@ -276,6 +391,11 @@ export class Engine extends EventTarget implements Harness {
         : undefined;
       const resolver = fabricResolver ?? engineResolver;
       const resolvedProgram = await this.resolve(resolver);
+      const trustedCommonFabricTypeSources =
+        validateTrustedCommonFabricTypeSources(
+          resolvedProgram.files,
+          engineResolver.trustedCommonFabricTypeSources(),
+        );
       const mounts = fabricResolver?.mounts() ?? [];
       const specifierAliases = fabricResolver?.specifierAliases() ?? new Map();
       const resolvedPins = fabricResolver?.resolvedPins() ?? [];
@@ -396,6 +516,7 @@ export class Engine extends EventTarget implements Harness {
         const compileOptions: TypeScriptCompilerOptions = {
           noCheck: options.noCheck,
           runtimeModules: Engine.runtimeModuleNames(),
+          trustedCommonFabricTypeSources,
           specifierAliases,
           getTransformedProgram: options.getTransformedProgram
             ? (nextProgram) => options.getTransformedProgram?.(nextProgram)
@@ -629,7 +750,7 @@ export class Engine extends EventTarget implements Harness {
     // Pretransform parses before the compiler internals are awaited.
     await ensureCompilerStack();
     const runTransform = options.transform ?? true;
-    const unioned = new Map<string, Source>();
+    const resolvedBatches: ResolvedProgramBatch[] = [];
     const mains: string[] = [];
     for (const program of programs) {
       const id = computeId(program);
@@ -639,25 +760,32 @@ export class Engine extends EventTarget implements Harness {
         this.ctRuntime.staticCache,
       );
       const resolved = await this.resolve(resolver);
-      for (const file of uniqueSourcesByName(resolved.files)) {
-        if (!unioned.has(file.name)) unioned.set(file.name, file);
-      }
+      resolvedBatches.push({
+        files: resolved.files,
+        trustedSources: resolver.trustedCommonFabricTypeSources(),
+      });
       mains.push(mapped.main);
     }
 
+    const {
+      files: mergedFiles,
+      trustedSources: trustedCommonFabricTypeSources,
+    } = mergeResolvedProgramBatches(resolvedBatches);
+
     const merged: RuntimeProgram = {
       main: mains[0]!,
-      files: [...unioned.values()],
+      files: mergedFiles,
     };
 
     const { compiler } = await this.getCompilerInternals();
     const { modules, diagnostics: compileDiagnostics } = compiler
       .compileToModulesCollecting(merged, {
         runtimeModules: Engine.runtimeModuleNames(),
+        trustedCommonFabricTypeSources,
         beforeTransformers: runTransform
           ? (program) => {
             const moduleIdentities = new Map(
-              [...unioned.keys()].map((name) => [name, `check:${name}`]),
+              mergedFiles.map(({ name }) => [name, `check:${name}`]),
             );
             const pipeline = new (compilerStack()
               .CommonFabricTransformerPipeline)({ moduleIdentities });
@@ -692,7 +820,7 @@ export class Engine extends EventTarget implements Harness {
 
     return {
       patternCount: programs.length,
-      fileCount: unioned.size,
+      fileCount: mergedFiles.length,
       diagnostics,
     };
   }
@@ -759,6 +887,11 @@ export class Engine extends EventTarget implements Harness {
       : undefined;
     const resolver = fabricResolver ?? engineResolver;
     const resolvedProgram = await this.resolve(resolver);
+    const trustedCommonFabricTypeSources =
+      validateTrustedCommonFabricTypeSources(
+        resolvedProgram.files,
+        engineResolver.trustedCommonFabricTypeSources(),
+      );
     const mounts = fabricResolver?.mounts() ?? [];
     const specifierAliases = fabricResolver?.specifierAliases() ?? new Map();
     const resolvedProgramFiles = uniqueSourcesByName(resolvedProgram.files);
@@ -803,6 +936,7 @@ export class Engine extends EventTarget implements Harness {
 
     const emitted = compiler.compileToModules(resolvedForCompile, {
       runtimeModules: Engine.runtimeModuleNames(),
+      trustedCommonFabricTypeSources,
       specifierAliases,
       beforeTransformers: (program) => {
         const pipeline = new (compilerStack()

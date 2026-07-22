@@ -15,15 +15,14 @@ subsumes lift from the CT-1585 callback hoister). `derive` has since been fully
 retired from both the transformer (CT-1643) and the runtime export (CT-1624).
 **CT-1655 extends Phase 2's whole-call hoisting to the other builders**:
 `handler` (hoisted to `const __cfHandler_N`) and `pattern` (hoisted to
-`const __cfPattern_N` out of `mapWithPattern` and `patternTool` argument
-position) shipped; the old callback hoister was deleted and the sole stage is
-now `BuilderCallHoistingTransformer`. The enclosing `patternTool(...)` call
-itself stays in place because its per-instance captures live in its second
-argument. **Phase 3 (`selfcontained` marker) remains unimplemented** — its
-design below is the active proposal and its open questions are mostly resolved
-(see the Phase 3 section and tracker). Historical phase notes retain the
-transformer names that existed when those investigations ran; the glossary near
-the end maps the current code._
+`const __cfPattern_N` out of `mapWithPattern` argument position) shipped; the
+old callback hoister was deleted and the sole stage is now
+`BuilderCallHoistingTransformer`. First-class factory closure conversion later
+removed the final `patternTool` special path. **Phase 3 (`selfcontained` marker)
+remains unimplemented** — its design below is the active proposal and its open
+questions are mostly resolved (see the Phase 3 section and tracker). Historical
+phase notes retain the transformer names that existed when those investigations
+ran; the glossary near the end maps the current code._
 
 ## Motivation
 
@@ -74,12 +73,11 @@ on the outer call. Implementation notes:
   still classifies as `handler` for the stages that run after hoisting.
 
 **Pattern shipped in CT-1655 (next).** `pattern`'s hoist is a _different_
-mechanic: pattern is not applied — a reactive map lowers to
-`expr.mapWithPattern(__cfHelpers.pattern(cb, inSchema, outSchema), { params })`,
-so the bare `pattern(...)` call (argument 0 of `mapWithPattern`) is the
-hoistable unit, with per-instance captures flowing through `mapWithPattern`'s
-_second_ argument. The bare pattern call is therefore capture-free and safe to
-evaluate once at module scope. Implementation notes:
+mechanic: pattern is not applied — a reactive map lowers to a one-argument
+`expr.mapWithPattern(__cfHelpers.pattern(cb, inSchema, outSchema).curry(params))`.
+The bare `pattern(...)` call is the hoistable unit; public list input stays in
+callback argument 0 and captures flow through callback argument 1.
+Implementation notes:
 
 - The hoisting stage was renamed `LiftHoistingTransformer` →
   `BuilderCallHoistingTransformer` (`lift-hoisting.ts` →
@@ -88,8 +86,8 @@ evaluate once at module scope. Implementation notes:
   `BuilderCallbackHoistingTransformer` it is subsuming.
 - `HoistableBuilderSpec` gains an optional `rewriteSite` hook. Applied builders
   (lift/handler) keep the default callee-swap; pattern provides `rewriteSite` to
-  replace just `mapWithPattern`'s first argument with the hoisted name, leaving
-  the callee and the params argument intact.
+  replace the pattern call with the hoisted name while retaining any private
+  `.curry(params)` tail.
 - Recognition is positional via `getMapWithPatternHoistablePatternCall`: a
   `*WithPattern` call whose first argument is a `pattern(...)` builder call. The
   top-level `export default pattern(...)` is a _direct_ call (not a
@@ -116,12 +114,10 @@ evaluate once at module scope. Implementation notes:
   declarations. The transformer's golden tests only check emitted text, so this
   was caught by the runner's pattern-execution tests, not the fixture suite.
 
-**`patternTool` resolution.** The canonical form is
-`patternTool(pattern(fn), { extraParams })`. The enclosing call stays at its
-authored site so per-instance `extraParams` stay local, while
-`BuilderCallHoistingTransformer` hoists the inner `pattern(...)` argument. This
-emptied the old CT-1585 callback-hoister set; that transformer and its
-module-scope callback-analysis module were deleted.
+**Tool resolution.** `patternTool` has been removed. Direct and metadata-wrapped
+PatternFactory tool values follow ordinary nested-pattern closure conversion,
+including private params and one compiler-emitted `.curry(...)` when captures
+exist.
 
 ## Relationship to prior work
 
@@ -339,16 +335,12 @@ Note three changes from the existing CT-1585 hoist:
   hoist-before and are likewise fixed by hoist-after.) See
   `session_outputs/2026-06-02_lift-hoist-phase2/02-ordering-correction.md`.
 - **Interaction with the existing CT-1585 hoist.** **Subsume, verified.** Phase
-  2 owns lift hoisting: `lift` is removed from CT-1585's
-  `HOISTABLE_BUILDER_NAMES` and the lift-applied branch in `resolveHoistTarget`
-  is disabled. Coexistence produced a double-hoist that TDZ-crashed at module
-  load (`Cannot access
-  '__cfModuleCallback_1' before initialization` — Phase
-  2's lift const hoisted above CT-1585's callback const). CT-1585 still owns
-  `pattern`/`handler`/ `patternTool`; both coexist correctly in one file (e.g.
-  `patternTool` callback stays `__cfModuleCallback_N` while sibling lifts become
-  `__cfLift_N`). When `pattern`/`handler` get whole-call hoisting they fold into
-  `LiftHoistingTransformer`.
+  2 owns lift hoisting. Coexistence produced a double-hoist that TDZ-crashed at
+  module load (`Cannot access
+  '__cfModuleCallback_1' before initialization` —
+  Phase 2's lift const hoisted above CT-1585's callback const). The current
+  `BuilderCallHoistingTransformer` owns whole-call lift, handler, and pattern
+  relocation; no callback-only hoister remains.
 - **Naming collision.** Names come from a per-file counter plus
   `factory.createIdentifier("__cfLift_" + n)`. The `__cfLift` prefix is added to
   `isTransformerInjectedIdentifier` so that a `__cfLift_N` reference appearing
@@ -466,18 +458,18 @@ resolutions.)
 Quick reference for the current code. All paths are relative to
 `packages/ts-transformers/`.
 
-| Concept                                      | Where it lives                                                                          | Notes                                                                                                                                                                    |
-| -------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Pipeline stage order                         | `src/cf-pipeline.ts` (`CFC_TRANSFORMER_STAGE_SPECS`)                                    | The 23-stage registry is authoritative; prose synchronization is pinned by `test/spec-sync.test.ts`.                                                                     |
-| `LiftLoweringTransformer`                    | `src/lift/transformer.ts`                                                               | Stage 10. Lowers `computed(...)` (and formerly user `derive(...)`) to the lift-applied form.                                                                             |
-| `ClosureTransformer`                         | `src/closures/transformer.ts`                                                           | Stage 11. The main reactive lowering; extracts captures into the lift input object.                                                                                      |
-| `createLiftAppliedCall`                      | `src/transformers/builtins/lift-applied.ts`                                             | Factory for synthesized lift-style helper calls; emits `lift<In,Out>(cb)(input)`.                                                                                        |
-| `BuilderCallHoistingTransformer`             | `src/transformers/builder-call-hoisting.ts`                                             | Stage 17, after schema injection. Sole module-scope hoister for applied `lift`/`handler` calls and argument-position `pattern` calls, including `patternTool`'s pattern. |
-| `detectCallKind` (`kind === "lift-applied"`) | `src/ast/call-kind.ts`                                                                  | Centralized call classifier. The `__cfLift` original-node fallback preserves classification after hoisting.                                                              |
-| `SchemaInjectionTransformer`                 | `src/transformers/schema-injection.ts`                                                  | Stage 16. Derives the argument schema from the applied captures object before hoisting relocates the inner builder call.                                                 |
-| Pattern-test runtime                         | `tasks/integration.ts` (`runPatternTests`)                                              | Runs `deno task cf test --root packages/patterns ...` to validate runtime behavior of hoisted/selfcontained lifts.                                                       |
-| SES bundle verifier (lift)                   | `packages/runner/src/sandbox/compiled-bundle-verifier.ts` (`callbackIndexesForBuilder`) | Verifies trusted-builder calls in compiled bundles, including the two-argument `lift(false, fn)` form.                                                                   |
-| CT-1585/CT-1644 regression coverage          | `test/closures/module-scope-helper-hoisting.test.ts`                                    | Historical callback-hoist cases updated to the current whole-call hoist shape.                                                                                           |
+| Concept                                      | Where it lives                                                                          | Notes                                                                                                                                         |
+| -------------------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pipeline stage order                         | `src/cf-pipeline.ts` (`CFC_TRANSFORMER_STAGE_SPECS`)                                    | The 27-stage registry is authoritative; prose synchronization is pinned by `test/spec-sync.test.ts`.                                          |
+| `LiftLoweringTransformer`                    | `src/lift/transformer.ts`                                                               | Stage 13. Lowers `computed(...)` (and formerly user `derive(...)`) to the lift-applied form.                                                  |
+| `ClosureTransformer`                         | `src/closures/transformer.ts`                                                           | Stage 14. The main reactive lowering; extracts captures into the lift input object.                                                           |
+| `createLiftAppliedCall`                      | `src/transformers/builtins/lift-applied.ts`                                             | Factory for synthesized lift-style helper calls; emits `lift<In,Out>(cb)(input)`.                                                             |
+| `BuilderCallHoistingTransformer`             | `src/transformers/builder-call-hoisting.ts`                                             | Stage 21, after framework-call injection. Sole module-scope hoister for applied `lift`/`handler` calls and argument-position `pattern` calls. |
+| `detectCallKind` (`kind === "lift-applied"`) | `src/ast/call-kind.ts`                                                                  | Centralized call classifier. The `__cfLift` original-node fallback preserves classification after hoisting.                                   |
+| `SchemaInjectionTransformer`                 | `src/transformers/schema-injection.ts`                                                  | Stage 19. Derives the argument schema from the applied captures object before hoisting relocates the inner builder call.                      |
+| Pattern-test runtime                         | `tasks/integration.ts` (`runPatternTests`)                                              | Runs `deno task cf test --root packages/patterns ...` to validate runtime behavior of hoisted/selfcontained lifts.                            |
+| SES bundle verifier (lift)                   | `packages/runner/src/sandbox/compiled-bundle-verifier.ts` (`callbackIndexesForBuilder`) | Verifies trusted-builder calls in compiled bundles, including the two-argument `lift(false, fn)` form.                                        |
+| CT-1585/CT-1644 regression coverage          | `test/closures/module-scope-helper-hoisting.test.ts`                                    | Historical callback-hoist cases updated to the current whole-call hoist shape.                                                                |
 
 ## Past lessons worth carrying forward
 

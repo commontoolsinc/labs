@@ -845,6 +845,7 @@ async function resolvePieceCallable(
       return {
         ...resolved,
         callableCell: liveCallableCell,
+        identityCell: resolved.identityCell ?? resolved.callableCell,
         commandSpec: callableCommandSpec(liveCallableCell, "tool"),
       };
     }

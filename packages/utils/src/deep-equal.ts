@@ -30,18 +30,11 @@ export function deepEqual(a: any, b: any): boolean {
   // At this point, we're looking at a pair of non-null records (e.g. plain
   // objects, arrays, or instances).
 
-  // Note: Even if they have the same `constructor`, it's technically possible
-  // for `a` and `b` to have different prototypes, in which case it's possible
-  // for this function to decide, ultimately, that they are "equal" in some
-  // cases where, in some sort of plane of pure existence, we'd want to say they
-  // aren't. However, practically speaking, all such cases are going to be from
-  // some code intentionally doing something that's probably a bad idea for
-  // other reasons, and we'll probably never actually encounter this in the real
-  // world. And, very notably, in the case of stuff ending up here from
-  // comparisons done regarding stored data, that's all normalized anyway, so
-  // we'll only be getting plain objects, normal arrays, and trusted instances
-  // made by the storage system.
-  if (a.constructor !== b.constructor) return false;
+  // Compare prototypes without reading `constructor`. Stored query proxies
+  // interpret arbitrary property reads as data access, so touching the
+  // inherited constructor can resolve and clone the `Object` function even
+  // though it is not part of either logical value.
+  if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
 
   const keysA = Object.keys(a);
   const keysALength = keysA.length;

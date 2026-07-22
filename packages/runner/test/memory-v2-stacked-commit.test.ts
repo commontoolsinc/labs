@@ -505,7 +505,19 @@ const createHarness = () => {
             value: unknown;
           }
           | { op: "delete"; id: URI; type: MIME }
+          | {
+            op: "ensure";
+            id: URI;
+            type: MIME;
+            value: unknown;
+          }
         >;
+        preparations?: Array<{
+          key: string;
+          prepare: () => Promise<readonly unknown[]> | readonly unknown[];
+          onConfirmed?: () => void;
+          onRejected?: (reason: unknown) => void;
+        }>;
         schedulerObservation?: unknown;
       },
       source?: unknown,
@@ -798,6 +810,14 @@ const applyOperation = (
         : operation.value as RootValue,
     );
   }
+  if (operation.op === "ensure") {
+    if (current !== undefined) return current;
+    return clone(
+      isEntityDocumentValue(operation.value)
+        ? operation.value.value as RootValue
+        : operation.value as RootValue,
+    );
+  }
   const next = applyPatch(
     { value: clone(current) ?? {} } as FabricValue,
     operation.patches,
@@ -927,6 +947,166 @@ const waitForCondition = async (
   }
   throw new Error(`timed out waiting for ${label}`);
 };
+
+Deno.test("memory v2 keeps cold prepared commits optimistic while preserving wire order", async () => {
+  const harness = createHarness();
+  const preparation = Promise.withResolvers<
+    readonly [{
+      op: "ensure";
+      id: URI;
+      type: MIME;
+      value: { value: RootValue };
+    }]
+  >();
+  try {
+    const first = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("first") },
+      }],
+      preparations: [{
+        key: "artifact:first",
+        prepare: () => preparation.promise,
+      }],
+    });
+    const second = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.B,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("second") },
+      }],
+    });
+
+    // Both transactions are visible immediately in the speculative replica,
+    // even though the first one's artifact closure is still cold.
+    assertEquals(visibleValue(harness.provider, DOCS.A), valueFor("first"));
+    assertEquals(visibleValue(harness.provider, DOCS.B), valueFor("second"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assertEquals(harness.model.transactLocalSeqs, []);
+
+    preparation.resolve([{
+      op: "ensure",
+      id: "pattern:prepared-artifact" as URI,
+      type: DOCUMENT_MIME,
+      value: { value: valueFor("artifact") },
+    }]);
+
+    assertEquals(await first, { ok: {} });
+    assertEquals(await second, { ok: {} });
+    assertEquals(harness.model.transactLocalSeqs, [1, 2]);
+    assertEquals(
+      harness.model.applied.get(1)?.commit.operations.map((op) => op.op),
+      ["ensure", "set"],
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 reserves wire order before reentrant optimistic notifications", async () => {
+  const harness = createHarness();
+  let second:
+    | Promise<
+      | { ok: Record<PropertyKey, never>; error?: undefined }
+      | {
+        ok?: undefined;
+        error: { name?: string; message?: string };
+      }
+    >
+    | undefined;
+  try {
+    harness.notifications.onNotification = (notification) => {
+      if (second !== undefined || notification.type !== "commit") return;
+      const changedIds = "changes" in notification
+        ? [...notification.changes].map((change) => change.address.id)
+        : [];
+      if (!changedIds.includes(DOCS.A)) return;
+
+      second = harness.replica.commitNative({
+        operations: [{
+          op: "set",
+          id: DOCS.B,
+          type: DOCUMENT_MIME,
+          value: { value: valueFor("second") },
+        }],
+      }, sourceFromReads([{ id: DOCS.A }]));
+    };
+
+    const first = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("first") },
+      }],
+    });
+
+    assertExists(second);
+    assertEquals(visibleValue(harness.provider, DOCS.A), valueFor("first"));
+    assertEquals(visibleValue(harness.provider, DOCS.B), valueFor("second"));
+    assertEquals(await first, { ok: {} });
+    assertEquals(await second, { ok: {} });
+    assertEquals(harness.model.transactLocalSeqs, [1, 2]);
+    assertEquals(
+      harness.model.applied.get(2)?.commit.reads.pending.map((read) => ({
+        id: read.id,
+        path: [...read.path],
+        localSeq: read.localSeq,
+      })),
+      [{
+        id: DOCS.A,
+        path: ["value"],
+        localSeq: 1,
+      }],
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 releases the causal wire turn when preparation rejects", async () => {
+  const harness = createHarness();
+  let observedRejection: unknown;
+  try {
+    const first = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("first") },
+      }],
+      preparations: [{
+        key: "artifact:rejected",
+        prepare: () => Promise.reject(new Error("artifact preparation failed")),
+        onRejected: (reason) => {
+          observedRejection = reason;
+        },
+      }],
+    });
+    const second = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.B,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("second") },
+      }],
+    });
+
+    const rejected = await first;
+    assertExists(rejected.error);
+    assert(
+      String(rejected.error.message).includes("artifact preparation failed"),
+    );
+    assertStrictEquals(observedRejection, rejected.error);
+    assertEquals(await second, { ok: {} });
+    assertEquals(harness.model.transactLocalSeqs, [2]);
+  } finally {
+    await harness.close();
+  }
+});
 
 const beginSet = (
   harness: Harness,

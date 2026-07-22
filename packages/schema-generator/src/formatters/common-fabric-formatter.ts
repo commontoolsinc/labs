@@ -29,9 +29,15 @@ import {
   CFC_ATOM_TYPE,
   CFC_CANONICAL_ALIAS_NAMES,
 } from "@commonfabric/api/cfc";
+import { containsFactoryType } from "./factory-formatter.ts";
 
 type WrapperKind = CellWrapperKind;
 const CFC_ALIAS_NAMES: ReadonlySet<string> = new Set(CFC_CANONICAL_ALIAS_NAMES);
+const CFC_WRITER_ALIAS_NAMES: ReadonlySet<string> = new Set([
+  "WriteAuthorizedBy",
+  "TrustedActionWrite",
+  "TrustedActionWriteWithIntegrity",
+]);
 const SCOPE_WRAPPER_SCOPES: Readonly<Record<string, SchemaScope>> = {
   PerSpace: "space",
   PerUser: "user",
@@ -124,6 +130,16 @@ export class CommonFabricFormatter implements TypeFormatter {
   }
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
+    // Factory-valued unions are storage schemas, even when one arm is a
+    // HandlerFactory whose call result is Stream. Leave those to UnionFormatter
+    // instead of collapsing the whole value to an asCell stream schema.
+    if (
+      (type.flags & ts.TypeFlags.Union) !== 0 &&
+      containsFactoryType(type, context.typeChecker)
+    ) {
+      return false;
+    }
+
     const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
     if (scopeForWrapperName(aliasName) !== undefined) {
       return true;
@@ -153,7 +169,12 @@ export class CommonFabricFormatter implements TypeFormatter {
     // Fallback: check via aliasSymbol for Default<T> when typeToTypeNode expanded the alias.
     // typeToTypeNode expands Default<T,V> to its branded union representation, losing the
     // "Default" type node. The type object itself still carries aliasSymbol = Default.
-    if (isDefaultAliasSymbol((type as TypeWithInternals).aliasSymbol)) {
+    if (
+      isDefaultAliasSymbol(
+        (type as TypeWithInternals).aliasSymbol,
+        context.typeChecker,
+      )
+    ) {
       return true;
     }
 
@@ -184,25 +205,35 @@ export class CommonFabricFormatter implements TypeFormatter {
   ): JSONSchemaMutable {
     const n = context.typeNode;
     const resolvedScopeWrapper = resolveScopeWrapperNode(n);
+    const aliasType = type as TypeWithInternals;
+    const aliasScope = scopeForWrapperName(aliasType.aliasSymbol?.name);
+    const semanticInnerType = aliasType.aliasTypeArguments?.[0];
+
     if (resolvedScopeWrapper) {
       return this.formatScopeWrapperTypeFromNode(
         resolvedScopeWrapper.node,
         context,
         resolvedScopeWrapper.scope,
+        // Closure schemas pair an exact semantic scoped-wrapper Type with a
+        // synthetic TypeNode used for emission. The node remains authoritative
+        // because it can contain deliberate capability or structural
+        // refinements. Its matching semantic inner type is recovery data when
+        // a detached synthetic node cannot resolve aliases or concrete generic
+        // instantiations such as Cell<Box<string>>.
+        aliasScope === resolvedScopeWrapper.scope
+          ? semanticInnerType
+          : undefined,
       );
     }
 
-    const aliasType = type as TypeWithInternals;
-    const aliasScope = scopeForWrapperName(aliasType.aliasSymbol?.name);
     if (aliasScope !== undefined) {
-      const innerType = aliasType.aliasTypeArguments?.[0];
-      if (!innerType) {
+      if (!semanticInnerType) {
         throw new Error(
           `${aliasType.aliasSymbol?.name}<T> requires type argument`,
         );
       }
       const innerSchema = this.schemaGenerator.formatChildType(
-        innerType,
+        semanticInnerType,
         context,
         undefined,
       );
@@ -265,7 +296,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     // and V from aliasTypeArguments[1] so the default value is preserved in the schema.
     const typeWithAlias = type as TypeWithInternals;
     if (
-      isDefaultAliasSymbol(typeWithAlias.aliasSymbol) &&
+      isDefaultAliasSymbol(typeWithAlias.aliasSymbol, context.typeChecker) &&
       typeWithAlias.aliasTypeArguments &&
       typeWithAlias.aliasTypeArguments.length >= 1
     ) {
@@ -446,10 +477,16 @@ export class CommonFabricFormatter implements TypeFormatter {
       }
     }
 
-    const innerSchema = this.schemaGenerator.formatChildType(
+    let innerSchema = this.schemaGenerator.formatChildType(
       innerType,
       childContext,
       innerTypeNode,
+    );
+    innerSchema = this.fallbackForIncompleteWriterSchema(
+      innerType,
+      innerTypeNode,
+      innerSchema,
+      childContext,
     );
 
     if (wrapperKind === "Stream") {
@@ -484,6 +521,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     typeRefNode: ts.TypeReferenceNode,
     context: GenerationContext,
     scope: SchemaScope,
+    fallbackInnerType?: ts.Type,
   ): JSONSchemaMutable {
     const innerTypeNode = typeRefNode.typeArguments?.[0];
     if (!innerTypeNode) {
@@ -496,6 +534,12 @@ export class CommonFabricFormatter implements TypeFormatter {
         context.typeChecker.getTypeFromTypeNode(innerTypeNode);
     } catch {
       innerType = context.typeChecker.getAnyType();
+    }
+    if (
+      this.isUnusableInnerType(innerType) && fallbackInnerType &&
+      !this.isUnusableInnerType(fallbackInnerType)
+    ) {
+      innerType = fallbackInnerType;
     }
 
     const innerSchema = this.schemaGenerator.formatChildType(
@@ -600,11 +644,21 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     const syntheticNodeNeedsHelp = !!innerTypeNode && !!isSyntheticNode &&
       this.innerTypeNeedsNodeAssistance(innerType, context.typeChecker);
+    const registeredSyntheticInnerType = innerTypeNode
+      ? context.typeRegistry?.get(innerTypeNode)
+      : undefined;
+    const syntheticNodeHasRegisteredType = registeredSyntheticInnerType !==
+        undefined &&
+      !this.isUnusableInnerType(registeredSyntheticInnerType);
 
     // Prefer real source nodes, but allow synthetic nodes when the resolved type
-    // is widened/unusable and the node still carries useful structure.
+    // is widened/unusable and the node still carries useful structure. A
+    // compiler-owned registry pairing is also authoritative: node syntax can
+    // retain Default/CFC semantics erased from the checker Type, while the
+    // paired Type preserves exact nested generic instantiations.
     const shouldPassTypeNode = innerTypeNode && !innerTypeIsGeneric &&
-      (!isSyntheticNode || syntheticNodeNeedsHelp);
+      (!isSyntheticNode || syntheticNodeNeedsHelp ||
+        syntheticNodeHasRegisteredType);
 
     // Check for schema hints on the current typeNode and propagate to child context.
     // This allows identity-only/property-only array access patterns to avoid
@@ -628,11 +682,27 @@ export class CommonFabricFormatter implements TypeFormatter {
       }
     }
 
-    const innerSchema = this.schemaGenerator.formatChildType(
+    let innerSchema = this.schemaGenerator.formatChildType(
       innerType,
       childContext,
       shouldPassTypeNode ? innerTypeNode : undefined,
     );
+
+    // TypeScript erases `typeof binding` to the binding's structural type when
+    // it reconstructs an inferred return annotation. A synthetic CFC alias can
+    // therefore retain trusted companion metadata while losing one or more
+    // writer identities. Keep the metadata-only fallback whenever a writer
+    // alias's own binding argument is no longer an explicit `typeof` query:
+    // adding the synthetic node's object/array shape would shadow the
+    // destination cell's complete trusted schema.
+    if (shouldPassTypeNode && innerTypeNode) {
+      innerSchema = this.fallbackForIncompleteWriterSchema(
+        innerType,
+        innerTypeNode,
+        innerSchema,
+        childContext,
+      );
+    }
 
     // Stream<T>: can also reflect inner Cell-ness
     if (wrapperKind === "Stream") {
@@ -758,6 +828,153 @@ export class CommonFabricFormatter implements TypeFormatter {
       return false;
     }
     return this.isUnusableInnerType(numericIndex);
+  }
+
+  private hasIncompleteWriterIdentityObligation(
+    type: ts.Type,
+    node: ts.TypeNode,
+    context: GenerationContext,
+  ): boolean {
+    if (
+      this.nodeHasIncompleteWriterIdentityObligation(
+        node,
+        context,
+      )
+    ) {
+      return true;
+    }
+    const resolved = this.resolveCfcAliasInstantiation(
+      type as TypeWithInternals,
+      { ...context, typeNode: node },
+    );
+    if (!resolved) return false;
+    if (CFC_WRITER_ALIAS_NAMES.has(resolved.aliasName)) {
+      return !this.writerBindingNodeIsComplete(resolved.aliasArgNodes?.[1]);
+    }
+    return (resolved.aliasArgNodes ?? []).some((argument) =>
+      this.nodeHasIncompleteWriterIdentityObligation(argument, context)
+    );
+  }
+
+  private writerAliasName(
+    typeName: ts.EntityName,
+  ): string | undefined {
+    if (ts.isIdentifier(typeName)) {
+      return CFC_WRITER_ALIAS_NAMES.has(typeName.text)
+        ? typeName.text
+        : undefined;
+    }
+    if (
+      ts.isIdentifier(typeName.left) &&
+      typeName.left.text === "__cfHelpers" &&
+      CFC_WRITER_ALIAS_NAMES.has(typeName.right.text)
+    ) {
+      return typeName.right.text;
+    }
+    return undefined;
+  }
+
+  private writerBindingNodeIsComplete(
+    node: ts.TypeNode | undefined,
+  ): boolean {
+    return !!node && ts.isTypeQueryNode(node) &&
+      ts.isIdentifier(node.exprName);
+  }
+
+  private nodeHasIncompleteWriterIdentityObligation(
+    node: ts.Node,
+    context: GenerationContext,
+    visitedAliases: ReadonlySet<ts.TypeAliasDeclaration> = new Set(),
+  ): boolean {
+    if (ts.isTypeReferenceNode(node)) {
+      if (this.writerAliasName(node.typeName)) {
+        return !this.writerBindingNodeIsComplete(node.typeArguments?.[1]);
+      }
+
+      if (
+        (node.typeArguments ?? []).some((argument) =>
+          this.nodeHasIncompleteWriterIdentityObligation(
+            argument,
+            context,
+            visitedAliases,
+          )
+        )
+      ) {
+        return true;
+      }
+
+      if (ts.isIdentifier(node.typeName)) {
+        const declaration = this.getTypeAliasDeclarationForSymbol(
+          context.typeChecker.getSymbolAtLocation(node.typeName),
+          context,
+        );
+        if (declaration && !visitedAliases.has(declaration)) {
+          const paramNodeMap = new Map<string, ts.TypeNode>();
+          for (
+            let index = 0;
+            index < (declaration.typeParameters?.length ?? 0);
+            index++
+          ) {
+            const name = declaration.typeParameters?.[index]?.name.text;
+            const argument = node.typeArguments?.[index];
+            if (name && argument) {
+              paramNodeMap.set(name, argument);
+            }
+          }
+          const nextVisited = new Set(visitedAliases);
+          nextVisited.add(declaration);
+          return this.nodeHasIncompleteWriterIdentityObligation(
+            this.substituteTypeNode(declaration.type, paramNodeMap),
+            context,
+            nextVisited,
+          );
+        }
+      }
+    }
+
+    let incomplete = false;
+    node.forEachChild((child) => {
+      if (!incomplete) {
+        incomplete = this.nodeHasIncompleteWriterIdentityObligation(
+          child,
+          context,
+          visitedAliases,
+        );
+      }
+    });
+    return incomplete;
+  }
+
+  private fallbackForIncompleteWriterSchema(
+    type: ts.Type,
+    node: ts.TypeNode,
+    schema: JSONSchemaMutable,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
+    if (
+      !this.isSyntheticWrapperNode(node) ||
+      !this.hasIncompleteWriterIdentityObligation(
+        type,
+        node,
+        context,
+      )
+    ) {
+      return schema;
+    }
+    const semanticSchema = this.schemaGenerator.formatChildType(
+      type,
+      context,
+      undefined,
+    );
+    const semanticIfc = isRecord(semanticSchema) &&
+        isRecord(semanticSchema.ifc)
+      ? semanticSchema.ifc
+      : undefined;
+    const nodeIfc = isRecord(schema) && isRecord(schema.ifc)
+      ? schema.ifc
+      : undefined;
+    const ifc = semanticIfc ?? nodeIfc;
+    return ifc ? { ifc: { ...ifc } } : {};
   }
 
   /**

@@ -10,6 +10,8 @@
  * corresponding declarations there.
  */
 
+import type { FabricFactory as ApiFabricFactory } from "@commonfabric/api";
+
 //
 // `FabricSpecialObject`
 //
@@ -103,6 +105,24 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
 //
 
 /**
+ * Type-only brand for the narrow callable arm of `FabricValue`.
+ *
+ * Runtime admission is owned by `fabric-factory.ts`; this unexported symbol
+ * prevents an arbitrary JavaScript function from satisfying the protocol by
+ * structural typing alone.
+ */
+/**
+ * A callable admitted to the Fabric factory protocol.
+ *
+ * The callable itself is the Fabric value. Pattern, module, and handler
+ * factories specialize this interface; ordinary JavaScript functions do not.
+ */
+export interface FabricFactory<
+  Args extends unknown[] = [never],
+  Result = unknown,
+> extends ApiFabricFactory<Args, Result> {}
+
+/**
  * The full set of values that the fabric storage layer can represent. This
  * is the strongly-typed "middle layer" of the three-layer architecture:
  *
@@ -135,6 +155,8 @@ export type FabricValue =
   | string
   | bigint
   | symbol
+  // -- Admitted callable factories --
+  | FabricFactory
   // -- Fabric special objects --
   | FabricSpecialObject
   // -- Containers --

@@ -244,6 +244,7 @@ const handlers: Record<
     const evalResult = await runtime.patternManager.compileAndRegisterModules(
       program,
       { patternCoverage },
+      { space },
     );
     const { main } = evalResult;
     // Channel 2: snapshot logger counts AFTER compile, before the run phase.

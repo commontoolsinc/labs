@@ -24,6 +24,7 @@ import {
   runIdempotencyRecheck,
 } from "./diagnosis.ts";
 import { RetryImmediately } from "./retry-immediately.ts";
+import { RetryWhenReady } from "./retry-when-ready.ts";
 import { toActionRunTraceAddress } from "./diagnostics.ts";
 import { buildSchedulerActionObservation } from "./persistent-observation.ts";
 import { filterIgnoredAddresses, txToReactivityLog } from "./reactivity.ts";
@@ -105,6 +106,7 @@ export function startReactiveActionCommit(state: {
 
 export function watchReactiveActionCommit(state: {
   readonly action: Action;
+  readonly generation: number;
   readonly tx: IExtendedStorageTransaction;
   readonly log: ReactivityLog;
   readonly retries: WeakMap<Action, number>;
@@ -114,8 +116,15 @@ export function watchReactiveActionCommit(state: {
   readonly markInvalid: (action: Action) => void;
   readonly queueExecution: () => void;
   readonly restoreInvalidCauses: () => void;
+  readonly isActionGenerationCurrent: (
+    action: Action,
+    generation: number,
+  ) => boolean;
 }): void {
   state.commitPromise.then(async ({ error }) => {
+    if (!state.isActionGenerationCurrent(state.action, state.generation)) {
+      return;
+    }
     if (!error) {
       // Clear retries after successful commit.
       state.retries.delete(state.action);
@@ -152,6 +161,9 @@ export function watchReactiveActionCommit(state: {
       // reader-dirty can re-trigger the action while we wait for the catch-up.
       state.restoreInvalidCauses();
       state.resubscribe(state.action, state.log);
+      if (!state.isActionGenerationCurrent(state.action, state.generation)) {
+        return;
+      }
       const readyToRetry =
         (error as { readyToRetry?: () => unknown }).readyToRetry;
       if (typeof readyToRetry === "function") {
@@ -169,6 +181,9 @@ export function watchReactiveActionCommit(state: {
             readyError,
           );
         }
+      }
+      if (!state.isActionGenerationCurrent(state.action, state.generation)) {
+        return;
       }
       state.markInvalid(state.action);
       state.pending.add(state.action);
@@ -200,6 +215,9 @@ export function watchReactiveActionCommit(state: {
     const retries = (state.retries.get(state.action) ?? 0) + 1;
     state.retries.set(state.action, retries);
     if (retries < MAX_RETRIES_FOR_REACTIVE) {
+      if (!state.isActionGenerationCurrent(state.action, state.generation)) {
+        return;
+      }
       // Resubscribe sets up dependencies/triggers from the log so the action
       // re-runs when its inputs change. The run still exists only because of the
       // consumed trigger reads (§8.9.2), so restore them for its tx.
@@ -213,6 +231,9 @@ export function watchReactiveActionCommit(state: {
       // against rolled-back data (accepted zombie — spec §15 decision 9).
     }
   }).catch((error) => {
+    if (!state.isActionGenerationCurrent(state.action, state.generation)) {
+      return;
+    }
     logger.error(
       "schedule-error",
       "Commit promise rejected in finalizeAction:",
@@ -270,6 +291,17 @@ export interface SchedulerActionRunState {
   readonly retries: WeakMap<Action, number>;
   readonly pending: Set<Action>;
   readonly actionRunTrace: ActionRunTraceEntry[];
+  readonly getActionGeneration: (action: Action) => number;
+  readonly beginActionReadinessAttempt: (action: Action) => symbol;
+  readonly isActionGenerationCurrent: (
+    action: Action,
+    generation: number,
+  ) => boolean;
+  readonly isActionReadinessAttemptCurrent: (
+    action: Action,
+    generation: number,
+    attempt: symbol,
+  ) => boolean;
   readonly nodes: NodeRegistry;
   readonly diagnosisHistory: Map<string, DiagnosisRecord[]>;
   readonly diagnosisNonIdempotent: NonIdempotentReport[];
@@ -298,6 +330,7 @@ export interface SchedulerActionRunState {
   readonly handleError: (error: Error, action: Action) => void;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
   readonly markInvalid: (action: Action) => void;
+  readonly clearDirty: (action: Action) => void;
   readonly queueExecution: () => void;
   readonly setExecutingAction: (action: Action, actionId: string) => void;
   readonly clearExecutingAction: () => void;
@@ -308,6 +341,7 @@ export async function runSchedulerAction(
   action: Action,
 ): Promise<any> {
   logger.timeStart("scheduler", "run");
+  const generation = state.getActionGeneration(action);
   const actionId = state.getActionId(action);
   state.runtime.telemetry.submit({
     type: "scheduler.run",
@@ -321,6 +355,15 @@ export async function runSchedulerAction(
 
   const runningPromise = state.getRunningPromise();
   if (runningPromise) await runningPromise;
+  if (!state.isActionGenerationCurrent(action, generation)) {
+    logger.timeEnd("scheduler", "run");
+    return undefined;
+  }
+  // Every actual invocation supersedes readiness continuations parked by an
+  // earlier invocation of the same registration. This is distinct from the
+  // registration generation: an input change can legitimately re-run the same
+  // registration while its previous factory artifact is still loading.
+  const readinessAttempt = state.beginActionReadinessAttempt(action);
 
   const tx = state.runtime.edit({
     changeGroup: state.actionChangeGroups.get(action),
@@ -350,6 +393,8 @@ export async function runSchedulerAction(
         actionId,
         tx,
         actionStartTime,
+        generation,
+        readinessAttempt,
         invalidCauses,
         result,
         error,
@@ -394,12 +439,18 @@ function finalizeSchedulerAction(
     readonly actionId: string;
     readonly tx: IExtendedStorageTransaction;
     readonly actionStartTime: number;
+    readonly generation: number;
+    readonly readinessAttempt: symbol;
     readonly invalidCauses: readonly IMemorySpaceAddress[] | undefined;
     readonly result: unknown;
     readonly error?: unknown;
     readonly resolve: (value: unknown) => void;
   },
 ): void {
+  if (!state.isActionGenerationCurrent(args.action, args.generation)) {
+    abortSupersededActionRun(args);
+    return;
+  }
   // Record action execution time for cycle-aware scheduling
   const elapsed = performance.now() - args.actionStartTime;
   recordActionTime(state.actionTimingState, args.action, elapsed);
@@ -415,6 +466,16 @@ function finalizeSchedulerAction(
   state.maybeAutoDebounce(args.action);
   state.markActionHasRun(args.action);
   state.markNodeHasRun(args.action);
+
+  // Factory code loading is scheduler control flow, not an authored failure.
+  // Preserve this attempt's read subscriptions, discard every authored write,
+  // and let the scheduler continue processing unrelated work while readiness
+  // settles. A newer invocation or registration generation fences the parked
+  // continuation.
+  if (args.error instanceof RetryWhenReady) {
+    rescheduleActionWhenReady(state, { ...args, error: args.error });
+    return;
+  }
 
   // A RetryImmediately signal means the action referenced an inSpace("name")
   // target that has now been resolved into the runtime cache. Abort this run's
@@ -437,18 +498,109 @@ function finalizeSchedulerAction(
   }
 }
 
+function rescheduleActionWhenReady(
+  state: SchedulerActionRunState,
+  args: {
+    readonly action: Action;
+    readonly tx: IExtendedStorageTransaction;
+    readonly generation: number;
+    readonly readinessAttempt: symbol;
+    readonly invalidCauses: readonly IMemorySpaceAddress[] | undefined;
+    readonly error: RetryWhenReady;
+    readonly resolve: (value: unknown) => void;
+  },
+): void {
+  const log = txToReactivityLog(args.tx);
+  if (args.tx.status().status === "ready") args.tx.abort(args.error);
+  // A parked action is clean until either a retained dependency changes or
+  // readiness explicitly schedules the continuation. Leaving its direct/stale
+  // bit set makes pull demand invoke the same not-ready action every settle
+  // pass even when no new input arrived.
+  state.clearDirty(args.action);
+
+  if (
+    state.isActionReadinessAttemptCurrent(
+      args.action,
+      args.generation,
+      args.readinessAttempt,
+    )
+  ) {
+    // The transaction is aborted, but its reads are still the authoritative
+    // dependency selection for this invocation. Keeping them armed lets an
+    // input change supersede this parked attempt before code loading finishes.
+    state.resubscribe(
+      args.action,
+      args.error.keepDependenciesWhileWaiting
+        ? log
+        : { reads: [], shallowReads: [], writes: [] },
+    );
+  }
+
+  args.error.readiness.then(
+    () => {
+      if (
+        !state.isActionReadinessAttemptCurrent(
+          args.action,
+          args.generation,
+          args.readinessAttempt,
+        )
+      ) {
+        return;
+      }
+      if (args.invalidCauses !== undefined && args.invalidCauses.length > 0) {
+        // Ordinary dependency retention controls whether input changes wake a
+        // parked action early. CFC invalidation provenance is independent:
+        // this retry still exists because those inputs scheduled the aborted
+        // run, so its eventual transaction must join their labels either way.
+        const record = state.nodes.get(args.action);
+        if (record) {
+          restoreInvalidCauses(
+            state.nodes,
+            args.action,
+            args.invalidCauses,
+          );
+        }
+      }
+      state.markInvalid(args.action);
+      state.pending.add(args.action);
+      state.queueExecution();
+    },
+    (error) => {
+      if (
+        !state.isActionReadinessAttemptCurrent(
+          args.action,
+          args.generation,
+          args.readinessAttempt,
+        )
+      ) {
+        return;
+      }
+      state.handleError(normalizeThrownError(error), args.action);
+    },
+  );
+
+  // Readiness is deliberately not the scheduler's running promise: parking one
+  // factory consumer must not block unrelated actions or event handlers.
+  args.resolve(undefined);
+}
+
 function rescheduleActionForImmediateRetry(
   state: SchedulerActionRunState,
   args: {
     readonly action: Action;
     readonly actionId: string;
     readonly tx: IExtendedStorageTransaction;
+    readonly generation: number;
     readonly invalidCauses: readonly IMemorySpaceAddress[] | undefined;
     readonly error?: unknown;
     readonly resolve: (value: unknown) => void;
   },
 ): void {
   if (args.tx.status().status === "ready") args.tx.abort(args.error);
+  if (!state.isActionGenerationCurrent(args.action, args.generation)) {
+    args.resolve(undefined);
+    return;
+  }
   const retries = (state.retries.get(args.action) ?? 0) + 1;
   state.retries.set(args.action, retries);
   if (retries < MAX_RETRIES_FOR_REACTIVE) {
@@ -481,18 +633,33 @@ function normalizeThrownError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
+function abortSupersededActionRun(args: {
+  readonly tx: IExtendedStorageTransaction;
+  readonly resolve: (value: unknown) => void;
+}): void {
+  if (args.tx.status().status === "ready") {
+    args.tx.abort(new Error("Scheduler action generation superseded"));
+  }
+  args.resolve(undefined);
+}
+
 function finalizeReactiveActionCommit(
   state: SchedulerActionRunState,
   args: {
     readonly action: Action;
     readonly actionId: string;
     readonly tx: IExtendedStorageTransaction;
+    readonly generation: number;
     readonly invalidCauses: readonly IMemorySpaceAddress[] | undefined;
     readonly result: unknown;
     readonly resolve: (value: unknown) => void;
   },
   elapsed: number,
 ): void {
+  if (!state.isActionGenerationCurrent(args.action, args.generation)) {
+    abortSupersededActionRun(args);
+    return;
+  }
   // Set up new reactive subscriptions after the action runs
 
   // Commit the transaction. The code continues synchronously after
@@ -533,6 +700,7 @@ function finalizeReactiveActionCommit(
   const committedLog = log;
   watchReactiveActionCommit({
     action: args.action,
+    generation: args.generation,
     tx: args.tx,
     log: committedLog,
     retries: state.retries,
@@ -551,6 +719,7 @@ function finalizeReactiveActionCommit(
         restoreInvalidCauses(state.nodes, args.action, args.invalidCauses);
       }
     },
+    isActionGenerationCurrent: state.isActionGenerationCurrent,
   });
 
   logger.debug("schedule-run-complete", () => [
@@ -564,7 +733,9 @@ function finalizeReactiveActionCommit(
 
   logger.timeStart("scheduler", "run", "resubscribe");
   try {
-    state.resubscribe(args.action, committedLog);
+    if (state.isActionGenerationCurrent(args.action, args.generation)) {
+      state.resubscribe(args.action, committedLog);
+    }
   } finally {
     logger.timeEnd("scheduler", "run", "resubscribe");
   }

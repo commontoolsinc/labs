@@ -33,6 +33,8 @@ export interface NodeTypeLinks {
   schemaInjected?: true;
 }
 
+type FactoryContractHint = NonNullable<SchemaHint["factoryContracts"]>[number];
+
 /**
  * CrossStageState — the single owner of the pipeline's cross-transformer
  * communication registries.
@@ -51,15 +53,16 @@ export interface NodeTypeLinks {
  *   2. `nodeLinks` — the NodeLinks-shaped side table for the internal,
  *      non-cache-invalidating per-node channels (capabilitySummary,
  *      schemaInjected), reached only through the record/lookup/mark/is methods.
- *   3. The marker family — node/symbol-keyed WeakSets whose mutators are
- *      coupled to the context's reactive-analysis cache invalidation.
+ *   3. The marker family — node/symbol-keyed WeakSets. Reactive-analysis
+ *      marker mutators are coupled to context cache invalidation; late
+ *      emission markers such as live factory derivations are not.
  *
  * Division of responsibility with `TransformationContext`:
  *   - CrossStageState owns the DATA and exposes pure data operations
  *     (record/lookup/mark/is). It performs NO cache invalidation — it has no
  *     knowledge of the context's analysis caches.
  *   - TransformationContext keeps the public mark/record methods. For the
- *     four marker-set mutators it delegates to CrossStageState AND then calls
+ *     four reactive marker-set mutators it delegates to CrossStageState AND then calls
  *     its own `invalidateReactiveAnalysisCaches()`. Invalidation stays a
  *     context concern; this object stays a pure data holder. (This is why the
  *     `mark*` methods here do not invalidate — the context wrapper does.)
@@ -90,6 +93,18 @@ export class CrossStageState {
    */
   readonly typeRegistry: TypeRegistry = new WeakMap();
   readonly schemaHints: SchemaHints = new WeakMap();
+  /**
+   * Compiler-owned exact factory contracts keyed by their declaration symbol.
+   * Structural checker types are deliberately insufficient here: two wrappers
+   * can expose the same public PatternFactory type while carrying different
+   * protected-path authority. Unlike `schemaHints`, this channel is
+   * transformer-internal and is never visible to authored schemas or
+   * serialized Factory state.
+   */
+  readonly factoryContractsBySymbol = new WeakMap<
+    ts.Symbol,
+    readonly FactoryContractHint[]
+  >();
 
   /**
    * NodeLinks-shaped side table for the transformer-internal,
@@ -108,6 +123,7 @@ export class CrossStageState {
   readonly mapCallbackRegistry = new WeakSet<ts.Node>();
   readonly syntheticComputeCallbackRegistry = new WeakSet<ts.Node>();
   readonly syntheticComputeOwnedNodeRegistry = new WeakSet<ts.Node>();
+  readonly liveFactoryDerivationRegistry = new WeakSet<ts.Node>();
   readonly syntheticReactiveCollectionRegistry:
     SyntheticReactiveCollectionRegistry = new WeakSet();
 
@@ -156,6 +172,16 @@ export class CrossStageState {
     return this.#hasWithOriginal(this.syntheticComputeOwnedNodeRegistry, node);
   }
 
+  // --- liveFactoryDerivationRegistry ---
+
+  markLiveFactoryDerivation(node: ts.Node): void {
+    this.liveFactoryDerivationRegistry.add(node);
+  }
+
+  isLiveFactoryDerivation(node: ts.Node): boolean {
+    return this.#hasWithOriginal(this.liveFactoryDerivationRegistry, node);
+  }
+
   // --- syntheticReactiveCollectionRegistry (keyed by ts.Symbol) ---
 
   markSyntheticReactiveCollection(symbol: ts.Symbol): void {
@@ -169,16 +195,37 @@ export class CrossStageState {
   // --- schemaHints ---
 
   recordSchemaHint(node: ts.Node, hint: SchemaHint): void {
-    this.schemaHints.set(node, hint);
+    this.schemaHints.set(node, {
+      ...this.schemaHints.get(node),
+      ...hint,
+    });
     const original = ts.getOriginalNode(node);
     if (original !== node) {
-      this.schemaHints.set(original, hint);
+      this.schemaHints.set(original, {
+        ...this.schemaHints.get(original),
+        ...hint,
+      });
     }
   }
 
   lookupSchemaHint(node: ts.Node): SchemaHint | undefined {
     return this.schemaHints.get(node) ??
       this.schemaHints.get(ts.getOriginalNode(node));
+  }
+
+  recordFactoryContractForSymbol(
+    symbol: ts.Symbol,
+    contract: FactoryContractHint,
+  ): void {
+    const existing = this.factoryContractsBySymbol.get(symbol) ?? [];
+    if (existing.includes(contract)) return;
+    this.factoryContractsBySymbol.set(symbol, [...existing, contract]);
+  }
+
+  lookupFactoryContractsForSymbol(
+    symbol: ts.Symbol,
+  ): readonly FactoryContractHint[] | undefined {
+    return this.factoryContractsBySymbol.get(symbol);
   }
 
   // --- capabilitySummary (nodeLinks-backed) ---

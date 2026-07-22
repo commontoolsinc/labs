@@ -3,6 +3,7 @@
  */
 import type {
   BuilderFunctionsAndConstants,
+  InternalBuilderHelpers,
   ToSchemaFunction,
 } from "./types.ts";
 import {
@@ -26,7 +27,12 @@ import {
   WebhookConfigSchema,
 } from "./types.ts";
 import { h, UiAction, UiDisclosure, UiPromptSlot } from "@commonfabric/html";
-import { pattern } from "./pattern.ts";
+import {
+  pattern,
+  withFrameworkProvidedPaths,
+  withPatternParamsSchema,
+} from "./pattern.ts";
+import { invokeFactory } from "./invoke-factory.ts";
 import {
   action,
   assert,
@@ -50,7 +56,6 @@ import {
   llm,
   llmDialog,
   navigateTo,
-  patternTool,
   sqliteDatabase,
   sqliteQuery,
   str,
@@ -149,11 +154,6 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
   const trustedStr =
     ((strings: TemplateStringsArray, ...values: unknown[]) =>
       trustValue(str(strings, ...values))) as typeof str;
-  const trustedPatternTool = ((...args: any[]) =>
-    trustValue(
-      (patternTool as (...args: any[]) => unknown)(...args),
-    )) as typeof patternTool;
-
   // Associate runtime programs with patterns after compilation and initial eval
   // and before compilation returns, so before any e.g. pattern would be
   // instantiated. This way they get saved with a way to rehydrate them.
@@ -173,7 +173,6 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
   const commonfabric = {
     // Pattern creation
     pattern: trustedPattern,
-    patternTool: trustedPatternTool,
 
     // Module creation
     lift: trustedLift,
@@ -252,6 +251,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
 
     // Utility
     byRef,
+    invokeFactory,
 
     // Environment
     getPatternEnvironment,
@@ -297,9 +297,14 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     toCompactDebugString,
     toIndentedDebugString,
   } as BuilderFunctionsAndConstants & {
-    __cfHelpers?: BuilderFunctionsAndConstants;
+    __cfHelpers?: InternalBuilderHelpers;
   };
-  commonfabric.__cfHelpers = commonfabric;
+  const internalHelpers: InternalBuilderHelpers = {
+    ...commonfabric,
+    withFrameworkProvidedPaths,
+    withPatternParamsSchema,
+  };
+  commonfabric.__cfHelpers = internalHelpers;
 
   return {
     commonfabric,

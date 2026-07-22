@@ -5,6 +5,9 @@ import {
   CfcPolicyAuthoringTransformer,
   CfcPolicyOfValidationTransformer,
   EmptyArrayOfValidationTransformer,
+  FactoryAuthoringValidationTransformer,
+  FrameworkProvidedForwardingTransformer,
+  FrameworkProvidedTransformer,
   HelperOwnedExpressionSiteLoweringTransformer,
   JsxExpressionSiteRouterTransformer,
   MergeablePushValidationTransformer,
@@ -19,6 +22,7 @@ import {
   ReactiveVariableForTransformer,
   SchemaGeneratorTransformer,
   SchemaInjectionTransformer,
+  SymbolicFactoryCallTransformer,
   WriteAuthorizedByValidationTransformer,
 } from "./transformers/mod.ts";
 import { ClosureTransformer } from "./closures/transformer.ts";
@@ -45,6 +49,10 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
   {
     name: "EmptyArrayOfValidationTransformer",
     create: (options) => new EmptyArrayOfValidationTransformer(options),
+  },
+  {
+    name: "FactoryAuthoringValidationTransformer",
+    create: (options) => new FactoryAuthoringValidationTransformer(options),
   },
   {
     name: "OpaqueGetValidationTransformer",
@@ -79,6 +87,14 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
     create: (options) => new AssertDiagnosticsTransformer(options),
   },
   {
+    name: "FrameworkProvidedForwardingTransformer",
+    create: (options) => new FrameworkProvidedForwardingTransformer(options),
+  },
+  {
+    name: "SymbolicFactoryCallTransformer",
+    create: (options) => new SymbolicFactoryCallTransformer(options),
+  },
+  {
     name: "LiftLoweringTransformer",
     create: (options) => new LiftLoweringTransformer(options),
   },
@@ -107,6 +123,10 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
   {
     name: "SchemaInjectionTransformer",
     create: (options) => new SchemaInjectionTransformer(options),
+  },
+  {
+    name: "FrameworkProvidedTransformer",
+    create: (options) => new FrameworkProvidedTransformer(options),
   },
   {
     name: "BuilderCallHoistingTransformer",

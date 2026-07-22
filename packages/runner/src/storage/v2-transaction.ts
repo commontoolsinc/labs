@@ -44,6 +44,7 @@ import type {
   MemorySpace,
   NativeStorageCommit,
   NativeStorageCommitOperation,
+  NativeStorageCommitPreparation,
   ReaderError,
   ReadError,
   Result,
@@ -245,15 +246,18 @@ const invalidateFrozenReadsOnChain = (
 const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
   if (
     value === undefined || value === null ||
-    typeof value !== "object"
+    (typeof value !== "object" && typeof value !== "function")
   ) {
     return value;
   }
   // `cloneIfNecessary()` (frozen by default) returns an already-deep-frozen
   // value by identity (O(1) via the deep-frozen cache) and otherwise
   // deep-clones-and-freezes -- isolating the result from later source
-  // mutation. On the hot read path, repeated reads of the same stored
-  // (deep-frozen) value collapse to a single cache lookup.
+  // mutation. Admitted callable factories deliberately pass through this gate:
+  // the shared clone protocol seals and freezes them as immutable logical
+  // atoms, while rejecting arbitrary JavaScript functions. On the hot read
+  // path, repeated reads of the same stored (deep-frozen) value collapse to a
+  // single cache lookup.
   return cloneIfNecessary(value as FabricValue) as T;
 };
 
@@ -882,6 +886,10 @@ export class V2StorageTransaction implements IStorageTransaction {
   >();
   // Folded SQLite write ops per space, applied in the same commit as cell ops.
   #sqliteOps = new Map<MemorySpace, SqliteOperation[]>();
+  #nativeCommitPreparations = new Map<
+    MemorySpace,
+    Map<string, NativeStorageCommitPreparation>
+  >();
   #writeSpace?: MemorySpace;
   // Multi-space write opt-in (see enableMultiSpaceWrites). When disabled the
   // transaction rejects writes to a second space; when enabled commit() splits
@@ -1091,6 +1099,29 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
   }
 
+  addNativeCommitPreparation(
+    space: MemorySpace,
+    preparation: NativeStorageCommitPreparation,
+  ): void {
+    this.assertWritable("addNativeCommitPreparation()");
+    let preparations = this.#nativeCommitPreparations.get(space);
+    if (preparations === undefined) {
+      preparations = new Map();
+      this.#nativeCommitPreparations.set(space, preparations);
+    }
+    preparations.set(preparation.key, preparation);
+  }
+
+  removeNativeCommitPreparation(space: MemorySpace, key: string): void {
+    this.assertWritable("removeNativeCommitPreparation()");
+    const preparations = this.#nativeCommitPreparations.get(space);
+    if (preparations === undefined) return;
+    preparations.delete(key);
+    if (preparations.size === 0) {
+      this.#nativeCommitPreparations.delete(space);
+    }
+  }
+
   getNativeCommit(space: MemorySpace): NativeStorageCommit | undefined {
     const branch = this.#branches.get(space);
     const schedulerObservation = this.schedulerObservationForNativeCommit(
@@ -1110,9 +1141,11 @@ export class V2StorageTransaction implements IStorageTransaction {
       ...createOnlyPreconditions,
     ];
     const sqliteOps = this.#sqliteOps.get(space);
+    const preparations = this.#nativeCommitPreparations.get(space);
     if (
       !branch && schedulerObservation === undefined &&
-      nativePreconditions.length === 0 && !sqliteOps?.length
+      nativePreconditions.length === 0 && !sqliteOps?.length &&
+      !preparations?.size
     ) {
       return undefined;
     }
@@ -1177,6 +1210,9 @@ export class V2StorageTransaction implements IStorageTransaction {
         ? { preconditions: nativePreconditions }
         : {}),
       ...(sqliteOps?.length ? { sqliteOps: [...sqliteOps] } : {}),
+      ...(preparations?.size
+        ? { preparations: [...preparations.values()] }
+        : {}),
     };
   }
 
@@ -1876,6 +1912,28 @@ export class V2StorageTransaction implements IStorageTransaction {
     });
   }
 
+  private rejectPreparations(
+    preparations: Iterable<NativeStorageCommitPreparation>,
+    reason: unknown,
+  ): void {
+    for (const preparation of preparations) {
+      if (preparation.onRejected === undefined) continue;
+      try {
+        preparation.onRejected(reason);
+      } catch (error) {
+        logger.warn("native-preparation-rejection-callback-failed", () => [
+          String(error),
+        ]);
+      }
+    }
+  }
+
+  private rejectNativeCommitPreparations(reason: unknown): void {
+    for (const preparations of this.#nativeCommitPreparations.values()) {
+      this.rejectPreparations(preparations.values(), reason);
+    }
+  }
+
   abort(reason?: unknown): Result<Unit, InactiveTransactionError> {
     this.assertWritable("abort()");
     const ready = this.editable();
@@ -1886,6 +1944,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       status: "done",
       result: { error: TransactionAborted(reason) },
     };
+    this.rejectNativeCommitPreparations(reason);
     return { ok: {} };
   }
 
@@ -1929,9 +1988,10 @@ export class V2StorageTransaction implements IStorageTransaction {
     const hasSchedulerObservation = native?.schedulerObservation !== undefined;
     const hasCommitPreconditions = (native?.preconditions?.length ?? 0) > 0;
     const hasSqliteOps = (native?.sqliteOps?.length ?? 0) > 0;
+    const hasPreparations = (native?.preparations?.length ?? 0) > 0;
     if (
       operations.length === 0 && !hasSchedulerObservation &&
-      !hasCommitPreconditions && !hasSqliteOps
+      !hasCommitPreconditions && !hasSqliteOps && !hasPreparations
     ) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
       this.#state = { status: "done", result };
@@ -1947,12 +2007,17 @@ export class V2StorageTransaction implements IStorageTransaction {
         status: "done",
         result: { error: validation.error },
       };
+      this.rejectNativeCommitPreparations(validation.error);
       return { error: validation.error };
     }
 
     const replica = this.storage.open(writeSpace).replica;
     if (!replica.commitNative) {
-      throw new Error("memory v2 replica does not support commitNative()");
+      const error = new Error(
+        "memory v2 replica does not support commitNative()",
+      );
+      this.rejectNativeCommitPreparations(error);
+      throw error;
     }
     const commitNative = replica.commitNative.bind(replica);
     const promise = withCommitTiming(
@@ -1988,10 +2053,11 @@ export class V2StorageTransaction implements IStorageTransaction {
         native?.schedulerObservation !== undefined;
       const hasCommitPreconditions = (native?.preconditions?.length ?? 0) > 0;
       const hasSqliteOps = (native?.sqliteOps?.length ?? 0) > 0;
+      const hasPreparations = (native?.preparations?.length ?? 0) > 0;
       if (
         !native ||
         (operations.length === 0 && !hasSchedulerObservation &&
-          !hasCommitPreconditions && !hasSqliteOps)
+          !hasCommitPreconditions && !hasSqliteOps && !hasPreparations)
       ) {
         continue;
       }
@@ -2007,6 +2073,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     const validation = this.validate();
     if (validation.error) {
       this.#state = { status: "done", result: { error: validation.error } };
+      this.rejectNativeCommitPreparations(validation.error);
       return { error: validation.error };
     }
 
@@ -2060,7 +2127,13 @@ export class V2StorageTransaction implements IStorageTransaction {
       const { space, native } = commits[i];
       const replica = this.storage.open(space).replica;
       if (!replica.commitNative) {
-        throw new Error("memory v2 replica does not support commitNative()");
+        const error = new Error(
+          "memory v2 replica does not support commitNative()",
+        );
+        for (const skipped of commits.slice(i)) {
+          this.rejectPreparations(skipped.native.preparations ?? [], error);
+        }
+        throw error;
       }
       const commitNative = replica.commitNative.bind(replica);
       // Stop at the first per-space failure rather than committing the
@@ -2079,6 +2152,12 @@ export class V2StorageTransaction implements IStorageTransaction {
               `earlier spaces are not rolled back and later spaces are skipped`,
             result.error,
           );
+          for (const skipped of commits.slice(i + 1)) {
+            this.rejectPreparations(
+              skipped.native.preparations ?? [],
+              result.error,
+            );
+          }
           return { error: result.error };
         }
       } catch (error) {
@@ -2088,6 +2167,9 @@ export class V2StorageTransaction implements IStorageTransaction {
             `earlier spaces are not rolled back and later spaces are skipped`,
           error,
         );
+        for (const skipped of commits.slice(i + 1)) {
+          this.rejectPreparations(skipped.native.preparations ?? [], error);
+        }
         return { error: toStoreError(error) };
       }
     }

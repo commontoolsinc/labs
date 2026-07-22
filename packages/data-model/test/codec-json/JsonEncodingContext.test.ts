@@ -2,7 +2,12 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { JsonEncodingContext } from "@/codec-json/JsonEncodingContext.ts";
-import { FabricInstance, type FabricValue } from "@/interface.ts";
+import {
+  type FabricFactory,
+  FabricInstance,
+  type FabricPlainObject,
+  type FabricValue,
+} from "@/interface.ts";
 import type { JsonWireValue } from "@/codec-json/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
@@ -19,6 +24,30 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { BaseReconstructionContext } from "@/codec-common/BaseReconstructionContext.ts";
+import {
+  factoryStateOf,
+  type FactoryStateV1,
+  registerFabricFactory,
+} from "@/fabric-factory.ts";
+
+const FACTORY_REF = {
+  identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  symbol: "__cfPattern_1",
+} as const;
+
+function testPatternFactory(
+  params?: FabricPlainObject,
+): FabricFactory<[unknown], unknown> {
+  return registerFabricFactory((input: unknown) => input, "pattern", {
+    kind: "pattern",
+    ref: FACTORY_REF,
+    argumentSchema: { type: "object" },
+    resultSchema: { type: "object" },
+    ...(params === undefined
+      ? {}
+      : { paramsSchema: { type: "object" } as const, params }),
+  });
+}
 
 /**
  * Shared test `ReconstructionContext`: `getCell()` always throws (no test
@@ -112,6 +141,141 @@ function fromWireFormat(data: JsonWireValue): FabricValue {
 }
 
 describe("JsonEncodingContext", () => {
+  describe("Factory@1", () => {
+    it("round-trips every factory kind through the callable codec", () => {
+      const states: FactoryStateV1[] = [
+        {
+          kind: "pattern",
+          ref: FACTORY_REF,
+          argumentSchema: true,
+          resultSchema: true,
+        },
+        { kind: "module", ref: FACTORY_REF },
+        { kind: "handler", ref: FACTORY_REF },
+      ];
+
+      for (const state of states) {
+        const factory = registerFabricFactory(
+          () => undefined,
+          state.kind,
+          state,
+        );
+        const decoded = roundTrip(factory) as FabricFactory<[]>;
+        expect(factoryStateOf(decoded)).toEqual(state);
+        expect(Object.isFrozen(decoded)).toBe(true);
+      }
+    });
+
+    it("round-trips exact state to a frozen inert callable", () => {
+      const factory = testPatternFactory({ prefix: "hello" });
+      expect(toWireFormat(factory)).toEqual({
+        "/Factory@1": {
+          kind: "pattern",
+          ref: FACTORY_REF,
+          argumentSchema: { type: "object" },
+          resultSchema: { type: "object" },
+          paramsSchema: { type: "object" },
+          params: { prefix: "hello" },
+        },
+      });
+
+      const decoded = roundTrip(factory) as FabricFactory<[]>;
+      expect(Object.isFrozen(decoded)).toBe(true);
+      expect(factoryStateOf(decoded)).toEqual(factoryStateOf(factory));
+      expect(toWireFormat(decoded)).toEqual(toWireFormat(factory));
+      expect(() => decoded()).toThrow(
+        "factory requires runner materialization",
+      );
+    });
+
+    it("round-trips factories when nested and through byte entry points", () => {
+      const factory = testPatternFactory();
+      const nested = roundTrip({ factory, list: [factory] }) as Record<
+        string,
+        FabricValue
+      >;
+      expect(typeof nested.factory).toBe("function");
+      expect(typeof (nested.list as FabricValue[])[0]).toBe("function");
+
+      const { context, runtime } = makeTestContext();
+      const fromBytes = context.decodeFromBytes(
+        context.encodeToBytes(factory),
+        runtime,
+      );
+      expect(typeof fromBytes).toBe("function");
+    });
+
+    it("round-trips a factory inside another factory's params", () => {
+      const child = registerFabricFactory(() => undefined, "module", {
+        kind: "module",
+        ref: { ...FACTORY_REF, symbol: "__cfModule_1" },
+      });
+      const parent = testPatternFactory({ child });
+
+      const decoded = roundTrip(parent) as FabricFactory<[]>;
+      const decodedState = factoryStateOf(decoded);
+      const decodedChild = decodedState.kind === "pattern"
+        ? (decodedState.params as FabricPlainObject | undefined)?.child
+        : undefined;
+      expect(typeof decodedChild).toBe("function");
+      expect(factoryStateOf(decodedChild)).toEqual({
+        kind: "module",
+        ref: { ...FACTORY_REF, symbol: "__cfModule_1" },
+      });
+      expect(Object.isFrozen(decodedChild)).toBe(true);
+    });
+
+    it("rejects arbitrary and copy-branded functions", () => {
+      const { context } = makeTestContext();
+      expect(() => context.encode((() => undefined) as never)).toThrow(
+        "no applicable codec",
+      );
+
+      const factory = testPatternFactory();
+      const copied = () => undefined;
+      for (const key of Reflect.ownKeys(factory)) {
+        if (typeof key !== "symbol") continue;
+        Object.defineProperty(
+          copied,
+          key,
+          Object.getOwnPropertyDescriptor(factory, key)!,
+        );
+      }
+      expect(() => context.encode(copied as never)).toThrow(
+        "no applicable codec",
+      );
+    });
+
+    it("tracks callable factory cycles but permits repeated siblings", () => {
+      const params: Record<string, FabricValue> = {};
+      const factory = testPatternFactory(params);
+      params.self = factory;
+      const { context } = makeTestContext();
+      expect(() => context.encode(factory)).toThrow("cyclic state");
+
+      const shared = testPatternFactory();
+      expect(() => context.encode([shared, shared])).not.toThrow();
+    });
+
+    it("fails malformed wire strictly and wraps it in lenient mode", () => {
+      const wire = `fvj1:${
+        JSON.stringify({
+          "/Factory@1": {
+            kind: "module",
+            ref: { identity: "host:1", symbol: "x" },
+          },
+        })
+      }`;
+      const runtime = new TestReconstructionContext();
+      expect(() => new JsonEncodingContext().decode(wire, runtime)).toThrow(
+        "43-character base64url",
+      );
+      expect(
+        new JsonEncodingContext({ lenient: true }).decode(wire, runtime),
+      ).toBeInstanceOf(ProblematicValue);
+    });
+  });
+
   describe("`encodeToBytes()` / `decodeFromBytes()` (bytes entry points)", () => {
     it("returns `Uint8Array` from `encodeToBytes()`", () => {
       const { context } = makeTestContext();

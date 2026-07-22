@@ -215,11 +215,15 @@ export class JsonEncodingContext implements SerializationContext<string> {
       const seen = _seen ?? new Set<object>();
       let addedToSeen = false;
 
-      if (value !== null && typeof value === "object") {
-        if (seen.has(value as object)) {
+      if (
+        value !== null &&
+        (typeof value === "object" || typeof value === "function")
+      ) {
+        const seenValue = value as object;
+        if (seen.has(seenValue)) {
           throw new Error("Circular reference detected during serialization");
         }
-        seen.add(value as object);
+        seen.add(seenValue);
         addedToSeen = true;
       }
 
@@ -249,7 +253,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
     }
 
     // Self-representing primitives returned `SELF_REP` above. Past this point,
-    // `value` is an `object`.
+    // `value` is an object or an unadmitted function that will fail the plain
+    // object guard below.
 
     // Arrays
     if (Array.isArray(value)) {

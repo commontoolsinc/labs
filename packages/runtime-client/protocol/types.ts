@@ -24,6 +24,9 @@ export type { CfcLabelView };
 
 export type MessageId = number;
 
+/** Canonical context-free Fabric codec projection for structured-clone IPC. */
+export type FabricValueIPCEncoding = "fabric-json";
+
 export type CellRef = NormalizedFullLink & {
   cfcLabelView?: CfcLabelView;
 };
@@ -234,7 +237,8 @@ export interface CellGetRequest extends BaseRequest {
 export interface CellSetRequest extends BaseRequest {
   type: RequestType.CellSet;
   cell: CellRef;
-  value: JSONValue;
+  value: JSONValue | undefined;
+  valueEncoding?: FabricValueIPCEncoding;
 }
 
 // A read-modify-write append (`CellHandle.push`). Same wire shape as CellSet —
@@ -244,13 +248,15 @@ export interface CellSetRequest extends BaseRequest {
 export interface CellPushRequest extends BaseRequest {
   type: RequestType.CellPush;
   cell: CellRef;
-  value: JSONValue;
+  value: JSONValue | undefined;
+  valueEncoding?: FabricValueIPCEncoding;
 }
 
 export interface CellSendRequest extends BaseRequest {
   type: RequestType.CellSend;
   cell: CellRef;
-  event: JSONValue;
+  event: JSONValue | undefined;
+  eventEncoding?: FabricValueIPCEncoding;
 }
 
 export interface CellSubscribeRequest extends BaseRequest {
@@ -790,6 +796,7 @@ export interface BooleanResponse {
 
 export interface JSONValueResponse {
   value: JSONValue | undefined;
+  valueEncoding?: FabricValueIPCEncoding;
 }
 
 export interface CellGetResponse extends JSONValueResponse {
@@ -843,7 +850,8 @@ export interface PatternCoverageResponse {
 export interface CellUpdateNotification {
   type: NotificationType.CellUpdate;
   cell: CellRef;
-  value: JSONValue;
+  value: JSONValue | undefined;
+  valueEncoding?: FabricValueIPCEncoding;
   // Present only for subscriptions that opted in via `includeCfcLabel`. Carries
   // the cell's current display label so the client re-renders on label changes
   // without a separate getCfcLabel round-trip.
@@ -876,6 +884,9 @@ export interface ErrorNotification {
 export interface TelemetryNotification {
   type: NotificationType.Telemetry;
   marker: RuntimeTelemetryMarkerResult;
+  /** Canonical Fabric JSON projection when marker detail contains Factory@1. */
+  encodedMarker?: string;
+  markerEncoding?: FabricValueIPCEncoding;
 }
 
 /**
@@ -925,6 +936,9 @@ export interface VDomBatchNotification {
   batchId: number;
   /** The operations to apply, in order */
   ops: VDomOp[];
+  /** Canonical Fabric JSON projection when an op contains Factory@1. */
+  encodedOps?: string;
+  opsEncoding?: FabricValueIPCEncoding;
   /** Optional: the root node ID for this render tree */
   rootId?: number;
   /** The mount ID this batch belongs to */
@@ -956,6 +970,7 @@ export type RemoteResponse =
   | UploadBlobResponse;
 
 export type IPCRemoteNotification =
+  | TelemetryNotification
   | CellUpdateNotification
   | ConsoleNotification
   | NavigateRequestNotification

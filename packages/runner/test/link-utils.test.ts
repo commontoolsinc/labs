@@ -732,6 +732,32 @@ describe("link-utils", () => {
   });
 
   describe("stripAsCellAndStreamFromSchema", () => {
+    it("preserves the complete asFactory contract while stripping an outer cell wrapper", () => {
+      const factoryContract = {
+        kind: "pattern" as const,
+        argumentSchema: {
+          type: "object" as const,
+          properties: {
+            source: { type: "string" as const, asCell: ["readonly"] as const },
+          },
+        },
+        resultSchema: {
+          type: "object" as const,
+          properties: {
+            output: { type: "number" as const, asCell: ["cell"] as const },
+          },
+        },
+      };
+      const schema = {
+        asCell: ["cell"],
+        asFactory: factoryContract,
+      } as const satisfies JSONSchema;
+
+      expect(sanitizeSchemaForLinks(schema, KeepAsCell.None)).toEqual({
+        asFactory: factoryContract,
+      });
+    });
+
     it("memoizes a frozen input per keepAsCell mode, handing out a fresh top that shares the cached sub-tree", () => {
       // The memo only engages for deep-frozen inputs (a mutable input's identity
       // could go stale), so it no-ops for the non-frozen literals other tests

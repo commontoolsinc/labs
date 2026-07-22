@@ -6,6 +6,7 @@ import type {
 } from "@commonfabric/api";
 import type {
   CommitPrecondition,
+  DocumentPath,
   EntityDocument,
   PatchOp,
   SchedulerActionSnapshotQuery,
@@ -982,6 +983,26 @@ export interface IStorageTransaction {
    * more direct representation than legacy fact archives.
    */
   getNativeCommit?(space: MemorySpace): NativeStorageCommit | undefined;
+
+  /**
+   * Attach runner-owned work that augments the eventual wire commit without
+   * participating in optimistic local state. Registrations are keyed and
+   * idempotent within a destination space.
+   */
+  addNativeCommitPreparation?(
+    space: MemorySpace,
+    preparation: NativeStorageCommitPreparation,
+  ): void;
+
+  /**
+   * Remove runner-owned wire work that no longer corresponds to the current
+   * transaction draft. The owner remains responsible for settling any
+   * lifecycle callback associated with the removed preparation.
+   */
+  removeNativeCommitPreparation?(
+    space: MemorySpace,
+    key: string,
+  ): void;
 }
 
 export interface IExtendedStorageTransaction
@@ -1754,10 +1775,36 @@ export type NativeStorageCommitOperation =
     scope?: CellScope;
     patches: PatchOp[];
     value: FabricValue;
+  }
+  | {
+    op: "ensure";
+    id: URI;
+    type: MediaType;
+    scope?: CellScope;
+    value: FabricValue;
+    ignore?: readonly DocumentPath[];
+    addUnique?: readonly DocumentPath[];
   };
+
+export interface NativeStorageCommitPreparation {
+  /** Stable transaction-local deduplication key. */
+  key: string;
+  /**
+   * Warm artifacts return operations directly. Cold artifacts return a
+   * promise; only wire submission waits for it.
+   */
+  prepare: () =>
+    | readonly NativeStorageCommitOperation[]
+    | Promise<readonly NativeStorageCommitOperation[]>;
+  /** Runs only after the augmented commit is durably accepted. */
+  onConfirmed?: () => void;
+  /** Runs when the containing transaction, preparation, or wire commit fails. */
+  onRejected?: (reason: unknown) => void;
+}
 
 export interface NativeStorageCommit {
   operations: readonly NativeStorageCommitOperation[];
+  preparations?: readonly NativeStorageCommitPreparation[];
   schedulerObservation?: unknown;
   preconditions?: readonly CommitPrecondition[];
   /**

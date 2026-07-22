@@ -12,6 +12,12 @@ import {
   shallowFabricFromNativeValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+  mapFactoryStateValues,
+  trySealedFactoryState,
+} from "@commonfabric/data-model/fabric-factory";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { codecOf } from "@commonfabric/data-model/codec-common";
 import {
@@ -149,12 +155,25 @@ import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
 import { MetaField } from "@commonfabric/api";
+import {
+  createFactoryTraversalContext,
+  type FactoryTraversalContext,
+  hasTraversableFabricInstanceState,
+  mapFabricInstanceStateForTraversal,
+  mapFactoryForTraversal,
+} from "./builder/factory-traversal.ts";
 ensureNotRenderThread();
 
 const logger = getLogger("cell", { level: "warn" });
 
 type SinkOptions = {
   changeGroup?: ChangeGroup;
+  /**
+   * Register the initial dependency set before invoking the callback. This is
+   * reserved for supervisors whose callback can expose a readiness/error
+   * signal that causes the observed value to be replaced immediately.
+   */
+  subscribeBeforeInitial?: boolean;
   /**
    * Read the cell's display CFC label as part of the sink's tracked read set
    * and pass it to the callback as a second argument. Reading it on the sink's
@@ -163,6 +182,8 @@ type SinkOptions = {
    * reactive label delivery over a subscription. Off by default.
    */
   includeCfcLabel?: boolean;
+  /** Preserve inert Factory@1 shells for a runner-owned materializer. */
+  materializeFactories?: boolean;
 };
 
 export type RawCellReadOptions = IReadOptions & {
@@ -179,6 +200,12 @@ export type RawCellReadOptions = IReadOptions & {
 let mapFactory: NodeFactory<any, any> | undefined;
 let filterFactory: NodeFactory<any, any> | undefined;
 let flatMapFactory: NodeFactory<any, any> | undefined;
+
+type ListPatternCallbackInput<T> = {
+  element: T extends Array<infer U> ? U : T;
+  index: number;
+  array: T;
+};
 
 /**
  * Error thrown by the function-form `.map`/`.filter`/`.flatMap` on an
@@ -333,7 +360,12 @@ declare module "@commonfabric/api" {
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
       writable?: boolean,
+      materializeFactories?: boolean,
     ): CellResult<DeepKeyLookup<T, Path>>;
+    /** @internal Dependency-only read for dynamic/scheduled factory selection. */
+    getWithoutFactoryMaterialization(
+      options?: { traverseCells?: boolean },
+    ): Readonly<StripDefaultBrand<T>>;
     getAsNormalizedFullLink(): NormalizedFullLink;
     getAsLink(
       options?: {
@@ -980,6 +1012,19 @@ export class CellImpl<T extends FabricValue>
     return value;
   }
 
+  getWithoutFactoryMaterialization(
+    options?: { traverseCells?: boolean },
+  ): Readonly<StripDefaultBrand<T>> {
+    if (!this.synced) this.sync();
+    return validateAndTransform(
+      this.runtime,
+      this.tx,
+      this.viewRef,
+      [],
+      { ...options, synced: this.synced, materializeFactories: false },
+    );
+  }
+
   /**
    * Read the cell's current value without creating a reactive dependency.
    * Unlike `get()`, calling `sample()` inside a handler won't cause the handler
@@ -1271,6 +1316,11 @@ export class CellImpl<T extends FabricValue>
 
       const event = convertCellsToLinks(newValue) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
+      assertFactoryArtifactsPublishableForWrite(
+        this.runtime,
+        event,
+        resolvedToValueLink.space,
+      );
 
       // Trigger on fully resolved link
       this.runtime.scheduler.queueEvent(
@@ -1302,6 +1352,17 @@ export class CellImpl<T extends FabricValue>
 
       // Looks for arrays and makes sure each object gets its own doc.
       const transformedValue = recursivelyAddIDIfNeeded(newValue, this._frame);
+      const writeLink = resolveLink(
+        this.runtime,
+        this.tx,
+        this.link,
+        "writeRedirect",
+      );
+      assertFactoryArtifactsPublishableForWrite(
+        this.runtime,
+        transformedValue,
+        writeLink.space,
+      );
       recordRelevantSchemaWritePolicyInput(
         this.tx,
         resolvedToValueLink,
@@ -1312,7 +1373,7 @@ export class CellImpl<T extends FabricValue>
       diffAndUpdate(
         this.runtime,
         this.tx,
-        resolveLink(this.runtime, this.tx, this.link, "writeRedirect"),
+        writeLink,
         transformedValue,
         this._frame?.cause,
       );
@@ -1491,6 +1552,11 @@ export class CellImpl<T extends FabricValue>
     for (let i = 0; i < value.length; i++) {
       combined[array.length + i] = value[i];
     }
+    assertFactoryArtifactsPublishableForWrite(
+      this.runtime,
+      value,
+      resolvedLink.space,
+    );
     diffAndUpdate(
       this.runtime,
       this.tx,
@@ -1578,6 +1644,11 @@ export class CellImpl<T extends FabricValue>
     if (toAdd.length === 0) {
       return;
     }
+    assertFactoryArtifactsPublishableForWrite(
+      this.runtime,
+      toAdd,
+      resolvedLink.space,
+    );
     diffAndUpdate(
       this.runtime,
       this.tx,
@@ -2042,22 +2113,28 @@ export class CellImpl<T extends FabricValue>
     path?: Readonly<Path>,
     tx?: IExtendedStorageTransaction,
     writable?: boolean,
+    materializeFactories = true,
   ): CellResult<DeepKeyLookup<T, Path>> {
     if (!this.synced) this.sync(); // No await, just kicking this off
     const subPath = path || [];
+    const stringPath = subPath.map((p) => p.toString());
     return createQueryResultProxy(
       this.runtime,
       tx ?? this.tx ?? this.runtime.edit(),
       {
         ...this.link,
-        path: [...this.path, ...subPath.map((p) => p.toString())] as string[],
+        path: [...this.path, ...stringPath] as string[],
+        schema: stringPath.length === 0
+          ? this.link.schema
+          : this.runtime.cfc.getSchemaAtPath(this.link.schema, stringPath),
       },
       0,
       writable,
       rebaseCfcLabelView(
         this._cfcLabelView,
-        subPath.map((p) => p.toString()),
+        stringPath,
       ),
+      materializeFactories,
     );
   }
 
@@ -2125,14 +2202,14 @@ export class CellImpl<T extends FabricValue>
     const tx = this.runtime.readTx(this.tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final
     // link.
-    const value = tx.readValueOrThrow(
-      resolveLink(this.runtime, tx, this.link, lastNode),
-      readOptions,
-    );
+    const resolvedLink = resolveLink(this.runtime, tx, this.link, lastNode);
+    const value = tx.readValueOrThrow(resolvedLink, readOptions);
     // Deep-copy with desired frozenness, without native unwrapping — getRaw()
     // and getRawUntyped() return fabric-layer values, not native ("wild
     // west") values.
-    return cloneIfNecessary(value, { frozen });
+    const result = cloneIfNecessary(value, { frozen });
+    this.runtime.noteFactoryArtifactSource(result, resolvedLink.space);
+    return result;
   }
 
   setRaw(value: (NoInfer<T> & FabricValue) | undefined): void {
@@ -2147,6 +2224,11 @@ export class CellImpl<T extends FabricValue>
     if (!this.synced) this.sync();
 
     const inlined = findAndInlineDataUriLinks(value);
+    assertFactoryArtifactsPublishableForWrite(
+      this.runtime,
+      inlined,
+      this.link.space,
+    );
 
     // When asked to write only on change, read the current raw value and bail
     // out if it already equals what we'd write. `readValueOrThrow` mirrors the
@@ -2426,8 +2508,11 @@ export class CellImpl<T extends FabricValue>
    */
   mapWithPattern<S>(
     this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
-    params: Record<string, any>,
+    op: PatternFactory<ListPatternCallbackInput<T>, S>,
+  ): Reactive<S[]>;
+  mapWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<any, S>,
   ): Reactive<S[]> {
     // Create the factory if it doesn't exist
     if (!mapFactory) {
@@ -2439,8 +2524,7 @@ export class CellImpl<T extends FabricValue>
 
     const result = mapFactory({
       list: this as unknown as Reactive<T>,
-      op: op,
-      params: params,
+      op,
     });
     result.setSchema(listResultSchema(op.resultSchema));
     return result;
@@ -2517,8 +2601,11 @@ export class CellImpl<T extends FabricValue>
    */
   filterWithPattern<S>(
     this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S>,
-    params: Record<string, any>,
+    op: PatternFactory<ListPatternCallbackInput<T>, S>,
+  ): Reactive<(T extends Array<infer U> ? U : T)[]>;
+  filterWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<any, S>,
   ): Reactive<(T extends Array<infer U> ? U : T)[]> {
     if (!filterFactory) {
       filterFactory = createNodeFactory({
@@ -2529,8 +2616,7 @@ export class CellImpl<T extends FabricValue>
 
     const result = filterFactory({
       list: this as unknown as Reactive<T>,
-      op: op,
-      params: params,
+      op,
     });
     result.setSchema(listResultSchema());
     return result;
@@ -2557,8 +2643,11 @@ export class CellImpl<T extends FabricValue>
    */
   flatMapWithPattern<S>(
     this: IsThisObject,
-    op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,
-    params: Record<string, any>,
+    op: PatternFactory<ListPatternCallbackInput<T>, S[]>,
+  ): Reactive<S[]>;
+  flatMapWithPattern<S>(
+    this: IsThisObject,
+    op: PatternFactory<any, S[]>,
   ): Reactive<S[]> {
     if (!flatMapFactory) {
       flatMapFactory = createNodeFactory({
@@ -2569,8 +2658,7 @@ export class CellImpl<T extends FabricValue>
 
     const result = flatMapFactory({
       list: this as unknown as Reactive<T>,
-      op: op,
-      params: params,
+      op,
     });
     result.setSchema(listResultSchema());
     return result;
@@ -2636,44 +2724,48 @@ function subscribeToReferencedDocs<T>(
   options: SinkOptions = {},
 ): Cancel {
   const link = ref.link;
+  const readSinkValue = (
+    tx: IExtendedStorageTransaction,
+  ): { value: T; cfcLabel: CfcLabelView | undefined } => {
+    // Using a new transaction for child cells, as we're only interested in
+    // dependencies for the initial get, not further cells the callback might
+    // read. The callback is responsible for calling sink on those cells if it
+    // wants to stay updated.
+    const extraTx = runtime.edit();
+    const wrappedTx = createChildCellTransaction(tx, extraTx);
+    const schema = link.schema;
+    const needsTraversal = schema === undefined ||
+      ContextualFlowControl.isTrueSchema(schema);
+    // The sink synchronizes the root before this read, so nested `asCell`
+    // projections inherit that state instead of starting duplicate syncs.
+    const value = validateAndTransform(runtime, wrappedTx, ref, undefined, {
+      synced: true,
+      materializeFactories: options.materializeFactories ?? true,
+    }) as T;
+    if (needsTraversal && value !== undefined && value !== null) {
+      deepTraverse(value);
+    }
+    // Read the label on the SINK's transaction (`tx`), not the child `extraTx`,
+    // so the cfc-metadata read joins this sink's reactive dependency set: a
+    // later label-only write re-fires the sink. `cfcLabelViewForCell` is a pure
+    // store read (no sync); `internalVerifierRead` keeps it reactive but out of
+    // CFC taint. Raw here — the worker redacts before it leaves.
+    const cfcLabel = options.includeCfcLabel
+      ? cfcLabelViewForCell(createCell(runtime, link, tx))
+      : undefined;
+
+    // No async await here, but that also means no retry. So far all sinks are
+    // read-only, so changes already retrigger them.
+    runtime.prepareTxForCommit(extraTx);
+    void extraTx.commit();
+    return { value, cfcLabel };
+  };
   const sink: SinkAction = {
     cleanup: undefined,
     action: (tx) => {
       if (isCancel(sink.cleanup)) sink.cleanup();
-
-      // Using a new transaction for child cells, as we're only interested in
-      // dependencies for the initial get, not further cells the callback might
-      // read. The callback is responsible for calling sink on those cells if it
-      // wants to stay updated.
-      const extraTx = runtime.edit();
-      const wrappedTx = createChildCellTransaction(tx, extraTx);
-      const schema = link.schema;
-      const needsTraversal = schema === undefined ||
-        ContextualFlowControl.isTrueSchema(schema);
-      // sink() always kicks off sync before subscribing. Preserve that state
-      // on asCell projections created for the callback, just as get() does, so
-      // nested sinks reuse the root query instead of opening one per cut point.
-      const newValue = validateAndTransform(runtime, wrappedTx, ref, [], {
-        synced: true,
-      });
-      if (needsTraversal && newValue !== undefined && newValue !== null) {
-        deepTraverse(newValue);
-      }
-      // Read the label on the SINK's transaction (`tx`), not the child `extraTx`,
-      // so the cfc-metadata read joins this sink's reactive dependency set: a
-      // later label-only write re-fires the sink. `cfcLabelViewForCell` is a
-      // pure store read (no sync); `internalVerifierRead` keeps it reactive but
-      // out of CFC taint. Raw here — the worker redacts before it leaves.
-      const cfcLabel = options.includeCfcLabel
-        ? cfcLabelViewForCell(createCell(runtime, link, tx))
-        : undefined;
-      sink.cleanup = callback(newValue, cfcLabel);
-
-      // no async await here, but that also means no retry. TODO(seefeld): Should
-      // we add a retry? So far all sinks are read-only, so they get re-triggered
-      // on changes already.
-      runtime.prepareTxForCommit(extraTx);
-      extraTx.commit();
+      const { value, cfcLabel } = readSinkValue(tx);
+      sink.cleanup = callback(value, cfcLabel);
     },
   };
   return sinkHelper(
@@ -2681,6 +2773,9 @@ function subscribeToReferencedDocs<T>(
     runtime,
     toMemorySpaceAddress(link),
     options,
+    (tx) => {
+      readSinkValue(tx);
+    },
   );
 }
 
@@ -2694,6 +2789,7 @@ function sinkHelper(
   runtime: Runtime,
   address: IMemorySpaceAddress,
   options: SinkOptions = {},
+  collectInitialDependencies?: (tx: IExtendedStorageTransaction) => void,
 ) {
   // Attach a name to the sink action
   const sinkName = `sink:${address.space}/${address.id}/${
@@ -2704,6 +2800,57 @@ function sinkHelper(
     configurable: true,
   });
   (sink.action as Action & { src?: string }).src = sinkName;
+
+  const subscriptionOptions = {
+    isEffect: true,
+    ...(options.changeGroup !== undefined && {
+      changeGroup: options.changeGroup,
+    }),
+  };
+
+  if (options.subscribeBeforeInitial) {
+    if (collectInitialDependencies === undefined) {
+      throw new Error(
+        "subscribeBeforeInitial requires an initial dependency collector",
+      );
+    }
+    // Collect and install the dependency set in one synchronous turn, without
+    // invoking user code between the read and subscription. Then perform the
+    // initial callback synchronously and replace the provisional log with the
+    // callback's actual reads. A callback-triggered write therefore cannot
+    // land in either the old run-before-subscribe gap or a scheduler-owned
+    // initial action that suppresses its own concurrent invalidation.
+    const dependencyTx = runtime.edit();
+    collectInitialDependencies(dependencyTx);
+    const dependencyLog = txToReactivityLog(dependencyTx);
+    runtime.prepareTxForCommit(dependencyTx);
+    void dependencyTx.commit();
+    runtime.scheduler.resubscribe(
+      sink.action,
+      dependencyLog,
+      subscriptionOptions,
+    );
+
+    const initialTx = runtime.edit();
+    runtime.scheduler.withExecutingAction(
+      sink.action,
+      () => sink.action(initialTx),
+    );
+    const initialLog = txToReactivityLog(initialTx);
+    runtime.prepareTxForCommit(initialTx);
+    void initialTx.commit();
+    runtime.scheduler.resubscribe(
+      sink.action,
+      initialLog,
+      subscriptionOptions,
+    );
+
+    return () => {
+      runtime.scheduler.unsubscribe(sink.action);
+      if (isCancel(sink.cleanup)) sink.cleanup();
+      sink.cleanup = undefined;
+    };
+  }
 
   // Call action once immediately, which also defines what docs need to be
   // subscribed to. Wrap with withExecutingAction so that any child sinks
@@ -2720,13 +2867,7 @@ function sinkHelper(
 
   // Mark as effect since sink() is a side-effectful consumer (FRP effect/sink)
   // Use resubscribe because we've already run it once above
-  const resubscribeOptions = {
-    isEffect: true,
-    ...(options.changeGroup !== undefined && {
-      changeGroup: options.changeGroup,
-    }),
-  };
-  runtime.scheduler.resubscribe(sink.action, log, resubscribeOptions);
+  runtime.scheduler.resubscribe(sink.action, log, subscriptionOptions);
 
   return () => {
     runtime.scheduler.unsubscribe(sink.action);
@@ -2743,7 +2884,19 @@ function sinkHelper(
  */
 function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
   if (value === null || value === undefined) return;
+
+  if (isAdmittedFabricFactory(value)) {
+    if (seen.has(value)) return;
+    seen.add(value);
+    mapFactoryStateValues(factoryStateOf(value), (nested) => {
+      deepTraverse(nested, seen);
+      return nested;
+    });
+    return;
+  }
+
   if (typeof value !== "object") return;
+  if (value instanceof FabricSpecialObject) return;
 
   // Avoid infinite loops with circular references
   if (seen.has(value)) return;
@@ -2884,6 +3037,15 @@ function validateStaticData(value: unknown): void {
       );
     }
 
+    if (typeof val === "function" && !isAdmittedFabricFactory(val)) {
+      throw new Error(
+        `Cell.of() only accepts static data, but found a JavaScript function at path '${
+          path.join(".")
+        }'.\n` +
+          "help: only branded pattern, module, and handler factories are valid callable Fabric values",
+      );
+    }
+
     // Check for cycles - only ancestors in current path, not all seen objects
     if (ancestors.has(obj)) {
       throw new Error(
@@ -2896,11 +3058,23 @@ function validateStaticData(value: unknown): void {
 
     ancestors.add(obj);
 
-    // TODO(danfuzz): This walk has no `FabricSpecialObject` guard, so a
-    // `FabricPrimitive`/`FabricInstance` in `Cell.of()` static data is walked by
-    // enumerable props instead of treated as a leaf / descended by codec
-    // contents.
-    //
+    if (isAdmittedFabricFactory(val)) {
+      mapFactoryStateValues(factoryStateOf(val), (nested, field) => {
+        traverse(nested, [...path, field]);
+        return nested;
+      });
+      ancestors.delete(obj);
+      return;
+    }
+
+    // Fabric special values are atomic at runner graph boundaries. Their
+    // codec-owned state is validated by the data-model boundary rather than
+    // flattened through enumerable implementation details here.
+    if (val instanceof FabricSpecialObject) {
+      ancestors.delete(obj);
+      return;
+    }
+
     // Traverse arrays and objects
     if (Array.isArray(obj)) {
       for (let i = 0; i < obj.length; i++) {
@@ -2944,9 +3118,40 @@ export function recursivelyAddIDIfNeeded<T>(
   value: T,
   frame: Frame | undefined,
   seen: Map<unknown, unknown> = new Map(),
+  factoryContext: FactoryTraversalContext = createFactoryTraversalContext(),
+  factoryStatesPrepared = false,
 ): T {
-  // Can't add IDs without frame.
+  if (!factoryStatesPrepared) {
+    value = prepareFactoryStatesForWrite(value, factoryContext) as T;
+    factoryStatesPrepared = true;
+  }
+
+  // Can't add IDs without frame. Factory state still has to be prepared above:
+  // setup arguments use frame-less cells, and their hidden selectors may be
+  // live Cells that must become links before Fabric sealing.
   if (!frame) return value;
+
+  // Factories are atomic callable values whose graph-bearing fields live in
+  // hidden protocol state. Visit that state before native conversion attempts
+  // to seal the callable at this still-live builder boundary.
+  if (isAdmittedFabricFactory(value)) {
+    // A canonical codec value has already passed the complete Fabric walk and
+    // is deeply frozen. Injecting runner-only `[ID]` symbols into its hidden
+    // params would make the validated Factory@1 state unencodable.
+    if (trySealedFactoryState(value) !== undefined) return value;
+    return mapFactoryForTraversal(
+      value,
+      (nested) =>
+        recursivelyAddIDIfNeeded(
+          nested,
+          frame,
+          seen,
+          factoryContext,
+          factoryStatesPrepared,
+        ),
+      factoryContext,
+    );
+  }
 
   // Already seen, return previously annotated result. Check this before
   // shallowFabricFromNativeValue() to handle circular references properly.
@@ -2970,7 +3175,13 @@ export function recursivelyAddIDIfNeeded<T>(
 
     const state = codecOf(value).encode(value);
     if (isRecord(state) || Array.isArray(state)) {
-      recursivelyAddIDIfNeeded(state, frame, seen);
+      recursivelyAddIDIfNeeded(
+        state,
+        frame,
+        seen,
+        factoryContext,
+        factoryStatesPrepared,
+      );
     }
     return value;
   }
@@ -2996,7 +3207,13 @@ export function recursivelyAddIDIfNeeded<T>(
     if (converted instanceof FabricInstance) {
       const state = codecOf(converted).encode(converted);
       if (isRecord(state) || Array.isArray(state)) {
-        recursivelyAddIDIfNeeded(state, frame, seen);
+        recursivelyAddIDIfNeeded(
+          state,
+          frame,
+          seen,
+          factoryContext,
+          factoryStatesPrepared,
+        );
       }
     }
     return converted as T;
@@ -3029,7 +3246,13 @@ export function recursivelyAddIDIfNeeded<T>(
     if (convertedDiffers) seen.set(converted, result);
 
     sourceArray.forEach((el, i) => {
-      const v = recursivelyAddIDIfNeeded(el, frame, seen);
+      const v = recursivelyAddIDIfNeeded(
+        el,
+        frame,
+        seen,
+        factoryContext,
+        factoryStatesPrepared,
+      );
       // For objects on arrays only: Add ID if not already present. A
       // `FabricSpecialObject` is an atomic fabric leaf, not a plain container —
       // `{ [ID]: …, ...v }` would spread away its private state (flattening e.g.
@@ -3071,7 +3294,13 @@ export function recursivelyAddIDIfNeeded<T>(
     if (convertedDiffers) seen.set(converted, result);
 
     Object.entries(sourceRecord).forEach(([key, v]) => {
-      const next = recursivelyAddIDIfNeeded(v, frame, seen);
+      const next = recursivelyAddIDIfNeeded(
+        v,
+        frame,
+        seen,
+        factoryContext,
+        factoryStatesPrepared,
+      );
       if (!Object.is(next, v)) {
         changed = true;
       }
@@ -3101,6 +3330,218 @@ export function recursivelyAddIDIfNeeded<T>(
 }
 
 /**
+ * Prepare live factory state before the ordinary Fabric write conversion sees
+ * the enclosing value.
+ *
+ * Factory state is intentionally hidden on the callable, so a live builder
+ * factory may still contain runner values such as `Cell`s even when the
+ * surrounding authored object looks like an ordinary record. The data-model
+ * conversion seals admitted factories atomically; by then it is too late to
+ * turn those runner values into serializable links. Walk the visible container
+ * first, rebuild only factories whose hidden state changes, and leave all
+ * other values for the existing write-boundary conversion below.
+ */
+export function prepareFactoryStatesForWrite(
+  value: unknown,
+  factoryContext: FactoryTraversalContext = createFactoryTraversalContext(),
+  seen: Map<object, unknown> = new Map(),
+): unknown {
+  if (isAdmittedFabricFactory(value)) {
+    // Context-free decoded factories already contain sealed Fabric state. They
+    // are canonical values and must remain atomic at this runner boundary.
+    if (trySealedFactoryState(value) !== undefined) return value;
+
+    return mapFactoryForTraversal(
+      value,
+      (nested) =>
+        convertCellsToLinks(
+          nested,
+          { includeSchema: true },
+          [],
+          new Map(),
+          factoryContext,
+        ),
+      factoryContext,
+    );
+  }
+
+  // Cells/results and link records are converted only when they occur inside
+  // hidden factory state above. Everywhere else the established cell write
+  // path remains authoritative. Codec-backed Fabric instances expose only
+  // their registered codec state to this preparation walk.
+  if (
+    isCellResultForDereferencing(value) || isCell(value) || isCellLink(value)
+  ) {
+    return value;
+  }
+
+  if (hasTraversableFabricInstanceState(value)) {
+    const prior = seen.get(value);
+    if (prior !== undefined) return prior;
+    seen.set(value, value);
+    const prepared = mapFabricInstanceStateForTraversal(
+      value,
+      (state) =>
+        prepareFactoryStatesForWrite(
+          state,
+          factoryContext,
+          seen,
+        ) as FabricValue,
+    );
+    seen.set(value, prepared);
+    return prepared;
+  }
+
+  // Fabric primitives are immutable leaves. Ordinary non-record values remain
+  // under the established write-boundary conversion.
+  if (value instanceof FabricSpecialObject || !isRecord(value)) return value;
+
+  const object = value as object;
+  const prior = seen.get(object);
+  if (prior !== undefined) return prior;
+
+  if (Array.isArray(value)) {
+    const result = new Array<unknown>(value.length);
+    seen.set(object, result);
+    let changed = false;
+
+    for (let index = 0; index < value.length; index++) {
+      if (!(index in value)) continue;
+      const current = value[index];
+      const next = prepareFactoryStatesForWrite(
+        current,
+        factoryContext,
+        seen,
+      );
+      if (!Object.is(next, current)) changed = true;
+      result[index] = next;
+    }
+
+    if (!changed) {
+      seen.set(object, value);
+      return value;
+    }
+    return result;
+  }
+
+  const source = value as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  seen.set(object, result);
+  let changed = false;
+
+  for (const [key, current] of Object.entries(source)) {
+    const next = prepareFactoryStatesForWrite(
+      current,
+      factoryContext,
+      seen,
+    );
+    if (!Object.is(next, current)) changed = true;
+    result[key] = next;
+  }
+
+  [ID, ID_FIELD].forEach((symbol) => {
+    if (symbol in source) {
+      (result as IDFields)[symbol as keyof IDFields] =
+        (source as IDFields)[symbol as keyof IDFields];
+    }
+  });
+
+  if (!changed) {
+    seen.set(object, value);
+    return value;
+  }
+  return result;
+}
+
+/**
+ * Fail closed before a by-value Factory@1 write unless the artifact is already
+ * available in the destination or the runner has trusted source provenance for
+ * atomic publication at commit time.
+ *
+ * Links retain their own source-space provenance and are intentionally atomic
+ * here. Callable factory values, including factories nested in factory state,
+ * keep their synchronous authored API: warm source is prepared synchronously;
+ * cold source delays only the containing commit's ordered wire submission.
+ */
+function assertFactoryArtifactsPublishableForWrite(
+  runtime: Runtime,
+  value: unknown,
+  destinationSpace: MemorySpace,
+  seen: Set<object> = new Set(),
+): void {
+  if (value === null || value === undefined) return;
+  if (typeof value !== "object" && typeof value !== "function") return;
+
+  const object = value as object;
+  if (seen.has(object)) return;
+  seen.add(object);
+
+  if (isAdmittedFabricFactory(value)) {
+    const state = factoryStateOf(value);
+    if (state.ref === undefined) {
+      throw new Error(
+        `Factory has no durable artifact ref for space ${destinationSpace}`,
+      );
+    }
+    runtime.assertFactoryArtifactsPublishableForWrite(
+      value,
+      destinationSpace,
+    );
+    mapFactoryStateValues(state, (nested) => {
+      assertFactoryArtifactsPublishableForWrite(
+        runtime,
+        nested,
+        destinationSpace,
+        seen,
+      );
+      return nested;
+    });
+    return;
+  }
+
+  if (
+    isCell(value) || isCellResultForDereferencing(value) || isCellLink(value)
+  ) {
+    return;
+  }
+
+  if (value instanceof FabricInstance) {
+    assertFactoryArtifactsPublishableForWrite(
+      runtime,
+      codecOf(value).encode(value),
+      destinationSpace,
+      seen,
+    );
+    return;
+  }
+
+  if (value instanceof FabricSpecialObject) return;
+
+  if (Array.isArray(value)) {
+    for (const nested of value) {
+      assertFactoryArtifactsPublishableForWrite(
+        runtime,
+        nested,
+        destinationSpace,
+        seen,
+      );
+    }
+    return;
+  }
+
+  if (isRecord(value)) {
+    for (const nested of Object.values(value)) {
+      assertFactoryArtifactsPublishableForWrite(
+        runtime,
+        nested,
+        destinationSpace,
+        seen,
+      );
+    }
+  }
+}
+
+/**
  * Converts cells and objects that can be turned to cells to links.
  *
  * @param value - The value to convert.
@@ -3116,7 +3557,23 @@ export function convertCellsToLinks(
   } = {},
   path: string[] = [],
   seen: Map<any, string[]> = new Map(),
+  factoryContext: FactoryTraversalContext = createFactoryTraversalContext(),
 ): any {
+  if (isAdmittedFabricFactory(value)) {
+    return mapFactoryForTraversal(
+      value,
+      (nested, field) =>
+        convertCellsToLinks(
+          nested,
+          options,
+          [...path, field],
+          seen,
+          factoryContext,
+        ),
+      factoryContext,
+    );
+  }
+
   if (seen.has(value)) {
     return linkRefFrom({ path: seen.get(value) });
   }
@@ -3154,19 +3611,33 @@ export function convertCellsToLinks(
   // convertible.
   value = shallowFabricFromNativeValue(value);
 
+  if (value instanceof FabricSpecialObject) return value;
+
   // Recursively process arrays and objects, if we ended up with one of those.
   if (!isRecord(value)) {
     // `shallowFabricFromNativeValue()` converted this into a primitive value of some sort.
     return value;
   } else if (Array.isArray(value)) {
     return value.map((value, index) =>
-      convertCellsToLinks(value, options, [...path, String(index)], seen)
+      convertCellsToLinks(
+        value,
+        options,
+        [...path, String(index)],
+        seen,
+        factoryContext,
+      )
     );
   } else {
     return Object.fromEntries(
       Object.entries(value).map(([key, value]) => [
         key,
-        convertCellsToLinks(value, options, [...path, String(key)], seen),
+        convertCellsToLinks(
+          value,
+          options,
+          [...path, String(key)],
+          seen,
+          factoryContext,
+        ),
       ]),
     );
   }

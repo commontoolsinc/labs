@@ -112,6 +112,29 @@ export interface SetOperation {
   value: EntityDocument;
 }
 
+/**
+ * Idempotently install content-addressed data. An absent entity is written as a
+ * normal set revision, an equal entity is a no-op, and a different entity is
+ * an integrity failure that rejects the whole commit. A commit must not also
+ * carry a semantic set, patch, or delete for the same resolved address; that
+ * order-dependent shape is rejected before any revision is written. Multiple
+ * same-address ensures require identical normalized path policies, and policy
+ * paths must not overlap.
+ */
+export interface EnsureOperation {
+  op: "ensure";
+  id: EntityId;
+  scope?: CellScope;
+  value: EntityDocument;
+  /** Incidental metadata excluded from the content-identity comparison. */
+  ignore?: DocumentPath[];
+  /**
+   * Explicit identity-excluded set fields to union from `value` into an
+   * existing entity after the canonical core compares equal.
+   */
+  addUnique?: DocumentPath[];
+}
+
 export interface PatchOperation {
   op: "patch";
   id: EntityId;
@@ -140,6 +163,7 @@ export interface SqliteOperation {
 
 export type Operation =
   | SetOperation
+  | EnsureOperation
   | PatchOperation
   | DeleteOperation
   | SqliteOperation;

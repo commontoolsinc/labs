@@ -5,7 +5,6 @@ import {
   llmDialog,
   NAME,
   pattern,
-  patternTool,
   type Stream,
   UI,
   type VNode,
@@ -173,11 +172,15 @@ ${profileSection}`;
     const messages = new Writable<BuiltInLLMMessage[]>([]);
 
     const llmTools = {
-      searchSpace: patternTool(summarySearchPattern, {
-        entries: summaryEntries,
-      }),
-      listMentionable: patternTool(listMentionable, { mentionable }),
-      listRecent: patternTool(listRecent, { recentPieces }),
+      searchSpace: pattern(({ query }: { query: string }) =>
+        summarySearchPattern({ query, entries: summaryEntries })
+      ),
+      listMentionable: pattern((_input: Record<string, never>) =>
+        listMentionable({ mentionable })
+      ),
+      listRecent: pattern((_input: Record<string, never>) =>
+        listRecent({ recentPieces })
+      ),
       createNote: {
         handler: createNoteHandler({ allPieces }),
         description:

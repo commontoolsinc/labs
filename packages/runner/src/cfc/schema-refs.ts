@@ -100,7 +100,7 @@ export const cfcSchemaChildRoot = (
 
 export const cfcSchemaIsInternalKey = (key: string): boolean =>
   key === "ifc" || key === "asCell" || key === "asStream" ||
-  key === "scope";
+  key === "asFactory" || key === "scope";
 
 export const cfcSchemaIsTrue = (schema: JSONSchema): boolean => {
   if (schema === true) {
@@ -216,10 +216,15 @@ const addRefs = (target: Set<string>, source: ReadonlySet<string>): void => {
   for (const ref of source) target.add(ref);
 };
 
-const summarizeCfcSchemaRefs = (schema: JSONSchema): SchemaRefSummary => {
+const summarizeCfcSchemaRefs = (
+  schema: JSONSchema,
+  includeFactorySchemas = true,
+): SchemaRefSummary => {
   if (typeof schema === "boolean") return EMPTY_REF_SUMMARY;
-  const cached = schemaRefSummaryCache.get(schema);
-  if (cached !== undefined) return cached;
+  if (includeFactorySchemas) {
+    const cached = schemaRefSummaryCache.get(schema);
+    if (cached !== undefined) return cached;
+  }
 
   const all = new Set<string>();
   const localDefinitions = new Set<string>();
@@ -229,7 +234,7 @@ const summarizeCfcSchemaRefs = (schema: JSONSchema): SchemaRefSummary => {
     if (name !== undefined) localDefinitions.add(name);
   }
   forEachSubschema(schema, (child) => {
-    const childSummary = summarizeCfcSchemaRefs(child);
+    const childSummary = summarizeCfcSchemaRefs(child, includeFactorySchemas);
     addRefs(all, childSummary.all);
     // A child carrying its own `$defs` starts a new local-ref scope. Its refs
     // still count for the public findRefs() walk, but must not retain names in
@@ -237,7 +242,7 @@ const summarizeCfcSchemaRefs = (schema: JSONSchema): SchemaRefSummary => {
     if (!(isRecord(child) && child.$defs !== undefined)) {
       addRefs(localDefinitions, childSummary.localDefinitions);
     }
-  }, ALL_SUBSCHEMAS);
+  }, { ...ALL_SUBSCHEMAS, includeFactorySchemas });
 
   const summary: SchemaRefSummary = {
     all: all.size === 0 ? EMPTY_REFS : all,
@@ -245,7 +250,9 @@ const summarizeCfcSchemaRefs = (schema: JSONSchema): SchemaRefSummary => {
       ? EMPTY_REFS
       : localDefinitions,
   };
-  if (isDeepFrozen(schema)) schemaRefSummaryCache.set(schema, summary);
+  if (includeFactorySchemas && isDeepFrozen(schema)) {
+    schemaRefSummaryCache.set(schema, summary);
+  }
   return summary;
 };
 
@@ -500,7 +507,13 @@ const resolveCfcSchemaRefUncached = (
   }
   if (isRecord(schemaCursor)) {
     const schemaRefs = new Set<string>();
-    findCfcSchemaRefs(schemaCursor, schemaRefs);
+    // A factory contract's public schemas are separately rooted documents.
+    // Their local refs do not depend on the enclosing schema's `$defs`, so
+    // they must not make us graft those outer definitions onto this result.
+    addRefs(
+      schemaRefs,
+      summarizeCfcSchemaRefs(schemaCursor, false).all,
+    );
     if (schemaRefs.size > 0 && schemaCursor.$defs === undefined) {
       schemaCursor = {
         ...schemaCursor,

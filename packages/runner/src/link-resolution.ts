@@ -124,7 +124,8 @@ const canFollowLinkHop = (
  * @param tx - The storage transaction to read from.
  * @param link - The link to read.
  * @param lastNode - The last node in the path.
- * @param options - Allows you to preserve the `overwrite` field if needed
+ * @param options - Allows preserving `overwrite` and observing actual pointer
+ *   hop sources without exposing terminal link-probe reads.
  * @returns The resolved link.
  */
 export function resolveLink(
@@ -132,7 +133,10 @@ export function resolveLink(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   lastNode: LastNode = "value",
-  options: { preserveOverwrite?: boolean } = {},
+  options: {
+    preserveOverwrite?: boolean;
+    onDereferenceSource?: (source: NormalizedFullLink) => void;
+  } = {},
 ): ResolvedFullLink {
   const seen = new Set<string>();
 
@@ -290,6 +294,7 @@ export function resolveLink(
         throw new Error(`Link cycle detected at ${key}: ${detail}`);
       }
       recordDereferenceHop(tx, nextHop);
+      options.onDereferenceSource?.(nextHop.source);
       const nextLink = nextHop.link;
       const crossSpace = nextLink.space !== link.space;
       if (nextLink.schema === undefined && link.schema !== undefined) {

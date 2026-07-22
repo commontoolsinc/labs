@@ -11,6 +11,15 @@ import { JsonEncodingContext } from "@/codec-json/JsonEncodingContext.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { FabricValue } from "@/fabric-value.ts";
 import { BaseReconstructionContext } from "@/codec-common/BaseReconstructionContext.ts";
+import { factoryStateOf, registerFabricFactory } from "@/fabric-factory.ts";
+import type { FabricFactory } from "@/interface.ts";
+import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
+import { isDeepFrozen } from "@/deep-freeze.ts";
+
+const FACTORY_REF = {
+  identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  symbol: "__cfHandler_1",
+} as const;
 
 /** Mock runtime for deserialization calls. */
 class MockRuntime extends BaseReconstructionContext {
@@ -42,6 +51,52 @@ function expectWireFormat(value: FabricValue, expected: unknown): void {
 }
 
 describe("json-encoding", () => {
+  it("round-trips Factory@1 without a reconstruction context", () => {
+    const factory = registerFabricFactory(() => undefined, "handler", {
+      kind: "handler",
+      ref: FACTORY_REF,
+      contextSchema: true,
+      eventSchema: false,
+    });
+    const encoded = jsonFromValue(factory);
+    const decoded = valueFromJson(encoded) as FabricFactory<[]>;
+
+    expect(factoryStateOf(decoded)).toEqual(factoryStateOf(factory));
+    expect(jsonFromValue(decoded)).toBe(encoded);
+    expect(() => decoded()).toThrow(
+      "factory requires runner materialization",
+    );
+    expect(() => plainObjectFromJson(encoded)).toThrow(/primitive/);
+  });
+
+  it("round-trips an unknown tagged value in factory params without a context", () => {
+    const wire = `fvj1:${
+      JSON.stringify({
+        "/Factory@1": {
+          kind: "pattern",
+          ref: FACTORY_REF,
+          argumentSchema: true,
+          resultSchema: true,
+          paramsSchema: true,
+          params: {
+            future: { "/FutureFactoryParam@7": { value: [1, 2, 3] } },
+          },
+        },
+      })
+    }`;
+
+    const decoded = valueFromJson(wire) as FabricFactory<[]>;
+    const state = factoryStateOf(decoded);
+    const future = state.kind === "pattern"
+      ? (state.params as Record<string, FabricValue> | undefined)?.future
+      : null;
+    expect(future).toBeInstanceOf(UnknownValue);
+    expect(isDeepFrozen(future)).toBe(true);
+    expect(JSON.parse(jsonFromValue(decoded).slice("fvj1:".length))).toEqual(
+      JSON.parse(wire.slice("fvj1:".length)),
+    );
+  });
+
   it("round-trips `undefined`", () => {
     expect(roundTrip(undefined)).toBe(undefined);
   });

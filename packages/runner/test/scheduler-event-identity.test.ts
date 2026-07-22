@@ -8,12 +8,16 @@ import {
 } from "./scheduler-test-utils.ts";
 import { mintEventId } from "../src/scheduler/event-identity.ts";
 import {
+  addSchedulerEventHandler,
   dropQueuedEvent,
   queueSchedulerEvent,
 } from "../src/scheduler/events.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
 import type { Runtime } from "../src/runtime.ts";
-import type { QueuedEvent } from "../src/scheduler/types.ts";
+import type {
+  EventHandlerRegistration,
+  QueuedEvent,
+} from "../src/scheduler/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 
@@ -63,9 +67,16 @@ describe("scheduler event identity", () => {
 
     queueSchedulerEvent({
       runtime: {} as Runtime,
-      eventHandlers: [[eventLink, handler]],
+      eventHandlers: [{
+        ref: eventLink,
+        handler,
+        generation: 1,
+        active: true,
+        readinessCancels: new Set(),
+      }],
       eventQueue,
       backgroundTasks: new Set(),
+      nextEventSequence: () => 1,
       queueExecution: () => {},
       recordLineageEvent: () => {},
       releaseLineageEvent: () => {},
@@ -134,6 +145,151 @@ describe("scheduler event identity", () => {
     }
   });
 
+  it("hydrates a load-pending event as soon as its exact handler registers", async () => {
+    const loadingLink: NormalizedFullLink = {
+      ...eventLink,
+      id: "of:register-during-load-stream",
+      space,
+    };
+    const env = createSchedulerTestRuntime(import.meta.url);
+    const pieceLoad = Promise.withResolvers<boolean>();
+    const handled = Promise.withResolvers<string>();
+    try {
+      const schedulerInternals = env.runtime.scheduler as unknown as {
+        eventQueueState: {
+          loadPieceForEvent?: () => Promise<boolean>;
+        };
+      };
+      schedulerInternals.eventQueueState.loadPieceForEvent = () =>
+        pieceLoad.promise;
+
+      env.runtime.scheduler.queueEvent(loadingLink, "payload");
+      env.runtime.scheduler.addEventHandler((_tx, value) => {
+        handled.resolve(String(value));
+      }, loadingLink);
+
+      const outcome = await Promise.race([
+        handled.promise,
+        new Promise<string>((resolve) =>
+          setTimeout(() => resolve("piece-load-deadlock"), 250)
+        ),
+      ]);
+      expect(outcome).toBe("payload");
+
+      const idleOutcome = await Promise.race([
+        env.runtime.idle().then(() => "idle"),
+        new Promise<string>((resolve) =>
+          setTimeout(() => resolve("piece-load-still-blocks-idle"), 250)
+        ),
+      ]);
+      expect(idleOutcome).toBe("idle");
+    } finally {
+      pieceLoad.resolve(true);
+      await disposeSchedulerTestRuntime(env);
+    }
+  });
+
+  it("keeps a started piece's event parked until its nested handler registers", async () => {
+    const eventQueue: QueuedEvent[] = [];
+    const eventHandlers: EventHandlerRegistration[] = [];
+    const backgroundTasks = new Set<Promise<unknown>>();
+    let executionWakes = 0;
+    const state = {
+      runtime: {} as Runtime,
+      eventHandlers,
+      eventQueue,
+      backgroundTasks,
+      nextEventSequence: () => 1,
+      loadPieceForEvent: () => Promise.resolve(true),
+      queueExecution: () => executionWakes++,
+      recordLineageEvent: () => {},
+      releaseLineageEvent: () => {},
+    };
+
+    queueSchedulerEvent(state, {
+      eventLink,
+      event: "payload",
+      retries: true,
+      doNotLoadPieceIfNotRunning: false,
+    });
+    await Promise.all([...backgroundTasks]);
+
+    expect(eventQueue.length).toBe(1);
+    expect(eventQueue[0].handlerLoadPending).toBe(true);
+
+    executionWakes = 0;
+    const handler = () => {};
+    addSchedulerEventHandler({
+      eventHandlers,
+      nextEventHandlerGeneration: () => 1,
+      eventQueue,
+      queueExecution: () => executionWakes++,
+    }, { handler, ref: eventLink });
+
+    expect(eventQueue[0].handlerLoadPending).toBeUndefined();
+    expect(eventQueue[0].handler).toBe(handler);
+    expect(executionWakes).toBe(1);
+  });
+
+  it("settles a handler-load-pending event during runtime disposal", async () => {
+    const loadingLink: NormalizedFullLink = {
+      ...eventLink,
+      id: "of:dispose-pending-stream",
+      space,
+    };
+    const env = createSchedulerTestRuntime(import.meta.url);
+    const commitStatus = Promise.withResolvers<string>();
+    const pieceLoad = Promise.withResolvers<boolean>();
+    let loadSignal: AbortSignal | undefined;
+    let disposed = false;
+    try {
+      const schedulerInternals = env.runtime.scheduler as unknown as {
+        eventQueueState: {
+          loadPieceForEvent?: (
+            runtime: Runtime,
+            link: NormalizedFullLink,
+            signal: AbortSignal,
+          ) => Promise<boolean>;
+        };
+        backgroundTasks: Set<Promise<unknown>>;
+      };
+      schedulerInternals.eventQueueState.loadPieceForEvent = (
+        _runtime,
+        _link,
+        signal,
+      ) => {
+        loadSignal = signal;
+        return pieceLoad.promise;
+      };
+
+      env.runtime.scheduler.queueEvent(
+        loadingLink,
+        "payload",
+        undefined,
+        (tx) => commitStatus.resolve(tx.status().status),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(schedulerInternals.backgroundTasks.size).toBe(1);
+
+      const outcome = await Promise.race([
+        disposeSchedulerTestRuntime(env).then(() => "disposed"),
+        new Promise<string>((resolve) =>
+          setTimeout(() => resolve("dispose-deadlock"), 250)
+        ),
+      ]);
+      expect(outcome).toBe("disposed");
+      expect(await commitStatus.promise).toBe("error");
+      expect(loadSignal?.aborted).toBe(true);
+      disposed = outcome === "disposed";
+    } finally {
+      pieceLoad.resolve(true);
+      if (!disposed) {
+        env.runtime.scheduler.addEventHandler(() => {}, loadingLink);
+        await disposeSchedulerTestRuntime(env);
+      }
+    }
+  });
+
   it("settles a piece-start failure exactly once", async () => {
     const eventQueue: QueuedEvent[] = [];
     const backgroundTasks = new Set<Promise<unknown>>();
@@ -149,6 +305,7 @@ describe("scheduler event identity", () => {
       eventHandlers: [],
       eventQueue,
       backgroundTasks,
+      nextEventSequence: () => 1,
       loadPieceForEvent: () => Promise.reject(new Error("start failed")),
       queueExecution: () => {},
       recordLineageEvent: () => {},
@@ -184,6 +341,7 @@ describe("scheduler event identity", () => {
       eventHandlers: [],
       eventQueue,
       backgroundTasks,
+      nextEventSequence: () => 1,
       loadPieceForEvent: () => pieceLoad.promise,
       queueExecution: () => {},
       recordLineageEvent: () => {},

@@ -10,6 +10,7 @@ import {
   isTrustedPattern,
   resolveOriginal,
   setArtifactEntryRef,
+  setDurableArtifactEntryRef,
   setPatternProgram,
 } from "./builder/pattern-metadata.ts";
 import type { MemorySpace, Runtime } from "./runtime.ts";
@@ -27,9 +28,15 @@ import type { CachedCompiledModule } from "./sandbox/module-record-compiler.ts";
 import type {
   CommitError,
   IExtendedStorageTransaction,
+  IStorageManager,
+  NativeStorageCommitOperation,
 } from "./storage/interface.ts";
+import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
+import { V2StorageTransaction } from "./storage/v2-transaction.ts";
+import { toDocumentPath } from "@commonfabric/memory/v2";
 import {
   buildSourceDocs,
+  type CompiledDoc,
   compiledDocKey,
   deriveModuleDelegations,
   getCompileCacheRuntimeVersion,
@@ -41,6 +48,7 @@ import {
   type SourceDoc,
   sourceDocKey,
   WRITE_TARGET_EDGE_SYNC_SCHEMA,
+  writeCompiledDocs,
   writeSourceAndCompiledDocs,
   writeSourceDocs,
 } from "./compilation-cache/cell-cache.ts";
@@ -207,6 +215,42 @@ function uniqueCacheableImports(
   return out;
 }
 
+/**
+ * Source recovery recompiles the entry's authored import view only. Synthetic
+ * roots are emitted compiler topology (and may retain several runtime
+ * generations under one content-addressed entry); the current compiler injects
+ * its own helpers. Feeding retained roots back as authored files can introduce
+ * duplicate filenames or select an obsolete ambient generation.
+ */
+function authoredSourceFiles(
+  sourceDocs: ReadonlyMap<string, SourceDoc>,
+  entryIdentity: string,
+): Source[] {
+  const files: Source[] = [];
+  const seen = new Set<string>();
+  const pending = [entryIdentity];
+  while (pending.length > 0) {
+    const identity = pending.shift()!;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    const doc = sourceDocs.get(identity);
+    if (doc === undefined) continue;
+    files.push({ name: doc.filename, contents: doc.code });
+    for (const imp of doc.imports) {
+      if (!imp.specifier.startsWith(ROOT_LINK_SPECIFIER)) {
+        pending.push(imp.identity);
+      }
+    }
+  }
+  return files;
+}
+
+interface VerifiedArtifactClosure {
+  readonly sourceDocs: Map<string, SourceDoc>;
+  readonly compiledDocs?: Map<string, CompiledDoc>;
+  readonly runtimeVersion?: string;
+}
+
 export class PatternManager {
   // Single-flight dedup + in-memory result cache for `compileOrGetPattern`,
   // keyed by a content hash of the program (NOT a cell id, NOT the retired
@@ -214,7 +258,7 @@ export class PatternManager {
   // instance. The hash is computed with `createRef` purely as a stable digest
   // function — no `pattern:` cell is ever minted. Bounded FIFO to cap memory.
   private inProgressCompilations = new Map<string, Promise<Pattern>>();
-  // Single-flight dedup for the expensive tail of `loadPatternByIdentity`
+  // Single-flight dedup for the expensive tail of `loadArtifactByIdentity`
   // (storage closure read + SES evaluation), keyed by `${space}\0${identity}`.
   // Boot references the same entry several times at once (one load per
   // referencing piece/system pattern); without this every concurrent miss ran
@@ -225,7 +269,7 @@ export class PatternManager {
   // a load arriving after completion takes.
   private inProgressByIdentityLoads = new Map<
     string,
-    Promise<Pattern | undefined>
+    Promise<boolean>
   >();
   // Content-hash → { compiled pattern, the space its closure was first written
   // into }. The space is tracked so a cross-space cache hit can replicate the
@@ -253,6 +297,18 @@ export class PatternManager {
   // modules — the same order of retention the engine's strong implementation
   // index (E1) already committed to for their implementation functions.
   private addressableByIdentity = new Map<string, Map<string, unknown>>();
+  /**
+   * Explicitly trusted, session-only identities for hand-built patterns.
+   * These have no durable source closure by construction, so exact-space
+   * storage authority does not apply to their in-session resume path.
+   */
+  private sessionOnlyArtifactIdentities = new Set<string>();
+  // Successful module evaluations, retained for the session independently of
+  // the bounded namespace cache below. This is also the negative-symbol cache:
+  // once one evaluation indexed every trusted export and __cfReg binding, an
+  // absent/untrusted symbol is definitively absent and must not trigger another
+  // storage read + SES evaluation.
+  private evaluatedArtifactIdentities = new Set<string>();
   // Bound for the module-NAMESPACE cache below (`modulesByIdentity`) only; its
   // misses recover through the async storage-backed load. Instance field so
   // tests can shrink it.
@@ -287,6 +343,29 @@ export class PatternManager {
   // A best-effort identity recovery that failed to persist skips the in-memory
   // artifact shortcuts on the next load so storage recovery runs again.
   private failedCompileCacheRecoveries = new Set<string>();
+  // `${entryIdentity}\0${space}` fire-and-forget compatibility replications
+  // already kicked off this session (see `replicatePatternToSpace`). An entry
+  // is removed on failure so the next child creation retries.
+  private replicatedClosures = new Set<string>();
+  // Single-flight awaited artifact-closure ensures. The source participates in
+  // the key: two trusted source spaces may race to repair the same destination,
+  // but callers naming the exact same transport share one verification/copy.
+  // Settled entries are always removed. Successful calls subsequently hit the
+  // exact-space availability map; failed calls remain retryable.
+  private inProgressArtifactClosureReplications = new Map<
+    string,
+    Promise<void>
+  >();
+  // Exact-space durability authority for Factory@1 writers. A live artifact
+  // index proves only that code evaluated in this session; it says nothing
+  // about which space can cold-load the content-addressed source closure. This
+  // map is populated only after an awaited persistence succeeds or a complete
+  // storage-backed source closure is verified in that exact space.
+  private availableArtifactIdentities = new Map<MemorySpace, Set<string>>();
+  // Verified source closures retained for synchronous by-value publication.
+  // A cold source still enters through the async loader and populates this map
+  // before its containing commit reaches the wire.
+  private artifactPublicationModules = new Map<string, CacheableModule[]>();
 
   constructor(readonly runtime: Runtime) {}
 
@@ -304,6 +383,343 @@ export class PatternManager {
     byIdentityHits: number;
   } {
     return { ...this.esmCacheStats };
+  }
+
+  /**
+   * Whether `identity` has a verified durable source closure in
+   * `artifactSpace`. This is runner-owned provenance: neither Factory@1 wire
+   * state nor a pattern's execution `spaceSelector` can populate it.
+   */
+  isArtifactAvailableInSpace(
+    identity: string,
+    artifactSpace: MemorySpace,
+  ): boolean {
+    return this.availableArtifactIdentities.get(artifactSpace)?.has(identity) ??
+      false;
+  }
+
+  /** Trusted in-session source space for an already-verified artifact. */
+  artifactSourceSpace(
+    identity: string,
+    destination?: MemorySpace,
+  ): MemorySpace | undefined {
+    for (const [space, identities] of this.availableArtifactIdentities) {
+      if (space !== destination && identities.has(identity)) return space;
+    }
+    return undefined;
+  }
+
+  private artifactPublicationKey(
+    space: MemorySpace,
+    identity: string,
+  ): string {
+    return `${space}\0${identity}`;
+  }
+
+  private cacheArtifactPublicationModules(
+    space: MemorySpace,
+    identity: string,
+    modules: CacheableModule[],
+  ): void {
+    this.artifactPublicationModules.set(
+      this.artifactPublicationKey(space, identity),
+      modules,
+    );
+  }
+
+  /**
+   * Retain the exact forward import closure rooted at every verified module.
+   *
+   * A compiled entry can expose factories from any module in its graph. Once
+   * that graph is verified, each such factory is warm and must publish without
+   * introducing an asynchronous readiness boundary. The original entry keeps
+   * the complete verified set, including synthetic extra roots. Other modules
+   * retain independently rooted forward closures so publishing a dependency
+   * directly does not include importer-only siblings.
+   */
+  private cacheArtifactPublicationClosures(
+    space: MemorySpace,
+    modules: CacheableModule[],
+    entryIdentity: string,
+  ): void {
+    const modulesByIdentity = new Map(
+      modules.map((module) => [module.identity, module]),
+    );
+    for (const rootIdentity of modulesByIdentity.keys()) {
+      if (rootIdentity === entryIdentity) {
+        this.cacheArtifactPublicationModules(space, rootIdentity, modules);
+        continue;
+      }
+      const reachable = new Set<string>();
+      const pending = [rootIdentity];
+      while (pending.length > 0) {
+        const identity = pending.pop()!;
+        if (reachable.has(identity)) continue;
+        const module = modulesByIdentity.get(identity);
+        if (module === undefined) continue;
+        reachable.add(identity);
+        for (const imp of module.imports) {
+          if (
+            !imp.specifier.startsWith(ROOT_LINK_SPECIFIER) &&
+            modulesByIdentity.has(imp.targetIdentity)
+          ) {
+            pending.push(imp.targetIdentity);
+          }
+        }
+      }
+      this.cacheArtifactPublicationModules(
+        space,
+        rootIdentity,
+        modules.filter((module) => reachable.has(module.identity)),
+      );
+    }
+  }
+
+  /**
+   * Build the source-document ensures that make a by-value Factory@1 durable
+   * in `toSpace`. Warm verified source returns synchronously. A cold source
+   * returns a promise, which the v2 replica holds behind the already-visible
+   * speculative containing commit.
+   */
+  prepareArtifactPublication(
+    entryIdentity: string,
+    fromSpace: MemorySpace,
+    toSpace: MemorySpace,
+    sourcePublication?: Promise<readonly CacheableModule[] | undefined>,
+    onPrepared?: (modules: readonly CacheableModule[]) => void,
+  ):
+    | readonly NativeStorageCommitOperation[]
+    | Promise<readonly NativeStorageCommitOperation[]> {
+    if (this.isArtifactAvailableInSpace(entryIdentity, toSpace)) return [];
+
+    const cached = this.artifactPublicationModules.get(
+      this.artifactPublicationKey(fromSpace, entryIdentity),
+    );
+    if (cached !== undefined) {
+      onPrepared?.(cached);
+      return this.buildArtifactPublicationOperations(
+        cached,
+        entryIdentity,
+        toSpace,
+      );
+    }
+
+    return (async () => {
+      const loadFromDurableSource = async () => {
+        await Promise.allSettled([...this.pendingCacheWriteBacks]);
+        return await this.loadVerifiedArtifactClosure(
+          fromSpace,
+          entryIdentity,
+          undefined,
+        );
+      };
+      // A keyed publication is only a fallback for a Cell value visible from
+      // the speculative overlay. Probe durable source authority first: an
+      // unrelated pending rewrite of the same content identity must neither
+      // delay nor reject a copy from an already-durable Cell. If durable proof
+      // misses, the pending generation may make that exact content available;
+      // await it and retry verification once.
+      let closure = await loadFromDurableSource();
+      if (closure === undefined && sourcePublication !== undefined) {
+        const publishedModules = await sourcePublication;
+        if (this.isArtifactAvailableInSpace(entryIdentity, toSpace)) return [];
+        if (publishedModules !== undefined) {
+          const modules = [...publishedModules];
+          this.cacheArtifactPublicationClosures(
+            fromSpace,
+            modules,
+            entryIdentity,
+          );
+          onPrepared?.(modules);
+          return this.buildArtifactPublicationOperations(
+            modules,
+            entryIdentity,
+            toSpace,
+          );
+        }
+        closure = await loadFromDurableSource();
+      }
+      if (closure === undefined) {
+        throw new Error(
+          `Artifact closure ${entryIdentity} is unavailable in source space ${fromSpace}`,
+        );
+      }
+      const modules = this.modulesFromVerifiedArtifactClosure(closure);
+      this.cacheArtifactPublicationClosures(
+        fromSpace,
+        modules,
+        entryIdentity,
+      );
+      onPrepared?.(modules);
+      return this.buildArtifactPublicationOperations(
+        modules,
+        entryIdentity,
+        toSpace,
+      );
+    })();
+  }
+
+  /** Grant destination-space authority only after the atomic wire commit. */
+  noteArtifactPublicationConfirmed(
+    entryIdentity: string,
+    toSpace: MemorySpace,
+  ): void {
+    this.noteArtifactClosureAvailable(toSpace, [entryIdentity]);
+  }
+
+  private buildArtifactPublicationOperations(
+    modules: CacheableModule[],
+    entryIdentity: string,
+    toSpace: MemorySpace,
+  ): readonly NativeStorageCommitOperation[] {
+    // Build against an intentionally empty replica so every artifact document
+    // (including derived import-edge documents) is represented as an explicit
+    // ensure even when the real destination happens to be warm locally.
+    const emptyStorage = {
+      open: (space: MemorySpace) => ({
+        replica: {
+          did: () => space,
+          get: () => undefined,
+          getDocument: () => undefined,
+        },
+      }),
+    } as unknown as IStorageManager;
+    const base = new V2StorageTransaction(emptyStorage);
+    const draft = new ExtendedStorageTransaction(base);
+    try {
+      writeSourceDocs(this.runtime, toSpace, modules, entryIdentity, draft);
+      const native = base.getNativeCommit(toSpace);
+      if (native === undefined) {
+        throw new Error(
+          `Artifact closure ${entryIdentity} produced no publication documents`,
+        );
+      }
+      return native.operations.map((operation) => {
+        if (operation.op === "delete" || operation.op === "ensure") {
+          throw new Error(
+            `Artifact closure ${entryIdentity} produced unexpected ${operation.op} draft operation`,
+          );
+        }
+        const document = operation.value;
+        const isSourceDocument = isRecord(document) &&
+          isRecord(document.value) && document.value.kind === "source";
+        const isCompiledDocument = isRecord(document) &&
+          isRecord(document.value) && document.value.kind === "compiled";
+        return {
+          op: "ensure" as const,
+          id: operation.id,
+          type: operation.type,
+          scope: operation.scope,
+          value: operation.value,
+          // Product annotations and runtime-maintained CFC labels are not part
+          // of the module's content identity and must not create false
+          // mismatches against a pre-existing destination artifact.
+          ignore: [
+            ...(isSourceDocument
+              ? [toDocumentPath(["value", "annotations"])]
+              : []),
+            toDocumentPath(["cfc"]),
+          ],
+          // Synthetic closure roots affect load topology only. Source and
+          // compiled identity exclude them, so the same module may
+          // legitimately be sealed with a different root set in another entry
+          // closure. Union them so the destination retains every published
+          // closure's reachability. Product annotations remain source-only.
+          ...(isSourceDocument || isCompiledDocument
+            ? { addUnique: [toDocumentPath(["value", "roots"])] }
+            : {}),
+        };
+      });
+    } finally {
+      draft.abort("artifact publication draft complete");
+    }
+  }
+
+  /** Fail closed unless the exact containing space can cold-load `identity`. */
+  assertArtifactAvailableInSpace(
+    identity: string,
+    artifactSpace: MemorySpace,
+  ): void {
+    if (!this.isArtifactAvailableInSpace(identity, artifactSpace)) {
+      throw new Error(
+        `Factory artifact ${identity} is not available in space ${artifactSpace}`,
+      );
+    }
+  }
+
+  private noteArtifactClosureAvailable(
+    artifactSpace: MemorySpace,
+    identities: Iterable<string>,
+  ): void {
+    let available = this.availableArtifactIdentities.get(artifactSpace);
+    if (available === undefined) {
+      available = new Set<string>();
+      this.availableArtifactIdentities.set(artifactSpace, available);
+    }
+    for (const identity of identities) {
+      available.add(identity);
+      // A factory can be evaluated and indexed before the containing commit
+      // publishes its closure. Commit confirmation is the point at which that
+      // exact content identity becomes durable authority, so upgrade every
+      // already-live symbol without requiring a re-evaluation.
+      const indexed = this.addressableByIdentity.get(identity);
+      if (indexed !== undefined) {
+        for (const [symbol, value] of indexed) {
+          setDurableArtifactEntryRef(value, { identity, symbol });
+        }
+      }
+    }
+  }
+
+  /**
+   * Load and verify the complete source closure that can back one artifact in
+   * `artifactSpace`, including pinned Fabric imports. Source documents omit
+   * Fabric edges deliberately, so verifying only the entry's linked closure
+   * would miss separately rooted imported artifacts that compiled-cache
+   * closures include. Every such root must itself verify in the same space.
+   */
+  private async loadVerifiedArtifactSourceClosure(
+    artifactSpace: MemorySpace,
+    entryIdentity: string,
+    tx: IExtendedStorageTransaction,
+  ): Promise<Map<string, SourceDoc> | undefined> {
+    const verified = new Map<string, SourceDoc>();
+    const visitedRoots = new Set<string>();
+    const pendingRoots = [entryIdentity];
+
+    while (pendingRoots.length > 0) {
+      const rootIdentity = pendingRoots.shift()!;
+      if (visitedRoots.has(rootIdentity)) continue;
+      visitedRoots.add(rootIdentity);
+
+      const closure = await loadVerifiedSourceClosure(
+        this.runtime,
+        artifactSpace,
+        rootIdentity,
+        tx,
+      );
+      if (closure === undefined) return undefined;
+
+      for (const [identity, doc] of closure) {
+        if (!verified.has(identity)) verified.set(identity, doc);
+        for (const imp of fabricImportRefsFromSource(doc)) {
+          if (!visitedRoots.has(imp.targetIdentity)) {
+            pendingRoots.push(imp.targetIdentity);
+          }
+        }
+      }
+    }
+
+    // Verification is the single authority for retaining publication source.
+    // Every caller that successfully loads a closure — compiled-cache hits,
+    // runtime-version recovery, ordinary pattern compilation, and explicit
+    // closure verification — now warms the same synchronous publication path.
+    this.cacheArtifactPublicationClosures(
+      artifactSpace,
+      this.modulesFromVerifiedArtifactClosure({ sourceDocs: verified }),
+      entryIdentity,
+    );
+    return verified;
   }
 
   /** Resolve once all in-flight compiled-cache write-backs have settled. */
@@ -351,6 +767,7 @@ export class PatternManager {
     ref: { identity: string; symbol: string },
   ): void {
     brandTrustedPattern(pattern);
+    this.sessionOnlyArtifactIdentities.add(ref.identity);
     this.indexArtifact(ref.identity, ref.symbol, pattern);
   }
 
@@ -401,11 +818,15 @@ export class PatternManager {
 
     const entryRef = this.getArtifactEntryRef(pattern);
     if (!entryRef) return;
-    const replication = this.replicateClosures(
+    const dedupeKey = `${entryRef.identity}\0${toSpace}`;
+    if (this.replicatedClosures.has(dedupeKey)) return;
+    this.replicatedClosures.add(dedupeKey);
+    const replication = this.ensureArtifactClosureInSpace(
       entryRef.identity,
       fromSpace,
       toSpace,
     ).catch((error) => {
+      this.replicatedClosures.delete(dedupeKey);
       logger.error("closure-replication-failed", () => [
         `entry=${entryRef.identity}`,
         `from=${fromSpace}`,
@@ -418,14 +839,60 @@ export class PatternManager {
   }
 
   /**
-   * Copy the closures reachable from `entryIdentity` out of `fromSpace` into
-   * `toSpace`, rebuilding the emitted-module shape the write functions expect.
-   * All-or-nothing: a partial compiled closure can never be served (the loaders
-   * require a full, integrity-valid hit), so an incomplete origin set throws
-   * instead of persisting an unservable copy. Delegation metadata is deliberately
-   * not copied across spaces: it carries writer authority and is valid only in
-   * the space whose cache documents attest it. The ordinary save path still
-   * preserves any authenticated delegation already present in `toSpace`.
+   * Await exact-space durability for one content-addressed builder artifact.
+   * Concurrent calls for the same `(identity, source, destination)` share one
+   * flight. A successful cross-space call either verifies an already-complete
+   * destination closure or copies source first, then the runtime-versioned
+   * compiled set, and verifies the complete destination before granting any
+   * availability. Same-space calls verify and mark without writing.
+   *
+   * Failures never grant availability and settled flights are removed, so a
+   * caller can repair missing storage and retry the same operation.
+   */
+  ensureArtifactClosureInSpace(
+    entryIdentity: string,
+    fromSpace: MemorySpace,
+    toSpace: MemorySpace,
+  ): Promise<void> {
+    // A prior successful cross-space ensure is already the required proof.
+    // Same-space calls deliberately re-enter verification: this public seam is
+    // also how a fresh manager learns authority for pre-existing storage.
+    if (
+      fromSpace !== toSpace &&
+      this.isArtifactAvailableInSpace(entryIdentity, toSpace)
+    ) {
+      return Promise.resolve();
+    }
+
+    const dedupeKey = `${fromSpace}\0${toSpace}\0${entryIdentity}`;
+    const inProgress = this.inProgressArtifactClosureReplications.get(
+      dedupeKey,
+    );
+    if (inProgress !== undefined) return inProgress;
+
+    const replication = this.replicateClosures(
+      entryIdentity,
+      fromSpace,
+      toSpace,
+    );
+    this.inProgressArtifactClosureReplications.set(dedupeKey, replication);
+    const clearReplication = () => {
+      if (
+        this.inProgressArtifactClosureReplications.get(dedupeKey) ===
+          replication
+      ) {
+        this.inProgressArtifactClosureReplications.delete(dedupeKey);
+      }
+    };
+    void replication.then(clearReplication, clearReplication);
+    return replication;
+  }
+
+  /**
+   * Verify or copy one complete artifact closure. Fabric-import source edges
+   * are deliberately not persisted as ordinary source links, so
+   * `loadVerifiedArtifactClosure` roots each pinned dependency separately and
+   * validates that the compiled graph covers that entire combined source set.
    */
   private async replicateClosures(
     entryIdentity: string,
@@ -437,70 +904,205 @@ export class PatternManager {
     if (visited.has(visitKey)) return;
     visited.add(visitKey);
 
-    // The origin-space closure may still have an in-flight cache write. Reading
-    // before it commits would make this replication fail even though the source
-    // is about to become available. Await write-backs first. Use their own set,
-    // not flushCompileCacheWrites: this replication promise is tracked there and
-    // would await itself.
+    // The origin-space closure may have been produced by THIS session's cold
+    // compile, whose write-back is itself fire-and-forget and may not have
+    // committed yet. A lost race would throw here — and for a handler-created
+    // child (one space per profile) nothing re-fires the released dedupe key,
+    // leaving that child permanently unloadable. Await the in-flight
+    // write-backs first. (Their own set, not flushCompileCacheWrites: this
+    // replication promise is tracked there and would await itself.)
     await Promise.allSettled([...this.pendingCacheWriteBacks]);
-    // Replicate the same cached variant the compile path uses — the coverage
-    // suffix keeps an instrumented closure from being served under an ordinary
-    // key (and vice versa).
     const runtimeVersion = moduleByteCacheRuntimeVersion(
       await getCompileCacheRuntimeVersion(),
       { patternCoverage: this.runtime.patternCoverage !== undefined },
     );
+    const existing = await this.loadVerifiedArtifactClosure(
+      toSpace,
+      entryIdentity,
+      runtimeVersion,
+    );
+    if (fromSpace === toSpace) {
+      if (existing !== undefined) {
+        this.noteArtifactClosureAvailable(toSpace, existing.sourceDocs.keys());
+        return;
+      }
+      throw new Error(
+        `Artifact closure ${entryIdentity} is unavailable in space ${toSpace}`,
+      );
+    }
+
+    const origin = await this.loadVerifiedArtifactClosure(
+      fromSpace,
+      entryIdentity,
+      runtimeVersion,
+    );
+    if (origin === undefined) {
+      // Preserve the actionable failure categories exposed by the replication
+      // seam. The combined verifier deliberately returns only success/miss so
+      // callers can probe a destination without exceptions; an origin miss is
+      // terminal, and merits a second, diagnostic read.
+      const diagnosticTx = this.runtime.edit();
+      try {
+        const sourceDocs = await this.loadVerifiedArtifactSourceClosure(
+          fromSpace,
+          entryIdentity,
+          diagnosticTx,
+        );
+        if (!sourceDocs?.has(entryIdentity)) {
+          throw new Error("source closure unavailable in origin space");
+        }
+        if (runtimeVersion !== undefined) {
+          const compiledDocs = await loadCompiledClosure(
+            this.runtime,
+            fromSpace,
+            entryIdentity,
+            { runtimeVersion },
+            diagnosticTx,
+          );
+          if (
+            isPatternCoverageCacheRuntimeVersion(runtimeVersion) &&
+            !cacheEntriesIncludePatternCoverage(compiledDocs.values())
+          ) {
+            throw new Error("coverage spans unavailable in origin space");
+          }
+          if (!compiledDocs.has(entryIdentity)) {
+            throw new Error(`compiled doc missing for ${entryIdentity}`);
+          }
+        }
+      } finally {
+        diagnosticTx.abort?.("closure-replication diagnostic read complete");
+      }
+      throw new Error(
+        `Artifact closure ${entryIdentity} is unavailable in source space ${fromSpace}`,
+      );
+    }
+    const existingCoversOrigin = existing !== undefined &&
+      [...origin.sourceDocs.keys()].every((identity) =>
+        existing.sourceDocs.has(identity)
+      ) &&
+      (origin.compiledDocs === undefined ||
+        (existing.compiledDocs !== undefined &&
+          [...origin.compiledDocs.keys()].every((identity) =>
+            existing.compiledDocs!.has(identity)
+          )));
+    if (existingCoversOrigin) {
+      // Synthetic roots are topology rather than module identity. A valid
+      // destination can therefore be only a subset of the exact trusted
+      // origin closure; accept it only after proving coverage, while an
+      // existing superset remains an idempotent no-op.
+      this.noteArtifactClosureAvailable(toSpace, existing.sourceDocs.keys());
+      return;
+    }
+    const modules = this.modulesFromVerifiedArtifactClosure(origin);
+
+    // Source is the runtime-version-independent recovery authority. Make the
+    // complete source set durable before attempting the compiled cache so a
+    // compiled-write failure leaves a safe, retryable source-first partial
+    // copy, never a compiled-only destination.
+    await this.writeBackSourceCache(toSpace, modules, entryIdentity);
+    if (runtimeVersion !== undefined) {
+      await this.writeBackCompiledCache(
+        toSpace,
+        modules,
+        entryIdentity,
+        { runtimeVersion },
+      );
+    }
+
+    const copied = await this.loadVerifiedArtifactClosure(
+      toSpace,
+      entryIdentity,
+      runtimeVersion,
+    );
+    if (
+      copied === undefined ||
+      [...origin.sourceDocs.keys()].some((identity) =>
+        !copied.sourceDocs.has(identity)
+      ) ||
+      (origin.compiledDocs !== undefined &&
+        (copied.compiledDocs === undefined ||
+          [...origin.compiledDocs.keys()].some((identity) =>
+            !copied.compiledDocs!.has(identity)
+          )))
+    ) {
+      throw new Error(
+        `Artifact closure ${entryIdentity} failed verification in destination space ${toSpace}`,
+      );
+    }
+    this.noteArtifactClosureAvailable(toSpace, copied.sourceDocs.keys());
+  }
+
+  private async loadVerifiedArtifactClosure(
+    artifactSpace: MemorySpace,
+    entryIdentity: string,
+    runtimeVersion: string | undefined,
+  ): Promise<VerifiedArtifactClosure | undefined> {
     const readTx = this.runtime.edit();
-    let sourceDocs;
-    let compiledDocs;
     try {
-      // Verification recomputes module identities with the default ("")
-      // runtimeFingerprint — the same default every compile path in the tree
-      // uses today. If a non-empty fingerprint is ever threaded into
-      // compilation, it must be threaded here too or verification will
-      // reject every closure (logged as replication failures).
-      sourceDocs = await loadVerifiedSourceClosure(
-        this.runtime,
-        fromSpace,
+      // Source verification recomputes module identities with the default ("")
+      // runtimeFingerprint — the same default every compile path uses today.
+      // If a non-empty fingerprint is threaded into compilation, it must also
+      // be threaded through this verifier.
+      const sourceDocs = await this.loadVerifiedArtifactSourceClosure(
+        artifactSpace,
         entryIdentity,
         readTx,
       );
-      if (runtimeVersion === undefined) {
-        compiledDocs = undefined;
-      } else {
-        const cacheOpts = { runtimeVersion };
-        compiledDocs = await loadCompiledClosure(
-          this.runtime,
-          fromSpace,
-          entryIdentity,
-          cacheOpts,
-          readTx,
-        );
+      if (sourceDocs === undefined || !sourceDocs.has(entryIdentity)) {
+        return undefined;
       }
+      const sourceClosure = { sourceDocs } satisfies VerifiedArtifactClosure;
+      if (runtimeVersion === undefined) return sourceClosure;
+
+      const compiledDocs = await loadCompiledClosure(
+        this.runtime,
+        artifactSpace,
+        entryIdentity,
+        { runtimeVersion },
+        readTx,
+      );
+      if (
+        !compiledDocs.has(entryIdentity) ||
+        [...compiledDocs.keys()].some((identity) =>
+          !sourceDocs.has(identity)
+        ) ||
+        (isPatternCoverageCacheRuntimeVersion(runtimeVersion) &&
+          !cacheEntriesIncludePatternCoverage(compiledDocs.values()))
+      ) {
+        return undefined;
+      }
+      // Source roots are monotonic across compiler/runtime generations, while
+      // compiled documents are version-keyed. Select the source view named by
+      // this compiled closure instead of requiring old source-only generations
+      // to appear in the current version's compiled set.
+      const selectedSourceDocs = new Map<string, SourceDoc>();
+      for (const identity of compiledDocs.keys()) {
+        selectedSourceDocs.set(identity, sourceDocs.get(identity)!);
+      }
+      if (
+        [...selectedSourceDocs.values()].some((doc) =>
+          doc.imports.some((imp) =>
+            !imp.specifier.startsWith(ROOT_LINK_SPECIFIER) &&
+            !compiledDocs.has(imp.identity)
+          )
+        )
+      ) {
+        return undefined;
+      }
+      return { sourceDocs: selectedSourceDocs, compiledDocs, runtimeVersion };
     } finally {
-      readTx.abort?.("closure-replication read complete");
+      readTx.abort?.("artifact-closure verification complete");
     }
-    if (!sourceDocs?.has(entryIdentity)) {
-      throw new Error("source closure unavailable in origin space");
-    }
-    if (
-      runtimeVersion !== undefined &&
-      isPatternCoverageCacheRuntimeVersion(runtimeVersion) &&
-      (compiledDocs === undefined ||
-        !cacheEntriesIncludePatternCoverage(compiledDocs.values()))
-    ) {
-      throw new Error("coverage spans unavailable in origin space");
-    }
+  }
+
+  private modulesFromVerifiedArtifactClosure(
+    closure: VerifiedArtifactClosure,
+  ): CacheableModule[] {
     const modules: CacheableModule[] = [];
-    const fabricDependencies = new Set<string>();
-    for (const [identity, doc] of sourceDocs) {
-      const compiled = compiledDocs?.get(identity);
-      if (runtimeVersion !== undefined && !compiled) {
+    for (const [identity, doc] of closure.sourceDocs) {
+      const compiled = closure.compiledDocs?.get(identity);
+      if (closure.runtimeVersion !== undefined && compiled === undefined) {
         throw new Error(`compiled doc missing for ${identity}`);
-      }
-      const fabricImports = fabricImportRefsFromSource(doc);
-      for (const imp of fabricImports) {
-        fabricDependencies.add(imp.targetIdentity);
       }
       modules.push({
         identity,
@@ -516,8 +1118,8 @@ export class PatternManager {
         ...(compiled?.policyManifests !== undefined
           ? { policyManifests: compiled.policyManifests }
           : {}),
-        // The write functions re-derive the entry's root links; keep only the
-        // real import edges.
+        // Rebuild real internal and pinned Fabric import edges. Synthetic cache
+        // root links are recomputed by the write functions for the complete set.
         imports: uniqueCacheableImports([
           ...doc.imports
             .filter((imp) => !imp.specifier.startsWith(ROOT_LINK_SPECIFIER))
@@ -525,33 +1127,11 @@ export class PatternManager {
               specifier: imp.specifier,
               targetIdentity: imp.identity,
             })),
-          ...fabricImports,
+          ...fabricImportRefsFromSource(doc),
         ]),
       });
     }
-    if (runtimeVersion === undefined) {
-      await this.persistSourceCacheTracked(
-        toSpace,
-        modules,
-        entryIdentity,
-      );
-    } else {
-      await this.persistCompileCacheTracked(
-        toSpace,
-        modules,
-        entryIdentity,
-        { runtimeVersion },
-      );
-    }
-
-    for (const dependencyIdentity of fabricDependencies) {
-      await this.replicateClosures(
-        dependencyIdentity,
-        fromSpace,
-        toSpace,
-        visited,
-      );
-    }
+    return modules;
   }
 
   private async loadPreviousSourceClosure(
@@ -646,8 +1226,8 @@ export class PatternManager {
    * CLI pattern-test harness and the multi-user worker previously reached for the
    * lower-level `Engine.compileAndEvaluateModules` directly and skipped
    * registration (CT-1811): map/filter/flatMap ops then had no content-addressed
-   * entry ref and fell back to a defer-corrupted embedded graph instead of their
-   * canonical `$patternRef` artifact.
+   * entry ref and could not participate in canonical Factory@1 identity and
+   * cold materialization.
    *
    * Registration is fused with evaluation here on purpose, so it cannot be
    * forgotten — mirroring what the runtime's own `compilePattern` /
@@ -669,6 +1249,7 @@ export class PatternManager {
   async compileAndRegisterModules(
     program: RuntimeProgram,
     options?: TypeScriptHarnessProcessOptions,
+    cacheCtx?: { space: MemorySpace },
   ): Promise<EvaluateResult> {
     const patternCoverage = this.patternCoverageFor(options);
     const effectiveOptions: TypeScriptHarnessProcessOptions = {
@@ -682,7 +1263,10 @@ export class PatternManager {
         await getCompileCacheRuntimeVersion(),
         { patternCoverage: patternCoverage !== undefined },
       );
-    if (byteCache === undefined || runtimeVersion === undefined) {
+    if (
+      cacheCtx === undefined &&
+      (byteCache === undefined || runtimeVersion === undefined)
+    ) {
       const result = await this.runtime.harness.compileAndEvaluateModules(
         program,
         effectiveOptions,
@@ -691,13 +1275,34 @@ export class PatternManager {
       return result;
     }
 
-    const { id, graph, mainSpecifier, modules } = await this.runtime.harness
+    const { id, graph, mainSpecifier, entryIdentity, modules } = await this
+      .runtime.harness
       .compileToRecordGraph(program, {
         ...effectiveOptions,
-        precompiledModulesFor: ({ identities }) =>
-          Promise.resolve(byteCache.getCompleteSet(runtimeVersion, identities)),
+        ...(cacheCtx === undefined
+          ? {}
+          : { fabricImports: { space: cacheCtx.space } }),
+        ...(byteCache === undefined || runtimeVersion === undefined ? {} : {
+          precompiledModulesFor: ({ identities }) =>
+            Promise.resolve(
+              byteCache.getCompleteSet(runtimeVersion, identities),
+            ),
+        }),
       });
-    byteCache.putAll(runtimeVersion, modules);
+    if (byteCache !== undefined && runtimeVersion !== undefined) {
+      byteCache.putAll(runtimeVersion, modules);
+    }
+    if (cacheCtx !== undefined) {
+      // This full-namespace seam is used by pattern-test harnesses that need
+      // named exports in addition to `main.default`. Persist the complete
+      // version-independent source closure before granting durable refs; a
+      // process byte-cache hit alone is only session authority.
+      await this.persistSourceCacheTracked(
+        cacheCtx.space,
+        modules,
+        entryIdentity,
+      );
+    }
     // Yield ahead of the synchronous SES evaluation (see compilePattern).
     await interleaveCompileYield();
     const result = this.runtime.harness.evaluateRecordGraph(
@@ -706,7 +1311,11 @@ export class PatternManager {
       mainSpecifier,
       program.files,
     );
-    this.registerEvaluatedModules(result);
+    if (cacheCtx === undefined) {
+      this.registerEvaluatedModules(result);
+    } else {
+      this.registerDurableEvaluatedModules(result);
+    }
     return result;
   }
 
@@ -871,13 +1480,20 @@ export class PatternManager {
               !patternCoverage ||
               cacheEntriesIncludePatternCoverage(bodies.values())
             ) {
-              const sourceClosure = await loadVerifiedSourceClosure(
-                this.runtime,
-                space,
-                entryIdentity,
-                readTx,
-              );
-              if (sourceClosure?.has(entryIdentity)) {
+              const sourceClosure = await this
+                .loadVerifiedArtifactSourceClosure(
+                  space,
+                  entryIdentity,
+                  readTx,
+                );
+              if (
+                sourceClosure !== undefined &&
+                identities.every((identity) => sourceClosure.has(identity))
+              ) {
+                this.noteArtifactClosureAvailable(
+                  space,
+                  sourceClosure.keys(),
+                );
                 warmHit = true;
                 return bodies;
               }
@@ -953,17 +1569,16 @@ export class PatternManager {
       this.esmCacheStats[compiledBodiesServed ? "hits" : "misses"]++;
     }
     if (!warmHit || moduleDelegations.size > 0) {
-      // Persist the module set into this space. AWAITED (identity E4): refs-only
-      // pattern JSON makes artifact persistence part of the compilation
-      // contract — a cell can only carry a `$patternRef` after compilePattern
-      // returned, so completing the write here guarantees every persisted ref
-      // has a durable closure behind it (no race against session end). This
+      // Persist the module set into this space. AWAITED: Factory@1 values carry
+      // content-addressed artifact refs, so completing the write here guarantees
+      // every persisted factory has a durable closure behind it (no race against
+      // session end). This
       // covers BOTH a cold compile AND a process-byte-cache hit: in the latter
       // the transform-and-emit step was skipped, but this space's persisted
       // cache may be empty (e.g. a fresh space), and the by-identity reload path
-      // needs the closure here. A failed write fails the compile: persisted
-      // refs-only pattern JSON would otherwise point at a closure that is not
-      // durable in `space`.
+      // needs the closure here. A failed write fails the compile: a persisted
+      // factory would otherwise point at a closure that is not durable in
+      // `space`.
       await this.persistCompileCacheTracked(
         space,
         modules,
@@ -993,8 +1608,8 @@ export class PatternManager {
     // bodies read below carry probes exactly when this is set.
     const patternCoverage = this.patternCoverageFor();
     const readTx = this.runtime.edit();
-    let closure;
-    let sourceClosure;
+    let closure = new Map<string, CompiledDoc>();
+    let sourceClosure: Map<string, SourceDoc> | undefined;
     try {
       const readStart = performance.now();
       closure = await loadCompiledClosure(
@@ -1004,20 +1619,20 @@ export class PatternManager {
         cacheOpts,
         readTx,
       );
+      logger.time(readStart, "compile-cache", "read-by-identity");
       if (closure.has(entryIdentity)) {
-        sourceClosure = await loadVerifiedSourceClosure(
-          this.runtime,
+        sourceClosure = await this.loadVerifiedArtifactSourceClosure(
           space,
           entryIdentity,
           readTx,
         );
       }
-      logger.time(readStart, "compile-cache", "read-by-identity");
     } finally {
       readTx.abort?.("compile-cache by-identity read complete");
     }
     if (
-      !closure.has(entryIdentity) || !sourceClosure?.has(entryIdentity) ||
+      !closure.has(entryIdentity) || sourceClosure === undefined ||
+      ![...closure.keys()].every((identity) => sourceClosure.has(identity)) ||
       (patternCoverage !== undefined &&
         !cacheEntriesIncludePatternCoverage(closure.values()))
     ) {
@@ -1071,7 +1686,13 @@ export class PatternManager {
           ...(patternCoverage ? { patternCoverage } : {}),
         },
       );
-      return this.patternFromEvaluation(result, program, entryIdentity);
+      const pattern = this.patternFromEvaluation(
+        result,
+        program,
+        entryIdentity,
+      );
+      this.noteArtifactClosureAvailable(space, sourceClosure.keys());
+      return pattern;
     } catch (error) {
       // Incomplete/invalid cached closure — fall back to recompile.
       logger.warn("compile-cache-by-identity-miss", () => [
@@ -1083,89 +1704,119 @@ export class PatternManager {
   }
 
   /**
-   * Load a pattern referenced purely by content identity — the
-   * `{identity, symbol}` result-cell reference — the ONLY pattern pointer. The
-   * resolution chain is: in-memory live module → integrity-valid compiled
-   * closure → cold recompile from the verified `pattern:<identity>` source-doc
-   * closure ({@link tryColdLoadByIdentity}, which survives a
-   * runtime-version change). No TypeScript program in hand, no meta cell — the
-   * source docs are the single durable source.
-   *
-   * Returns the pattern, or `undefined` when the by-identity load is
-   * unavailable (CFC not enforcing / closure absent or incomplete / invalid /
-   * no stored source). A piece carrying only a legacy `pattern` link (no
-   * `patternIdentity`) is unrecoverable — the sanctioned data-wipe outcome.
+   * Resolve a trusted builder artifact by its content-addressed module identity
+   * and export/__cfReg symbol. Storage-backed evaluation is scoped to the
+   * trusted artifact source space; symbol selection happens only after the one
+   * identity-level evaluation has indexed every trusted builder artifact.
    */
-  async loadPatternByIdentity(
+  async loadArtifactByIdentity(
     entryIdentity: string,
     symbol: string,
-    space: MemorySpace,
-  ): Promise<Pattern | undefined> {
-    const recoveryKey = compileCacheRecoveryKey(space, entryIdentity);
+    artifactSpace: MemorySpace,
+  ): Promise<object | undefined> {
+    const recoveryKey = compileCacheRecoveryKey(
+      artifactSpace,
+      entryIdentity,
+    );
     const retryFailedRecovery = this.failedCompileCacheRecoveries.has(
       recoveryKey,
     );
-    // In-memory artifact index: the pattern may already be live this session —
-    // an evaluated ESM artifact, or a hand-built pattern given a synthetic
-    // pointer via `associatePatternIdentity`. This path is independent of the
-    // compiled cache (and of CFC enforcement), so it serves the same artifact
-    // `artifactFromIdentitySync` would return.
+    const sourceAvailable = this.isArtifactAvailableInSpace(
+      entryIdentity,
+      artifactSpace,
+    ) && !retryFailedRecovery;
+    // The generic live index is populated only through indexArtifact's trusted
+    // builder gate. Probe the gate again here so this public API never turns a
+    // corrupted/private-table value into executable authority.
     const indexed = this.addressableByIdentity.get(entryIdentity)?.get(symbol);
     if (
-      !retryFailedRecovery && indexed !== undefined && isTrustedPattern(indexed)
+      (sourceAvailable ||
+        this.sessionOnlyArtifactIdentities.has(entryIdentity)) &&
+      indexed !== undefined && isTrustedBuilderArtifact(indexed)
     ) {
       this.esmCacheStats.byIdentityHits++;
-      return indexed;
+      return indexed as object;
     }
     if (this.runtime.cfcEnforcementMode === "disabled") {
       return undefined;
     }
     // In-memory fast path (CT-1623): the module may already be live from a
-    // parent bundle's evaluation (e.g. a sub-pattern of the just-loaded
-    // space root). Reuse it directly — no storage closure read, no SES re-eval.
-    const live = retryFailedRecovery
-      ? undefined
-      : this.patternFromEvaluatedModule(entryIdentity, symbol);
-    if (live) {
+    // parent bundle's evaluation. Reuse any trusted builder kind directly — no
+    // storage closure read and no SES re-evaluation. A failed cache recovery
+    // bypasses session shortcuts so storage repair is attempted again.
+    const live = sourceAvailable
+      ? this.artifactFromEvaluatedModule(entryIdentity, symbol)
+      : undefined;
+    if (live !== undefined) {
       this.esmCacheStats.byIdentityHits++;
       return live;
     }
+
+    // A successful prior evaluation indexed every trusted export and __cfReg
+    // binding. Reaching this point therefore makes this a stable negative
+    // lookup; do not re-evaluate just because the requested symbol is missing
+    // or names an arbitrary JavaScript export.
+    if (
+      sourceAvailable && this.evaluatedArtifactIdentities.has(entryIdentity)
+    ) {
+      return undefined;
+    }
+
     // Single-flight the expensive tail (see `inProgressByIdentityLoads`).
-    const key = `${space}\0${entryIdentity}`;
+    const key = `${artifactSpace}\0${entryIdentity}`;
     const pending = this.inProgressByIdentityLoads.get(key);
     if (pending === undefined) {
-      const load = this.loadPatternByIdentityFromStorage(
+      const load = this.loadArtifactModuleByIdentityFromStorage(
         entryIdentity,
-        symbol,
-        space,
+        artifactSpace,
       ).finally(() => this.inProgressByIdentityLoads.delete(key));
       this.inProgressByIdentityLoads.set(key, load);
-      return await load;
+      if (!await load) return undefined;
+    } else {
+      // Followers share the identity evaluation even when they request
+      // different symbols. Preserve the old transient-failure behavior: a
+      // rejected leader does not permanently poison later attempts.
+      try {
+        if (!await pending) return undefined;
+      } catch {
+        return await this.loadArtifactByIdentity(
+          entryIdentity,
+          symbol,
+          artifactSpace,
+        );
+      }
     }
-    // Follower: the leader's evaluation indexes every symbol of the closure,
-    // so after it settles the in-memory lookups above serve this call. Its
-    // failure is the leader caller's to surface; this call retries on its own
-    // behalf below.
-    await pending.catch(() => {});
-    // Back through the front door: hits the now-populated indexes in the
-    // common case. If the leader failed or did not surface this symbol, the
-    // in-flight entry is gone, so this call becomes the leader of its own
-    // attempt — the same load it would have run without dedup. Each pass
-    // consumes a settled leader, so the recursion is bounded by the number of
-    // concurrent callers.
-    return await this.loadPatternByIdentity(entryIdentity, symbol, space);
+
+    const loaded = this.addressableByIdentity.get(entryIdentity)?.get(symbol);
+    if (loaded !== undefined && isTrustedBuilderArtifact(loaded)) {
+      return loaded as object;
+    }
+    return undefined;
   }
 
-  /**
-   * The storage-backed tail of {@link loadPatternByIdentity}: closure read,
-   * SES evaluation, artifact indexing, and the cold-load recovery fallbacks.
-   * Callers must hold the single-flight slot for `(space, entryIdentity)`.
-   */
-  private async loadPatternByIdentityFromStorage(
+  /** Pattern-only compatibility wrapper for existing result-cell callers. */
+  async loadPatternByIdentity(
     entryIdentity: string,
     symbol: string,
     space: MemorySpace,
   ): Promise<Pattern | undefined> {
+    const artifact = await this.loadArtifactByIdentity(
+      entryIdentity,
+      symbol,
+      space,
+    );
+    return isTrustedPattern(artifact) ? artifact : undefined;
+  }
+
+  /**
+   * The storage-backed tail of {@link loadArtifactByIdentity}: closure read,
+   * SES evaluation, generic artifact indexing, and cold-load recovery.
+   * Callers must hold the single-flight slot for `(space, entryIdentity)`.
+   */
+  private async loadArtifactModuleByIdentityFromStorage(
+    entryIdentity: string,
+    space: MemorySpace,
+  ): Promise<boolean> {
     const harness = this.runtime.harness;
     const patternCoverage = this.patternCoverageFor();
     // Select the same cached variant the compile path wrote. A coverage-on
@@ -1176,12 +1827,13 @@ export class PatternManager {
       { patternCoverage: patternCoverage !== undefined },
     );
     if (runtimeVersion === undefined) {
-      return await this.tryColdLoadByIdentity(entryIdentity, symbol, space);
+      return await this.tryColdLoadByIdentity(entryIdentity, space);
     }
     const cacheOpts = { runtimeVersion };
 
     const readTx = this.runtime.edit();
     let closure;
+    let sourceClosure;
     try {
       const readStart = performance.now();
       closure = await loadCompiledClosure(
@@ -1191,9 +1843,16 @@ export class PatternManager {
         cacheOpts,
         readTx,
       );
-      logger.time(readStart, "compile-cache", "load-pattern-by-identity");
+      logger.time(readStart, "compile-cache", "load-artifact-by-identity");
+      if (closure.has(entryIdentity)) {
+        sourceClosure = await this.loadVerifiedArtifactSourceClosure(
+          space,
+          entryIdentity,
+          readTx,
+        );
+      }
     } finally {
-      readTx.abort?.("load-pattern-by-identity read complete");
+      readTx.abort?.("load-artifact-by-identity read complete");
     }
     if (
       !closure.has(entryIdentity) ||
@@ -1205,7 +1864,19 @@ export class PatternManager {
       );
       return await this.tryColdLoadByIdentity(
         entryIdentity,
-        symbol,
+        space,
+        cacheOpts,
+      );
+    }
+    if (
+      sourceClosure === undefined ||
+      ![...closure.keys()].every((identity) => sourceClosure!.has(identity))
+    ) {
+      // Compiled-only cache entries are runtime-version-specific and cannot
+      // authorize a durable Factory value. Fall back to verified source; if it
+      // is absent too, fail closed instead of indexing an unloadable artifact.
+      return await this.tryColdLoadByIdentity(
+        entryIdentity,
         space,
         cacheOpts,
       );
@@ -1252,21 +1923,20 @@ export class PatternManager {
           ...(patternCoverage ? { patternCoverage } : {}),
         },
       );
-      const pattern = this.patternFromMain(result, symbol, entryIdentity);
+      this.registerLoadedArtifactModule(result, entryIdentity);
       this.failedCompileCacheRecoveries.delete(
         compileCacheRecoveryKey(space, entryIdentity),
       );
+      this.noteArtifactClosureAvailable(space, sourceClosure.keys());
       this.esmCacheStats.byIdentityHits++;
-      return pattern;
+      return true;
     } catch (error) {
-      logger.warn("load-pattern-by-identity-miss", () => [
+      logger.warn("load-artifact-by-identity-miss", () => [
         `entry=${entryIdentity}`,
-        `symbol=${symbol}`,
         String(error),
       ]);
       return await this.tryColdLoadByIdentity(
         entryIdentity,
-        symbol,
         space,
         cacheOpts,
       );
@@ -1274,19 +1944,19 @@ export class PatternManager {
   }
 
   /**
-   * Runtime-version-bump recovery for a content-addressed pattern reference:
+   * Runtime-version-bump recovery for a content-addressed artifact reference:
    * recompile from the verified source closure, letting fabric imports refetch
    * their own source closures from the same space.
    */
   private async tryColdLoadByIdentity(
     entryIdentity: string,
-    symbol: string,
     space: MemorySpace,
     cacheOpts?: { runtimeVersion: string },
-  ): Promise<Pattern | undefined> {
+  ): Promise<boolean> {
     const harness = this.runtime.harness;
     const readTx = this.runtime.edit();
     let sourceDocs;
+    let artifactSourceDocs;
     try {
       sourceDocs = await loadVerifiedSourceClosure(
         this.runtime,
@@ -1294,18 +1964,24 @@ export class PatternManager {
         entryIdentity,
         readTx,
       );
+      if (sourceDocs !== undefined) {
+        artifactSourceDocs = await this.loadVerifiedArtifactSourceClosure(
+          space,
+          entryIdentity,
+          readTx,
+        );
+      }
     } finally {
-      readTx.abort?.("load-pattern-by-identity source read complete");
+      readTx.abort?.("load-artifact-by-identity source read complete");
     }
-    if (sourceDocs === undefined) return undefined;
+    if (sourceDocs === undefined || artifactSourceDocs === undefined) {
+      return false;
+    }
     const entry = sourceDocs.get(entryIdentity);
-    if (entry === undefined) return undefined;
+    if (entry === undefined) return false;
     const moduleDelegations = moduleDelegationsFromDocs(sourceDocs);
 
-    const sourceFiles: Source[] = [...sourceDocs.values()].map((doc) => ({
-      name: doc.filename,
-      contents: doc.code,
-    }));
+    const sourceFiles = authoredSourceFiles(sourceDocs, entryIdentity);
 
     const patternCoverage = this.patternCoverageFor();
     try {
@@ -1345,7 +2021,8 @@ export class PatternManager {
           ...(patternCoverage ? { patternCoverage } : {}),
         },
       );
-      const pattern = this.patternFromMain(result, symbol, entryIdentity);
+      this.registerLoadedArtifactModule(result, entryIdentity);
+      this.noteArtifactClosureAvailable(space, artifactSourceDocs.keys());
       if (cacheOpts !== undefined) {
         const recoveryKey = compileCacheRecoveryKey(space, entryIdentity);
         const repair = this.persistCompileCacheTracked(
@@ -1358,66 +2035,40 @@ export class PatternManager {
           this.failedCompileCacheRecoveries.delete(recoveryKey);
         }).catch((error) => {
           this.failedCompileCacheRecoveries.add(recoveryKey);
-          logger.warn("load-pattern-by-identity-writeback-failed", () => [
+          logger.warn("load-artifact-by-identity-writeback-failed", () => [
             `entry=${entryIdentity}`,
-            `symbol=${symbol}`,
             String(error),
           ]);
         });
         this.compileCacheWrites.add(repair);
         repair.finally(() => this.compileCacheWrites.delete(repair));
       }
-      return pattern;
+      return true;
     } catch (error) {
-      logger.warn("load-pattern-by-identity-source-miss", () => [
+      logger.warn("load-artifact-by-identity-source-miss", () => [
         `entry=${entryIdentity}`,
-        `symbol=${symbol}`,
         String(error),
       ]);
-      return undefined;
+      return false;
     }
   }
 
   /**
-   * Build a pattern object from an evaluation result by export `symbol`, with
-   * NO program attached (the source-free by-identity path). Mirrors
-   * `patternFromEvaluation` minus `setPatternProgram` — recovery of the program
-   * happens by identity via the source closure, not from the pattern object.
+   * Index all trusted builder artifacts from one storage-backed evaluation.
+   * Selection by export/__cfReg symbol deliberately happens afterward so one
+   * identity flight serves pattern, module, handler, and negative lookups.
    */
-  private patternFromMain(
+  private registerLoadedArtifactModule(
     result: EvaluateResult,
-    symbol: string,
     entryIdentity: string,
-  ): Pattern {
-    this.registerEvaluatedModules(result);
-    const { main } = result;
-    if (!main) {
-      throw new Error("Pattern compilation produced no exports.");
+  ): void {
+    // This path is reached only after a verified compiled/source closure was
+    // loaded from `space`, so every indexed artifact is cold-resolvable there.
+    this.registerDurableEvaluatedModules(result);
+    this.evaluatedArtifactIdentities.add(entryIdentity);
+    if (!result.main) {
+      throw new Error("Artifact compilation produced no exports.");
     }
-    // Usually an authored export, but a map/filter/flatMap `op` reloads by a
-    // transformer HOIST symbol (`__cfReg`, e.g. `__cfPattern_1`) that is not an
-    // export — `registerEvaluatedModules` above indexed it, so resolve it there.
-    const pattern =
-      (symbol in main
-        ? main[symbol]
-        : this.addressableByIdentity.get(entryIdentity)?.get(symbol)) as
-          | Pattern
-          | undefined;
-    if (!pattern) {
-      throw new Error(
-        `No "${symbol}" export or hoist registration found in compiled pattern.`,
-      );
-    }
-    // Trust gate stays pattern-only on purpose: the forward
-    // `{ identity, symbol }` ref for a NON-pattern artifact was already set by
-    // `registerEvaluatedModules` via `indexArtifact`, whose gate is the wider
-    // `isTrustedBuilderArtifact` — narrowing `indexArtifact` would drop
-    // exported lift/handler forward refs (the gap Codex flagged on an earlier
-    // revision of #3912).
-    if (isTrustedPattern(pattern)) {
-      setArtifactEntryRef(pattern, { identity: entryIdentity, symbol });
-    }
-    return pattern;
   }
 
   /**
@@ -1439,10 +2090,26 @@ export class PatternManager {
    * run. Idempotent per identity (re-registering refreshes the LRU), so paths that
    * already registered are unaffected.
    */
+  // Ordinary evaluation proves an in-memory artifact but says nothing about a
+  // storage closure. Keep this public seam session-only; only the private
+  // storage-backed path below may unlock Factory@1 sealing.
   registerEvaluatedModules(result: EvaluateResult): void {
+    this.registerEvaluatedModulesWithDurability(result, false);
+  }
+
+  /** Index artifacts whose source closure is known durable in a concrete space. */
+  private registerDurableEvaluatedModules(result: EvaluateResult): void {
+    this.registerEvaluatedModulesWithDurability(result, true);
+  }
+
+  private registerEvaluatedModulesWithDurability(
+    result: EvaluateResult,
+    durable: boolean,
+  ): void {
     const byId = result.exportsByIdentity;
     if (byId) {
       for (const [identity, exports] of byId) {
+        this.evaluatedArtifactIdentities.add(identity);
         // `modulesByIdentity` keeps the whole namespace for MODULE reuse on a
         // by-identity reload (a separate concern from artifact addressing).
         // Refresh insertion order (Map is FIFO-ordered) so eviction is ~LRU.
@@ -1453,7 +2120,12 @@ export class PatternManager {
         // instead of cold-recompiling — CT-1623.)
         for (const exportName of Object.keys(exports)) {
           if (exportName === "__esModule") continue;
-          this.indexArtifact(identity, exportName, exports[exportName]);
+          this.indexArtifact(
+            identity,
+            exportName,
+            exports[exportName],
+            durable,
+          );
         }
       }
       while (this.modulesByIdentity.size > this.maxEvaluatedModuleCacheSize) {
@@ -1468,8 +2140,9 @@ export class PatternManager {
     const sink = result.registrationsByIdentity;
     if (sink) {
       for (const [identity, entries] of sink) {
+        this.evaluatedArtifactIdentities.add(identity);
         for (const [symbol, value] of entries) {
-          this.indexArtifact(identity, symbol, value);
+          this.indexArtifact(identity, symbol, value, durable);
         }
       }
     }
@@ -1496,6 +2169,7 @@ export class PatternManager {
     identity: string,
     symbol: string,
     value: unknown,
+    durable = false,
   ): void {
     if (!isTrustedBuilderArtifact(value)) return;
     // Reverse index. Overwrite an existing symbol so a re-evaluation of the
@@ -1509,7 +2183,7 @@ export class PatternManager {
     bucket.set(symbol, value);
     // Forward map is FIRST-WRITE-WINS, deliberately, on two grounds:
     //   - One artifact instance legitimately reachable under two refs (e.g. both
-    //     a `__cfReg` entry AND an export, or set first by `patternFromMain`)
+    //     a `__cfReg` entry AND an export, or selected after generic loading)
     //     keeps a single canonical `{ identity, symbol }` for serialization.
     //   - The reverse index above already overwrote, so by-identity LOOKUP
     //     (`artifactFromIdentitySync`) is always fresh; the forward ref only
@@ -1519,7 +2193,15 @@ export class PatternManager {
     // the forward ref stays pinned to the original — acceptable because the
     // value is, by content identity, the original. `getArtifactEntryRef`
     // consumers tolerate this (it resolves to a real, addressable artifact).
-    setArtifactEntryRef(value, { identity, symbol });
+    const ref = { identity, symbol };
+    // Availability may have been confirmed before a later re-evaluation of the
+    // same content identity. Once any exact space holds a verified closure, a
+    // newly indexed live value may safely expose the space-neutral durable ref.
+    if (durable || this.artifactSourceSpace(identity) !== undefined) {
+      setDurableArtifactEntryRef(value, ref);
+    } else {
+      setArtifactEntryRef(value, ref);
+    }
     // Note: content-addressed CFC provenance is recorded by the engine at
     // evaluation time (Engine.recordModuleProvenance) — the single home, so it
     // covers every load path, not only ones routed through this indexing.
@@ -1562,34 +2244,24 @@ export class PatternManager {
     return getPatternProgram(pattern)?.files;
   }
 
-  /**
-   * Reuse a module already evaluated in-memory (as part of any bundle) for a
-   * by-identity load, skipping the storage closure read + SES re-evaluation.
-   * Returns undefined on a miss so the caller falls back to the cache path.
-   */
-  private patternFromEvaluatedModule(
+  /** Reuse any trusted builder artifact from an already-evaluated module. */
+  private artifactFromEvaluatedModule(
     entryIdentity: string,
     symbol: string,
-  ): Pattern | undefined {
+  ): object | undefined {
     const cached = this.modulesByIdentity.get(entryIdentity);
     if (!cached) return undefined;
-    // The symbol is usually an authored export, but a map/filter/flatMap `op`
-    // result cell references a transformer HOIST (`__cfReg`, e.g. `__cfPattern_1`)
-    // which is NOT a module export — it lives in the artifact index. Resolving it
-    // there (instead of falling through to a cold source recompile) is what keeps
-    // a reloaded op compile-free (CT-1623).
-    const pattern =
-      (symbol in cached.exports
-        ? cached.exports[symbol]
-        : this.addressableByIdentity.get(entryIdentity)?.get(symbol)) as
-          | Pattern
-          | undefined;
-    if (!pattern || !isTrustedPattern(pattern)) return undefined;
+    // A transformer hoist is not a namespace export, so fall back to the shared
+    // __cfReg/export artifact index.
+    const artifact = symbol in cached.exports
+      ? cached.exports[symbol]
+      : this.addressableByIdentity.get(entryIdentity)?.get(symbol);
+    if (!isTrustedBuilderArtifact(artifact)) return undefined;
     // Refresh recency.
     this.modulesByIdentity.delete(entryIdentity);
     this.modulesByIdentity.set(entryIdentity, cached);
-    setArtifactEntryRef(pattern, { identity: entryIdentity, symbol });
-    return pattern;
+    setArtifactEntryRef(artifact, { identity: entryIdentity, symbol });
+    return artifact as object;
   }
 
   /**
@@ -1673,6 +2345,11 @@ export class PatternManager {
     this.pendingCacheWriteBacks.add(persistence);
     try {
       await persistence;
+      this.cacheArtifactPublicationClosures(space, modules, entryIdentity);
+      this.noteArtifactClosureAvailable(
+        space,
+        modules.map((module) => module.identity),
+      );
     } finally {
       const current = this.inProgressCompileCacheWrites.get(
         persistenceSlotKey,
@@ -1751,6 +2428,11 @@ export class PatternManager {
     this.pendingCacheWriteBacks.add(writeBack);
     try {
       await writeBack;
+      this.cacheArtifactPublicationClosures(space, modules, entryIdentity);
+      this.noteArtifactClosureAvailable(
+        space,
+        modules.map((module) => module.identity),
+      );
     } finally {
       this.compileCacheWrites.delete(writeBack);
       this.pendingCacheWriteBacks.delete(writeBack);
@@ -1788,12 +2470,40 @@ export class PatternManager {
   }
 
   /**
+   * Persist only the runtime-versioned compiled half of an already-durable
+   * source-first artifact copy. The caller still verifies both halves together
+   * before granting exact-space availability.
+   */
+  private async writeBackCompiledCache(
+    space: MemorySpace,
+    modules: CacheableModule[],
+    entryIdentity: string,
+    opts: { runtimeVersion: string },
+  ): Promise<void> {
+    const writebackStart = performance.now();
+    await this.syncCompiledCacheWriteTargets(space, modules, opts);
+    const importEdges = modules.reduce((n, m) => n + m.imports.length, 0);
+    const writebackMaxRetries = Math.max(16, importEdges + 8);
+    const { error } = await this.runtime.editWithRetry((tx) => {
+      writeCompiledDocs(this.runtime, space, modules, entryIdentity, opts, tx);
+    }, writebackMaxRetries);
+    logger.time(writebackStart, "compile-cache", "compiled-writeback");
+    if (error) {
+      logger.error("compiled-cache-writeback-failed", () => [
+        `entry=${entryIdentity}`,
+        error.message,
+      ]);
+      throw throwableStorageError(error);
+    }
+  }
+
+  /**
    * Write the source + compiled document sets for an emitted module set into
    * `space`, on its own transaction, independent of the caller's. Uses
    * `editWithRetry` so a commit conflict (e.g. the cache write racing the
    * pattern's own space writes) retries rather than silently dropping the
-   * entry. A final failure throws because persisted refs-only pattern JSON
-   * requires a durable closure behind every `$patternRef`.
+   * entry. A final failure throws because persisted Factory@1 values require a
+   * durable closure behind every artifact ref.
    */
   private async writeBackCompileCache(
     space: MemorySpace,
@@ -1870,19 +2580,25 @@ export class PatternManager {
     modules: readonly CacheableModule[],
     opts: { runtimeVersion: string },
   ): Promise<void> {
+    await Promise.all([
+      this.syncSourceCacheWriteTargets(space, modules),
+      this.syncCompiledCacheWriteTargets(space, modules, opts),
+    ]);
+  }
+
+  private async syncCompiledCacheWriteTargets(
+    space: MemorySpace,
+    modules: readonly CacheableModule[],
+    opts: { runtimeVersion: string },
+  ): Promise<void> {
     await Promise.all(
-      modules.flatMap((module) => [
-        this.runtime.getCell(
-          space,
-          sourceDocKey(module.identity),
-          WRITE_TARGET_EDGE_SYNC_SCHEMA,
-        ).sync(),
+      modules.map((module) =>
         this.runtime.getCell(
           space,
           compiledDocKey(opts.runtimeVersion, module.identity),
           WRITE_TARGET_EDGE_SYNC_SCHEMA,
-        ).sync(),
-      ]),
+        ).sync()
+      ),
     );
   }
 
@@ -1892,7 +2608,13 @@ export class PatternManager {
     program: RuntimeProgram,
     entryIdentity?: string,
   ): Pattern {
-    this.registerEvaluatedModules(result);
+    if (entryIdentity === undefined) {
+      this.registerEvaluatedModules(result);
+    } else {
+      // Callers pass an entry identity only after awaiting persistence in a
+      // concrete artifact space, or after loading a verified closure from one.
+      this.registerDurableEvaluatedModules(result);
+    }
     const { main } = result;
     if (!main) {
       throw new Error("Pattern compilation produced no exports.");
@@ -1910,7 +2632,7 @@ export class PatternManager {
     if (isTrustedPattern(pattern)) {
       setPatternProgram(pattern, program);
       if (entryIdentity) {
-        setArtifactEntryRef(pattern, {
+        setDurableArtifactEntryRef(pattern, {
           identity: entryIdentity,
           symbol: exportName,
         });

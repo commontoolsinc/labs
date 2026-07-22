@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { dirname, join } from "@std/path";
+import { dirname, extname, join, resolve as resolvePath } from "@std/path";
 import { StaticCacheFS } from "@commonfabric/static";
 import {
   CommonFabricTransformerPipeline,
@@ -8,12 +8,39 @@ import {
   transformCfDirective,
 } from "../src/mod.ts";
 import { assert } from "@std/assert";
+import {
+  registerTrustedCommonFabricTestSources,
+  sharedCommonFabricTestSourceNames,
+} from "./trusted-commonfabric-sources.ts";
 
 const ENV_TYPE_ENTRIES = ["es2023", "dom", "jsx"] as const;
 
 type EnvTypeKey = (typeof ENV_TYPE_ENTRIES)[number];
 let envTypesCache: Record<EnvTypeKey, string> | undefined;
 let sourceFileCache: Map<string, ts.SourceFile> | undefined;
+
+function registerTestCommonFabricSource(
+  program: ts.Program,
+  types: Record<string, string>,
+): void {
+  registerTrustedCommonFabricTestSources(
+    program,
+    sharedCommonFabricTestSourceNames(types),
+  );
+}
+
+function assertNoTrustedCommonFabricTestSourceCollisions(
+  authoredFiles: Readonly<Record<string, string>>,
+  types: Readonly<Record<string, string>>,
+): void {
+  for (const sourceName of sharedCommonFabricTestSourceNames(types)) {
+    if (Object.hasOwn(authoredFiles, sourceName)) {
+      throw new Error(
+        `Authored source '${sourceName}' collides with trusted Common Fabric test source`,
+      );
+    }
+  }
+}
 
 export interface TransformOptions {
   mode?: "transform" | "error";
@@ -49,6 +76,7 @@ export async function batchTypeCheckFixtures(
   options: { types?: Record<string, string> } = {},
 ): Promise<BatchTypeCheckResult> {
   const { types = {} } = options;
+  assertNoTrustedCommonFabricTestSourceCollisions(files, types);
 
   if (!envTypesCache) {
     envTypesCache = await loadEnvironmentTypes();
@@ -206,19 +234,11 @@ export async function batchTypeCheckFixtures(
             isExternalLibraryImport: false,
           };
         }
-        if (name.startsWith(".")) {
-          const resolvedFileName = join(dirname(containingFile), name);
-          if (transformedFiles[resolvedFileName] !== undefined) {
-            return {
-              resolvedFileName,
-              extension: resolvedFileName.endsWith(".tsx")
-                ? ts.Extension.Tsx
-                : ts.Extension.Ts,
-              isExternalLibraryImport: false,
-            };
-          }
-        }
-        return undefined;
+        return resolveVirtualSourceModule(
+          name,
+          containingFile,
+          transformedFiles,
+        );
       });
     },
     resolveTypeReferenceDirectives: (typeDirectiveNames) =>
@@ -245,6 +265,7 @@ export async function batchTypeCheckFixtures(
   const rootFiles = [...Object.keys(transformedFiles), ...typeDefFiles];
 
   const program = ts.createProgram(rootFiles, compilerOptions, host);
+  registerTestCommonFabricSource(program, types);
 
   // Get all diagnostics
   const diagnostics = ts.getPreEmitDiagnostics(program);
@@ -299,6 +320,7 @@ export async function transformFiles(
     logger,
     typeCheck = false,
   } = options;
+  assertNoTrustedCommonFabricTestSourceCollisions(inFiles, types);
   if (!envTypesCache) {
     envTypesCache = await loadEnvironmentTypes();
   }
@@ -456,19 +478,7 @@ export async function transformFiles(
             isExternalLibraryImport: false,
           };
         }
-        if (name.startsWith(".")) {
-          const resolvedFileName = join(dirname(containingFile), name);
-          if (files[resolvedFileName] !== undefined) {
-            return {
-              resolvedFileName,
-              extension: resolvedFileName.endsWith(".tsx")
-                ? ts.Extension.Tsx
-                : ts.Extension.Ts,
-              isExternalLibraryImport: false,
-            };
-          }
-        }
-        return undefined;
+        return resolveVirtualSourceModule(name, containingFile, files);
       });
     },
     resolveTypeReferenceDirectives: (typeDirectiveNames) =>
@@ -496,6 +506,7 @@ export async function transformFiles(
   const rootFiles = [...Object.keys(files), ...typeDefFiles];
 
   const program = ts.createProgram(rootFiles, compilerOptions, host);
+  registerTestCommonFabricSource(program, types);
 
   // Type checking - only run diagnostics if needed
   if (typeCheck || logger) {
@@ -672,6 +683,7 @@ export async function validateFiles(
     types = {},
     logger,
   } = options;
+  assertNoTrustedCommonFabricTestSourceCollisions(inFiles, types);
   if (!envTypesCache) {
     envTypesCache = await loadEnvironmentTypes();
   }
@@ -815,19 +827,7 @@ export async function validateFiles(
             isExternalLibraryImport: false,
           };
         }
-        if (name.startsWith(".")) {
-          const resolvedFileName = join(dirname(containingFile), name);
-          if (files[resolvedFileName] !== undefined) {
-            return {
-              resolvedFileName,
-              extension: resolvedFileName.endsWith(".tsx")
-                ? ts.Extension.Tsx
-                : ts.Extension.Ts,
-              isExternalLibraryImport: false,
-            };
-          }
-        }
-        return undefined;
+        return resolveVirtualSourceModule(name, containingFile, files);
       });
     },
     resolveTypeReferenceDirectives: (typeDirectiveNames) =>
@@ -853,6 +853,7 @@ export async function validateFiles(
   const rootFiles = [...Object.keys(files), ...typeDefFiles];
 
   const program = ts.createProgram(rootFiles, compilerOptions, host);
+  registerTestCommonFabricSource(program, types);
   const pipeline = new CommonFabricTransformerPipeline({
     mode,
     logger,
@@ -932,6 +933,36 @@ async function loadEnvironmentTypes(): Promise<Record<EnvTypeKey, string>> {
     ),
   );
   return Object.fromEntries(entries) as Record<EnvTypeKey, string>;
+}
+
+function resolveVirtualSourceModule(
+  specifier: string,
+  containingFile: string,
+  files: Readonly<Record<string, string>>,
+) {
+  if (!specifier.startsWith(".")) return undefined;
+
+  const base = resolvePath(dirname(containingFile), specifier);
+  const candidates = extname(base)
+    ? [base]
+    : [`${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.jsx`];
+  const resolvedFileName = candidates.find((candidate) =>
+    files[candidate] !== undefined
+  );
+  if (!resolvedFileName) return undefined;
+
+  const extension = resolvedFileName.endsWith(".tsx")
+    ? ts.Extension.Tsx
+    : resolvedFileName.endsWith(".js")
+    ? ts.Extension.Js
+    : resolvedFileName.endsWith(".jsx")
+    ? ts.Extension.Jsx
+    : ts.Extension.Ts;
+  return {
+    resolvedFileName,
+    extension,
+    isExternalLibraryImport: false,
+  };
 }
 
 function baseNameFromPath(path: string): string | undefined {

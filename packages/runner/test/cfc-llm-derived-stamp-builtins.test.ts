@@ -16,7 +16,10 @@ import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import { parseLink } from "../src/link-utils.ts";
 import type { Cell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  installTestPatternArtifact,
+} from "./support/trusted-builder.ts";
 import { LLM_DERIVED_RESULT_STAMP_SCHEMA } from "../src/builtins/llm-schemas.ts";
 
 // Epic D1b (docs/history/plans/cfc-future-work-implementation.md): the `llm`,
@@ -366,7 +369,10 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       },
     );
 
-    const dummyPattern = builder.pattern(() => ({}), { type: "object" });
+    const dummyPattern = installTestPatternArtifact(
+      runtime,
+      builder.pattern(() => ({}), { type: "object" }),
+    );
     const testPattern = builder.pattern(() =>
       builder.generateObject({
         prompt: testPrompt,

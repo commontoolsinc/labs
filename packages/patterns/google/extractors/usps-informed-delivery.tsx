@@ -24,7 +24,6 @@ import {
   JSONSchema,
   NAME,
   pattern,
-  type PatternFactory,
   TILE_UI,
   UI,
   Writable,
@@ -167,16 +166,9 @@ interface MailPieceAnalysisItem {
     result?: MailAnalysis;
   };
   pending: boolean;
-  error?: unknown;
+  error?: string | null;
   result?: MailAnalysis;
 }
-
-type ReactiveArray<T> = T[] & {
-  mapWithPattern<I, S>(
-    op: PatternFactory<I, S>,
-    params: Record<string, unknown>,
-  ): S[];
-};
 
 // =============================================================================
 // HELPERS
@@ -330,7 +322,7 @@ If you cannot read the image clearly, make your best guess based on what you can
     imageUrl: imageInfo.imageUrl,
     analysis,
     pending: analysis.pending,
-    error: analysis.error,
+    error: computed(() => analysis.error ? String(analysis.error) : null),
     result: analysis.result,
   };
 });
@@ -455,9 +447,9 @@ export default pattern<PatternInput, PatternOutput>(
     // Count of images to analyze
     const imageCount = computed(() => mailPieceImages?.length || 0);
 
-    const mailPieceAnalyses = (
-      mailPieceImages as ReactiveArray<MailPieceImageInfo>
-    ).mapWithPattern(analyzeMailPiece, {});
+    const mailPieceAnalyses = mailPieceImages.map((imageInfo) =>
+      analyzeMailPiece(imageInfo)
+    );
 
     // Count pending analyses
     const pendingCount = computed(
@@ -472,9 +464,9 @@ export default pattern<PatternInput, PatternOutput>(
         ).length || 0,
     );
 
-    const mailPieces = (
-      mailPieceAnalyses as ReactiveArray<MailPieceAnalysisItem>
-    ).mapWithPattern(extractMailPieceResult, {});
+    const mailPieces = mailPieceAnalyses.map((analysis) =>
+      extractMailPieceResult(analysis)
+    );
 
     // Derived counts from stored mailPieces
     const mailCount = computed(() => mailPieces?.length || 0);

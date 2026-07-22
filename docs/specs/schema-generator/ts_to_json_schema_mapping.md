@@ -2,8 +2,8 @@
 
 **Status:** Descriptive (current behavior; on conflict, code/tests win — §1)\
 **Package:** `@commonfabric/schema-generator`\
-**Last verified against:** origin/main `47ad2b898` plus this documentation and
-test branch, 2026-07-16 verification\
+**Last verified against:** origin/main `f5d2de2ae` plus the rebased #4687 branch,
+2026-07-16 verification\
 **Related:** `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`
 (§10, §12 describe the consumer side; its §6.8/§12 CFC-lowering account was
 corrected in the same 2026-07 audit that produced this document) and
@@ -25,15 +25,18 @@ Authoritative implementation sources:
 
 If this document conflicts with code or passing tests, code/tests win.
 
-Package exports (`deno.jsonc:4-12`): `.` → `src/index.ts` (no `mod.ts`), plus
-six subpaths — `./interface`, `./cell-brand`, `./wrapper-names`,
-`./type-traversal`, `./property-optionality`, `./property-name`.
+Package exports (`deno.jsonc`): `.` → `src/index.ts` (no `mod.ts`), plus
+seven subpaths — `./interface`, `./cell-brand`, `./wrapper-names`,
+`./type-traversal`, `./property-optionality`, `./property-name`, and
+`./common-fabric-symbols`.
 `src/index.ts` exports the `SchemaGenerator` class,
-`createSchemaTransformerV2`, the `ISchemaGenerator` type, and re-exports
-`JSONSchemaObjMutable`.
+`createSchemaTransformerV2`, `containsFactoryType`,
+`detectTrustedFactoryType`, the `FactoryTypeInfo` / `FactoryTypeKind` /
+`ISchemaGenerator` types, the Common Fabric declaration/provenance helpers, and
+re-exports `JSONSchemaObjMutable`.
 
 Consumers, as of this writing (verified by import grep): the only external
-consumer package is `@commonfabric/ts-transformers`, along two axes:
+consumer package is `@commonfabric/ts-transformers`, along three axes:
 
 1. **Schema generation proper** — `SchemaGeneratorTransformer`
    (`packages/ts-transformers/src/transformers/schema-generator.ts`) calls
@@ -47,6 +50,10 @@ consumer package is `@commonfabric/ts-transformers`, along two axes:
    call-kind), `property-name` (reactive-keys, type-shrinking),
    `property-optionality` (`ast/utils.ts`). The `src/typescript/` tables are
    load-bearing for the whole transformer pipeline, not just schema output.
+3. **Factory/provenance oracle** — factory-aware transformer stages import
+   `detectTrustedFactoryType` from the root, while
+   `core/common-fabric-symbols.ts` imports the `./common-fabric-symbols`
+   subpath. These are authority checks, not convenience name matching.
 
 Instance state: `AnonymousType_N` naming lives on the `SchemaGenerator`
 instance (`anonymousNames` WeakMap + counter, `src/schema-generator.ts:45-48`)
@@ -54,26 +61,25 @@ instance (`anonymousNames` WeakMap + counter, `src/schema-generator.ts:45-48`)
 
 ## 2. Generation Entry Points And Analysis-Path Selection
 
-Two public methods (`src/interface.ts:86-143`, implemented in
+Two public methods (`src/interface.ts`, implemented in
 `src/schema-generator.ts`): `generateSchema(type, checker, typeNode?,
-{widenLiterals?}?, schemaHints?, sourceFile?)` (`:54-85`) — the normal,
+{widenLiterals?}?, schemaHints?, sourceFile?, typeRegistry?)` — the normal,
 type-driven path — and `generateSchemaFromSyntheticTypeNode(typeNode, checker,
-typeRegistry?, schemaHints?, sourceFile?)` (`:94-126`), a thin wrapper that
+typeRegistry?, schemaHints?, sourceFile?)`, a thin wrapper that
 passes `checker.getAnyType()` as the type (`:116`), forcing the auto-detection
 below onto the node-based path.
 
 `createSchemaTransformerV2()` (`src/plugin.ts:8-46`) wraps one shared
-`SchemaGenerator` instance and exposes both methods. Type-level drift: the
-plugin's signatures narrow `schemaHints` to `WeakMap<ts.Node, { items?:
-unknown }>` (`plugin.ts:17,34`) while the class and `GenerationContext` accept
-the full `{ items?, cfcUiContract? }` shape (`interface.ts:46-60`) —
-runtime-compatible, type-level under-description.
+`SchemaGenerator` instance and exposes both methods with the full `SchemaHint`
+and `typeRegistry` contract.
 
 **Path selection** (`shouldUseNodeBasedAnalysis`,
 `src/schema-generator.ts:221-237`): node-based analysis is used iff a
 `typeNode` is present, the resolved type has `TypeFlags.Any`, and the node is
 *not* a wrapper reference (`detectWrapperViaNode`) — wrapper nodes stay on the
-type path for `CommonFabricFormatter`. `formatChildType` (`:246-280`) re-runs
+type path for `CommonFabricFormatter`. Before that structural fallback, exact
+`factoryContracts` hints route directly through `FactoryFormatter`, even when
+the semantic type is `any`. `formatChildType` (`:246-280`) re-runs
 the detection per child and deliberately strips the parent's `typeNode` when
 no child node is supplied (`:251-255`) to avoid mismatched type/node pairs.
 
@@ -110,21 +116,23 @@ emitted schemas depending on the producing path. The distinction is pinned by
 `formatType` dispatches to the first formatter whose `supportsType` returns
 true, in this fixed order (`src/schema-generator.ts:35-44`):
 
-1. `CommonFabricFormatter` — wrappers, scopes, Default, CFC aliases, wrapper
+1. `FactoryFormatter` — trusted first-class factories and exact compiler hints
+2. `CommonFabricFormatter` — wrappers, scopes, Default, CFC aliases, wrapper
    unions
-2. `NativeTypeFormatter` — built-in name table (§5.2)
-3. `UnionFormatter`
-4. `IntersectionFormatter` — declines cell-branded intersections
+3. `NativeTypeFormatter` — built-in name table (§5.2)
+4. `UnionFormatter`
+5. `IntersectionFormatter` — declines cell-branded intersections
    (`intersection-formatter.ts:21-27`)
-5. `ArrayFormatter` — deliberately before `PrimitiveFormatter` "to avoid
+6. `ArrayFormatter` — deliberately before `PrimitiveFormatter` "to avoid
    Any-flag misrouting" (comment `:40`)
-6. `PrimitiveFormatter`
-7. `ObjectFormatter` — also claims the TS `object` keyword via `typeToString`
+7. `PrimitiveFormatter`
+8. `ObjectFormatter` — also claims the TS `object` keyword via `typeToString`
    (`object-formatter.ts:187-193`)
 
-Order matters: CommonFabric before Union (wrapper unions), Native before
-Object (built-ins are object types), Array before Primitive. If no formatter
-matches, generation throws (`src/schema-generator.ts:462-474`). Before
+Order matters: Factory before ordinary callable filtering; CommonFabric before
+Union (wrapper unions); Native before Object (built-ins are object types); Array
+before Primitive. If no formatter matches, generation throws
+(`src/schema-generator.ts:462-474`). Before
 dispatch, `formatType` short-circuits unresolved type parameters
 (constraint → default → `{}`, `:351-362`) and conditional types (`{}`,
 `:369-371`).
@@ -157,11 +165,11 @@ by any repo test.
 | Dictionary with both string and number index | treated as object map, not array | `type-utils.ts:716-733` | untested directly |
 | Index signatures on objects | `additionalProperties: <value schema>`; string index takes precedence over number; JSDoc from index-signature declarations propagates (conflicts → keep first + `$comment`) | `object-formatter.ts:334-379`; node path `schema-generator.ts:793-825` (no JSDoc) | descriptions-index* fixtures |
 | `Record<K,V>` with finite literal-union `K` | expands to concrete `properties` (checker-driven property enumeration) | via `ObjectFormatter`; fixture `record-union-keys` | record-mapped-types.test.ts |
-| Functions / callables / constructables | property skipped entirely (not in `properties`, not in `required`) — **except** callable properties whose call signature returns `Stream`/`Cell`/`SqliteDb` (ModuleFactory/HandlerFactory shapes): kept as `{ asCell: ["stream"/"cell"/"sqlite"] }` and they participate in `required` | skip: `type-utils.ts:558-575`, `object-formatter.ts:233-238,259,269-287`; exception: `object-formatter.ts:44-67` (only those three kinds; capability cells like `ReadonlyCell` returns are *not* kept) | pattern-with-types fixtures |
+| Functions / callables / constructables | property skipped entirely (not in `properties`, not in `required`) — **except** trusted first-class factories (§13), and legacy callable properties whose call signature returns `Stream`/`Cell`/`SqliteDb`, which remain `{ asCell: ["stream"/"cell"/"sqlite"] }` | skip/legacy exception: `type-utils.ts`, `object-formatter.ts`; first-class exception: `factory-formatter.ts` and ObjectFormatter factory routing | pattern-with-types and factory-types tests |
 | TS `enum` declaration | hoisted under the enum name with **no `type` key** (all-literal union path, §8): numeric → `$defs: { Color: { enum: [0,1,2] } }` + `$ref`; string → `$defs: { Mode: { enum: ["on","off"] } }` | union path `union-formatter.ts:176-214`; hoisting §5 | `test/enum-schema-rows.test.ts` |
 | Single enum member type (`Mode.On`) | inline literal schema, e.g. `{ type: "string", enum: ["on"] }`; enum-member symbols are excluded from named-type hoisting so same-named members and unrelated named types cannot collide in `$defs` | `getNamedTypeKey`, `type-utils.ts`; pinned by `test/enum-member-hoisting.test.ts` | — |
 | `Date` / `URL` / typed arrays / etc. | native table, §5.2 | `native-type-formatter.ts:5-28` | date-types fixture, native-type tests |
-| `Map`/`WeakMap`/`Set`/`WeakSet` | **throws** (§13) | `type-utils.ts:400-411` | schema-generator.test.ts:643-682 |
+| `Map`/`WeakMap`/`Set`/`WeakSet` | **throws** (§16) | `type-utils.ts:400-411` | schema-generator.test.ts:643-682 |
 | `Reactive<T>` | erases to `<T>`'s schema, **no marker** (§6.4) | — | capability-wrapper-types.test.ts:118-132 |
 | Wrappers / `Default` / scopes / CFC aliases | §6, §7, §10, §11 | — | — |
 
@@ -229,7 +237,7 @@ through `BigUint64Array`) is claimed only when declared in a default-lib or
 have **no** such guard (untested collision). Native resolution also pierces
 type-parameter constraints/defaults and intersection constituents
 (`getNativeTypeSchema`, `type-utils.ts:360-416`) — where the `Map`/`Set`
-rejections live (§15) — and is consulted from union members, intersections,
+rejections live (§16) — and is consulted from union members, intersections,
 and object built-in lookup (`union-formatter.ts:147-151`;
 `intersection-formatter.ts:34-37`; `object-formatter.ts:209-210`).
 
@@ -577,7 +585,7 @@ Mechanics:
   marker with the compiled module identity, exported symbol, and policy digest.
   If it cannot match a compiler-verified exported `exchangeRules()` binding,
   it reports a `cfc-policy-of` diagnostic and leaves the marker unresolved.
-- `uiContract` also arrives via the hints channel (§13), produced by
+- `uiContract` also arrives via the hints channel (§14), produced by
   `ts-transformers/src/transformers/ui-helper-lowering.ts:219`.
 
 In-package coverage: `test/schema/cfc-authoring.test.ts` (13 tests), including
@@ -622,9 +630,74 @@ The api type also declares `[ID]`/`[ID_FIELD]` extension keys
   field `index.ts:1573-1575`). Fixtures: descriptions-hashtag-tags,
   descriptions-index-signature-tags, descriptions-root-with-tags.
 
-## 13. The Hints Channel (`schemaHints`)
+## 13. First-Class Factory Values (`asFactory`)
 
-Hint shape (`src/interface.ts:46-60`): `WeakMap<ts.Node, { items?: unknown;
+`FactoryFormatter` runs first and handles trusted `PatternFactory`,
+`ModuleFactory`, and `HandlerFactory` values. Detection requires either:
+
+1. a public Common Fabric factory alias or its Common Fabric private factory
+   brand plus the stable public factory surface, or
+2. exact compiler-owned `SchemaHint.factoryContracts` metadata.
+
+A user-declared type merely named `PatternFactory` (including an authored
+ambient `commonfabric` lookalike) is not trusted. `FactoryInput<T>` is unwrapped
+for the public input contract; a handler's `Stream<E>` result is unwrapped to
+the public event contract.
+
+Emitted shapes are:
+
+```json
+{ "asFactory": {
+  "kind": "pattern",
+  "argumentSchema": { "type": "object" },
+  "resultSchema": { "type": "object" }
+} }
+```
+
+```json
+{ "asFactory": {
+  "kind": "module",
+  "argumentSchema": { "type": "object" },
+  "resultSchema": { "type": "object" }
+} }
+```
+
+```json
+{ "asFactory": {
+  "kind": "handler",
+  "contextSchema": { "type": "object" },
+  "eventSchema": { "type": "object" }
+} }
+```
+
+Every nested input/output schema is an independent, self-contained schema
+document. If it uses `$ref`, its own field owns the matching `$defs`; it cannot
+borrow definitions from the containing value schema or a sibling contract
+field. Ordinary recursion inside one contract document is allowed. A recursive
+factory-inside-factory chain that would require an unbounded series of
+independent documents throws with the source location and contract type.
+
+Compiler hints may carry already generated `inputSchema` / `outputSchema`; those
+exact documents are authoritative over checker reconstruction. Multiple exact
+contracts emit `anyOf`, preserving same-kind and cross-kind stored union arms.
+Invocation compatibility is a ts-transformers concern, not a schema-generator
+filter: the compiler separately requires same kind, equal public schemas, and
+equal FrameworkProvided paths before a union can be called.
+
+`FrameworkProvided` paths are compiler/runtime authority metadata and are not
+emitted inside `asFactory`. First-class factories are also the deliberate
+exception to ObjectFormatter's ordinary callable-property skip. Other callable
+properties keep the behavior in §4.
+
+Synthetic node analysis checks exact factory hints before structural fallback,
+and UnionFormatter pairs semantic members with member TypeNodes through
+`typeRegistry` so hinted arms reach `FactoryFormatter`. Ambiguous same-kind
+pairings fail conservatively instead of guessing from alias order.
+
+## 14. The Hints Channel (`schemaHints`)
+
+Hint shape (`src/interface.ts`): `WeakMap<ts.Node, { items?: unknown;
+factoryContracts?: readonly FactoryContractHint[];
 cfcUiContract?: { helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
 action?; surface?; role?; kind?; trustedPattern?; requiredEventIntegrity? } }>`.
 Lookups always try the node and `ts.getOriginalNode(node)`
@@ -648,8 +721,13 @@ writes both — `cross-stage-state.ts:150-163`).
   against the emitted literal
   (`ts-transformers/.../schema-generator.ts:118-125,245-345`, preferring an
   existing `$UI` property when present).
+- **`factoryContracts`** carries one or more exact pattern/module/handler
+  contracts: kind, trusted factory type when available, input/output TypeNodes
+  and Types, optional already-generated schemas, and compiler-only
+  `frameworkProvidedPaths`. Exact hinted contracts route through
+  `FactoryFormatter`; the protected paths are not serialized (§13).
 
-## 14. Options
+## 15. Options
 
 Exactly one generation option exists as of this writing: `widenLiterals`
 (`interface.ts:43-44`, plumbed at `schema-generator.ts:181`). Effects:
@@ -662,7 +740,7 @@ in-package behavior; consumer-side it is extracted from `toSchema` options and
 exercised via ts-transformers' injection paths
 (`ts-transformers/.../schema-generator.ts:67-82`).
 
-## 15. Fail-Loud Inventory And Silent Degradations
+## 16. Fail-Loud Inventory And Silent Degradations
 
 Everything that throws, with source (test-pinned unless noted):
 
@@ -682,6 +760,7 @@ Everything that throws, with source (test-pinned unless noted):
 | Nested scope wrappers | `Nested scope wrappers require a cell boundary between scopes.` | `common-fabric-formatter.ts:522-527` |
 | Circular type alias (wrapper chain) | `Circular type alias detected: A -> B -> …` | `type-utils.ts:854-859` |
 | Circular type alias (union alias) | `Circular type alias detected: <name>` | `union-formatter.ts:433-438` |
+| Recursive nested factory contract cannot form a finite independent document | `<file>:<line>:<column>: Recursive nested factory contract for '…' cannot be emitted as a finite self-contained schema document` | `SchemaGenerator.generateFactoryContractSchema`; pinned by `test/schema/factory-types.test.ts` |
 | Wrapper/scope/CFC alias without type argument | `<Kind><T> requires type argument` | `cff:195-198,396-398,485-487,579-583,969-971,997-999` (untested) |
 | Internal invariants: empty union/intersection; CommonFabric claimed-but-unformattable terminal; ArrayFormatter element-info mismatch | `… received empty … type` / `Unexpected Common Fabric type: …` / `… indicates a bug in supportsType logic` | `union-formatter.ts:106-108`; `intersection-formatter.ts:41-45`; `common-fabric-formatter.ts:376-379`; `array-formatter.ts:33-43` (all untested) |
 
@@ -694,7 +773,7 @@ synthetic node resolution failure → `any` → `true`
 `applyWrapperSemantics` with an unmappable kind returns the schema unchanged
 (`cff:2057-2061`).
 
-## 16. Known Limits And Observed Quirks
+## 17. Known Limits And Observed Quirks
 
 1. **Tuples lose positional structure** — no `prefixItems`/length bounds (§4);
    the empty-array-pruning safety argument (`union-formatter.ts:280-285`)
@@ -708,7 +787,7 @@ synthetic node resolution failure → `any` → `true`
    `type` key; individual enum-member types stay inline to avoid `$defs` name
    collisions. Pinned by `test/enum-member-hoisting.test.ts` +
    `test/enum-schema-rows.test.ts`.
-3. **`widenLiterals` is incoherent at the literal-union boundary** (§14;
+3. **`widenLiterals` is incoherent at the literal-union boundary** (§15;
    pinned by `test/widen-literals.test.ts`): all-literal unions stay enums
    under the flag while the same literals DO widen inside mixed unions, and a
    single-literal property widens next to an unwidened literal-union sibling.
@@ -731,14 +810,13 @@ synthetic node resolution failure → `any` → `true`
     uiContract/writeAuthorizedBy attachment
     (`ts-transformers/.../schema-generator.ts:117,134`); idempotent for
     literal options.
-11. **`plugin.ts` hint-type drift** (§2).
-12. **Untested helper modules** — `typescript/property-name.ts`,
+11. **Untested helper modules** — `typescript/property-name.ts`,
     `property-optionality.ts`, `type-traversal.ts`, `wrapper-names.ts` have no
     dedicated unit tests (`test/typescript/` holds one cell-brand test);
     exercised indirectly through ts-transformers suites.
-13. **Primitive fallback sentinel** (§15) — silent, mis-typed, untested.
+12. **Primitive fallback sentinel** (§16) — silent, mis-typed, untested.
 
-## 17. Test Workflow
+## 18. Test Workflow
 
 - `deno task test` from `packages/schema-generator/` (env knobs allow-listed
   in `deno.jsonc:16-21`); `deno task check` type-checks source, harnesses, and
@@ -771,10 +849,11 @@ synthetic node resolution failure → `any` → `true`
   scope-wrappers, tuple-emission, widen-literals, typescript/cell-brand, and the
   `test/schema/` family
   (arrays, booleans, capability wrappers, cell types, CFC authoring, circular
-  aliases, defaults ×5, factory inputs, nested wrappers, records/mapped types,
+  aliases, defaults ×5, factory inputs, first-class factory values/contracts,
+  nested wrappers, records/mapped types,
   recursion, aliases, type-to-schema, void).
 
-## 18. Sources Of Truth
+## 19. Sources Of Truth
 
 When a section above enumerates a set, the constant/function below is
 canonical; update prose from it, not the other way around. Paths relative to
@@ -783,6 +862,9 @@ canonical; update prose from it, not the other way around. Paths relative to
 | Spec content | Canonical source | Guard / note |
 | --- | --- | --- |
 | Formatter chain + order (§3) | `SchemaGenerator.formatters` (`src/schema-generator.ts:35-44`) | array literal is the order; routing tests in `test/schema-generator.test.ts` |
+| Trusted factory recognition and `asFactory` shapes (§13) | `detectTrustedFactoryType` / `FactoryFormatter` / `asFactorySchema` (`src/formatters/factory-formatter.ts`) | `test/schema/factory-types.test.ts`; Common Fabric provenance or exact compiler hints only |
+| Independent factory contract documents and recursive failure (§13, §16) | `SchemaGenerator.generateFactoryContractSchema` and `FactoryFormatter.formatContract` | each input/output field owns its local `$defs`; recursive nested factory-document cycles throw |
+| Public root exports (§1) | `src/index.ts` | class/plugin, factory detection/types, Common Fabric declaration helpers, and public schema types |
 | Core keyword mappings (§4) | `PrimitiveFormatter.getSchemaType` (`src/formatters/primitive-formatter.ts:37-126`); node table `analyzeTypeNodeStructure` (`src/schema-generator.ts:925-948`) | void-type / array-special-types tests |
 | Hoisting exclusion rule (§5.1) | `getNamedTypeKey` (`src/type-utils.ts:422-553`) | recursion/shared-type/alias fixtures |
 | Native leaf table + guard (§5.2) | `NATIVE_TYPE_SCHEMAS` / `LIB_DECLARED_NATIVE_TYPES` (`src/formatters/native-type-formatter.ts:5-49`) | `test/native-type-parameters.test.ts` |
@@ -795,10 +877,10 @@ canonical; update prose from it, not the other way around. Paths relative to
 | CFC alias set (§11) | `CFC_CANONICAL_ALIAS_NAMES` (`packages/api/cfc.ts:765-784`) | — |
 | CFC payload map (§11) | `buildIfcMetadataForAlias` switch (`src/formatters/common-fabric-formatter.ts:1292-1392`) | cfc-authoring tests |
 | `ifc` key vocabulary (§11) | `JSONSchemaObj.ifc` (`packages/api/index.ts:1648-1678`) | — |
-| Hint shape (§13) | `GenerationContext["schemaHints"]` (`src/interface.ts:46-60`) | note plugin.ts drift (§2) |
-| Generation options (§14) | `GenerationContext["widenLiterals"]` (`src/interface.ts:43-44`) | sole option as of this writing |
-| Throw inventory (§15) | grep `throw new Error` under `src/` | messages quoted above verified this snapshot |
-| Fixture env knobs (§17) | `test/fixtures-runner.test.ts:26-101`; `packages/test-support/src/fixture-runner.ts:119` | — |
+| Hint shape (§14) | `SchemaHint` / `GenerationContext["schemaHints"]` (`src/interface.ts`) | includes items, exact factory contracts/provenance, and CFC UI contract |
+| Generation options (§15) | `GenerationContext["widenLiterals"]` (`src/interface.ts`) | sole option as of this writing |
+| Throw inventory (§16) | grep `throw new Error` under `src/` | messages quoted above verified this snapshot |
+| Fixture env knobs (§18) | `test/fixtures-runner.test.ts`; `packages/test-support/src/fixture-runner.ts` | — |
 
 A drift-resistant habit (mirroring the ts-transformers spec §21.1): when
 editing a set above, update this document from the canonical source and keep

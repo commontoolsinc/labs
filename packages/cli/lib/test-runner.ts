@@ -1087,7 +1087,7 @@ export async function runTestPattern(
       () =>
         runtime.patternManager.compileAndRegisterModules(program, {
           patternCoverage,
-        }),
+        }, { space }),
     );
     const { main } = evalResult;
 

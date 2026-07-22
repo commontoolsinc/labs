@@ -24,29 +24,32 @@ const RESULT_PRESENCE_SCHEMA = internSchema({
 });
 
 import { type Cell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
+import { type Action, RetryWhenReady } from "../scheduler.ts";
 import { type AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { RawBuiltinReturnType } from "../module.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
-import { outputSpotFromBinding } from "./scope-policy.ts";
 import { listResultSchema } from "./list-result-schema.ts";
-import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import {
+  boundPatternFactoryScope,
   cellIdentityKey,
   exposedResultCell,
+  outputSpotFromBinding,
+  resolvedCellScope,
   scopedCell,
 } from "./scope-policy.ts";
+import { narrowestScope } from "../scope.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { listElementLink } from "./list-element-link.ts";
 import {
+  ignoreReadForScheduling,
   linkResolutionProbe,
   machineryRead,
 } from "../storage/reactivity-log.ts";
-import { resolveOpPattern } from "./op-pattern-ref.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { createListPatternFactorySupervisor } from "./list-factory-materialization.ts";
 
 const logger = getLogger("runner.map", { enabled: true, level: "warn" });
 
@@ -54,9 +57,7 @@ const logger = getLogger("runner.map", { enabled: true, level: "warn" });
  * Implementation of built-in map module. Unlike regular modules, this will be
  * called once at setup and thus sets up its own actions for the scheduler.
  *
- * This supports both legacy map calls and closure-transformed map calls:
- * - Legacy mode (params === undefined): Passes { element, index, array } to pattern
- * - Closure mode (params !== undefined): Passes { element, index, array, params } to pattern
+ * Nodes carry a bound PatternFactory in `op` and no sibling params.
  *
  * The goal is to keep the output array current without recomputing too much.
  *
@@ -72,14 +73,12 @@ const logger = getLogger("runner.map", { enabled: true, level: "warn" });
  *
  * @param list - A doc containing an array of values to map over.
  * @param op - A pattern to apply to each value.
- * @param params - Optional object containing captured variables from outer scope (closure mode).
  * @returns A doc containing the mapped values.
  */
 export function map(
   inputsCell: Cell<{
     list: any[];
     op: Pattern;
-    params?: Record<string, any>;
   }>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   addCancel: AddCancel,
@@ -96,8 +95,17 @@ export function map(
   // there's no need to store the element cell separately.
   const elementRuns = new Map<
     string,
-    { resultCell: Cell<any>; lastIndex: number }
+    { resultCell: Cell<any>; lastIndex: number; runGeneration?: number }
   >();
+  const factorySupervisor = createListPatternFactorySupervisor(
+    runtime,
+    addCancel,
+    () => {
+      for (const entry of elementRuns.values()) {
+        runtime.runner.stop(entry.resultCell);
+      }
+    },
+  );
 
   // Only the initial (resume) reconcile should defer its per-element sub-pattern
   // runs until storage sync completes. This coordinator registers as
@@ -107,6 +115,8 @@ export function map(
   // each child rehydrate its own persisted state at registration. Elements
   // added by later (post-resume) reconciles are fresh and must not wait.
   let resumeBatchAwaitSync = !!awaitSync;
+  let resumeRowsReadyKey: string | undefined;
+  let resumeRowsReadiness: Promise<void> | undefined;
 
   // Hold the durable container while the input list itself confirms. On a resume
   // reconcile the input can be undefined or a transient empty default standing in
@@ -125,7 +135,11 @@ export function map(
               .withTx(settleTx).getRaw();
             if (raw === undefined || (Array.isArray(raw) && raw.length === 0)) {
               settleTx.runWithAmbientReadMeta(
-                { ...linkResolutionProbe, ...machineryRead },
+                {
+                  ...ignoreReadForScheduling,
+                  ...linkResolutionProbe,
+                  ...machineryRead,
+                },
                 () =>
                   result!.asSchema(RESULT_PRESENCE_SCHEMA).withTx(settleTx).set(
                     [],
@@ -149,13 +163,24 @@ export function map(
   };
 
   const reconcile: Action = (tx: IExtendedStorageTransaction) => {
+    if (resumeRowsReadiness !== undefined) {
+      // A dependency notification may supersede the invocation that began the
+      // row pre-sync. Park that newer invocation without collecting another
+      // copy of the coordinator's broad setup read set. Readiness always
+      // schedules a fresh invocation, which then rereads the current list and
+      // factory and starts another pre-sync if their key changed meanwhile.
+      throw new RetryWhenReady(
+        resumeRowsReadiness,
+        "map: resumed row patterns are waiting for durable state",
+        { keepDependenciesWhileWaiting: false },
+      );
+    }
     // Captured before the loop consumes it: this reconcile's element runs use
     // the current value; the flag is cleared only once a non-empty resume batch
     // has been processed (below), so a transient empty first reconcile doesn't
     // burn it.
     const elementAwaitSync = resumeBatchAwaitSync;
-    const mappedInputs = inputsCell.asSchema(MAP_INPUT_SCHEMA).withTx(tx);
-    const op = mappedInputs.key("op").get();
+    inputsCell.asSchema(MAP_INPUT_SCHEMA).withTx(tx).key("op").get();
     const sourceListCell = inputsCell.key("list");
     const listTarget = resolveLink(
       runtime,
@@ -187,15 +212,49 @@ export function map(
       ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
       : rawList.map((slot, i) => {
         const slotLink = listElementLink(runtime.cfc, listBase, slot, i);
-        const resolved = resolveLink(runtime, tx, slotLink, "value");
+        const dereferenceSources: NormalizedFullLink[] = [];
+        const resolved = tx.runWithAmbientReadMeta(
+          {
+            ...ignoreReadForScheduling,
+            ...linkResolutionProbe,
+            ...machineryRead,
+          },
+          () =>
+            resolveLink(runtime, tx, slotLink, "value", {
+              onDereferenceSource: (source) => {
+                dereferenceSources.push(source);
+              },
+            }),
+        );
+        // Resolution probes at the terminal element must not make the list
+        // coordinator depend on element content. Actual pointer hops are
+        // different: if an intermediate redirect retargets, this coordinator
+        // must rebind the row. Replay just those hop-source reads outside the
+        // non-scheduling resolver scope, retaining their followRef/CFC class.
+        for (const source of dereferenceSources) {
+          tx.runWithAmbientReadMeta(
+            { ...linkResolutionProbe, ...machineryRead },
+            () => tx.readValueOrThrow(source),
+          );
+        }
         return runtime.getCellFromLink(resolved, undefined, tx);
       });
-    // .getRaw() because we want the pattern itself and avoid following the
-    // aliases in the pattern. The raw value is either a compact
-    // `{ $patternRef }` sentinel (resolved to the live canonical pattern by
-    // identity) or, on the legacy path, the embedded pattern graph itself.
-    const opPattern = resolveOpPattern(runtime, op.getRaw(), "map");
-    const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
+    const selection = factorySupervisor.materialize(
+      tx,
+      inputsCell.key("op"),
+      "map",
+    );
+    const opPattern = selection.pattern;
+    const factoryGeneration = selection.generation;
+    const factorySelectionLink = selection.factorySelectionLink;
+    const factoryResultScope = selection.factorySourceLink === undefined
+      ? undefined
+      : boundPatternFactoryScope(
+        runtime,
+        tx,
+        opPattern,
+        selection.factorySourceLink,
+      );
 
     if (!result || result.getAsNormalizedFullLink().scope !== listScope) {
       const resultSchema = listResultSchema(opPattern.resultSchema);
@@ -234,10 +293,9 @@ export function map(
       .withTx(tx);
 
     const createRunInput = (element: Cell<any>, index: number) => ({
-      ...(argumentUsage.usesElement ? { element } : {}),
-      ...(argumentUsage.usesIndex ? { index } : {}),
-      ...(argumentUsage.usesArray ? { array: listCell } : {}),
-      ...(argumentUsage.usesParams ? { params: inputsCell.key("params") } : {}),
+      element,
+      index,
+      array: listCell,
     });
 
     // If the result's value is undefined, set it to the empty array.
@@ -254,7 +312,11 @@ export function map(
     // plumbing containers now that the generic mint route is on (SC-8).
     const probeScoped = <T>(fn: () => T): T =>
       tx.runWithAmbientReadMeta(
-        { ...linkResolutionProbe, ...machineryRead },
+        {
+          ...ignoreReadForScheduling,
+          ...linkResolutionProbe,
+          ...machineryRead,
+        },
         fn,
       );
     // Resume against confirmed state, not the not-yet-loaded value: on the
@@ -268,7 +330,11 @@ export function map(
       elementAwaitSync &&
       probeScoped(() => resultWithLog.get()) === undefined
     ) {
-      const pending = result.sync();
+      // Capture this container: a later row-readiness attempt deliberately
+      // clears `result` so its aborted binding is rebuilt, while this async
+      // seed still has to finish against the container it originally probed.
+      const pendingResult = result;
+      const pending = pendingResult.sync();
       // The container's durable value is still streaming in; its arrival
       // re-triggers this reconcile (the probe read above is journaled). If the
       // container was never persisted — so nothing will ever stream in to
@@ -276,7 +342,7 @@ export function map(
       // left wedged waiting for a value that will never arrive.
       const seedIfStillAbsent = () =>
         runtime.editWithRetry((seedTx) => {
-          const container = result!.withTx(seedTx);
+          const container = pendingResult.withTx(seedTx);
           if (container.getRaw() === undefined) container.set([]);
         }).then(({ error }) => {
           if (error) {
@@ -338,6 +404,65 @@ export function map(
       throw new Error("map currently only supports arrays");
     }
 
+    // List-generated row patterns are not statically reachable from the
+    // containing pattern's resume graph, so the normal resume pre-sync cannot
+    // discover their deterministic result/params/internal cells. Park the
+    // first resumed reconcile until those row subtrees are confirmed. Without
+    // this, setup observes missing params metadata in the cold cache and
+    // re-publishes it; several concurrently resumed pieces then conflict on
+    // the space sequence even though every durable value is unchanged.
+    if (elementAwaitSync) {
+      const keyCounts = new Map<string, number>();
+      const rowCells: Cell<unknown>[] = [];
+      const rowKeys: string[] = [];
+      for (let i = 0; i < list.length; i++) {
+        if (!(i in list)) continue;
+        const { dedupKey, linkKey } = cellIdentityKey(list[i]);
+        const occurrence = keyCounts.get(dedupKey) ?? 0;
+        keyCounts.set(dedupKey, occurrence + 1);
+        const elementKey = JSON.stringify([...linkKey, occurrence]);
+        rowKeys.push(elementKey);
+        rowCells.push(runtime.getCell(
+          parentCell.space,
+          { map: result, elementKey },
+        ));
+      }
+      const readyKey = JSON.stringify([factoryGeneration, rowKeys]);
+      if (resumeRowsReadyKey !== readyKey) {
+        resumeRowsReadiness = Promise.all(
+          rowCells.map((rowCell) =>
+            runtime.runner.syncCellsForPatternResume(rowCell, opPattern)
+          ),
+        ).then(
+          () => {
+            resumeRowsReadyKey = readyKey;
+          },
+          (error) => {
+            // A row pre-sync failure is transient supervisor state, not a
+            // permanent failure of the map. Fulfill this readiness attempt so
+            // the scheduler re-invokes the coordinator; because the ready key
+            // is not recorded, that invocation starts a fresh pre-sync.
+            logger.warn(
+              "resume-rows",
+              "syncing resumed row patterns failed; retrying",
+              { error },
+            );
+          },
+        ).finally(() => {
+          resumeRowsReadiness = undefined;
+        });
+        // The result binding was established in this transaction. It will be
+        // aborted with RetryWhenReady, so force the retry to establish it again
+        // against the same deterministic container identity.
+        result = undefined;
+        throw new RetryWhenReady(
+          resumeRowsReadiness,
+          "map: resumed row patterns are waiting for durable state",
+          { keepDependenciesWhileWaiting: false },
+        );
+      }
+    }
+
     // The resume batch has now been observed; later reconciles are post-resume.
     if (list.length > 0) resumeBatchAwaitSync = false;
 
@@ -348,26 +473,45 @@ export function map(
       if (!(i in list)) continue;
 
       const { dedupKey, linkKey } = cellIdentityKey(list[i]);
+      const rowScope = narrowestScope([
+        resolvedCellScope(runtime, tx, list[i]),
+        factoryResultScope,
+      ]);
       const occurrence = keyCounts.get(dedupKey) ?? 0;
       keyCounts.set(dedupKey, occurrence + 1);
       const elementKey = JSON.stringify([...linkKey, occurrence]);
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
-        if (argumentUsage.usesIndex && existing.lastIndex !== i) {
-          runtime.runner.run(
-            tx,
-            opPattern,
-            createRunInput(list[i], i),
-            existing.resultCell,
-            {
-              doNotUpdateOnPatternChange: true,
-              awaitSyncBeforeInitialRun: elementAwaitSync,
-            },
+        const staleFactoryGeneration = factoryGeneration !== undefined &&
+          existing.runGeneration !== factoryGeneration;
+        if (staleFactoryGeneration || existing.lastIndex !== i) {
+          tx.runWithAmbientReadMeta(
+            { ...ignoreReadForScheduling, ...machineryRead },
+            () =>
+              runtime.runner.run(
+                tx,
+                opPattern,
+                createRunInput(list[i], i),
+                existing.resultCell,
+                {
+                  doNotUpdateOnPatternChange: true,
+                  awaitSyncBeforeInitialRun: elementAwaitSync,
+                  ...(factorySelectionLink === undefined
+                    ? {}
+                    : { factorySelectionLink }),
+                },
+              ),
           );
+          existing.runGeneration = factoryGeneration;
         }
         existing.lastIndex = i;
-        newArrayValue[i] = exposedResultCell(runtime, tx, existing.resultCell);
+        newArrayValue[i] = exposedResultCell(
+          runtime,
+          tx,
+          existing.resultCell,
+          rowScope,
+        );
       } else {
         const resultCell = runtime.getCell(
           parentCell.space,
@@ -375,23 +519,39 @@ export function map(
           undefined,
           tx,
         );
-        runtime.runner.run(
-          tx,
-          opPattern,
-          createRunInput(list[i], i),
-          resultCell,
-          {
-            doNotUpdateOnPatternChange: true,
-            awaitSyncBeforeInitialRun: elementAwaitSync,
-          },
+        tx.runWithAmbientReadMeta(
+          { ...ignoreReadForScheduling, ...machineryRead },
+          () =>
+            runtime.runner.run(
+              tx,
+              opPattern,
+              createRunInput(list[i], i),
+              resultCell,
+              {
+                doNotUpdateOnPatternChange: true,
+                awaitSyncBeforeInitialRun: elementAwaitSync,
+                ...(factorySelectionLink === undefined
+                  ? {}
+                  : { factorySelectionLink }),
+              },
+            ),
         );
         // Link these individual cells to the top cell
         setResultCell(resultCell, parentCell);
         // Link the new result cells to the pattern cell too
         setPatternCell(resultCell, parentCell.key("pattern"));
         addCancel(() => runtime.runner.stop(resultCell));
-        elementRuns.set(elementKey, { resultCell, lastIndex: i });
-        newArrayValue[i] = exposedResultCell(runtime, tx, resultCell);
+        elementRuns.set(elementKey, {
+          resultCell,
+          lastIndex: i,
+          runGeneration: factoryGeneration,
+        });
+        newArrayValue[i] = exposedResultCell(
+          runtime,
+          tx,
+          resultCell,
+          rowScope,
+        );
       }
     }
     probeScoped(() => resultWithLog.set(newArrayValue));

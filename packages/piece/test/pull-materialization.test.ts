@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
+  FactoryArtifactUnavailableError,
   getPatternIdentityRef,
   getPatternRepository,
   isLink,
@@ -1404,6 +1405,99 @@ describe("piece pull materialization", () => {
 
     await expect(runtime.setup(undefined, undefined, {}, unknownPiece))
       .rejects.toThrow(`Unknown pattern: ${"Z".repeat(43)}#default`);
+  });
+
+  it("pulls only the selected result path", async () => {
+    const piece = runtime.getCell(
+      manager.getSpace(),
+      "piece-controller-selected-result-path",
+    );
+    let rootPulls = 0;
+    let childPulls = 0;
+    const child = {
+      pull() {
+        childPulls++;
+      },
+      get() {
+        return "selected";
+      },
+      key() {
+        return this;
+      },
+    };
+    const root = {
+      pull() {
+        rootPulls++;
+      },
+      get() {
+        throw new Error("root contains a cold factory sibling");
+      },
+      key(segment: string | number) {
+        if (segment !== "lastMessage") throw new Error("unexpected path");
+        return child;
+      },
+    };
+    (manager as unknown as { getResult(): unknown }).getResult = () => root;
+    const controller = new PieceController(manager, piece);
+
+    expect(await controller.result.get(["lastMessage"])).toBe("selected");
+    expect(rootPulls).toBe(0);
+    expect(childPulls).toBe(1);
+  });
+
+  it("warms a cold factory artifact before returning a result", async () => {
+    const piece = runtime.getCell(
+      manager.getSpace(),
+      "piece-controller-cold-factory-result",
+    );
+    const ref = {
+      identity: "PAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      symbol: "coldFactory",
+    };
+    let warmed = false;
+    let pulls = 0;
+    const root = {
+      pull() {
+        pulls++;
+      },
+      get() {
+        if (!warmed) {
+          throw new FactoryArtifactUnavailableError(ref, manager.getSpace());
+        }
+        return { factory: "materialized" };
+      },
+      key() {
+        return this;
+      },
+    };
+    const originalGetResult = manager.getResult.bind(manager);
+    const originalLoad = runtime.patternManager.loadArtifactByIdentity.bind(
+      runtime.patternManager,
+    );
+    const loads: unknown[][] = [];
+    manager.getResult = () => root as never;
+    runtime.patternManager.loadArtifactByIdentity = (
+      identity,
+      symbol,
+      space,
+    ) => {
+      loads.push([identity, symbol, space]);
+      warmed = true;
+      return Promise.resolve({});
+    };
+    try {
+      const controller = new PieceController(manager, piece);
+      expect(await controller.result.get()).toEqual({
+        factory: "materialized",
+      });
+      expect(pulls).toBe(1);
+      expect(loads).toEqual([
+        [ref.identity, ref.symbol, manager.getSpace()],
+      ]);
+    } finally {
+      manager.getResult = originalGetResult;
+      runtime.patternManager.loadArtifactByIdentity = originalLoad;
+    }
   });
 
   it("pulls before reading result values", async () => {

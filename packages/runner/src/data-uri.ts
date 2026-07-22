@@ -24,13 +24,20 @@
  */
 
 import {
-  FabricInstance,
-  FabricPrimitive,
+  FabricSpecialObject,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+} from "@commonfabric/data-model/fabric-factory";
 import { isRecord } from "@commonfabric/utils/types";
 import { type Cell, isCell } from "./cell.ts";
-import { isPrimitiveCellLink, type NormalizedLink } from "./link-types.ts";
+import {
+  isAliasBinding,
+  isPrimitiveCellLink,
+  type NormalizedLink,
+} from "./link-types.ts";
 import {
   createSigilLinkFromParsedLink,
   isCellLink,
@@ -43,6 +50,13 @@ import {
   dataUriFromValue,
   valueFromDataUri,
 } from "@commonfabric/data-model/data-uri-codec";
+import { isPattern } from "./builder/types.ts";
+import {
+  createFactoryTraversalContext,
+  hasTraversableFabricInstanceState,
+  mapFabricInstanceStateForTraversal,
+  mapFactoryForTraversal,
+} from "./builder/factory-traversal.ts";
 
 /**
  * Makes a `data:` URI that names a cell whose content is carried in the id
@@ -78,48 +92,101 @@ export function dataUriFromValueWithResolvedLinks(
   base?: Cell | NormalizedLink,
 ): URI {
   const baseLink = isCell(base) ? base.getAsNormalizedFullLink() : base;
+  const factoryContext = createFactoryTraversalContext();
 
   function traverseAndAddBaseIdToRelativeLinks(
-    value: FabricValue,
+    value: unknown,
     seen: Set<object>,
+    insideLegacyPatternGraph = false,
   ): FabricValue {
-    if (!isRecord(value)) return value;
+    if (isAdmittedFabricFactory(value)) {
+      const state = factoryStateOf(value);
+      const legacyPattern = value as unknown as { toJSON?: () => unknown };
+      if (
+        insideLegacyPatternGraph && state.kind === "pattern" &&
+        state.ref === undefined && typeof legacyPattern.toJSON === "function"
+      ) {
+        return traverseAndAddBaseIdToRelativeLinks(
+          legacyPattern.toJSON(),
+          seen,
+          true,
+        );
+      }
+      return mapFactoryForTraversal(
+        value,
+        (nested) => traverseAndAddBaseIdToRelativeLinks(nested, seen),
+        factoryContext,
+      ) as FabricValue;
+    }
+    if (typeof value === "function") {
+      throw new TypeError("Arbitrary functions are not valid Fabric values");
+    }
+    // Structural legacy aliases are executable graph metadata, not references
+    // relative to whichever inline document happens to transport the graph.
+    if (insideLegacyPatternGraph && isAliasBinding(value)) {
+      return value as FabricValue;
+    }
+    // Modern links are Fabric instances, so recognize links before the generic
+    // codec-instance/special-object branches.
+    if (isPrimitiveCellLink(value)) {
+      const link = parseLink(value, baseLink);
+      return createSigilLinkFromParsedLink(link, {
+        includeSchema: true,
+        keepAsCell: KeepAsCell.All,
+      });
+    }
+    if (hasTraversableFabricInstanceState(value)) {
+      if (seen.has(value)) {
+        throw new Error(`Cycle detected when creating data URI`);
+      }
+      seen.add(value);
+      try {
+        return mapFabricInstanceStateForTraversal(
+          value,
+          (state) =>
+            traverseAndAddBaseIdToRelativeLinks(
+              state,
+              seen,
+              insideLegacyPatternGraph,
+            ),
+        );
+      } finally {
+        seen.delete(value);
+      }
+    }
+    if (value instanceof FabricSpecialObject) return value;
+    if (!isRecord(value)) return value as FabricValue;
     if (seen.has(value)) {
       throw new Error(`Cycle detected when creating data URI`);
     }
     seen.add(value);
     try {
-      if (isPrimitiveCellLink(value)) {
-        const link = parseLink(value, baseLink);
-        return createSigilLinkFromParsedLink(link, {
-          includeSchema: true,
-          keepAsCell: KeepAsCell.All,
-        });
-      } else if (value instanceof FabricPrimitive) {
-        // A `FabricPrimitive` is a leaf; the value encoding represents it
-        // via its codec.
-        return value;
-      } else if (value instanceof FabricInstance) {
-        // TODO(danfuzz): A `FabricInstance` is not a leaf: its state can
-        // carry cell links, which need the same relative-to-absolute
-        // rewriting as everything else. That requires codec-mediated
-        // traversal into instance state; until that exists, the instance
-        // passes through unrewritten (encoded correctly in form, but any
-        // relative link within it stays relative).
-        return value;
-      } else if (Array.isArray(value)) {
+      if (Array.isArray(value)) {
         return value.map((item) =>
-          traverseAndAddBaseIdToRelativeLinks(item, seen)
+          traverseAndAddBaseIdToRelativeLinks(
+            item,
+            seen,
+            insideLegacyPatternGraph,
+          )
         );
       } else { // isObject
+        const childIsInsideLegacyPattern = insideLegacyPatternGraph ||
+          isPattern(value);
         return Object.fromEntries(
-          Object.entries(value).map((
+          Object.entries(value).filter(([key, child]) =>
+            !(childIsInsideLegacyPattern && key === "toJSON" &&
+              typeof child === "function")
+          ).map((
             [key, value],
           ) => [
             key,
-            traverseAndAddBaseIdToRelativeLinks(value as FabricValue, seen),
+            traverseAndAddBaseIdToRelativeLinks(
+              value,
+              seen,
+              childIsInsideLegacyPattern,
+            ),
           ]),
-        );
+        ) as FabricValue;
       }
     } finally {
       seen.delete(value);
@@ -131,24 +198,27 @@ export function dataUriFromValueWithResolvedLinks(
   );
 }
 
-/**
- * Find any data: URI links and inline them.
- *
- * TODO(danfuzz): This `isRecord`-gated walk has no `FabricSpecialObject`
- * guard: after the link check, a non-link `FabricPrimitive`/`FabricInstance`
- * falls into the `Object.entries` descent, which walks it by enumerable own
- * props instead of treating it as a leaf. An instance with no enumerable
- * props happens to pass through by reference, but the copy-on-write branch
- * (`{ ...value }`) silently flattens any instance whose entry inlines
- * differently into a plain object. The payload walk
- * (`dataValue[path.shift()]`) indexes into decoded content with the same
- * blindness.
- *
- * @param value - The value to find and inline data: URI links in.
- * @returns The value with any data: URI links inlined.
- */
+/** Find data-URI links and inline them, including factory and codec state. */
 export function findAndInlineDataUriLinks(value: any): any {
-  if (isCellLink(value)) {
+  return findAndInlineDataUriLinksInner(
+    value,
+    createFactoryTraversalContext(),
+  );
+}
+
+function findAndInlineDataUriLinksInner(
+  value: any,
+  factoryContext: ReturnType<typeof createFactoryTraversalContext>,
+): any {
+  if (isAdmittedFabricFactory(value)) {
+    return mapFactoryForTraversal(
+      value,
+      (nested) => findAndInlineDataUriLinksInner(nested, factoryContext),
+      factoryContext,
+    );
+  } else if (typeof value === "function") {
+    throw new TypeError("Arbitrary functions are not valid Fabric values");
+  } else if (isCellLink(value)) {
     const dataLink = parseLink(value)!;
 
     if (dataLink.id?.startsWith("data:")) {
@@ -184,7 +254,7 @@ export function findAndInlineDataUriLinks(value: any): any {
             includeSchema: true,
             keepAsCell: KeepAsCell.All,
           });
-          return findAndInlineDataUriLinks(newSigilLink);
+          return findAndInlineDataUriLinksInner(newSigilLink, factoryContext);
         }
         if (path.length > 0) {
           dataValue = dataValue[path.shift()!];
@@ -202,7 +272,7 @@ export function findAndInlineDataUriLinks(value: any): any {
     for (let index = 0; index < value.length; index++) {
       if (!(index in value)) continue;
       const current = value[index];
-      const inlined = findAndInlineDataUriLinks(current);
+      const inlined = findAndInlineDataUriLinksInner(current, factoryContext);
       if (next) {
         next[index] = inlined;
       } else if (!Object.is(inlined, current)) {
@@ -213,10 +283,17 @@ export function findAndInlineDataUriLinks(value: any): any {
       }
     }
     return next ?? value;
+  } else if (hasTraversableFabricInstanceState(value)) {
+    return mapFabricInstanceStateForTraversal(
+      value,
+      (state) => findAndInlineDataUriLinksInner(state, factoryContext),
+    );
+  } else if (value instanceof FabricSpecialObject) {
+    return value;
   } else if (isRecord(value)) {
     let next: Record<string, unknown> | undefined;
     for (const [key, entry] of Object.entries(value)) {
-      const inlined = findAndInlineDataUriLinks(entry);
+      const inlined = findAndInlineDataUriLinksInner(entry, factoryContext);
       if (next) {
         next[key] = inlined;
       } else if (!Object.is(inlined, entry)) {

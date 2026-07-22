@@ -12,6 +12,16 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import {
+  createFactoryShell,
+  type FactoryStateV1,
+  registerFabricFactory,
+} from "@/fabric-factory.ts";
+
+const FACTORY_REF = {
+  identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  symbol: "__cfFactory_1",
+} as const;
 
 // Dynamic import to satisfy the no-external-import lint rule.
 const nodeCrypto = await import("node:crypto");
@@ -40,6 +50,123 @@ function hashBytesOf(value: FabricValue): Uint8Array {
 
 describe("value-hash", () => {
   describe("hashOf()", () => {
+    describe("Fabric factories", () => {
+      it("hashes through the exact TAG_INSTANCE / Factory@1 codec byte arm", () => {
+        const factory = createFactoryShell({
+          kind: "module",
+          ref: FACTORY_REF,
+        });
+        const stream: number[] = [0x12]; // TAG_INSTANCE
+        const pushShortString = (value: string) => {
+          const encoded = new TextEncoder().encode(value);
+          stream.push(0x24, encoded.length, ...encoded);
+        };
+
+        pushShortString("Factory@1");
+        stream.push(0x11); // canonical state object
+        pushShortString("kind");
+        pushShortString("module");
+        pushShortString("ref");
+        stream.push(0x11); // ref object
+        pushShortString("identity");
+        pushShortString(FACTORY_REF.identity);
+        pushShortString("symbol");
+        pushShortString(FACTORY_REF.symbol);
+        stream.push(0x00); // end ref
+        stream.push(0x00); // end state
+
+        expect(hashBytesOf(factory)).toEqual(sha256(stream));
+      });
+
+      it("gives independent equal shells the same stable hash", () => {
+        const a = createFactoryShell({ kind: "handler", ref: FACTORY_REF });
+        const b = createFactoryShell({ kind: "handler", ref: FACTORY_REF });
+        expect(hashBytesOf(a)).toEqual(hashBytesOf(b));
+        expect(hashOf(a)).toBe(hashOf(a));
+      });
+
+      it("hashes a factory nested in another factory's params", () => {
+        const child = createFactoryShell({
+          kind: "module",
+          ref: FACTORY_REF,
+        });
+        const parent = registerFabricFactory(() => undefined, "pattern", {
+          kind: "pattern",
+          rootToken: {},
+          ref: { ...FACTORY_REF, symbol: "__cfPattern_1" },
+          argumentSchema: true,
+          resultSchema: true,
+          paramsSchema: true,
+          params: { child },
+        });
+        const sameParent = registerFabricFactory(() => undefined, "pattern", {
+          kind: "pattern",
+          rootToken: {},
+          ref: { ...FACTORY_REF, symbol: "__cfPattern_1" },
+          argumentSchema: true,
+          resultSchema: true,
+          paramsSchema: true,
+          params: {
+            child: createFactoryShell({
+              kind: "module",
+              ref: FACTORY_REF,
+            }),
+          },
+        });
+        const differentParent = registerFabricFactory(
+          () => undefined,
+          "pattern",
+          {
+            kind: "pattern",
+            rootToken: {},
+            ref: { ...FACTORY_REF, symbol: "__cfPattern_1" },
+            argumentSchema: true,
+            resultSchema: true,
+            paramsSchema: true,
+            params: {
+              child: createFactoryShell({
+                kind: "module",
+                ref: { ...FACTORY_REF, symbol: "__cfFactory_2" },
+              }),
+            },
+          },
+        );
+
+        expect(hashBytesOf(parent)).toEqual(hashBytesOf(sameParent));
+        expect(hashBytesOf(parent)).not.toEqual(hashBytesOf(differentParent));
+      });
+
+      it("fails before hashing a live factory whose artifact ref is unavailable", () => {
+        const factory = registerFabricFactory(() => undefined, "module", {
+          kind: "module",
+          rootToken: {},
+        });
+        expect(() => hashOf(factory)).toThrow(
+          "artifact ref is not available",
+        );
+      });
+
+      it("memoizes canonical state before hashing accessor state can drift", () => {
+        let state: FactoryStateV1 = { kind: "module", ref: FACTORY_REF };
+        const factory = registerFabricFactory(
+          () => undefined,
+          "module",
+          () => state,
+        );
+        const first = hashStringOf(factory);
+        state = { kind: "handler", ref: FACTORY_REF };
+        expect(hashStringOf(factory)).toBe(first);
+      });
+
+      it("rejects arbitrary functions directly and when nested", () => {
+        const fn = (() => undefined) as unknown as FabricValue;
+        expect(() => hashOf(fn)).toThrow("arbitrary function");
+        expect(() => hashOf({ fn } as unknown as FabricValue)).toThrow(
+          "arbitrary function",
+        );
+      });
+    });
+
     it("produces `TAG_NULL` byte stream for `null`", () => {
       // Byte stream: [0x20]
       const expected = sha256([0x20]);
