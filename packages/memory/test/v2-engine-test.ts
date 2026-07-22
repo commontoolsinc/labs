@@ -19,7 +19,9 @@ import {
   createBranch,
   deleteBranch,
   type Engine,
+  entityIdExists,
   listBranches,
+  listEntityIdPage,
   listEntityIds,
   open,
   ProtocolError,
@@ -573,6 +575,13 @@ Deno.test("memory v2 engine lists live space-scoped entity identifiers", async (
       "of:fid1:first",
       "of:fid1:second",
     ]);
+    assertEquals(listEntityIdPage(engine, { limit: 1 }), ["of:fid1:first"]);
+    assertEquals(
+      listEntityIdPage(engine, { after: "of:fid1:first", limit: 1 }),
+      ["of:fid1:second"],
+    );
+    assertEquals(entityIdExists(engine, "of:fid1:first"), true);
+    assertEquals(entityIdExists(engine, "of:fid1:missing"), false);
 
     applyCommit(engine, {
       sessionId: "session:alice",
@@ -585,6 +594,7 @@ Deno.test("memory v2 engine lists live space-scoped entity identifiers", async (
     });
 
     assertEquals(listEntityIds(engine), ["of:fid1:second"]);
+    assertEquals(entityIdExists(engine, "of:fid1:first"), false);
     assertEquals(
       engine.database.prepare(`
         SELECT id, scope_key, op

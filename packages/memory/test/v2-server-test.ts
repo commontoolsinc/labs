@@ -150,10 +150,46 @@ Deno.test("memory v2 server parses entity identifier listing requests", () => {
   assertEquals(
     parseClientMessage(encodeMemoryBoundary({
       type: "entity-id.list",
+      requestId: "entity-list-page",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:1",
+      after: "of:fid1:first",
+      limit: 100,
+      expectedServerSeq: 42,
+    })),
+    {
+      type: "entity-id.list",
+      requestId: "entity-list-page",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:1",
+      after: "of:fid1:first",
+      limit: 100,
+      expectedServerSeq: 42,
+    },
+  );
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      type: "entity-id.list",
       requestId: "entity-list-2",
       space: "did:key:z6Mk-space",
     })),
     null,
+  );
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      type: "entity-id.exists",
+      requestId: "entity-exists-1",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:1",
+      id: "of:fid1:first",
+    })),
+    {
+      type: "entity-id.exists",
+      requestId: "entity-exists-1",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:1",
+      id: "of:fid1:first",
+    },
   );
 });
 

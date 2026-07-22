@@ -4,6 +4,8 @@ import {
   Console as RuntimeConsole,
   EntityId,
   entityIdFrom,
+  type EntityIdListOptions,
+  type EntityIdListResult,
   getEntityId,
   getMetaLink,
   getPatternIdentityRef,
@@ -155,6 +157,23 @@ export class PieceManager {
   async listEntityIds(): Promise<string[] | undefined> {
     await this.ready;
     return await this.runtime.storageManager.open(this.space).listEntityIds?.();
+  }
+
+  async listEntityIdPage(
+    options: EntityIdListOptions = {},
+  ): Promise<EntityIdListResult | undefined> {
+    await this.ready;
+    return await this.runtime.storageManager.open(this.space)
+      .listEntityIdPage?.(
+        options,
+      );
+  }
+
+  async entityIdExists(id: string): Promise<boolean | undefined> {
+    await this.ready;
+    return await this.runtime.storageManager.open(this.space).entityIdExists?.(
+      id,
+    );
   }
 
   getSpaceCellContents(): Cell<SpaceCellContents> {

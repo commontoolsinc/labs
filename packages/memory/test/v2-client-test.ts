@@ -476,6 +476,44 @@ Deno.test("memory v2 entity identifier listing transfers identifiers without ent
     assertEquals(listResponses.length, 1);
     const response = listResponses[0];
     assertEquals(Object.keys(response.ok ?? {}).sort(), ["ids", "serverSeq"]);
+
+    const firstPage = await space.listEntityIds({ limit: 1 });
+    assertEquals(firstPage?.ids, ["of:fid1:first"]);
+    assertEquals(firstPage?.nextAfter, "of:fid1:first");
+    const secondPage = await space.listEntityIds({
+      after: firstPage?.nextAfter,
+      limit: 1,
+      expectedServerSeq: firstPage?.serverSeq,
+    });
+    assertEquals(secondPage?.ids, ["of:fid1:second"]);
+    assertEquals(secondPage?.nextAfter, undefined);
+    await space.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:fid1:third",
+        value: { value: { payload: "third" } },
+      }],
+    });
+    await assertRejects(
+      () =>
+        space.listEntityIds({
+          after: firstPage?.nextAfter,
+          limit: 1,
+          expectedServerSeq: firstPage?.serverSeq,
+        }),
+      Error,
+      "entity identifier snapshot changed",
+    );
+    assertEquals(
+      (await space.entityIdExists("of:fid1:first"))?.exists,
+      true,
+    );
+    assertEquals(
+      (await space.entityIdExists("of:fid1:missing"))?.exists,
+      false,
+    );
   } finally {
     await client.close();
     await server.close();

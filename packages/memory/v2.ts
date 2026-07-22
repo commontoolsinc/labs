@@ -295,6 +295,10 @@ export type MemoryProtocolFlags = {
   pendingReadStacks: boolean;
   /** The server can list live space-scoped entity identifiers without values. */
   entityIdListing: boolean;
+  /** The server can page one stable entity-identifier snapshot. */
+  entityIdPagination: boolean;
+  /** The server can test one entity identifier without loading its value. */
+  entityIdLookup: boolean;
 };
 
 /**
@@ -309,6 +313,8 @@ export type WireMemoryProtocolFlags = {
   sqliteCommitRowLabelEval?: boolean;
   pendingReadStacks?: boolean;
   entityIdListing?: boolean;
+  entityIdPagination?: boolean;
+  entityIdLookup?: boolean;
 };
 
 export type HelloMessage = {
@@ -378,6 +384,18 @@ export type GraphQueryResult = {
 export type EntityIdListResult = {
   serverSeq: number;
   ids: EntityId[];
+  nextAfter?: EntityId;
+};
+
+export type EntityIdListOptions = {
+  after?: EntityId;
+  limit?: number;
+  expectedServerSeq?: number;
+};
+
+export type EntityIdLookupResult = {
+  serverSeq: number;
+  exists: boolean;
 };
 
 export type QueryWatchSpec = {
@@ -462,6 +480,17 @@ export interface EntityIdListRequest {
   requestId: string;
   space: string;
   sessionId: SessionId;
+  after?: EntityId;
+  limit?: number;
+  expectedServerSeq?: number;
+}
+
+export interface EntityIdLookupRequest {
+  type: "entity-id.exists";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  id: EntityId;
 }
 
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
@@ -797,6 +826,7 @@ export type ClientMessage =
   | TransactRequest
   | GraphQueryRequest
   | EntityIdListRequest
+  | EntityIdLookupRequest
   | SqliteQueryRequest
   | SqliteRegisterDiskSourceRequest
   | WatchSetRequest
@@ -889,6 +919,8 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // The engine answers this request from its identifier index without
   // selecting stored entity values.
   entityIdListing: true,
+  entityIdPagination: true,
+  entityIdLookup: true,
   syncSchemaTableV2: getSyncSchemaTableConfig(),
 });
 
@@ -978,6 +1010,22 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const entityIdPagination = value.entityIdPagination;
+  if (
+    entityIdPagination !== undefined &&
+    typeof entityIdPagination !== "boolean"
+  ) {
+    return null;
+  }
+
+  const entityIdLookup = value.entityIdLookup;
+  if (
+    entityIdLookup !== undefined &&
+    typeof entityIdLookup !== "boolean"
+  ) {
+    return null;
+  }
+
   return {
     modernCellRep: modernCellRep === true,
     persistentSchedulerState: persistentSchedulerState === true,
@@ -991,6 +1039,8 @@ export const parseMemoryProtocolFlags = (
     // reads to top-of-stack unless the array capability is advertised.
     pendingReadStacks: pendingReadStacks === true,
     entityIdListing: entityIdListing === true,
+    entityIdPagination: entityIdPagination === true,
+    entityIdLookup: entityIdLookup === true,
   };
 };
 
@@ -1008,6 +1058,8 @@ export const wireMemoryProtocolFlags = (
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
   pendingReadStacks: flags.pendingReadStacks,
   entityIdListing: flags.entityIdListing,
+  entityIdPagination: flags.entityIdPagination,
+  entityIdLookup: flags.entityIdLookup,
 });
 
 /**

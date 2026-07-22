@@ -144,6 +144,8 @@ describe("memory v2 flags", () => {
       sqliteCommitRowLabelEval: true,
       pendingReadStacks: true,
       entityIdListing: true,
+      entityIdPagination: true,
+      entityIdLookup: true,
       syncSchemaTableV2: false,
     });
 
@@ -160,6 +162,8 @@ describe("memory v2 flags", () => {
       sqliteCommitRowLabelEval: true,
       pendingReadStacks: true,
       entityIdListing: true,
+      entityIdPagination: true,
+      entityIdLookup: true,
       syncSchemaTableV2: true,
     });
 
@@ -180,6 +184,8 @@ describe("memory v2 flags", () => {
         sqliteCommitRowLabelEval: true,
         pendingReadStacks: true,
         entityIdListing: true,
+        entityIdPagination: true,
+        entityIdLookup: true,
       },
       {
         modernCellRep: true,
@@ -193,6 +199,8 @@ describe("memory v2 flags", () => {
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
       },
     ));
   });
@@ -209,6 +217,8 @@ describe("parseMemoryProtocolFlags", () => {
       sqliteCommitRowLabelEval: false,
       pendingReadStacks: false,
       entityIdListing: false,
+      entityIdPagination: false,
+      entityIdLookup: false,
     });
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: false }), {
       modernCellRep: false,
@@ -219,6 +229,8 @@ describe("parseMemoryProtocolFlags", () => {
       sqliteCommitRowLabelEval: false,
       pendingReadStacks: false,
       entityIdListing: false,
+      entityIdPagination: false,
+      entityIdLookup: false,
     });
   });
 
@@ -236,6 +248,8 @@ describe("parseMemoryProtocolFlags", () => {
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
       },
     );
   });
@@ -254,6 +268,8 @@ describe("parseMemoryProtocolFlags", () => {
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
       },
     );
   });
@@ -272,6 +288,8 @@ describe("parseMemoryProtocolFlags", () => {
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
       },
     );
   });
@@ -290,6 +308,8 @@ describe("parseMemoryProtocolFlags", () => {
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
       },
     );
   });
@@ -326,6 +346,8 @@ describe("parseMemoryProtocolFlags", () => {
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: true,
         entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
       },
     );
   });
@@ -342,6 +364,28 @@ describe("parseMemoryProtocolFlags", () => {
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         entityIdListing: true,
+        entityIdPagination: false,
+        entityIdLookup: false,
+      },
+    );
+  });
+
+  it("accepts entity identifier pagination and lookup capability keys", () => {
+    assertEquals(
+      parseMemoryProtocolFlags({
+        entityIdPagination: true,
+        entityIdLookup: true,
+      }),
+      {
+        modernCellRep: false,
+        persistentSchedulerState: false,
+        commitPreconditions: false,
+        syncSchemaTable: false,
+        syncSchemaTableV2: false,
+        sqliteCommitRowLabelEval: false,
+        entityIdListing: false,
+        entityIdPagination: true,
+        entityIdLookup: true,
       },
     );
   });
@@ -363,6 +407,11 @@ describe("parseMemoryProtocolFlags", () => {
       null,
     );
     assertEquals(parseMemoryProtocolFlags({ entityIdListing: "true" }), null);
+    assertEquals(
+      parseMemoryProtocolFlags({ entityIdPagination: "true" }),
+      null,
+    );
+    assertEquals(parseMemoryProtocolFlags({ entityIdLookup: "true" }), null);
     assertEquals(
       parseMemoryProtocolFlags({
         modernCellRep: true,
