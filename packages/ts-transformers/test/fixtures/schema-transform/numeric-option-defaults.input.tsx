@@ -5,8 +5,8 @@ interface Config {
   ratio: number;
   nan: number;
   inf: number;
-  ninf: number;
-  nzero: number;
+  negInf: number;
+  negZero: number;
   parenthesized: number;
 }
 
@@ -16,8 +16,8 @@ const configSchema = toSchema<Config>({
     ratio: -0.5,
     nan: NaN,
     inf: Infinity,
-    ninf: -Infinity,
-    nzero: -0,
+    negInf: -Infinity,
+    negZero: -0,
     // Parentheses carry no meaning, but they are a distinct AST node; without
     // unwrapping them this property is dropped like any other.
     parenthesized: (-1),

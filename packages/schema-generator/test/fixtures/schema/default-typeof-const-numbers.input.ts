@@ -13,7 +13,7 @@
 import { Default } from "commonfabric";
 
 const SENTINELS = { selected: -1, ratio: -0.5, negZero: -0 };
-const NON_FINITE = { nan: NaN, inf: Infinity, ninf: -Infinity };
+const NON_FINITE = { nan: NaN, inf: Infinity, negInf: -Infinity };
 const OFFSETS = [-1, 2, -3];
 
 interface SchemaRoot {
@@ -25,7 +25,7 @@ interface SchemaRoot {
 
   // Object payload, values with no literal form at all.
   nonFinite: Default<
-    { nan: number; inf: number; ninf: number },
+    { nan: number; inf: number; negInf: number },
     typeof NON_FINITE
   >;
 

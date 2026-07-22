@@ -16,8 +16,8 @@ interface Config {
     ratio: number;
     nan: number;
     inf: number;
-    ninf: number;
-    nzero: number;
+    negInf: number;
+    negZero: number;
     parenthesized: number;
 }
 const configSchema = __cfHelpers.__cf_data({
@@ -35,24 +35,24 @@ const configSchema = __cfHelpers.__cf_data({
         inf: {
             type: "number"
         },
-        ninf: {
+        negInf: {
             type: "number"
         },
-        nzero: {
+        negZero: {
             type: "number"
         },
         parenthesized: {
             type: "number"
         }
     },
-    required: ["sentinel", "ratio", "nan", "inf", "ninf", "nzero", "parenthesized"],
+    required: ["sentinel", "ratio", "nan", "inf", "negInf", "negZero", "parenthesized"],
     "default": {
         sentinel: -1,
         ratio: -0.5,
         nan: NaN,
         inf: Infinity,
-        ninf: -Infinity,
-        nzero: -0,
+        negInf: -Infinity,
+        negZero: -0,
         parenthesized: -1
     }
 } as const satisfies __cfHelpers.JSONSchema);

@@ -8,7 +8,7 @@
         "nan": {
           "/SpecialNumber@1": "NaN"
         },
-        "ninf": {
+        "negInf": {
           "/SpecialNumber@1": "-Infinity"
         }
       },
@@ -19,14 +19,14 @@
         "nan": {
           "type": "number"
         },
-        "ninf": {
+        "negInf": {
           "type": "number"
         }
       },
       "required": [
         "inf",
         "nan",
-        "ninf"
+        "negInf"
       ],
       "type": "object"
     },
