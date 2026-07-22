@@ -76,6 +76,7 @@ import {
 } from "./handles.ts";
 import {
   DirectoryHandleMap,
+  type DirectorySnapshotEntry,
   prepareDirectoryForHandle,
 } from "./directory-handles.ts";
 import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
@@ -1533,6 +1534,7 @@ export async function main(argv: string[] = Deno.args) {
     ) => {
       logOp("readdir", ino.toString());
       const inode = BigInt(ino);
+      const fh = fi ? readFileInfo(fi).fh : 0n;
       const sendDirectoryReply = () => {
         const node = tree.getNode(inode);
         if (!node || node.kind !== "dir") {
@@ -1543,31 +1545,33 @@ export async function main(argv: string[] = Deno.args) {
         const bufSize = Number(size);
         const startOffset = Number(offset);
 
-        type DirEntry = { name: string; ino: bigint; mode: number };
-        const entries: DirEntry[] = [
-          { name: ".", ino: inode, mode: DIR_MODE },
-          {
-            name: "..",
-            ino: tree.parents.get(inode) ?? 1n,
-            mode: DIR_MODE,
-          },
-        ];
+        const entries = directoryHandles.snapshot(fh, inode, () => {
+          const snapshot: DirectorySnapshotEntry[] = [
+            { name: ".", ino: inode, mode: DIR_MODE },
+            {
+              name: "..",
+              ino: tree.parents.get(inode) ?? 1n,
+              mode: DIR_MODE,
+            },
+          ];
 
-        for (const [childName, childIno] of tree.getChildren(inode)) {
-          const childNode = tree.getNode(childIno);
-          if (!childNode) continue;
-          entries.push({
-            name: childName,
-            ino: childIno,
-            mode: nodeMode(
-              childNode,
-              Boolean(
-                bridge?.resolveWritePath(childIno) ||
-                  bridge?.resolveSourceWritePath(childIno),
+          for (const [childName, childIno] of tree.getChildren(inode)) {
+            const childNode = tree.getNode(childIno);
+            if (!childNode) continue;
+            snapshot.push({
+              name: childName,
+              ino: childIno,
+              mode: nodeMode(
+                childNode,
+                Boolean(
+                  bridge?.resolveWritePath(childIno) ||
+                    bridge?.resolveSourceWritePath(childIno),
+                ),
               ),
-            ),
-          });
-        }
+            });
+          }
+          return snapshot;
+        });
 
         const buf = new Uint8Array(bufSize);
         let pos = 0;
@@ -1606,7 +1610,6 @@ export async function main(argv: string[] = Deno.args) {
         );
       };
 
-      const fh = fi ? readFileInfo(fi).fh : 0n;
       const preparation = prepareDirectoryForHandle(
         directoryHandles,
         fh,
