@@ -228,10 +228,26 @@ const VOTE_SWATCH: Record<VoteColor, string> = {
 
 const trimmedName = (n: string | undefined) => (n ?? "").trim();
 
-const newOptionId = () =>
-  `o_${Date.now().toString(36)}_${
-    Math.floor(Math.random() * 1e6).toString(36)
-  }`;
+// Produce a stable unused id from action inputs and the current collection.
+// This deliberately avoids Date.now()/Math.random(): pre-#4740 Loom runtimes
+// reject those ambient capabilities in secure handlers.
+const unusedId = (
+  prefix: string,
+  parts: readonly string[],
+  existingIds: readonly string[],
+): string => {
+  const base = `${prefix}_${JSON.stringify(parts)}`;
+  let id = base;
+  let suffix = 2;
+  while (existingIds.includes(id)) id = `${base}_${suffix++}`;
+  return id;
+};
+
+const newOptionId = (
+  options: readonly Option[],
+  addedByName: string,
+  title: string,
+): string => unusedId("o", [addedByName, title], options.map((o) => o.id));
 
 // The deterministic key a vote is addressed by: a voter's vote for one option.
 // castVote, clearMyVote, and the removeOption cascade all derive the same key,
@@ -427,19 +443,29 @@ const dayLabelOf = (ms: number): string => {
   } ${d.getDate()}`;
 };
 
-const newHistoryId = () =>
-  `h_${Date.now().toString(36)}_${
-    Math.floor(Math.random() * 1e6).toString(36)
-  }`;
+const newHistoryId = (
+  visits: readonly HistoryEntry[],
+  loggedByName: string,
+  title: string,
+  wentAt: number,
+): string =>
+  unusedId(
+    "h",
+    [loggedByName, title, String(wentAt)],
+    visits.map((visit) => visit.id),
+  );
 
 // Parse a "YYYY-MM-DD" draft (from the host's date input) into a timestamp,
-// anchored to local midnight. Blank or unparseable → now. Only ever called
-// from a handler, so reading the clock here is fine.
-const parseVisitDate = (draft: string | undefined): number => {
+// anchored to local midnight. Blank or unparseable → the caller's explicit
+// deterministic `#now` snapshot.
+const parseVisitDate = (
+  draft: string | undefined,
+  fallbackNow: number,
+): number => {
   const s = (draft ?? "").trim();
-  if (!s) return Date.now();
+  if (!s) return fallbackNow;
   const t = new Date(`${s}T00:00:00`).getTime();
-  return Number.isNaN(t) ? Date.now() : t;
+  return Number.isNaN(t) ? fallbackNow : t;
 };
 
 // Cap the stored visit log at the most-recent MAX_HISTORY entries (by date). A
@@ -472,7 +498,7 @@ const addOption = handler<AddOptionEvent, {
   // Address the option by its id so later edits and removal reach it without a
   // positional index. addUnique merges concurrent adds (distinct ids) and is
   // idempotent on the id.
-  const id = newOptionId();
+  const id = newOptionId(options.get(), me, trimmed);
   const option = options.elementById(id);
   option.set({
     id,
@@ -512,12 +538,14 @@ const castVote = handler<CastVoteEvent, {
   votes: VotesCell;
   myName: NameCell;
   today: TodayCell;
-}>(({ optionId, voteType }, { votes, myName, today }) => {
+  loadedAt: number | null;
+}>(({ optionId, voteType }, { votes, myName, today, loadedAt }) => {
   const me = trimmedName(myName.get());
   if (!me) return;
-  // Reading the clock is fine here (handler, not computed). Refresh the
-  // session's "today" so the current-day filter tracks the interaction.
-  const now = Date.now();
+  // Use the session's deterministic `#now` snapshot. This keeps the deployed
+  // source compatible with Loom runtimes from before handler-scoped Date.now().
+  const now = loadedAt;
+  if (!now) return;
   today.set(now);
   // My vote for this option has a deterministic address, so this reads and
   // edits just that one vote — never the whole list. Clicking the current
@@ -565,12 +593,9 @@ export interface ClearVoteEvent {
 const clearMyVote = handler<ClearVoteEvent, {
   votes: VotesCell;
   myName: NameCell;
-  today: TodayCell;
-}>(({ optionId }, { votes, myName, today }) => {
+}>(({ optionId }, { votes, myName }) => {
   const me = trimmedName(myName.get());
   if (!me) return;
-  // Vote-affecting interaction → refresh the session's current-day filter.
-  today.set(Date.now());
   const key = voteKey(me, optionId);
   votes.removeByValue(votes.elementById(key));
   clearVoteEntity(votes, key);
@@ -614,9 +639,11 @@ const logVisit = handler<LogVisitEvent, {
       place = opt ? trimmedName(opt.title) : "";
     }
     if (!place) return;
+    const fallbackNow = today.get() || loadedAt || 0;
     const when = typeof wentAt === "number"
       ? wentAt
-      : parseVisitDate(visitDate.get());
+      : parseVisitDate(visitDate.get(), fallbackNow);
+    if (!when) return;
 
     // Resolve a name → that user's live Cell<User> in the directory, for the
     // `*Link` live-profile links (the shared-profile-roster idiom). users.key(i)
@@ -658,23 +685,26 @@ const logVisit = handler<LogVisitEvent, {
       });
     }
 
+    // The id and cap both depend on the current list, so this is deliberately
+    // one read-modify-write. A mergeable push would keep the explicit read in
+    // the conflict set anyway and would mix an append with a whole-list trim.
+    const currentVisits = visits.get();
     const entry: HistoryEntry = {
-      id: newHistoryId(),
+      id: newHistoryId(currentVisits, me, place, when),
       title: place,
       loggedByName: me,
       loggedBy: cellForName(me),
       wentAt: when,
       votes: voteSnapshot,
     };
-    // Append (push round-trips the live links); cap to the MAX_HISTORY most
-    // recent only on overflow.
-    visits.push(entry);
-    const all = visits.get();
-    if (all.length > MAX_HISTORY) {
-      visits.set(
-        [...all].sort((a, b) => b.wentAt - a.wentAt).slice(0, MAX_HISTORY),
-      );
-    }
+    const nextVisits = [...currentVisits, entry];
+    visits.set(
+      nextVisits.length > MAX_HISTORY
+        ? [...nextVisits]
+          .sort((a, b) => b.wentAt - a.wentAt)
+          .slice(0, MAX_HISTORY)
+        : nextVisits,
+    );
 
     // Reset the date draft so the next log defaults back to today.
     visitDate.set("");
@@ -903,8 +933,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       myName,
       adminName,
     });
-    const boundCastVote = castVote({ votes, myName, today });
-    const boundClearMyVote = clearMyVote({ votes, myName, today });
+    const boundCastVote = castVote({ votes, myName, today, loadedAt });
+    const boundClearMyVote = clearMyVote({ votes, myName });
     const boundResetVotes = resetVotes({ votes, myName, adminName });
     const boundLogVisit = logVisit({
       visits,
