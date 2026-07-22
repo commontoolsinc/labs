@@ -164,6 +164,25 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
     expect(String(proxy.b)).toBe("hello");
   });
 
+  it("reflects inherited prototype members without treating them as stored paths", async () => {
+    const link = writeCell(runtime, tx, "frozen-prototype-members", {
+      value: 1,
+    });
+
+    tx = await commitAndReopen(runtime, tx);
+
+    const proxy = createQueryResultProxy<{ value: number }>(
+      runtime,
+      tx,
+      link,
+      0,
+      false,
+    );
+
+    expect(proxy.constructor).toBe(Object);
+    expect(proxy.toString()).toBe("[object Object]");
+  });
+
   it("resolves nested links multiple levels deep in a frozen tree", async () => {
     // Create a target cell.
     const innerCell = runtime.getCell<{ deep: string }>(

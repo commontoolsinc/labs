@@ -195,7 +195,8 @@ export const resolve = (
   while (++at < path.length) {
     const key = path[at];
     if (isRecord(value)) {
-      value = (value as FabricPlainObject)[key];
+      const record = value as FabricPlainObject;
+      value = Object.hasOwn(record, key) ? record[key] : undefined;
     } else {
       // If the value is undefined, the path doesn't exist, but we can still
       // write onto it. Return error with last valid path component.
