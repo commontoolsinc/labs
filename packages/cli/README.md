@@ -27,8 +27,7 @@ they need to ignore a stale inherited `INIT_CWD`.
 
 The child CLI process inherits the parent environment. The launcher only adds
 `CF_CLI_NAME=cf`, so caller-provided `CF_API_URL`, `CF_IDENTITY`, experimental
-flags, `COMMIT_SHA` build attestation, and CFC/sandbox-related environment
-variables continue to flow through.
+flags, and CFC/sandbox-related environment variables continue to flow through.
 
 From the Labs checkout:
 

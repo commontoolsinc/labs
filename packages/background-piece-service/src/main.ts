@@ -1,6 +1,5 @@
 import { parseArgs } from "@std/cli/parse-args";
 import {
-  clientVersionFromEnv,
   type EnvReader,
   experimentalOptionsFromEnv,
   Runtime,
@@ -64,7 +63,6 @@ export function createRuntime(
       memoryHost: new URL(env.API_URL),
     }),
     experimental: experimentalOptionsFromEnv(readEnv),
-    clientVersion: clientVersionFromEnv(readEnv),
   }));
 }
 

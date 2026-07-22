@@ -1,4 +1,4 @@
-// Hermetic test for the unified entity model + fvj1 commit decoding. Seeds a
+// Hermetic test for the unified entity model + encoded commit decoding. Seeds a
 // modern piece (patternIdentity → module, argument, internal manifest), an
 // owned cell, a stream, and a free cell, then checks classification + lineage.
 // Side-effect free.
@@ -47,7 +47,7 @@ function seed(path: string) {
   );
   const session = "session:did:key:zSpaceAAAA:11111111-2222-3333";
 
-  // Commit 1: original stored fvj1-encoded with 2 ops and 1 confirmed read.
+  // Commit 1: original stored codec-encoded with 2 ops and 1 confirmed read.
   const original = jsonFromValue({
     localSeq: 1,
     operations: [{ op: "set" }, { op: "patch" }],
@@ -113,7 +113,7 @@ function seed(path: string) {
   db.close();
 }
 
-Deno.test("unified entity model + fvj1 commit decode", async (t) => {
+Deno.test("unified entity model + encoded commit decode", async (t) => {
   const dir = await Deno.makeTempDir({ prefix: "state-inspector-model-" });
   const dbPath = `${dir}/space.sqlite`;
   try {
@@ -121,7 +121,7 @@ Deno.test("unified entity model + fvj1 commit decode", async (t) => {
     const space = openSpace(dbPath);
     try {
       await t.step(
-        "listCommits decodes an fvj1 original (ops/reads non-zero)",
+        "listCommits decodes an encoded original (ops/reads non-zero)",
         () => {
           const rows = listCommits(space);
           const c1 = rows.find((r) => r.seq === 1)!;

@@ -115,7 +115,6 @@ export class BackgroundPieceService {
           identity: this.identity,
           timeoutMs: this.workerTimeoutMs,
           experimental: this.runtime.experimental,
-          clientVersion: this.runtime.clientVersion,
         });
         this.pieceSchedulers.set(did, scheduler);
         scheduler.start();

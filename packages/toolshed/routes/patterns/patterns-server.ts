@@ -72,10 +72,12 @@ export class PatternsServer {
 
   /**
    * Compute (and memoize) the content-addressed identity of a pattern entry —
-   * the same `patternIdentity.identity` the runtime would store for this source
-   * at this build. Walks the entry's authored import closure via `getText`
-   * (single-file reads only, so it works in a compiled binary) and hashes the
-   * pristine bytes; no compiler, runtime, or storage is involved.
+   * the value advertised to runtimes through `?identity`. Walks the entry's
+   * authored import closure via `getText` (single-file reads only, so it works
+   * in a compiled binary) and hashes the pristine bytes; no compiler, runtime,
+   * or storage is involved. An updater independently compiles the downloaded
+   * closure and requires its entry ref to have this identity before replacing
+   * a root.
    *
    * `filename` is the same root-relative path `getText` accepts, e.g.
    * `system/default-app.tsx`. Rejects if the closure is incomplete or reaches a
