@@ -10,6 +10,7 @@ import {
   Stream,
   UI,
   type VNode,
+  wish,
   Writable,
 } from "commonfabric";
 
@@ -20,6 +21,9 @@ import Topic, {
   fidPayload,
   openTopic,
   snippet,
+  topicAuthorFromAgent,
+  topicAuthorFromPerson,
+  topicAuthorLabel,
   topicCorpus,
   type TopicPiece,
   TOPICS_THEME,
@@ -28,6 +32,11 @@ import Topic, {
 
 // Re-export the shared types for consumers and tests.
 export type {
+  AddCommentEvent,
+  AddLinkEvent,
+  AgentAuthoredEvent,
+  SetBodyEvent,
+  TopicAuthor,
   TopicComment,
   TopicInput,
   TopicLink,
@@ -38,9 +47,17 @@ export type {
 
 export interface TopicsInput {
   topics?: Writable<TopicPiece[] | Default<[]>>;
-  /** The viewer's display name, set once per user and shared with every topic
-   * this tracker creates ("commenting as"). */
+  /** @deprecated Accepted so boards created before profile-backed authorship
+   * continue to load. New code never reads or writes this field. */
   myName?: PerUser<Writable<string | Default<"">>>;
+}
+
+export interface AddTopicEvent {
+  title: string;
+  /** The agent making this mutation. The authenticated principal remains the
+   * human whose identity key invoked the stream; this is the agent's explicit
+   * content-level signature under that shared principal. */
+  agentName: string;
 }
 
 /** One topic's place in the prose reference graph. Derived at read time from
@@ -73,14 +90,11 @@ export interface TopicsOutput {
    * (non-null) entry of `topics`. Rows carry their topic, so consumers never
    * need to correlate by index — indices are not a stable address. */
   crossrefs: TopicCrossref[] | Default<[]>;
-  /** The viewer's display name (normalized to "" until set). */
-  myName: string;
   /** Session-local draft for the footer composer (exposed for embedding and
    * headless driving, like the chat exemplar's drafts). */
   newTitle?: PerSession<Writable<string>>;
-  addTopic: Stream<{ title: string }>;
-  setMyName: Stream<{ name: string }>;
-  /** Submit the footer composer: reads newTitle, delegates to addTopic. */
+  addTopic: Stream<AddTopicEvent>;
+  /** Submit the footer composer as the current viewer's canonical Profile. */
   submitTopic: Stream<void>;
 }
 
@@ -89,17 +103,29 @@ export interface TopicsOutput {
 // tests keep importing them from the tracker.
 export { crossrefChipRow, openTopic } from "./topic.tsx";
 
-export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
+export default pattern<TopicsInput, TopicsOutput>(({ topics }) => {
   const newTitle = new Writable.perSession("");
 
-  const addTopic = action(({ title }: { title: string }) => {
+  // Browser authorship comes from the current viewer's canonical Profile.
+  // CLI streams below remain wish-free: agents sign each mutation in the
+  // event payload, while Fabric records the human principal behind the key.
+  const profileWish = wish<{ name?: string; avatar?: string }>({
+    query: "#profile",
+  });
+  const profileNameWish = wish<string>({ query: "#profileName" });
+  const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
+  const profileName = computed(() => profileNameWish.result ?? "");
+  const profileAvatar = computed(() => profileAvatarWish.result ?? "");
+  const hasProfile = computed(() => profileName.trim().length > 0);
+
+  const addTopic = action(({ title, agentName }: AddTopicEvent) => {
     const trimmed = (title ?? "").trim();
-    if (!trimmed) return;
+    const author = topicAuthorFromAgent(agentName);
+    if (!trimmed || !author) return;
     const piece = Topic({
       title: trimmed,
       createdAt: Date.now(),
-      createdByName: (myName.get() ?? "").trim() || "someone",
-      myName,
+      createdBy: author,
       // The board's own list, so the detail page can derive its connections
       // and the editor has a mention universe (backfilled as a one-time
       // link-bind on pieces created before this input existed).
@@ -110,17 +136,19 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     newTitle.set("");
   });
 
-  const setMyName = action(({ name }: { name: string }) => {
-    myName.set((name ?? "").trim());
-  });
-
   const submitTopic = action(() => {
-    addTopic.send({ title: newTitle.get() });
+    const trimmed = (newTitle.get() ?? "").trim();
+    const author = topicAuthorFromPerson(profileName, profileAvatar);
+    if (!trimmed || !author) return;
+    const piece = Topic({
+      title: trimmed,
+      createdAt: Date.now(),
+      createdBy: author,
+      mentionable: topics,
+    });
+    topics.push(piece);
+    newTitle.set("");
   });
-
-  // Normalized snapshot: a never-written PerUser cell reads as undefined in
-  // other runtimes; assertions need a real, stable value.
-  const myNameView = computed(() => myName.get() ?? "");
 
   const topicCount = computed(() => asArray(topics.get()).length);
 
@@ -179,9 +207,18 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
                   {topicCount} topics · durable units of shared attention
                 </cf-text>
               </cf-vstack>
-              <cf-field label="Commenting as" style="width: 180px;">
-                <cf-input $value={myName} placeholder="Your name" />
-              </cf-field>
+              <cf-hstack gap="2" align="center">
+                <cf-text variant="caption" tone="muted">Acting as</cf-text>
+                {hasProfile
+                  ? (
+                    <cf-profile-badge
+                      $profile={profileWish.result}
+                      size="sm"
+                      noNavigate
+                    />
+                  )
+                  : <div>{profileWish[UI]}</div>}
+              </cf-hstack>
             </cf-hstack>
           </cf-vstack>
 
@@ -218,7 +255,8 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
                           : null}
                         <cf-text variant="caption" tone="muted">
                           {t.commentCount} comments · by{" "}
-                          {t.createdByName || "someone"} ·{" "}
+                          {topicAuthorLabel(t.createdBy, t.createdByName)} ·
+                          {" "}
                           {whenLabel(t.lastActivityAt)}
                         </cf-text>
                         {crossrefChipRow("references →", false, row.refsOut)}
@@ -255,7 +293,11 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
                   placeholder="What deserves shared attention?"
                 />
               </cf-field>
-              <cf-button variant="primary" onClick={submitTopic}>
+              <cf-button
+                variant="primary"
+                disabled={computed(() => !hasProfile)}
+                onClick={submitTopic}
+              >
                 Start
               </cf-button>
             </cf-hstack>
@@ -267,10 +309,8 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     mentionable: topics,
     topicCount,
     crossrefs,
-    myName: myNameView,
     newTitle,
     addTopic,
-    setMyName,
     submitTopic,
   };
 });

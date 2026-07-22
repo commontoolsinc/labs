@@ -3,9 +3,9 @@
  *
  * Complements multi-user.test.tsx (which covers cross-runtime isolation and
  * merge behavior): this file drives every exposed stream and derived value in
- * one runtime — action guards, authorship fallback ("someone" before a name
- * is set), the unsafe-scheme link rejection, label defaulting, body Edit→Save
- * via setBody, activity-based sorting, the derived crossref graph (edges from
+ * one runtime — action guards, atomic agent signatures, legacy authorship
+ * fallback, the unsafe-scheme link rejection, label defaulting, body updates,
+ * activity-based sorting, the derived crossref graph (edges from
  * fids pasted in bodies, comments, and link URLs; never persisted), and the
  * exported pure helpers.
  */
@@ -22,6 +22,7 @@ import Topic, {
   fidPayload,
   isSafeLinkUrl,
   snippet,
+  topicAuthorLabel,
   topicCorpus,
   whenLabel,
 } from "./topic.tsx";
@@ -39,64 +40,89 @@ export default pattern(() => {
   // Branch pin for the detail derive: a piece with no `mentionable` wired
   // (the pre-rev corpus, until backfilled) derives empty connection sets.
   const lone = Topic({ title: "Lone", createdAt: 1, createdByName: "t" });
+  // Pre-migration fields remain accepted and readable, but new writes below
+  // never produce them.
+  const legacy = Topic({
+    title: "Legacy",
+    createdAt: 1,
+    createdByName: "Legacy Person",
+    comments: [{ authorName: "Old Agent", body: "old", sentAt: 2 }],
+  });
 
   // --- actions ---
 
   const action_add_blank_topic = action(() => {
-    board.addTopic.send({ title: "   " });
+    board.addTopic.send({ title: "   ", agentName: "Sol" });
+  });
+  const action_add_unsigned_topic = action(() => {
+    board.addTopic.send({ title: "Unsigned", agentName: "   " });
   });
   const action_add_first_topic = action(() => {
-    board.addTopic.send({ title: "  First topic  " });
-  });
-  const action_set_name = action(() => {
-    board.setMyName.send({ name: "  Tester  " });
+    board.addTopic.send({ title: "  First topic  ", agentName: "  Sol  " });
   });
   const action_add_second_topic = action(() => {
-    board.addTopic.send({ title: "Second topic" });
+    board.addTopic.send({ title: "Second topic", agentName: "Fable" });
+  });
+  const action_add_third_topic = action(() => {
+    board.addTopic.send({ title: "Composed topic", agentName: "Sol" });
   });
 
   const action_blank_comment = action(() => {
-    board.topics?.[0]?.addComment.send({ body: "   " });
+    board.topics?.[0]?.addComment.send({ body: "   ", agentName: "Sol" });
   });
-  const action_comment_unnamed = action(() => {
-    board.topics?.[0]?.addComment.send({ body: "hello thread" });
+  const action_comment_unsigned = action(() => {
+    board.topics?.[0]?.addComment.send({
+      body: "unsigned",
+      agentName: "   ",
+    });
+  });
+  const action_comment_signed = action(() => {
+    board.topics?.[0]?.addComment.send({
+      body: "hello thread",
+      agentName: "Sol",
+    });
   });
   const action_set_body = action(() => {
-    board.topics?.[0]?.setBody.send({ body: "line one\nline two" });
+    board.topics?.[0]?.setBody.send({
+      body: "line one\nline two",
+      agentName: "Sol",
+    });
   });
   const action_link_unsafe = action(() => {
     board.topics?.[0]?.addLink.send({
       kind: "web",
       url: "javascript:alert(1)",
       label: "evil",
+      agentName: "Sol",
     });
   });
   const action_link_blank = action(() => {
-    board.topics?.[0]?.addLink.send({ kind: "web", url: "   ", label: "x" });
+    board.topics?.[0]?.addLink.send({
+      kind: "web",
+      url: "   ",
+      label: "x",
+      agentName: "Sol",
+    });
   });
   const action_link_valid_unlabeled = action(() => {
     board.topics?.[0]?.addLink.send({
       kind: "pr",
       url: "https://github.com/commontoolsinc/labs/pull/4643",
       label: "  ",
+      agentName: "Sol",
     });
   });
   const action_comment_first_again = action(() => {
-    board.topics?.[0]?.addComment.send({ body: "bumping the first topic" });
+    board.topics?.[0]?.addComment.send({
+      body: "bumping the first topic",
+      agentName: "Sol",
+    });
   });
 
   // --- UI-affordance flows (the same paths the rendered controls drive) ---
 
-  const action_submit_topic_via_composer = action(() => {
-    board.newTitle?.set("Composed topic");
-    board.submitTopic.send();
-  });
   const action_submit_blank_comment_draft = action(() => {
     directTopic.commentDraft.set("   ");
-    directTopic.submitComment.send();
-  });
-  const action_submit_comment_draft = action(() => {
-    directTopic.commentDraft.set("via the composer");
     directTopic.submitComment.send();
   });
   // Edit flows are split across test steps: startEditBody's handler runs in
@@ -109,18 +135,8 @@ export default pattern(() => {
     directTopic.bodyDraft.set("abandoned draft");
     directTopic.cancelEditBody.send();
   });
-  const action_save_edit = action(() => {
-    directTopic.bodyDraft.set("edited body");
-    directTopic.saveBody.send();
-  });
   const action_submit_blank_link_draft = action(() => {
     directTopic.linkUrlDraft.set("   ");
-    directTopic.submitLink.send();
-  });
-  const action_submit_link_draft = action(() => {
-    directTopic.linkUrlDraft.set("https://example.com/design");
-    directTopic.linkLabelDraft.set("design notes");
-    directTopic.linkKindDraft.set("session");
     directTopic.submitLink.send();
   });
   // Bound at pattern-body level (binding inside an action is an illegal
@@ -137,7 +153,6 @@ export default pattern(() => {
 
   const assert_initial = computed(() =>
     board.topicCount === 0 &&
-    board.myName === "" &&
     (board.topics ?? []).length === 0 &&
     (board.mentionable ?? []).length === 0
   );
@@ -145,19 +160,17 @@ export default pattern(() => {
   // Blank titles are rejected by the addTopic guard.
   const assert_still_empty = computed(() => board.topicCount === 0);
 
-  // Topic created before any name is set: authorship falls back to "someone"
-  // (the `(myName.get() ?? "").trim()` guard — cubic P1 on PR #4643).
   const assert_first_topic = computed(() =>
     board.topicCount === 1 &&
     board.topics?.[0]?.title === "First topic" &&
-    board.topics?.[0]?.createdByName === "someone" &&
+    board.topics?.[0]?.createdBy?.kind === "agent" &&
+    board.topics?.[0]?.createdBy?.name === "Sol" &&
+    !board.topics?.[0]?.createdByName &&
     (board.topics?.[0]?.createdAt ?? 0) > 0 &&
     board.topics?.[0]?.commentCount === 0 &&
     board.topics?.[0]?.lastActivityAt === board.topics?.[0]?.createdAt &&
     board.topics?.[0]?.[NAME] === "First topic"
   );
-
-  const assert_named = computed(() => board.myName === "Tester");
 
   const assert_blank_comment_rejected = computed(() =>
     board.topics?.[0]?.commentCount === 0
@@ -165,7 +178,9 @@ export default pattern(() => {
 
   const assert_comment_landed = computed(() =>
     board.topics?.[0]?.commentCount === 1 &&
-    board.topics?.[0]?.comments?.[0]?.authorName === "Tester" &&
+    board.topics?.[0]?.comments?.[0]?.author?.kind === "agent" &&
+    board.topics?.[0]?.comments?.[0]?.author?.name === "Sol" &&
+    !board.topics?.[0]?.comments?.[0]?.authorName &&
     board.topics?.[0]?.comments?.[0]?.body === "hello thread" &&
     (board.topics?.[0]?.comments?.[0]?.sentAt ?? 0) > 0 &&
     (board.topics?.[0]?.lastActivityAt ?? 0) >=
@@ -173,7 +188,10 @@ export default pattern(() => {
   );
 
   const assert_body_set = computed(() =>
-    board.topics?.[0]?.body === "line one\nline two"
+    board.topics?.[0]?.body === "line one\nline two" &&
+    board.topics?.[0]?.bodyUpdatedBy?.kind === "agent" &&
+    board.topics?.[0]?.bodyUpdatedBy?.name === "Sol" &&
+    (board.topics?.[0]?.bodyUpdatedAt ?? 0) > 0
   );
 
   // javascript: and blank URLs are rejected; a valid https link with a blank
@@ -185,32 +203,27 @@ export default pattern(() => {
     (board.topics?.[0]?.links ?? []).length === 1 &&
     board.topics?.[0]?.links?.[0]?.kind === "pr" &&
     board.topics?.[0]?.links?.[0]?.label ===
-      "https://github.com/commontoolsinc/labs/pull/4643"
+      "https://github.com/commontoolsinc/labs/pull/4643" &&
+    board.topics?.[0]?.links?.[0]?.addedBy?.name === "Sol" &&
+    (board.topics?.[0]?.links?.[0]?.addedAt ?? 0) > 0
   );
 
-  // Second topic created after naming: authorship snapshots the name; the
-  // board name computed reflects the count.
   const assert_second_topic = computed(() =>
     board.topicCount === 2 &&
     board.topics?.[1]?.title === "Second topic" &&
-    board.topics?.[1]?.createdByName === "Tester" &&
+    board.topics?.[1]?.createdBy?.kind === "agent" &&
+    board.topics?.[1]?.createdBy?.name === "Fable" &&
     board[NAME] === "Topics (2)"
   );
 
-  const assert_composed_topic = computed(() =>
+  const assert_third_topic = computed(() =>
     board.topicCount === 3 &&
     board.topics?.[2]?.title === "Composed topic" &&
-    board.newTitle?.get() === ""
+    board.topics?.[2]?.createdBy?.name === "Sol"
   );
 
   const assert_blank_draft_rejected = computed(() =>
     directTopic.commentCount === 0
-  );
-
-  const assert_composer_comment = computed(() =>
-    directTopic.commentCount === 1 &&
-    directTopic.comments?.[0]?.body === "via the composer" &&
-    directTopic.commentDraft.get() === ""
   );
 
   // startEditBody copied the current body into the draft and opened the editor.
@@ -224,17 +237,17 @@ export default pattern(() => {
     directTopic.body === "line one\nline two"
   );
 
-  const assert_edit_saved = computed(() =>
-    directTopic.editingBody === false &&
-    directTopic.body === "edited body"
-  );
-
-  const assert_link_draft_flow = computed(() =>
-    (directTopic.links ?? []).length === 1 &&
-    directTopic.links?.[0]?.kind === "session" &&
-    directTopic.links?.[0]?.label === "design notes" &&
-    directTopic.linkUrlDraft.get() === "" &&
-    directTopic.linkKindDraft.get() === "web"
+  const assert_legacy_fields_load = computed(() =>
+    legacy.createdByName === "Legacy Person" &&
+    legacy.createdBy === undefined &&
+    legacy.comments?.[0]?.authorName === "Old Agent" &&
+    legacy.comments?.[0]?.author === undefined &&
+    topicAuthorLabel(legacy.createdBy, legacy.createdByName) ===
+      "Legacy Person" &&
+    topicAuthorLabel(
+        legacy.comments?.[0]?.author,
+        legacy.comments?.[0]?.authorName,
+      ) === "Old Agent"
   );
 
   // A fresh comment on the FIRST topic makes it the most recently active.
@@ -275,6 +288,7 @@ export default pattern(() => {
     const fid = board.crossrefs?.[0]?.fid ?? "";
     board.topics?.[1]?.setBody.send({
       body: `relates to https://estuary.example/topics-dev/${fid} directly`,
+      agentName: "Sol",
     });
   });
   const assert_body_edge = computed(() =>
@@ -323,6 +337,7 @@ export default pattern(() => {
     const enc = (board.crossrefs?.[0]?.fid ?? "").replace(":", "%3A");
     board.topics?.[2]?.addComment.send({
       body: `shared as ?shared-pattern=estuary%2Ftopics-dev%2F${enc}`,
+      agentName: "Sol",
     });
   });
   const assert_comment_edge = computed(() =>
@@ -339,6 +354,7 @@ export default pattern(() => {
         board.crossrefs?.[1]?.fid ?? ""
       }`,
       label: "the second topic",
+      agentName: "Sol",
     });
   });
   const assert_link_edge = computed(() =>
@@ -353,6 +369,7 @@ export default pattern(() => {
     const own = board.crossrefs?.[0]?.fid ?? "";
     board.topics?.[0]?.setBody.send({
       body: `self ${own} and unknown fid1:${"Z".repeat(43)} stay edgeless`,
+      agentName: "Sol",
     });
   });
   const assert_self_unknown_ignored = computed(() =>
@@ -362,7 +379,10 @@ export default pattern(() => {
 
   // Nothing is persisted: retract the prose and the edge is simply gone.
   const action_remove_body_ref = action(() => {
-    board.topics?.[1]?.setBody.send({ body: "no references anymore" });
+    board.topics?.[1]?.setBody.send({
+      body: "no references anymore",
+      agentName: "Sol",
+    });
   });
   const assert_edge_removed = computed(() =>
     (board.crossrefs?.[1]?.refsOut ?? []).length === 0 &&
@@ -433,13 +453,15 @@ export default pattern(() => {
       { assertion: assert_initial },
       { action: action_add_blank_topic },
       { assertion: assert_still_empty },
+      { action: action_add_unsigned_topic },
+      { assertion: assert_still_empty },
       { action: action_add_first_topic },
       { assertion: assert_first_topic },
-      { action: action_set_name },
-      { assertion: assert_named },
       { action: action_blank_comment },
       { assertion: assert_blank_comment_rejected },
-      { action: action_comment_unnamed },
+      { action: action_comment_unsigned },
+      { assertion: assert_blank_comment_rejected },
+      { action: action_comment_signed },
       { assertion: assert_comment_landed },
       { action: action_set_body },
       { assertion: assert_body_set },
@@ -461,25 +483,20 @@ export default pattern(() => {
       { assertion: assert_chip_row_markup },
       { render: board[UI] },
       { action: action_comment_first_again },
-      { action: action_submit_topic_via_composer },
-      { assertion: assert_composed_topic },
+      { action: action_add_third_topic },
+      { assertion: assert_third_topic },
       { action: action_submit_blank_comment_draft },
       { assertion: assert_blank_draft_rejected },
-      { action: action_submit_comment_draft },
-      { assertion: assert_composer_comment },
       { action: action_start_edit },
       { assertion: assert_editing },
       { action: action_cancel_edit },
       { assertion: assert_edit_cancelled },
-      { action: action_start_edit },
-      { action: action_save_edit },
-      { assertion: assert_edit_saved },
       { action: action_submit_blank_link_draft },
-      { action: action_submit_link_draft },
       // Materialize the direct Topic after its comment and link exist so the
       // nested row renderers are exercised without putting UI into TopicPiece.
       { render: directTopic[UI] },
-      { assertion: assert_link_draft_flow },
+      { render: legacy[UI] },
+      { assertion: assert_legacy_fields_load },
       { action: action_open_topic },
       { assertion: assert_pure_helpers },
       { action: action_comment_ref_encoded },

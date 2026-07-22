@@ -12,8 +12,8 @@ percent-encoded share link) becomes a navigable "references →" / "← referenc
 by" chip on the topic's card, and the graph is exported as the `crossrefs`
 output for headless consumers. Each topic also derives its own row of the graph
 on its detail page (a **Connections** card) from the `mentionable` input — a
-reference to the board's own topics list, wired at creation like `myName` and
-backfillable as a one-time link-bind on pre-existing pieces.
+reference to the board's own topics list, wired at creation and backfillable as
+a one-time link-bind on pre-existing pieces.
 
 Deliberately absent until reached for: statuses (not even open/closed), labels,
 assignees, attachments, nesting. What a topic grows next is part of the
@@ -26,16 +26,28 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
 
 ## Design commitments
 
-- **Wish-free handlers.** Nothing gates event dispatch on a `wish()` binding
-  (unresolved wish bindings drop events silently — CT-1879). Authorship is a
-  fallback chain: `myName` snapshot at write → identity → profile enrichment
-  later, when the cross-host profile story lands.
+- **One principal, explicit actor.** Fabric authenticates every write with the
+  identity key that made it. In the short-term agent model, that key belongs to
+  the human user; an agent also supplies `agentName` in the same mutation event.
+  Topics stores a structured `{ kind: "agent", name }` snapshot so the UI can
+  say “Sol (agent)” without pretending the agent has a separate principal.
+- **Profile-native browser authorship.** Human-facing controls use the current
+  viewer's canonical `#profile` name/avatar and store a `{ kind: "person", … }`
+  snapshot. There is no free-text “commenting as” field.
+- **Wish-free agent handlers.** CLI streams do not depend on profile wishes.
+  Blank `agentName` values reject the mutation, and the signature is carried in
+  the same event as the content, avoiding shared mutable attribution state.
 - **Mergeable writes everywhere users collide**: comments, links, and topics are
   `push` appends; concurrent writers all land. The body is a large string
   (whole-value conflict semantics), so body edits go through an explicit
   Edit→Save toggle rather than a live-bound textarea.
-- **`myName` is `PerUser` on the shared piece** — one tracker, one name per
-  authenticated identity, shared with every topic the tracker creates.
+- **Fabric owns history and concurrency.** Topics adds neither an activity-log
+  duplicate nor an application-level revision/CAS protocol. If Fabric cannot
+  preserve history or safely arbitrate concurrent body writes, this dogfood
+  surface should expose the framework gap rather than conceal it mechanically.
+- **Storage compatibility is read-only.** `myName`, `createdByName`, and
+  `authorName` remain optional in accepted schemas so existing boards/topics
+  load and render. New code does not read `myName` or write any legacy field.
 - **`mentionable` is a structural reference, not derived data.** The board
   passes its own topics list at creation; the topic derives its Connections
   read-side from it (SELF + equals to find its own row). Requires the
@@ -59,13 +71,16 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
 Agents are first-class participants. Against a deployed board piece:
 
 ```bash
-cf piece call --piece <board> setMyName '{"name":"Fable"}'
-cf piece call --piece <board> addTopic '{"title":"..."}'
+cf piece call --piece <board> addTopic '{"title":"...","agentName":"Sol"}'
 cf piece get  --piece <board> topics --input      # then address a topic piece
-cf piece call --piece <topic> addComment '{"body":"..."}'
+cf piece call --piece <topic> addComment \
+  '{"body":"point-in-time progress update","agentName":"Sol"}'
+cf piece call --piece <topic> setBody \
+  '{"body":"latest state plus the topic narrative","agentName":"Sol"}'
+cf piece call --piece <topic> addLink \
+  '{"kind":"pr","url":"https://github.com/org/repo/pull/123","label":"PR #123","agentName":"Sol"}'
 ```
 
-Do **not** run `cf piece step` from a fresh CLI replica: a replica with a
-partial view persists deriveds computed from that partial view. Writes commit
-fine on their own; renderers derive for themselves. Verify writes via a renderer
-or post-materialization fid reads.
+Every agent-authored mutation carries `agentName`; there is no preceding “set
+current name” call. Fabric's operation history retains the authenticated human
+principal, while the stored snapshot disambiguates which agent acted.
