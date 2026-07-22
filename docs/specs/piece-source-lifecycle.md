@@ -927,12 +927,16 @@ The implementation evidence for this table is concentrated in:
 
 Pattern imports and piece origins intentionally have different update rules.
 An unpinned mutable `cf:` import is resolved and written back with an immutable
-pin when source is deployed. The deployed importer does not track later
-changes. The same fabric URL used as piece-origin metadata stays live when it
-is unpinned and resolves to a mutable `patternIdentity`-bearing entity. The
-piece can then follow that entity's current pattern. A fabric origin that
-resolves to `pattern:<identity>`, or that was supplied as an entity-FID URL with
-a trailing pin, is immutable and has no later update to discover.
+pin when source is deployed. This includes type-only imports because Common
+Fabric uses imported types to generate runtime schemas. Supported ESM-style
+type imports follow this rule. Unsupported import-equals syntax is rejected
+rather than left mutable. The deployed importer does not track later changes.
+The same fabric URL used as piece-origin metadata stays live when it is unpinned
+and resolves to a mutable
+`patternIdentity`-bearing entity. The piece can then follow that entity's
+current pattern. A fabric origin that resolves to `pattern:<identity>`, or that
+was supplied as an entity-FID URL with a trailing pin, is immutable and has no
+later update to discover.
 
 Piece-origin metadata remains outside authored source. Mutable web and fabric
 entity origins are checked when that piece loads. A content-addressed or pinned

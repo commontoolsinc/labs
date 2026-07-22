@@ -390,6 +390,27 @@ There is no value/type filtering and no dependence on emit elision. The earlier
 behavior-changing type edit as a no-op, which is exactly the under-counting we
 must avoid.
 
+A static fabric type edge in the supported ESM-style syntax also follows the
+ordinary pin-in-source rule. An `import type`, type-only named import or export,
+or inline `import("cf:…").Type` reference cannot remain mutable in deployed
+source. If it could, a later type change could alter generated schemas and
+executable behavior without changing the importing pattern's stored source. The
+current `rewriteFabricPins` visitor already rewrites import declarations, export
+declarations, and inline import-type nodes. `collectImportSpecifiers` already
+includes these edges in module identity. Automatic piece deployment still
+uses an ordinary local resolver before invoking the rewriter. It therefore
+rejects every fabric import or export declaration at that stage, including an
+already-pinned reference. Correct pin-on-deploy ordering remains required
+integration work.
+
+The CommonJS-style TypeScript form
+`import type Alias = require("cf:…")` is unsupported. The current visitors do
+not recognize its `ImportEqualsDeclaration`, so graph discovery, rewriting, and
+identity calculation must reject it explicitly rather than allow it to bypass
+the pin. Production resolution and persistence of all authored declaration
+inputs also require the integration described in
+[pattern-imports/implementation-plan.md](pattern-imports/implementation-plan.md).
+
 ### Loader: ES modules in SES compartments
 
 Move from one flattened AMD bundle to ES modules loaded through the SES module

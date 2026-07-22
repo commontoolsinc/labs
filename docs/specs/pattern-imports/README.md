@@ -27,12 +27,17 @@ distinction evaporates at pin time — both freeze to the same kind of hash.
 ## Status
 
 **Implemented for content-addressed and same-toolshed references** (`#4081`):
-parsing, slug and piece resolution, deploy-time pinning, and mounting. Dynamic
-per-space route registration and home-site-table hydration are implemented as
-foundations. Applying a host supplied by a `cf://` import remains planned, as
-do `cf publish` and source subpaths. This remains the design of record; for the
-as-built pointer model note that the patternId + pattern **meta cell** this
-document originally leaned on were **retired** in `#4156`
+parsing, slug and piece resolution, mounting, the pin-rewrite primitive, and
+`cf deps update`. Automatic pin-on-deploy is incomplete. The current piece
+deployment path resolves the local program before it invokes the pin rewriter,
+so any fabric import or export declaration fails initial local resolution. This
+includes an already-pinned reference. An unpinned declaration therefore never
+reaches the rewriter. Dynamic per-space route registration and home-site-table
+hydration are implemented as foundations. Applying a host supplied by a
+`cf://` import remains planned, as do `cf publish` and source subpaths. This
+remains the design of record; for the as-built pointer model note that the
+patternId + pattern **meta cell** this document originally leaned on were
+**retired** in `#4156`
 (`docs/specs/pattern-id-retirement.md`) — a piece now carries only
 `patternIdentity = { identity, symbol }`, and a pattern's source lives in the
 `pattern:<identity>` source-doc closure. References below are updated to match.
@@ -312,6 +317,38 @@ Mechanics:
    ```tsx
    import { TodoItem } from "cf:/did:key:z6Mk…/todo-list@AvcnyZ…rC1c";
    ```
+
+   Pinning applies to every supported static, ESM-style fabric reference in
+   TypeScript module and type syntax. This includes `import type`, type-only
+   named imports and exports, and inline references such as
+   `import("cf:/did:key:z6Mk…/todo-list").TodoItem`. There is no type-only
+   exception. Common Fabric lowers imported types into schemas that affect
+   validation, reactivity, and emitted behavior. Leaving such a reference
+   mutable would let a dependency change a deployed pattern without changing
+   the pattern's stored source. The pin remains in authored source even when
+   TypeScript erases the corresponding JavaScript import.
+
+   TypeScript's CommonJS-style
+   `import type Alias = require("cf:…")` form is not part of the supported ESM
+   import surface. It must be rejected explicitly rather than ignored by
+   pinning or identity collection. That rejection and its regression test are
+   required work.
+
+   **Implemented:** `rewriteFabricPins` visits import declarations, export
+   declarations, and inline import-type nodes. Its tests cover both
+   `import type` and `import("cf:…").Type`. Module identity collection also
+   includes those type edges. `cf deps update` collects the local program with
+   fabric references allowed before running the rewriter.
+
+   **Deploy integration required:** `getPinnedProgramFromFile()` currently
+   calls the ordinary harness resolver before `pinProgramFabricImports()`.
+   That resolver has no fabric-aware layer, so any fabric import or export
+   declaration fails, including one that is already pinned. An unpinned
+   declaration therefore cannot reach the rewriter. Deployment must collect the
+   local program while allowing fabric references, rewrite every file, and then
+   perform the frozen compile. Complete production resolution, identity, and
+   persistence of authored `.d.ts` inputs also remains required work. Neither
+   gap creates a type-only exception to the target pinning rule.
 
    The stored program is then fully deterministic: compilation, identity, and
    execution never read the slug or piece again.
@@ -806,16 +843,11 @@ unchanged.
    `patternIdentity` meta present ⇒ a pattern-bearing cell). Good enough, or
    should slug assignment stamp an explicit kind on the slug cell for better
    errors and tooling?
-3. **Type-only imports.** Should `import type { … }` from a fabric ref skip
-   the pin requirement (types don't affect runtime identity)? Tempting, but
-   the transformer lowers types into schemas — so types DO affect emitted
-   behavior, and the conservative answer is no special-casing. Revisit with
-   evidence.
-4. **Subpath surface.** Whether subpaths may address any file in the program
+3. **Subpath surface.** Whether subpaths may address any file in the program
    or only files the entry re-exports (an "exports map" discipline, like npm's
    `exports`). Start permissive, tighten if published-internal-file coupling
    becomes a problem.
-6. **Public distribution surface.** Should the product standardize a dedicated
+4. **Public distribution surface.** Should the product standardize a dedicated
    distribution space whose space-wide ACL grants `READ` to `*`, making every
    pattern in that space readable by any authenticated identity? Should it also
    offer an anonymous, CDN-cacheable HTTP endpoint? An anonymous endpoint would
@@ -823,7 +855,7 @@ unchanged.
    source. It could serve only patterns copied under that policy after CFC
    allows unrestricted disclosure. A URL or content identity alone must never
    qualify a pattern for either form of distribution.
-7. **Host-route reliability and relocation.** The known-hint registration rule
+5. **Host-route reliability and relocation.** The known-hint registration rule
    does not say what to do when a recorded host is unavailable, a space moves,
    or more than one host can serve the same space. Revisit how route changes
    are authenticated, how stale site-table entries are replaced, whether
