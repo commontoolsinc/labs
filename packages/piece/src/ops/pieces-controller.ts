@@ -1,5 +1,4 @@
 import {
-  buildsMatch,
   type Cell,
   clientVersionFromEnv,
   entityIdFrom,
@@ -12,7 +11,6 @@ import {
   type MemorySpace,
   type ModuleByteCache,
   type PatternCoverageCollector,
-  patternResponseBuild,
   Runtime,
   runtimePresets,
   RuntimeProgram,
@@ -43,7 +41,7 @@ export const DEFAULT_APP_PATTERN_URL = "/api/patterns/system/default-app.tsx";
  * The official system space-root pattern URL for a space type — the home DID
  * gets home.tsx, every other space gets the default app. This derivation only
  * selects the identity to check; it never proves that a sourceless root tracks
- * that URL. Exact equality with the build-attested official identity supplies
+ * that URL. Exact equality with the official content identity supplies
  * that proof below.
  */
 export function deriveSystemPatternUrl(
@@ -69,8 +67,6 @@ export type UpdateOutcome =
   | "updated"
   | "repaired-provenance"
   | "current"
-  | "skipped-skew"
-  | "skipped-unknown-build"
   | "skipped-disabled";
 
 // This module can load outside Deno (browser-safe storage import above), so
@@ -623,7 +619,7 @@ export class PiecesController<T = unknown> {
       //    space must resolve against its own toolshed). For a pre-provenance
       //    root, derive only the official URL whose identity can be tested. The
       //    URL or an author-controlled filename is not provenance: below, only
-      //    an exact match with the build-attested current identity admits it.
+      //    an exact match with the current content identity admits it.
       const runningRef = getPatternIdentityRef(root);
       if (runningRef === undefined) return "current";
       const storedSource = getPatternSource(root);
@@ -664,46 +660,22 @@ export class PiecesController<T = unknown> {
         return result.ok ? "repaired-provenance" : "current";
       };
 
-      // The version gate (step 4) validates `host`'s build, and ?identity is
-      // only comparable within that build — so only act on a source served BY
-      // `host`. A cross-origin patternSource (a published / custom-app source
-      // on another host) would be gated against the wrong build; defer it to
-      // the cross-host published-pattern flow.
+      // Only same-origin system sources participate in this loop. Cross-origin
+      // published/custom sources use their own update flow.
       const target = new URL(url, host);
       if (target.origin !== new URL(host).origin) {
         return "current";
       }
 
-      // 4. Version gate. This is a precondition for every update.
-      const toolshedVersion = await runtime.toolshedGitSha(host);
-      if (!buildsMatch(runtime.clientVersion, toolshedVersion)) {
-        // An unknown sha on either side proves nothing — skip silently. The
-        // skew signal raises the shell's "reload to update" banner, which must
-        // only claim what is proven: both builds known and different.
-        if (
-          runtime.clientVersion === undefined || toolshedVersion === undefined
-        ) {
-          return "skipped-unknown-build";
-        }
-        runtime.reportVersionSkew({
-          space,
-          clientVersion: runtime.clientVersion,
-          toolshedVersion,
-        });
-        return "skipped-skew";
-      }
-      const expectedBuild = runtime.clientVersion;
-      if (expectedBuild === undefined) return "skipped-unknown-build";
-
-      // 5. Current identity from the toolshed (cached per serving build). The
-      // response itself must attest `expectedBuild`, binding this request to the
-      // version gate even during a rolling deploy.
-      const currentId = await runtime.cachedPatternIdentity(
-        host,
-        url,
-        expectedBuild,
-      );
-      if (currentId === undefined) return "current"; // unresolved → skip
+      // 4. Ask the source host for the entry's content identity. This request is
+      // deliberately fresh: the host may roll between checks, and the compiled
+      // closure below is the end-to-end consistency proof for this attempt.
+      const identityUrl = new URL(target);
+      identityUrl.searchParams.set("identity", "");
+      const identityResponse = await runtime.fetch(identityUrl);
+      if (!identityResponse.ok) return "current";
+      const currentId = (await identityResponse.text()).trim();
+      if (currentId.length === 0) return "current";
 
       // A sourceless root is eligible only when its full content identity (which
       // includes authored module paths) is exactly the official current entry.
@@ -758,7 +730,7 @@ export class PiecesController<T = unknown> {
         }
       }
 
-      // 6. Equal identity is not enough to declare the root healthy: persisted
+      // 5. Equal identity is not enough to declare the root healthy: persisted
       // source/compiled closures or the stored symbol may still be unloadable.
       // Probe the exact ref; only the successful load takes the fast path.
       if (currentId === runningRef?.identity) {
@@ -778,22 +750,12 @@ export class PiecesController<T = unknown> {
         }
       }
 
-      // 7. Apply/repair. Every successful source response must attest the same
-      // build as ?identity; imports are checked too because HttpProgramResolver
-      // uses this fetch for the whole authored closure.
-      const attestedFetch: typeof globalThis.fetch = async (input, init) => {
-        const response = await runtime.fetch(input, init);
-        if (
-          response.ok && patternResponseBuild(response) !== expectedBuild
-        ) {
-          throw new Error(
-            `Pattern source response was not served by build ${expectedBuild}`,
-          );
-        }
-        return response;
-      };
+      // 6. Resolve and compile the full authored closure locally. Only the
+      // compiler-produced entry ref can authorize a swap: if a rolling deploy
+      // serves identity and source from different revisions, their content
+      // identities differ and the original root remains untouched.
       const program = await runtime.harness.resolve(
-        new HttpProgramResolver(target.href, attestedFetch),
+        new HttpProgramResolver(target.href, runtime.fetch),
       );
       const pattern = await runtime.patternManager.compilePattern(program, {
         space,
@@ -804,7 +766,7 @@ export class PiecesController<T = unknown> {
           "identity-attestation-mismatch",
           () => [
             "checkAndUpdateDefaultPattern: compiled source did not match " +
-            "the build-attested identity",
+            "the advertised identity",
             space,
             currentId,
             entryRef?.identity,
