@@ -25,6 +25,7 @@ import {
   canonicalizePreparedDigestInput,
   canonicalizeWritePolicyInput,
   logicalPathToPointer,
+  preparedDigestFor,
 } from "../src/cfc/mod.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
@@ -207,6 +208,62 @@ describe("CFC canonicalization helpers", () => {
         item.kind === "custom" ? item.name : ""
       ),
     ).toEqual(["a", "b"]);
+  });
+
+  it("binds delegation space while canonicalizing delegation order", () => {
+    const spaceA = signer.did();
+    const spaceB = "did:key:z6MkPreparedDigestOtherSpace" as MemorySpace;
+    const base = {
+      consumedReads: [],
+      attemptedWrites: [],
+      writes: [],
+      writeAttemptLog: [],
+      dereferenceTraces: [],
+      triggerReads: [],
+      writePolicyInputs: [],
+    };
+
+    expect(preparedDigestFor({
+      ...base,
+      moduleDelegations: [{
+        space: spaceA,
+        moduleIdentity: "successor",
+        delegatedModuleIdentities: ["predecessor"],
+      }],
+    })).not.toBe(preparedDigestFor({
+      ...base,
+      moduleDelegations: [{
+        space: spaceB,
+        moduleIdentity: "successor",
+        delegatedModuleIdentities: ["predecessor"],
+      }],
+    }));
+
+    const ordered = preparedDigestFor({
+      ...base,
+      moduleDelegations: [{
+        space: spaceB,
+        moduleIdentity: "z-successor",
+        delegatedModuleIdentities: ["z-predecessor", "a-predecessor"],
+      }, {
+        space: spaceA,
+        moduleIdentity: "a-successor",
+        delegatedModuleIdentities: ["predecessor"],
+      }],
+    });
+    const reversed = preparedDigestFor({
+      ...base,
+      moduleDelegations: [{
+        space: spaceA,
+        moduleIdentity: "a-successor",
+        delegatedModuleIdentities: ["predecessor"],
+      }, {
+        space: spaceB,
+        moduleIdentity: "z-successor",
+        delegatedModuleIdentities: ["a-predecessor", "z-predecessor"],
+      }],
+    });
+    expect(reversed).toBe(ordered);
   });
 
   it("canonicalizes link-write policy input paths", () => {

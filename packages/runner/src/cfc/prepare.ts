@@ -507,6 +507,7 @@ const writeAuthorizedByReason = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
   path: readonly string[],
+  targetSpace: MemorySpace,
   targetIdentity?: ImplementationIdentity,
 ): string | undefined => {
   if (!isRecord(schema) || !isRecord(schema.ifc)) {
@@ -562,11 +563,15 @@ const writeAuthorizedByReason = (
   // module spells differently across piece-deploy and HTTP compiles —
   // labs#4772), while moduleIdentity already pins the module content-
   // addressed, subsuming anything the spelling could soundly assert.
-  const identityArmMatches =
-    typeof bindingIdentity.moduleIdentity === "string" &&
-    typeof identity.moduleIdentity === "string" &&
-    identity.moduleIdentity.length > 0 &&
-    identity.moduleIdentity === bindingIdentity.moduleIdentity;
+  const claimedModuleIdentity = bindingIdentity.moduleIdentity;
+  const writerModuleIdentity = identity.moduleIdentity;
+  const identityArmMatches = typeof claimedModuleIdentity === "string" &&
+    typeof writerModuleIdentity === "string" &&
+    writerModuleIdentity.length > 0 &&
+    (writerModuleIdentity === claimedModuleIdentity ||
+      tx.getCfcState().moduleDelegations.get(targetSpace)?.get(
+          writerModuleIdentity,
+        )?.includes(claimedModuleIdentity) === true);
   if (
     !identityArmMatches ||
     !arraysEqual(identity.bindingPath, bindingIdentity.path)
@@ -3453,6 +3458,7 @@ const verifyInputRequirements = (
       tx,
       entry.schema,
       entry.path,
+      target.space,
       identityForPath(entry.path),
     );
     const setupProjection = setupProjectionSourceMatchesValue(

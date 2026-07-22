@@ -643,6 +643,71 @@ export class Runtime {
   private cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
   readonly #policyManifests = new Map<string, PolicyArtifactManifestV1>();
   readonly #policyManifestSpaces = new Map<string, Set<MemorySpace>>();
+  // Attesting space -> successor module identity -> direct predecessor
+  // identities whose writer authority it inherits. Entries come only from
+  // verified source closures or integrity-valid compiled closures in that same
+  // space. Transactions receive a transitive, immutable snapshot at creation
+  // so an in-flight authorization decision cannot change when another module
+  // loads, and authorization in one space can never borrow another space's
+  // delegation metadata.
+  readonly #moduleDelegations = new Map<
+    MemorySpace,
+    Map<string, Set<string>>
+  >();
+
+  registerModuleDelegations(
+    space: MemorySpace,
+    delegations: ReadonlyMap<string, ReadonlySet<string>>,
+  ): void {
+    if (typeof space !== "string" || space.length === 0) return;
+    const spaceDelegations = this.#moduleDelegations.get(space) ?? new Map();
+    for (const [identity, predecessors] of delegations) {
+      if (typeof identity !== "string" || identity.length === 0) continue;
+      const merged = spaceDelegations.get(identity) ?? new Set<string>();
+      for (const predecessor of predecessors) {
+        if (
+          typeof predecessor === "string" && predecessor.length > 0 &&
+          predecessor !== identity
+        ) {
+          merged.add(predecessor);
+        }
+      }
+      if (merged.size > 0) spaceDelegations.set(identity, merged);
+    }
+    if (spaceDelegations.size > 0) {
+      this.#moduleDelegations.set(space, spaceDelegations);
+    }
+  }
+
+  private moduleDelegationSnapshot(): Map<
+    MemorySpace,
+    ReadonlyMap<string, readonly string[]>
+  > {
+    const snapshot = new Map<
+      MemorySpace,
+      ReadonlyMap<string, readonly string[]>
+    >();
+    for (const [space, spaceDelegations] of this.#moduleDelegations) {
+      const spaceSnapshot = new Map<string, readonly string[]>();
+      for (const identity of spaceDelegations.keys()) {
+        const inherited = new Set<string>();
+        const pending = [...(spaceDelegations.get(identity) ?? [])];
+        while (pending.length > 0) {
+          const predecessor = pending.pop()!;
+          if (predecessor === identity || inherited.has(predecessor)) continue;
+          inherited.add(predecessor);
+          pending.push(...(spaceDelegations.get(predecessor) ?? []));
+        }
+        if (inherited.size > 0) {
+          spaceSnapshot.set(identity, [...inherited].sort());
+        }
+      }
+      if (spaceSnapshot.size > 0) {
+        snapshot.set(space, spaceSnapshot);
+      }
+    }
+    return snapshot;
+  }
 
   registerCfcPolicyManifests(
     space: MemorySpace | undefined,
@@ -1286,6 +1351,7 @@ export class Runtime {
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);
+    wrapped.setCfcModuleDelegations(this.moduleDelegationSnapshot());
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     return wrapped;
   }

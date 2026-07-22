@@ -17,8 +17,9 @@ import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
  * that read EXISTING stamps (verification, stored-claim reconciliation), pin
  * that stamp MINTING stays exact (rebind — the tolerance never widens who
  * can create authority), and pin that identity and path stay fail-closed
- * (claim rotation across module versions remains a conflict pending the
- * setsrc-history delegation design; see the board topic).
+ * (direct claim rotation across module versions remains a conflict; legitimate
+ * updates retain the old claim and use authenticated `piece setsrc`
+ * delegation).
  */
 
 const MODULE_IDENTITY = "profile-home-module-identity";
