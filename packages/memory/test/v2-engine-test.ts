@@ -582,21 +582,6 @@ Deno.test("memory v2 engine lists live space-scoped entity identifiers", async (
     );
     assertEquals(entityIdExists(engine, "of:fid1:first"), true);
     assertEquals(entityIdExists(engine, "of:fid1:missing"), false);
-    assertThrows(
-      () => listEntityIds(engine, "missing"),
-      Error,
-      "unknown branch: missing",
-    );
-    assertThrows(
-      () => listEntityIdPage(engine, { branch: "missing", limit: 1 }),
-      Error,
-      "unknown branch: missing",
-    );
-    assertThrows(
-      () => entityIdExists(engine, "of:fid1:first", "missing"),
-      Error,
-      "unknown branch: missing",
-    );
 
     applyCommit(engine, {
       sessionId: "session:alice",

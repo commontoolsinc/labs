@@ -56,6 +56,11 @@ The limit includes hydrated projections. Projections with kernel lookup
 references, open file handles, open directory handles, or in-flight hydration
 remain pinned. The cache may exceed its configured limit by the number of
 pinned projections and returns to the limit as those references close.
+Lookup preparation reserves the kernel reference before returning an inode to
+the reply callback. This keeps concurrent asynchronous lookups from evicting a
+projection that another callback has prepared but not yet returned. If
+libfuse rejects an entry, open, or create reply, the callback releases the
+reserved lookup reference or handle immediately.
 Eviction removes the projected tree, its controller, subscriptions, and CFC
 entry metadata. Enumeration remains complete because its names live in the
 open directory handle rather than this cache.
@@ -64,7 +69,10 @@ Deletion and eviction remove the directory entry immediately. A referenced
 inode subtree remains available by inode until its final lookup and open
 references close. This matches the FUSE lifetime rule and prevents an open
 directory or file from changing to `ENOENT` because unrelated entity lookups
-filled the projection cache.
+filled the projection cache. Reference bookkeeping records each retained
+inode's projection root when the reference is created. Releasing a descendant
+still finds that root after a reactive update has removed the descendant's
+parent link.
 
 Mount connection creates only the space's fixed synthetic files and
 directories. It does not request identifiers, the space root, the default
@@ -314,7 +322,8 @@ Changes to the entity projection must preserve all of the following:
 9. **Bounded retained projection state.** Enumeration does not add permanent
    identifier inodes. Unreferenced exact and hydrated entity projections obey
    the configured cache limit. Referenced projections are removed after their
-   lookup and open references close.
+   lookup and open references close. Interrupted FUSE replies do not retain
+   lookup references or handles.
 
 Performance tests should prefer deterministic counters and query-plan
 assertions over wall-clock CI thresholds. Useful scale fixtures are 1,000,
@@ -336,6 +345,10 @@ legacy callers, but the server rejects an unpaginated result larger than 1,000
 IDs. A server without point lookup can resolve only exact projections already
 cached in the bridge or known piece controllers. It does not refresh the
 complete identifier list for one missing name.
+
+Connection health does not depend on these optional capabilities. A healthy
+older server can reconnect even though a later attempt to enumerate
+`entities/` will report that pagination is unsupported.
 
 If the caller later opens `pieces/`, the legacy `allPieces` projection is
 materialized. Its known controllers can support exact entity access, but they

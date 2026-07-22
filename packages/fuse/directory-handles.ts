@@ -15,6 +15,10 @@ export interface DirectoryPreparer {
 export interface FuseOperationPreparer extends DirectoryPreparer {
   shouldPrepareLookup(parentIno: bigint, name: string): boolean;
   prepareLookup(parentIno: bigint, name: string): Promise<boolean>;
+  prepareLookupForReply?(
+    parentIno: bigint,
+    name: string,
+  ): Promise<bigint | undefined>;
   retainEntityProjectionLookup?(ino: bigint, count?: bigint): void;
   releaseEntityProjectionLookup?(ino: bigint, count?: bigint): void;
   retainEntityProjectionOpen?(ino: bigint): void;
@@ -186,11 +190,18 @@ export class FuseOperationState {
     parentIno: bigint,
     name: string,
   ): Promise<bigint | undefined> {
+    if (this.preparer?.prepareLookupForReply) {
+      return await this.preparer.prepareLookupForReply(parentIno, name);
+    }
     if (!this.preparer?.shouldPrepareLookup(parentIno, name)) {
-      return this.lookup(parentIno, name);
+      const ino = this.lookup(parentIno, name);
+      if (ino !== undefined) this.retainLookup(ino);
+      return ino;
     }
     if (!await this.preparer.prepareLookup(parentIno, name)) return undefined;
-    return this.lookup(parentIno, name);
+    const ino = this.lookup(parentIno, name);
+    if (ino !== undefined) this.retainLookup(ino);
+    return ino;
   }
 
   retainLookup(ino: bigint): void {
@@ -248,6 +259,20 @@ export function visitDirectoryEntries(
 ): void {
   for (let index = startOffset; index < entries.length; index++) {
     if (!visit(entries[index], index + 1)) return;
+  }
+}
+
+/** Roll back retained request state when libfuse rejects a reply. */
+export function replyWithRetainedState(
+  reply: () => number,
+  rollback: () => void,
+): boolean {
+  let accepted = false;
+  try {
+    accepted = reply() === 0;
+    return accepted;
+  } finally {
+    if (!accepted) rollback();
   }
 }
 
