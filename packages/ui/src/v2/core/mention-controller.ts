@@ -160,8 +160,15 @@ export class MentionController implements ReactiveController {
 
     const filtered: CellHandle<Mentionable>[] = [];
     for (let i = 0; i < mentionableArray.length; i++) {
-      // Use .key(i) to get Cell reference, preserving cell-ness
-      const mentionCell = handle.key(i);
+      // Skip degraded holes: a member whose pattern can't load on this runtime
+      // surfaces as a null slot (CT-1863 — see MentionableArraySchema) with no
+      // mentionable identity or name. Without this guard an empty query would
+      // push the hole (the `!query` branch below skips the name check).
+      if (mentionableArray[i] == null) continue;
+
+      // Use .key(i) to get Cell reference, preserving cell-ness. Non-null was
+      // just asserted above, so the slot is a real Mentionable.
+      const mentionCell = handle.key(i) as CellHandle<Mentionable>;
 
       // Only call .get() to read the name for filtering
       const name = mentionCell.get()?.[NAME];
@@ -387,7 +394,10 @@ export class MentionController implements ReactiveController {
     // Use .key(i) to preserve cell-ness of items
     const mentions: CellHandle<Mentionable>[] = [];
     for (let i = 0; i < mentionableArray.length; i++) {
-      const mentionCell = handle.key(i);
+      // Skip degraded holes (CT-1863): an unloadable member is a null slot,
+      // not a mentionable piece — don't hand callers a handle to nothing.
+      if (mentionableArray[i] == null) continue;
+      const mentionCell = handle.key(i) as CellHandle<Mentionable>;
       if (mentionCell) {
         mentions.push(mentionCell);
       }

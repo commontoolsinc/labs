@@ -1355,6 +1355,77 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
     expect(error).toBeDefined();
   });
 
+  // CT-1863: the mentionable/piece-list read shape. Each element is an object
+  // keyed by a required NAME; an unloadable member (deployed pattern source the
+  // current runtime refuses) resolves to an unmaterializable link and fails the
+  // object schema. These two tests pin the before/after: a non-nullable element
+  // schema voids the WHOLE list (blanking every loadable sibling — the bug),
+  // while wrapping the member schema in `anyOf` with null degrades only the bad
+  // member and keeps the rest (the fix, exactly what MentionableArraySchema
+  // now does).
+  const memberObjectSchema = {
+    type: "object",
+    properties: { $NAME: { type: "string" } },
+    required: ["$NAME"],
+  } as const;
+
+  function makeMemberListDoc() {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-member-list" as URI;
+    const docEntity = docUri as Entity;
+    const missingUri = "of:unloadable-member" as URI;
+    const docValue = [
+      { $NAME: "Alpha" },
+      // Unloadable member: a link whose target never materializes (pattern
+      // source refused by this runtime), so the element fails memberObjectSchema.
+      { "/": { [LINK_V1_TAG]: { id: missingUri, path: [] } } },
+      { $NAME: "Gamma" },
+    ];
+    store.set(`${docEntity}/${type}`, {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: hashOf({ the: type, of: docEntity }),
+      since: 1,
+    });
+    // Note: missingUri is deliberately absent from the store.
+    return { store, docUri, type, docValue };
+  }
+
+  it("degrades one unloadable member to null and keeps siblings (CT-1863 fix — anyOf null)", () => {
+    const { store, docUri, type, docValue } = makeMemberListDoc();
+    const schema = {
+      type: "array",
+      items: { anyOf: [{ type: "null" }, memberObjectSchema] },
+    } as JSONSchema;
+
+    const { ok: result } = getTraverser(store, { path: ["value"], schema })
+      .traverse({
+        address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+        value: docValue as FabricValue[],
+      });
+
+    expect(result).toEqual([{ $NAME: "Alpha" }, null, { $NAME: "Gamma" }]);
+  });
+
+  it("voids the whole list when one member is unloadable and items are non-nullable (CT-1863 bug)", () => {
+    const { store, docUri, type, docValue } = makeMemberListDoc();
+    const schema = {
+      type: "array",
+      items: memberObjectSchema,
+    } as JSONSchema;
+
+    const { error } = getTraverser(store, { path: ["value"], schema })
+      .traverse({
+        address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+        value: docValue as FabricValue[],
+      });
+
+    // One bad member blanks all three — the exact blast radius CT-1863 fixes.
+    expect(error).toBeDefined();
+  });
+
   it("does not silently replace a mismatched item with undefined when items schema is a $ref", () => {
     // Before the isValidType $ref fix, isValidType called with a schema of the
     // form { $ref: "...", $defs: {...} } would skip $ref resolution and fall
