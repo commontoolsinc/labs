@@ -160,6 +160,23 @@ Deno.test("removeChild clears dir and nested file recursively", () => {
   assertEquals(tree.lookup(tree.rootIno, "dir"), undefined);
 });
 
+Deno.test("detachChild retains an unlinked subtree until it is cleared", () => {
+  const tree = new FsTree();
+  const detached = tree.addDir(tree.rootIno, "entity");
+  const child = tree.addFile(detached, "value.txt", "old", "string");
+
+  assertEquals(tree.detachChild(tree.rootIno, "entity"), detached);
+  assertEquals(tree.lookup(tree.rootIno, "entity"), undefined);
+  assertEquals(tree.inodes.has(detached), true);
+  assertEquals(tree.inodes.has(child), true);
+
+  const replacement = tree.addDir(tree.rootIno, "entity");
+  tree.clear(detached);
+  assertEquals(tree.lookup(tree.rootIno, "entity"), replacement);
+  assertEquals(tree.inodes.has(detached), false);
+  assertEquals(tree.inodes.has(child), false);
+});
+
 Deno.test("clear removes subtree but keeps sibling", () => {
   const tree = new FsTree();
   const a = tree.addDir(tree.rootIno, "a");
