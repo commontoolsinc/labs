@@ -4,7 +4,7 @@ Letting authored patterns import other patterns published in the fabric:
 
 ```tsx
 // Shown for illustration only.
-import { TodoItem, todoSchema } from "cf:/kitchen/todo-list";  // a slug — names a piece OR a published pattern
+import { TodoItem, todoSchema } from "cf:/did:key:z6Mk…/todo-list";  // a slug in an identified space
 import { TodoItem } from "cf:pattern:AvcnyZ…rC1c";               // a content-addressed source, directly
 ```
 
@@ -157,9 +157,11 @@ separate fields:
   fabric URL that is unpinned and resolves to a piece or another mutable
   `patternIdentity`-bearing entity follows that entity's current pattern. A
   fabric URL that resolves to `pattern:<identity>` names content-addressed
-  source and cannot update. A trailing `@<identity>` pin makes any fabric URL
-  immutable, even when its unpinned form names a piece. These piece-origin
-  semantics are specified in
+  source and cannot update. A trailing `@<identity>` pin on an entity-FID URL
+  makes that URL immutable, even though its unpinned form names a piece. The
+  tentative piece-origin policy rejects slug-shaped URLs even when they carry a
+  pin. Authored static imports remain a separate case and may use pinned slugs.
+  These piece-origin semantics are specified in
   [`../piece-source-lifecycle.md`](../piece-source-lifecycle.md) and require
   work. An origin answers "where did this source come from, and should that
   place be checked again?"; `source.ref` answers "which exact bytes are
@@ -187,7 +189,7 @@ cf://<host>/<space>/<ref>[/<subpath>][@<pin>]      ; explicit toolshed
 ref     = slug                ; no ":" — isSlugAddress convention
         | "of:fid1:" hash     ; cell URI (a piece / a cell carrying patternIdentity)
         | "pattern:" hash     ; entry-module identity (content-addressed source)
-space   = space-name | space-did
+space   = space-name | space-did ; parser shape; resolution currently requires a DID
 host    = domain[":"port]     ; a toolshed
 pin     = "@" hash            ; entry-module identity
 hash    = 43 base64url chars  ; hashStringOf/hashOf output (value-hash.ts):
@@ -207,14 +209,14 @@ Examples:
 // Shown for illustration only.
 import { TodoItem } from "cf:todo-list";                            // slug, current space
 import { todoSchema } from "cf:todo-list/schemas";                  // subpath (phase 2)
-import { TodoItem } from "cf:/kitchen/todo-list";                   // space by name
+import { TodoItem } from "cf:/kitchen/todo-list";                   // name-shaped space parses, but resolution rejects it
 import { TodoItem } from "cf:/did:key:z6Mk…/todo-list";             // space by DID
-import { TodoItem } from "cf://toolshed.common.tools/kitchen/todo-list";  // explicit toolshed
+import { TodoItem } from "cf://toolshed.common.tools/did:key:z6Mk…/todo-list";  // explicit toolshed
 import { TodoItem } from "cf:pattern:AvcnyZ…rC1c";                    // content-addressed, space-free
-import { TodoItem } from "cf:/kitchen/of:fid1:ZwjMI…A2Os";          // a piece (patternIdentity-bearing cell) by URI
+import { TodoItem } from "cf:/did:key:z6Mk…/of:fid1:ZwjMI…A2Os";    // a piece (patternIdentity-bearing cell) by URI
 
 // What a deployed importer actually stores (§ Snapshot semantics):
-import { TodoItem } from "cf:/kitchen/todo-list@AvcnyZ…rC1c";
+import { TodoItem } from "cf:/did:key:z6Mk…/todo-list@AvcnyZ…rC1c";
 ```
 
 Parsing rules (each form is disjoint by prefix; no segment counting needed):
@@ -263,8 +265,12 @@ Why this shape:
   is entirely ours via the `ProgramResolver`/compiler-host seam, and TypeScript
   is satisfied through the same mechanism that resolves `commonfabric` today
   (`packages/js-compiler/typescript/compiler.ts:176-207`).
-- **It is the shell's URL shape with a scheme on it** —
-  `/{spaceNameOrDid}/{pieceIdOrSlug}` — so users learn one addressing model.
+- **Its durable identifier forms follow the shell's URL shapes.** A mutable
+  piece uses `cf:/<space-did>/of:fid1:<piece-id>`. An immutable pattern uses the
+  space-free `cf:pattern:<identity>` form. Authored static imports may still use
+  a slug because deployment pins its terminal content identity. A piece origin
+  does not accept that slug-shaped form under the tentative direction in Open
+  question 1. Human-readable URL aliases belong in a separate shortlink layer.
 - **Publication = naming.** `slug → a cell carrying patternIdentity` (a piece,
   or a published-pointer cell) in a readable space is the whole publish story;
   updating the slug is publishing a new version (dist-tag semantics). Pieces and
@@ -304,7 +310,7 @@ Mechanics:
    the specifier in the stored source** to the pinned form:
 
    ```tsx
-   import { TodoItem } from "cf:/kitchen/todo-list@AvcnyZ…rC1c";
+   import { TodoItem } from "cf:/did:key:z6Mk…/todo-list@AvcnyZ…rC1c";
    ```
 
    The stored program is then fully deterministic: compilation, identity, and
@@ -683,10 +689,24 @@ unchanged.
 
 ## Open questions
 
-1. **Space-name resolution.** Refs with space *names* (not DIDs) need a
-   name→DID mapping per host; the shell resolves names client-side today and
-   there is no service surface here to hang it on. Name squatting/renaming
-   semantics need a decision before phase 2 (DID-form refs sidestep it).
+1. **Identifier-only durable URLs and future shortlinks, tentative.** The
+   current resolver rejects a name in the space position. The tentative
+   direction is to preserve that boundary rather than add name-to-DID
+   resolution to the fabric URL grammar. A durable piece-origin URL uses the
+   repository's stable identifier forms: a DID for the space, an entity FID
+   for a mutable piece or publication pointer, or a content identity for an
+   immutable pattern. Current-space shorthand for an unpinned mutable entity
+   normalizes to the explicit space DID and entity FID before it becomes origin
+   state. A direct pattern identity or a pin on an entity-FID URL normalizes to
+   the space-free content identity. The piece-origin validator rejects a
+   slug-shaped or root-only fabric reference, including a pinned slug. Existing
+   authored import aliases remain a separate case because deployment pins their
+   terminal content identity into source. A UI or future shortlink service may
+   map a custom string to a canonical identifier URL before the lifecycle sees
+   it. The shortlink is not itself the durable origin or a repoint target.
+   Further study must settle whether spaces should eventually have FIDs rather
+   than DIDs, shortlink ownership and reassignment, and whether supplied aliases
+   receive separate optional provenance metadata.
 2. **Slug-cell typing.** The uniform chase duck-types its hops (a
    `patternIdentity` meta present ⇒ a pattern-bearing cell). Good enough, or
    should slug assignment stamp an explicit kind on the slug cell for better

@@ -183,10 +183,15 @@ prefix:
   `/api/patterns/system/default-app.tsx`) → use `?identity` against the space's
   host, then fetch and compile whenever the persisted artifact needs an update
   or repair.
-
-General source URL origins use the discriminated active-origin and revision
-schemas defined by the piece source lifecycle spec. They do not permanently
-overload this raw string with origin-kind-specific behavior.
+- **General source URL origins** use the discriminated active-origin and
+  revision schemas defined by the piece source lifecycle spec. They must not
+  overload the raw string with origin-kind-specific behavior. A fabric
+  `cf://` URL that is unpinned and resolves to a mutable
+  `patternIdentity`-bearing entity stores the stable entity rather than a slug
+  and follows its current pattern. A fabric URL that resolves to
+  `pattern:<hash>` or carries a trailing pin on an entity FID stores exact,
+  immutable source and cannot update. The tentative piece-origin policy rejects
+  slug-shaped URLs even when pinned. Static imports may still use pinned slugs.
 
 Baseline migration preserves the current pattern independently from update
 authority. It creates an active origin only when a durable tracking choice can
@@ -207,11 +212,16 @@ supplies and authorizes an origin.
 
 **Born-from determinism.** The system chooses a root's initial source when it
 creates the space. In the target model, it passes that source through the same
-creation transition used for any other piece. The current implementation
-instead seeds a non-home root's raw `patternSource` from the home root's
-`defaultAppUrl`. Editing that template later does not change an existing root.
-Changing that root's source is an ordinary repoint, edit, revert, or other
-lifecycle operation.
+creation transition used for any other piece. That transition writes the first
+revision. It writes a normalized active origin only when creation also makes
+the ordinary explicit choice to accept future updates from a mutable default.
+The current implementation instead seeds a non-home root's raw `patternSource`
+from the home root's `defaultAppUrl`. Editing that template later does **not**
+change an existing root. Changing that root's source is an ordinary repoint,
+edit, revert, or other lifecycle operation. Under the tentative identifier-only
+URL policy, a template stores a canonical space DID with a stable entity FID,
+or it stores a space-free content identity. A future shortlink service resolves
+a custom string before the template reaches the lifecycle operation.
 
 Today `defaultAppUrl` is output state on the home root. That is not a durable
 home for creation configuration once the home root can be repointed or
@@ -228,6 +238,14 @@ new per-ref storage:
 cf:[[//toolshed.url]/space/][slug]
 ```
 
+These are fabric-internal source URLs as well as import specifiers. When used
+as a piece origin, an unpinned URL that resolves to a piece or another mutable
+pattern-bearing entity follows its current `patternIdentity`. A URL that
+resolves directly to a content-addressed pattern is immutable. A trailing pin
+on an entity-FID URL makes that URL immutable, including when its unpinned ref
+names a piece. The piece-origin validator rejects a slug-shaped form even when
+it has a pin.
+
 - The `//toolshed.url` host means *"this space lived at this URL at least at
   some point"* — a bootstrap hint for when the runtime does not already know
   where a space is hosted (we have not built host-discovery-without-hints yet;
@@ -238,20 +256,24 @@ cf:[[//toolshed.url]/space/][slug]
   route into the home-space site table before it commits a canonical host-less
   target. A template may then keep the form `cf:/<space-did>/<ref>`. The
   revision also retains the supplied `cf://` URL. A lifecycle follow resolves
-  an unpinned slug once and stores the stable entity. A pinned ref normalizes to
-  exact pattern source. The host is routing, not identity; it is not copied
-  into every canonical target.
+  and stores the piece named by a stable entity FID. Under the tentative
+  identifier-only policy, a human-readable shortlink resolves before this
+  operation. A pin on an entity-FID ref normalizes to exact pattern source. The
+  host is routing, not identity; it is not copied into every canonical target.
 - Host **hints belong to the space**, not to each cross-space link — a
   home-space site table is the current durable store and the seed of later host
   discovery. The runtime processor hydrates its entries on startup. Writing it
   from a host-qualified lifecycle operation remains required work.
 - **Optional ref**: `cf://toolshed/space/` with no ref resolves that space's
   current root pattern through the space cell's `defaultPattern` and then its
-  `patternIdentity`. Static resolution pins that result. A lifecycle operation
-  that starts from this form stores the resolved root piece as its stable
-  origin; later relinking of the space root does not redirect the follower.
-- Space is a **DID** (names still require name→DID resolution — README open
-  question).
+  `patternIdentity`. Static resolution pins that result. Under the tentative
+  identifier-only piece-origin policy, the lifecycle resolver rejects this
+  root shorthand. An outer authoring layer may resolve it to the current root
+  piece FID before invoking the lifecycle. Later relinking of the space root
+  then does not redirect the follower.
+- Space is a **DID**. The tentative policy rejects names in fabric URLs and
+  leaves human-readable aliases to a future shortlink service. README Open
+  question 1 retains this decision for further study.
 
 ## In-place apply
 
