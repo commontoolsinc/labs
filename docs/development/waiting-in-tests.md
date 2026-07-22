@@ -276,26 +276,44 @@ flushes them from a `queueMicrotask` callback, which hands the batch to the
 ops are one microtask away, and a microtask the test queues afterwards runs
 after the flush, because microtasks run in the order they were queued.
 
-The reconciler tests in `packages/html/test/` wait through `opsFlushed` in
-`packages/html/test/reconciler-support.ts`, which covers both, because their
-trees mix synchronous mock cells with runtime-backed ones:
+The reconciler tests in `packages/html/test/` write plain `Deno.test` and wait
+through `t.settle`, added to the test context by a preload:
 
 ```ts
-// Shown at module scope.
-export function opsFlushed(runtime: Runtime): Promise<void> {
-  return runtime.idle().then(() =>
-    new Promise<void>((resolve) => queueMicrotask(resolve))
-  );
-}
+// Shown for illustration only.
+Deno.test("...", async (t) => {
+  cell.set(next);
+  await t.settle();
+  assertEquals(collector.getOpsOfType("set-prop"), expected);
+});
 ```
 
-This shape is an ordering guarantee rather than a deadline, so it cannot lose a
-race under load. It also holds for a test asserting that an op is *absent*:
-once it returns, every op the change was going to produce has been delivered, so
-no later batch can falsify the absence. Those tests need it. A wait on the
-`onOps` callback would never return for them, since a change that emits no ops
-produces no batch, and they pass vacuously when nothing has flushed at all —
-their teeth come from the wait being long enough to have seen an unwanted op.
+Nothing is imported. The package's test task runs `test/clock-preload.ts`
+before the test modules (through Deno's `--preload`); it replaces `Deno.test`
+so each test runs under a clock that freezes only positive-delay timers, and it
+adds `settle` to the context. `test/clock.d.ts` gives `t.settle` its type, which
+`deno check` sees because it type-checks the package directory as one program.
+
+A zero-delay `setTimeout(fn, 0)` still fires, driven through the real event
+loop, so the scheduler's dispatch, the reconciler's flush, and teardown all
+resolve on their own. `t.settle` resolves once every zero-delay timer and
+microtask has run to a fixpoint, so it covers both the mock-cell and
+runtime-cell trees these tests mix, and needs no runtime argument.
+
+`t.settle` is an ordering guarantee rather than a deadline, so it cannot lose a
+race under load. It also holds for a test asserting that an op is *absent*: once
+it returns, every op the change was going to produce has been delivered, so no
+later batch can falsify the absence. Those tests pass vacuously when nothing has
+flushed at all, so their teeth come from the wait being long enough to have seen
+an unwanted op.
+
+The frozen clock is what keeps a fixed delay from creeping back in. A
+`setTimeout(resolve, 10)` sleep, in any spelling since they all bottom out in
+the same timer, is a positive-delay timer, so it is never fired and the promise
+it backs never resolves. A test that waits on one deadlocks, which the async-op
+sanitizer reports at once rather than letting the sleep pass by luck. No test in
+the package needs a real positive-delay timer; one that did would deadlock and
+announce itself.
 
 ## Proving a negative
 
