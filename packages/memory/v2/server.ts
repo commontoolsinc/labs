@@ -18,6 +18,7 @@ import {
   type GraphQueryRequest,
   type GraphQueryResult,
   type HelloMessage,
+  MAX_ENTITY_ID_PAGE_SIZE,
   type Operation,
   parseMemoryProtocolFlags,
   type ResponseMessage,
@@ -118,8 +119,6 @@ const SLOW_QUERY_THRESHOLD_MS = 100;
 const SLOW_QUERY_BUFFER_SIZE = 100;
 const DEFAULT_SESSION_OPEN_CHALLENGE_TTL_SECONDS = 300;
 const SESSION_OPEN_CHALLENGE_BYTES = 32;
-export const MAX_ENTITY_ID_PAGE_SIZE = 1_000;
-
 // SQLite resource caps (mirror the `sqlite.query` wire-parse caps; also applied
 // to the folded-write path, which is parsed loosely as part of a `transact`).
 const MAX_SQLITE_SQL_LENGTH = 100_000;
@@ -2338,12 +2337,24 @@ export class Server {
         message.after === undefined && message.limit === undefined &&
         message.expectedServerSeq === undefined
       ) {
+        const ids = Engine.listEntityIdPage(engine, {
+          limit: MAX_ENTITY_ID_PAGE_SIZE + 1,
+        });
+        if (ids.length > MAX_ENTITY_ID_PAGE_SIZE) {
+          return respondTypedError<EntityIdListResult>(
+            message.requestId,
+            toError(
+              "ProtocolError",
+              `unpaginated entity identifier listing exceeds ${MAX_ENTITY_ID_PAGE_SIZE} entries; use pagination`,
+            ),
+          );
+        }
         return {
           type: "response",
           requestId: message.requestId,
           ok: {
             serverSeq,
-            ids: Engine.listEntityIds(engine),
+            ids,
           },
         };
       }

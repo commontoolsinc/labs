@@ -1791,14 +1791,34 @@ class SpaceReplica implements ISpaceReplica {
     if (client.serverFlags?.entityIdListing !== true) {
       return undefined;
     }
-    return (await session.listEntityIds())?.ids;
+    if (client.serverFlags.entityIdPagination !== true) {
+      return (await session.listEntityIds())?.ids;
+    }
+
+    const ids: string[] = [];
+    let after: string | undefined;
+    let expectedServerSeq: number | undefined;
+    for (;;) {
+      const page = await session.listEntityIds({
+        ...(after === undefined ? {} : { after }),
+        ...(expectedServerSeq === undefined ? {} : { expectedServerSeq }),
+      });
+      if (page === undefined) return undefined;
+      expectedServerSeq ??= page.serverSeq;
+      ids.push(...page.ids);
+      if (page.nextAfter === undefined) return ids;
+      after = page.nextAfter;
+    }
   }
 
   async listEntityIdPage(
     options: EntityIdListOptions = {},
   ): Promise<EntityIdListResult | undefined> {
     const { client, session } = await this.sessionHandle();
-    if (client.serverFlags?.entityIdListing !== true) {
+    if (
+      client.serverFlags?.entityIdListing !== true ||
+      client.serverFlags.entityIdPagination !== true
+    ) {
       return undefined;
     }
     return await session.listEntityIds(options);

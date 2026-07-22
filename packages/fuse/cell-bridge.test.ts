@@ -134,21 +134,28 @@ class SinkableCell {
 }
 
 class PatternIdentityCell {
-  #sinks = new Map<string, () => void>();
+  #sinks = new Map<string, Set<() => void>>();
 
   asSchema() {
     return { sync: () => Promise.resolve() };
   }
 
   sinkMeta(key: string, sink: () => void): () => void {
-    this.#sinks.set(key, sink);
+    let sinks = this.#sinks.get(key);
+    if (!sinks) {
+      sinks = new Set();
+      this.#sinks.set(key, sinks);
+    }
+    sinks.add(sink);
     return () => {
-      if (this.#sinks.get(key) === sink) this.#sinks.delete(key);
+      const current = this.#sinks.get(key);
+      current?.delete(sink);
+      if (current?.size === 0) this.#sinks.delete(key);
     };
   }
 
   emit(key = "patternIdentity"): void {
-    this.#sinks.get(key)?.();
+    for (const sink of this.#sinks.get(key) ?? []) sink();
   }
 }
 
@@ -481,6 +488,237 @@ Deno.test("CellBridge exact entity lookup is targeted and projection cache is bo
   );
 });
 
+Deno.test("CellBridge keeps a newly resolved projection while older hydration is pending", async () => {
+  const firstId = "of:fid1:pending-entity";
+  const secondId = "of:fid1:new-entity";
+  const firstPiece = defer<unknown>();
+  const hydrationStarted = defer<void>();
+  const piece = (id: string) => ({
+    id,
+    name: () => id,
+    getPatternRef: () => Promise.resolve(undefined),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+  });
+  const manager = {
+    getSpace: () => "did:key:zPendingEntitySpace",
+    entityIdExists: (id: string) =>
+      Promise.resolve(id === firstId || id === secondId),
+  } as unknown as SpaceState["manager"];
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: () => Promise.resolve(manager),
+    maxEntityProjections: 1,
+  });
+  bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
+  const state = await bridge.connectSpace("home");
+  state.pieces = {
+    get: (id: string) => {
+      if (id === firstId) {
+        hydrationStarted.resolve();
+        return firstPiece.promise;
+      }
+      return Promise.resolve(piece(id));
+    },
+  } as unknown as SpaceState["pieces"];
+
+  assertEquals(
+    await bridge.prepareLookup(
+      state.entitiesIno,
+      encodeFuseComponent(firstId),
+    ),
+    true,
+  );
+  const firstIno = tree.lookup(
+    state.entitiesIno,
+    encodeFuseComponent(firstId),
+  )!;
+  const firstHydration = bridge.prepareLookup(firstIno, "meta.json");
+  await hydrationStarted.promise;
+
+  assertEquals(
+    await bridge.prepareLookup(
+      state.entitiesIno,
+      encodeFuseComponent(secondId),
+    ),
+    true,
+  );
+  assertNotEquals(
+    tree.lookup(state.entitiesIno, encodeFuseComponent(secondId)),
+    undefined,
+  );
+
+  firstPiece.resolve(piece(firstId));
+  await firstHydration;
+  assertEquals(
+    tree.lookup(state.entitiesIno, encodeFuseComponent(firstId)),
+    undefined,
+  );
+  assertNotEquals(
+    tree.lookup(state.entitiesIno, encodeFuseComponent(secondId)),
+    undefined,
+  );
+});
+
+Deno.test("CellBridge defers projection eviction until lookup and open references close", async () => {
+  const ids = [
+    "of:fid1:referenced-entity",
+    "of:fid1:middle-entity",
+    "of:fid1:latest-entity",
+  ];
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: () =>
+      Promise.resolve(
+        {
+          getSpace: () => "did:key:zReferencedEntitySpace",
+          entityIdExists: (id: string) => Promise.resolve(ids.includes(id)),
+        } as unknown as SpaceState["manager"],
+      ),
+    maxEntityProjections: 1,
+  });
+  bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
+  const state = await bridge.connectSpace("home");
+
+  await bridge.prepareLookup(state.entitiesIno, encodeFuseComponent(ids[0]));
+  const firstIno = tree.lookup(
+    state.entitiesIno,
+    encodeFuseComponent(ids[0]),
+  )!;
+  bridge.retainEntityProjectionLookup(firstIno);
+  bridge.retainEntityProjectionOpen(firstIno);
+
+  await bridge.prepareLookup(state.entitiesIno, encodeFuseComponent(ids[1]));
+  await bridge.prepareLookup(state.entitiesIno, encodeFuseComponent(ids[2]));
+  const latestIno = tree.lookup(
+    state.entitiesIno,
+    encodeFuseComponent(ids[2]),
+  )!;
+  bridge.retainEntityProjectionLookup(latestIno);
+
+  assertNotEquals(tree.getNode(firstIno), undefined);
+  assertNotEquals(tree.getNode(latestIno), undefined);
+  bridge.releaseEntityProjectionLookup(firstIno);
+  assertNotEquals(tree.getNode(firstIno), undefined);
+  bridge.releaseEntityProjectionOpen(firstIno);
+  assertEquals(tree.getNode(firstIno), undefined);
+  assertNotEquals(tree.getNode(latestIno), undefined);
+  bridge.releaseEntityProjectionLookup(latestIno);
+});
+
+Deno.test("CellBridge removes an entity deleted during root hydration", async () => {
+  const entityId = "of:fid1:deleted-during-hydration";
+  let entityIds = [entityId];
+  const pendingPiece = defer<unknown>();
+  const hydrationStarted = defer<void>();
+  const piece = {
+    id: entityId,
+    name: () => "Deleted Entity",
+    getPatternRef: () => Promise.resolve(undefined),
+    input: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+    result: {
+      getCell: () => Promise.resolve(makeCell({}, undefined)),
+      get: () => Promise.resolve({}),
+    },
+  };
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+  state.manager = {
+    listEntityIdPage: () =>
+      Promise.resolve({ serverSeq: 1, ids: [...entityIds] }),
+    entityIdExists: (id: string) => Promise.resolve(entityIds.includes(id)),
+  } as unknown as SpaceState["manager"];
+  state.pieces = {
+    get: () => {
+      hydrationStarted.resolve();
+      return pendingPiece.promise;
+    },
+  } as unknown as SpaceState["pieces"];
+
+  await openDirectorySnapshot(bridge, state.entitiesIno);
+  await bridge.prepareLookup(
+    state.entitiesIno,
+    encodeFuseComponent(entityId),
+  );
+  const entityIno = tree.lookup(
+    state.entitiesIno,
+    encodeFuseComponent(entityId),
+  )!;
+  const hydration = bridge.prepareLookup(entityIno, "meta.json");
+  await hydrationStarted.promise;
+
+  entityIds = [];
+  await openDirectorySnapshot(bridge, state.entitiesIno);
+  assertEquals(
+    tree.lookup(state.entitiesIno, encodeFuseComponent(entityId)),
+    undefined,
+  );
+  assertNotEquals(tree.getNode(entityIno), undefined);
+
+  pendingPiece.resolve(piece);
+  assertEquals(await hydration, false);
+  assertEquals(tree.getNode(entityIno), undefined);
+});
+
+Deno.test("CellBridge keeps hydrated entity-only projections current", async () => {
+  const time = new FakeTime();
+  try {
+    const entityId = "of:fid1:entity-only-reactive";
+    const resultCell = new SinkableCell({ content: "before" });
+    const piece = {
+      id: entityId,
+      name: () => "Entity Only",
+      getPatternRef: () => Promise.resolve(undefined),
+      input: {
+        getCell: () => Promise.resolve(makeCell({}, undefined)),
+        get: () => Promise.resolve({}),
+      },
+      result: {
+        getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+        get: () => Promise.resolve(resultCell.get()),
+      },
+    };
+    const tree = new FsTree();
+    const bridge = new CellBridge(tree, "/tmp/cf-exec");
+    const state = buildTestSpace(bridge, "home", []);
+    state.manager = {
+      entityIdExists: (id: string) => Promise.resolve(id === entityId),
+    } as unknown as SpaceState["manager"];
+    state.pieces = {
+      get: () => Promise.resolve(piece),
+    } as unknown as SpaceState["pieces"];
+
+    await bridge.prepareLookup(
+      state.entitiesIno,
+      encodeFuseComponent(entityId),
+    );
+    const entityIno = tree.lookup(
+      state.entitiesIno,
+      encodeFuseComponent(entityId),
+    )!;
+    assertEquals(await bridge.prepareLookup(entityIno, "result"), true);
+    const resultIno = tree.lookup(entityIno, "result")!;
+    assertEquals(getFileContent(tree, resultIno, "content"), "before");
+
+    resultCell.set({ content: "after" });
+    await time.tickAsync(200);
+    await time.runMicrotasks();
+    assertEquals(getFileContent(tree, resultIno, "content"), "after");
+  } finally {
+    time.restore();
+  }
+});
+
 Deno.test("CellBridge keeps a mounted space visible when identifier listing fails", async () => {
   const tree = new FsTree();
   const entityId = "of:fid1:retry-entity";
@@ -572,9 +810,12 @@ Deno.test("CellBridge reconnect keeps an unmaterialized /pieces view identifier-
   let disposedManagers = 0;
   const reconnectManager = {
     synced: () => Promise.resolve(),
-    listEntityIds: () => {
+    listEntityIdPage: () => {
       identifierRequests++;
-      return Promise.resolve(["of:fid1:reconnect-entity"]);
+      return Promise.resolve({
+        serverSeq: 1,
+        ids: ["of:fid1:reconnect-entity"],
+      });
     },
     runtime: {
       dispose: () => {
@@ -913,7 +1154,7 @@ Deno.test("CellBridge removes property indexes with a deleted entity", async () 
   assertEquals(bridge.shouldPrepareDirectory(resultIno), false);
 });
 
-Deno.test("CellBridge does not load allPieces without identifier-list support", async () => {
+Deno.test("CellBridge fails closed without paginated identifier listing", async () => {
   const tree = new FsTree();
   const entityId = "of:fid1:legacy-piece";
   let entityValueRequests = 0;
@@ -950,11 +1191,10 @@ Deno.test("CellBridge does not load allPieces without identifier-list support", 
   bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
 
   const state = await bridge.connectSpace("home");
-  assertEquals(
-    (await openDirectorySnapshot(bridge, state.entitiesIno)).map(
-      ({ name }) => name,
-    ),
-    [".", ".."],
+  await assertRejects(
+    () => openDirectorySnapshot(bridge, state.entitiesIno),
+    Error,
+    "does not support paginated entity identifier listing",
   );
 
   assertEquals(
