@@ -1,5 +1,6 @@
 /**
- * Test: adding a module reports the position the module actually occupies.
+ * Test: adding a module reports the position the module actually occupies and
+ * assigns the next unused standard label.
  *
  * handleAddModule reads the sub-piece list once and depends on that read twice:
  * getNextUnusedLabel derives the new module's label by scanning the existing
@@ -8,10 +9,14 @@
  * these tests drive successive adds and check each reported index against the
  * entry sitting at it.
  *
- * The label half is not asserted. An entry holds its module as a piece typed
- * `unknown`, which carries no schema, so the runner reads a module's label back
- * as undefined and a test cannot see which label the handler chose. Replacing
- * getNextUnusedLabel's body with `return undefined` still passes these tests.
+ * The label half is asserted through the entry's own `label` field. The chosen
+ * label is recorded on the SubPieceEntry at creation time; the label on the
+ * sub-piece itself is not readable, because SubPieceEntry.piece is typed
+ * `unknown`, whose schema the runner reads back as undefined. Successive adds of
+ * the same type walk the standard label list (email: Personal, Work, School,
+ * Other), a different type starts its own sequence, and an explicit label in
+ * initialData overrides the default. Replacing getNextUnusedLabel's body with
+ * `return undefined` now fails the label assertions.
  *
  * The list starts empty. The lift that seeds a notes module and a type picker
  * assigns its result to a variable nothing reads, and an unconsumed lift does
@@ -41,6 +46,7 @@ export default pattern(() => {
   // apart rather than reading whichever one wrote last.
   const firstEmail = new Writable<AddResult>();
   const secondEmail = new Writable<AddResult>();
+  const thirdEmail = new Writable<AddResult>();
   const phone = new Writable<AddResult>();
   const withInitialData = new Writable<AddResult>();
   const unknownType = new Writable<AddResult>();
@@ -52,6 +58,9 @@ export default pattern(() => {
   });
   const action_add_second_email = action(() => {
     subject.addModule!.send({ type: "email", result: secondEmail });
+  });
+  const action_add_third_email = action(() => {
+    subject.addModule!.send({ type: "email", result: thirdEmail });
   });
   const action_add_phone = action(() => {
     subject.addModule!.send({ type: "phone", result: phone });
@@ -137,6 +146,33 @@ export default pattern(() => {
     );
   });
 
+  // The smart-default label walks the standard list as successive modules of
+  // the same type are added; a different type starts its own sequence; an
+  // explicit label in initialData overrides the default.
+  const assert_first_email_label_personal = computed(() =>
+    [...(subject.subPieces ?? [])][0]?.label === "Personal"
+  );
+  const assert_second_email_label_work = computed(() =>
+    [...(subject.subPieces ?? [])][1]?.label === "Work"
+  );
+  const assert_phone_label_mobile = computed(() =>
+    [...(subject.subPieces ?? [])][2]?.label === "Mobile"
+  );
+  const assert_address_label_override = computed(() =>
+    [...(subject.subPieces ?? [])][3]?.label === "Chosen"
+  );
+
+  // A third email add reads two prior emails (Personal, Work) and picks the
+  // next unused standard label. This fails if getNextUnusedLabel cannot see the
+  // labels the earlier adds assigned.
+  const assert_third_email_appended = computed(() => {
+    const current = [...(subject.subPieces ?? [])];
+    return current.length === 5 && current[4].type === "email";
+  });
+  const assert_third_email_label_school = computed(() =>
+    [...(subject.subPieces ?? [])][4]?.label === "School"
+  );
+
   // The rejection paths report the reason and leave the list alone.
   const assert_unknown_type_rejected = computed(() => {
     const result = unknownType.get();
@@ -181,6 +217,11 @@ export default pattern(() => {
       { assertion: assert_entries_in_add_order },
       { assertion: assert_reported_indices_address_their_modules },
 
+      { assertion: assert_first_email_label_personal },
+      { assertion: assert_second_email_label_work },
+      { assertion: assert_phone_label_mobile },
+      { assertion: assert_address_label_override },
+
       { action: action_add_unknown },
       { assertion: assert_unknown_type_rejected },
       { action: action_add_missing_type },
@@ -188,6 +229,10 @@ export default pattern(() => {
       { action: action_add_notes },
       { assertion: assert_notes_type_rejected },
       { assertion: assert_rejections_appended_nothing },
+
+      { action: action_add_third_email },
+      { assertion: assert_third_email_appended },
+      { assertion: assert_third_email_label_school },
     ],
     subject,
   };

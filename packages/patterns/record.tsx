@@ -56,22 +56,15 @@ function getNextUnusedLabel(
   const standards = STANDARD_LABELS[type];
   if (!standards || standards.length === 0) return undefined;
 
-  // Collect labels already used by modules of this type
+  // Collect labels already assigned to modules of this type. The label is read
+  // from the entry, which records the label chosen when the module was created.
+  // The label on the sub-piece itself is not readable here: SubPieceEntry.piece
+  // is typed `unknown`, whose schema (`{ type: "unknown" }`) the runner reads
+  // back as undefined rather than materializing.
   const usedLabels = new Set<string>();
   for (const entry of existingPieces) {
-    if (entry.type === type) {
-      try {
-        // Access the label field from the piece pattern output
-        // Property access is reactive - framework handles Cell unwrapping
-        // deno-lint-ignore no-explicit-any
-        const piece = entry.piece as any;
-        const labelValue = piece?.label;
-        if (typeof labelValue === "string" && labelValue) {
-          usedLabels.add(labelValue);
-        }
-      } catch {
-        // Ignore errors from pieces without label field
-      }
+    if (entry.type === type && typeof entry.label === "string" && entry.label) {
+      usedLabels.add(entry.label);
     }
   }
 
@@ -302,6 +295,7 @@ const addSubPiece = handler<
     collapsed: false,
     piece,
     schema,
+    label: nextLabel,
   }]);
   sat.set("");
 });
@@ -603,12 +597,17 @@ const handleAddModule = handler<
 
   const current = sc.get() || [];
 
-  // Get smart default label for modules that support it
+  // Get smart default label for modules that support it. initialData may carry
+  // an explicit label that overrides the smart default; record the effective
+  // label on the entry so the next add can see it.
   const nextLabel = getNextUnusedLabel(type, current);
   const initialValues = {
     ...(nextLabel ? { label: nextLabel } : {}),
     ...initialData,
   };
+  const entryLabel = typeof initialValues.label === "string"
+    ? initialValues.label
+    : undefined;
 
   // Create the module - special cases handled
   let piece: unknown;
@@ -641,6 +640,7 @@ const handleAddModule = handler<
     collapsed: false,
     piece,
     schema,
+    label: entryLabel,
   }]);
 
   if (result) {
@@ -816,6 +816,7 @@ const createSibling = handler<
     pinned: false,
     collapsed: false,
     piece,
+    label: nextLabel,
   });
   sc.set(updated);
 });
