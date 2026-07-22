@@ -83,9 +83,9 @@ general piece origin model is described in `../piece-source-lifecycle.md`.
 
 | Piece of machinery | Where | Role here |
 |---|---|---|
-| `ProgramResolver` seam (`main()` / `resolveSource(specifier)`, async) | `packages/js-compiler/program.ts`, `typescript/resolver.ts` | The hook where fabric imports plug in; compilation already runs inside a runtime with storage + network access |
+| `ProgramResolver` seam (`main()` / `resolveSource(specifier)`, async) | `packages/js-compiler/program.ts`, `typescript/resolver.ts` | The hook where fabric imports plug in; it discovers only the reachable closure and cannot enumerate unreachable authored files |
 | Authored-import policy | `packages/runner/src/sandbox/runtime-module-policy.ts` | Single dispatch point for `cf:` specifiers |
-| Per-module Merkle identity (source + deps; external deps fold the full specifier string into the leaf: `runtime:${specifier}@${fingerprint}`) | `computeModuleHashes` in `packages/runner/src/harness/module-identity.ts` | Makes pinned specifiers content-derived with **no hashing changes** (§ Snapshot semantics) |
+| Per-module Merkle identity (source + deps; external deps fold the full specifier string into the leaf: `runtime:${specifier}@${fingerprint}`) | `computeModuleHashes` in `packages/runner/src/harness/module-identity.ts` | Makes pinned specifiers content-derived with **no hashing changes** (§ Snapshot semantics); the primitive includes type edges, but production engine paths currently remove authored `.d.ts` files before identity and persistence |
 | Piece → pattern pointer: `meta("patternIdentity")` = `{ identity, symbol }` (entry-module identity), the sole pointer post-`#4156` (a separate `meta("pattern")` survives only as a builtin parent-backlink) | write `applySetupState`, read `getPatternIdentityRef` in `packages/runner/src/runner.ts` | The terminal hop of the resolution chain |
 | Pattern source-of-truth: the `pattern:<identity>` source-doc closure (there is no longer a meta cell; the retired one's `program` was pure duplication of these docs) | `packages/runner/src/compilation-cache/cell-cache.ts` | Recovered via `getPatternSourceProgramByIdentity` / `loadVerifiedSourceClosure` |
 | Compile cache: source docs at cell key **`pattern:<identity>`**, compiled docs at `compileCache:<rtVersion>/<identity>` | `packages/runner/src/compilation-cache/cell-cache.ts` (`sourceDocKey`/`compiledDocKey`) | **The URI a pattern is saved under by hash.** Content-addressed per-module source + compiled storage; imports resolve from and dedupe into it |
@@ -323,6 +323,24 @@ Mechanics:
    transitively different program ids (`engine.ts:computeId` hashes the source
    files, which contain the specifier). No changes to any hashing code.
 
+   The runtime fingerprint is part of the same external-dependency leaf. An
+   importer therefore receives a new executable identity when that fingerprint
+   changes, even when its authored files and pinned specifiers do not. This is a
+   runtime rebuild, not an authored-source edit.
+
+   Each source document in a pinned imported subtree retains the effective
+   identity fingerprint under which that document was published. Pure modules
+   use the canonical empty fingerprint, while newly published importers of
+   external modules use the published non-empty value. For every document whose
+   reachable graph contains an external dependency, the current runtime must be
+   compatible with the recorded effective fingerprint. This check includes an
+   affected legacy document whose absent field has the canonical empty value.
+   Pure modules need no compatibility check because their identities do not
+   depend on the fingerprint. If the check fails, compilation requires a newly
+   published dependency and pin. The compiler never re-identifies the old
+   pinned source in place or hashes the whole mount under the entry document's
+   fingerprint.
+
 3. **No re-resolution on recompile.** Cold compiles (cache-version bumps,
    eviction) recompile from the stored, pinned source. This is the reason the
    pin lives *in the source* rather than being an emergent property of "first
@@ -370,21 +388,27 @@ alternatives fail:
 - *whole-program id* (`computeId`): entry-point and sibling-file sensitive,
   and not the namespace existing load machinery keys on.
 
-Because the identity is a Merkle root, the transitive source closure is
-discoverable and verifiable from it (source docs at `pattern:<identity>` store
-per-module source + resolved import links), and pinned chains cannot cycle — a
-hash cannot reference itself. (Unpinned mutable references can form cycles —
-A imports slug B whose pattern imports slug A — only during live dev
-resolution, where the resolver needs an ordinary cycle guard.)
+Because the identity is a Merkle root, the program's transitive internal source
+closure is discoverable and verifiable from it. Source documents at
+`pattern:<identity>` store per-module source and internal authored-import links.
+Pinned fabric dependencies remain external to that closure and are retained by
+parsing their content identities from source. Pinned chains cannot cycle because
+a hash cannot reference itself. Unpinned mutable references can form cycles only
+during live development resolution. For example, pattern A can import a slug for
+pattern B while B imports a slug for A. The resolver needs an ordinary cycle
+guard for that case.
 
 ## What an import gives you
 
-The imported module's **exports**: patterns, schemas (`schemas.tsx` sharing is
-a first-class use case), types, lifts/handlers, plain helpers. Imports are
-type-checked against the real fetched source, not declarations. The entry
-module is the program's `main`; subpaths (`/schemas` etc.) address other files
-in the same program and are a phase-2 extension (same resolution, an extra path
-join inside the mounted program).
+The imported module's **exports** include patterns, schemas (`schemas.tsx`
+sharing is a first-class use case), types, lifts and handlers, and plain
+helpers. Imports are type-checked against fetched authored implementation and
+declaration source. Runtime-supplied declaration stubs can describe runtime
+modules for TypeScript, but they are not authored identity nodes. The
+corresponding bare runtime specifier remains an external fingerprinted leaf.
+The entry module is the program's `main`. Subpaths such as `/schemas` address
+other files in the same program and are a phase-2 extension. They use the same
+resolution with an extra path join inside the mounted program.
 
 ## Coexistence with esm.sh / npm / jsr (later)
 
@@ -465,9 +489,10 @@ Engine wraps the authored resolver; on a `cf:` specifier:
    own namespace, its own authored paths) and require the entry hash to equal
    the requested identity. Mismatch = compile error. This is what makes every
    mirror trust-free.
-4. **Mount for type-checking**: splice the fetched files into the TS program
-   under a reserved prefix (e.g. `/~cf/<identity>/<original-path>`), and
-   thread a specifier→mounted-entry alias map into the compiler so
+4. **Mount for type-checking and emission**: splice the fetched files into the
+   TS program under a reserved prefix such as
+   `/~cf/<identity>/<original-path>`. Thread a
+   specifier-to-mounted-entry alias map into the compiler so
    `resolveModuleNameLiterals` (`compiler.ts:176`) maps the `cf:` specifier to
    the mounted file. Relative imports inside the subtree resolve as ordinary
    path joins.
@@ -482,28 +507,31 @@ anything. Therefore:
 - The importer's modules treat the `cf:` specifier as an **external dep** for
   identity purposes (status quo hashing; the pin in the specifier carries the
   content into the hash — § Snapshot semantics).
-- The imported subtree is **not re-emitted** as part of the importer's
-  compilation. Mounted files participate in type-checking only; the importer's
-  emitted module records reference `cf:module/<published-identity>` edges
-  (`module-record-compiler.ts` already emits cross-module edges in exactly
-  this form).
-- If the compiled set for the imported identity is missing (runtime-version
-  bump, never compiled here), compile the imported program **as its own
-  compilation** (existing `loadPatternByIdentity`-shaped path) and let the
-  compile cache absorb it; then the importer's edges resolve normally.
+- Mounted implementation modules are compiled and emitted in the importer's
+  self-contained record graph. Their records keep the published identities
+  computed in the imported program's namespace. Mounted declarations
+  participate in type checking and source history but do not emit records.
+- The importer's emitted records reference imported implementation modules
+  through `cf:module/<published-identity>` edges. A cache hit can reuse compiled
+  bytes already stored under that identity. On a miss, the same importer
+  compilation emits the mounted implementation module and writes it under its
+  published identity.
 
 Payoff: at runtime, an importer and a running piece of the imported pattern
 share compiled artifacts and live module namespaces
-(`modulesByIdentity`, `addressableByIdentity` in `pattern-manager.ts`) — the
-import costs nothing the deployed pattern hasn't already paid.
+(`modulesByIdentity`, `addressableByIdentity` in `pattern-manager.ts`). The
+importer's record graph remains self-contained, while content identities let it
+reuse work the deployed pattern has already paid for.
 
 **Availability is a compile-time concern only.** The compile's write-back
-copies the imported modules' source + compiled docs into the **compiling
-space** (content-addressed keys, idempotent), so both rehydration paths —
-warm (compiled-doc links) and cold (source docs re-fetched by hash) — read
-locally. The referenced space/host must be reachable when a ref is pinned or
-first compiled, never to reload a deployed importer. (This copy is exactly
-the provenance-relevant flow flagged under § Security.)
+copies the imported implementation modules' source and compiled documents into
+the **compiling space**. It copies imported declaration source without creating
+compiled declaration documents. The keys are content-addressed and writes are
+idempotent, so both rehydration paths read locally. The warm path follows
+compiled-document links. The cold path fetches source documents by hash. The
+referenced space or host must be reachable when a reference is pinned or first
+compiled, but not when a deployed importer reloads. This copy is the
+provenance-relevant flow flagged under § Security.
 
 ### 4. Cross-host references: no service surface at all
 
@@ -644,6 +672,14 @@ unchanged.
   pattern" failures per chain shape.
 - **Identity folding** (red-green): two importers identical except for the pin
   hash get different module identities; pin rewrite changes `computeId`.
+- **Runtime rebuild identity**: identical authored files and pins compiled with
+  two runtime fingerprints produce different importer identities while their
+  runtime-neutral program digest remains equal.
+- **Authored declarations**: changing an imported authored `.d.ts` file changes
+  the importer identity, misses prior compiled bytes, persists both declaration
+  revisions, and propagates the new source revision to a follower. A warm load
+  requests no compiled declaration document, while runtime type stubs stay
+  external fingerprinted dependencies.
 - **Snapshot semantics**: deploy piece A; deploy importer B (pin captured);
   move A's piece (and separately: re-point the slug) to a new pattern; B's
   compile, identity, and behavior are byte-identical until `cf deps update`,
@@ -665,14 +701,14 @@ unchanged.
 ## Resolved questions
 
 1. **Publish granularity and source visibility.** Within a space, a pattern and
-   its verified source closure have the same ACL and visibility: that space's.
-   A caller that can resolve the pattern there may read its source. A caller
-   that cannot resolve it gains nothing from knowing its URL or content
-   identity. Assigning a slug to a pattern already present in the space is only
-   naming and discovery; it creates no separate source grant. Publishing into
-   another space is different: it creates an ACL-scoped replica under the
-   destination space's visibility and requires destination write authorization
-   plus a permitted CFC flow.
+   its source documents, authored-program manifests, and source revision history
+   have the same ACL and visibility: that space's. A caller that can resolve the
+   pattern there may read its source. A caller that cannot resolve it gains
+   nothing from knowing its URL or content identity. Assigning a slug to a
+   pattern already present in the space is only naming and discovery; it creates
+   no separate source grant. Publishing into another space is different: it
+   creates an ACL-scoped replica under the destination space's visibility and
+   requires destination write authorization plus a permitted CFC flow.
 2. **Registration of a known space-to-host hint, within the current routing
    model.** Use the ordinary per-space storage session rather than a short-lived
    secondary session. A host-qualified operation registers its accepted hint
@@ -686,6 +722,65 @@ unchanged.
    still needs the pre-open conflict guard. This settles how a known hint enters
    the current session. It does not settle host discovery, availability,
    failover, or space relocation.
+3. **Runtime-fingerprint interaction.** A runtime fingerprint change creates a
+   new executable identity for an importer whose reachable graph contains an
+   external dependency, even when its authored source and fabric pins are
+   unchanged. A detached piece's owner, or a deployment migration service with
+   that space's write authority, may publish the runtime rebuild through the
+   ordinary guarded source transition. A web-origin piece publishes only a
+   rebuild of its resolved web source. A mutable fabric follower publishes only
+   a revision it adopted from its upstream origin. An immutable fabric-origin
+   piece does not move while keeping that origin.
+
+   Followers do not rebuild upstream retained source locally. They adopt the new
+   identity after the upstream piece advertises it. A middle piece in a follow
+   chain adopts the revision before advertising its accepted local revision to
+   downstream followers. A follower that cannot execute the published
+   fingerprint remains on its last accepted revision and reports an
+   incompatibility.
+
+   Piece revisions record the accepted runtime fingerprint and the version-1
+   runtime-neutral program digest defined in
+   [module-loading.md](../module-loading.md). An ordinary transition has the
+   runtime-rebuild cause only when the executable identity and accepted
+   fingerprint changed while the digest, selected export, and active origin
+   remained equal. Revert compares source and fingerprint with its selected
+   historical revision because it intentionally detaches. An immutable fabric
+   origin does not move to a new identity. Loading that exact identity fails if
+   the current runtime cannot execute its recorded fingerprint. A user may
+   detach and rebuild the current retained authored program under the new
+   runtime. This is a direct edit rather than a revert, so it works even when
+   the piece has only its creation revision. Revert remains the operation for
+   selecting an earlier retained program.
+
+   Each revision retains the complete authored program through an immutable
+   version-1 manifest of its canonical main and exact filename-to-source-identity
+   set. It also retains the complete transitive graph of pinned fabric
+   dependencies, with repeated identities stored once. The manifest, rather than
+   mutable synthetic root links on an entry source document, makes source-only
+   revisions and later revert reliable.
+
+   Source ingestion must enumerate the intended authored file set before
+   import-closure resolution. Current `ProgramResolver` flows expose only the
+   reachable closure. An unindexed web entry therefore has no unreachable files
+   in its lifecycle source until a web program manifest supplies that list.
+
+   Runtime compatibility is explicit. An equal fingerprint is compatible by
+   default. A runtime may support another recorded fingerprint only through a
+   versioned compatibility declaration. It must not infer compatibility from
+   similar strings or successful compilation.
+
+   [module-loading.md](../module-loading.md) defines the target authoritative
+   `getExecutableRuntimeFingerprint()` provider and its versioned input policy.
+   The existing broad compile-cache runtime version is a mandatory input in
+   version 1. A later representation-only cache version may move independently
+   only after its inputs are separated from executable semantics.
+
+   The optional `runtimeFingerprint` input and its module-identity test are
+   implemented. Production pattern compilation and source verification still
+   use the empty default. Threading a non-empty fingerprint through compilation,
+   source retention and per-document mount verification, piece revisions, the
+   authoritative provider, and rebuild propagation remains required work.
 
 ## Open questions
 
@@ -720,11 +815,6 @@ unchanged.
    or only files the entry re-exports (an "exports map" discipline, like npm's
    `exports`). Start permissive, tighten if published-internal-file coupling
    becomes a problem.
-5. **Runtime-fingerprint interaction.** External-dep leaves include
-   `runtimeFingerprint`; a runtime upgrade thus shifts importer identities even
-   with identical pins (status quo for runtime modules, now also for fabric
-   refs). Acceptable, but worth stating in the compile-cache invalidation
-   docs.
 6. **Public distribution surface.** Should the product standardize a dedicated
    distribution space whose space-wide ACL grants `READ` to `*`, making every
    pattern in that space readable by any authenticated identity? Should it also

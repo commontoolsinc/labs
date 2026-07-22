@@ -16,7 +16,8 @@ transitive import graph, and (2) ES-module loading into SES compartments. The
 motivating consumer is [persistent scheduler state](persistent-scheduler-state.md),
 whose action implementation fingerprint is currently unstable across reloads.
 
-All phases are complete. Identity decoupling (Phase 1, formerly behind
+All phases of the original loader rollout are complete. Identity decoupling
+(Phase 1, formerly behind
 `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`) is merged. The module-loading
 mechanism (Phases 2–4) is the production path: a synchronous SES
 virtual-module-record loader, a TS→record adapter that runs the full CF
@@ -29,9 +30,15 @@ path, and a structural graph verifier. Security hardening landed alongside
 done: the flag was flipped, then the flag, the AMD bundle pipeline, and the AMD
 compilation cache were deleted.
 
+The module hash accepts an optional runtime fingerprint, and unit tests cover
+its effect on external-dependency leaves. Production pattern compilation,
+entry-identity calculation, source verification, and replication currently use
+the empty default. The fingerprint-aware executable-identity and lifecycle
+rules below are settled target behavior that still requires integration.
+
 ## Last Updated
 
-2026-07-21
+2026-07-22
 
 ## Summary
 
@@ -52,11 +59,11 @@ TypeScript source** and the hashes of every module it imports. That hash is:
 
 - **stable** across entry points and unrelated sibling files, because it depends
   only on the module's own reachable import closure;
-- **stable across TCB evolution**, because it hashes the author's source, not the
-  compiled output. A transformer or compiler improvement must not retroactively
-  change the identity of code the author never edited — code references can
-  point at long-known-good versions, and the trusted computing base (the
-  transformer/compiler) evolves independently of them;
+- **stable as authored source across TCB evolution**, because a runtime-neutral
+  module identity hashes the author's source and pinned specifiers rather than
+  compiled output. The executable module identity separately folds the runtime
+  fingerprint into external-dependency leaves. An affected importer therefore
+  receives a new executable identity after a runtime upgrade;
 - **transitively sensitive**, because changing any module in that closure changes
   the importing module's hash too — behavior can change when an imported function
   *or an imported type* changes, and the fingerprint must reflect that.
@@ -85,10 +92,10 @@ this work and is out of scope.
 - Make that identity sensitive to transitive changes: editing an imported
   function or type invalidates the fingerprint of everything that transitively
   imports it.
-- Keep code identity stable across TCB evolution: a transformer/compiler change
-  must not invalidate references to unchanged authored source. Compilation-
-  semantics changes are captured separately by the scheduler's
-  `runtimeFingerprint`, not by the per-module content hash.
+- Keep a runtime-neutral identity for unchanged authored source across TCB
+  evolution. Fold the runtime fingerprint into executable identities whose
+  reachable graphs contain external dependencies. Revision history can then
+  distinguish a runtime rebuild from an authored-source edit.
 - Track type imports as well as value imports, because the transformer lowers
   types into emitted output (schema generation), so types affect runtime
   behavior.
@@ -206,15 +213,13 @@ For each authored module `M`:
   the CF transformer pipeline and before TypeScript emit. Normalization is
   limited to line-ending canonicalization; type annotations and comments are
   retained. Hashing the author's source rather than compiled JS is deliberate:
-  - It keeps code identity **stable across TCB evolution.** The transformer and
-    compiler are the trusted computing base; they improve over time. Hashing
-    emitted output would give the same authored code a new identity on every
-    transformer release, so a reference could never denote a long-known-good
-    version of code. Hashing source ties identity to author intent. Compilation-
-    semantics changes are handled on a separate axis by the scheduler's
-    `runtimeFingerprint` (which already encodes the runtime/scheduler version),
-    so the scheduler still invalidates correctly when the TCB changes — without
-    destroying the durable code identity.
+  - It keeps the runtime-neutral module identity **stable across TCB
+    evolution.** The transformer and compiler are the trusted computing base;
+    they improve over time. Hashing emitted output would make it impossible to
+    tell a runtime rebuild from an authored-source change. The executable module
+    identity separately includes `runtimeFingerprint` on external-dependency
+    leaves. A runtime upgrade therefore changes affected executable identities
+    without changing the runtime-neutral module identity.
   - It naturally **includes types**, which are load-bearing (the transformer
     lowers types into emitted schemas). We therefore do *not* strip types, and
     do *not* need to distinguish type-only from value imports.
@@ -244,6 +249,80 @@ leafOrHash(target) =
 upgrade invalidates everything that imports them, consistent with the existing
 `runtimeFingerprint` invariant.
 
+The executable runtime fingerprint comes from one authoritative provider,
+`getExecutableRuntimeFingerprint()`. Its version-1 value is a domain-separated
+hash with the tag `cf/executable-runtime-fingerprint/v1`. The hash includes:
+
+- the value returned by `getCompileCacheRuntimeVersion()`;
+- `schedulerRuntimeFingerprint()`;
+- an automatically generated catalog hash of the implementations and export
+  surfaces of every pattern-facing runtime module; and
+- an automatically generated catalog hash of the sandbox and execution-policy
+  inputs that can change pattern behavior.
+
+The existing compile-cache runtime version intentionally hashes a broad set of
+compiler, transformer, schema, harness, sandbox, API, compiler-option, and
+dependency inputs. Version 1 uses that value as a mandatory input even though it
+can over-invalidate executable identities. A later design may split
+representation-only cache inputs from executable semantics. Such a split may
+roll `runtimeVersion` alone only for an input proven unable to affect compiled
+behavior. A compiler, transformer, generated-schema, runtime-module, sandbox,
+execution-policy, or scheduler-semantics change must roll the executable runtime
+fingerprint.
+
+The provider and its input catalogs are required production work. Once the
+provider is enabled, inability to calculate its value fails closed. The empty
+fingerprint remains only the canonical interpretation of source documents
+published before this integration. It is not a valid fingerprint for newly
+published source whose identity depends on an external module.
+
+Piece history compares complete authored programs with a versioned,
+runtime-neutral digest:
+
+```text
+const hashes = computeModuleHashes(authoredProgram, {
+  runtimeFingerprint: "",
+});
+const runtimeNeutralProgramDigest = hashStringOf({
+  v: "cf/runtime-neutral-program-digest/v1",
+  main: authoredProgram.main,
+  modules: [...hashes]
+    .sort(([a], [b]) => utf8Compare(a, b))
+    .map(([filename, identity]) => [filename, identity]),
+});
+```
+
+The input is the explicitly enumerated canonical authored program before adding
+fabric-mounted files or synthetic retention links. It includes every enumerated
+authored file, including an unreachable sibling and an authored declaration
+file. Each per-module identity includes the canonical filename, normalized
+source, internal import graph, and external specifier text, including fabric
+pins. The digest excludes the selected export, which revision comparison checks
+separately. It is comparison metadata rather than a fabric URL, executable
+identity, or revert target.
+
+The lifecycle source service must materialize that complete `Program` before
+import-closure resolution. The current `ProgramResolver` interface cannot
+enumerate unreachable files, so existing resolver-only flows define their input
+as the reachable closure until they adopt an explicit program manifest.
+
+Authored and verified mounted `.d.ts` files are source-only identity nodes. A
+value or type import of one of these declarations contributes the declaration's
+module identity to every transitive importer. The declaration is stored in
+source history but does not produce a JavaScript module record.
+
+Declaration stubs supplied by the runtime for modules such as `commonfabric`
+remain type-check inputs rather than authored identity nodes. The authored bare
+specifier stays an external leaf that contains the runtime fingerprint. Record
+assembly, compiled-cache membership, and compiled links include only emitted
+modules.
+
+Production `Engine` paths currently filter every `.d.ts` file before
+`computeFabricModuleIdentities`, `CacheableModule` construction, and
+`writeSourceDocs`. Replacing that blanket filter with provenance-aware
+type-check, identity and source-history, and emitted sets is required integration
+work.
+
 **Cycles.** ES modules permit import cycles, so the import graph is not strictly
 a DAG. Compute over the condensation: find strongly-connected components, hash
 each SCC as a unit (members sorted by stable path, concatenating their
@@ -259,11 +338,13 @@ reduce to the formula above.
   `M`'s closure, file ordering, or any whole-program prefix. Therefore the same
   module with the same reachable imports hashes identically no matter which
   entry point pulled it into a compilation.
-- **TCB independence.** `moduleHash(M)` is a function of authored source, not of
-  the transformer/compiler version, so a TCB upgrade leaves it unchanged. The
-  scheduler's `runtimeFingerprint` covers the "did the compilation semantics
-  change" question separately, so trusting a persisted observation still
-  requires both a matching `moduleHash` *and* a matching `runtimeFingerprint`.
+- **Runtime sensitivity with source continuity.** `moduleHash(M)` changes with
+  `runtimeFingerprint` when `M` or its reachable dependencies import an external
+  module. A module with no reachable external dependency remains unchanged. A
+  separate runtime-neutral module identity over authored source and pinned
+  specifiers identifies the module across runtime rebuilds. Trusting a persisted
+  observation still requires both a matching `moduleHash` and a matching
+  `runtimeFingerprint`.
 - **Transitive sensitivity.** If any module `N` in `M`'s closure changes,
   `moduleHash(N)` changes; since `moduleHash(N)` is an input to every module that
   transitively imports `N`, all of their hashes change. Changes propagate to
@@ -358,46 +439,90 @@ The cache key moves from whole-program `computeId` to per-module
 ### Storage model: two content-addressed document sets, per space
 
 The persistent cache is **content-addressed cells**, not an in-process map. Each
-module is stored as two regular cells, in the **target space** (per-space — there
-is no global cache), and the storage layer's existing **sigil-link following**
-under a schema loads the whole import closure transitively from a single request
-(cycles handled by per-document dedup, as for any linked data):
+emitted module is stored as two regular cells in the **target space**. Authored
+and mounted declarations have only a source document because they emit no
+JavaScript record. There is no global cache. The storage layer's existing
+**sigil-link following** under a schema loads the whole import closure
+transitively from a single request. Per-document dedup handles cycles, as for any
+linked data:
 
-1. **Source set — `pattern:<identity>`.** Authored TypeScript, keyed by the
-   per-module Merkle `moduleHash` (`cf:module/<hash>`). It is runtime-version
-   independent (written essentially once ever) and **self-verifying**: a reader
-   checks `hash(content) === <identity>`, so content-addressing *is* the
-   integrity — no separate label needed.
-2. **Compiled set — `compileCache:<runtimeVersion>/<identity>`.** Compiled +
-   verified JS, keyed by `(runtimeVersion, identity)`. A runtime/transformer
-   upgrade rolls `runtimeVersion`, recompiling this set while the source set
-   persists.
+1. **Source set — `pattern:<identity>`.** Authored TypeScript implementation and
+   declaration source, keyed by the per-module Merkle `moduleHash`
+   (`cf:module/<hash>`). It is independent of the compiled-cache
+   `runtimeVersion`. An affected module receives another source set when
+   `runtimeFingerprint` changes. It is **self-verifying**: a reader recomputes
+   the identity from the source, import graph, and recorded identity
+   fingerprint. Content addressing is the integrity check, so no separate label
+   is needed.
+2. **Compiled set — `compileCache:<runtimeVersion>/<identity>`.** Compiled and
+   verified JS, keyed by `(runtimeVersion, identity)`. Under the version-1
+   executable-fingerprint rule, the existing broad compiler-input fingerprint
+   rolls both `runtimeVersion` and `runtimeFingerprint`. That creates a new
+   executable identity for an affected module and writes a new source set. A
+   future representation-only cache change may roll `runtimeVersion` alone only
+   after the fingerprint inputs distinguish it from executable semantics.
 
-Each document holds
-`{ code, filename, imports: [{ specifier, link }], delegatedModuleIdentities? }`,
-where `link` is a sigil link to the dependency's document in the same set.
+Each new source document whose reachable graph contains an external dependency
+also records the runtime fingerprint used for its identity. A source document
+without such a dependency uses the canonical empty fingerprint, and writers
+omit the field for that value. The same identity therefore never has two
+effective fingerprint representations. Other non-normative fields, including
+annotations and synthetic retention links, may differ without changing module
+identity. An absent fingerprint field always means the empty value for legacy
+compatibility. Verification recomputes that document under the effective value.
+Removing the non-empty field from a newer document therefore produces an
+identity mismatch without a separate missing-field rule. A verifier rejects a
+non-empty value on a document whose identity does not depend on it because that
+fingerprint representation is not canonical.
+As in the existing per-view verifier, each source document becomes the root of
+its authored-import view and supplies that view's effective fingerprint.
+Synthetic retention links are excluded. This lets one retained source set hold
+unrelated legacy and current roots without applying one entry fingerprint to
+every document.
+
+Source and compiled documents share the base shape
+`{ code, filename, imports: [{ specifier, link }], delegatedModuleIdentities? }`.
+A source document may additionally carry the runtime fingerprint used for its
+identity. Their link sets are different. A source document stores internal
+authored-import links, including links to authored declarations. It omits fabric
+edges so one program's source closure does not absorb another program.
+Synthetic retention links may keep other source roots alive, but they are
+excluded from the identity hash and executable graph traversal. A compiled
+document stores runtime edges only between emitted modules. It includes fabric
+edges needed by the self-contained compiled closure. The entry compiled
+document also uses synthetic `cf:cache-root/` links to load emitted modules that
+no runtime edge reaches. Compiled runtime and synthetic links only target
+emitted modules. They never target a declaration document.
+
 `delegatedModuleIdentities` is mutable metadata, excluded from the Merkle
 identity, that records predecessor module hashes whose writer authority the
-current module may exercise. Since content-addressing does not authenticate
+current module may exercise. Since content addressing does not authenticate
 that mutable field, source documents carry the compiler integrity stamp on the
-delegation field alone; compiled documents authenticate it with their existing
+delegation field alone. Compiled documents authenticate it with their existing
 root compiler stamp. Loaders discard delegation metadata without the applicable
-stamp. The general source/compiled save path computes one union of newly derived
-entries and authenticated entries already stored in either document set under
-`editWithRetry`, writes that same union to both sets, and registers the union
-from the successful commit under the attesting space in the active runtime. It
-never replaces entries, because one content-addressed successor can be shared by
-patterns updated from different predecessors. Because
-`identity` is a one-way Merkle hash, the `imports` links are load-bearing (stored
-explicitly), but the parent hash commits to its children's identities, so the
-graph wiring is verifiable on load by recomputing identities and checking each
-against its document key — the content-addressed analog of the structural graph
-verifier. A module shared by N programs is stored once per `(space, identity)`;
-a "program" is just an entry identity over a shared set of module documents.
+stamp. The general source and compiled save path computes one union of newly
+derived entries and authenticated entries already stored in either document set
+under `editWithRetry`. It writes that same union to both sets and registers the
+union from the successful commit under the attesting space in the active
+runtime. It never replaces entries, because one content-addressed successor can
+be shared by patterns updated from different predecessors.
+
+Because `identity` is a one-way Merkle hash, internal source links are
+load-bearing and stored explicitly. The parent hash commits to those children's
+identities. The authored graph wiring is verifiable on load by recomputing
+identities and checking each against its document key. This is the
+content-addressed analog of the structural graph verifier. A module shared by N
+programs is stored once per `(space, identity)`. An executable graph is an entry
+identity over a shared set of module documents.
+Piece revision history separately uses the immutable
+`cf/authored-program-manifest/v1` value from
+[piece-source-lifecycle.md](piece-source-lifecycle.md) to bind the canonical main
+and every authored file, including files outside that executable graph.
 
 This replaces the whole-program `PatternMeta` store after the flag flip (the two
-coexist behind the flag until then). The compiler-version `fingerprint` and
-`sesValidated` gating carry over: `runtimeVersion` is the fingerprint, and the
+coexist behind the flag until then). The compiler-version and `sesValidated`
+gating carry over. `runtimeVersion` selects a compiled-cache variant. It is
+separate from the `runtimeFingerprint` input to executable module identity. The
 compiled set is only ever written from verified output (see the threat model).
 
 ### Module update delegation (`piece setsrc`)
@@ -454,13 +579,14 @@ versus the in-process cache, because the runtime `eval`s the cell's contents.
 The cache is designed around this:
 
 - **Source set integrity is free.** `pattern:<identity>` is keyed by a hash of
-  its own contents, so a reader self-checks `hash(content) === <identity>`. A
-  tampered source document fails the check; a poisoned-but-different source would
-  not hash to the requested identity. Recompiling a source document also re-runs
-  the SES verifier, so a malformed source is rejected on the compile path. The
-  one exception is mutable delegation metadata, which is deliberately outside
-  that hash and therefore requires its own field-level compiler integrity stamp
-  before a loader can use it as authority.
+  its own contents, import graph, and recorded identity fingerprint, so a reader
+  recomputes and checks the requested identity. A tampered source document or
+  fingerprint fails the check. The verifier also rejects a non-empty fingerprint
+  on a module whose identity does not depend on one. Recompiling a source
+  document also re-runs the SES verifier, so a malformed source is rejected on
+  the compile path. Mutable delegation metadata is deliberately outside that
+  hash and requires its own field-level compiler integrity stamp before a loader
+  can use it as authority.
 - **Compiled set integrity is a CFC label.** `compileCache:<runtimeVersion>/<identity>`
   is keyed by the *source* identity, which does not bind the *JS* bytes.
   The compiled document therefore carries a **CFC integrity label**, written with
@@ -528,10 +654,10 @@ not currently have. Concretely:
 
 - `SchedulerActionObservationV1.implementationFingerprint` becomes
   `moduleHash(M)#symbol` instead of `src:/<id>/path:line:col`. It is stable
-  across reloads, entry points, and TCB upgrades, and it changes when any
-  transitive import (value or type) changes — exactly the validity condition the
-  scheduler needs to decide whether a persisted observation may be trusted, in
-  combination with the separately-checked `runtimeFingerprint`.
+  across reloads and entry points. It changes when any transitive import (value
+  or type) changes. It also changes when the runtime fingerprint changes and the
+  reachable graph contains an external dependency. The scheduler continues to
+  check `runtimeFingerprint` separately before trusting a persisted observation.
 - The version-1 "implementation fingerprint is a placeholder" limitation in that
   spec is resolved: the fingerprint is now content-derived, so a clean
   observation can no longer be trusted against changed code.
@@ -594,9 +720,16 @@ Sequence identity first to retire the rehydration bug quickly, then the loader.
   `moduleHash` and the same action implementation fingerprint.
 - Changing a transitively-imported value function changes the importer's
   `moduleHash`; changing a transitively-imported **type** also changes it.
-- Recompiling unchanged source under a changed transformer/compiler version
-  leaves `moduleHash` unchanged (TCB independence); the scheduler still
-  invalidates via `runtimeFingerprint`.
+- Changing an authored `.d.ts` declaration changes every importer identity that
+  reaches it, invalidates the compiled-cache entry, and persists the declaration
+  as source-only history without emitting a JavaScript record. A later warm load
+  does not request a compiled declaration document. Runtime-provided declaration
+  stubs remain external fingerprinted dependencies.
+- Recompiling unchanged source under a changed runtime fingerprint changes the
+  `moduleHash` of every module whose reachable graph contains an external
+  dependency. Its runtime-neutral module identity and the complete program's
+  runtime-neutral digest remain unchanged. A module with no reachable external
+  dependency keeps its `moduleHash`.
 - An unrelated sibling file added to or removed from the compilation does not
   change an untouched module's hash.
 - Import cycles produce deterministic, stable hashes across reloads.
@@ -622,8 +755,14 @@ Sequence identity first to retire the rehydration bug quickly, then the loader.
   integrity label is treated as a miss and recompiled from the self-verifying
   source document; only integrity-valid documents are reused without
   re-verification.
-- Runtime-version bump misses the compiled set (recompile) while the source set
-  (`pattern:<identity>`) persists.
+- A future representation-only compile-cache `runtimeVersion` bump with an
+  unchanged runtime fingerprint misses the compiled set and recompiles while
+  the source set (`pattern:<identity>`) persists. Version 1 treats the current
+  broad compiler-input version as executable and therefore rolls both values.
+- A `runtimeFingerprint` bump gives an affected entry module a new executable
+  identity and writes a new source set. The prior source set remains retained
+  for history. Tests compare the runtime-neutral digest to classify this as a
+  runtime rebuild rather than an authored-source change.
 
 ## Appendix: Current Pipeline Reference
 
