@@ -56,7 +56,7 @@ export async function runDenoCommandWithTemporaryLock(
     if (options.env) {
       commandOptions.env = options.env;
     }
-    return await new Deno.Command(Deno.execPath(), commandOptions).output();
+    return await new Deno.Command("deno", commandOptions).output();
   } finally {
     await removeIfPresent(tempDir, { recursive: true });
   }

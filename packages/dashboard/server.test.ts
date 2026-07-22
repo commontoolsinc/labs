@@ -13,7 +13,7 @@ import {
   start,
   tick,
 } from "./server.ts";
-import { PORT } from "./config.ts";
+import { LOOM_CI_WORKFLOW, LOOM_REPO, PORT } from "./config.ts";
 import { TILES } from "./registry.ts";
 import type { Tile, TileView } from "./types.ts";
 
@@ -259,6 +259,65 @@ Deno.test("each completed collection is published while slower tiles are still r
   assertStringIncludes(updateFromEvent(messages[1]).gridHtml, "slow");
 });
 
+Deno.test("a tile can publish cached data while its collection is still running", async () => {
+  const messages: string[] = [];
+  const client = {
+    enqueue(value: Uint8Array) {
+      messages.push(dec.decode(value));
+    },
+  } as unknown as ReadableStreamDefaultController<Uint8Array>;
+  let releaseCollection!: (view: TileView) => void;
+  const finalView = new Promise<TileView>((resolve) => {
+    releaseCollection = resolve;
+  });
+  let cachedPublished!: () => void;
+  const sawCached = new Promise<void>((resolve) => {
+    cachedPublished = resolve;
+  });
+  let publishIntermediate = (_view: TileView) => {};
+  let collection: Promise<void> | undefined;
+  clients.add(client);
+  try {
+    collection = tick([{
+      id: "benchmark",
+      intervalMs: 0,
+      async collect(_ctx, publish) {
+        publishIntermediate = publish ?? publishIntermediate;
+        publish?.({ label: "benchmark", status: "good", value: "cached" });
+        cachedPublished();
+        return await finalView;
+      },
+    }]);
+    await sawCached;
+    assertEquals(messages.length, 1);
+    assertStringIncludes(updateFromEvent(messages[0]).gridHtml, "cached");
+
+    releaseCollection({
+      label: "benchmark",
+      status: "good",
+      value: "refreshed",
+    });
+    await collection;
+    assertEquals(messages.length, 2);
+    assertStringIncludes(updateFromEvent(messages[1]).gridHtml, "refreshed");
+    publishIntermediate({
+      label: "benchmark",
+      status: "bad",
+      value: "late cached value",
+    });
+    assertEquals(messages.length, 2);
+    assertStringIncludes(tileHtml("benchmark"), "refreshed");
+  } finally {
+    releaseCollection({
+      label: "benchmark",
+      status: "unknown",
+      value: "stopped",
+    });
+    await collection;
+    clients.delete(client);
+  }
+});
+
 Deno.test("sse: /events opens a stream, tick pushes new tile markup, disconnect drops the client", async () => {
   const res = await handle(req("/events"));
   assertEquals(res.headers.get("content-type"), "text/event-stream");
@@ -305,11 +364,21 @@ Deno.test("broadcast: a client whose stream is gone is dropped rather than throw
 });
 
 Deno.test("routes: a tile's drill-down path wins over the page; anything else is the page", async () => {
-  // ci-duration declares /ci, so the generic runtime serves it without knowing the tile.
-  const drill = await handle(req("/ci"));
-  assertEquals(drill.status, 200);
-  const html = await drill.text();
-  assertStringIncludes(html, "<title>CI Gantt — configurable</title>");
+  const gantt = await handle(req("/bench?view=gantt&repo=loom"));
+  assertEquals(gantt.status, 200);
+  const html = await gantt.text();
+  assertStringIncludes(html, "<title>CI run Gantt</title>");
+  assertStringIncludes(html, `${LOOM_REPO} · ${LOOM_CI_WORKFLOW}`);
+
+  const sha = "c".repeat(40);
+  const commitGantt = await handle(
+    req(`/ci-gantt?repo=labs&sha=${sha}&limit=1&mainOnly=1&run=901:1`),
+  );
+  assertEquals(commitGantt.status, 200);
+  assertStringIncludes(
+    await commitGantt.text(),
+    `<title>CI Gantt · ${sha.slice(0, 7)}</title>`,
+  );
 
   const fallback = await handle(req("/not-a-route"));
   assertEquals(fallback.status, 200);
