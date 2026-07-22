@@ -178,11 +178,14 @@ async function runSchemaTransform(inputPath: string): Promise<SchemaResult> {
 /**
  * Render a value as golden-file text: its fabric JSON encoding, pretty-printed.
  *
- * Plain `JSON.stringify` cannot express three of the values the schema
- * generator is allowed to produce -- it renders `-0` as `0` and both `NaN` and
- * the infinities as `null`. A golden that cannot hold a value cannot guard it,
- * and the failure is silent: the golden and the buggy output agree. The fabric
- * encoding carries them as `/SpecialNumber@1` tagged objects instead.
+ * `JSON.stringify()` cannot represent every `FabricValue`, and the schema
+ * generator is free to produce ones it cannot. Worse, it mostly does not refuse
+ * them: it substitutes quietly, rendering `-0` as `0` and `NaN` and the
+ * infinities as `null`. (A bigint is the exception that throws outright.) A
+ * golden that cannot hold a value cannot guard it, and a golden that silently
+ * flattens one agrees with buggy output instead of catching it. The fabric
+ * encoding has a representation for every `FabricValue`, so the golden holds
+ * whatever the generator produced.
  *
  * The encoding's prefix tag identifies it on the wire but is not part of the
  * JSON, so it cannot survive pretty-printing. Taking it off and putting it back
