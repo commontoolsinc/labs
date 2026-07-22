@@ -1,3 +1,4 @@
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { expect } from "@std/expect";
 import { ensureDir } from "@std/fs/ensure-dir";
 import { dirname, resolve } from "@std/path";
@@ -7,6 +8,14 @@ import {
   createUnifiedDiff,
   defineFixtureSuite,
 } from "@commonfabric/test-support/fixture-runner";
+import {
+  jsonFromValue,
+  valueFromJson,
+} from "@commonfabric/data-model/codec-json";
+import {
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import { createSchemaTransformerV2 } from "../src/plugin.ts";
 import {
   batchTypeCheckFixtures,
@@ -21,6 +30,9 @@ interface SchemaResult {
 
 const TYPE_NAME = "SchemaRoot";
 const FIXTURES_ROOT = "./test/fixtures/schema";
+
+/** Encoding tag that precedes the JSON body of a fabric-encoded value. */
+const FVJ1_PREFIX = "fvj1:";
 
 // Environment variable filtering for faster iteration
 const fixtureFilter = Deno.env.get("FIXTURE");
@@ -110,25 +122,30 @@ defineFixtureSuite<SchemaResult, string>({
     expect(actual.serialized).toEqual(rerun.serialized);
   },
   compare(actual, expectedText, fixture) {
-    let actualObj;
-    let expectedObj;
+    let expectedValue;
     try {
-      actualObj = JSON.parse(actual.serialized.trim());
-      expectedObj = JSON.parse(expectedText.trim());
+      expectedValue = decodeGolden(expectedText);
     } catch (error) {
       throw new Error(
-        `JSON parsing failed for ${fixture.id}: ${
+        `Golden decoding failed for ${fixture.id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
     }
 
-    const normalizedActual = normalizeArrayOrdering(actualObj);
-    const normalizedExpected = normalizeArrayOrdering(expectedObj);
+    // A generated schema is a fabric value; `normalizeArrayOrdering` is typed
+    // loosely because it walks arbitrary structure.
+    const normalizedActual = normalizeArrayOrdering(
+      actual.normalized,
+    ) as FabricValue;
+    const normalizedExpected = normalizeArrayOrdering(
+      expectedValue,
+    ) as FabricValue;
 
-    try {
-      expect(normalizedActual).toEqual(normalizedExpected);
-    } catch {
+    // `valueEqual` is the value model's own equality: `Object.is` at primitive
+    // leaves, so -0 does not pass as 0 and NaN equals itself, and it knows the
+    // whole `FabricValue` vocabulary the decoded golden can contain.
+    if (!valueEqual(normalizedActual, normalizedExpected)) {
       const diff = createUnifiedDiff(
         expectedText.trim(),
         actual.serialized.trim(),
@@ -141,10 +158,6 @@ defineFixtureSuite<SchemaResult, string>({
         "",
         "=== UNIFIED DIFF (expected vs actual) ===",
         diff,
-        "",
-        "=== PARSED OBJECTS ===",
-        `Expected: ${JSON.stringify(normalizedExpected, null, 2)}`,
-        `Actual:   ${JSON.stringify(normalizedActual, null, 2)}`,
       ].join("\n");
       throw new Error(message);
     }
@@ -161,8 +174,32 @@ async function runSchemaTransform(inputPath: string): Promise<SchemaResult> {
   const normalized = normalizeSchema(
     transformer.generateSchema(type, checker, typeNode),
   );
-  const serialized = JSON.stringify(normalized, null, 2) + "\n";
-  return { normalized, serialized };
+  return { normalized, serialized: encodeGolden(normalized) };
+}
+
+/**
+ * Render a value as golden-file text: its fabric JSON encoding, pretty-printed.
+ *
+ * Plain `JSON.stringify` cannot express three of the values the schema
+ * generator is allowed to produce -- it renders `-0` as `0` and both `NaN` and
+ * the infinities as `null`. A golden that cannot hold a value cannot guard it,
+ * and the failure is silent: the golden and the buggy output agree. The fabric
+ * encoding carries them as `/SpecialNumber@1` tagged objects instead.
+ *
+ * The `fvj1:` prefix identifies the encoding on the wire but is not part of the
+ * JSON, so it cannot survive pretty-printing; it lives here in the harness and
+ * is re-attached on the way back in. Key order needs no help: a conforming
+ * encoder emits plain-object keys in canonical order.
+ */
+function encodeGolden(value: unknown): string {
+  const encoded = jsonFromValue(value as FabricValue);
+  const body = JSON.parse(encoded.slice(FVJ1_PREFIX.length));
+  return JSON.stringify(body, null, 2) + "\n";
+}
+
+/** Inverse of {@link encodeGolden}. */
+function decodeGolden(text: string): unknown {
+  return valueFromJson(FVJ1_PREFIX + text.trim());
 }
 
 async function writeText(path: string, data: string) {
@@ -186,3 +223,49 @@ function normalizeArrayOrdering(obj: unknown): unknown {
   }
   return obj;
 }
+
+// The golden format exists to hold values plain JSON cannot. Guard that
+// directly: a fixture cannot reach these values on its own yet, and a golden
+// that silently flattens them would agree with buggy output instead of
+// catching it.
+Deno.test("golden encoding preserves values JSON cannot represent", () => {
+  const schema = {
+    type: "object",
+    properties: {
+      negZero: { type: "number", default: -0 },
+      nan: { type: "number", default: NaN },
+      inf: { type: "number", default: Infinity },
+      negInf: { type: "number", default: -Infinity },
+      big: { type: "integer", default: 12345678901234567890n },
+      ordinary: { type: "number", default: -1 },
+    },
+  };
+
+  const decoded = decodeGolden(encodeGolden(schema)) as {
+    properties: Record<string, { default: unknown }>;
+  };
+  const back = decoded.properties;
+
+  // Asserted leaf by leaf with `Object.is`: a structural compare would let -0
+  // through as 0, which is one of the conflations under test.
+  assert(Object.is(back.negZero!.default, -0), "-0 lost its sign");
+  assert(Object.is(back.nan!.default, NaN), "NaN did not survive");
+  assertEquals(back.inf!.default, Infinity);
+  assertEquals(back.negInf!.default, -Infinity);
+  assertEquals(back.big!.default, 12345678901234567890n);
+  assertEquals(back.ordinary!.default, -1);
+
+  assert(valueEqual(schema as FabricValue, decoded as FabricValue));
+});
+
+Deno.test("plain JSON would lose exactly those values", () => {
+  // Not a test of our code -- an executable statement of why the golden format
+  // is what it is. If these ever stop holding, the encoding indirection can go.
+  const roundTrip = (v: unknown) => JSON.parse(JSON.stringify({ v })).v;
+
+  assert(Object.is(roundTrip(-0), 0), "JSON kept the sign of -0");
+  assertEquals(roundTrip(NaN), null);
+  assertEquals(roundTrip(Infinity), null);
+  assertEquals(roundTrip(-Infinity), null);
+  assertThrows(() => JSON.stringify({ v: 1n }), TypeError);
+});
