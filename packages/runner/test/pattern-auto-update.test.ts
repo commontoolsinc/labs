@@ -193,6 +193,39 @@ describe("lazy system-pattern auto-update", () => {
     expect(getPatternSource(piece)).toBe(PARENT_PATH);
   });
 
+  it("checks the locally known default role without a storage round trip", async () => {
+    let fetches = 0;
+    const piece = await preparePiece(() => {
+      fetches++;
+      return Promise.resolve(new Response("unexpected"));
+    });
+    const defaultPattern = runtime.getSpaceCell(piece.space)
+      .key("defaultPattern");
+    const assigned = await runtime.editWithRetry((tx) => {
+      defaultPattern.withTx(tx).set(piece.withTx(tx));
+    });
+    expect(assigned.error).toBeUndefined();
+
+    const originalSyncCell = storageManager.syncCell.bind(storageManager);
+    let defaultPatternSyncs = 0;
+    storageManager.syncCell = ((cell) => {
+      if (
+        cell.resolveAsCell().equals(defaultPattern.resolveAsCell())
+      ) defaultPatternSyncs++;
+      return originalSyncCell(cell);
+    }) as typeof storageManager.syncCell;
+
+    try {
+      expect(await runtime.start(piece)).toBe(true);
+      await runtime.patternUpdater.idle();
+    } finally {
+      storageManager.syncCell = originalSyncCell;
+    }
+
+    expect(defaultPatternSyncs).toBe(0);
+    expect(fetches).toBe(0);
+  });
+
   it("aborts an in-flight identity request during disposal", async () => {
     const identityRequested = defer<AbortSignal | undefined>();
     const abortObserved = defer();
