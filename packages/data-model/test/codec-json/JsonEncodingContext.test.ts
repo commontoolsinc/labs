@@ -64,6 +64,14 @@ class UnregisteredInstance extends BaseFabricInstance {
   }
 }
 
+/**
+ * The encoding prefix tag, named once for the assertions below that pin the
+ * wire form or that feed the decoder deliberately broken input. Bridging
+ * between encoded strings and wire-format trees does NOT go through this --
+ * that is what `JsonEncodingContext`'s wrap/unwrap helpers are for.
+ */
+const ENCODING_PREFIX = "fvj1:";
+
 /** Creates a standard test context (non-lenient) and a mock runtime. */
 function makeTestContext() {
   const context = new JsonEncodingContext();
@@ -1409,13 +1417,17 @@ describe("JsonEncodingContext", () => {
       it("rejects a tag with nothing after it", () => {
         // `seemsLikeEncoded()` accepts this, so only the throwaway decode
         // catches it.
-        expect(() => JsonEncodingContext.unwrapEncodedValueForTesting("fvj1:"))
+        expect(() =>
+          JsonEncodingContext.unwrapEncodedValueForTesting(ENCODING_PREFIX)
+        )
           .toThrow();
       });
 
       it("rejects a tag followed by text that will not parse", () => {
         expect(() =>
-          JsonEncodingContext.unwrapEncodedValueForTesting("fvj1:{nope")
+          JsonEncodingContext.unwrapEncodedValueForTesting(
+            `${ENCODING_PREFIX}{nope`,
+          )
         ).toThrow();
       });
     });
@@ -1434,7 +1446,7 @@ describe("JsonEncodingContext", () => {
       it("returns the body unaltered beneath the tag", () => {
         const body = JSON.stringify({ b: 2, a: 1 });
         expect(JsonEncodingContext.wrapEncodedValueForTesting(body))
-          .toBe(`fvj1:${body}`);
+          .toBe(`${ENCODING_PREFIX}${body}`);
       });
 
       it("accepts a pretty-printed body", () => {
@@ -1481,13 +1493,13 @@ describe("JsonEncodingContext", () => {
       it("accepts an undecodable payload when told it is deliberate", () => {
         expect(
           JsonEncodingContext.wrapEncodedValueForTesting(undecodable, true),
-        ).toBe(`fvj1:${undecodable}`);
+        ).toBe(`${ENCODING_PREFIX}${undecodable}`);
       });
 
       it("unwraps an undecodable payload when told it is deliberate", () => {
         expect(
           JsonEncodingContext.unwrapEncodedValueForTesting(
-            `fvj1:${undecodable}`,
+            `${ENCODING_PREFIX}${undecodable}`,
             true,
           ),
         ).toBe(undecodable);
@@ -1501,7 +1513,10 @@ describe("JsonEncodingContext", () => {
           JsonEncodingContext.wrapEncodedValueForTesting("{nope", true)
         ).toThrow();
         expect(() =>
-          JsonEncodingContext.unwrapEncodedValueForTesting("fvj1:{nope", true)
+          JsonEncodingContext.unwrapEncodedValueForTesting(
+            `${ENCODING_PREFIX}{nope`,
+            true,
+          )
         ).toThrow();
       });
 
