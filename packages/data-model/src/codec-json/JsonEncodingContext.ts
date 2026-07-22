@@ -473,6 +473,19 @@ export class JsonEncodingContext implements SerializationContext<string> {
   //
 
   /**
+   * Reconstruction context for the throwaway checks in the testing helpers
+   * below. Deep-freezes, as the ordinary decode path does. Paired with a
+   * lenient codec context, a cell reference degrades to a `ProblematicValue`
+   * rather than throwing.
+   */
+  static readonly #testingReconstructionContext = Object.freeze(
+    new EmptyReconstructionContext(
+      true,
+      "no runtime context (validity check in a test-only helper).",
+    ),
+  );
+
+  /**
    * Indicates if the given text has a "first-blush" appearance as valid JSON
    * encoded by this class -- that is, whether it carries the encoding prefix
    * tag.
@@ -573,18 +586,6 @@ export class JsonEncodingContext implements SerializationContext<string> {
   static #testingCheckContext(isMalformed: boolean): JsonEncodingContext {
     return new JsonEncodingContext({ lenient: isMalformed });
   }
-
-  /**
-   * Reconstruction context for the throwaway checks above. Deep-freezes, as the
-   * ordinary decode path does. Paired with the lenient codec context, a cell
-   * reference here degrades to a `ProblematicValue` rather than throwing.
-   */
-  static readonly #testingReconstructionContext = Object.freeze(
-    new EmptyReconstructionContext(
-      true,
-      "no runtime context (validity check in a test-only helper).",
-    ),
-  );
 
   /**
    * Parses the JSON-text wire form, _without_ a tag prefix.
