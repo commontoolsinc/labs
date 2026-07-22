@@ -91,7 +91,7 @@ describe("normalizeSandboxResult", () => {
     );
   });
 
-  it("does not trust a spoofed intrinsic brand", () => {
+  it("does not trust spoofed intrinsic brands", () => {
     class FakeDate {
       get [Symbol.toStringTag](): string {
         return "Date";
@@ -99,6 +99,27 @@ describe("normalizeSandboxResult", () => {
     }
     expect(() => normalizeSandboxResult(new FakeDate())).toThrow(
       /Action returned a FakeDate/,
+    );
+
+    class FakeRegExp {
+      get [Symbol.toStringTag](): string {
+        return "RegExp";
+      }
+    }
+    expect(() => normalizeSandboxResult(new FakeRegExp())).toThrow(
+      /Action returned a FakeRegExp/,
+    );
+  });
+
+  it("rejects values whose intrinsic brand cannot be inspected", () => {
+    class ThrowingBrand {
+      get [Symbol.toStringTag](): string {
+        throw new Error("brand unavailable");
+      }
+    }
+
+    expect(() => normalizeSandboxResult(new ThrowingBrand())).toThrow(
+      /Action returned a ThrowingBrand/,
     );
   });
 });
