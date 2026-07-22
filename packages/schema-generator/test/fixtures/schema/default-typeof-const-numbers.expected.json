@@ -43,27 +43,27 @@
     },
     "sentinels": {
       "default": {
-        "ratio": -0.5,
-        "selected": -1,
-        "zero": {
+        "negZero": {
           "/SpecialNumber@1": "-0"
-        }
+        },
+        "ratio": -0.5,
+        "selected": -1
       },
       "properties": {
+        "negZero": {
+          "type": "number"
+        },
         "ratio": {
           "type": "number"
         },
         "selected": {
           "type": "number"
-        },
-        "zero": {
-          "type": "number"
         }
       },
       "required": [
+        "negZero",
         "ratio",
-        "selected",
-        "zero"
+        "selected"
       ],
       "type": "object"
     }

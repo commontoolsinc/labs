@@ -12,14 +12,14 @@
 
 import { Default } from "commonfabric";
 
-const SENTINELS = { selected: -1, ratio: -0.5, zero: -0 };
+const SENTINELS = { selected: -1, ratio: -0.5, negZero: -0 };
 const NON_FINITE = { nan: NaN, inf: Infinity, ninf: -Infinity };
 const OFFSETS = [-1, 2, -3];
 
 interface SchemaRoot {
   // Object payload, sign-prefixed values (`-1` is the canonical sentinel).
   sentinels: Default<
-    { selected: number; ratio: number; zero: number },
+    { selected: number; ratio: number; negZero: number },
     typeof SENTINELS
   >;
 
