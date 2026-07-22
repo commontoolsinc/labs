@@ -1404,6 +1404,14 @@ Deno.test("acl enforce: auxiliary read and operator surfaces honor capabilities"
     });
     assertEquals(snapshots.ok?.snapshots, []);
 
+    const entityIds = await server.listEntityIds({
+      type: "entity-id.list",
+      requestId: nextRequestId("acl-entity-identifiers"),
+      space,
+      sessionId: bobSession.ok.sessionId,
+    });
+    assertEquals(entityIds.ok?.ids, [`of:${space}`]);
+
     const watch = await server.watchAdd({
       type: "session.watch.add",
       requestId: nextRequestId("acl-watch-add"),

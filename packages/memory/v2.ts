@@ -261,6 +261,8 @@ export interface MemoryProtocolFlags {
    * (not configuration), so a server of this version always advertises it.
    */
   sqliteCommitRowLabelEval: boolean;
+  /** The server can list live space-scoped entity identifiers without values. */
+  entityIdListing: boolean;
 }
 
 /**
@@ -273,6 +275,7 @@ export type WireMemoryProtocolFlags = {
   syncSchemaTable?: boolean;
   syncSchemaTableV2?: boolean;
   sqliteCommitRowLabelEval?: boolean;
+  entityIdListing?: boolean;
 };
 
 export interface HelloMessage {
@@ -337,6 +340,11 @@ export interface EntitySnapshot {
 export interface GraphQueryResult {
   serverSeq: number;
   entities: EntitySnapshot[];
+}
+
+export interface EntityIdListResult {
+  serverSeq: number;
+  ids: EntityId[];
 }
 
 export interface QueryWatchSpec {
@@ -414,6 +422,13 @@ export interface GraphQueryRequest {
   space: string;
   sessionId: SessionId;
   query: GraphQuery;
+}
+
+export interface EntityIdListRequest {
+  type: "entity-id.list";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
 }
 
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
@@ -655,6 +670,7 @@ export type ClientMessage =
   | SessionOpenRequest
   | TransactRequest
   | GraphQueryRequest
+  | EntityIdListRequest
   | SqliteQueryRequest
   | SqliteRegisterDiskSourceRequest
   | WatchSetRequest
@@ -740,6 +756,9 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // advertises the fact. Peers that see it absent (an older server) keep their
   // write gate failing closed.
   sqliteCommitRowLabelEval: true,
+  // The engine answers this request from its identifier index without
+  // selecting stored entity values.
+  entityIdListing: true,
   syncSchemaTableV2: getSyncSchemaTableConfig(),
 });
 
@@ -813,6 +832,14 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const entityIdListing = value.entityIdListing;
+  if (
+    entityIdListing !== undefined &&
+    typeof entityIdListing !== "boolean"
+  ) {
+    return null;
+  }
+
   return {
     modernCellRep: modernCellRep === true,
     persistentSchedulerState: persistentSchedulerState === true,
@@ -822,6 +849,7 @@ export const parseMemoryProtocolFlags = (
     // Absent (an older peer) parses to false: the capability must be
     // POSITIVELY advertised for the runner to relax its write gate.
     sqliteCommitRowLabelEval: sqliteCommitRowLabelEval === true,
+    entityIdListing: entityIdListing === true,
   };
 };
 
@@ -837,6 +865,7 @@ export const wireMemoryProtocolFlags = (
   syncSchemaTable: flags.syncSchemaTable,
   syncSchemaTableV2: flags.syncSchemaTableV2,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
+  entityIdListing: flags.entityIdListing,
 });
 
 /**

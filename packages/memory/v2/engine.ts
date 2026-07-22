@@ -528,6 +528,21 @@ JOIN revision r
 WHERE h.branch = :branch AND h.id = :id AND h.scope_key = :scope_key
 `;
 
+const SELECT_CURRENT_ENTITY_IDS = `
+SELECT h.id
+FROM head h
+JOIN revision r
+ ON r.branch = h.branch
+ AND r.id = h.id
+ AND r.scope_key = h.scope_key
+ AND r.seq = h.seq
+ AND r.op_index = h.op_index
+WHERE h.branch = :branch
+  AND h.scope_key = :scope_key
+  AND r.op <> 'delete'
+ORDER BY h.id ASC
+`;
+
 const SELECT_AT_SEQ_LOCAL = `
 SELECT seq, op_index, op, data
 FROM revision
@@ -728,6 +743,7 @@ interface PreparedStatements {
   selectBranchStatus: PreparedStatement;
   selectCommitRevisions: PreparedStatement;
   selectCurrentLocal: PreparedStatement;
+  selectCurrentEntityIds: PreparedStatement;
   selectExistingCommit: PreparedStatement;
   selectHead: PreparedStatement;
   selectLatestBase: PreparedStatement;
@@ -1178,6 +1194,7 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   selectBranchStatus: database.prepare(SELECT_BRANCH_STATUS),
   selectCommitRevisions: database.prepare(SELECT_COMMIT_REVISIONS),
   selectCurrentLocal: database.prepare(SELECT_CURRENT_LOCAL),
+  selectCurrentEntityIds: database.prepare(SELECT_CURRENT_ENTITY_IDS),
   selectExistingCommit: database.prepare(SELECT_EXISTING_COMMIT),
   selectHead: database.prepare(SELECT_HEAD),
   selectLatestBase: database.prepare(SELECT_LATEST_BASE),
@@ -2269,6 +2286,17 @@ export const listBranches = (engine: Engine): BranchState[] => {
   return (engine.statements.selectBranches.all() as BranchRow[]).map(
     toBranchState,
   );
+};
+
+export const listEntityIds = (
+  engine: Engine,
+  branch: BranchName = DEFAULT_BRANCH,
+): EntityId[] => {
+  ensureReadableBranch(engine, branch);
+  return (engine.statements.selectCurrentEntityIds.all({
+    branch,
+    scope_key: DEFAULT_SCOPE_KEY,
+  }) as { id: EntityId }[]).map(({ id }) => id);
 };
 
 export const read = (

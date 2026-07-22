@@ -3,6 +3,7 @@ import {
   compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
+  type EntityIdListResult,
   type EntitySnapshot,
   getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
@@ -568,6 +569,22 @@ export class SpaceSession {
       space: this.space,
       sessionId: this.#sessionId,
       query,
+    });
+
+    this.noteResult(result.serverSeq);
+    return result;
+  }
+
+  async listEntityIds(): Promise<EntityIdListResult | undefined> {
+    this.#assertOpen();
+    if (this.client.serverFlags?.entityIdListing !== true) {
+      return undefined;
+    }
+    const result = await this.client.request<EntityIdListResult>({
+      type: "entity-id.list",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
     });
 
     this.noteResult(result.serverSeq);
