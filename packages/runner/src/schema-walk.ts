@@ -184,9 +184,11 @@ export function forEachSubschema(
       ? (["contextSchema", "eventSchema"] as const)
       : (["argumentSchema", "resultSchema"] as const);
     for (const field of fields) {
+      const child = node.asFactory[field] as JSONSchema | undefined;
+      if (child === undefined) continue;
       if (
         visit(
-          node.asFactory[field] as JSONSchema,
+          child,
           "asFactory",
           field,
           undefined,
@@ -259,13 +261,15 @@ export function* subschemaEdges(
 ): Generator<SubschemaEdge> {
   if (!isRecord(schema)) return;
   const node = schema as JSONSchemaObj;
-  if (node.asFactory !== undefined) {
+  if (opts.includeFactorySchemas !== false && node.asFactory !== undefined) {
     const fields = node.asFactory.kind === "handler"
       ? (["contextSchema", "eventSchema"] as const)
       : (["argumentSchema", "resultSchema"] as const);
     for (const field of fields) {
+      const child = node.asFactory[field] as JSONSchema | undefined;
+      if (child === undefined) continue;
       yield {
-        schema: node.asFactory[field] as JSONSchema,
+        schema: child,
         keyword: "asFactory",
         key: field,
       };

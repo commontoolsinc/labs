@@ -5,11 +5,6 @@ import {
   uriSchemeForEntityKind,
 } from "./entity-kind.ts";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
-import {
-  jsonFromValue,
-  valueFromJson,
-} from "@commonfabric/data-model/codec-json";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
@@ -17,22 +12,6 @@ import {
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
 import type { URI } from "./sigil-types.ts";
-
-export const LEGACY_JSON_DATA_URI_MEDIA_TYPE = "application/json";
-export const FABRIC_VALUE_DATA_URI_MEDIA_TYPE =
-  "application/vnd.commonfabric.fabric-value";
-export const FABRIC_VALUE_DATA_URI_PREFIX =
-  `data:${FABRIC_VALUE_DATA_URI_MEDIA_TYPE};charset=utf-8,`;
-
-export class UnsupportedDataURIMediaTypeError extends Error {
-  readonly mediaType: string;
-
-  constructor(mediaType: string) {
-    super(`Unsupported data URI media type: ${mediaType}`);
-    this.name = "UnsupportedDataURIMediaTypeError";
-    this.mediaType = mediaType;
-  }
-}
 /**
  * Convert an entity ID to URI format. The scheme carries the entity kind:
  * no kind ⇒ `of:`, `kind: "computed"` ⇒ `computed:` (see `entity-kind.ts`).
@@ -97,88 +76,4 @@ export function fromURI(uri: URI | string): string {
     // TODO(seefeld): Remove this once we want to support any URI
     throw new Error(`Invalid URI: ${uri}`);
   }
-}
-
-interface ParsedDataURI {
-  readonly mediaType: string;
-  readonly decodedData: string;
-}
-
-/** Parse the transport envelope without interpreting its document payload. */
-function parseDataURI(uri: URI | string): ParsedDataURI {
-  if (!uri.startsWith("data:")) {
-    throw new Error(`Invalid URI: ${uri}`);
-  }
-
-  const commaIndex = uri.indexOf(",");
-  if (commaIndex === -1) {
-    throw new Error(`Invalid data URI format: ${uri}`);
-  }
-
-  const header = uri.substring(0, commaIndex);
-  const data = uri.substring(commaIndex + 1);
-
-  const headerParts = header.split(";").map((part) => part.trim());
-  const mediaType = headerParts[0].slice("data:".length);
-  for (const part of headerParts.slice(1)) {
-    const lowerPart = part.toLowerCase();
-    if (lowerPart.startsWith("charset=")) {
-      const charset = lowerPart.substring(8);
-      if (charset !== "utf-8" && charset !== "utf8") {
-        throw new Error(
-          `Unsupported charset: ${charset}. Only UTF-8 is supported.`,
-        );
-      }
-    }
-  }
-
-  const isBase64 = headerParts.some((part) => part.toLowerCase() === "base64");
-
-  let decodedData: string;
-  if (isBase64) {
-    const binaryString = atob(data);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    const decoder = new TextDecoder();
-    decodedData = decoder.decode(bytes);
-  } else {
-    decodedData = decodeURIComponent(data);
-  }
-
-  return { mediaType, decodedData };
-}
-
-/**
- * Decode a supported inline document.
- *
- * The media type is the dispatch authority: legacy JSON remains ordinary JSON,
- * while the Fabric media type requires the versioned `fvj1:` codec payload.
- * Payload shape is never sniffed or reinterpreted across those formats.
- */
-export function decodeDataURIValue(uri: URI | string): FabricValue {
-  const { mediaType, decodedData } = parseDataURI(uri);
-  switch (mediaType) {
-    case LEGACY_JSON_DATA_URI_MEDIA_TYPE:
-      return decodedData.length > 0
-        ? JSON.parse(decodedData) as FabricValue
-        : undefined;
-    case FABRIC_VALUE_DATA_URI_MEDIA_TYPE:
-      return valueFromJson(decodedData);
-    default:
-      throw new UnsupportedDataURIMediaTypeError(mediaType);
-  }
-}
-
-/** Encode a Fabric value in the canonical inline-document representation. */
-export function encodeFabricValueDataURI(value: FabricValue): URI {
-  return `${FABRIC_VALUE_DATA_URI_PREFIX}${
-    encodeURIComponent(jsonFromValue(value))
-  }` as URI;
-}
-
-/** Compatibility name retained while callers migrate to dual-format decode. */
-export function getJSONFromDataURI(uri: URI | string): any {
-  return decodeDataURIValue(uri);
 }

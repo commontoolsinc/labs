@@ -6,13 +6,13 @@ import {
   factoryStateOf,
   isAdmittedFabricFactory,
 } from "@commonfabric/data-model/fabric-factory";
+import {
+  DATA_URI_MEDIA_TYPE,
+  valueFromDataUri,
+} from "@commonfabric/data-model/data-uri-codec";
 
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import {
-  decodeDataURIValue,
-  FABRIC_VALUE_DATA_URI_PREFIX,
-} from "../src/uri-utils.ts";
 
 const signer = await Identity.fromPassphrase("factory data URI writer");
 const destinationSpace = signer.did();
@@ -69,16 +69,17 @@ describe("canonical factory data URI writer", () => {
     });
     const id = cell.getAsNormalizedFullLink().id;
 
-    expect(id.startsWith(FABRIC_VALUE_DATA_URI_PREFIX)).toBe(true);
-    const document = decodeDataURIValue(id) as {
-      value: { direct: unknown; nested: unknown[] };
+    expect(id.startsWith(`data:${DATA_URI_MEDIA_TYPE},`)).toBe(true);
+    const value = valueFromDataUri(id) as {
+      direct: unknown;
+      nested: unknown[];
     };
-    expect(isAdmittedFabricFactory(document.value.direct)).toBe(true);
-    expect(isAdmittedFabricFactory(document.value.nested[0])).toBe(true);
-    expect(factoryStateOf(document.value.direct)).toEqual(
+    expect(isAdmittedFabricFactory(value.direct)).toBe(true);
+    expect(isAdmittedFabricFactory(value.nested[0])).toBe(true);
+    expect(factoryStateOf(value.direct)).toEqual(
       factoryStateOf(factory),
     );
-    expect(() => (document.value.direct as () => unknown)()).toThrow(
+    expect(() => (value.direct as () => unknown)()).toThrow(
       "factory requires runner materialization",
     );
 
@@ -101,9 +102,9 @@ describe("canonical factory data URI writer", () => {
   it("rejects session-only factories and arbitrary JavaScript functions", async () => {
     const sessionOnly = await runtime.patternManager.compilePattern(PROGRAM);
     expect(() => runtime.getImmutableCell(destinationSpace, sessionOnly))
-      .toThrow("no durable artifact ref");
+      .toThrow("artifact ref is not available");
     expect(() => runtime.getImmutableCell(destinationSpace, () => undefined))
-      .toThrow("no applicable codec");
+      .toThrow("Cannot store function");
   });
 
   it("preserves undefined fields and sparse arrays in canonical inline documents", () => {

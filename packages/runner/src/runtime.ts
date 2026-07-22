@@ -65,7 +65,6 @@ import {
 import { Engine } from "./harness/index.ts";
 import {
   CellLink,
-  createDataCellURI,
   isCellLink,
   isNormalizedFullLink,
   isSigilLink,
@@ -2224,38 +2223,35 @@ export class Runtime {
     cfcLabelView?: CfcLabelView,
     factoryArtifactPolicy: "assert" | "retry" = "assert",
   ): Cell<any> {
-    const asDataURI = createDataCellURI(data, undefined, {
-      assertFactoryAvailable: (factory) => {
-        const ref = factoryStateOf(factory).ref;
-        if (ref === undefined) {
-          throw new Error(
-            `Factory has no durable artifact ref for space ${space}`,
-          );
-        }
-        if (
-          !this.patternManager.isArtifactAvailableInSpace(ref.identity, space)
-        ) {
-          const sourceSpace = this.patternManager.artifactSourceSpace(
-            ref.identity,
+    // Preserve main's immutable-value semantics: convert exactly what the
+    // caller supplied and do not resolve relative links against a containing
+    // document. Factory values additionally require exact-space artifact
+    // availability because this inline cell has no later containing commit in
+    // which an artifact closure could be published atomically.
+    const fabricData = fabricFromNativeValue(data);
+    const identities = new Map<string, object[]>();
+    collectFactoryArtifactIdentities(fabricData, identities);
+    for (const identity of identities.keys()) {
+      if (this.patternManager.isArtifactAvailableInSpace(identity, space)) {
+        continue;
+      }
+      const sourceSpace = this.patternManager.artifactSourceSpace(
+        identity,
+        space,
+      );
+      if (sourceSpace !== undefined && factoryArtifactPolicy === "retry") {
+        throw new RetryWhenReady(
+          this.patternManager.ensureArtifactClosureInSpace(
+            identity,
+            sourceSpace,
             space,
-          );
-          if (sourceSpace !== undefined && factoryArtifactPolicy === "retry") {
-            throw new RetryWhenReady(
-              this.patternManager.ensureArtifactClosureInSpace(
-                ref.identity,
-                sourceSpace,
-                space,
-              ),
-              `Factory artifact ${ref.identity} is waiting for replication into ${space}`,
-            );
-          }
-          this.patternManager.assertArtifactAvailableInSpace(
-            ref.identity,
-            space,
-          );
-        }
-      },
-    });
+          ),
+          `Factory artifact ${identity} is waiting for replication into ${space}`,
+        );
+      }
+      this.patternManager.assertArtifactAvailableInSpace(identity, space);
+    }
+    const asDataURI = dataUriFromValue(fabricData);
     return createCell(
       this,
       {

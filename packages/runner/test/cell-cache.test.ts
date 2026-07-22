@@ -1965,7 +1965,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     ).toBe(true);
   });
 
-  it("distinguishes persisted closures that share an entry module", async () => {
+  it("retains additive roots for closures that share an entry module", async () => {
     const targetSpace = "did:key:z6MkCellCacheSharedEntryTarget";
     const main = {
       name: "/main.ts",
@@ -2024,7 +2024,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     readTx.abort?.();
 
     expect(loaded.has(secondExtraIdentity)).toBe(true);
-    expect(loaded.has(firstExtraIdentity)).toBe(false);
+    expect(loaded.has(firstExtraIdentity)).toBe(true);
 
     await manager.persistCompileCacheTracked(
       targetSpace,
@@ -2042,7 +2042,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     );
     replayTx.abort?.();
     expect(replayed.has(firstExtraIdentity)).toBe(true);
-    expect(replayed.has(secondExtraIdentity)).toBe(false);
+    expect(replayed.has(secondExtraIdentity)).toBe(true);
   });
 
   it("tracks a queued replacement write before its predecessor completes", async () => {

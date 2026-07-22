@@ -7,10 +7,6 @@ import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
 import { findAndInlineDataUriLinks } from "../src/data-uri.ts";
-import {
-  createDataCellURI,
-  findAndInlineDataURILinks,
-} from "../src/link-utils.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import {
   createFactoryShell,
@@ -49,7 +45,7 @@ describe("data URI inlining", () => {
 
   describe("findAndInlineDataUriLinks", () => {
     it("keeps decoded factories inert and inlines links in hidden state", () => {
-      const nestedURI = createDataCellURI("captured value");
+      const nestedURI = dataUriFromValueWithResolvedLinks("captured value");
       const factory = createFactoryShell({
         kind: "pattern",
         ref: {
@@ -67,22 +63,20 @@ describe("data URI inlining", () => {
           },
         },
       });
-      const factoryURI = createDataCellURI(factory, undefined, {
-        assertFactoryAvailable: () => {},
-      });
+      const factoryURI = dataUriFromValueWithResolvedLinks(factory);
       const storedFactoryLink = {
         "/": {
           [LINK_V1_TAG]: { id: factoryURI, path: [] },
         },
       };
 
-      const decoded = findAndInlineDataURILinks(storedFactoryLink);
+      const decoded = findAndInlineDataUriLinks(storedFactoryLink);
       expect(isAdmittedFabricFactory(decoded)).toBe(true);
       expect(() => decoded()).toThrow(
         "factory requires runner materialization",
       );
 
-      const inlined = findAndInlineDataURILinks(decoded);
+      const inlined = findAndInlineDataUriLinks(decoded);
       expect(isAdmittedFabricFactory(inlined)).toBe(true);
       expect(inlined).not.toBe(decoded);
       const state = factoryStateOf(inlined);
@@ -108,7 +102,7 @@ describe("data URI inlining", () => {
     });
 
     it("inlines factory state nested in codec-backed values", () => {
-      const nestedURI = createDataCellURI("captured value");
+      const nestedURI = dataUriFromValueWithResolvedLinks("captured value");
       const factory = createFactoryShell({
         kind: "pattern",
         ref: {
@@ -132,7 +126,7 @@ describe("data URI inlining", () => {
       ];
 
       for (const value of values) {
-        const inlined = findAndInlineDataURILinks(value) as
+        const inlined = findAndInlineDataUriLinks(value) as
           | UnknownValue
           | ProblematicValue;
         expect(inlined).not.toBe(value);
@@ -160,7 +154,7 @@ describe("data URI inlining", () => {
       ];
 
       for (const value of values) {
-        expect(findAndInlineDataURILinks(value)).toBe(value);
+        expect(findAndInlineDataUriLinks(value)).toBe(value);
       }
     });
 

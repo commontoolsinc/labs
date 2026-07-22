@@ -15,8 +15,11 @@ import {
   FabricInstance,
   FabricPrimitive,
   FabricSpecialObject,
-  IS_DEEP_FROZEN,
 } from "./interface.ts";
+import {
+  BaseFabricInstance,
+  IS_DEEP_FROZEN,
+} from "./fabric-instances/BaseFabricInstance.ts";
 
 /** Content-addressed reference to a builder factory artifact. */
 export interface FactoryArtifactRef {
@@ -327,7 +330,7 @@ function isCanonicallyDeepFrozenValue(
     if (value instanceof FabricPrimitive) {
       return Object.isFrozen(value);
     }
-    if (value instanceof FabricInstance) {
+    if (value instanceof BaseFabricInstance) {
       return value[IS_DEEP_FROZEN]((nested) =>
         isCanonicallyDeepFrozenValue(nested, visiting)
       );

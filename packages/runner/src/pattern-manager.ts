@@ -898,7 +898,12 @@ export class PatternManager {
     entryIdentity: string,
     fromSpace: MemorySpace,
     toSpace: MemorySpace,
+    visited = new Set<string>(),
   ): Promise<void> {
+    const visitKey = `${fromSpace}\0${toSpace}\0${entryIdentity}`;
+    if (visited.has(visitKey)) return;
+    visited.add(visitKey);
+
     // The origin-space closure may have been produced by THIS session's cold
     // compile, whose write-back is itself fire-and-forget and may not have
     // committed yet. A lost race would throw here — and for a handler-created
@@ -932,6 +937,41 @@ export class PatternManager {
       runtimeVersion,
     );
     if (origin === undefined) {
+      // Preserve the actionable failure categories exposed by the replication
+      // seam. The combined verifier deliberately returns only success/miss so
+      // callers can probe a destination without exceptions; an origin miss is
+      // terminal, and merits a second, diagnostic read.
+      const diagnosticTx = this.runtime.edit();
+      try {
+        const sourceDocs = await this.loadVerifiedArtifactSourceClosure(
+          fromSpace,
+          entryIdentity,
+          diagnosticTx,
+        );
+        if (!sourceDocs?.has(entryIdentity)) {
+          throw new Error("source closure unavailable in origin space");
+        }
+        if (runtimeVersion !== undefined) {
+          const compiledDocs = await loadCompiledClosure(
+            this.runtime,
+            fromSpace,
+            entryIdentity,
+            { runtimeVersion },
+            diagnosticTx,
+          );
+          if (
+            isPatternCoverageCacheRuntimeVersion(runtimeVersion) &&
+            !cacheEntriesIncludePatternCoverage(compiledDocs.values())
+          ) {
+            throw new Error("coverage spans unavailable in origin space");
+          }
+          if (!compiledDocs.has(entryIdentity)) {
+            throw new Error(`compiled doc missing for ${entryIdentity}`);
+          }
+        }
+      } finally {
+        diagnosticTx.abort?.("closure-replication diagnostic read complete");
+      }
       throw new Error(
         `Artifact closure ${entryIdentity} is unavailable in source space ${fromSpace}`,
       );
@@ -1568,8 +1608,8 @@ export class PatternManager {
     // bodies read below carry probes exactly when this is set.
     const patternCoverage = this.patternCoverageFor();
     const readTx = this.runtime.edit();
-    let closure;
-    let sourceClosure;
+    let closure = new Map<string, CompiledDoc>();
+    let sourceClosure: Map<string, SourceDoc> | undefined;
     try {
       const readStart = performance.now();
       closure = await loadCompiledClosure(

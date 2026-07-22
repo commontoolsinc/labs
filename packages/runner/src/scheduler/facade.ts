@@ -1439,10 +1439,13 @@ export class Scheduler {
   private pieceIdForEventLink(
     eventLink: NormalizedFullLink,
   ): string | undefined {
-    for (const [link, handler] of this.eventHandlers) {
-      if (areNormalizedLinksSame(link, eventLink)) {
+    for (const registration of this.eventHandlers) {
+      if (
+        registration.active &&
+        areNormalizedLinksSame(registration.ref, eventLink)
+      ) {
         return shaperInstanceGroupKey(
-          (handler as {
+          (registration.handler as {
             schedulerObservationIdentity?: SchedulerObservationIdentity;
           }).schedulerObservationIdentity,
         );

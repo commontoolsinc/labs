@@ -164,6 +164,27 @@ describe("subschemaEdges (generator form)", () => {
     expect([...subschemaEdges(schema, { includeUnused: true })].length).toBe(1);
   });
 
+  it("skips absent schema-light factory fields and honors factory opt-out", () => {
+    const schemaLight = {
+      asFactory: { kind: "module" },
+    } as JSONSchema;
+    expect([...subschemaEdges(schemaLight)]).toEqual([]);
+
+    const handler = {
+      asFactory: {
+        kind: "handler",
+        contextSchema: { type: "object" },
+      },
+    } as unknown as JSONSchema;
+    expect([...subschemaEdges(handler)].map(({ keyword, key }) => ({
+      keyword,
+      key,
+    }))).toEqual([{ keyword: "asFactory", key: "contextSchema" }]);
+    expect([
+      ...subschemaEdges(handler, { includeFactorySchemas: false }),
+    ]).toEqual([]);
+  });
+
   it("supports early break", () => {
     const schema: JSONSchema = {
       properties: { a: { type: "string" }, b: { type: "number" } },
