@@ -8,15 +8,19 @@ This is the design of record for source origins and source history on pieces.
 [`pattern-imports/README.md`](pattern-imports/README.md) remains the design of
 record for static imports inside pattern source.
 [`pattern-imports/pattern-updates.md`](pattern-imports/pattern-updates.md)
-describes the narrower system-root update mechanism that exists today.
+describes the narrower same-toolshed system-source update mechanism that exists
+today and must be migrated into this lifecycle.
 
 ## Status
 
 The content-addressed source and in-place pattern replacement foundations are
 implemented. Local command-line creation is implemented end to end. Automatic
-updates exist only for system space roots. The general origin, history,
-forking, following, reverting, and repointing model in this document requires
-work unless the implementation table says otherwise.
+updates exist only through a specialized path for same-toolshed system sources.
+That path reconciles roots before bootstrap and checks other successfully
+instantiated patterns in the background. It is not the target model: a space
+root is an ordinary piece under this entire lifecycle. The general origin,
+history, forking, following, reverting, and repointing model in this document
+requires work unless the implementation table says otherwise.
 
 Status labels in this document have exact meanings:
 
@@ -43,6 +47,18 @@ module closure under a content-derived identity.
 A **piece** is a stateful instance that runs one exported pattern. Its
 `patternIdentity` metadata contains the identity and export symbol of the exact
 pattern it currently runs.
+
+A **space root** is an ordinary piece selected by the space's `defaultPattern`
+link. When a space is created, the system chooses the new root piece's initial
+source from the configured default. After creation, the root has the same
+source lifecycle as every other piece. The configured default is not a durable
+controller for existing roots.
+
+A **space-creation template** is configuration that the system consults when
+choosing that initial source. It is not stored as lifecycle state on any root
+piece. The current `defaultAppUrl` field lives on the home root; moving that
+value into configuration independent of a mutable root is required before root
+lifecycle unification is complete.
 
 An **origin** is an optional source URL that a piece remembers durably. URL in
 this document includes both web URLs and fabric-internal URLs:
@@ -127,16 +143,25 @@ pieces; it does not generate pattern source.
    piece does not make imports in that piece or in another pattern live.
 9. Creation and every later transition use ordinary authorization for the
    target piece's space. Following grants no write access to the origin piece.
-10. Within a space, every cell and document that makes a pattern resolvable,
+10. A space root follows every ordinary piece lifecycle rule. The system selects
+    its initial source only when creating the space. A mutable default becomes
+    an active origin only through the ordinary explicit-consent rule. A later
+    change to the configured default does not update or repoint an existing
+    root.
+11. The root role has an interface contract even though it has no special source
+    lifecycle. Creating or relinking `defaultPattern` validates that the piece
+    exposes the operations and state the space runtime requires. An arbitrary
+    piece cannot become a root merely because it is a piece.
+12. Within a space, every cell and document that makes a pattern resolvable,
     including its verified source closure, uses that space's ACL. The source
     therefore has the same visibility as the pattern in that space. Anyone
     authorized to resolve the pattern there may read its source. A fabric URL,
     slug, or content identity does not grant access by itself. The same content
     identity can have replicas in spaces with different ACLs.
-11. Moving source between spaces is an information flow, not just a read. The
+13. Moving source between spaces is an information flow, not just a read. The
     operation propagates CFC provenance labels and fails closed before copying
     source when those labels do not permit the destination flow.
-12. A content-addressed or explicitly pinned fabric URL never reports an
+14. A content-addressed or explicitly pinned fabric URL never reports an
     update. Reconciliation verifies and loads the named source, but the URL
     cannot resolve to a different pattern identity later.
 
@@ -185,6 +210,27 @@ the current source closure. If it cannot do so, it leaves the piece in its
 legacy state and reports that history migration is blocked. It does not invent
 a revision whose source cannot be restored.
 
+This migration treats an existing space root exactly like any other legacy
+piece. A raw `patternSource` is migration provenance, but it does not alone
+prove that the piece granted its source permission to supply future code. The
+current implementation stamps that field independently from the flags that
+enable updates. Migration creates an active origin only when a durable tracking
+choice can be established under the ordinary consent rule. Otherwise it records
+the locator as inactive historical provenance and creates a detached baseline.
+
+A legacy relative toolshed path is not retained as a root-only origin kind.
+Migration resolves it against the accepted toolshed host for the root's space
+and persists the resulting absolute web URL. A later host remapping does not
+silently change that origin; changing it requires an ordinary repoint. If the
+host cannot be established, migration does not invent an active origin.
+
+A source-less legacy home root does not gain an origin merely because it is the
+home root. Its specialized updater currently derives `home.tsx`, while a
+source-less non-home root remains pinned. Migration preserves both as detached
+unless a durable tracking choice explicitly supplies and authorizes an origin.
+New spaces create their root through the ordinary source-creation transition
+and link that new piece as the space root.
+
 ## Source transitions
 
 | Interaction | Exact source after the interaction | Active origin after the interaction | History effect |
@@ -193,6 +239,7 @@ a revision whose source cannot be restored.
 | Create from LLM-generated code | The generated program | None | Append a generated-create revision |
 | Create from a source URL with the command line | The program resolved from the `https://` or fabric `cf:` URL, including `cf://` | The normalized URL and any required export selector | Append a web URL create, follow, or fabric pattern create revision according to what the URL resolves to |
 | Create from a known source URL in the UI | The program resolved from the `https://` or fabric `cf:` URL, including `cf://` | The normalized URL and any required export selector | Append a web URL create, follow, or fabric pattern create revision according to what the URL resolves to |
+| Create the root for a new space | The program resolved from the system-selected default source | Whatever origin the ordinary source-creation rules derive from that source | Append the same creation revision that the equivalent user-created piece would receive |
 | Refresh from an external web URL | The newly fetched program, if its identity or export symbol changed and it passed validation | The same `https://` URL and entry export | Append an automatic-update revision only when the identity or export symbol changes |
 | Load from a content-addressed or explicitly pinned fabric URL | The exact program named by the identity or trailing pin | The normalized fabric pattern URL and export symbol | Do not append an automatic-update revision because the resolved identity cannot change |
 | Fork a piece | The source currently used by the selected piece | None | Append a fork revision with `forkedFrom`; do not copy the source piece's log |
@@ -205,6 +252,12 @@ a revision whose source cannot be restored.
 Direct command-line source updates follow the same detach rule as LLM edits.
 Otherwise a later load could silently replace a user's edit with a refresh
 from an origin they no longer intended to follow.
+
+After space creation, the root can detach, follow, update, fork, revert, or
+repoint through the same operations as any other piece. Changing the system's
+default source affects only roots created afterward. Changing an existing
+space's root is an explicit piece lifecycle operation or an explicit relink to
+another ordinary piece that passes the root-interface compatibility check.
 
 For an unpinned fabric URL that resolves to a mutable entity, the stored
 reference names the stable entity, not a slug. A piece is the product case in
@@ -319,11 +372,12 @@ implementation. A legacy piece that has neither a loadable prior source nor
 persisted compatibility descriptors cannot update automatically. The user
 must explicitly choose a detached force update or fork instead.
 
-This order generalizes the system-root repair path that already reconciles a
-persisted root before bootstrap. The system-root updater has a narrower repair
-contract and can replace an obsolete root before loading it. The general path
-does not silently skip state-compatibility checks when prior source is
-unavailable.
+The specialized system-root updater already demonstrates reconciliation before
+bootstrap. It is a transitional implementation. Once this lifecycle is
+available, roots use the same sequence above as every other piece. Retained
+compatibility descriptors let that sequence replace an obsolete implementation
+without executing it first. A root does not receive a narrower repair contract
+or skip checks when prior source is unavailable.
 
 ## Following while a piece is running
 
@@ -409,7 +463,8 @@ log provides an exact rollback target after a bad but valid update.
 | Manually push code from a source URL and create a piece that remembers it | **CLI URL flow required** | The command-line `new` and `setsrc` commands accept local filesystem entries. `RuntimeClient.createPage(URL)` and `HttpProgramResolver` can fetch `http:` and `https:` source. Fabric resolution can resolve content-addressed patterns and same-toolshed piece references to a source identity, but its result does not carry the export symbol as origin state. Neither path gives the command line a general `https://` or `cf://` source-origin operation. `--repository` is descriptive metadata and is not an origin. |
 | Use a UI affordance to push a known source URL into an owned space | **Partial** | `fetchProgram` with `compileAndRun`, the omnibox's `fetchAndRunPattern`, and `RuntimeClient.createPage(URL)` can fetch and run indexed web programs. The resulting piece does not receive a general active source URL or a source revision. There is no corresponding fabric URL affordance. |
 | Load or create from an immutable fabric URL | **Immutable URL flow required** | The source cache and fabric resolver can load verified `cf:pattern:<identity>` source and honor a trailing pin, but no product operation normalizes that URL and export symbol into immutable piece origin metadata or appends the required revision. |
-| Automatically refresh a mutable URL-origin piece when loaded | **Partial** | The shell enables pre-start URL reconciliation for non-home system roots. Home-root updates remain behind `systemPatternAutoUpdateHome`. Ordinary pieces, external web URLs, and mutable fabric entity URLs do not use this path. A content-addressed or explicitly pinned fabric URL intentionally has nothing to refresh. |
+| Automatically refresh a mutable URL-origin piece when loaded | **Partial** | The shell reconciles system roots before bootstrap and checks other successfully instantiated same-toolshed system-source patterns in the background. External web URLs and mutable fabric entity URLs do not use this path. A content-addressed or explicitly pinned fabric URL intentionally has nothing to refresh. |
+| Manage a space root through the ordinary piece lifecycle | **Lifecycle unification required** | A root is already a piece and the specialized updater can replace its pattern in place. Creation still stamps a raw `patternSource`, reconciliation bypasses revision history, and update authority is not durable per piece. Root updates still use a separate controller path. The creation template currently lives on the mutable home root, relative source paths are not ordinary origins, and root linking does not validate a root interface. New-root creation, legacy-root migration, and later transitions do not yet use the ordinary lifecycle path. |
 | Fork an existing piece and detach it | **Fork operation required** | Tooling can recover a piece's verified source closure, and the runtime can create another piece from a program. There is no fork operation or UI, no `forkedFrom` history, and no atomic detach contract. |
 | Follow another piece and receive its source updates | **Follow operation required** | `cf:` resolution can read another piece's current `patternIdentity`, content-addressed source can be replicated, and a running piece watches its own `patternIdentity` for in-place swaps. No operation stores an unpinned, normalized fabric entity URL as the active origin, reconciles it on load, subscribes to the origin while running, or exposes follow and unfollow UI. Cross-host routing also remains incomplete. |
 | Wish an existing piece to change and detach it | **LLM edit UI required** | `PieceController.setPattern` and `cf piece setsrc` replace a pattern in place with schema checks. There is no LLM-backed edit affordance or revision log. Existing setup writes also preserve `patternSource` and `patternRepository` when replacements omit them, so the required detach behavior is not implemented. |
@@ -461,8 +516,11 @@ The implementation evidence for this table is concentrated in:
   references, explicit pins, and same-toolshed mutable references by stable
   entity or slug. Static imports pin mutable references into source.
 - System space roots carry a `patternSource` URL path when created through
-  `ensureDefaultPattern`. Non-home roots can check that source and replace
-  `patternIdentity` before starting.
+  `ensureDefaultPattern`. Roots can check that source and replace
+  `patternIdentity` before starting. Other successfully instantiated
+  same-toolshed system-source patterns are checked in the background. This is a
+  transitional implementation and migration input, not a target lifecycle
+  exception.
 - Tooling exposes the immutable source ref, optional repository locator,
   authored entry path, and optional current `patternSource` origin separately.
 
@@ -478,7 +536,13 @@ The implementation evidence for this table is concentrated in:
 2. Provide one atomic source-transition API used by every caller. It must wait
    for failure-propagating closure persistence and compare the expected
    revision head, current pattern, and active origin. Add baseline revision
-   migration for existing pieces.
+   migration for existing pieces, including roots whose legacy origin is a raw
+   `patternSource` string. Materialize a durable tracked-or-detached choice; do
+   not infer update authority from the string, rollout flags, or the root role.
+   When no durable active choice can be established, migrate detached. Resolve
+   a relative legacy path against the accepted toolshed host before storing an
+   absolute web origin. Preserve an unconfirmed locator only as inactive
+   historical provenance.
 3. Make local edits explicitly clear active origin metadata. Make source URL
    creation accept and normalize both `https://` and fabric `cf:` inputs,
    including `cf://`. Resolve an unpinned fabric slug once, then store either a
@@ -492,7 +556,13 @@ The implementation evidence for this table is concentrated in:
    event-driven subscription while an unpinned mutable fabric origin is
    running. Do not subscribe for a content-addressed or explicitly pinned
    fabric origin. Reuse content verification, schema compatibility, guarded
-   source transitions, and the existing in-place pattern watcher.
+   source transitions, and the existing in-place pattern watcher. Use this same
+   path for space roots and retire the specialized root reconciler after
+   migration. Move the current home-root `defaultAppUrl` into durable
+   space-creation configuration outside any root piece. Space creation must
+   resolve that configured default through the ordinary create transition and
+   then link the resulting piece as the root. Creating or relinking that link
+   must validate the runtime's root-interface contract.
 5. Build the central source URL service. Apply the network policy and explicit
    ongoing-code consent to mutable web origins. Apply fabric authorization,
    content verification, pin handling, durable routing, and provenance checks
@@ -513,7 +583,10 @@ The implementation evidence for this table is concentrated in:
    subscription cancellation, authorization loss, source unavailability,
    cross-space authorization and provenance, web and fabric URL policy,
    mutable versus content-addressed fabric targets, explicit pins, durable host
-   routing after reload, and reload behavior.
+   routing after reload, space-root creation from a default, changes to a
+   default after root creation, tracked and detached root baseline migration,
+   source-less legacy roots, relative-path normalization, root-interface
+   rejection, and reload behavior.
    Tests must prove the current source, active origin, revision head, retained
    closure, and revision log after each operation.
 
