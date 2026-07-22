@@ -563,7 +563,7 @@ describe("JsonEncodingContext", () => {
         string,
         Record<string, FabricValue>
       >;
-      expect(result.outer.inner).toBe(42);
+      expect(result.outer!.inner).toBe(42);
     });
 
     it("preserves `undefined` values in objects", () => {
@@ -693,7 +693,7 @@ describe("JsonEncodingContext", () => {
           string,
           Record<string, FabricValue>
         >;
-        expect(result["/x"]["a"]).toBe(1);
+        expect(result["/x"]!["a"]).toBe(1);
       });
     });
 
@@ -709,7 +709,7 @@ describe("JsonEncodingContext", () => {
           string,
           Record<string, FabricValue>
         >;
-        expect(result["/x"]["/y"]).toBe(123);
+        expect(result["/x"]!["/y"]).toBe(123);
       });
 
       it("boundary contrast: literal subtree uses `/quote`, Fabric type uses `/object`", () => {
@@ -809,7 +809,7 @@ describe("JsonEncodingContext", () => {
           string,
           Record<string, FabricValue>
         >;
-        expect(result["outer"]["/inner"]).toBe(1);
+        expect(result["outer"]!["/inner"]).toBe(1);
       });
 
       it("single-key `/`-prefixed object still routes through `unwrapTag()` (no regression)", () => {
@@ -842,7 +842,7 @@ describe("JsonEncodingContext", () => {
           string,
           Record<string, FabricValue>
         >;
-        expect(result["/x"]["/quote"]).toBe("inner");
+        expect(result["/x"]!["/quote"]).toBe("inner");
       });
     });
   });
@@ -1191,9 +1191,9 @@ describe("JsonEncodingContext", () => {
 
       expect(isDeepFrozen(result)).toBe(true);
       expect(Object.isFrozen(result.outer)).toBe(true);
-      expect(Object.isFrozen(result.outer.inner)).toBe(true);
+      expect(Object.isFrozen(result.outer!.inner)).toBe(true);
       expect(() => {
-        (result.outer.inner as unknown as number[])[0] = 99;
+        (result.outer!.inner as unknown as number[])[0] = 99;
       }).toThrow();
       expect(() => {
         (result.outer as Record<string, unknown>).added = true;
@@ -1211,9 +1211,9 @@ describe("JsonEncodingContext", () => {
       ) as Record<string, Record<string, Array<Record<string, FabricValue>>>>;
 
       expect(isDeepFrozen(result)).toBe(true);
-      expect(Object.isFrozen(result.outer.inner[0])).toBe(true);
+      expect(Object.isFrozen(result.outer!.inner![0])).toBe(true);
       expect(() => {
-        (result.outer.inner[0] as Record<string, unknown>).deep = 2;
+        (result.outer!.inner![0] as Record<string, unknown>).deep = 2;
       }).toThrow();
     });
 

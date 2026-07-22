@@ -37,7 +37,7 @@ const defaultRegistry: CodecRegistry = createDefaultRegistry();
 function isEncodedInstance(v: JsonWireValue): boolean {
   if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
   const keys = Object.keys(v);
-  return keys.length === 1 && keys[0].startsWith("/");
+  return keys.length === 1 && keys[0]!.startsWith("/");
 }
 
 /**
@@ -67,7 +67,7 @@ function unquote(v: JsonWireValue): JsonWireValue {
     const result = v.map(unquote) as JsonWireValue;
     return Object.freeze(result);
   } else if (isEncodedInstance(v) && Object.keys(v)[0] === "/quote") {
-    return (v as Record<string, JsonWireValue>)["/quote"];
+    return (v as Record<string, JsonWireValue>)["/quote"]!;
   } else {
     const result = Object.fromEntries(
       Object.entries(v).map(([k, val]) => [k, unquote(val as JsonWireValue)]),
@@ -179,9 +179,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
     // `isEncodedInstance()` guaranteed a single-property object, so this
     // destructures that one entry. (`isPlainObject()` is not a type guard, so
     // narrow explicitly for the type-checker.)
-    const [[key, value]] = Object.entries(
+    const [key, value] = Object.entries(
       data as Record<string, JsonWireValue>,
-    );
+    )[0]!;
     return { tag: key.slice(1), state: value };
   }
 

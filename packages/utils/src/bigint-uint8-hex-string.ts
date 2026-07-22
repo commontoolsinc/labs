@@ -99,7 +99,7 @@ export function bigintToMtcHex(value: bigint): Uint8Array {
 
     if (resultLength < 128) {
       for (let i = 0; i < resultLength; i++) {
-        result[i] = ~result[i];
+        result[i] = ~result[i]!;
       }
     } else {
       // At around 128 bytes (measured in benchmarks), it becomes faster to
@@ -110,11 +110,11 @@ export function bigintToMtcHex(value: bigint): Uint8Array {
       const resultUint32 = new Uint32Array(result.buffer, 0, resultLength >> 2);
 
       for (let i = 0; i < resultUint32.length; i++) {
-        resultUint32[i] = ~resultUint32[i];
+        resultUint32[i] = ~resultUint32[i]!;
       }
 
       for (let i = resultLength - byteRemainder; i < resultLength; i++) {
-        result[i] = ~result[i];
+        result[i] = ~result[i]!;
       }
     }
 
@@ -134,7 +134,7 @@ export function bigintFromMtcHex(bytes: Uint8Array): bigint {
   const hexString = bytes.toHex();
   const positiveResult = BigInt(`0x${hexString}`);
 
-  if (bytes[0] <= 0x7f) {
+  if (bytes[0]! <= 0x7f) {
     return positiveResult;
   } else {
     // Negative number. We make the initial positive result of conversion
