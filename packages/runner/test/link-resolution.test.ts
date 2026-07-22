@@ -171,6 +171,38 @@ describe("link-resolution", () => {
       ).toBe(true);
       expect(tx.readValueOrThrow(result)).toBe(1);
     });
+
+    it("does not follow $alias-shaped records stored in data", () => {
+      const testCell = runtime.getCell<any>(
+        space,
+        "does not follow $alias records in data 1",
+        undefined,
+        tx,
+      );
+      testCell.setRaw({
+        alias: { $alias: { path: ["value"] } },
+        value: 42,
+      });
+      const location = testCell.key("alias").getAsNormalizedFullLink();
+
+      // Resolving a link to the location holding the `$alias` record returns
+      // the location itself: the record is plain data, not a redirect.
+      const redirectResolved = resolveLink(
+        runtime,
+        tx,
+        location,
+        "writeRedirect",
+      );
+      expect(areNormalizedLinksSame(redirectResolved, location)).toBe(true);
+
+      const valueResolved = resolveLink(runtime, tx, location);
+      expect(areNormalizedLinksSame(valueResolved, location)).toBe(true);
+
+      // The value at the location is the record itself, verbatim.
+      expect(tx.readValueOrThrow(valueResolved)).toEqual({
+        $alias: { path: ["value"] },
+      });
+    });
   });
 
   describe("Schema handling in links", () => {

@@ -505,11 +505,18 @@ const recordSetupProjectionPolicyInputs = (
     return;
   }
 
-  if (isWriteRedirectLink(projection) || isAliasBinding(projection)) {
+  // Sigil redirects only, deliberately NOT paired with `isAliasBinding`: the
+  // projection is about to be STORED (argument via diffAndUpdate, result via
+  // setRawUntyped), and in stored data only sigil links function as
+  // redirects — a residual `$alias` record (e.g. a still-deferred binding of
+  // an embedded pattern) is inert there. The prepare gate agrees: marker
+  // verification requires the stored value to be a sigil redirect
+  // (`setupProjectionSourceMatchesValue`), and recording a marker for an
+  // alias would wrongly widen `writeIsPatternSetupInitialization`'s
+  // trusted-initialization exemption to a path nothing redirects to.
+  if (isWriteRedirectLink(projection)) {
     const target = resultCell.getAsNormalizedFullLink();
-    const source = isAliasBinding(projection)
-      ? parseAliasBinding(projection, target)
-      : parseLink(projection, target);
+    const source = parseLink(projection, target);
     tx.recordCfcWritePolicyInput({
       kind: "structural-provenance",
       target: {
@@ -3367,6 +3374,11 @@ export class Runner {
     };
 
     const visit = (schema: unknown, currentValue: unknown): void => {
+      // Sigil-only, deliberately NOT paired with `isAliasBinding`: the value
+      // is post-unwrap, where the only `$alias` records left belong to
+      // embedded Pattern values (their `defer` bookkeeping resolves them at
+      // that pattern's own instantiation) — parsing one here would read it at
+      // the wrong nesting level.
       if (isWriteRedirectLink(currentValue)) {
         const link = parseLink(currentValue, processCell);
         links.push({
@@ -3564,6 +3576,9 @@ export class Runner {
   } {
     if (!isRecord(inputs) || !("$event" in inputs)) return {};
 
+    // Sigil-only: `$event` is builder-generated and always unwraps to a sigil
+    // link; a residual `$alias` here could only be an embedded pattern's
+    // binding, which must not be followed at this level.
     let value: FabricValue = inputs.$event as FabricValue;
     let lastLink: NormalizedFullLink | undefined;
     while (isWriteRedirectLink(value)) {

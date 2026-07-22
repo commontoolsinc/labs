@@ -93,12 +93,12 @@ export function toJSONWithAliasBindings(
       } satisfies AliasBinding;
     } else if (!("cell" in alias) || typeof (alias.cell) === "string") {
       // If we encounter an existing alias and it isn't an absolute reference
-      // with a cell id, then increase the nesting level.
+      // with a cell id, then increase the nesting level. (Named-cell aliases
+      // carry no scope; only partialCause aliases do.)
       return {
         $alias: {
           defer: (alias.defer ?? 0) + 1,
           path: alias.path,
-          ...(alias.scope !== undefined && { scope: alias.scope }),
           ...(alias.schema !== undefined && { schema: alias.schema }),
           ...(alias.cell !== undefined && { cell: alias.cell }),
         },

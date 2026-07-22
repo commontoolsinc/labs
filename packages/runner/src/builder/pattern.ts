@@ -407,18 +407,23 @@ function factoryFromPattern<T, R>(
 
     const commonAliasProps = {
       path,
-      ...(scope !== undefined && { scope }),
       ...(schema !== undefined && { schema }),
     };
     // See if we're one of the special cells (result or argument)
     const cellName = cellNameForCell(cell);
     if (cellName !== undefined) {
+      // No scope on named-cell aliases: the argument/result cell's own link
+      // provides it at unwrap time.
       return { cell: cellName, ...commonAliasProps };
     }
     // Otherwise, we should be an internal call, and should have partialCause
     const partialCause = assignedInternalPartialCauses.get(top);
     if (partialCause !== undefined) {
-      return { partialCause, ...commonAliasProps };
+      return {
+        partialCause,
+        ...(scope !== undefined && { scope }),
+        ...commonAliasProps,
+      };
     }
   };
 

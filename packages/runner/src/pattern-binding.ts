@@ -452,9 +452,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           ? getDerivedInternalCellLink(resultCell, descriptor)
           : getDerivedInternalCellLink(resultCell, {
             partialCause: alias.partialCause,
-            scope: alias.scope === "inherit"
-              ? resultCell.export().scope
-              : alias.scope,
+            scope: alias.scope,
           });
         const path = alias.path;
         const sourceSchema = alias.schema !== undefined
@@ -579,6 +577,12 @@ export function findAllWriteRedirectCells<T>(
     if (isAliasBinding(binding) && (binding.$alias.defer ?? 0) > 0) {
       return;
     } else if (isWriteRedirectLink(binding) || isAliasBinding(binding)) {
+      // `$alias` bindings are honored here for PRE-unwrap callers (raw
+      // `node.inputs`/`node.outputs`, e.g. the cold-resume prefetch), where
+      // they are the current level's wiring. Post-unwrap values only carry
+      // `$alias` inside embedded Pattern values, and the `isPattern` skip
+      // below stops the walk before reaching those.
+      //
       // Follow a *chain* of write redirects: record this redirect, then if its
       // target value is ITSELF a write redirect, follow that too (one string of
       // redirects). We stop as soon as the target is a non-redirect value — we
@@ -608,6 +612,13 @@ export function findAllWriteRedirectCells<T>(
       if (isWriteRedirectLink(target)) find(target, linkCell);
     } else if (isCellLink(binding)) {
       // Links that are not write redirects: Ignore them.
+      return;
+    } else if (isPattern(binding)) {
+      // Embedded Pattern values are opaque here: their `$alias` records and
+      // sigil links are the embedded pattern's own binding vocabulary,
+      // interpreted only when THAT pattern is instantiated (`defer`
+      // bookkeeping positions its aliases for that moment). Walking into them
+      // would declare reads at the wrong nesting level.
       return;
     } else if (Array.isArray(binding)) {
       // If the binding is an array, recurse into each element.

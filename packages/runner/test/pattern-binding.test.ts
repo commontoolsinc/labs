@@ -527,6 +527,62 @@ describe("pattern-binding", () => {
       expect(links[0].space).toBe(space);
     });
 
+    it("should ignore deferred legacy aliases", () => {
+      const testCell = runtime.getCell<{ foo: number }>(
+        space,
+        "deferred legacy aliases",
+        undefined,
+        tx,
+      );
+      testCell.set({ foo: 1 });
+      const binding = {
+        deferredArgument: {
+          $alias: { cell: "argument", path: ["foo"], defer: 1 },
+        },
+        deferredInternal: {
+          $alias: { partialCause: "local", path: [], defer: 1 },
+        },
+        immediate: { $alias: { path: ["foo"] } },
+      };
+
+      const links = findAllWriteRedirectCells(binding, testCell);
+      expect(links.length).toBe(1);
+      expect(links[0].path).toEqual(["foo"]);
+    });
+
+    it("does not walk into embedded Pattern values", () => {
+      // An embedded pattern's sigil links and aliases are its own binding
+      // vocabulary, resolved when THAT pattern is instantiated — not reads of
+      // the node carrying it.
+      const testCell = runtime.getCell<{ foo: number }>(
+        space,
+        "embedded pattern",
+        undefined,
+        tx,
+      );
+      testCell.set({ foo: 123 });
+      const embeddedPattern = {
+        argumentSchema: true,
+        resultSchema: {},
+        result: {
+          doubled: { $alias: { cell: "argument", path: ["x"] } },
+        },
+        nodes: [{
+          module: { type: "javascript" },
+          inputs: testCell.key("foo").getAsWriteRedirectLink({
+            base: testCell,
+          }),
+          outputs: {},
+        }],
+      };
+      const binding = {
+        template: embeddedPattern,
+        direct: testCell.key("foo").getAsWriteRedirectLink({ base: testCell }),
+      };
+      const links = findAllWriteRedirectCells(binding, testCell);
+      expect(links.map((l) => l.path)).toEqual([["foo"]]);
+    });
+
     it("follows a chain of write redirects (redirect -> redirect)", () => {
       const testCell = runtime.getCell<Record<string, unknown>>(
         space,
@@ -657,29 +713,6 @@ describe("pattern-binding", () => {
       const binding = { bar: 2 };
       const links = findAllWriteRedirectCells(binding, testCell);
       expect(links.length).toBe(0);
-    });
-
-    it("should ignore deferred legacy aliases", () => {
-      const testCell = runtime.getCell<{ foo: number }>(
-        space,
-        "deferred legacy aliases",
-        undefined,
-        tx,
-      );
-      testCell.set({ foo: 1 });
-      const binding = {
-        deferredArgument: {
-          $alias: { cell: "argument", path: ["foo"], defer: 1 },
-        },
-        deferredInternal: {
-          $alias: { partialCause: "local", path: [], defer: 1 },
-        },
-        immediate: { $alias: { path: ["foo"] } },
-      };
-
-      const links = findAllWriteRedirectCells(binding, testCell);
-      expect(links.length).toBe(1);
-      expect(links[0].path).toEqual(["foo"]);
     });
 
     it("should find write redirect links using sigil format", () => {

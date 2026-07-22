@@ -325,7 +325,7 @@ export function stringifyText(
   ) {
     return "";
   } else if (typeof value === "object") {
-    // Handle unresolved alias objects gracefully - render empty until resolved
+    // Objects are not expected here - warn and render their JSON as a fallback
     console.warn(
       "unexpected object when value was expected",
       value,

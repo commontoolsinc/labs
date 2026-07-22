@@ -66,6 +66,16 @@ bindings — e.g.
 ```
 — not cross-document references.
 
+The plain-value reading applies to *data* only. Inside a Pattern object the
+interpretation is positional and shape-based with no escape encoding: pattern
+serialization (`toJSONWithAliasBindings`) treats any `$alias`-shaped record it
+encounters as a binding. A literal `{ "$alias": { "path": [...] } }` object
+passed as factory inputs (via `.with(...)`/`.bind(...)`, captured closure
+state, or a pattern's outputs) is therefore not preserved as data: the
+serializer rewrites it as a nested-pattern binding (incrementing `defer`), and
+instantiation later resolves it as a write redirect into the pattern's own
+documents.
+
 **`LegacyJSONCellLink`** (`{ cell: { "/": string }, path: [...] }`) — removed
 from write and recognition code paths. The type definition still exists in
 `sigil-types.ts`, and backwards-compatible reading of previously persisted data

@@ -414,6 +414,54 @@ describe("link-utils", () => {
       });
     });
 
+    it("should resolve explicit inherit scope on alias bindings to the base's scope", () => {
+      const baseCell = runtime.getCell(space, "base-inherit-scope");
+      const base = {
+        ...baseCell.getAsNormalizedFullLink(),
+        scope: "session" as const,
+      };
+
+      // The alias types no longer admit `scope: "inherit"` (the builder never
+      // generates it), but stored pattern JSON is untyped: parsing stays
+      // defensive and resolves it to the base link's scope, like an absent
+      // scope.
+      expect(
+        parseAliasBinding(
+          {
+            $alias: { path: ["nested", "value"], scope: "inherit" },
+          } as unknown as AliasBinding,
+          base,
+        ),
+      ).toEqual({
+        id: base.id,
+        path: ["nested", "value"],
+        space: space,
+        scope: "session",
+        overwrite: "redirect",
+      });
+
+      // A concrete scope (partialCause aliases only) wins over the base's
+      // scope.
+      expect(
+        parseAliasBinding(
+          {
+            $alias: {
+              partialCause: "internal-cell",
+              path: ["nested", "value"],
+              scope: "user",
+            },
+          },
+          base,
+        ),
+      ).toEqual({
+        id: base.id,
+        path: ["nested", "value"],
+        space: space,
+        scope: "user",
+        overwrite: "redirect",
+      });
+    });
+
     it("should return undefined for non-link values", () => {
       expect(parseLink("string")).toBeUndefined();
       expect(parseLink(123)).toBeUndefined();

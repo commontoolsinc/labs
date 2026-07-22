@@ -429,6 +429,42 @@ describe("data-updating", () => {
       expect(changes.length).toBe(0);
     });
 
+    it("stores $alias-shaped records verbatim as plain data", () => {
+      const testCell = runtime.getCell<any>(
+        space,
+        "normalizeAndDiff $alias plain data",
+        undefined,
+        tx,
+      );
+
+      const aliasRecord = { $alias: { path: ["target"] } };
+      diffAndUpdate(runtime, tx, testCell.getAsNormalizedFullLink(), {
+        alias: aliasRecord,
+        target: 1,
+      });
+
+      // Stored verbatim: the record is plain data, not converted to a link.
+      expect(testCell.getRaw()).toEqual({ alias: aliasRecord, target: 1 });
+      expect(isSigilLink(testCell.key("alias").getRaw())).toBe(false);
+
+      // Writing at the location holding the record writes there; the record
+      // is not followed as a write redirect.
+      const changes = normalizeAndDiff(
+        runtime,
+        tx,
+        testCell.key("alias").getAsNormalizedFullLink(),
+        100,
+      );
+      expect(changes.length).toBe(1);
+      expect(
+        areNormalizedLinksSame(
+          changes[0].location,
+          testCell.key("alias").getAsNormalizedFullLink(),
+        ),
+      ).toBe(true);
+      expect(changes[0].value).toBe(100);
+    });
+
     it("should follow aliases", () => {
       const testCell = runtime.getCell<{
         value: number;

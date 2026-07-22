@@ -1,4 +1,9 @@
-import type { JSONSchema, JSONValue, LinkScope } from "@commonfabric/api";
+import type {
+  CellScope,
+  JSONSchema,
+  JSONValue,
+  LinkScope,
+} from "@commonfabric/api";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { URI } from "@commonfabric/memory/interface";
 import {
@@ -118,13 +123,15 @@ export type SigilWriteRedirectLink = LinkRef<
  */
 type AliasBindingBase = {
   path: readonly string[];
-  scope?: LinkScope;
   schema?: JSONSchema;
 };
 
+// Named-cell aliases carry no scope: the referenced argument/result cell's
+// own link determines the scope when the binding is unwrapped.
 type AliasBindingNamedCell = AliasBindingBase & {
   cell?: "result" | "argument";
   partialCause?: never;
+  scope?: never;
   defer?: number;
 };
 
@@ -134,10 +141,15 @@ type AliasBindingNamedCell = AliasBindingBase & {
  * we decrement that. Once it's 0, we know that it's associated with the
  * current pattern, and we can generate real cells based ont the combination
  * of the pattern's result (parent) and the partialCause.
+ *
+ * `scope` names where the derived internal cell is minted. It is a concrete
+ * `CellScope`: "inherit" is never generated (the builder's `cell.export()`
+ * filters non-cell scopes), and would mean the same as omitting it.
  */
 type AliasBindingPartialCause = AliasBindingBase & {
   cell?: never;
   partialCause: JSONValue;
+  scope?: CellScope;
   defer?: number;
 };
 

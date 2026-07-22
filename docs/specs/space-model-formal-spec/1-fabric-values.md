@@ -2880,7 +2880,7 @@ boundary-only serialization and the three-layer architecture:
 
 ### 7.2 Unifying JSON Encoding
 
-Four legacy conventions in the current codebase must be migrated to the unified
+Three legacy conventions in the current codebase must be migrated to the unified
 `/<Type>@<Version>` format:
 
 | Legacy Convention | Where Used | Example | New Form |

@@ -5,6 +5,7 @@ import {
   $onCellUpdate,
   CellHandle,
   type CellRef,
+  isCellHandle,
   RequestType,
   type RuntimeClient,
 } from "./mod.ts";
@@ -463,6 +464,82 @@ describe("CellHandle reactive CFC label delivery", () => {
     expect(cell.wantsCfcLabel).toBe(true);
     await Promise.resolve(); // let the unsubscribe().finally(subscribe) settle
     expect(events).toEqual(["subscribe", "unsubscribe", "subscribe"]);
+  });
+});
+
+describe("CellHandle $alias records stay plain data", () => {
+  // `$alias` records are Pattern-binding vocabulary, only meaningful inside
+  // Pattern objects the client never interprets. In data they are inert plain
+  // values: hydration must not turn them into CellHandles (PR #4895).
+  const makeRuntime = () =>
+    ({
+      [$conn]: () => ({
+        request: () => Promise.resolve({}),
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+      }),
+    }) as unknown as RuntimeClient;
+  const ref: CellRef = {
+    id: "of:alias-plain-data-cell" as CellRef["id"],
+    space: "did:key:test" as CellRef["space"],
+    scope: "space",
+    path: [],
+  };
+  // A genuine sigil link in the same payload — the positive control that the
+  // hydration path is actually exercised.
+  const sigilLink = {
+    "/": {
+      "link@1": {
+        id: "of:linked-cell",
+        space: "did:key:test",
+        scope: "space",
+        path: ["item"],
+      },
+    },
+  };
+  const payload = {
+    binding: { $alias: { path: ["foo"] } },
+    nested: { deeper: { $alias: { path: ["foo", "bar"] } } },
+    link: sigilLink,
+  };
+
+  it("deserialize keeps $alias records plain while sigil links hydrate", () => {
+    const base = new CellHandle(makeRuntime(), ref);
+
+    const result = CellHandle.deserialize(base, payload) as Record<
+      string,
+      unknown
+    >;
+
+    // Positive control: the sigil link DOES become a CellHandle.
+    expect(isCellHandle(result.link)).toBe(true);
+    // The $alias records do not — they stay deep-equal plain data, at the top
+    // level and nested.
+    expect(isCellHandle(result.binding)).toBe(false);
+    expect(result.binding).toEqual({ $alias: { path: ["foo"] } });
+    expect(result.nested).toEqual({
+      deeper: { $alias: { path: ["foo", "bar"] } },
+    });
+  });
+
+  it("update delivery keeps $alias records plain while sigil links hydrate", () => {
+    const cell = new CellHandle<{
+      binding: unknown;
+      nested: unknown;
+      link: unknown;
+    }>(makeRuntime(), ref);
+
+    cell[$onCellUpdate](payload);
+    const value = cell.get()!;
+
+    // Positive control: the sigil link DOES become a CellHandle.
+    expect(isCellHandle(value.link)).toBe(true);
+    // The $alias records remain inert plain data.
+    expect(isCellHandle(value.binding)).toBe(false);
+    expect(value.binding).toEqual({ $alias: { path: ["foo"] } });
+    expect(value.nested).toEqual({
+      deeper: { $alias: { path: ["foo", "bar"] } },
+    });
   });
 });
 
