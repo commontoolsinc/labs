@@ -99,6 +99,7 @@ cell:
   argument: SigilLink, // link to input data cell
   internal: Array<{
     partialCause: JSONValue,
+    patternIdentity?: { identity: string, symbol: string }, // generated causes only
     link: SigilLink
   }>,                 // manifest of derived internal cells
   schema?: JSONSchema

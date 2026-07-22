@@ -4,6 +4,7 @@ import {
   brandTrustedBuilderArtifact,
   brandTrustedPattern,
   getArtifactEntryRef,
+  getGeneratedInternalCellPatternIdentity,
   isTrustedBuilderArtifact,
   isTrustedPattern,
   noteDerivedCopy,
@@ -28,6 +29,14 @@ const patternShape = () => ({
   resultSchema: { type: "object" as const },
   nodes: [],
   result: {},
+});
+
+const patternWithInternals = () => ({
+  ...patternShape(),
+  derivedInternalCells: [
+    { partialCause: { $generated: 0 } },
+    { partialCause: "named-state" },
+  ],
 });
 
 describe("noteDerivedCopy trust carry", () => {
@@ -100,5 +109,37 @@ describe("entry-ref resolution through copies", () => {
       identity: "first",
       symbol: "a",
     });
+  });
+});
+
+describe("generated internal-cell pattern identity", () => {
+  it("associates only generated descriptors with the artifact ref", () => {
+    const pattern = brandTrustedPattern(patternWithInternals());
+    const ref = { identity: "pattern-v1", symbol: "default" };
+    setArtifactEntryRef(pattern, ref);
+
+    expect(
+      getGeneratedInternalCellPatternIdentity(
+        pattern.derivedInternalCells[0],
+      ),
+    ).toEqual(ref);
+    expect(
+      getGeneratedInternalCellPatternIdentity(
+        pattern.derivedInternalCells[1],
+      ),
+    ).toBeUndefined();
+  });
+
+  it("associates a pre-index copy lazily when its ref is resolved", () => {
+    const original = brandTrustedPattern(patternWithInternals());
+    const copy = patternWithInternals();
+    noteDerivedCopy(copy, original);
+    const ref = { identity: "pattern-v2", symbol: "op" };
+    setArtifactEntryRef(original, ref);
+
+    expect(getArtifactEntryRef(copy)).toEqual(ref);
+    expect(
+      getGeneratedInternalCellPatternIdentity(copy.derivedInternalCells[0]),
+    ).toEqual(ref);
   });
 });

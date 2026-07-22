@@ -42,6 +42,7 @@ piece ownership graph:
   internal: [          // manifest of derived internal cells
     {
       partialCause: JSONValue,
+      patternIdentity?: { identity: string, symbol: string }, // generated causes only
       link: SigilLink
     }
   ],
