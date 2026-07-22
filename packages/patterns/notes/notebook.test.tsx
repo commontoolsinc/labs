@@ -17,7 +17,7 @@
  * - SELF-dependent functionality: parentNotebook set correctly on created notes
  *
  * The test harness sets up defaultPattern so wish("#default") resolves,
- * enabling tests for handlers that push to allPieces.
+ * enabling tests for handlers that write to pieceRegistry.
  *
  * Run: deno task cf test packages/patterns/notes/notebook.test.tsx --verbose
  */
@@ -365,7 +365,7 @@ export default pattern(() => {
   // Assertions - Create Nested Notebook
   // ==========================================================================
 
-  // createNotebook pushes to allPieces, not to this notebook's notes array.
+  // createNotebook writes to pieceRegistry, not this notebook's notes array.
   // So the notebook's own noteCount should remain unchanged at 3.
   const assert_notebook_count_unchanged = computed(() =>
     notebook.noteCount === 3
@@ -442,7 +442,7 @@ export default pattern(() => {
       { action: action_delete_selected },
       { assertion: assert_notes_deleted },
 
-      // === Create nested notebook (pushes to allPieces, not notes) ===
+      // === Create nested notebook (writes to pieceRegistry, not notes) ===
       { action: action_create_notebook_via_stream },
       { assertion: assert_notebook_count_unchanged },
       // === Bulk create notes ===

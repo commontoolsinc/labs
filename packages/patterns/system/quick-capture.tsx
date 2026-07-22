@@ -24,7 +24,7 @@ import { type MentionablePiece } from "./backlinks-index.tsx";
 // ===== Input/Output Types =====
 
 interface QuickCaptureInput {
-  allPieces: Writable<MentionablePiece[]>;
+  pieceRegistry: Writable<MentionablePiece[]>;
 }
 
 export interface QuickCaptureOutput {
@@ -90,20 +90,20 @@ const captureHandler = handler<
 
 const createNoteHandler = handler<
   { title: string; content: string },
-  { allPieces: Writable<MentionablePiece[]> }
->(({ title, content }, { allPieces }) => {
+  { pieceRegistry: Writable<MentionablePiece[]> }
+>(({ title, content }, { pieceRegistry }) => {
   const note = Note({
     title,
     content,
   });
-  allPieces.push(note as any);
+  pieceRegistry.push(note as any);
   return note;
 });
 
 const createNotebookHandler = handler<
   { title: string; notes?: Array<{ title: string; content: string }> },
-  { allPieces: Writable<MentionablePiece[]> }
->(({ title, notes: notesData }, { allPieces }) => {
+  { pieceRegistry: Writable<MentionablePiece[]> }
+>(({ title, notes: notesData }, { pieceRegistry }) => {
   const notes = (notesData ?? []).map((data) =>
     Note({
       title: data.title,
@@ -111,14 +111,14 @@ const createNotebookHandler = handler<
     })
   );
   const notebook = Notebook({ title, notes });
-  allPieces.push(notebook as any);
+  pieceRegistry.push(notebook as any);
   return notebook;
 });
 
 // ===== Main Pattern =====
 
 export default pattern<QuickCaptureInput, QuickCaptureOutput>(
-  ({ allPieces }) => {
+  ({ pieceRegistry }) => {
     // Wishes for space data
     const mentionable = wish<MentionablePiece[]>({
       query: "#mentionable",
@@ -179,12 +179,12 @@ ${profileSection}`;
       listMentionable: patternTool(listMentionable, { mentionable }),
       listRecent: patternTool(listRecent, { recentPieces }),
       createNote: {
-        handler: createNoteHandler({ allPieces }),
+        handler: createNoteHandler({ pieceRegistry }),
         description:
           "Create a single note with a title and markdown content. Returns the created note cell. Call once per note.",
       },
       createNotebook: {
-        handler: createNotebookHandler({ allPieces }),
+        handler: createNotebookHandler({ pieceRegistry }),
         description:
           "Create a notebook with a title and optional initial notes (each with title and content). Notes are created as real Note instances inside the notebook. Use sparingly — only for the 'Capture Log' notebook or when there's a clear reason to group notes.",
       },

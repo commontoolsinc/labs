@@ -201,10 +201,10 @@ const handleNewBacklink = handler<
   },
   {
     mentionable: Writable<MentionablePiece[]>;
-    allPieces: Writable<MinimalPiece[]>;
+    pieceRegistry: Writable<MinimalPiece[]>;
   }
->(({ detail }, { mentionable, allPieces }) => {
-  allPieces.push(detail.piece);
+>(({ detail }, { mentionable, pieceRegistry }) => {
+  pieceRegistry.push(detail.piece);
 
   if (detail.navigate) {
     return navigateTo(detail.piece);
@@ -346,8 +346,8 @@ const ChatNote = pattern<Input, Output>(
     model,
     [SELF]: self,
   }) => {
-    const { allPieces } = wish<{ allPieces: MinimalPiece[] | Default<[]> }>({
-      query: "/",
+    const pieceRegistry = wish<MinimalPiece[] | Default<[]>>({
+      query: "#pieceRegistry",
     }).result!;
     const mentionable = wish<MentionablePiece[] | Default<[]>>({
       query: "#mentionable",
@@ -623,7 +623,10 @@ const ChatNote = pattern<Input, Output>(
             $mentioned={mentioned}
             $pattern={patternJson}
             onbacklink-click={handlePieceLinkClick({})}
-            onbacklink-create={handleNewBacklink({ mentionable, allPieces })}
+            onbacklink-create={handleNewBacklink({
+              mentionable,
+              pieceRegistry,
+            })}
             language="text/markdown"
             theme="light"
             wordWrap

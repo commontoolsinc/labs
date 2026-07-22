@@ -528,6 +528,12 @@ export interface SpaceCellContents {
   defaultPattern: Cell<unknown>;
 }
 
+type RuntimeSetupOptions = {
+  patternRepository?: string;
+  reapplyStoredSetup?: boolean;
+  prepareForResume?: boolean;
+};
+
 function isMemorySpaceDID(value: string): boolean {
   return /^did:[^:]+:.+/.test(value);
 }
@@ -1877,26 +1883,32 @@ export class Runtime {
   }
 
   // Convenience methods that delegate to the runner
+  syncStoredSetupArgument(
+    resultCell: Cell<unknown>,
+  ): Promise<(candidate: Cell<unknown>) => boolean> {
+    return this.runner.syncStoredSetupArgument(resultCell);
+  }
+
   setup<T, R>(
     tx: IExtendedStorageTransaction | undefined,
     patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
-    options?: { patternRepository?: string },
+    options?: RuntimeSetupOptions,
   ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options?: { patternRepository?: string },
+    options?: RuntimeSetupOptions,
   ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options?: { patternRepository?: string },
+    options?: RuntimeSetupOptions,
   ): Promise<Cell<R>> {
     return this.runner.setup<T, R>(
       tx,

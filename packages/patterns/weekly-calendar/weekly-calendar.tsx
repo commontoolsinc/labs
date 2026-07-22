@@ -237,7 +237,7 @@ const createEventHandler = handler<
     newEventColor: Writable<string>;
     showNewEventPrompt: Writable<boolean>;
     events: Writable<EventPiece[]>;
-    allPieces: Writable<EventPiece[]>;
+    pieceRegistry: Writable<EventPiece[]>;
   }
 >((
   _,
@@ -249,7 +249,7 @@ const createEventHandler = handler<
     newEventColor,
     showNewEventPrompt,
     events,
-    allPieces,
+    pieceRegistry,
   },
 ) => {
   const title = newEventTitle.get() || "New Event";
@@ -263,7 +263,7 @@ const createEventHandler = handler<
     isHidden: false,
     eventId: generateId(),
   });
-  allPieces.push(newEvent);
+  pieceRegistry.push(newEvent);
   events.push(newEvent);
 
   // Reset modal state and stay on calendar
@@ -281,7 +281,7 @@ const createEventAndContinue = handler<
     newEventEndTime: Writable<string>;
     newEventColor: Writable<string>;
     events: Writable<EventPiece[]>;
-    allPieces: Writable<EventPiece[]>;
+    pieceRegistry: Writable<EventPiece[]>;
     usedCreateAnother: Writable<boolean>;
   }
 >((
@@ -293,7 +293,7 @@ const createEventAndContinue = handler<
     newEventEndTime,
     newEventColor,
     events,
-    allPieces,
+    pieceRegistry,
     usedCreateAnother,
   },
 ) => {
@@ -308,7 +308,7 @@ const createEventAndContinue = handler<
     isHidden: false,
     eventId: generateId(),
   });
-  allPieces.push(newEvent);
+  pieceRegistry.push(newEvent);
   events.push(newEvent);
   usedCreateAnother.set(true);
   newEventTitle.set("");
@@ -337,8 +337,8 @@ const handleBacklinkClick = handler<
 // LLM-callable handler: Create a single event
 const handleCreateEvent = handler<
   { title: string; date: string; startTime: string; endTime: string },
-  { events: Writable<EventPiece[]>; allPieces: Writable<EventPiece[]> }
->(({ title, date, startTime, endTime }, { events, allPieces }) => {
+  { events: Writable<EventPiece[]>; pieceRegistry: Writable<EventPiece[]> }
+>(({ title, date, startTime, endTime }, { events, pieceRegistry }) => {
   const newEvent = Event({
     title,
     date,
@@ -349,7 +349,7 @@ const handleCreateEvent = handler<
     isHidden: false,
     eventId: generateId(),
   });
-  allPieces.push(newEvent);
+  pieceRegistry.push(newEvent);
   events.push(newEvent);
   return newEvent;
 });
@@ -367,8 +367,8 @@ const handleSetTitle = handler<
 
 const WeeklyCalendar = pattern<Input, Output>(
   ({ title, events, isCalendar, isHidden }) => {
-    const { allPieces } = wish<{ allPieces: EventPiece[] }>({
-      query: "#default",
+    const pieceRegistry = wish<EventPiece[]>({
+      query: "#pieceRegistry",
     }).result!;
 
     // Reactive #now for date defaults (filled once it resolves; the ambient
@@ -723,7 +723,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                     newEventEndTime,
                     newEventColor,
                     events,
-                    allPieces,
+                    pieceRegistry,
                     usedCreateAnother,
                   })}
                 >
@@ -740,7 +740,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                     newEventColor,
                     showNewEventPrompt,
                     events,
-                    allPieces,
+                    pieceRegistry,
                   })}
                 >
                   Create
@@ -1312,7 +1312,7 @@ const WeeklyCalendar = pattern<Input, Output>(
       isHidden,
       backlinks,
       // LLM-callable streams
-      createEvent: handleCreateEvent({ events, allPieces }),
+      createEvent: handleCreateEvent({ events, pieceRegistry }),
       setTitle: handleSetTitle({ title }),
     };
   },

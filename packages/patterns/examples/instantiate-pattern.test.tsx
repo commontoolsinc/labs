@@ -8,7 +8,7 @@ import Factory, { Counter } from "./instantiate-pattern.tsx";
 // result to Counter — is exercised here by constructing a Counter directly.
 export default pattern(() => {
   const counter = Counter({ value: 3 });
-  const factory = Factory({ allPieces: [] });
+  const factory = Factory({ pieceRegistry: [] });
 
   const assert_counter_reports_its_value = computed(() => counter.value === 3);
   // The name is a computed over the same cell, so it tracks the value.

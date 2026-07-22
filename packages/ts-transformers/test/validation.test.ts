@@ -4384,12 +4384,12 @@ Deno.test("Inline reactive-root chain rewrite", async (t) => {
       const source = `
         import { pattern, wish } from "commonfabric";
 
-        type ResultShape = { allPieces: { id: string }[] };
+        type ResultShape = { pieceRegistry: { id: string }[] };
 
         export default pattern<Record<string, never>>(() => {
-          const { allPieces } =
+          const { pieceRegistry } =
             (wish({ query: "/" }) as { result: ResultShape }).result;
-          return { count: allPieces.length };
+          return { count: pieceRegistry.length };
         });
       `;
       const { diagnostics, output } = await validateSource(source, {

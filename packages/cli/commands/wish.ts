@@ -117,7 +117,7 @@ PROFILE TARGETS (resolve against the IDENTITY's home space; '--space' optional):
   #profileSpace   Its own space cell
 
 OTHER TARGETS (space-relative; pass '--space'):
-  #favorites  #journal  #learned  #mentionable  #recent  /  #allPieces  …
+  #favorites  #journal  #learned  #mentionable  #recent  /  #pieceRegistry  …
 
 ZERO-PROFILE: when no profile exists yet, the wish surfaces an error; this
 command prints it to stderr and exits non-zero (use --allow-empty to instead

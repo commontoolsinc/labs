@@ -2,7 +2,8 @@ import {
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
-import { type Cell, isCell } from "./cell.ts";
+import { isRecord } from "@commonfabric/utils/types";
+import { type Cell, isCell, isStream } from "./cell.ts";
 import type { MemorySpace } from "./storage/interface.ts";
 import type { JSONSchema, Pattern } from "./builder/types.ts";
 import type { Runtime } from "./runtime.ts";
@@ -91,6 +92,33 @@ export function getResultCellWithSourceSchema<T = unknown>(
     }
   }
   return cell;
+}
+
+const DEFAULT_APP_PATTERN_SOURCE = "/api/patterns/system/default-app.tsx";
+
+/**
+ * Identifies a persisted default-app-shaped root that still exposes its piece
+ * registry under the retired field. Provenance-free roots and roots tracking
+ * the official default app qualify; custom sourced roots do not.
+ */
+export function isLegacyPieceRegistryRoot(
+  root: Cell<unknown>,
+): boolean {
+  const patternIdentity = root.getMetaRaw("patternIdentity");
+  const patternSource = root.getMetaRaw("patternSource");
+  if (
+    !isRecord(patternIdentity) ||
+    typeof patternIdentity.identity !== "string" ||
+    typeof patternIdentity.symbol !== "string" ||
+    (patternSource !== undefined &&
+      patternSource !== DEFAULT_APP_PATTERN_SOURCE)
+  ) {
+    return false;
+  }
+
+  return root.key("pieceRegistry").getRaw() === undefined &&
+    root.key("allPieces").getRaw() !== undefined &&
+    isStream(root.key("addPiece").resolveAsCell());
 }
 
 /**

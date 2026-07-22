@@ -6,6 +6,7 @@ import {
   navigateTo,
   pattern,
   patternTool,
+  Stream,
   UI,
   Writable,
 } from "commonfabric";
@@ -47,6 +48,8 @@ export interface PiecesListOutput {
   };
   sidebarUI?: unknown;
   fabUI: unknown;
+  pieceRegistry: MentionablePiece[];
+  addPiece: Stream<{ piece: Writable<MentionablePiece> }>;
 }
 
 const _visit = handler<
@@ -63,20 +66,20 @@ const removePiece = handler<
   Record<string, never>,
   {
     piece: Writable<MinimalPiece>;
-    allPieces: Writable<MinimalPiece[]>;
+    pieceRegistry: Writable<MinimalPiece[]>;
   }
 >((_, state) => {
-  const allPiecesValue = state.allPieces.get();
-  const index = allPiecesValue.findIndex(
+  const registeredPieces = state.pieceRegistry.get();
+  const index = registeredPieces.findIndex(
     (c: any) => c && state.piece.equals(c),
   );
 
   if (index !== -1) {
-    const pieceListCopy = [...allPiecesValue];
+    const pieceListCopy = [...registeredPieces];
     console.log("pieceListCopy before", pieceListCopy.length);
     pieceListCopy.splice(index, 1);
     console.log("pieceListCopy after", pieceListCopy.length);
-    state.allPieces.set(pieceListCopy);
+    state.pieceRegistry.set(pieceListCopy);
   }
 });
 
@@ -149,10 +152,10 @@ const menuQuickCapture = handler<
 // Menu: Daily Journal (singleton)
 const menuDailyJournal = handler<
   void,
-  { menuOpen: Writable<boolean>; allPieces: Writable<MinimalPiece[]> }
->((_, { menuOpen, allPieces }) => {
+  { menuOpen: Writable<boolean>; pieceRegistry: Writable<MinimalPiece[]> }
+>((_, { menuOpen, pieceRegistry }) => {
   menuOpen.set(false);
-  const pieces = allPieces.get();
+  const pieces = pieceRegistry.get();
   const existing = pieces.find((piece: any) => piece?.isJournal === true);
   if (existing) {
     return navigateTo(existing as any);
@@ -160,15 +163,12 @@ const menuDailyJournal = handler<
   return navigateTo(DailyJournal({ title: "Daily Journal" }));
 });
 
-// Handler: Add piece to allPieces if not already present
+// Handler: Add a piece to the registry if not already present.
 const addPiece = handler<
-  { piece: MentionablePiece },
-  { allPieces: Writable<MentionablePiece[]> }
->(({ piece }, { allPieces }) => {
-  const current = allPieces.get();
-  if (!current.some((c) => equals(c, piece))) {
-    allPieces.push(piece);
-  }
+  { piece: Writable<MentionablePiece> },
+  { pieceRegistry: Writable<MentionablePiece[]> }
+>(({ piece }, { pieceRegistry }) => {
+  pieceRegistry.addUnique(piece);
 });
 
 // Handler: Track piece as recently used (add to front, maintain max)
@@ -214,10 +214,29 @@ Knowledge graph:
 
 export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // OWN the data cells (not from wish)
-  const allPieces = new Writable<MentionablePiece[]>([]);
+  const legacyPieceRegistry = new Writable<MentionablePiece[]>([]).for(
+    "allPieces",
+  );
+  const pieceRegistry = new Writable<MentionablePiece[]>([]);
+  // TODO(2026-08-21): Remove the retired allPieces cell and
+  // pieceRegistryMigrationComplete state.
+  const pieceRegistryMigrationComplete = new Writable(false).for(
+    "pieceRegistryMigrationComplete",
+  );
   const recentPieces = new Writable<MentionablePiece[]>([]);
   const suggestionHistory = new Writable<SuggestionHistoryEntry[]>([]);
   const suggestionHistoryViewer = SuggestionHistory({});
+
+  // Copy the retired owned cell into the new registry once. Existing canonical
+  // state wins when both cells contain data.
+  computed(() => {
+    if (pieceRegistryMigrationComplete.get()) return;
+    const legacyPieces = legacyPieceRegistry.get();
+    if (legacyPieces.length > 0 && pieceRegistry.get().length === 0) {
+      pieceRegistry.set([...legacyPieces]);
+    }
+    pieceRegistryMigrationComplete.set(true);
+  });
 
   // Dropdown menu state
   const menuOpen = new Writable(false);
@@ -226,7 +245,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // (prevents transient hash-only pills during reactive updates)
   // NOTE: Use truthy check, not === true, because piece.isHidden is a proxy object
   const visiblePieces = computed(() =>
-    allPieces.get().filter((piece) => {
+    pieceRegistry.get().filter((piece) => {
       if (!piece) return false;
       if (piece.isHidden) return false;
       const name = piece?.[NAME];
@@ -237,18 +256,18 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   const doListItems = new Writable<any[]>([]);
   const doList = DoList({ items: doListItems });
 
-  // Combine user-managed allPieces with system pieces (like doList) so
+  // Combine registered pieces with system pieces (like doList) so
   // BacklinksIndex picks up their mentionable items.
-  const allPiecesWithSystem = computed(() => [
-    ...allPieces.get(),
+  const piecesWithSystem = computed(() => [
+    ...pieceRegistry.get(),
     doList as any,
   ]);
 
-  const index = BacklinksIndex({ allPieces: allPiecesWithSystem });
+  const index = BacklinksIndex({ pieceRegistry: piecesWithSystem });
   const summaryIdx = SummaryIndex({});
   const knowledgeGraph = KnowledgeGraph({});
 
-  const quickCapture = QuickCapture({ allPieces });
+  const quickCapture = QuickCapture({ pieceRegistry });
 
   const fab = OmniboxFAB({
     mentionable: index.mentionable,
@@ -428,7 +447,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
               </cf-button>
               <cf-button
                 variant="ghost"
-                onClick={menuDailyJournal({ menuOpen, allPieces })}
+                onClick={menuDailyJournal({ menuOpen, pieceRegistry })}
                 style={{ justifyContent: "flex-start" }}
               >
                 {"\u00A0\u00A0"}📅 Daily Journal
@@ -523,7 +542,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                             <cf-button
                               size="sm"
                               variant="ghost"
-                              onClick={removePiece({ piece, allPieces })}
+                              onClick={removePiece({ piece, pieceRegistry })}
                             >
                               🗑️
                             </cf-button>
@@ -542,12 +561,12 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     fabUI: fab[UI],
 
     // Exported data
-    allPieces,
+    pieceRegistry,
     recentPieces,
     suggestionHistory,
 
     // Exported handlers (bound to state cells for external callers)
-    addPiece: addPiece({ allPieces }),
+    addPiece: addPiece({ pieceRegistry }),
     trackRecent: trackRecent({ recentPieces }),
     recordSuggestion: recordSuggestion({ suggestionHistory }),
     pinToChat: fab.pinToChat,

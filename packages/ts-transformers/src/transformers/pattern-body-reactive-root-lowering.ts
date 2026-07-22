@@ -1205,12 +1205,12 @@ function hasLocalOpaqueOriginBinding(
  * Source shapes handled:
  *   const x = wish(...).result
  *     => const { result: x } = wish(...)
- *   const x = wish(...).result.allPieces
- *     => const { result: { allPieces: x } } = wish(...)
+ *   const x = wish(...).result.pieceRegistry
+ *     => const { result: { pieceRegistry: x } } = wish(...)
  *   const { x } = wish(...).result
  *     => const { result: { x } } = wish(...)
- *   const { x } = wish(...).result.allPieces
- *     => const { result: { allPieces: { x } } } = wish(...)
+ *   const { x } = wish(...).result.pieceRegistry
+ *     => const { result: { pieceRegistry: { x } } } = wish(...)
  *
  * Non-null assertions inside the chain are dropped (they have no runtime
  * effect). Casts and parens at the root of the chain are preserved.

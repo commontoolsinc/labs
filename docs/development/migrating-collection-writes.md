@@ -111,18 +111,20 @@ type receives a proxy, and `addUnique` on it silently duplicates:
 // Shown for illustration only.
 // The event field is a plain type, so `piece` arrives as a proxy and this
 // never dedups.
-handler<{ piece: MentionablePiece }, { allPieces: Writable<MentionablePiece[]> }>(
-  ({ piece }, { allPieces }) => {
-    allPieces.addUnique(piece);
+handler<
+  { piece: MentionablePiece },
+  { pieceRegistry: Writable<MentionablePiece[]> }
+>(({ piece }, { pieceRegistry }) => {
+    pieceRegistry.addUnique(piece);
   },
 );
 
 // Declaring the field as a cell makes the same call compare by link.
 handler<
   { piece: Writable<MentionablePiece> },
-  { allPieces: Writable<MentionablePiece[]> }
->(({ piece }, { allPieces }) => {
-  allPieces.addUnique(piece);
+  { pieceRegistry: Writable<MentionablePiece[]> }
+>(({ piece }, { pieceRegistry }) => {
+  pieceRegistry.addUnique(piece);
 });
 ```
 

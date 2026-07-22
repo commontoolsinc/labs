@@ -2,10 +2,14 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   getPatternIdentityRef,
+  isLink,
   resolveEntryIdentity,
   Runtime,
 } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  EmulatedStorageManager,
+} from "@commonfabric/runner/storage/cache.deno";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PieceManager } from "../src/manager.ts";
 import {
@@ -24,33 +28,82 @@ import {
 
 const signer = await Identity.fromPassphrase("default-app golden replay");
 
-// A default-app-SHAPED root: it OWNS a `pieces` list via `new Writable([])` —
-// exactly how default-app owns `allPieces` — and derives a reactive `summary`
-// from it. The list is kept at the same stable position across versions, so a
-// correct in-place swap must carry the seeded pieces across untouched (owned
-// cells are addressed by a stable cause, not by pattern identity).
-//
-// `version` is the ONLY authored difference between V1 and V2, and it lives
-// INSIDE the reactive `summary` closure — re-instantiation re-wires reactive
-// nodes (not static result literals), so a version marker only shows through the
-// swap if the new code's own computation runs. `summary` therefore proves two
-// things at once: the new code is live, and it can read the state seeded under
-// the old code.
-const rootSource = (version: string) =>
-  [
-    "import { pattern, computed, Writable } from 'commonfabric';",
-    "export default pattern<void>(() => {",
-    "  const pieces = new Writable<string[]>([]);",
-    "  return {",
-    "    pieces,",
-    `    summary: computed(() => \`${version}:\` + pieces.get().length),`,
-    "  };",
-    "});",
-    "",
-  ].join("\n");
+const EMULATED_AUDIENCE = "did:key:z6Mk-runner-emulated-memory";
 
-const ROOT_V1 = rootSource("v1");
-const ROOT_V2 = rootSource("v2");
+function newSharedServer(): MemoryV2Server.Server {
+  return new MemoryV2Server.Server({
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: { audience: EMULATED_AUDIENCE },
+  });
+}
+
+class SharedServerStorageManager extends EmulatedStorageManager {
+  static connectTo(
+    server: MemoryV2Server.Server,
+  ): SharedServerStorageManager {
+    const manager = new SharedServerStorageManager(
+      // deno-lint-ignore no-explicit-any
+      { as: signer, memoryHost: new URL("memory://") } as any,
+      () => server,
+    );
+    manager.#sharedServer = server;
+    return manager;
+  }
+
+  #sharedServer!: MemoryV2Server.Server;
+
+  protected override server(): MemoryV2Server.Server {
+    return this.#sharedServer;
+  }
+}
+
+// A default-app-shaped root before and after the registry rename. V2 keeps the
+// old owned-cell cause privately and migrates its contents into the new cell
+// once.
+const ROOT_V1 = [
+  "import { pattern, computed, Writable } from 'commonfabric';",
+  "interface Profile { name: string; }",
+  "interface Input { label?: string; profile?: Profile; }",
+  "export default pattern<Input>(() => {",
+  "  const allPieces = new Writable<string[]>([]);",
+  "  return {",
+  "    allPieces,",
+  "    summary: computed(() => `v1:` + allPieces.get().length),",
+  "  };",
+  "});",
+  "",
+].join("\n");
+
+const ROOT_V2 = [
+  "import { Default, pattern, computed, Writable } from 'commonfabric';",
+  "interface Profile { name: string; }",
+  "interface Input { label?: string; profile: Profile; count: number | Default<2>; }",
+  "export default pattern<Input>(({ profile }) => {",
+  "  const legacyPieceRegistry = new Writable<string[]>([]).for('allPieces');",
+  "  const pieceRegistry = new Writable<string[]>([]);",
+  "  const pieceRegistryMigrationComplete = new Writable(false).for(",
+  "    'pieceRegistryMigrationComplete'",
+  "  );",
+  "  computed(() => {",
+  "    if (pieceRegistryMigrationComplete.get()) return;",
+  "    const legacyPieces = legacyPieceRegistry.get();",
+  "    if (legacyPieces.length > 0 && pieceRegistry.get().length === 0) {",
+  "      pieceRegistry.set([...legacyPieces]);",
+  "    }",
+  "    pieceRegistryMigrationComplete.set(true);",
+  "  });",
+  "  return {",
+  "    pieceRegistry,",
+  "    summary: computed(() => `v2:` + pieceRegistry.get().length),",
+  "    profileName: computed(() => profile.name),",
+  "  };",
+  "});",
+  "",
+].join("\n");
 
 const SEEDED_PIECES = ["note:groceries", "note:standup", "notebook:trip"];
 
@@ -104,7 +157,8 @@ function installFetchStub(): StubControls {
 
 describe("default-app golden replay (state survives an in-place roll-forward)", () => {
   let stub: StubControls;
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let server: MemoryV2Server.Server;
+  let storageManager: SharedServerStorageManager;
   let runtime: Runtime;
   let manager: PieceManager;
   let controller: PiecesController;
@@ -112,7 +166,8 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
   beforeEach(async () => {
     stub = installFetchStub();
     stub.setSource(ROOT_V1);
-    storageManager = StorageManager.emulate({ as: signer });
+    server = newSharedServer();
+    storageManager = SharedServerStorageManager.connectTo(server);
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
@@ -132,10 +187,11 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
       await controller?.dispose();
     } catch { /* already disposed */ }
     await storageManager?.close();
+    await server?.close();
     stub.restore();
   });
 
-  it("carries seeded state across the N→N+1 swap without crashing", async () => {
+  it("migrates legacy state once without restoring removed pieces", async () => {
     // N: instantiate the default-app-shaped root.
     const piece = await controller.ensureDefaultPattern();
     const root = piece.getCell();
@@ -155,13 +211,14 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
       summary = value;
     });
 
-    // Seed representative state: add "pieces" to the running root, the way a
+    // Seed representative state: add pieces to the running root, the way a
     // user filling a fresh space would, and confirm they landed durably.
     await runtime.editWithRetry((tx) => {
-      root.withTx(tx).key("pieces").set([...SEEDED_PIECES]);
+      root.withTx(tx).key("allPieces").set([...SEEDED_PIECES]);
     });
+    await piece.setInput({ profile: { name: "warm" } });
     await runtime.idle();
-    expect(root.key("pieces").get()).toEqual(SEEDED_PIECES);
+    expect(root.key("allPieces").get()).toEqual(SEEDED_PIECES);
     // V1's reactive summary sees the seeded state.
     expect(summary).toBe("v1:" + SEEDED_PIECES.length);
 
@@ -174,6 +231,21 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     await runtime.idle();
     const rolled = (await manager.getDefaultPattern(false))!;
     await rolled.pull();
+
+    const registryRoot = rolled.asSchema(
+      {
+        type: "object",
+        properties: {
+          pieceRegistry: { type: "array", items: { type: "string" } },
+        },
+      } as const,
+    );
+    let pieceRegistry: unknown;
+    const cancelPieceRegistrySink = registryRoot.key("pieceRegistry").sink(
+      (value) => {
+        pieceRegistry = value;
+      },
+    );
     await runtime.idle();
 
     // Same piece entity — the root was rewritten in place, not re-minted.
@@ -184,15 +256,195 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     expect(idV2).toBe(await identityForSource(ROOT_V2));
     expect(idV2).not.toBe(idV1);
 
-    // The crux: the state seeded under V1 survived the swap, intact and in
-    // order. No crash, no loss.
-    expect(rolled.key("pieces").get()).toEqual(SEEDED_PIECES);
-
-    // And the NEW code is actually running over that survived state: the V2
-    // computation (`v2:`, not `v1:`) reports the seeded count. One assertion,
-    // both properties — new code live + old state readable by it.
+    // The new computation proves that V2 is running before we inspect the
+    // migrated state.
     expect(summary).toBe("v2:" + SEEDED_PIECES.length);
 
+    // The crux: the state seeded under V1 survived the swap, intact and in
+    // order. No crash, no loss.
+    expect(pieceRegistry).toEqual(SEEDED_PIECES);
+
+    // Emptying the canonical registry later is intentional user state. The
+    // completed migration must not restore entries from the retained old cell.
+    await runtime.editWithRetry((tx) => {
+      rolled.withTx(tx).key("pieceRegistry").set([]);
+    });
+    await runtime.idle();
+    expect(pieceRegistry).toEqual([]);
+    expect(summary).toBe("v2:0");
+
+    cancelPieceRegistrySink();
     cancelSink();
+  });
+
+  it("migrates the legacy registry before a cold root starts", async () => {
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    const profilePattern = await runtime.patternManager.compilePattern(
+      {
+        main: "/cold-update-profile.tsx",
+        files: [{
+          name: "/cold-update-profile.tsx",
+          contents: [
+            "import { pattern } from 'commonfabric';",
+            "export default pattern<void>(() => ({ name: 'Ada' }));",
+            "",
+          ].join("\n"),
+        }],
+      },
+      { space: manager.getSpace() },
+    );
+    const profile = await manager.runPersistent<{ name: string }>(
+      profilePattern,
+      {},
+      "cold update profile",
+    );
+    await runtime.editWithRetry((tx) => {
+      root.withTx(tx).key("allPieces").set([...SEEDED_PIECES]);
+    });
+    await piece.setInput({ label: "durable", profile });
+    const storedProfile = (manager.getArgument(root).getRawUntyped() as {
+      profile?: unknown;
+    }).profile;
+    expect(isLink(storedProfile)).toBe(true);
+    await runtime.idle();
+    await manager.synced();
+    await manager.stopPiece(root);
+
+    stub.setSource(ROOT_V2);
+    const session = await createSession({
+      identity: signer,
+      spaceName: manager.getSpaceName()!,
+    });
+    const readerStorage = SharedServerStorageManager.connectTo(server);
+    const freshRuntime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager: readerStorage,
+      experimental: { systemPatternAutoUpdate: true },
+    });
+    const freshManager = new PieceManager(session, freshRuntime);
+    const freshController = new PiecesController(freshManager);
+    let cancelPieceRegistrySink: (() => void) | undefined;
+
+    try {
+      await freshManager.synced();
+      const profileLink = profile.getAsNormalizedFullLink();
+      const readerReplica = readerStorage.open(
+        manager.getSpace(),
+      ) as unknown as {
+        get?: (uri: string, scope?: unknown) => unknown;
+      };
+      expect(
+        readerReplica.get?.(profileLink.id, profileLink.scope),
+      ).toBeUndefined();
+      const coldRoot = await freshManager.getDefaultPattern(false);
+      expect(coldRoot).toBeDefined();
+      expect(
+        await freshController.checkAndUpdateDefaultPattern(coldRoot),
+      ).toBe("updated");
+      expect(
+        readerReplica.get?.(profileLink.id, profileLink.scope),
+      ).toBeDefined();
+      const updated = await freshController.ensureDefaultPattern();
+      const updatedRoot = updated.getCell().asSchema(
+        {
+          type: "object",
+          properties: {
+            pieceRegistry: { type: "array", items: { type: "string" } },
+          },
+        } as const,
+      );
+
+      let pieceRegistry: unknown;
+      cancelPieceRegistrySink = updatedRoot.key("pieceRegistry").sink(
+        (value) => {
+          pieceRegistry = value;
+        },
+      );
+      await freshRuntime.idle();
+
+      expect(getPatternIdentityRef(updatedRoot)?.identity).toBe(
+        await identityForSource(ROOT_V2),
+      );
+      expect(pieceRegistry).toEqual(SEEDED_PIECES);
+      const updatedArgument = freshManager.getArgument(updatedRoot);
+      await updatedArgument.pull();
+      expect(updatedArgument.get()).toEqual({
+        label: "durable",
+        profile: { name: "Ada" },
+        count: 2,
+      });
+    } finally {
+      cancelPieceRegistrySink?.();
+      await freshController.dispose();
+      await readerStorage.close();
+    }
+  });
+
+  it("repairs a metadata-only roll-forward to the current pattern", async () => {
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    await piece.setInput({ profile: { name: "warm" } });
+    await runtime.editWithRetry((tx) => {
+      root.withTx(tx).key("allPieces").set([...SEEDED_PIECES]);
+    });
+    await runtime.idle();
+    await manager.stopPiece(root);
+
+    stub.setSource(ROOT_V2);
+    const currentPattern = await runtime.patternManager.compilePattern(
+      {
+        main: DEFAULT_APP_PATTERN_URL,
+        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: ROOT_V2 }],
+      },
+      { space: manager.getSpace() },
+    );
+    const currentRef = runtime.patternManager.getArtifactEntryRef(
+      currentPattern,
+    )!;
+    expect(currentRef.identity).toBe(await identityForSource(ROOT_V2));
+    expect(
+      (currentPattern.resultSchema as { required?: string[] }).required,
+    ).toContain("pieceRegistry");
+
+    // Reproduce the updater that advanced only patternIdentity. The persisted
+    // root still carries V1's stored schema and projection.
+    const metadataUpdate = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", currentRef);
+    });
+    expect(metadataUpdate.error).toBeUndefined();
+    const metadataOnlyRoot = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(metadataOnlyRoot)).toEqual(currentRef);
+    expect(metadataOnlyRoot.getMetaRaw("schema")).not.toEqual(
+      currentPattern.resultSchema,
+    );
+    await manager.startPiece(metadataOnlyRoot);
+    expect(metadataOnlyRoot.key("pieceRegistry").getRaw()).toBeUndefined();
+
+    const outcome = await controller.checkAndUpdateDefaultPattern(
+      metadataOnlyRoot,
+    );
+    await runtime.idle();
+
+    const repairedRoot = metadataOnlyRoot.asSchema(
+      {
+        type: "object",
+        properties: {
+          pieceRegistry: { type: "array", items: { type: "string" } },
+        },
+      } as const,
+    );
+    let pieceRegistry: unknown;
+    const cancelPieceRegistrySink = repairedRoot.key("pieceRegistry").sink(
+      (value) => {
+        pieceRegistry = value;
+      },
+    );
+    await repairedRoot.pull();
+    await runtime.idle();
+
+    expect(pieceRegistry).toEqual(SEEDED_PIECES);
+    expect(outcome).toBe("updated");
+    cancelPieceRegistrySink();
   });
 });

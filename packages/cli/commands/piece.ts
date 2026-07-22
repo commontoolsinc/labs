@@ -728,7 +728,7 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
     "link",
     `Link a field from one piece to another for reactive data flow.
 
-WELL-KNOWN IDS: System-level data (like allPieces) can be linked using
+WELL-KNOWN IDS: System-level data (like pieceRegistry) can be linked using
 well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
   )
   .usage(spaceUsage)
@@ -752,9 +752,9 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
   )
   .example(
     cliText(
-      `cf piece link ${EX_ID} ${EX_COMP} fid1:abc123 fid1:piece1/allPieces`,
+      `cf piece link ${EX_ID} ${EX_COMP} fid1:abc123 fid1:piece1/pieceRegistry`,
     ),
-    `Link well-known "allPieces" list to a piece field.`,
+    `Link the well-known "pieceRegistry" list to a piece field.`,
   )
   .example(
     cliText(

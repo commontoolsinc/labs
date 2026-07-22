@@ -154,9 +154,9 @@ export class PiecesController<T = unknown> {
     return new PieceController(this.#manager, cell);
   }
 
-  async getAllPieces() {
+  async getRegisteredPieces() {
     this.disposeCheck();
-    const piecesCell = await this.#manager.getPieces();
+    const piecesCell = await this.#manager.getPieceRegistry();
     const pieces = await this.#manager.syncPieces(piecesCell);
     return pieces.map((piece) =>
       new PieceController(this.#manager, piece.asSchema(undefined))
