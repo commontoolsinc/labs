@@ -9,6 +9,7 @@ import {
   defineFixtureSuite,
 } from "@commonfabric/test-support/fixture-runner";
 import {
+  JsonEncodingContext,
   jsonFromValue,
   valueFromJson,
 } from "@commonfabric/data-model/codec-json";
@@ -30,9 +31,6 @@ interface SchemaResult {
 
 const TYPE_NAME = "SchemaRoot";
 const FIXTURES_ROOT = "./test/fixtures/schema";
-
-/** Encoding tag that precedes the JSON body of a fabric-encoded value. */
-const FVJ1_PREFIX = "fvj1:";
 
 // Environment variable filtering for faster iteration
 const fixtureFilter = Deno.env.get("FIXTURE");
@@ -186,20 +184,26 @@ async function runSchemaTransform(inputPath: string): Promise<SchemaResult> {
  * and the failure is silent: the golden and the buggy output agree. The fabric
  * encoding carries them as `/SpecialNumber@1` tagged objects instead.
  *
- * The `fvj1:` prefix identifies the encoding on the wire but is not part of the
- * JSON, so it cannot survive pretty-printing; it lives here in the harness and
- * is re-attached on the way back in. Key order needs no help: a conforming
+ * The encoding's prefix tag identifies it on the wire but is not part of the
+ * JSON, so it cannot survive pretty-printing. Taking it off and putting it back
+ * goes through `JsonEncodingContext`'s test-only helpers, which is what keeps
+ * the tag defined in exactly one place. Key order needs no help: a conforming
  * encoder emits plain-object keys in canonical order.
  */
 function encodeGolden(value: unknown): string {
-  const encoded = jsonFromValue(value as FabricValue);
-  const body = JSON.parse(encoded.slice(FVJ1_PREFIX.length));
+  const body = JSON.parse(
+    JsonEncodingContext.unwrapEncodedValueForTesting(
+      jsonFromValue(value as FabricValue),
+    ),
+  );
   return JSON.stringify(body, null, 2) + "\n";
 }
 
 /** Inverse of {@link encodeGolden}. */
 function decodeGolden(text: string): unknown {
-  return valueFromJson(FVJ1_PREFIX + text.trim());
+  return valueFromJson(
+    JsonEncodingContext.wrapEncodedValueForTesting(text.trim()),
+  );
 }
 
 async function writeText(path: string, data: string) {
