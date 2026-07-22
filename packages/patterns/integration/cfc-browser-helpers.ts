@@ -155,11 +155,6 @@ const fillAndVerify = async (
     return false;
   }
 
-  phase("scrolling");
-  input.scrollIntoView({ block: "center", inline: "center" });
-  await new Promise((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(resolve))
-  );
   // Rendered, not on-screen: the fill drives the field through focus and
   // dispatched events rather than a coordinate click, so its viewport position
   // never bears on whether the value takes.
@@ -211,27 +206,23 @@ const fillAndVerify = async (
   return verified;
 };
 
-// Scroll the cf-button behind `selector` into view and tag its inner click
-// target so the test can resolve and click exactly that element. A click target
-// that is still detached, or not rendered — laid out, and not display:none or
+// Tag the inner click target of the cf-button behind `selector` so the test can
+// resolve and click exactly that element. A click target that is still
+// detached, or not rendered — laid out, and not display:none or
 // visibility:hidden — is left untagged, so a re-check on the next DOM mutation
 // retries the mark once the control renders. The check is viewport-independent:
 // the click scrolls the element into view itself, so a control below the fold
 // is markable. It reads the click target alone because hiding the host or any
 // ancestor reaches the inner button either way: display:none zeroes its box,
 // and visibility:hidden inherits into its computed visibility.
-const markForClick = async (
+const markForClick = (
   probe: ProbeApi,
   selector: string,
   token: string,
   attr: string,
-): Promise<boolean> => {
+): boolean => {
   const target = probe.collect(selector)[0] as HTMLElement | undefined;
   if (!target) return false;
-  target.scrollIntoView({ block: "center", inline: "center" });
-  await new Promise((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(resolve))
-  );
   const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
     | HTMLElement
     | null) ?? target;
@@ -240,26 +231,21 @@ const markForClick = async (
   return true;
 };
 
-// Scroll the `index`-th element matching `selector` into view and tag it once it
-// is rendered. Unlike `markForClick`, the selector here already resolves to the
-// clickable elements, so the match is tagged directly rather than reached
-// through a host's shadow root. The check is viewport-independent for the same
-// reason as `markForClick`: the click scrolls the element into view itself, so
-// requiring it on-screen at tagging time only invites a wait that never
-// satisfies.
-const markNthForClick = async (
+// Tag the `index`-th element matching `selector` once it is rendered. Unlike
+// `markForClick`, the selector here already resolves to the clickable elements,
+// so the match is tagged directly rather than reached through a host's shadow
+// root. The check is viewport-independent for the same reason as `markForClick`:
+// the click scrolls the element into view itself, so requiring it on-screen at
+// tagging time only invites a wait that never satisfies.
+const markNthForClick = (
   probe: ProbeApi,
   selector: string,
   index: number,
   token: string,
   attr: string,
-): Promise<boolean> => {
+): boolean => {
   const target = probe.collect(selector)[index] as HTMLElement | undefined;
   if (!target) return false;
-  target.scrollIntoView({ block: "center", inline: "center" });
-  await new Promise((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(resolve))
-  );
   if (!target.isConnected || !probe.isRendered(target)) return false;
   target.setAttribute(attr, token);
   return true;
@@ -273,22 +259,18 @@ const markNthForClick = async (
 // on-screen requirement, since the trusted click scrolls the target into view
 // before dispatching. Disabled-ness is asked of both, because a host can carry
 // an `aria-disabled` its inner control does not.
-const markTrustedAction = async (
+const markTrustedAction = (
   probe: ProbeApi,
   action: string,
   token: string,
   attr: string,
-): Promise<boolean> => {
+): boolean => {
   const isDisabled = (element: HTMLElement): boolean =>
     element.hasAttribute("disabled") ||
     element.getAttribute("aria-disabled") === "true";
 
   for (const element of probe.collect(`[data-ui-action="${action}"]`)) {
     const target = element as HTMLElement;
-    target.scrollIntoView({ block: "center", inline: "center" });
-    await new Promise((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(resolve))
-    );
     const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
       | HTMLElement
       | null) ?? target;
@@ -329,7 +311,7 @@ const markTrustedAction = async (
 // Resolve once the shell's reactive view has caught up to runtime state and is
 // interactive, so a click lands on a bound handler. Waits for the shell to
 // expose `viewSettled` (notification-driven), then awaits the settle.
-async function settleView(
+export async function settleView(
   page: Page,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ): Promise<void> {
