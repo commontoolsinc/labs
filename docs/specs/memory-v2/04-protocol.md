@@ -47,10 +47,11 @@ The client MUST declare its protocol version in the first WebSocket message:
 ```json
 {
   "type": "hello",
-  "protocol": "memory/v2",
+  "protocol": "memory",
   "flags": {
     "modernCellRep": true,
-    "persistentSchedulerState": true
+    "persistentSchedulerState": true,
+    "syncSchemaTableV2": true
   }
 }
 ```
@@ -60,10 +61,11 @@ If the server accepts the protocol, it returns:
 ```json
 {
   "type": "hello.ok",
-  "protocol": "memory/v2",
+  "protocol": "memory",
   "flags": {
     "modernCellRep": true,
-    "persistentSchedulerState": true
+    "persistentSchedulerState": true,
+    "syncSchemaTableV2": true
   },
   "sessionOpen": {
     "audience": "did:key:z6Mk...",
@@ -128,6 +130,13 @@ a client and server may connect when their scheduler-state flags differ, and
 the server's flag controls the scheduler-observation data plane for that
 connection.
 
+`syncSchemaTableV2` advertises support for the hash-keyed schema table described
+in [Session Sync Payload](#423-session-sync-payload). It defaults to `false`
+when absent. The server sends compact sync payloads only when both peers
+advertise the capability; otherwise it sends the historical fully expanded
+shape. The older `syncSchemaTable` flag names an incompatible, index-keyed draft
+and does not enable the v2 encoding.
+
 ### 4.1.2 Logical Sessions and Resume
 
 Pending-read resolution, idempotent replay, and live sync are scoped to a
@@ -159,7 +168,7 @@ interface SessionOpenInvocation {
   sub: SpaceId;
   aud: DID;
   args: {
-    protocol: "memory/v2";
+    protocol: "memory";
     session: {
       sessionId?: SessionId;
       seenSeq?: number;
@@ -229,10 +238,11 @@ semantic commit body. Per-commit signed UCAN envelopes remain deferred.
 // Shown at module scope.
 interface HelloMessage {
   type: "hello";
-  protocol: "memory/v2";
+  protocol: "memory";
   flags: {
     modernCellRep: boolean;
     persistentSchedulerState?: boolean;
+    syncSchemaTableV2?: boolean;
   };
 }
 
@@ -315,6 +325,80 @@ Semantics:
 - `deleted: true` means the entity is currently tombstoned
 - `removes` are not deletions in storage; they mean the entity is no longer in
   the session's relevant watch-set result
+
+#### Negotiated schema-table encoding
+
+When both peers advertise `syncSchemaTableV2`, the server MAY compact a
+server-to-client `SessionSync` carried by `response.ok.sync` or
+`session/effect.effect`. For each JSON Schema attached to a modern `link@1`
+payload, it:
+
+1. computes the canonical tagged schema hash
+2. replaces the inline schema with `schema-ref@2:<tagged-hash>`
+3. adds the interned schema to a frame-local `schemaTable` keyed by that
+   hash (structurally equal to the inline schema; its serialized key order is
+   not guaranteed canonical — only the hash is)
+
+For example, the compact wire form can contain:
+
+```json
+{
+  "type": "sync",
+  "fromSeq": 10,
+  "toSeq": 11,
+  "upserts": [{
+    "branch": "",
+    "id": "of:example",
+    "seq": 11,
+    "doc": {
+      "value": {
+        "contact": {
+          "/": {
+            "link@1": {
+              "id": "of:contact",
+              "path": [],
+              "schema": "schema-ref@2:fid1:..."
+            }
+          }
+        }
+      }
+    }
+  }],
+  "removes": [],
+  "schemaTable": {
+    "fid1:...": {
+      "type": "object",
+      "properties": { "name": { "type": "string" } }
+    }
+  }
+}
+```
+
+The table is scoped to one sync payload, not to a connection or logical
+session. A client MUST resolve every `schema-ref@2:` before exposing the sync to
+the session cache. It MUST reject a reference when the table is missing the key
+or when hashing the referenced table value does not reproduce the key. It MUST
+also reject a sync whose documents still carry a reserved reference at a
+recognized schema position after expansion — a reference the client does not
+interpret must fail the frame rather than reach the session cache as data.
+After expansion, downstream consumers observe the historical `SessionSync`
+shape with inline schemas and no `schemaTable` field.
+
+Earlier revisions of this encoding also interned the `schema` field of
+`$alias` records. Those records are Pattern-binding vocabulary, not links —
+their `schema` field is binding metadata — and saved patterns continue to
+carry them, so current servers leave alias schemas inline. Clients deployed
+against the earlier revision continue to expand references at alias schema
+positions, so those positions remain covered by the reservation rule below.
+
+The `schema-ref@2:` prefix is reserved in the `schema` field of `link@1` and
+legacy `$alias` payloads. Link recognition follows the canonical cell-rep
+form — in the legacy representation, the single-key `{ "/": { "link@1": … } }`
+envelope — so an envelope carrying sibling keys is not a link and its contents
+are ordinary data. Memory servers MUST reject set or patch operations
+whose resulting stored document uses that prefix as an opaque schema string in
+a recognized schema position; ordinary strings in other document positions are
+unaffected.
 
 ### 4.2.4 Batching
 
