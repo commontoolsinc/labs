@@ -3,7 +3,7 @@
 // runs and the token-gated tiles get an empty env (their gray-out contract).
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Ctx, Run } from "./types.ts";
-import { LOOM_REPO, REPO, TRUST_COLS } from "./config.ts";
+import { LOOM_REPO, REPO } from "./config.ts";
 import { labsCi, loomCi } from "./tiles/main-build.ts";
 import { labsCiTrust, loomCiTrust } from "./tiles/ci-trust.ts";
 import { labsCiDuration, loomCiDuration } from "./tiles/ci-duration.ts";
@@ -90,21 +90,50 @@ Deno.test("labs ci trust: only first-attempt success counts as green", async () 
   const v = await labsCiTrust.collect(ctx(runs));
   assertEquals(v.value, "50.0%");
   assertEquals(v.status, "bad");
+  assertEquals(v.sub, "first-try green · last 4 runs");
 });
 
-Deno.test("labs ci trust grid: cell count is a whole number of rows (no half-empty final row)", async () => {
-  const runs = Array.from(
-    { length: 130 },
-    () => run({ conclusion: "success" }),
-  );
-  const cells =
-    ((await labsCiTrust.collect(ctx(runs))).extra ?? "").match(/class="cell"/g)
-      ?.length ?? 0;
-  assert(
-    cells > 0 && cells % TRUST_COLS === 0,
-    `expected a multiple of ${TRUST_COLS}, got ${cells}`,
-  );
-  assertEquals(cells, 120); // floor(130 / 40) * 40
+Deno.test(
+  "labs ci trust grid: every run in the latest 200-run window has a cell",
+  async () => {
+    const runs = [
+      run({ status: "in_progress", conclusion: null }),
+      ...Array.from({ length: 199 }, () => run({ conclusion: "success" })),
+      run({ conclusion: "failure" }),
+    ];
+    const view = await labsCiTrust.collect(ctx(runs));
+    const cells = (view.extra ?? "").match(/class="cell"/g)?.length ?? 0;
+    assertEquals(cells, 200);
+    assertEquals(
+      view.sub,
+      "first-try green · 199 counted of last 200 runs",
+    );
+    assert(
+      !(view.extra ?? "").includes("#e2504a"),
+      "the 201st run must be outside the grid and percentage window",
+    );
+  },
+);
+
+Deno.test("labs ci trust grid: cell colors match trust scoring", async () => {
+  const runs = [
+    run({ conclusion: "success", run_attempt: 1 }),
+    run({ conclusion: "success", run_attempt: 2 }),
+    run({ conclusion: "failure" }),
+    run({ conclusion: "cancelled" }),
+    run({ status: "in_progress", conclusion: null }),
+    run({ status: "queued", conclusion: null }),
+    run({ status: "completed", conclusion: null }),
+  ];
+  const view = await labsCiTrust.collect(ctx(runs));
+  const colors = [
+    ...(view.extra ?? "").matchAll(/background:(#[0-9a-f]+)/g),
+  ].map((match) => match[1]);
+  assertEquals(view.value, "25.0%");
+  assertEquals(colors.filter((color) => color === "#43c574").length, 1);
+  assertEquals(colors.filter((color) => color === "#e2504a").length, 3);
+  assertEquals(colors.filter((color) => color === "#6ea8fe").length, 1);
+  assertEquals(colors.filter((color) => color === "#7c828c").length, 2);
 });
 
 Deno.test("ci-duration window: the 6h window when it has >= 20 runs, else the most recent 20", async () => {
