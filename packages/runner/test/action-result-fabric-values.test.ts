@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import {
   FabricBytes,
+  FabricEpochNsec,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -145,12 +146,10 @@ function expectActionValues(value: ActionValues, expectError = true): void {
   expect(Object.is(value.negativeZero, -0)).toBe(true);
   expect(value.symbol).toBe(Symbol.for("action-result-fabric-value"));
 
-  // Explicit downstream carve-out: the SES action boundary invokes the
-  // intrinsic Date `toJSON()` before runner validation sees the result, so a
-  // Date currently participates in this battery as its stable ISO string.
-  // This is not a validator re-narrowing; direct data-model conversion still
-  // materializes native Date as FabricEpochNsec.
-  expect(value.date).toBe("2026-07-21T12:34:56.789Z");
+  expect(value.date).toBeInstanceOf(FabricEpochNsec);
+  expect((value.date as FabricEpochNsec).value).toBe(
+    1_784_637_296_789_000_000n,
+  );
   expect(value.regexp).toBeInstanceOf(FabricRegExp);
   expect((value.regexp as FabricRegExp).source).toBe("fabric-values");
   expect((value.regexp as FabricRegExp).flags).toBe("gi");

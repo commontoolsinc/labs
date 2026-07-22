@@ -1,8 +1,106 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import {
+  FabricBytes,
+  FabricEpochNsec,
+  FabricRegExp,
+} from "@commonfabric/data-model/fabric-primitives";
 import { validateAndCheckReactives } from "../src/runner.ts";
 import { isReactiveMarker } from "../src/builder/types.ts";
+import { normalizeSandboxResult } from "../src/sandbox/result-normalization.ts";
+
+describe("normalizeSandboxResult", () => {
+  it("canonicalizes native leaves into Fabric values", () => {
+    const input = {
+      bytes: new Uint8Array([1, 2, 3]),
+      date: new Date(1_234),
+      regexp: /fabric/gi,
+      error: new TypeError("fabric"),
+    };
+
+    const normalized = normalizeSandboxResult(input);
+    const value = normalized.value as Record<string, unknown>;
+    expect(normalized.hasReactive).toBe(false);
+    expect(value).not.toBe(input);
+    expect(Object.isFrozen(value)).toBe(true);
+    expect(value.bytes).toBeInstanceOf(FabricBytes);
+    expect(Array.from((value.bytes as FabricBytes).slice())).toEqual([1, 2, 3]);
+    expect(value.date).toBeInstanceOf(FabricEpochNsec);
+    expect((value.date as FabricEpochNsec).value).toBe(1_234_000_000n);
+    expect(value.regexp).toBeInstanceOf(FabricRegExp);
+    expect((value.regexp as FabricRegExp).source).toBe("fabric");
+    expect((value.regexp as FabricRegExp).flags).toBe("gi");
+    expect(value.error).toBeInstanceOf(FabricError);
+    expect((value.error as FabricError).type).toBe("TypeError");
+  });
+
+  it("preserves opaque leaves while normalizing their siblings", () => {
+    const reactive = { [isReactiveMarker]: true };
+    const cellLink = linkRefFrom({ id: "of:test" });
+    const input = {
+      reactive,
+      cellLink,
+      nested: { date: new Date(0) },
+    };
+
+    const normalized = normalizeSandboxResult(input);
+    const value = normalized.value as Record<string, unknown>;
+    expect(normalized.hasReactive).toBe(true);
+    expect(value.reactive).toBe(reactive);
+    expect(value.cellLink).toBe(cellLink);
+    expect(
+      (value.nested as Record<string, unknown>).date,
+    ).toBeInstanceOf(FabricEpochNsec);
+  });
+
+  it("preserves shared references while copying realm containers", () => {
+    const shared = { value: 1 };
+    const normalized = normalizeSandboxResult({
+      first: shared,
+      second: shared,
+    });
+    const value = normalized.value as Record<string, unknown>;
+    expect(value.first).toBe(value.second);
+    expect(value.first).not.toBe(shared);
+  });
+
+  it("copies a foreign-realm-shaped plain object onto the host prototype", () => {
+    const foreignObjectPrototype = Object.create(null);
+    const foreign = Object.assign(Object.create(foreignObjectPrototype), {
+      value: 1,
+    });
+    const normalized = normalizeSandboxResult(foreign);
+    expect(Object.getPrototypeOf(normalized.value)).toBe(Object.prototype);
+    expect((normalized.value as { value: number }).value).toBe(1);
+  });
+
+  it("rejects enumerable state on realm-native leaves", () => {
+    const date = new Date(0) as Date & { extra?: boolean };
+    date.extra = true;
+    expect(() => normalizeSandboxResult({ nested: date })).toThrow(
+      /Action returned a Date at path "nested"[\s\S]*extra enumerable properties/,
+    );
+
+    const regexp = /fabric/ as RegExp & { extra?: boolean };
+    regexp.extra = true;
+    expect(() => normalizeSandboxResult({ nested: regexp })).toThrow(
+      /Action returned a RegExp at path "nested"[\s\S]*extra enumerable properties/,
+    );
+  });
+
+  it("does not trust a spoofed intrinsic brand", () => {
+    class FakeDate {
+      get [Symbol.toStringTag](): string {
+        return "Date";
+      }
+    }
+    expect(() => normalizeSandboxResult(new FakeDate())).toThrow(
+      /Action returned a FakeDate/,
+    );
+  });
+});
 
 describe("validateAndCheckReactives", () => {
   describe("valid values", () => {
