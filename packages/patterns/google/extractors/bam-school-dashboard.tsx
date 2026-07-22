@@ -24,7 +24,6 @@ import {
   JSONSchema,
   NAME,
   pattern,
-  safeDateNow,
   TILE_UI,
   UI,
   wish,

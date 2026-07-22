@@ -3,8 +3,8 @@ import type { ProbeApi } from "@commonfabric/integration";
 import { buttonDisabledIs, markForClick } from "./cfc-browser-helpers.ts";
 
 type FakeElement = {
+  isConnected: boolean;
   shadowRoot?: { querySelector(selector: string): FakeElement | null };
-  scrollIntoView(): void;
   hasAttribute(name: string): boolean;
   getAttribute(name: string): string | null;
   setAttribute(name: string, value: string): void;
@@ -13,14 +13,14 @@ type FakeElement = {
 function fakeElement(attributes: string[] = []): FakeElement {
   const values = new Map(attributes.map((name) => [name, ""]));
   return {
-    scrollIntoView() {},
+    isConnected: true,
     hasAttribute: (name) => values.has(name),
     getAttribute: (name) => values.get(name) ?? null,
     setAttribute: (name, value) => values.set(name, value),
   };
 }
 
-Deno.test("markForClick skips a stale disabled match", async () => {
+Deno.test("markForClick skips a stale disabled match", () => {
   const staleButton = fakeElement(["disabled"]);
   const activeButton = fakeElement();
   const staleHost = fakeElement();
@@ -30,22 +30,13 @@ Deno.test("markForClick skips a stale disabled match", async () => {
 
   const probe = {
     collect: () => [staleHost, activeHost],
-    isVisible: () => true,
+    isRendered: () => true,
   } as unknown as ProbeApi;
-  const previousAnimationFrame = globalThis.requestAnimationFrame;
-  globalThis.requestAnimationFrame = (callback: FrameRequestCallback) => {
-    callback(performance.now());
-    return 1;
-  };
 
-  try {
-    assertEquals(
-      await markForClick(probe, "cf-button", "current", "data-target"),
-      true,
-    );
-  } finally {
-    globalThis.requestAnimationFrame = previousAnimationFrame;
-  }
+  assertEquals(
+    markForClick(probe, "cf-button", "current", "data-target"),
+    true,
+  );
 
   assertEquals(staleButton.getAttribute("data-target"), null);
   assertEquals(activeButton.getAttribute("data-target"), "current");

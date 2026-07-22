@@ -2736,7 +2736,10 @@ function subscribeToReferencedDocs<T>(
     const schema = link.schema;
     const needsTraversal = schema === undefined ||
       ContextualFlowControl.isTrueSchema(schema);
+    // The sink synchronizes the root before this read, so nested `asCell`
+    // projections inherit that state instead of starting duplicate syncs.
     const value = validateAndTransform(runtime, wrappedTx, ref, undefined, {
+      synced: true,
       materializeFactories: options.materializeFactories ?? true,
     }) as T;
     if (needsTraversal && value !== undefined && value !== null) {

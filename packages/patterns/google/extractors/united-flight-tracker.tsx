@@ -22,7 +22,6 @@ import {
   JSONSchema,
   NAME,
   pattern,
-  safeDateNow,
   TILE_UI,
   toIndentedDebugString,
   UI,

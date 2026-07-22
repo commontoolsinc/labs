@@ -7,7 +7,6 @@ import {
   llmDialog,
   NAME,
   pattern,
-  safeDateNow,
   toIndentedDebugString,
   UI,
   Writable,
