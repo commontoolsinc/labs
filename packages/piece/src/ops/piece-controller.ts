@@ -1431,6 +1431,37 @@ function withoutMissingFlag(
   return contract;
 }
 
+/**
+ * The capability a source declares at its outermost level, when that kind is
+ * a true capability rather than an ordinary `cell`/`stream` and every contract
+ * agrees on it.
+ *
+ * Used only to decide whether an already-durable link may be restored as-is.
+ * Returns undefined for anything ambiguous — disagreeing contracts, a
+ * localization issue, an ordinary value — so the caller falls through to the
+ * full validation below, which reports each of those in its own words rather
+ * than having them silently swallowed here.
+ */
+function restorableCapabilityKind(
+  contracts: readonly PathSchemaContract[],
+): CellKind | undefined {
+  const localized = contracts.map((contract) =>
+    localizeOuterCellContract(contract)
+  );
+  if (localized.some((entry) => entry.issue !== undefined)) return undefined;
+  const outers = localized.flatMap((entry) =>
+    entry.outer === undefined ? [] : [entry.outer]
+  );
+  const outer = outers[0];
+  if (outer === undefined) return undefined;
+  if (!outers.every((other) => outerCellShapesMatch(outer, other))) {
+    return undefined;
+  }
+  return outer.kind === "cell" || outer.kind === "stream"
+    ? undefined
+    : outer.kind;
+}
+
 /** @internal Exported for focused durable-link contract tests. */
 export function assertSuppliedLinkSchemasCompatible(
   links: readonly SuppliedLink[],
@@ -1548,12 +1579,9 @@ export function assertSuppliedLinkSchemasCompatible(
         );
       }
     }
-    const preservesDirectHandle = targetOuter !== undefined &&
-      isCell(suppliedLink.value);
-    if (preservesDirectHandle) preservedDirectHandles.add(suppliedLink);
-
     let sourceContracts: PathSchemaContract[];
     let rawSourceContracts: PathSchemaContract[];
+    let preservesDirectHandle = false;
     try {
       rawSourceContracts = durableSource.schemas.flatMap((source) =>
         linkPathContracts(
@@ -1562,6 +1590,29 @@ export function assertSuppliedLinkSchemasCompatible(
           { trackSourcePresence: true, preserveMissingFlag: true },
         )
       );
+      // Whether the ORIGINAL link value survives verbatim — keeping whatever
+      // capability it carries — or is rebuilt below as a plain alias.
+      //
+      // A live Cell handed in by a caller qualifies outright. So does a link
+      // being RESTORED over an unchanged capability declaration: `setPattern`
+      // re-applies the piece's retained links from `argumentCell.getRaw()`,
+      // and raw storage holds SERIALIZED links, which are never `isCell()`.
+      // Keying only on `isCell` therefore made every capability-kind input
+      // permanently un-updatable — the restore was always judged to be
+      // exposing the capability as an ordinary alias, even when the incoming
+      // pattern declared that exact capability at that exact path. Preserving
+      // a capability into a destination that asks for the same capability is
+      // not exposure; it is the identity case.
+      //
+      // Deliberately narrow: ordinary `cell`/`stream` sources keep their
+      // existing sanitize-and-rebuild path untouched, so this only reaches
+      // true capabilities (e.g. an injected `sqlite` handle).
+      const restoredCapability = restorableCapabilityKind(rawSourceContracts);
+      preservesDirectHandle = targetOuter !== undefined &&
+        (isCell(suppliedLink.value) ||
+          restoredCapability === targetOuter.kind);
+      if (preservesDirectHandle) preservedDirectHandles.add(suppliedLink);
+
       sourceContracts = durableSource.schemas.flatMap((source) => {
         const root = preservesDirectHandle
           ? source.root

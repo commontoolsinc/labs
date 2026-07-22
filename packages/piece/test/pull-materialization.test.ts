@@ -1058,6 +1058,70 @@ describe("piece pull materialization", () => {
     ).toThrow(/projection alias reconciliation requires a transaction/);
   });
 
+  it("restores a capability link whose destination declares the same kind", async () => {
+    // A source update (`PieceController.setPattern`, i.e. `cf piece setsrc`)
+    // re-applies the piece's retained links from `argumentCell.getRaw()`.
+    // Raw storage holds SERIALIZED links, never live Cells, so every link on
+    // that path fails `isCell()` — which is what `preservesDirectHandle`
+    // keys off. A capability-kind input was therefore always judged to be
+    // "exposed as an ordinary alias", even when the incoming pattern
+    // declares that exact capability at that exact path.
+    //
+    // The practical effect: a piece holding an injected `SqliteDb` input
+    // (Loom's native connector panels — `db: SqliteDb`, which compiles to
+    // `asCell: ["sqlite"]`) could never have its source updated in place.
+    // Restoring a link into a destination that declares the SAME capability
+    // preserves the capability; it does not expose it as a plain alias.
+    const sqliteDb: JSONSchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        tables: { type: "object" },
+        rev: { type: "number" },
+      },
+      asCell: ["sqlite"],
+    };
+    const argumentSchema: JSONSchema = {
+      type: "object",
+      properties: { db: sqliteDb },
+      required: ["db"],
+    };
+
+    // The injected handle: seeded directly at a deterministic id, so it
+    // carries no producer-owned metadata — exactly how a disk-source handle
+    // is created (`linkSqliteDiskSource`). `durableSourceContract` finds
+    // nothing, so validation falls back to the prior argument contract.
+    const handle = runtime.getCell(
+      manager.getSpace(),
+      "sqlite-handle-" + crypto.randomUUID(),
+    );
+    await runtime.editWithRetry((tx) => {
+      handle.withTx(tx).set({ id: "handle-1", tables: {}, rev: 0 });
+    });
+
+    const base = runtime.getCell(
+      manager.getSpace(),
+      "sqlite-panel-argument-" + crypto.randomUUID(),
+    );
+    await runtime.editWithRetry((tx) => {
+      base.withTx(tx).set({ db: handle });
+    });
+
+    const raw = base.getRaw() as { db: unknown };
+    // Guard the premise: the restore path really does see a serialized link.
+    expect(isLink(raw.db)).toBe(true);
+
+    expect(() =>
+      assertSuppliedLinkSchemasCompatible(
+        [{ path: ["db"], value: raw.db }],
+        argumentSchema,
+        base,
+        manager,
+        { priorArgumentSchema: argumentSchema },
+      )
+    ).not.toThrow();
+  });
+
   it("fails closed for ambiguous producer and destination Cell contracts", async () => {
     const ordinarySourceSchema: JSONSchema = {
       type: "object",
