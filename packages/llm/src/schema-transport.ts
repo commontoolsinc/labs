@@ -30,6 +30,7 @@
 // transport belongs to the boundary that crosses it, and the boundary says no.
 
 import { isPlainObject } from "@commonfabric/utils/types";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 
 /** A value ordinary JSON serialization would not carry faithfully. */
 export interface JsonUnfaithfulValue {
@@ -120,10 +121,7 @@ function walk(
       // JSON serializes an array's indices only; any other own property is
       // dropped. `Object.keys` yields the present indices plus those extras.
       for (const key of Object.keys(obj)) {
-        const index = Number(key);
-        const isIndex = Number.isInteger(index) && index >= 0 &&
-          index < obj.length && String(index) === key;
-        if (!isIndex) {
+        if (!isArrayIndexPropertyName(key)) {
           out.push({
             pointer: pointerChild(pointer, key),
             reason: "non-index array property (dropped)",
