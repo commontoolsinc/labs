@@ -11,6 +11,7 @@ import {
   Runtime,
   type RuntimeFetch,
   type RuntimeProgram,
+  setPatternRepository,
   setPatternSource,
 } from "../src/index.ts";
 
@@ -262,6 +263,26 @@ describe("lazy system-pattern auto-update", () => {
     ).toBe("current");
   });
 
+  it("disposes when an injected fetch ignores the abort signal", async () => {
+    const identityRequested = defer<AbortSignal | undefined>();
+    const ignoredFetch = defer<Response>();
+    const piece = await preparePiece((_input, init) => {
+      identityRequested.resolve(init?.signal ?? undefined);
+      return ignoredFetch.promise;
+    });
+
+    const start = runtime.start(piece);
+    const signal = await identityRequested.promise;
+    expect(signal).toBeDefined();
+    expect(await start).toBe(true);
+
+    await runtime.patternUpdater.dispose();
+
+    expect(signal!.aborted).toBe(true);
+    expect(getPatternSource(piece)).toBeUndefined();
+    ignoredFetch.resolve(new Response("late response"));
+  });
+
   it("does not resolve source after disposal aborts a completed identity fetch", async () => {
     const v2Identity = await identityFor(source("v2"));
     const identityRequested = defer<AbortSignal | undefined>();
@@ -335,6 +356,27 @@ describe("lazy system-pattern auto-update", () => {
 
     expect(fetches).toBe(0);
     expect(getPatternSource(piece)).toBe("cf:published-pattern");
+  });
+
+  it("leaves repository-pinned patterns untouched when they have a source", async () => {
+    let fetches = 0;
+    const piece = await preparePiece(() => {
+      fetches++;
+      return Promise.resolve(new Response("unexpected"));
+    });
+    const originalRef = getPatternIdentityRef(piece);
+    const update = await runtime.editWithRetry((tx) => {
+      setPatternSource(piece, tx, PARENT_PATH);
+      setPatternRepository(piece, tx, "https://github.com/example/patterns");
+    });
+    expect(update.error).toBeUndefined();
+
+    runtime.patternUpdater.schedule(piece);
+    await runtime.patternUpdater.idle();
+
+    expect(fetches).toBe(0);
+    expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+    expect(getPatternSource(piece)).toBe(PARENT_PATH);
   });
 
   it("does not repair provenance after the piece becomes the default", async () => {

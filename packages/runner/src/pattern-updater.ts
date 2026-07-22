@@ -15,6 +15,21 @@ const logger = getLogger("runner.pattern-update", {
   level: "warn",
 });
 
+async function abortableFetch(
+  request: () => Promise<Response>,
+  signal: AbortSignal,
+): Promise<Response> {
+  signal.throwIfAborted();
+  const aborted = Promise.withResolvers<never>();
+  const onAbort = () => aborted.reject(signal.reason);
+  signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    return await Promise.race([request(), aborted.promise]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
 /** The result of checking one toolshed-backed pattern source. */
 export type PatternUpdateOutcome =
   | "updated"
@@ -143,10 +158,10 @@ export class PatternUpdater {
       if (runningRef === undefined) return "current";
       const storedSource = getPatternSource(resultCell);
       const storedRepository = getPatternRepository(resultCell);
+      if (storedRepository !== undefined) return "current";
 
       let source = storedSource;
       if (source === undefined) {
-        if (storedRepository !== undefined) return "current";
         if (mode.kind === "default-root") {
           source = mode.officialSource;
         }
@@ -208,11 +223,15 @@ export class PatternUpdater {
       // browser may reuse unchanged bytes after a 304, but never without asking
       // the source host whether they are still current.
       const revalidatingFetch: typeof globalThis.fetch = (input, init) =>
-        runtime.fetch(input, {
-          ...init,
-          cache: "no-cache",
+        abortableFetch(
+          () =>
+            runtime.fetch(input, {
+              ...init,
+              cache: "no-cache",
+              signal,
+            }),
           signal,
-        });
+        );
       const identityUrl = new URL(target);
       identityUrl.searchParams.set("identity", "");
       const identityResponse = await revalidatingFetch(identityUrl);
