@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import {
   collectDirectorySnapshot,
   collectVirtualDirectorySnapshot,
@@ -8,6 +8,7 @@ import {
   type FuseOperationPreparer,
   FuseOperationState,
   prepareDirectoryForHandle,
+  replyWithRetainedState,
   visitDirectoryEntries,
 } from "./directory-handles.ts";
 import { DIR_MODE, DIR_MODE_RW } from "./platform.ts";
@@ -209,8 +210,8 @@ Deno.test("FuseOperationState follows lookup and directory callback lifetimes", 
     dynamicFile,
   );
   assertEquals(await operations.prepareLookup(directory, "missing"), undefined);
-  operations.retainLookup(dynamicFile);
-  operations.forget(dynamicFile, 2n);
+  operations.forget(staticFile, 1n);
+  operations.forget(dynamicFile, 1n);
 
   assertEquals(operations.openDirectory(staticFile), undefined);
   const fh = operations.openDirectory(directory);
@@ -224,8 +225,10 @@ Deno.test("FuseOperationState follows lookup and directory callback lifetimes", 
   operations.closeDirectory(fh!, directory);
 
   assertEquals(lookupRefs, [
+    ["retain", staticFile, 1n],
     ["retain", dynamicFile, 1n],
-    ["forget", dynamicFile, 2n],
+    ["forget", staticFile, 1n],
+    ["forget", dynamicFile, 1n],
   ]);
   assertEquals(openRefs, [
     ["retain", directory],
@@ -256,4 +259,32 @@ Deno.test("directory callback helpers skip stale children and stop at buffer bou
     },
   );
   assertEquals(visited, ["first"]);
+});
+
+Deno.test("failed FUSE replies roll back retained request state", () => {
+  let rollbacks = 0;
+  assertEquals(
+    replyWithRetainedState(() => 0, () => rollbacks++),
+    true,
+  );
+  assertEquals(rollbacks, 0);
+
+  assertEquals(
+    replyWithRetainedState(() => -1, () => rollbacks++),
+    false,
+  );
+  assertEquals(rollbacks, 1);
+
+  assertThrows(
+    () =>
+      replyWithRetainedState(
+        () => {
+          throw new Error("reply failed");
+        },
+        () => rollbacks++,
+      ),
+    Error,
+    "reply failed",
+  );
+  assertEquals(rollbacks, 2);
 });

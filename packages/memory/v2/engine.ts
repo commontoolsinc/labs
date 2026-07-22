@@ -2398,11 +2398,9 @@ export const listBranches = (engine: Engine): BranchState[] => {
 
 export const listEntityIds = (
   engine: Engine,
-  branch: BranchName = DEFAULT_BRANCH,
 ): EntityId[] => {
-  ensureReadableBranch(engine, branch);
   return (engine.statements.selectCurrentEntityIds.all({
-    branch,
+    branch: DEFAULT_BRANCH,
     scope_key: DEFAULT_SCOPE_KEY,
   }) as { id: EntityId }[]).map(({ id }) => id);
 };
@@ -2410,19 +2408,17 @@ export const listEntityIds = (
 export interface EntityIdPageOptions {
   after?: EntityId;
   limit: number;
-  branch?: BranchName;
 }
 
 export const listEntityIdPage = (
   engine: Engine,
-  { after, limit, branch = DEFAULT_BRANCH }: EntityIdPageOptions,
+  { after, limit }: EntityIdPageOptions,
 ): EntityId[] => {
-  ensureReadableBranch(engine, branch);
   const statement = after === undefined
     ? engine.statements.selectCurrentEntityIdPage
     : engine.statements.selectCurrentEntityIdPageAfter;
   return (statement.all({
-    branch,
+    branch: DEFAULT_BRANCH,
     scope_key: DEFAULT_SCOPE_KEY,
     limit,
     ...(after === undefined ? {} : { after }),
@@ -2432,11 +2428,9 @@ export const listEntityIdPage = (
 export const entityIdExists = (
   engine: Engine,
   id: EntityId,
-  branch: BranchName = DEFAULT_BRANCH,
 ): boolean => {
-  ensureReadableBranch(engine, branch);
   return engine.statements.selectCurrentEntityId.get({
-    branch,
+    branch: DEFAULT_BRANCH,
     scope_key: DEFAULT_SCOPE_KEY,
     id,
   }) !== undefined;
