@@ -425,11 +425,12 @@ export function normalizeSchema<T extends Record<string, unknown> | boolean>(
   if (typeof schema === "boolean") {
     return schema;
   }
-  const clone: any = JSON.parse(JSON.stringify(schema));
-  // Strip top-level $schema noise
-  delete clone.$schema;
-  // Canonicalize recursively
-  return deepCanonicalize(clone) as T;
+  // Strip top-level $schema noise. Destructuring rather than deleting off a
+  // copy keeps the input untouched without a clone; `deepCanonicalize` rebuilds
+  // every object and array it returns, so nothing downstream aliases the input
+  // either.
+  const { $schema: _dropped, ...rest } = schema as Record<string, unknown>;
+  return deepCanonicalize(rest) as T;
 }
 
 /**
@@ -443,12 +444,6 @@ export function asObjectSchema<T>(schema: T): T & JSONSchemaObj {
     );
   }
   return schema as T & JSONSchemaObj;
-}
-
-function sortObjectKeys(obj: Record<string, unknown>): Record<string, unknown> {
-  const sorted: Record<string, unknown> = {};
-  for (const k of Object.keys(obj).sort()) sorted[k] = obj[k];
-  return sorted;
 }
 
 function normalizeAnyOf(node: any): any {
@@ -465,35 +460,35 @@ function normalizeAnyOf(node: any): any {
   return node;
 }
 
+/**
+ * Canonicalize the parts of a schema whose written order carries no meaning.
+ *
+ * This handles only the JSON-Schema-specific cases, all of them arrays whose
+ * order is incidental: `required` and `enum` denote sets, and a two-member
+ * nullable `anyOf` reads more naturally with the null arm first. Object key
+ * order is deliberately NOT handled here — the golden encoder emits plain
+ * objects in canonical key order per the fabric JSON encoding spec (§10), and
+ * every other comparison against these values is key-order insensitive.
+ */
 function deepCanonicalize(node: unknown): unknown {
   if (Array.isArray(node)) {
-    // Sort specific arrays we know should be order-insensitive
     return node.map(deepCanonicalize);
   }
   if (!isRecord(node)) return node;
 
-  // Clone and canonicalize children first
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(node)) {
     out[k] = deepCanonicalize(v);
   }
 
-  // Sort known arrays
   if (Array.isArray(out.required)) {
     out.required = [...out.required].sort();
   }
   if (Array.isArray(out.enum)) {
-    out.enum = [...out.enum].slice().sort();
+    out.enum = [...out.enum].sort();
   }
 
-  // Sort definitions keys deterministically
-  if (isRecord(out.definitions)) {
-    out.definitions = sortObjectKeys(out.definitions);
-  }
-
-  // Apply anyOf normalization for nullable patterns
   normalizeAnyOf(out);
 
-  // Finally sort all object keys to ensure stable ordering in comparisons
-  return sortObjectKeys(out);
+  return out;
 }
