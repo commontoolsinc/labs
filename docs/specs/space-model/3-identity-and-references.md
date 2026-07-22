@@ -55,10 +55,16 @@ Example:
 
 #### Legacy Formats
 
-**`$alias` format** — still actively produced by pattern serialization:
+**`$alias` format** — no longer a link. Generic link recognition and parsing
+(`isWriteRedirectLink`, `parseLink`, `isCellLink`) are sigil-only, so an
+`$alias` record found in data is a plain value. The form survives solely as
+Pattern *binding* vocabulary (produced by `toJSONWithAliasBindings`, consumed
+via `isAliasBinding`/`parseAliasBinding`), where it marks intermediate
+bindings — e.g.
 ```json
-{ "$alias": { "cell": { "/": "abc123" }, "path": ["value"] } }
+{ "$alias": { "cell": "argument", "path": ["items"] } }
 ```
+— not cross-document references.
 
 **`LegacyJSONCellLink`** (`{ cell: { "/": string }, path: [...] }`) — removed
 from write and recognition code paths. The type definition still exists in
@@ -166,14 +172,16 @@ simplify content addressing.
 `LegacyJSONCellLink` and bare string links (`{ "/": string }`) have been removed
 from write and recognition code paths. `LegacyJSONCellLink` retains
 backwards-compatible reading for previously persisted data, but is otherwise
-inactive. The `$alias` format remains in active use by pattern serialization and
-should be removed once that path produces `link@1` format.
+inactive. `$alias` has been removed from link recognition entirely — in data it
+is a plain value. It remains in use as Pattern-binding vocabulary only, and can
+be retired once pattern serialization emits sigil bindings.
 
 ---
 
 ## Open Questions
 
-- When can the `$alias` format be removed?
+- When can the `$alias` binding vocabulary be removed (pattern serialization
+  emitting sigil bindings)?
 - How do cross-space references interact with permissions?
 - Should `toJSON()` on cells be removed once JSON is no longer the primary format?
 

@@ -204,7 +204,7 @@ or stops needing identity-carry, the symbols die with it.)
 
 | # | Copy site | What it does | Verdict |
 |---|---|---|---|
-| C1 | `createPattern` (`builder/pattern.ts` ~332, 368–373): build-time serialization of `result` + every node's `module`/`inputs`/`outputs` via `toJSONWithLegacyAliases` | Produces the `Pattern` object — the durable graph representation. Writes `unsafe_originalPattern` onto every nested pattern copy (`json-utils.ts:183`) | **Copy stays in memory; stops crossing the serialization boundary.** The in-memory graph remains the instantiation representation; `toJSON` at the storage boundary emits refs (§7). The *backref* is replaced by registering the copy in a side table at copy time (§ Trust). |
+| C1 | `createPattern` (`builder/pattern.ts` ~332, 368–373): build-time serialization of `result` + every node's `module`/`inputs`/`outputs` via `toJSONWithAliasBindings` | Produces the `Pattern` object — the durable graph representation. Writes `unsafe_originalPattern` onto every nested pattern copy (`json-utils.ts:183`) | **Copy stays in memory; stops crossing the serialization boundary.** The in-memory graph remains the instantiation representation; `toJSON` at the storage boundary emits refs (§7). The *backref* is replaced by registering the copy in a side table at copy time (§ Trust). |
 | C2 | `moduleToJSON` pattern-type implementation (`json-utils.ts:387`, the CT-1230 workaround): sub-pattern passed as a module implementation (e.g. to `.map()`) | Serializes the nested pattern graph instead of stringifying it | **Subsumed by op-by-identity.** The op already travels as `$patternRef` + `$opFallback`; with `$opFallback` retained the embedded copy is only the fallback payload. When the fallback is dropped (Phase 4), this copy site disappears. |
 | C3 | `traverseValue` (`traverse-utils.ts:54`): copies during build traversal (`collectCellsAndNodes`, `node-utils` connect) | Preserves the backref so a traversal copy still resolves `getArtifactEntryRef` | **Copy stays; backref replaced** by side-table registration at the same line. |
 | C4 | `unwrapOneLevelAndBindtoDoc` (`pattern-binding.ts:333–340`): instantiation-time rebinding copies | Propagates backref + the `verifiedLoadId` side-table entry to the bound copy | **Copy stays; backref replaced** by side-table registration; the `verifiedLoadId` propagation is deleted outright (CFC identity no longer flows through loadIds — § CFC). |
@@ -464,7 +464,7 @@ tolerate a miss. E4 (same day) removed that blocker and completed the flip:
   vintage's two resolution paths.
 - The internal/boundary split is structural: `serializePatternGraph()`
   (json-utils) serializes the full graph under an internal-serialization
-  context that suppresses `$patternRef`; `toJSONWithLegacyAliases` (the
+  context that suppresses `$patternRef`; `toJSONWithAliasBindings` (the
   builder-time node serializer) routes pattern values through it, so
   `Pattern.nodes` stays a bare-graph in-memory representation.
 

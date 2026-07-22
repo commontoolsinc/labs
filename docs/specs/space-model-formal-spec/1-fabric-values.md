@@ -1102,7 +1102,7 @@ codec's `encode()` returns the payload directly, and `decode()` reconstructs a
 malformed). The JSON wire form is the `/Link@1`-tagged envelope
 `{ "/Link@1": <payload> }`; see Section 3 of `3-json-encoding.md` for the wire
 encoding, and the migration table in Section 4 for how legacy link forms
-(the IPLD sigil `{ "/": { "link@1": … } }` and `$alias`) map onto it.
+(the IPLD sigil `{ "/": { "link@1": … } }`) map onto it.
 
 ```typescript
 // Shown for illustration only.
@@ -2888,17 +2888,11 @@ Four legacy conventions in the current codebase must be migrated to the unified
 | IPLD sigil | Links (`sigil-types.ts`) | `{ "/": { "link@1": { id, path, space } } }` | `{ "/Link@1": { id, path, space } }` |
 | `@` prefix | Errors (`fabric-value.ts`) | `{ "@Error": { name, message, ... } }` | `{ "/Error@1": { name, message, ... } }` |
 | `$` prefix (stream) | Streams (`builder/types.ts`) | `{ "$stream": true }` | `{ "/Stream@1": null }` |
-| `$` prefix (alias) | Internal refs (`json-utils.ts`, `cell-handle.ts`) | `{ "$alias": { path, cell?, schema? } }` | `{ "/Link@1": { id, path, space, overwrite? } }` |
 
 > **Note on `$stream`:** In the current codebase, `$stream` is a stateless
 > marker — it signals that a cell path is a stream endpoint rather than carrying
 > reconstructible state. Under the new encoding it becomes `{ "/Stream@1": null }`
 > (a stateless tagged type per Section 5 of `3-json-encoding.md`), preserving its marker semantics.
->
-> **Note on `$alias`:** An alias is an internal cross-cell reference with an
-> optional schema filter. During migration it maps to `/Link@1` with the
-> appropriate `overwrite` property (e.g., `overwrite: "redirect"` for aliases
-> that redirect writes to the target cell).
 
 ### 7.3 Replacing CID-Based Hashing
 
