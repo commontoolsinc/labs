@@ -141,12 +141,12 @@ describe("data-uri-codec", () => {
       expect(() => valueFromDataUriPayloadText("")).toThrow();
     });
 
-    it("decodes encoded-`FabricValue` (`fvj1:`) payload text", () => {
+    it("decodes encoded-`FabricValue` payload text", () => {
       const value = { value: { b: 1, a: [true, null, "x"] } };
       expect(valueFromDataUriPayloadText(jsonFromValue(value))).toEqual(value);
     });
 
-    it("rejects invalid payload text past the `fvj1:` tag", () => {
+    it("rejects invalid payload text past the codec tag", () => {
       expect(() => valueFromDataUriPayloadText("fvj1:{nope")).toThrow();
     });
   });
@@ -222,7 +222,7 @@ describe("data-uri-codec", () => {
       });
     });
 
-    describe("encoded-`FabricValue` (`fvj1:`) payloads", () => {
+    describe("encoded-`FabricValue` payloads", () => {
       it("decodes a payload", () => {
         const value = { value: { b: 1, a: [true, null, "x"] } };
         expect(valueFromDataUri(uriOf(jsonFromValue(value)))).toEqual(

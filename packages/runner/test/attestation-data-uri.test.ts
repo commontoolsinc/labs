@@ -31,14 +31,14 @@ describe("attestation `load()` of `data:` URIs", () => {
     expect(Object.isFrozen(ok!.value)).toBe(true);
   });
 
-  it("loads an encoded-`FabricValue` (`fvj1:`) payload", () => {
+  it("loads an encoded-`FabricValue` payload", () => {
     const value = { b: 1, a: [true, null, "x"] };
     const { ok, error } = load({ id: uriOf(jsonFromValue(value)) });
     expect(error).toBeUndefined();
     expect(ok!.value).toEqual({ value });
   });
 
-  it("preserves non-finite numbers in an `fvj1:` payload", () => {
+  it("preserves non-finite numbers in an encoded payload", () => {
     const { ok, error } = load({
       id: uriOf(jsonFromValue([NaN, -0, Infinity])),
     });
@@ -55,7 +55,7 @@ describe("attestation `load()` of `data:` URIs", () => {
     expect(error?.name).toBe("InvalidDataURIError");
   });
 
-  it("errors on an undecodable payload past the `fvj1:` tag", () => {
+  it("errors on an undecodable payload past the codec tag", () => {
     const { ok, error } = load({ id: uriOf("fvj1:{nope") });
     expect(ok).toBeUndefined();
     expect(error?.name).toBe("InvalidDataURIError");

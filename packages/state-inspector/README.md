@@ -38,10 +38,11 @@ shared `space` value AND a per-`user:<DID>` override AND a
 per-`session:<DID>:<sid>` override, stored side by side and genuinely different
 — this is where "looks different for me" multiplayer bugs live.
 
-**Two at-rest value formats coexist, both handled:** modern `fvj1:`-prefixed
-codec-json (ids `of:fid1:…`) and legacy plain-JSON sigils (ids `of:baedrei…`).
-`decode.ts` routes by the `fvj1:` tag; links are recognized in both the legacy
-sigil form (`{ "/": { "link@1": {…} } }`) and the modern `FabricLink` form.
+**Two at-rest value formats coexist, both handled:** modern `data-model`
+codec-json, which carries that codec's prefix tag (ids `of:fid1:…`), and legacy
+plain-JSON sigils (ids `of:baedrei…`). `decode.ts` routes on the presence of
+that tag; links are recognized in both the legacy sigil form
+(`{ "/": { "link@1": {…} } }`) and the modern `FabricLink` form.
 
 ## What is ground truth vs. a hint
 
