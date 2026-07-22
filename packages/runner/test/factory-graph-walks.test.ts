@@ -4,6 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import {
   createFactoryShell,
   factoryStateOf,
+  isAdmittedFabricFactory,
   type LivePatternFactoryState,
 } from "@commonfabric/data-model/fabric-factory";
 import {
@@ -41,7 +42,10 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { StorageManager as V2StorageManager } from "../src/storage/v2.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
 import type { NormalizedLink } from "../src/link-types.ts";
-import { validateAndCheckReactives } from "../src/runner-utils.ts";
+import {
+  normalizeSandboxResult,
+  validateAndCheckReactives,
+} from "../src/sandbox/result-normalization.ts";
 import { getCellOrThrow } from "../src/query-result-proxy.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
@@ -111,7 +115,8 @@ describe("factory-aware graph and static walks", () => {
       undefined,
       tx,
     );
-    const factory = bindPattern({ source: source.getAsReactiveProxy() });
+    const sourceReactive = source.getAsReactiveProxy();
+    const factory = bindPattern({ source: sourceReactive });
     const shell = createFactoryShell({
       kind: "pattern",
       ref: REF,
@@ -123,6 +128,15 @@ describe("factory-aware graph and static walks", () => {
 
     expect(validateAndCheckReactives(factory)).toBe(true);
     expect(validateAndCheckReactives(shell)).toBe(false);
+    const normalized = normalizeSandboxResult({ factory });
+    const normalizedFactory = (normalized.value as { factory: unknown })
+      .factory;
+    expect(normalized.hasReactive).toBe(true);
+    expect(isAdmittedFabricFactory(normalizedFactory)).toBe(true);
+    expect(
+      ((factoryStateOf(normalizedFactory) as LivePatternFactoryState)
+        .params as { source: unknown }).source,
+    ).toBe(sourceReactive);
     expect(() => validateAndCheckReactives(() => undefined)).toThrow(
       "Action returned a function",
     );

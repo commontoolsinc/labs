@@ -205,14 +205,18 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     // Null-prototype objects (`Object.create(null)`) and cross-realm / SES
     // ordinary objects. A foreign realm's `Object` constructor is not
     // identity-equal to ours, and hardened compartments may remove its
-    // prototype's `constructor` property entirely. The defining shape is that
-    // the value's direct prototype itself terminates the prototype chain.
-    // Ordinary class prototypes inherit from that realm's Object.prototype
-    // and therefore do not match this shape.
+    // prototype's `constructor` property entirely. The defining fallback
+    // shape is a constructorless terminal prototype, or a terminal prototype
+    // carrying Object.prototype's intrinsic surface. A custom class whose
+    // author deliberately severed its prototype chain retains its constructor
+    // but not that surface, so it is not mistaken for a plain object.
     if (tag === null) {
       if (
         directPrototype === null ||
-        Object.getPrototypeOf(directPrototype) === null
+        (Object.getPrototypeOf(directPrototype) === null &&
+          (ctor === undefined ||
+            (Object.hasOwn(directPrototype, "hasOwnProperty") &&
+              Object.hasOwn(directPrototype, "toString"))))
       ) {
         tag = NATIVE_TAGS.Object;
       }
