@@ -4,12 +4,12 @@
  * resurrected, and saving splices the edited lines back into the underlying
  * files. A diff matching no file on disk is read-only.
  */
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import { parseDiff } from "../lib/view/diff.ts";
 import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { createDiffHighlighter, diffSource } from "../lib/view/diffedit.ts";
-import type { GitRunner } from "../lib/view/commitmsg.ts";
+import { type GitRunner, realGit } from "../lib/view/commitmsg.ts";
 import { Session } from "../lib/view/session.ts";
 import { promptText } from "./view-helpers.ts";
 
@@ -25,12 +25,15 @@ function type(s: Session, text: string): void {
   for (const ch of text) s.handleKey({ name: ch, char: ch });
 }
 
-/** Enter edit mode if needed and move the cursor down to the given diff line. */
+/** Enter edit mode if needed and move the cursor to the given diff line. */
 function toLine(s: Session, line: number): void {
   if (!s.view().cursor) press(s, "e"); // enter edit mode at the top
   let guard = 0;
   while ((s.view().cursor?.line ?? -1) < line && guard++ < 1000) {
     press(s, "down");
+  }
+  while ((s.view().cursor?.line ?? -1) > line && guard++ < 1000) {
+    press(s, "up");
   }
 }
 
@@ -127,21 +130,27 @@ const GIT_SHOW = [
 // Line indices: 4 = subject, 5 = blank message line, 6 = body; 13 = a hunk
 // context line (editable); 16 = removed; 17,18 = additions.
 
-/** A fake git runner recording the message an amend would write. */
+/** A fake git runner recording the replacement message, or null when preserved. */
 function fakeGit(head: string | null): {
   git: GitRunner;
   amended: () => string | null;
+  amendedPaths: () => readonly string[] | null;
 } {
   let amended: string | null = null;
+  let amendedPaths: readonly string[] | null = null;
   return {
     git: {
       headSha: () => head,
-      amendMessage: (m) => {
+      fileAtCommit: (_commit, path) => Deno.readTextFileSync(path),
+      applyFileChanges: (_committed, _before, after) => after,
+      amendCommit: (m, files, expectedHead) => {
         amended = m;
-        return "Amended the commit message";
+        amendedPaths = [...files.keys()];
+        return { status: "Amended the commit", head: expectedHead };
       },
     },
     amended: () => amended,
+    amendedPaths: () => amendedPaths,
   };
 }
 
@@ -151,19 +160,37 @@ function fakeGit(head: string | null): {
 function movingGit(first: string, later: string): {
   git: GitRunner;
   amended: () => string | null;
+  amendedPaths: () => readonly string[] | null;
 } {
   let calls = 0;
   let amended: string | null = null;
+  let amendedPaths: readonly string[] | null = null;
   return {
     git: {
       headSha: () => (++calls === 1 ? first : later),
-      amendMessage: (m) => {
+      fileAtCommit: (_commit, path) => Deno.readTextFileSync(path),
+      applyFileChanges: (_committed, _before, after) => after,
+      amendCommit: (m, files, expectedHead) => {
         amended = m;
-        return "Amended the commit message";
+        amendedPaths = [...files.keys()];
+        return { status: "Amended the commit", head: expectedHead };
       },
     },
     amended: () => amended,
+    amendedPaths: () => amendedPaths,
   };
+}
+
+function runGit(root: string, args: string[]): string {
+  const output = new Deno.Command("git", {
+    args,
+    cwd: root,
+    stdout: "piped",
+    stderr: "piped",
+  }).outputSync();
+  const stderr = new TextDecoder().decode(output.stderr).trim();
+  assert(output.success, stderr || `git ${args[0]} failed`);
+  return new TextDecoder().decode(output.stdout);
 }
 
 Deno.test("diffedit: edits an added line in place and saves it to the file", () => {
@@ -626,11 +653,16 @@ index 0000000..1111111 100644
 +const w = 3;
 `;
 
-Deno.test("diffedit: a save reports only the files an edit actually touched", () => {
+Deno.test("diffedit: a save writes and reports only files whose contents changed", () => {
   const root = Deno.makeTempDirSync();
   try {
-    Deno.writeTextFileSync(join(root, "x.ts"), "const x = 1;\nconst y = 3;\n");
-    Deno.writeTextFileSync(join(root, "z.ts"), "const z = 1;\nconst w = 3;\n");
+    const xPath = join(root, "x.ts");
+    const zPath = join(root, "z.ts");
+    Deno.writeTextFileSync(xPath, "const x = 1;\nconst y = 3;\n");
+    Deno.writeTextFileSync(zPath, "const z = 1;\nconst w = 3;\n");
+    const oldTime = new Date("2000-01-01T00:00:00.000Z");
+    Deno.utimeSync(zPath, oldTime, oldTime);
+    const zMtime = Deno.statSync(zPath).mtime?.getTime();
     const ws: DiffWorkspace = {
       resolve: (p) => join(root, p),
       read: (a) => {
@@ -648,8 +680,139 @@ Deno.test("diffedit: a save reports only the files an edit actually touched", ()
     const edited = TWO_FILE_DIFF.replace("+const y = 3;", "+const y = 30;");
     assertEquals(src.dirtyLabels!(TWO_FILE_DIFF, edited), ["x.ts"]);
     assertEquals(src.dirtyLabels!(TWO_FILE_DIFF, TWO_FILE_DIFF), []);
+    assertEquals(src.save(edited), "Saved 1 file");
+    assertEquals(Deno.readTextFileSync(xPath), "const x = 1;\nconst y = 30;\n");
+    assertEquals(Deno.readTextFileSync(zPath), "const z = 1;\nconst w = 3;\n");
+    assertEquals(
+      Deno.statSync(zPath).mtime?.getTime(),
+      zMtime,
+      "the untouched file was not opened for writing",
+    );
   } finally {
     Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: save reports exact zero- and two-file counts", () => {
+  const { ws, done } = twoFileWs();
+  try {
+    const model = parseDiff(TWO_FILE_DIFF)!;
+    const { edit } = buildDiffDocument(TWO_FILE_DIFF, model, ws);
+    const src = diffSource(ws, edit);
+    assertEquals(src.save(TWO_FILE_DIFF), "Saved 0 files");
+    const edited = TWO_FILE_DIFF
+      .replace("+const y = 3;", "+const y = 30;")
+      .replace("+const w = 3;", "+const w = 30;");
+    assertEquals(src.save(edited), "Saved 2 files");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: save reports zero when the edited contents are already on disk", () => {
+  const { ws, done } = twoFileWs();
+  try {
+    const model = parseDiff(TWO_FILE_DIFF)!;
+    const { edit } = buildDiffDocument(TWO_FILE_DIFF, model, ws);
+    const src = diffSource(ws, edit);
+    const edited = TWO_FILE_DIFF.replace(
+      "+const y = 3;",
+      "+const y = 30;",
+    );
+    const xPath = [...edit.fileText.keys()].find((path) =>
+      path.endsWith("x.ts")
+    )!;
+    Deno.writeTextFileSync(xPath, "const x = 1;\nconst y = 30;\n");
+    const oldTime = new Date("2000-01-01T00:00:00.000Z");
+    Deno.utimeSync(xPath, oldTime, oldTime);
+    const mtime = Deno.statSync(xPath).mtime?.getTime();
+
+    assertEquals(src.save(edited, TWO_FILE_DIFF), "Saved 0 files");
+    assertEquals(
+      Deno.statSync(xPath).mtime?.getTime(),
+      mtime,
+      "a file already holding the saved contents was not rewritten",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: a later save can restore the contents captured at open", () => {
+  const { ws, done } = twoFileWs();
+  try {
+    const model = parseDiff(TWO_FILE_DIFF)!;
+    const { edit } = buildDiffDocument(TWO_FILE_DIFF, model, ws);
+    const src = diffSource(ws, edit);
+    const first = TWO_FILE_DIFF.replace(
+      "+const y = 3;",
+      "+const y = 30;",
+    );
+    assertEquals(src.save(first, TWO_FILE_DIFF), "Saved 1 file");
+    assertEquals(src.save(TWO_FILE_DIFF, first), "Saved 1 file");
+    assertEquals(
+      ws.read([...edit.fileText.keys()][0]),
+      "const x = 1;\nconst y = 3;\n",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: a later save uses the hunk size produced by an insertion", () => {
+  const { root, ws, done } = tempWorkspace();
+  try {
+    const s = diffSession(ws);
+    toLine(s, 9); // the added answer line
+    press(s, "end", "enter");
+    type(s, "// inserted");
+    press(s, "f3");
+
+    press(s, "up", "end");
+    type(s, " // second save");
+    press(s, "f3");
+
+    assertEquals(
+      Deno.readTextFileSync(join(root, "m.ts")),
+      FILE_TEXT.replace(
+        "export const answer = double(21);\n",
+        "export const answer = double(21); // second save\n// inserted\n",
+      ),
+      "the second save does not duplicate the hunk's final line",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: save refuses to overwrite a file changed after opening", () => {
+  const { ws, done } = twoFileWs();
+  try {
+    const model = parseDiff(TWO_FILE_DIFF)!;
+    const { edit } = buildDiffDocument(TWO_FILE_DIFF, model, ws);
+    const src = diffSource(ws, edit);
+    const edited = TWO_FILE_DIFF.replace(
+      "+const y = 3;",
+      "+const y = 30;",
+    );
+    const xPath = [...edit.fileText.keys()].find((path) =>
+      path.endsWith("x.ts")
+    )!;
+    const external = "const x = 1;\nconst y = 300; // external\n";
+    Deno.writeTextFileSync(xPath, external);
+
+    assertThrows(
+      () => src.save(edited, TWO_FILE_DIFF),
+      Error,
+      "changed after this view opened",
+    );
+    assertEquals(
+      Deno.readTextFileSync(xPath),
+      external,
+      "the external edit remains untouched",
+    );
+  } finally {
+    done();
   }
 });
 
@@ -779,13 +942,14 @@ function expandSession(): { root: string; s: Session; done: () => void } {
     },
   };
   const model = parseDiff(EXPAND_DIFF)!;
-  const { doc, edit } = buildDiffDocument(EXPAND_DIFF, model, ws);
+  const cache = new Map();
+  const { doc, edit } = buildDiffDocument(EXPAND_DIFF, model, ws, cache);
   const s = new Session(
     doc,
     { color: false, showLineNumbers: false },
     { width: 80, height: 30 },
     undefined,
-    diffSource(ws, edit),
+    diffSource(ws, edit, cache),
   );
   return { root, s, done: () => Deno.removeSync(root, { recursive: true }) };
 }
@@ -1514,6 +1678,26 @@ Deno.test("diffedit: expanding after an insert reveals the right file lines", ()
   }
 });
 
+Deno.test("diffedit: expanding after saving an insert reads the saved file", () => {
+  const { s, done } = expandSession();
+  try {
+    toLine(s, 7); // "+delta"
+    press(s, "end", "enter");
+    type(s, "INS");
+    press(s, "f3");
+
+    const epsilon = s.doc.text.split("\n").indexOf(" epsilon");
+    toLine(s, epsilon);
+    s.handleKey({ name: "ctrl-l" });
+    assert(
+      s.doc.text.includes(" epsilon\n zeta\n eta\n theta"),
+      s.doc.text,
+    );
+  } finally {
+    done();
+  }
+});
+
 Deno.test("diffedit: insert + expand + edit then save writes the file correctly", () => {
   const { root, s, done } = expandSession();
   try {
@@ -1554,7 +1738,11 @@ function stubWs(root: string): DiffWorkspace {
   };
 }
 
-function sessionFor(diff: string, ws: DiffWorkspace): Session {
+function sessionFor(
+  diff: string,
+  ws: DiffWorkspace,
+  git?: GitRunner,
+): Session {
   const model = parseDiff(diff)!;
   const { doc, edit } = buildDiffDocument(diff, model, ws);
   return new Session(
@@ -1562,7 +1750,7 @@ function sessionFor(diff: string, ws: DiffWorkspace): Session {
     { color: false, showLineNumbers: false },
     { width: 80, height: 40 },
     undefined,
-    diffSource(ws, edit),
+    diffSource(ws, edit, undefined, git),
   );
 }
 
@@ -1602,7 +1790,11 @@ Deno.test("diffedit: saving a git log -p diff does not absorb commit text or wri
       "+realLine0",
       "",
     ].join("\n");
-    const s = sessionFor(log, stubWs(root));
+    const s = sessionFor(
+      log,
+      stubWs(root),
+      fakeGit("bbbbbbbbbbbbbbbb").git,
+    );
     const before = s.doc.text;
     toLine(s, 24); // the stale hunk's "-original" line
     assert(
@@ -1611,7 +1803,10 @@ Deno.test("diffedit: saving a git log -p diff does not absorb commit text or wri
     );
     press(s, "R");
     assertEquals(s.doc.text, before, "the stale removed line stayed protected");
-    assert(s.view().message.includes("isn't editable"), s.view().message);
+    assertEquals(
+      s.view().message,
+      "This line belongs to a commit other than HEAD and cannot be edited.",
+    );
     press(s, "f3"); // save with no edits at all
     assertEquals(
       Deno.readTextFileSync(join(root, "x.ts")),
@@ -2302,9 +2497,13 @@ Deno.test("diffedit: an edit-mode search skips the preamble to a savable line", 
 // --- editing the HEAD commit's message (git show) ----------------------------
 
 Deno.test("diffedit: the HEAD commit's message is editable; save prompts then amends", () => {
-  const { ws, done } = tempWorkspace();
+  const { root, ws, done } = tempWorkspace();
   const fg = fakeGit(SHOW_SHA); // the shown commit IS HEAD
   try {
+    const path = join(root, "m.ts");
+    const oldTime = new Date("2000-01-01T00:00:00.000Z");
+    Deno.utimeSync(path, oldTime, oldTime);
+    const mtime = Deno.statSync(path).mtime?.getTime();
     const s = diffSessionFrom(ws, GIT_SHOW, 20, fg.git);
     toLine(s, 4); // the subject line — an editable message line
     press(s, "end");
@@ -2323,29 +2522,337 @@ Deno.test("diffedit: the HEAD commit's message is editable; save prompts then am
     );
     assertEquals(fg.amended(), null, "nothing amended before confirming");
     // Confirm: the amend runs with the edited message (indent stripped).
-    press(s, "y");
+    press(s, "a");
     assertEquals(
       fg.amended(),
       "Subject line of the commit EDIT\n\nA body paragraph of the message.",
     );
-    assert(s.view().message.includes("Amended"), s.view().message);
+    assertEquals(fg.amendedPaths(), []);
+    assertEquals(s.view().message, "Saved 0 files; Amended the commit");
+    assertEquals(
+      Deno.statSync(path).mtime?.getTime(),
+      mtime,
+      "a message-only amend did not write the unchanged file",
+    );
   } finally {
     done();
   }
 });
 
-Deno.test("diffedit: declining the amend prompt writes nothing", () => {
-  const { ws, done } = tempWorkspace();
+Deno.test("diffedit: a commit with no file diff can amend its message", () => {
+  const commitOnly = [
+    `commit ${SHOW_SHA}`,
+    "Author: A B <a@b.example>",
+    "Date:   Wed Jul 1 12:00:00 2026 -0700",
+    "",
+    "    Empty commit subject",
+    "",
+  ].join("\n");
+  const ws: DiffWorkspace = { resolve: () => null, read: () => null };
+  const model = {
+    files: [],
+    lines: commitOnly.split("\n").map(() => ({ kind: "other" as const })),
+  };
+  const { doc, edit } = buildDiffDocument(commitOnly, model, ws);
+  const fg = fakeGit(SHOW_SHA);
+  const src = diffSource(ws, edit, undefined, fg.git);
+  assertEquals(src.editable, true);
+  assertEquals(src.label, null);
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 80, height: 12 },
+    undefined,
+    src,
+  );
+
+  toLine(s, 4);
+  press(s, "end");
+  type(s, " EDIT");
+  press(s, "f3");
+  assert(promptText(s.view()).includes("Amend commit"), promptText(s.view()));
+  press(s, "s");
+  assertEquals(fg.amended(), null);
+  assertEquals(
+    s.view().message,
+    "Saved 0 files; commit message remains unsaved",
+  );
+  press(s, "f3");
+  press(s, "a");
+  assertEquals(fg.amended(), "Empty commit subject EDIT");
+  assertEquals(fg.amendedPaths(), []);
+  assertEquals(s.view().message, "Saved 0 files; Amended the commit");
+});
+
+Deno.test("diffedit: the amend prompt offers explicit save actions", () => {
+  const { root, ws, done } = tempWorkspace();
   const fg = fakeGit(SHOW_SHA);
   try {
+    const path = join(root, "m.ts");
+    const before = Deno.readTextFileSync(path);
     const s = diffSessionFrom(ws, GIT_SHOW, 20, fg.git);
     toLine(s, 6); // the body line
     press(s, "end");
     type(s, " more");
+    toLine(s, 17);
+    press(s, "end");
+    type(s, " // pending");
     press(s, "f3");
-    press(s, "n"); // decline
+    assertEquals(
+      s.view().dialog?.buttons.map(({ label, hotkey }) => ({ label, hotkey })),
+      [
+        { label: "Amend commit", hotkey: "a" },
+        { label: "Save files only", hotkey: "s" },
+        { label: "Cancel", hotkey: "c" },
+      ],
+    );
+    press(s, "y", "n");
+    assert(s.view().dialog, "the former yes/no keys do nothing");
+    press(s, "c");
     assertEquals(fg.amended(), null, "the commit was not amended");
-    assert(s.view().message.toLowerCase().includes("cancel"), s.view().message);
+    assertEquals(Deno.readTextFileSync(path), before, "no file was saved");
+    assertEquals(s.view().message, "Save cancelled.");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: saving files only leaves a message edit unsaved", () => {
+  const { root, ws, done } = tempWorkspace();
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 20, fg.git);
+    toLine(s, 4);
+    press(s, "end");
+    type(s, " EDIT");
+    toLine(s, 17);
+    press(s, "end");
+    type(s, " // workspace");
+
+    press(s, "f3");
+    press(s, "s");
+
+    assertEquals(fg.amended(), null, "files-only save did not amend HEAD");
+    assert(
+      Deno.readTextFileSync(join(root, "m.ts")).includes("// workspace"),
+      "the hunk edit was written to its workspace file",
+    );
+    assertEquals(
+      s.view().message,
+      "Saved 1 file; commit message remains unsaved",
+    );
+
+    // Only the message remains dirty. Saving again offers the same explicit
+    // choice, and amending now does not absorb the earlier workspace-only edit.
+    press(s, "f3");
+    assert(s.view().dialog, "the unsaved message prompts again");
+    press(s, "a");
+    assertEquals(
+      fg.amended(),
+      "Subject line of the commit EDIT\n\nA body paragraph of the message.",
+    );
+    assertEquals(fg.amendedPaths(), []);
+    assertEquals(s.view().message, "Saved 0 files; Amended the commit");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: saving files only can complete a pending quit", () => {
+  const { root, ws, done } = tempWorkspace();
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 20, fg.git);
+    toLine(s, 17);
+    press(s, "end");
+    type(s, " // workspace");
+    press(s, "escape", "q");
+    press(s, "s"); // Save in the ordinary quit prompt.
+    assert(!s.quit, "the commit choice is still pending");
+    press(s, "s"); // Save files only in the commit prompt.
+
+    assert(s.quit, "the clean buffer can quit after its files are saved");
+    assertEquals(fg.amended(), null);
+    assert(
+      Deno.readTextFileSync(join(root, "m.ts")).includes("// workspace"),
+      "the workspace file contains the edit",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: a failed amend restores files written by the save", () => {
+  const { root, ws, done } = tempWorkspace();
+  try {
+    const path = join(root, "m.ts");
+    const git: GitRunner = {
+      headSha: () => SHOW_SHA,
+      fileAtCommit: (_commit, file) => Deno.readTextFileSync(file),
+      applyFileChanges: (_committed, _before, after) => after,
+      amendCommit: () => {
+        throw new Error("commit hook rejected the amend");
+      },
+    };
+    const model = parseDiff(GIT_SHOW)!;
+    const { edit } = buildDiffDocument(GIT_SHOW, model, ws);
+    const src = diffSource(ws, edit, undefined, git);
+    const edited = GIT_SHOW.replace(
+      "+export const answer = double(21);",
+      "+export const answer = double(21); // pager edit",
+    );
+    let error = "";
+    try {
+      src.save(edited, GIT_SHOW);
+    } catch (caught) {
+      error = caught instanceof Error ? caught.message : String(caught);
+    }
+    assert(
+      error.includes("commit hook rejected"),
+      error || "save did not fail",
+    );
+    assertEquals(
+      Deno.readTextFileSync(path),
+      FILE_TEXT,
+      "the failed amend left the workspace file as it was before save",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: save refuses a selected workspace file that disappeared", () => {
+  const { root, ws, done } = tempWorkspace();
+  try {
+    const model = parseDiff(DIFF)!;
+    const { edit } = buildDiffDocument(DIFF, model, ws);
+    const source = diffSource(ws, edit);
+    Deno.removeSync(join(root, "m.ts"));
+    const edited = DIFF.replace(
+      "+export const answer = double(21);",
+      "+export const answer = double(21); // pager",
+    );
+
+    assertThrows(
+      () => source.save(edited, DIFF),
+      Error,
+      "Could not read",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: failed amend accepts a file already restored by the Git runner", () => {
+  const { root, ws, done } = tempWorkspace();
+  try {
+    const path = join(root, "m.ts");
+    const git: GitRunner = {
+      headSha: () => SHOW_SHA,
+      fileAtCommit: (_commit, file) => Deno.readTextFileSync(file),
+      applyFileChanges: (_committed, _before, after) => after,
+      amendCommit: () => {
+        Deno.writeTextFileSync(path, FILE_TEXT);
+        throw new Error("commit hook rejected the amend");
+      },
+    };
+    const model = parseDiff(GIT_SHOW)!;
+    const { edit } = buildDiffDocument(GIT_SHOW, model, ws);
+    const source = diffSource(ws, edit, undefined, git);
+    const edited = GIT_SHOW.replace(
+      "+export const answer = double(21);",
+      "+export const answer = double(21); // pager",
+    );
+
+    const error = assertThrows(
+      () => source.save(edited, GIT_SHOW),
+      Error,
+      "commit hook rejected",
+    );
+    assert(!error.message.includes("restoring files failed"), error.message);
+    assertEquals(Deno.readTextFileSync(path), FILE_TEXT);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: reports an error while reading a file for rollback", () => {
+  const root = Deno.makeTempDirSync();
+  const path = join(root, "m.ts");
+  Deno.writeTextFileSync(path, FILE_TEXT);
+  let rollback = false;
+  const ws: DiffWorkspace = {
+    resolve: (relative) => join(root, relative),
+    read: (absolute) => {
+      if (rollback) throw new Error("rollback read failed");
+      return Deno.readTextFileSync(absolute);
+    },
+  };
+  const git: GitRunner = {
+    headSha: () => SHOW_SHA,
+    fileAtCommit: (_commit, file) => Deno.readTextFileSync(file),
+    applyFileChanges: (_committed, _before, after) => after,
+    amendCommit: () => {
+      rollback = true;
+      throw new Error("commit hook rejected the amend");
+    },
+  };
+  try {
+    const model = parseDiff(GIT_SHOW)!;
+    const { edit } = buildDiffDocument(GIT_SHOW, model, ws);
+    const source = diffSource(ws, edit, undefined, git);
+    const edited = GIT_SHOW.replace(
+      "+export const answer = double(21);",
+      "+export const answer = double(21); // pager",
+    );
+
+    const error = assertThrows(
+      () => source.save(edited, GIT_SHOW),
+      Error,
+      "restoring files failed",
+    );
+    assert(error.message.includes("rollback read failed"), error.message);
+    assert(Deno.readTextFileSync(path).includes("// pager"));
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: a failed amend preserves a file changed during the amend", () => {
+  const { root, ws, done } = tempWorkspace();
+  try {
+    const path = join(root, "m.ts");
+    const git: GitRunner = {
+      headSha: () => SHOW_SHA,
+      fileAtCommit: (_commit, file) => Deno.readTextFileSync(file),
+      applyFileChanges: (_committed, _before, after) => after,
+      amendCommit: (_message, _files, _head, _ref, expectedWorkspace) => {
+        assert(
+          expectedWorkspace?.get(path)?.includes("// pager edit"),
+          "the amend validates the workspace contents written by the save",
+        );
+        Deno.writeTextFileSync(path, "changed during amend\n");
+        throw new Error("commit hook rejected the amend");
+      },
+    };
+    const model = parseDiff(GIT_SHOW)!;
+    const { edit } = buildDiffDocument(GIT_SHOW, model, ws);
+    const src = diffSource(ws, edit, undefined, git);
+    const edited = GIT_SHOW.replace(
+      "+export const answer = double(21);",
+      "+export const answer = double(21); // pager edit",
+    );
+
+    assertThrows(
+      () => src.save(edited, GIT_SHOW),
+      Error,
+      "changed again and was not restored",
+    );
+    assertEquals(
+      Deno.readTextFileSync(path),
+      "changed during amend\n",
+      "the later file contents remain untouched",
+    );
   } finally {
     done();
   }
@@ -2363,7 +2870,7 @@ Deno.test("diffedit: Enter in a message adds another indented line", () => {
     // The new line carries git's four-space indent and stays a message line.
     assertEquals(s.doc.lines[5].text, "    second subject line");
     press(s, "f3");
-    press(s, "y");
+    press(s, "a");
     assertEquals(
       fg.amended(),
       "Subject line of the commit\nsecond subject line\n\n" +
@@ -2383,6 +2890,10 @@ Deno.test("diffedit: a non-HEAD commit's message is not editable", () => {
     const before = s.doc.text;
     type(s, "X");
     assertEquals(s.doc.text, before, "a non-HEAD message is read-only");
+    assertEquals(
+      s.view().message,
+      "This line belongs to a commit other than HEAD and cannot be edited.",
+    );
     // Saving does not offer to amend a commit that is not HEAD.
     press(s, "f3");
     assertEquals(fg.amended(), null, "a non-HEAD commit is never amended");
@@ -2391,7 +2902,112 @@ Deno.test("diffedit: a non-HEAD commit's message is not editable", () => {
   }
 });
 
-Deno.test("diffedit: editing only a hunk (not the message) saves with no amend prompt", () => {
+Deno.test("diffedit: a blank line before the first commit has no commit owner", () => {
+  const { ws, done } = tempWorkspace();
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const text = `\n${GIT_SHOW}`;
+    const model = parseDiff(text)!;
+    const { edit } = buildDiffDocument(text, model, ws);
+    const source = diffSource(ws, edit, undefined, fg.git);
+
+    assertEquals(
+      source.policy?.notEditableMessage?.(text.split("\n"), 0),
+      null,
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: refuses to amend after the represented commit header is removed", () => {
+  const { root, ws, done } = tempWorkspace();
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const model = parseDiff(GIT_SHOW)!;
+    const { edit } = buildDiffDocument(GIT_SHOW, model, ws);
+    const source = diffSource(ws, edit, undefined, fg.git);
+    const edited = GIT_SHOW.replace(`commit ${SHOW_SHA}\n`, "").replace(
+      "+export const answer = double(21);",
+      "+export const answer = double(21); // pager",
+    );
+
+    assertThrows(
+      () => source.save(edited, GIT_SHOW),
+      Error,
+      "No commit to amend",
+    );
+    assertEquals(fg.amended(), null);
+    assertEquals(Deno.readTextFileSync(join(root, "m.ts")), FILE_TEXT);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: refuses to amend after HEAD switches branches", () => {
+  const { root, ws, done } = tempWorkspace();
+  let currentRef = "refs/heads/main";
+  const git: GitRunner = {
+    headSha: () => SHOW_SHA,
+    headRef: () => currentRef,
+    fileAtCommit: (_commit, path) => Deno.readTextFileSync(path),
+    applyFileChanges: (_committed, _before, after) => after,
+    amendCommit: () => {
+      throw new Error("amend must not run");
+    },
+  };
+  try {
+    const model = parseDiff(GIT_SHOW)!;
+    const { edit } = buildDiffDocument(GIT_SHOW, model, ws);
+    const source = diffSource(ws, edit, undefined, git);
+    const edited = GIT_SHOW.replace(
+      "+export const answer = double(21);",
+      "+export const answer = double(21); // pager",
+    );
+    currentRef = "refs/heads/topic";
+
+    assertThrows(
+      () => source.save(edited, GIT_SHOW),
+      Error,
+      "different branch",
+    );
+    assertEquals(Deno.readTextFileSync(join(root, "m.ts")), FILE_TEXT);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: refuses to amend a selected path missing from the shown commit", () => {
+  const { root, ws, done } = tempWorkspace();
+  const git: GitRunner = {
+    headSha: () => SHOW_SHA,
+    fileAtCommit: () => null,
+    applyFileChanges: (_committed, _before, after) => after,
+    amendCommit: () => {
+      throw new Error("amend must not run");
+    },
+  };
+  try {
+    const model = parseDiff(GIT_SHOW)!;
+    const { edit } = buildDiffDocument(GIT_SHOW, model, ws);
+    const source = diffSource(ws, edit, undefined, git);
+    const edited = GIT_SHOW.replace(
+      "+export const answer = double(21);",
+      "+export const answer = double(21); // pager",
+    );
+
+    assertThrows(
+      () => source.save(edited, GIT_SHOW),
+      Error,
+      "shown commit does not contain",
+    );
+    assertEquals(Deno.readTextFileSync(join(root, "m.ts")), FILE_TEXT);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: editing only a hunk prompts and amends the file into the commit", () => {
   const { root, ws, done } = tempWorkspace();
   const fg = fakeGit(SHOW_SHA);
   try {
@@ -2400,15 +3016,896 @@ Deno.test("diffedit: editing only a hunk (not the message) saves with no amend p
     press(s, "end");
     type(s, " // x");
     press(s, "f3");
-    // The message is unchanged, so no amend prompt and no amend.
-    assert(s.view().message.startsWith("Saved"), s.view().message);
-    assertEquals(fg.amended(), null, "an unchanged message is not amended");
+    assert(promptText(s.view()).includes("Amend commit"), promptText(s.view()));
+    assertEquals(fg.amended(), null, "nothing amended before confirmation");
+    press(s, "a");
+    assertEquals(fg.amended(), null, "the unchanged message is preserved");
+    assertEquals(fg.amendedPaths(), [join(root, "m.ts")]);
+    assertEquals(s.view().message, "Saved 1 file; Amended the commit");
     assert(
       Deno.readTextFileSync(join(root, "m.ts")).includes("// x"),
-      "the hunk edit was written",
+      "the hunk edit was written before the commit was amended",
     );
   } finally {
     done();
+  }
+});
+
+Deno.test("diffedit: saving edited git show output amends the real HEAD tree", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    runGit(root, ["init", "-q"]);
+    runGit(root, ["config", "user.email", "t@t.test"]);
+    runGit(root, ["config", "user.name", "Test"]);
+    const path = join(root, "m.ts");
+    Deno.writeTextFileSync(
+      path,
+      FILE_TEXT.replace(
+        "export const answer = double(21);\nconst extra = answer + 1;",
+        "export const answer = 42;",
+      ),
+    );
+    runGit(root, ["add", "m.ts"]);
+    runGit(root, ["commit", "-q", "-m", "parent"]);
+    Deno.writeTextFileSync(path, FILE_TEXT);
+    runGit(root, ["add", "m.ts"]);
+    runGit(root, ["commit", "-q", "-m", "Subject line of the commit"]);
+
+    const shown = runGit(root, ["show", "--no-ext-diff", "--no-color", "HEAD"]);
+    const ws: DiffWorkspace = {
+      resolve: (relative) => join(root, relative),
+      read: (absolute) => {
+        try {
+          return Deno.readTextFileSync(absolute);
+        } catch {
+          return null;
+        }
+      },
+    };
+    const model = parseDiff(shown)!;
+    const { doc, edit } = buildDiffDocument(shown, model, ws);
+    const s = new Session(
+      doc,
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 30 },
+      undefined,
+      diffSource(ws, edit, undefined, realGit(root)),
+    );
+    const line = s.doc.lines.findIndex((entry) =>
+      entry.text === "+export const answer = double(21);"
+    );
+    assert(line >= 0, "git show contains the added line");
+    toLine(s, line);
+    press(s, "end");
+    type(s, " // amended");
+    press(s, "f3");
+    assert(promptText(s.view()).includes("Amend commit"), promptText(s.view()));
+    press(s, "a");
+
+    assertEquals(s.view().message, "Saved 1 file; Amended the commit");
+    assert(
+      runGit(root, ["show", "HEAD:m.ts"]).includes("double(21); // amended"),
+      "the amended commit contains the pager edit",
+    );
+    assertEquals(runGit(root, ["status", "--porcelain"]), "");
+
+    press(s, "end");
+    type(s, " twice");
+    press(s, "f3");
+    press(s, "a");
+    assertEquals(s.view().message, "Saved 1 file; Amended the commit");
+    assert(
+      runGit(root, ["show", "HEAD:m.ts"]).includes(
+        "double(21); // amended twice",
+      ),
+      "a later save amends the commit from the previous pager result",
+    );
+    assertEquals(runGit(root, ["status", "--porcelain"]), "");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: a hunk-only amend preserves the raw commit message", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    runGit(root, ["init", "-q"]);
+    runGit(root, ["config", "user.email", "t@t.test"]);
+    runGit(root, ["config", "user.name", "Test"]);
+    const path = join(root, "f.txt");
+    Deno.writeTextFileSync(path, "before\n");
+    runGit(root, ["add", "f.txt"]);
+    runGit(root, ["commit", "-q", "-m", "parent"]);
+    Deno.writeTextFileSync(path, "after\n");
+    runGit(root, ["add", "f.txt"]);
+    runGit(root, [
+      "commit",
+      "-q",
+      "--cleanup=verbatim",
+      "-m",
+      "\nsubject\n\n\n",
+    ]);
+    const rawBefore = runGit(root, ["cat-file", "commit", "HEAD"]);
+    const messageBefore = rawBefore.slice(rawBefore.indexOf("\n\n") + 2);
+    const shown = runGit(root, [
+      "show",
+      "--no-ext-diff",
+      "--no-color",
+      "HEAD",
+    ]);
+    const ws = stubWs(root);
+    const model = parseDiff(shown)!;
+    const { edit } = buildDiffDocument(shown, model, ws);
+    const source = diffSource(ws, edit, undefined, realGit(root));
+    const edited = shown.replace("+after\n", "+after edited\n");
+
+    assertEquals(
+      source.save(edited, shown),
+      "Saved 1 file; Amended the commit",
+    );
+
+    const rawAfter = runGit(root, ["cat-file", "commit", "HEAD"]);
+    assertEquals(
+      rawAfter.slice(rawAfter.indexOf("\n\n") + 2),
+      messageBefore,
+    );
+    assertEquals(runGit(root, ["show", "HEAD:f.txt"]), "after edited\n");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: abbreviated, compact, and email formats amend hunk edits", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    runGit(root, ["init", "-q"]);
+    runGit(root, ["config", "user.email", "t@t.test"]);
+    runGit(root, ["config", "user.name", "Test"]);
+    const path = join(root, "f.txt");
+    Deno.writeTextFileSync(path, "before\n");
+    runGit(root, ["add", "f.txt"]);
+    runGit(root, ["commit", "-q", "-m", "parent"]);
+    Deno.writeTextFileSync(path, "value 0\n");
+    runGit(root, [
+      "commit",
+      "-qa",
+      "-m",
+      "subject",
+      "-m",
+      `ffff ordinary body line
+commit deadbeef
+From ${"f".repeat(40)} Mon Sep 17 00:00:00 2001
+From: Fake Author <fake@example.test>
+Date: Wed, 1 Jul 2026 12:00:00 -0700
+Subject: [PATCH] Embedded envelope`,
+    ]);
+    const message = runGit(root, ["cat-file", "commit", "HEAD"]).split(
+      "\n\n",
+    ).slice(1).join("\n\n");
+
+    const formats: Array<{ name: string; args: string[] }> = [
+      {
+        name: "four-character medium",
+        args: ["--pretty=medium", "--abbrev-commit", "--abbrev=4"],
+      },
+      { name: "oneline", args: ["--pretty=oneline"] },
+      { name: "reference", args: ["--pretty=reference"] },
+      { name: "email", args: ["--pretty=email"] },
+    ];
+    for (const [index, format] of formats.entries()) {
+      const shown = runGit(root, [
+        "show",
+        ...format.args,
+        "--no-ext-diff",
+        "--no-color",
+        "HEAD",
+      ]);
+      const current = `value ${index}`;
+      const next = `value ${index + 1}`;
+      assert(
+        shown.includes(`+${current}\n`),
+        `${format.name} output has the hunk`,
+      );
+      if (format.name === "four-character medium") {
+        assert(/^commit [0-9a-f]{4}\n/.test(shown), shown.split("\n")[0]);
+      }
+      const ws = stubWs(root);
+      const model = parseDiff(shown)!;
+      const { edit } = buildDiffDocument(shown, model, ws);
+      const source = diffSource(ws, edit, undefined, realGit(root));
+      const edited = shown.replace(`+${current}\n`, `+${next}\n`);
+
+      assertEquals(
+        source.save(edited, shown),
+        "Saved 1 file; Amended the commit",
+        format.name,
+      );
+      assertEquals(runGit(root, ["show", "HEAD:f.txt"]), `${next}\n`);
+      const raw = runGit(root, ["cat-file", "commit", "HEAD"]);
+      assertEquals(raw.split("\n\n").slice(1).join("\n\n"), message);
+    }
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: standard and compact views skip email ownership checks", () => {
+  const { ws, done } = tempWorkspace();
+  try {
+    let ownershipChecks = 0;
+    const git: GitRunner = {
+      ...fakeGit(SHOW_SHA).git,
+      commitMatchesDiff: () => {
+        ownershipChecks++;
+        return true;
+      },
+    };
+    const diff = GIT_SHOW.slice(GIT_SHOW.indexOf("diff --git "));
+    const views = [
+      GIT_SHOW,
+      `${SHOW_SHA} Subject\n${diff}`,
+      `${SHOW_SHA.slice(0, 8)} (Subject, 2026-07-20)\n${diff}`,
+    ];
+
+    for (const shown of views) {
+      const model = parseDiff(shown)!;
+      const { edit } = buildDiffDocument(shown, model, ws);
+      diffSource(ws, edit, undefined, git);
+    }
+
+    assertEquals(ownershipChecks, 0);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: consecutive compact commits keep historical hunk ownership", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    runGit(root, ["init", "-q"]);
+    runGit(root, ["config", "user.email", "t@t.test"]);
+    runGit(root, ["config", "user.name", "Test"]);
+    const path = join(root, "f.txt");
+    Deno.writeTextFileSync(path, "before\n");
+    runGit(root, ["add", "f.txt"]);
+    runGit(root, ["commit", "-q", "-m", "base"]);
+    Deno.writeTextFileSync(path, "after\n");
+    runGit(root, ["commit", "-qam", "parent with patch"]);
+    runGit(root, ["commit", "-q", "--allow-empty", "-m", "empty HEAD"]);
+    const head = runGit(root, ["rev-parse", "HEAD"]);
+    const shown = runGit(root, [
+      "log",
+      "-2",
+      "--pretty=oneline",
+      "-p",
+      "--no-ext-diff",
+      "--no-color",
+    ]);
+    const ws = stubWs(root);
+    const model = parseDiff(shown)!;
+    const { edit } = buildDiffDocument(shown, model, ws);
+    const source = diffSource(ws, edit, undefined, realGit(root));
+
+    assertEquals(
+      source.save(shown.replace("+after\n", "+workspace edit\n"), shown),
+      "Saved 1 file",
+    );
+    assertEquals(runGit(root, ["rev-parse", "HEAD"]), head);
+    assertEquals(Deno.readTextFileSync(path), "workspace edit\n");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: consecutive email commits keep historical hunk ownership", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    runGit(root, ["init", "-q"]);
+    runGit(root, ["config", "user.email", "t@t.test"]);
+    runGit(root, ["config", "user.name", "Test"]);
+    const path = join(root, "f.txt");
+    Deno.writeTextFileSync(path, "before\n");
+    runGit(root, ["add", "f.txt"]);
+    runGit(root, ["commit", "-q", "-m", "base"]);
+    Deno.writeTextFileSync(path, "after\n");
+    runGit(root, ["commit", "-qam", "parent with patch"]);
+    runGit(root, ["commit", "-q", "--allow-empty", "-m", "empty HEAD"]);
+    const head = runGit(root, ["rev-parse", "HEAD"]);
+    const shown = runGit(root, [
+      "log",
+      "-2",
+      "--pretty=email",
+      "-p",
+      "--no-ext-diff",
+      "--no-color",
+    ]);
+    const ws = stubWs(root);
+    const model = parseDiff(shown)!;
+    const { edit } = buildDiffDocument(shown, model, ws);
+    const source = diffSource(ws, edit, undefined, realGit(root));
+
+    assertEquals(
+      source.save(shown.replace("+after\n", "+workspace edit\n"), shown),
+      "Saved 1 file",
+    );
+    assertEquals(runGit(root, ["rev-parse", "HEAD"]), head);
+    assertEquals(Deno.readTextFileSync(path), "workspace edit\n");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: a CRLF commit preamble keeps an LF-normalized message", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    runGit(root, ["init", "-q"]);
+    runGit(root, ["config", "user.email", "t@t.test"]);
+    runGit(root, ["config", "user.name", "Test"]);
+    const path = join(root, "f.txt");
+    Deno.writeTextFileSync(path, "before\n");
+    runGit(root, ["add", "f.txt"]);
+    runGit(root, ["commit", "-q", "-m", "parent"]);
+    Deno.writeTextFileSync(path, "after\n");
+    runGit(root, ["commit", "-qam", "subject", "-m", "body"]);
+
+    const shownLf = runGit(root, [
+      "show",
+      "--no-ext-diff",
+      "--no-color",
+      "HEAD",
+    ]);
+    const diffStart = shownLf.indexOf("diff --git ");
+    assert(diffStart >= 0, "git show contains a file diff");
+    const shown = shownLf.slice(0, diffStart).replaceAll("\n", "\r\n") +
+      shownLf.slice(diffStart);
+    const ws = stubWs(root);
+    const model = parseDiff(shown)!;
+    const { edit } = buildDiffDocument(shown, model, ws);
+    const source = diffSource(ws, edit, undefined, realGit(root));
+    const edited = shown.replace("+after\n", "+after edited\n");
+
+    assertEquals(
+      source.save(edited, shown),
+      "Saved 1 file; Amended the commit",
+    );
+    const rawCommit = runGit(root, ["cat-file", "commit", "HEAD"]);
+    assertEquals(
+      rawCommit.slice(rawCommit.indexOf("\n\n") + 2),
+      "subject\n\nbody\n",
+    );
+    assertEquals(Deno.readTextFileSync(path), "after edited\n");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test({
+  name: "diffedit: a commit view saves through clean and textconv filters",
+  ignore: Deno.build.os === "windows",
+  fn() {
+    const root = Deno.makeTempDirSync();
+    try {
+      runGit(root, ["init", "-q"]);
+      runGit(root, ["config", "user.email", "t@t.test"]);
+      runGit(root, ["config", "user.name", "Test"]);
+      runGit(root, [
+        "config",
+        "filter.caps.clean",
+        "tr '[:lower:]' '[:upper:]'",
+      ]);
+      runGit(root, [
+        "config",
+        "filter.caps.smudge",
+        "tr '[:upper:]' '[:lower:]'",
+      ]);
+      const textconv = join(root, ".git", "lower-textconv.sh");
+      Deno.writeTextFileSync(
+        textconv,
+        "#!/bin/sh\ntr '[:upper:]' '[:lower:]' < \"$1\"\n",
+      );
+      Deno.chmodSync(textconv, 0o755);
+      runGit(root, ["config", "diff.lower.textconv", textconv]);
+      Deno.writeTextFileSync(
+        join(root, ".gitattributes"),
+        "*.dat filter=caps diff=lower\n",
+      );
+      const path = join(root, "f.dat");
+      Deno.writeTextFileSync(path, "old\n");
+      runGit(root, ["add", ".gitattributes", "f.dat"]);
+      runGit(root, ["commit", "-q", "-m", "parent"]);
+      Deno.writeTextFileSync(path, "new\n");
+      runGit(root, ["commit", "-qam", "head"]);
+
+      const shown = runGit(root, [
+        "show",
+        "--no-ext-diff",
+        "--no-color",
+        "HEAD",
+      ]);
+      const ws = stubWs(root);
+      const model = parseDiff(shown)!;
+      const { doc, edit } = buildDiffDocument(shown, model, ws);
+      const s = new Session(
+        doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 20 },
+        undefined,
+        diffSource(ws, edit, undefined, realGit(root)),
+      );
+      const line = s.doc.lines.findIndex((entry) => entry.text === "+new");
+      assert(line >= 0, "textconv exposes the filtered added line");
+      toLine(s, line);
+      press(s, "end");
+      press(s, "backspace", "backspace", "backspace");
+      type(s, "pager");
+      press(s, "f3");
+      press(s, "a");
+
+      assertEquals(s.view().message, "Saved 1 file; Amended the commit");
+      assertEquals(runGit(root, ["show", "HEAD:f.dat"]), "PAGER\n");
+      assertEquals(runGit(root, ["show", ":f.dat"]), "PAGER\n");
+      assertEquals(Deno.readTextFileSync(path), "pager\n");
+      assertEquals(runGit(root, ["status", "--porcelain"]), "");
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  },
+});
+
+Deno.test("diffedit: an empty-message commit amends when its hunk changes", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    runGit(root, ["init", "-q"]);
+    runGit(root, ["config", "user.email", "t@t.test"]);
+    runGit(root, ["config", "user.name", "Test"]);
+    const path = join(root, "m.ts");
+    Deno.writeTextFileSync(path, "before\n");
+    runGit(root, ["add", "m.ts"]);
+    runGit(root, ["commit", "-q", "-m", "parent"]);
+    Deno.writeTextFileSync(path, "after\n");
+    runGit(root, ["add", "m.ts"]);
+    runGit(root, ["commit", "-q", "--allow-empty-message", "-m", ""]);
+
+    const shown = runGit(root, ["show", "--no-ext-diff", "--no-color", "HEAD"]);
+    const ws = stubWs(root);
+    const model = parseDiff(shown)!;
+    const { doc, edit } = buildDiffDocument(shown, model, ws);
+    const s = new Session(
+      doc,
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 20 },
+      undefined,
+      diffSource(ws, edit, undefined, realGit(root)),
+    );
+    const line = s.doc.lines.findIndex((entry) => entry.text === "+after");
+    assert(line >= 0, "git show contains the added line");
+    toLine(s, line);
+    press(s, "end");
+    type(s, " amended");
+    press(s, "f3");
+    assert(promptText(s.view()).includes("Amend commit"), promptText(s.view()));
+    press(s, "a");
+
+    assertEquals(s.view().message, "Saved 1 file; Amended the commit");
+    assertEquals(runGit(root, ["show", "HEAD:m.ts"]), "after amended\n");
+    assertEquals(runGit(root, ["log", "-1", "--format=%B"]), "\n");
+    assertEquals(runGit(root, ["status", "--porcelain"]), "");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: later hunk saves retain earlier amendments in the same file", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    runGit(root, ["init", "-q"]);
+    runGit(root, ["config", "user.email", "t@t.test"]);
+    runGit(root, ["config", "user.name", "Test"]);
+    const path = join(root, "m.ts");
+    const parent = Array.from(
+      { length: 16 },
+      (_, index) => `line ${index + 1}`,
+    );
+    Deno.writeTextFileSync(path, `${parent.join("\n")}\n`);
+    runGit(root, ["add", "m.ts"]);
+    runGit(root, ["commit", "-q", "-m", "parent"]);
+    const head = [...parent];
+    head[1] = "line 2 committed";
+    head[14] = "line 15 committed";
+    Deno.writeTextFileSync(path, `${head.join("\n")}\n`);
+    runGit(root, ["add", "m.ts"]);
+    runGit(root, ["commit", "-q", "-m", "two hunks"]);
+
+    const shown = runGit(root, ["show", "--no-ext-diff", "--no-color", "HEAD"]);
+    const ws = stubWs(root);
+    const model = parseDiff(shown)!;
+    assertEquals(model.files[0].hunks.length, 2, "git show has two hunks");
+    const { doc, edit } = buildDiffDocument(shown, model, ws);
+    const s = new Session(
+      doc,
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 30 },
+      undefined,
+      diffSource(ws, edit, undefined, realGit(root)),
+    );
+    const first = s.doc.lines.findIndex((entry) =>
+      entry.text === "+line 2 committed"
+    );
+    assert(first >= 0, "git show contains the first hunk");
+    toLine(s, first);
+    press(s, "end", "enter");
+    type(s, "inserted after first hunk line");
+    press(s, "f3");
+    press(s, "a");
+
+    const second = s.doc.lines.findIndex((entry) =>
+      entry.text === "+line 15 committed"
+    );
+    assert(second >= 0, "git show contains the second hunk");
+    toLine(s, second);
+    press(s, "end");
+    type(s, " second save");
+    press(s, "f3");
+    press(s, "a");
+
+    const committed = runGit(root, ["show", "HEAD:m.ts"]);
+    assert(
+      committed.includes(
+        "line 2 committed\ninserted after first hunk line\nline 3\n",
+      ),
+      committed,
+    );
+    assert(committed.includes("line 15 committed second save\n"), committed);
+    assertEquals(runGit(root, ["status", "--porcelain"]), "");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: editing a HEAD hunk does not amend a matching historical hunk", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    runGit(root, ["init", "-q"]);
+    runGit(root, ["config", "user.email", "t@t.test"]);
+    runGit(root, ["config", "user.name", "Test"]);
+    const path = join(root, "m.ts");
+    const parent = Array.from(
+      { length: 12 },
+      (_, index) => `line ${index + 1}`,
+    );
+    Deno.writeTextFileSync(path, `${parent.join("\n")}\n`);
+    runGit(root, ["add", "m.ts"]);
+    runGit(root, ["commit", "-q", "-m", "parent"]);
+
+    const historical = [...parent];
+    historical[9] = "line 10 historical";
+    Deno.writeTextFileSync(path, `${historical.join("\n")}\n`);
+    runGit(root, ["add", "m.ts"]);
+    runGit(root, ["commit", "-q", "-m", "historical line"]);
+
+    const current = [...historical];
+    current[9] = "line 10 current";
+    Deno.writeTextFileSync(path, `${current.join("\n")}\n`);
+    runGit(root, ["add", "m.ts"]);
+    runGit(root, ["commit", "-q", "-m", "current line"]);
+
+    const head = [...current];
+    head[2] = "line 3 head";
+    Deno.writeTextFileSync(path, `${head.join("\n")}\n`);
+    runGit(root, ["add", "m.ts"]);
+    runGit(root, ["commit", "-q", "-m", "head line"]);
+    const shown = runGit(root, [
+      "log",
+      "-p",
+      "-3",
+      "--no-ext-diff",
+      "--no-color",
+    ]);
+
+    const workspace = [...head];
+    workspace[9] = "line 10 historical";
+    Deno.writeTextFileSync(path, `${workspace.join("\n")}\n`);
+    const ws = stubWs(root);
+    const model = parseDiff(shown)!;
+    const { doc, edit } = buildDiffDocument(shown, model, ws);
+    const s = new Session(
+      doc,
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 40 },
+      undefined,
+      diffSource(ws, edit, undefined, realGit(root)),
+    );
+    const line = s.doc.lines.findIndex((entry) =>
+      entry.text === "+line 3 head"
+    );
+    assert(line >= 0, "git log contains the HEAD hunk");
+    toLine(s, line);
+    press(s, "end");
+    type(s, " amended");
+    press(s, "f3");
+    assert(promptText(s.view()).includes("Amend commit"), promptText(s.view()));
+    press(s, "a");
+    assertEquals(s.view().message, "Saved 1 file; Amended the commit");
+
+    const amendedHead = [...head];
+    amendedHead[2] = "line 3 head amended";
+    const amendedWorkspace = [...workspace];
+    amendedWorkspace[2] = "line 3 head amended";
+    assertEquals(
+      runGit(root, ["show", "HEAD:m.ts"]),
+      `${amendedHead.join("\n")}\n`,
+      "the amended commit keeps the current version of the historical line",
+    );
+    assertEquals(
+      Deno.readTextFileSync(path),
+      `${amendedWorkspace.join("\n")}\n`,
+      "the unrelated worktree version of the historical line remains",
+    );
+    assertEquals(runGit(root, ["status", "--porcelain"]), " M m.ts\n");
+
+    const amendedSha = runGit(root, ["rev-parse", "HEAD"]);
+    const historicalLine = s.doc.lines.findIndex((entry) =>
+      entry.text === "+line 10 historical"
+    );
+    assert(historicalLine > line, "git log contains the older writable hunk");
+    toLine(s, historicalLine);
+    press(s, "end");
+    type(s, " workspace edit");
+    press(s, "f3");
+
+    amendedWorkspace[9] = "line 10 historical workspace edit";
+    assertEquals(
+      s.view().dialog,
+      null,
+      "an older commit does not prompt amend",
+    );
+    assertEquals(s.view().message, "Saved 1 file");
+    assertEquals(
+      runGit(root, ["rev-parse", "HEAD"]),
+      amendedSha,
+      "editing an older commit's hunk does not move HEAD",
+    );
+    assertEquals(
+      Deno.readTextFileSync(path),
+      `${amendedWorkspace.join("\n")}\n`,
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: a historical insertion does not shift a later HEAD amend", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    runGit(root, ["init", "-q"]);
+    runGit(root, ["config", "user.email", "t@t.test"]);
+    runGit(root, ["config", "user.name", "Test"]);
+    const path = join(root, "m.ts");
+    const base = Array.from({ length: 14 }, (_, index) => `line ${index + 1}`);
+    Deno.writeTextFileSync(path, `${base.join("\n")}\n`);
+    runGit(root, ["add", "m.ts"]);
+    runGit(root, ["commit", "-q", "-m", "base"]);
+
+    const historical = [...base];
+    historical[1] = "line 2 historical";
+    Deno.writeTextFileSync(path, `${historical.join("\n")}\n`);
+    runGit(root, ["commit", "-qam", "historical"]);
+
+    const head = [...historical];
+    head[11] = "line 12 head";
+    Deno.writeTextFileSync(path, `${head.join("\n")}\n`);
+    runGit(root, ["commit", "-qam", "head"]);
+    const shown = runGit(root, [
+      "log",
+      "-p",
+      "-2",
+      "-U0",
+      "--no-ext-diff",
+      "--no-color",
+    ]);
+    const ws = stubWs(root);
+    const model = parseDiff(shown)!;
+    const { doc, edit } = buildDiffDocument(shown, model, ws);
+    const s = new Session(
+      doc,
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 30 },
+      undefined,
+      diffSource(ws, edit, undefined, realGit(root)),
+    );
+
+    const older = s.doc.lines.findIndex((entry) =>
+      entry.text === "+line 2 historical"
+    );
+    assert(older >= 0, "git log contains the historical hunk");
+    toLine(s, older);
+    press(s, "end", "enter");
+    type(s, "historical workspace insertion");
+    press(s, "f3");
+    assertEquals(s.view().dialog, null, "the historical edit does not amend");
+    assertEquals(s.view().message, "Saved 1 file");
+
+    const headLine = s.doc.lines.findIndex((entry) =>
+      entry.text === "+line 12 head"
+    );
+    assert(headLine >= 0, "git log contains the HEAD hunk");
+    toLine(s, headLine);
+    press(s, "end");
+    type(s, " amended");
+    press(s, "f3");
+    assert(promptText(s.view()).includes("Amend commit"), promptText(s.view()));
+    press(s, "a");
+    assertEquals(s.view().message, "Saved 1 file; Amended the commit");
+
+    const amendedHead = [...head];
+    amendedHead[11] = "line 12 head amended";
+    assertEquals(
+      runGit(root, ["show", "HEAD:m.ts"]),
+      `${amendedHead.join("\n")}\n`,
+    );
+    const workspace = [...amendedHead];
+    workspace.splice(2, 0, "historical workspace insertion");
+    assertEquals(Deno.readTextFileSync(path), `${workspace.join("\n")}\n`);
+    assertEquals(runGit(root, ["status", "--porcelain"]), " M m.ts\n");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: expanded workspace context stays outside the amended commit", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    runGit(root, ["init", "-q"]);
+    runGit(root, ["config", "user.email", "t@t.test"]);
+    runGit(root, ["config", "user.name", "Test"]);
+    const path = join(root, "m.ts");
+    const base = Array.from({ length: 12 }, (_, index) => `line ${index + 1}`);
+    Deno.writeTextFileSync(path, `${base.join("\n")}\n`);
+    runGit(root, ["add", "m.ts"]);
+    runGit(root, ["commit", "-q", "-m", "base"]);
+
+    const head = [...base];
+    head[9] = "line 10 head";
+    Deno.writeTextFileSync(path, `${head.join("\n")}\n`);
+    runGit(root, ["commit", "-qam", "head"]);
+    const shown = runGit(root, [
+      "show",
+      "-U0",
+      "--no-ext-diff",
+      "--no-color",
+      "HEAD",
+    ]);
+
+    const workspace = [...head];
+    workspace[8] = "line 9 unstaged";
+    Deno.writeTextFileSync(path, `${workspace.join("\n")}\n`);
+    const ws = stubWs(root);
+    const model = parseDiff(shown)!;
+    const { doc, edit } = buildDiffDocument(shown, model, ws);
+    const s = new Session(
+      doc,
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 30 },
+      undefined,
+      diffSource(ws, edit, undefined, realGit(root)),
+    );
+    const line = s.doc.lines.findIndex((entry) =>
+      entry.text === "+line 10 head"
+    );
+    assert(line >= 0, "git show contains the HEAD hunk");
+    const header = s.doc.lines.findLastIndex((entry, index) =>
+      index < line && entry.text.startsWith("@@ ")
+    );
+    assert(header >= 0, "git show contains the HEAD hunk header");
+    toLine(s, header);
+    press(s, "ctrl-l");
+    assert(
+      s.doc.lines.some((entry) => entry.text === " line 9 unstaged"),
+      `expansion reveals the unstaged workspace line:\n${s.doc.text}`,
+    );
+    const expandedLine = s.doc.lines.findIndex((entry) =>
+      entry.text === "+line 10 head"
+    );
+    toLine(s, expandedLine);
+    press(s, "end");
+    type(s, " amended");
+    assert(s.doc.text.includes("+line 10 head amended"), s.doc.text);
+    press(s, "f3");
+    assert(promptText(s.view()).includes("Amend commit"), promptText(s.view()));
+    press(s, "a");
+    assertEquals(s.view().message, "Saved 1 file; Amended the commit");
+
+    const amendedHead = [...head];
+    amendedHead[9] = "line 10 head amended";
+    assertEquals(
+      runGit(root, ["show", "HEAD:m.ts"]),
+      `${amendedHead.join("\n")}\n`,
+      "the expanded unstaged line is absent from the commit",
+    );
+    workspace[9] = "line 10 head amended";
+    assertEquals(Deno.readTextFileSync(path), `${workspace.join("\n")}\n`);
+    assertEquals(runGit(root, ["status", "--porcelain"]), " M m.ts\n");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: an amend excludes unrelated same-file edits and preserves their staged state", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    runGit(root, ["init", "-q"]);
+    runGit(root, ["config", "user.email", "t@t.test"]);
+    runGit(root, ["config", "user.name", "Test"]);
+    const path = join(root, "m.ts");
+    const parentLines = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`);
+    const commitLines = [...parentLines];
+    commitLines[5] = "line 6 committed";
+    Deno.writeTextFileSync(path, `${parentLines.join("\n")}\n`);
+    runGit(root, ["add", "m.ts"]);
+    runGit(root, ["commit", "-q", "-m", "parent"]);
+    Deno.writeTextFileSync(path, `${commitLines.join("\n")}\n`);
+    runGit(root, ["add", "m.ts"]);
+    runGit(root, ["commit", "-q", "-m", "commit view"]);
+    const shown = runGit(root, ["show", "--no-ext-diff", "--no-color", "HEAD"]);
+
+    const indexLines = [...commitLines];
+    indexLines[3] = "line 4 staged";
+    Deno.writeTextFileSync(path, `${indexLines.join("\n")}\n`);
+    runGit(root, ["add", "m.ts"]);
+    const workspaceLines = [...commitLines];
+    workspaceLines[11] = "line 12 unstaged";
+    Deno.writeTextFileSync(path, `${workspaceLines.join("\n")}\n`);
+
+    const ws: DiffWorkspace = {
+      resolve: (relative) => join(root, relative),
+      read: (absolute) => {
+        try {
+          return Deno.readTextFileSync(absolute);
+        } catch {
+          return null;
+        }
+      },
+    };
+    const model = parseDiff(shown)!;
+    const { doc, edit } = buildDiffDocument(shown, model, ws);
+    const s = new Session(
+      doc,
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 30 },
+      undefined,
+      diffSource(ws, edit, undefined, realGit(root)),
+    );
+    const line = s.doc.lines.findIndex((entry) =>
+      entry.text === "+line 6 committed"
+    );
+    assert(line >= 0, "git show contains the committed line");
+    toLine(s, line);
+    press(s, "end");
+    type(s, " EDIT");
+    press(s, "f3");
+    press(s, "a");
+
+    const amendedCommit = [...commitLines];
+    amendedCommit[5] = "line 6 committed EDIT";
+    const amendedIndex = [...indexLines];
+    amendedIndex[5] = "line 6 committed EDIT";
+    const amendedWorkspace = [...workspaceLines];
+    amendedWorkspace[5] = "line 6 committed EDIT";
+    assertEquals(
+      runGit(root, ["show", "HEAD:m.ts"]),
+      `${amendedCommit.join("\n")}\n`,
+    );
+    assertEquals(
+      runGit(root, ["show", ":m.ts"]),
+      `${amendedIndex.join("\n")}\n`,
+    );
+    assertEquals(
+      Deno.readTextFileSync(path),
+      `${amendedWorkspace.join("\n")}\n`,
+    );
+    assertEquals(runGit(root, ["status", "--porcelain"]), "MM m.ts\n");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
   }
 });
 
@@ -2432,7 +3929,7 @@ Deno.test("diffedit: quitting with an edited message confirms the save then the 
       promptText(s.view()),
     );
     assert(!s.quit, "not quit until the amend is confirmed");
-    press(s, "y"); // confirm the amend → save, amend, and quit
+    press(s, "a"); // confirm the amend → save, amend, and quit
     assert(s.quit, "quits after the amend");
     assert(
       fg.amended()?.startsWith("Subject line of the commit Q"),
@@ -2458,7 +3955,7 @@ Deno.test("diffedit: with no git runner the message is not editable", () => {
 
 // --- amend safety (review follow-ups) ----------------------------------------
 
-Deno.test("diffedit: refuses to save an all-blank commit message", () => {
+Deno.test("diffedit: refuses to amend an all-blank commit message", () => {
   const { ws, done } = tempWorkspace();
   const fg = fakeGit(SHOW_SHA);
   try {
@@ -2470,16 +3967,17 @@ Deno.test("diffedit: refuses to save an all-blank commit message", () => {
       press(s, "ctrl-k"); // kill to end (nudged past the indent)
     }
     press(s, "f3");
+    assert(s.view().dialog, "the files-only alternative remains available");
+    press(s, "a");
     assert(s.view().message.includes("would be empty"), s.view().message);
     assertEquals(fg.amended(), null, "an empty message is never amended");
-    // No amend prompt was raised, so no file was written either.
     assert(s.view().dialog == null, "no prompt is left open");
   } finally {
     done();
   }
 });
 
-Deno.test("diffedit: refuses to save when every commit-message line is deleted", () => {
+Deno.test("diffedit: refuses to amend when every commit-message line is deleted", () => {
   const { root, ws, done } = tempWorkspace();
   const before = Deno.readTextFileSync(join(root, "m.ts"));
   const fg = fakeGit(SHOW_SHA);
@@ -2496,6 +3994,8 @@ Deno.test("diffedit: refuses to save when every commit-message line is deleted",
     }
     assertEquals(s.doc.lines[4].text, "", "no message lines are left");
     press(s, "f3");
+    assert(s.view().dialog, "the files-only alternative remains available");
+    press(s, "a");
     assert(s.view().message.includes("would be empty"), s.view().message);
     assertEquals(fg.amended(), null, "the commit was not amended");
     assertEquals(s.view().dialog, null, "no prompt is left open");
@@ -2526,7 +4026,7 @@ Deno.test("diffedit: a SHA-256 repository's commit message is editable and amend
     assertEquals(s.doc.lines[4].text, "    Subject line of the commit EDIT");
     press(s, "f3");
     assert(promptText(s.view()).includes("Amend commit"), promptText(s.view()));
-    press(s, "y");
+    press(s, "a");
     assertEquals(
       fg.amended(),
       "Subject line of the commit EDIT\n\nA body paragraph of the message.",
@@ -2546,7 +4046,7 @@ Deno.test("diffedit: does not amend (or write files) when HEAD moved since the d
     press(s, "end");
     type(s, " X");
     press(s, "f3"); // editability used the cached (original) HEAD
-    press(s, "y"); // the amend re-reads HEAD, sees it moved, and refuses
+    press(s, "a"); // the amend re-reads HEAD, sees it moved, and refuses
     assertEquals(fg.amended(), null, "no amend when HEAD moved");
     assert(s.view().message.includes("HEAD has moved"), s.view().message);
     // The amend runs before the file write, so a refusal leaves files untouched.

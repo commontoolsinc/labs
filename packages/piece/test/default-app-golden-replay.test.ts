@@ -23,7 +23,6 @@ import {
 // verified before this defaults on.
 
 const signer = await Identity.fromPassphrase("default-app golden replay");
-const BUILD_SHA = "golden-build-1";
 
 // A default-app-SHAPED root: it OWNS a `pieces` list via `new Writable([])` —
 // exactly how default-app owns `allPieces` — and derives a reactive `summary`
@@ -55,7 +54,7 @@ const ROOT_V2 = rootSource("v2");
 
 const SEEDED_PIECES = ["note:groceries", "note:standup", "notebook:trip"];
 
-/** Content identity a toolshed at this build would serve for `source`. */
+/** Content identity a toolshed would serve for `source`. */
 function identityForSource(source: string): Promise<string> {
   return resolveEntryIdentity(
     DEFAULT_APP_PATTERN_URL,
@@ -82,12 +81,6 @@ function installFetchStub(): StubControls {
       ? input.href
       : input.url;
     const url = new URL(href);
-
-    if (url.pathname === "/api/meta") {
-      return new Response(JSON.stringify({ did: "did:x", gitSha: BUILD_SHA }), {
-        headers: { "content-type": "application/json" },
-      });
-    }
 
     if (url.pathname === DEFAULT_APP_PATTERN_URL) {
       if (url.searchParams.has("identity")) {
@@ -123,7 +116,6 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
-      clientVersion: BUILD_SHA,
       experimental: { systemPatternAutoUpdate: true },
     });
     const session = await createSession({

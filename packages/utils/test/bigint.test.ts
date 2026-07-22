@@ -266,7 +266,7 @@ for (
     describe(`${biToMtc.name}()`, () => {
       it(`correctly encodes ${sliceLabel}`, () => {
         for (let i = 0; i < slice.length; i++) {
-          const { value, encoded, label } = slice[i];
+          const { value, encoded, label } = slice[i]!;
           try {
             expect(biToMtc(value)).toEqual(encoded);
           } catch (e) {
@@ -279,7 +279,7 @@ for (
     describe(`${biFromMtc.name}()`, () => {
       it(`correctly decodes ${sliceLabel}`, () => {
         for (let i = 0; i < slice.length; i++) {
-          const { value, encoded, label } = slice[i];
+          const { value, encoded, label } = slice[i]!;
           try {
             expect(biFromMtc(encoded)).toBe(value);
           } catch (e) {
@@ -292,7 +292,7 @@ for (
     describe(`${biToMtc.name}()->${biFromMtc.name}() round trip through base64url`, () => {
       it(`correctly round-trips ${sliceLabel}`, () => {
         for (let i = 0; i < slice.length; i++) {
-          const { value, label } = slice[i];
+          const { value, label } = slice[i]!;
           const bytes = biToMtc(value);
           const b64 = toUnpaddedBase64url(bytes);
           const decodedBytes = fromBase64url(b64);

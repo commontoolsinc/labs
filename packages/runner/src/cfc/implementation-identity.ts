@@ -3,6 +3,7 @@ import type { HarnessedFunction } from "../harness/types.ts";
 import type { ImplementationIdentity } from "./types.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
+import { normalizeIdentitySource } from "./writer-claim-correspondence.ts";
 
 /**
  * Resolve the policy-facing implementation identity for a module invocation.
@@ -60,9 +61,11 @@ const resolveProvenanceImplementationIdentity = (
 
   // `.src` (the debug source location) is NO LONGER consulted for identity: the
   // WeakMap provenance lookup above IS the anti-spoof proof (an attacker-supplied
-  // function has no entry), and every field the `writeAuthorizedBy` gate checks
-  // (`moduleIdentity`, `sourceFile`, `bindingPath` — prepare.ts) is provenance-
-  // derived, never `.src`-derived. The former `identityFromCanonicalSource(.src)
+  // function has no entry), and the policy-facing identity fields are provenance-
+  // derived, never `.src`-derived. `writeAuthorizedBy` verifies the direct or
+  // delegated `moduleIdentity` plus the exact `bindingPath`; `sourceFile` remains
+  // diagnostic at verification time and participates only when claims are minted
+  // or reconciled. The former `identityFromCanonicalSource(.src)
   // === provenance.identity` consistency check was defense-in-depth, not the
   // security boundary; it is dropped so that making `.src` lazy/debug-only
   // (skipped at boot) cannot flip a genuinely-verified implementation to
@@ -76,7 +79,7 @@ const resolveProvenanceImplementationIdentity = (
       ? {
         sourceFile: normalizeIdentitySource(
           provenance.bindingIdentity.sourceFile,
-        ),
+        )!,
         bindingPath: [...provenance.bindingIdentity.bindingPath],
       }
       : {}),
@@ -86,6 +89,3 @@ const resolveProvenanceImplementationIdentity = (
     }),
   };
 };
-
-const normalizeIdentitySource = (source: string): string =>
-  source.startsWith("/") ? source : `/${source}`;

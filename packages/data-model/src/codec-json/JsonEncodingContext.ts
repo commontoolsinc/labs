@@ -8,6 +8,7 @@ import {
   type SerializationContext,
 } from "@/codec-common/interface.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
+import { EmptyReconstructionContext } from "@/codec-common/EmptyReconstructionContext.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { createDefaultRegistry } from "./createDefaultRegistry.ts";
@@ -37,7 +38,7 @@ const defaultRegistry: CodecRegistry = createDefaultRegistry();
 function isEncodedInstance(v: JsonWireValue): boolean {
   if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
   const keys = Object.keys(v);
-  return keys.length === 1 && keys[0].startsWith("/");
+  return keys.length === 1 && keys[0]!.startsWith("/");
 }
 
 /**
@@ -67,7 +68,7 @@ function unquote(v: JsonWireValue): JsonWireValue {
     const result = v.map(unquote) as JsonWireValue;
     return Object.freeze(result);
   } else if (isEncodedInstance(v) && Object.keys(v)[0] === "/quote") {
-    return (v as Record<string, JsonWireValue>)["/quote"];
+    return (v as Record<string, JsonWireValue>)["/quote"]!;
   } else {
     const result = Object.fromEntries(
       Object.entries(v).map(([k, val]) => [k, unquote(val as JsonWireValue)]),
@@ -179,9 +180,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
     // `isEncodedInstance()` guaranteed a single-property object, so this
     // destructures that one entry. (`isPlainObject()` is not a type guard, so
     // narrow explicitly for the type-checker.)
-    const [[key, value]] = Object.entries(
+    const [key, value] = Object.entries(
       data as Record<string, JsonWireValue>,
-    );
+    )[0]!;
     return { tag: key.slice(1), state: value };
   }
 
@@ -472,12 +473,123 @@ export class JsonEncodingContext implements SerializationContext<string> {
   //
 
   /**
+   * Reconstruction context for the throwaway checks in the testing helpers
+   * below. Deep-freezes, as the ordinary decode path does. Paired with a
+   * lenient codec context, a cell reference degrades to a `ProblematicValue`
+   * rather than throwing.
+   */
+  static readonly #testingReconstructionContext = Object.freeze(
+    new EmptyReconstructionContext(
+      true,
+      "no runtime context (validity check in a test-only helper).",
+    ),
+  );
+
+  /**
    * Indicates if the given text has a "first-blush" appearance as valid JSON
    * encoded by this class -- that is, whether it carries the encoding prefix
    * tag.
    */
   static seemsLikeEncoded(value: string): boolean {
     return value.startsWith(ENCODING_PREFIX_TAG);
+  }
+
+  /**
+   * **Intended for tests only.** Strips the encoding prefix tag off an encoded
+   * value, yielding the bare JSON text underneath.
+   *
+   * Tests legitimately need the JSON body on its own -- to pretty-print it, to
+   * store it in a fixture file, to compare it against a literal. Doing that by
+   * hand means writing the prefix a second time, which is how one definition of
+   * a format quietly becomes several that can drift apart.
+   *
+   * This is deliberately not useful outside a test. Its result is precisely a
+   * string that is _no longer_ an encoded fabric value: it has shed the very
+   * marker whose purpose is to say "this JSON came from here." Production code
+   * that wants to recognize an encoded value should call `seemsLikeEncoded()`;
+   * production code that wants the value itself should call `decode()`.
+   *
+   * That is enforced rather than merely advised: by default this performs a
+   * throwaway decode of `encoded` and throws if it is not genuinely decodable.
+   * So it cannot serve as a cheap "chop off the first few characters," and it
+   * is far too expensive to belong on any hot path.
+   *
+   * Pass `isMalformed` when the payload is bad on purpose. The decode is then
+   * skipped entirely -- malformed means malformed, and deliberately broken text
+   * cannot be asked to survive a decode. Only the prefix check remains.
+   *
+   * The tag itself is still required either way. That is not a judgment about
+   * the payload: removing a prefix that is not there does not produce the body,
+   * it produces nonsense, so there is nothing for this to return.
+   */
+  static unwrapEncodedValueForTesting(
+    encoded: string,
+    isMalformed = false,
+  ): string {
+    if (isMalformed) {
+      if (!JsonEncodingContext.seemsLikeEncoded(encoded)) {
+        throw new Error(
+          `Not a JSON-encoded \`FabricValue\` string: \`${encoded}\``,
+        );
+      }
+    } else {
+      // Throwaway decode. The result is discarded; it is performed only to
+      // establish that `encoded` really is one of ours, rather than a string
+      // that happens to begin with the right few characters. (`decode()` checks
+      // the tag first, so the malformed branch above loses nothing.)
+      new JsonEncodingContext().decode(
+        encoded,
+        JsonEncodingContext.#testingReconstructionContext,
+      );
+    }
+
+    return encoded.slice(ENCODING_PREFIX_TAG.length);
+  }
+
+  /**
+   * **Intended for tests only.** Attaches the encoding prefix tag to bare JSON
+   * text, producing an encoded value. The inverse of
+   * `unwrapEncodedValueForTesting()`, and it exists for the same reason: so a
+   * test that took an encoded value apart can put it back together without
+   * naming the prefix itself.
+   *
+   * The same caveats apply, and for the same reason. Nothing in production
+   * should be assembling an encoded value out of text -- code that has a value
+   * to encode should call `encode()`, which is the only thing that can promise
+   * the result is well-formed.
+   *
+   * Here that promise is checked directly: the tagged result is decoded and
+   * then re-encoded, and both steps must succeed. Text earns the prefix only if
+   * the codec can actually read what follows it and write it back out. Note
+   * that the re-encoded form is not compared against the input, so incidental
+   * differences -- whitespace, in particular -- are fine; a pretty-printed body
+   * is accepted.
+   *
+   * Pass `isMalformed` when the payload is bad on purpose -- a test that wants
+   * the decoder to choke on it, say. No check runs at all in that case:
+   * malformed means malformed, and text that is deliberately broken cannot be
+   * asked to survive a decode. The result is the tag with `json` after it,
+   * whatever `json` is. The flag is the call site saying out loud that the
+   * badness is the point.
+   */
+  static wrapEncodedValueForTesting(
+    json: string,
+    isMalformed = false,
+  ): string {
+    const encoded = ENCODING_PREFIX_TAG + json;
+
+    if (!isMalformed) {
+      // Throwaway decode and re-encode; both results are discarded. See above.
+      const context = new JsonEncodingContext();
+      context.encode(
+        context.decode(
+          encoded,
+          JsonEncodingContext.#testingReconstructionContext,
+        ),
+      );
+    }
+
+    return encoded;
   }
 
   /**

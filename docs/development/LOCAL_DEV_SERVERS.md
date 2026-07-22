@@ -19,6 +19,21 @@
 ./scripts/share-pattern-via-tailscale.sh --down                                 # Tear that down
 ```
 
+To make source-run build metadata describe the checkout the same way compiled
+binaries do, pass the current revision into the start script:
+
+```bash
+COMMIT_SHA="$(git rev-parse HEAD)" ./scripts/start-local-dev.sh --bg-updater
+```
+
+The script's children inherit the value: toolshed uses it as the source-run
+fallback for `/api/meta.gitSha`, and shell surfaces it in diagnostics. The
+source-run shell still loads its mutable worker graph from `/scripts`; only a
+deployed shell selects the immutable `/builds/<sha>` namespace. `COMMIT_SHA` is
+descriptive metadata, not a system-pattern update gate. The updater instead
+compiles the downloaded source/import closure and requires its entry identity
+to equal `?identity` before changing the persisted root.
+
 To let teammates interact with a locally-hosted pattern (e.g. "host latest-main
 `<pattern>` locally with `--inspect` and export it over Tailscale"), use
 `share-pattern-via-tailscale.sh`. It starts an isolated toolshed (with

@@ -1,10 +1,10 @@
 import {
-  buildsMatch,
   type Cell,
   entityIdFrom,
   type EnvReader,
   experimentalOptionsFromEnv,
   getPatternIdentityRef,
+  getPatternRepository,
   getPatternSource,
   type JSONSchema,
   type MemorySpace,
@@ -37,16 +37,11 @@ export const HOME_PATTERN_URL = "/api/patterns/system/home.tsx";
 export const DEFAULT_APP_PATTERN_URL = "/api/patterns/system/default-app.tsx";
 
 /**
- * The system space-root pattern URL a space of this type is created with — the
- * home DID gets home.tsx, every other space the default app. Used to back-fill
- * `patternSource` for spaces created before provenance stamping.
- *
- * Known v1 limitation: an existing *custom-app* space (whose root was seeded
- * from home's `defaultAppUrl`) that carries no stored `patternSource` derives to
- * default-app.tsx here. The auto-update check must therefore only act when a
- * stored `patternSource` is present (or the running identity matches a known
- * system identity) — otherwise it would roll a custom app to the default. See
- * docs/specs/pattern-imports/pattern-updates.md risk list.
+ * The official system space-root pattern URL for a space type — the home DID
+ * gets home.tsx, every other space gets the default app. This derivation only
+ * selects the identity to check; it never proves that a sourceless root tracks
+ * that URL. Exact equality with the official content identity supplies
+ * that proof below.
  */
 export function deriveSystemPatternUrl(
   space: MemorySpace,
@@ -69,9 +64,8 @@ const pieceUpdateLogger = getLogger("piece.update", {
 /** The result of a system-pattern update check. */
 export type UpdateOutcome =
   | "updated"
+  | "repaired-provenance"
   | "current"
-  | "skipped-skew"
-  | "skipped-unknown-build"
   | "skipped-disabled";
 
 // This module can load outside Deno (browser-safe storage import above), so
@@ -331,14 +325,14 @@ export class PiecesController<T = unknown> {
       if (isHomeSpace) {
         patternConfig = {
           name: "Home",
-          urlPath: "/api/patterns/system/home.tsx",
+          urlPath: HOME_PATTERN_URL,
           cause: `home-pattern-${Date.now()}`,
         };
       } else {
         const customUrl = await this.getDefaultAppUrlFromHome();
         patternConfig = {
           name: "DefaultPieceList",
-          urlPath: customUrl || "/api/patterns/system/default-app.tsx",
+          urlPath: customUrl || DEFAULT_APP_PATTERN_URL,
           cause: `space-root-${Date.now()}`,
         };
       }
@@ -372,6 +366,21 @@ export class PiecesController<T = unknown> {
 
       // Run pattern setup within same transaction
       this.#manager.runtime.run(tx, pattern, {}, pieceCell);
+
+      // Stamp the provenance the piece tracks for updates, mirroring
+      // ensureDefaultPattern (CT-1890). Without this, every recreated root
+      // is born unprovenanced and checkAndUpdateDefaultPattern can only admit
+      // it while its ref exactly equals the current official identity — the
+      // repair path would otherwise mint roots with no durable update source.
+      // A custom program has no URL the
+      // auto-updater could re-fetch (stamping the "custom" placeholder
+      // would poison URL resolution — it would resolve relative to the
+      // host); its locator, when supplied, is recorded via
+      // setPatternRepository below, so a custom root without a repository
+      // intentionally stays unstamped.
+      if (options?.customProgram === undefined) {
+        setPatternSource(pieceCell, tx, patternConfig.urlPath);
+      }
 
       if (options?.repository !== undefined) {
         setPatternRepository(pieceCell, tx, options.repository);
@@ -577,9 +586,9 @@ export class PiecesController<T = unknown> {
    * Roll the space's system root pattern forward in place if its toolshed
    * serves a newer content identity. Best-effort: every failure logs and
    * returns without throwing. During {@link ensureDefaultPattern}, this runs
-   * before the persisted root is started, so an unloadable obsolete identity
-   * can be replaced before bootstrap. If the root is already running, its
-   * watcher applies the same metadata swap in place.
+   * before the persisted root is started, so an eligible tracked root's
+   * unloadable obsolete identity can be replaced before bootstrap. If the root
+   * is already running, its watcher applies the same metadata swap in place.
    *
    * Never calls run()/stop()/recreateDefaultPattern.
    */
@@ -589,13 +598,11 @@ export class PiecesController<T = unknown> {
     const runtime = this.#manager.runtime;
     const space = this.#manager.getSpace();
 
-    // 1. Flag gate. Home is held behind a second flag until its durable state
-    //    is verified stable-key-addressed (spec § open question 4).
+    // 1. Flag gate. One flag governs every tracked system root, home included:
+    //    home state survival across an in-place roll is pinned by
+    //    home-golden-replay.test.ts, so the home root no longer needs a
+    //    separate opt-in.
     if (!runtime.experimental?.systemPatternAutoUpdate) {
-      return "skipped-disabled";
-    }
-    const isHomeSpace = space === runtime.userIdentityDID;
-    if (isHomeSpace && !runtime.experimental?.systemPatternAutoUpdateHome) {
       return "skipped-disabled";
     }
 
@@ -607,83 +614,212 @@ export class PiecesController<T = unknown> {
       if (!root) return "current";
 
       // 3. Provenance + per-space host (NOT the global apiUrl — a foreign-homed
-      //    space must resolve against its own toolshed). A non-home root
-      //    created before provenance stamping has no patternSource; we must NOT
-      //    derive default-app.tsx for it — a custom-app space (seeded from
-      //    home's defaultAppUrl) would be silently rolled to the default app.
-      //    Deriving is only safe for the home root (definitionally home.tsx).
-      //    Legacy non-home roots stay pinned until re-created stamps them; a
-      //    known-system-identity match could relax this later (spec M2.3).
+      //    space must resolve against its own toolshed). For a pre-provenance
+      //    root, derive only the official URL whose identity can be tested. The
+      //    URL or an author-controlled filename is not provenance: below, only
+      //    an exact match with the current content identity admits it.
+      const runningRef = getPatternIdentityRef(root);
+      if (runningRef === undefined) return "current";
       const storedSource = getPatternSource(root);
-      if (storedSource === undefined && !isHomeSpace) {
+      const storedRepository = getPatternRepository(root);
+      if (storedSource === undefined && storedRepository !== undefined) {
         return "current";
       }
       const url = storedSource ?? deriveSystemPatternUrl(space, runtime);
       const host = runtime.mappedHostFor(space) ?? runtime.apiUrl.href;
+      // Async identity/load/compile work must not authorize a later write to a
+      // root another client has replaced in the meantime. Reading all captured
+      // metadata inside each transaction makes both writes compare-and-swap;
+      // editWithRetry re-runs this predicate after every conflict.
+      const rootStillMatches = (candidate: Cell<NameSchema>): boolean => {
+        const candidateRef = getPatternIdentityRef(candidate);
+        return candidateRef?.identity === runningRef.identity &&
+          candidateRef.symbol === runningRef.symbol &&
+          getPatternSource(candidate) === storedSource &&
+          getPatternRepository(candidate) === storedRepository;
+      };
+      const repairProvenance = async (): Promise<UpdateOutcome> => {
+        const result = await runtime.editWithRetry((tx) => {
+          if (!rootStillMatches(root.withTx(tx))) return false;
+          setPatternSource(root, tx, url);
+          return true;
+        });
+        if (result.error) {
+          pieceUpdateLogger.warn(
+            "provenance-repair-failed",
+            () => [
+              "checkAndUpdateDefaultPattern: provenance repair failed",
+              space,
+              result.error,
+            ],
+          );
+          return "current";
+        }
+        return result.ok ? "repaired-provenance" : "current";
+      };
 
-      // The version gate (step 4) validates `host`'s build, and the light
-      // ?identity is only trustworthy from that same build — so only act on a
-      // source served BY `host`. A cross-origin patternSource (a published /
-      // custom-app source on another host) would be gated against the wrong
-      // build; defer it to the cross-host published-pattern flow (Phase 4).
+      // Only same-origin system sources participate in this loop. Cross-origin
+      // published/custom sources use their own update flow.
       const target = new URL(url, host);
       if (target.origin !== new URL(host).origin) {
         return "current";
       }
 
-      // 4. Version gate: the light ?identity is only comparable within a build.
-      const toolshedVersion = await runtime.toolshedGitSha(host);
-      if (!buildsMatch(runtime.clientVersion, toolshedVersion)) {
-        // An unknown sha on either side (dev/source servers carry none)
-        // proves nothing — skip silently. The skew signal raises the shell's
-        // "reload to update" banner, which must only claim what is proven:
-        // both builds known and different. Signalling on unknown would show
-        // the banner on every space open in local dev, where no reload helps.
-        if (
-          runtime.clientVersion === undefined || toolshedVersion === undefined
-        ) {
-          return "skipped-unknown-build";
+      // Revalidate every request in one update attempt. Pattern responses use
+      // content-checksum ETags, so unchanged modules can reuse cached bytes
+      // after a 304 while stale identity, entry, or import bodies cannot pin or
+      // contaminate the update.
+      const revalidatingFetch: typeof globalThis.fetch = (input, init) =>
+        runtime.fetch(input, { ...init, cache: "no-cache" });
+
+      // 4. Ask the source host for the entry's content identity. This request is
+      // deliberately fresh: the host may roll between checks, and the compiled
+      // closure below is the end-to-end consistency proof for this attempt.
+      const identityUrl = new URL(target);
+      identityUrl.searchParams.set("identity", "");
+      const identityResponse = await revalidatingFetch(identityUrl);
+      if (!identityResponse.ok) return "current";
+      const currentId = (await identityResponse.text()).trim();
+      if (currentId.length === 0) return "current";
+
+      // A sourceless root is eligible only when its full content identity (which
+      // includes authored module paths) is exactly the official current entry.
+      // This admits a known system identity, never a lookalike filename. A stale
+      // sourceless root that still LOADS stays pinned: it may be a custom
+      // program (custom recreation deliberately stamps no provenance), and
+      // rolling it forward would overwrite that choice with the system pattern.
+      //
+      // When the stored root cannot cold-load at all, the pin protects only a
+      // dead page: an obsolete system root heals, and a broken custom root
+      // degrades to a WORKING system root with its displaced identity recorded
+      // under `displacedPattern` meta for recovery. (2026-07-21: a runtime
+      // migration bricked every pre-provenance home root, and this pin kept
+      // them bricked after the update flag opened.)
+      const staleSourceless = storedSource === undefined &&
+        (runningRef.identity !== currentId || runningRef.symbol !== "default");
+      if (staleSourceless) {
+        // Applies to every space's DEFAULT pattern (this function is only
+        // ever invoked on the root the space cell's `defaultPattern` ref
+        // names): a root that cannot load is a dead space regardless of
+        // space kind, and the displaced ref recorded below preserves the
+        // recovery pointer for a replaced custom program. Widened from
+        // home-only by the flag owner's call after a non-home field report
+        // (loom vendor update bricked on a stale sourceless space root).
+        // The probe is only meaningful where by-identity recovery is
+        // supported: under cfcEnforcementMode "disabled" it returns
+        // `undefined` unconditionally, which must not read as "dead".
+        if (runtime.cfcEnforcementMode === "disabled") return "current";
+        try {
+          const staleRoot = await runtime.patternManager.loadPatternByIdentity(
+            runningRef.identity,
+            runningRef.symbol,
+            space,
+          );
+          // Loadable in the current runtime → the pin still protects a live
+          // object. Only an explicit `undefined` — the artifact unavailable
+          // through every supported recovery path — authorizes replacement.
+          if (staleRoot !== undefined) return "current";
+        } catch (error) {
+          // A failed CHECK is not authority to replace an ambiguous root:
+          // fail closed like the enclosing function.
+          pieceUpdateLogger.warn(
+            "stale-root-probe-failed",
+            () => [
+              "checkAndUpdateDefaultPattern: stale-root load probe failed",
+              space,
+              runningRef,
+              error,
+            ],
+          );
+          return "current";
         }
-        runtime.reportVersionSkew({
-          space,
-          clientVersion: runtime.clientVersion,
-          toolshedVersion,
-        });
-        return "skipped-skew";
       }
 
-      // 5. Current identity from the toolshed (cached).
-      const currentId = await runtime.cachedPatternIdentity(host, url);
-      if (currentId === undefined) return "current"; // unresolved → skip
+      // 5. Equal identity is not enough to declare the root healthy: persisted
+      // source/compiled closures or the stored symbol may still be unloadable.
+      // Probe the exact ref; only the successful load takes the fast path.
+      if (currentId === runningRef?.identity) {
+        let loadable = false;
+        try {
+          loadable = await runtime.patternManager.loadPatternByIdentity(
+            runningRef.identity,
+            runningRef.symbol,
+            space,
+          ) !== undefined;
+        } catch {
+          // Continue through the same identity-authorized source path below.
+        }
+        if (loadable) {
+          if (storedSource !== undefined) return "current";
+          return await repairProvenance();
+        }
+      }
 
-      // 6. Compare to the running identity.
-      const running = getPatternIdentityRef(root)?.identity;
-      if (currentId === running) return "current";
-
-      // 7. Apply: compile the new source, then swap patternIdentity in place.
+      // 6. Resolve and compile the full authored closure locally. Only the
+      // compiler-produced entry ref can authorize a swap: if a rolling deploy
+      // serves identity and source from different revisions, their content
+      // identities differ and the original root remains untouched.
       const program = await runtime.harness.resolve(
-        new HttpProgramResolver(target.href),
+        new HttpProgramResolver(target.href, revalidatingFetch),
       );
       const pattern = await runtime.patternManager.compilePattern(program, {
         space,
       });
-      const entryRef = runtime.patternManager.getArtifactEntryRef(pattern) ??
-        { identity: currentId, symbol: "default" };
-      const { error } = await runtime.editWithRetry((tx) => {
+      const entryRef = runtime.patternManager.getArtifactEntryRef(pattern);
+      if (entryRef === undefined || entryRef.identity !== currentId) {
+        pieceUpdateLogger.warn(
+          "compiled-identity-mismatch",
+          () => [
+            "checkAndUpdateDefaultPattern: compiled source did not match " +
+            "the advertised identity",
+            space,
+            currentId,
+            entryRef?.identity,
+          ],
+        );
+        return "current";
+      }
+      if (
+        entryRef.identity === runningRef?.identity &&
+        entryRef.symbol === runningRef.symbol
+      ) {
+        if (storedSource === undefined) {
+          return await repairProvenance();
+        }
+        return "current";
+      }
+      const result = await runtime.editWithRetry((tx) => {
+        if (!rootStillMatches(root.withTx(tx))) return false;
+        if (staleSourceless) {
+          // The displaced ref had no provenance, so this swap is the only
+          // record of it. A replaced custom root's compiled artifacts remain
+          // content-addressed in the space; this breadcrumb is the pointer a
+          // recovery needs.
+          root.withTx(tx).setMetaRaw("displacedPattern", {
+            identity: runningRef.identity,
+            symbol: runningRef.symbol,
+            displacedAt: Date.now(),
+          });
+        }
         root.withTx(tx).setMetaRaw("patternIdentity", {
           identity: entryRef.identity,
           symbol: entryRef.symbol,
         });
         setPatternSource(root, tx, url); // back-fill provenance
+        return true;
       });
-      if (error) {
+      if (result.error) {
         pieceUpdateLogger.warn(
           "swap-failed",
-          () => ["checkAndUpdateDefaultPattern: swap failed", space, error],
+          () => [
+            "checkAndUpdateDefaultPattern: swap failed",
+            space,
+            result.error,
+          ],
         );
         return "current";
       }
-      return "updated";
+      return result.ok ? "updated" : "current";
     } catch (error) {
       pieceUpdateLogger.warn(
         "check-failed",

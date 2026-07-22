@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { fromBase64url } from "@commonfabric/utils/base64url";
+import { seemsLikeJsonEncodedFabricValue } from "@commonfabric/data-model/codec-json";
 import {
   linkRefFrom,
   linkRefPayload,
@@ -245,7 +246,7 @@ describe("data-uri", () => {
       const payload = new TextDecoder().decode(
         fromBase64url(dataURI.slice(dataURI.indexOf(",") + 1)),
       );
-      expect(payload.startsWith("fvj1:")).toBe(true);
+      expect(seemsLikeJsonEncodedFabricValue(payload)).toBe(true);
     });
 
     // The standard encoding canonicalizes key order, so the minted id is a

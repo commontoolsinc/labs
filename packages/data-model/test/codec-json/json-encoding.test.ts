@@ -7,6 +7,7 @@ import {
   seemsLikeJsonEncodedFabricValue,
   valueFromJson,
 } from "@/codec-json/json-encoding.ts";
+import { JsonEncodingContext } from "@/codec-json/JsonEncodingContext.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { FabricValue } from "@/fabric-value.ts";
 import { BaseReconstructionContext } from "@/codec-common/BaseReconstructionContext.ts";
@@ -33,10 +34,11 @@ function roundTrip(value: FabricValue): FabricValue {
  * (compared as parsed structure, after stripping the modern encoding prefix).
  */
 function expectWireFormat(value: FabricValue, expected: unknown): void {
-  const PREFIX = "fvj1:";
   const json = jsonFromValue(value);
-  expect(json.startsWith(PREFIX)).toBe(true);
-  expect(JSON.parse(json.slice(PREFIX.length))).toEqual(expected);
+  expect(seemsLikeJsonEncodedFabricValue(json)).toBe(true);
+  expect(
+    JSON.parse(JsonEncodingContext.unwrapEncodedValueForTesting(json)),
+  ).toEqual(expected);
 }
 
 describe("json-encoding", () => {

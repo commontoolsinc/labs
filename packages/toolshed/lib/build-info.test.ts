@@ -28,22 +28,43 @@ Deno.test("normalize", async (t) => {
 });
 
 Deno.test("resolveGitShaFrom", async (t) => {
-  await t.step("env var wins over baked value", () => {
-    assertEquals(resolveGitShaFrom("env-sha", "baked-sha"), "env-sha");
+  await t.step("explicit override wins over baked value", () => {
+    assertEquals(
+      resolveGitShaFrom("override-sha", "baked-sha", "source-run-sha"),
+      "override-sha",
+    );
   });
-  await t.step("trims env var before precedence check", () => {
-    assertEquals(resolveGitShaFrom("  env-sha  ", "baked-sha"), "env-sha");
+  await t.step("trims the explicit override before precedence check", () => {
+    assertEquals(
+      resolveGitShaFrom(
+        "  override-sha  ",
+        "baked-sha",
+        "source-run-sha",
+      ),
+      "override-sha",
+    );
   });
   await t.step("falls through to baked when env is unset/empty", () => {
-    assertEquals(resolveGitShaFrom(undefined, "baked-sha"), "baked-sha");
-    assertEquals(resolveGitShaFrom(null, "baked-sha"), "baked-sha");
-    assertEquals(resolveGitShaFrom("", "baked-sha"), "baked-sha");
-    assertEquals(resolveGitShaFrom("   ", "baked-sha"), "baked-sha");
+    for (const explicit of [undefined, null, "", "   "]) {
+      assertEquals(
+        resolveGitShaFrom(explicit, "baked-sha", "source-run-sha"),
+        "baked-sha",
+      );
+    }
   });
-  await t.step("returns null when both unset", () => {
-    assertEquals(resolveGitShaFrom(undefined, null), null);
-    assertEquals(resolveGitShaFrom("", null), null);
-    assertEquals(resolveGitShaFrom("   ", null), null);
+  await t.step(
+    "uses COMMIT_SHA when explicit and baked values are absent",
+    () => {
+      assertEquals(
+        resolveGitShaFrom(undefined, null, "  source-run-sha  "),
+        "source-run-sha",
+      );
+    },
+  );
+  await t.step("returns null when all values are unset", () => {
+    assertEquals(resolveGitShaFrom(undefined, null, undefined), null);
+    assertEquals(resolveGitShaFrom("", null, ""), null);
+    assertEquals(resolveGitShaFrom("   ", null, "   "), null);
   });
 });
 

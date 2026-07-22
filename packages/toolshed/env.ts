@@ -264,6 +264,9 @@ export const EnvSchema = z.object({
   // Git SHA of the deployed commit. Set at deploy time; takes priority over
   // the build-baked SHA (see lib/build-info.ts).
   TOOLSHED_GIT_SHA: z.string().optional(),
+  // Source-run build metadata fallback for /api/meta, mirroring the gitSha a
+  // compiled binary reads from its baked COMPILED file.
+  COMMIT_SHA: z.string().optional(),
 
   // ===========================================================================
   // Sandbox Service

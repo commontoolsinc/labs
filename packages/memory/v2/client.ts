@@ -32,6 +32,7 @@ import type { Server } from "./server.ts";
 import type { AppliedCommit } from "./engine.ts";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
+import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
 
 export interface Transport {
   send(payload: string): Promise<void>;
@@ -252,7 +253,13 @@ export class Client {
     let message: unknown;
     try {
       message = decodeMemoryBoundary(payload);
-      message = expandServerMessageSchemas(message);
+      // A frame whose raw text lacks every reserved reference prefix cannot
+      // carry a schema reference (strings serialize verbatim — see the note
+      // on encodeMemoryBoundary), so the expansion walk over its upserts is
+      // skipped entirely.
+      if (containsReservedSchemaRefSubstring(payload)) {
+        message = expandServerMessageSchemas(message);
+      }
     } catch (cause) {
       const error = new Error("Unable to parse memory server message", {
         cause,

@@ -292,6 +292,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     writePolicyInputs: [],
     writePolicyInputIdentities: new Map(),
     writeIdentity: { sawWrite: false, multiple: false },
+    moduleDelegations: new Map(),
     outbox: [],
     diagnostics: [],
     unprivilegedSystemWrites: [],
@@ -333,6 +334,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // Set on the FIRST call (always the Runtime's, in edit()), regardless of
   // value.
   #cfcTrustConfigPinned = false;
+  #cfcModuleDelegationsPinned = false;
   // Depth of the runtime's privileged system-write scope. The runtime's own
   // label/schema persistence (prepareBoundaryCommit) runs inside it; any write
   // to a protected system path outside it is recorded as unprivileged (S18).
@@ -650,6 +652,31 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcState.trustConfig = config === undefined
       ? undefined
       : deepFreeze(config);
+  }
+
+  // Module-update authority is runtime-learned trust state. Snapshot and pin
+  // it once at transaction creation: later module loads affect future
+  // transactions, never an authorization decision already in flight.
+  setCfcModuleDelegations(
+    delegations: ReadonlyMap<
+      MemorySpace,
+      ReadonlyMap<string, readonly string[]>
+    >,
+  ): void {
+    if (this.#cfcModuleDelegationsPinned) return;
+    this.#cfcModuleDelegationsPinned = true;
+    const snapshot = new Map<
+      MemorySpace,
+      ReadonlyMap<string, readonly string[]>
+    >();
+    for (const [space, spaceDelegations] of delegations) {
+      const spaceSnapshot = new Map<string, readonly string[]>();
+      for (const [identity, predecessors] of spaceDelegations) {
+        spaceSnapshot.set(identity, [...predecessors]);
+      }
+      if (spaceSnapshot.size > 0) snapshot.set(space, spaceSnapshot);
+    }
+    this.#cfcState.moduleDelegations = snapshot;
   }
 
   markCfcRelevant(reason?: string): void {
@@ -1225,6 +1252,34 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       writePolicyInputs: [...this.#cfcState.writePolicyInputs],
       implementationIdentity: this.#cfcState.implementationIdentity,
       trustSnapshot: this.#cfcState.trustSnapshot,
+      ...(this.#cfcState.moduleDelegations.size > 0
+        ? {
+          moduleDelegations: [...this.#cfcState.moduleDelegations]
+            .flatMap(([space, spaceDelegations]) =>
+              [...spaceDelegations].map(([
+                moduleIdentity,
+                delegatedModuleIdentities,
+              ]) => ({
+                space,
+                moduleIdentity,
+                delegatedModuleIdentities: [
+                  ...delegatedModuleIdentities,
+                ].sort(),
+              }))
+            )
+            .sort((left, right) =>
+              left.space < right.space
+                ? -1
+                : left.space > right.space
+                ? 1
+                : left.moduleIdentity < right.moduleIdentity
+                ? -1
+                : left.moduleIdentity > right.moduleIdentity
+                ? 1
+                : 0
+            ),
+        }
+        : {}),
       // Digest-only projection: the decision-relevant identity of the policy
       // set (Epic B5). The snapshot itself is frozen Runtime config; only its
       // identity needs to invalidate.

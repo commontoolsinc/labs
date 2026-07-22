@@ -84,8 +84,6 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   // Everything below rides the constructor default unless a preset's
   // declared delta param supplies it (covered by the routing tests).
   spaceHostMap: { treat: "absent" },
-  clientVersion: { treat: "absent" },
-  onVersionSkew: { treat: "absent" },
   consoleHandler: { treat: "absent" },
   errorHandlers: { treat: "absent" },
   navigateCallback: { treat: "absent" },
@@ -192,8 +190,6 @@ describe("runtimePresets conformance (CT-1814)", () => {
     } as unknown as NonNullable<RuntimeOptions["telemetry"]>;
     const commitBackpressure = { retryWindowMs: 100 };
     const spaceHostMap = { "did:key:zSpace": "https://host.example" };
-    const clientVersion = "build-sha-x";
-    const onVersionSkew = () => {};
 
     it("productionServer", () => {
       const patternApiUrl = new URL("https://public.example/api");
@@ -254,7 +250,6 @@ describe("runtimePresets conformance (CT-1814)", () => {
       expect(runtimePresets.browserWorker({
         ...minimalCore,
         spaceHostMap,
-        clientVersion,
         cfcEnforcementMode: "observe",
         cfcFlowLabels: "observe",
         trustSnapshotProvider,
@@ -263,12 +258,10 @@ describe("runtimePresets conformance (CT-1814)", () => {
         errorHandlers,
         navigateCallback,
         pieceCreatedCallback,
-        onVersionSkew,
         patternCoverage,
       })).toEqual({
         ...minimalOutputs.browserWorker,
         spaceHostMap,
-        clientVersion,
         cfcEnforcementMode: "observe",
         cfcFlowLabels: "observe",
         trustSnapshotProvider,
@@ -277,7 +270,6 @@ describe("runtimePresets conformance (CT-1814)", () => {
         errorHandlers,
         navigateCallback,
         pieceCreatedCallback,
-        onVersionSkew,
         patternCoverage,
       });
     });

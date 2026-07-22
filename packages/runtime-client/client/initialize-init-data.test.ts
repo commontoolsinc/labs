@@ -14,9 +14,7 @@ import type { RuntimeTransport, RuntimeTransportEvents } from "./transport.ts";
 /**
  * Guards the shell→worker `InitializationData` wiring: the fields carried by
  * `RuntimeClientOptions` must survive `RuntimeClient.initialize`'s hand-built
- * `InitializationData` literal. `clientVersion` was silently dropped there once
- * (the unit tests that build `Runtime` directly could not catch it, so the
- * version-skew gate always failed and no space ever auto-updated).
+ * `InitializationData` literal.
  */
 class CapturingTransport extends EventEmitter<RuntimeTransportEvents>
   implements RuntimeTransport {
@@ -37,34 +35,10 @@ class CapturingTransport extends EventEmitter<RuntimeTransportEvents>
 }
 
 describe("RuntimeClient.initialize InitializationData wiring", () => {
-  it("forwards clientVersion into the worker InitializationData", async () => {
-    const identity = await Identity.fromPassphrase("init-data test");
-    const transport = new CapturingTransport();
-
-    await RuntimeClient.initialize(transport, {
-      apiUrl: new URL("http://toolshed.test"),
-      identity,
-      spaceDid: identity.did(),
-      clientVersion: "client-sha-xyz",
-      experimental: {},
-    });
-
-    const init = transport.sent.find(
-      (m): m is IPCClientMessage =>
-        "msgId" in m && m.data?.type === RequestType.Initialize,
-    );
-    expect(init).toBeDefined();
-    // request payload → { type: Initialize, data: InitializationData }
-    const data = (init as { data: { data: { clientVersion?: string } } }).data
-      .data;
-    expect(data.clientVersion).toBe("client-sha-xyz");
-  });
-
   it("forwards patternCoverage into the worker InitializationData", async () => {
-    // The same drop-on-the-wire failure as clientVersion above: the flag is set
-    // on RuntimeClientOptions but the hand-built InitializationData literal must
-    // copy it, or the worker is built without a coverage collector and the
-    // integration jobs collect nothing.
+    // The flag is set on RuntimeClientOptions but the hand-built
+    // InitializationData literal must copy it, or the worker is built without
+    // a coverage collector and the integration jobs collect nothing.
     const identity = await Identity.fromPassphrase("init-data coverage test");
     const transport = new CapturingTransport();
 
@@ -85,9 +59,13 @@ describe("RuntimeClient.initialize InitializationData wiring", () => {
       .data.data;
     expect(data.patternCoverage).toBe(true);
   });
+});
 
-  it("re-emits a worker versionSkew notification as a client event", async () => {
-    const identity = await Identity.fromPassphrase("skew forward test");
+describe("RuntimeClient notification wiring", () => {
+  it("re-emits PendingWritesChanged from the transport", async () => {
+    const identity = await Identity.fromPassphrase(
+      "pending writes notification test",
+    );
     const transport = new CapturingTransport();
     const client = await RuntimeClient.initialize(transport, {
       apiUrl: new URL("http://toolshed.test"),
@@ -95,31 +73,17 @@ describe("RuntimeClient.initialize InitializationData wiring", () => {
       spaceDid: identity.did(),
       experimental: {},
     });
-
-    let received: { space?: string; toolshedVersion?: string } | undefined;
     let pending: boolean | undefined;
-    client.on("versionskew", (msg) => (received = msg));
-    client.on("pendingwriteschange", (e) => (pending = e.pending));
+    client.on("pendingwriteschange", (event) => (pending = event.pending));
 
-    // A pendingWrites notification first exercises the demux arm immediately
-    // above versionSkew, so both the versionSkew arm and the branch it chains
-    // off of are covered.
-    transport.simulateMessage({
-      type: NotificationType.PendingWritesChanged,
-      pending: true,
-    });
-    // Worker → shell: the connection demuxes the notification and RuntimeClient
-    // re-emits it (covers the guard, the connection dispatch arm, and the
-    // client forwarder).
-    transport.simulateMessage({
-      type: NotificationType.VersionSkew,
-      space: "did:key:z6Mk-skew",
-      clientVersion: "c",
-      toolshedVersion: "t",
-    });
-
-    expect(pending).toBe(true);
-    expect(received?.space).toBe("did:key:z6Mk-skew");
-    expect(received?.toolshedVersion).toBe("t");
+    try {
+      transport.simulateMessage({
+        type: NotificationType.PendingWritesChanged,
+        pending: true,
+      });
+      expect(pending).toBe(true);
+    } finally {
+      await client.dispose();
+    }
   });
 });

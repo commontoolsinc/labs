@@ -11,4 +11,3 @@ export {
   computeEntryIdentity,
   resolveEntryIdentity,
 } from "./entry-identity.ts";
-export { buildsMatch, fetchToolshedGitSha } from "./version-gate.ts";

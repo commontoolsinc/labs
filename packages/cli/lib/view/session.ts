@@ -57,6 +57,7 @@ import type {
   ExpandResult,
   HunkRoom,
   RevertScope,
+  SaveOptions,
 } from "./editsource.ts";
 import type { Highlighter } from "./parse.ts";
 import type { DirEntry, FileGateway } from "./filegateway.ts";
@@ -230,9 +231,6 @@ export class Session {
   private dialogFocus = 0;
   /** What the active save prompt does on confirm. */
   private savePromptThen: "quit" | null = null;
-  /** Set once the user confirms amending the commit message, so the save that
-   * follows goes ahead instead of prompting again. */
-  private amendConfirmed = false;
   /** Filenames a save would write, computed when the quit prompt opens and
    * listed above it. */
   private editedFiles: string[] = [];
@@ -705,10 +703,11 @@ export class Session {
     const subject = full.length > 46 ? `${full.slice(0, 45)}…` : full;
     return {
       title: "Amend Commit",
-      body: [`Amend commit ${sha}?`, `“${subject}”`],
+      body: [`Amend commit ${sha}, or save files only?`, `“${subject}”`],
       buttons: [
-        { label: "Yes", hotkey: "y", kind: "default" },
-        { label: "No", hotkey: "n", kind: "cancel" },
+        { label: "Amend commit", hotkey: "a", kind: "default" },
+        { label: "Save files only", hotkey: "s" },
+        { label: "Cancel", hotkey: "c", kind: "cancel" },
       ],
     };
   }
@@ -737,7 +736,7 @@ export class Session {
     return { title: "Revert", body: ["Revert which changes?"], buttons };
   }
 
-  handleKey(key: Key): void {
+  handleKey(key: Key, beforeButtonAction?: () => void): void {
     // A reveal is animated by the driver over the frames after the key that
     // caused it, so the next key ends it whatever it was. A message that takes
     // itself away goes now rather than waiting out its moment, before this key
@@ -749,7 +748,7 @@ export class Session {
       this.mode === "savePrompt" || this.mode === "amendPrompt" ||
       this.mode === "revertPrompt"
     ) {
-      this.handleDialogKey(key);
+      this.handleDialogKey(key, beforeButtonAction);
       return;
     }
     if (this.mode === "filePicker") {
@@ -2274,9 +2273,13 @@ export class Session {
   }
 
   private notEditableMessage(): string {
-    return this.canResurrectRemovedLine()
-      ? "This removed line isn't editable; press R to resurrect it."
-      : NOT_EDITABLE_MSG;
+    if (this.canResurrectRemovedLine()) {
+      return "This removed line isn't editable; press R to resurrect it.";
+    }
+    const b = this.buffer;
+    const policy = this.source?.policy;
+    return (b ? policy?.notEditableMessage?.(b.lines, b.row) : null) ??
+      NOT_EDITABLE_MSG;
   }
 
   private afterMove(): void {
@@ -2461,7 +2464,7 @@ export class Session {
     else this.message = `C-x ${key.name}: unbound`;
   }
 
-  private requestSave(): boolean {
+  private requestSave(target?: "amend" | "workspace"): boolean {
     if (!this.source || !this.buffer) {
       this.message = "Nothing to save.";
       return false;
@@ -2472,53 +2475,61 @@ export class Session {
     }
     const baseline = this.buffer.baseline();
     const current = this.buffer.text();
-    // A changed commit message rewrites git history, so confirm before saving.
+    if (!this.buffer.dirty()) {
+      this.message = "Saved 0 files";
+      return true;
+    }
+    // Saving changed commit output rewrites git history, so confirm first.
     const amend = this.source.pendingAmend?.(baseline, current) ?? null;
-    if (amend && !this.amendConfirmed) {
-      if (amend.subject.trim() === "") {
-        this.message = "Refusing to amend: the commit message would be empty.";
-        return false;
-      }
+    if (amend && target === undefined) {
       this.mode = "amendPrompt";
       this.focusDefaultButton();
       this.message = "";
       return false;
     }
+    if (amend && target === "amend" && amend.subject.trim() === "") {
+      this.message = "Refusing to amend: the commit message would be empty.";
+      return false;
+    }
+    const options: SaveOptions | undefined = target === "workspace"
+      ? { amendCommit: false }
+      : undefined;
     try {
-      // Amend the commit before writing files: if the amend fails (an empty
-      // message, a rejecting hook, HEAD moved) nothing is written to disk, so a
-      // failed save never leaves the files half-written.
-      const amended = amend
-        ? this.source.amendCommit!(baseline, current)
-        : null;
-      const saved = this.source.save(current);
-      this.message = amended
-        ? (/^No(thing)?\b/.test(saved) ? amended : `${saved}; ${amended}`)
-        : saved;
-      this.buffer.commitSaved();
+      this.message = this.source.save(current, baseline, options);
+      const savedBaseline = this.source.baselineAfterSave?.(
+        baseline,
+        current,
+        options,
+      ) ?? current;
+      this.buffer.setBaseline(savedBaseline);
+      if (target === "workspace" && this.buffer.dirty()) {
+        this.message += "; commit message remains unsaved";
+      }
       return true;
     } catch (e) {
       this.message = `Save failed: ${e instanceof Error ? e.message : e}`;
       return false;
-    } finally {
-      this.amendConfirmed = false;
     }
   }
 
   private applyAmendButton(button: DialogButton): void {
-    if (button.hotkey === "y") {
-      this.amendConfirmed = true;
-      const ok = this.requestSave();
+    if (button.hotkey === "a" || button.hotkey === "s") {
+      const ok = this.requestSave(
+        button.hotkey === "a" ? "amend" : "workspace",
+      );
       this.mode = "normal";
       this.editedFiles = [];
-      if (ok && this.savePromptThen === "quit") this.quit = true;
+      if (
+        ok && this.savePromptThen === "quit" && !this.buffer?.dirty()
+      ) {
+        this.quit = true;
+      }
       this.savePromptThen = null;
     } else if (button.kind === "cancel") {
       this.mode = "normal";
-      this.amendConfirmed = false;
       this.savePromptThen = null;
       this.editedFiles = [];
-      this.message = "Save cancelled — the commit was not amended.";
+      this.message = "Save cancelled.";
     }
   }
 
@@ -2570,7 +2581,10 @@ export class Session {
    * move the focus ring between buttons, wrapping around; Space and Enter
    * activate the focused button; Esc activates the cancel button; a button's
    * shortcut letter activates it directly. Any other key leaves the prompt up. */
-  private handleDialogKey(key: Key): void {
+  private handleDialogKey(
+    key: Key,
+    beforeButtonAction?: () => void,
+  ): void {
     // Reached only from the prompt modes, each of which builds a dialog with at
     // least two buttons, so the dialog is present and its row is non-empty.
     const dialog = this.promptDialog()!;
@@ -2602,14 +2616,18 @@ export class Session {
       index = buttons.findIndex((b) => b.hotkey.toLowerCase() === k);
     }
     if (index < 0 || index >= n) return; // an unbound key leaves the prompt up
-    this.activateButton(dialog, index);
+    this.activateButton(dialog, index, beforeButtonAction);
   }
 
-  /** Run a prompt button's action, first capturing the frame that shows it
-   * pushed so the driver can play the press before the result appears. The
-   * pressed button is drawn focused as well, so a shortcut-key press shows it
-   * highlighted rather than leaving the highlight on whatever Tab last chose. */
-  private activateButton(dialog: DialogState, index: number): void {
+  /** Capture a prompt button's pushed frame, let the driver paint it, then run
+   * the button's action. The pressed button is drawn focused as well, so a
+   * shortcut-key press shows it highlighted rather than leaving the highlight
+   * on whatever Tab last chose. */
+  private activateButton(
+    dialog: DialogState,
+    index: number,
+    beforeButtonAction?: () => void,
+  ): void {
     this.dialogFocus = index;
     this.pendingPush = {
       doc: this.displayDoc(),
@@ -2618,6 +2636,7 @@ export class Session {
         dialog: { ...dialog, focus: index, pushed: index },
       },
     };
+    beforeButtonAction?.();
     const button = dialog.buttons[index];
     if (this.mode === "savePrompt") this.applySaveButton(button);
     else if (this.mode === "amendPrompt") this.applyAmendButton(button);

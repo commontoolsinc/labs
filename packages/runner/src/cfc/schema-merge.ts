@@ -4,6 +4,7 @@ import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import { forEachSubschema } from "../schema-walk.ts";
 import { normalizeClause } from "./clause.ts";
+import { writerClaimFilesCorrespond } from "./writer-claim-correspondence.ts";
 
 const IFC_KEYS = [
   "confidentiality",
@@ -78,21 +79,32 @@ const WRITER_CLAIM_STAMP_KEYS = ["bundleId", "moduleIdentity"] as const;
 const writerClaimIsStamped = (identity: Record<string, unknown>): boolean =>
   WRITER_CLAIM_STAMP_KEYS.some((key) => identity[key] !== undefined);
 
-const writerClaimWithoutStamp = (
+const writerClaimWithoutStampAndFile = (
   identity: Record<string, unknown>,
 ): Record<string, unknown> => {
   const rest = { ...identity };
   for (const key of WRITER_CLAIM_STAMP_KEYS) delete rest[key];
+  // The file spelling is compared separately, tolerantly
+  // (writerClaimFilesCorrespond) — never byte-wise.
+  delete rest.file;
   return rest;
 };
 
 /**
- * Reconcile two `writeAuthorizedBy` writer-identity claims that differ only
- * by the presence of the provenance stamp (`moduleIdentity`, or a legacy
- * `bundleId` on pre-migration claims — one side recorded under a verified
- * identity, the other without one). Returns the stamped claim, or `undefined`
- * when the claims genuinely conflict (different bindings, or two different
- * stamps).
+ * Reconcile two `writeAuthorizedBy` writer-identity claims that mean the same
+ * binding. The binding a claim MEANS is `path` (+ `moduleIdentity` once
+ * stamped); the `file` spelling is resolver-dependent (the same module spells
+ * differently across piece-deploy and HTTP compiles — labs#4772), so two
+ * claims reconcile when their paths match, their file spellings CORRESPOND
+ * (equal or one-leading-segment apart), and everything outside file + stamp
+ * is equal. Returns the stamped side when exactly one carries the provenance
+ * stamp (`moduleIdentity`, or a legacy `bundleId` on pre-migration claims),
+ * the existing side when neither does or both carry the SAME stamp (stored
+ * spelling wins — stability), and `undefined` when the claims genuinely
+ * conflict (different bindings, or two different stamps). A legitimate
+ * `setsrc` update does not rotate this stamp: the stored claim keeps its
+ * predecessor identity, and authenticated module delegation authorizes the
+ * successor at verification time.
  */
 const reconcileWriterClaimStamp = (
   existing: unknown,
@@ -103,26 +115,45 @@ const reconcileWriterClaimStamp = (
   }
   const existingIdentity = existing.__ctWriterIdentityOf;
   const candidateIdentity = candidate.__ctWriterIdentityOf;
-  const existingStamped = writerClaimIsStamped(existingIdentity);
-  const candidateStamped = writerClaimIsStamped(candidateIdentity);
-  // Exactly one side stamped — otherwise deepEqual already decided (equal
-  // stamps) or this is a genuine conflict (two different stamps).
-  if (existingStamped === candidateStamped) {
+  if (
+    !writerClaimFilesCorrespond(
+      typeof existingIdentity.file === "string"
+        ? existingIdentity.file
+        : undefined,
+      typeof candidateIdentity.file === "string"
+        ? candidateIdentity.file
+        : undefined,
+    )
+  ) {
     return undefined;
   }
   if (
     !deepEqual(
       {
         ...existing,
-        __ctWriterIdentityOf: writerClaimWithoutStamp(existingIdentity),
+        __ctWriterIdentityOf: writerClaimWithoutStampAndFile(existingIdentity),
       },
       {
         ...candidate,
-        __ctWriterIdentityOf: writerClaimWithoutStamp(candidateIdentity),
+        __ctWriterIdentityOf: writerClaimWithoutStampAndFile(candidateIdentity),
       },
     )
   ) {
     return undefined;
+  }
+  const existingStamped = writerClaimIsStamped(existingIdentity);
+  const candidateStamped = writerClaimIsStamped(candidateIdentity);
+  if (existingStamped && candidateStamped) {
+    // Both stamped: same stamp → the stored claim (spelling included) wins;
+    // different stamps → genuine conflict, never silently rotated.
+    return WRITER_CLAIM_STAMP_KEYS.every((key) =>
+        deepEqual(existingIdentity[key], candidateIdentity[key])
+      )
+      ? existing
+      : undefined;
+  }
+  if (!existingStamped && !candidateStamped) {
+    return existing;
   }
   return existingStamped ? existing : candidate;
 };

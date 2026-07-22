@@ -15,6 +15,7 @@ import {
   UI,
   VNode,
 } from "@commonfabric/runner";
+import { validateSchemaValue } from "@commonfabric/runner/cfc";
 import type { CellScope } from "@commonfabric/api";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
@@ -76,6 +77,49 @@ export interface PieceConfig extends SpaceConfig {
 
 export interface SetPiecePatternOptions {
   dangerouslyAllowIncompatibleSchema?: boolean;
+}
+
+export interface GetCellValueOptions {
+  input?: boolean;
+  step?: boolean;
+}
+
+export class PieceResultProjectionError extends Error {
+  constructor(path: readonly (string | number)[], stepped: boolean) {
+    const location = path.length === 0 ? "<root>" : path.join("/");
+    const stepHint = stepped
+      ? " The piece was stepped, but the required value still did not " +
+        "materialize."
+      : " Use --step to start the piece and materialize session-scoped " +
+        "computed values before reading.";
+    super(
+      `Cannot read piece result at "${location}": stored data is present, ` +
+        `but its schema could not resolve all required values.${stepHint}`,
+    );
+    this.name = "PieceResultProjectionError";
+  }
+}
+
+async function resultProjectionFailedAtPath(
+  piece: {
+    result: { getCell(): Promise<Cell<unknown>> };
+  },
+  path: readonly (string | number)[],
+): Promise<boolean> {
+  const rootCell = await piece.result.getCell();
+  let targetCell = rootCell;
+  for (const segment of path) {
+    targetCell = targetCell.key(segment as keyof unknown) as Cell<unknown>;
+  }
+  const schema = targetCell.schema;
+  if (targetCell.getRaw() === undefined || schema === undefined) {
+    return false;
+  }
+  return validateSchemaValue(
+    schema,
+    undefined,
+    rootCell.schema ?? schema,
+  ) !== undefined;
 }
 
 export interface ResolvedPieceCallable extends CallableResolution {
@@ -1332,21 +1376,68 @@ export function formatViewTree(view: unknown): string {
 export async function getCellValue(
   config: PieceConfig,
   path: (string | number)[],
-  options?: { input?: boolean },
+  options: GetCellValueOptions = {},
+  deps: PieceOperationDependencies = {},
 ): Promise<unknown> {
-  const manager = await loadManager(config);
-  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
-  const pieces = new PiecesController(manager);
+  const manager = await (deps.loadManager ?? loadManager)(config);
+  const resolvedConfig = await resolvePieceConfigWithManager(
+    config,
+    manager,
+    deps.resolvePieceAddress,
+  );
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
+  const shouldStep = options.step === true;
   const piece = await pieces.get(
     resolvedConfig.piece,
-    false,
+    shouldStep,
     undefined,
     resolvedConfig.pieceScope,
   );
-  if (options?.input) {
-    return await piece.input.get(path);
-  } else {
-    return await piece.result.get(path);
+
+  try {
+    if (shouldStep) {
+      await piece.getCell().pull();
+      const rootCell =
+        await (options.input ? piece.input.getCell() : piece.result.getCell());
+      let targetCell = rootCell;
+      for (const segment of path) {
+        targetCell = targetCell.key(segment as keyof unknown) as Cell<unknown>;
+      }
+      await targetCell.pull();
+      await manager.synced();
+      await manager.runtime.idle();
+      await manager.synced();
+    }
+
+    let value: unknown;
+    try {
+      value = options.input
+        ? await piece.input.get(path)
+        : await piece.result.get(path);
+    } catch (error) {
+      if (
+        !options.input && error instanceof Error &&
+        error.message.startsWith("Cannot access path") &&
+        await resultProjectionFailedAtPath(piece, path)
+      ) {
+        throw new PieceResultProjectionError(path, shouldStep);
+      }
+      throw error;
+    }
+
+    if (
+      !options.input && value === undefined &&
+      await resultProjectionFailedAtPath(piece, path)
+    ) {
+      throw new PieceResultProjectionError(path, shouldStep);
+    }
+
+    return value;
+  } finally {
+    if (shouldStep) {
+      await pieces.stop(resolvedConfig.piece);
+    }
   }
 }
 

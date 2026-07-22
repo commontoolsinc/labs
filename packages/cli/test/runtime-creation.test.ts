@@ -1,0 +1,75 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { createSession, Identity } from "@commonfabric/identity";
+import { Runtime } from "@commonfabric/runner";
+import { createRuntime as createAclRuntime } from "../lib/acl.ts";
+import { loadManager } from "../lib/piece.ts";
+import { withEnv } from "./utils.ts";
+
+const AUTO_UPDATE_ENV = "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE";
+
+describe("CLI runtime creation", () => {
+  it("applies deployed-client options to the ACL runtime", async () => {
+    const identity = await Identity.fromPassphrase("acl runtime creation test");
+    const session = await createSession({
+      identity,
+      spaceName: "acl-runtime-creation",
+    });
+    const originalHealthCheck = Runtime.prototype.healthCheck;
+    let created: Runtime | undefined;
+    Runtime.prototype.healthCheck = function () {
+      created = this;
+      return Promise.resolve(false);
+    };
+
+    await withEnv(AUTO_UPDATE_ENV, "true", async () => {
+      try {
+        await expect(createAclRuntime({
+          apiUrl: new URL("https://toolshed.test"),
+          identityPath: "unused",
+          space: "unused",
+        }, session)).rejects.toThrow("Could not connect");
+        expect(created?.apiUrl.href).toBe("https://toolshed.test/");
+        expect(created?.experimental.systemPatternAutoUpdate).toBe(true);
+      } finally {
+        Runtime.prototype.healthCheck = originalHealthCheck;
+        if (created) {
+          await (created.storageManager as unknown as {
+            closeNow(): Promise<void>;
+          }).closeNow();
+          await created.dispose();
+        }
+      }
+    });
+  });
+
+  it("applies deployed-client options to the piece-manager runtime", async () => {
+    const identity = await Identity.fromPassphrase(
+      "piece runtime creation test",
+      { implementation: "noble" },
+    );
+    const keyPath = await Deno.makeTempFile();
+    await Deno.writeFile(keyPath, identity.toPkcs8());
+    const originalHealthCheck = Runtime.prototype.healthCheck;
+    let created: Runtime | undefined;
+    Runtime.prototype.healthCheck = function () {
+      created = this;
+      return Promise.resolve(false);
+    };
+
+    await withEnv(AUTO_UPDATE_ENV, "true", async () => {
+      try {
+        await expect(loadManager({
+          apiUrl: "https://toolshed.test",
+          identity: keyPath,
+          space: "piece-runtime-creation",
+        })).rejects.toThrow("Could not connect");
+        expect(created?.apiUrl.href).toBe("https://toolshed.test/");
+        expect(created?.experimental.systemPatternAutoUpdate).toBe(true);
+      } finally {
+        Runtime.prototype.healthCheck = originalHealthCheck;
+        await Deno.remove(keyPath);
+      }
+    });
+  });
+});

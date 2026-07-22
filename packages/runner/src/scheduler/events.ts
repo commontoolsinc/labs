@@ -53,6 +53,27 @@ const logger = getLogger("scheduler", {
 });
 const EVENT_COMMIT_TELEMETRY_WRITE_LIMIT = 25;
 
+/**
+ * A CFC-enforcement-rejected commit on a give-up disposition is silent data
+ * loss of user intent — the UI's write simply never lands (labs#4772 shipped
+ * that way for weeks behind the opt-in scheduler logger, which is disabled in
+ * deployed workers). Report it unconditionally; the opt-in `logger.warn`
+ * alongside still carries the full disposition detail.
+ */
+export function reportDroppedCfcRejectedWrite(
+  error: { message?: string } | undefined,
+  handlerId: unknown,
+): void {
+  if (!error?.message?.startsWith("CFC enforcement rejected commit")) {
+    return;
+  }
+  console.error(
+    "[cfc] Owner-protected write dropped: CFC enforcement rejected the " +
+      "commit and re-running cannot resolve it.",
+    { error: error.message, handlerId },
+  );
+}
+
 export function isHeadEventParked(
   state: { readonly eventQueue: readonly QueuedEvent[] },
   now: number = performance.now(),
@@ -1107,6 +1128,7 @@ export async function dispatchQueuedEvent(state: {
           return;
         case "give-up":
           runFinalCommitCallback();
+          reportDroppedCfcRejectedWrite(result.error, handlerId);
           logger.warn(
             "scheduler",
             disposition.reason === "non-retryable"

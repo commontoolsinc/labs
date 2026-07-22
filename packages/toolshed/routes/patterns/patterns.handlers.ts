@@ -1,8 +1,41 @@
 import type { Context } from "@hono/hono";
+import {
+  compareETags,
+  createCacheHeaders,
+  generateETag,
+} from "@commonfabric/static/etag";
 import { PatternsServer } from "./patterns-server.ts";
 
 // Create a single server instance to be reused across requests
 const patternsServer = new PatternsServer();
+
+/** Headers shared by source and `?identity` responses from this process. */
+export function patternResponseHeaders(
+  contentType: string,
+  etag: string,
+): Record<string, string> {
+  return {
+    "Content-Type": contentType,
+    ...createCacheHeaders(etag),
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Expose-Headers": "ETag",
+  };
+}
+
+function patternResponse(
+  c: Context,
+  body: BodyInit,
+  contentType: string,
+  etag: string,
+): Response {
+  const headers = patternResponseHeaders(contentType, etag);
+  if (compareETags(etag, c.req.header("If-None-Match"))) {
+    return new Response(null, { status: 304, headers });
+  }
+  return new Response(body, { status: 200, headers });
+}
 
 /**
  * Handler for serving pattern files from the patterns directory.
@@ -32,34 +65,30 @@ export const getPattern = async (
     }
 
     // `?identity`: return the file's content-addressed identity (the value the
-    // runtime would store as patternIdentity.identity for this source at this
-    // build) as plain text, instead of the source itself.
+    // runtime would store as patternIdentity.identity for this authored import
+    // closure) as plain text, instead of the source itself.
     if (new URL(c.req.url).searchParams.has("identity")) {
       const identity = await patternsServer.identity(filename);
-      return new Response(identity, {
-        status: 200,
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type",
-        },
-      });
+      return patternResponse(
+        c,
+        identity,
+        "text/plain; charset=utf-8",
+        `"${identity}"`,
+      );
     }
 
-    // Get the file content from server
-    const content = await patternsServer.getText(filename);
+    // Hash and serve the exact bytes so the ETag is a strong validator for the
+    // representation the client caches.
+    const content = await patternsServer.get(filename);
+    const etag = await generateETag(content);
 
     // Return with proper headers for TSX files
-    return new Response(content, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/typescript-jsx; charset=utf-8",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-      },
-    });
+    return patternResponse(
+      c,
+      content as BodyInit,
+      "text/typescript-jsx; charset=utf-8",
+      etag,
+    );
   } catch (error) {
     const { status, body } = classifyPatternError(error);
     if (status === 500) console.error("Error serving pattern file:", error);

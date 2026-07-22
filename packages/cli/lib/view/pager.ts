@@ -182,8 +182,9 @@ export async function runPager(
   };
 
   // A prompt button press shows the button pushed for a moment before its result
-  // lands. The captured pushed frame is painted now; a timer then draws the real
-  // state (the dialog closed, or the next prompt up). Any key drops the wait.
+  // lands. The captured pushed frame is painted before the button's synchronous
+  // action starts. A timer then draws the real state (the dialog closed, or the
+  // next prompt up). Any key drops the wait.
   let cancelPush: (() => void) | undefined;
   const stopPush = () => {
     if (cancelPush) {
@@ -311,31 +312,40 @@ export async function runPager(
       const chunk = concat(leftover, buf.subarray(0, n));
       const { keys, rest } = decodeKeys(chunk);
       leftover = rest;
+      // A partial key sequence has not changed the session. Keep any active
+      // animation on screen while its remaining bytes arrive.
+      if (keys.length === 0) continue;
+      let pushStarted = false;
       for (const key of keys) {
-        session.handleKey(key);
+        // A new key ends animations and short-lived messages left by the
+        // previous key, including an earlier key decoded from this same read.
+        stopReveal();
+        stopExpiry();
+        stopPush();
+        pushStarted = false;
+        session.handleKey(key, () => {
+          // activateButton calls this after capturing the pushed frame and
+          // before running the action, so a slow synchronous save leaves the
+          // button visibly depressed for the duration of the work.
+          pushStarted = startPush();
+        });
         if (session.quit) break;
       }
       if (session.quit) {
         stopReveal();
         stopExpiry();
-        stopPush();
-        // A committing button (Save / Discard, and amend-Yes) sets quit as its
-        // action. Hold its pressed frame on screen for the press moment before
-        // the screen is torn down, so it depresses like any other button rather
-        // than vanishing. A bare `q` has nothing pushed and exits at once.
-        const push = session.pendingPush;
-        if (push) {
-          paint(push.doc, push.view);
+        // A committing button can set quit as its action. Its pressed frame is
+        // already on screen. Hold it for the rest of the press moment before
+        // tearing the screen down. A bare `q` exits at once.
+        if (pushStarted) {
+          stopPush();
           await deps.delay(PUSH_FRAME_MS);
         }
         break;
       }
-      stopReveal();
-      stopExpiry();
-      stopPush();
       // A reveal or a button press draws its own frames, ending on the finished
       // one; otherwise draw the new state now.
-      if (!startReveal() && !startPush()) {
+      if (!startReveal() && !pushStarted) {
         draw();
         startExpiry(); // starts the clock on the message the draw put up
       }

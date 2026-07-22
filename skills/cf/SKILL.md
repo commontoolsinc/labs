@@ -84,6 +84,7 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 | Update existing   | `deno task cf piece setsrc pattern.tsx --root . --repository REPO --piece ID -i key -a url -s space` |
 | Inspect state     | `deno task cf piece inspect --piece ID ...`                                                          |
 | Get field         | `deno task cf piece get --piece ID fieldPath ...`                                                    |
+| Step + get        | `deno task cf piece get --piece ID fieldPath --step ...`                                             |
 | Set field         | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`                                  |
 | Call handler      | `deno task cf piece call --piece ID handlerName ...`                                                 |
 | Trigger recompute | `deno task cf piece step --piece ID ...`                                                             |
@@ -169,13 +170,19 @@ echo '{"name": "John"}' | deno task cf piece set ... user
 ## Gotcha: Always `step` After `set` or `call`
 
 Neither `piece set` nor `piece call` triggers recomputation automatically. You
-**must** run `piece step` after either one to get fresh computed values.
+**must** run `piece step` after either one to get fresh computed values. When
+the value is session-scoped, use `piece get --step` so recomputation and the
+read happen in the same CLI session; a separate `piece step` process cannot
+carry session-local materialization into the following `piece get` process.
 
 ```bash
 # After setting data:
 echo '[...]' | deno task cf piece set --piece ID expenses ...
 deno task cf piece step --piece ID ...  # Required!
 deno task cf piece get --piece ID totalSpent ...
+
+# Equivalent one-session read (required for session-scoped computed output):
+deno task cf piece get --piece ID totalSpent --step ...
 
 # After calling a handler:
 deno task cf piece call --piece ID addItem '{"title": "Test"}'

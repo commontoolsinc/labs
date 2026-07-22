@@ -197,6 +197,26 @@ Deno.test("editor: F3 saves the edited text to disk", async () => {
   }
 });
 
+Deno.test("editor: F3 on an unchanged file reports zero and does not write", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".ts" });
+  try {
+    await Deno.writeTextFile(path, "hello\n");
+    const oldTime = new Date("2000-01-01T00:00:00.000Z");
+    await Deno.utime(path, oldTime, oldTime);
+    const mtime = (await Deno.stat(path)).mtime?.getTime();
+    const s = editSession("hello\n", fileSource(path));
+    press(s, "f3");
+    assertEquals(s.view().message, "Saved 0 files");
+    assertEquals(
+      (await Deno.stat(path)).mtime?.getTime(),
+      mtime,
+      "the unchanged file was not opened for writing",
+    );
+  } finally {
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("editor: C-x C-s saves to disk", async () => {
   const path = await Deno.makeTempFile({ suffix: ".ts" });
   try {

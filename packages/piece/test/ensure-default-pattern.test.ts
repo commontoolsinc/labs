@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { getPatternRepository, NAME, Runtime } from "@commonfabric/runner";
+import {
+  getPatternRepository,
+  getPatternSource,
+  NAME,
+  Runtime,
+} from "@commonfabric/runner";
 import type { RuntimeProgram } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
@@ -348,11 +353,26 @@ describe("PiecesController.recreateDefaultPattern", () => {
 
     expect(getPatternRepository(piece.getCell())).toBe(repository);
     expect((await piece.getPatternRef())?.source.repository).toBe(repository);
+    // The repository locator is the custom root's provenance; patternSource
+    // stays absent (there is no URL the auto-updater could re-fetch).
+    expect(getPatternSource(piece.getCell())).toBeUndefined();
   });
 
   it("rejects a repository locator without a custom root program", async () => {
     await expect(controller.recreateDefaultPattern({
       repository: "https://github.com/commontoolsinc/labs",
     })).rejects.toThrow(/only be supplied with a custom program/);
+  });
+
+  it("does not stamp patternSource for a custom root without a repository", async () => {
+    // A custom program has no URL the auto-updater could re-fetch, and there
+    // is no locator to record. Stamping the "custom" placeholder would poison
+    // the updater's URL resolution, so the root intentionally stays
+    // unstamped (CT-1890).
+    const piece = await controller.recreateDefaultPattern({
+      customProgram: defaultPatternProgram,
+    });
+
+    expect(getPatternSource(piece.getCell())).toBeUndefined();
   });
 });
