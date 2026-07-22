@@ -1342,8 +1342,9 @@ Behavior:
    object and array literals, enum constants, and numbers in any of their
    spellings (bare literal, sign-prefixed, or the `NaN` / `Infinity` globals,
    the latter only where the name is not shadowed). Parentheses and the
-   type-only assertion forms (`as`, `satisfies`, `<T>x`) are transparent. A
-   property whose value is none of these is dropped from the options object.
+   type-only assertion forms (`as`, `satisfies`, `<T>x`) are transparent at any
+   depth, including nested inside a sign (`-(1 as number)`). A property whose
+   value is none of these is dropped from the options object.
 3. extract `widenLiterals` generation option
 4. generate schema via `createSchemaTransformerV2`
 5. merge non-generation options into resulting schema object

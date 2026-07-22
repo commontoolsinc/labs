@@ -139,6 +139,20 @@ Deno.test("numberFromExpression: sees through parentheses", () => {
   );
 });
 
+Deno.test("numberFromExpression: sees through type-only wrappers", () => {
+  // `as`, `satisfies` and the angle-bracket assertion change no value. They are
+  // transparent at the caller's outermost level already; these are the nested
+  // positions only this function can reach.
+  assertStrictEquals(evaluateExpr("1 as number"), 1);
+  assertStrictEquals(evaluateExpr("-(1 as number)"), -1);
+  assertStrictEquals(evaluateExpr("-(1 as const)"), -1);
+  assertStrictEquals(evaluateExpr("(-1) as number"), -1);
+  assertStrictEquals(evaluateExpr("1 satisfies number"), 1);
+  assertStrictEquals(evaluateExpr("-(1 satisfies number)"), -1);
+  assertEquals(Object.is(evaluateExpr("-(0 as number)"), -0), true);
+  assertStrictEquals(evaluateExpr("-(Infinity as number)"), -Infinity);
+});
+
 Deno.test("numberFromExpression: declines non-numeric expressions", () => {
   assertStrictEquals(evaluateExpr(`"5"`), undefined);
   assertStrictEquals(evaluateExpr("true"), undefined);

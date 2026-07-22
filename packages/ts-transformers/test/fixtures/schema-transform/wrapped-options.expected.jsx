@@ -14,6 +14,7 @@ const __cfAmdHooks = undefined;
 interface Config {
     count: number;
     label: string;
+    offset: number;
 }
 const configSchema = __cfHelpers.__cf_data({
     type: "object",
@@ -23,21 +24,26 @@ const configSchema = __cfHelpers.__cf_data({
         },
         label: {
             type: "string"
+        },
+        offset: {
+            type: "number"
         }
     },
-    required: ["count", "label"],
+    required: ["count", "label", "offset"],
     description: "a description",
     "default": {
         count: 1,
-        label: "text"
+        label: "text",
+        offset: -1
     },
-    examples: ["one", 2]
+    examples: ["one", 2, 3]
 } as const satisfies __cfHelpers.JSONSchema);
-// FIXTURE: parenthesized-options
-// Verifies: a parenthesized value in the toSchema options object survives,
-// whatever its type. Each of these properties was silently dropped before --
-// including plainly non-numeric ones, which is why the unwrapping belongs in
-// the options evaluator rather than in its numeric special case.
+// FIXTURE: wrapped-options
+// Verifies: a value wrapped in parentheses or a type-only assertion survives in
+// the toSchema options object, whatever its type and however deeply the wrapper
+// is nested. Each of these properties was silently dropped before -- including
+// plainly non-numeric ones, which is why the unwrapping belongs in the options
+// evaluator rather than in its numeric special case.
 export { configSchema };
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }

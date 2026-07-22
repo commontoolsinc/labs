@@ -51,9 +51,14 @@ export function numberFromExpression(
   expr: ts.Expression,
   checker: ts.TypeChecker,
 ): number | undefined {
-  // Parentheses carry no meaning here, and they can appear anywhere -- `(-1)`,
-  // but also `-(1)`, which no amount of unwrapping by the caller would reach.
-  if (ts.isParenthesizedExpression(expr)) {
+  // Wrappers that change no value: parentheses and the type-only assertion
+  // forms. A caller can strip these off the outside of what it hands over, but
+  // not out of the middle -- `-(1 as number)` reaches here with the wrapper
+  // still nested inside the sign, so the recursion has to know them too.
+  if (
+    ts.isParenthesizedExpression(expr) || ts.isAsExpression(expr) ||
+    ts.isSatisfiesExpression(expr) || ts.isTypeAssertionExpression(expr)
+  ) {
     return numberFromExpression(expr.expression, checker);
   }
 

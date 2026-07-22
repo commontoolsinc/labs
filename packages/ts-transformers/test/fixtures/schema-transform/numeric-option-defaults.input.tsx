@@ -27,5 +27,5 @@ const configSchema = toSchema<Config>({
 // Verifies: the toSchema options object carries signed and non-finite numbers
 // through to the emitted schema. Recognizing only bare NumericLiteral drops
 // each of these properties silently — a `-1` sentinel default just vanishes.
-// (Parentheses across all option types: see `parenthesized-options`.)
+// (Wrappers across all option types: see `wrapped-options`.)
 export { configSchema };
