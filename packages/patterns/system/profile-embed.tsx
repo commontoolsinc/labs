@@ -10,7 +10,7 @@ import {
   Writable,
 } from "commonfabric";
 import type {
-  ProfileHomeOutput,
+  BackwardsCompatibleProfile,
   SetProfileAvatarEvent,
   SetProfileBioEvent,
   SetProfileNameEvent,
@@ -52,7 +52,7 @@ import type {
 // The wish `result` for `#profile` is the profile-home pattern's output: it
 // carries the readable `name`/`avatar`/`bio` fields AND the exported
 // owner-protected write streams we amend through.
-type ProfileResult = ProfileHomeOutput;
+type ProfileResult = BackwardsCompatibleProfile;
 
 const trimmed = (value?: string): string => (value ?? "").trim();
 
