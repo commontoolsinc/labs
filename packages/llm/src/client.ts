@@ -8,6 +8,7 @@ import {
   LLMToolCall,
   LLMToolResult,
 } from "./types.ts";
+import { assertSchemaJsonTransportSafe } from "./schema-transport.ts";
 
 type PartialCallback = (text: string) => void;
 
@@ -452,6 +453,14 @@ export class LLMClient {
       endpoint?: string | URL;
     },
   ): Promise<LLMGenerateObjectResponse> {
+    // The request crosses to the provider as ordinary JSON. Refuse a schema
+    // holding a value that would not survive that intact, before anything is
+    // sent -- this is the last point where the schema is still the faithful
+    // in-memory object rather than its JSON rendering. Checked ahead of the
+    // mock and test-environment paths too: such a request is malformed for its
+    // purpose regardless of where it would have gone.
+    assertSchemaJsonTransportSafe(request.schema);
+
     // Check for mock mode
     if (mockCatalog.isEnabled()) {
       const mockResponse = mockCatalog.findObjectResponse(request);

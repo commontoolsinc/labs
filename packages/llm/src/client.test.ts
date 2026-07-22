@@ -123,6 +123,26 @@ describe("LLMClient test-environment guard", () => {
     resetMockMode();
   });
 
+  it("generateObject rejects a JSON-unsafe schema before anything is sent", async () => {
+    // The check runs ahead of the mock path, so a schema carrying a value that
+    // could not survive JSON transport is refused even here -- the request is
+    // malformed for its purpose regardless of where it would have gone.
+    enableMockMode();
+    addMockObjectResponse(() => true, { object: { name: "Alice" } });
+
+    await expect(
+      client.generateObject({
+        messages: [{ role: "user", content: "hello" }],
+        schema: {
+          type: "object",
+          properties: { threshold: { type: "number", default: NaN } },
+        },
+      }),
+    ).rejects.toThrow("properties.threshold.default");
+
+    resetMockMode();
+  });
+
   it("mock mode without matching response throws descriptive error", async () => {
     enableMockMode();
     clearMockResponses();
