@@ -128,6 +128,7 @@ import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import {
   getArtifactEntryRef,
+  getGeneratedInternalCellPatternIdentity,
   getPatternProgram,
   getPatternSourcePath,
   isTrustedBuilderArtifact,
@@ -187,9 +188,15 @@ const EAGER_RESULT_BUILTIN_REFS = new Set([
 type InternalCellDescriptor = {
   partialCause: JSONValue;
   /**
+   * Present only for compiler-generated causes. Generated ordinals are local
+   * to one pattern artifact, so this is part of their manifest match key.
+   */
+  patternIdentity?: { identity: string; symbol: string };
+  /**
    * Entity kind of the materialized cell's id. Part of the manifest match
-   * key alongside `partialCause`: a kind flip across pattern versions must
-   * re-materialize the cell under its new id rather than reuse the old link.
+   * key alongside `partialCause` and, for generated causes,
+   * `patternIdentity`: a kind flip across pattern versions must re-materialize
+   * the cell under its new id rather than reuse the old link.
    */
   kind?: EntityKind;
   link: SigilLink;
@@ -1746,6 +1753,9 @@ export class Runner {
     const manifest: InternalCellDescriptor[] = [];
 
     for (const descriptor of descriptors) {
+      const patternIdentity = getGeneratedInternalCellPatternIdentity(
+        descriptor,
+      );
       const derivedCell = getDerivedInternalCell(
         resultCell,
         descriptor,
@@ -1753,6 +1763,7 @@ export class Runner {
       );
       const manifestMatch = existingManifest.findIndex((existingDescriptor) =>
         deepEqual(existingDescriptor.partialCause, descriptor.partialCause) &&
+        deepEqual(existingDescriptor.patternIdentity, patternIdentity) &&
         existingDescriptor.kind === descriptor.kind
       );
       // Re-emit the manifest link and backlink from the current descriptor on
@@ -1765,6 +1776,7 @@ export class Runner {
       });
       manifest.push({
         partialCause: descriptor.partialCause,
+        ...(patternIdentity !== undefined && { patternIdentity }),
         ...(descriptor.kind !== undefined && { kind: descriptor.kind }),
         link: derivedSigilLink,
       });

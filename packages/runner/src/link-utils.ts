@@ -43,6 +43,7 @@ import {
 import { MetaLinkField } from "@commonfabric/api";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { createRef } from "./create-ref.ts";
+import { getGeneratedInternalCellPatternIdentity } from "./builder/pattern-metadata.ts";
 
 export * from "./link-types.ts";
 
@@ -614,6 +615,7 @@ export function getDerivedInternalCellLink(
 ): NormalizedFullLink {
   const resultCellLink = resultCell.getAsNormalizedFullLink();
   const parent = resultCell.entityId ?? resultCell;
+  const patternIdentity = getGeneratedInternalCellPatternIdentity(descriptor);
   return {
     space: resultCellLink.space,
     // The kind's ONLY representation is the URI scheme applied here by
@@ -625,7 +627,10 @@ export function getDerivedInternalCellLink(
         {
           parent,
           type: "internal",
-          cause: descriptor.partialCause,
+          cause: patternIdentity === undefined ? descriptor.partialCause : {
+            patternIdentity,
+            partialCause: descriptor.partialCause,
+          },
         },
       ),
       descriptor.kind,
