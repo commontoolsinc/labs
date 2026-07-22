@@ -665,12 +665,19 @@ export class PiecesController<T = unknown> {
         return "current";
       }
 
+      // Revalidate every request in one update attempt. Pattern responses use
+      // content-checksum ETags, so unchanged modules can reuse cached bytes
+      // after a 304 while stale identity, entry, or import bodies cannot pin or
+      // contaminate the update.
+      const revalidatingFetch: typeof globalThis.fetch = (input, init) =>
+        runtime.fetch(input, { ...init, cache: "no-cache" });
+
       // 4. Ask the source host for the entry's content identity. This request is
       // deliberately fresh: the host may roll between checks, and the compiled
       // closure below is the end-to-end consistency proof for this attempt.
       const identityUrl = new URL(target);
       identityUrl.searchParams.set("identity", "");
-      const identityResponse = await runtime.fetch(identityUrl);
+      const identityResponse = await revalidatingFetch(identityUrl);
       if (!identityResponse.ok) return "current";
       const currentId = (await identityResponse.text()).trim();
       if (currentId.length === 0) return "current";
@@ -753,7 +760,7 @@ export class PiecesController<T = unknown> {
       // serves identity and source from different revisions, their content
       // identities differ and the original root remains untouched.
       const program = await runtime.harness.resolve(
-        new HttpProgramResolver(target.href, runtime.fetch),
+        new HttpProgramResolver(target.href, revalidatingFetch),
       );
       const pattern = await runtime.patternManager.compilePattern(program, {
         space,

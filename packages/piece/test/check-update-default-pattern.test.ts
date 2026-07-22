@@ -54,12 +54,14 @@ interface StubControls {
   setSource(source: string): void;
   setCustomSource(source: string | null): void;
   setIdentitySource(source: string): void;
+  setIdentityResponse(body: string, status?: number): void;
   setImport(path: string, source: string): void;
   setIdentityImport(path: string, source: string): void;
   failIdentity(fail: boolean): void;
   identityFetches(): number;
   sourceFetches(): number;
   requestedHrefs(): string[];
+  requestedFetches(): Array<{ href: string; cache?: RequestCache }>;
   restore(): void;
 }
 
@@ -71,12 +73,17 @@ function installFetchStub(): StubControls {
   let identitySource: string | undefined;
   const imports: Record<string, string> = {};
   const identityImports: Record<string, string> = {};
+  let identityResponse: { body: string; status: number } | undefined;
   let failIdentityFetch = false;
   let identityFetchCount = 0;
   let sourceFetchCount = 0;
   const requestedHrefs: string[] = [];
+  const requestedFetches: Array<{ href: string; cache?: RequestCache }> = [];
 
-  globalThis.fetch = (async (input: string | URL | Request) => {
+  globalThis.fetch = (async (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ) => {
     const href = typeof input === "string"
       ? input
       : input instanceof URL
@@ -84,6 +91,11 @@ function installFetchStub(): StubControls {
       : input.url;
     const url = new URL(href);
     requestedHrefs.push(url.href);
+    requestedFetches.push({
+      href: url.href,
+      cache: init?.cache ??
+        (input instanceof Request ? input.cache : undefined),
+    });
 
     if (
       url.pathname === DEFAULT_APP_PATTERN_URL ||
@@ -92,6 +104,12 @@ function installFetchStub(): StubControls {
       if (url.searchParams.has("identity")) {
         identityFetchCount++;
         if (failIdentityFetch) throw new Error("identity fetch failed");
+        if (identityResponse) {
+          return new Response(identityResponse.body, {
+            status: identityResponse.status,
+            headers: { "content-type": "text/plain" },
+          });
+        }
         return new Response(
           await identityForSource(
             identitySource ?? source,
@@ -136,12 +154,16 @@ function installFetchStub(): StubControls {
     setSource: (s) => (source = s),
     setCustomSource: (s) => (customSource = s),
     setIdentitySource: (s) => (identitySource = s),
+    setIdentityResponse: (body, status = 200) => {
+      identityResponse = { body, status };
+    },
     setImport: (path, s) => (imports[path] = s),
     setIdentityImport: (path, s) => (identityImports[path] = s),
     failIdentity: (f) => (failIdentityFetch = f),
     identityFetches: () => identityFetchCount,
     sourceFetches: () => sourceFetchCount,
     requestedHrefs: () => [...requestedHrefs],
+    requestedFetches: () => [...requestedFetches],
     restore: () => (globalThis.fetch = original),
   };
 }
@@ -396,6 +418,45 @@ describe("checkAndUpdateDefaultPattern", () => {
     ).toBe(false);
   });
 
+  it("revalidates HTTP caches for identity and the downloaded closure", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    await controller.ensureDefaultPattern();
+    const requestsBefore = stub.requestedFetches().length;
+    const importingSource = [
+      "import { pattern } from 'commonfabric';",
+      "import { marker } from './update-marker.ts';",
+      "export default pattern<{ items: string[] }>(({ items }) => ({ items, marker }));",
+      "",
+    ].join("\n");
+    stub.setSource(importingSource);
+    stub.setImport(IMPORTED_MODULE_URL, 'export const marker = "fresh";\n');
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
+
+    expect(
+      stub.requestedFetches().slice(requestsBefore).map(({ href, cache }) => {
+        const url = new URL(href);
+        return {
+          path: url.pathname,
+          identity: url.searchParams.has("identity"),
+          cache,
+        };
+      }),
+    ).toEqual([
+      {
+        path: DEFAULT_APP_PATTERN_URL,
+        identity: true,
+        cache: "no-cache",
+      },
+      {
+        path: DEFAULT_APP_PATTERN_URL,
+        identity: false,
+        cache: "no-cache",
+      },
+      { path: IMPORTED_MODULE_URL, identity: false, cache: "no-cache" },
+    ]);
+  });
+
   it("keeps the original when downloaded source differs from ?identity", async () => {
     await setup({ systemPatternAutoUpdate: true });
     const piece = await controller.ensureDefaultPattern();
@@ -455,6 +516,30 @@ describe("checkAndUpdateDefaultPattern", () => {
     stub.failIdentity(true);
     expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
     expect(getPatternIdentityRef(piece.getCell())?.identity).toBe(before);
+  });
+
+  it("keeps the original when identity lookup returns a non-success response", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const before = getPatternIdentityRef(piece.getCell());
+    const sourceFetchesBefore = stub.sourceFetches();
+    stub.setIdentityResponse("unavailable", 503);
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    expect(getPatternIdentityRef(piece.getCell())).toEqual(before);
+    expect(stub.sourceFetches()).toBe(sourceFetchesBefore);
+  });
+
+  it("keeps the original when identity lookup returns an empty identity", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const before = getPatternIdentityRef(piece.getCell());
+    const sourceFetchesBefore = stub.sourceFetches();
+    stub.setIdentityResponse("  \n");
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    expect(getPatternIdentityRef(piece.getCell())).toEqual(before);
+    expect(stub.sourceFetches()).toBe(sourceFetchesBefore);
   });
 
   it("back-fills provenance when a legacy root is the current official identity", async () => {
@@ -725,6 +810,21 @@ describe("checkAndUpdateDefaultPattern", () => {
     } finally {
       runtime.patternManager.compilePattern = originalCompile;
     }
+  });
+
+  it("keeps the original when advertised source needs unavailable runtime semantics", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const before = getPatternIdentityRef(piece.getCell());
+    stub.setSource([
+      "import { pattern, futureRuntimeApi } from 'commonfabric';",
+      "futureRuntimeApi();",
+      "export default pattern<{ items: string[] }>(({ items }) => ({ items }));",
+      "",
+    ].join("\n"));
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    expect(getPatternIdentityRef(piece.getCell())).toEqual(before);
   });
 
   it("leaves the current root untouched when the identity swap cannot commit", async () => {

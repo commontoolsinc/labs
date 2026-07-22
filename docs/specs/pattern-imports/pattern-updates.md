@@ -228,6 +228,12 @@ and `home.tsx`:
   pathname-prefixed names — **not** patterns-root-relative names — or the two
   identities never match and the check re-updates forever.
 
+Both the `?identity` representation and every source-module representation use
+strong checksum `ETag`s with `Cache-Control: public, no-cache`. The identity
+itself is the `?identity` validator; a source module's validator is the SHA-256
+of its exact response bytes. Clients therefore retain unchanged bytes but must
+conditionally revalidate them before every update attempt.
+
 **Runtime side (at space open, in the per-space worker).** Resolve the persisted
 root with `runIt=false`, run this loop, re-resolve the cell after any metadata
 transaction, and only then start it:
@@ -237,7 +243,9 @@ transaction, and only then start it:
    provenance. A root with explicit repository provenance remains pinned.
    `host` = `mappedHostFor(space) ?? apiUrl`. Only same-origin toolshed sources
    participate in this v1 loop.
-2. `currentId` = a fresh `GET {host}{url}?identity` for this attempt. An HTTP
+2. `currentId` = a revalidating `GET {host}{url}?identity` for this attempt
+   (`fetch` cache mode `no-cache`). A matching `ETag` may reuse the cached body
+   after a `304`; the browser may not replay it without validation. An HTTP
    failure, empty response, or exception performs no metadata write; the
    subsequent root start retains its normal loud failure.
 3. If `patternSource` is absent, admit the root only when its stored ref is
@@ -247,12 +255,13 @@ transaction, and only then start it:
    artifact. A successful load is done (and may back-fill proven provenance).
    A missing or unloadable artifact continues to repair rather than taking the
    fast path.
-5. Fetch `{host}{url}` and its complete authored import closure, then compile
-   with `compilePattern(program, { space })`. Apply only when the compiler
-   supplies an entry ref whose identity exactly equals `currentId`; never
-   synthesize a ref or fall back around `?identity`. A fetch, compile,
-   evaluation, missing-entry-ref, or identity-mismatch failure leaves the root
-   metadata unchanged.
+5. Revalidate `{host}{url}` and every module in its complete authored import
+   closure with the same `no-cache` fetch policy, then compile with
+   `compilePattern(program, { space })`. Apply only when the compiler supplies
+   an entry ref whose identity exactly equals `currentId`; never synthesize a
+   ref or fall back around `?identity`. A fetch, compile, evaluation,
+   missing-entry-ref, or identity-mismatch failure leaves the root metadata
+   unchanged.
 6. Provenance repair and identity replacement are transactional
    compare-and-swap writes: the captured identity, source, and repository must
    still match on every retry, so a concurrent custom-root replacement wins.
@@ -275,6 +284,14 @@ written. The same rule covers an identity-algorithm incompatibility between an
 older worker and a newer toolshed: disagreement prevents the update. No
 `/api/meta` request, git-SHA comparison, pattern response build header, or
 worker-to-shell version-skew signal is part of the authorization path.
+
+Authored identity deliberately does not fingerprint bare runtime imports or the
+runtime's implementation. Local compilation and evaluation are a capability
+check: a closure that needs an unavailable API, cannot be transformed, or does
+not reproduce `currentId` leaves the root unchanged. They are not proof that two
+API-compatible runtime builds assign identical semantics to the same closure;
+that residual is bounded by system-pattern golden replay and fast redeploy, as
+with other schema-valid but semantically wrong updates.
 
 `COMMIT_SHA` remains build metadata only. A source-run toolshed may use it as
 the fallback `gitSha` returned by `/api/meta`, matching the field a compiled
@@ -299,14 +316,16 @@ binary populates from baked build metadata; the updater does not consult it.
 
 - **Toolshed**: `?identity` handler + boot-time `{ name → identity }` cache in
   the patterns route (`patterns.routes.ts` / `patterns.handlers.ts` /
-  `patterns-server.ts`); import `computeModuleIdentities` +
+  `patterns-server.ts`); strong checksum `ETag` + mandatory revalidation for
+  identity and source responses; import `computeModuleIdentities` +
   `transformInjectHelperModule` from the runner.
 - **Runtime worker**: an update-check step at space open, next to
   `handleGetSpaceRootPattern` / `ensureDefaultPattern`
   (`runtime-client/backends/runtime-processor.ts`, `pieces-controller.ts`):
   per-space host resolution, exact-identity legacy-provenance recovery,
-  fresh `?identity` lookup, locally compiled source-closure verification, and
-  an in-place `patternIdentity` swap before bootstrap.
+  conditionally revalidated `?identity` and source-closure fetches, locally
+  compiled source-closure verification, and an in-place `patternIdentity` swap
+  before bootstrap.
 - **Piece**: `patternSource` meta getter/setter; stamped by URL-based creation
   and recreation from the applicable source (system path, or a `cf:` ref derived
   from `defaultAppUrl`). Custom `RuntimeProgram` recreation remains unstamped;
@@ -331,9 +350,10 @@ binary populates from baked build metadata; the updater does not consult it.
 
 ## Open questions
 
-1. **`?identity` vs ETag/HEAD.** A conditional GET (`ETag: <identity>`,
-   `If-None-Match`) is the idiomatic HTTP form; `?identity` is simpler. Recommend
-   `?identity` for v1.
+1. **`?identity` vs ETag/HEAD.** Resolved 2026-07-22: they are complementary.
+   `?identity` remains the explicit closure-identity value used for update
+   authorization; checksum `ETag`s plus mandatory conditional revalidation keep
+   its body and every source module cacheable without allowing stale replay.
 2. **Where the root's `patternSource` lives** — the root piece meta (general;
    recommended) vs the space cell (co-located with `defaultPattern`). Recommend
    the piece; the space cell holds only the `defaultAppUrl` template.
