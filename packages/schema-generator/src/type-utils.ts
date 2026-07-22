@@ -486,7 +486,8 @@ export function getNamedTypeKey(
     (symFlags & ts.SymbolFlags.Method) !== 0 ||
     (symFlags & ts.SymbolFlags.Signature) !== 0 ||
     (symFlags & ts.SymbolFlags.Function) !== 0 ||
-    (symFlags & ts.SymbolFlags.TypeParameter) !== 0
+    (symFlags & ts.SymbolFlags.TypeParameter) !== 0 ||
+    (symFlags & ts.SymbolFlags.EnumMember) !== 0
   ) {
     return undefined;
   }
@@ -494,7 +495,8 @@ export function getNamedTypeKey(
   if (
     decls.some((d) =>
       ts.isPropertySignature(d) || ts.isMethodSignature(d) ||
-      ts.isPropertyDeclaration(d) || ts.isMethodDeclaration(d)
+      ts.isPropertyDeclaration(d) || ts.isMethodDeclaration(d) ||
+      ts.isEnumMember(d)
     )
   ) {
     return undefined;
