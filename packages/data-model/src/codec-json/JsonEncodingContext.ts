@@ -516,22 +516,34 @@ export class JsonEncodingContext implements SerializationContext<string> {
    *
    * Pass `isMalformed` when the payload is _deliberately_ bad -- a test feeding
    * a broken tag state through the decoder to see it degrade, say. The check
-   * then runs leniently, so such a payload survives it, and the call site says
-   * out loud that the badness is the point. Note that this also covers a
-   * payload holding a cell reference, which cannot be reconstructed here for
-   * want of a runtime.
+   * Pass `isMalformed` when the payload is bad on purpose. The decode is then
+   * skipped entirely -- malformed means malformed, and deliberately broken text
+   * cannot be asked to survive a decode.
+   *
+   * The tag itself is still required either way. That is not a judgment about
+   * the payload: removing a prefix that is not there does not produce the body,
+   * it produces nonsense, so there is nothing for this to return.
    */
   static unwrapEncodedValueForTesting(
     encoded: string,
     isMalformed = false,
   ): string {
-    // Throwaway decode. The result is discarded; it is performed only to
-    // establish that `encoded` really is one of ours, rather than a string that
-    // happens to begin with the right few characters.
-    JsonEncodingContext.#testingCheckContext(isMalformed).decode(
-      encoded,
-      JsonEncodingContext.#testingReconstructionContext,
-    );
+    if (isMalformed) {
+      if (!JsonEncodingContext.seemsLikeEncoded(encoded)) {
+        throw new Error(
+          `Not a JSON-encoded \`FabricValue\` string: \`${encoded}\``,
+        );
+      }
+    } else {
+      // Throwaway decode. The result is discarded; it is performed only to
+      // establish that `encoded` really is one of ours, rather than a string
+      // that happens to begin with the right few characters. (`decode()` checks
+      // the tag first, so the malformed branch above loses nothing.)
+      new JsonEncodingContext().decode(
+        encoded,
+        JsonEncodingContext.#testingReconstructionContext,
+      );
+    }
 
     return encoded.slice(ENCODING_PREFIX_TAG.length);
   }
@@ -555,9 +567,12 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * differences -- whitespace, in particular -- are fine; a pretty-printed body
    * is accepted.
    *
-   * `isMalformed` means the same thing as it does on
-   * `unwrapEncodedValueForTesting()`: the payload is meant to be bad, so check
-   * it leniently and let the call site say so.
+   * Pass `isMalformed` when the payload is bad on purpose -- a test that wants
+   * the decoder to choke on it, say. No check runs at all in that case: malformed
+   * means malformed, and text that is deliberately broken cannot be asked to
+   * survive a decode. The result is the tag with `json` after it, whatever
+   * `json` is. The flag is the call site saying out loud that the badness is
+   * the point.
    */
   static wrapEncodedValueForTesting(
     json: string,
@@ -565,26 +580,18 @@ export class JsonEncodingContext implements SerializationContext<string> {
   ): string {
     const encoded = ENCODING_PREFIX_TAG + json;
 
-    // Throwaway decode and re-encode; both results are discarded. See above.
-    const context = JsonEncodingContext.#testingCheckContext(isMalformed);
-    context.encode(
-      context.decode(
-        encoded,
-        JsonEncodingContext.#testingReconstructionContext,
-      ),
-    );
+    if (!isMalformed) {
+      // Throwaway decode and re-encode; both results are discarded. See above.
+      const context = new JsonEncodingContext();
+      context.encode(
+        context.decode(
+          encoded,
+          JsonEncodingContext.#testingReconstructionContext,
+        ),
+      );
+    }
 
     return encoded;
-  }
-
-  /**
-   * Codec context for the throwaway checks above. Strict by default, so that
-   * anything the codec cannot cleanly read is refused; lenient when the caller
-   * has declared the payload bad on purpose, which downgrades a failed
-   * reconstruction to a `ProblematicValue` instead of an error.
-   */
-  static #testingCheckContext(isMalformed: boolean): JsonEncodingContext {
-    return new JsonEncodingContext({ lenient: isMalformed });
   }
 
   /**

@@ -6,6 +6,7 @@ import {
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
 import {
+  JsonEncodingContext,
   jsonFromValue,
   seemsLikeJsonEncodedFabricValue,
 } from "@/codec-json/index.ts";
@@ -147,7 +148,11 @@ describe("data-uri-codec", () => {
     });
 
     it("rejects invalid payload text past the codec tag", () => {
-      expect(() => valueFromDataUriPayloadText("fvj1:{nope")).toThrow();
+      expect(() =>
+        valueFromDataUriPayloadText(
+          JsonEncodingContext.wrapEncodedValueForTesting("{nope", true),
+        )
+      ).toThrow();
     });
   });
 
@@ -280,7 +285,13 @@ describe("data-uri-codec", () => {
       });
 
       it("rejects a malformed payload past the tag", () => {
-        expect(() => valueFromDataUri(uriOf("fvj1:{nope"))).toThrow();
+        expect(() =>
+          valueFromDataUri(
+            uriOf(
+              JsonEncodingContext.wrapEncodedValueForTesting("{nope", true),
+            ),
+          )
+        ).toThrow();
       });
     });
   });

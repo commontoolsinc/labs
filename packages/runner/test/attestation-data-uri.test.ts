@@ -1,6 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { jsonFromValue } from "@commonfabric/data-model/codec-json";
+import {
+  JsonEncodingContext,
+  jsonFromValue,
+} from "@commonfabric/data-model/codec-json";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/data-uri-codec";
 import { load } from "../src/storage/transaction/attestation.ts";
@@ -56,7 +59,11 @@ describe("attestation `load()` of `data:` URIs", () => {
   });
 
   it("errors on an undecodable payload past the codec tag", () => {
-    const { ok, error } = load({ id: uriOf("fvj1:{nope") });
+    const { ok, error } = load({
+      id: uriOf(
+        JsonEncodingContext.wrapEncodedValueForTesting("{nope", true),
+      ),
+    });
     expect(ok).toBeUndefined();
     expect(error?.name).toBe("InvalidDataURIError");
   });

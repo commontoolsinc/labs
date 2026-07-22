@@ -1505,22 +1505,26 @@ describe("JsonEncodingContext", () => {
         ).toBe(undecodable);
       });
 
-      it("still refuses text that will not parse, however deliberate", () => {
-        // The flag excuses a payload the codec cannot rebuild -- not one it
-        // cannot even read. Otherwise it would be an escape hatch out of every
-        // check.
-        expect(() =>
-          JsonEncodingContext.wrapEncodedValueForTesting("{nope", true)
-        ).toThrow();
-        expect(() =>
+      it("wraps text that will not parse at all", () => {
+        // Malformed means malformed: the flag is a caller saying the payload is
+        // broken on purpose, so nothing is checked and the tag simply goes on
+        // the front.
+        expect(JsonEncodingContext.wrapEncodedValueForTesting("{nope", true))
+          .toBe(`${ENCODING_PREFIX}{nope`);
+      });
+
+      it("unwraps text that will not parse at all", () => {
+        expect(
           JsonEncodingContext.unwrapEncodedValueForTesting(
             `${ENCODING_PREFIX}{nope`,
             true,
-          )
-        ).toThrow();
+          ),
+        ).toBe("{nope");
       });
 
       it("still requires the tag on unwrap, however deliberate", () => {
+        // Not a judgment about the payload: stripping a prefix that is not
+        // there yields nonsense, not the body.
         expect(() =>
           JsonEncodingContext.unwrapEncodedValueForTesting("42", true)
         )
