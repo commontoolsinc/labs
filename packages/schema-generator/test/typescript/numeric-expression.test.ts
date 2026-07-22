@@ -113,6 +113,25 @@ Deno.test("numberFromExpression: shadowed non-finite globals do not fold", () =>
   );
 });
 
+Deno.test("numberFromExpression: sees through parentheses", () => {
+  // Parentheses can wrap the whole expression or sit inside it; `-(1)` is the
+  // case no unwrapping by the caller could reach.
+  assertStrictEquals(evaluateExpr("(1)"), 1);
+  assertStrictEquals(evaluateExpr("(-1)"), -1);
+  assertStrictEquals(evaluateExpr("((1))"), 1);
+  assertStrictEquals(evaluateExpr("-(1)"), -1);
+  assertStrictEquals(evaluateExpr("-(-1)"), 1);
+  assertEquals(Object.is(evaluateExpr("(-0)"), -0), true);
+  assertEquals(Object.is(evaluateExpr("-(0)"), -0), true);
+  assertEquals(Number.isNaN(evaluateExpr("(NaN)")), true);
+  assertStrictEquals(evaluateExpr("-(Infinity)"), -Infinity);
+  // A shadowed global stays unresolvable through parentheses too.
+  assertStrictEquals(
+    evaluate("const NaN = 111; const v = (NaN);", "v"),
+    undefined,
+  );
+});
+
 Deno.test("numberFromExpression: declines non-numeric expressions", () => {
   assertStrictEquals(evaluateExpr(`"5"`), undefined);
   assertStrictEquals(evaluateExpr("true"), undefined);

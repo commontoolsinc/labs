@@ -544,6 +544,17 @@ function evaluateExpression(
   node: ts.Expression,
   checker: ts.TypeChecker,
 ): unknown {
+  // Wrappers that do not change the value: parentheses, and the type-only
+  // assertion forms. Without this every parenthesized option is dropped, of
+  // whatever type -- `("text")` as surely as `(-1)`. The schema-generator side
+  // of this pair has always unwrapped them.
+  if (
+    ts.isParenthesizedExpression(node) || ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) || ts.isSatisfiesExpression(node)
+  ) {
+    return evaluateExpression(node.expression, checker);
+  }
+
   if (ts.isStringLiteral(node)) return node.text;
   const numeric = numberFromExpression(node, checker);
   if (numeric !== undefined) return numeric;

@@ -51,6 +51,12 @@ export function numberFromExpression(
   expr: ts.Expression,
   checker: ts.TypeChecker,
 ): number | undefined {
+  // Parentheses carry no meaning here, and they can appear anywhere -- `(-1)`,
+  // but also `-(1)`, which no amount of unwrapping by the caller would reach.
+  if (ts.isParenthesizedExpression(expr)) {
+    return numberFromExpression(expr.expression, checker);
+  }
+
   if (ts.isNumericLiteral(expr)) return Number(expr.text);
 
   if (ts.isPrefixUnaryExpression(expr)) {
