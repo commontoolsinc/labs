@@ -19,18 +19,21 @@
 //   GH_TOKEN                          GitHub tiles; org Members read also powers
 //                                     the organization-users tile
 
-import { PORT } from "./config.ts";
+import { CI_WORKFLOW, PORT, REPO } from "./config.ts";
 import { TILES } from "./registry.ts";
 import { makeCtx } from "./ctx.ts";
 import { friendlyError } from "./lib.ts";
 import { faviconPng, faviconStatus } from "./favicon.ts";
 import type { FaviconStatus } from "./favicon.ts";
 import { renderTile, shell, SHELL_VERSION } from "./render.ts";
-import type { Tile, TileView } from "./types.ts";
+import type { Ctx, Run, RunSource, Tile, TileView } from "./types.ts";
 
 const ctx = makeCtx();
 const views = new Map<string, TileView>();
 const lastRun = new Map<string, number>();
+const runSnapshots = new Map<string, Run[]>();
+const runSourceErrors = new Map<string, string>();
+const lastSourceTileRun = new Map<string, number>();
 let lastChange = 0;
 let faviconRedSince: number | null = null;
 
@@ -108,52 +111,204 @@ export const broadcast = (update: DashboardUpdate) => {
   }
 };
 
+const runSourceKey = (source: RunSource): string => `${source.repo} ${source.workflow}`;
+const runSourceTileKey = (source: RunSource, tile: Tile): string => `${runSourceKey(source)} ${tile.id}`;
+
+interface RunSourceGroup {
+  source: RunSource;
+  tiles: Tile[];
+}
+
+function groupRunSources(tiles: Tile[]): RunSourceGroup[] {
+  const groups = new Map<string, RunSourceGroup>();
+  for (const tile of tiles) {
+    for (const source of tile.runSources ?? []) {
+      const key = runSourceKey(source);
+      const group = groups.get(key);
+      if (group) {
+        if (!group.tiles.includes(tile)) group.tiles.push(tile);
+      } else {
+        groups.set(key, { source, tiles: [tile] });
+      }
+    }
+  }
+  return [...groups.values()];
+}
+
+function snapshotCtx(base: Ctx, snapshots: ReadonlyMap<string, Run[]>): Ctx {
+  const runsFor = (repo: string, workflow: string) =>
+    Promise.resolve(snapshots.get(runSourceKey({ repo, workflow })) ?? []);
+  return {
+    runs: () => runsFor(REPO, CI_WORKFLOW),
+    runsFor,
+    env: base.env,
+  };
+}
+
+function sourceLabel(source: RunSource): string {
+  return source.repo.split("/").at(-1) ?? source.repo;
+}
+
+function withSourceHealth(
+  tile: Tile,
+  view: TileView,
+  snapshots: ReadonlyMap<string, Run[]>,
+  errors: ReadonlyMap<string, string>,
+): TileView {
+  const problems: string[] = [];
+  for (const source of tile.runSources ?? []) {
+    const key = runSourceKey(source);
+    const error = errors.get(key);
+    if (error) problems.push(`${sourceLabel(source)} ${friendlyError(error)}`);
+    else if (!snapshots.has(key)) problems.push(`${sourceLabel(source)} pending`);
+  }
+  return problems.length ? { ...view, status: "unknown", sub: problems.join(" · ") } : view;
+}
+
+async function collectView(
+  tile: Tile,
+  collectionCtx: Ctx,
+  publish?: (view: TileView) => void,
+): Promise<TileView> {
+  let acceptingIntermediate = true;
+  try {
+    try {
+      return await tile.collect(
+        collectionCtx,
+        publish
+          ? (intermediate) => {
+            if (acceptingIntermediate) publish(intermediate);
+          }
+          : undefined,
+      );
+    } finally {
+      acceptingIntermediate = false;
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`tile ${tile.id} failed:`, msg);
+    const prev = views.get(tile.id);
+    return prev
+      ? { ...prev, status: "unknown", sub: friendlyError(msg) }
+      : { label: tile.id, status: "unknown", value: "—", sub: friendlyError(msg) };
+  }
+}
+
+function publishViews(collected: { tile: Tile; view: TileView }[], recoveryIsSettled: boolean): void {
+  const now = Date.now();
+  for (const { tile, view } of collected) {
+    views.set(tile.id, view);
+    lastRun.set(tile.id, now);
+  }
+  lastChange = now;
+  updateFaviconRedSince(now, recoveryIsSettled);
+  broadcast(dashboardUpdate());
+}
+
+function publishIntermediateView(tile: Tile, view: TileView): void {
+  const now = Date.now();
+  views.set(tile.id, view);
+  lastChange = now;
+  updateFaviconRedSince(now, false);
+  broadcast(dashboardUpdate());
+}
+
 // One ticker collects every tile that is due (respecting each tile's interval).
 // A reentrancy guard stops a slow tick from overlapping the next one.
 const TICK_MS = 15_000;
 let ticking = false;
-export async function tick(tiles: Tile[] = TILES) {
+export async function tick(tiles: Tile[] = TILES, sourceCtx: Ctx = ctx) {
   if (ticking) return;
   ticking = true;
   try {
     const now = Date.now();
-    const due = tiles.filter((t) => now - (lastRun.get(t.id) ?? 0) >= t.intervalMs);
-    if (!due.length) return;
-    let remaining = due.length;
-    await Promise.all(due.map(async (t) => {
-      let view: TileView;
-      let acceptingIntermediate = true;
-      try {
-        try {
-          view = await t.collect(ctx, (intermediate) => {
-            if (!acceptingIntermediate) return;
-            views.set(t.id, intermediate);
-            lastChange = Date.now();
-            updateFaviconRedSince(lastChange, false);
-            broadcast(dashboardUpdate());
-          });
-        } finally {
-          acceptingIntermediate = false;
-        }
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.error(`tile ${t.id} failed:`, msg); // full detail to the log
-        // A failed collection preserves the previous view in gray and shows a
-        // short error.
-        const prev = views.get(t.id);
-        view = prev
-          ? { ...prev, status: "unknown", sub: friendlyError(msg) }
-          : { label: t.id, status: "unknown", value: "—", sub: friendlyError(msg) };
-      }
-      views.set(t.id, view);
-      lastRun.set(t.id, Date.now());
-      lastChange = Date.now();
+    const sourceGroups = groupRunSources(tiles);
+    const sourceTiles = new Set(sourceGroups.flatMap((group) => group.tiles));
+    const dueTiles = tiles.filter((tile) =>
+      !sourceTiles.has(tile) && now - (lastRun.get(tile.id) ?? 0) >= tile.intervalMs
+    );
+    const dueSources = sourceGroups.flatMap((group) => {
+      const due = group.tiles.filter((tile) =>
+        now - (lastSourceTileRun.get(runSourceTileKey(group.source, tile)) ?? 0) >= tile.intervalMs
+      );
+      return due.length ? [{ source: group.source, tiles: due }] : [];
+    });
+    if (!dueTiles.length && !dueSources.length) return;
+
+    let remaining = dueTiles.length + dueSources.length;
+    const publish = (collected: { tile: Tile; view: TileView }[]) => {
       remaining--;
-      // A non-red intermediate snapshot keeps the incident until every due
-      // collection has settled.
-      updateFaviconRedSince(lastChange, remaining === 0);
-      broadcast(dashboardUpdate());
-    }));
+      publishViews(collected, remaining === 0);
+    };
+
+    // Source fetches and dependent collections run independently. Each tile
+    // retains the completed view with the highest snapshot revision.
+    let sourceRevision = 0;
+    const publishedTileRevision = new Map<string, number>();
+    const refreshSource = async (group: RunSourceGroup) => {
+      let runs: Run[] | undefined;
+      let error: string | undefined;
+      try {
+        runs = await sourceCtx.runsFor(group.source.repo, group.source.workflow);
+      } catch (e) {
+        error = e instanceof Error ? e.message : String(e);
+        console.error(`run source ${runSourceKey(group.source)} failed:`, error);
+      }
+
+      const key = runSourceKey(group.source);
+      if (runs) {
+        runSnapshots.set(key, runs);
+        runSourceErrors.delete(key);
+      } else {
+        runSourceErrors.set(key, error ?? "temporarily unavailable");
+      }
+      const snapshots = new Map(runSnapshots);
+      const errors = new Map(runSourceErrors);
+      const currentCtx = snapshotCtx(sourceCtx, snapshots);
+      const revision = ++sourceRevision;
+      const publishIntermediate = (tile: Tile, view: TileView) => {
+        if (revision < (publishedTileRevision.get(tile.id) ?? 0)) return;
+        publishedTileRevision.set(tile.id, revision);
+        publishIntermediateView(
+          tile,
+          withSourceHealth(tile, view, snapshots, errors),
+        );
+      };
+      const collected = await Promise.all(group.tiles.map(async (tile) => ({
+        tile,
+        view: withSourceHealth(
+          tile,
+          await collectView(
+            tile,
+            currentCtx,
+            (intermediate) => publishIntermediate(tile, intermediate),
+          ),
+          snapshots,
+          errors,
+        ),
+      })));
+      const current = collected.filter(({ tile }) => revision >= (publishedTileRevision.get(tile.id) ?? 0));
+      for (const { tile } of current) publishedTileRevision.set(tile.id, revision);
+      const completedAt = Date.now();
+      for (const tile of group.tiles) {
+        lastSourceTileRun.set(runSourceTileKey(group.source, tile), completedAt);
+      }
+      publish(current);
+    };
+
+    await Promise.all([
+      ...dueTiles.map(async (tile) =>
+        publish([{
+          tile,
+          view: await collectView(
+            tile,
+            sourceCtx,
+            (intermediate) => publishIntermediateView(tile, intermediate),
+          ),
+        }])
+      ),
+      ...dueSources.map(refreshSource),
+    ]);
   } finally {
     ticking = false;
   }

@@ -627,6 +627,7 @@ function makeCiDuration(
   return {
     id: opts.id,
     intervalMs: 30_000,
+    runSources: [{ repo: opts.repo, workflow: opts.workflow }],
     routes: opts.routes,
     async collect(ctx): Promise<TileView> {
       let runs: Run[];

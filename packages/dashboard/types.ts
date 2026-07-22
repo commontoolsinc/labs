@@ -24,10 +24,18 @@ export interface Route {
   handler(req: Request, url: URL): Response | Promise<Response>;
 }
 
+export interface RunSource {
+  repo: string;
+  workflow: string;
+}
+
 export interface Tile {
   id: string; // unique, stable key for this tile's scheduling + latest-view state
-  intervalMs: number; // how often collect() runs
+  intervalMs: number; // how often collect() runs, per source when runSources is set
   wide?: boolean; // render full-width below the grid, including before collection
+  // GitHub workflow snapshots that drive this tile. The scheduler refreshes
+  // each source independently and publishes its due dependent tiles together.
+  runSources?: readonly RunSource[];
   collect(ctx: Ctx, publish?: (view: TileView) => void): Promise<TileView>; // publish usable data before slower work completes
   routes?: Route[]; // optional drill-down routes this tile owns
 }

@@ -3,7 +3,7 @@
 // runs and the token-gated tiles get an empty env (their gray-out contract).
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Ctx, Run } from "./types.ts";
-import { LOOM_REPO, REPO } from "./config.ts";
+import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO } from "./config.ts";
 import { labsCi, loomCi } from "./tiles/main-build.ts";
 import { labsCiTrust, loomCiTrust } from "./tiles/ci-trust.ts";
 import { labsCiDuration, loomCiDuration } from "./tiles/ci-duration.ts";
@@ -297,6 +297,18 @@ Deno.test("tile labels: the labs/loom ci family is renamed and paired", async ()
   assertEquals((await loomCiTrust.collect(one)).label, "loom ci trust");
   assertEquals((await labsCiDuration.collect(one)).label, "labs ci duration");
   assertEquals((await loomCiDuration.collect(one)).label, "loom ci duration");
+});
+
+Deno.test("CI tiles declare the workflow snapshots that drive them", () => {
+  const labsSource = [{ repo: REPO, workflow: CI_WORKFLOW }];
+  const loomSource = [{ repo: LOOM_REPO, workflow: LOOM_CI_WORKFLOW }];
+  for (const tile of [labsCi, labsCiTrust, labsCiDuration]) {
+    assertEquals(tile.runSources, labsSource);
+  }
+  for (const tile of [loomCi, loomCiTrust, loomCiDuration]) {
+    assertEquals(tile.runSources, loomSource);
+  }
+  assertEquals(recentRuns.runSources, [...labsSource, ...loomSource]);
 });
 
 Deno.test("labs ci: an in-flight build renders at the bottom (extra), not the header (aside)", async () => {

@@ -79,6 +79,10 @@ export const recentRuns: Tile = {
   id: "recent-runs",
   intervalMs: 30_000,
   wide: true,
+  runSources: [
+    { repo: REPO, workflow: CI_WORKFLOW },
+    { repo: LOOM_REPO, workflow: LOOM_CI_WORKFLOW },
+  ],
   async collect(ctx): Promise<TileView> {
     // Two shared bases (labs + loom), merged newest-first and cut to the most
     // recent RECENT_DISPLAY across both.
