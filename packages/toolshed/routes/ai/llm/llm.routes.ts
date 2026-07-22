@@ -136,18 +136,17 @@ const StreamResponse = z.string().openapi({
     'complete response, and "error" reports a failure mid-stream.',
 });
 
-const JsonResponse = z.object({
-  type: z.literal("json"),
-  body: MessageSchema.openapi({
-    example: {
-      role: "assistant",
-      content:
-        "Arr! That be a mighty fine tongue-twister ye got there, matey! *adjusts eye patch*\n\nAs any seasoned sea dog would tell ye, a woodchuck (if the scurvy beast could chuck wood) would chuck as much wood as a woodchuck could chuck if a woodchuck could chuck wood! \n\nBut between you and me, shipmate, we pirates care more about how much booty we can plunder than how much wood them landlubbing woodchucks can chuck! Yarr har har! 🏴‍☠️",
-    },
-  }),
+// The non-streaming branch of this route answers with the model's reply message
+// written straight to the response body, with no envelope around it. The message
+// carries a `role` and its `content`, and the client parses those fields
+// directly from the body.
+const JsonResponse = MessageSchema.openapi({
+  example: {
+    role: "assistant",
+    content:
+      "Arr! That be a mighty fine tongue-twister ye got there, matey! *adjusts eye patch*\n\nAs any seasoned sea dog would tell ye, a woodchuck (if the scurvy beast could chuck wood) would chuck as much wood as a woodchuck could chuck if a woodchuck could chuck wood! \n\nBut between you and me, shipmate, we pirates care more about how much booty we can plunder than how much wood them landlubbing woodchucks can chuck! Yarr har har! 🏴‍☠️",
+  },
 });
-
-export type LLMJSONResponse = z.infer<typeof JsonResponse>;
 
 const GetModelsRouteQueryParams = z.object({
   search: z.string().optional(),

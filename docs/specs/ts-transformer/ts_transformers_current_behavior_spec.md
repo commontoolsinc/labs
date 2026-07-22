@@ -1338,7 +1338,21 @@ Recognized call forms:
 Behavior:
 
 1. resolve type from `typeRegistry` (preferred) or checker fallback
-2. evaluate literal options object
+2. evaluate literal options object — string, boolean and `null` literals,
+   object and array literals, and numbers in any of their spellings (bare
+   literal, sign-prefixed, or the `NaN` / `Infinity` globals, the latter only
+   where the name is not shadowed). Parentheses and the type-only assertion
+   forms (`as`, `satisfies`, `<T>x`) are transparent at any depth, including
+   nested inside a sign (`-(1 as number)`). A property whose value is none of
+   these is dropped from the options object.
+
+   The code carries a `checker.getConstantValue()` fallback intended to recover
+   a named constant or enum member. It runs, but the call returns `undefined`
+   for these nodes here (verified for both an `Identifier` and a
+   `PropertyAccessExpression`), so `{ maxProperties: K }` and
+   `{ maxProperties: E.One }` are both dropped where `{ maxProperties: 1 }`
+   survives. Why the checker recovers no constant value at this stage is not
+   established here; treat only literal values as supported.
 3. extract `widenLiterals` generation option
 4. generate schema via `createSchemaTransformerV2`
 5. merge non-generation options into resulting schema object
