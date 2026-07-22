@@ -1218,6 +1218,17 @@ const hasColumn = (
   return rows.some((row) => row.name === column);
 };
 
+const columnDefault = (
+  database: Database,
+  table: string,
+  column: string,
+): string | null | undefined => {
+  const rows = database.prepare(`PRAGMA table_info("${table}")`).all() as Array<
+    { name: string; dflt_value: string | null }
+  >;
+  return rows.find((row) => row.name === column)?.dflt_value;
+};
+
 const hasTable = (database: Database, table: string): boolean =>
   database.prepare(`
     SELECT 1 AS present
@@ -1408,24 +1419,48 @@ COMMIT;
 };
 
 const migrateHeadCurrentOp = (database: Database): void => {
-  if (!hasColumn(database, "head", "op")) {
+  if (
+    !hasColumn(database, "head", "op") ||
+    columnDefault(database, "head", "op") !== null
+  ) {
     database.exec(`
 BEGIN TRANSACTION;
 
-ALTER TABLE head
-ADD COLUMN op TEXT NOT NULL DEFAULT 'set'
-CHECK (op IN ('set', 'patch', 'delete'));
+DROP INDEX IF EXISTS idx_head_branch;
+DROP INDEX IF EXISTS idx_head_live_entity_ids;
 
-UPDATE head
-SET op = (
+ALTER TABLE head RENAME TO head_current_op_migration;
+
+CREATE TABLE head (
+  branch    TEXT    NOT NULL,
+  id        TEXT    NOT NULL,
+  scope_key TEXT    NOT NULL DEFAULT 'space',
+  seq       INTEGER NOT NULL,
+  op_index  INTEGER NOT NULL,
+  op        TEXT    NOT NULL CHECK (op IN ('set', 'patch', 'delete')),
+  PRIMARY KEY (branch, id, scope_key)
+);
+CREATE INDEX idx_head_branch ON head (branch);
+
+INSERT INTO head (branch, id, scope_key, seq, op_index, op)
+SELECT
+  h.branch,
+  h.id,
+  h.scope_key,
+  h.seq,
+  h.op_index,
+  (
   SELECT r.op
   FROM revision r
-  WHERE r.branch = head.branch
-    AND r.id = head.id
-    AND r.scope_key = head.scope_key
-    AND r.seq = head.seq
-    AND r.op_index = head.op_index
-);
+  WHERE r.branch = h.branch
+    AND r.id = h.id
+    AND r.scope_key = h.scope_key
+    AND r.seq = h.seq
+    AND r.op_index = h.op_index
+  )
+FROM head_current_op_migration h;
+
+DROP TABLE head_current_op_migration;
 
 COMMIT;
 `);
