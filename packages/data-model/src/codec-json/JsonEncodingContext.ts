@@ -509,16 +509,14 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * that wants to recognize an encoded value should call `seemsLikeEncoded()`;
    * production code that wants the value itself should call `decode()`.
    *
-   * That is enforced rather than merely advised: this performs a throwaway
-   * decode of `encoded` and throws if it is not genuinely decodable. So it
-   * cannot serve as a cheap "chop off the first few characters," and it is far
-   * too expensive to belong on any hot path.
+   * That is enforced rather than merely advised: by default this performs a
+   * throwaway decode of `encoded` and throws if it is not genuinely decodable.
+   * So it cannot serve as a cheap "chop off the first few characters," and it
+   * is far too expensive to belong on any hot path.
    *
-   * Pass `isMalformed` when the payload is _deliberately_ bad -- a test feeding
-   * a broken tag state through the decoder to see it degrade, say. The check
    * Pass `isMalformed` when the payload is bad on purpose. The decode is then
    * skipped entirely -- malformed means malformed, and deliberately broken text
-   * cannot be asked to survive a decode.
+   * cannot be asked to survive a decode. Only the prefix check remains.
    *
    * The tag itself is still required either way. That is not a judgment about
    * the payload: removing a prefix that is not there does not produce the body,
@@ -568,11 +566,11 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * is accepted.
    *
    * Pass `isMalformed` when the payload is bad on purpose -- a test that wants
-   * the decoder to choke on it, say. No check runs at all in that case: malformed
-   * means malformed, and text that is deliberately broken cannot be asked to
-   * survive a decode. The result is the tag with `json` after it, whatever
-   * `json` is. The flag is the call site saying out loud that the badness is
-   * the point.
+   * the decoder to choke on it, say. No check runs at all in that case:
+   * malformed means malformed, and text that is deliberately broken cannot be
+   * asked to survive a decode. The result is the tag with `json` after it,
+   * whatever `json` is. The flag is the call site saying out loud that the
+   * badness is the point.
    */
   static wrapEncodedValueForTesting(
     json: string,
