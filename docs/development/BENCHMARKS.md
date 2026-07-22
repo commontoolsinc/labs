@@ -9,10 +9,11 @@ work.
 The Benchmarks workflow (`.github/workflows/benchmarks.yml`) runs every four
 hours on a schedule, on the dedicated runner group so results stay comparable
 across runs. It runs `deno bench --json` over `packages/runner/test/*.bench.ts`
-plus two explicitly listed files in `packages/utils`, and uploads stdout as the
-`bench-results` artifact (90-day retention). A bench file outside those paths
-does not run in CI until it is added to the workflow. The workflow's manual
-trigger measures a specific commit.
+plus explicitly listed benchmarks in `packages/utils`, `packages/fuse`, and
+`packages/memory`, and uploads stdout as the `bench-results` artifact (90-day
+retention). A bench file outside those paths does not run in CI until it is
+added to the workflow. The workflow's manual trigger measures a specific
+commit.
 
 The team ops dashboard charts benchmark trends on its `/bench` page, sampling
 one successful run per four-hour window from those artifacts. Each
