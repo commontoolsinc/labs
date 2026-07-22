@@ -1629,6 +1629,43 @@ export class Runner {
     // (the only pattern pointer); a keyless pattern writes none, so its watcher
     // is inert by design (keyless patterns change only via a fresh run()).
     const setupPatternWatcher = () => {
+      // A hot-swap targets a DIFFERENT program over this piece's existing doc:
+      // the incoming pattern's internal cells — handler { "$stream": true }
+      // markers included — and its argument-schema defaults have never been
+      // materialized here. A fresh start() does that in its setup phase;
+      // skipping it makes every handler node of the incoming pattern fail as
+      // "Handler used as lift" at instantiation (the 2026-07-22 estuary
+      // home-root swap failure). Run the same setup state first, and only
+      // tear down the old nodes once it commits — a failed setup leaves the
+      // running pattern in place instead of a dead piece.
+      const swapToPattern = (
+        loaded: Pattern | NodeFactory<unknown, unknown>,
+        newRef: { identity: string; symbol: string },
+      ) => {
+        const pattern = this.resolveToPattern(loaded as Pattern);
+        const setupTx = this.runtime.edit();
+        try {
+          this.applySetupState(
+            setupTx,
+            pattern,
+            newRef,
+            false,
+            undefined,
+            resultCell,
+          );
+          this.runtime.prepareTxForCommit(setupTx);
+          setupTx.commit();
+        } catch (error) {
+          logger.error(
+            "pattern-swap-setup-error",
+            `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
+            error,
+          );
+          return;
+        }
+        cancelNodes?.();
+        instantiatePattern(pattern);
+      };
       addCancel(
         resultCell.sinkMeta("patternIdentity", (newValue) => {
           if (!active || startLifecycleEpoch !== this.lifecycleEpoch) return;
@@ -1644,8 +1681,7 @@ export class Runner {
             newRef.symbol,
           ) as Pattern | undefined;
           if (live) {
-            cancelNodes?.();
-            instantiatePattern(this.resolveToPattern(live));
+            swapToPattern(live, newRef);
             return;
           }
           // Async load for a pattern change after initial start. Errors are
@@ -1672,8 +1708,7 @@ export class Runner {
               logger.info("pattern changed", {
                 to: { ref: newRef, pattern: loaded },
               });
-              cancelNodes?.();
-              instantiatePattern(this.resolveToPattern(loaded));
+              swapToPattern(loaded, newRef);
             })
             .catch((err) => {
               if (!active || startLifecycleEpoch !== this.lifecycleEpoch) {
