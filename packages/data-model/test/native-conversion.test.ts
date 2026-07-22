@@ -22,6 +22,7 @@ import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import {
   BaseFabricInstance,
+  DEEP_CLONE_CORE,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
@@ -381,7 +382,7 @@ describe("native-conversion", () => {
         ): boolean {
           return Object.isFrozen(this);
         }
-        deepClone(_frozen: boolean): CustomFabInst {
+        protected [DEEP_CLONE_CORE](_frozen: boolean): CustomFabInst {
           return new CustomFabInst();
         }
         protected [SHALLOW_UNFROZEN_CLONE](): CustomFabInst {
