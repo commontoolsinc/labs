@@ -72,13 +72,20 @@ export const mapLinkSchemas = (
 
   if (isLinkRef(value)) {
     const payload = linkRefPayload(value);
-    const mappedPayload = mapPayloadSchemas(
-      payload,
-      mapSchema,
-      traversal,
-      depth,
-    );
-    return mappedPayload === payload ? value : linkRefFrom(mappedPayload);
+    if (isPlainRecord(payload)) {
+      const mappedPayload = mapPayloadSchemas(
+        payload,
+        mapSchema,
+        traversal,
+        depth,
+      );
+      return mappedPayload === payload ? value : linkRefFrom(mappedPayload);
+    }
+    // Envelope-shaped but the payload is not a record: cell-rep recognizes
+    // the envelope shape only, so stored data can put null, a primitive, or
+    // an array here. That is not a usable link — fall through and walk it
+    // as ordinary data (the pre-cell-rep walker did the same) instead of
+    // throwing mid-sync on the malformed payload.
   }
 
   if (!isPlainRecord(value)) return value;

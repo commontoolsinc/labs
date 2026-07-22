@@ -315,6 +315,63 @@ Deno.test("sync schema table leaves legacy alias schemas inline", () => {
   ]);
 });
 
+Deno.test("sync schema table survives malformed link envelope payloads", () => {
+  // Stored data can carry an envelope-shaped record whose payload is not a
+  // record at all — cell-rep recognizes the envelope shape only. Compression
+  // and expansion must treat these as ordinary data, not throw mid-sync (a
+  // throw here breaks the space's sync stream for every watcher). The walk
+  // still descends into them, so a valid link nested inside one interns.
+  const nestedSchema: JSONSchema = { type: "number" };
+  const sync: SessionSync = {
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [{
+      branch: "",
+      id: "of:malformed-envelopes",
+      scope: "space",
+      seq: 1,
+      doc: {
+        value: {
+          nullPayload: { "/": { [LINK_V1_TAG]: null } },
+          stringPayload: { "/": { [LINK_V1_TAG]: "not a payload" } },
+          arrayPayload: {
+            "/": {
+              [LINK_V1_TAG]: [{
+                "/": {
+                  [LINK_V1_TAG]: {
+                    id: "of:nested",
+                    path: [],
+                    schema: nestedSchema,
+                  },
+                },
+              }],
+            },
+          },
+        },
+      },
+    }],
+    removes: [],
+  };
+
+  const compressed = compressSessionSyncSchemas(sync) as SchemaTableSessionSync;
+  const nestedHash = internSchema(nestedSchema, true).taggedHashString;
+  assertExists(compressed.schemaTable);
+  assertEquals(Object.keys(compressed.schemaTable), [nestedHash]);
+  assertEquals(expandSessionSyncSchemas(compressed), sync);
+
+  // The string scanner takes the same ordinary walk: no throw on the
+  // malformed payloads, and a reserved string sitting AS the payload is
+  // still found.
+  assertEquals(containsSyncSchemaRefString(sync), false);
+  assertEquals(
+    containsSyncSchemaRefString({
+      "/": { [LINK_V1_TAG]: "schema-ref@2:fid1:planted" },
+    }),
+    true,
+  );
+});
+
 Deno.test("sync schema table expansion rejects refs at uninterpreted positions", () => {
   // An older server may still intern legacy `$alias` schema positions.
   // This expander no longer interprets them; delivering the surviving ref
@@ -1148,6 +1205,24 @@ Deno.test("validator covers mapper schema positions plus legacy aliases", () => 
       },
       validator: undefined,
       mapper: undefined,
+    },
+    {
+      label: "malformed envelope payload is not a link",
+      value: { "/": { [LINK_V1_TAG]: null } },
+      validator: undefined,
+      mapper: undefined,
+    },
+    {
+      label: "malformed envelope contents are walked as data",
+      value: {
+        "/": {
+          [LINK_V1_TAG]: [{
+            "/": { [LINK_V1_TAG]: { id: "of:k", path: [], schema: planted } },
+          }],
+        },
+      },
+      validator: planted,
+      mapper: planted,
     },
     {
       label: "harmless string position",

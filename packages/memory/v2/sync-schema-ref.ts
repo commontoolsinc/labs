@@ -71,16 +71,20 @@ export const findSyncSchemaRef = (value: unknown): string | undefined => {
 
     if (isLinkRef(current)) {
       const payload = linkRefPayload(current);
-      const ref = payloadSchemaRef(payload);
-      if (ref !== undefined) {
-        return ref;
-      }
-      for (const key in payload) {
-        if (key !== "schema" && Object.hasOwn(payload, key)) {
-          pending.push(payload[key]);
+      if (isPlainRecord(payload)) {
+        const ref = payloadSchemaRef(payload);
+        if (ref !== undefined) {
+          return ref;
         }
+        for (const key in payload) {
+          if (key !== "schema" && Object.hasOwn(payload, key)) {
+            pending.push(payload[key]);
+          }
+        }
+        continue;
       }
-      continue;
+      // Envelope-shaped but the payload is not a record: not a usable link.
+      // Fall through to the ordinary record walk, mirroring the mapper.
     }
 
     if (!isPlainRecord(current)) {
@@ -145,8 +149,11 @@ export const containsSyncSchemaRefString = (value: unknown): boolean => {
       }
       continue;
     }
-    if (isLinkRef(current)) {
+    if (isLinkRef(current) && !isPlainRecord(current)) {
       // A FabricLink's payload is not reachable by plain-record iteration.
+      // The legacy envelope IS a plain record and takes the ordinary walk
+      // below, which reaches its payload — malformed or not — and any
+      // sibling entries without trusting the payload extraction.
       pending.push(linkRefPayload(current));
       continue;
     }
