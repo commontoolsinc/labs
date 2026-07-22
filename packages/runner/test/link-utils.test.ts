@@ -129,10 +129,10 @@ describe("link-utils", () => {
   });
 
   describe("isWriteRedirectLink", () => {
-    it("should not identify legacy aliases as write redirect links", () => {
+    it("should not identify alias bindings as write redirect links", () => {
       // `$alias` is only meaningful as a Pattern binding, not as a link in
       // data; the binding predicate still matches it.
-      const legacyAlias = { $alias: { path: ["test"] } };
+      const legacyAlias = { $alias: { cell: "result", path: ["test"] } };
       expect(isWriteRedirectLink(legacyAlias)).toBe(false);
       expect(isAliasBinding(legacyAlias)).toBe(true);
     });
@@ -162,15 +162,15 @@ describe("link-utils", () => {
   });
 
   describe("isAliasBinding", () => {
-    it("should identify legacy aliases", () => {
+    it("should fail to match legacy aliases without name or cause", () => {
       const legacyAlias = { $alias: { path: ["test"] } };
-      expect(isAliasBinding(legacyAlias)).toBe(true);
+      expect(isAliasBinding(legacyAlias)).toBe(false);
     });
 
-    it("should identify legacy aliases with cell", () => {
+    it("should fail to match legacy aliases with cell id", () => {
       const cell = runtime.getCell(space, "test");
       const legacyAlias = { $alias: { cell: cell.entityId, path: ["test"] } };
-      expect(isAliasBinding(legacyAlias)).toBe(true);
+      expect(isAliasBinding(legacyAlias)).toBe(false);
     });
 
     it("should not identify non-legacy aliases", () => {
@@ -391,10 +391,13 @@ describe("link-utils", () => {
       });
     });
 
-    it("should handle legacy alias bindings without cell using base", () => {
+    it("should resolve named-cell alias bindings against the base", () => {
       const baseCell = runtime.getCell(space, "base");
       const legacyAlias = {
         $alias: {
+          // Only satisfies the AliasBinding constraint (name or
+          // partialCause); parseAliasBinding resolves against the base link.
+          cell: "result" as const,
           path: ["nested", "value"],
         },
       };
@@ -440,9 +443,10 @@ describe("link-utils", () => {
         overwrite: "redirect",
       });
 
-      // A concrete scope (partialCause aliases only) wins over the base's
-      // scope.
-      expect(
+      // A partialCause alias denotes a derived internal cell — a different
+      // document minted from the result cell and the partialCause, in the
+      // alias's own scope — so it cannot be parsed against a base link.
+      expect(() =>
         parseAliasBinding(
           {
             $alias: {
@@ -452,14 +456,8 @@ describe("link-utils", () => {
             },
           },
           base,
-        ),
-      ).toEqual({
-        id: base.id,
-        path: ["nested", "value"],
-        space: space,
-        scope: "user",
-        overwrite: "redirect",
-      });
+        )
+      ).toThrow("Cannot parse partialCause alias as link");
     });
 
     it("should return undefined for non-link values", () => {

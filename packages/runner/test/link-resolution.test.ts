@@ -96,7 +96,9 @@ describe("link-resolution", () => {
         tx,
       );
       testCell.set({ value: 42 });
-      const binding = { $alias: { path: ["value"] } };
+      // `cell` only satisfies the AliasBinding constraint (name or
+      // partialCause); parseAliasBinding resolves against the base link.
+      const binding = { $alias: { cell: "result" as const, path: ["value"] } };
       const result = resolveLink(
         runtime,
         tx,
@@ -123,7 +125,7 @@ describe("link-resolution", () => {
       outerCell.setRaw({
         outer: innerCell.key("inner").getAsWriteRedirectLink(),
       });
-      const binding = { $alias: { path: ["outer"] } };
+      const binding = { $alias: { cell: "result" as const, path: ["outer"] } };
       const result = resolveLink(
         runtime,
         tx,
@@ -156,7 +158,9 @@ describe("link-resolution", () => {
           b: { c: 1 },
         },
       });
-      const binding = { $alias: { path: ["a", "a", "c"] } };
+      const binding = {
+        $alias: { cell: "result" as const, path: ["a", "a", "c"] },
+      };
       const result = resolveLink(
         runtime,
         tx,

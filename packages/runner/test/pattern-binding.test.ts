@@ -511,7 +511,7 @@ describe("pattern-binding", () => {
   });
 
   describe("findAllWriteRedirectCells", () => {
-    it("should find a single legacy alias binding", () => {
+    it("should not find non-unwrapped alias binding", () => {
       const testCell = runtime.getCell<{ foo: number }>(
         space,
         "single legacy",
@@ -519,12 +519,24 @@ describe("pattern-binding", () => {
         tx,
       );
       testCell.set({ foo: 123 });
-      const binding = { $alias: { path: ["foo"] } };
+      const binding = { $alias: { cell: "result", path: ["foo"] } };
       const links = findAllWriteRedirectCells(binding, testCell);
-      expect(links.length).toBe(1);
-      expect(links[0].path).toEqual(["foo"]);
-      expect(links[0].id).toBeDefined();
-      expect(links[0].space).toBe(space);
+      expect(links.length).toBe(0);
+
+      const unwrappedBinding = unwrapOneLevelAndBindtoDoc(
+        runtime.cfc,
+        binding,
+        testCell.getAsNormalizedFullLink(),
+        testCell,
+      );
+      const unwrappedLinks = findAllWriteRedirectCells(
+        unwrappedBinding,
+        testCell,
+      );
+      expect(unwrappedLinks.length).toBe(1);
+      expect(unwrappedLinks[0].path).toEqual(["foo"]);
+      expect(unwrappedLinks[0].id).toBeDefined();
+      expect(unwrappedLinks[0].space).toBe(space);
     });
 
     it("should ignore deferred legacy aliases", () => {
@@ -542,10 +554,19 @@ describe("pattern-binding", () => {
         deferredInternal: {
           $alias: { partialCause: "local", path: [], defer: 1 },
         },
-        immediate: { $alias: { path: ["foo"] } },
+        immediate: { $alias: { cell: "result", path: ["foo"] } },
       };
 
-      const links = findAllWriteRedirectCells(binding, testCell);
+      // Unwrapping converts the immediate alias to a sigil link; the deferred
+      // aliases survive as aliases (defer crossed, next level's wiring) and
+      // stay invisible to the walker.
+      const unwrappedBinding = unwrapOneLevelAndBindtoDoc(
+        runtime.cfc,
+        binding,
+        testCell.getAsNormalizedFullLink(),
+        testCell,
+      );
+      const links = findAllWriteRedirectCells(unwrappedBinding, testCell);
       expect(links.length).toBe(1);
       expect(links[0].path).toEqual(["foo"]);
     });
@@ -671,11 +692,19 @@ describe("pattern-binding", () => {
       );
       testCell.set({ arr: [1, 2, 3] });
       const binding = [
-        { $alias: { path: ["arr", "0"] } },
-        { $alias: { path: ["arr", "1"] } },
-        { $alias: { path: ["arr", "2"] } },
+        { $alias: { cell: "result", path: ["arr", "0"] } },
+        { $alias: { cell: "result", path: ["arr", "1"] } },
+        { $alias: { cell: "result", path: ["arr", "2"] } },
       ];
-      const links = findAllWriteRedirectCells(binding, testCell);
+      const links = findAllWriteRedirectCells(
+        unwrapOneLevelAndBindtoDoc(
+          runtime.cfc,
+          binding,
+          testCell.getAsNormalizedFullLink(),
+          testCell,
+        ),
+        testCell,
+      );
       expect(links.length).toBe(3);
       expect(links.map((l) => l.path)).toEqual([
         ["arr", "0"],
@@ -693,11 +722,19 @@ describe("pattern-binding", () => {
       );
       testCell.set({ x: 1, y: 2 });
       const binding = {
-        a: { $alias: { path: ["x"] } },
-        b: { $alias: { path: ["y"] } },
+        a: { $alias: { cell: "result", path: ["x"] } },
+        b: { $alias: { cell: "result", path: ["y"] } },
         c: 3,
       };
-      const links = findAllWriteRedirectCells(binding, testCell);
+      const links = findAllWriteRedirectCells(
+        unwrapOneLevelAndBindtoDoc(
+          runtime.cfc,
+          binding,
+          testCell.getAsNormalizedFullLink(),
+          testCell,
+        ),
+        testCell,
+      );
       expect(links.length).toBe(2);
       expect(links.map((l) => l.path)).toEqual([["x"], ["y"]]);
     });

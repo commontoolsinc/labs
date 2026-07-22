@@ -19,7 +19,6 @@ import {
   isWriteRedirectLink,
   KeepAsCell,
   type NormalizedFullLink,
-  parseAliasBinding,
   parseLink,
   sanitizeSchemaForLinks,
 } from "./link-utils.ts";
@@ -574,15 +573,13 @@ export function findAllWriteRedirectCells<T>(
   // redirect-chain recursion re-base onto the resolved `linkCell` (a
   // `Cell<unknown>`) rather than the original typed base.
   function find(binding: unknown, baseCell: AnyCell<unknown>): void {
-    if (isAliasBinding(binding) && (binding.$alias.defer ?? 0) > 0) {
+    if (isAliasBinding(binding)) {
+      // Callers unwrap bindings (unwrapOneLevelAndBindtoDoc) before walking,
+      // so a surviving `$alias` belongs to a nested level — it just crossed
+      // its `defer` boundary, or sits inside an embedded Pattern value —
+      // and is not part of this level's read/write surface.
       return;
-    } else if (isWriteRedirectLink(binding) || isAliasBinding(binding)) {
-      // `$alias` bindings are honored here for PRE-unwrap callers (raw
-      // `node.inputs`/`node.outputs`, e.g. the cold-resume prefetch), where
-      // they are the current level's wiring. Post-unwrap values only carry
-      // `$alias` inside embedded Pattern values, and the `isPattern` skip
-      // below stops the walk before reaching those.
-      //
+    } else if (isWriteRedirectLink(binding)) {
       // Follow a *chain* of write redirects: record this redirect, then if its
       // target value is ITSELF a write redirect, follow that too (one string of
       // redirects). We stop as soon as the target is a non-redirect value — we
@@ -593,10 +590,7 @@ export function findAllWriteRedirectCells<T>(
       // documents — and was the dominant reload instantiation cost: resolving a
       // cell + walking its entire value per link. Following only direct redirect
       // chains keeps the cases that matter without the deep dive.)
-      const bindingBase = baseCell.getAsNormalizedFullLink();
-      const link = isAliasBinding(binding)
-        ? parseAliasBinding(binding, bindingBase)
-        : parseLink(binding, bindingBase);
+      const link = parseLink(binding, baseCell.getAsNormalizedFullLink());
       if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
       seen.push(link);
       const linkCell = baseCell.runtime.getCellFromLink(

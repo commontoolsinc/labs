@@ -754,6 +754,7 @@ describe("json-utils", () => {
           const { schema, scope } = cell.export();
           return {
             "$alias": {
+              partialCause: "placeholder", // we have no way to represent an alias binding to this fake cell
               path: ["path", "to", "cell"],
               ...(schema !== undefined && { schema }),
               ...(scope !== undefined && { scope }),
@@ -764,6 +765,7 @@ describe("json-utils", () => {
 
       expect(result).toEqual({
         "$alias": {
+          partialCause: "placeholder",
           path: [
             "path",
             "to",

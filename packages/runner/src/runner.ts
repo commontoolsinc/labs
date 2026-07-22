@@ -2625,22 +2625,70 @@ export class Runner {
     // scanned after the main sync wave (see below).
     const argumentCells: Cell<any>[] = [];
 
-    // Sync all the inputs and outputs of the pattern nodes.
-    for (const node of pattern.nodes) {
-      const inputs = findAllWriteRedirectCells(node.inputs, resultCell);
-      const outputs = findAllWriteRedirectCells(node.outputs, resultCell);
-
-      // TODO(seefeld): This ignores schemas provided by modules, so it might
-      // still fetch a lot.
-      [...inputs, ...outputs].forEach((link) => {
-        cells.push(this.runtime.getCellFromLink(link));
-      });
-      inputs.forEach((link) => {
-        argumentCells.push(this.runtime.getCellFromLink(link));
-      });
-    }
+    // Sync all the inputs and outputs of the pattern nodes. Bindings are
+    // unwrapped (bound to the argument/result documents) first, so named-cell
+    // and partialCause aliases resolve to the documents they actually denote;
+    // findAllWriteRedirectCells itself only walks sigil links. Without the
+    // argument meta link the bindings cannot be bound, so the node walk is
+    // skipped — the pre-sync is best-effort, and binding against a substitute
+    // document would pre-sync the wrong cells (see CT-1897 for the same
+    // defaulting bug in collectResumeOwnedCells).
     const argumentMetaLink = getMetaLink(resultCell, "argument");
-    if (argumentMetaLink) {
+    if (argumentMetaLink === undefined) {
+      // Instrumentation for how often the meta link is missing here (fresh
+      // first runs are expected to hit this; resumes should not).
+      logger.warn("resume-pre-sync", () => [
+        "argument meta link missing; skipping node pre-sync",
+        {
+          resultCell: resultCell.getAsNormalizedFullLink().id,
+          nodes: pattern.nodes.length,
+        },
+      ]);
+    } else {
+      for (const node of pattern.nodes) {
+        let inputs: NormalizedFullLink[];
+        let outputs: NormalizedFullLink[];
+        try {
+          inputs = findAllWriteRedirectCells(
+            unwrapOneLevelAndBindtoDoc(
+              this.runtime.cfc,
+              node.inputs,
+              argumentMetaLink,
+              resultCell,
+              { derivedInternalCells: pattern.derivedInternalCells },
+            ),
+            resultCell,
+          );
+          outputs = findAllWriteRedirectCells(
+            unwrapOneLevelAndBindtoDoc(
+              this.runtime.cfc,
+              node.outputs,
+              argumentMetaLink,
+              resultCell,
+              { derivedInternalCells: pattern.derivedInternalCells },
+            ),
+            resultCell,
+          );
+        } catch (error) {
+          // A node whose bindings cannot be bound contributes nothing rather
+          // than breaking the pre-sync walk; log it so a resume that silently
+          // skips a node's pre-sync is diagnosable.
+          logger.warn("resume-pre-sync", () => [
+            "skipping a node whose bindings did not unwrap",
+            error,
+          ]);
+          continue;
+        }
+
+        // TODO(seefeld): This ignores schemas provided by modules, so it might
+        // still fetch a lot.
+        [...inputs, ...outputs].forEach((link) => {
+          cells.push(this.runtime.getCellFromLink(link));
+        });
+        inputs.forEach((link) => {
+          argumentCells.push(this.runtime.getCellFromLink(link));
+        });
+      }
       argumentCells.push(this.runtime.getCellFromLink(argumentMetaLink));
     }
 

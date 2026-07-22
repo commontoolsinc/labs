@@ -97,10 +97,10 @@ export function toJSONWithAliasBindings(
       // carry no scope; only partialCause aliases do.)
       return {
         $alias: {
+          cell: alias.cell,
           defer: (alias.defer ?? 0) + 1,
           path: alias.path,
           ...(alias.schema !== undefined && { schema: alias.schema }),
-          ...(alias.cell !== undefined && { cell: alias.cell }),
         },
       } satisfies AliasBinding;
     } else {

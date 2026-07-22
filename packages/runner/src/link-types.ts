@@ -12,7 +12,6 @@ import {
   type SigilWriteRedirectLink,
   type URI,
 } from "./sigil-types.ts";
-import { isCellScope } from "./scope.ts";
 import { arrayEqual } from "./path-utils.ts";
 import type {
   IMemorySpaceAddress,
@@ -160,7 +159,9 @@ export function isWriteRedirectLink(
  */
 export function isAliasBinding(value: any): value is AliasBinding {
   return isRecord(value) && "$alias" in value && isRecord(value.$alias) &&
-    Array.isArray(value.$alias.path);
+    Array.isArray(value.$alias.path) &&
+    (value.$alias.partialCause !== undefined ||
+      value.$alias.cell === "result" || value.$alias.cell === "argument");
 }
 
 /**
@@ -213,14 +214,23 @@ export function parseAliasBinding(
   base: NormalizedFullLink,
 ): NormalizedFullLink {
   const alias = value.$alias;
-  // Named-cell ("argument"/"result") and partialCause aliases carry no
-  // absolute id of their own here, so resolve to the base cell's document.
-  // An "inherit" (or absent) scope resolves to the base's scope.
+  // A partialCause alias denotes a derived internal cell — a different
+  // document minted from the result cell and the partialCause (see
+  // getDerivedInternalCellLink), in the alias's own `scope` — not a path
+  // within the base document, so it cannot be parsed against a base link.
+  // Callers must convert it via unwrapOneLevelAndBindtoDoc instead.
+  if (alias.partialCause !== undefined) {
+    throw new Error(
+      `Cannot parse partialCause alias as link: ${JSON.stringify(value)}`,
+    );
+  }
+  // Named-cell ("argument"/"result") aliases carry no absolute id of their
+  // own here, so resolve to the base cell's document, in the base's scope.
   return {
     id: base.id,
     path: alias.path,
     space: base.space,
-    scope: isCellScope(alias.scope) ? alias.scope : base.scope,
+    scope: base.scope,
     ...(alias.schema !== undefined && { schema: alias.schema }),
     overwrite: "redirect",
   };
