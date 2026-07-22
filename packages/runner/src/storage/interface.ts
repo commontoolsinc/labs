@@ -7,6 +7,8 @@ import type {
 import type {
   CommitPrecondition,
   EntityDocument,
+  EntityIdListOptions,
+  EntityIdListResult,
   PatchOp,
   SchedulerActionSnapshotQuery,
   SchedulerExecutionContextKey,
@@ -367,6 +369,14 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
 
   /** List live space-scoped entity identifiers without loading their values. */
   listEntityIds?(): Promise<string[] | undefined>;
+
+  /** List one page from a stable live entity-identifier snapshot. */
+  listEntityIdPage?(
+    options?: EntityIdListOptions,
+  ): Promise<EntityIdListResult | undefined>;
+
+  /** Test one live space-scoped entity identifier without loading its value. */
+  entityIdExists?(id: string): Promise<boolean | undefined>;
 
   /**
    * Internal scheduler persistence query. Memory v2 providers implement this

@@ -24,6 +24,8 @@ import {
   type CommitPrecondition,
   type DocumentPath,
   type EntityDocument,
+  type EntityIdListOptions,
+  type EntityIdListResult,
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   type PatchOp,
@@ -1532,6 +1534,16 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.listEntityIds();
   }
 
+  listEntityIdPage(
+    options: EntityIdListOptions = {},
+  ): Promise<EntityIdListResult | undefined> {
+    return this.replica.listEntityIdPage(options);
+  }
+
+  entityIdExists(id: string): Promise<boolean | undefined> {
+    return this.replica.entityIdExists(id);
+  }
+
   listSchedulerActionSnapshots(
     query: SchedulerActionSnapshotQuery = {},
   ): Promise<SchedulerSnapshotListResult> {
@@ -1780,6 +1792,24 @@ class SpaceReplica implements ISpaceReplica {
       return undefined;
     }
     return (await session.listEntityIds())?.ids;
+  }
+
+  async listEntityIdPage(
+    options: EntityIdListOptions = {},
+  ): Promise<EntityIdListResult | undefined> {
+    const { client, session } = await this.sessionHandle();
+    if (client.serverFlags?.entityIdListing !== true) {
+      return undefined;
+    }
+    return await session.listEntityIds(options);
+  }
+
+  async entityIdExists(id: string): Promise<boolean | undefined> {
+    const { client, session } = await this.sessionHandle();
+    if (client.serverFlags?.entityIdLookup !== true) {
+      return undefined;
+    }
+    return (await session.entityIdExists(id))?.exists;
   }
 
   /**

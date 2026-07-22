@@ -11,6 +11,8 @@ import {
   type EntityDocument,
   type EntityIdListRequest,
   type EntityIdListResult,
+  type EntityIdLookupRequest,
+  type EntityIdLookupResult,
   getPersistentSchedulerStateConfig,
   type GraphQuery,
   type GraphQueryRequest,
@@ -116,6 +118,7 @@ const SLOW_QUERY_THRESHOLD_MS = 100;
 const SLOW_QUERY_BUFFER_SIZE = 100;
 const DEFAULT_SESSION_OPEN_CHALLENGE_TTL_SECONDS = 300;
 const SESSION_OPEN_CHALLENGE_BYTES = 32;
+export const MAX_ENTITY_ID_PAGE_SIZE = 1_000;
 
 // SQLite resource caps (mirror the `sqlite.query` wire-parse caps; also applied
 // to the folded-write path, which is parsed loosely as part of a `transact`).
@@ -672,6 +675,26 @@ class Connection {
         }
         {
           const response = await this.server.listEntityIds(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
+        return;
+      case "entity-id.exists":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        {
+          const response = await this.server.entityIdExists(parsed);
           this.sendSessionResponse(
             parsed.space,
             parsed.sessionId,
@@ -2297,16 +2320,99 @@ export class Server {
         return respondTypedError<EntityIdListResult>(message.requestId, deny);
       }
 
+      const serverSeq = Engine.serverSeq(engine);
+      if (
+        message.expectedServerSeq !== undefined &&
+        message.expectedServerSeq !== serverSeq
+      ) {
+        return respondTypedError<EntityIdListResult>(
+          message.requestId,
+          toError(
+            "SnapshotChangedError",
+            `entity identifier snapshot changed from server sequence ${message.expectedServerSeq} to ${serverSeq}`,
+          ),
+        );
+      }
+
+      if (
+        message.after === undefined && message.limit === undefined &&
+        message.expectedServerSeq === undefined
+      ) {
+        return {
+          type: "response",
+          requestId: message.requestId,
+          ok: {
+            serverSeq,
+            ids: Engine.listEntityIds(engine),
+          },
+        };
+      }
+
+      const limit = Math.min(
+        message.limit ?? MAX_ENTITY_ID_PAGE_SIZE,
+        MAX_ENTITY_ID_PAGE_SIZE,
+      );
+      const rows = Engine.listEntityIdPage(engine, {
+        after: message.after,
+        limit: limit + 1,
+      });
+      const ids = rows.slice(0, limit);
+      const nextAfter = rows.length > limit ? ids.at(-1) : undefined;
+
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: {
+          serverSeq,
+          ids,
+          ...(nextAfter === undefined ? {} : { nextAfter }),
+        },
+      };
+    } catch (error) {
+      return respondTypedError<EntityIdListResult>(
+        message.requestId,
+        toError(
+          "QueryError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
+  async entityIdExists(
+    message: EntityIdLookupRequest,
+  ): Promise<ResponseMessage<EntityIdLookupResult>> {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
+      return respondTypedError<EntityIdLookupResult>(
+        message.requestId,
+        toError("SessionError", "Unknown session for space"),
+      );
+    }
+
+    try {
+      const engine = await this.openEngine(message.space);
+      const deny = this.#authorizeCurrentSessionWithEngine(
+        engine,
+        message.space,
+        message.sessionId,
+        session,
+        "READ",
+      );
+      if (deny) {
+        return respondTypedError<EntityIdLookupResult>(message.requestId, deny);
+      }
+
       return {
         type: "response",
         requestId: message.requestId,
         ok: {
           serverSeq: Engine.serverSeq(engine),
-          ids: Engine.listEntityIds(engine),
+          exists: Engine.entityIdExists(engine, message.id),
         },
       };
     } catch (error) {
-      return respondTypedError<EntityIdListResult>(
+      return respondTypedError<EntityIdLookupResult>(
         message.requestId,
         toError(
           "QueryError",
@@ -3664,13 +3770,41 @@ export const parseClientMessage = (
     parsed.type === "entity-id.list" &&
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
-    typeof parsed.sessionId === "string"
+    typeof parsed.sessionId === "string" &&
+    (parsed.after === undefined || typeof parsed.after === "string") &&
+    (parsed.limit === undefined ||
+      (isNonNegativeInteger(parsed.limit) && parsed.limit > 0)) &&
+    (parsed.expectedServerSeq === undefined ||
+      isNonNegativeInteger(parsed.expectedServerSeq))
   ) {
     return {
       type: "entity-id.list",
       requestId: parsed.requestId,
       space: parsed.space,
       sessionId: parsed.sessionId,
+      ...(parsed.after === undefined
+        ? {}
+        : { after: parsed.after as EntityIdListRequest["after"] }),
+      ...(parsed.limit === undefined ? {} : { limit: parsed.limit }),
+      ...(parsed.expectedServerSeq === undefined
+        ? {}
+        : { expectedServerSeq: parsed.expectedServerSeq }),
+    };
+  }
+
+  if (
+    parsed.type === "entity-id.exists" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    typeof parsed.id === "string"
+  ) {
+    return {
+      type: "entity-id.exists",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      id: parsed.id as EntityIdLookupRequest["id"],
     };
   }
 
