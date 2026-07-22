@@ -138,7 +138,37 @@ describe("LLMClient test-environment guard", () => {
           properties: { threshold: { type: "number", default: NaN } },
         },
       }),
-    ).rejects.toThrow("properties.threshold.default");
+    ).rejects.toThrow("/properties/threshold/default");
+
+    resetMockMode();
+  });
+
+  it("sendRequest rejects a JSON-unsafe tool input schema, naming the tool", async () => {
+    // A tool's input schema rides the same JSON-serialized request, so it faces
+    // the same hazard and is checked ahead of the mock path too.
+    enableMockMode();
+    addMockResponse(() => true, {
+      role: "assistant",
+      content: "ok",
+      id: "mock-tool",
+    });
+
+    await expect(
+      client.sendRequest({
+        messages: [{ role: "user", content: "hello" }],
+        model: "test-model",
+        stream: false,
+        tools: {
+          search: {
+            description: "search",
+            inputSchema: {
+              type: "object",
+              properties: { limit: { type: "number", default: Infinity } },
+            },
+          },
+        },
+      }),
+    ).rejects.toThrow('tool "search"');
 
     resetMockMode();
   });

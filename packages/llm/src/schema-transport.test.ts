@@ -1,129 +1,160 @@
 import { assertEquals, assertThrows } from "@std/assert";
 
 import {
-  assertSchemaJsonTransportSafe,
-  findJsonUnsafeSchemaValues,
+  assertJsonTransportSafe,
+  findJsonUnfaithfulValues,
 } from "./schema-transport.ts";
 
-Deno.test("findJsonUnsafeSchemaValues: passes an ordinary schema", () => {
+Deno.test("findJsonUnfaithfulValues: accepts JSON-faithful shapes", () => {
+  // The whitelist: null, booleans, strings, finite numbers other than -0,
+  // dense arrays of accepted values, plain objects of accepted values.
   const schema = {
     type: "object",
     properties: {
       n: { type: "number", default: -1, minimum: 0, maximum: 100 },
+      z: { type: "number", default: 0 },
       s: { type: "string", default: "x" },
       flag: { type: "boolean", default: false },
       nothing: { type: "null", default: null },
       tags: { type: "array", default: ["a", "b"], items: { type: "string" } },
+      nested: { type: "object", default: { deep: [1, 2, { k: "v" }] } },
     },
     required: ["n"],
   };
-  assertEquals(findJsonUnsafeSchemaValues(schema), []);
+  assertEquals(findJsonUnfaithfulValues(schema), []);
 });
 
-Deno.test("findJsonUnsafeSchemaValues: catches each non-finite and signed zero", () => {
-  // One number the plain-JSON path alters, per row, at a `default`.
-  const cases: Array<[unknown, string]> = [
-    [NaN, "NaN"],
-    [Infinity, "Infinity"],
-    [-Infinity, "-Infinity"],
-    [-0, "-0"],
-  ];
-  for (const [value, description] of cases) {
-    const found = findJsonUnsafeSchemaValues({
-      type: "number",
-      default: value,
-    });
-    assertEquals(found, [{ path: "default", description }]);
+Deno.test("findJsonUnfaithfulValues: a boolean schema is faithful", () => {
+  // JSON Schema allows `true` / `false` as whole schemas.
+  assertEquals(findJsonUnfaithfulValues(true), []);
+  assertEquals(findJsonUnfaithfulValues(false), []);
+});
+
+Deno.test("findJsonUnfaithfulValues: catches each non-finite and signed zero", () => {
+  for (const value of [NaN, Infinity, -Infinity, -0]) {
+    const found = findJsonUnfaithfulValues({ type: "number", default: value });
+    assertEquals(found.length, 1);
+    assertEquals(found[0]!.pointer, "/default");
   }
 });
 
-Deno.test("findJsonUnsafeSchemaValues: catches a bigint", () => {
-  // JSON.stringify throws on a bigint rather than altering it; caught here so
-  // the failure names the value instead of surfacing as an opaque serialization
-  // error.
-  const found = findJsonUnsafeSchemaValues({
-    type: "integer",
-    default: 12345678901234567890n,
-  });
+Deno.test("findJsonUnfaithfulValues: catches a bigint", () => {
+  // JSON.stringify throws on a bigint; caught here so the failure names the
+  // value rather than surfacing as an opaque serialization error.
+  const found = findJsonUnfaithfulValues({ default: 42n });
   assertEquals(found, [{
-    path: "default",
-    description: "12345678901234567890n",
+    pointer: "/default",
+    reason: "bigint 42n (not representable)",
   }]);
 });
 
-Deno.test("findJsonUnsafeSchemaValues: does not flag a finite -1 or +0", () => {
-  // The negative SENTINEL and a plain zero are perfectly JSON-safe; only the
-  // sign of an actual -0 is at risk.
-  assertEquals(
-    findJsonUnsafeSchemaValues({ type: "number", default: -1 }),
-    [],
-  );
-  assertEquals(
-    findJsonUnsafeSchemaValues({ type: "number", default: 0 }),
-    [],
-  );
+Deno.test("findJsonUnfaithfulValues: catches undefined -- dropped, not a bad number", () => {
+  // A blacklist of bad numbers would miss this: `{ default: undefined }`
+  // serializes to `{}`, silently losing the default.
+  const found = findJsonUnfaithfulValues({ default: undefined });
+  assertEquals(found.length, 1);
+  assertEquals(found[0]!.pointer, "/default");
 });
 
-Deno.test("findJsonUnsafeSchemaValues: reaches into nested defaults and arrays", () => {
-  const found = findJsonUnsafeSchemaValues({
-    type: "object",
-    properties: {
-      cfg: {
-        type: "object",
-        default: { ratio: NaN, offsets: [1, -0, 3] },
-      },
-    },
-    examples: [{ ratio: -Infinity }],
+Deno.test("findJsonUnfaithfulValues: catches undefined inside an array (becomes null)", () => {
+  const found = findJsonUnfaithfulValues({ default: [1, undefined, 3] });
+  assertEquals(found.length, 1);
+  assertEquals(found[0]!.pointer, "/default/1");
+});
+
+Deno.test("findJsonUnfaithfulValues: catches a sparse array hole (becomes null)", () => {
+  // deno-lint-ignore no-sparse-arrays -- a hole is exactly what is under test.
+  const holed = [1, , 3];
+  const found = findJsonUnfaithfulValues({ default: holed });
+  assertEquals(found.length, 1);
+  assertEquals(found[0]!.pointer, "/default/1");
+  assertEquals(found[0]!.reason.includes("hole"), true);
+});
+
+Deno.test("findJsonUnfaithfulValues: catches symbol and function values", () => {
+  assertEquals(findJsonUnfaithfulValues({ a: Symbol("s") }).length, 1);
+  assertEquals(findJsonUnfaithfulValues({ a: () => 1 }).length, 1);
+});
+
+Deno.test("findJsonUnfaithfulValues: catches a symbol-keyed property", () => {
+  const found = findJsonUnfaithfulValues({ [Symbol("s")]: 1, ok: 2 });
+  assertEquals(found.length, 1);
+  assertEquals(found[0]!.reason.includes("symbol-keyed"), true);
+});
+
+Deno.test("findJsonUnfaithfulValues: catches a non-plain object (a class instance)", () => {
+  // A `FabricBytes` keeps its data in private fields, so `JSON.stringify` finds
+  // nothing to emit. Any class instance is rejected, no data-model import
+  // needed to demonstrate it.
+  class Holder {
+    #data = 5;
+    get() {
+      return this.#data;
+    }
+  }
+  const found = findJsonUnfaithfulValues({ default: new Holder() });
+  assertEquals(found.length, 1);
+  assertEquals(found[0]!.reason.includes("non-plain object"), true);
+});
+
+Deno.test("findJsonUnfaithfulValues: reports a cycle, but not a shared reference", () => {
+  // A shared subtree at sibling positions is fine -- JSON.stringify duplicates
+  // it. Only an actual cycle throws, so only that is reported.
+  const shared = { k: 1 };
+  assertEquals(findJsonUnfaithfulValues({ a: shared, b: shared }), []);
+
+  const cyclic: Record<string, unknown> = {};
+  cyclic.self = cyclic;
+  const found = findJsonUnfaithfulValues(cyclic);
+  assertEquals(found.length, 1);
+  assertEquals(found[0]!.reason.includes("circular"), true);
+});
+
+Deno.test("findJsonUnfaithfulValues: reaches nested defaults with correct pointers", () => {
+  const found = findJsonUnfaithfulValues({
+    properties: { cfg: { default: { ratio: NaN, offsets: [1, -0, 3] } } },
   });
-  assertEquals(found, [
-    { path: "properties.cfg.default.ratio", description: "NaN" },
-    { path: "properties.cfg.default.offsets[1]", description: "-0" },
-    { path: "examples[0].ratio", description: "-Infinity" },
+  assertEquals(found.map((p) => p.pointer).sort(), [
+    "/properties/cfg/default/offsets/1",
+    "/properties/cfg/default/ratio",
   ]);
 });
 
-Deno.test("findJsonUnsafeSchemaValues: flags a non-finite keyword value too", () => {
-  // The hazard is not specific to `default`: a non-finite `maximum` would be
-  // rendered `null` just the same.
-  const found = findJsonUnsafeSchemaValues({
-    type: "number",
-    maximum: Infinity,
-  });
-  assertEquals(found, [{ path: "maximum", description: "Infinity" }]);
+Deno.test("findJsonUnfaithfulValues: escapes ~ and / in pointer tokens", () => {
+  // RFC 6901: `~` -> `~0`, `/` -> `~1`. A property named `a/b` must not read as
+  // two path steps.
+  const found = findJsonUnfaithfulValues({ "a/b~c": NaN });
+  assertEquals(found[0]!.pointer, "/a~1b~0c");
 });
 
-Deno.test("assertSchemaJsonTransportSafe: returns for a safe schema", () => {
-  assertSchemaJsonTransportSafe({ type: "number", default: -1 });
+Deno.test("assertJsonTransportSafe: returns for a safe value", () => {
+  assertJsonTransportSafe({ type: "number", default: -1 }, "schema");
 });
 
-Deno.test("assertSchemaJsonTransportSafe: throws, naming path and value", () => {
+Deno.test("assertJsonTransportSafe: throws, naming label, pointer, and reason", () => {
   const err = assertThrows(
     () =>
-      assertSchemaJsonTransportSafe({
-        type: "object",
-        properties: { n: { type: "number", default: NaN } },
-      }),
+      assertJsonTransportSafe(
+        { properties: { n: { default: NaN } } },
+        "The generateObject schema",
+      ),
     Error,
   );
-  const message = err.message;
-  // The author needs to see both which value and where.
-  assertEquals(message.includes("properties.n.default"), true);
-  assertEquals(message.includes("NaN"), true);
+  assertEquals(err.message.includes("The generateObject schema"), true);
+  assertEquals(err.message.includes("/properties/n/default"), true);
+  assertEquals(err.message.includes("NaN"), true);
 });
 
-Deno.test("assertSchemaJsonTransportSafe: lists every offender", () => {
+Deno.test("assertJsonTransportSafe: lists every offender", () => {
   const err = assertThrows(
     () =>
-      assertSchemaJsonTransportSafe({
-        type: "object",
-        properties: {
-          a: { type: "number", default: NaN },
-          b: { type: "number", default: -0 },
-        },
-      }),
+      assertJsonTransportSafe(
+        { properties: { a: { default: NaN }, b: { default: -0 } } },
+        "schema",
+      ),
     Error,
   );
-  assertEquals(err.message.includes("properties.a.default"), true);
-  assertEquals(err.message.includes("properties.b.default"), true);
+  assertEquals(err.message.includes("/properties/a/default"), true);
+  assertEquals(err.message.includes("/properties/b/default"), true);
   assertEquals(err.message.includes("2 value(s)"), true);
 });

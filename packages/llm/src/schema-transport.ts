@@ -1,98 +1,167 @@
-// Guards a generated schema against the one lossy step between the runner and
-// an external LLM provider: the request is sent as ordinary JSON, so any value
-// the schema carries that plain JSON cannot represent faithfully reaches the
-// provider altered, or not at all.
+// Guards a value against the one lossy step between the runner and an external
+// LLM provider: the request is sent as ordinary JSON (`JSON.stringify`), so any
+// value it carries that plain JSON cannot represent faithfully reaches the
+// provider altered, dropped, or not at all -- or crashes the serialization.
 //
-// The Common Fabric schema/value model is a superset of JSON. A schema may
-// legitimately hold a non-finite number or a signed zero as a `default` (or a
-// `const`, an `examples` entry, a `minimum`, ...). Those are fine internally.
-// But `JSON.stringify` renders `NaN` and `±Infinity` as `null`, drops the sign
-// of `-0`, and throws outright on a `bigint`. A provider would then validate or
-// enforce a schema subtly different from the one the author wrote -- silently.
+// The Common Fabric value model is a superset of JSON, so a generated schema
+// (a `generateObject` schema, or a tool's `inputSchema`) may legitimately hold
+// values JSON cannot carry. Those are fine internally. Crossing to a provider,
+// they are not.
 //
-// This is deliberately a boundary check, not a schema fix. The narrowing
-// belongs to the external consumer, not to the schema generator, which keeps
-// the value faithfully. Here the policy is to refuse: a value that cannot be
-// sent without alteration is reported rather than quietly changed.
+// This is a positive whitelist, not a search for known-bad leaves. Only the
+// shapes JSON round-trips by identity are accepted -- `null`, booleans,
+// strings, finite numbers other than `-0`, dense arrays of accepted values,
+// and plain objects whose values are accepted. Everything else is reported:
+// `undefined` (dropped from an object, `null` in an array), `NaN` / `±Infinity`
+// (become `null`), `-0` (loses its sign), `bigint` / `symbol` / `function`
+// (not representable), array holes (`null`), symbol-keyed properties (dropped),
+// non-plain objects such as a `FabricBytes` (flattened -- `JSON.stringify`
+// finds no data in its private fields), and cycles (`JSON.stringify` throws).
+//
+// A blacklist that only hunted bad numbers would pass every one of those: they
+// leave no offending numeric leaf, yet JSON still alters them. Whitelisting is
+// the only framing that makes an empty result actually mean "JSON transport
+// will not change this."
+//
+// The policy is to refuse, not to quietly narrow: a value that cannot be sent
+// unaltered is reported rather than changed. The narrowing to a provider's
+// transport belongs to the boundary that crosses it, and the boundary says no.
 
-/** A value plain JSON serialization cannot carry faithfully, and where it sits. */
-export interface JsonUnsafeValue {
-  /** Dotted / bracketed path from the schema root, e.g. `properties.n.default`. */
-  readonly path: string;
-  /** How the offending value reads, e.g. `NaN`, `-0`, `-Infinity`, `42n`. */
-  readonly description: string;
+import { isPlainObject } from "@commonfabric/utils/types";
+
+/** A value ordinary JSON serialization would not carry faithfully. */
+export interface JsonUnfaithfulValue {
+  /** RFC 6901 JSON Pointer to the value; `""` is the whole input. */
+  readonly pointer: string;
+  /** Why JSON would not carry it, e.g. `NaN (becomes null)`. */
+  readonly reason: string;
 }
 
-function describe(value: number | bigint): string {
-  if (typeof value === "bigint") return `${value}n`;
-  if (Number.isNaN(value)) return "NaN";
-  if (value === Infinity) return "Infinity";
-  if (value === -Infinity) return "-Infinity";
-  if (Object.is(value, -0)) return "-0";
-  return String(value);
+/** Append one token to a JSON Pointer, escaping `~` and `/` per RFC 6901. */
+function pointerChild(base: string, token: string | number): string {
+  const escaped = String(token).replace(/~/g, "~0").replace(/\//g, "~1");
+  return `${base}/${escaped}`;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function numberReason(value: number): string | null {
+  if (Number.isNaN(value)) return "NaN (becomes null)";
+  if (value === Infinity) return "Infinity (becomes null)";
+  if (value === -Infinity) return "-Infinity (becomes null)";
+  if (Object.is(value, -0)) return "-0 (loses its sign)";
+  return null;
 }
 
-function collect(value: unknown, path: string, out: JsonUnsafeValue[]): void {
-  if (typeof value === "bigint") {
-    out.push({ path, description: describe(value) });
-    return;
-  }
-  if (typeof value === "number") {
-    if (!Number.isFinite(value) || Object.is(value, -0)) {
-      out.push({ path, description: describe(value) });
+function walk(
+  value: unknown,
+  pointer: string,
+  ancestors: Set<object>,
+  out: JsonUnfaithfulValue[],
+): void {
+  if (value === null) return;
+
+  switch (typeof value) {
+    case "boolean":
+    case "string":
+      return;
+    case "number": {
+      const reason = numberReason(value);
+      if (reason !== null) out.push({ pointer, reason });
+      return;
     }
+    case "bigint":
+      out.push({ pointer, reason: `bigint ${value}n (not representable)` });
+      return;
+    case "undefined":
+      out.push({
+        pointer,
+        reason: "undefined (dropped from an object, null in an array)",
+      });
+      return;
+    case "symbol":
+      out.push({ pointer, reason: "symbol (not representable)" });
+      return;
+    case "function":
+      out.push({ pointer, reason: "function (not representable)" });
+      return;
+  }
+
+  // A non-null object. Track ancestors (not all visited nodes), so a shared
+  // reference at sibling positions -- which `JSON.stringify` duplicates rather
+  // than rejects -- is fine; only an actual cycle is reported.
+  const obj = value as object;
+  if (ancestors.has(obj)) {
+    out.push({ pointer, reason: "circular reference (JSON.stringify throws)" });
     return;
   }
-  if (Array.isArray(value)) {
-    value.forEach((item, i) => collect(item, `${path}[${i}]`, out));
-    return;
-  }
-  if (isRecord(value)) {
-    for (const [key, child] of Object.entries(value)) {
-      collect(child, path ? `${path}.${key}` : key, out);
+  ancestors.add(obj);
+  try {
+    if (Array.isArray(obj)) {
+      for (let i = 0; i < obj.length; i++) {
+        if (!(i in obj)) {
+          out.push({
+            pointer: pointerChild(pointer, i),
+            reason: "array hole (becomes null)",
+          });
+          continue;
+        }
+        walk(obj[i], pointerChild(pointer, i), ancestors, out);
+      }
+      return;
     }
+
+    if (!isPlainObject(obj)) {
+      const name = obj.constructor?.name ?? "object";
+      out.push({
+        pointer,
+        reason: `non-plain object (${name}; JSON.stringify sees no own data)`,
+      });
+      return;
+    }
+
+    // A plain object. Symbol-keyed properties carry data JSON silently drops.
+    if (Object.getOwnPropertySymbols(obj).length > 0) {
+      out.push({ pointer, reason: "symbol-keyed properties (dropped)" });
+    }
+    for (const [key, child] of Object.entries(obj)) {
+      walk(child, pointerChild(pointer, key), ancestors, out);
+    }
+  } finally {
+    ancestors.delete(obj);
   }
 }
 
 /**
- * Find every value in `schema` that ordinary JSON serialization would alter or
- * reject: a non-finite number, a signed zero, or a bigint, anywhere in the
- * graph. Returns them with their paths; an empty array means the schema is
- * safe to send as JSON.
+ * Find every value in `value` that ordinary JSON serialization would not carry
+ * faithfully -- see the module comment for the whitelist. Returns them with
+ * their JSON Pointers; an empty array means the value round-trips through JSON
+ * by identity and is safe to send.
  */
-export function findJsonUnsafeSchemaValues(
-  schema: Record<string, unknown>,
-): JsonUnsafeValue[] {
-  const out: JsonUnsafeValue[] = [];
-  collect(schema, "", out);
+export function findJsonUnfaithfulValues(
+  value: unknown,
+): JsonUnfaithfulValue[] {
+  const out: JsonUnfaithfulValue[] = [];
+  walk(value, "", new Set<object>(), out);
   return out;
 }
 
 /**
- * Throw if `schema` holds any value ordinary JSON serialization cannot carry
- * faithfully. The message names each offending value and its path, so the
- * author can see which annotation to change rather than discovering a mangled
- * default downstream in the provider's behavior.
+ * Throw if `value` holds anything ordinary JSON serialization would not carry
+ * faithfully. `label` names what is being checked (e.g. `The generateObject
+ * schema`), and the message lists each offending value by JSON Pointer and
+ * reason, so the author can see what to change rather than discovering a
+ * mangled value downstream in the provider's behavior.
  */
-export function assertSchemaJsonTransportSafe(
-  schema: Record<string, unknown>,
-): void {
-  const unsafe = findJsonUnsafeSchemaValues(schema);
-  if (unsafe.length === 0) return;
+export function assertJsonTransportSafe(value: unknown, label: string): void {
+  const problems = findJsonUnfaithfulValues(value);
+  if (problems.length === 0) return;
 
-  const lines = unsafe.map(({ path, description }) =>
-    `  ${path || "<root>"}: ${description}`
+  const lines = problems.map(({ pointer, reason }) =>
+    `  ${pointer || "/"}: ${reason}`
   );
   throw new Error(
-    `The generateObject schema holds ${unsafe.length} value(s) that cannot be ` +
-      `sent to the LLM provider unaltered:\n${lines.join("\n")}\n` +
-      `These are valid Common Fabric values, but the provider receives the ` +
-      `schema as ordinary JSON, which renders NaN/±Infinity as null, drops the ` +
-      `sign of -0, and cannot represent a bigint. Remove or replace the ` +
-      `value(s) above.`,
+    `${label} holds ${problems.length} value(s) that ordinary JSON ` +
+      `serialization would not carry faithfully:\n${lines.join("\n")}\n` +
+      `These are valid Common Fabric values, but the request reaches the ` +
+      `provider as ordinary JSON. Remove or replace the value(s) above.`,
   );
 }
