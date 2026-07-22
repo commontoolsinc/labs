@@ -1111,6 +1111,102 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(after).toBeDefined();
   });
 
+  it("cold-boot swap: handler-bearing replacement heals a root that was NOT running", async () => {
+    // The real estuary bricked-space shape, which the running-piece test
+    // above cannot see: a bricked root never STARTED (its stored source
+    // fails to load), so there is no patternIdentity watcher when the swap
+    // lands. ensureDefaultPattern reconciles BEFORE start
+    // (startEnsuredDefaultPattern -> checkAndUpdateDefaultPattern), then
+    // cold-starts the piece — and Runner.startCore's initial instantiation
+    // does not run the setup phase, so the incoming pattern's
+    // { "$stream": true } markers were never materialized on the reused doc.
+    await setupHome({ systemPatternAutoUpdate: true });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    const staleRef = getPatternIdentityRef(root)!;
+
+    // The piece is NOT running when the swap lands — the defining difference
+    // from the watcher-path test above.
+    await manager.stopPiece(root);
+
+    stub.setSource(SOURCE_V3_HANDLER);
+    const restore = shadowLoadProbe(staleRef.identity, "undefined");
+    try {
+      // The real boot entry: reconcile-before-start, then cold start.
+      await controller.ensureDefaultPattern();
+    } finally {
+      restore();
+    }
+    await runtime.idle();
+
+    // Re-resolve: the controller's cell is a pre-heal transaction view.
+    const after = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(
+      await identityForSource(SOURCE_V3_HANDLER, {}, HOME_PATTERN_URL),
+    );
+    // Functional pin: the pattern body ran its setup (count materialized)…
+    expect(after.key("count").get()).toBe(0);
+    // …and the handler's stream marker actually works end-to-end.
+    (after.key("bump") as unknown as { send: (e: unknown) => void }).send({});
+    await runtime.idle();
+    await (after as unknown as { pull: () => Promise<unknown> }).pull();
+    const afterEvent = (await manager.getDefaultPattern(false))!;
+    expect(afterEvent.key("count").get()).toBe(1);
+  });
+
+  it("cold start heals a doc whose identity already moved without setup", async () => {
+    // The CURRENT durable state of an estuary space bricked by the deployed
+    // build: the 2026-07-22 flow already CAS-wrote patternIdentity to the
+    // official pattern (checkAndUpdateDefaultPattern "Never calls run()"),
+    // but no setup ever committed, so the doc has no internal-cell manifest
+    // entries or stream markers for that pattern. On the next boot the
+    // identity compares current, so no further swap fires — the doc must be
+    // healed at cold start itself.
+    await setupHome({ systemPatternAutoUpdate: true });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    await manager.stopPiece(root);
+
+    stub.setSource(SOURCE_V3_HANDLER);
+    const targetId = await identityForSource(
+      SOURCE_V3_HANDLER,
+      {},
+      HOME_PATTERN_URL,
+    );
+    // Model the already-committed swap: identity points at the CURRENT
+    // official pattern, doc still set up for SOURCE_V1 (marker-less for V3).
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: targetId,
+        symbol: "default",
+      });
+    });
+    expect(error).toBeUndefined();
+
+    await controller.ensureDefaultPattern();
+    await runtime.idle();
+
+    // Re-resolve: the controller's cell is a pre-heal transaction view.
+    const after = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(targetId);
+    expect(after.key("count").get()).toBe(0);
+    (after.key("bump") as unknown as { send: (e: unknown) => void }).send({});
+    await runtime.idle();
+    await (after as unknown as { pull: () => Promise<unknown> }).pull();
+    const afterEvent = (await manager.getDefaultPattern(false))!;
+    expect(afterEvent.key("count").get()).toBe(1);
+  });
+
   it("replaces an unloadable stale sourceless space root", async () => {
     // The fallback covers every space's DEFAULT pattern, not just home
     // (widened by the flag owner after a non-home field report): a root
