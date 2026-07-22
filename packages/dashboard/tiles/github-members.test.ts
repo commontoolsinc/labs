@@ -3,6 +3,7 @@
 // history, and the gray states for unavailable data.
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { REPO } from "../config.ts";
+import { dashboardCacheFile } from "../history-files.ts";
 import type { Ctx } from "../types.ts";
 import { createGithubMembers, organizationUserIds } from "./github-members.ts";
 
@@ -10,6 +11,12 @@ const DAY = 86_400_000;
 const HOUR = 3_600_000;
 const T0 = Date.UTC(2026, 6, 1);
 const ORG = REPO.split("/")[0];
+
+function historyFile(): string {
+  return dashboardCacheFile(
+    `fabric-wall-github-members-${ORG.toLowerCase()}-history.json`,
+  );
+}
 
 let clock = T0;
 
@@ -135,11 +142,11 @@ Deno.test("github users: organization rosters read every page and deduplicate id
   });
 });
 
-Deno.test("github users: configured history loads once across collections", async () => {
-  const key = "GITHUB_MEMBERS_HISTORY_FILE";
+Deno.test("github users: shared history cache loads once across collections", async () => {
+  const key = "DASHBOARD_CACHE_DIR";
   const saved = Deno.env.get(key);
-  const configured = "/configured/github-users-history.json";
-  Deno.env.set(key, configured);
+  const directory = "/configured/dashboard-cache";
+  Deno.env.set(key, directory);
   clock = T0;
 
   try {
@@ -154,18 +161,20 @@ Deno.test("github users: configured history loads once across collections", asyn
       clock += HOUR;
       await tile.collect(ctx({ GH_TOKEN: "token" }));
 
-      assertEquals(wire.reads, [configured]);
+      const file =
+        `${directory}/fabric-wall-github-members-${ORG.toLowerCase()}-history.json`;
+      assertEquals(wire.reads, [file]);
       assertEquals(wire.writes.map((write) => write.path), [
-        `${configured}.tmp`,
-        `${configured}.tmp`,
+        `${file}.tmp`,
+        `${file}.tmp`,
       ]);
       assertEquals(JSON.parse(wire.writes[1].data), [
         { t: T0, members: 2, collaborators: 1 },
         { t: T0 + HOUR, members: 2, collaborators: 1 },
       ]);
       assertEquals(wire.renames, [
-        { from: `${configured}.tmp`, to: configured },
-        { from: `${configured}.tmp`, to: configured },
+        { from: `${file}.tmp`, to: file },
+        { from: `${file}.tmp`, to: file },
       ]);
     });
   } finally {
@@ -214,12 +223,7 @@ Deno.test("github users: transitional overlap counts once and draws retained his
         `/orgs/${ORG}/outside_collaborators`,
       ]),
     );
-    assertEquals(wire.reads, [
-      Deno.env.get("GITHUB_MEMBERS_HISTORY_FILE") ??
-        `${
-          Deno.env.get("TMPDIR") ?? "/tmp"
-        }/fabric-wall-github-members-${ORG.toLowerCase()}-history.json`,
-    ]);
+    assertEquals(wire.reads, [historyFile()]);
     assertEquals(JSON.parse(wire.writes[0].data), [
       { t: T0 - 2 * DAY, members: 11, collaborators: 1 },
       { t: T0, members: 12, collaborators: 2 },
@@ -327,7 +331,7 @@ Deno.test("github users: unavailable or malformed organization data stays gray",
             headers: { "x-ratelimit-remaining": "0" },
           })
           : [],
-      sub: "rate-limited",
+      sub: "rate limit hit",
       log:
         `github users: could not read organization users: GitHub API orgs/${ORG}/outside_collaborators?per_page=100&page=1 failed: HTTP 403 (rate-limited)`,
     },

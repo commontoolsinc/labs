@@ -4,7 +4,7 @@
   },
   "tasks": {
     "watch": "deno run --watch --allow-net --allow-run=deno --allow-read --allow-write --allow-env server.ts",
-    "test": "deno test --allow-env --ignore=favicon-client.browser.test.ts --ignore=favicon-raster.test.ts --ignore=regenerate-favicons.test.ts && deno task test-favicon-raster && deno task test-browser",
+    "test": "deno run --allow-env --allow-read --allow-write --allow-run test/runner.ts",
     // Resvg's Linux loader checks the C library through Node's process report,
     // which reads CPU, network-interface, and hostname information.
     "test-favicon-raster": "deno test --allow-read --allow-write --allow-run=deno --allow-ffi --allow-sys=cpus,networkInterfaces,hostname favicon-raster.test.ts regenerate-favicons.test.ts",

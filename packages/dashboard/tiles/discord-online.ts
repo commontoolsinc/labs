@@ -10,6 +10,7 @@
 // closes with 4014.
 import type { Status, Tile, TileView } from "../types.ts";
 import { escapeHtml, multiSparkline, thin } from "../lib.ts";
+import { dashboardCacheFile } from "../history-files.ts";
 
 const GATEWAY = "wss://gateway.discord.gg/?v=10&encoding=json";
 const SNAPSHOT_TIMEOUT_MS = 12_000;
@@ -27,15 +28,14 @@ const VISITOR_COLOR = "#7c828c";
 const LINE_FADE = "#0e1915";
 
 // A rolling series of timestamped samples, charted as two lines. Samples are
-// retained for up to HISTORY_MAX_AGE_DAYS (~2 months) and persisted to disk
-// (DISCORD_HISTORY_FILE, else a file in the temp dir), reloaded on start so a
-// relaunch keeps the chart.
+// retained for up to HISTORY_MAX_AGE_DAYS (~2 months) and persisted to disk in
+// the dashboard cache directory, reloaded on start so a relaunch keeps the
+// chart.
 const HISTORY_MAX_AGE_DAYS = 60; // ~2 months
 // Cap the plotted points so a long window still renders as a small SVG; the full
 // history feeds the timestamps and span, this only thins the polyline.
 const PLOT_POINTS = 500;
-const HISTORY_FILE = Deno.env.get("DISCORD_HISTORY_FILE") ??
-  `${Deno.env.get("TMPDIR") ?? "/tmp"}/fabric-wall-discord-history.json`;
+const HISTORY_FILE = dashboardCacheFile("fabric-wall-discord-history.json");
 type Point = { t: number; team: number; visitors: number };
 const history: Point[] = [];
 

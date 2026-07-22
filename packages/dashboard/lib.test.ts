@@ -67,7 +67,7 @@ Deno.test("friendlyError: raw errors become short calm phrases", () => {
   );
   assertEquals(friendlyError("error sending request for url"), "source unreachable");
   assertEquals(friendlyError("HTTP 404: Not Found"), "not found");
-  assertEquals(friendlyError("HTTP 403: rate limit exceeded"), "rate-limited");
+  assertEquals(friendlyError("HTTP 403: rate limit exceeded"), "rate limit hit");
   assertEquals(friendlyError("Bad credentials"), "auth failed");
   assertEquals(friendlyError("GitHub API x: set GH_TOKEN or GITHUB_TOKEN"), "set GH_TOKEN");
   assertEquals(friendlyError("something weird"), "temporarily unavailable");

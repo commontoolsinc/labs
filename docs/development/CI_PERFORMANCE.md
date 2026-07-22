@@ -85,6 +85,16 @@ Jobs and steps for a run:
 `GET /repos/commontoolsinc/labs/actions/runs/<run-id>/jobs?per_page=100` — each
 job and step carries `started_at` and `completed_at`.
 
+The team ops dashboard's `/bench?view=ci` page provides repeated-run analysis
+for labs and loom. It reports overall workflow duration and individual job
+duration. Matrix jobs are grouped using the trailing-parenthesis base names from
+`scripts/ci-gantt.ts`, with the slowest shard tracked across runs to expose
+persistent imbalance.
+
+For a requested history window, the collector retains every successful main
+push build when there are at most 90. Larger sets are reduced to about 90 time
+buckets, keeping the newest build in each bucket.
+
 ## Step Phase Markers
 
 `scripts/ci-gantt.ts` draws each job as a bar and splits that bar into three
