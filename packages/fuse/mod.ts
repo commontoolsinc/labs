@@ -74,6 +74,10 @@ import {
   type HandleState,
   validateVirtualFileRange,
 } from "./handles.ts";
+import {
+  DirectoryHandleMap,
+  prepareDirectoryForHandle,
+} from "./directory-handles.ts";
 import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
 import {
   buildMountFuseArgs,
@@ -721,6 +725,7 @@ export async function main(argv: string[] = Deno.args) {
 
   // File handle tracking for write support
   const handles = new HandleMap();
+  const directoryHandles = new DirectoryHandleMap();
 
   function virtualFileRangeErrno(
     offset: number,
@@ -1505,6 +1510,9 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, ENOENT);
         return;
       }
+      const inode = BigInt(ino);
+      const fh = directoryHandles.open(inode);
+      writeFileInfo(fi, fh);
       fuse.symbols.fuse_reply_open(req, fi);
     },
   );
@@ -1521,7 +1529,7 @@ export async function main(argv: string[] = Deno.args) {
       ino: number | bigint,
       size: number | bigint,
       offset: number | bigint,
-      _fi: Deno.PointerValue,
+      fi: Deno.PointerValue,
     ) => {
       logOp("readdir", ino.toString());
       const inode = BigInt(ino);
@@ -1598,9 +1606,16 @@ export async function main(argv: string[] = Deno.args) {
         );
       };
 
-      if (bridge?.shouldPrepareDirectory(inode)) {
+      const fh = fi ? readFileInfo(fi).fh : 0n;
+      const preparation = prepareDirectoryForHandle(
+        directoryHandles,
+        fh,
+        inode,
+        bridge,
+      );
+      if (preparation) {
         const finishPendingReply = trackPendingFuseReply();
-        bridge.prepareDirectory(inode).then(() => {
+        preparation.then(() => {
           sendDirectoryReply();
           finishPendingReply();
         }).catch(() => {
@@ -2357,8 +2372,9 @@ export async function main(argv: string[] = Deno.args) {
   // releasedir(req, ino, fi_ptr)
   const releasedirCb = new Deno.UnsafeCallback(
     { parameters: ["pointer", "u64", "pointer"], result: "void" } as const,
-    (req: Deno.PointerValue, _ino: number | bigint, _fi: Deno.PointerValue) => {
-      logOp("releasedir", _ino.toString());
+    (req: Deno.PointerValue, ino: number | bigint, fi: Deno.PointerValue) => {
+      logOp("releasedir", ino.toString());
+      if (fi) directoryHandles.close(readFileInfo(fi).fh);
       fuse.symbols.fuse_reply_err(req, 0); // success
     },
   );
