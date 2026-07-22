@@ -3,6 +3,7 @@ import {
   computed,
   Default,
   entityRefToString,
+  handler,
   NAME,
   pattern,
   type PerSession,
@@ -103,6 +104,29 @@ export interface TopicsOutput {
 // tests keep importing them from the tracker.
 export { crossrefChipRow, openTopic } from "./topic.tsx";
 
+/** Browser composer submit. Profile wishes are resolved by the pattern and
+ * bound into this handler as plain snapshot values, which keeps the mutation
+ * independently testable without weakening the canonical Profile path. */
+export const submitProfileTopic = handler<void, {
+  topics: Writable<TopicPiece[] | Default<[]>>;
+  mentionable: Writable<TopicPiece[] | Default<[]>>;
+  newTitle: Writable<string>;
+  profileName: string;
+  profileAvatar: string;
+}>((_, { topics, mentionable, newTitle, profileName, profileAvatar }) => {
+  const trimmed = (newTitle.get() ?? "").trim();
+  const author = topicAuthorFromPerson(profileName, profileAvatar);
+  if (!trimmed || !author) return;
+  const piece = Topic({
+    title: trimmed,
+    createdAt: Date.now(),
+    createdBy: author,
+    mentionable,
+  });
+  topics.push(piece);
+  newTitle.set("");
+});
+
 export default pattern<TopicsInput, TopicsOutput>(({ topics }) => {
   const newTitle = new Writable.perSession("");
 
@@ -116,7 +140,9 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics }) => {
   const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
   const profileName = computed(() => profileNameWish.result ?? "");
   const profileAvatar = computed(() => profileAvatarWish.result ?? "");
-  const hasProfile = computed(() => profileName.trim().length > 0);
+  const hasProfile = computed(() =>
+    profileName.trim().length > 0 && profileWish.result !== undefined
+  );
 
   const addTopic = action(({ title, agentName }: AddTopicEvent) => {
     const trimmed = (title ?? "").trim();
@@ -136,18 +162,12 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics }) => {
     newTitle.set("");
   });
 
-  const submitTopic = action(() => {
-    const trimmed = (newTitle.get() ?? "").trim();
-    const author = topicAuthorFromPerson(profileName, profileAvatar);
-    if (!trimmed || !author) return;
-    const piece = Topic({
-      title: trimmed,
-      createdAt: Date.now(),
-      createdBy: author,
-      mentionable: topics,
-    });
-    topics.push(piece);
-    newTitle.set("");
+  const submitTopic = submitProfileTopic({
+    topics,
+    mentionable: topics,
+    newTitle,
+    profileName,
+    profileAvatar,
   });
 
   const topicCount = computed(() => asArray(topics.get()).length);

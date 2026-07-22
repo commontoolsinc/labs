@@ -9,11 +9,12 @@
  * fids pasted in bodies, comments, and link URLs; never persisted), and the
  * exported pure helpers.
  */
-import { action, computed, NAME, UI } from "commonfabric";
+import { action, computed, Default, NAME, UI, Writable } from "commonfabric";
 import { pattern } from "commonfabric";
 import Topics, {
   crossrefChipRow,
   openTopic,
+  submitProfileTopic,
   type TopicPiece,
 } from "./main.tsx";
 import Topic, {
@@ -21,9 +22,16 @@ import Topic, {
   extractFidPayloads,
   fidPayload,
   isSafeLinkUrl,
+  saveProfileBody,
   snippet,
+  submitProfileComment,
+  submitProfileLink,
+  type TopicAuthor,
   topicAuthorLabel,
+  type TopicComment,
   topicCorpus,
+  type TopicLink,
+  type TopicLinkKind,
   whenLabel,
 } from "./topic.tsx";
 
@@ -47,6 +55,57 @@ export default pattern(() => {
     createdAt: 1,
     createdByName: "Legacy Person",
     comments: [{ authorName: "Old Agent", body: "old", sentAt: 2 }],
+  });
+
+  // Deterministic bindings for the exact handlers used by Profile-backed UI
+  // controls. Pattern tests do not provide a #profile wish result, so bind the
+  // resolved snapshot values directly here rather than inventing a production
+  // fallback identity.
+  const profileTopics = new Writable<TopicPiece[] | Default<[]>>([]);
+  const profileTitleDraft = new Writable("Profile topic");
+  const profileComments = new Writable<TopicComment[] | Default<[]>>([]);
+  const profileCommentDraft = new Writable("via the profile composer");
+  const profileBody = new Writable<string | Default<"">>("old body");
+  const profileBodyDraft = new Writable("profile-edited body");
+  const profileEditingBody = new Writable(true);
+  const profileBodyUpdatedBy = new Writable<
+    TopicAuthor | Default<{ kind: "person"; name: "" }>
+  >({ kind: "person", name: "" });
+  const profileBodyUpdatedAt = new Writable<number | Default<0>>(0);
+  const profileLinks = new Writable<TopicLink[] | Default<[]>>([]);
+  const profileLinkUrlDraft = new Writable("https://example.com/profile-link");
+  const profileLinkLabelDraft = new Writable("profile link");
+  const profileLinkKindDraft = new Writable<TopicLinkKind>("session");
+
+  const profileSubmitTopic = submitProfileTopic({
+    topics: profileTopics,
+    mentionable: profileTopics,
+    newTitle: profileTitleDraft,
+    profileName: " Ada ",
+    profileAvatar: " 🦊 ",
+  });
+  const profileSubmitComment = submitProfileComment({
+    comments: profileComments,
+    commentDraft: profileCommentDraft,
+    profileName: "Ada",
+    profileAvatar: "🦊",
+  });
+  const profileSaveBody = saveProfileBody({
+    body: profileBody,
+    bodyDraft: profileBodyDraft,
+    editingBody: profileEditingBody,
+    bodyUpdatedBy: profileBodyUpdatedBy,
+    bodyUpdatedAt: profileBodyUpdatedAt,
+    profileName: "Ada",
+    profileAvatar: "🦊",
+  });
+  const profileSubmitLink = submitProfileLink({
+    links: profileLinks,
+    linkUrlDraft: profileLinkUrlDraft,
+    linkLabelDraft: profileLinkLabelDraft,
+    linkKindDraft: profileLinkKindDraft,
+    profileName: "Ada",
+    profileAvatar: "🦊",
   });
 
   // --- actions ---
@@ -117,6 +176,19 @@ export default pattern(() => {
       body: "bumping the first topic",
       agentName: "Sol",
     });
+  });
+
+  const action_submit_profile_topic = action(() => {
+    profileSubmitTopic.send();
+  });
+  const action_submit_profile_comment = action(() => {
+    profileSubmitComment.send();
+  });
+  const action_save_profile_body = action(() => {
+    profileSaveBody.send();
+  });
+  const action_submit_profile_link = action(() => {
+    profileSubmitLink.send();
   });
 
   // --- UI-affordance flows (the same paths the rendered controls drive) ---
@@ -249,6 +321,50 @@ export default pattern(() => {
         legacy.comments?.[0]?.authorName,
       ) === "Old Agent"
   );
+
+  const assert_profile_topic_submitted = computed(() => {
+    const list = profileTopics.get() ?? [];
+    return list.length === 1 &&
+      list[0]?.title === "Profile topic" &&
+      list[0]?.createdBy?.kind === "person" &&
+      list[0]?.createdBy?.name === "Ada" &&
+      list[0]?.createdBy?.avatar === "🦊" &&
+      profileTitleDraft.get() === "";
+  });
+
+  const assert_profile_comment_submitted = computed(() => {
+    const list = profileComments.get() ?? [];
+    return list.length === 1 &&
+      list[0]?.body === "via the profile composer" &&
+      list[0]?.author?.kind === "person" &&
+      list[0]?.author?.name === "Ada" &&
+      list[0]?.author?.avatar === "🦊" &&
+      (list[0]?.sentAt ?? 0) > 0 &&
+      profileCommentDraft.get() === "";
+  });
+
+  const assert_profile_body_saved = computed(() =>
+    profileBody.get() === "profile-edited body" &&
+    profileBodyUpdatedBy.get()?.kind === "person" &&
+    profileBodyUpdatedBy.get()?.name === "Ada" &&
+    profileBodyUpdatedAt.get() > 0 &&
+    profileEditingBody.get() === false
+  );
+
+  const assert_profile_link_submitted = computed(() => {
+    const list = profileLinks.get() ?? [];
+    return list.length === 1 &&
+      list[0]?.kind === "session" &&
+      list[0]?.url === "https://example.com/profile-link" &&
+      list[0]?.label === "profile link" &&
+      list[0]?.addedBy?.kind === "person" &&
+      list[0]?.addedBy?.name === "Ada" &&
+      list[0]?.addedBy?.avatar === "🦊" &&
+      (list[0]?.addedAt ?? 0) > 0 &&
+      profileLinkUrlDraft.get() === "" &&
+      profileLinkLabelDraft.get() === "" &&
+      profileLinkKindDraft.get() === "web";
+  });
 
   // A fresh comment on the FIRST topic makes it the most recently active.
   const assert_pure_helpers = computed(() =>
@@ -451,6 +567,14 @@ export default pattern(() => {
     [UI]: board[UI],
     tests: [
       { assertion: assert_initial },
+      { action: action_submit_profile_topic },
+      { assertion: assert_profile_topic_submitted },
+      { action: action_submit_profile_comment },
+      { assertion: assert_profile_comment_submitted },
+      { action: action_save_profile_body },
+      { assertion: assert_profile_body_saved },
+      { action: action_submit_profile_link },
+      { assertion: assert_profile_link_submitted },
       { action: action_add_blank_topic },
       { assertion: assert_still_empty },
       { action: action_add_unsigned_topic },
@@ -492,8 +616,8 @@ export default pattern(() => {
       { action: action_cancel_edit },
       { assertion: assert_edit_cancelled },
       { action: action_submit_blank_link_draft },
-      // Materialize the direct Topic after its comment and link exist so the
-      // nested row renderers are exercised without putting UI into TopicPiece.
+      // Materialize the direct and legacy Topics without putting UI into the
+      // board's shared TopicPiece projection.
       { render: directTopic[UI] },
       { render: legacy[UI] },
       { assertion: assert_legacy_fields_load },

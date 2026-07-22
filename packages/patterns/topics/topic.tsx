@@ -379,6 +379,93 @@ const LINK_KIND_ITEMS = [
   { label: "Agent session", value: "session" },
 ];
 
+/** Browser comment submit with Profile fields already resolved by the pattern.
+ * Keeping the mutation in a module-scope handler lets tests bind deterministic
+ * Profile snapshots while production still sources them only from wishes. */
+export const submitProfileComment = handler<void, {
+  comments: Writable<TopicComment[] | Default<[]>>;
+  commentDraft: Writable<string>;
+  profileName: string;
+  profileAvatar: string;
+}>((_, { comments, commentDraft, profileName, profileAvatar }) => {
+  const text = commentDraft.get();
+  const author = topicAuthorFromPerson(profileName, profileAvatar);
+  if (!text.trim() || !author) return;
+  comments.push({
+    author,
+    body: text.trim(),
+    sentAt: Date.now(),
+  });
+  commentDraft.set("");
+});
+
+/** Browser body save under the current Profile snapshot. */
+export const saveProfileBody = handler<void, {
+  body: Writable<string | Default<"">>;
+  bodyDraft: Writable<string>;
+  editingBody: Writable<boolean>;
+  bodyUpdatedBy: Writable<
+    TopicAuthor | Default<{ kind: "person"; name: "" }>
+  >;
+  bodyUpdatedAt: Writable<number | Default<0>>;
+  profileName: string;
+  profileAvatar: string;
+}>((
+  _,
+  {
+    body,
+    bodyDraft,
+    editingBody,
+    bodyUpdatedBy,
+    bodyUpdatedAt,
+    profileName,
+    profileAvatar,
+  },
+) => {
+  const author = topicAuthorFromPerson(profileName, profileAvatar);
+  if (!author) return;
+  // One whole-value set per explicit save keeps the conflict window small; a
+  // live-bound textarea on a shared string would conflict per keystroke.
+  body.set(bodyDraft.get());
+  bodyUpdatedBy.set(author);
+  bodyUpdatedAt.set(Date.now());
+  editingBody.set(false);
+});
+
+/** Browser link submit under the current Profile snapshot. */
+export const submitProfileLink = handler<void, {
+  links: Writable<TopicLink[] | Default<[]>>;
+  linkUrlDraft: Writable<string>;
+  linkLabelDraft: Writable<string>;
+  linkKindDraft: Writable<TopicLinkKind>;
+  profileName: string;
+  profileAvatar: string;
+}>((
+  _,
+  {
+    links,
+    linkUrlDraft,
+    linkLabelDraft,
+    linkKindDraft,
+    profileName,
+    profileAvatar,
+  },
+) => {
+  const url = linkUrlDraft.get();
+  const author = topicAuthorFromPerson(profileName, profileAvatar);
+  if (!url.trim() || !isSafeLinkUrl(url) || !author) return;
+  links.push({
+    kind: linkKindDraft.get(),
+    url: url.trim(),
+    label: linkLabelDraft.get().trim() || url.trim(),
+    addedBy: author,
+    addedAt: Date.now(),
+  });
+  linkUrlDraft.set("");
+  linkLabelDraft.set("");
+  linkKindDraft.set("web");
+});
+
 // ===== The pattern =====
 
 export default pattern<TopicInput, TopicOutput>(
@@ -415,7 +502,9 @@ export default pattern<TopicInput, TopicOutput>(
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
     const profileName = computed(() => profileNameWish.result ?? "");
     const profileAvatar = computed(() => profileAvatarWish.result ?? "");
-    const hasProfile = computed(() => profileName.trim().length > 0);
+    const hasProfile = computed(() =>
+      profileName.trim().length > 0 && profileWish.result !== undefined
+    );
 
     // --- Streams (external API; also usable headlessly via CLI) ---
 
@@ -456,16 +545,11 @@ export default pattern<TopicInput, TopicOutput>(
 
     // --- UI-side actions (close over session drafts) ---
 
-    const submitComment = action(() => {
-      const text = commentDraft.get();
-      const author = topicAuthorFromPerson(profileName, profileAvatar);
-      if (!text.trim() || !author) return;
-      comments.push({
-        author,
-        body: text.trim(),
-        sentAt: Date.now(),
-      });
-      commentDraft.set("");
+    const submitComment = submitProfileComment({
+      comments,
+      commentDraft,
+      profileName,
+      profileAvatar,
     });
 
     const startEditBody = action(() => {
@@ -473,35 +557,27 @@ export default pattern<TopicInput, TopicOutput>(
       editingBody.set(true);
     });
 
-    const saveBody = action(() => {
-      const author = topicAuthorFromPerson(profileName, profileAvatar);
-      if (!author) return;
-      // One whole-value set per explicit save keeps the conflict window small;
-      // a live-bound textarea on a shared string would conflict per keystroke.
-      body.set(bodyDraft.get());
-      bodyUpdatedBy.set(author);
-      bodyUpdatedAt.set(Date.now());
-      editingBody.set(false);
+    const saveBody = saveProfileBody({
+      body,
+      bodyDraft,
+      editingBody,
+      bodyUpdatedBy,
+      bodyUpdatedAt,
+      profileName,
+      profileAvatar,
     });
 
     const cancelEditBody = action(() => {
       editingBody.set(false);
     });
 
-    const submitLink = action(() => {
-      const url = linkUrlDraft.get();
-      const author = topicAuthorFromPerson(profileName, profileAvatar);
-      if (!url.trim() || !isSafeLinkUrl(url) || !author) return;
-      links.push({
-        kind: linkKindDraft.get(),
-        url: url.trim(),
-        label: linkLabelDraft.get().trim() || url.trim(),
-        addedBy: author,
-        addedAt: Date.now(),
-      });
-      linkUrlDraft.set("");
-      linkLabelDraft.set("");
-      linkKindDraft.set("web");
+    const submitLink = submitProfileLink({
+      links,
+      linkUrlDraft,
+      linkLabelDraft,
+      linkKindDraft,
+      profileName,
+      profileAvatar,
     });
 
     // --- Derived values ---
