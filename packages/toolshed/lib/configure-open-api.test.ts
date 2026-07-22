@@ -89,6 +89,31 @@ Deno.test("openapi reference", async (t) => {
     );
   });
 
+  // The non-streaming branch answers with the reply message written straight to
+  // the response body, which the handler produces with `c.json(result.message)`:
+  // an object carrying a `role` and its `content`. The document describes that
+  // message, not a `{type, body}` envelope wrapped around it.
+  await t.step("the JSON LLM response is the bare message", async () => {
+    const doc = await (await app.request("/doc")).json();
+    const schema = doc.paths["/api/ai/llm"].post.responses["200"]
+      .content["application/json"].schema;
+
+    assertEquals(schema.type, "object");
+    assertEquals([...schema.required].sort(), ["content", "role"]);
+    assert(
+      schema.properties.role.enum.includes("assistant"),
+      `the message role is undescribed: ${
+        JSON.stringify(schema.properties.role)
+      }`,
+    );
+    assert(
+      !("type" in schema.properties) && !("body" in schema.properties),
+      `the response carries an envelope: ${
+        JSON.stringify(Object.keys(schema.properties))
+      }`,
+    );
+  });
+
   // Scalar renders the configuration it is handed into the page without
   // validating it, serializing an unknown key as readily as a known one. The
   // document URL is read back out of the page and fetched, so the two routes
