@@ -87,6 +87,36 @@ Deno.test("rename carries CFC directory entry annotation to the new name", () =>
   assertEquals(entries?.[0].nameDigest.startsWith("fnv1a32:"), true);
 });
 
+Deno.test("CFC directory entry ordering is sorted once when read", () => {
+  const tree = new FsTree();
+  const annotator = new CfcProjectionAnnotator(tree, {
+    space: "did:key:zSpace",
+    generation: "generation-1",
+    labelView: { version: 1, entries: [] },
+  });
+  const parentIno = tree.addDir(tree.rootIno, "values", "object");
+  annotator.annotateJsonDirectory(parentIno, [], {});
+
+  const names = Array.from(
+    { length: 1_000 },
+    (_, index) => `entry-${(1_000 - index).toString().padStart(4, "0")}`,
+  );
+  for (const name of names) {
+    const childIno = tree.addFile(parentIno, name, name, "string");
+    annotator.annotateJsonScalar(childIno, [name], name);
+    annotator.annotateEntry(parentIno, name, childIno);
+  }
+
+  const pendingEntries = tree.getNode(parentIno)?.cfc?.entries?.entries ?? [];
+  assertEquals(pendingEntries.map((entry) => entry.name), names);
+
+  const entries = tree.getCfcAnnotation(parentIno)?.entries?.entries ?? [];
+  assertEquals(
+    entries.map((entry) => entry.nameDigest),
+    entries.map((entry) => entry.nameDigest).toSorted(),
+  );
+});
+
 Deno.test("rename across parents updates paths transitively", () => {
   const tree = new FsTree();
   const src = tree.addDir(tree.rootIno, "src");

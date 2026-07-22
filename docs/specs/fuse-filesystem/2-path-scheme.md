@@ -295,25 +295,30 @@ entities/
 ```
 
 The directory contains every live entity in the space scope, including
-entities that are not present in `allPieces`. Connecting the space and opening
-a fresh `entities/` directory handle request only entity identifiers from
-memory. Continuation reads for that handle reuse its prepared view rather than
-requesting the complete identifier set for every FUSE output buffer. Each
-identifier begins as an empty directory entry. Reading inside an entity
-directory loads that entity's value and builds its projected contents.
+entities that are not present in `allPieces`. Connecting the space requests no
+identifiers. Opening a fresh `entities/` directory handle requests stable,
+bounded pages of identifiers from memory. Continuation reads for that handle
+reuse its prepared virtual entries rather than repeating those requests. The
+identifiers are not retained as permanent filesystem-tree nodes.
+
+Looking up one exact identifier checks its liveness without listing the space.
+Opening that entity directory returns no projected child names and loads no
+value. Directly looking up a named child such as `result.json` or
+`result/title` loads that entity and builds the named projection.
 
 Mounting does not read the space root, its default pattern, or `allPieces`.
 The named projections under `pieces/` are built when that directory is first
 accessed. This keeps every entity value out of the mount and `entities/`
 listing path, including values for the space root and entities that also appear
 in `allPieces`. When the memory server does not support identifier listing,
-`entities/` remains empty until `pieces/` is accessed and supplies the older
-`allPieces`-only view.
+`entities/` remains empty. Opening `pieces/` does not turn it into an
+`allPieces`-only enumeration.
 
-The hydration boundary matters for recursive tools: listing only the top-level
-`entities/` directory is identifier-only, but a crawler that descends into
-every entity directory requests every entity value. The complete cost model,
-directory-handle semantics, measured scaling, and older-server contract are in
+The hydration boundary is safe for recursive tools: a crawler can list and
+open every entity directory without requesting entity values because those
+directories expose no enumerable children. Named projected paths remain
+available for explicit access. The complete cost model, directory-handle
+semantics, measured scaling, and older-server contract are in
 [Entity Lookup, Enumeration, and Performance](./11-entity-lookup-enumeration.md).
 
 Each directory name is the complete, canonically encoded entity ID. The

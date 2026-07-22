@@ -21,8 +21,8 @@
               |   - inode management       |
               |   - JSON-to-tree mapping   |
               |   - write buffering        |
-              |   - lazy entity-ID stubs   |
-              |   - directory handle views |
+              |   - bounded entity views  |
+              |   - virtual handle entries |
               |                            |
               |  Session / Runtime         |
               |   - PieceManager           |
@@ -102,7 +102,8 @@ and `ls` against cached JSON, not high-throughput I/O.
 Dynamic directory preparation is tracked per open directory handle. The first
 `readdir` prepares the view; continuation offsets reuse it, and `releasedir`
 discards the preparation state. In particular, a large `entities/` listing
-does not repeat the complete identifier request for every FUSE output buffer.
+uses stable protocol pages once and does not add an inode to the filesystem
+tree for every identifier. Exact entity paths use a bounded projection cache.
 See [Entity Lookup, Enumeration, and Performance](./11-entity-lookup-enumeration.md)
 for the storage and hydration boundaries behind that rule.
 

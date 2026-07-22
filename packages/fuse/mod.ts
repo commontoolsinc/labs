@@ -76,6 +76,7 @@ import {
 import {
   collectDirectorySnapshot,
   DirectoryHandleMap,
+  type DirectorySnapshotEntry,
   prepareDirectoryForHandle,
 } from "./directory-handles.ts";
 import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
@@ -1534,7 +1535,9 @@ export async function main(argv: string[] = Deno.args) {
       logOp("readdir", ino.toString());
       const inode = BigInt(ino);
       const fh = fi ? readFileInfo(fi).fh : 0n;
-      const sendDirectoryReply = () => {
+      const sendDirectoryReply = (
+        preparedEntries?: readonly DirectorySnapshotEntry[],
+      ) => {
         const node = tree.getNode(inode);
         if (!node || node.kind !== "dir") {
           fuse.symbols.fuse_reply_err(req, ENOENT);
@@ -1544,17 +1547,18 @@ export async function main(argv: string[] = Deno.args) {
         const bufSize = Number(size);
         const startOffset = Number(offset);
 
-        const entries = directoryHandles.snapshot(fh, inode, () => {
-          return collectDirectorySnapshot(
-            tree,
-            inode,
-            (childIno) =>
-              Boolean(
-                bridge?.resolveWritePath(childIno) ||
-                  bridge?.resolveSourceWritePath(childIno),
-              ),
-          );
-        });
+        const entries = preparedEntries ??
+          directoryHandles.snapshot(fh, inode, () => {
+            return collectDirectorySnapshot(
+              tree,
+              inode,
+              (childIno) =>
+                Boolean(
+                  bridge?.resolveWritePath(childIno) ||
+                    bridge?.resolveSourceWritePath(childIno),
+                ),
+            );
+          });
 
         const buf = new Uint8Array(bufSize);
         let pos = 0;
@@ -1601,8 +1605,8 @@ export async function main(argv: string[] = Deno.args) {
       );
       if (preparation) {
         const finishPendingReply = trackPendingFuseReply();
-        preparation.then(() => {
-          sendDirectoryReply();
+        preparation.then((entries) => {
+          sendDirectoryReply(entries);
           finishPendingReply();
         }).catch(() => {
           fuse.symbols.fuse_reply_err(req, ENOENT);
