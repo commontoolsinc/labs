@@ -57,10 +57,10 @@ over. So:
 - Keep names short. The dashboard has little horizontal room for series
   labels, and the origin file and group already carry context, so the name
   should not repeat them.
-- Keep names unique within a file. `Deno.bench` accepts duplicate names
-  without an error and reports them as a single benchmark whose results array
-  holds one entry per duplicate; a consumer reading one result per name
-  silently drops the rest.
+- Keep names unique within a group. `Deno.bench` accepts duplicate names in the
+  same group without an error and reports them as a single benchmark whose
+  results array holds one entry per duplicate. A consumer reading one result
+  per group and name silently drops the rest.
 
 `packages/runner/test/esm-verifier.bench.ts` shows the pattern: short stable
 names, per-module labels derived from source paths, sizes logged to stderr.

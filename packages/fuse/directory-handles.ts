@@ -1,3 +1,7 @@
+import { DIR_MODE } from "./platform.ts";
+import { nodeMode } from "./stat.ts";
+import { FsTree } from "./tree.ts";
+
 /** Minimal bridge surface needed to prepare a dynamic directory. */
 export interface DirectoryPreparer {
   shouldPrepareDirectory(ino: bigint): boolean;
@@ -8,6 +12,32 @@ export interface DirectorySnapshotEntry {
   readonly name: string;
   readonly ino: bigint;
   readonly mode: number;
+}
+
+/** Capture the current directory entries and modes in iteration order. */
+export function collectDirectorySnapshot(
+  tree: FsTree,
+  ino: bigint,
+  isWritable: (childIno: bigint) => boolean = () => false,
+): DirectorySnapshotEntry[] {
+  const entries: DirectorySnapshotEntry[] = [
+    { name: ".", ino, mode: DIR_MODE },
+    {
+      name: "..",
+      ino: tree.parents.get(ino) ?? tree.rootIno,
+      mode: DIR_MODE,
+    },
+  ];
+  for (const [name, childIno] of tree.getChildren(ino)) {
+    const child = tree.getNode(childIno);
+    if (!child) continue;
+    entries.push({
+      name,
+      ino: childIno,
+      mode: nodeMode(child, isWritable(childIno)),
+    });
+  }
+  return entries;
 }
 
 interface DirectoryHandleState {

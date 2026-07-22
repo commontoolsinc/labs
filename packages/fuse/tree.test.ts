@@ -149,6 +149,12 @@ Deno.test("getNameForIno returns the registered child name", () => {
   const tree = new FsTree();
   const ino = tree.addFile(tree.rootIno, "myfile.txt", "data", "string");
   assertEquals(tree.getNameForIno(ino), "myfile.txt");
+
+  tree.rename(tree.rootIno, "myfile.txt", tree.rootIno, "renamed.txt");
+  assertEquals(tree.getNameForIno(ino), "renamed.txt");
+
+  tree.removeChild(tree.rootIno, "renamed.txt");
+  assertEquals(tree.getNameForIno(ino), undefined);
 });
 
 // --- transplantSubtree ---------------------------------------------------

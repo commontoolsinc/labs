@@ -66,6 +66,10 @@ export class FsTree {
   paths: Map<string, bigint> = new Map();
   /** Reverse map: inode → path string (O(1) lookup). */
   private inoPaths: Map<bigint, string> = new Map();
+  /**
+   * Reverse map from inode to registered child name for constant-time lookup.
+   */
+  private inoNames: Map<bigint, string> = new Map();
   /** Renderers for inodes added by `addGeneratedFile`. */
   private generated: Map<bigint, () => Uint8Array | string> = new Map();
   private nextIno = 2n;
@@ -96,6 +100,7 @@ export class FsTree {
     const path = parentPath === "/" ? `/${name}` : `${parentPath}/${name}`;
     this.paths.set(path, ino);
     this.inoPaths.set(ino, path);
+    this.inoNames.set(ino, name);
   }
 
   private untrackPath(ino: bigint): void {
@@ -105,6 +110,7 @@ export class FsTree {
         this.paths.delete(path);
       }
       this.inoPaths.delete(ino);
+      this.inoNames.delete(ino);
     }
   }
 
@@ -481,16 +487,9 @@ export class FsTree {
     }
   }
 
-  /** Get the child name for an inode by scanning its parent's children map. */
+  /** Get the registered child name for an inode. */
   getNameForIno(ino: bigint): string | undefined {
-    const parentIno = this.parents.get(ino);
-    if (parentIno === undefined) return undefined;
-    const parent = this.inodes.get(parentIno);
-    if (!parent || parent.kind !== "dir") return undefined;
-    for (const [name, childIno] of parent.children) {
-      if (childIno === ino) return name;
-    }
-    return undefined;
+    return this.inoNames.get(ino);
   }
 
   /**
