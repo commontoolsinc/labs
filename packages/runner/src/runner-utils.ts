@@ -10,7 +10,6 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import {
   isModule,
-  isReactive,
   type JSONSchema,
   type Module,
   type Pattern,
@@ -156,86 +155,6 @@ export function describePatternOrModule(
   }
 
   return `pattern:nodes=${patternOrModule.nodes.length}`;
-}
-
-/**
- * Validates an action result and checks if it contains opaque refs.
- * Throws if result contains invalid types (Map, Set, functions, etc.).
- * Returns true if the result contains any Reactives.
- */
-export function validateAndCheckReactives(
-  value: unknown,
-  actionName?: string,
-  path: string[] = [],
-): boolean {
-  if (value === null || value === undefined) return false;
-  if (isReactive(value)) return true;
-  if (isCellLink(value)) return false;
-
-  const formatError = (typeName: string, hint?: string) => {
-    const pathStr = path.length > 0 ? ` at path "${path.join(".")}"` : "";
-    const actionStr = actionName ? `\n  in action: ${actionName}` : "";
-    const hintStr = hint ? ` ${hint}` : "";
-    return `Action returned a ${typeName}${pathStr}.${actionStr}\nActions must return JSON-serializable values, Reactives, or Cells.${hintStr}`;
-  };
-
-  if (typeof value === "function") {
-    throw new Error(formatError("function"));
-  }
-
-  if (typeof value === "symbol") {
-    throw new Error(formatError("Symbol", "Consider removing this property."));
-  }
-
-  if (typeof value === "bigint") {
-    throw new Error(
-      formatError("BigInt", "Consider converting to number or string."),
-    );
-  }
-
-  if (typeof value === "number") {
-    if (Number.isNaN(value)) {
-      throw new Error(
-        formatError("NaN", "Check your inputs or return null instead."),
-      );
-    }
-    if (!Number.isFinite(value)) {
-      throw new Error(
-        formatError("Infinity", "Check your inputs or return null instead."),
-      );
-    }
-    return false;
-  }
-
-  if (typeof value !== "object") return false;
-
-  const obj = value as object;
-
-  if (obj instanceof Map) {
-    throw new Error(
-      formatError("Map", "Consider using a plain object instead."),
-    );
-  }
-
-  if (obj instanceof Set) {
-    throw new Error(formatError("Set", "Consider using an array instead."));
-  }
-
-  if (Array.isArray(obj)) {
-    return obj.some((item: unknown, index: number) =>
-      validateAndCheckReactives(item, actionName, [...path, `[${index}]`])
-    );
-  }
-
-  const proto = Object.getPrototypeOf(obj);
-  if (proto !== null && proto !== Object.prototype) {
-    const typeName = obj.constructor?.name ?? "unknown type";
-    throw new Error(formatError(typeName));
-  }
-
-  return Object.entries(obj as Record<string, unknown>).some(
-    ([key, val]) => validateAndCheckReactives(val, actionName, [...path, key]),
-  );
 }
 
 /**

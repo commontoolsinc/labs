@@ -93,8 +93,8 @@ import {
   sanitizeDebugLabel,
   schemaAcceptsOpaqueCellValue,
   setRunnableName,
-  validateAndCheckReactives,
 } from "./runner-utils.ts";
+import { normalizeSandboxResult } from "./sandbox/result-normalization.ts";
 import {
   resolveBuiltinImplementationIdentity,
   resolvePolicyFacingImplementationIdentity,
@@ -120,8 +120,8 @@ export {
   mergeSchemaDefaults,
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
-  validateAndCheckReactives,
 } from "./runner-utils.ts";
+export { validateAndCheckReactives } from "./sandbox/result-normalization.ts";
 
 const logger = getLogger("runner", { enabled: true, level: "warn" });
 const triggerFlowLogger = getLogger("runner.trigger-flow", {
@@ -3728,7 +3728,7 @@ export class Runner {
   private handleJavaScriptHandlerResult(
     tx: IExtendedStorageTransaction,
     result: any,
-    name: string | undefined,
+    resultHasReactives: boolean,
     frame: Frame,
     processCell: Cell<any>,
     addCancel: AddCancel,
@@ -3742,10 +3742,7 @@ export class Runner {
     );
     const receiptsEnabled =
       this.runtime.experimental.commitPreconditions === true;
-    if (
-      !validateAndCheckReactives(result, name) &&
-      frame.reactives.size === 0
-    ) {
+    if (!resultHasReactives && frame.reactives.size === 0) {
       if (receiptsEnabled) {
         // Receipt-only handling (spec scheduler-v2 §7.6): nothing was
         // launched, but the result cell is still created — its create is the
@@ -3986,7 +3983,7 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     resultSchema: JSONSchema | undefined,
     result: any,
-    name: string | undefined,
+    resultHasReactives: boolean,
     frame: Frame,
     resultCell: Cell<any>,
     outputs: FabricValue,
@@ -3995,10 +3992,7 @@ export class Runner {
     previousResultCellRef: JavaScriptActionResultCells,
     narrowestReadScope?: CellScope,
   ): any {
-    if (
-      !validateAndCheckReactives(result, name) &&
-      frame.reactives.size === 0
-    ) {
+    if (!resultHasReactives && frame.reactives.size === 0) {
       recordOutputSchemaPolicyInputs(
         tx,
         this.runtime,
@@ -4226,10 +4220,11 @@ export class Runner {
             if (frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0) {
               return this.resolvePendingSpaceNamesAndRetry(frame);
             }
+            const normalized = normalizeSandboxResult(result, name);
             return this.handleJavaScriptHandlerResult(
               tx,
-              result,
-              name,
+              normalized.value,
+              normalized.hasReactive,
               frame,
               processCell,
               addCancel,
@@ -4547,11 +4542,12 @@ export class Runner {
             if (frame.pendingSpaceNames && frame.pendingSpaceNames.size > 0) {
               return this.resolvePendingSpaceNamesAndRetry(frame);
             }
+            const normalized = normalizeSandboxResult(result, name);
             return this.writeJavaScriptActionResult(
               tx,
               module.resultSchema,
-              result,
-              name,
+              normalized.value,
+              normalized.hasReactive,
               frame,
               resultCell,
               outputs,
