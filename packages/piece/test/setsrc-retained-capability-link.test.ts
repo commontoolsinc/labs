@@ -239,7 +239,8 @@ describe("setsrc over a retained injected sqlite capability link", () => {
       //    windowed by v2's LIMIT 3.
       await waitFor(
         "v2 to read 3 rows through the same injected source",
-        () => result.key("version").get() === "v2" &&
+        () =>
+          result.key("version").get() === "v2" &&
           (rowsOf()?.length ?? -1) === 3,
       );
       expect(rowsOf()).toEqual([
@@ -258,7 +259,8 @@ describe("setsrc over a retained injected sqlite capability link", () => {
       );
       await waitFor(
         "v3 to read 1 row through the same injected source",
-        () => result.key("version").get() === "v3" &&
+        () =>
+          result.key("version").get() === "v3" &&
           (rowsOf()?.length ?? -1) === 1,
       );
       expect(rowsOf()).toEqual([{ k: "a", v: "1" }]);
