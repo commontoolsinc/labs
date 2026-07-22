@@ -769,8 +769,9 @@ export async function resolveFabricRefToIdentity(
 Algorithm (spec § Resolution rule — implement hops exactly):
 
 1. Space: `ref.space` undefined → `compilingSpace`; a DID → use as-is; a name
-   → M2 throws `"space names require name→DID resolution (open question 2);
-   use a DID"` (names are NOT in M2 scope — spec open question).
+   → M2 throws `"space names require name→DID resolution; use a DID"` (names
+   are NOT in M2 scope — the space-name resolution question remains open in
+   the spec).
 2. Start cell:
    - slug → M2.1 resolver (wrap `SlugResolutionError` with the chain so far).
    - `of:` URI → reconstruct the entity id from the parsed hash via the
@@ -915,11 +916,15 @@ One integration test (runner-level, in-process, two "deploys"):
 
 ## M3 / M4 — sketches only (do NOT implement)
 
-- **M3 cross-host + publish**: `cf publish` (write source docs + meta + slug
-  to a target space), host-qualified refs (needs dynamic space→host routes —
-  spec open question 8; `spaceHostMap` is interim), CFC label propagation for
-  fetched source (spec § Security), possible public-pattern HTTP endpoint
-  (spec open question 7 — left open).
+- **M3 cross-host + publish**: `cf publish` verifies source-read authorization,
+  destination-write authorization, and the CFC flow. It copies the verified
+  source closure, creates a lightweight patternIdentity-bearing publication
+  cell, and optionally assigns a slug in the target space. It does not copy the
+  source piece or its state. The resulting replica uses the destination space's
+  ACL. Host-qualified refs need dynamic space→host routes (`spaceHostMap` is
+  interim) and CFC label propagation for fetched source (spec § Security). A
+  possible public-pattern HTTP endpoint remains open under the public
+  distribution question in the spec.
 - **M4 subpaths + npm vendoring**: subpath = alias to a non-entry mounted
   file (grammar already parses it); `npm:` = fetch via esm.sh → vendor as a
   content-addressed source set → same rails.

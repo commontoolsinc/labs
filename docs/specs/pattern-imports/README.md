@@ -52,10 +52,12 @@ general piece origin model is described in `../piece-source-lifecycle.md`.
   (`packages/runner/src/builtins/fetch-program.ts`) fetches and compiles remote
   programs at *runtime*, untyped at the call site. An import is compile-time:
   TypeScript checks the binding names and types against the real source.
-- **A publishing story that is just naming.** Pointing a slug at a cell that
-  carries a `patternIdentity` (a piece, or a lightweight published-pointer
-  cell) in a readable space *is* publication: a human-readable, updatable name
-  (a dist-tag) for a content-addressed artifact. No registry product required.
+- **A publishing story built from naming and placement.** Pointing a slug at a
+  cell that carries a `patternIdentity` (a piece, or a lightweight
+  published-pointer cell) gives a pattern a human-readable, updatable name (a
+  dist-tag) within that space. It does not change the space's ACL. Publishing
+  into another space creates a replica under that destination space's ACL.
+  No registry product required.
 - **Foundation for external packages.** The same resolution seam, pinning
   model, and collision rules are designed so that `npm:`/esm.sh support can be
   added later without revisiting this design (§ External packages).
@@ -510,10 +512,15 @@ depended on the transport).
 
 Consequences:
 
-- **Publication is purely a data/authz act**: make the slug cell, the
-  patternIdentity-bearing cell it points at, and the `pattern:<identity>` source
-  docs readable in a space (`cf publish` is sugar for writing them to such a
-  space and assigning the slug). Whoever can read the space can import; nobody
+- **Publication separates naming from placement.** Assigning a slug to a
+  pattern already present in a space only gives it another name; it does not
+  change that space's ACL. `cf publish --space` creates a lightweight
+  patternIdentity-bearing publication cell in the target space, copies the
+  verified source closure, then optionally assigns a slug. It does not copy the
+  source piece or any of that piece's state. The replica has the target space's
+  ACL and may therefore have a different audience. The operation requires
+  source-read authorization, destination-write authorization, and a permitted
+  CFC flow. Whoever can read the target space can import its replica; nobody
   else can.
 - **The host segment maps to a `spaceHostMap` entry.** One mechanical work
   item: the map is fixed at storage construction today
@@ -521,9 +528,10 @@ Consequences:
   the resolver needs either dynamic registration of a space→host route on the
   live session or a short-lived secondary session for the foreign space.
 - A cacheable, anonymous HTTP mirror for published patterns (CDN-style
-  distribution to readers with no fabric identity) remains *possible* later —
-  it would be trust-free thanks to hash verification — but it is an
-  optimization, not part of this design (§ Open questions).
+  distribution to readers with no fabric identity) remains *possible* later.
+  It would need an explicit anonymous visibility policy that covers the whole
+  pattern, including its source, and hash verification would still protect
+  integrity. It is not part of this design (§ Open questions).
 
 The existing `/api/patterns/:filename` (repo-file serving) is unrelated and
 unchanged.
@@ -535,9 +543,11 @@ unchanged.
   `pattern:<identity>` source documents.
 - Automatic pinning during piece deployment remains required work. The CLI
   intentionally has no `cf deploy` command.
-- `cf publish <pattern> [--slug name] [--space …]` *(not yet built)*: ensure the
-  source docs exist in the target space + assign the slug to a
-  patternIdentity-bearing cell.
+- `cf publish <pattern> [--slug name] [--space …]` *(not yet built)*: after
+  source-read authorization, destination-write authorization, and CFC
+  approval, copy the verified source closure and create a lightweight
+  patternIdentity-bearing publication cell in the target space, then
+  optionally assign the slug. Do not copy the source piece or its state.
 - `cf dev` / `cf check`: live-resolve unpinned refs against the connected
   toolshed; `--frozen` to forbid (CI). `--show-transformed` shows mounted
   files like any other program file.
@@ -573,10 +583,16 @@ unchanged.
   CFC verified-identity resolution uses
   (`docs/specs/content-addressed-action-identity.md`); imported modules verify
   and register exactly like authored ones. No new identity kind is introduced.
-- **No new authorization surface.** Resolution and content fetch are memory
-  reads under existing space authz — including cross-host (`spaceHostMap`
-  sessions authenticate like any other). Nothing exposes data a space-read
-  doesn't already grant.
+- **Source shares the containing space's ACL.** Within a space, every cell and
+  document that makes a pattern resolvable, including its verified source
+  closure, has that space's visibility. Anyone authorized to resolve the
+  pattern in that space may read its source; there is no separate
+  source-publication permission. Assigning a slug names the pattern but does
+  not grant access. Knowing a content identity or fabric URL is also not
+  authorization. The same content identity can be replicated into spaces with
+  different ACLs, and each replica follows its containing space's ACL.
+  Resolution and content fetch remain memory reads under existing space authz,
+  including cross-host reads through authenticated `spaceHostMap` sessions.
 - **Pattern source is data with provenance.** Patterns can contain private
   information (literals, prompts, embedded knowledge), so source docs are not
   exempt from CFC: fetching an imported pattern's source is a labeled read,
@@ -622,46 +638,58 @@ unchanged.
   error; fallback hop succeeds.
 - **Multi-runtime** (`multiUserTest` harness): user 1 deploys + publishes;
   user 2 imports across spaces; CFC verified identity intact.
+- **Authorization**: within one space, pattern and source visibility match; a
+  slug, URL, or content identity grants no access; a cross-space publish adopts
+  the target space's ACL only after authorization and CFC checks; revoking
+  origin access blocks future resolution without deleting source already
+  accepted into another space.
 - **Failure modes**: one test per row of the table.
+
+## Resolved questions
+
+1. **Publish granularity and source visibility.** Within a space, a pattern and
+   its verified source closure have the same ACL and visibility: that space's.
+   A caller that can resolve the pattern there may read its source. A caller
+   that cannot resolve it gains nothing from knowing its URL or content
+   identity. Assigning a slug to a pattern already present in the space is only
+   naming and discovery; it creates no separate source grant. Publishing into
+   another space is different: it creates an ACL-scoped replica under the
+   destination space's visibility and requires destination write authorization
+   plus a permitted CFC flow.
 
 ## Open questions
 
-1. **Publish granularity.** Is "publish" a distinct user action (`cf publish`
-   / slug assignment) or implicit for any pattern readable by the reference
-   resolver? Implicit is ergonomic but turns space-read into
-   source-disclosure; explicit publish is the conservative default proposed
-   here.
-2. **Space-name resolution.** Refs with space *names* (not DIDs) need a
+1. **Space-name resolution.** Refs with space *names* (not DIDs) need a
    name→DID mapping per host; the shell resolves names client-side today and
    there is no service surface here to hang it on. Name squatting/renaming
    semantics need a decision before phase 2 (DID-form refs sidestep it).
-3. **Slug-cell typing.** The uniform chase duck-types its hops (a
+2. **Slug-cell typing.** The uniform chase duck-types its hops (a
    `patternIdentity` meta present ⇒ a pattern-bearing cell). Good enough, or
    should slug assignment stamp an explicit kind on the slug cell for better
    errors and tooling?
-4. **Type-only imports.** Should `import type { … }` from a fabric ref skip
+3. **Type-only imports.** Should `import type { … }` from a fabric ref skip
    the pin requirement (types don't affect runtime identity)? Tempting, but
    the transformer lowers types into schemas — so types DO affect emitted
    behavior, and the conservative answer is no special-casing. Revisit with
    evidence.
-5. **Subpath surface.** Whether subpaths may address any file in the program
+4. **Subpath surface.** Whether subpaths may address any file in the program
    or only files the entry re-exports (an "exports map" discipline, like npm's
    `exports`). Start permissive, tighten if published-internal-file coupling
    becomes a problem.
-6. **Runtime-fingerprint interaction.** External-dep leaves include
+5. **Runtime-fingerprint interaction.** External-dep leaves include
    `runtimeFingerprint`; a runtime upgrade thus shifts importer identities even
    with identical pins (status quo for runtime modules, now also for fabric
    refs). Acceptable, but worth stating in the compile-cache invalidation
    docs.
-7. **What "publicly readable" means — and a possible public endpoint.**
-   Memory sessions are authenticated; importing requires *some* identity the
-   publishing space grants read to. Does publication mean "readable by any
-   authenticated identity" (a broad grant)? An anonymous, CDN-cacheable HTTP
-   endpoint serving **public** patterns by identity may still be useful on
-   top (trust-free via hash verification) — deliberately left open rather
-   than rejected; it only makes sense for content whose labels permit
-   unrestricted disclosure (see the provenance note in § Security).
-8. **Dynamic space→host routes.** `spaceHostMap` is fixed at storage
+6. **Public distribution surface.** Should the product standardize a dedicated
+   distribution space whose space-wide ACL grants `READ` to `*`, making every
+   pattern in that space readable by any authenticated identity? Should it also
+   offer an anonymous, CDN-cacheable HTTP endpoint? An anonymous endpoint would
+   need an explicit visibility policy applied equally to a pattern and its
+   source. It could serve only patterns copied under that policy after CFC
+   allows unrestricted disclosure. A URL or content identity alone must never
+   qualify a pattern for either form of distribution.
+7. **Dynamic space→host routes.** `spaceHostMap` is fixed at storage
    construction; host-qualified refs discovered mid-compile need dynamic
    route registration (or a short-lived secondary session). Small, but it
    touches session lifecycle — design alongside phase 3.
