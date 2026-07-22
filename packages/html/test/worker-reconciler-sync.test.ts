@@ -5,7 +5,6 @@ import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
 import type { VDomOp } from "../src/vdom-ops.ts";
-import { opsFlushed } from "./reconciler-support.ts";
 
 type SyncCall = {
   id: string;
@@ -18,6 +17,7 @@ type RenderResult = {
 };
 
 async function renderAndCollect(
+  settle: () => Promise<void>,
   vnode: VNode,
   update?: (rootCell: Cell<VNode>, runtime: Runtime) => Promise<void>,
 ): Promise<RenderResult> {
@@ -60,11 +60,11 @@ async function renderAndCollect(
     rootCell.asSchema(rendererVDOMSchema) as Cell<never>,
   );
   try {
-    await opsFlushed(runtime);
+    await settle();
     if (update !== undefined) {
       updateOps.length = 0;
       await update(rootCell, runtime);
-      await opsFlushed(runtime);
+      await settle();
     }
     return { syncCalls, updateOps };
   } finally {
@@ -73,57 +73,68 @@ async function renderAndCollect(
   }
 }
 
-Deno.test("worker reconciler preserves sync state across VDOM asCell cuts", async () => {
-  const { syncCalls } = await renderAndCollect({
-    type: "vnode",
-    name: "main",
-    props: {},
-    children: [{
+Deno.test(
+  "worker reconciler preserves sync state across VDOM asCell cuts",
+  async (t) => {
+    const { syncCalls } = await renderAndCollect(t.settle, {
       type: "vnode",
-      name: "section",
+      name: "main",
       props: {},
       children: [{
         type: "vnode",
-        name: "span",
+        name: "section",
         props: {},
-        children: ["leaf"],
+        children: [{
+          type: "vnode",
+          name: "span",
+          props: {},
+          children: ["leaf"],
+        }],
       }],
-    }],
-  });
+    });
 
-  assertEquals(
-    syncCalls.length,
-    1,
-    `Expected only the mounted root to sync, got ${JSON.stringify(syncCalls)}`,
-  );
-  assertEquals(syncCalls[0]?.path, []);
-});
+    assertEquals(
+      syncCalls.length,
+      1,
+      `Expected only the mounted root to sync, got ${
+        JSON.stringify(syncCalls)
+      }`,
+    );
+    assertEquals(syncCalls[0]?.path, []);
+  },
+);
 
-Deno.test("worker reconciler reuses VDOM schema coverage for style objects", async () => {
-  const { syncCalls, updateOps } = await renderAndCollect(
-    {
-      type: "vnode",
-      name: "div",
-      props: { style: { color: "red" } },
-      children: [],
-    },
-    async (rootCell, runtime) => {
-      const tx = runtime.edit();
-      rootCell.withTx(tx).key("props", "style", "color").set("blue");
-      await tx.commit();
-    },
-  );
+Deno.test(
+  "worker reconciler reuses VDOM schema coverage for style objects",
+  async (t) => {
+    const { syncCalls, updateOps } = await renderAndCollect(
+      t.settle,
+      {
+        type: "vnode",
+        name: "div",
+        props: { style: { color: "red" } },
+        children: [],
+      },
+      async (rootCell, runtime) => {
+        const tx = runtime.edit();
+        rootCell.withTx(tx).key("props", "style", "color").set("blue");
+        await tx.commit();
+      },
+    );
 
-  assertEquals(
-    syncCalls.length,
-    1,
-    `Expected style to reuse the root query, got ${JSON.stringify(syncCalls)}`,
-  );
-  assertEquals(syncCalls[0]?.path, []);
-  assertEquals(
-    updateOps.flatMap((op) =>
-      op.op === "set-prop" && op.key === "style" ? [op.value] : []
-    ),
-    ["color: blue"],
-  );
-});
+    assertEquals(
+      syncCalls.length,
+      1,
+      `Expected style to reuse the root query, got ${
+        JSON.stringify(syncCalls)
+      }`,
+    );
+    assertEquals(syncCalls[0]?.path, []);
+    assertEquals(
+      updateOps.flatMap((op) =>
+        op.op === "set-prop" && op.key === "style" ? [op.value] : []
+      ),
+      ["color: blue"],
+    );
+  },
+);
