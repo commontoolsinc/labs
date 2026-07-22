@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { join } from "@std/path";
 import { exec } from "../commands/exec.ts";
 import { test as testCommand } from "../commands/test-command.ts";
-import { withEnv } from "./utils.ts";
+import { cf, checkStderr, stripAnsi, withEnv } from "./utils.ts";
 
 class ExitError extends Error {
   constructor(readonly code: number) {
@@ -49,6 +49,120 @@ async function withCapturedErrors(
 }
 
 describe("main command", () => {
+  it("keeps command usage aligned with accepted positional syntax", async () => {
+    const { main } = await import(
+      "../commands/main.ts?main-command-usage-test"
+    );
+    const commands = [main];
+    const mismatchedUsage: string[] = [];
+    const customUsageCommands = new Set(["cf piece call"]);
+
+    for (const command of commands) {
+      commands.push(...command.getCommands());
+      if (customUsageCommands.has(command.getPath())) continue;
+
+      const typedArguments = command.getArgsDefinition();
+      if (!typedArguments) continue;
+
+      const untypedArguments = typedArguments.replaceAll(/:[^>\]]+/g, "");
+      const usage = command.getUsage();
+      const expectedArguments = [typedArguments, untypedArguments];
+      const matches = expectedArguments.some((expected) =>
+        usage.endsWith(expected)
+      );
+      if (!matches) {
+        mismatchedUsage.push(
+          `${command.getPath()}: expected usage to end with ${
+            expectedArguments.join(" or ")
+          }, got ${usage}`,
+        );
+      }
+    }
+
+    expect(mismatchedUsage).toEqual([]);
+  });
+
+  it("describes and parses piece call's accepted input forms", async () => {
+    const { piece } = await import(
+      "../commands/piece.ts?piece-call-usage-test"
+    );
+    const call = piece.getCommand("call")!;
+    const expectedUsage =
+      "--identity <identity> --url <url> --api-url <api-url> --space <space> --piece <piece> <callable> [input]";
+
+    expect(call.getArgsDefinition()).toBe(
+      "<callable:string> [tail...:string]",
+    );
+    expect(call.getUsage()).toBe(expectedUsage);
+    const { code, stdout, stderr } = await cf("piece call --help");
+    checkStderr(stderr);
+    const help = stripAnsi(stdout.join("\n"));
+    const renderedUsage = help.split("\n").find((line) =>
+      line.trimStart().startsWith("Usage:")
+    );
+    expect(renderedUsage?.replaceAll(/\s+/g, " ").trim()).toBe(
+      `Usage: cf piece call ${expectedUsage}`,
+    );
+    const normalizedHelp = help.replaceAll(/\s+/g, " ");
+    expect(normalizedHelp).toContain(
+      `INPUT: Pass one inline JSON value, or put "--" before flags generated from the callable's input schema. Handlers interpret piped input using their input schema. Tools read piped JSON when called with "-- --json".`,
+    );
+    expect(code).toBe(0);
+
+    const parsedCalls: Array<{
+      positionals: unknown[];
+      literalArguments: string[];
+    }> = [];
+    call.action(function (_options, ...positionals) {
+      parsedCalls.push({
+        positionals,
+        literalArguments: this.getLiteralArgs(),
+      });
+    });
+    await piece.parse(["call", "search", '{"query":"tea"}']);
+    await piece.parse(["call", "search", "--help"]);
+    await piece.parse(["call", "search", "--", "--json"]);
+    expect(parsedCalls).toEqual([
+      {
+        positionals: ["search", '{"query":"tea"}'],
+        literalArguments: [],
+      },
+      { positionals: ["search", "--help"], literalArguments: [] },
+      { positionals: ["search"], literalArguments: ["--json"] },
+    ]);
+  });
+
+  it("rejects multiple inline inputs to piece call", async () => {
+    const { main } = await import(
+      "../commands/main.ts?piece-call-inline-validation-test"
+    );
+    const errors = await withCapturedErrors(async () => {
+      const code = await withMockExit(async () => {
+        await main.parse([
+          "piece",
+          "--identity",
+          "./identity.key",
+          "--api-url",
+          "https://cf.dev",
+          "--space",
+          "common-knowledge",
+          "call",
+          "--piece",
+          "abcdefghijklmnopqrstuvwxyz",
+          "search",
+          '{"query":"tea"}',
+          '{"limit":5}',
+        ]);
+      });
+
+      expect(code).toBe(1);
+    });
+
+    expect(errors).toEqual([
+      'Use a single inline JSON argument or "--" before schema-derived flags.',
+    ]);
+  });
+
   it("registers view and reports configured environment defaults", async () => {
     await withEnv("CF_IDENTITY", "./identity.key", async () => {
       await withEnv("CF_API_URL", "http://127.0.0.1:8000", async () => {
