@@ -1,6 +1,7 @@
 import ts from "typescript";
 import { StaticCacheFS } from "@commonfabric/static";
 import { isRecord } from "@commonfabric/utils/types";
+import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import type { JSONSchemaObj } from "@commonfabric/api";
 
 // Cache for TypeScript library definitions
@@ -474,7 +475,16 @@ function deepCanonicalize(node: unknown): unknown {
   if (Array.isArray(node)) {
     return node.map(deepCanonicalize);
   }
-  if (!isRecord(node)) return node;
+  // A `FabricPrimitive` (`FabricBytes` and the like) keeps its state in private
+  // fields with no enumerable own properties, so walking it with
+  // `Object.entries` would silently flatten it to `{}`. It is a leaf here.
+  //
+  // TODO(danfuzz): The other `FabricSpecialObject` subclass, `FabricInstance`,
+  // is NOT a leaf -- it holds nested `FabricValue`s that this walk ought to
+  // descend into. There is no faithful way to do that through `Object.entries`
+  // either, so a `FabricInstance` still flattens to `{}` here. Handling it is
+  // left for when the golden path needs to carry one.
+  if (!isRecord(node) || node instanceof FabricPrimitive) return node;
 
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(node)) {
