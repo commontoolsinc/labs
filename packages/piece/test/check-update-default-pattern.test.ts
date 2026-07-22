@@ -233,6 +233,38 @@ describe("checkAndUpdateDefaultPattern", () => {
     );
   });
 
+  it("returns current when the space has no default pattern", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    expect(stub.identityFetches()).toBe(0);
+  });
+
+  it("does not duplicate the update check for a newly created root", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+
+    await controller.ensureDefaultPattern();
+    await runtime.patternUpdater.idle();
+
+    expect(stub.identityFetches()).toBe(0);
+  });
+
+  it("contains failures while resolving the default pattern", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const originalGetDefaultPattern = manager.getDefaultPattern;
+    manager.getDefaultPattern = (() =>
+      Promise.reject(
+        new Error("default-pattern lookup failed"),
+      )) as typeof manager.getDefaultPattern;
+
+    try {
+      expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+      expect(stub.identityFetches()).toBe(0);
+    } finally {
+      manager.getDefaultPattern = originalGetDefaultPattern;
+    }
+  });
+
   it("returns current when the identity is unchanged (no write)", async () => {
     await setup({ systemPatternAutoUpdate: true });
     const piece = await controller.ensureDefaultPattern();
@@ -296,7 +328,10 @@ describe("checkAndUpdateDefaultPattern", () => {
     const { error } = await runtime.editWithRetry((tx) => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: staleIdentity,
-        symbol: "default",
+        // The obsolete runtime selected an export the current system source no
+        // longer has. Dead-root recovery must select the official entry's
+        // default export, rather than trying to preserve this broken symbol.
+        symbol: "removed-export",
       });
     });
     expect(error).toBeUndefined();
@@ -314,6 +349,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(getPatternIdentityRef(updated.getCell())?.identity).toBe(
       await identityForSource(SOURCE_V2),
     );
+    expect(getPatternIdentityRef(updated.getCell())?.symbol).toBe("default");
   });
 
   it("repairs persisted artifacts when the served identity is unchanged", async () => {

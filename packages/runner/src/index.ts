@@ -111,6 +111,10 @@ export {
 } from "./link-utils.ts";
 export * from "./pattern-manager.ts";
 export {
+  type PatternUpdateOutcome,
+  PatternUpdater,
+} from "./pattern-updater.ts";
+export {
   asPatternIdentityRef,
   extractDefaultValues,
   getPatternIdentityRef,
