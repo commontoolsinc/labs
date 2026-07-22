@@ -2,6 +2,7 @@ import {
   Cell,
   type CellPath,
   ContextualFlowControl,
+  deepEqual,
   extractDefaultValues,
   formatFabricRef,
   getMetaLink,
@@ -1431,6 +1432,38 @@ function withoutMissingFlag(
   return contract;
 }
 
+/**
+ * Whether a supplied SERIALIZED link is identical to the value already
+ * durably committed at its path under `baseCell`.
+ *
+ * This is what lets a restore flow (`linksPreservedVerbatim`) treat a
+ * serialized link as a preserved direct handle without taking the caller's
+ * word for any individual link: writing back bytes that are already committed
+ * grants nothing that was not already granted. Anything else arriving under
+ * the flag — a fresh link minted from the incoming pattern's schema
+ * `default`s, a caller-mutated envelope — fails the comparison and falls
+ * through to the rebuild rules, exactly as if the flag were unset.
+ *
+ * The comparison must run against COMMITTED state, not the transaction's
+ * staged view: the caller that sets the flag validates after
+ * `applySetupState` has already staged the argument write, so a staged-side
+ * read would compare the supplied links against themselves and always pass.
+ * `withTx()` with no transaction detaches the read.
+ */
+function linkMatchesCommittedState(
+  suppliedLink: SuppliedLink,
+  baseCell: Cell<unknown>,
+  basePath: readonly (string | number)[],
+): boolean {
+  if (suppliedLink.value === undefined) return false;
+  const committedRoot = baseCell.withTx().getRaw();
+  const committed = getValueAtPath(committedRoot, [
+    ...basePath,
+    ...suppliedLink.path,
+  ]);
+  return deepEqual(committed, suppliedLink.value);
+}
+
 /** @internal Exported for focused durable-link contract tests. */
 export function assertSuppliedLinkSchemasCompatible(
   links: readonly SuppliedLink[],
@@ -1463,8 +1496,16 @@ export function assertSuppliedLinkSchemasCompatible(
      * to say. `setPattern` is the case that has one: `applySetupState` carries
      * the argument over from `previousArgumentCell.getRaw()`, so every
      * retained link survives byte for byte by construction and there is no
-     * rebuild for the ordinary-alias rules below to police. Left unset (every
-     * other flow), those rules apply exactly as before.
+     * rebuild for the ordinary-alias rules below to police.
+     *
+     * The declaration is scoped, not trusted: a serialized link only counts
+     * as preserved when it is identical to the value already durably
+     * committed at its path ({@link linkMatchesCommittedState}) — restoring
+     * committed bytes grants nothing new. Any link that fails that comparison
+     * (one minted from the incoming pattern's schema `default`s, a mutated
+     * envelope, a lying caller) is validated by the rebuild rules below
+     * exactly as if this option were unset. Left unset (every other flow),
+     * those rules apply to every serialized link, as before.
      */
     linksPreservedVerbatim?: boolean;
   } = {},
@@ -1563,8 +1604,9 @@ export function assertSuppliedLinkSchemasCompatible(
       }
     }
     // Does the original envelope survive? Two independent ways to know it
-    // does: the caller declared it for every link it supplied, or this value
-    // is a live Cell the caller demonstrably holds.
+    // does: this value is a live Cell the caller demonstrably holds, or the
+    // caller declared a preserving write plan AND this link is identical to
+    // what is already committed at its path.
     //
     // These answer different questions and must not be conflated. `isCell` is
     // PROVENANCE — a live Cell is a capability the caller possesses, whereas a
@@ -1579,8 +1621,18 @@ export function assertSuppliedLinkSchemasCompatible(
     // holds serialized links, which are never `isCell()`, so the restore was
     // always judged to be exposing the capability as an ordinary alias — a
     // laundering that the caller was not in fact performing.
+    //
+    // The declared plan is verified per link, not trusted: only bytes already
+    // durably committed at this path count as "preserved" (see
+    // `linkMatchesCommittedState`). In the one flow that sets the flag, the
+    // staged argument is the previous argument merged with the INCOMING
+    // pattern's schema defaults — a link-shaped default would be brand-new,
+    // pattern-authored bytes riding the same restore, and it falls through to
+    // the rebuild rules here.
     const preservesDirectHandle = targetOuter !== undefined &&
-      (options.linksPreservedVerbatim === true || isCell(suppliedLink.value));
+      (isCell(suppliedLink.value) ||
+        (options.linksPreservedVerbatim === true &&
+          linkMatchesCommittedState(suppliedLink, baseCell, basePath)));
     if (preservesDirectHandle) preservedDirectHandles.add(suppliedLink);
 
     let sourceContracts: PathSchemaContract[];
@@ -1681,11 +1733,15 @@ export function assertSuppliedLinkSchemasCompatible(
       // is caller-written bytes. The rebuild branch checks it below ("link
       // carries a non-durable Cell wrapper"); this branch could previously
       // skip it because `isCell` was the only way in, and a live Cell has no
-      // separate envelope to forge. A caller declaring it preserves serialized
-      // links verbatim reopens that gap, so re-assert it here: a carried
-      // wrapper has to match the source's own durable contract, never widen
-      // it. (Loom's injected links carry none — `PieceManager.link` serializes
-      // with `KeepAsCell.OnlyStream` — so the real restore case is unaffected.)
+      // separate envelope to forge. A serialized link only reaches here when
+      // it is identical to already-committed state, but committed does not
+      // mean vetted — raw write paths (`PieceManager.link`) commit links
+      // without ever running this validator — so re-assert it: a carried
+      // wrapper's `asCell` STACK (kind and scope, per `asCellShapesMatch`;
+      // payload schemas are proved separately against the durable contracts)
+      // has to match every durable contract of the source. (Loom's injected
+      // links carry no envelope — `PieceManager.link` serializes with
+      // `KeepAsCell.OnlyStream` — so the real restore case is unaffected.)
       if (!isCell(suppliedLink.value)) {
         const carried = ContextualFlowControl.getAsCellValues(link.schema);
         if (carried.length > 0) {
@@ -1695,9 +1751,15 @@ export function assertSuppliedLinkSchemasCompatible(
               [{ schema: link.schema, root: link.schema }],
               [],
             )[0]?.schema;
-          const matchesDurableContract = sourceContracts.some((contract) =>
-            asCellShapesMatch(carriedSchema, contract.schema)
-          );
+          // `.every`, not `.some`: the durable contracts are a conjunction,
+          // so a wrapper the source did not declare in ALL of them was never
+          // uniformly granted. Contracts that disagree about the wrapper
+          // stack reject every carried envelope — that state is already
+          // refused at the outer level below.
+          const matchesDurableContract = sourceContracts.length > 0 &&
+            sourceContracts.every((contract) =>
+              asCellShapesMatch(carriedSchema, contract.schema)
+            );
           if (!matchesDurableContract) {
             throw new Error(
               `input link at ${displayPath} schema is not compatible: link carries a non-durable Cell wrapper`,
@@ -2797,7 +2859,12 @@ export class PieceController<T = unknown> {
                 priorArgumentSchema: previousPattern.argumentSchema,
                 // `applySetupState` rewrites the argument from `getRaw()`, so
                 // every retained link's envelope is written back unchanged and
-                // nothing here is rebuilt as an alias.
+                // nothing here is rebuilt as an alias. The validator verifies
+                // that per link against committed state rather than taking
+                // this declaration on trust — anything the setup staged that
+                // is NOT already committed (e.g. a link-shaped schema
+                // default from the incoming pattern) still faces the full
+                // rebuild rules.
                 linksPreservedVerbatim: true,
               },
             ),

@@ -1161,12 +1161,42 @@ describe("piece pull materialization", () => {
         { priorArgumentSchema: argumentSchema },
       )
     ).toThrow(/sqlite capability cannot be exposed as an ordinary alias/);
+
+    // And the declaration is scoped by committed state, not taken on trust:
+    // the same serialized link supplied at a path where it is NOT already
+    // committed is a fresh link riding the restore — the staged argument on
+    // a source update is the previous argument merged with the INCOMING
+    // pattern's schema defaults, so link-shaped defaults arrive exactly this
+    // way — and it faces the rebuild rules despite the flag: the identical
+    // bytes that restore fine at `db` are refused at `db2`.
+    const twoSlotSchema: JSONSchema = {
+      type: "object",
+      properties: { db: sqliteDb, db2: sqliteDb },
+      required: ["db"],
+    };
+    expect(() =>
+      assertSuppliedLinkSchemasCompatible(
+        [{ path: ["db2"], value: raw.db }],
+        twoSlotSchema,
+        base,
+        manager,
+        {
+          priorArgumentSchema: twoSlotSchema,
+          linksPreservedVerbatim: true,
+        },
+      )
+    ).toThrow(/sqlite capability cannot be exposed as an ordinary alias/);
   });
 
   it("refuses a preserved link whose carried wrapper widens its contract", async () => {
     // The envelope on a SERIALIZED link is caller-written bytes. Declaring
     // that links are preserved verbatim must not become a way to smuggle a
-    // forged `asCell` past the check the rebuild branch performs.
+    // forged `asCell` past the check the rebuild branch performs. Two layers
+    // refuse it: a forged envelope that was never committed loses preserve
+    // status outright (it is not the committed bytes at its path) and faces
+    // the rebuild rules; and even a COMMITTED forged envelope — raw write
+    // paths like `PieceManager.link` commit links without ever running this
+    // validator — is caught by the preserve branch's own wrapper check.
     const readonlyNum: JSONSchema = { type: "number", asCell: ["readonly"] };
     const argumentSchema: JSONSchema = {
       type: "object",
@@ -1208,7 +1238,7 @@ describe("piece pull materialization", () => {
     expect(envelope).toBeDefined();
     envelope.schema = { type: "number", asCell: ["cell"] };
 
-    expect(() =>
+    const supplyForged = () =>
       assertSuppliedLinkSchemasCompatible(
         [{ path: ["v"], value: forged }],
         argumentSchema,
@@ -1218,8 +1248,20 @@ describe("piece pull materialization", () => {
           priorArgumentSchema: argumentSchema,
           linksPreservedVerbatim: true,
         },
-      )
-    ).toThrow(/non-durable Cell wrapper/);
+      );
+
+    // Layer 1: never committed — the forgery is not the committed bytes at
+    // its path, so the flag does not apply and the rebuild rules refuse the
+    // capability slot outright.
+    expect(supplyForged).toThrow(/cannot be exposed as an ordinary alias/);
+
+    // Layer 2: commit the forgery raw (as an unvalidated write path would),
+    // making it identical to committed state — the preserve branch's own
+    // wrapper check still refuses the non-durable envelope.
+    await runtime.editWithRetry((tx) => {
+      base.withTx(tx).key("v").setRawUntyped(forged);
+    });
+    expect(supplyForged).toThrow(/non-durable Cell wrapper/);
   });
 
   it("restores a retained ordinary Cell link across a source update", async () => {
