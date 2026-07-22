@@ -189,9 +189,10 @@ export function convergence(
     const view = entityMeta(space, opts.id, scope, branch);
     view.label = label;
     if (view.present) {
-      // Decode can throw (e.g. an fvj1 payload referencing a live cell). Keep the
-      // entity counted as present but isolate the failure so one bad row doesn't
-      // abort a whole scan; errored spaces cluster together by a distinct key.
+      // Decode can throw (e.g. an encoded payload referencing a live cell).
+      // Keep the entity counted as present but isolate the failure, so that one
+      // bad row doesn't abort a whole scan; errored spaces cluster together by
+      // a distinct key.
       try {
         const res = getValueAt(space, { id: opts.id, scope, branch }, path);
         if (!res.exists) {

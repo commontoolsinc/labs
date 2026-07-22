@@ -371,6 +371,9 @@ export type MetaField =
   | "patternSource" // provenance: the source a piece tracks for updates (a
   // toolshed pattern path, or later a `cf:` fabric ref)
   | "patternRepository" // optional caller-supplied repository locator
+  | "displacedPattern" // {identity, symbol, displacedAt}: the prior pattern
+  // reference recorded when system-pattern auto-update replaces an unloadable
+  // sourceless root — the recovery pointer for a displaced custom program
   | "internal"
   | "schema"
   | "slug";

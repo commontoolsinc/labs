@@ -164,6 +164,7 @@ type InternalCellDescriptor = {
 
 type StartAttempt = {
   readonly lifecycleEpoch: number;
+  readonly schedulePatternUpdate: boolean;
   readonly generationsByDoc: Map<string, number>;
   readonly preResolutionStopKeys: Set<string>;
 };
@@ -674,6 +675,10 @@ function defersInitialRunUntilSynced(
 // Options shared by run()/startWithTx()/startAfterSuccessfulCommit().
 type RunnerRunOptions = {
   doNotUpdateOnPatternChange?: boolean;
+  // Default roots reconcile against their system source before start (or are
+  // compiled from that source during creation), so their caller suppresses
+  // the otherwise-automatic lazy check while retaining identity hot-swaps.
+  schedulePatternUpdate?: boolean;
   // Resumed-from-synced-state: hold each action's initial rehydration/run until
   // the space has finished syncing, so consumers don't race the data.
   awaitSyncBeforeInitialRun?: boolean;
@@ -1448,10 +1453,14 @@ export class Runner {
    * Returns a Promise that resolves to true on success, or rejects with an error.
    * Runs synchronously when data is available (important for tests).
    */
-  start<T = any>(resultCell: Cell<T>): Promise<boolean> {
+  start<T = any>(
+    resultCell: Cell<T>,
+    options: { schedulePatternUpdate?: boolean } = {},
+  ): Promise<boolean> {
     const startKey = this.getDocKey(resultCell);
     const attempt: StartAttempt = {
       lifecycleEpoch: this.lifecycleEpoch,
+      schedulePatternUpdate: options.schedulePatternUpdate ?? true,
       generationsByDoc: new Map(),
       preResolutionStopKeys: new Set(),
     };
@@ -1510,13 +1519,19 @@ export class Runner {
       tx?: IExtendedStorageTransaction;
       givenPattern?: Pattern;
       doNotUpdateOnPatternChange?: boolean;
+      schedulePatternUpdate?: boolean;
       schedulerRehydration?: SchedulerRehydrationSubscriptionOptions;
       // Resumed-from-synced-state: hold each action's initial rehydration/run
       // until the space has finished syncing, so consumers don't race the data.
       awaitSyncBeforeInitialRun?: boolean;
     } = {},
   ): Cancel {
-    const { tx, givenPattern, doNotUpdateOnPatternChange } = options;
+    const {
+      tx,
+      givenPattern,
+      doNotUpdateOnPatternChange,
+      schedulePatternUpdate = true,
+    } = options;
     const key = this.getDocKey(resultCell);
     this.locallyStoppedResults.delete(key);
 
@@ -1587,6 +1602,20 @@ export class Runner {
             pattern,
             schedulerRehydration,
           );
+        }
+        if (!doNotUpdateOnPatternChange && schedulePatternUpdate) {
+          // Source reconciliation is lazy for ordinary pieces: the current
+          // pattern is fully instantiated first, and only a successful commit
+          // launches the fire-and-forget check. An aborted setup must neither
+          // fetch nor mutate a piece that never came into existence.
+          actualTx.addCommitCallback((_tx, result) => {
+            if (
+              !result.error && active &&
+              startLifecycleEpoch === this.lifecycleEpoch
+            ) {
+              this.runtime.patternUpdater.schedule(resultCell);
+            }
+          });
         }
       } finally {
         if (shouldCommit) {
@@ -1867,6 +1896,7 @@ export class Runner {
       try {
         this.startCore(rootCell, {
           givenPattern: resolvedPattern,
+          schedulePatternUpdate: attempt.schedulePatternUpdate,
         });
       } catch (err) {
         return Promise.reject(err);
@@ -1914,6 +1944,7 @@ export class Runner {
       try {
         this.startCore(rootCell, {
           givenPattern: resolvedPattern,
+          schedulePatternUpdate: attempt.schedulePatternUpdate,
           schedulerRehydration: this.schedulerRehydrationOptions(
             rootCell,
             snapshotsByActionId,
@@ -1948,6 +1979,7 @@ export class Runner {
       tx,
       givenPattern,
       doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
+      schedulePatternUpdate: options.schedulePatternUpdate,
       awaitSyncBeforeInitialRun: options.awaitSyncBeforeInitialRun,
     });
   }

@@ -1,13 +1,13 @@
 import { env, waitFor, waitForCondition } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
+import { writeTempIdentity } from "@commonfabric/integration/temp-identity";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { describe, it } from "@std/testing/bdd";
-import { dirname, join, resolve } from "@std/path";
+import { join, resolve } from "@std/path";
 import "../src/globals.ts";
-import { Identity } from "@commonfabric/identity";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import { clickPierce } from "./shadow-dom.ts";
 import { expect } from "@std/expect";
-import { defer, type Deferred } from "@commonfabric/utils/defer";
 
 const { API_URL, SPACE_NAME, FRONTEND_URL } = env;
 const REPO_ROOT = resolve(import.meta.dirname!, "../../..");
@@ -53,13 +53,6 @@ async function runCfPieceNewWithSlug(options: {
     throw new Error(`cf piece new did not print a fid1 id:\n${stdout}`);
   }
   return pieceId;
-}
-
-async function writeIdentityKey(identity: Identity): Promise<string> {
-  const dir = await Deno.makeTempDir({ prefix: "shell-slug-piece-" });
-  const path = join(dir, "identity.key");
-  await Deno.writeFile(path, identity.toPkcs8());
-  return path;
 }
 
 async function waitForSlugPieceMarker(
@@ -115,27 +108,13 @@ describe("shell piece tests", () => {
 
   it("can view and interact with a piece", async () => {
     const page = shell.page();
-    const identity = await Identity.generate({ implementation: "noble" });
-    const cc = await PiecesController.initialize({
-      spaceName: SPACE_NAME,
-      apiUrl: new URL(API_URL),
-      identity: identity,
+    const { identity, path: identityPath } = await writeTempIdentity({
+      implementation: "noble",
     });
+    // Initialized as the first step inside the try below, so a failure there
+    // still runs the finally that removes the keyfile.
+    let cc: PiecesController | undefined;
     let piece: PieceController | undefined;
-    let pieceSinkCancel: (() => void) | undefined;
-    let identityPath: string | undefined;
-    // The piece's committed result value, tracked by the result-cell sink set
-    // up below, and a one-shot waiter the sink resolves when the value reaches
-    // a target. A fresh deferred per call keeps the sequential checks (0, then
-    // -1, then -2) independent.
-    let latestResultValue: number | undefined;
-    let resultWaiter: { target: number; deferred: Deferred } | undefined;
-    const awaitResultValue = (target: number): Promise<void> => {
-      if (latestResultValue === target) return Promise.resolve();
-      const deferred = defer();
-      resultWaiter = { target, deferred };
-      return deferred.promise;
-    };
     const logDebugSnapshot = async (label: string) => {
       console.log(label, {
         shellState: await shell.state(),
@@ -208,6 +187,12 @@ describe("shell piece tests", () => {
     };
 
     try {
+      const controller = await PiecesController.initialize({
+        spaceName: SPACE_NAME,
+        apiUrl: new URL(API_URL),
+        identity: identity,
+      });
+      cc = controller;
       const sourcePath = join(
         import.meta.dirname!,
         "..",
@@ -216,30 +201,32 @@ describe("shell piece tests", () => {
         "counter",
         "counter.tsx",
       );
-      identityPath = await writeIdentityKey(identity);
       const slug = `compile-cache-${crypto.randomUUID()}`;
       const pieceId = await runCfPieceNewWithSlug({
         sourcePath,
         identityPath,
         slug,
       });
-      const currentPiece = await cc.get(pieceId, false);
+      const currentPiece = await controller.get(pieceId, false);
       piece = currentPiece;
 
-      const resultCell = cc.manager().getResult(currentPiece.getCell());
-      pieceSinkCancel = resultCell.sink((value) => {
-        latestResultValue = (value as { value?: number } | undefined)?.value;
-        if (resultWaiter && latestResultValue === resultWaiter.target) {
-          resultWaiter.deferred.resolve();
-          resultWaiter = undefined;
-        }
-      });
+      // Read the piece's committed result value at quiescence. Each call sinks
+      // on the result cell, drains the scheduler, and resolves once the value
+      // reaches its target, so the sequential checks (0, then -1, then -2) each
+      // wait on a real committed change rather than a timer.
+      const resultCell = controller.manager().getResult(currentPiece.getCell());
+      const awaitResultValue = (target: number): Promise<unknown> =>
+        waitForCellValue<{ value?: number }>(
+          controller.manager().runtime,
+          resultCell,
+          (value) => value?.value === target,
+        );
 
       await awaitResultValue(0);
       // A fresh reload of the piece has no sink; poll until its own sync round
       // trip reads the committed value back.
       await waitFor(async () => {
-        const reloadedPiece = await cc.get(pieceId, true);
+        const reloadedPiece = await controller.get(pieceId, true);
         return (await reloadedPiece.result.get(["value"])) === 0;
       });
       await shell.goto({
@@ -363,23 +350,18 @@ describe("shell piece tests", () => {
       }
       throw error;
     } finally {
-      pieceSinkCancel?.();
       await shell.disposeRuntime();
-      await cc.dispose();
+      await cc?.dispose();
       await new Promise((resolve) => setTimeout(resolve, 100));
-      if (identityPath) {
-        await Deno.remove(dirname(identityPath), { recursive: true }).catch(
-          () => {},
-        );
-      }
+      await Deno.remove(identityPath).catch(() => {});
     }
   });
 
   it("loads a slug piece and reloads when cf piece new repoints the slug", async () => {
     const slug = `slug-repoint-${crypto.randomUUID()}`;
-    const identity = await Identity.generate({ implementation: "noble" });
-    const identityPath = await writeIdentityKey(identity);
-    const identityDir = dirname(identityPath);
+    const { identity, path: identityPath } = await writeTempIdentity({
+      implementation: "noble",
+    });
     const firstSource = join(
       import.meta.dirname!,
       "fixtures",
@@ -426,15 +408,15 @@ describe("shell piece tests", () => {
       const href = await shell.page().evaluate(() => globalThis.location.href);
       expect(href).toContain(`/${SPACE_NAME}/${slug}`);
     } finally {
-      await Deno.remove(identityDir, { recursive: true });
+      await Deno.remove(identityPath).catch(() => {});
     }
   });
 
   it("tears the runtime down cleanly on logout while a piece is rendered", async () => {
     const slug = `logout-teardown-${crypto.randomUUID()}`;
-    const identity = await Identity.generate({ implementation: "noble" });
-    const identityPath = await writeIdentityKey(identity);
-    const identityDir = dirname(identityPath);
+    const { identity, path: identityPath } = await writeTempIdentity({
+      implementation: "noble",
+    });
     const source = join(
       import.meta.dirname!,
       "fixtures",
@@ -473,7 +455,7 @@ describe("shell piece tests", () => {
         new Promise((resolve) => setTimeout(resolve, 250))
       );
     } finally {
-      await Deno.remove(identityDir, { recursive: true }).catch(() => {});
+      await Deno.remove(identityPath).catch(() => {});
     }
   });
 });

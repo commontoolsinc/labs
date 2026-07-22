@@ -122,8 +122,19 @@ export async function tick(tiles: Tile[] = TILES) {
     let remaining = due.length;
     await Promise.all(due.map(async (t) => {
       let view: TileView;
+      let acceptingIntermediate = true;
       try {
-        view = await t.collect(ctx);
+        try {
+          view = await t.collect(ctx, (intermediate) => {
+            if (!acceptingIntermediate) return;
+            views.set(t.id, intermediate);
+            lastChange = Date.now();
+            updateFaviconRedSince(lastChange, false);
+            broadcast(dashboardUpdate());
+          });
+        } finally {
+          acceptingIntermediate = false;
+        }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.error(`tile ${t.id} failed:`, msg); // full detail to the log

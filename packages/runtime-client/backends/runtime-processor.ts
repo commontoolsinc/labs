@@ -34,7 +34,6 @@ import {
   setPatternEnvironment,
   type SigilLink,
   unmarkUiInputBlindWriteTx,
-  type VersionSkewInfo,
 } from "@commonfabric/runner";
 import { linkRefPayload } from "@commonfabric/runner/shared";
 import {
@@ -128,7 +127,6 @@ import {
   type VDomMountRequest,
   type VDomMountResponse,
   type VDomUnmountRequest,
-  type VersionSkewNotification,
   type WriteStackTraceResponse,
 } from "../protocol/mod.ts";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
@@ -194,23 +192,6 @@ function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
   return new URL(url, spaceBaseUrl).href;
 }
 
-/** The worker→shell versionSkew IPC payload for a build-mismatch skip. */
-export function versionSkewNotification(
-  info: VersionSkewInfo,
-): VersionSkewNotification {
-  return {
-    type: NotificationType.VersionSkew,
-    space: info.space,
-    clientVersion: info.clientVersion,
-    toolshedVersion: info.toolshedVersion,
-  };
-}
-
-/** Post the versionSkew notification to the shell. Exported for testing. */
-export function postVersionSkew(info: VersionSkewInfo): void {
-  self.postMessage(versionSkewNotification(info));
-}
-
 /** Whether the home root must take the reconcile-before-start path. */
 export function shouldReconcileHomeRoot(
   runtime: Pick<Runtime, "experimental">,
@@ -231,9 +212,6 @@ export function browserWorkerParamsFromInitializationData(
 ): BrowserWorkerPresetParams {
   return {
     apiUrl: new URL(data.apiUrl),
-    ...(data.clientVersion !== undefined
-      ? { clientVersion: data.clientVersion }
-      : {}),
     storageManager,
     // The host decides the flags (shell build-time defines); absent ⇒ runtime
     // defaults.
@@ -608,7 +586,6 @@ export class RuntimeProcessor {
       },
 
       errorHandlers: [postContextualRuntimeError],
-      onVersionSkew: postVersionSkew,
     }));
 
     if (!await runtime.healthCheck()) {

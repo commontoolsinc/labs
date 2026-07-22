@@ -8,6 +8,11 @@ import {
 } from "./patch.ts";
 import { isPrefixPath, parentPath, pathsOverlap } from "./path.ts";
 import {
+  containsReservedSchemaRefSubstring,
+  containsSyncSchemaRefString,
+  findSyncSchemaRef,
+} from "./sync-schema-ref.ts";
+import {
   type BranchName,
   type CellScope,
   type ClientCommit,
@@ -5062,6 +5067,8 @@ const applyCommitTransaction = (
     revisions.push(revision);
   }
 
+  validateStoredSyncSchemaRefs(engine, branch, revisions, original);
+
   engine.statements.updateBranchHead.run({ branch, seq });
   materializeSnapshots(engine, branch, revisions);
 
@@ -5955,6 +5962,186 @@ const materializeSnapshots = (
     seen.add(key);
     maybeMaterializeSnapshot(engine, branch, revision.id, revisionScopeKey);
   }
+};
+
+const rejectStoredSyncSchemaRef = (
+  document: EntityDocument | undefined,
+): void => {
+  const ref = findSyncSchemaRef(document);
+  if (ref !== undefined) {
+    throw new ProtocolError(
+      `memory v2 documents may not persist reserved wire schema reference: ${ref}`,
+    );
+  }
+};
+
+const validateStoredSyncSchemaRefs = (
+  engine: Engine,
+  branch: BranchName,
+  revisions: readonly AppliedRevision[],
+  serializedCommit: string,
+): void => {
+  // Every string a set document or patch operation carries appears verbatim
+  // in the commit's serialization (already computed for the commit log), so
+  // a commit whose serialization lacks both reserved prefixes can only put a
+  // reference into a schema position via a JSON Patch move relocating a
+  // string that already exists in the stored pre-state.
+  const commitMayIntroduceRef = containsReservedSchemaRefSubstring(
+    serializedCommit,
+  );
+
+  // Entities whose patches need post-state validation, keyed by revision key,
+  // preserving this commit's revision order per entity.
+  const statefulEntities = new Map<string, AppliedRevision[]>();
+
+  for (const revision of revisions) {
+    if (revision.op === "set" && commitMayIntroduceRef) {
+      rejectStoredSyncSchemaRef(revision.document);
+    }
+    // Every revision here is set/patch/delete: sqlite operations never enter
+    // the revisions list (see applyCommitTransaction).
+    const key = revisionKey(
+      branch,
+      revision.id,
+      revision.scopeKey ?? DEFAULT_SCOPE_KEY,
+    );
+    const isCandidatePatch = revision.op === "patch" &&
+      (revision.patches?.some((patch) => patch.op === "move") === true ||
+        (commitMayIntroduceRef &&
+          containsSyncSchemaRefString(revision.patches)));
+    const group = statefulEntities.get(key);
+    if (group !== undefined) {
+      // Once an entity is stateful, every later revision participates in the
+      // replay so each intermediate stored state is validated.
+      group.push(revision);
+      continue;
+    }
+    if (isCandidatePatch) {
+      // Earlier same-commit revisions of this entity are irrelevant history:
+      // a set baseline is re-established by the replay's reconstruction.
+      statefulEntities.set(key, [revision]);
+    }
+  }
+
+  for (const group of statefulEntities.values()) {
+    validateStatefulEntityRevisions(
+      engine,
+      branch,
+      group,
+      commitMayIntroduceRef,
+    );
+  }
+};
+
+/** Replays one entity's in-commit revisions, validating each stored state.
+ *  Reconstructs the pre-state at most once per entity (and not at all when
+ *  neither the commit nor any stored source row can contain a reserved
+ *  reference), keeping validation linear in this commit's patch count. */
+const validateStatefulEntityRevisions = (
+  engine: Engine,
+  branch: BranchName,
+  entityRevisions: readonly AppliedRevision[],
+  commitMayIntroduceRef: boolean,
+): void => {
+  const first = entityRevisions[0];
+  const scopeKey = first.scopeKey ?? DEFAULT_SCOPE_KEY;
+  if (
+    !commitMayIntroduceRef &&
+    !storedEntitySourcesMayContainRef(engine, {
+      id: first.id,
+      scopeKey,
+      branch,
+      seq: first.seq,
+      opIndex: first.opIndex,
+    })
+  ) {
+    // A move can only relocate an existing string, and every string in the
+    // stored pre-state appears verbatim in some stored source row.
+    return;
+  }
+
+  let document: EntityDocument | undefined;
+  for (const revision of entityRevisions) {
+    if (revision.op === "set") {
+      document = revision.document;
+      // Already validated by the set path when the commit can introduce a
+      // reference; a clean commit's set document cannot contain one.
+      continue;
+    }
+    if (revision.op !== "patch") {
+      // A delete tombstones the entity: later in-commit patches start empty.
+      document = emptyEntityDocument();
+      continue;
+    }
+    document = document === undefined
+      ? reconstructPatchedDocument(engine, {
+        id: revision.id,
+        scopeKey,
+        branch,
+        seq: revision.seq,
+        opIndex: revision.opIndex,
+      })
+      : applyPatchDocument(document, revision.patches ?? []);
+    rejectStoredSyncSchemaRef(document);
+  }
+};
+
+/** Substring probe over the serialized rows reconstruction would read — the
+ *  latest set/snapshot base and the patch span — without decoding any of
+ *  them. A negative answer proves the reconstructed pre-state cannot contain
+ *  a reserved reference. */
+const storedEntitySourcesMayContainRef = (
+  engine: Engine,
+  options: {
+    id: EntityId;
+    scopeKey: string;
+    branch: BranchName;
+    seq: number;
+    opIndex: number;
+  },
+): boolean => {
+  const { id, scopeKey, branch, seq, opIndex } = options;
+  const baseRow = engine.statements.selectLatestBase.get({
+    branch,
+    id,
+    scope_key: scopeKey,
+    seq,
+    op_index: opIndex,
+  }) as ReadRow | undefined;
+  const snapshotRow = engine.statements.selectLatestSnapshot.get({
+    branch,
+    id,
+    scope_key: scopeKey,
+    seq,
+  }) as SnapshotRow | undefined;
+
+  let baseSeq = 0;
+  let baseOpIndex = -1;
+  let baseMayContain = false;
+  if (snapshotRow && (!baseRow || snapshotRow.seq >= baseRow.seq)) {
+    baseSeq = snapshotRow.seq;
+    baseOpIndex = Number.MAX_SAFE_INTEGER;
+    baseMayContain = containsReservedSchemaRefSubstring(snapshotRow.value);
+  } else if (baseRow) {
+    baseSeq = baseRow.seq;
+    baseOpIndex = baseRow.op_index;
+    baseMayContain = baseRow.op === "set" && baseRow.data !== null &&
+      containsReservedSchemaRefSubstring(baseRow.data);
+  }
+  if (baseMayContain) return true;
+
+  const patches = engine.statements.selectPatches.all({
+    branch,
+    id,
+    scope_key: scopeKey,
+    base_seq: baseSeq,
+    base_op_index: baseOpIndex,
+    seq,
+    op_index: opIndex,
+  }) as Array<{ data: string }>;
+  return patches.some((patch) =>
+    containsReservedSchemaRefSubstring(patch.data)
+  );
 };
 
 const maybeMaterializeSnapshot = (

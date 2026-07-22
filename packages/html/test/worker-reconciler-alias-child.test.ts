@@ -17,7 +17,6 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "@commonfabric/runner";
 import type { Cell } from "@commonfabric/runner";
-import { opsFlushed } from "./reconciler-support.ts";
 
 /**
  * Helper to collect ops emitted by the reconciler.
@@ -105,7 +104,7 @@ Deno.test("worker reconciler - $alias records in child position", async (t) => {
       let cancel;
       try {
         cancel = reconciler.mount(rootCell as unknown as Cell<unknown>);
-        await opsFlushed(runtime);
+        await t.settle();
       } finally {
         console.warn = originalWarn;
       }

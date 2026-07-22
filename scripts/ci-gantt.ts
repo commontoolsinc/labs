@@ -27,12 +27,14 @@
 //     --repo OWNER/REPO     default commontoolsinc/labs
 //     --workflow FILE       default deno.yml
 //     --limit N             runs to fetch, default 100
+//     --input PATH          cached run and job JSON; skips GitHub requests
 //     --out PATH            output file, default ci-gantt.png; a .svg path
 //                           writes the raw SVG instead of a rasterized PNG
 //     --scale N             raster scale factor, default 2
 //     --concurrency N       parallel job fetches, default 8
 //     --min-runs N          drop jobs seen in fewer than N runs (default: 10% of runs)
 //     --main-only           only fetch pushes to main, skipping pre-land PR runs
+//     --all-conclusions     include failed and cancelled jobs with timing
 //     --run-id ID           chart this workflow run ID, repeatable
 //     --theme NAME          color palette: "default" (light) or "dark"
 //     --colors JSON         override palette keys, e.g. '{"work":"#6ea8fe"}'
@@ -56,7 +58,8 @@ function numOpt(
 if (args.includes("--help") || args.includes("-h")) {
   console.log(
     "Usage: scripts/ci-gantt.ts [--repo OWNER/REPO] [--workflow FILE] [--limit N]\n" +
-      "       [--out PATH] [--scale N] [--concurrency N] [--min-runs N] [--main-only]\n" +
+      "       [--input PATH] [--out PATH] [--scale N] [--concurrency N] [--min-runs N]\n" +
+      "       [--main-only] [--all-conclusions]\n" +
       "       [--run-id ID] [--theme default|dark] [--colors '<json>']",
   );
   Deno.exit(0);
@@ -65,6 +68,7 @@ if (args.includes("--help") || args.includes("-h")) {
 const REPO = opt("repo", "commontoolsinc/labs");
 const WORKFLOW = opt("workflow", "deno.yml");
 const LIMIT = numOpt("limit", 100, { min: 1, integer: true });
+const INPUT = opt("input", "");
 const OUT = opt("out", "ci-gantt.png");
 const SCALE = numOpt("scale", 2, { min: 0.1 });
 const CONCURRENCY = numOpt("concurrency", 8, { min: 1, integer: true });
@@ -81,12 +85,14 @@ const SUCCESS_ONLY = !RUN_IDS.length && !args.includes("--all-conclusions");
 const MAIN_ONLY = args.includes("--main-only");
 
 // ---------------------------------------------------------------------------
-// Data fetching: calls the GitHub REST API directly, authenticated with
-// GH_TOKEN or GITHUB_TOKEN. One of those must be set.
+// Data fetching: without --input, calls the GitHub REST API directly,
+// authenticated with GH_TOKEN or GITHUB_TOKEN. One of those must be set.
 // ---------------------------------------------------------------------------
 
-const TOKEN = Deno.env.get("GH_TOKEN") ?? Deno.env.get("GITHUB_TOKEN");
-if (!TOKEN) {
+const TOKEN = INPUT
+  ? undefined
+  : Deno.env.get("GH_TOKEN") ?? Deno.env.get("GITHUB_TOKEN");
+if (!INPUT && !TOKEN) {
   console.error(
     "Set GH_TOKEN or GITHUB_TOKEN (a GitHub token with repo read).",
   );
@@ -125,7 +131,6 @@ async function githubApi<T>(path: string): Promise<T> {
       accept: "application/vnd.github+json",
       "x-github-api-version": "2022-11-28",
     },
-    signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) throw new Error(`GitHub API ${path} failed: HTTP ${res.status}`);
   return await res.json() as T;
@@ -205,6 +210,10 @@ interface Job {
   started_at: string | null;
   completed_at: string | null;
   steps?: Step[];
+}
+
+interface GanttInput {
+  runs: { run: Run; jobs: Job[] }[];
 }
 
 function hasTiming(job: Job): boolean {
@@ -364,49 +373,70 @@ function esc(s: string): string {
 // Main
 // ---------------------------------------------------------------------------
 
-console.error(
-  RUN_IDS.length
-    ? `Fetching ${RUN_IDS.length} selected run(s) on ${REPO} ...`
-    : `Fetching last ${LIMIT} ${WORKFLOW} runs on ${REPO}${
-      MAIN_ONLY ? " (main pushes only)" : ""
-    } ...`,
-);
-const runs: Run[] = RUN_IDS.length
-  ? await pool(
-    RUN_IDS,
-    CONCURRENCY,
-    async (runId) =>
-      toRun(await githubApi<RestRun>(`/repos/${REPO}/actions/runs/${runId}`)),
-  )
-  : await fetchRuns();
-
-const completed = runs.filter((r) => r.status === "completed");
-console.error(
-  `Got ${runs.length} runs (${completed.length} completed); fetching jobs ...`,
-);
-
-const jobsPerRun = await pool(completed, CONCURRENCY, async (run, i) => {
-  if ((i + 1) % 10 === 0) console.error(`  ${i + 1}/${completed.length}`);
-  let jobs = await fetchJobs(
-    `/repos/${REPO}/actions/runs/${run.databaseId}/attempts/1/jobs`,
-  );
-  if ((run.attempt ?? 1) > 1) {
-    const latestJobs = await fetchJobs(
-      `/repos/${REPO}/actions/runs/${run.databaseId}/jobs`,
-    );
-    const latestByName = new Map(
-      latestJobs.map((job) => [job.name, job]),
-    );
-    jobs = jobs.map((job) => {
-      const latest = latestByName.get(job.name);
-      if (latest && !hasTiming(job) && hasTiming(latest)) return latest;
-      return latest
-        ? { ...job, status: latest.status, conclusion: latest.conclusion }
-        : job;
-    });
+let runs: Run[];
+let jobsPerRun: GanttInput["runs"];
+if (INPUT) {
+  const input = JSON.parse(await Deno.readTextFile(INPUT)) as GanttInput;
+  if (!Array.isArray(input.runs)) {
+    throw new Error("CI Gantt input must contain a runs array.");
   }
-  return { run, jobs };
-});
+  jobsPerRun = input.runs;
+  runs = jobsPerRun.map(({ run }) => run);
+  console.error(`Loaded ${runs.length} cached run(s) for ${REPO}.`);
+} else {
+  console.error(
+    RUN_IDS.length
+      ? `Fetching ${RUN_IDS.length} selected run(s) on ${REPO} ...`
+      : `Fetching last ${LIMIT} ${WORKFLOW} runs on ${REPO}${
+        MAIN_ONLY ? " (main pushes only)" : ""
+      } ...`,
+  );
+  runs = RUN_IDS.length
+    ? await pool(
+      RUN_IDS,
+      CONCURRENCY,
+      async (runId) =>
+        toRun(
+          await githubApi<RestRun>(`/repos/${REPO}/actions/runs/${runId}`),
+        ),
+    )
+    : await fetchRuns();
+  const completedRuns = runs.filter((run) => run.status === "completed");
+  console.error(
+    `Got ${runs.length} runs (${completedRuns.length} completed); fetching jobs ...`,
+  );
+  jobsPerRun = await pool(
+    completedRuns,
+    CONCURRENCY,
+    async (run, i) => {
+      if ((i + 1) % 10 === 0) {
+        console.error(`  ${i + 1}/${completedRuns.length}`);
+      }
+      let jobs = await fetchJobs(
+        `/repos/${REPO}/actions/runs/${run.databaseId}/attempts/1/jobs`,
+      );
+      if ((run.attempt ?? 1) > 1) {
+        const latestJobs = await fetchJobs(
+          `/repos/${REPO}/actions/runs/${run.databaseId}/jobs`,
+        );
+        const latestByName = new Map(
+          latestJobs.map((job) => [job.name, job]),
+        );
+        jobs = jobs.map((job) => {
+          const latest = latestByName.get(job.name);
+          if (latest && !hasTiming(job) && hasTiming(latest)) return latest;
+          return latest
+            ? { ...job, status: latest.status, conclusion: latest.conclusion }
+            : job;
+        });
+      }
+      return { run, jobs };
+    },
+  );
+}
+
+const completed = runs.filter((run) => run.status === "completed");
+jobsPerRun = jobsPerRun.filter(({ run }) => run.status === "completed");
 
 // Accumulate timings keyed by exact job name (each shard is its own key).
 const acc = new Map<

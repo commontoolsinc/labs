@@ -222,8 +222,11 @@ Both the home pattern and the default app pattern follow the same mechanism:
 5. Before an existing eligible root starts, it is reconciled in place. A root
    with stored `patternSource` tracks that source. A pre-provenance root is
    admitted only when its stored `{ identity, symbol }` exactly matches the
-   build-attested current official entry for that space; stale, custom, and
-   repository-pinned sourceless roots remain pinned
+   current official entry's advertised content identity for that space;
+   otherwise it remains pinned. The exception is a sourceless root the current
+   runtime explicitly cannot load: it is replaced by the current system root,
+   and its displaced identity is recorded for recovery. Repository-pinned
+   sourceless roots always remain pinned.
 
 
 Runtime internals (ACL initialization, PieceManager home-space detection) are

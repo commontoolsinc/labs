@@ -6,9 +6,10 @@ const formatError = (e) => ({
 });
 
 class Test {
-  constructor(name, fn, el) {
+  constructor(name, fn, el, timeoutMs) {
     this.name = name;
     this.fn = fn;
+    this.timeoutMs = timeoutMs;
     this.success = null;
     this.duration = null;
     this.error = null;
@@ -16,16 +17,43 @@ class Test {
     this.el.innerText = name;
   }
 
+  // Rejects once the test has run for `timeoutMs` without finishing. A test
+  // that waits on an event which never arrives would otherwise sit here until
+  // the driver's own deadline killed the whole run without naming it.
+  #stuck() {
+    return new Promise((_, reject) => {
+      this.timer = setTimeout(() => {
+        reject(
+          new Error(
+            `Timed out after ${this.timeoutMs}ms. The harness stops waiting on ` +
+              `a test at that point and calls it stuck; it is not a bound on ` +
+              `how long a test may legitimately take. Either this test is ` +
+              `waiting for something that never arrived, or the suite needs a ` +
+              `larger \`testTimeout\` in its deno-web-test.config.ts.`,
+          ),
+        );
+      }, this.timeoutMs);
+    });
+  }
+
   async run() {
     const start = performance.now();
     try {
-      await this.fn();
+      // Nothing can cancel the test's own promise, so a stuck test goes on
+      // running in the page after this returns. Keep a handler on it either
+      // way, so that settling late does not surface as an unhandled rejection
+      // against whichever test is running by then.
+      const running = (async () => await this.fn())();
+      running.catch(() => {});
+      await Promise.race([running, this.#stuck()]);
       this.success = true;
       this.el.setAttribute("state", "success");
     } catch (e) {
       this.success = false;
       this.error = formatError(e);
       this.el.setAttribute("state", "error");
+    } finally {
+      clearTimeout(this.timer);
     }
     this.duration = performance.now() - start;
     // This matches `TestResult` in typescript
@@ -70,7 +98,12 @@ class TestController {
 
 class TestHarness {
   constructor() {
-    this.testFile = new URL(globalThis.location.href).searchParams.get("test");
+    const params = new URL(globalThis.location.href).searchParams;
+    this.testFile = params.get("test");
+    // `BrowserController` always sends this; the fallback only covers the page
+    // being opened by hand. Keep it in step with `DEFAULT_TEST_TIMEOUT_MS`,
+    // which this file cannot import.
+    this.testTimeout = Number(params.get("testTimeout")) || 40_000;
     this.tests = [];
     this.currentTest = 0;
     this.loadError = null;
@@ -106,7 +139,7 @@ class TestHarness {
     }
     const el = document.createElement("li");
     $("#tests").appendChild(el);
-    this.tests.push(new Test(name, fn, el));
+    this.tests.push(new Test(name, fn, el, this.testTimeout));
   }
 
   async runNext() {

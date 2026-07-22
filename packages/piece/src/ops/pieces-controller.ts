@@ -1,18 +1,13 @@
 import {
-  buildsMatch,
   type Cell,
-  clientVersionFromEnv,
   entityIdFrom,
   type EnvReader,
   experimentalOptionsFromEnv,
-  getPatternIdentityRef,
-  getPatternRepository,
-  getPatternSource,
   type JSONSchema,
   type MemorySpace,
   type ModuleByteCache,
   type PatternCoverageCollector,
-  patternResponseBuild,
+  type PatternUpdateOutcome,
   Runtime,
   runtimePresets,
   RuntimeProgram,
@@ -39,11 +34,17 @@ const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
 export const HOME_PATTERN_URL = "/api/patterns/system/home.tsx";
 export const DEFAULT_APP_PATTERN_URL = "/api/patterns/system/default-app.tsx";
 
+// Default roots have a stronger update policy than ordinary pieces: an
+// existing root is reconciled before start, while a new root is compiled from
+// the current source immediately before creation. Keep the runner's watcher,
+// but do not schedule its duplicate fire-and-forget source check.
+const DEFAULT_ROOT_RUN_OPTIONS = { schedulePatternUpdate: false } as const;
+
 /**
  * The official system space-root pattern URL for a space type — the home DID
  * gets home.tsx, every other space gets the default app. This derivation only
  * selects the identity to check; it never proves that a sourceless root tracks
- * that URL. Exact equality with the build-attested official identity supplies
+ * that URL. Exact equality with the official content identity supplies
  * that proof below.
  */
 export function deriveSystemPatternUrl(
@@ -64,14 +65,8 @@ const pieceUpdateLogger = getLogger("piece.update", {
   level: "warn",
 });
 
-/** The result of a system-pattern update check. */
-export type UpdateOutcome =
-  | "updated"
-  | "repaired-provenance"
-  | "current"
-  | "skipped-skew"
-  | "skipped-unknown-build"
-  | "skipped-disabled";
+/** Backward-compatible name for the result of a pattern update check. */
+export type UpdateOutcome = PatternUpdateOutcome;
 
 // This module can load outside Deno (browser-safe storage import above), so
 // env reads are guarded like PIECE_TRACE_TIMINGS: absent env ⇒ defaults.
@@ -233,7 +228,6 @@ export class PiecesController<T = unknown> {
         spaceIdentity: session.spaceIdentity,
       }),
       experimental: experimentalOptionsFromEnv(readEnv),
-      clientVersion: clientVersionFromEnv(readEnv),
       moduleByteCache,
       patternCoverage,
       trustSnapshotProvider: () => ({
@@ -371,7 +365,13 @@ export class PiecesController<T = unknown> {
       );
 
       // Run pattern setup within same transaction
-      this.#manager.runtime.run(tx, pattern, {}, pieceCell);
+      this.#manager.runtime.run(
+        tx,
+        pattern,
+        {},
+        pieceCell,
+        DEFAULT_ROOT_RUN_OPTIONS,
+      );
 
       // Stamp the provenance the piece tracks for updates, mirroring
       // ensureDefaultPattern (CT-1890). Without this, every recreated root
@@ -411,7 +411,7 @@ export class PiecesController<T = unknown> {
     }
 
     // Start the piece
-    await this.#manager.startPiece(finalPattern);
+    await this.#manager.startPiece(finalPattern, DEFAULT_ROOT_RUN_OPTIONS);
     await this.#manager.runtime.idle();
     await this.#manager.synced();
 
@@ -523,7 +523,13 @@ export class PiecesController<T = unknown> {
           );
 
           // Run pattern setup within same transaction
-          this.#manager.runtime.run(tx, pattern, {}, pieceCell);
+          this.#manager.runtime.run(
+            tx,
+            pattern,
+            {},
+            pieceCell,
+            DEFAULT_ROOT_RUN_OPTIONS,
+          );
 
           // Stamp the provenance the piece tracks for updates (the source it
           // was born from) — the same transaction, one extra meta write.
@@ -574,7 +580,7 @@ export class PiecesController<T = unknown> {
 
     await timePiecesPhase(
       "ensureDefaultPattern.startPiece",
-      () => this.#manager.startPiece(rootToStart),
+      () => this.#manager.startPiece(rootToStart, DEFAULT_ROOT_RUN_OPTIONS),
     );
     await timePiecesPhase(
       "ensureDefaultPattern.runtime.idle",
@@ -603,209 +609,22 @@ export class PiecesController<T = unknown> {
   ): Promise<UpdateOutcome> {
     const runtime = this.#manager.runtime;
     const space = this.#manager.getSpace();
-
-    // 1. Flag gate. One flag governs every tracked system root, home included:
-    //    home state survival across an in-place roll is pinned by
-    //    home-golden-replay.test.ts, so the home root no longer needs a
-    //    separate opt-in.
     if (!runtime.experimental?.systemPatternAutoUpdate) {
       return "skipped-disabled";
     }
-
     try {
-      // 2. The root piece's result cell, resolved without starting it. Ensure
-      // passes the cell it already found; explicit checks resolve it here.
-      const root = resolvedRoot ??
-        await this.#manager.getDefaultPattern(false);
+      const root = resolvedRoot ?? await this.#manager.getDefaultPattern(false);
       if (!root) return "current";
-
-      // 3. Provenance + per-space host (NOT the global apiUrl — a foreign-homed
-      //    space must resolve against its own toolshed). For a pre-provenance
-      //    root, derive only the official URL whose identity can be tested. The
-      //    URL or an author-controlled filename is not provenance: below, only
-      //    an exact match with the build-attested current identity admits it.
-      const runningRef = getPatternIdentityRef(root);
-      if (runningRef === undefined) return "current";
-      const storedSource = getPatternSource(root);
-      const storedRepository = getPatternRepository(root);
-      if (storedSource === undefined && storedRepository !== undefined) {
-        return "current";
-      }
-      const url = storedSource ?? deriveSystemPatternUrl(space, runtime);
-      const host = runtime.mappedHostFor(space) ?? runtime.apiUrl.href;
-      // Async identity/load/compile work must not authorize a later write to a
-      // root another client has replaced in the meantime. Reading all captured
-      // metadata inside each transaction makes both writes compare-and-swap;
-      // editWithRetry re-runs this predicate after every conflict.
-      const rootStillMatches = (candidate: Cell<NameSchema>): boolean => {
-        const candidateRef = getPatternIdentityRef(candidate);
-        return candidateRef?.identity === runningRef.identity &&
-          candidateRef.symbol === runningRef.symbol &&
-          getPatternSource(candidate) === storedSource &&
-          getPatternRepository(candidate) === storedRepository;
-      };
-      const repairProvenance = async (): Promise<UpdateOutcome> => {
-        const result = await runtime.editWithRetry((tx) => {
-          if (!rootStillMatches(root.withTx(tx))) return false;
-          setPatternSource(root, tx, url);
-          return true;
-        });
-        if (result.error) {
-          pieceUpdateLogger.warn(
-            "provenance-repair-failed",
-            () => [
-              "checkAndUpdateDefaultPattern: provenance repair failed",
-              space,
-              result.error,
-            ],
-          );
-          return "current";
-        }
-        return result.ok ? "repaired-provenance" : "current";
-      };
-
-      // The version gate (step 4) validates `host`'s build, and ?identity is
-      // only comparable within that build — so only act on a source served BY
-      // `host`. A cross-origin patternSource (a published / custom-app source
-      // on another host) would be gated against the wrong build; defer it to
-      // the cross-host published-pattern flow.
-      const target = new URL(url, host);
-      if (target.origin !== new URL(host).origin) {
-        return "current";
-      }
-
-      // 4. Version gate. This is a precondition for every update.
-      const toolshedVersion = await runtime.toolshedGitSha(host);
-      if (!buildsMatch(runtime.clientVersion, toolshedVersion)) {
-        // An unknown sha on either side proves nothing — skip silently. The
-        // skew signal raises the shell's "reload to update" banner, which must
-        // only claim what is proven: both builds known and different.
-        if (
-          runtime.clientVersion === undefined || toolshedVersion === undefined
-        ) {
-          return "skipped-unknown-build";
-        }
-        runtime.reportVersionSkew({
-          space,
-          clientVersion: runtime.clientVersion,
-          toolshedVersion,
-        });
-        return "skipped-skew";
-      }
-      const expectedBuild = runtime.clientVersion;
-      if (expectedBuild === undefined) return "skipped-unknown-build";
-
-      // 5. Current identity from the toolshed (cached per serving build). The
-      // response itself must attest `expectedBuild`, binding this request to the
-      // version gate even during a rolling deploy.
-      const currentId = await runtime.cachedPatternIdentity(
-        host,
-        url,
-        expectedBuild,
+      return await runtime.patternUpdater.checkDefaultPattern(
+        root,
+        deriveSystemPatternUrl(space, runtime),
       );
-      if (currentId === undefined) return "current"; // unresolved → skip
-
-      // A sourceless root is eligible only when its full content identity (which
-      // includes authored module paths) is exactly the official current entry.
-      // This admits a known system identity, never a lookalike filename. A stale
-      // sourceless root stays pinned until an explicit migration supplies its
-      // durable provenance.
-      if (
-        storedSource === undefined &&
-        (runningRef.identity !== currentId || runningRef.symbol !== "default")
-      ) {
-        return "current";
-      }
-
-      // 6. Equal identity is not enough to declare the root healthy: persisted
-      // source/compiled closures or the stored symbol may still be unloadable.
-      // Probe the exact ref; only the successful load takes the fast path.
-      if (currentId === runningRef?.identity) {
-        let loadable = false;
-        try {
-          loadable = await runtime.patternManager.loadPatternByIdentity(
-            runningRef.identity,
-            runningRef.symbol,
-            space,
-          ) !== undefined;
-        } catch {
-          // Continue through the same identity-authorized source path below.
-        }
-        if (loadable) {
-          if (storedSource !== undefined) return "current";
-          return await repairProvenance();
-        }
-      }
-
-      // 7. Apply/repair. Every successful source response must attest the same
-      // build as ?identity; imports are checked too because HttpProgramResolver
-      // uses this fetch for the whole authored closure.
-      const attestedFetch: typeof globalThis.fetch = async (input, init) => {
-        const response = await runtime.fetch(input, init);
-        if (
-          response.ok && patternResponseBuild(response) !== expectedBuild
-        ) {
-          throw new Error(
-            `Pattern source response was not served by build ${expectedBuild}`,
-          );
-        }
-        return response;
-      };
-      const program = await runtime.harness.resolve(
-        new HttpProgramResolver(target.href, attestedFetch),
-      );
-      const pattern = await runtime.patternManager.compilePattern(program, {
-        space,
-      });
-      const entryRef = runtime.patternManager.getArtifactEntryRef(pattern);
-      if (entryRef === undefined || entryRef.identity !== currentId) {
-        pieceUpdateLogger.warn(
-          "identity-attestation-mismatch",
-          () => [
-            "checkAndUpdateDefaultPattern: compiled source did not match " +
-            "the build-attested identity",
-            space,
-            currentId,
-            entryRef?.identity,
-          ],
-        );
-        return "current";
-      }
-      if (
-        entryRef.identity === runningRef?.identity &&
-        entryRef.symbol === runningRef.symbol
-      ) {
-        if (storedSource === undefined) {
-          return await repairProvenance();
-        }
-        return "current";
-      }
-      const result = await runtime.editWithRetry((tx) => {
-        if (!rootStillMatches(root.withTx(tx))) return false;
-        root.withTx(tx).setMetaRaw("patternIdentity", {
-          identity: entryRef.identity,
-          symbol: entryRef.symbol,
-        });
-        setPatternSource(root, tx, url); // back-fill provenance
-        return true;
-      });
-      if (result.error) {
-        pieceUpdateLogger.warn(
-          "swap-failed",
-          () => [
-            "checkAndUpdateDefaultPattern: swap failed",
-            space,
-            result.error,
-          ],
-        );
-        return "current";
-      }
-      return result.ok ? "updated" : "current";
     } catch (error) {
-      pieceUpdateLogger.warn(
-        "check-failed",
-        () => ["checkAndUpdateDefaultPattern: check failed", space, error],
-      );
+      pieceUpdateLogger.warn("root-resolution-failed", () => [
+        "checkAndUpdateDefaultPattern: root resolution failed",
+        space,
+        error,
+      ]);
       return "current";
     }
   }

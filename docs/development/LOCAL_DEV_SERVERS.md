@@ -19,21 +19,20 @@
 ./scripts/share-pattern-via-tailscale.sh --down                                 # Tear that down
 ```
 
-To exercise version-gated system-pattern updates with source-run processes,
-attest one Labs revision for the whole launch:
+To make source-run build metadata describe the checkout the same way compiled
+binaries do, pass the current revision into the start script:
 
 ```bash
 COMMIT_SHA="$(git rev-parse HEAD)" ./scripts/start-local-dev.sh --bg-updater
 ```
 
-The script's children inherit the value: toolshed exposes it through
-`/api/meta` and pattern responses, shell bakes it into the browser runtime, and
-the optional background-piece-service forwards it to its workers. The
-source-run shell still loads its mutable worker graph from `/scripts`; the SHA
-attests the client build but does not redirect local development to the
-deployed `/builds/<sha>` namespace. Pass the same value to standalone `cf`
-commands. Only use a revision that actually describes all launched Labs
-sources; a shared but false value defeats the safety gate.
+The script's children inherit the value: toolshed uses it as the source-run
+fallback for `/api/meta.gitSha`, and shell surfaces it in diagnostics. The
+source-run shell still loads its mutable worker graph from `/scripts`; only a
+deployed shell selects the immutable `/builds/<sha>` namespace. `COMMIT_SHA` is
+descriptive metadata, not a system-pattern update gate. The updater instead
+compiles the downloaded source/import closure and requires its entry identity
+to equal `?identity` before changing the persisted root.
 
 To let teammates interact with a locally-hosted pattern (e.g. "host latest-main
 `<pattern>` locally with `--inspect` and export it over Tailscale"), use

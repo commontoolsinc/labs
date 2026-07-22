@@ -41,7 +41,7 @@ const SERIAL_TESTS = [
   "test/inspect-remote.test.ts",
   "test/log-level.test.ts",
   "test/main-command.test.ts",
-  "test/runtime-client-version.test.ts",
+  "test/runtime-creation.test.ts",
   "test/test-runner-compile-byte-cache.test.ts",
   "test/test-runner-pattern-coverage.test.ts",
   "test/view-commitmsg.test.ts",

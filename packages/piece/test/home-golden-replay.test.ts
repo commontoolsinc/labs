@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   getPatternIdentityRef,
-  PATTERN_RESPONSE_BUILD_HEADER,
   resolveEntryIdentity,
   Runtime,
 } from "@commonfabric/runner";
@@ -36,7 +35,6 @@ import {
 // would surface here as lost home data.
 
 const signer = await Identity.fromPassphrase("home golden replay");
-const BUILD_SHA = "home-golden-build-1";
 
 // A home-SHAPED synthetic root: owns three lists the way home.tsx does (stable
 // `.for(...)` causes), and derives a reactive `summary` folding all three counts
@@ -81,7 +79,7 @@ const SEEDED_SPACES = [
 const SEEDED_COUNTS =
   `${SEEDED_FAVORITES.length}/${SEEDED_JOURNAL.length}/${SEEDED_SPACES.length}`;
 
-/** Content identity a toolshed at this build would serve for `source`. */
+/** Content identity a toolshed would serve for `source`. */
 function identityForSource(source: string): Promise<string> {
   return resolveEntryIdentity(
     HOME_PATTERN_URL, // /api/patterns/system/home.tsx
@@ -109,26 +107,14 @@ function installFetchStub(): StubControls {
       : input.url;
     const url = new URL(href);
 
-    if (url.pathname === "/api/meta") {
-      return new Response(JSON.stringify({ did: "did:x", gitSha: BUILD_SHA }), {
-        headers: { "content-type": "application/json" },
-      });
-    }
-
     if (url.pathname === HOME_PATTERN_URL) {
       if (url.searchParams.has("identity")) {
         return new Response(await identityForSource(source), {
-          headers: {
-            "content-type": "text/plain",
-            [PATTERN_RESPONSE_BUILD_HEADER]: BUILD_SHA,
-          },
+          headers: { "content-type": "text/plain" },
         });
       }
       return new Response(source, {
-        headers: {
-          "content-type": "text/typescript-jsx",
-          [PATTERN_RESPONSE_BUILD_HEADER]: BUILD_SHA,
-        },
+        headers: { "content-type": "text/typescript-jsx" },
       });
     }
 
@@ -155,7 +141,6 @@ describe("home golden replay (durable home state survives an in-place roll-forwa
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
-      clientVersion: BUILD_SHA,
       // One flag covers every tracked system root, home included.
       experimental: { systemPatternAutoUpdate: true },
     });

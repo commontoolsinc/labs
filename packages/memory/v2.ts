@@ -839,6 +839,18 @@ export const wireMemoryProtocolFlags = (
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
 });
 
+/**
+ * Encodes a wire payload. The encoding embeds every string value
+ * byte-verbatim (`fvj1:` tag + canonical JSON; strings self-represent, and
+ * neither reserved schema-reference prefix contains a JSON-escapable
+ * character). Three consumers depend on that property as a cheap substring
+ * gate and must move in lockstep with any codec change (fvj2, escaping of
+ * tag-like strings): the client receive-path expansion gate (v2/client.ts),
+ * `containsReservedSchemaRefSubstring` (v2/sync-schema-ref.ts), and the
+ * engine's commit/stored-row probes (v2/engine.ts). A pinning test in
+ * test/v2-sync-schema-table-test.ts fails loudly if verbatim embedding ever
+ * stops holding.
+ */
 export const encodeMemoryBoundary = (value: FabricValue): string =>
   jsonFromValue(value);
 

@@ -862,14 +862,17 @@ export class PieceManager {
   }
 
   /** Start scheduling and running a prepared piece. */
-  async startPiece<T = unknown>(pieceOrId: string | Cell<T>): Promise<void> {
+  async startPiece<T = unknown>(
+    pieceOrId: string | Cell<T>,
+    options: { schedulePatternUpdate?: boolean } = {},
+  ): Promise<void> {
     const piece = typeof pieceOrId === "string"
       ? await timePiecePhase("startPiece.get", () => this.get<T>(pieceOrId))
       : pieceOrId;
     if (!piece) throw new Error("Piece not found");
     await timePiecePhase(
       "startPiece.runtime.start",
-      () => this.runtime.start(piece),
+      () => this.runtime.start(piece, options),
     );
     await timePiecePhase(
       "startPiece.result.pull",

@@ -247,8 +247,6 @@ jobs:
 
       - name: 🏗️ Build bg-piece-service binary
         run: deno task build-binaries bg-piece-service
-        env:
-          COMMIT_SHA: ${{ github.sha }}
 
       - name: 📤 Upload bg-piece-service binary
         uses: actions/upload-artifact@v7
@@ -273,8 +271,6 @@ jobs:
 
       - name: 🏗️ Build cf binary
         run: deno task build-binaries cf
-        env:
-          COMMIT_SHA: ${{ github.sha }}
 
       - name: 📤 Upload cf binary
         uses: actions/upload-artifact@v7

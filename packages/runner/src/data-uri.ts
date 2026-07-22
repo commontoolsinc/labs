@@ -54,8 +54,8 @@ import {
  *
  * This is the encode half of the matched set this module exists to hold;
  * {@link valueFromDataUri} is what reads back what this writes. Both
- * sides speak only the standard `data-model` `FabricValue` encoding
- * (tagged `fvj1:`).
+ * sides speak only the standard `data-model` `FabricValue` encoding, which
+ * carries that codec's prefix tag.
  *
  * Each primitive cell link within `data` is rewritten to a full sigil link,
  * with relative links resolved against `base`. That rewriting is what makes

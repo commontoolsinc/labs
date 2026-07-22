@@ -28,7 +28,7 @@ export interface Tile {
   id: string; // unique, stable key for this tile's scheduling + latest-view state
   intervalMs: number; // how often collect() runs
   wide?: boolean; // render full-width below the grid, including before collection
-  collect(ctx: Ctx): Promise<TileView>;
+  collect(ctx: Ctx, publish?: (view: TileView) => void): Promise<TileView>; // publish usable data before slower work completes
   routes?: Route[]; // optional drill-down routes this tile owns
 }
 

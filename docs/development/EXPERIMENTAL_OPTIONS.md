@@ -31,7 +31,7 @@ was last checked against the code.
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | graduate to always-on | implemented, off by default, rollout in progress |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
-| [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (all tracked system roots, home included); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete flag | implemented, on in the shell |
+| [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (same-toolshed system sources, including all roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete flag | implemented, on in the shell |
 | [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | off | Robin McCollum (in development) | graduate to always-on with the computed-cell write-conflict policy | in development on robin/feat-computed-cell-identity-p2 (redesigned: `computed:` URI scheme) |
 | [`cfcEnforcementMode`](#cfcenforcementmode) | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse) | `enforce-explicit` | Bernhard Seefeld (#3263) | tighten default toward `enforce-strict` | active; ladder is permanent |
 | [`cfcFlowLabels`](#cfcflowlabels) | `RuntimeOptions.cfcFlowLabels` | `off` | Bernhard Seefeld (#4011) | move toward `persist` | implemented, staged rollout |
@@ -215,39 +215,60 @@ propagate](#how-flags-propagate).
 - **Added by.** Bernhard Seefeld, in "system-pattern auto-update (in-place
   rollforward, flag-gated)" (#4611, 2026-07-08); defaulted on for the shell in
   #4619 (2026-07-09).
-- **Purpose.** At space open, rolls a space's root system pattern (default-app,
-  and the home root — the home-specific second gate was retired on the strength
-  of home-golden-replay state-survival coverage) forward in place when its
-  toolshed serves a newer content identity. Every tracked root uses the client/toolshed version gate and cached
-  `?identity` comparison before an in-place `patternIdentity` swap. The
-  identity response, every fetched source/import, and the compiler-produced
-  entry must all agree with the same client build and identity. Equal identities
-  take the fast path only after the persisted artifact loads; an unloadable root
-  is rebuilt through that same identity-authorized source path before bootstrap.
-  Source-run toolsheds, CLI, and daemon processes can receive the shared Labs
-  revision through `COMMIT_SHA`. Persisted roots are resolved without starting.
-  A pre-provenance root may be back-filled only when its stored
-  `{ identity, symbol }` exactly equals the build-attested current official
-  entry; stale, custom, and repository-pinned sourceless roots remain pinned.
-  URL-based creation and recreation stamp provenance; custom `RuntimeProgram`
-  recreation does not. The check remains best-effort; if identity lookup or
-  replacement compilation is unavailable, the subsequent root start retains
-  its normal loud failure behavior. An unknown build SHA skips silently; the
-  `versionSkew` IPC
-  signal—which raises the shell's reload banner—fires only on a proven mismatch
-  (both SHAs known and different). See
+- **Purpose.** Rolls same-toolshed system-source patterns forward in place when
+  their source serves a newer content identity. Persisted default-app and home
+  roots reconcile before bootstrap. Every other watched pattern starts first;
+  its successful instantiation commit launches a background check, so network
+  and compilation never delay its current graph. An unstamped non-root recovers
+  its verified authored entry filename and becomes tracked only when that
+  same-origin route implements `?identity`. Missing/failing identity routes are
+  ordinary non-system sources and remain untouched.
+  Every accepted move downloads and compiles the complete authored closure and
+  permits an in-place `patternIdentity` swap only when the compiler-produced
+  entry has exactly the advertised identity and selected export symbol.
+  Ordinary patterns preserve their selected export; default-pattern routes
+  select the official source's `default` export. Fetch, compile, evaluation,
+  identity-mismatch, and commit failures leave the original pointer and running
+  graph untouched. Equal identities let ordinary patterns stop immediately
+  (and persist newly proven source provenance); roots take the fast path only
+  after the persisted artifact loads, so an unloadable root can rebuild through
+  the same identity-authorized source path before bootstrap.
+  Persisted roots are resolved without starting. A pre-provenance root may be
+  back-filled only when its stored `{ identity, symbol }` exactly equals the
+  current official entry's advertised content identity; stale, custom, and
+  repository-pinned sourceless roots remain pinned —
+  except a stale sourceless root whose stored pattern the current runtime
+  explicitly cannot load (probe resolves `undefined`; a probe error stays
+  pinned, and `cfcEnforcementMode: "disabled"` — where the probe is
+  unsupported — stays pinned too): that root is replaced with the official
+  system root for the space kind (home.tsx / default-app.tsx), recording the
+  displaced ref under `displacedPattern` meta (see pattern-updates.md for the
+  full exception semantics).
+  URL-based root creation and recreation stamp provenance; custom
+  `RuntimeProgram` recreation does not. Repository-pinned sourceless patterns,
+  cross-origin sources, default roots reached by the generic post-start hook,
+  and starts that intentionally install no pattern watcher remain excluded. The
+  check remains best-effort; if identity lookup or replacement compilation is
+  unavailable, an ordinary pattern keeps running and the subsequent root start
+  retains its normal loud failure behavior. The update path does not consult
+  build SHA metadata; a rolling deployment that mixes
+  identity/source/import revisions fails closed at the compiled-identity
+  comparison. See
   [`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md).
 - **Current default and planned end state.** The runner built-in default is off
   like every flag in this category; the shell build injects `true` unless the
   define is set to `"false"`, so the deployed product (and local shell dev
-  builds) run it on for non-home roots. Server-side processes (toolshed, CLI,
-  background piece service) leave it off unless the env var is set. End state:
-  graduate to always-on for system roots once golden-replay coverage has
+  builds) run it on for roots and other same-toolshed system-source patterns.
+  Server-side processes
+  (toolshed, CLI, background piece service) leave it off unless the env var is
+  set. End state:
+  graduate to always-on for system sources once golden-replay coverage has
   soaked, then delete the flag.
-- **Status on 2026-07-21.** Implemented; on in the shell for all tracked system
+- **Status on 2026-07-22.** Implemented; on in the shell for all tracked system
   roots, home included ([`systemPatternAutoUpdateHome`](#appendix-a-removed-and-never-shipped-flags)
-  removed), off elsewhere. Root reconciliation and broken-root repair run
-  before bootstrap.
+  removed), and for other patterns whose verified source path exposes
+  `?identity`; off elsewhere. Root reconciliation and broken-root repair run
+  before bootstrap, while ordinary-pattern checks run after instantiation.
 - **Path to removal.** Make the check unconditional and remove the flag.
 
 ### `computedCellIds`

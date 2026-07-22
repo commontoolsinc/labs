@@ -7,21 +7,36 @@ import { LOOM_REPO, REPO, TRUST_COLS } from "./config.ts";
 import { labsCi, loomCi } from "./tiles/main-build.ts";
 import { labsCiTrust, loomCiTrust } from "./tiles/ci-trust.ts";
 import { labsCiDuration, loomCiDuration } from "./tiles/ci-duration.ts";
-import { recentRuns } from "./tiles/recent-runs.ts";
+import { commitGanttHref, recentRuns } from "./tiles/recent-runs.ts";
 import { dau, foldSeries, parseExcludes } from "./tiles/dau.ts";
 import { githubMembers } from "./tiles/github-members.ts";
 import { buildSnapshot, discordOnline } from "./tiles/discord-online.ts";
 import { gcpSpend } from "./tiles/gcp-spend.ts";
 import { prodErrors } from "./tiles/prod-errors.ts";
-import { githubCiSpend, GITHUB_LAG_DAYS, projectMonthly, settled } from "./tiles/github-ci-spend.ts";
+import {
+  GITHUB_LAG_DAYS,
+  githubCiSpend,
+  projectMonthly,
+  settled,
+} from "./tiles/github-ci-spend.ts";
 import { modelSpend } from "./tiles/model-spend.ts";
-import { benchmark, formatNs, trendPct, trendStatus } from "./tiles/benchmark.ts";
+import {
+  benchmark,
+  formatNs,
+  trendPct,
+  trendStatus,
+} from "./tiles/benchmark.ts";
 import { TILES } from "./registry.ts";
 
-function ctx(runs: Run[], env: Record<string, string> = {}, runsByRepo?: (repo: string) => Run[]): Ctx {
+function ctx(
+  runs: Run[],
+  env: Record<string, string> = {},
+  runsByRepo?: (repo: string) => Run[],
+): Ctx {
   return {
     runs: () => Promise.resolve(runs),
-    runsFor: (repo: string) => Promise.resolve(runsByRepo ? runsByRepo(repo) : runs),
+    runsFor: (repo: string) =>
+      Promise.resolve(runsByRepo ? runsByRepo(repo) : runs),
     env: (k) => env[k],
   };
 }
@@ -56,27 +71,39 @@ Deno.test("labs ci:failing tip -> bad (shows the raw conclusion)", async () => {
 });
 
 Deno.test("labs ci:no completed runs -> unknown", async () => {
-  const v = await labsCi.collect(ctx([run({ status: "in_progress", conclusion: null })]));
+  const v = await labsCi.collect(
+    ctx([run({ status: "in_progress", conclusion: null })]),
+  );
   assertEquals(v.status, "unknown");
   assertEquals(v.value, "—");
 });
 
-Deno.test("labs ci trust: first-try-green rate drives status", async () => {
-  // 2 of 3 completed passed first try -> 66.7% -> below the warn threshold -> bad.
+Deno.test("labs ci trust: only first-attempt success counts as green", async () => {
+  // Two of four completed runs passed first try. A success on retry remains in
+  // the denominator but does not count as first-try green.
   const runs = [
     run({ conclusion: "success", run_attempt: 1 }),
     run({ conclusion: "success", run_attempt: 1 }),
+    run({ conclusion: "success", run_attempt: 2 }),
     run({ conclusion: "failure" }),
   ];
   const v = await labsCiTrust.collect(ctx(runs));
-  assertStringIncludes(v.value ?? "", "66.7%");
+  assertEquals(v.value, "50.0%");
   assertEquals(v.status, "bad");
 });
 
 Deno.test("labs ci trust grid: cell count is a whole number of rows (no half-empty final row)", async () => {
-  const runs = Array.from({ length: 130 }, () => run({ conclusion: "success" }));
-  const cells = ((await labsCiTrust.collect(ctx(runs))).extra ?? "").match(/class="cell"/g)?.length ?? 0;
-  assert(cells > 0 && cells % TRUST_COLS === 0, `expected a multiple of ${TRUST_COLS}, got ${cells}`);
+  const runs = Array.from(
+    { length: 130 },
+    () => run({ conclusion: "success" }),
+  );
+  const cells =
+    ((await labsCiTrust.collect(ctx(runs))).extra ?? "").match(/class="cell"/g)
+      ?.length ?? 0;
+  assert(
+    cells > 0 && cells % TRUST_COLS === 0,
+    `expected a multiple of ${TRUST_COLS}, got ${cells}`,
+  );
   assertEquals(cells, 120); // floor(130 / 40) * 40
 });
 
@@ -89,13 +116,19 @@ Deno.test("ci-duration window: the 6h window when it has >= 20 runs, else the mo
     });
   // 25 runs within the last ~25 min -> the 6h window wins (25 >= 20).
   const busy = Array.from({ length: 25 }, (_, i) => at(i));
-  assertStringIncludes((await labsCiDuration.collect(ctx(busy))).sub ?? "", "25 passing runs in the last 6h");
+  assertStringIncludes(
+    (await labsCiDuration.collect(ctx(busy))).sub ?? "",
+    "25 passing runs in the last 6h",
+  );
   // 5 recent + 30 from two days ago -> only 5 in 6h (< 20) -> fall back to the last 20.
   const quiet = [
     ...Array.from({ length: 5 }, (_, i) => at(i)),
     ...Array.from({ length: 30 }, () => at(60 * 48)),
   ];
-  assertStringIncludes((await labsCiDuration.collect(ctx(quiet))).sub ?? "", "last 20 passing runs");
+  assertStringIncludes(
+    (await labsCiDuration.collect(ctx(quiet))).sub ?? "",
+    "last 20 passing runs",
+  );
 });
 
 Deno.test("ci-duration: only runs that passed end to end count", async () => {
@@ -114,11 +147,18 @@ Deno.test("ci-duration: only runs that passed end to end count", async () => {
     at(3, { status: "in_progress", conclusion: null }),
   ];
   // Only the 20 successful runs are counted; the rest are ignored.
-  assertStringIncludes((await labsCiDuration.collect(ctx(runs))).sub ?? "", "20 passing runs in the last 6h");
+  assertStringIncludes(
+    (await labsCiDuration.collect(ctx(runs))).sub ?? "",
+    "20 passing runs in the last 6h",
+  );
 });
 
 Deno.test("recent-runs: wide, failure tip -> bad, rows link to the landing PR", async () => {
-  const v = await recentRuns.collect(ctx([run({ conclusion: "failure", head_commit: { message: "oops (#42)" } })]));
+  const v = await recentRuns.collect(
+    ctx([
+      run({ conclusion: "failure", head_commit: { message: "oops (#42)" } }),
+    ]),
+  );
   assertEquals(recentRuns.wide, true);
   assertEquals(v.status, "bad");
   assertStringIncludes(v.extra ?? "", "/pull/42");
@@ -126,12 +166,98 @@ Deno.test("recent-runs: wide, failure tip -> bad, rows link to the landing PR", 
 
 Deno.test("recent runs: timestamps have a UTC fallback and a viewer-local marker", async () => {
   const startedAt = "2024-01-02T17:05:00Z";
-  const runsByRepo = (repo: string) => repo === REPO ? [run({ run_started_at: startedAt })] : [];
+  const runsByRepo = (repo: string) =>
+    repo === REPO ? [run({ run_started_at: startedAt })] : [];
   const v = await recentRuns.collect(ctx([], {}, runsByRepo));
   assertStringIncludes(
     v.extra ?? "",
     `<time class="t" datetime="${startedAt}" data-viewer-time>17:05 UTC</time>`,
   );
+});
+
+Deno.test("recent runs: duration opens every successful run for the commit", async () => {
+  const sha = "a".repeat(40);
+  const start = Date.parse("2026-07-21T18:00:00Z");
+  const first = run({
+    id: 41,
+    head_sha: sha,
+    run_started_at: new Date(start).toISOString(),
+    updated_at: new Date(start + 185_000).toISOString(),
+  });
+  const second = run({
+    id: 42,
+    head_sha: sha,
+    run_attempt: 2,
+    run_started_at: new Date(start - 60_000).toISOString(),
+    updated_at: new Date(start + 120_000).toISOString(),
+  });
+  const failed = run({ id: 43, head_sha: sha, conclusion: "failure" });
+  const loom = run({ id: 44, repo: LOOM_REPO, head_sha: sha });
+  const dispatched = run({
+    id: 45,
+    event: "workflow_dispatch",
+    head_sha: sha,
+  });
+  const running = run({
+    id: 46,
+    status: "in_progress",
+    conclusion: null,
+    head_sha: "b".repeat(40),
+    run_started_at: new Date(start - 120_000).toISOString(),
+  });
+  const untimed = run({
+    id: 47,
+    head_sha: "c".repeat(40),
+    run_started_at: new Date(start - 180_000).toISOString(),
+    updated_at: "not-a-timestamp",
+  });
+  const brief = run({
+    id: 48,
+    head_sha: "d".repeat(40),
+    run_started_at: new Date(start - 240_000).toISOString(),
+    updated_at: new Date(start - 198_000).toISOString(),
+  });
+
+  const href = commitGanttHref(first, [
+    first,
+    second,
+    failed,
+    loom,
+    dispatched,
+  ]);
+  assert(href);
+  const target = new URL(href, "http://dashboard");
+  assertEquals(target.pathname, "/ci-gantt");
+  assertEquals(target.searchParams.get("repo"), "labs");
+  assertEquals(target.searchParams.get("sha"), sha);
+  assertEquals(target.searchParams.getAll("run"), ["41:1", "42:2"]);
+  assertEquals(commitGanttHref({ ...first, head_sha: "" }, [first]), null);
+  assertEquals(commitGanttHref(failed, [first, failed]), null);
+  const tooMany = Array.from(
+    { length: 151 },
+    (_, index) => run({ id: 1_000 + index, head_sha: sha }),
+  );
+  assertEquals(commitGanttHref(tooMany[0], tooMany), null);
+
+  const runsByRepo = (repo: string) =>
+    repo === REPO
+      ? [first, second, failed, dispatched, running, untimed, brief]
+      : [loom];
+  const html = (await recentRuns.collect(ctx([], {}, runsByRepo))).extra ?? "";
+  assertStringIncludes(
+    html,
+    `class="evdur" data-focus-key="gantt-41" href="${
+      href.replaceAll("&", "&amp;")
+    }"`,
+  );
+  assertStringIncludes(html, 'class="evtxt" data-focus-key="pr-title-41"');
+  assertStringIncludes(
+    html,
+    '>3m 05s</a><a class="evarrow" data-focus-key="pr-arrow-41"',
+  );
+  assertStringIncludes(html, '<span class="evdur">running</span>');
+  assertStringIncludes(html, '<span class="evdur">—</span>');
+  assertStringIncludes(html, '>42s</a><a class="evarrow"');
 });
 
 Deno.test("tile labels: the labs/loom ci family is renamed and paired", async () => {
@@ -151,20 +277,32 @@ Deno.test("labs ci: an in-flight build renders at the bottom (extra), not the he
   ];
   const v = await labsCi.collect(ctx(runs));
   assertStringIncludes(v.extra ?? "", "next build running");
-  assert(!(v.aside ?? "").includes("next build running"), "the badge is no longer in the header aside");
+  assert(
+    !(v.aside ?? "").includes("next build running"),
+    "the badge is no longer in the header aside",
+  );
 });
 
 Deno.test("recent runs: labs and loom runs interleave chronologically, each tagged", async () => {
   const now = Date.now();
   const mk = (repo: string, minsAgo: number, msg: string) =>
-    run({ repo, run_started_at: new Date(now - minsAgo * 60_000).toISOString(), head_commit: { message: msg } });
+    run({
+      repo,
+      run_started_at: new Date(now - minsAgo * 60_000).toISOString(),
+      head_commit: { message: msg },
+    });
   const byRepo = (repo: string) =>
     repo === LOOM_REPO
       ? [mk(LOOM_REPO, 10, "loom c (#7)"), mk(LOOM_REPO, 30, "loom b (#6)")]
       : [mk(REPO, 5, "labs c (#3)"), mk(REPO, 20, "labs a (#2)")];
   const v = await recentRuns.collect(ctx([], {}, byRepo));
   // Newest-first interleave across repos: labs 5m, loom 10m, labs 20m, loom 30m.
-  const order = [...(v.extra ?? "").matchAll(/\/pull\/(\d+)/g)].map((m) => m[1]);
+  const order = [
+    ...(v.extra ?? "").matchAll(
+      /class="evtxt" data-focus-key="pr-title-\d+" href="[^"]*\/pull\/(\d+)/g,
+    ),
+  ]
+    .map((match) => match[1]);
   assertEquals(order, ["3", "7", "2", "6"]);
   assertStringIncludes(v.extra ?? "", "labs · ");
   assertStringIncludes(v.extra ?? "", "loom · ");
@@ -190,11 +328,17 @@ Deno.test("dau: distinct identities per UTC day, excluding the DIDs we name", ()
   assertEquals(human.get(day1)?.size, 1);
   assertEquals(human.get(day2)?.size, 2);
   // A bucket carrying no spans for an identity is not that identity being active.
-  assertEquals(foldSeries([ser("did:key:alice", [[day1, 0]])], new Set()).size, 0);
+  assertEquals(
+    foldSeries([ser("did:key:alice", [[day1, 0]])], new Set()).size,
+    0,
+  );
 });
 
 Deno.test("dau: the exclusion list is read defensively", () => {
-  assertEquals([...parseExcludes("did:key:a, did:key:b ,, ")], ["did:key:a", "did:key:b"]);
+  assertEquals([...parseExcludes("did:key:a, did:key:b ,, ")], [
+    "did:key:a",
+    "did:key:b",
+  ]);
   assertEquals(parseExcludes(undefined).size, 0);
   assertEquals(parseExcludes("").size, 0);
 });
@@ -252,7 +396,9 @@ Deno.test("projectMonthly: >=2-week (or month-to-date) window, spilling into las
   assertEquals(projectMonthly(2000, 20, 30, lastMonth), 3000);
   // < 2 weeks -> 14-day window = 6 days this month + last 8 of last month.
   //   window = 1200 + 8*100 = 2000 over 14 days -> (2000/14)*30.
-  assert(Math.abs(projectMonthly(1200, 6, 30, lastMonth) - (2000 / 14) * 30) < 1e-6);
+  assert(
+    Math.abs(projectMonthly(1200, 6, 30, lastMonth) - (2000 / 14) * 30) < 1e-6,
+  );
   // No data this month yet -> window is the last 14 days of last month.
   assertEquals(projectMonthly(0, 0, 31, lastMonth), 100 * 31);
   // No data anywhere -> falls back to mtd.
@@ -263,12 +409,24 @@ Deno.test("settled: a day is known once it has a figure, or once billing has had
   const L = GITHUB_LAG_DAYS; // 2
   // Day 15 of the month. Spend every day through the 15th: the last two days have
   // figures, so they are known despite being inside the lag.
-  assertEquals(settled(Array.from({ length: 31 }, (_, i) => (i < 15 ? 10 : 0)), 15, L).length, 15);
+  assertEquals(
+    settled(Array.from({ length: 31 }, (_, i) => (i < 15 ? 10 : 0)), 15, L)
+      .length,
+    15,
+  );
   // Nothing since the 5th. The days that carried spend stop at 5, but by the 15th
   // billing has settled everything up to the 13th, so those quiet days are known.
-  assertEquals(settled(Array.from({ length: 31 }, (_, i) => (i < 5 ? 10 : 0)), 15, L).length, 13);
+  assertEquals(
+    settled(Array.from({ length: 31 }, (_, i) => (i < 5 ? 10 : 0)), 15, L)
+      .length,
+    13,
+  );
   // The window keeps growing as the month goes on rather than stalling at 5.
-  assertEquals(settled(Array.from({ length: 31 }, (_, i) => (i < 5 ? 10 : 0)), 31, L).length, 29);
+  assertEquals(
+    settled(Array.from({ length: 31 }, (_, i) => (i < 5 ? 10 : 0)), 31, L)
+      .length,
+    29,
+  );
   // Nothing at all this month: still only what billing has settled.
   assertEquals(settled(new Array(31).fill(0), 15, L).length, 13);
   // Day 1: nothing is settled yet and nothing has a figure.
@@ -296,7 +454,10 @@ Deno.test("projectMonthly: the window keeps up with the calendar once spend stop
   assert(projectMonthly(1.01, 2, 31, []) / rate(15) > 6);
   // By the end of the month the projection has converged on what was actually spent,
   // instead of stalling at the 14th and claiming double.
-  assert(rate(31) < 1.15, `end-of-month projection should approach $1.01, got ${rate(31)}`);
+  assert(
+    rate(31) < 1.15,
+    `end-of-month projection should approach $1.01, got ${rate(31)}`,
+  );
   assert(rate(31) < rate(15), "the rate falls as quiet days accumulate");
   // The same money landing early is rated over the same elapsed fortnight, not over
   // the two days at the start of it.
@@ -316,13 +477,25 @@ Deno.test("projectMonthly: a borrowed tail is settled before it is borrowed", ()
   // On the 1st, with a 2-day lag, last month's final day is not known yet.
   const unsettledTail = [...steady.slice(0, 29), 0];
   assertEquals(settled(unsettledTail, 30 + 1, GITHUB_LAG_DAYS).length, 29);
-  assertEquals(projectMonthly(30, 3, 31, settled(unsettledTail, 30 + 1, GITHUB_LAG_DAYS)), truth);
+  assertEquals(
+    projectMonthly(30, 3, 31, settled(unsettledTail, 30 + 1, GITHUB_LAG_DAYS)),
+    truth,
+  );
   // Borrowed raw, that one zero drags the rate down.
-  assert(projectMonthly(30, 3, 31, unsettledTail) < truth, "an unsettled tail under-projects");
+  assert(
+    projectMonthly(30, 3, 31, unsettledTail) < truth,
+    "an unsettled tail under-projects",
+  );
   // A prior month with no data at all borrows nothing rather than a month of zeros.
-  assertEquals(settled(new Array(30).fill(0), 30 + 1, GITHUB_LAG_DAYS).length, 29);
+  assertEquals(
+    settled(new Array(30).fill(0), 30 + 1, GITHUB_LAG_DAYS).length,
+    29,
+  );
   // But by mid-month a genuinely quiet prior month is known, and counts as quiet.
-  assertEquals(settled(new Array(30).fill(0), 30 + 15, GITHUB_LAG_DAYS).length, 30);
+  assertEquals(
+    settled(new Array(30).fill(0), 30 + 15, GITHUB_LAG_DAYS).length,
+    30,
+  );
 });
 
 Deno.test("benchmark: trend classification — flat/down good, up warn, steep up bad", () => {
@@ -359,5 +532,7 @@ Deno.test("benchmark: formatNs picks a readable unit", () => {
 Deno.test("registry: unique ids and positive intervals", () => {
   const ids = TILES.map((t) => t.id);
   assertEquals(new Set(ids).size, ids.length, "tile ids must be unique");
-  for (const t of TILES) assert(t.intervalMs > 0, `${t.id} needs a positive intervalMs`);
+  for (const t of TILES) {
+    assert(t.intervalMs > 0, `${t.id} needs a positive intervalMs`);
+  }
 });

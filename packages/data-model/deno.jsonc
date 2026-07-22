@@ -1,5 +1,8 @@
 {
   "name": "@commonfabric/data-model",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": true
+  },
   "imports": {
     "@/": "./src/"
   },
