@@ -101,33 +101,35 @@ Deno.test("worker reconciler - $alias records in child position", async (t) => {
       console.warn = (...args: unknown[]) => {
         warnings.push(args);
       };
-      let cancel;
+      let cancel: (() => void) | undefined;
       try {
         cancel = reconciler.mount(rootCell as unknown as Cell<unknown>);
         await t.settle();
+
+        const textOps = collector.getOpsOfType("create-text");
+        assertEquals(
+          textOps.some((op) =>
+            "text" in op && op.text === JSON.stringify(aliasRecord)
+          ),
+          true,
+          "$alias child should render its JSON serialization",
+        );
+        assertEquals(
+          textOps.some((op) => "text" in op && op.text === ""),
+          false,
+          "$alias child must not render as empty text (the old unresolved-alias special case)",
+        );
+        assertEquals(
+          warnings.length >= 1,
+          true,
+          "should warn about the unexpected object",
+        );
       } finally {
         console.warn = originalWarn;
+        cancel?.();
       }
-
-      const textOps = collector.getOpsOfType("create-text");
-      assertEquals(
-        textOps.some((op) =>
-          "text" in op && op.text === JSON.stringify(aliasRecord)
-        ),
-        true,
-        "$alias child should render its JSON serialization",
-      );
-      assertEquals(
-        textOps.some((op) => "text" in op && op.text === ""),
-        false,
-        "$alias child must not render as empty text (the old unresolved-alias special case)",
-      );
-      assertEquals(
-        warnings.length >= 1,
-        true,
-        "should warn about the unexpected object",
-      );
-      cancel();
     },
   );
+
+  await dummyTx.commit();
 });
