@@ -61,15 +61,17 @@ Deno.test("labs ci:no completed runs -> unknown", async () => {
   assertEquals(v.value, "—");
 });
 
-Deno.test("labs ci trust: first-try-green rate drives status", async () => {
-  // 2 of 3 completed passed first try -> 66.7% -> below the warn threshold -> bad.
+Deno.test("labs ci trust: only first-attempt success counts as green", async () => {
+  // Two of four completed runs passed first try. A success on retry remains in
+  // the denominator but does not count as first-try green.
   const runs = [
     run({ conclusion: "success", run_attempt: 1 }),
     run({ conclusion: "success", run_attempt: 1 }),
+    run({ conclusion: "success", run_attempt: 2 }),
     run({ conclusion: "failure" }),
   ];
   const v = await labsCiTrust.collect(ctx(runs));
-  assertStringIncludes(v.value ?? "", "66.7%");
+  assertEquals(v.value, "50.0%");
   assertEquals(v.status, "bad");
 });
 
