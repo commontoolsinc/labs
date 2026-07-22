@@ -60,7 +60,7 @@ export function traverseValue(
       // `resolveOriginal`/`getArtifactEntryRef` would be severed, which is how
       // a pattern passed as an `op` is later identified by
       // `{ identity, symbol }`. Mirrors the registration in
-      // `toJSONWithLegacyAliases`.
+      // `toJSONWithAliasBindings`.
       if (isPattern(value)) noteDerivedCopy(copy, value);
       return copy;
     }

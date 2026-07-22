@@ -218,7 +218,7 @@ describe("pattern", () => {
       "javascript",
     );
     expect(nodes[0].inputs).toEqual({
-      $alias: { cell: "argument", path: ["x"], scope: "space" },
+      $alias: { cell: "argument", path: ["x"] },
     });
     expect(nodes[0].outputs).toEqual({
       $alias: { partialCause: { $generated: 0 }, path: [], scope: "space" },
@@ -320,7 +320,7 @@ describe("pattern", () => {
       "javascript",
     );
     expect(nodes[0].inputs).toEqual({
-      x: { $alias: { cell: "argument", path: ["x"], scope: "space" } },
+      x: { $alias: { cell: "argument", path: ["x"] } },
     });
     expect(nodes[0].outputs).toEqual({
       $alias: { partialCause: { $generated: 0 }, path: [], scope: "space" },
