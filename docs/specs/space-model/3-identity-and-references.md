@@ -180,8 +180,6 @@ be retired once pattern serialization emits sigil bindings.
 
 ## Open Questions
 
-- When can the `$alias` binding vocabulary be removed (pattern serialization
-  emitting sigil bindings)?
 - How do cross-space references interact with permissions?
 - Should `toJSON()` on cells be removed once JSON is no longer the primary format?
 
