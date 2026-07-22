@@ -1,5 +1,5 @@
-// Entity projection scaling benchmark. This file is intentionally outside the
-// scheduled benchmark set described in docs/development/BENCHMARKS.md.
+// Entity projection scaling benchmark. The scheduled benchmark workflow stores
+// its operation timings and additional resource diagnostics.
 
 import type { PieceManager } from "@commonfabric/piece";
 import type {
@@ -55,16 +55,19 @@ function mib(bytes: number): number {
 }
 
 function diagnostic(label: string, value: object): void {
-  // BENCHMARKS.md requires benchmark stdout to remain pure JSON. Diagnostics
-  // therefore go to stderr.
-  console.error(JSON.stringify({ label, ...value }));
+  // The JSON reporter captures console output from benchmark bodies. Direct
+  // stderr writes remain available to the workflow's diagnostics artifact.
+  const bytes = encoder.encode(`${JSON.stringify({ label, ...value })}\n`);
+  const written = Deno.stderr.writeSync(bytes);
+  if (written !== bytes.length) {
+    throw new Error(`wrote ${written} of ${bytes.length} diagnostic bytes`);
+  }
 }
 
 async function connect(
-  count: number,
+  ids: string[],
   cfcAnnotations: boolean,
 ): Promise<ConnectedFixture> {
-  const ids = entityIds(count);
   let requests = 0;
   const manager = {
     getSpace: () => "did:key:zFuseEntityProjectionBenchmark",
@@ -91,17 +94,31 @@ async function connect(
   };
 }
 
+async function measureOperation<T>(
+  benchmark: Deno.BenchContext,
+  operation: () => Promise<T>,
+): Promise<{ value: T; wallMs: number }> {
+  const started = performance.now();
+  benchmark.start();
+  try {
+    const value = await operation();
+    return { value, wallMs: performance.now() - started };
+  } finally {
+    benchmark.end();
+  }
+}
+
 async function measureConstruction(
-  count: number,
+  benchmark: Deno.BenchContext,
+  ids: string[],
   cfcAnnotations: boolean,
 ): Promise<Measurement> {
-  // Generate the server response before measuring so the retained-memory delta
-  // describes the projection rather than the fixture's source ID array.
   forceGc();
   const before = Deno.memoryUsage();
-  const started = performance.now();
-  const fixture = await connect(count, cfcAnnotations);
-  const wallMs = performance.now() - started;
+  const { value: fixture, wallMs } = await measureOperation(
+    benchmark,
+    () => connect(ids, cfcAnnotations),
+  );
   forceGc();
   const after = Deno.memoryUsage();
   const measurement = {
@@ -113,7 +130,7 @@ async function measureConstruction(
     wireMiB: mib(encoder.encode(JSON.stringify({ ids: fixture.ids })).length),
   };
   // Keep the fixture live through the post-construction memory snapshot.
-  if (fixture.state.entityIds.size !== count) {
+  if (fixture.state.entityIds.size !== ids.length) {
     throw new Error("entity projection did not retain every ID");
   }
   return measurement;
@@ -124,10 +141,11 @@ for (const count of [1_000, 10_000, 100_000]) {
     name: `stubs-${count}`,
     group: "entity projection cfc off",
     n: 1,
-    fn: async () => {
+    fn: async (benchmark) => {
+      const ids = entityIds(count);
       diagnostic(
         `construction-cfc-off-${count}`,
-        await measureConstruction(count, false),
+        await measureConstruction(benchmark, ids, false),
       );
     },
   });
@@ -138,10 +156,11 @@ for (const count of [1_000, 5_000, 10_000, 20_000]) {
     name: `stubs-${count}`,
     group: "entity projection cfc on",
     n: 1,
-    fn: async () => {
+    fn: async (benchmark) => {
+      const ids = entityIds(count);
       diagnostic(
         `construction-cfc-on-${count}`,
-        await measureConstruction(count, true),
+        await measureConstruction(benchmark, ids, true),
       );
     },
   });
@@ -157,15 +176,15 @@ for (
     name: `${count}-ids-${refreshes}-refreshes`,
     group: "entity projection refresh",
     n: 1,
-    fn: async () => {
-      const fixture = await connect(count, false);
+    fn: async (benchmark) => {
+      const fixture = await connect(entityIds(count), false);
       forceGc();
       const before = Deno.memoryUsage();
-      const started = performance.now();
-      for (let iteration = 0; iteration < refreshes; iteration++) {
-        await fixture.bridge.prepareDirectory(fixture.state.entitiesIno);
-      }
-      const wallMs = performance.now() - started;
+      const { wallMs } = await measureOperation(benchmark, async () => {
+        for (let iteration = 0; iteration < refreshes; iteration++) {
+          await fixture.bridge.prepareDirectory(fixture.state.entitiesIno);
+        }
+      });
       forceGc();
       const after = Deno.memoryUsage();
       diagnostic(`refresh-${count}-${refreshes}`, {
@@ -197,9 +216,9 @@ Deno.bench({
   name: "1000-entity-recursive-walk",
   group: "entity projection hydration",
   n: 1,
-  fn: async () => {
+  fn: async (benchmark) => {
     const count = 1_000;
-    const fixture = await connect(count, false);
+    const fixture = await connect(entityIds(count), false);
     let entityGets = 0;
     let inputGets = 0;
     let resultGets = 0;
@@ -240,11 +259,13 @@ Deno.bench({
 
     forceGc();
     const before = Deno.memoryUsage();
-    const started = performance.now();
-    for (const [, ino] of fixture.tree.getChildren(fixture.state.entitiesIno)) {
-      await fixture.bridge.prepareDirectory(ino);
-    }
-    const wallMs = performance.now() - started;
+    const { wallMs } = await measureOperation(benchmark, async () => {
+      for (
+        const [, ino] of fixture.tree.getChildren(fixture.state.entitiesIno)
+      ) {
+        await fixture.bridge.prepareDirectory(ino);
+      }
+    });
     forceGc();
     const after = Deno.memoryUsage();
     diagnostic("recursive-hydration-1000", {

@@ -160,7 +160,8 @@ revision path and are not selected, decoded, or returned by ID enumeration.
 
 ## Measured Baseline
 
-The review benchmarks are diagnostic benchmarks, not scheduled CI gates:
+The scheduled benchmark workflow runs these diagnostic benchmarks. Their
+results show trends but do not gate changes:
 
 - `packages/fuse/entity-projection.bench.ts` measures identifier-stub
   construction, repeated refresh, CFC annotation overhead, and recursive
@@ -176,6 +177,12 @@ deno task --cwd packages/fuse bench:entity-projection
 deno task --cwd packages/memory bench:entity-id-list
 ```
 
+The workflow's JSON artifact records only the operations named by each
+benchmark. Fixture construction, forced garbage collection, and diagnostic
+measurement happen outside those timers. Heap, request-count, response-size,
+and independently measured wall-time diagnostics go to stderr. The workflow
+stores them in `diagnostics.log` beside the JSON results.
+
 The measurements below were collected on 2026-07-22 with Deno 2.8.x. Ranges
 come from repeated local runs. They are evidence about scaling and relative
 cost, not portable latency budgets.
@@ -186,12 +193,14 @@ With CFC annotations disabled:
 
 | Live IDs | Build time | Retained V8 heap | ID response | Final inodes |
 | ---: | ---: | ---: | ---: | ---: |
-| 1,000 | 5.1–5.2 ms | 0.7–0.8 MiB | about 0.06 MiB | 1,008 |
-| 10,000 | 54–77.5 ms | 8.3 MiB | about 0.6 MiB | 10,008 |
-| 100,000 | 574–826 ms | 76.9–77.0 MiB | about 5.5 MiB | 100,008 |
+| 1,000 | 2.1–2.7 ms | 0.5 MiB | about 0.06 MiB | 1,008 |
+| 10,000 | 22.9–24.6 ms | 6.4–6.5 MiB | about 0.6 MiB | 10,008 |
+| 100,000 | 269–321 ms | 58.6 MiB | about 5.5 MiB | 100,008 |
 
 The result is linear but material: enumerating 100,000 IDs retains roughly
-77 MiB in the V8 heap before any entity value is loaded. The benchmark's fake
+59 MiB in the V8 heap before any entity value is loaded. The retained-memory
+baseline already contains the fixture's source ID array, so this delta covers
+the projection rather than counting the source IDs again. The benchmark's fake
 transport excludes database time, network framing, JSON decoding, and FUSE
 buffer-copy cost.
 
@@ -200,21 +209,21 @@ retain additional metadata per node:
 
 | Live IDs | Build time with CFC annotations |
 | ---: | ---: |
-| 1,000 | 59–71.5 ms |
-| 5,000 | 639–862 ms |
-| 10,000 | 2.44–2.68 s |
-| 20,000 | 11.88–14.32 s |
+| 1,000 | 22.9–24.1 ms |
+| 5,000 | 384–393 ms |
+| 10,000 | 1.40–1.57 s |
+| 20,000 | 5.75–6.07 s |
 
 Repeated refreshes confirmed why per-handle preparation matters. Ten refreshes
-of 10,000 IDs took 166–216 ms and made 11 list requests including connection;
-three refreshes of 100,000 IDs took 442–553 ms and made four requests. Each
+of 10,000 IDs took 70.5–70.6 ms and made 11 list requests including connection;
+three refreshes of 100,000 IDs took 266–273 ms and made four requests. Each
 100,000-ID response was about 5.5 MiB even though the identifier set had not
 changed.
 
 The recursive-walk fixture descended into 1,000 stubs. It performed exactly
 1,000 entity gets, 1,000 input gets, and 1,000 result gets. About 3 MiB of
 source JSON expanded to 64.5–65 MiB of retained heap and 106,008 inodes in
-345–423 ms. This quantifies the crawler boundary: identifier-only top-level
+475–516 ms. This quantifies the crawler boundary: identifier-only top-level
 listing is cheap relative to projecting every value, but directory shape can
 invite the latter.
 
