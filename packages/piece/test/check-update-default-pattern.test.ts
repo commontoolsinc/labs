@@ -999,10 +999,12 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(typeof displaced?.displacedAt).toBe("number");
   });
 
-  it("keeps a non-home stale sourceless root pinned even when unloadable", async () => {
-    // The destructive fallback is scoped to home spaces: fleet evidence
-    // exists for pre-provenance system HOME roots; an arbitrary space's
-    // sourceless root is more plausibly a deliberate custom program.
+  it("replaces an unloadable stale sourceless space root", async () => {
+    // The fallback covers every space's DEFAULT pattern, not just home
+    // (widened by the flag owner after a non-home field report): a root
+    // that cannot load is a dead space regardless of kind. The displaced
+    // ref is recorded for non-home too — it is the recovery pointer if
+    // the replaced root was a custom program.
     await setup({ systemPatternAutoUpdate: true });
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -1017,12 +1019,27 @@ describe("checkAndUpdateDefaultPattern", () => {
     stub.setSource(SOURCE_V2);
     const restore = shadowLoadProbe(staleRef.identity, "undefined");
     try {
-      expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+      expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
     } finally {
       restore();
     }
-    expect(getPatternIdentityRef(root)).toEqual(staleRef);
-    expect(getPatternSource(root)).toBeUndefined();
+    await runtime.idle();
+
+    const after = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(
+      await identityForSource(SOURCE_V2),
+    );
+    expect(getPatternSource(after)).toBe(DEFAULT_APP_PATTERN_URL);
+    const displaced = (after as unknown as {
+      getMetaRaw: (key: string) => unknown;
+    }).getMetaRaw("displacedPattern") as {
+      identity?: string;
+      symbol?: string;
+      displacedAt?: number;
+    };
+    expect(displaced?.identity).toBe(staleRef.identity);
+    expect(displaced?.symbol).toBe(staleRef.symbol);
+    expect(typeof displaced?.displacedAt).toBe("number");
   });
 
   it("keeps the home root pinned when the load probe fails", async () => {
