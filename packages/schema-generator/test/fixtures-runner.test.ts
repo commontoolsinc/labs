@@ -14,9 +14,11 @@ import {
   valueFromJson,
 } from "@commonfabric/data-model/codec-json";
 import {
+  FabricPrimitive,
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { createSchemaTransformerV2 } from "../src/plugin.ts";
 import {
   batchTypeCheckFixtures,
@@ -218,7 +220,18 @@ function normalizeArrayOrdering(obj: unknown): unknown {
   if (Array.isArray(obj)) {
     return obj.map(normalizeArrayOrdering);
   }
-  if (obj && typeof obj === "object") {
+  // A `FabricPrimitive` (`FabricBytes` and the like) has no enumerable own
+  // properties, so `Object.entries` would flatten it to `{}` and hide whatever
+  // it carried -- and then `valueEqual`, which this feeds, would compare two
+  // different primitives as equal. Treat it as a leaf.
+  //
+  // TODO(danfuzz): A `FabricInstance` (the other `FabricSpecialObject`
+  // subclass) is NOT a leaf -- it wraps nested `FabricValue`s -- but there is
+  // no faithful `Object.entries` descent for it either, so it still flattens to
+  // `{}` here. Handle it when the golden path needs to carry one.
+  if (
+    obj !== null && typeof obj === "object" && !(obj instanceof FabricPrimitive)
+  ) {
     const entries = Object.entries(obj as Record<string, unknown>)
       .map(([key, value]) => {
         if (key === "required" && Array.isArray(value)) {
@@ -275,4 +288,53 @@ Deno.test("plain JSON would lose exactly those values", () => {
   assertEquals(roundTrip(Infinity), null);
   assertEquals(roundTrip(-Infinity), null);
   assertThrows(() => JSON.stringify({ v: 1n }), TypeError);
+});
+
+Deno.test("golden compare keeps Fabric special objects distinct, not flattened to {}", () => {
+  // Both normalizers walk objects by key. A Fabric special object has no
+  // enumerable own properties, so walking it flattens it to `{}` -- and then
+  // `valueEqual` sees only `{}` on each side and calls two different values
+  // equal. That is exactly the silent agreement this whole harness exists to
+  // rule out, so it has to hold for special objects too, not only for the
+  // special numbers that motivated the format.
+  //
+  // The generator does not mint a `FabricBytes` default today, so the
+  // post-`normalizeSchema` shape is built directly and driven through the same
+  // encode -> decode -> normalize -> `valueEqual` path the fixture runner uses.
+  const schemaWithBytes = (bytes: number[]) =>
+    ({
+      type: "object",
+      properties: { blob: { type: "string" } },
+      default: { blob: new FabricBytes(new Uint8Array(bytes)) },
+    }) as unknown as Record<string, unknown>;
+
+  // "Expected" side: as a golden would be read back and normalized.
+  const throughGolden = (normalized: Record<string, unknown>) =>
+    normalizeArrayOrdering(
+      decodeGolden(encodeGolden(normalized)),
+    ) as FabricValue;
+
+  // "Actual" side: as the runner normalizes fresh output.
+  const actual = normalizeArrayOrdering(
+    normalizeSchema(schemaWithBytes([1, 2, 3])),
+  ) as FabricValue;
+
+  // Same bytes still compare equal after the full round trip.
+  expect(
+    valueEqual(
+      actual,
+      throughGolden(normalizeSchema(schemaWithBytes([1, 2, 3]))),
+    ),
+  )
+    .toBe(true);
+
+  // Different bytes are still seen as different. This is the assertion that
+  // fails if either normalizer flattens the `FabricBytes` to `{}`.
+  expect(
+    valueEqual(
+      actual,
+      throughGolden(normalizeSchema(schemaWithBytes([4, 5, 6]))),
+    ),
+  )
+    .toBe(false);
 });
