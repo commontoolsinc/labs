@@ -36,8 +36,9 @@ matters) is the same ceiling: sensitive data, untrusted input, and
 network access cannot safely coexist under the current rules.
 
 The fabric is a runtime built on the opposite rule: **the software is
-untrusted, and safety attaches to the data.** Three mechanisms enforce
-it, and all three are built. Together they form a distributed, trusted
+untrusted, and safety attaches to the data.** Its unit of untrusted
+code is the pattern: a small, bounded program. Three mechanisms enforce
+the rule — all three built — and they add up to a distributed, trusted
 microkernel for networked software in the AI era.
 
 ## In this repository
@@ -48,7 +49,7 @@ microkernel for networked software in the AI era.
 - the flow-checking machinery
 - the sandboxing
 - a reactive, multiplayer-by-default storage layer with keypair identity
-- roughly two hundred running programs, including a live demonstration
+- roughly two hundred running patterns, including a live demonstration
   of prompt injection being structurally contained
   (`packages/patterns/cfc-agent-prompt-injection-demo/`)
 - an attestation pipeline running on Intel TDX hardware
@@ -96,14 +97,15 @@ bit of a nag, and the reward for satisfying it is code that provably has
 no data races. Humans find such checkers a slog. Language models have
 infinite patience: they are happy to grind against the checker until it
 is satisfied, and whatever they come up with is safe by construction.
-And because programs carry no authority of their own, any program anyone
-has already spent the tokens to make can be safely reused: programs are
-crowd-sourced, cached save points in the latent space of software.
+And because patterns carry no authority of their own, any pattern
+anyone has already spent the tokens to make can be safely reused:
+patterns are crowd-sourced, cached save points in the latent space of
+software.
 
-What makes the check tractable is the compiler: programs are plain
+What makes the check tractable is the compiler: patterns are plain
 TypeScript, and the compiler rewrites every closure to capture only the
 fields it actually reads, so taint is tracked per field rather than per
-program, and the full dataflow graph is known before anything runs. None
+pattern, and the full dataflow graph is known before anything runs. None
 of this is hidden: `cf check <pattern> --show-transformed` prints the
 exact code the runtime executes.
 
@@ -114,8 +116,8 @@ prove, bit for bit, that it is running the open-source runtime, in
 memory its own operator cannot read. Nodes refuse peers that cannot
 prove it, so you can build a trusted fabric out of untrusted nodes: your
 data may flow anywhere that can prove itself, and nowhere else. Identity
-is a keypair, not an account. State accretes at Schelling points, and
-durable Schelling points form where no participant can hold the state
+is a keypair, not an account, so state accretes at Schelling points —
+and the durable ones form where no participant can hold the state
 hostage.
 
 Attestation is existing hardware pointed backward. Confidential
@@ -132,7 +134,7 @@ attestation is only as strong as the ecosystem that checks it
 (independent verifiers, transparency logs, reproducible builds), and
 nobody stands up that ecosystem for one workload; a payments enclave is
 not worth it. A general-purpose runtime that can run anything is a
-different matter: verify the runtime once, and every program that ever
+different matter: verify the runtime once, and every pattern that ever
 runs on it inherits the verification.
 
 ## Four classes of cloud security
@@ -178,8 +180,7 @@ exploded, it invalidated Windows 95's security model, no amount of
 patching a monolithic kernel could make it safe, and the industry moved
 to NT, a kernel with the boundary designed in from the start.
 
-There is also a reason this is buildable now and was not before: two
-ingredients arrived almost at once. Secure enclaves make trust across a
+This is buildable now because two ingredients arrived almost at once. Secure enclaves make trust across a
 network possible. And language models write software for approximately
 free; a new framework used to mean convincing humans to write for an
 empty ecosystem, and now models will happily write for it. The standard
@@ -189,69 +190,76 @@ infinite software.
 
 ## Resonant by default
 
-Hollow things are things you like, but afterwards you are left feeling
-regret. Resonant things are things you like, and afterwards you feel
-nourished. They are superficially similar but fundamentally different.
-Modern society — modern tech, modern business, modern politics — is
-great at delivering hollow experiences and terrible at delivering
-resonant ones. AI supercharges everything, so it is more important than
+All of this machinery is for one thing: how software feels to live
+with. Hollow things are things you like, but
+afterwards you are left feeling regret. Resonant things are things you
+like, and afterwards you feel nourished. They are superficially similar
+but fundamentally different. Modern society — modern tech, modern
+business, modern politics — is great at delivering hollow experiences
+and terrible at delivering resonant ones; the aggregator equilibrium,
+maximally-used and minimally-liked, is hollowness as a market outcome. AI supercharges everything, so it is more important than
 ever that software become resonant by default. And to do that, you need
 to invert the physics of trust.
 
-[Resonant computing](https://resonantcomputing.org) has five
-principles, and the inversion is what turns each one from aspiration
-into structure:
+[Resonant computing](https://resonantcomputing.org), a manifesto we
+co-authored, names five principles. The inversion gives each one
+teeth:
 
 - **Private.** Policies on data make people the primary stewards of
   their own context, determining how it is used.
-- **Dedicated.** Flow checking proves at compile time that software
-  works exclusively for you — no hidden agendas, no conflicting
-  interests.
-- **Plural.** The attestation mesh and keypair identity mean no single
-  entity controls the digital spaces we inhabit.
-- **Adaptable.** Infinite software, safe by construction: open-ended,
-  able to meet the specific, context-dependent needs of each person.
-- **Prosocial.** A multiplayer substrate where collective signals
-  belong to the people whose data they are — software that helps us
-  become better neighbors, collaborators, and stewards of shared
-  spaces.
+- **Dedicated.** Flow checking proves at compile time that your data
+  serves no interest but yours: every flow out of your context is
+  either policy-permitted or a compile error.
+- **Plural.** No single entity controls the digital spaces we inhabit:
+  identity is a keypair, and the mesh has no center.
+- **Adaptable.** Infinite software, safe by construction — open-ended
+  enough to meet each person's actual needs.
+- **Prosocial.** Multiplayer is the substrate default, and collective
+  signals carry the policies of the people who generated them: no
+  intermediary can own what a group made together.
 
 ## From cells to a city
 
-This is what life did with dangerous chemistry: put it in boundaries.
-The mechanisms above are the membrane, and what they make possible is
-small, bounded programs — policy-checked, provenance-carrying, unable
-to leak what they touch. A single one is unimpressive. But as more
-patterns accumulate, they transmute into something radically different,
-with emergent power that makes the individual programs look puny: a
-general-purpose material that can be shaped into nearly infinite
-variety.
+Life did this with dangerous chemistry: put it in cells. The
+mechanisms above are the membrane, and what they make possible is
+patterns: policy-checked, provenance-carrying, unable to leak what they
+touch. A
+single one is unimpressive: a screenshot of any one running pattern
+looks like almost nothing, the way any single web page looked like
+almost nothing in 1994. The point of the web was never a page; it was
+the emergent whole, the ability to teleport anywhere. The same is true
+here. Because policies survive derivation, patterns compose: any two
+that check can be joined, and the joint result still checks; no trust
+negotiation required. As more patterns accumulate,
+they transmute into something radically different, with emergent power
+that makes the individual patterns look puny: a general-purpose
+material that can be shaped into nearly anything. The patterns are the
+cells; the fabric is the organism.
 
 Infinite software will not be infinite apps; it will be one system that
 does infinite things. The software melts away, and it feels like your
-data coming alive — something that lives with you, holding up the day
-like a tray: light, organized, human-scale, the mundane scaffolding of
-a good life. Alive not like a person, with one face you can talk to,
+data coming alive — something that lives with you. Alive not like a
+person, with one face you can talk to,
 but like a city. A whole city of cognitive labor that works just for
 you.
 
 ## The whole unlock
 
-For forty years we have structurally underproduced software: the
-expense of creating it, and the verticalized world of the same-origin
-paradigm. LLMs have changed the first. We can change the second.
+For forty years we have structurally underproduced software, for two
+reasons: it was expensive to create, and the same-origin paradigm
+verticalized the world. LLMs removed the expense. The paradigm is a
+design choice.
 Personal computing was supposed to make computers personal; instead, it
 made people subordinate to software. This is the way back: a personal
-fabric that everyone can own, woven into a society-scale common fabric
-of intention. If the singularity comes, let it be plural: exuberant,
+fabric that everyone can own, woven into a society-scale common
+fabric. If the singularity comes, let it be plural: exuberant,
 creative, messy — billions of experiments in flourishing, not one
 experiment in species-wide management.
 
-And none of it survives without the inversion. Every property above
-leans on the same rule — the fabric has your intentions woven in,
-structurally guiding what it can and cannot do, not as some hastily
-jury-rigged solution on top. Safety attaches to the data, not the
-software. Inverting the physics of trust is the whole unlock.
+And none of it survives without the inversion. The fabric has your
+intentions woven in, structurally guiding what it can and cannot do —
+not as some hastily jury-rigged solution on top. Inverting the physics
+of trust is the whole unlock.
 
 ## Where things stand
 
