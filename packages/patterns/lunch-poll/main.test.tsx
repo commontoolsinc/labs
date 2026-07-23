@@ -664,7 +664,7 @@ export default pattern(() => {
   // Options saved before generated art was introduced have no `imageUrl`
   // property. They must still satisfy the card's map/pattern contract and
   // render normally rather than passing a present-but-undefined value.
-  const assert_legacy_option_without_image_renders = computed(() =>
+  const assert_legacy_option_without_image_renders = assert(() =>
     findNodeByProp(
       stalePoll[UI],
       "data-option-title",
