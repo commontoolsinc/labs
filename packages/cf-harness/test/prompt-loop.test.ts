@@ -3,6 +3,7 @@ import {
   assertEquals,
   assertRejects,
   assertStringIncludes,
+  assertThrows,
 } from "@std/assert";
 import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import { decodeBase64 } from "@std/encoding/base64";
@@ -144,6 +145,25 @@ class FakeProcessRunner implements ProcessRunner {
     );
   }
 }
+
+Deno.test("CfHarnessPromptLoop rejects known provider/client mismatches", () => {
+  assertThrows(
+    () =>
+      new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          modelProvider: "openai-compatible-gateway",
+          cfcEnforcementMode: "disabled",
+        }),
+        modelClient: {
+          providerId: "openai-codex",
+          complete: () => Promise.reject(new Error("unused")),
+        },
+      }),
+    Error,
+    "does not match configured provider",
+  );
+});
 
 Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through the shared CFC loop", async () => {
   const sandbox = new FakeSandboxRuntime();

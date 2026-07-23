@@ -38,17 +38,32 @@ interface HarnessCommonConfig {
   runManifestPath?: string;
 }
 
-/**
- * Resolved harness configuration. The gateway fields remain required for
- * backward-compatible library access; `modelProvider` determines whether they
- * are active. The Codex provider ignores them and uses `credentialOwnerKey`.
- */
+/** Public configuration shape retained for pre-provider gateway callers. */
 export interface HarnessConfig extends HarnessCommonConfig {
-  modelProvider: HarnessModelProviderId;
+  modelProvider?: HarnessModelProviderId;
   gatewayBaseUrl: string;
   gatewayAuthMode: HarnessGatewayAuthMode;
   credentialOwnerKey?: string;
 }
+
+/** Fully resolved configuration used by the engine. */
+export type ResolvedHarnessConfig =
+  & HarnessCommonConfig
+  & (
+    | {
+      modelProvider: "openai-compatible-gateway";
+      gatewayBaseUrl: string;
+      gatewayAuthMode: HarnessGatewayAuthMode;
+      credentialOwnerKey?: never;
+    }
+    | {
+      modelProvider: "openai-codex";
+      credentialOwnerKey: string;
+      // Kept as inactive metadata for public API compatibility.
+      gatewayBaseUrl: string;
+      gatewayAuthMode: HarnessGatewayAuthMode;
+    }
+  );
 
 export interface ResolveHarnessConfigOptions {
   modelProvider?: HarnessModelProviderId;
@@ -88,6 +103,11 @@ export const isHarnessGatewayAuthMode = (
 ): input is HarnessGatewayAuthMode =>
   typeof input === "string" &&
   GATEWAY_AUTH_MODES.includes(input as HarnessGatewayAuthMode);
+
+export const isHarnessModelProviderId = (
+  input: unknown,
+): input is HarnessModelProviderId =>
+  input === "openai-compatible-gateway" || input === "openai-codex";
 
 export const parseHarnessGatewayAuthMode = (
   input: string | null | undefined,
@@ -162,7 +182,7 @@ export const resolveGatewayAuthMode = (
 
 export const resolveHarnessConfig = (
   options: ResolveHarnessConfigOptions = {},
-): HarnessConfig => {
+): ResolvedHarnessConfig => {
   const modelProvider = options.modelProvider ?? "openai-compatible-gateway";
   if (
     modelProvider === "openai-codex" &&
@@ -204,19 +224,21 @@ export const resolveHarnessConfig = (
     cfcEnforcementMode: resolveCfcEnforcementMode(options),
     cfcEnforcementModeSource: resolveCfcEnforcementModeSource(options),
   };
+  if (modelProvider === "openai-codex") {
+    return {
+      ...common,
+      modelProvider,
+      credentialOwnerKey: options.credentialOwnerKey ?? "local",
+      gatewayBaseUrl: normalizeGatewayBaseUrl(DEFAULT_GATEWAY_BASE_URL),
+      gatewayAuthMode: "bearer",
+    };
+  }
   return {
     ...common,
     modelProvider,
     gatewayBaseUrl: normalizeGatewayBaseUrl(
-      modelProvider === "openai-compatible-gateway"
-        ? options.gatewayBaseUrl ?? DEFAULT_GATEWAY_BASE_URL
-        : DEFAULT_GATEWAY_BASE_URL,
+      options.gatewayBaseUrl ?? DEFAULT_GATEWAY_BASE_URL,
     ),
-    gatewayAuthMode: modelProvider === "openai-compatible-gateway"
-      ? resolveGatewayAuthMode(options)
-      : "bearer",
-    ...(modelProvider === "openai-codex"
-      ? { credentialOwnerKey: options.credentialOwnerKey ?? "local" }
-      : {}),
+    gatewayAuthMode: resolveGatewayAuthMode(options),
   };
 };

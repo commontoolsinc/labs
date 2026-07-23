@@ -1,6 +1,7 @@
 import {
   assertEquals,
   assertRejects,
+  assertStrictEquals,
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
@@ -20,6 +21,18 @@ import {
   InMemoryHarnessCredentialStore,
 } from "../src/auth/credential-store.ts";
 import type { OpenAICodexOAuthCredential } from "../src/auth/types.ts";
+
+const errorGraphText = (input: unknown): string => {
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  let current = input;
+  while (current !== undefined && current !== null && !seen.has(current)) {
+    seen.add(current);
+    parts.push(current instanceof Error ? current.message : String(current));
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return parts.join("\n");
+};
 
 const jwt = (payload: Record<string, unknown>): string => {
   const encode = (value: unknown) =>
@@ -234,6 +247,145 @@ Deno.test("Codex credential refresh honors pre-abort and releases its owner lock
     expiresAt: 4_000_000_000_000,
     accountId: "other-account",
   });
+});
+
+Deno.test("Codex credential resolution preserves abort during credential reads", async () => {
+  const credential: OpenAICodexOAuthCredential = {
+    type: "oauth",
+    providerId: "openai-codex",
+    accessToken: "access",
+    refreshToken: "refresh",
+    expiresAt: 4_000_000_000_000,
+    accountId: "account",
+  };
+  let releaseRead!: () => void;
+  const readHeld = new Promise<void>((resolve) => {
+    releaseRead = resolve;
+  });
+  let markReadStarted!: () => void;
+  const readStarted = new Promise<void>((resolve) => {
+    markReadStarted = resolve;
+  });
+  const store = new InMemoryHarnessCredentialStore();
+  await store.set("local", "openai-codex", credential);
+  const originalGet = store.get.bind(store);
+  store.get = async (ownerKey, providerId) => {
+    markReadStarted();
+    await readHeld;
+    return await originalGet(ownerKey, providerId);
+  };
+  const resolver = new OpenAICodexCredentialResolver({
+    store,
+    ownerKey: "local",
+  });
+  const controller = new AbortController();
+  const resolving = resolver.resolve(controller.signal);
+  await readStarted;
+  const reason = new Error("abort during credential read");
+  controller.abort(reason);
+  releaseRead();
+
+  const error = await assertRejects(() => resolving);
+  assertStrictEquals(error, reason);
+});
+
+Deno.test("Codex browser login preserves abort during PKCE generation", async () => {
+  const controller = new AbortController();
+  let authorizationUrls = 0;
+  const login = loginOpenAICodexWithBrowser({
+    authService: new OpenAICodexAuthService(
+      new InMemoryHarnessCredentialStore(),
+      "local",
+    ),
+    signal: controller.signal,
+    onAuthorizationUrl: () => {
+      authorizationUrls += 1;
+    },
+  });
+  const reason = new Error("abort during PKCE");
+  controller.abort(reason);
+
+  const error = await assertRejects(() => login);
+  assertStrictEquals(error, reason);
+  assertEquals(authorizationUrls, 0);
+});
+
+Deno.test("Codex exchange and refresh network errors have secret-free cause graphs", async () => {
+  const exchangeError = await assertRejects(() =>
+    exchangeOpenAICodexAuthorizationCode({
+      code: "exchange-code-secret",
+      verifier: "exchange-verifier-secret",
+      redirectUri: "http://localhost:1455/auth/callback",
+      fetchFn: () =>
+        Promise.reject(
+          new Error("exchange-code-secret exchange-verifier-secret"),
+        ),
+    })
+  );
+  assertEquals(
+    errorGraphText(exchangeError).includes("exchange-code-secret"),
+    false,
+  );
+  assertEquals(
+    errorGraphText(exchangeError).includes("exchange-verifier-secret"),
+    false,
+  );
+
+  const store = new InMemoryHarnessCredentialStore();
+  await store.set("local", "openai-codex", {
+    type: "oauth",
+    providerId: "openai-codex",
+    accessToken: "access-secret-in-cause",
+    refreshToken: "refresh-secret-in-cause",
+    expiresAt: 0,
+    accountId: "account-secret-in-cause",
+  });
+  const refreshError = await assertRejects(() =>
+    new OpenAICodexCredentialResolver({
+      store,
+      ownerKey: "local",
+      now: () => 100_000,
+      fetchFn: () =>
+        Promise.reject(
+          new Error(
+            "access-secret-in-cause refresh-secret-in-cause account-secret-in-cause",
+          ),
+        ),
+    }).resolve()
+  );
+  const refreshGraph = errorGraphText(refreshError);
+  assertEquals(refreshGraph.includes("access-secret-in-cause"), false);
+  assertEquals(refreshGraph.includes("refresh-secret-in-cause"), false);
+  assertEquals(refreshGraph.includes("account-secret-in-cause"), false);
+});
+
+Deno.test("Codex authorization-code exchange preserves non-DOM abort reasons", async () => {
+  const controller = new AbortController();
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const exchange = exchangeOpenAICodexAuthorizationCode({
+    code: "code",
+    verifier: "verifier",
+    redirectUri: "http://localhost:1455/auth/callback",
+    signal: controller.signal,
+    fetchFn: (_input, init) => {
+      markStarted();
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => reject(init.signal?.reason),
+          { once: true },
+        );
+      });
+    },
+  });
+  await started;
+  const reason = new Error("custom exchange abort");
+  controller.abort(reason);
+  const error = await assertRejects(() => exchange);
+  assertStrictEquals(error, reason);
 });
 
 Deno.test("Codex browser login ignores wrong-state callbacks and accepts the valid callback", async () => {

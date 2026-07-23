@@ -73,6 +73,73 @@ Deno.test("file credential store cancels queued local lock waits", async () => {
   );
 });
 
+Deno.test("file credential store cancels a cross-process advisory-lock wait", async () => {
+  if (Deno.build.os === "windows") return;
+  const root = await Deno.makeTempDir();
+  const path = join(root, "auth.json");
+  const lockPath = `${path}.lock`;
+  const holder = new Deno.Command(Deno.execPath(), {
+    args: [
+      "eval",
+      "--quiet",
+      `const file = await Deno.open(Deno.args[0], { create: true, read: true, write: true, mode: 0o600 });
+await file.lock(true);
+console.log("locked");
+await Deno.stdin.read(new Uint8Array(1));
+await file.unlock();
+file.close();`,
+      lockPath,
+    ],
+    cwd: root,
+    stdin: "piped",
+    stdout: "piped",
+    stderr: "null",
+  }).spawn();
+  const stdout = holder.stdout.getReader();
+  let holderOutput = "";
+  while (!holderOutput.includes("locked")) {
+    const { value, done } = await stdout.read();
+    if (done) throw new Error("lock holder exited before acquiring the lock");
+    holderOutput += new TextDecoder().decode(value);
+  }
+  stdout.releaseLock();
+
+  let markLockStarted!: () => void;
+  const lockStarted = new Promise<void>((resolve) => {
+    markLockStarted = resolve;
+  });
+  const store = new FileHarnessCredentialStore({
+    path,
+    onLockAcquisitionStarted: markLockStarted,
+  });
+  const controller = new AbortController();
+  const pending = store.update(
+    "local",
+    "openai-codex",
+    () => credential("local"),
+    controller.signal,
+  );
+  await lockStarted;
+  const reason = new DOMException("cross-process wait canceled", "AbortError");
+  controller.abort(reason);
+
+  await assertRejects(
+    () => pending,
+    DOMException,
+    "cross-process wait canceled",
+  );
+
+  const stdin = holder.stdin.getWriter();
+  await stdin.write(new Uint8Array([1]));
+  await stdin.close();
+  assertEquals((await holder.status).success, true);
+  await store.set("local", "openai-codex", credential("after-cancel"));
+  assertEquals(
+    (await store.get("local", "openai-codex"))?.accountId,
+    "account-after-cancel",
+  );
+});
+
 Deno.test("file credential store is owner-isolated, atomic, and private", async () => {
   const root = await Deno.makeTempDir();
   const path = join(root, "harness-home", "auth.json");
@@ -206,6 +273,25 @@ Deno.test("file credential store surfaces malformed storage without overwriting 
   );
   assertEquals(await Deno.readTextFile(path), "{malformed");
   assertEquals(store.lastValidSnapshot(), lastValid);
+});
+
+Deno.test("file credential store rejects malformed owners and expiries fail-closed", async () => {
+  const root = await Deno.makeTempDir();
+  const path = join(root, "auth.json");
+  const malformedDocuments = [
+    '{"version":1,"owners":[]}',
+    '{"version":1,"owners":{"local":{"openai-codex":{"type":"oauth","providerId":"openai-codex","accessToken":"access","refreshToken":"refresh","expiresAt":1e999,"accountId":"account"}}}}',
+  ];
+  for (const malformed of malformedDocuments) {
+    await Deno.writeTextFile(path, malformed, { mode: 0o600 });
+    const store = new FileHarnessCredentialStore({ path });
+    await assertRejects(
+      () => store.set("local", "openai-codex", credential("replacement")),
+      Error,
+      "failed to read credential store",
+    );
+    assertEquals(await Deno.readTextFile(path), malformed);
+  }
 });
 
 Deno.test("logout deletes only the selected owner/provider entry", async () => {

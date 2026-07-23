@@ -6,6 +6,7 @@ import type {
   HarnessTranscriptMessage,
 } from "../contracts/transcript.ts";
 import type { HarnessFetch } from "../contracts/http-fetch.ts";
+import type { HarnessCredentialOwnerRef } from "../contracts/run-manifest.ts";
 import { defaultHarnessFetch } from "../contracts/http-fetch.ts";
 import { materializeImageAttachmentContentPart } from "../image-attachments.ts";
 import type { OpenAICodexOAuthCredential } from "../auth/types.ts";
@@ -24,11 +25,14 @@ export const OPENAI_CODEX_MODELS_URL =
 const OPENAI_CODEX_CLIENT_VERSION = "0.0.0";
 
 export interface OpenAICodexCredentialResolverLike {
+  readonly ownerKey?: string;
+  readonly credentialOwner?: HarnessCredentialOwnerRef;
   resolve(signal?: AbortSignal): Promise<OpenAICodexOAuthCredential>;
 }
 
 export interface OpenAICodexResponsesClientOptions {
   credentialResolver: OpenAICodexCredentialResolverLike;
+  credentialOwner?: HarnessCredentialOwnerRef;
   fetchFn?: HarnessFetch;
   endpoint?: string;
   now?: () => Date;
@@ -199,11 +203,11 @@ async function* parseSse(
   }
   const reader = response.body.getReader();
   if (signal?.aborted) {
-    await reader.cancel(signal.reason);
+    await reader.cancel(signal.reason).catch(() => {});
     throw abortReason(signal);
   }
   const onAbort = () => {
-    void reader.cancel(signal?.reason);
+    void reader.cancel(signal?.reason).catch(() => {});
   };
   signal?.addEventListener("abort", onAbort, { once: true });
   const decoder = new TextDecoder();
@@ -211,7 +215,14 @@ async function* parseSse(
   let completed = false;
   try {
     while (true) {
-      const { value, done } = await reader.read();
+      let read: ReadableStreamReadResult<Uint8Array>;
+      try {
+        read = await reader.read();
+      } catch (error) {
+        if (signal?.aborted) throw abortReason(signal);
+        throw error;
+      }
+      const { value, done } = read;
       if (signal?.aborted) throw abortReason(signal);
       buffered += decoder.decode(value, { stream: !done });
       buffered = buffered.replaceAll("\r\n", "\n");
@@ -379,6 +390,7 @@ const emitAttempt = async (
 
 export class OpenAICodexResponsesClient implements HarnessModelClient {
   readonly providerId = "openai-codex";
+  readonly credentialOwner?: HarnessCredentialOwnerRef;
   readonly #resolver: OpenAICodexCredentialResolverLike;
   readonly #fetchFn: HarnessFetch;
   readonly #endpoint: string;
@@ -386,6 +398,11 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
 
   constructor(options: OpenAICodexResponsesClientOptions) {
     this.#resolver = options.credentialResolver;
+    const credentialOwner = options.credentialOwner ??
+      options.credentialResolver.credentialOwner;
+    this.credentialOwner = credentialOwner === undefined
+      ? undefined
+      : structuredClone(credentialOwner);
     this.#fetchFn = options.fetchFn ?? defaultHarnessFetch;
     this.#endpoint = options.endpoint ?? OPENAI_CODEX_RESPONSES_URL;
     if (this.#endpoint !== OPENAI_CODEX_RESPONSES_URL) {
@@ -400,6 +417,7 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
     signal?: AbortSignal,
   ): Promise<readonly HarnessModelCatalogEntry[]> {
     const credential = await this.#resolver.resolve(signal);
+    if (signal?.aborted) throw abortReason(signal);
     const url = new URL(OPENAI_CODEX_MODELS_URL);
     url.searchParams.set("client_version", OPENAI_CODEX_CLIENT_VERSION);
     const response = await this.#fetchFn(url, {
@@ -413,6 +431,10 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
       },
       signal,
     });
+    if (signal?.aborted) {
+      await response.body?.cancel(signal.reason).catch(() => {});
+      throw abortReason(signal);
+    }
     if (!response.ok) {
       throw new Error(
         `OpenAI Codex model discovery failed (${response.status})`,
@@ -422,8 +444,10 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
     try {
       body = await response.json() as Record<string, unknown>;
     } catch {
+      if (signal?.aborted) throw abortReason(signal);
       throw new Error("OpenAI Codex model discovery returned invalid JSON");
     }
+    if (signal?.aborted) throw abortReason(signal);
     if (!Array.isArray(body.models)) {
       throw new Error("OpenAI Codex model discovery omitted the models array");
     }
@@ -477,7 +501,9 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
       );
     }
     const credential = await this.#resolver.resolve(request.signal);
+    if (request.signal?.aborted) throw abortReason(request.signal);
     const converted = await toResponsesInput(request.transcript);
+    if (request.signal?.aborted) throw abortReason(request.signal);
     const responseTools = toResponsesTools(request.tools);
     const body = JSON.stringify({
       model: request.model,
@@ -513,6 +539,10 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         body,
         signal: request.signal,
       });
+      if (request.signal?.aborted) {
+        await response.body?.cancel(request.signal.reason).catch(() => {});
+        throw abortReason(request.signal);
+      }
     } catch (error) {
       const endedAt = this.#now();
       const errorDetail = redactCredentialValues(
@@ -539,13 +569,8 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         outcome: "transport_error",
         errorDetail,
       });
-      if (
-        error instanceof DOMException && error.name === "AbortError" &&
-        errorDetail === error.message
-      ) {
-        throw error;
-      }
-      throw new Error(errorDetail, { cause: error });
+      if (request.signal?.aborted) throw abortReason(request.signal);
+      throw new Error(errorDetail);
     }
     const endedAt = this.#now();
     const baseAttempt: HarnessModelAttemptDiagnostic = {

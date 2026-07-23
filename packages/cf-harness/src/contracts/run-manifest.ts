@@ -31,6 +31,13 @@ export interface HarnessCredentialOwnerRef {
   tenantKey?: string;
 }
 
+export const harnessCredentialOwnersEqual = (
+  left: HarnessCredentialOwnerRef,
+  right: HarnessCredentialOwnerRef,
+): boolean =>
+  left.type === right.type && left.version === right.version &&
+  left.ownerKey === right.ownerKey && left.tenantKey === right.tenantKey;
+
 export interface LoomRunManifest {
   type: typeof LOOM_RUN_MANIFEST_TYPE;
   version: 1;

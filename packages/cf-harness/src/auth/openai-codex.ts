@@ -4,6 +4,10 @@ import {
 } from "../contracts/http-fetch.ts";
 import type { HarnessCredentialStore } from "./credential-store.ts";
 import {
+  HARNESS_CREDENTIAL_OWNER_REF_TYPE,
+  type HarnessCredentialOwnerRef,
+} from "../contracts/run-manifest.ts";
+import {
   type HarnessCredentialStatus,
   OPENAI_CODEX_PROVIDER_ID,
   type OpenAICodexOAuthCredential,
@@ -225,23 +229,26 @@ export const exchangeOpenAICodexAuthorizationCode = async (options: {
         signal: options.signal,
       },
     );
-  } catch (error) {
+  } catch {
+    if (options.signal?.aborted) throw abortReason(options.signal);
     throw new OpenAICodexAuthError(
       "network",
       "OpenAI Codex token exchange failed before receiving a response",
-      { cause: error },
     );
   }
-  return await readTokenResponse(
+  const credential = await readTokenResponse(
     response,
     "exchange",
     (options.now ?? Date.now)(),
   );
+  if (options.signal?.aborted) throw abortReason(options.signal);
+  return credential;
 };
 
 export interface OpenAICodexCredentialResolverOptions {
   store: HarnessCredentialStore;
   ownerKey: string;
+  credentialOwner?: HarnessCredentialOwnerRef;
   fetchFn?: HarnessFetch;
   now?: () => number;
   refreshSkewMs?: number;
@@ -250,6 +257,7 @@ export interface OpenAICodexCredentialResolverOptions {
 export class OpenAICodexCredentialResolver {
   readonly #store: HarnessCredentialStore;
   readonly #ownerKey: string;
+  readonly #credentialOwner: HarnessCredentialOwnerRef;
   readonly #fetchFn: HarnessFetch;
   readonly #now: () => number;
   readonly #refreshSkewMs: number;
@@ -257,6 +265,16 @@ export class OpenAICodexCredentialResolver {
   constructor(options: OpenAICodexCredentialResolverOptions) {
     this.#store = options.store;
     this.#ownerKey = options.ownerKey;
+    this.#credentialOwner = structuredClone(
+      options.credentialOwner ?? {
+        type: HARNESS_CREDENTIAL_OWNER_REF_TYPE,
+        version: 1,
+        ownerKey: options.ownerKey,
+      },
+    );
+    if (this.#credentialOwner.ownerKey !== options.ownerKey) {
+      throw new Error("credential owner reference does not match owner key");
+    }
     this.#fetchFn = options.fetchFn ?? defaultHarnessFetch;
     this.#now = options.now ?? Date.now;
     this.#refreshSkewMs = options.refreshSkewMs ?? REFRESH_SKEW_MS;
@@ -264,6 +282,10 @@ export class OpenAICodexCredentialResolver {
 
   get ownerKey(): string {
     return this.#ownerKey;
+  }
+
+  get credentialOwner(): HarnessCredentialOwnerRef {
+    return structuredClone(this.#credentialOwner);
   }
 
   async resolve(signal?: AbortSignal): Promise<OpenAICodexOAuthCredential> {
@@ -274,13 +296,14 @@ export class OpenAICodexCredentialResolver {
         this.#ownerKey,
         OPENAI_CODEX_PROVIDER_ID,
       );
-    } catch (error) {
+    } catch {
+      if (signal?.aborted) throw abortReason(signal);
       throw new OpenAICodexAuthError(
         "storage",
         "OpenAI Codex credential storage could not be read",
-        { cause: error },
       );
     }
+    if (signal?.aborted) throw abortReason(signal);
     if (!current) {
       throw new Error(
         "OpenAI Codex is not connected for this credential owner",
@@ -316,15 +339,20 @@ export class OpenAICodexCredentialResolver {
               }),
               signal,
             });
-          } catch (error) {
+          } catch {
             if (signal?.aborted) throw abortReason(signal);
             throw new OpenAICodexAuthError(
               "network",
               "OpenAI Codex token refresh failed before receiving a response",
-              { cause: error },
             );
           }
-          return await readTokenResponse(response, "refresh", this.#now());
+          const credential = await readTokenResponse(
+            response,
+            "refresh",
+            this.#now(),
+          );
+          if (signal?.aborted) throw abortReason(signal);
+          return credential;
         },
         signal,
       );
@@ -334,7 +362,6 @@ export class OpenAICodexCredentialResolver {
       throw new OpenAICodexAuthError(
         "storage",
         "OpenAI Codex credential storage could not be updated",
-        { cause: error },
       );
     }
     if (!refreshed) throw new Error("OpenAI Codex credential was disconnected");
@@ -511,6 +538,10 @@ export const loginOpenAICodexWithBrowser = async (options: {
   } catch (error) {
     activeBrowserLoginOwners.delete(options.authService.ownerKey);
     throw error;
+  }
+  if (options.signal?.aborted) {
+    activeBrowserLoginOwners.delete(options.authService.ownerKey);
+    throw abortReason(options.signal);
   }
   const closeController = new AbortController();
   type CallbackResult =

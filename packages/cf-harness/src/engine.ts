@@ -1,5 +1,6 @@
 import {
   type HarnessConfig,
+  type ResolvedHarnessConfig,
   resolveHarnessConfig,
   type ResolveHarnessConfigOptions,
 } from "./config.ts";
@@ -296,7 +297,7 @@ type HostSandboxMount = {
 };
 
 export class CfHarnessEngine {
-  readonly config: HarnessConfig;
+  readonly config: ResolvedHarnessConfig;
   readonly sandbox: SandboxRuntime;
   readonly artifactStore?: HarnessArtifactStore;
   readonly hostProcessRunner: ProcessRunner;
@@ -312,7 +313,38 @@ export class CfHarnessEngine {
 
   constructor(options: CreateHarnessEngineOptions = {}) {
     this.#now = options.now ?? (() => new Date().toISOString());
-    this.config = resolveHarnessConfig(options);
+    const recordedProvider = options.runState?.modelProvider ??
+      "openai-compatible-gateway";
+    if (
+      options.runState !== undefined && options.modelProvider !== undefined &&
+      options.modelProvider !== recordedProvider
+    ) {
+      throw new Error(
+        `resumed run provider ${recordedProvider} does not match requested provider ${options.modelProvider}`,
+      );
+    }
+    if (
+      options.runState !== undefined && recordedProvider === "openai-codex" &&
+      options.runState.credentialOwnerKey !== undefined &&
+      options.credentialOwnerKey !== undefined &&
+      options.credentialOwnerKey !== options.runState.credentialOwnerKey
+    ) {
+      throw new Error(
+        "resumed run credential owner does not match requested credential owner",
+      );
+    }
+    this.config = resolveHarnessConfig({
+      ...options,
+      modelProvider: options.runState === undefined
+        ? options.modelProvider
+        : recordedProvider,
+      ...(options.runState !== undefined && recordedProvider === "openai-codex"
+        ? {
+          credentialOwnerKey: options.runState.credentialOwnerKey ??
+            options.credentialOwnerKey,
+        }
+        : {}),
+    });
     const runId = options.runState?.runId ?? options.runId ??
       crypto.randomUUID();
     const sandboxConfig = options.sandboxRuntime === undefined

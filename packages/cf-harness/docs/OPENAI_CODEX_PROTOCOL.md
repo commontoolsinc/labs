@@ -64,10 +64,10 @@ top-level `models` array. Entries remain in provider order and retain advertised
 input, reasoning, and parallel-tool capabilities. Model metadata is not cached
 by this first implementation.
 
-The response adapter accepts `response.completed`, `response.done`, and
-`response.incomplete` terminal event spellings because the compared clients
-normalize all three. It persists encrypted reasoning output items only as
-provider-tagged opaque continuation state.
+The response adapter accepts `response.completed`, `response.done`,
+`response.incomplete`, and `response.failed` terminal event spellings because
+the compared clients normalize those terminal forms. It persists encrypted
+reasoning output items only as provider-tagged opaque continuation state.
 
 ## Product boundary
 

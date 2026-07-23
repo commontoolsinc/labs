@@ -3,6 +3,7 @@ import {
   CfHarnessEngine,
   type CreateHarnessEngineOptions,
 } from "./engine.ts";
+import { isHarnessModelProviderId } from "./config.ts";
 import type { HarnessBrowserAccessLease } from "./contracts/browser-access.ts";
 import {
   type CfcEnforcementMode,
@@ -1660,6 +1661,14 @@ export class CfHarnessPromptLoop {
     } else {
       this.modelClient = new OpenAICompatibleGatewayModelClient(
         this.#gatewayClient!,
+      );
+    }
+    if (
+      isHarnessModelProviderId(this.modelClient.providerId) &&
+      this.modelClient.providerId !== this.engine.config.modelProvider
+    ) {
+      throw new Error(
+        `model client provider ${this.modelClient.providerId} does not match configured provider ${this.engine.config.modelProvider}`,
       );
     }
     this.#maxModelTurns = options.maxModelTurns ?? DEFAULT_MAX_MODEL_TURNS;

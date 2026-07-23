@@ -526,7 +526,8 @@ Expected files:
 - [x] Refresh credentials at request time; do not snapshot access tokens into
   run artifacts.
 - [x] Verify that a resumed run preserves tool-call ids, prompt-cache affinity,
-  model, provider, and max-turn accounting.
+  model, and provider. The max-turn bound applies independently to each
+  resumed prompt-loop invocation; it is not a cumulative run-wide budget.
 - [x] Define a clear failure for a credential that was logged out or revoked
   between the original run and resume.
 

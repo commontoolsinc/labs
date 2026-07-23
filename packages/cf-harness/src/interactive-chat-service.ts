@@ -30,7 +30,10 @@ import {
   resolveHarnessChatPolicy,
 } from "./contracts/interactive-chat.ts";
 import { BROWSER_SUBAGENT_PROFILE } from "./contracts/subagent.ts";
-import type { HarnessCredentialOwnerRef } from "./contracts/run-manifest.ts";
+import {
+  type HarnessCredentialOwnerRef,
+  harnessCredentialOwnersEqual,
+} from "./contracts/run-manifest.ts";
 import type {
   HarnessAssistantTranscriptMessage,
   HarnessToolTranscriptMessage,
@@ -323,6 +326,25 @@ export class HarnessInteractiveChatService {
     ) {
       throw new Error(
         "interactive service credential owner does not match the owner-bound model client",
+      );
+    }
+    if (
+      codexConfigured &&
+      this.#basePromptLoopOptions.modelClient?.credentialOwner === undefined
+    ) {
+      throw new Error(
+        "openai-codex interactive services require a model client with an exact credential owner binding",
+      );
+    }
+    if (
+      codexConfigured &&
+      !harnessCredentialOwnersEqual(
+        this.#basePromptLoopOptions.modelClient!.credentialOwner!,
+        options.credentialOwner!,
+      )
+    ) {
+      throw new Error(
+        "interactive service credential owner does not match the model client's full owner binding",
       );
     }
     this.#createPromptLoop = options.createPromptLoop ??

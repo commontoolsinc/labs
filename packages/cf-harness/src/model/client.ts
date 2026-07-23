@@ -4,6 +4,7 @@ import type {
   HarnessAssistantTranscriptMessage,
   HarnessTranscriptMessage,
 } from "../contracts/transcript.ts";
+import type { HarnessCredentialOwnerRef } from "../contracts/run-manifest.ts";
 
 export interface HarnessModelRequestSummary {
   model: string;
@@ -68,6 +69,8 @@ export interface HarnessModelCatalogEntry {
 
 export interface HarnessModelClient {
   readonly providerId: string;
+  /** Exact authenticated owner binding for owner-bound providers. */
+  readonly credentialOwner?: HarnessCredentialOwnerRef;
   complete(request: HarnessModelTurnRequest): Promise<HarnessModelTurnResult>;
   listModels?(
     signal?: AbortSignal,

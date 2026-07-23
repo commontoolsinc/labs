@@ -169,7 +169,7 @@ const isCredential = (value: unknown): value is HarnessCredential => {
   return input.type === "oauth" && input.providerId === "openai-codex" &&
     typeof input.accessToken === "string" &&
     typeof input.refreshToken === "string" &&
-    typeof input.expiresAt === "number" &&
+    typeof input.expiresAt === "number" && Number.isFinite(input.expiresAt) &&
     typeof input.accountId === "string";
 };
 
@@ -181,7 +181,7 @@ const parseDocument = (text: string): CredentialDocument => {
   const input = parsed as Record<string, unknown>;
   if (
     input.version !== 1 || typeof input.owners !== "object" ||
-    input.owners === null
+    input.owners === null || Array.isArray(input.owners)
   ) {
     throw new Error("unsupported credential store format");
   }
@@ -209,14 +209,18 @@ const parseDocument = (text: string): CredentialDocument => {
 
 export interface FileHarnessCredentialStoreOptions {
   path: string;
+  /** @internal Observability hook used by lock-contention tests. */
+  onLockAcquisitionStarted?: () => void;
 }
 
 export class FileHarnessCredentialStore implements HarnessCredentialStore {
   readonly path: string;
+  readonly #onLockAcquisitionStarted?: () => void;
   #lastValid: CredentialDocument = emptyDocument();
 
   constructor(options: FileHarnessCredentialStoreOptions) {
     this.path = resolve(options.path);
+    this.#onLockAcquisitionStarted = options.onLockAcquisitionStarted;
   }
 
   async #ensurePrivateDirectory(): Promise<void> {
@@ -282,13 +286,7 @@ export class FileHarnessCredentialStore implements HarnessCredentialStore {
       lockFile = await Deno.open(lockPath, { read: true, write: true });
     }
     let locked = false;
-    let closed = false;
-    const closeWhileWaiting = () => {
-      if (!locked && !closed) {
-        closed = true;
-        lockFile.close();
-      }
-    };
+    let cleanupDetached = false;
     try {
       await this.#assertPrivateRegularFile(
         lockPath,
@@ -296,15 +294,51 @@ export class FileHarnessCredentialStore implements HarnessCredentialStore {
         false,
       );
       signal?.throwIfAborted();
-      signal?.addEventListener("abort", closeWhileWaiting, { once: true });
-      await lockFile.lock(true);
-      locked = true;
+      const lockPromise = lockFile.lock(true).then(() => {
+        locked = true;
+      });
+      this.#onLockAcquisitionStarted?.();
+      if (signal === undefined) {
+        await lockPromise;
+      } else {
+        let removeAbortListener = () => {};
+        const aborted = new Promise<"aborted">((resolve) => {
+          const onAbort = () => resolve("aborted");
+          signal.addEventListener("abort", onAbort, { once: true });
+          removeAbortListener = () =>
+            signal.removeEventListener("abort", onAbort);
+        });
+        let outcome: "locked" | "aborted";
+        try {
+          outcome = await Promise.race([
+            lockPromise.then(() => "locked" as const),
+            aborted,
+          ]);
+        } finally {
+          removeAbortListener();
+        }
+        if (outcome === "aborted") {
+          cleanupDetached = true;
+          void (async () => {
+            try {
+              await lockPromise;
+              await lockFile.unlock().catch(() => {});
+            } catch {
+              // The caller has already observed cancellation.
+            } finally {
+              lockFile.close();
+            }
+          })();
+          signal.throwIfAborted();
+        }
+      }
       signal?.throwIfAborted();
       return await operation();
     } finally {
-      signal?.removeEventListener("abort", closeWhileWaiting);
-      if (locked) await lockFile.unlock().catch(() => {});
-      if (!closed) lockFile.close();
+      if (!cleanupDetached) {
+        if (locked) await lockFile.unlock().catch(() => {});
+        lockFile.close();
+      }
     }
   }
 

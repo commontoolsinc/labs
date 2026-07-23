@@ -3,6 +3,7 @@ import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
   DEFAULT_GATEWAY_BASE_URL,
   DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE,
+  type HarnessConfig,
   parseCfcEnforcementMode,
   parseHarnessGatewayAuthMode,
   resolveCfcEnforcementMode,
@@ -11,6 +12,17 @@ import {
   resolveHarnessConfig,
 } from "../src/config.ts";
 import { resolveDockerRunscSandboxConfig } from "../src/sandbox/docker-runsc.ts";
+
+Deno.test("HarnessConfig preserves legacy gateway object literals", () => {
+  const legacy: HarnessConfig = {
+    gatewayBaseUrl: "https://gateway.example/",
+    gatewayAuthMode: "bearer",
+    skillScriptExecutionTarget: "sandbox",
+    cfcEnforcementMode: "observe",
+    cfcEnforcementModeSource: "default",
+  };
+  assertEquals(legacy.modelProvider, undefined);
+});
 
 Deno.test("parseCfcEnforcementMode accepts runner-aligned values", () => {
   assertEquals(parseCfcEnforcementMode("observe"), "observe");

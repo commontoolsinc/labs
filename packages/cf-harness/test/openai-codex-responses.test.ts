@@ -1,4 +1,9 @@
-import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import {
+  assertEquals,
+  assertRejects,
+  assertStrictEquals,
+  assertStringIncludes,
+} from "@std/assert";
 import {
   OPENAI_CODEX_MODELS_URL,
   OpenAICodexResponsesClient,
@@ -13,6 +18,18 @@ const credential: OpenAICodexOAuthCredential = {
   refreshToken: "refresh-secret",
   expiresAt: Date.now() + 60_000,
   accountId: "acct-123",
+};
+
+const errorGraphText = (input: unknown): string => {
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  let current = input;
+  while (current !== undefined && current !== null && !seen.has(current)) {
+    seen.add(current);
+    parts.push(current instanceof Error ? current.message : String(current));
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return parts.join("\n");
 };
 
 const sse = (...events: unknown[]): Response =>
@@ -540,7 +557,7 @@ Deno.test("Codex transport errors redact credential and account values", async (
     })
   );
 
-  const serialized = `${(error as Error).message}${JSON.stringify(attempts)}`;
+  const serialized = `${errorGraphText(error)}${JSON.stringify(attempts)}`;
   assertEquals(serialized.includes("access-secret"), false);
   assertEquals(serialized.includes("refresh-secret"), false);
   assertEquals(serialized.includes("acct-123"), false);
@@ -550,6 +567,10 @@ Deno.test("Codex transport errors redact credential and account values", async (
 Deno.test("Codex Responses abort cancels an active stream without retry", async () => {
   let canceled = false;
   let requests = 0;
+  let markRequested!: () => void;
+  const requested = new Promise<void>((resolve) => {
+    markRequested = resolve;
+  });
   const body = new ReadableStream<Uint8Array>({
     cancel() {
       canceled = true;
@@ -564,6 +585,7 @@ Deno.test("Codex Responses abort cancels an active stream without retry", async 
     },
     fetchFn: () => {
       requests += 1;
+      markRequested();
       return Promise.resolve(new Response(body, { status: 200 }));
     },
   });
@@ -576,11 +598,88 @@ Deno.test("Codex Responses abort cancels an active stream without retry", async 
     runId: "run-abort",
     signal: controller.signal,
   });
+  await requested;
   controller.abort(new DOMException("cancel test", "AbortError"));
 
   await assertRejects(() => completion, DOMException, "cancel test");
   assertEquals(canceled, true);
   assertEquals(requests, 1);
+});
+
+Deno.test("Codex Responses preserves non-DOM abort reasons when stream cancellation rejects", async () => {
+  let markRequested!: () => void;
+  const requested = new Promise<void>((resolve) => {
+    markRequested = resolve;
+  });
+  const body = new ReadableStream<Uint8Array>({
+    cancel() {
+      return Promise.reject(new Error("stream cancel failed"));
+    },
+  });
+  const controller = new AbortController();
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: () => {
+      markRequested();
+      return Promise.resolve(new Response(body, { status: 200 }));
+    },
+  });
+  const completion = client.complete({
+    model: "gpt-5.4",
+    transcript: [{ role: "user", content: "hi" }],
+    tools: [],
+    nativeModelToolIds: [],
+    runId: "run-rejecting-cancel",
+    signal: controller.signal,
+  });
+  await requested;
+  const reason = new Error("custom stream abort");
+  controller.abort(reason);
+
+  const error = await assertRejects(() => completion);
+  assertStrictEquals(error, reason);
+});
+
+Deno.test("Codex Responses preserves abort after credential resolution", async () => {
+  const controller = new AbortController();
+  let releaseCredential!: () => void;
+  const heldCredential = new Promise<void>((resolve) => {
+    releaseCredential = resolve;
+  });
+  let markResolving!: () => void;
+  const resolving = new Promise<void>((resolve) => {
+    markResolving = resolve;
+  });
+  let requests = 0;
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: {
+      resolve: async () => {
+        markResolving();
+        await heldCredential;
+        return credential;
+      },
+    },
+    fetchFn: () => {
+      requests += 1;
+      return Promise.reject(new Error("must not fetch"));
+    },
+  });
+  const completion = client.complete({
+    model: "gpt-5.4",
+    transcript: [{ role: "user", content: "hi" }],
+    tools: [],
+    nativeModelToolIds: [],
+    runId: "run-abort-after-credential",
+    signal: controller.signal,
+  });
+  await resolving;
+  const reason = new Error("abort after credential resolution");
+  controller.abort(reason);
+  releaseCredential();
+
+  const error = await assertRejects(() => completion);
+  assertStrictEquals(error, reason);
+  assertEquals(requests, 0);
 });
 
 Deno.test("Codex Responses returns on the first terminal event and cancels a keep-alive stream", async () => {

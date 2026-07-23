@@ -1476,12 +1476,27 @@ const createSelectedModelClient = async (options: {
   if (options.provider === "openai-compatible-gateway") return undefined;
   const credentialOwnerKey = options.credentialOwner.ownerKey;
   if (options.deps.createModelClient !== undefined) {
-    return await options.deps.createModelClient({
+    const client = await options.deps.createModelClient({
       provider: options.provider,
       credentialOwnerKey,
       credentialOwner: options.credentialOwner,
       loom: options.loom,
     });
+    if (client.providerId !== options.provider) {
+      throw new Error(
+        `created model client provider ${client.providerId} does not match selected provider ${options.provider}`,
+      );
+    }
+    if (
+      options.loom &&
+      (client.credentialOwner === undefined ||
+        !credentialOwnersEqual(client.credentialOwner, options.credentialOwner))
+    ) {
+      throw new Error(
+        "Loom model client credential owner does not match the run manifest",
+      );
+    }
+    return client;
   }
   let resolver = options.deps.openAICodexCredentialResolver;
   if (options.loom) {
@@ -1507,9 +1522,13 @@ const createSelectedModelClient = async (options: {
     resolver = new OpenAICodexCredentialResolver({
       store,
       ownerKey: credentialOwnerKey,
+      credentialOwner: options.credentialOwner,
     });
   }
-  return new OpenAICodexResponsesClient({ credentialResolver: resolver! });
+  return new OpenAICodexResponsesClient({
+    credentialResolver: resolver!,
+    credentialOwner: options.credentialOwner,
+  });
 };
 
 const runCfHarnessModelsCommand = async (

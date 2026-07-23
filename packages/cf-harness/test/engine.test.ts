@@ -990,3 +990,49 @@ Deno.test("CfHarnessEngine rejects legacy run state snapshots without currentDir
     "older cf-harness runs cannot be resumed",
   );
 });
+
+Deno.test("CfHarnessEngine keeps a resumed run's recorded provider authoritative", () => {
+  const runState: HarnessRunState = {
+    runId: "run-codex-resume-provider",
+    status: "completed",
+    createdAt: "2026-07-22T00:00:00.000Z",
+    updatedAt: "2026-07-22T00:00:01.000Z",
+    cfcEnforcementMode: "disabled",
+    currentDir: "/workspace",
+    modelProvider: "openai-codex",
+    modelAuthSource: "owner-bound-oauth",
+    credentialOwnerKey: "loom:user-1",
+    policyEvents: [],
+    toolOutputs: [],
+    failureRecords: [],
+  };
+
+  const resumed = new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runState,
+  });
+  assertEquals(resumed.config.modelProvider, "openai-codex");
+  assertEquals(resumed.config.credentialOwnerKey, "loom:user-1");
+
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState,
+        modelProvider: "openai-compatible-gateway",
+      }),
+    Error,
+    "does not match requested provider",
+  );
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState,
+        modelProvider: "openai-codex",
+        credentialOwnerKey: "loom:user-2",
+      }),
+    Error,
+    "credential owner does not match",
+  );
+});

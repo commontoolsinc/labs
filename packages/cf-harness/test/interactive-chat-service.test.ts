@@ -145,6 +145,12 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
 Deno.test("interactive service preserves an owner-bound Codex client across turns", async () => {
   const modelClient = {
     providerId: "openai-codex",
+    credentialOwner: {
+      type: "cf-harness.credential-owner-ref",
+      version: 1,
+      ownerKey: "loom:user-1",
+      tenantKey: "loom-tenant-1",
+    },
     complete: () => Promise.reject(new Error("unused in injected loop")),
   } as const;
   const loopOptions: CreateHarnessPromptLoopOptions[] = [];
@@ -201,6 +207,12 @@ Deno.test("interactive service preserves an owner-bound Codex client across turn
 Deno.test("interactive Codex services require one matching process owner", () => {
   const modelClient = {
     providerId: "openai-codex",
+    credentialOwner: {
+      type: "cf-harness.credential-owner-ref",
+      version: 1,
+      ownerKey: "loom:user-1",
+      tenantKey: "tenant-a",
+    },
     complete: () => Promise.reject(new Error("unused")),
   } as const;
   assertThrows(
@@ -231,6 +243,24 @@ Deno.test("interactive Codex services require one matching process owner", () =>
       }),
     Error,
     "does not match",
+  );
+  assertThrows(
+    () =>
+      new HarnessInteractiveChatService({
+        credentialOwner: {
+          type: "cf-harness.credential-owner-ref",
+          version: 1,
+          ownerKey: "loom:user-1",
+          tenantKey: "tenant-b",
+        },
+        basePromptLoopOptions: {
+          modelProvider: "openai-codex",
+          credentialOwnerKey: "loom:user-1",
+          modelClient,
+        },
+      }),
+    Error,
+    "full owner binding",
   );
 });
 

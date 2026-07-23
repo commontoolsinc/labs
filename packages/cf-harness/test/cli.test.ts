@@ -3913,6 +3913,7 @@ Deno.test("Loom Codex invocation preserves two users' owner bindings", async () 
           owners.push(options.credentialOwnerKey);
           return {
             providerId: "openai-codex",
+            credentialOwner: options.credentialOwner,
             complete: () => Promise.reject(new Error("unused")),
           };
         },
@@ -3959,6 +3960,7 @@ Deno.test("Loom Codex client injection preserves the authenticated tenant bindin
         });
         return {
           providerId: "openai-codex",
+          credentialOwner: options.credentialOwner,
           complete: () => Promise.reject(new Error("unused")),
         };
       },
