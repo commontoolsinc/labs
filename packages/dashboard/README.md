@@ -45,13 +45,27 @@ dashboard/
 `server.ts` knows nothing about individual tiles. It runs a single ticker,
 collects each tile that is due (respecting its `intervalMs`), renders the
 results uniformly, mounts any drill-down routes a tile declares, and pushes new
-tile markup as each collection completes. Every registered tile has a gray
-placeholder labelled with its id in its registered position until its first
-collection completes, so slow collectors do not leave holes in the board. A
-tile whose `collect()` throws is desaturated to a gray "unknown" — it keeps its
-last-known value and shows a short reason (e.g. "source unreachable"), with the
-full error in the server log — so one unreachable source never blanks or breaks
-the board.
+tile markup as each independent collection completes. Every registered tile has
+a gray placeholder labelled with its id in its registered position until its
+first collection completes, so slow collectors do not leave holes in the board.
+A tile whose `collect()` throws is desaturated to a gray "unknown" — it keeps
+its last-known value and shows a short reason (e.g. "source unreachable"), with
+the full error in the server log — so one unreachable source never blanks or
+breaks the board.
+
+GitHub CI tiles declare the workflow snapshots they read in `runSources`. The
+scheduler fetches each workflow independently. When a workflow fetch completes,
+the scheduler collects every due tile that reads it from the same stored
+snapshot and publishes those tile updates together. Each workflow can trigger a
+tile once per collection interval. A tile with several workflows can update
+once for each workflow as they arrive. This keeps a repository's build, trust,
+duration, and recent-run views in agreement when their intervals coincide.
+
+The recent-main-runs tile reads both the Labs and Loom snapshots. It rebuilds
+and sorts the combined list whenever either snapshot arrives. If one snapshot
+has not arrived yet, it shows the runs from the available snapshot in gray and
+names the pending source. If a later refresh fails, it keeps the last good
+snapshot for that source and shows the combined list in gray with the error.
 
 Each event connection receives the current tile snapshot before it waits for
 new collections. The browser reconciles that snapshot by tile ID, leaving
@@ -88,6 +102,7 @@ export const myTile: Tile = {
   id: "my-tile",          // unique, stable
   intervalMs: 60_000,     // how often collect() runs
   // wide: true,           // optional full-width placement
+  // runSources: [{ repo: "owner/repo", workflow: "ci.yml" }],
   async collect(ctx): Promise<TileView> {
     // ctx.runs() -> shared CI runs; ctx.env("KEY") -> env var.
     // If a required env var is missing, return a gray "unknown" view — don't throw.
@@ -147,7 +162,7 @@ surveillance tool.
 |---|---|---|
 | labs ci, labs ci trust, labs ci duration | GitHub Actions (`deno.yml` on main in `commontoolsinc/labs`), via the REST API | `GH_TOKEN` (or `GITHUB_TOKEN`) |
 | loom ci, loom ci trust, loom ci duration | the same three tiles for `commontoolsinc/loom` (`test-fast.yml` on main) | `GH_TOKEN` (read access to loom); optional `DASHBOARD_LOOM_REPO` |
-| recent main runs | labs + loom main runs interleaved chronologically, each row tagged with its repo | `GH_TOKEN` |
+| recent main runs | Labs and Loom main-run snapshots, refreshed independently and merged chronologically whenever either arrives; each row is tagged with its repo | `GH_TOKEN` |
 | commit CI Gantt → `/ci-gantt` | job and step timing for every successful main workflow run attached to one commit, linked from run durations in recent main runs | `GH_TOKEN` |
 | CI duration history → `/bench?view=ci` | labs and loom job, shard-group, and end-to-end workflow duration trends. The duration tiles open their matching repository view | `GH_TOKEN` |
 | CI run Gantt → `/bench?view=gantt` | detailed labs or loom job phases from `scripts/ci-gantt.ts`, backed by the CI history cache | `GH_TOKEN` |

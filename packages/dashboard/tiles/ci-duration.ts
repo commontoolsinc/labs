@@ -4,7 +4,14 @@
 // on /bench. The labs instance owns the Gantt image route. The Gantt view
 // exposes scripts/ci-gantt.ts controls for both repositories.
 import { fromFileUrl } from "@std/path";
-import type { Route, Run, Status, Tile, TileView } from "../types.ts";
+import {
+  runSource,
+  type Route,
+  type Run,
+  type Status,
+  type Tile,
+  type TileView,
+} from "../types.ts";
 import { escapeHtml, friendlyError, SPARK_FADE, sparkline } from "../lib.ts";
 import {
   CI_WORKFLOW,
@@ -627,6 +634,7 @@ function makeCiDuration(
   return {
     id: opts.id,
     intervalMs: 30_000,
+    runSources: [runSource(opts.repo, opts.workflow)],
     routes: opts.routes,
     async collect(ctx): Promise<TileView> {
       let runs: Run[];
