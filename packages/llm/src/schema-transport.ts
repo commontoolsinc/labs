@@ -28,6 +28,34 @@
 // The policy is to refuse, not to quietly narrow: a value that cannot be sent
 // unaltered is reported rather than changed. The narrowing to a provider's
 // transport belongs to the boundary that crosses it, and the boundary says no.
+//
+// KNOWN LIMITATIONS. The walk reads enumerable own keys (`Object.keys` /
+// `Object.entries`) and an own `toJSON` data property, which certifies the
+// ordinary Fabric values a generated schema actually holds. It does NOT fully
+// certify adversarially-shaped objects, so for these the empty result is not a
+// guarantee (all confirmed to pass here while `JSON.stringify` alters them):
+//
+//   - A non-enumerable string data property is dropped by JSON but not seen
+//     here (the walk is enumerable-only).
+//   - An accessor-based `toJSON` (a getter) is missed: the own-descriptor check
+//     matches a data property whose value is a function, not an accessor -- and
+//     a plain read could fire the getter, which the check avoids on purpose.
+//   - An inherited `toJSON` (e.g. on a custom array prototype) is missed: the
+//     check looks at own descriptors only.
+//   - The array-hole test uses `i in obj`, which consults the prototype, so an
+//     inherited numeric property masks a hole; this also does not match JSON's
+//     own-vs-inherited element read.
+//
+// None of these arise from a normally generated schema, which is why they are
+// documented rather than handled. A future hardening pass would inspect own
+// property descriptors instead of `Object.keys` / `Object.entries`, reject
+// accessors and non-enumerable data properties, use `Object.hasOwn` for array
+// slots, and reject a nonstandard array prototype or an inherited `toJSON`.
+//
+// A minor diagnostic point in the same vein: the thrown message renders the
+// root pointer as `/`. Under RFC 6901 the root is `""` and `/` names a property
+// whose key is the empty string; the message trades that strict accuracy for
+// legibility.
 
 import { isPlainObject } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
