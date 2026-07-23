@@ -558,6 +558,36 @@ describe("mergeCfcSchemaEnvelopes", () => {
     ).toThrow(/divergent oneOf branches/);
   });
 
+  it("rejects divergent ifc branches nested under a tuple slot", () => {
+    // CT-1895: the guard's recursion visited only properties and items, so
+    // a divergent-ifc shape under a prefixItems slot escaped it.
+    const withTupleBranches = {
+      type: "array",
+      prefixItems: [{
+        oneOf: [
+          { type: "string", ifc: { confidentiality: ["secret"] } },
+          { type: "number" },
+        ],
+      }],
+    } as const;
+    expect(() => mergeCfcSchemaEnvelopes(withTupleBranches, withTupleBranches))
+      .toThrow(/divergent oneOf branches/);
+  });
+
+  it("rejects divergent ifc branches nested under additionalProperties", () => {
+    const withMapBranches = {
+      type: "object",
+      additionalProperties: {
+        anyOf: [
+          { type: "string", ifc: { confidentiality: ["secret"] } },
+          { type: "number" },
+        ],
+      },
+    } as const;
+    expect(() => mergeCfcSchemaEnvelopes(withMapBranches, withMapBranches))
+      .toThrow(/divergent anyOf branches/);
+  });
+
   it("allows non-object divergent branches without ifc labels", () => {
     const merged = mergeCfcSchemaEnvelopes({
       anyOf: [true, { type: "string" }],

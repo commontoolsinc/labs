@@ -324,12 +324,21 @@ const assertNoDivergentIfcBranches = (
     }
   }
 
-  for (const [key, value] of Object.entries(object.properties ?? {})) {
-    assertNoDivergentIfcBranches(value, `${path}/${key}`);
-  }
-  if (object.items !== undefined) {
-    assertNoDivergentIfcBranches(object.items, `${path}/*`);
-  }
+  // Recurse over the shared keyword vocabulary so a divergent-ifc shape
+  // cannot hide under a keyword this guard forgot (prefixItems and
+  // additionalProperties previously escaped it). Combinator members are
+  // technically redundant here — a member containing ifc anywhere already
+  // threw via branchContainsIfc above — but descending them is harmless.
+  forEachSubschema(object, (child, keyword, key, index) => {
+    const childPath = keyword === "properties"
+      ? `${path}/${key}`
+      : keyword === "items" || keyword === "additionalProperties"
+      ? `${path}/*`
+      : keyword === "prefixItems"
+      ? `${path}/${index}`
+      : path;
+    assertNoDivergentIfcBranches(child, childPath);
+  });
 };
 
 const mergeRequired = (
