@@ -75,10 +75,13 @@ import {
 } from "./handles.ts";
 import {
   type DirectorySnapshotEntry,
-  FuseOperationState,
   replyWithRetainedState,
   visitDirectoryEntries,
 } from "./directory-handles.ts";
+import {
+  closeKernelFileHandle,
+  createFuseOperationState,
+} from "./operation-wiring.ts";
 import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
 import {
   buildMountFuseArgs,
@@ -232,29 +235,6 @@ export function rootSpaceLookupNames(name: string): {
     spaceName,
     directoryName: encodeFusePathSegments([spaceName])[0],
   };
-}
-
-export function createFuseOperationState(
-  tree: FsTree,
-  bridge: CellBridge | null,
-): FuseOperationState {
-  return new FuseOperationState(
-    tree,
-    bridge,
-    (ino) =>
-      Boolean(
-        bridge?.resolveWritePath(ino) || bridge?.resolveSourceWritePath(ino),
-      ),
-  );
-}
-
-export function closeKernelFileHandle(
-  handles: HandleMap,
-  bridge: Pick<CellBridge, "releaseEntityProjectionOpen"> | null,
-  fh: bigint,
-): void {
-  const closed = handles.close(fh);
-  if (closed) bridge?.releaseEntityProjectionOpen(closed.ino);
 }
 
 function readBuffer(ptr: Deno.PointerValue, size: bigint): Uint8Array {
