@@ -102,6 +102,8 @@ One line per archived document; each document's header carries the fuller
 
 ### Executed plans and work orders
 
+- [cf-harness implementation plan](packages/cf-harness/docs/IMPLEMENTATION_PLAN.md)
+  — April 2026 package bootstrap plan and implementation checkpoint.
 - [2026-03-17-ct-exec-fuse-callables.md](plans/2026-03-17-ct-exec-fuse-callables.md)
   and [its test plan](plans/2026-03-17-ct-exec-fuse-callables-test-plan.md) —
   `cf exec` and mounted callable files.
@@ -194,6 +196,8 @@ One line per archived document; each document's header carries the fuller
 
 ### Investigations, journals, and working notes
 
+- [cf-harness Loom migration notes](packages/cf-harness/docs/LOOM_MIGRATION_NOTES.md)
+  — April 2026 pre-integration assessment of Loom's Codex batch and interactive paths.
 - [bug3-suggestion-alias-verification-2026-07.md](packages/patterns/bug3-suggestion-alias-verification-2026-07.md)
   — verification that the December 2025 survey's Bug 3 (Counter values
   rendering as raw `$alias` objects when instantiated via `fetchAndRunPattern`)
