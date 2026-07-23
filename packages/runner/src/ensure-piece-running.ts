@@ -114,9 +114,8 @@ export async function ensurePieceRunning(
       const resultCell = await followResultCellChain(runtime, rootCell, tx);
       if (resultCell === undefined) return false;
 
-      // If rootCell is a result cell, it will carry a `{ identity, symbol }`
-      // pattern pointer.
-      await resultCell.sync();
+      // followResultCellChain synchronizes every cell before returning it, so
+      // the terminal result cell's pattern pointer is already current here.
       const identityRef = readPatternIdentity(resultCell);
       if (!identityRef) {
         logger.debug("ensure-piece", () => [
