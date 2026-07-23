@@ -209,10 +209,13 @@ export {
 } from "./cfc.ts";
 export type { Mutable } from "@commonfabric/utils/types";
 export {
+  type HostRuntimeTelemetryMarker,
+  type HostSchedulerEventPreflightStats,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
   type RuntimeTelemetryMarker,
   type RuntimeTelemetryMarkerResult,
+  type SchedulerEventPreflightStats,
   type SchedulerGraphEdge,
   type SchedulerGraphNode,
   type SchedulerGraphSnapshot,

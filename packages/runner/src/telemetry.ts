@@ -69,14 +69,6 @@ export interface SchedulerActionInfo {
   writes?: string[];
 }
 
-/** Content-free action metadata safe to transfer to a runtime host. */
-export interface HostSchedulerActionInfo {
-  patternName?: string;
-  moduleName?: string;
-  readCount?: number;
-  writeCount?: number;
-}
-
 export interface SchedulerEventPreflightStats {
   visitCount: number;
   dirtyInputCount: number;
@@ -107,6 +99,24 @@ export interface SchedulerEventPreflightActionSummary {
   readCount: number;
   shallowReadCount: number;
   writeCount: number;
+}
+
+/** Aggregate-only preflight statistics safe to transfer to a runtime host. */
+export interface HostSchedulerEventPreflightStats {
+  visitCount: number;
+  dirtyInputCount: number;
+  resultTrueCount: number;
+  workSetAddCount: number;
+  reverseDependencyActionCount: number;
+  reverseDependencyEdgeCount: number;
+  logReadCount: number;
+  logShallowReadCount: number;
+  writerCandidateCount: number;
+  writerOverlapCount: number;
+  directWriterCount: number;
+  hotActionCount: number;
+  hotFanoutActionCount: number;
+  rootDirectWriterCount: number;
 }
 
 /** Fixed, content-free reasons an event can be dropped before dispatch. */
@@ -311,28 +321,96 @@ export type RuntimeTelemetryMarkerResult = RuntimeTelemetryMarker & {
   timeStamp: number;
 };
 
-type WithoutInternalTelemetryDetails<Marker extends { type: string }> =
-  Marker["type"] extends
-    | "scheduler.invocation"
-    | "scheduler.event.drop" ? Omit<Marker, "eventId">
-    : Marker["type"] extends "scheduler.event.commit"
-      ? Omit<Marker, "eventId" | "writes" | "writesTruncated">
-    : Marker;
-
-type WithHostSchedulerActionInfo<Marker> = Marker extends {
-  actionInfo?: SchedulerActionInfo;
-} ? Omit<Marker, "actionInfo"> & { actionInfo?: HostSchedulerActionInfo }
-  : Marker extends { handlerInfo?: SchedulerActionInfo }
-    ? Omit<Marker, "handlerInfo"> & { handlerInfo?: HostSchedulerActionInfo }
-  : Marker;
-
 /** Telemetry marker safe to transfer from a runtime worker to its host. */
-export type HostRuntimeTelemetryMarker = RuntimeTelemetryMarkerResult extends
-  infer Marker
-  ? Marker extends { type: string }
-    ? WithHostSchedulerActionInfo<WithoutInternalTelemetryDetails<Marker>>
-  : never
-  : never;
+export type HostRuntimeTelemetryMarker =
+  | { type: "scheduler.run"; timeStamp: number; ok: boolean }
+  | {
+    type: "scheduler.run.complete";
+    timeStamp: number;
+    durationMs: number;
+    ok: boolean;
+  }
+  | {
+    type: "scheduler.settle";
+    timeStamp: number;
+    durationMs: number;
+    iterations: number;
+    settledEarly: boolean;
+    seedCount: number;
+    workSetSize: number;
+  }
+  | { type: "cell.update"; timeStamp: number }
+  | { type: "scheduler.invocation"; timeStamp: number; ok: boolean }
+  | {
+    type: "scheduler.event.commit";
+    timeStamp: number;
+    readCount: number;
+    writeCount: number;
+    changedWriteCount: number;
+    ok: boolean;
+    permanentRejection?: "origin-committed" | "receipt-exists";
+    retryAttempt?: number;
+    backoffMs?: number;
+    terminal?: "permanent" | "convergence" | "rule";
+  }
+  | {
+    type: "scheduler.event.drop";
+    timeStamp: number;
+    reason: SchedulerEventDropReason;
+  }
+  | {
+    type: "scheduler.event.preflight";
+    timeStamp: number;
+    readCount: number;
+    shallowReadCount: number;
+    dirtySizeBefore: number;
+    pendingSizeBefore: number;
+    dirtyDependencyCount: number;
+    hasDirtyDependencies: boolean;
+    skipped: boolean;
+    populateMs: number;
+    txToLogMs: number;
+    depCommitMs: number;
+    collectMs: number;
+    scheduleMs: number;
+    stats: HostSchedulerEventPreflightStats;
+    ok: boolean;
+  }
+  | { type: "storage.push.start"; timeStamp: number; ok: boolean }
+  | { type: "storage.push.complete"; timeStamp: number; ok: boolean }
+  | { type: "storage.push.error"; timeStamp: number; ok: false }
+  | { type: "storage.pull.start"; timeStamp: number; ok: boolean }
+  | { type: "storage.pull.complete"; timeStamp: number; ok: boolean }
+  | { type: "storage.pull.error"; timeStamp: number; ok: false }
+  | {
+    type: "storage.connection.update";
+    timeStamp: number;
+    status: "pending" | "ok" | "error";
+    attempt: number;
+    ok: boolean;
+  }
+  | { type: "storage.subscription.add"; timeStamp: number; ok: boolean }
+  | { type: "storage.subscription.remove"; timeStamp: number; ok: boolean }
+  | {
+    type: "scheduler.graph.snapshot";
+    timeStamp: number;
+    nodeCount: number;
+    edgeCount: number;
+  }
+  | { type: "scheduler.subscribe"; timeStamp: number; isEffect: boolean }
+  | {
+    type: "scheduler.dependencies.update";
+    timeStamp: number;
+    readCount: number;
+    writeCount: number;
+  }
+  | {
+    type: "scheduler.non-settling";
+    timeStamp: number;
+    busyTime: number;
+    windowDuration: number;
+    busyRatio: number;
+  };
 
 export class RuntimeTelemetryEvent
   extends CustomEvent<{ marker: RuntimeTelemetryMarker }> {
