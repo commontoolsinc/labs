@@ -37,7 +37,7 @@ into the same active-origin and revision model.
 
 ## Last Updated
 
-2026-07-22
+2026-07-23
 
 ## Motivation
 
@@ -88,7 +88,7 @@ into the same active-origin and revision model.
 | Mechanism | Where | Role here |
 |---|---|---|
 | Pattern pointer `patternIdentity = {identity, symbol}` on the piece result cell | `runner.ts` (`applySetupState` / `getPatternIdentityRef`) | The thing an update rewrites |
-| **In-place re-run watcher** — `setupPatternWatcher` sinks the `patternIdentity` meta; on change it cancels the old pattern's nodes and re-instantiates the new pattern **onto the same result cell** | `runner.ts` (enabled unless `doNotUpdateOnPatternChange`) | Applies a metadata swap when the piece is already running; at space open, bootstrap reads the reconciled metadata directly |
+| **In-place re-run watcher** — `setupPatternWatcher` sinks the `patternIdentity` meta; on change it cancels the old pattern's nodes and re-instantiates the new pattern **onto the same result cell** | `runner.ts` (enabled unless `doNotUpdateOnPatternChange`) | Activates a replacement graph after its setup metadata and projection commit atomically with the pointer; at space open, bootstrap reads that prepared state directly |
 | `PatternUpdater` | `packages/runner/src/pattern-updater.ts` | Shared identity lookup, verified closure compile, provenance repair, and compare-and-swap for awaited roots and background ordinary-piece checks |
 | Space root: `spaceCell.defaultPattern` link → root piece → `patternIdentity` | `packages/piece/src/manager.ts` (`linkDefaultPattern`/`getDefaultPattern`) | What a system update rewrites |
 | `ensureDefaultPattern` (resolve → reconcile → start) / `recreateDefaultPattern` (manual, **not** state-preserving) | `packages/piece/src/ops/pieces-controller.ts` | The automatic self-heal hook (ensure) and the state-losing escape hatch (recreate); both URL-based creation paths stamp `patternSource` |
@@ -124,12 +124,14 @@ Two decisions carry the whole design:
    `?identity`. A filename that names no route is not a claim about a source,
    and the piece stays unstamped.
 2. **Update = resolve `patternSource` → current identity; if it differs from
-   the persisted `patternIdentity.identity`, write the new `{identity, symbol}`
-   to the piece's `patternIdentity` meta.** At space open this happens before
-   root bootstrap, so `start()` loads the reconciled identity. Every other
-   pattern starts first; its successful instantiation commit launches a
-   fire-and-forget check, and the existing watcher re-instantiates a verified
-   replacement in place. No new apply machinery.
+   the persisted `patternIdentity.identity`, run the replacement pattern's
+   setup in the compare-and-swap transaction.** Setup writes the new
+   `{identity, symbol}` together with its internal-cell manifest, defaults,
+   backlinks, schemas, and result projection. At space open this happens before
+   root bootstrap, so `start()` loads prepared state. Every other pattern starts
+   first; its successful instantiation commit launches a fire-and-forget check,
+   and the existing watcher re-instantiates the verified, already-prepared
+   replacement in place.
 
    The awaited default-root reconcile has a second entry point beyond space
    open: `PieceManager.getDefaultPattern` — the resolution every registry
@@ -310,15 +312,20 @@ it has a pin.
 
 The apply is: ensure the new closure is loadable in the space
 (`compilePattern(program, { space })` writes source + compiled docs), then use
-the normal pattern setup path to install the new result schema, result
+the normal pattern setup path in the same compare-and-swap transaction as the
+source transition. That atomically installs the internal-cell manifest and
+defaults, reciprocal result backlinks, argument and result schemas, result
 projection, `{ identity, symbol }`, and `patternSetupIdentity` completion marker
-on the existing result cell. The completion marker is not a pattern pointer;
-it records which identity had its complete setup staged. It is also what tells
-an apply from a same-version replay when the pointer moved first — the
-roll-forward materialize commits the new `{ identity, symbol }` and then runs
-setup, and an identity moved with no setup at all leaves the same shape. The
-pointer then reads as unchanged, while the marker still names the version that
-staged the state.
+on the existing result cell. A bare pointer write is not a supported update
+operation: it can make new nodes write cells that the old manifest or projection
+does not expose.
+
+The completion marker is not a pattern pointer; it records which identity had
+its complete setup staged. It is also what tells an apply from a same-version
+replay when the pointer moved first — the roll-forward materialize commits the
+new `{ identity, symbol }` and then runs setup, and an identity moved with no
+setup at all leaves the same shape. The pointer then reads as unchanged, while
+the marker still names the version that staged the state.
 
 Setup re-points the piece's stored argument at the incoming argument schema and
 validates it in the same transaction, so an apply whose durable argument the new
@@ -451,11 +458,13 @@ transaction, and only then start it:
    compile, evaluation,
    missing-entry-ref, or identity-mismatch failure leaves the root metadata
    unchanged. Use the normal pattern setup path to install the candidate result
-   schema, projection, identity, and setup completion marker.
+   schema, projection, identity, setup completion marker, internal-cell
+   manifest/defaults, and reciprocal backlinks.
 6. Provenance repair and pattern setup are transactional compare-and-swap
    writes: the captured identity, setup completion marker, source, and
    repository must still match on every retry, so a concurrent custom-root
-   replacement wins.
+   replacement wins. Replacement setup commits the pointer and all of that
+   staged state together.
 7. Start the reconciled root. A newly created root skips the check because it
    was compiled from the current source in the same ensure operation; a root
    discovered after a creation race is treated as persisted and reconciled.
@@ -477,10 +486,11 @@ awaits the check from `start()`:
 4. On a changed identity, revalidate and compile the whole closure with the
    running ref's export symbol. Require both the compiler-produced identity and
    symbol to equal the advertised identity and existing symbol.
-5. Compare-and-swap `{ patternIdentity, patternSource, patternRepository }`.
-   A concurrent setsrc/custom replacement wins. A successful swap wakes the
-   already-installed watcher; fetch, compile, evaluation, mismatch, and commit
-   failures leave the current graph running.
+5. Compare-and-swap `{ patternIdentity, patternSource, patternRepository }`
+   while running replacement setup in that same transaction. A concurrent
+   setsrc/custom replacement wins. A successful prepared swap wakes the
+   already-installed watcher; fetch, compile, evaluation, setup validation,
+   mismatch, and commit failures leave the current graph running.
 
 ## End-to-end identity check
 

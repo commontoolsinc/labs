@@ -14,6 +14,7 @@ import {
   StorageManager as StorageManagerV2,
 } from "../src/storage/v2.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import type { Pattern } from "../src/builder/types.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -379,8 +380,9 @@ const SCOPED_PROGRAM: RuntimeProgram = {
     contents: [
       "import { lift, pattern, UI } from 'commonfabric';",
       "const scale = lift((n: number) => n * 10);",
-      "const inner = pattern<{ n: number }>(({ n }) => {",
-      "  return { scaled: scale(n) };",
+      "const inner = pattern<{ n: number }, { scaled: number[] }>(({ n }) => {",
+      "  const scaled = ['slot'].map(() => scale(n));",
+      "  return { scaled };",
       "});",
       // The explicit Output type omits UI, so the inferred result schema has no
       // $UI property even though the result object carries one. That makes the
@@ -388,8 +390,8 @@ const SCOPED_PROGRAM: RuntimeProgram = {
       "export default pattern<{ seed: number }, { value: number }>(({ seed }) => {",
       "  const child = inner.asScope('user')({ n: seed });",
       "  return {",
-      "    value: child.scaled,",
-      "    [UI]: <div>{child.scaled}</div>,",
+      "    value: child.scaled[0],",
+      "    [UI]: <div>{child.scaled[0]}</div>,",
       "  };",
       "});",
     ].join("\n"),
@@ -427,6 +429,16 @@ describe("resume owned-cell walk: scoped sub-pattern", () => {
     const compiled1 = await rt1.patternManager.compilePattern(SCOPED_PROGRAM, {
       space,
     });
+    const childPattern = compiled1.nodes.find((node) =>
+      node.module.type === "pattern"
+    )?.module.implementation as Pattern | undefined;
+    expect(
+      childPattern?.derivedInternalCells?.some((descriptor) =>
+        typeof descriptor.partialCause === "object" &&
+        descriptor.partialCause !== null &&
+        "$generated" in descriptor.partialCause
+      ),
+    ).toBe(true);
     const tx0 = rt1.edit();
     const rc1 = rt1.getCell<{ value: number }>(
       space,

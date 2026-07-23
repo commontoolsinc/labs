@@ -124,7 +124,9 @@ Canonical examples:
 containing a manifest array whose entries have a `partialCause` and a sigil
 `link` to one derived internal cell. Entries for compiler-generated causes also
 carry the owning `patternIdentity`; named causes omit it and retain their cell
-identity across pattern upgrades. The older `source` property, when present,
+identity across pattern upgrades. Legacy generated entries created before
+pattern versioning also omit it; they remain valid while the piece's pattern is
+unchanged. The older `source` property, when present,
 uses the separate short-link form `{"/":"<short-id>"}` and resolves to
 `of:<short-id>` in the same space. CFC metadata also uses its own compact stored
 shape and is converted to a CID sigil link during traversal. When the server

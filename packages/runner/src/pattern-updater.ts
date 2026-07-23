@@ -505,7 +505,10 @@ export class PatternUpdater {
             ...(setupNeedsRepair ? { reapplyStoredSetup: true } : {}),
           });
         } else {
-          candidate.setMetaRaw("patternIdentity", entryRef);
+          // Prepare the complete replacement graph atomically with the source
+          // transition and pointer. A bare pointer write could let the watcher
+          // start new nodes against an old manifest, schema, or projection.
+          void runtime.setup(tx, pattern, undefined, candidate);
         }
         return true;
       });
