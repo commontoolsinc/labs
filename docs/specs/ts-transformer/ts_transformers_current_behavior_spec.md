@@ -1381,7 +1381,9 @@ Special path:
   `AnyOf<...>` becomes an IFC `anyOf` atom, and `PolicyOf<typeof policy>`
   becomes a policy-reference marker that `SchemaGeneratorTransformer`
   resolves to module identity, symbol, and digest. `WriteAuthorizedBy`
-  rehydrates as `ifc.writeAuthorizedBy.__ctWriterIdentityOf = { file, path }`,
+  rehydrates as `ifc.writeAuthorizedBy.__ctWriterIdentityOf = { file, path }`
+  (plus a mint-time `moduleIdentity` stamp when the compiler was given
+  `moduleIdentities` — see §17.3 file normalization),
   and router-seeded `cfcUiContract` hints emit as `ifc.uiContract`. See §6.8;
   pinned by `test/cfc-authoring.test.ts`,
   `packages/schema-generator/test/schema/cfc-authoring.test.ts`, and
@@ -1804,7 +1806,7 @@ values it can classify as `builder | data | function | import`, and rejects raw
 mutable literals and arbitrary call results at module scope
 (`classifyExpressionText`,
 `packages/runner/src/sandbox/compiled-bundle-verifier.ts`; policy narrative in
-`docs/specs/module-loading-verifier-and-engine-design.md` §"Security
+`docs/specs/module-loading.md` §"Security
 classification"). `__cf_data(...)` is the canonical "verified module-safe
 data" wrapper of that grammar: the verifier pattern-matches the wrapper
 boundary without interpreting the payload, and at module load the runtime
@@ -2028,7 +2030,7 @@ admits the module-safe subset (plain objects, arrays, `Map`→`FrozenMap`,
 (`SES_SANDBOXING_SPEC.md` §4.2.3; `packages/runner/src/sandbox/plain-data.ts`).
 The same classification serves both the AMD factory body and the per-module
 ESM record body (`classifyModuleItems` doc comment;
-`docs/specs/module-loading-verifier-and-engine-design.md`); on the ESM path,
+`docs/specs/module-loading.md`); on the ESM path,
 write-once exports neutralize side effects smuggled into an accepted wrapper
 argument (`__cf_data((exports.x = evil, 1))`), and pipeline-compiled bodies are
 required precisely because bare `ts.transpileModule` cannot produce the
@@ -2545,16 +2547,36 @@ the annotated value itself and, when the value carries a function-valued
 `.implementation` (builder factories do), on that implementation function too
 (`createBindingIdentityHelper` / `createDefineBindingMetadataCall`).
 
-**File normalization.** `normalizeWriterIdentityFile` (backslashes → slashes,
-then strip the first path segment when the path has more than one) is
-deliberately duplicated, character-for-character, in
-`src/transformers/schema-generator.ts`, which emits the matching claim into
-schemas as `ifc: { writeAuthorizedBy: { __ctWriterIdentityOf: { file, path
-} } }` (`attachWriteAuthorizedByMarker` / `extractWriteAuthorizedByIdentity`).
-The stripped leading segment corresponds to the engine's per-load `/${id}`
-module-path prefix (see the prefix/identity-source-normalization discussion
-in `docs/specs/module-loading-verifier-and-engine-design.md`), keeping both
-sides load-independent and equal.
+**File normalization and mint-time stamps.**
+`normalizeWriterIdentityFile` (`src/utils/writer-identity-file.ts`) normalizes
+backslashes → slashes and then applies the caller-supplied
+`canonicalWriterIdentityFile` option (`TransformerOptions`), the compile-name →
+authored-name unmapping. `src/transformers/schema-generator.ts` uses it while
+emitting `ifc: { writeAuthorizedBy: { __ctWriterIdentityOf: { file, path } } }`.
+General nested/interface/alias claims are constructed by the schema-generator's
+`CommonFabricFormatter`; the transformer passes it the same writer-source
+resolver used by the direct-root special case. When
+`TransformerOptions.moduleIdentities` contains the binding's defining compile
+source, the payload also carries that source's `moduleIdentity`. The engine's
+map covers its authored sources and is computed from pristine source before
+the TS compile, so engine-minted claims are *born stamped* and the capturable
+unstamped state is never minted (labs#4772 residual —
+`writerIdentityForSourceFile` / `extractWriteAuthorizedByIdentity`). Supplying
+an identity map that lacks the binding's defining source fails compilation;
+only callers that omit the map entirely retain unstamped compatibility output.
+
+The runner's engine passes its `storedFilenameFor`
+(stripping the per-load `/${id}` module-path prefix and unmapping fabric-mount
+paths — see the prefix/identity-source-normalization discussion in
+`docs/specs/module-loading.md`), keeping claim and
+provenance spellings load-independent and equal. Without the option the name
+is recorded verbatim: direct compiles (HTTP resolver, piece manifests) already
+present authored paths. Historical behavior — blindly stripping the first
+segment of any absolute multi-segment name as a presumed engine prefix —
+mis-spelled modules from direct compiles whose first segment was a real path
+segment, shearing claims from provenance across compile stacks (labs#4772 /
+CT-1886); stores hold claims minted under those spellings (see the
+spelling-compat note in the normalizer's doc comment).
 
 **Runtime consumption.** After a verified evaluation,
 `Engine.recordModuleProvenance` reads the annotation off each exported or
@@ -2567,10 +2589,15 @@ CFC's implementation identity surfaces it as `sourceFile`/`bindingPath`
 moduleIdentity to equal the claim's directly or name an authenticated
 `piece setsrc` predecessor, plus an equal binding path — the file SPELLING is
 deliberately not load-bearing at verification (it is resolver-dependent;
-labs#4772). Stamp MINTING (`rebindWriteAuthorizedByClaims`) still requires exact
-slash-normalized file equality, and stored-claim reconciliation tolerates
-spellings one leading segment apart
-(`packages/runner/src/cfc/writer-claim-correspondence.ts`). The
+labs#4772). Stamp MINTING (`rebindWriteAuthorizedByClaims`) still requires
+exact slash-normalized file equality, and stored-claim reconciliation
+tolerates spellings one leading segment apart
+(`packages/runner/src/cfc/writer-claim-correspondence.ts`); when both sides
+of a reconcile carry stamps for the same binding, the STORED stamp always
+wins — a republished module's born-stamped claim never rotates the stored
+one at merge time (its field writes are authorized at verification by
+authenticated `piece setsrc` module delegation, or fail closed loudly
+without one), and the envelope's sibling writes keep committing. The
 non-exported case reaches provenance through the `__cfReg` registration sink
 — the gap guarded by
 `packages/runner/test/cfc-nonexported-binding-identity.test.ts`.
@@ -2681,7 +2708,7 @@ until the verifier agrees (also stated in
   `registerFunctionStatement`). The design doc states the rule directly:
   "canonical function-hardening (`__cfHardenFn(fn)`) and binding-identity
   statements recognized by byte-equality to `sandbox-contract.ts` sources"
-  (`docs/specs/module-loading-verifier-and-engine-design.md`). A same-named
+  (`docs/specs/module-loading.md`). A same-named
   helper with a different body is just an ordinary function — and the module
   then fails on its call sites: pinned by the adversarial case "fake
   (non-canonical) __cfHardenFn laundering a callback"
@@ -2881,7 +2908,7 @@ re-listing it. The enforced sources of truth:
 | Module-scope `__cf_data` wrap/exclusion name sets + verifier error strings (§15) | `TRUSTED_BUILDERS` / `TRUSTED_DATA_HELPERS` (`packages/utils/src/sandbox-contract.ts`); `CF_DATA_CONSTRUCTOR_NAMES` (`src/transformers/module-scope-cf-data.ts`); `TOP_LEVEL_CALL_RESULT_ERROR` (`packages/runner/src/sandbox/policy.ts`) | one module feeds both transformer and runner verifier — cross-package contract; runtime freezer semantics live in `packages/runner/src/sandbox/plain-data.ts` |
 | Coverage instrumentation + span schema (§16) | `PatternCoverageTransformer` (`src/transformers/pattern-coverage.ts`); `PatternCoverageSpan` / `PatternCoverageOptions` / `PATTERN_COVERAGE_GLOBAL` (`src/core/transformers.ts`) | line remapping pins the one-line helper prelude: `HELPERS_STMT` (`src/core/cf-helpers.ts`) ↔ `patternCoverageOptionsForCompile` (`packages/runner/src/harness/engine.ts`) — change them together |
 | Hardening/binding helper names, metadata field, canonical helper bodies (§17) | `FUNCTION_HARDENING_HELPER_NAME` / `BINDING_IDENTITY_HELPER_NAME` / `VERIFIED_BINDING_METADATA_FIELD` and `createFunctionHardeningHelperSource` / `createBindingIdentityHelperSource` (`packages/utils/src/sandbox-contract.ts`) | the runner verifier recognizes helper declarations by trivia-stripped byte equality to these sources (`CANONICAL_HARDENING_HELPER` in `packages/runner/src/sandbox/compiled-bundle-verifier.ts`); the transformer's AST-built twins (`createFunctionHardeningHelper` / `createBindingIdentityHelper` in `src/transformers/module-scope-function-hardening.ts`) must compile to exactly that text — drift fails every module load |
-| Trusted-binding type names + binding positions (§17.3) | seed map in `discoverWriteAuthorizedByBindingPositions` (`src/transformers/module-scope-function-hardening.ts`) | keep in sync with `WriteAuthorizedByValidationTransformer` (§6.8) and the schema generator's `__ctWriterIdentityOf` claim emission; `normalizeWriterIdentityFile` is intentionally duplicated in `schema-generator.ts` and must stay identical |
+| Trusted-binding type names + binding positions (§17.3) | seed map in `discoverWriteAuthorizedByBindingPositions` (`src/transformers/module-scope-function-hardening.ts`) | keep in sync with `WriteAuthorizedByValidationTransformer` (§6.8) and the schema generator's `__ctWriterIdentityOf` claim emission; both spell files via the shared `normalizeWriterIdentityFile` (`src/utils/writer-identity-file.ts`) so claim and provenance spellings cannot drift |
 
 A drift-resistant habit: when a section enumerates a set, cite the constant /
 function that defines it so a reader can confirm the live set, and keep prose

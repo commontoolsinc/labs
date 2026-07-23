@@ -1663,6 +1663,7 @@ export type JSONSchemaObj = {
           readonly bundleId?: string;
           readonly file?: string;
           readonly path?: readonly string[];
+          readonly moduleIdentity?: string;
         };
       };
     readonly exactCopyOf?: readonly string[];

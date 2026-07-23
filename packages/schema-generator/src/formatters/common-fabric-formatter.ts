@@ -1507,7 +1507,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     context: GenerationContext,
     bindingName: ts.Identifier,
     normalizeFile = true,
-  ): { file: string; path: string[] } {
+  ): { file: string; path: string[]; moduleIdentity?: string } {
     const symbol = context.typeChecker.getSymbolAtLocation(bindingName);
     const declarationSymbol = symbol && (symbol.flags & ts.SymbolFlags.Alias)
       ? context.typeChecker.getAliasedSymbol(symbol)
@@ -1525,6 +1525,13 @@ export class CommonFabricFormatter implements TypeFormatter {
       bindingName.getSourceFile().fileName ??
       context.sourceFileName ??
       "unknown";
+
+    if (normalizeFile && context.writerIdentityForSourceFile) {
+      return {
+        ...context.writerIdentityForSourceFile(sourceFileName),
+        path: [declaredName],
+      };
+    }
 
     return {
       file: normalizeFile

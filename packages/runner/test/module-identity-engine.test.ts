@@ -121,6 +121,70 @@ describe("Engine implementation identity", () => {
     expect(entryIdentity).toBe(pristineId);
   });
 
+  it("mints nested writer claims with the engine's authored path and module identity", async () => {
+    const fileName = "/api/patterns/system/profile-home.tsx";
+    const program: RuntimeProgram = {
+      main: fileName,
+      files: [{
+        name: fileName,
+        contents: `/// <cts-enable />
+          import { handler, toSchema, Writable, WriteAuthorizedBy } from "commonfabric";
+          const setBio = handler<string, { bio: Writable<string> }>(
+            (value, { bio }) => bio.set(value),
+          );
+          type ProtectedBio = WriteAuthorizedBy<string, typeof setBio>;
+          interface Output { bio: ProtectedBio; }
+          export const schema = toSchema<Output>();
+        `,
+      }],
+    };
+
+    const compiled = await engine.compileToRecordGraph(program);
+    const evaluated = engine.evaluateRecordGraph(
+      compiled.id,
+      compiled.graph,
+      compiled.mainSpecifier,
+      program.files,
+    );
+    const findWriterIdentity = (
+      value: unknown,
+    ): Record<string, unknown> | undefined => {
+      if (!value || typeof value !== "object") return undefined;
+      const record = value as Record<string, unknown>;
+      const marker = record.__ctWriterIdentityOf;
+      if (marker && typeof marker === "object") {
+        return marker as Record<string, unknown>;
+      }
+      for (const child of Object.values(record)) {
+        const found = findWriterIdentity(child);
+        if (found) return found;
+      }
+      return undefined;
+    };
+    const identity = findWriterIdentity(evaluated.main?.schema);
+
+    expect(identity).toEqual({
+      file: fileName,
+      path: ["setBio"],
+      moduleIdentity: compiled.entryIdentity,
+    });
+
+    // The source-cache recovery compiler is a separate pipeline construction
+    // site; pin the same born-stamped payload there as well.
+    const recovered = await engine.compileResolvedToRecordGraph(
+      program.files,
+      program.main,
+    );
+    expect(recovered.entryIdentity).toBe(compiled.entryIdentity);
+    const recoveredBody = recovered.modules.find((module) =>
+      module.filename === fileName
+    )?.js;
+    expect(recoveredBody).toContain(`file: "${fileName}"`);
+    expect(recoveredBody).toContain(
+      `moduleIdentity: "${compiled.entryIdentity}"`,
+    );
+  });
+
   it("changes the identity when the shared module's source changes", async () => {
     const program = (body: string): RuntimeProgram => ({
       main: "/shared.ts",

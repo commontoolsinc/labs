@@ -6,6 +6,7 @@ import {
 } from "@commonfabric/utils/sandbox-contract";
 import { TransformationContext, Transformer } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
+import { normalizeWriterIdentityFile } from "../utils/writer-identity-file.ts";
 
 export class ModuleScopeFunctionHardeningTransformer extends Transformer {
   override transform(context: TransformationContext): ts.SourceFile {
@@ -19,7 +20,10 @@ export class ModuleScopeFunctionHardeningTransformer extends Transformer {
     const trustedBindingNames = collectWriteAuthorizedByBindingNames(
       sourceFile,
     );
-    const sourceFileName = normalizeWriterIdentityFile(sourceFile.fileName);
+    const sourceFileName = normalizeWriterIdentityFile(
+      sourceFile.fileName,
+      context.options.canonicalWriterIdentityFile,
+    );
 
     const statements = sourceFile.statements.flatMap((statement) =>
       transformTopLevelStatement(statement, context, {
@@ -676,12 +680,6 @@ function collectTypeQueryIdentifiers(
     names.add(node.exprName.text);
   }
   ts.forEachChild(node, (child) => collectTypeQueryIdentifiers(child, names));
-}
-
-function normalizeWriterIdentityFile(fileName: string): string {
-  const normalized = fileName.replace(/\\/g, "/");
-  const strippedPrefixed = normalized.match(/^\/[^/]+(\/.+)$/)?.[1];
-  return strippedPrefixed ?? normalized;
 }
 
 function isDirectFunctionExpression(expression: ts.Expression): boolean {

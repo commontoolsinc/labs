@@ -247,6 +247,72 @@ describe("Engine fabric imports", () => {
     expect(reference?.moduleIdentity).not.toBe(compiled.entryIdentity);
   });
 
+  it("binds nested writer claims to a pinned import's defining identity", async () => {
+    const dependency = await publish({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `/// <cts-enable />
+          import { handler, Writable, WriteAuthorizedBy } from "commonfabric";
+          export const commitMessage = handler<string, { message: Writable<string> }>(
+            (value, { message }) => message.set(value),
+          );
+          export type ProtectedMessage = WriteAuthorizedBy<
+            string,
+            typeof commitMessage
+          >;
+        `,
+      }],
+    });
+    const specifier = `cf:pattern:${dependency.entryIdentity}`;
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `/// <cts-enable />
+          import { toSchema } from "commonfabric";
+          import type { ProtectedMessage } from "${specifier}";
+          interface Output { message: ProtectedMessage; }
+          export const schema = toSchema<Output>();
+        `,
+      }],
+    };
+
+    const compiled = await engine.compileToRecordGraph(program, {
+      fabricImports: { space },
+    });
+    const evaluated = engine.evaluateRecordGraph(
+      compiled.id,
+      compiled.graph,
+      compiled.mainSpecifier,
+      program.files,
+    );
+    const findWriterIdentity = (
+      value: unknown,
+    ): Record<string, unknown> | undefined => {
+      if (!value || typeof value !== "object") return undefined;
+      const record = value as Record<string, unknown>;
+      const marker = record.__ctWriterIdentityOf;
+      if (marker && typeof marker === "object") {
+        return marker as Record<string, unknown>;
+      }
+      for (const child of Object.values(record)) {
+        const found = findWriterIdentity(child);
+        if (found) return found;
+      }
+      return undefined;
+    };
+
+    expect(findWriterIdentity(evaluated.main?.schema)).toEqual({
+      // The mounted dependency and importer intentionally share this authored
+      // spelling; the content identity is what keeps the claim unambiguous.
+      file: "/main.tsx",
+      path: ["commitMessage"],
+      moduleIdentity: dependency.entryIdentity,
+    });
+    expect(dependency.entryIdentity).not.toBe(compiled.entryIdentity);
+  });
+
   it("uses the mounted source for TypeScript diagnostics", async () => {
     const dependency = await publish(dependencyProgram(1));
     const specifier = `cf:pattern:${dependency.entryIdentity}`;

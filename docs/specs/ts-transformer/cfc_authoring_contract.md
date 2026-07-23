@@ -183,18 +183,30 @@ Normative behavior:
    - a local function declaration
 4. The transformer must report `cfc-write-authorized-by` if any of the above
    conditions fail.
-5. The schema-generator must preserve the identity through a marker payload,
-   then rehydrate it back into emitted schema AST as `<binding> as any`.
+5. The schema-generator must preserve the declaring source and binding path in
+   `__ctWriterIdentityOf`. The transformer maps the declaring compile name to
+   the caller's authored file spelling. When `moduleIdentities` contains that
+   defining source, the marker must also carry its content-addressed
+   `moduleIdentity`, so engine-authored claims are stamped when minted.
+6. If `moduleIdentities` is supplied but omits the defining source, compilation
+   must fail instead of silently minting an unstamped claim.
 
 One valid marker shape is:
 
 ```ts
 // Shown for illustration only.
-{ __ctWriterIdentityOf: <ts.EntityName> }
+{
+  __ctWriterIdentityOf: {
+    file: "/authored/path.tsx",
+    path: ["binding"],
+    moduleIdentity: "cf:module/content-identity"
+  }
+}
 ```
 
-That marker is an implementation detail, but the implementation still needs an
-equivalent cross-stage identity channel.
+`moduleIdentity` is absent for compatibility callers that do not supply source
+identities and for aged stored claims. The marker is an implementation detail,
+but the implementation still needs an equivalent cross-stage identity channel.
 
 ## Pipeline Contract
 

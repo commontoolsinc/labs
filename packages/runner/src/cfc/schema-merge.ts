@@ -99,12 +99,15 @@ const writerClaimWithoutStampAndFile = (
  * (equal or one-leading-segment apart), and everything outside file + stamp
  * is equal. Returns the stamped side when exactly one carries the provenance
  * stamp (`moduleIdentity`, or a legacy `bundleId` on pre-migration claims),
- * the existing side when neither does or both carry the SAME stamp (stored
- * spelling wins — stability), and `undefined` when the claims genuinely
- * conflict (different bindings, or two different stamps). A legitimate
- * `setsrc` update does not rotate this stamp: the stored claim keeps its
- * predecessor identity, and authenticated module delegation authorizes the
- * successor at verification time.
+ * and the existing side otherwise — both-unstamped, both same stamp, and
+ * both stamped DIFFERENTLY (a version boundary: born-stamped claims make a
+ * republished module re-present this binding under its new moduleIdentity
+ * on every envelope write; the stored stamp is kept, never rotated, and the
+ * successor's field writes are authorized at verification time by
+ * authenticated `piece setsrc` module delegation — or fail closed loudly
+ * without one — while the envelope's sibling writes keep committing).
+ * `undefined` only when the claims name different bindings
+ * (non-corresponding files or paths).
  */
 const reconcileWriterClaimStamp = (
   existing: unknown,
@@ -144,13 +147,18 @@ const reconcileWriterClaimStamp = (
   const existingStamped = writerClaimIsStamped(existingIdentity);
   const candidateStamped = writerClaimIsStamped(candidateIdentity);
   if (existingStamped && candidateStamped) {
-    // Both stamped: same stamp → the stored claim (spelling included) wins;
-    // different stamps → genuine conflict, never silently rotated.
-    return WRITER_CLAIM_STAMP_KEYS.every((key) =>
-        deepEqual(existingIdentity[key], candidateIdentity[key])
-      )
-      ? existing
-      : undefined;
+    // Both stamped, same binding: the stored claim wins either way. With
+    // equal stamps this is plain stability (spelling included). With
+    // DIFFERENT stamps it is a version boundary — claims are minted born
+    // stamped, so a republished module re-presents this binding under its
+    // new moduleIdentity on every envelope write. Keeping the stored stamp
+    // (instead of conflict-aborting the transaction) preserves the
+    // fail-closed posture at the right granularity: the new version's
+    // writes to THIS field are rejected loudly at verification until the
+    // setsrc-history delegation design authorizes the rotation, while the
+    // envelope's sibling fields keep committing. Rotation never happens
+    // here in either direction.
+    return existing;
   }
   if (!existingStamped && !candidateStamped) {
     return existing;
@@ -215,8 +223,9 @@ const mergeSetLikeIfcArray = (
           // authoring identity's provenance stamp and one recorded without an
           // identity (unstamped). The BINDING (file + path) is what the claim
           // means; the stamp is provenance added per input — keep the stamped
-          // claim. Two DIFFERENT stamps (or different bindings) still
-          // conflict.
+          // claim. For two different stamps of the same binding, keep the
+          // stored stamp (a version boundary, never a rotation here). Different
+          // bindings still conflict.
           if (key === "writeAuthorizedBy") {
             const reconciled = reconcileWriterClaimStamp(existing, candidate);
             if (reconciled !== undefined) {
