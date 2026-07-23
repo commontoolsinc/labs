@@ -1,6 +1,19 @@
-import { action, computed, Default, pattern, UI, Writable } from "commonfabric";
+import {
+  action,
+  computed,
+  Default,
+  equals,
+  pattern,
+  UI,
+  Writable,
+} from "commonfabric";
 import ParticipantIdentityCard from "./participant-identity-card.tsx";
-import type { User } from "./main.tsx";
+import {
+  DEFAULT_PARTICIPANT_PROFILES,
+  type LunchProfile,
+  type ParticipantProfileDirectoryValue,
+  type User,
+} from "./main.tsx";
 import {
   findNode,
   hasText,
@@ -25,10 +38,36 @@ export default pattern(() => {
   const users = new Writable<User[] | Default<[]>>([]);
   const myName = new Writable<string | Default<"">>("");
   const adminName = new Writable<string | Default<"">>("");
+  const participantProfiles = Writable.of<ParticipantProfileDirectoryValue>(
+    DEFAULT_PARTICIPANT_PROFILES,
+  );
   const participantIdentity = ParticipantIdentityCard({
     users,
     myName,
     adminName,
+    participantProfiles,
+  });
+
+  // The profile-backed path is injected explicitly so lane-2 tests exercise
+  // the same live profile cell that the parent receives from `wish("#profile")`.
+  const profileUsers = new Writable<User[] | Default<[]>>([]);
+  const profileMyName = new Writable<string | Default<"">>("");
+  const profileAdminName = new Writable<string | Default<"">>("");
+  const profileDirectory = Writable.of<ParticipantProfileDirectoryValue>(
+    DEFAULT_PARTICIPANT_PROFILES,
+  );
+  const aliceProfile = Writable.of<LunchProfile>({
+    initialNameApplied: "Profile Alice",
+    name: "Stale fallback",
+    avatar: "alice.png",
+    bio: "Lunch enthusiast",
+  });
+  const profileIdentity = ParticipantIdentityCard({
+    users: profileUsers,
+    myName: profileMyName,
+    adminName: profileAdminName,
+    participantProfiles: profileDirectory,
+    profile: aliceProfile,
   });
 
   // Profile-first UI fires `joinAs.send({})` (no name) for the "Join as <name>"
@@ -40,6 +79,19 @@ export default pattern(() => {
 
   const action_join_as_alex = action(() => {
     participantIdentity.joinAs.send({ name: "Alex" });
+  });
+
+  const action_join_with_profile = action(() => {
+    profileIdentity.joinAs.send({});
+  });
+
+  const action_update_canonical_profile = action(() => {
+    aliceProfile.set({
+      initialNameApplied: "Alice Updated",
+      name: "Stale fallback",
+      avatar: "alice-updated.png",
+      bio: "Still a lunch enthusiast",
+    });
   });
 
   const action_try_rejoin_as_alex_two = action(() => {
@@ -89,6 +141,13 @@ export default pattern(() => {
       hasText(ui, "First to join becomes the host.");
   });
 
+  const assert_profile_first_renders = computed(() => {
+    const ui = profileIdentity[UI];
+    return hasText(ui, "Join as Profile Alice") &&
+      findByProp(ui, "data-profile-identity", "canonical") !== undefined &&
+      findByProp(ui, "aria-label", "Use a different name") !== undefined;
+  });
+
   const assert_empty_send_noop = computed(() =>
     users.get().length === 0 &&
     participantIdentity.me === "" &&
@@ -102,9 +161,32 @@ export default pattern(() => {
       currentUsers[0]?.joinedAt === 0 &&
       myName.get() === "Alex" &&
       adminName.get() === "Alex" &&
+      participantProfiles.get().participants.length === 0 &&
       participantIdentity.me === "Alex" &&
       participantIdentity.isJoined === true &&
       participantIdentity.isAdmin === true;
+  });
+
+  const assert_joined_with_profile = computed(() => {
+    const currentUsers = profileUsers.get();
+    const links = profileDirectory.get().participants;
+    return currentUsers.length === 1 &&
+      currentUsers[0]?.name === "Profile Alice" &&
+      currentUsers[0]?.avatar === "alice.png" &&
+      profileMyName.get() === "Profile Alice" &&
+      profileAdminName.get() === "Profile Alice" &&
+      links.length === 1 &&
+      links[0]?.name === "Profile Alice" &&
+      equals(links[0]?.profile, aliceProfile) &&
+      profileIdentity.isJoined === true &&
+      profileIdentity.isAdmin === true;
+  });
+
+  const assert_profile_link_stays_live = computed(() => {
+    const currentUsers = profileUsers.get();
+    return currentUsers[0]?.name === "Profile Alice" &&
+      currentUsers[0]?.avatar === "alice.png" &&
+      profileIdentity.profileName === "Alice Updated";
   });
 
   const assert_rejoin_noop = computed(() => {
@@ -132,8 +214,13 @@ export default pattern(() => {
     tests: [
       { assertion: assert_initial },
       { assertion: assert_manual_fallback_renders },
+      { assertion: assert_profile_first_renders },
       { action: action_join_empty },
       { assertion: assert_empty_send_noop },
+      { action: action_join_with_profile },
+      { assertion: assert_joined_with_profile },
+      { action: action_update_canonical_profile },
+      { assertion: assert_profile_link_stays_live },
       { action: action_join_as_alex },
       { assertion: assert_joined_as_alex },
       { action: action_try_rejoin_as_alex_two },

@@ -9,10 +9,11 @@
  * Identity follows the scrabble idiom:
  * - `users` is a per-space directory of joined participants.
  * - Each viewer's `myName` is per-user; it is set once on join and treated as
- *   immutable thereafter. The join name/avatar come from the viewer's shared
- *   profile (`wish({ query: "#profile" })` — its built-in UI covers profile
- *   create/pick); programmatic callers can still pass an explicit name in the
- *   `joinAs` event.
+ *   immutable thereafter. A profile-backed join stores the viewer's live
+ *   `wish({ query: "#profile" })` cell in the object-wrapped
+ *   `participantProfiles` directory, while keeping a name/avatar snapshot in
+ *   the legacy name-keyed poll state. A guest may instead type a string; guest
+ *   entries deliberately have no canonical profile link.
  * - The first joiner's name is captured into `adminName` (per-space). They can
  *   add/remove options and reset votes. `isAdmin` is derived, not stored.
  * - Open host takeover: any joined participant can `claimHost`, transferring
@@ -32,9 +33,10 @@
  * denormalized, so the snapshot survives the option being removed. The
  * "📊 Lunch stats" card derives per-place visit + green/yellow/red tallies from
  * those embedded snapshots via a plain `computed` (the `tallyOptions` idiom).
- * Live voting stays on the in-cell `votes` array. Each entry — and each embedded
- * vote — carries a frozen name snapshot plus a live `Cell<User>` profile link
- * (the shared-profile-roster live-link idiom).
+ * Live voting stays on the in-cell `votes` array. Each history entry — and each
+ * embedded vote — carries a frozen name plus a same-space `Cell<User>` roster
+ * link. Canonical cross-space profile identity lives separately in
+ * `participantProfiles` so legacy stored Lunch Poll arguments remain valid.
  *
  * History was briefly backed by the SQLite builtin (#4144/#4145, to dogfood it),
  * but that brought a deployed-piece "invalid database handle" failure plus a
@@ -61,6 +63,7 @@ import {
   type Cell,
   computed,
   Default,
+  equals,
   handler,
   NAME,
   pattern,
@@ -83,6 +86,50 @@ export interface User {
   color: string;
   joinedAt: number;
 }
+
+/** Canonical profile fields consumed by Lunch Poll's identity UI. */
+export interface LunchProfile {
+  readonly initialNameApplied?: string;
+  readonly name?: string;
+  readonly avatar?: string;
+  readonly bio?: string;
+  readonly externalLinks?: readonly {
+    readonly label: string;
+    readonly url: string;
+  }[];
+  readonly verifiedIdentities?: readonly Cell<unknown>[];
+}
+
+/** Stable identity for a profile-backed participant. */
+export type LunchProfileCell = Cell<LunchProfile>;
+
+export interface ParticipantProfileLink {
+  /** Immutable Lunch Poll name used by the current name-keyed vote schema. */
+  readonly name: string;
+  /** Live canonical profile cell; compare it by identity with `equals()`. */
+  readonly profile: LunchProfileCell;
+}
+
+/**
+ * Live profile links use an object-wrapped directory. Nested cross-space cells
+ * inside Lunch Poll's legacy bare `users` array do not preserve strong handler
+ * schemas, so the compatibility-safe profile index remains separate.
+ */
+export interface ParticipantProfileDirectory {
+  readonly participants: ParticipantProfileLink[] | Default<[]>;
+}
+
+export const DEFAULT_PARTICIPANT_PROFILES = {
+  participants: [] as ParticipantProfileLink[],
+} satisfies ParticipantProfileDirectory;
+
+export type ParticipantProfileDirectoryValue =
+  | ParticipantProfileDirectory
+  | Default<typeof DEFAULT_PARTICIPANT_PROFILES>;
+
+export type ParticipantProfileDirectoryCell = Writable<
+  ParticipantProfileDirectoryValue
+>;
 
 export interface Option {
   id: string;
@@ -146,8 +193,8 @@ export type ResetVotesEvent = Record<PropertyKey, never>;
  * A snapshot of one person's vote at the moment a visit was logged, embedded in
  * the visit's `votes` list. `optionTitle` is denormalized (options can be
  * removed later; the title is the meaningful record). `voter` is a frozen name
- * snapshot; `voterLink` is a live `Cell<User>` link to that voter's profile
- * (null if the voter is no longer in the directory).
+ * snapshot; `voterLink` is a live `Cell<User>` link to that voter's Lunch Poll
+ * roster entry (null if the voter is no longer in the directory).
  */
 export interface VoteSnapshot {
   voter: string;
@@ -160,8 +207,9 @@ export interface VoteSnapshot {
  * A place the group actually ate, logged by the host — one entry in the
  * `PerSpace<HistoryEntry[]>` visit log. `loggedByName` is a frozen name snapshot
  * (what the "Recently eaten" card renders); `loggedBy` is a live `Cell<User>`
- * link to the logging host's profile (null if absent). `votes` embeds the vote
- * snapshot taken at log time, so per-place stats survive an option's removal.
+ * link to the logging host's Lunch Poll roster entry (null if absent). `votes`
+ * embeds the vote snapshot taken at log time, so per-place stats survive an
+ * option's removal.
  */
 export interface HistoryEntry {
   id: string;
@@ -684,9 +732,9 @@ const logVisit = handler<LogVisitEvent, {
       : parseVisitDate(visitDate.get(), fallbackNow);
     if (!when) return;
 
-    // Resolve a name → that user's live Cell<User> in the directory, for the
-    // `*Link` live-profile links (the shared-profile-roster idiom). users.key(i)
-    // is a stable cell that round-trips through the array as a link.
+    // Resolve a name → that user's same-space Cell<User> roster entry.
+    // Canonical cross-space identity is held by `participantProfiles`; these
+    // historical links remain unchanged for stored-value compatibility.
     const us = users.get();
     const cellForName = (name: string): Cell<User> | null => {
       const idx = us.findIndex((u) => u.name === name);
@@ -847,6 +895,8 @@ export interface CozyPollInput {
   options?: PerSpace<Option[] | Default<[]>>;
   votes?: PerSpace<Vote[] | Default<[]>>;
   users?: PerSpace<User[] | Default<[]>>;
+  /** Canonical live profile links for profile-backed users; guests are absent. */
+  participantProfiles?: PerSpace<ParticipantProfileDirectoryValue>;
   adminName?: PerSpace<string | Default<"">>;
   myName?: PerUser<string | Default<"">>;
   // Durable "we went here" log; each entry embeds its own vote snapshot. Capped
@@ -865,6 +915,7 @@ export interface CozyPollOutput {
   // only `todaysVotes` — see the current-day filter note in the file header.
   votes: readonly Vote[];
   users: readonly User[];
+  participantProfiles: readonly ParticipantProfileLink[];
   adminName: string;
   myName: string;
   userCount: number;
@@ -909,6 +960,7 @@ export interface CozyPollOutput {
 const EMPTY_OPTIONS: Option[] = [];
 const EMPTY_VOTES: Vote[] = [];
 const EMPTY_USERS: User[] = [];
+const EMPTY_PARTICIPANT_PROFILE_LINKS: ParticipantProfileLink[] = [];
 
 export default pattern<CozyPollInput, CozyPollOutput>(
   (
@@ -917,6 +969,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       options,
       votes,
       users,
+      participantProfiles,
       adminName,
       myName,
       visits,
@@ -952,10 +1005,15 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     >(null);
     const resetConfirmPending = Writable.perSession.of<boolean>(false);
     const clearHistoryConfirmPending = Writable.perSession.of<boolean>(false);
+    // The live cell is the stable identity. Its current name/avatar are only
+    // snapshotted into the legacy name-keyed poll state when this viewer joins.
+    const profileWish = wish<LunchProfile>({ query: "#profile" });
     const participantIdentity = ParticipantIdentityCard({
       users,
       myName,
       adminName,
+      participantProfiles,
+      profile: profileWish.result,
     });
     const boundAddOption = addOption({
       options,
@@ -1041,6 +1099,14 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const me = participantIdentity.me;
     const isJoined = participantIdentity.isJoined;
     const isAdmin = participantIdentity.isAdmin;
+    const viewerUsesCanonicalProfile = computed(() => {
+      const viewerProfile = profileWish.result;
+      const viewerName = participantIdentity.me;
+      if (!viewerProfile || !viewerName) return false;
+      return participantProfiles.participants.some((entry) =>
+        entry.name === viewerName && equals(entry.profile, viewerProfile)
+      );
+    });
     // Hoist a boolean cell for the reset-confirm JSX ternary so TS doesn't
     // narrow `resetConfirmPending` itself and lose the `.set` method in
     // the false branch.
@@ -1154,27 +1220,40 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           </span>
                         )
                         : null}
-                      <span
-                        title={viewer}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          padding: "4px 10px",
-                          borderRadius: "9999px",
-                          background: "#f3f4f6",
-                          border: "1px solid #e5e7eb",
-                          fontSize: "12px",
-                          fontWeight: 600,
-                          color: "#374151",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        <span style={{ fontSize: "10px", color: "#10b981" }}>
-                          ●
-                        </span>
-                        {viewer}
-                      </span>
+                      {viewerUsesCanonicalProfile
+                        ? (
+                          <cf-profile-badge
+                            variant="chip"
+                            size="sm"
+                            $profile={profileWish.result}
+                            noNavigate
+                          />
+                        )
+                        : (
+                          <span
+                            title={viewer}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              padding: "4px 10px",
+                              borderRadius: "9999px",
+                              background: "#f3f4f6",
+                              border: "1px solid #e5e7eb",
+                              fontSize: "12px",
+                              fontWeight: 600,
+                              color: "#374151",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            <span
+                              style={{ fontSize: "10px", color: "#10b981" }}
+                            >
+                              ●
+                            </span>
+                            {viewer}
+                          </span>
+                        )}
                     </div>
                   );
                 })}
@@ -1790,6 +1869,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       options: computed(() => options ?? EMPTY_OPTIONS),
       votes: computed(() => votes ?? EMPTY_VOTES),
       users: computed(() => users ?? EMPTY_USERS),
+      participantProfiles: computed(() =>
+        participantProfiles.participants ?? EMPTY_PARTICIPANT_PROFILE_LINKS
+      ),
       adminName: computed(() => trimmedName(adminName)),
       myName: participantIdentity.me,
       userCount,
