@@ -1,18 +1,23 @@
 import { parse } from "./commands/mod.ts";
 import { main as rootCommand } from "./commands/main.ts";
 import { CompilerError, TransformerError } from "@commonfabric/js-compiler";
+import { ValidationError } from "@cliffy/command";
 import { cliName } from "./lib/cli-name.ts";
 import { applyLogLevel } from "./lib/log-level.ts";
 import { applyColorMode } from "./lib/color-mode.ts";
+import { reservesStdoutForCommandOutput } from "./lib/json-output.ts";
 
 /**
- * The value to print for a top-level CLI failure. TransformerError and
- * CompilerError carry pre-formatted messages, so print those without a stack
- * trace; other Errors print their stack (falling back to the message); anything
+ * The value to print for a top-level CLI failure. Validation, transformer, and
+ * compiler errors carry user-facing messages, so print those without a stack
+ * trace. Other Errors print their stack, falling back to the message. Anything
  * else prints as-is.
  */
 export function renderCliError(e: unknown): unknown {
-  if (e instanceof TransformerError || e instanceof CompilerError) {
+  if (
+    e instanceof ValidationError || e instanceof TransformerError ||
+    e instanceof CompilerError
+  ) {
     return e.message;
   }
   if (e instanceof Error) {
@@ -27,6 +32,7 @@ export async function main(args: string[]) {
   const { args: cleanArgs, enabled: colorsEnabled } = applyColorMode(
     applyLogLevel(args),
   );
+  const reservedStdout = reservesStdoutForCommandOutput(cleanArgs);
   // Cliffy's help generator ignores the global color flag (it force-sets its
   // own `colors` option while rendering), so mirror the decision here. The
   // .reset() re-targets the builder chain at the root command (without it,
@@ -39,17 +45,17 @@ export async function main(args: string[]) {
   try {
     await parse(cleanArgs);
     if (profileDoneMarker) {
-      console.log(profileDoneMarker);
+      (reservedStdout ? console.error : console.log)(profileDoneMarker);
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     Deno.exit(0);
   } catch (e) {
     console.error(renderCliError(e));
     if (profileDoneMarker) {
-      console.log(profileDoneMarker);
+      (reservedStdout ? console.error : console.log)(profileDoneMarker);
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    Deno.exit(1);
+    Deno.exit(e instanceof ValidationError ? e.exitCode : 1);
   }
 }
 

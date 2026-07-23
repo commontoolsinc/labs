@@ -19,6 +19,7 @@ import {
 } from "../lib/exec.ts";
 import { writeMountState } from "../lib/fuse.ts";
 import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
+import type { SpaceConfig } from "../lib/piece.ts";
 import { cf, isIgnorableDenoWarningLine } from "./utils.ts";
 
 function makeSpec(
@@ -950,11 +951,14 @@ describe("renderPieceCallHelp", () => {
     expect(help).toContain("cf piece call ... search --help");
     expect(help).toContain("cf piece call ... search --help --json");
     expect(help).toContain("cf piece call ... search <json>");
+    expect(help).toContain("cf piece call ... search --json [<json>]");
     expect(help).toContain(
       "cf piece call ... search -- [run] --query <string>",
     );
     expect(help).toContain("JSON input:");
-    expect(help).toContain("Pass inline JSON as the next argument");
+    expect(help).toContain(
+      "Pass inline JSON as one positional argument or after `--json`",
+    );
     expect(help).toContain("query: string");
     expect(help).toContain("help?: string");
     expect(help).toContain("Flags after `--`:");
@@ -1784,17 +1788,23 @@ describe("mounted callable resolution and execution", () => {
       loadManager: () => Promise.resolve(harness.manager),
       loadPiece: () => Promise.resolve(harness.piece),
     });
+    const loadConfigs: SpaceConfig[] = [];
     const result = await executeMountedCallableFile(
       filePath,
       ["--query", "tea"],
       {
         stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
+        loadManager: (config) => {
+          loadConfigs.push(config);
+          return Promise.resolve(harness.manager);
+        },
         loadPiece: () => Promise.resolve(harness.piece),
         uuid: () => "tool-result-id",
       },
     );
 
+    expect(loadConfigs).toHaveLength(1);
+    expect(loadConfigs[0].jsonOutput).toBe(true);
     expect(
       Object.keys(
         (resolved.commandSpec.inputSchema as {

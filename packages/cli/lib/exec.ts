@@ -78,6 +78,10 @@ export interface ExecutedMountedCallableFile {
   resolved: ResolvedMountedCallableFile;
 }
 
+export interface ResolveMountedCallableOptions {
+  jsonOutput?: boolean;
+}
+
 async function defaultLoadPiece(
   manager: CallableManagerLike,
   pieceId: string,
@@ -239,6 +243,7 @@ async function assertMountedCallableFileExists(
 export async function resolveMountedCallableFile(
   filePath: string,
   deps: ExecDependencies = {},
+  options: ResolveMountedCallableOptions = {},
 ): Promise<ResolvedMountedCallableFile> {
   const absPath = resolve(filePath);
   const mount = await findMountForPath(absPath, deps.stateDir);
@@ -268,11 +273,13 @@ export async function resolveMountedCallableFile(
       apiUrl: mount.entry.apiUrl,
       identity: mount.entry.identity,
       space: callablePath.spaceName,
+      ...(options.jsonOutput ? { jsonOutput: true } : {}),
     })
     : await loadManager({
       apiUrl: mount.entry.apiUrl,
       identity: mount.entry.identity,
       space: callablePath.spaceName,
+      ...(options.jsonOutput ? { jsonOutput: true } : {}),
     }) as unknown as CallableManagerLike;
   const piece = await (deps.loadPiece ?? defaultLoadPiece)(
     manager,
@@ -306,7 +313,9 @@ export async function executeMountedCallableFile(
   rawArgs: string[],
   deps: ExecDependencies = {},
 ): Promise<ExecutedMountedCallableFile> {
-  const resolved = await resolveMountedCallableFile(filePath, deps);
+  const resolved = await resolveMountedCallableFile(filePath, deps, {
+    jsonOutput: true,
+  });
   const invocationStyle = deps.invocationStyle ??
     (Deno.env.get("CF_EXEC_SHEBANG") === "1" ? "direct" : "cf");
   const result = await executeCallableCommand({

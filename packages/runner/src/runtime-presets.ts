@@ -407,7 +407,7 @@ export const runtimePresets = {
     };
   },
 
-  /** Local CLI development runtime (`cf check` / `cf dev`): emulated storage, real fetch. */
+  /** Local CLI check runtime: emulated storage, real fetch. */
   localDev(params: CoreParams): RuntimeOptions {
     return coreOptions(params);
   },

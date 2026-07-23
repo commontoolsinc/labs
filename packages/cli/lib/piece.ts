@@ -67,6 +67,7 @@ import {
 } from "./exec-schema.ts";
 import { cliCommand } from "./cli-name.ts";
 import { deriveDiskHandleId } from "./sqlite-source.ts";
+import { stderrConsoleHandler } from "./json-output.ts";
 
 export interface EntryConfig {
   mainPath: string;
@@ -79,6 +80,7 @@ export interface SpaceConfig {
   apiUrl: string;
   space: string;
   identity: string;
+  jsonOutput?: boolean;
 }
 
 /** Metadata returned for a piece whose stored data matches a search query. */
@@ -281,59 +283,64 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
       // Shared first-party posture for client runtimes against a deployed
       // API (CT-1814); collectors and the navigate hook are this CLI's
       // declared deltas.
-      new Runtime(runtimePresets.remoteClient({
-        apiUrl: new URL(config.apiUrl),
-        storageManager: StorageManager.open({
-          as: session.as,
-          memoryHost: new URL(config.apiUrl),
-          spaceIdentity: session.spaceIdentity,
-        }),
-        experimental: experimentalOptionsFromEnv(Deno.env.get),
-        errorHandlers: [
-          (error) => {
-            runtimeErrors.push({
-              message: error.message,
-              pieceId: error.pieceId,
-              patternId: error.patternId,
-              spellId: error.spellId,
-              space: error.space,
-              stackTrace: error.stack,
-            });
-          },
-        ],
-        navigateCallback: (target) => {
-          try {
-            const id = pieceId(target);
-            if (!id) {
-              console.error("navigateTo: target missing piece id");
-              return;
-            }
-            // Emit greppable line immediately so scripts can capture without waiting
-            console.log(`navigateTo new piece id ${id}`);
-            // Best-effort: ensure piece is present in list
-            runtime.storageManager
-              .synced()
-              .then(async () => {
-                try {
-                  const mgr = pieceManagerRef.current!;
-                  const piecesCell = await mgr.getPieces();
-                  const list = piecesCell.get();
-                  const exists = list.some((c) => pieceId(c) === id);
-                  if (!exists) {
-                    await mgr.add([target]);
-                  }
-                } catch (e) {
-                  console.error("navigateTo add error:", e);
-                }
-              })
-              .catch((_err: unknown) => {
-                // ignore; we already emitted the id
+      new Runtime({
+        ...runtimePresets.remoteClient({
+          apiUrl: new URL(config.apiUrl),
+          storageManager: StorageManager.open({
+            as: session.as,
+            memoryHost: new URL(config.apiUrl),
+            spaceIdentity: session.spaceIdentity,
+          }),
+          experimental: experimentalOptionsFromEnv(Deno.env.get),
+          errorHandlers: [
+            (error) => {
+              runtimeErrors.push({
+                message: error.message,
+                pieceId: error.pieceId,
+                patternId: error.patternId,
+                spellId: error.spellId,
+                space: error.space,
+                stackTrace: error.stack,
               });
-          } catch (e) {
-            console.error("navigateTo callback error:", e);
-          }
-        },
-      })),
+            },
+          ],
+          navigateCallback: (target) => {
+            try {
+              const id = pieceId(target);
+              if (!id) {
+                console.error("navigateTo: target missing piece id");
+                return;
+              }
+              // Emit greppable line immediately so scripts can capture without waiting
+              (config.jsonOutput ? console.error : console.log)(
+                `navigateTo new piece id ${id}`,
+              );
+              // Best-effort: ensure piece is present in list
+              runtime.storageManager
+                .synced()
+                .then(async () => {
+                  try {
+                    const mgr = pieceManagerRef.current!;
+                    const piecesCell = await mgr.getPieces();
+                    const list = piecesCell.get();
+                    const exists = list.some((c) => pieceId(c) === id);
+                    if (!exists) {
+                      await mgr.add([target]);
+                    }
+                  } catch (e) {
+                    console.error("navigateTo add error:", e);
+                  }
+                })
+                .catch((_err: unknown) => {
+                  // ignore; we already emitted the id
+                });
+            } catch (e) {
+              console.error("navigateTo callback error:", e);
+            }
+          },
+        }),
+        ...(config.jsonOutput ? { consoleHandler: stderrConsoleHandler } : {}),
+      }),
   );
   (runtime as Runtime & { [CF_RUNTIME_ERROR_LOG]?: CliRuntimeErrorRecord[] })[
     CF_RUNTIME_ERROR_LOG
@@ -1436,7 +1443,11 @@ export async function executePieceCallable(
   rawArgs: string[],
   deps: PieceCallableDependencies = {},
 ): Promise<ExecutedPieceCallable> {
-  const resolved = await resolvePieceCallable(config, callableName, deps);
+  const resolved = await resolvePieceCallable(
+    { ...config, jsonOutput: true },
+    callableName,
+    deps,
+  );
   return await executeCallableCommand({
     resolved,
     execution: resolved,

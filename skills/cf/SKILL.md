@@ -46,10 +46,8 @@ Three equivalent ways to run the CLI, in order of preference for agents:
 ## Output Conventions (scripts & agents)
 
 - stdout carries command output only; hints, tips and diagnostics go to stderr.
-  `piece get` prints plain JSON, with no ANSI to strip — except an absent value
-  prints the literal `undefined`, which is not valid JSON, so test for it before
-  parsing (it stays `undefined` rather than `null`; see the loom note in
-  `packages/cli/README.md` for why).
+  `piece get` prints JSON, with no ANSI to strip, and represents an absent value
+  as `null`.
 - ANSI colors are emitted only when stdout is a TTY. Force off with `--no-color`
   or `NO_COLOR=1`; force on (e.g. through a pager) with `FORCE_COLOR=1`.
   (`cf view` keeps its own `--color` flag.)
@@ -143,12 +141,16 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 | ---------------------- | -------------------------------------------------- |
 | `--no-run`             | Type check only, don't execute                     |
 | `--no-check`           | Execute without type checking                      |
+| `--json`               | Compile without evaluating; print compiled JSON    |
 | `--show-transformed`   | Show the transformed TypeScript after compilation  |
 | `--verbose-errors`     | Show original TS errors alongside simplified hints |
 | `--pattern-json`       | Print the evaluated pattern export as JSON         |
 | `--output <path>`      | Store compiled JS to a file                        |
 | `--main-export <name>` | Select non-default export (default: `"default"`)   |
-| `--filename <name>`    | Override filename for source maps                  |
+
+`--json`, `--show-transformed`, and `--pattern-json` are mutually exclusive.
+Each mode waits for every input to succeed before it writes to stdout. Errors go
+to stderr and leave stdout empty.
 
 Common usage:
 
@@ -156,6 +158,7 @@ Common usage:
 deno task cf check pattern.tsx              # Compile + execute (quiet on success)
 deno task cf check pattern.tsx --no-run     # Type check only (fast)
 deno task cf check pattern.tsx --no-check   # Skip types, just execute
+deno task cf check pattern.tsx --json       # Structured compiled output
 deno task cf check pattern.tsx --show-transformed  # Debug compiler transforms
 deno task cf check pattern.tsx --verbose-errors     # Detailed error context
 ```
@@ -210,6 +213,33 @@ echo '42' | deno task cf piece set ... count
 # Objects
 echo '{"name": "John"}' | deno task cf piece set ... user
 ```
+
+`piece get` and `wish` always print JSON. Both accept a redundant `--json` so
+callers can request the format explicitly.
+
+For `piece call`, options before the callable name configure `piece call`.
+Arguments after the callable name configure the invoked handler or tool. The
+JSON forms match `cf exec`:
+
+```bash
+# Complete input as an inline JSON value
+deno task cf piece call --piece ID search --json '{"query":"milk"}'
+
+# Complete input from stdin
+printf '%s' '{"query":"milk"}' |
+  deno task cf piece call --piece ID search --json
+
+# Machine-readable callable schema
+deno task cf piece call --piece ID search --help --json
+
+# Schema-derived input flags
+deno task cf piece call --piece ID search -- --query milk
+```
+
+A single positional JSON value after the callable is also accepted. Use
+`-- --json-file <path>` to read JSON from a file. Handler confirmations move to
+stderr when JSON input is selected, so stdout remains available for JSON tool
+results. Errors always go to stderr.
 
 ## Gotcha: Always `step` After `set` or `call`
 

@@ -58,6 +58,10 @@ export function safeStringify(obj: unknown, maxDepth = 8): string {
       return "<max depth reached>";
     }
 
+    if (typeof value === "bigint") {
+      return { $bigint: value.toString() };
+    }
+
     if (value === null || typeof value !== "object") {
       return value;
     }
@@ -81,8 +85,9 @@ export function safeStringify(obj: unknown, maxDepth = 8): string {
   };
 
   try {
-    return JSON.stringify(stringify(obj), null, 2);
+    return JSON.stringify(stringify(obj), null, 2) ?? "null";
   } catch (error) {
-    return `<error stringifying object: ${(error as Error)?.message}>`;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Could not serialize JSON output: ${message}`);
   }
 }

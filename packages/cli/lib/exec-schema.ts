@@ -1101,6 +1101,10 @@ function pieceJsonUsageLine(commandPrefix: string): string {
   return `${commandPrefix} <json>`;
 }
 
+function pieceExplicitJsonUsageLine(commandPrefix: string): string {
+  return `${commandPrefix} --json [<json>]`;
+}
+
 function pieceFlagUsageLine(
   commandPrefix: string,
   spec: ExecCommandSpec,
@@ -1121,6 +1125,7 @@ function pieceUsageLines(
       ? [`  ${commandPrefix}`, `  ${commandPrefix} -- invoke`]
       : []),
     `  ${pieceJsonUsageLine(commandPrefix)}`,
+    `  ${pieceExplicitJsonUsageLine(commandPrefix)}`,
     `  ${commandPrefix} -- --json-file <path>`,
     `  ${pieceFlagUsageLine(commandPrefix, spec)}`,
     ...(!properties ? [`  ${commandPrefix} -- --value-file <path>`] : []),
@@ -1129,7 +1134,8 @@ function pieceUsageLines(
 
 function pieceJsonInputLines(schema: JSONSchema): string[] {
   return [
-    "  Pass inline JSON as the next argument, use `-- --json-file <path>`, or pipe JSON on stdin with `-- --json`.",
+    "  Pass inline JSON as one positional argument or after `--json`. Bare `--json` reads JSON from stdin.",
+    "  Use `-- --json-file <path>` for a file. Schema-derived flags also follow `--`.",
     ...schemaShapeString(schema).split("\n").map((line) => `  ${line}`),
   ];
 }
