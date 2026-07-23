@@ -71,6 +71,87 @@ Deno.test("Topics diagnostics classifies invalid CLI configuration", async () =>
   assertEquals(reportSafeErrorCode(error), "invalid-configuration");
 });
 
+Deno.test("Topics diagnostics runs aggregate-only matrix phases", async () => {
+  const report = await runTopicsDiagnostics([
+    "--quick",
+    "--topics=2",
+    "--users=2",
+    "--sessions-per-user=1",
+    "--rounds=1",
+    "--typing-steps=1",
+    "--scenario=create-topics,noops,titles,comments,links,bodies,crossrefs",
+    "--cases=2x2,3x2",
+  ]);
+
+  assertEquals(report.kind, "topics-workload-diagnostics");
+  assertEquals(report.results.length, 2);
+  for (const [index, result] of report.results.entries()) {
+    if (!result.ok) throw new Error(`diagnostics failed: ${result.error}`);
+    const topicCount = index + 2;
+    assertEquals(result.result.case, { topics: topicCount, users: 2 });
+    assertEquals(result.result.convergence.converged, true);
+    assertEquals(
+      result.result.phases.map((phase) => phase.phase),
+      [
+        "concurrent-topic-creation",
+        "repeated-noop-writes",
+        "live-title-typing",
+        "concurrent-comments",
+        "concurrent-links",
+        "concurrent-body-saves",
+        "cross-reference-fanout",
+      ],
+    );
+    assertEquals(result.result.convergence.summary, {
+      topics: [topicCount, topicCount],
+      comments: [2, 2],
+      links: [2, 2],
+    });
+    for (const phase of result.result.phases) {
+      assertEquals(phase.telemetry.distinctDroppedEventCount, 0);
+      assertEquals(phase.telemetry.terminalFailureCount, 0);
+      assertEquals(phase.graph.postSettleMaxPendingAcrossSessions, 0);
+      assertEquals(phase.derivedTelemetry.elidedNoopCandidateWrites >= 0, true);
+      const serialized = JSON.stringify(phase);
+      assertEquals(serialized.includes("diagnostic-"), false);
+      assertEquals(serialized.includes("did:"), false);
+      assertEquals(serialized.includes("https://"), false);
+    }
+  }
+  const serializedReport = JSON.stringify(report);
+  assertEquals(serializedReport.includes("diagnostic-"), false);
+  assertEquals(serializedReport.includes("did:"), false);
+  assertEquals(serializedReport.includes("https://"), false);
+});
+
+Deno.test("Topics diagnostics runs aggregate-only conflict phase", async () => {
+  const report = await runTopicsDiagnostics([
+    "--profile=conflicts",
+    "--quick",
+    "--rounds=1",
+  ]);
+
+  const [result] = report.results;
+  if (!result.ok) throw new Error(`diagnostics failed: ${result.error}`);
+  assertEquals(
+    result.result.phases.map((phase) => phase.phase),
+    [
+      "setup-topics",
+      "alternating-whole-root-oscillation",
+    ],
+  );
+  assertEquals(result.result.convergence.converged, true);
+  const oscillation = result.result.phases[1];
+  assertEquals(oscillation.rootOscillation?.targetWriteCount, 2);
+  assertEquals(oscillation.memoryTelemetry.conflictCount > 0, true);
+  for (const phase of result.result.phases) {
+    const serialized = JSON.stringify(phase);
+    assertEquals(serialized.includes("diagnostic-"), false);
+    assertEquals(serialized.includes("did:"), false);
+    assertEquals(serialized.includes("https://"), false);
+  }
+});
+
 Deno.test("Topics diagnostics reduces content-free runtime summaries", () => {
   const summaries = [
     {

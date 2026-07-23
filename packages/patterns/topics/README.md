@@ -202,6 +202,8 @@ OTel bridge and suppress worker error output, so identifier-bearing worker spans
 and scheduler error payloads cannot escape through the diagnostic process. The
 local memory server also uses non-recording spans and suppresses free-form
 warnings in this mode. Aggregate workers reject generic read, raw-read, link,
-detailed-diagnostics, and logger-map RPCs; only lifecycle controls and the
-fixed-shape Topics commands are available. The report retains only numeric
-aggregates and fixed categories.
+detailed-diagnostics, and logger-map RPCs. They allow lifecycle controls, the
+fixed-shape Topics commands, and the sanitized `diagnosticsSummary`,
+`diagnosticsActivityGeneration`, `telemetry`, and `topicsDiagnosticsChurn`
+aggregate commands. Those responses and the report retain only numeric
+aggregates, booleans, and fixed categories.

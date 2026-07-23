@@ -12,14 +12,12 @@ import type {
   SchedulerGraphSnapshot,
 } from "@commonfabric/runner";
 import {
-  areLinksSame,
   classifyTelemetryWriteCounts,
   markRendererInputTx,
   markUiInputBlindWriteTx,
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
-import type { NormalizedFullLink } from "@commonfabric/runner/shared";
 import { markRendererTrustedEvent } from "@commonfabric/runner/cfc";
 import { Identity, type KeyPairRaw } from "@commonfabric/identity";
 import {
@@ -1534,57 +1532,54 @@ const handlers: Record<
           validatedSources: 0,
         } satisfies TopicsDiagnosticsCrossrefValidation;
       }
-      await syncResultTopology();
-      const target = topicsCell(["topics", 0]).resolveAsCell();
-      await target.sync();
+      await idle();
+      const target = await syncResultTopology(["crossrefs", 0, "topic"]);
       await target.pull();
-      const targetLink = target.getAsNormalizedFullLink();
-      const sourceLinks: NormalizedFullLink[] = [];
+      const sources: Cell<any>[] = [];
+      let validatedSources = 0;
       for (let index = 1; index < topicCount; index++) {
-        const refsOut = topicsCell(["topics", index, "crossrefs", "refsOut"]);
-        await refsOut.sync();
+        const refsOut = await syncResultTopology([
+          "crossrefs",
+          index,
+          "refsOut",
+        ]);
         const values = await refsOut.pull();
         if (!Array.isArray(values) || values.length !== 1) {
           return { ok: false, validatedSources: index - 1 };
         }
         const referenced = refsOut.key(0).resolveAsCell();
-        await referenced.sync();
         await referenced.pull();
-        if (!areLinksSame(referenced.getAsNormalizedFullLink(), targetLink)) {
+        if (!referenced.equals(target)) {
           return { ok: false, validatedSources: index - 1 };
         }
-        const source = topicsCell(["topics", index]).resolveAsCell();
-        await source.sync();
+        const source = await syncResultTopology([
+          "crossrefs",
+          index,
+          "topic",
+        ]);
         await source.pull();
-        sourceLinks.push(source.getAsNormalizedFullLink());
+        sources.push(source);
+        validatedSources++;
       }
-      const referencedBy = topicsCell([
-        "topics",
-        0,
+      const referencedBy = await syncResultTopology([
         "crossrefs",
+        0,
         "referencedBy",
       ]);
-      await referencedBy.sync();
       const backlinks = await referencedBy.pull();
       if (!Array.isArray(backlinks) || backlinks.length !== topicCount - 1) {
-        return { ok: false, validatedSources: sourceLinks.length };
+        return { ok: false, validatedSources };
       }
       for (const [index] of backlinks.entries()) {
         const backlink = referencedBy.key(index).resolveAsCell();
-        await backlink.sync();
         await backlink.pull();
-        if (
-          !areLinksSame(
-            backlink.getAsNormalizedFullLink(),
-            sourceLinks[index],
-          )
-        ) {
-          return { ok: false, validatedSources: sourceLinks.length };
+        if (!backlink.equals(sources[index])) {
+          return { ok: false, validatedSources };
         }
       }
       return {
         ok: true,
-        validatedSources: sourceLinks.length,
+        validatedSources,
       } satisfies TopicsDiagnosticsCrossrefValidation;
     } catch {
       return {
