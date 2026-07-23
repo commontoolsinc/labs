@@ -464,10 +464,8 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           { includeSchema: true, overwrite: "redirect" },
         );
       } else {
-        // Resolve the special values for "argument" and "result".
-        if (alias.cell !== "argument" && alias.cell !== "result") {
-          throw new Error("Invalid pseudo-alias cell: " + alias.cell);
-        }
+        // Resolve the special values for "argument" and "result" — the only
+        // `cell` values isAliasBinding admits.
         const link = alias.cell === "argument"
           ? argumentCellLink
           : resultCellLink;

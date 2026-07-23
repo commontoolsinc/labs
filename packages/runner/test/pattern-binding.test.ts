@@ -362,6 +362,52 @@ describe("pattern-binding", () => {
       ).toBe(true);
     });
 
+    it("binds result aliases without an argument link", () => {
+      // collectResumeOwnedCells passes an undefined argument link when the
+      // argument meta is not yet written (fresh run) or not yet synced (cold
+      // resume); bindings that never touch the argument must still unwrap.
+      const binding = {
+        y: { $alias: { cell: "result", path: ["b"] } },
+        z: 3,
+      };
+      const resultCell = runtime.getCell<{ b: number }>(
+        space,
+        "no argument link result cell",
+        undefined,
+        tx,
+      );
+      const result = unwrapOneLevelAndBindtoDoc(
+        runtime.cfc,
+        binding,
+        undefined,
+        resultCell,
+      );
+      expect(
+        areLinksSame(result.y, resultCell.key("b").getAsWriteRedirectLink()),
+      ).toBe(true);
+      expect(result.z).toBe(3);
+    });
+
+    it("throws when an argument alias binds without an argument link", () => {
+      const binding = {
+        y: { $alias: { cell: "argument", path: ["b"] } },
+      };
+      const resultCell = runtime.getCell<{ b: number }>(
+        space,
+        "missing argument link result cell",
+        undefined,
+        tx,
+      );
+      expect(() =>
+        unwrapOneLevelAndBindtoDoc(
+          runtime.cfc,
+          binding,
+          undefined,
+          resultCell,
+        )
+      ).toThrow("Cannot bind argument alias: no argument cell link available");
+    });
+
     it("uses the argument link schema when converting aliases", () => {
       const profileSchema = {
         type: "object",
