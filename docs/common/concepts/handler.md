@@ -101,7 +101,8 @@ instead of hiding it in module-scoped mutable variables.
   timestamp or random ID. Inside a handler these built-ins are allowed (the
   clock is coarsened to one-second resolution); in a lift/computed or at
   pattern-body level they throw a `TimeCapabilityError`. For reactive time in a
-  computed, read the `#now` wish.
+  computed, read the interval `#now/N` wish (bare `#now` is a frozen
+  first-load capture, not a clock).
 - Timers are not part of the authored surface and do not compile, so drive
   timed work through the scheduler rather than reaching for `setTimeout()` or
   `setInterval()` in handler code.

@@ -17,7 +17,9 @@ import {
 //    reactive code: `Date.now()` / `new Date()` throw in a lift, a computed, or
 //    the pattern body (a live clock read would make the computation
 //    non-idempotent). The replacement is the `#now` wish:
-//      wish({ query: "#now" })     one snapshot, captured when it first resolves
+//      wish({ query: "#now" })     one durable snapshot — the piece's
+//                                  FIRST-EVER load; reloads and other
+//                                  runtimes read the original capture
 //      wish({ query: "#now/N" })   a fresh snapshot every N seconds
 //    Both are coarse (one second) and grid-aligned, and read `null` until the
 //    wish resolves — so guard for that load window. `new Date(ms)` with an
@@ -62,7 +64,7 @@ const setTyped = handler<{ value: string }, { typed: Writable<string> }>(
 export interface ReactiveNowOutput {
   [NAME]: string;
   [UI]: VNode;
-  /** The one-shot load time, "HH:MM:SS" (or "…" before #now resolves). */
+  /** The piece's first-load time, "HH:MM:SS" (or "…" before #now resolves). */
   loadedAt: string;
   /** The ticking current time, "HH:MM:SS" (or "…"). */
   now: string;
@@ -85,7 +87,8 @@ export interface ReactiveNowOutput {
 }
 
 export const ReactiveNow = pattern<void, ReactiveNowOutput>(() => {
-  // One-shot: resolves once, then holds — a stable "when this instance loaded".
+  // One-shot: resolves once, then holds durably — "when this piece FIRST
+  // loaded", shared by every later reload and runtime (not per-session).
   const loadedAtCell = wish<number>({ query: "#now" });
   // Ticking: a fresh coarse timestamp every second.
   const nowCell = wish<number>({ query: "#now/1" });
