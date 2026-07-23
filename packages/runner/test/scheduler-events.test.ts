@@ -447,6 +447,8 @@ describe("event handling", () => {
     await tx.commit();
 
     const commitMarkers: RuntimeTelemetryMarker[] = [];
+    const releaseDetailedEventCommitTelemetry = runtime.telemetry
+      .retainDetailedEventCommitTelemetry();
     const listener = (event: Event) => {
       const marker = (event as CustomEvent<{
         marker: RuntimeTelemetryMarker;
@@ -475,11 +477,122 @@ describe("event handling", () => {
       expect(marker?.type).toBe("scheduler.event.commit");
       if (marker?.type === "scheduler.event.commit") {
         expect(marker.writeCount).toBe(40);
+        expect(marker.changedWriteCount).toBe(40);
         expect(marker.writes.length).toBe(25);
         expect(marker.writesTruncated).toBe(true);
       }
     } finally {
       runtime.telemetry.removeEventListener("telemetry", listener);
+      releaseDetailedEventCommitTelemetry();
+    }
+  });
+
+  it("should skip no-op candidate classification without detailed event commit telemetry", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "should report same-value event sets as no-op candidates event",
+      undefined,
+      tx,
+    );
+    const targetCell = runtime.getCell<number>(
+      space,
+      "should report same-value event sets as no-op candidates target",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    targetCell.set(1);
+    await tx.commit();
+
+    const commitMarkers: RuntimeTelemetryMarker[] = [];
+    const listener = (event: Event) => {
+      const marker = (event as CustomEvent<{
+        marker: RuntimeTelemetryMarker;
+      }>).detail.marker;
+      if (marker.type === "scheduler.event.commit") {
+        commitMarkers.push(marker);
+      }
+    };
+    runtime.telemetry.addEventListener("telemetry", listener);
+
+    try {
+      const eventHandler: EventHandler = (handlerTx) => {
+        targetCell.withTx(handlerTx).set(1);
+      };
+      runtime.scheduler.addEventHandler(
+        eventHandler,
+        eventCell.getAsNormalizedFullLink(),
+      );
+
+      runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
+      await waitForSchedulerCondition(runtime, () => commitMarkers.length > 0);
+
+      const marker = commitMarkers.at(-1);
+      expect(marker?.type).toBe("scheduler.event.commit");
+      if (marker?.type === "scheduler.event.commit") {
+        // No lease means the scheduler does not inspect attempted writes or
+        // build path keys. The marker retains cheap compatibility fields.
+        expect(marker.writeCount).toBe(0);
+        expect(marker.changedWriteCount).toBe(0);
+        expect(marker.writes).toEqual([]);
+      }
+    } finally {
+      runtime.telemetry.removeEventListener("telemetry", listener);
+    }
+  });
+
+  it("should report same-value event sets as no-op candidates when detailed telemetry is retained", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "detailed no-op candidate event",
+      undefined,
+      tx,
+    );
+    const targetCell = runtime.getCell<number>(
+      space,
+      "detailed no-op candidate target",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    targetCell.set(1);
+    await tx.commit();
+
+    const commitMarkers: RuntimeTelemetryMarker[] = [];
+    const listener = (event: Event) => {
+      const marker = (event as CustomEvent<{
+        marker: RuntimeTelemetryMarker;
+      }>).detail.marker;
+      if (marker.type === "scheduler.event.commit") {
+        commitMarkers.push(marker);
+      }
+    };
+    const releaseDetailedEventCommitTelemetry = runtime.telemetry
+      .retainDetailedEventCommitTelemetry();
+    runtime.telemetry.addEventListener("telemetry", listener);
+
+    try {
+      const eventHandler: EventHandler = (handlerTx) => {
+        targetCell.withTx(handlerTx).set(1);
+      };
+      runtime.scheduler.addEventHandler(
+        eventHandler,
+        eventCell.getAsNormalizedFullLink(),
+      );
+
+      runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
+      await waitForSchedulerCondition(runtime, () => commitMarkers.length > 0);
+
+      const marker = commitMarkers.at(-1);
+      expect(marker?.type).toBe("scheduler.event.commit");
+      if (marker?.type === "scheduler.event.commit") {
+        expect(marker.writeCount).toBe(1);
+        expect(marker.changedWriteCount).toBe(0);
+        expect(marker.writes).toEqual([]);
+      }
+    } finally {
+      runtime.telemetry.removeEventListener("telemetry", listener);
+      releaseDetailedEventCommitTelemetry();
     }
   });
 
