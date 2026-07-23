@@ -153,6 +153,14 @@ tests. It sleeps on the sink and applies its predicate to the cell only after
 iteration cap over it. Its predicate takes `T | undefined`, since a cell holds
 no value until its piece writes one.
 
+The runner's llm tests wait on that shape often enough to have a name for it.
+`waitForLlmSettled`, in `packages/runner/test/support/llm-result.ts`, resolves
+once `llm`, `generateText` or `generateObject` has finished a request. It is a
+call to `waitForCellValue` carrying the predicate those builtins settle on,
+`pending === false`, and it holds no wait machinery of its own. Reach for it
+rather than re-deriving that predicate: reading at quiescence is what makes it
+honest, and the helper's comment records why.
+
 Some traps are worth knowing before you hand-roll one of these against a
 runtime. They cost real debugging to find, and they are why the helper takes a
 runtime.

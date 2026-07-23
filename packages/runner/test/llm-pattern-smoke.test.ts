@@ -20,8 +20,8 @@ import { GOOGLE_SEARCH_NATIVE_MODEL_TOOL } from "@commonfabric/llm/types";
 import type { BuiltInLLMMessage } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { waitForLlmSettled } from "./support/llm-result.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { Cell } from "../src/cell.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -95,8 +95,7 @@ describe("LLM pattern smoke tests", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await waitForPendingToBecomeFalse(result);
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(result.key("pending").get()).toBe(false);
     expect(result.key("result").get()).toBe("Hello from mock!");
@@ -158,8 +157,7 @@ describe("LLM pattern smoke tests", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await waitForPendingToBecomeFalse(result);
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(result.key("pending").get()).toBe(false);
     expect(result.key("result").get()).toBe("Searched the web.");
@@ -213,8 +211,7 @@ describe("LLM pattern smoke tests", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await waitForPendingToBecomeFalse(result);
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(result.key("pending").get()).toBe(false);
     const obj = result.key("result").get();
@@ -304,8 +301,7 @@ describe("LLM pattern smoke tests", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await waitForPendingToBecomeFalse(result);
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(result.key("pending").get()).toBe(false);
     expect(result.key("result").get()).toEqual({
@@ -350,39 +346,9 @@ describe("LLM pattern smoke tests", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await waitForPendingToBecomeFalse(result);
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(result.key("pending").get()).toBe(false);
     expect(result.key("result").get()).toBe("I see Alice likes cats!");
   });
 });
-
-function waitForPendingToBecomeFalse(
-  cell: Cell<unknown>,
-  timeoutMs = 1000,
-): Promise<void> {
-  let cancel: () => void;
-  let timeout: ReturnType<typeof setTimeout>;
-  return new Promise<void>((resolve, reject) => {
-    timeout = setTimeout(() => {
-      reject(new Error("Timeout waiting for pending to become false"));
-    }, timeoutMs);
-    cancel = cell.asSchema({
-      type: "object",
-      properties: {
-        pending: { type: "boolean" },
-        error: true,
-        result: true,
-      },
-      default: {},
-    }).sink(({ pending, error, result } = {}) => {
-      if (pending === false && (error !== undefined || result !== undefined)) {
-        resolve();
-      }
-    });
-  }).finally(() => {
-    clearTimeout(timeout);
-    cancel?.();
-  });
-}
