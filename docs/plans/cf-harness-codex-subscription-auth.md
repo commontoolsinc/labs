@@ -592,7 +592,7 @@ Expected files:
   harness tool call through the existing CFC path.
 - [ ] Loom users can connect, select, use, refresh, resume, and disconnect their
   own supported subscription without exposing it to another user or workload.
-- [x] Shared or product-hosted workloads cannot select a personal subscription
+- [ ] Shared or product-hosted workloads cannot select a personal subscription
   accidentally or through ambient process state.
 
 ## Deferred work

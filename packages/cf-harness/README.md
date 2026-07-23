@@ -190,7 +190,7 @@ cd packages/cf-harness
 deno task run -- auth login openai-codex
 deno task run -- auth login openai-codex --device
 
-# Inspect connection health and the live, subscription-scoped model catalog.
+# Inspect local credential status and the live, subscription-scoped model catalog.
 deno task run -- auth status openai-codex
 deno task run -- models openai-codex
 

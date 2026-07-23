@@ -187,6 +187,9 @@ const toResponsesTools = (
     strict: null,
   }));
 
+const abortReason = (signal: AbortSignal): unknown =>
+  signal.reason ?? new DOMException("operation aborted", "AbortError");
+
 async function* parseSse(
   response: Response,
   signal?: AbortSignal,
@@ -197,7 +200,7 @@ async function* parseSse(
   const reader = response.body.getReader();
   if (signal?.aborted) {
     await reader.cancel(signal.reason);
-    throw signal.reason ?? new DOMException("operation aborted", "AbortError");
+    throw abortReason(signal);
   }
   const onAbort = () => {
     void reader.cancel(signal?.reason);
@@ -205,9 +208,11 @@ async function* parseSse(
   signal?.addEventListener("abort", onAbort, { once: true });
   const decoder = new TextDecoder();
   let buffered = "";
+  let completed = false;
   try {
     while (true) {
       const { value, done } = await reader.read();
+      if (signal?.aborted) throw abortReason(signal);
       buffered += decoder.decode(value, { stream: !done });
       buffered = buffered.replaceAll("\r\n", "\n");
       let boundary: number;
@@ -241,8 +246,12 @@ async function* parseSse(
         "Codex Responses stream ended with an incomplete SSE event",
       );
     }
+    completed = true;
   } finally {
     signal?.removeEventListener("abort", onAbort);
+    if (!completed) {
+      await reader.cancel().catch(() => {});
+    }
     reader.releaseLock();
   }
 }

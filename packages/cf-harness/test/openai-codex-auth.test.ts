@@ -1,8 +1,14 @@
-import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import {
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
 import {
   completeOpenAICodexDeviceAuthorization,
   createOpenAICodexBrowserAuthorization,
   exchangeOpenAICodexAuthorizationCode,
+  extractOpenAICodexAccountId,
   loginOpenAICodexWithBrowser,
   OPENAI_CODEX_CLIENT_ID,
   OpenAICodexAuthError,
@@ -44,6 +50,17 @@ Deno.test("Codex browser authorization pins the OpenCode/pi PKCE contract", asyn
   assertEquals(url.searchParams.get("originator"), "cf-harness");
   assertEquals(flow.state.length > 20, true);
   assertEquals(flow.verifier.length > 40, true);
+});
+
+Deno.test("Codex account identity requires the pinned nested claim", () => {
+  assertThrows(
+    () =>
+      extractOpenAICodexAccountId(jwt({
+        chatgpt_account_id: "top-level-must-not-be-trusted",
+      })),
+    Error,
+    "did not include a ChatGPT account id",
+  );
 });
 
 Deno.test("Codex credential refresh is serialized per owner and persists rotation", async () => {
@@ -196,6 +213,30 @@ Deno.test("Codex browser login cancellation closes the callback listener", async
       }),
     DOMException,
   );
+});
+
+Deno.test("Codex browser login rejects a pre-aborted signal before opening the listener", async () => {
+  const controller = new AbortController();
+  const reason = new DOMException("already canceled", "AbortError");
+  controller.abort(reason);
+  let authorizationUrls = 0;
+
+  await assertRejects(
+    () =>
+      loginOpenAICodexWithBrowser({
+        authService: new OpenAICodexAuthService(
+          new InMemoryHarnessCredentialStore(),
+          "local",
+        ),
+        signal: controller.signal,
+        onAuthorizationUrl: () => {
+          authorizationUrls += 1;
+        },
+      }),
+    DOMException,
+    "already canceled",
+  );
+  assertEquals(authorizationUrls, 0);
 });
 
 Deno.test("Codex browser login rejects concurrent transactions for one owner", async () => {

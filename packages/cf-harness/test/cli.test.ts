@@ -3827,6 +3827,11 @@ Deno.test("runCfHarnessCli injects the Codex model client into the shared loop",
         assertEquals(options, {
           provider: "openai-codex",
           credentialOwnerKey: "local",
+          credentialOwner: {
+            type: "cf-harness.credential-owner-ref",
+            version: 1,
+            ownerKey: "local",
+          },
           loom: false,
         });
         return client;
@@ -3922,6 +3927,50 @@ Deno.test("Loom Codex invocation preserves two users' owner bindings", async () 
     assertEquals(stderr, []);
   }
   assertEquals(owners, ["loom:user-a", "loom:user-b"]);
+});
+
+Deno.test("Loom Codex client injection preserves the authenticated tenant binding", async () => {
+  const { io, stderr } = createIoBuffers();
+  const exitCode = await runCfHarnessCli(
+    ["--run-manifest", "/tmp/loom-tenant.json", "--prompt", "hello"],
+    {
+      io,
+      cwd: "/tmp/project",
+      env: {},
+      readTextFile: () =>
+        Promise.resolve(JSON.stringify({
+          type: "cf-harness.loom-run-manifest",
+          version: 1,
+          source: "loom",
+          modelProvider: "openai-codex",
+          credentialOwner: {
+            type: "cf-harness.credential-owner-ref",
+            version: 1,
+            ownerKey: "shared-user-key",
+            tenantKey: "tenant-a",
+          },
+        })),
+      createModelClient: (options) => {
+        assertEquals(options.credentialOwner, {
+          type: "cf-harness.credential-owner-ref",
+          version: 1,
+          ownerKey: "shared-user-key",
+          tenantKey: "tenant-a",
+        });
+        return {
+          providerId: "openai-codex",
+          complete: () => Promise.reject(new Error("unused")),
+        };
+      },
+      createPromptLoop: () => ({
+        runPrompt: () => Promise.resolve(completedCliResult("run-tenant")),
+        runTranscript: () => Promise.reject(new Error("unexpected resume")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(stderr, []);
 });
 
 Deno.test("local auth status and logout are provider-scoped and secret-free", async () => {
@@ -4071,5 +4120,79 @@ Deno.test("resume preserves the recorded Codex provider and continuation", async
   );
   assertEquals(mismatchIo.stderr, [
     "resume provider mismatch: run uses openai-codex, requested openai-compatible-gateway\n",
+  ]);
+});
+
+Deno.test("resume rejects manifest provider and credential-owner switches", async () => {
+  const recordedOwner = {
+    type: "cf-harness.credential-owner-ref" as const,
+    version: 1 as const,
+    ownerKey: "shared-user-key",
+    tenantKey: "tenant-a",
+  };
+  const readRunArtifacts = () =>
+    Promise.resolve({
+      runRoot: "/tmp/run",
+      runStatePath: "/tmp/run/run-state.json",
+      transcriptPath: "/tmp/run/transcript.json",
+      runState: {
+        runId: "run-loom-resume",
+        status: "failed" as const,
+        createdAt: "2026-07-22T12:00:00.000Z",
+        updatedAt: "2026-07-22T12:00:01.000Z",
+        cfcEnforcementMode: "disabled" as const,
+        currentDir: "/workspace",
+        model: "gpt-5.4",
+        modelProvider: "openai-codex" as const,
+        credentialOwnerKey: recordedOwner.ownerKey,
+        runManifest: {
+          type: "cf-harness.loom-run-manifest" as const,
+          version: 1 as const,
+          source: "loom" as const,
+          modelProvider: "openai-codex" as const,
+          credentialOwner: recordedOwner,
+        },
+        policyEvents: [],
+        toolOutputs: [],
+      },
+      transcript: [{ role: "user" as const, content: "Continue" }],
+    });
+  const run = async (manifest: Record<string, unknown>) => {
+    const buffers = createIoBuffers();
+    const exitCode = await runCfHarnessCli(
+      ["--resume-run", "/tmp/run", "--run-manifest", "/tmp/resume.json"],
+      {
+        io: buffers.io,
+        cwd: "/tmp/project",
+        env: {},
+        readRunArtifacts,
+        readTextFile: () => Promise.resolve(JSON.stringify(manifest)),
+      },
+    );
+    return { exitCode, stderr: buffers.stderr };
+  };
+
+  const providerSwitch = await run({
+    type: "cf-harness.loom-run-manifest",
+    version: 1,
+    source: "loom",
+    modelProvider: "openai-compatible-gateway",
+    credentialOwner: recordedOwner,
+  });
+  assertEquals(providerSwitch.exitCode, 1);
+  assertEquals(providerSwitch.stderr, [
+    "resume provider mismatch: run uses openai-codex, requested openai-compatible-gateway\n",
+  ]);
+
+  const ownerSwitch = await run({
+    type: "cf-harness.loom-run-manifest",
+    version: 1,
+    source: "loom",
+    modelProvider: "openai-codex",
+    credentialOwner: { ...recordedOwner, tenantKey: "tenant-b" },
+  });
+  assertEquals(ownerSwitch.exitCode, 1);
+  assertEquals(ownerSwitch.stderr, [
+    "resume credential owner mismatch: requested owner does not match the recorded run\n",
   ]);
 });

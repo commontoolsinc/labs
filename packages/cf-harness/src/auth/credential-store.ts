@@ -60,8 +60,6 @@ class KeyedMutationQueue {
   }
 }
 
-const processMutationQueue = new KeyedMutationQueue();
-
 export class InMemoryHarnessCredentialStore implements HarnessCredentialStore {
   readonly #credentials = new Map<string, HarnessCredential>();
   readonly #queue = new KeyedMutationQueue();
@@ -118,7 +116,23 @@ interface CredentialDocument {
   >;
 }
 
-const emptyDocument = (): CredentialDocument => ({ version: 1, owners: {} });
+const emptyDocument = (): CredentialDocument => ({
+  version: 1,
+  owners: Object.create(null),
+});
+
+const setOwn = <T extends object>(
+  target: T,
+  key: PropertyKey,
+  value: unknown,
+): void => {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+};
 
 const isCredential = (value: unknown): value is HarnessCredential => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -144,7 +158,7 @@ const parseDocument = (text: string): CredentialDocument => {
   ) {
     throw new Error("unsupported credential store format");
   }
-  const owners: CredentialDocument["owners"] = {};
+  const owners: CredentialDocument["owners"] = Object.create(null);
   for (const [owner, rawProviders] of Object.entries(input.owners)) {
     if (
       typeof rawProviders !== "object" || rawProviders === null ||
@@ -157,9 +171,11 @@ const parseDocument = (text: string): CredentialDocument => {
     if (credential !== undefined && !isCredential(credential)) {
       throw new Error("invalid openai-codex credential entry");
     }
-    owners[owner] = credential === undefined
-      ? {}
-      : { "openai-codex": credential };
+    setOwn(
+      owners,
+      owner,
+      credential === undefined ? {} : { "openai-codex": credential },
+    );
   }
   return { version: 1, owners };
 };
@@ -176,8 +192,83 @@ export class FileHarnessCredentialStore implements HarnessCredentialStore {
     this.path = resolve(options.path);
   }
 
+  async #ensurePrivateDirectory(): Promise<void> {
+    const directory = dirname(this.path);
+    await Deno.mkdir(directory, { recursive: true, mode: 0o700 });
+    const info = await Deno.lstat(directory);
+    if (info.isSymlink || !info.isDirectory) {
+      throw new Error("credential store directory must not be a symlink");
+    }
+    if (
+      Deno.build.os !== "windows" && info.mode !== null &&
+      (info.mode & 0o077) !== 0
+    ) {
+      throw new Error(
+        "credential store directory must have private permissions",
+      );
+    }
+  }
+
+  async #assertPrivateRegularFile(
+    path: string,
+    label: "credential store" | "credential store lock",
+    allowMissing = true,
+  ): Promise<void> {
+    try {
+      const info = await Deno.lstat(path);
+      if (info.isSymlink || !info.isFile) {
+        throw new Error(`${label} file must be a regular file`);
+      }
+      if (
+        Deno.build.os !== "windows" && info.mode !== null &&
+        (info.mode & 0o077) !== 0
+      ) {
+        throw new Error(`${label} file must have private permissions`);
+      }
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound && allowMissing) return;
+      throw error;
+    }
+  }
+
+  async #withFileLock<T>(operation: () => Promise<T>): Promise<T> {
+    await this.#ensurePrivateDirectory();
+    const lockPath = `${this.path}.lock`;
+    let lockFile: Deno.FsFile;
+    try {
+      lockFile = await Deno.open(lockPath, {
+        createNew: true,
+        read: true,
+        write: true,
+        mode: 0o600,
+      });
+    } catch (error) {
+      if (!(error instanceof Deno.errors.AlreadyExists)) throw error;
+      await this.#assertPrivateRegularFile(
+        lockPath,
+        "credential store lock",
+        false,
+      );
+      lockFile = await Deno.open(lockPath, { read: true, write: true });
+    }
+    try {
+      await this.#assertPrivateRegularFile(
+        lockPath,
+        "credential store lock",
+        false,
+      );
+      await lockFile.lock(true);
+      return await operation();
+    } finally {
+      await lockFile.unlock().catch(() => {});
+      lockFile.close();
+    }
+  }
+
   async #read(): Promise<CredentialDocument> {
     try {
+      await this.#ensurePrivateDirectory();
+      await this.#assertPrivateRegularFile(this.path, "credential store");
       const document = parseDocument(await Deno.readTextFile(this.path));
       this.#lastValid = document;
       return structuredClone(document);
@@ -192,7 +283,7 @@ export class FileHarnessCredentialStore implements HarnessCredentialStore {
   }
 
   async #write(document: CredentialDocument): Promise<void> {
-    await Deno.mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
+    await this.#ensurePrivateDirectory();
     const temporaryPath = join(
       dirname(this.path),
       `.auth-${crypto.randomUUID()}.tmp`,
@@ -226,7 +317,10 @@ export class FileHarnessCredentialStore implements HarnessCredentialStore {
 
   async get(ownerKey: string, providerId: HarnessCredentialProviderId) {
     const document = await this.#read();
-    return document.owners[ownerKey]?.[providerId];
+    const providers = Object.hasOwn(document.owners, ownerKey)
+      ? document.owners[ownerKey]
+      : undefined;
+    return providers?.[providerId];
   }
 
   async set(
@@ -244,18 +338,21 @@ export class FileHarnessCredentialStore implements HarnessCredentialStore {
       current: HarnessCredential | undefined,
     ) => Promise<HarnessCredential | undefined> | HarnessCredential | undefined,
   ): Promise<HarnessCredential | undefined> {
-    // Every mutation rewrites the whole document. Serialize by file path, not
-    // owner, so concurrent owners cannot overwrite each other's updates.
-    const queueKey = this.path;
-    return processMutationQueue.run(queueKey, async () => {
+    // Every mutation rewrites the whole document. The stable advisory lock
+    // serializes read/modify/write transactions across processes as well as
+    // across distinct store instances in this process.
+    return this.#withFileLock(async () => {
       const document = await this.#read();
-      const current = document.owners[ownerKey]?.[providerId];
+      const currentProviders = Object.hasOwn(document.owners, ownerKey)
+        ? document.owners[ownerKey]
+        : undefined;
+      const current = currentProviders?.[providerId];
       const next = await updater(current);
-      const providers = { ...(document.owners[ownerKey] ?? {}) };
+      const providers = { ...(currentProviders ?? {}) };
       if (next === undefined) delete providers[providerId];
       else providers[providerId] = next;
       if (Object.keys(providers).length === 0) delete document.owners[ownerKey];
-      else document.owners[ownerKey] = providers;
+      else setOwn(document.owners, ownerKey, providers);
       await this.#write(document);
       return next;
     });

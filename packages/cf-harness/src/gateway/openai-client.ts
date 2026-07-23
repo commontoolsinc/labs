@@ -338,9 +338,10 @@ export class OpenAICompatibleGatewayClient {
     };
   }
 
-  async listModels(): Promise<Response> {
+  async listModels(signal?: AbortSignal): Promise<Response> {
     return await this.#fetchFn(this.endpoint("/v1/models"), {
       headers: this.headers(),
+      ...(signal !== undefined ? { signal } : {}),
     });
   }
 

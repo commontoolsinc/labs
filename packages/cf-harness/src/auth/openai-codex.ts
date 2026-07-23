@@ -122,7 +122,7 @@ export const extractOpenAICodexAccountId = (
     const nested = payload?.[ACCOUNT_CLAIM];
     const accountId = typeof nested === "object" && nested !== null
       ? (nested as Record<string, unknown>).chatgpt_account_id
-      : payload?.chatgpt_account_id;
+      : undefined;
     if (typeof accountId === "string" && accountId.length > 0) return accountId;
   }
   throw new Error("OpenAI Codex token did not include a ChatGPT account id");
@@ -486,6 +486,9 @@ export const loginOpenAICodexWithBrowser = async (options: {
   onAuthorizationUrl: (url: string) => void | Promise<void>;
   now?: () => number;
 }): Promise<OpenAICodexOAuthCredential> => {
+  if (options.signal?.aborted) {
+    throw abortReason(options.signal);
+  }
   if (activeBrowserLoginOwners.has(options.authService.ownerKey)) {
     throw new Error(
       "OpenAI Codex login is already in progress for this credential owner",

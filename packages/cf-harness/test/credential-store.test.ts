@@ -44,7 +44,96 @@ Deno.test("file credential store is owner-isolated, atomic, and private", async 
   const names = [...Deno.readDirSync(join(root, "harness-home"))].map((e) =>
     e.name
   );
-  assertEquals(names, ["auth.json"]);
+  assertEquals(names.sort(), ["auth.json", "auth.json.lock"]);
+});
+
+Deno.test("file credential store serializes mutations across store instances", async () => {
+  const root = await Deno.makeTempDir();
+  const path = join(root, "auth.json");
+  const first = new FileHarnessCredentialStore({ path });
+  const second = new FileHarnessCredentialStore({ path });
+
+  await Promise.all([
+    first.set("loom:user-a", "openai-codex", credential("a")),
+    second.set("loom:user-b", "openai-codex", credential("b")),
+  ]);
+
+  assertEquals(
+    (await first.get("loom:user-a", "openai-codex"))?.accountId,
+    "account-a",
+  );
+  assertEquals(
+    (await first.get("loom:user-b", "openai-codex"))?.accountId,
+    "account-b",
+  );
+});
+
+Deno.test("file credential store preserves prototype-shaped owner keys", async () => {
+  const root = await Deno.makeTempDir();
+  const store = new FileHarnessCredentialStore({
+    path: join(root, "auth.json"),
+  });
+
+  await store.set("__proto__", "openai-codex", credential("prototype"));
+
+  assertEquals(
+    (await store.get("__proto__", "openai-codex"))?.accountId,
+    "account-prototype",
+  );
+});
+
+Deno.test("file credential store rejects non-private and symlinked homes", async () => {
+  if (Deno.build.os === "windows") return;
+  const root = await Deno.makeTempDir();
+  const publicHome = join(root, "public-home");
+  await Deno.mkdir(publicHome, { mode: 0o755 });
+  await assertRejects(
+    () =>
+      new FileHarnessCredentialStore({ path: join(publicHome, "auth.json") })
+        .get("local", "openai-codex"),
+    Error,
+    "private permissions",
+  );
+
+  const realHome = join(root, "real-home");
+  const linkedHome = join(root, "linked-home");
+  await Deno.mkdir(realHome, { mode: 0o700 });
+  await Deno.symlink(realHome, linkedHome);
+  await assertRejects(
+    () =>
+      new FileHarnessCredentialStore({ path: join(linkedHome, "auth.json") })
+        .get("local", "openai-codex"),
+    Error,
+    "must not be a symlink",
+  );
+
+  const privateHome = join(root, "private-home");
+  await Deno.mkdir(privateHome, { mode: 0o700 });
+  const publicAuthFile = join(privateHome, "auth.json");
+  await Deno.writeTextFile(
+    publicAuthFile,
+    JSON.stringify({ version: 1, owners: {} }),
+    { mode: 0o644 },
+  );
+  await assertRejects(
+    () =>
+      new FileHarnessCredentialStore({ path: publicAuthFile })
+        .get("local", "openai-codex"),
+    Error,
+    "file must have private permissions",
+  );
+
+  await Deno.remove(publicAuthFile);
+  const lockTarget = join(root, "lock-target");
+  await Deno.writeTextFile(lockTarget, "");
+  await Deno.symlink(lockTarget, `${publicAuthFile}.lock`);
+  await assertRejects(
+    () =>
+      new FileHarnessCredentialStore({ path: publicAuthFile })
+        .set("local", "openai-codex", credential("local")),
+    Error,
+    "lock file must be a regular file",
+  );
 });
 
 Deno.test("file credential store surfaces malformed storage without overwriting it", async () => {

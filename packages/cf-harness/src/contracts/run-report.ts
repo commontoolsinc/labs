@@ -100,8 +100,8 @@ export interface HarnessRunReport {
   generatedAt: string;
   status: string;
   model: string;
-  modelProvider: HarnessModelProviderId;
-  modelAuthSource: HarnessModelAuthSource;
+  modelProvider?: HarnessModelProviderId;
+  modelAuthSource?: HarnessModelAuthSource;
   modelTurns: number;
   cfcEnforcementMode: CfcEnforcementMode;
   createdAt?: string;
@@ -281,12 +281,14 @@ export const createHarnessRunReport = (
     generatedAt: options.runState.updatedAt,
     status: options.runState.status,
     model: options.model,
-    modelProvider: options.runState.modelProvider ??
-      "openai-compatible-gateway",
-    modelAuthSource: options.runState.modelAuthSource ??
-      (options.runState.modelProvider === "openai-codex"
-        ? "owner-bound-oauth"
-        : "api-key"),
+    ...(options.runState.modelProvider !== undefined
+      ? { modelProvider: options.runState.modelProvider }
+      : {}),
+    ...(options.runState.modelAuthSource !== undefined
+      ? { modelAuthSource: options.runState.modelAuthSource }
+      : options.runState.modelProvider === "openai-codex"
+      ? { modelAuthSource: "owner-bound-oauth" as const }
+      : {}),
     modelTurns: options.modelTurns,
     cfcEnforcementMode: options.runState.cfcEnforcementMode,
     ...(options.runState.createdAt !== undefined

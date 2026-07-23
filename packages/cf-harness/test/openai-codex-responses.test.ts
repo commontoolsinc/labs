@@ -573,3 +573,33 @@ Deno.test("Codex Responses abort cancels an active stream without retry", async 
   assertEquals(canceled, true);
   assertEquals(requests, 1);
 });
+
+Deno.test("Codex Responses cancels the stream after malformed SSE", async () => {
+  let canceled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("data: {not-json}\n\n"));
+    },
+    cancel() {
+      canceled = true;
+    },
+  });
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: () => Promise.resolve(new Response(body, { status: 200 })),
+  });
+
+  await assertRejects(
+    () =>
+      client.complete({
+        model: "gpt-5.4",
+        transcript: [{ role: "user", content: "hi" }],
+        tools: [],
+        nativeModelToolIds: [],
+        runId: "run-malformed-sse",
+      }),
+    Error,
+    "malformed JSON",
+  );
+  assertEquals(canceled, true);
+});

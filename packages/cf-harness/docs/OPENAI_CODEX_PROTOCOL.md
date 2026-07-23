@@ -30,7 +30,8 @@ Reviewed sources:
 - Device poll: `/api/accounts/deviceauth/token`
 - Device verification: `/codex/device`
 - Device token-exchange redirect: `/deviceauth/callback`
-- Account id claim: `https://api.openai.com/auth.chatgpt_account_id`
+- Account id claim: object key `https://api.openai.com/auth`, nested field
+  `chatgpt_account_id`
 
 Authorization-code exchange sends `grant_type`, `client_id`, `code`,
 `code_verifier`, and `redirect_uri` as form data. Refresh sends
@@ -73,9 +74,10 @@ inject an authenticated owner/tenant key and store that owner's credential in
 its encrypted secret backend. Tokens and account ids never belong in Cells,
 Spaces, manifests, transcripts, reports, diagnostics, or command lines.
 
-The only origins that receive OAuth material are `https://auth.openai.com`
-(authorization, device authorization, and token exchange) and
-`https://chatgpt.com` (Codex Responses and model discovery). The implementation
-does not probe alternatives. On drift, update this reference and its fixtures
-from newly pinned OpenCode, pi, and official Codex sources; until then, fail
-closed.
+OAuth material is sent only to `https://auth.openai.com` (authorization, device
+authorization, and token exchange), the fixed loopback callback
+`http://localhost:1455/auth/callback` (the browser redirects the authorization
+code and state), and `https://chatgpt.com` (Codex Responses and model
+discovery). The implementation does not probe alternatives. On drift, update
+this reference and its fixtures from newly pinned OpenCode, pi, and official
+Codex sources; until then, fail closed.

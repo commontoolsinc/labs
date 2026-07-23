@@ -2575,14 +2575,6 @@ export class CfHarnessPromptLoop {
       delegateInput.profile,
     );
     const childModel = resolveSubagentModel(options.model, profileConfig);
-    if (
-      childModel.source === "profile" &&
-      this.modelClient.providerId === "openai-codex"
-    ) {
-      throw new Error(
-        `subagent profile ${delegateInput.profile} model ${childModel.model} is not available from provider openai-codex`,
-      );
-    }
     const maxModelTurns = delegateInput.maxModelTurns ??
       profileConfig.maxModelTurns;
     const parentRunState = this.engine.getRunState();
@@ -2680,6 +2672,14 @@ export class CfHarnessPromptLoop {
     let childModelTurns = 0;
     let structuredReturn: HarnessSubagentStructuredReturn | undefined;
     try {
+      if (
+        childModel.source === "profile" &&
+        this.modelClient.providerId === "openai-codex"
+      ) {
+        throw new Error(
+          `subagent profile ${delegateInput.profile} model ${childModel.model} is not available from provider openai-codex`,
+        );
+      }
       if (
         profileConfig.skillNames !== undefined &&
         profileConfig.skillNames.length > 0 &&

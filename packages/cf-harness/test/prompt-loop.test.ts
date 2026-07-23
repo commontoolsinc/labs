@@ -297,6 +297,65 @@ Deno.test("Codex parent and child loops share one serialized credential refresh"
   assertEquals(serialized.includes("rotated-refresh-secret"), false);
 });
 
+Deno.test("Codex profile model overrides fail the child without aborting the parent loop", async () => {
+  let modelTurns = 0;
+  const modelClient: HarnessModelClient = {
+    providerId: "openai-codex",
+    complete: () => {
+      modelTurns += 1;
+      return Promise.resolve({
+        assistant: modelTurns === 1
+          ? {
+            role: "assistant" as const,
+            content: "",
+            toolCalls: [{
+              id: "call-web-search",
+              type: "function" as const,
+              function: {
+                name: "delegate_task",
+                arguments: JSON.stringify({
+                  goal: "Search current documentation.",
+                  profile: "web_search",
+                }),
+              },
+            }],
+          }
+          : { role: "assistant" as const, content: "Parent recovered." },
+      });
+    },
+  };
+  const loop = new CfHarnessPromptLoop({
+    modelClient,
+    allowedToolIds: ["delegate_task"],
+    allowedSubagentProfiles: ["web_search"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-codex-profile-override",
+      model: "gpt-5.4",
+      modelProvider: "openai-codex",
+      credentialOwnerKey: "local",
+      cfcEnforcementMode: "disabled",
+    }),
+  });
+
+  const result = await loop.runPrompt({ prompt: "Delegate and continue." });
+  const toolMessage = result.transcript.at(-2);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected delegate_task tool message");
+  }
+  const output = JSON.parse(toolMessage.content) as {
+    subagent: { status: string; summary: string };
+  };
+
+  assertEquals(result.finalAssistantText, "Parent recovered.");
+  assertEquals(modelTurns, 2);
+  assertEquals(output.subagent.status, "failed");
+  assertStringIncludes(
+    output.subagent.summary,
+    "is not available from provider openai-codex",
+  );
+});
+
 class FailingArtifactStore implements HarnessArtifactStore {
   readonly artifactRoot = "/tmp/cf-harness-artifacts";
   readonly runRoot = "/tmp/cf-harness-artifacts/run-error";

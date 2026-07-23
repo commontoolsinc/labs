@@ -41,6 +41,8 @@ import {
   type PromptSlotRole,
 } from "./contracts/prompt-slot.ts";
 import {
+  HARNESS_CREDENTIAL_OWNER_REF_TYPE,
+  type HarnessCredentialOwnerRef,
   type HarnessRunManifest,
   parseLoomRunManifestJson,
 } from "./contracts/run-manifest.ts";
@@ -277,10 +279,12 @@ export interface RunCfHarnessCliDependencies {
   credentialStore?: HarnessCredentialStore;
   openAICodexCredentialResolver?: OpenAICodexCredentialResolverLike & {
     ownerKey?: string;
+    credentialOwner?: HarnessCredentialOwnerRef;
   };
   createModelClient?: (options: {
     provider: HarnessModelProviderId;
     credentialOwnerKey: string;
+    credentialOwner: HarnessCredentialOwnerRef;
     loom: boolean;
   }) => HarnessModelClient | Promise<HarnessModelClient>;
   openUrl?: (url: string) => void | Promise<void>;
@@ -1447,18 +1451,35 @@ const readRunManifest = async (
     ? undefined
     : parseLoomRunManifestJson(await readTextFile(path));
 
+const localCredentialOwner = (
+  ownerKey = "local",
+): HarnessCredentialOwnerRef => ({
+  type: HARNESS_CREDENTIAL_OWNER_REF_TYPE,
+  version: 1,
+  ownerKey,
+});
+
+const credentialOwnersEqual = (
+  left: HarnessCredentialOwnerRef,
+  right: HarnessCredentialOwnerRef,
+): boolean =>
+  left.type === right.type && left.version === right.version &&
+  left.ownerKey === right.ownerKey && left.tenantKey === right.tenantKey;
+
 const createSelectedModelClient = async (options: {
   provider: HarnessModelProviderId;
-  credentialOwnerKey: string;
+  credentialOwner: HarnessCredentialOwnerRef;
   loom: boolean;
   harnessHome: string;
   deps: RunCfHarnessCliDependencies;
 }): Promise<HarnessModelClient | undefined> => {
   if (options.provider === "openai-compatible-gateway") return undefined;
+  const credentialOwnerKey = options.credentialOwner.ownerKey;
   if (options.deps.createModelClient !== undefined) {
     return await options.deps.createModelClient({
       provider: options.provider,
-      credentialOwnerKey: options.credentialOwnerKey,
+      credentialOwnerKey,
+      credentialOwner: options.credentialOwner,
       loom: options.loom,
     });
   }
@@ -1469,10 +1490,11 @@ const createSelectedModelClient = async (options: {
         "Loom openai-codex runs require an injected owner-bound credential resolver",
       );
     }
-    if (
-      resolver.ownerKey !== undefined &&
-      resolver.ownerKey !== options.credentialOwnerKey
-    ) {
+    const resolverOwnerMatches = resolver.credentialOwner !== undefined
+      ? credentialOwnersEqual(resolver.credentialOwner, options.credentialOwner)
+      : options.credentialOwner.tenantKey === undefined &&
+        resolver.ownerKey === credentialOwnerKey;
+    if (!resolverOwnerMatches) {
       throw new Error(
         "Loom credential resolver owner does not match the run manifest",
       );
@@ -1484,7 +1506,7 @@ const createSelectedModelClient = async (options: {
       });
     resolver = new OpenAICodexCredentialResolver({
       store,
-      ownerKey: options.credentialOwnerKey,
+      ownerKey: credentialOwnerKey,
     });
   }
   return new OpenAICodexResponsesClient({ credentialResolver: resolver! });
@@ -1511,7 +1533,7 @@ const runCfHarnessModelsCommand = async (
   );
   const client = await createSelectedModelClient({
     provider: "openai-codex",
-    credentialOwnerKey: "local",
+    credentialOwner: localCredentialOwner(),
     loom: false,
     harnessHome,
     deps,
@@ -2198,15 +2220,17 @@ export const runCfHarnessCli = async (
       const artifacts = await readRunArtifacts(parsed.resumeRun);
       const recordedProvider = artifacts.runState.modelProvider ??
         "openai-compatible-gateway";
-      const modelProvider = parsed.modelProvider ??
-        runManifest?.modelProvider ?? recordedProvider;
+      const requestedProvider = parsed.modelProvider ??
+        runManifest?.modelProvider;
       if (
-        modelProvider !== recordedProvider && parsed.modelProvider !== undefined
+        requestedProvider !== undefined &&
+        requestedProvider !== recordedProvider
       ) {
         throw new Error(
-          `resume provider mismatch: run uses ${recordedProvider}, requested ${modelProvider}`,
+          `resume provider mismatch: run uses ${recordedProvider}, requested ${requestedProvider}`,
         );
       }
+      const modelProvider = recordedProvider;
       if (
         modelProvider === "openai-codex" && parsed.gatewayConfigurationExplicit
       ) {
@@ -2222,11 +2246,23 @@ export const runCfHarnessCli = async (
           "no API key configured; set CF_HARNESS_API_KEY or OPENAI_API_KEY",
         );
       }
-      const credentialOwnerKey = runManifest?.credentialOwner?.ownerKey ??
-        artifacts.runState.credentialOwnerKey ?? "local";
+      const recordedRunManifest = artifacts.runState.runManifest;
+      const credentialOwner = recordedRunManifest?.credentialOwner ??
+        localCredentialOwner(artifacts.runState.credentialOwnerKey ?? "local");
       if (
-        modelProvider === "openai-codex" && runManifest?.source === "loom" &&
-        runManifest.credentialOwner === undefined
+        runManifest?.credentialOwner !== undefined &&
+        !credentialOwnersEqual(runManifest.credentialOwner, credentialOwner)
+      ) {
+        throw new Error(
+          "resume credential owner mismatch: requested owner does not match the recorded run",
+        );
+      }
+      const credentialOwnerKey = credentialOwner.ownerKey;
+      const effectiveRunManifest = recordedRunManifest ?? runManifest;
+      const loom = effectiveRunManifest?.source === "loom";
+      if (
+        modelProvider === "openai-codex" && loom &&
+        recordedRunManifest?.credentialOwner === undefined
       ) {
         throw new Error(
           "Loom openai-codex runs require an authenticated credential owner reference",
@@ -2234,8 +2270,8 @@ export const runCfHarnessCli = async (
       }
       const modelClient = await createSelectedModelClient({
         provider: modelProvider,
-        credentialOwnerKey,
-        loom: runManifest?.source === "loom",
+        credentialOwner,
+        loom,
         harnessHome: parsed.harnessHome,
         deps,
       });
@@ -2276,7 +2312,9 @@ export const runCfHarnessCli = async (
           ? { browserAccess: parsed.browserAccess }
           : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
-        ...(runManifest !== undefined ? { runManifest } : {}),
+        ...(effectiveRunManifest !== undefined
+          ? { runManifest: effectiveRunManifest }
+          : {}),
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
@@ -2308,7 +2346,9 @@ export const runCfHarnessCli = async (
           ? { browserAccess: parsed.browserAccess }
           : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
-        ...(runManifest !== undefined ? { runManifest } : {}),
+        ...(effectiveRunManifest !== undefined
+          ? { runManifest: effectiveRunManifest }
+          : {}),
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
@@ -2354,8 +2394,9 @@ export const runCfHarnessCli = async (
           "no API key configured; set CF_HARNESS_API_KEY or OPENAI_API_KEY",
         );
       }
-      const credentialOwnerKey = runManifest?.credentialOwner?.ownerKey ??
-        "local";
+      const credentialOwner = runManifest?.credentialOwner ??
+        localCredentialOwner();
+      const credentialOwnerKey = credentialOwner.ownerKey;
       if (
         modelProvider === "openai-codex" && runManifest?.source === "loom" &&
         runManifest.credentialOwner === undefined
@@ -2366,7 +2407,7 @@ export const runCfHarnessCli = async (
       }
       const modelClient = await createSelectedModelClient({
         provider: modelProvider,
-        credentialOwnerKey,
+        credentialOwner,
         loom: runManifest?.source === "loom",
         harnessHome: parsed.harnessHome,
         deps,

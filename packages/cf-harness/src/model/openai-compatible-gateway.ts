@@ -171,9 +171,9 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
   }
 
   async listModels(
-    _signal?: AbortSignal,
+    signal?: AbortSignal,
   ): Promise<readonly HarnessModelCatalogEntry[]> {
-    const response = await this.gatewayClient.listModels();
+    const response = await this.gatewayClient.listModels(signal);
     if (!response.ok) {
       throw new Error(`model list request failed (${response.status})`);
     }
