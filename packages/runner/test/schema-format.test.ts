@@ -18,6 +18,61 @@ Deno.test("schemaToTypeString converts arrays", () => {
   assertEquals(schemaToTypeString(schema), "string[]");
 });
 
+Deno.test("schemaToTypeString converts type arrays to unions", () => {
+  // The union formatter merges anyOf branches into type arrays; these used to
+  // hit the String(type) fallback and render as "number,string"
+  assertEquals(
+    schemaToTypeString({ type: ["number", "string"] } as any),
+    "number | string",
+  );
+  assertEquals(
+    schemaToTypeString({ type: ["string", "null"] } as any),
+    "string | null",
+  );
+  assertEquals(
+    schemaToTypeString({ type: ["integer", "number"] } as any),
+    "number",
+  );
+});
+
+Deno.test("schemaToTypeString renders const literals like their enum twins", () => {
+  // The generator's node path emits const where its type path emits a
+  // single-value enum; both should render as the TS literal type
+  assertEquals(
+    schemaToTypeString({ type: "string", const: "x" } as any),
+    '"x"',
+  );
+  assertEquals(schemaToTypeString({ type: "number", const: 42 } as any), "42");
+  assertEquals(
+    schemaToTypeString({ type: "string", enum: ["x"] } as any),
+    '"x"',
+  );
+});
+
+Deno.test("schemaToTypeString keeps the index-signature value type", () => {
+  assertEquals(
+    schemaToTypeString({
+      type: "object",
+      additionalProperties: { type: "number" },
+    } as any),
+    "Record<string, number>",
+  );
+  // Named properties alongside an index signature keep both, TS-style
+  assertEquals(
+    schemaToTypeString({
+      type: "object",
+      properties: { a: { type: "string" } },
+      additionalProperties: { type: "number" },
+    } as any),
+    "{\n  a?: string,\n  [key: string]: number\n}",
+  );
+  // Bare additionalProperties: true stays as before
+  assertEquals(
+    schemaToTypeString({ type: "object", additionalProperties: true } as any),
+    "Record<string, unknown>",
+  );
+});
+
 Deno.test("schemaToTypeString converts tuples (prefixItems)", () => {
   // CT-1895: tuples used to render as "unknown[]"
   const schema: any = {

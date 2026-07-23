@@ -84,6 +84,19 @@ export interface SchemaFormatOptions {
  * // → '"open" | "closed"'
  *
  * @example
+ * // const literals and type arrays
+ * schemaToTypeString({ type: "string", const: "x" }) // → '"x"'
+ * schemaToTypeString({ type: ["string", "null"] })   // → "string | null"
+ *
+ * @example
+ * // Index signatures (object-valued additionalProperties)
+ * schemaToTypeString({
+ *   type: "object",
+ *   additionalProperties: { type: "number" }
+ * })
+ * // → "Record<string, number>"
+ *
+ * @example
  * // PatternToolResult schemas (from patternTool())
  * schemaToTypeString({
  *   type: "object",
@@ -160,6 +173,7 @@ function schemaToTypeStringInner(
     } else {
       if (schema.type === "object") return "{...}";
       if (schema.type === "array") return "[...]";
+      if (Array.isArray(schema.type)) return typeArrayToUnion(schema.type);
       return String(schema.type || "unknown");
     }
   }
@@ -189,11 +203,16 @@ function schemaToTypeStringInner(
     }
   }
 
+  // Handle const - show as the literal, matching the enum rendering (the
+  // generator's node path emits `const` where its type path emits a
+  // single-value `enum`)
+  if (s.const !== undefined) {
+    return literalToTypeString(s.const);
+  }
+
   // Handle enum - show as union of literals
   if (Array.isArray(s.enum)) {
-    const values = s.enum.slice(0, 5).map((v) =>
-      typeof v === "string" ? `"${v}"` : String(v)
-    );
+    const values = s.enum.slice(0, 5).map(literalToTypeString);
     if (s.enum.length > 5) values.push("...");
     return values.join(" | ");
   }
@@ -210,6 +229,10 @@ function schemaToTypeStringInner(
 
   // Handle basic types
   const type = s.type;
+
+  // A type array (e.g. from the union formatter's anyOf merge) is a union of
+  // the named types
+  if (Array.isArray(type)) return typeArrayToUnion(type);
 
   if (type === "string") return "string";
   if (type === "number" || type === "integer") return "number";
@@ -239,7 +262,18 @@ function schemaToTypeStringInner(
   // Handle objects
   if (type === "object" || s.properties) {
     const props = s.properties as Record<string, JSONSchema> | undefined;
+    // An index signature (object-valued additionalProperties) carries a value
+    // schema worth showing; a bare `additionalProperties: true` does not
+    const indexValueSchema = typeof s.additionalProperties === "object" &&
+        s.additionalProperties !== null
+      ? s.additionalProperties as JSONSchema
+      : undefined;
     if (!props || Object.keys(props).length === 0) {
+      if (indexValueSchema) {
+        return `Record<string, ${
+          schemaToTypeString(indexValueSchema, nextOpts)
+        }>`;
+      }
       if (s.additionalProperties) return "Record<string, unknown>";
       return "{}";
     }
@@ -262,6 +296,15 @@ function schemaToTypeStringInner(
       lines.push(`${padding}${key}${optional}: ${propType}`);
     }
 
+    // Named properties alongside an index signature keep both, TS-style
+    if (indexValueSchema) {
+      const valueType = schemaToTypeString(indexValueSchema, {
+        ...nextOpts,
+        indent: indent + 1,
+      });
+      lines.push(`${padding}[key: string]: ${valueType}`);
+    }
+
     if (lines.length === 0) return "{}";
 
     const closePadding = "  ".repeat(indent);
@@ -270,6 +313,17 @@ function schemaToTypeStringInner(
 
   // Fallback
   return type ? String(type) : "unknown";
+}
+
+/** Renders a literal value the way TS spells the literal type. */
+function literalToTypeString(value: unknown): string {
+  return typeof value === "string" ? `"${value}"` : String(value);
+}
+
+/** Renders a JSON Schema `type` array as a TS union, e.g. "number | string". */
+function typeArrayToUnion(types: readonly unknown[]): string {
+  const names = types.map((t) => t === "integer" ? "number" : String(t));
+  return [...new Set(names)].join(" | ") || "unknown";
 }
 
 function getWrappedTypeString(
