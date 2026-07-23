@@ -16,6 +16,8 @@ import {
   TypeWithInternals,
 } from "../type-utils.ts";
 import { isRecord } from "@commonfabric/utils/types";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { dedupeByValueEqual } from "../value-equality.ts";
 
 // Simple primitive schemas only have these keys (possibly just one)
 const PRIMITIVE_SCHEMA_KEY_SET = new Set(["type", "enum"]);
@@ -1045,8 +1047,8 @@ export class UnionFormatter implements TypeFormatter {
       // so we don't need to add it to the list, and we can just return.
       return false;
     }
-    const curStr = JSON.stringify(cur);
-    if (anyOf.some((option) => JSON.stringify(option) === curStr)) {
+    const curHash = hashStringOf(cur);
+    if (anyOf.some((option) => hashStringOf(option) === curHash)) {
       return false;
     }
     // See if we can merge into one of the anyOf options
@@ -1065,15 +1067,18 @@ export class UnionFormatter implements TypeFormatter {
       isRecord(cur) && Array.isArray(cur.enum) && isRecord(matchingType) &&
       Array.isArray(matchingType.enum)
     ) {
-      // Add our enum values to their enum values, and keep the same type
-      const mergedEnum = new Set([
+      // Add our enum values to their enum values, and keep the same type.
+      // Dedupe by `valueEqual` rather than a `Set`: a `Set` uses SameValueZero,
+      // which would collapse `-0` and `0` into one enum member, where the value
+      // model keeps them distinct.
+      const mergedEnum = dedupeByValueEqual([
         ...matchingType.enum,
         ...cur.enum,
       ]);
       // Special case for boolean with all options
       if (
-        cur.type === "boolean" && mergedEnum.has(true) &&
-        mergedEnum.has(false)
+        cur.type === "boolean" && mergedEnum.includes(true) &&
+        mergedEnum.includes(false)
       ) {
         // this collapse may allow us to combine with other options that have only a type,
         // but I'm not doing that currently.
@@ -1082,7 +1087,7 @@ export class UnionFormatter implements TypeFormatter {
       } else {
         anyOf[matchingTypeIdx] = {
           ...matchingType,
-          enum: [...mergedEnum].toSorted(),
+          enum: mergedEnum.toSorted(),
         };
       }
     } else if (isRecord(matchingType)) {
