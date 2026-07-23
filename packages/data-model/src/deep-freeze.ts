@@ -1,6 +1,3 @@
-import { isPlainObject } from "@commonfabric/utils/types";
-import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
-
 import type { FabricValue } from "./interface.ts";
 import {
   BaseFabricInstance,
@@ -8,6 +5,7 @@ import {
   IS_DEEP_FROZEN,
 } from "./fabric-instances/BaseFabricInstance.ts";
 import { BaseFabricPrimitive } from "./fabric-primitives/BaseFabricPrimitive.ts";
+import { isFabricValue } from "./type-check.ts";
 
 /**
  * Cache of confirmed deep-frozen objects.
@@ -15,19 +13,18 @@ import { BaseFabricPrimitive } from "./fabric-primitives/BaseFabricPrimitive.ts"
 const deepFrozenCache = new WeakSet<object>();
 
 /**
- * Data-descriptor-only object graphs already proven to be both deeply frozen
- * and valid Fabric values. Accessors and FabricInstance protocol values are
- * deliberately excluded: Object.freeze() does not freeze their closed-over or
- * private logical state, so their proof is not stable by root identity.
+ * Object graphs already proven to be both deeply frozen and valid `FabricValue`s,
+ * memoized by root identity for `isDeepFrozenFabricValue()`.
  *
- * TODO(danfuzz): Evaluate the above reasoning as to why `FabricInstance` is
- * excluded. Though it's certainly true that `#private` members mean that
- * something which is deep-frozen per the JavaScript contract might not _really_
- * be deep frozen, the data model's contract for the `IS_DEEP_FROZEN` protocol
- * should make it so that clients can in fact rely on `FabricInstance`s' reports
- * about their deep-frozenness. To the extent that a `FabricInstance` class is
- * "lying" about its effective frozenness, it probably shouldn't be up to _this_
- * code to paper over that fact.
+ * Caching by identity is sound because of the "Deep-frozen honesty" mandate (see
+ * the `[IS_DEEP_FROZEN]` protocol member on `BaseFabricInstance` and the
+ * `FabricValue` doc in `interface.ts`): a `FabricValue` may not expose an accessor
+ * whose result contradicts its frozen state, and a `FabricInstance` may not report
+ * deep-frozen unless permanently immutable. So a proven deep-frozen fabric value
+ * stays one -- including graphs reaching a `FabricInstance` -- and its proof does
+ * not need re-validation. A class that violates the mandate can corrupt this cache,
+ * as any contract violation can; that is the implementing class's bug, not this
+ * code's to defend against.
  */
 const deepFrozenFabricValueCache = new WeakSet<object>();
 
@@ -271,132 +268,36 @@ export function deepFreeze<T>(value: T): T {
 }
 
 /**
- * Indicates whether the value is a deep-frozen `FabricValue`. Returns `true` if
- * the value is a primitive -- other than a unique (uninterned) symbol; see
- * below -- or a frozen object/array whose children are all also deep-frozen
- * `FabricValue`s.
+ * Indicates whether the value is a deep-frozen `FabricValue`: it is both a
+ * `FabricValue` by structural membership (`isFabricValue()`) and deeply frozen
+ * (`isDeepFrozen()`). Equivalent to `isFabricValue(value) && isDeepFrozen(value)`,
+ * with an identity-cached fast path for values already proven.
  *
- * A `function`, and a unique (uninterned) symbol, are not `FabricValue`s and so
- * yield `false`, whether the value itself or reached anywhere within it. (Only
- * registry-interned `Symbol.for(...)` symbols are `FabricValue`s.) The
- * `function` case differs from `isDeepFrozen()`, which asks the
- * JavaScript-level question and (incorrectly) admits functions; see the `TODO`
- * on `isNecessarilyFrozenValue()`.
+ * The cache is sound because a `FabricValue` must report its frozen state
+ * truthfully and permanently -- see the "Deep-frozen honesty" mandate on the
+ * `[IS_DEEP_FROZEN]` protocol member (`BaseFabricInstance`) and on `FabricValue`
+ * (`interface.ts`): no member exposes an accessor whose result contradicts its
+ * frozen state, and no `FabricInstance` reports deep-frozen unless permanently
+ * immutable. A proven deep-frozen fabric value therefore stays one, so its proof
+ * is cached by root identity and not re-validated.
+ *
+ * (Membership is gated by `isFabricValue()`: `isDeepFrozen()` alone admits
+ * `function`s via the `isNecessarilyFrozenValue()` bug, but `isFabricValue()`
+ * rejects them, so the conjunction is correct for all in-spec values.)
  */
 export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
-  // The recursive membership half of this check is available standalone as
-  // `isFabricValue()` (in `type-check.ts`). This function deliberately keeps its
-  // own combined walk rather than composing `isFabricValue(v) && isDeepFrozen(v)`:
-  // the two are not equivalent. `isDeepFrozen()` identity-caches accessor-backed
-  // graphs unconditionally, so that composition would report a stale `true` for
-  // a graph whose accessor later yields an unfrozen (but structurally valid)
-  // child, whereas this walk re-validates deep-frozenness per node and refuses
-  // to identity-cache accessor-backed graphs. Frozen-ness therefore stays woven
-  // into the membership recursion below.
-  switch (typeof value) {
-    case "function": {
-      return false;
-    }
-
-    case "object": {
-      if (value === null || deepFrozenFabricValueCache.has(value)) {
-        return true;
-      } else if (!isDeepFrozen(value)) {
-        return false;
-      }
-
-      // Continue below the `switch`.
-      break;
-    }
-
-    case "symbol": {
-      // Only registry-interned symbols are `FabricValue`s; unique (uninterned)
-      // symbols are not portable across realms and are rejected, matching
-      // `isFabricValue()` / `isFabricValueLayer()`.
-      return Symbol.keyFor(value) !== undefined;
-    }
-
-    default: {
-      // It's a primitive. Return here for efficiency, rather than do the
-      // heavyweight setup for recursive tracing.
-      return true;
-    }
+  if (
+    typeof value === "object" && value !== null &&
+    deepFrozenFabricValueCache.has(value)
+  ) {
+    return true;
   }
 
-  // At this point, it's known to be a deep-frozen value with internal
-  // structure, but we don't know if it's actually a `FabricValue`.
+  const result = isFabricValue(value) && isDeepFrozen(value);
 
-  const seen = new Set<object>();
-  let cacheableByIdentity = true;
-  const checkValue = (item: unknown): boolean => {
-    if (typeof item === "function") return false;
-    if (typeof item === "symbol") return Symbol.keyFor(item) !== undefined;
-    if (item === null || typeof item !== "object") {
-      // It's a non-function, non-symbol primitive.
-      return true;
-    } else if (seen.has(item)) {
-      return true;
-    } else if (!isDeepFrozen(item)) {
-      // Accessors may expose a different child after the root was cached by
-      // isDeepFrozen(). Recheck each currently observed object independently.
-      return false;
-    }
+  if (result && typeof value === "object" && value !== null) {
+    deepFrozenFabricValueCache.add(value);
+  }
 
-    seen.add(item);
-
-    if (BaseFabricPrimitive.isInstance(item)) {
-      // `FabricPrimitive`s are by definition frozen and have no outbound
-      // references.
-      return true;
-    } else if (BaseFabricInstance.isInstance(item)) {
-      // Object.freeze() cannot prove that a fabric instance's private logical
-      // contents will remain unchanged, so validate it but do not root-cache a
-      // graph that reaches one.
-      cacheableByIdentity = false;
-      // Fabric instances answer the deep-frozen question via their
-      // `[IS_DEEP_FROZEN]` protocol member (the side-effect-free sibling of
-      // `[DEEP_FREEZE]`), recursing through `checkValue`. Gating via
-      // `BaseFabricInstance.isInstance()` keeps this guard generic (and enforces
-      // the "every `FabricInstance` is a `BaseFabricInstance`" invariant); the
-      // `[IS_DEEP_FROZEN]` member is abstract on `BaseFabricInstance`, so every
-      // instance is guaranteed to implement it.
-      return item[IS_DEEP_FROZEN](checkValue);
-    } else if (Array.isArray(item)) {
-      // Arrays with enumerable named properties have no fabric representation.
-      if (!isArrayWithOnlyIndexProperties(item)) return false;
-      for (let i = 0; i < item.length; i++) {
-        if (!(i in item)) continue;
-        const descriptor = Object.getOwnPropertyDescriptor(item, i.toString());
-        if (
-          descriptor === undefined || descriptor.get !== undefined ||
-          descriptor.set !== undefined
-        ) {
-          cacheableByIdentity = false;
-        }
-        if (!checkValue(item[i])) return false;
-      }
-      return true;
-    } else if (isPlainObject(item)) {
-      const record = item as Record<string, unknown>;
-      for (const key of Object.keys(record)) {
-        const descriptor = Object.getOwnPropertyDescriptor(record, key);
-        if (
-          descriptor === undefined || descriptor.get !== undefined ||
-          descriptor.set !== undefined
-        ) {
-          cacheableByIdentity = false;
-        }
-        if (!checkValue(record[key])) return false;
-      }
-      return true;
-    } else {
-      // It's an instance of a class that isn't covered by the `FabricValue`
-      // type definition.
-      return false;
-    }
-  };
-
-  const result = checkValue(value);
-  if (result && cacheableByIdentity) deepFrozenFabricValueCache.add(value);
   return result;
 }
