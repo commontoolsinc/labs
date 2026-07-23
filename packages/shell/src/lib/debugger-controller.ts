@@ -275,14 +275,6 @@ export class DebuggerController implements ReactiveController {
         this.telemetryMarkers = allMarkers.slice(-MAX_TELEMETRY_EVENTS);
         this.updateVersion++;
 
-        // Check for graph snapshot events in recent markers
-        const latestMarker = allMarkers[allMarkers.length - 1];
-        if (latestMarker?.type === "scheduler.graph.snapshot") {
-          this.processGraphSnapshot(
-            (latestMarker as { graph: SchedulerGraphSnapshot }).graph,
-          );
-        }
-
         // NOTE: Auto-refresh disabled - was causing infinite loop
         // (telemetry -> UI update -> sink -> telemetry)
         // Use manual refresh button instead
