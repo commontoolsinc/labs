@@ -1,10 +1,15 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { isFabricPlainObject, isFabricValueLayer } from "@/type-check.ts";
+import {
+  isFabricPlainObject,
+  isFabricValue,
+  isFabricValueLayer,
+} from "@/type-check.ts";
 import type { FabricValue } from "@/interface.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 
 describe("type-check", () => {
   describe("isFabricValueLayer()", () => {
@@ -135,6 +140,188 @@ describe("type-check", () => {
 
       it("rejects unique (uninterned) symbols", () => {
         expect(isFabricValueLayer(Symbol("k"))).toBe(false);
+      });
+    });
+  });
+
+  describe("isFabricValue()", () => {
+    describe("returns `true` for scalar members", () => {
+      it("accepts booleans", () => {
+        expect(isFabricValue(true)).toBe(true);
+        expect(isFabricValue(false)).toBe(true);
+      });
+
+      it("accepts strings", () => {
+        expect(isFabricValue("")).toBe(true);
+        expect(isFabricValue("hello")).toBe(true);
+      });
+
+      it("accepts finite numbers (including `-0`)", () => {
+        expect(isFabricValue(0)).toBe(true);
+        expect(isFabricValue(-0)).toBe(true);
+        expect(isFabricValue(3.14159)).toBe(true);
+        expect(isFabricValue(Number.MAX_VALUE)).toBe(true);
+      });
+
+      it("accepts non-finite numbers (`NaN`, `±Infinity`)", () => {
+        expect(isFabricValue(NaN)).toBe(true);
+        expect(isFabricValue(Infinity)).toBe(true);
+        expect(isFabricValue(-Infinity)).toBe(true);
+      });
+
+      it("accepts `bigint`", () => {
+        expect(isFabricValue(0n)).toBe(true);
+        expect(isFabricValue(123n)).toBe(true);
+      });
+
+      it("accepts symbols (interned and unique alike)", () => {
+        // Unlike `isFabricValueLayer()`'s registry-interned-only gate, this
+        // structural check matches `isDeepFrozenFabricValue()` and admits any
+        // symbol as a member.
+        expect(isFabricValue(Symbol.for("k"))).toBe(true);
+        expect(isFabricValue(Symbol("k"))).toBe(true);
+      });
+
+      it("accepts `null`", () => {
+        expect(isFabricValue(null)).toBe(true);
+      });
+
+      it("accepts `undefined`", () => {
+        expect(isFabricValue(undefined)).toBe(true);
+      });
+    });
+
+    describe("returns `true` for structural members, recursively", () => {
+      it("accepts plain objects of fabric values", () => {
+        expect(isFabricValue({})).toBe(true);
+        expect(isFabricValue({ a: 1, b: "two", c: null })).toBe(true);
+        expect(isFabricValue({ nested: { deeply: { value: 1 } } })).toBe(true);
+      });
+
+      it("accepts null-prototype objects", () => {
+        const obj = Object.create(null) as Record<string, unknown>;
+        obj.a = 1;
+        expect(isFabricValue(obj)).toBe(true);
+      });
+
+      it("accepts arrays of fabric values", () => {
+        expect(isFabricValue([])).toBe(true);
+        expect(isFabricValue([1, 2, 3])).toBe(true);
+        expect(isFabricValue([{ a: 1 }, [2, 3], "x"])).toBe(true);
+      });
+
+      it("accepts arrays with `undefined` elements and sparse holes", () => {
+        expect(isFabricValue([1, undefined, 3])).toBe(true);
+        const sparse: unknown[] = [];
+        sparse[0] = 1;
+        sparse[2] = 3; // hole at index 1
+        expect(isFabricValue(sparse)).toBe(true);
+      });
+
+      it("accepts a `FabricPrimitive` (`FabricBytes`, `FabricEpochNsec`)", () => {
+        expect(isFabricValue(new FabricBytes(new Uint8Array([1, 2, 3]))))
+          .toBe(true);
+        expect(isFabricValue(new FabricEpochNsec(0n))).toBe(true);
+      });
+
+      it("accepts a `FabricInstance` (`FabricError`)", () => {
+        expect(isFabricValue(FabricError.fromNativeError(new Error("x"))))
+          .toBe(true);
+      });
+
+      it("accepts a fabric instance nested in a tree", () => {
+        const fe = FabricError.fromNativeError(new Error("nested"));
+        expect(isFabricValue({ a: 1, e: fe, list: [fe] })).toBe(true);
+      });
+    });
+
+    describe("membership is independent of frozen-ness", () => {
+      it("accepts an unfrozen plain object and array", () => {
+        // Structurally valid but not frozen: still a `FabricValue`. This is the
+        // deliberate difference from `isDeepFrozenFabricValue()`.
+        const obj = { a: 1, nested: { b: 2 } };
+        expect(Object.isFrozen(obj)).toBe(false);
+        expect(isFabricValue(obj)).toBe(true);
+        expect(isFabricValue([1, [2, 3]])).toBe(true);
+      });
+
+      it("accepts an unfrozen `FabricInstance` (member by type)", () => {
+        // A fabric instance is a member by type; membership does not require it
+        // to be deep-frozen and does not recurse into its private interior.
+        const fe = FabricError.fromNativeError(new Error("test"));
+        expect(Object.isFrozen(fe)).toBe(false);
+        expect(isFabricValue(fe)).toBe(true);
+      });
+    });
+
+    describe("returns `false` for non-members", () => {
+      it("rejects functions at the top level", () => {
+        expect(isFabricValue(() => {})).toBe(false);
+        expect(isFabricValue(function () {})).toBe(false);
+        expect(isFabricValue(async () => {})).toBe(false);
+      });
+
+      it("rejects a function reached anywhere within the graph", () => {
+        expect(isFabricValue({ a: 1, fn: () => {} })).toBe(false);
+        expect(isFabricValue([1, [2, () => {}]])).toBe(false);
+        expect(isFabricValue({ deep: { nested: { fn: () => {} } } }))
+          .toBe(false);
+      });
+
+      it("rejects non-fabric class instances (`Date`, `Map`, `Set`, `RegExp`)", () => {
+        expect(isFabricValue(new Date())).toBe(false);
+        expect(isFabricValue(new Map())).toBe(false);
+        expect(isFabricValue(new Set())).toBe(false);
+        expect(isFabricValue(/regex/)).toBe(false);
+      });
+
+      it("rejects a non-fabric class instance nested in the graph", () => {
+        expect(isFabricValue({ a: 1, d: new Date() })).toBe(false);
+        expect(isFabricValue([1, [2, new Map()]])).toBe(false);
+      });
+
+      it("rejects arrays with enumerable named (non-index) properties", () => {
+        const arr = [1, 2, 3] as unknown[] & { foo?: string };
+        arr.foo = "bar";
+        expect(isFabricValue(arr)).toBe(false);
+      });
+
+      it("rejects a named-property array nested in the graph", () => {
+        const arr = [1, 2] as unknown[] & { extra?: number };
+        arr.extra = 42;
+        expect(isFabricValue({ data: arr })).toBe(false);
+      });
+    });
+
+    describe("handles circular references", () => {
+      it("terminates on a self-referential plain object", () => {
+        const a: Record<string, unknown> = { x: 1 };
+        a.self = a;
+        expect(() => isFabricValue(a)).not.toThrow();
+        expect(isFabricValue(a)).toBe(true);
+      });
+
+      it("terminates on a two-node cycle (a -> b -> a)", () => {
+        const a: Record<string, unknown> = { tag: "a" };
+        const b: Record<string, unknown> = { tag: "b" };
+        a.next = b;
+        b.next = a;
+        expect(() => isFabricValue(a)).not.toThrow();
+        expect(isFabricValue(a)).toBe(true);
+      });
+
+      it("terminates on a self-referential array", () => {
+        const arr: unknown[] = [1, 2];
+        arr.push(arr);
+        expect(() => isFabricValue(arr)).not.toThrow();
+        expect(isFabricValue(arr)).toBe(true);
+      });
+
+      it("still rejects a non-member reached past a cycle", () => {
+        const a: Record<string, unknown> = { tag: "a" };
+        a.self = a;
+        a.bad = () => {};
+        expect(isFabricValue(a)).toBe(false);
       });
     });
   });

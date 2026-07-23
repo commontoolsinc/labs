@@ -282,9 +282,15 @@ export function deepFreeze<T>(value: T): T {
  * `isNecessarilyFrozenValue()`.
  */
 export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
-  // TODO(@danfuzz): A function `isFabricValue()` should ultimately get
-  // extracted from this function, which does just the recursive type check.
-
+  // The recursive membership half of this check is available standalone as
+  // `isFabricValue()` (in `type-check.ts`). This function deliberately keeps its
+  // own combined walk rather than composing `isFabricValue(v) && isDeepFrozen(v)`:
+  // the two are not equivalent. `isDeepFrozen()` identity-caches accessor-backed
+  // graphs unconditionally, so that composition would report a stale `true` for
+  // a graph whose accessor later yields an unfrozen (but structurally valid)
+  // child, whereas this walk re-validates deep-frozenness per node and refuses
+  // to identity-cache accessor-backed graphs. Frozen-ness therefore stays woven
+  // into the membership recursion below.
   switch (typeof value) {
     case "function": {
       return false;
