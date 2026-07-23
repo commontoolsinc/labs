@@ -35,7 +35,29 @@ jobs:
         uses: ./.github/actions/deno-install
 
       - name: 🔎 Check codebase formatting
+        id: pinned_format
+        continue-on-error: true
         run: deno fmt --check
+
+      # Deno 2.9.3's embedded CSS formatter is not idempotent for some Lit
+      # components (denoland/deno#35948). Keep accepting the 2.8.1 format until
+      # the 2.9 formatter migration lands separately.
+      - name: 🦕 Setup fallback Deno formatter
+        if: steps.pinned_format.outcome == 'failure'
+        uses: ./.github/actions/deno-setup
+        with:
+          cache: false
+          deno-version: 2.8.1
+
+      - name: 🔎 Check codebase formatting with fallback Deno
+        if: steps.pinned_format.outcome == 'failure'
+        run: deno fmt --check
+
+      - name: 🦕 Restore pinned Deno
+        if: steps.pinned_format.outcome == 'failure'
+        uses: ./.github/actions/deno-setup
+        with:
+          cache: false
 
       - name: 🧹 Lint codebase
         run: deno lint
