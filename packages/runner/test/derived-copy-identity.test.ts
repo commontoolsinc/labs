@@ -11,6 +11,7 @@ import {
   resolveOriginal,
   setArtifactEntryRef,
 } from "../src/builder/pattern-metadata.ts";
+import { getEffectiveGeneratedInternalCellPatternIdentity } from "../src/link-utils.ts";
 
 /**
  * Derived-copy identity carry (PR B of
@@ -76,6 +77,12 @@ describe("noteDerivedCopy trust carry", () => {
 });
 
 describe("entry-ref resolution through copies", () => {
+  it("ignores non-object artifacts", () => {
+    const ref = { identity: "ignored", symbol: "default" };
+    setArtifactEntryRef("not-an-artifact", ref);
+    expect(getArtifactEntryRef("not-an-artifact")).toBeUndefined();
+  });
+
   it("resolves a ref registered BEFORE the copy (eager)", () => {
     const original = brandTrustedPattern(patternShape());
     setArtifactEntryRef(original, { identity: "id-eager", symbol: "default" });
@@ -140,6 +147,27 @@ describe("generated internal-cell pattern identity", () => {
     expect(getArtifactEntryRef(copy)).toEqual(ref);
     expect(
       getGeneratedInternalCellPatternIdentity(copy.derivedInternalCells[0]),
+    ).toEqual(ref);
+  });
+
+  it("uses the versioned identity when the current manifest is absent", () => {
+    const pattern = brandTrustedPattern(patternWithInternals());
+    const ref = { identity: "pattern-v3", symbol: "default" };
+    setArtifactEntryRef(pattern, ref);
+
+    const resultCell = {
+      getMetaRaw(field: string) {
+        return field === "patternIdentity" ? ref : undefined;
+      },
+    } as unknown as Parameters<
+      typeof getEffectiveGeneratedInternalCellPatternIdentity
+    >[0];
+
+    expect(
+      getEffectiveGeneratedInternalCellPatternIdentity(
+        resultCell,
+        pattern.derivedInternalCells[0],
+      ),
     ).toEqual(ref);
   });
 });
