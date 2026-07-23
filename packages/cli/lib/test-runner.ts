@@ -29,6 +29,7 @@ import { Identity } from "@commonfabric/identity";
 import {
   ConsoleMethod,
   experimentalOptionsFromEnv,
+  parseLink,
   PatternCoverageCollector,
   patternCoverageOutputPath,
   Runtime,
@@ -1139,6 +1140,27 @@ export async function runTestPattern(
       );
       const pieceRegistry = (defaultPatternCell as any).key("pieceRegistry");
       pieceRegistry.set([]);
+      const addPiece = runtime.getCell(
+        space,
+        "test-default-add-piece",
+        undefined,
+        setupTx,
+      );
+      addPiece.setRaw({ $stream: true });
+      (defaultPatternCell as any).key("addPiece").set(addPiece);
+      const testPieceRegistrationCount = (defaultPatternCell as any).key(
+        "testPieceRegistrationCount",
+      );
+      testPieceRegistrationCount.set(0);
+      runtime.scheduler.addEventHandler(
+        (handlerTx, event) => {
+          const piece = event?.piece;
+          if (!piece) return;
+          pieceRegistry.withTx(handlerTx).addUnique(piece);
+          testPieceRegistrationCount.withTx(handlerTx).increment();
+        },
+        parseLink(addPiece),
+      );
       (defaultPatternCell as any).key("recentPieces").set([]);
       (defaultPatternCell as any).key("backlinksIndex").set({
         mentionable: [],
