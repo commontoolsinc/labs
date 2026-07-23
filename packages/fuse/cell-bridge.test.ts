@@ -1,5 +1,10 @@
 // cell-bridge.test.ts — Integration tests for CellBridge using fake piece objects
-import { assertEquals, assertNotEquals, assertRejects } from "@std/assert";
+import {
+  assertEquals,
+  assertNotEquals,
+  assertRejects,
+  assertThrows,
+} from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { defer } from "@commonfabric/utils/defer";
 import { createSession, Identity } from "@commonfabric/identity";
@@ -407,6 +412,104 @@ Deno.test("CellBridge entity directory snapshots do not hydrate values", async (
   assertEquals(deferredSpaceCellSync, true);
   assertEquals(state.pieceMap.size, 0);
   assertEquals(state.allPieceIds, new Set());
+});
+
+Deno.test("CellBridge rejects invalid entity projection cache limits", () => {
+  for (const maxEntityProjections of [0, -1, 1.5, Number.NaN]) {
+    assertThrows(
+      () =>
+        new CellBridge(new FsTree(), "/tmp/cf-exec", {
+          maxEntityProjections,
+        }),
+      RangeError,
+      "maxEntityProjections must be a positive integer",
+    );
+  }
+});
+
+Deno.test("CellBridge removes partial state after a late connection failure", async () => {
+  const tree = new FsTree();
+  let cancellations = 0;
+  let disposeCalls = 0;
+  const manager = {
+    getSpace: () => "did:key:zFailedSpace",
+    runtime: {
+      dispose: () => {
+        disposeCalls++;
+        return Promise.reject(new Error("dispose failed"));
+      },
+    },
+  } as unknown as SpaceState["manager"];
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: () => Promise.resolve(manager),
+  });
+  bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
+
+  const internals = bridge as unknown as {
+    updateIndexJson(state: SpaceState): void;
+    entitySubscriptions: Map<bigint, Array<() => void>>;
+    unhydratedEntityRoots: Map<bigint, unknown>;
+    pendingEntityHydrations: Map<bigint, Promise<boolean>>;
+    entityProjectionLru: Map<bigint, unknown>;
+    entityProjectionEvictionCandidates: Map<bigint, unknown>;
+    entityProjectionUseOrder: Map<bigint, number>;
+    pendingEntityRemovals: Map<bigint, unknown>;
+    pendingPieceHydrations: Map<string, Promise<void>>;
+    pieceSyncs: Map<string, Promise<void>>;
+    syncAgain: Set<string>;
+  };
+  const connectionFailure = new Error("manifest generation failed");
+  internals.updateIndexJson = (state) => {
+    const cancel = () => {
+      cancellations++;
+    };
+    state.unsubscribes.push(cancel);
+    state.pieceSubs.set("partial-piece", [cancel]);
+    tree.addDir(state.piecesIno, "partial-piece");
+    const entityIno = tree.addDir(state.entitiesIno, "partial-entity");
+    internals.entitySubscriptions.set(entityIno, [cancel]);
+    internals.unhydratedEntityRoots.set(entityIno, {});
+    internals.pendingEntityHydrations.set(
+      entityIno,
+      Promise.resolve(false),
+    );
+    internals.entityProjectionLru.set(entityIno, {});
+    internals.entityProjectionEvictionCandidates.set(entityIno, {});
+    internals.entityProjectionUseOrder.set(entityIno, 1);
+    internals.pendingEntityRemovals.set(entityIno, {});
+    internals.pendingPieceHydrations.set("home", Promise.resolve());
+    internals.pieceSyncs.set("home", Promise.resolve());
+    internals.syncAgain.add("home");
+    throw connectionFailure;
+  };
+
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => warnings.push(args);
+  try {
+    await assertRejects(
+      () => bridge.connectSpace("home"),
+      Error,
+      connectionFailure.message,
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assertEquals(cancellations, 3);
+  assertEquals(disposeCalls, 1);
+  assertEquals(warnings.length, 1);
+  assertEquals(String(warnings[0][0]).includes("dispose failed"), true);
+  assertEquals(
+    tree.lookup(tree.rootIno, encodeFuseComponent("home")),
+    undefined,
+  );
+  assertEquals(bridge.spaces.has("home"), false);
+  assertEquals(bridge.knownSpaces.has("home"), false);
+  assertEquals(bridge.isConnecting("home"), false);
+  assertEquals(internals.pendingPieceHydrations.has("home"), false);
+  assertEquals(internals.pieceSyncs.has("home"), false);
+  assertEquals(internals.syncAgain.has("home"), false);
 });
 
 Deno.test("CellBridge prepares a stable paginated entity identifier snapshot", async () => {
