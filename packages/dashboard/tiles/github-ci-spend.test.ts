@@ -5,7 +5,10 @@ import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Ctx, TileView } from "../types.ts";
 import { REPO } from "../config.ts";
 import { blacksmithRoutes } from "../blacksmith.ts";
-import { githubCiSpend } from "./github-ci-spend.ts";
+import {
+  githubCiSpend,
+  projectMonthly,
+} from "./github-ci-spend.ts";
 
 const ORG = "acme";
 const D = 86_400_000;
@@ -117,6 +120,10 @@ const BLACKSMITH_ENV = {
   BLACKSMITH_ORG: ORG,
 };
 
+class RejectedRoute {
+  constructor(readonly reason: unknown) {}
+}
+
 function ctx(env: Record<string, string>): Ctx {
   return {
     runs: () => Promise.resolve([]),
@@ -150,6 +157,7 @@ async function view(
       return Promise.resolve(new Response(null, { status: 404 }));
     }
     const body = routes[key];
+    if (body instanceof RejectedRoute) return Promise.reject(body.reason);
     if (body instanceof Error) return Promise.reject(body);
     if (body instanceof Response) return Promise.resolve(body);
     return Promise.resolve(
@@ -174,6 +182,10 @@ Deno.test("ci spend: without a token the tile is gray and names what it needs", 
   assertStringIncludes(v.sub ?? "", "GH_TOKEN");
   assertStringIncludes(v.sub ?? "", "org billing read"); // the extra right this tile needs
   assertStringIncludes(v.sub ?? "", "BLACKSMITH_API_TOKEN");
+});
+
+Deno.test("ci spend: a projection with no observed rate window preserves the measured total", () => {
+  assertEquals(projectMonthly(37, 0, 31, []), 37);
 });
 
 Deno.test("ci spend: projects the month from the settled daily rate, against the GitHub budget", async () => {
@@ -480,6 +492,121 @@ Deno.test("ci spend: malformed Blacksmith costs never read as a green zero", asy
   }
 });
 
+Deno.test("ci spend: malformed Blacksmith daily and storage payloads are unavailable", async () => {
+  const now = "2026-01-20T09:00:00Z";
+  const cases: Array<{
+    name: string;
+    routeFragment: string;
+    response: unknown;
+  }> = [
+    {
+      name: "daily metrics are not an array",
+      routeFragment: "/metrics/daily?",
+      response: { daily_metrics: null },
+    },
+    {
+      name: "storage collections are not arrays",
+      routeFragment: "/metrics/docker/daily-by-type?",
+      response: { dockerfile: {}, stickydisk: [] },
+    },
+    {
+      name: "a daily date is not text",
+      routeFragment: "/metrics/daily?",
+      response: {
+        daily_metrics: [{ date: 42, jobs: 1, cost: 1, minutes: 1 }],
+      },
+    },
+    {
+      name: "a daily date is not a calendar day",
+      routeFragment: "/metrics/daily?",
+      response: {
+        daily_metrics: [blacksmithDay("2026-99-99", 1)],
+      },
+    },
+    {
+      name: "a storage measurement is blank",
+      routeFragment: "/metrics/docker/daily-by-type?",
+      response: {
+        dockerfile: [{ date: "2026-01-01", value: " " }],
+        stickydisk: [],
+      },
+    },
+  ];
+
+  for (const malformed of cases) {
+    const routes = blacksmithRouteSet(now, [
+      blacksmithDay("2026-01-01", 1),
+    ]);
+    const path = Object.keys(routes).find((candidate) =>
+      candidate.includes(malformed.routeFragment)
+    );
+    assert(path, malformed.name);
+    routes[path] = malformed.response;
+
+    const result = await view(now, routes, BLACKSMITH_ENV);
+    assertEquals(result.status, "unknown", malformed.name);
+    assertEquals(result.value, "—", malformed.name);
+    assertEquals(result.sub, "temporarily unavailable", malformed.name);
+  }
+});
+
+Deno.test("ci spend: malformed Blacksmith invoice and threshold payloads are unavailable", async () => {
+  const now = "2026-01-20T09:00:00Z";
+  const cases: Array<{
+    name: string;
+    billing: { invoice?: unknown; threshold?: unknown };
+  }> = [
+    {
+      name: "invoice currency is not USD",
+      billing: { invoice: { amount: 10, currency: "EUR" } },
+    },
+    {
+      name: "invoice amount is negative",
+      billing: { invoice: { amount: -1, currency: "USD" } },
+    },
+    {
+      name: "threshold object has no supported field",
+      billing: { threshold: {} },
+    },
+    {
+      name: "threshold is negative",
+      billing: { threshold: { threshold: -1 } },
+    },
+  ];
+
+  for (const malformed of cases) {
+    const routes = blacksmithRouteSet(
+      now,
+      [blacksmithDay("2026-01-01", 10)],
+      undefined,
+      undefined,
+      ORG,
+      malformed.billing,
+    );
+    const result = await view(now, routes, BLACKSMITH_ENV);
+    assertEquals(result.status, "unknown", malformed.name);
+    assertEquals(result.value, "—", malformed.name);
+    assertEquals(result.sub, "temporarily unavailable", malformed.name);
+  }
+});
+
+Deno.test("ci spend: a null threshold field is an unknown provider budget", async () => {
+  const now = "2026-01-20T09:00:00Z";
+  const routes = blacksmithRouteSet(
+    now,
+    [blacksmithDay("2026-01-01", 10)],
+    undefined,
+    undefined,
+    ORG,
+    { threshold: { threshold: null } },
+  );
+
+  const result = await view(now, routes, BLACKSMITH_ENV);
+  assertEquals(result.status, "good");
+  assertEquals(result.value, "~$16/mo");
+  assertStringIncludes(result.extra ?? "", "Budget $???");
+});
+
 Deno.test("ci spend: Blacksmith token errors say how to restore the source", async () => {
   const now = "2026-01-20T09:00:00Z";
   const expiredRoutes = blacksmithRouteSet(now, []);
@@ -498,6 +625,36 @@ Deno.test("ci spend: Blacksmith token errors say how to restore the source", asy
   });
   assertEquals(invalid.status, "unknown");
   assertEquals(invalid.sub, "check BLACKSMITH_API_URL");
+});
+
+Deno.test("ci spend: a source that rejects without an Error remains unavailable", async () => {
+  const rejected = new RejectedRoute("billing stopped");
+  const result = await view("2026-01-20T09:00:00Z", {
+    [usagePath(2026, 1)]: rejected,
+    [classicPath()]: rejected,
+  });
+
+  assertEquals(result.status, "unknown");
+  assertEquals(result.value, "—");
+  assertEquals(result.sub, "CI spend unavailable");
+});
+
+Deno.test("ci spend: a Blacksmith token removed during collection is unavailable", async () => {
+  let tokenReads = 0;
+  const result = await githubCiSpend.collect({
+    runs: () => Promise.resolve([]),
+    runsFor: () => Promise.resolve([]),
+    env: (name) => {
+      if (name !== "BLACKSMITH_API_TOKEN") return undefined;
+      tokenReads++;
+      return tokenReads === 1 ? "blacksmith-token" : undefined;
+    },
+  });
+
+  assertEquals(tokenReads, 2);
+  assertEquals(result.status, "unknown");
+  assertEquals(result.value, "—");
+  assertEquals(result.sub, "temporarily unavailable");
 });
 
 Deno.test("ci spend: current Blacksmith billing endpoint failures are not hidden", async () => {
