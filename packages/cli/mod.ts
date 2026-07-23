@@ -1,7 +1,9 @@
 import { parse } from "./commands/mod.ts";
+import { main as rootCommand } from "./commands/main.ts";
 import { CompilerError, TransformerError } from "@commonfabric/js-compiler";
 import { cliName } from "./lib/cli-name.ts";
 import { applyLogLevel } from "./lib/log-level.ts";
+import { applyColorMode } from "./lib/color-mode.ts";
 
 /**
  * The value to print for a top-level CLI failure. TransformerError and
@@ -20,8 +22,17 @@ export function renderCliError(e: unknown): unknown {
 }
 
 export async function main(args: string[]) {
-  // Extract --log-level before Cliffy parses and apply the resulting floor.
-  const cleanArgs = applyLogLevel(args);
+  // Extract --log-level and --no-color before Cliffy parses; apply the log
+  // floor and the color policy (TTY detection, NO_COLOR, FORCE_COLOR).
+  const { args: cleanArgs, enabled: colorsEnabled } = applyColorMode(
+    applyLogLevel(args),
+  );
+  // Cliffy's help generator ignores the global color flag (it force-sets its
+  // own `colors` option while rendering), so mirror the decision here. The
+  // .reset() re-targets the builder chain at the root command (without it,
+  // .help() lands on the last-registered subcommand); help settings inherit,
+  // so the root covers every subcommand.
+  rootCommand.reset().help({ colors: colorsEnabled });
   Deno.env.set("CF_CLI_NAME", cliName());
   const profileDoneMarker = Deno.env.get("CF_PROFILE_DONE_MARKER");
 

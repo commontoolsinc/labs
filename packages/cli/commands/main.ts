@@ -52,6 +52,11 @@ LOGGING:
     CF_LOG_LEVEL=debug cf piece ls
   Valid levels: debug, info, warn (default), error, silent
 
+COLOR:
+  ANSI colors are emitted only when stdout is a terminal. Override with
+  --no-color or NO_COLOR=1 to disable, FORCE_COLOR=1 or CLICOLOR_FORCE=1 to
+  force when piped.
+
 Run 'cf <command> --help' for command-specific help.`);
 
 export const main = new Command()
