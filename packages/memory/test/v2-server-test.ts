@@ -1489,6 +1489,34 @@ Deno.test("memory v2 server telemetry accounts for unknown-session attempts", as
   }
 });
 
+Deno.test("memory v2 server telemetry preserves malformed transact ingress errors", async () => {
+  const server = createServer(
+    "memory://memory-v2-server-telemetry-malformed-transact",
+    0,
+    true,
+  );
+  try {
+    const response = await server.transact({
+      type: "transact",
+      requestId: "malformed",
+      space: "did:key:z6Mk-memory-v2-server-telemetry-malformed-transact",
+      sessionId: "session:unknown",
+      commit: { reads: null, operations: null },
+    } as never);
+    assertEquals(response, {
+      type: "response",
+      requestId: "malformed",
+      error: {
+        name: "SessionError",
+        message: "Unknown session for space",
+      },
+    });
+    assertEquals(server.commitTelemetry().transactCount, 1);
+  } finally {
+    await server.close();
+  }
+});
+
 Deno.test("memory v2 server telemetry accounts for transacts rejected by a connection session gate", async () => {
   const server = createServer(
     "memory://memory-v2-server-telemetry-connection-session",

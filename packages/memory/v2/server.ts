@@ -363,15 +363,28 @@ class CommitTelemetry {
     this.#snapshot.transactCount += 1;
   }
 
-  recordReceivedCommit(commit: ClientCommit): void {
+  recordReceivedCommit(commit: unknown): void {
+    if (!isRecord(commit)) return;
     const encodedByteLength = (
       value: Parameters<typeof encodeMemoryBoundary>[0],
-    ): number =>
-      (commitTelemetryTextEncoder ??= new TextEncoder()).encode(
-        encodeMemoryBoundary(value),
-      ).byteLength;
-    const confirmedReads = commit.reads.confirmed;
-    const operations = commit.operations;
+    ): number => {
+      try {
+        return (commitTelemetryTextEncoder ??= new TextEncoder()).encode(
+          encodeMemoryBoundary(value),
+        ).byteLength;
+      } catch {
+        // Telemetry is observational; malformed ingress must reach the normal
+        // protocol validator and typed-error path unchanged.
+        return 0;
+      }
+    };
+    const reads = isRecord(commit.reads) ? commit.reads : undefined;
+    const confirmedReads = Array.isArray(reads?.confirmed)
+      ? reads.confirmed
+      : [];
+    const operations = Array.isArray(commit.operations)
+      ? commit.operations.filter(isRecord)
+      : [];
     const confirmedReadBytes = encodedByteLength(confirmedReads);
     const operationBytes = operations.reduce(
       (total, operation) => total + encodedByteLength(operation),
@@ -396,20 +409,34 @@ class CommitTelemetry {
     );
     addCommitTelemetryCounter(this.#snapshot.operationBytes, operationBytes);
     for (const operation of operations) {
-      this.#snapshot.operationsByType[operation.op] += 1;
-      if (operation.op === "patch") {
+      if (
+        operation.op === "set" || operation.op === "patch" ||
+        operation.op === "delete" || operation.op === "sqlite"
+      ) {
+        this.#snapshot.operationsByType[operation.op] += 1;
+      }
+      if (operation.op === "patch" && Array.isArray(operation.patches)) {
         for (const patch of operation.patches) {
-          this.#snapshot.receivedPatchOperationsByType[patch.op] += 1;
-          this.#recordPatchPath(patch);
+          if (
+            isRecord(patch) && typeof patch.path === "string" &&
+            (patch.op === "replace" || patch.op === "add" ||
+              patch.op === "remove" || patch.op === "move" ||
+              patch.op === "splice" || patch.op === "append" ||
+              patch.op === "add-unique" || patch.op === "remove-by-value" ||
+              patch.op === "increment")
+          ) {
+            this.#snapshot.receivedPatchOperationsByType[patch.op] += 1;
+            this.#recordPatchPath(patch.path);
+          }
         }
       }
     }
   }
 
-  #recordPatchPath(patch: PatchOp): void {
+  #recordPatchPath(path: string): void {
     incrementCommitTelemetryMap(
       this.#snapshot.patchesByPathShape,
-      patchPathShape(patch.path),
+      patchPathShape(path),
     );
   }
 
