@@ -2062,6 +2062,11 @@
           "npm:@opentelemetry/api@^1.9.1"
         ]
       },
+      "packages/piece": {
+        "dependencies": [
+          "jsr:@db/sqlite@0.13.0"
+        ]
+      },
       "packages/runner": {
         "dependencies": [
           "npm:@opentelemetry/api@^1.9.1",
