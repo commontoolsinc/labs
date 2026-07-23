@@ -1194,6 +1194,42 @@ describe("schema-based prompt injection sanitization compatibility", () => {
     });
   });
 
+  it("sanitizes tuple (prefixItems) elements against their slot schema", () => {
+    // CT-1895: itemSchemaForIndex collected only `items` (+allOf), so tuple
+    // elements sanitized against an unconstrained schema — a raw string in a
+    // number slot dodged the opaque-link gate.
+    const schema = {
+      type: "object",
+      properties: {
+        pair: {
+          type: "array",
+          prefixItems: [
+            { type: "string", enum: ["label"] },
+            { type: "number" },
+          ],
+        },
+      },
+      required: ["pair"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+
+    const sanitized = validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: { pair: ["label", "untrusted page text"] },
+      opaqueHandleId: "child-run-1",
+    });
+
+    // Slot 0 pins the string via its enum — kept (schema-inert); slot 1 is
+    // a number slot, so the raw string is linkified rather than passed
+    // through.
+    expect(sanitized).toEqual({
+      value: {
+        pair: ["label", { "@link": "opaque:child-run-1#/pair/1" }],
+      },
+      linkedStringCount: 1,
+    });
+  });
+
   it("preserves caller-provided opaque links when the matching schema branch allows them", () => {
     const opaqueLinkSchema = {
       type: "object",

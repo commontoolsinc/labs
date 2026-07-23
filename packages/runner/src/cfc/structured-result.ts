@@ -259,20 +259,34 @@ const knownPropertyNames = (
 const itemSchemaForIndex = (
   schema: JSONSchema,
   fullSchema: JSONSchema,
+  index: number,
 ): JSONSchema => {
   const resolved = resolveSchemaForValidation(schema, fullSchema);
   const itemSchemas: JSONSchema[] = [];
-  if (
-    isRecord(resolved) &&
-    (typeof resolved.items === "boolean" || isRecord(resolved.items))
-  ) {
-    itemSchemas.push(resolved.items);
-  }
-  if (isRecord(resolved) && Array.isArray(resolved.allOf)) {
-    for (const branch of resolved.allOf) {
-      const item = itemSchemaForIndex(branch, fullSchema);
-      if (item !== true) {
-        itemSchemas.push(item);
+  if (isRecord(resolved)) {
+    // 2020-12 array semantics: a tuple slot governs its exact index; the
+    // uniform `items` schema governs only the indices past the slots.
+    // Collecting only `items` let tuple elements sanitize against an
+    // unconstrained schema, dodging the opaque-link/raw-string gate.
+    const prefixItems = Array.isArray(resolved.prefixItems)
+      ? resolved.prefixItems
+      : undefined;
+    if (prefixItems !== undefined && index < prefixItems.length) {
+      const slot = prefixItems[index];
+      if (typeof slot === "boolean" || isRecord(slot)) {
+        itemSchemas.push(slot);
+      }
+    } else if (
+      typeof resolved.items === "boolean" || isRecord(resolved.items)
+    ) {
+      itemSchemas.push(resolved.items);
+    }
+    if (Array.isArray(resolved.allOf)) {
+      for (const branch of resolved.allOf) {
+        const item = itemSchemaForIndex(branch, fullSchema, index);
+        if (item !== true) {
+          itemSchemas.push(item);
+        }
       }
     }
   }
@@ -305,7 +319,7 @@ const sanitizeValueWithOpaqueLinks = (
     const items = value.map((item, index) => {
       const sanitized = sanitizeValueWithOpaqueLinks(
         item,
-        itemSchemaForIndex(effectiveSchema, fullSchema),
+        itemSchemaForIndex(effectiveSchema, fullSchema, index),
         fullSchema,
         opaqueHandleId,
         [...path, index],
