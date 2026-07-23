@@ -61,6 +61,10 @@ the reply callback. This keeps concurrent asynchronous lookups from evicting a
 projection that another callback has prepared but not yet returned. If
 libfuse rejects an entry, open, or create reply, the callback releases the
 reserved lookup reference or handle immediately.
+Pinned projections are absent from the eviction-candidate set. A kernel that
+retains many lookup references therefore does not make each later lookup scan
+all earlier projections. Per-root owner indexes also let final cleanup visit
+only the retained descendant inodes that belong to that root.
 Eviction removes the projected tree, its controller, subscriptions, and CFC
 entry metadata. Enumeration remains complete because its names live in the
 open directory handle rather than this cache.
@@ -110,7 +114,10 @@ request per ID, but they do not issue entity, input, or result value reads.
 Directly named access remains available for callers that know the projection
 path. Tests and benchmarks count entity, input, and result requests directly
 rather than inferring the boundary from the absence of a familiar payload
-string.
+string. The FUSE integration suite also records server-to-client Memory frames
+while a kernel-mounted filesystem lists every direct child of `entities/`. It
+requires the known entity ID in those frames and rejects the entity's seeded
+payload marker.
 
 ## Directory Handles and FUSE Pagination
 
