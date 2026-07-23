@@ -223,8 +223,9 @@ const mergeSetLikeIfcArray = (
           // authoring identity's provenance stamp and one recorded without an
           // identity (unstamped). The BINDING (file + path) is what the claim
           // means; the stamp is provenance added per input — keep the stamped
-          // claim. Two DIFFERENT stamps (or different bindings) still
-          // conflict.
+          // claim. For two different stamps of the same binding, keep the
+          // stored stamp (a version boundary, never a rotation here). Different
+          // bindings still conflict.
           if (key === "writeAuthorizedBy") {
             const reconciled = reconcileWriterClaimStamp(existing, candidate);
             if (reconciled !== undefined) {

@@ -4,7 +4,10 @@ import {
   HelpersOnlyTransformer,
   TransformationContext,
 } from "../core/mod.ts";
-import { createSchemaTransformerV2 } from "@commonfabric/schema-generator";
+import {
+  createSchemaTransformerV2,
+  type SchemaGenerationOptions,
+} from "@commonfabric/schema-generator";
 import { numberFromExpression } from "@commonfabric/schema-generator/numeric-expression";
 import {
   getNodeText,
@@ -22,6 +25,22 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
     const { logger, state } = context.options;
     const typeRegistry = state?.typeRegistry;
     const schemaHints = state?.schemaHints;
+    const writerIdentityForSourceFile = (fileName: string) => {
+      const moduleIdentities = context.options.moduleIdentities;
+      const moduleIdentity = moduleIdentities?.get(fileName);
+      if (moduleIdentities && moduleIdentity === undefined) {
+        throw new Error(
+          `Cannot mint WriteAuthorizedBy claim: no module identity for defining source '${fileName}'`,
+        );
+      }
+      return {
+        file: normalizeWriterIdentityFile(
+          fileName,
+          context.options.canonicalWriterIdentityFile,
+        ),
+        ...(moduleIdentity !== undefined ? { moduleIdentity } : {}),
+      };
+    };
 
     const visit: ts.Visitor = (node) => {
       if (isToSchemaNode(node)) {
@@ -29,18 +48,16 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         const typeArguments = ts.isTypeReferenceNode(typeArg)
           ? typeArg.typeArguments
           : undefined;
+        // Mint-time identity binding: when the compiler knows module
+        // identities (the engine computes them from pristine source BEFORE
+        // the TS compile), this direct-root claim is born stamped with its own
+        // module's content identity. General nested claims use the same
+        // resolver from inside the schema-generator and resolve imported
+        // bindings against their defining source.
         const writeAuthorizedByIdentity = extractWriteAuthorizedByIdentity(
           typeArg,
           sourceFile.fileName,
-          context.options.canonicalWriterIdentityFile,
-          // Mint-time identity binding: when the compiler knows the module
-          // identities (the engine computes them from pristine sources BEFORE
-          // the TS compile), the claim is born stamped with its own module's
-          // content-addressed identity — the unstamped state, whose first
-          // stamp is capturable by whoever writes first (labs#4772 residual),
-          // is never minted. The lookup is by this file's own compile name:
-          // claims always name a binding in the minting module.
-          context.options.moduleIdentities?.get(sourceFile.fileName),
+          writerIdentityForSourceFile,
         );
         let schemaTypeArg: ts.TypeNode = typeArg;
         if (
@@ -89,9 +106,14 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         }
 
         // Build options for schema generation
-        const generationOptions = widenLiterals !== undefined
-          ? { widenLiterals }
-          : undefined;
+        const generationOptions: SchemaGenerationOptions = {
+          ...(widenLiterals !== undefined ? { widenLiterals } : {}),
+          // The schema-generator owns the general/nested CFC alias path. Give
+          // it the same spelling and stamp source used by the direct
+          // WriteAuthorizedBy special case below, including for bindings
+          // declared in imported authored modules.
+          writerIdentityForSourceFile,
+        };
 
         // If Type resolved to 'any' or the synthetic TypeNode intentionally
         // contains unknown, use the synthetic-node generator so the checker
@@ -110,6 +132,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
             typeRegistry,
             schemaHints,
             sourceFile,
+            generationOptions,
           );
         } else {
           // Normal Type path
@@ -448,8 +471,10 @@ function attachUiContractToSchemaRecord(
 function extractWriteAuthorizedByIdentity(
   typeNode: ts.TypeNode,
   sourceFileName: string,
-  canonicalize?: (fileName: string) => string,
-  moduleIdentity?: string,
+  writerIdentityForSourceFile: (fileName: string) => {
+    file: string;
+    moduleIdentity?: string;
+  },
 ): { file: string; path: string[]; moduleIdentity?: string } | undefined {
   if (!isWriteAuthorizedByType(typeNode)) {
     return undefined;
@@ -462,9 +487,8 @@ function extractWriteAuthorizedByIdentity(
     return undefined;
   }
   return {
-    file: normalizeWriterIdentityFile(sourceFileName, canonicalize),
+    ...writerIdentityForSourceFile(sourceFileName),
     path: [bindingNode.exprName.text],
-    ...(moduleIdentity ? { moduleIdentity } : {}),
   };
 }
 

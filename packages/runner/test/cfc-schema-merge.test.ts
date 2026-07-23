@@ -577,11 +577,16 @@ describe("mergeCfcSchemaEnvelopes", () => {
           type: "array",
           ifc: { writeAuthorizedBy: claimFor("fid1:right") },
         },
+        displayName: { type: "string" },
       },
     });
     // deno-lint-ignore no-explicit-any
     expect((merged as any).properties.elements.ifc.writeAuthorizedBy)
       .toEqual(claimFor("fid1:left"));
+    // This is the production reason for reconciling instead of aborting: the
+    // candidate envelope can still contribute an unrelated sibling schema.
+    // deno-lint-ignore no-explicit-any
+    expect((merged as any).properties.displayName).toEqual({ type: "string" });
   });
 
   it("rejects writeAuthorizedBy claims with different bindings", () => {

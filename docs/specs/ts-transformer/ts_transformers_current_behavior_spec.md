@@ -1806,7 +1806,7 @@ values it can classify as `builder | data | function | import`, and rejects raw
 mutable literals and arbitrary call results at module scope
 (`classifyExpressionText`,
 `packages/runner/src/sandbox/compiled-bundle-verifier.ts`; policy narrative in
-`docs/specs/module-loading-verifier-and-engine-design.md` §"Security
+`docs/specs/module-loading.md` §"Security
 classification"). `__cf_data(...)` is the canonical "verified module-safe
 data" wrapper of that grammar: the verifier pattern-matches the wrapper
 boundary without interpreting the payload, and at module load the runtime
@@ -2030,7 +2030,7 @@ admits the module-safe subset (plain objects, arrays, `Map`→`FrozenMap`,
 (`SES_SANDBOXING_SPEC.md` §4.2.3; `packages/runner/src/sandbox/plain-data.ts`).
 The same classification serves both the AMD factory body and the per-module
 ESM record body (`classifyModuleItems` doc comment;
-`docs/specs/module-loading-verifier-and-engine-design.md`); on the ESM path,
+`docs/specs/module-loading.md`); on the ESM path,
 write-once exports neutralize side effects smuggled into an accepted wrapper
 argument (`__cf_data((exports.x = evil, 1))`), and pipeline-compiled bodies are
 required precisely because bare `ts.transpileModule` cannot produce the
@@ -2547,22 +2547,28 @@ the annotated value itself and, when the value carries a function-valued
 `.implementation` (builder factories do), on that implementation function too
 (`createBindingIdentityHelper` / `createDefineBindingMetadataCall`).
 
-**File normalization.** `normalizeWriterIdentityFile`
-(`src/utils/writer-identity-file.ts`, shared with
-`src/transformers/schema-generator.ts`, which emits the matching claim into
-schemas as `ifc: { writeAuthorizedBy: { __ctWriterIdentityOf: { file, path
-} } }`, plus `moduleIdentity` when `TransformerOptions.moduleIdentities` maps
-this compile name — claims are then *born stamped* with their own module's
-content-addressed identity, so the capturable unstamped state is never minted
-(labs#4772 residual); the engine supplies the map, computed from pristine
-sources before the TS compile — `attachWriteAuthorizedByMarker` /
-`extractWriteAuthorizedByIdentity`)
-normalizes backslashes → slashes and then applies the caller-supplied
+**File normalization and mint-time stamps.**
+`normalizeWriterIdentityFile` (`src/utils/writer-identity-file.ts`) normalizes
+backslashes → slashes and then applies the caller-supplied
 `canonicalWriterIdentityFile` option (`TransformerOptions`), the compile-name →
-authored-name unmapping. The runner's engine passes its `storedFilenameFor`
+authored-name unmapping. `src/transformers/schema-generator.ts` uses it while
+emitting `ifc: { writeAuthorizedBy: { __ctWriterIdentityOf: { file, path } } }`.
+General nested/interface/alias claims are constructed by the schema-generator's
+`CommonFabricFormatter`; the transformer passes it the same writer-source
+resolver used by the direct-root special case. When
+`TransformerOptions.moduleIdentities` contains the binding's defining compile
+source, the payload also carries that source's `moduleIdentity`. The engine's
+map covers its authored sources and is computed from pristine source before
+the TS compile, so engine-minted claims are *born stamped* and the capturable
+unstamped state is never minted (labs#4772 residual —
+`writerIdentityForSourceFile` / `extractWriteAuthorizedByIdentity`). Supplying
+an identity map that lacks the binding's defining source fails compilation;
+only callers that omit the map entirely retain unstamped compatibility output.
+
+The runner's engine passes its `storedFilenameFor`
 (stripping the per-load `/${id}` module-path prefix and unmapping fabric-mount
 paths — see the prefix/identity-source-normalization discussion in
-`docs/specs/module-loading-verifier-and-engine-design.md`), keeping claim and
+`docs/specs/module-loading.md`), keeping claim and
 provenance spellings load-independent and equal. Without the option the name
 is recorded verbatim: direct compiles (HTTP resolver, piece manifests) already
 present authored paths. Historical behavior — blindly stripping the first
@@ -2702,7 +2708,7 @@ until the verifier agrees (also stated in
   `registerFunctionStatement`). The design doc states the rule directly:
   "canonical function-hardening (`__cfHardenFn(fn)`) and binding-identity
   statements recognized by byte-equality to `sandbox-contract.ts` sources"
-  (`docs/specs/module-loading-verifier-and-engine-design.md`). A same-named
+  (`docs/specs/module-loading.md`). A same-named
   helper with a different body is just an ordinary function — and the module
   then fails on its call sites: pinned by the adversarial case "fake
   (non-canonical) __cfHardenFn laundering a callback"

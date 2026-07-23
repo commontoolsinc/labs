@@ -256,7 +256,10 @@ describe("writeAuthorizedBy across resolver spellings (labs#4772)", () => {
 });
 
 describe("stored-claim reconciliation across spellings", () => {
-  const envelope = (identity: Record<string, unknown>): JSONSchemaObj =>
+  const envelope = (
+    identity: Record<string, unknown>,
+    siblingProperties: Record<string, JSONSchemaObj> = {},
+  ): JSONSchemaObj =>
     ({
       type: "object",
       properties: {
@@ -266,6 +269,7 @@ describe("stored-claim reconciliation across spellings", () => {
             writeAuthorizedBy: { __ctWriterIdentityOf: identity },
           },
         },
+        ...siblingProperties,
       },
     }) as unknown as JSONSchemaObj;
 
@@ -336,13 +340,15 @@ describe("stored-claim reconciliation across spellings", () => {
         moduleIdentity: "profile-home-module-identity-v2",
         file: HTTP_SPELLING,
         path: ["setBio"],
-      }),
+      }, { displayName: { type: "string" } }),
     );
     expect(claimOf(merged)).toEqual({
       moduleIdentity: "profile-home-module-identity-v1",
       file: PIECE_SPELLING,
       path: ["setBio"],
     });
+    // deno-lint-ignore no-explicit-any
+    expect((merged as any).properties.displayName).toEqual({ type: "string" });
   });
 
   it("still conflicts on different binding paths", () => {

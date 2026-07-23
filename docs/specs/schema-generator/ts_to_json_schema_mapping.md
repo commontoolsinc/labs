@@ -535,7 +535,7 @@ inside those payloads.
 | `MaxConfidentiality<T, C>` | `{ maxConfidentiality: C }` |
 | `AnyOf<X>` | when nested in an IFC label tuple, one atom `{ anyOf: X }` |
 | `PolicyOf<typeof rules>` | when nested in an IFC label tuple, a policy atom carrying a compile-time module-binding marker; the ts-transformer resolves it to `{ type, policyRefKind: "module", subject, moduleIdentity, symbol, policyDigest }` |
-| `WriteAuthorizedBy<T, typeof b>` | `{ writeAuthorizedBy: { __ctWriterIdentityOf: { file, path: [binding] } } }` (`:1444-1532`) |
+| `WriteAuthorizedBy<T, typeof b>` | `{ writeAuthorizedBy: { __ctWriterIdentityOf: { file, path: [binding], moduleIdentity? } } }` (`:1444-1539`) |
 | `TrustedActionWriteWithIntegrity<…>` | writeAuthorizedBy metadata + `uiContract { helper: "UiAction", action, trustedPattern, requiredEventIntegrity }` (`:1340-1347,1455-1478`) |
 | `TrustedActionWrite<…>` | same, with `requiredEventIntegrity` defaulting to `[trustedPattern]` (`:1349-1358`) |
 | `TrustedActionUiContract<…>` | `{ uiContract: { helper: "UiAction", action, trustedPattern, requiredEventIntegrity? } }` (`:1359-1371`) |
@@ -566,13 +566,17 @@ Mechanics:
   (`mergeIfcMetadata`, `:1554-1570`); boolean schemas become `{ ifc }` /
   `{ not: true, ifc }`.
 - `WriteAuthorizedBy` writer identity resolves through import aliases to the
-  declaring file; the file name is normalized (backslashes → `/`, first path
-  segment stripped — `normalizeWriterIdentityFile`, `:2237-2241`). The
-  transformer **duplicates** this attachment for
-  `toSchema<WriteAuthorizedBy<T, typeof b>>()`
-  (`ts-transformers/.../schema-generator.ts:29-40,126-131,347-428`), with a
-  marker AST form so the identity survives literal emission (`:170-171,
-  399-422`).
+  declaring file. A transformer caller supplies
+  `writerIdentityForSourceFile`, which maps that compile name to its authored
+  spelling and can attach the defining source's content-addressed
+  `moduleIdentity`; the runner supplies both, so engine-minted claims are born
+  stamped. A transformer identity map that omits the defining source is a
+  compile error, rather than a silent downgrade to an unstamped claim.
+  Standalone schema-generator callers that omit the callback retain
+  the legacy fallback (backslashes → `/`, first path segment stripped by
+  `normalizeWriterIdentityFile`). The transformer also handles the direct-root
+  `toSchema<WriteAuthorizedBy<T, typeof b>>()` form specially so the wrapper's
+  value schema remains the root while the same identity marker is attached.
 - `SchemaGeneratorTransformer.resolvePolicyOfMarkers` replaces a valid policy
   marker with the compiled module identity, exported symbol, and policy digest.
   If it cannot match a compiler-verified exported `exchangeRules()` binding,
