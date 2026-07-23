@@ -824,13 +824,13 @@ describe("Schema - Link Resolution", () => {
    */
   describe("validateAndTransform with redirect links", () => {
     it("creates schema-declared stream cells for missing stream targets", () => {
-      const processCell = runtime.getCell(
+      const resultCell = runtime.getCell(
         space,
-        "missing-stream-target-process",
+        "missing-stream-target-result",
         undefined,
         tx,
       );
-      processCell.setRawUntyped({ internal: {} });
+      resultCell.setRawUntyped({ internal: {} });
 
       const streamSchema = {
         type: "object",
@@ -848,7 +848,7 @@ describe("Schema - Link Resolution", () => {
           $ctx: {
             add: {
               $alias: {
-                cell: processCell.entityId,
+                cell: resultCell.entityId,
                 path: ["internal", "dialog", "add"],
                 schema: streamSchema,
               },
