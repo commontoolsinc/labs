@@ -147,8 +147,9 @@ pieces; it does not generate pattern source.
 
 1. `patternIdentity` and its export symbol identify the exact executable export
    a piece runs. The current revision retains the complete authored program,
-   including files outside that export's reachable import graph. Loading code
-   never depends on an origin still being reachable.
+   including files outside that export's reachable import graph and the exact
+   public-subpath map. Loading code never depends on an origin still being
+   reachable.
 2. At most one source URL is active at a time. It resolves as an external web
    endpoint, a mutable fabric `patternIdentity`-bearing entity, or an immutable
    fabric pattern.
@@ -213,9 +214,9 @@ storage schema to use these exact TypeScript field names.
 |---|---|---|
 | Current pattern | `{ identity, symbol }` for the exact executable export | Implemented as `patternIdentity` metadata on the piece result cell |
 | Verified identity closure | The authored implementation and declaration files that determine the current executable identity | **Implementation files stored**: `pattern:<identity>` source documents exist, but production filters authored `.d.ts` files before identity and persistence |
-| Retained authored program | An immutable version-1 manifest for the complete authored program accepted by the current revision, including unreachable files | **Program manifest required**: source documents can retain extra roots, but no piece revision binds the exact accepted file set |
+| Retained authored program | An immutable version-1 manifest for the complete authored program accepted by the current revision, including unreachable files and its exact public-subpath map | **Manifest and exports required**: source documents can retain extra roots, but no piece revision binds the exact accepted file set or public map |
 | Runtime fingerprint | The trusted runtime identity used to calculate the accepted executable pattern identity | **Authoritative provider required**: the optional module-hash input exists, but production compilation and source verification still use the empty default |
-| Runtime-neutral program digest | The version-1 digest of the canonical main filename and every authored file's runtime-neutral module identity | **Lifecycle comparison required**: the module hash can run with the empty fingerprint, but the complete program digest is not recorded |
+| Runtime-neutral program digest | The version-1 digest of the canonical main filename, every authored file's runtime-neutral module identity, and the public-subpath map | **Digest and lifecycle required**: the module hash can run with the empty fingerprint, but the complete program digest is not recorded |
 | Active origin | No origin, an external `https://` URL with an entry export, a stable mutable fabric-entity URL, or a content-addressed fabric pattern URL with an export symbol | Partial: `patternSource` stores a string for system roots, but general web and fabric URL origins are not supported end to end |
 | Revision head | The stable identifier of the latest accepted source and origin state | Revision head required |
 | Source revision log | Ordered records of every accepted source and origin state, with a durable reference to each immutable authored-program manifest | Revision log required |
@@ -224,21 +225,33 @@ storage schema to use these exact TypeScript field names.
 The runtime-neutral program digest is
 `cf/runtime-neutral-program-digest/v1` from
 [module-loading.md](module-loading.md). It covers the canonical main filename
-and every authored file, including unreachable siblings. It excludes mounted
-files, synthetic retention links, and the selected export. The digest is
-comparison metadata. It is not a fabric URL target, an executable pattern
-identity, or a revert target.
+and every authored file, including unreachable siblings. It also covers the
+normalized exact map from public subpaths to authored filenames. It excludes
+mounted files, synthetic retention links, and the selected executable export.
+The digest is comparison metadata. It is not a fabric URL target, an executable
+pattern identity, or a revert target.
 
-Lifecycle ingestion first materializes a complete `Program` with a canonical
-`main` and an explicit `files` list. That list defines the authored program for
-history. Command-line directory input, LLM output, and a web program manifest
-must enumerate every intended file before import-closure resolution. A retained
-authored-program manifest provides the list for fork, follow, revert, and
-rebuild. A raw web entry point or another `ProgramResolver` that cannot enumerate
-files defines its authored program as only the reachable closure it returns. It
-cannot later report an unenumerated sibling as a source update. Duplicate
-canonical filenames are rejected. Declaration stubs injected by the runtime for
-type checking are not authored files and do not enter this list.
+Lifecycle ingestion first materializes the repository's current `Program`
+shape, with a canonical `main` and an explicit `files` list. It pairs that value
+with a normalized public-subpath map. Together they define the authored program
+for history. Command-line directory input, LLM output, and a web program
+manifest must enumerate every intended file before import-closure resolution.
+They must also supply the public map, or the canonical empty map when only the
+implicit entry is public. A retained authored-program manifest provides both
+for fork, follow, revert, and rebuild. A raw web entry point or another
+`ProgramResolver` that cannot enumerate files defines its authored program as
+only the reachable closure it returns. It cannot later report an unenumerated
+sibling as a source update. Duplicate canonical filenames are rejected.
+Invalid public names and targets outside the authored file set are also
+rejected. Declaration stubs injected by the runtime for type checking are not
+authored files and do not enter this list.
+
+A direct `cf:pattern:<identity>` URL is one of these resolver-only inputs. The
+module identity binds its reachable source closure, but it does not bind one
+complete authored-program manifest. Creating a piece from that URL therefore
+retains the reachable closure with an empty public-subpath map. A mutable piece
+or publication origin can preserve and propagate its complete retained
+manifest, including unreachable files and explicit public subpaths.
 
 The current `ProgramResolver` interface exposes only `main()` and
 `resolveSource()`, and `resolveProgram()` returns only the reachable import
@@ -248,14 +261,17 @@ and retained-manifest sources is required integration work.
 Each revision's source-retention reference names an immutable
 `cf/authored-program-manifest/v1` value. The manifest contains the canonical
 main filename and a UTF-8 filename-sorted list of every authored file with its
-verified source-document identity. It directly retains those source documents
-and the complete transitive graph of content-addressed fabric dependencies
-pinned by the program. Recursive retention deduplicates dependency identities
-and parses pinned fabric specifiers because source documents intentionally omit
-fabric links. Its file list must reproduce the revision's runtime-neutral
-program digest. It does not rely on the entry source document's synthetic root
-links. Those links are non-normative and can be rewritten when another program
-uses the same entry identity.
+verified source-document identity. It also contains a UTF-8 key-sorted exact
+map from public subpaths to canonical authored filenames. The empty subpath
+implicitly selects the canonical main and does not appear in the map. The
+manifest directly retains its source documents and the complete transitive
+graph of content-addressed fabric dependencies pinned by the program. Recursive
+retention deduplicates dependency identities and parses pinned fabric
+specifiers because source documents intentionally omit fabric links. Its file
+list and public map must reproduce the revision's runtime-neutral program
+digest. It does not rely on the entry source document's synthetic root links.
+Those links are non-normative and can be rewritten when another program uses
+the same entry identity.
 
 The revision embeds this value or points to a content-addressed copy. It never
 points through a mutable piece, slug, origin, or entry-document retention list.
@@ -295,6 +311,13 @@ The current pattern, retained-program reference and digest, accepted origin
 revision, and active origin remain directly readable metadata. The revision head
 names a latest revision that mirrors them. They are written together so the log
 cannot claim a transition that the piece did not adopt.
+
+Changing only the manifest's public-subpath map is an accepted source revision.
+It changes the retained manifest and runtime-neutral program digest while
+preserving every module identity and the executable `patternIdentity`. A piece
+advertises that revision to downstream followers like any other source-only
+revision. Existing pinned static imports do not move until their owners perform
+an explicit dependency update.
 
 A runtime fingerprint change that produces a new executable pattern identity is
 an accepted source revision even when the authored source is unchanged. For an
@@ -736,6 +759,7 @@ mislabeling the current creation revision as a revert target.
 | Load or create from an immutable fabric URL | **Immutable URL flow required** | The source cache and fabric resolver can load verified `cf:pattern:<identity>` source and honor a trailing pin on an entity-FID reference. No product operation normalizes that URL and export symbol into immutable piece origin metadata or appends the required revision. |
 | Automatically refresh a mutable URL-origin piece when loaded | **Partial** | The shell reconciles system roots before bootstrap and checks other successfully instantiated same-toolshed system-source patterns in the background. The specialized updater changes `patternIdentity` without the complete pre-apply structural comparison. A running pattern's setup can refuse an incompatible argument shape and keep the old graph, but the metadata pointer has already changed. External web URLs and mutable fabric entity URLs do not use this path. A content-addressed or explicitly pinned fabric URL intentionally has nothing to refresh. |
 | Retain authored declaration files | **Declaration identity work required** | `computeModuleHashes` follows type-import edges, but production engine paths remove authored `.d.ts` files before module identity calculation, source-document construction, and cache persistence. Declaration-only changes can therefore reuse stale executable identities and compiled bytes. |
+| Publish explicit source subpaths | **Exports-map support required** | The `cf:` grammar parses a subpath. Compile resolution and the shared pin/update chase reject it before entry resolution, so current tooling cannot create a misleading subpath pin. There is no immutable authored-program manifest or exact public exports map. Entry imports continue to pin the entry identity. |
 | Record and propagate a runtime rebuild | **Provider and lifecycle required** | `computeModuleHashes` accepts `runtimeFingerprint`, and its unit test proves that changing the fingerprint changes a module with an external dependency. Production pattern compilation and source verification use the empty default. There is no authoritative executable-fingerprint provider. Source documents do not retain a non-empty identity fingerprint, and pieces have no revision log, runtime-neutral program digest, runtime-rebuild cause, owner-published propagation contract, or cross-runtime revert handling. |
 | Manage a space root through the ordinary piece lifecycle | **Lifecycle unification required** | A root is already a piece and the specialized updater can replace its pattern in place. Creation still stamps a raw `patternSource`, reconciliation bypasses revision history, and update authority is not durable per piece. Root updates still use a separate controller path. The creation template currently lives on the mutable home root, relative source paths are not ordinary origins, and root linking does not validate a root interface. New-root creation, legacy-root migration, and later transitions do not yet use the ordinary lifecycle path. |
 | Fork an existing piece and detach it | **Fork operation required** | Tooling can recover a piece's verified source closure, and the runtime can create another piece from a program. There is no fork operation or UI, no `forkedFrom` history, and no atomic detach contract. |
@@ -813,16 +837,19 @@ The implementation evidence for this table is concentrated in:
    revision head. Define immutable revision records and
    `cf/authored-program-manifest/v1`. Each manifest binds the canonical main and
    exact filename-to-source-identity set, including authored `.d.ts` files. It
-   retains every transitive pinned fabric dependency once. Add a complete
-   program enumeration path before import-closure resolution. Revisions also
-   record the accepted runtime fingerprint,
-   runtime-neutral program digest, separate operation and cause fields, and the
-   compatibility descriptors needed without executing an old pattern. Replace
-   the unused lineage declarations or remove them rather than treating dead
-   declarations as a shipped feature. Implement the authoritative version-1
-   executable runtime fingerprint and runtime-neutral program digest defined in
-   [module-loading.md](module-loading.md). Treat an unavailable production
-   fingerprint as an error rather than publishing under the legacy empty value.
+   also binds the normalized exact public-subpath map. Add validation that
+   accepts only authored-file targets and includes the map in the manifest
+   identity and runtime-neutral program digest. It retains every transitive
+   pinned fabric dependency once. Add a complete program enumeration path
+   before import-closure resolution. Revisions also record the accepted runtime
+   fingerprint, runtime-neutral program digest, separate operation and cause
+   fields, and the compatibility descriptors needed without executing an old
+   pattern. Replace the unused lineage declarations or remove them rather than
+   treating dead declarations as a shipped feature. Implement the authoritative
+   version-1 executable runtime fingerprint and runtime-neutral program digest
+   defined in [module-loading.md](module-loading.md). Treat an unavailable
+   production fingerprint as an error rather than publishing under the legacy
+   empty value.
 2. Provide one atomic source-transition API used by every caller. It must wait
    for failure-propagating closure persistence and compare the expected
    revision head, current pattern, and active origin. Mutable-origin activation
@@ -918,19 +945,24 @@ The implementation evidence for this table is concentrated in:
    immutable-origin repoint, cross-runtime revert under a new executable
    identity, detach-and-rebuild recovery from an incompatible first
    immutable-origin revision, two source-only revisions that share an entry
-   identity but restore different unreachable files, and a nested pinned fabric
-   dependency restored after incidental source roots disappear. Tests must prove
-   the current source, active origin, revision head, authored-program manifest,
-   recursively retained dependency graph, and revision log after each operation.
+   identity but restore different unreachable files, a public-subpath-map-only
+   revision that propagates through a follower and can be reverted, and a
+   nested pinned fabric dependency restored after incidental source roots
+   disappear. Tests must prove the current source, active origin, revision
+   head, authored-program manifest, recursively retained dependency graph, and
+   revision log after each operation.
 
 ## Relationship to pattern imports
 
 Pattern imports and piece origins intentionally have different update rules.
 An unpinned mutable `cf:` import is resolved and written back with an immutable
-pin when source is deployed. This includes type-only imports because Common
-Fabric uses imported types to generate runtime schemas. Supported ESM-style
-type imports follow this rule. Unsupported import-equals syntax is rejected
-rather than left mutable. The deployed importer does not track later changes.
+pin when source is deployed. An entry import pins the target piece's entry
+module identity. An explicitly published subpath resolves through the current
+authored-program manifest and pins the selected module identity. This includes
+type-only imports because Common Fabric uses imported types to generate runtime
+schemas. Supported ESM-style type imports follow this rule. Unsupported
+import-equals syntax is rejected rather than left mutable. The deployed
+importer does not track later changes to the piece or its public-subpath map.
 The same fabric URL used as piece-origin metadata stays live when it is unpinned
 and resolves to a mutable
 `patternIdentity`-bearing entity. The piece can then follow that entity's

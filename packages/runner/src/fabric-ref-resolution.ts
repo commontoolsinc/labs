@@ -26,6 +26,9 @@ export async function resolveFabricRefToIdentity(
   ref: FabricRef,
 ): Promise<FabricChaseResult> {
   const specifier = formatFabricRef(ref);
+  if (ref.subpath !== undefined) {
+    throw new Error(`subpaths not yet supported (M4): ${specifier}`);
+  }
   const refSpace = resolveRefSpace(ref.space, compilingSpace);
 
   if (ref.ref.kind === "uri" && ref.ref.scheme === "pattern") {

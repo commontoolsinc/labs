@@ -26,7 +26,7 @@ These were settled in the spec + design review. Implement as stated:
 
 1. **One grammar, no type tag**: `cf:<ref>`, `cf:/<space>/<ref>`,
    `cf://<host>/<space>/<ref>`, trailing `@<pin>`. Resolution chases pointers
-   to an entry-module identity.
+   and selects a module identity.
 2. **Pin-in-source** (rewrite the import specifier at pin time). No lockfile
    side-table. No pin resolution at compile time for stored programs.
 3. **Type-only fabric references are pinned.** Supported ESM-style
@@ -61,6 +61,14 @@ These were settled in the spec + design review. Implement as stated:
    Do not build label propagation now; do not silently strip it either —
    the write-back path reuses existing write machinery so labels flow (or
    fail) exactly as any cell write does today.
+10. **Subpaths use explicit public exports.** The immutable
+    `cf/authored-program-manifest/v1` value maps exact public subpaths to
+    authored filenames. The entry is public without a map entry. There are no
+    wildcard or conditional entries in version 1, and arbitrary files are not
+    addressable. Pin time writes the selected file's module identity. Frozen
+    compilation does not consult the map. A direct `cf:pattern:<identity>`
+    names one exact module and never accepts a subpath. The manifest identity
+    and runtime-neutral program digest include the map.
 
 ## Architecture recap (what plugs in where)
 
@@ -106,13 +114,14 @@ Reload paths:
 - **fabric ref / fabric specifier** — an authored import specifier under the
   `cf:` grammar
   (`cf:pattern:<hash>`, `cf:/did:key:z6Mk…/todo-list@<hash>`, …).
-- **pin** — the trailing `@<hash>` entry-module identity on a mutable ref.
+- **pin** — the trailing `@<hash>` selected-module identity on a mutable ref.
 - **hash** — 43 base64url chars (`[A-Za-z0-9_-]`, case-SENSITIVE, no
   padding), the unprefixed output of `hashStringOf`/`hashOf`
   (`packages/data-model/src/value-hash.ts:553`). NOT hex — e.g.
   `Avcny13Rj8q-2ClANy_-k0ikWWQcXx7QTdsiqGfrC1c`. Never lowercase or
   otherwise normalize a hash.
-- **terminal identity** — the entry-module identity a ref resolves to.
+- **terminal identity** — the selected-module identity after pointer and
+  subpath resolution. It is the entry-module identity when no subpath exists.
 - **subtree** — the source closure of one imported pattern (its own program).
 - **mount** — a subtree's files spliced into a compilation under
   `/~cf/<terminalIdentity>/<storedFilename>`.
@@ -136,12 +145,12 @@ export interface FabricRef {
   ref:
     | { kind: "slug"; slug: string }
     // "of" = entity URI (stored/spelled "of:fid1:<hash>"); "pattern" =
-    // entry-module identity ("pattern:<hash>"). hash is the bare base64url
+    // exact module identity ("pattern:<hash>"). hash is the bare base64url
     // part (no "fid1:" tag) in both cases.
     | { kind: "uri"; scheme: "of" | "pattern"; hash: string };
-  /** Path inside the target program (phase 4; parsed, rejected downstream). */
+  /** Exact public name in the target manifest (phase 4; currently rejected). */
   subpath?: string;
-  /** Trailing @<hash> pin (base64url — see glossary; never normalized). */
+  /** Trailing selected-module @<hash> pin; never normalized. */
   pin?: string;
 }
 
@@ -570,9 +579,10 @@ Before enabling a non-empty production fingerprint:
 5. Compute `cf/runtime-neutral-program-digest/v1` exactly as defined in
    [module-loading.md](../module-loading.md): hash the canonical main filename
    and the UTF-8 filename-sorted runtime-neutral identities of every authored
-   file. Do not include mounted files or synthetic retention links. Piece
-   history uses this comparison value with the selected export and active
-   origin to distinguish a runtime rebuild from a source edit.
+   file. Also hash the UTF-8 key-sorted public exports map. Do not include
+   mounted files or synthetic retention links. Piece history uses this
+   comparison value with the selected export and active origin to distinguish
+   a runtime rebuild from a source edit.
 6. Record the accepted runtime fingerprint and a separate revision cause. A
    detached piece or resolved web origin may publish an authorized runtime
    rebuild. A mutable fabric follower only adopts the revision advertised by
@@ -993,13 +1003,20 @@ export async function resolveFabricRefToIdentity(
 
 Algorithm (spec § Resolution rule — implement hops exactly):
 
-1. Space: `ref.space` undefined → `compilingSpace`; a DID → use as-is; a name
+1. Scope guard: when `ref.subpath` is present, throw
+   `"subpaths not yet supported (M4): <specifier>"` before resolving the space,
+   slug, piece, or entry identity. This guard is shared by deployment pinning
+   and `cf deps update`; otherwise those paths can silently write the entry
+   identity as the pin for an unsupported subpath. M4 replaces this guard with
+   manifest lookup. Keep the independent `FabricAwareResolver` guard until M4
+   also teaches frozen compilation to mount a selected subpath module.
+2. Space: `ref.space` undefined → `compilingSpace`; a DID → use as-is; a name
    → M2 throws
    `"space names are currently unsupported; resolve the name to a DID first"`.
    The tentative identifier-only policy keeps name resolution outside the
    fabric resolver. README Open question 1 retains that policy for further
    study and places human-readable aliases in a future shortlink service.
-2. Start cell:
+3. Start cell:
    - slug → M2.1 resolver (wrap `SlugResolutionError` with the chain so far).
    - `of:` URI → reconstruct the entity id from the parsed hash via the
      `uri-utils.ts` helpers (`fromURI("of:fid1:" + hash)` / the `{"/": id}`
@@ -1007,17 +1024,17 @@ Algorithm (spec § Resolution rule — implement hops exactly):
      hand-building the string), then `sync()`.
    - `pattern:` → already terminal (return immediately; callers normally
      short-circuit via `pinnedIdentity` and never get here).
-3. Piece hop: if the cell has pattern metadata — use the SAME accessors the
+4. Piece hop: if the cell has pattern metadata — use the SAME accessors the
    runner uses (`getPatternIdentityRef` / `getPatternId` around
    `packages/runner/src/runner.ts:4137`; export them if module-private):
    - `patternIdentity` present → its `.identity` IS the terminal identity;
      append hops; done.
    - else `patternId` present → load the pattern meta cell by that URI
      (mirror how `PatternManager` reads meta cells — `patternMetaSchema`),
-     continue at 4.
+     continue at 5.
    - neither, and the cell itself is not a pattern meta cell → throw
      `"cf:… does not resolve to a pattern (chain: …)"`.
-4. Pattern-meta hop: `entryIdentity` field present → done. Absent → throw
+5. Pattern-meta hop: `entryIdentity` field present → done. Absent → throw
    `"pattern meta for cf:… has no entryIdentity (legacy pattern; re-deploy
    it)"`. (Computing it from `program` requires a full pretransform+hash
    pass — deliberately out of scope; the error names the remedy.)
@@ -1031,7 +1048,10 @@ setters from runner.ts — find `setMetaRaw("pattern", …)` usage at
 runner.ts:901 and mirror it); slug → piece; slug → pattern meta directly;
 slug → plain data cell (error + chain); missing slug; `of:` directly to meta
 cell; piece with only legacy `patternId`; meta without `entryIdentity`
-(error message).
+(error message). Add a direct `pattern:` subpath test that proves the scope
+guard runs before the otherwise-terminal identity is returned. Add a CLI
+pin/update regression that resolves a valid slug but rejects its subpath rather
+than writing the slug target's entry identity.
 
 ### M2.3 Pin rewriting (byte-precise source surgery)
 
@@ -1176,9 +1196,55 @@ One integration test (runner-level, in-process, two "deploys"):
   Cross-host publication also needs CFC label propagation for fetched source
   (spec § Security). A possible public-pattern HTTP endpoint remains open under
   the public distribution question in the spec.
-- **M4 subpaths + npm vendoring**: subpath = alias to a non-entry mounted
-  file (grammar already parses it); `npm:` = fetch via esm.sh → vendor as a
-  content-addressed source set → same rails.
+- **M4 explicit subpaths**: extend lifecycle source ingestion and retained
+  publications with the following behavior.
+
+  1. Add an `exports` map to `cf/authored-program-manifest/v1`. The empty
+     subpath implicitly selects `main` and cannot appear in the map. Require
+     each key to be a canonical slash-separated public name with no leading or
+     trailing slash, empty segment, `.` segment, `..` segment, or `@`
+     character. Reject noncanonical keys, duplicate keys, wildcards,
+     conditions, and targets that are not canonical authored filenames in the
+     manifest. Compare the parsed subpath exactly. Do not percent-decode or
+     fold case.
+  2. Include the UTF-8 key-sorted map in the manifest identity and
+     `cf/runtime-neutral-program-digest/v1`. A map-only edit creates a new
+     source revision even when all module identities and the executable entry
+     identity stay equal. Revert restores the previous map. Followers observe
+     the new revision.
+  3. Make each mutable import target expose its current immutable manifest
+     through the source revision. This applies to pieces and future lightweight
+     publication pointers. A target that exposes only `patternIdentity` cannot
+     resolve an unpinned subpath.
+  4. At pin time, chase the mutable locator to its current source revision.
+     Look up the exact public subpath, load the mapped file's verified
+     source-document identity, and write that selected module identity as the
+     trailing pin. Preserve the locator and subpath before the pin. `cf deps
+     update` repeats the lookup against the current manifest. Replace the M2
+     subpath guard in `resolveFabricRefToIdentity()` with this branch. Extend
+     `FabricChaseResult` with `selectedIdentity`; keep `entryIdentity` as the
+     identity reached by the pointer chase. The two values are equal without a
+     subpath. Pin rewriting must use `selectedIdentity`.
+  5. During frozen compilation, let the existing `pinnedIdentity()` fast path
+     mount the selected module closure directly. Do not read the mutable target
+     or manifest. An entry import continues to pin
+     `patternIdentity.identity`, so M1 and M2 behavior stays unchanged.
+  6. Reject any subpath on a direct `cf:pattern:<identity>` reference. One
+     module source identity does not bind an authoritative manifest. A caller
+     that knows the target module identity uses it directly. Do not infer
+     public names from entry-module re-exports or expose a file merely because
+     its source document is readable.
+  7. Permit an exports-map target to be an authored `.d.ts` file. Type-only
+     imports retain and hash that declaration normally. Reject a value import
+     from a declaration-only target because it has no emitted runtime module.
+  8. Test exact selection, selected-module pin rewrite, frozen resolution after
+     the mutable target disappears, explicit dependency updates, invalid map
+     entries, arbitrary-file rejection, direct-pattern subpath rejection,
+     declaration targets, map-only revision propagation, and revert.
+- **Later npm vendoring**: `npm:` fetches through the selected package source,
+  vendors a content-addressed source set, and then uses the same identity and
+  mounting machinery. Its design remains separate from explicit fabric
+  subpaths.
 
 ## Invariants checklist (the reviewer will check every one)
 
