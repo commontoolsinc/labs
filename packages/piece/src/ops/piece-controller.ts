@@ -1455,7 +1455,9 @@ function linkMatchesCommittedState(
   baseCell: Cell<unknown>,
   basePath: readonly (string | number)[],
 ): boolean {
-  if (suppliedLink.value === undefined) return false;
+  // No undefined guard needed: `parseLinkOrThrow` has already rejected any
+  // supplied value that is not a real link record, so `suppliedLink.value`
+  // can never equal an absent committed slot here.
   const committedRoot = baseCell.withTx().getRaw();
   const committed = getValueAtPath(committedRoot, [
     ...basePath,
