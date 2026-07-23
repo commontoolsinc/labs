@@ -140,6 +140,31 @@ Deno.test("parse: structure tree groups by section with builders and schemas", (
   );
 });
 
+Deno.test("parse: tuple (prefixItems) schema fields render as tuple types", () => {
+  // CT-1895: tuples used to summarize as bare "array"
+  const doc = parseDocument(`// transformed: /app.ts
+const __cfLift_1 = lift({
+    type: "object",
+    properties: {
+        pair: { type: "array", prefixItems: [{ type: "string" }, { type: "number" }] },
+        rest: { type: "array", prefixItems: [{ type: "string" }], items: { type: "boolean" } }
+    }
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ pair }) => pair);
+`);
+  const schemaNode = doc.flatStructure.find((n) => n.meta?.kind === "schema");
+  assert(schemaNode, "found a schema-meta node");
+  const schema = (schemaNode!.meta as {
+    kind: "schema";
+    schema: { fields: readonly { name: string; type: string }[] };
+  }).schema;
+  const pair = schema.fields.find((f) => f.name === "pair");
+  assertEquals(pair?.type, "[string, number]");
+  const rest = schema.fields.find((f) => f.name === "rest");
+  assertEquals(rest?.type, "[string, ...boolean[]]");
+});
+
 Deno.test("parse: definition index resolves declarations", () => {
   const doc = parseDocument(SAMPLE);
   assert(doc.definitions.has("myPattern"), "myPattern defined");

@@ -1892,7 +1892,11 @@ function parseSchemaObject(obj: ts.ObjectLiteralExpression): SchemaMeta {
     }
   }
   const rootType = props.type ??
-    (props.items ? "array" : props.properties ? "object" : "any");
+    (props.items || props.prefixItems
+      ? "array"
+      : props.properties
+      ? "object"
+      : "any");
   return { rootType, required: props.required, fields };
 }
 
@@ -1901,6 +1905,17 @@ function fieldType(
 ): { type: string; fields?: readonly SchemaField[] } {
   const props = readSchemaProps(o);
   if (props.type === "array") {
+    // Tuples (prefixItems) render as TS tuple types; an `items` schema
+    // alongside becomes a rest element
+    if (props.prefixItems) {
+      const slots = props.prefixItems.elements.map((el) =>
+        ts.isObjectLiteralExpression(el) ? fieldType(el).type : "any"
+      );
+      if (props.items) {
+        slots.push(`...${fieldType(props.items).type}[]`);
+      }
+      return { type: `[${slots.join(", ")}]` };
+    }
     if (props.items) {
       const it = fieldType(props.items);
       return { type: `${it.type}[]`, fields: it.fields };
@@ -1924,6 +1939,7 @@ interface SchemaProps {
   properties?: ts.ObjectLiteralExpression;
   required: string[];
   items?: ts.ObjectLiteralExpression;
+  prefixItems?: ts.ArrayLiteralExpression;
 }
 
 function readSchemaProps(obj: ts.ObjectLiteralExpression): SchemaProps {
@@ -1941,6 +1957,10 @@ function readSchemaProps(obj: ts.ObjectLiteralExpression): SchemaProps {
       result.properties = p.initializer;
     } else if (key === "items" && ts.isObjectLiteralExpression(p.initializer)) {
       result.items = p.initializer;
+    } else if (
+      key === "prefixItems" && ts.isArrayLiteralExpression(p.initializer)
+    ) {
+      result.prefixItems = p.initializer;
     } else if (
       key === "required" && ts.isArrayLiteralExpression(p.initializer)
     ) {
