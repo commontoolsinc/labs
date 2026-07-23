@@ -18,7 +18,7 @@ cd "${baseDir}"
 # a warning when the version differs from the pin.
 # tasks/check-deno-pins.ts verifies that the range contains the pin.
 DENO_VERSION_MIN="2.8.0"
-DENO_VERSION_MAX="2.9.0"
+DENO_VERSION_MAX="2.10.0"
 if [[ ! -f mise.toml ]]; then
   # Checked before the read: `set -e` would otherwise abort on sed's exit
   # status with only sed's own message.

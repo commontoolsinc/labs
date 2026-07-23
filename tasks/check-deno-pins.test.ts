@@ -21,12 +21,16 @@ const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 // file name alone would pass here for a reason production could not reproduce.
 function alignedFiles() {
   return {
-    miseToml: '[tools]\ndeno = "2.8.1"\n',
-    dockerfile: "FROM denoland/deno:2.8.1 AS builder\n" +
-      "RUN deno install --frozen\n" +
-      "FROM denoland/deno:2.8.1\n",
+    miseToml: '[tools]\ndeno = "2.9.3"\n',
+    dockerfiles: {
+      "Dockerfile.toolshed": "FROM denoland/deno:2.9.3 AS builder\n" +
+        "RUN deno install --frozen\n" +
+        "FROM denoland/deno:2.9.3\n",
+      "Dockerfile.dashboard":
+        "FROM --platform=linux/amd64 denoland/deno:2.9.3\n",
+    },
     checkSh: "# The exact Deno version is pinned in mise.toml.\n" +
-      'DENO_VERSION_MIN="2.8.0"\nDENO_VERSION_MAX="2.9.0"\n' +
+      'DENO_VERSION_MIN="2.8.0"\nDENO_VERSION_MAX="2.10.0"\n' +
       `DENO_PINS="$(sed -n 's/^deno = "\\([^"]*\\)"$/\\1/p' mise.toml)"\n`,
     denoSetupAction: '    description: "Defaults to the pin in mise.toml."\n' +
       "    # The repository's Deno version is pinned once, in mise.toml.\n" +
@@ -36,7 +40,7 @@ function alignedFiles() {
 }
 
 Deno.test("parseMisePin extracts the pinned version", () => {
-  assertEquals(parseMisePin('[tools]\ndeno = "2.8.1"\n'), "2.8.1");
+  assertEquals(parseMisePin('[tools]\ndeno = "2.9.3"\n'), "2.9.3");
 });
 
 Deno.test("parseMisePin returns undefined when there is no pin", () => {
@@ -45,17 +49,17 @@ Deno.test("parseMisePin returns undefined when there is no pin", () => {
 
 Deno.test("parseMisePin returns undefined when the pin is defined twice", () => {
   assertEquals(
-    parseMisePin('[tools]\ndeno = "2.8.1"\ndeno = "2.8.1"\n'),
+    parseMisePin('[tools]\ndeno = "2.9.3"\ndeno = "2.9.3"\n'),
     undefined,
   );
 });
 
 Deno.test("parseMisePins returns every pin in order", () => {
-  assertEquals(parseMisePins('[tools]\ndeno = "2.8.1"\n'), ["2.8.1"]);
+  assertEquals(parseMisePins('[tools]\ndeno = "2.9.3"\n'), ["2.9.3"]);
   assertEquals(parseMisePins('[tools]\nnode = "22.0.0"\n'), []);
   assertEquals(
-    parseMisePins('[tools]\ndeno = "2.8.1"\ndeno = "2.9.0"\n'),
-    ["2.8.1", "2.9.0"],
+    parseMisePins('[tools]\ndeno = "2.9.3"\ndeno = "2.10.0"\n'),
+    ["2.9.3", "2.10.0"],
   );
 });
 
@@ -65,8 +69,8 @@ Deno.test("parseMisePins returns every pin in order", () => {
 Deno.test("findProblems flags a Deno pin defined twice", () => {
   for (
     const miseToml of [
-      '[tools]\ndeno = "2.8.1"\ndeno = "2.8.1"\n',
-      '[tools]\ndeno = "2.8.1"\ndeno = "2.9.0"\n',
+      '[tools]\ndeno = "2.9.3"\ndeno = "2.9.3"\n',
+      '[tools]\ndeno = "2.9.3"\ndeno = "2.10.0"\n',
     ]
   ) {
     const problems = findProblems({ ...alignedFiles(), miseToml });
@@ -76,8 +80,10 @@ Deno.test("findProblems flags a Deno pin defined twice", () => {
 });
 
 Deno.test("parseDockerfileDenoVersions finds every FROM line", () => {
-  const versions = parseDockerfileDenoVersions(alignedFiles().dockerfile);
-  assertEquals(versions, ["2.8.1", "2.8.1"]);
+  const versions = parseDockerfileDenoVersions(
+    alignedFiles().dockerfiles["Dockerfile.toolshed"],
+  );
+  assertEquals(versions, ["2.9.3", "2.9.3"]);
 });
 
 Deno.test("parseDockerfileDenoVersions reads past flags and a lowercase FROM", () => {
@@ -92,15 +98,15 @@ Deno.test("parseDockerfileDenoVersions reads past flags and a lowercase FROM", (
 
 Deno.test("parseDockerfileDenoVersions drops a digest", () => {
   assertEquals(
-    parseDockerfileDenoVersions("FROM denoland/deno:2.8.1@sha256:abc123\n"),
-    ["2.8.1"],
+    parseDockerfileDenoVersions("FROM denoland/deno:2.9.3@sha256:abc123\n"),
+    ["2.9.3"],
   );
 });
 
 Deno.test("parseCheckShRange extracts min and max", () => {
   assertEquals(parseCheckShRange(alignedFiles().checkSh), {
     min: "2.8.0",
-    max: "2.9.0",
+    max: "2.10.0",
   });
 });
 
@@ -141,10 +147,10 @@ Deno.test("isExactVersion accepts only MAJOR.MINOR.PATCH", () => {
 });
 
 Deno.test("versionInRange includes the minimum and excludes the maximum", () => {
-  assert(versionInRange("2.8.0", "2.8.0", "2.9.0"));
-  assert(versionInRange("2.8.1", "2.8.0", "2.9.0"));
-  assert(!versionInRange("2.9.0", "2.8.0", "2.9.0"));
-  assert(!versionInRange("2.7.9", "2.8.0", "2.9.0"));
+  assert(versionInRange("2.8.0", "2.8.0", "2.10.0"));
+  assert(versionInRange("2.9.3", "2.8.0", "2.10.0"));
+  assert(!versionInRange("2.10.0", "2.8.0", "2.10.0"));
+  assert(!versionInRange("2.7.9", "2.8.0", "2.10.0"));
 });
 
 Deno.test("findProblems accepts aligned files", () => {
@@ -157,24 +163,57 @@ Deno.test("findProblems flags a missing pin", () => {
 });
 
 Deno.test("findProblems flags a non-exact pin", () => {
-  const files = { ...alignedFiles(), miseToml: '[tools]\ndeno = "2.8"\n' };
+  const files = { ...alignedFiles(), miseToml: '[tools]\ndeno = "2.9"\n' };
   assertEquals(findProblems(files).length, 1);
 });
 
 Deno.test("findProblems flags a mismatched Dockerfile image", () => {
   const files = {
     ...alignedFiles(),
-    dockerfile: "FROM denoland/deno:2.8.0 AS builder\n" +
-      "FROM denoland/deno:2.8.1\n",
+    dockerfiles: {
+      ...alignedFiles().dockerfiles,
+      "Dockerfile.toolshed": "FROM denoland/deno:2.9.2 AS builder\n" +
+        "FROM denoland/deno:2.9.3\n",
+    },
   };
   const problems = findProblems(files);
   assertEquals(problems.length, 1);
-  assert(problems[0].includes("2.8.0"));
+  assert(problems[0].includes("Dockerfile.toolshed"));
+  assert(problems[0].includes("2.9.2"));
 });
 
-Deno.test("findProblems flags a Dockerfile without deno images", () => {
-  const files = { ...alignedFiles(), dockerfile: "FROM debian:12\n" };
-  assertEquals(findProblems(files).length, 1);
+Deno.test("findProblems flags a mismatched dashboard image", () => {
+  const files = {
+    ...alignedFiles(),
+    dockerfiles: {
+      ...alignedFiles().dockerfiles,
+      "Dockerfile.dashboard": "FROM denoland/deno:2.9.2\n",
+    },
+  };
+  const problems = findProblems(files);
+  assertEquals(problems.length, 1);
+  assert(problems[0].includes("Dockerfile.dashboard"));
+  assert(problems[0].includes("2.9.2"));
+});
+
+Deno.test("findProblems flags each Dockerfile without deno images", () => {
+  for (
+    const dockerfilePath of [
+      "Dockerfile.toolshed",
+      "Dockerfile.dashboard",
+    ] as const
+  ) {
+    const files = {
+      ...alignedFiles(),
+      dockerfiles: {
+        ...alignedFiles().dockerfiles,
+        [dockerfilePath]: "FROM debian:12\n",
+      },
+    };
+    const problems = findProblems(files);
+    assertEquals(problems.length, 1, dockerfilePath);
+    assert(problems[0].includes(dockerfilePath), dockerfilePath);
+  }
 });
 
 // check.sh reads the bounds with shell arithmetic, which aborts on a bound
@@ -196,7 +235,7 @@ Deno.test("findProblems flags a range bound that is not exact", () => {
     const withMax = findProblems({
       ...alignedFiles(),
       checkSh: alignedFiles().checkSh.replace(
-        'DENO_VERSION_MAX="2.9.0"',
+        'DENO_VERSION_MAX="2.10.0"',
         `DENO_VERSION_MAX="${bad}"`,
       ),
     });
@@ -210,7 +249,7 @@ Deno.test("findProblems flags both range bounds when both are malformed", () => 
     ...alignedFiles(),
     checkSh: alignedFiles().checkSh
       .replace('DENO_VERSION_MIN="2.8.0"', 'DENO_VERSION_MIN="2.8"')
-      .replace('DENO_VERSION_MAX="2.9.0"', 'DENO_VERSION_MAX="2.9"'),
+      .replace('DENO_VERSION_MAX="2.10.0"', 'DENO_VERSION_MAX="2.10"'),
   });
   assertEquals(problems.length, 2);
 });
@@ -219,8 +258,8 @@ Deno.test("findProblems flags a range that excludes the pin", () => {
   const files = {
     ...alignedFiles(),
     checkSh: alignedFiles().checkSh
-      .replace('DENO_VERSION_MIN="2.8.0"', 'DENO_VERSION_MIN="2.9.0"')
-      .replace('DENO_VERSION_MAX="2.9.0"', 'DENO_VERSION_MAX="2.10.0"'),
+      .replace('DENO_VERSION_MIN="2.8.0"', 'DENO_VERSION_MIN="2.10.0"')
+      .replace('DENO_VERSION_MAX="2.10.0"', 'DENO_VERSION_MAX="2.11.0"'),
   };
   const problems = findProblems(files);
   assertEquals(problems.length, 1);
@@ -236,7 +275,7 @@ Deno.test("findProblems flags an action that stops reading mise.toml", () => {
     denoSetupAction: '    description: "Defaults to the pin in mise.toml."\n' +
       "    # The repository's Deno version is pinned once, in mise.toml.\n" +
       "      run: |\n" +
-      '        version="2.8.1"\n',
+      '        version="2.9.3"\n',
   };
   const problems = findProblems(files);
   assertEquals(problems.length, 1);
@@ -247,7 +286,7 @@ Deno.test("findProblems flags a check.sh that stops reading mise.toml", () => {
   const files = {
     ...alignedFiles(),
     checkSh: "# The exact Deno version is pinned in mise.toml.\n" +
-      'DENO_VERSION_MIN="2.8.0"\nDENO_VERSION_MAX="2.9.0"\n',
+      'DENO_VERSION_MIN="2.8.0"\nDENO_VERSION_MAX="2.10.0"\n',
   };
   const problems = findProblems(files);
   assertEquals(problems.length, 1);
@@ -257,8 +296,12 @@ Deno.test("findProblems flags a check.sh that stops reading mise.toml", () => {
 Deno.test("findProblems flags a Dockerfile stage stale behind a flag", () => {
   const files = {
     ...alignedFiles(),
-    dockerfile: "FROM --platform=linux/amd64 denoland/deno:2.5.0 AS builder\n" +
-      "FROM denoland/deno:2.8.1\n",
+    dockerfiles: {
+      ...alignedFiles().dockerfiles,
+      "Dockerfile.toolshed":
+        "FROM --platform=linux/amd64 denoland/deno:2.5.0 AS builder\n" +
+        "FROM denoland/deno:2.9.3\n",
+    },
   };
   const problems = findProblems(files);
   assertEquals(problems.length, 1);
@@ -268,8 +311,12 @@ Deno.test("findProblems flags a Dockerfile stage stale behind a flag", () => {
 Deno.test("findProblems accepts a digest-pinned image on the pin", () => {
   const files = {
     ...alignedFiles(),
-    dockerfile: "FROM denoland/deno:2.8.1@sha256:abc123 AS builder\n" +
-      "FROM denoland/deno:2.8.1\n",
+    dockerfiles: {
+      ...alignedFiles().dockerfiles,
+      "Dockerfile.toolshed":
+        "FROM denoland/deno:2.9.3@sha256:abc123 AS builder\n" +
+        "FROM denoland/deno:2.9.3\n",
+    },
   };
   assertEquals(findProblems(files), []);
 });
@@ -289,7 +336,7 @@ Deno.test("findProblems accepts a literal in the action equal to the pin", () =>
   const files = {
     ...alignedFiles(),
     denoSetupAction: alignedFiles().denoSetupAction +
-      'default: "2.8.1"\n',
+      'default: "2.9.3"\n',
   };
   assertEquals(findProblems(files), []);
 });
@@ -304,7 +351,7 @@ Deno.test("findProblems flags a check.sh with no range at all", () => {
   assert(problems[0].includes("DENO_VERSION_MIN/DENO_VERSION_MAX not found"));
 });
 
-// Writes the four files main() reads into a fresh temp tree and returns its
+// Writes the five files main() reads into a fresh temp tree and returns its
 // root. The caller removes the tree.
 async function fixtureTree(
   files: ReturnType<typeof alignedFiles>,
@@ -315,7 +362,14 @@ async function fixtureTree(
     recursive: true,
   });
   await Deno.writeTextFile(join(root, "mise.toml"), files.miseToml);
-  await Deno.writeTextFile(join(root, "Dockerfile.toolshed"), files.dockerfile);
+  await Deno.writeTextFile(
+    join(root, "Dockerfile.toolshed"),
+    files.dockerfiles["Dockerfile.toolshed"],
+  );
+  await Deno.writeTextFile(
+    join(root, "Dockerfile.dashboard"),
+    files.dockerfiles["Dockerfile.dashboard"],
+  );
   await Deno.writeTextFile(join(root, "tasks", "check.sh"), files.checkSh);
   await Deno.writeTextFile(
     join(root, ".github", "actions", "deno-setup", "action.yml"),
@@ -352,7 +406,7 @@ Deno.test("main reports the pin and returns 0 on aligned files", async () => {
       code = await main(root);
     });
     assertEquals(code, 0);
-    assert(out.includes("Deno toolchain pins are aligned: 2.8.1"));
+    assert(out.includes("Deno toolchain pins are aligned: 2.9.3"));
   } finally {
     await Deno.remove(root, { recursive: true });
   }
@@ -361,10 +415,13 @@ Deno.test("main reports the pin and returns 0 on aligned files", async () => {
 Deno.test("main reports each problem and returns 1 when misaligned", async () => {
   const root = await fixtureTree({
     ...alignedFiles(),
-    dockerfile: "FROM denoland/deno:2.5.0 AS builder\n",
+    dockerfiles: {
+      ...alignedFiles().dockerfiles,
+      "Dockerfile.toolshed": "FROM denoland/deno:2.5.0 AS builder\n",
+    },
     checkSh: alignedFiles().checkSh.replace(
-      'DENO_VERSION_MAX="2.9.0"',
-      'DENO_VERSION_MAX="2.9"',
+      'DENO_VERSION_MAX="2.10.0"',
+      'DENO_VERSION_MAX="2.10"',
     ),
   });
   try {
