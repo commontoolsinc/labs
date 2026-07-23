@@ -66,12 +66,14 @@ export function isFabricValueLayer(
  * structural membership in the `FabricValue` type, independent of frozen-ness.
  *
  * Returns `true` for any scalar (`null`, `undefined`, `boolean`, `number`
- * -- including `-0`, `NaN`, and `±Infinity` -- `string`, `bigint`, `symbol`),
- * any `FabricInstance` or `FabricPrimitive`, an array of `FabricValue`s with no
- * enumerable non-index properties (sparse holes allowed), or a plain object
- * whose values are all `FabricValue`s. Returns `false` for a `function`
- * (anywhere in the graph) and for any other class instance (`Date`, `Map`, ...)
- * not representable as a `FabricValue`. Handles circular references.
+ * -- including `-0`, `NaN`, and `±Infinity` -- `string`, `bigint`, and
+ * registry-interned (`Symbol.for(...)`) symbols), any `FabricInstance` or
+ * `FabricPrimitive`, an array of `FabricValue`s with no enumerable non-index
+ * properties (sparse holes allowed), or a plain object whose values are all
+ * `FabricValue`s. Returns `false` for a `function` or a unique (uninterned)
+ * symbol -- whether the value itself or reached anywhere within it -- and for
+ * any other class instance (`Date`, `Map`, ...) not representable as a
+ * `FabricValue`. Handles circular references.
  *
  * This is a *membership* check, not a frozen-ness check: a structurally-valid
  * but unfrozen object or array is still a `FabricValue`. For the deep-frozen

@@ -272,14 +272,16 @@ export function deepFreeze<T>(value: T): T {
 
 /**
  * Indicates whether the value is a deep-frozen `FabricValue`. Returns `true` if
- * the value is a primitive, or a frozen object/array whose children are all
- * also deep-frozen `FabricValue`s.
+ * the value is a primitive -- other than a unique (uninterned) symbol; see
+ * below -- or a frozen object/array whose children are all also deep-frozen
+ * `FabricValue`s.
  *
- * A value of type `function` is not a `FabricValue`, and so yields `false`,
- * whether it is the value itself or reached anywhere within it. Note that this
- * differs from `isDeepFrozen()`, which asks the JavaScript-level question and
- * (incorrectly) admits functions; see the `TODO` on
- * `isNecessarilyFrozenValue()`.
+ * A `function`, and a unique (uninterned) symbol, are not `FabricValue`s and so
+ * yield `false`, whether the value itself or reached anywhere within it. (Only
+ * registry-interned `Symbol.for(...)` symbols are `FabricValue`s.) The
+ * `function` case differs from `isDeepFrozen()`, which asks the
+ * JavaScript-level question and (incorrectly) admits functions; see the `TODO`
+ * on `isNecessarilyFrozenValue()`.
  */
 export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
   // The recursive membership half of this check is available standalone as
