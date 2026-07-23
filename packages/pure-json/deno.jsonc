@@ -1,0 +1,13 @@
+{
+  "name": "@commonfabric/pure-json",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": true
+  },
+  "tasks": {
+    // --no-check: this package is type-checked by `deno task check` (tasks/check.sh).
+    "test": "deno test --no-check"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

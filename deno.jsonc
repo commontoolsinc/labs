@@ -25,6 +25,7 @@
     "./packages/memory",
     "./packages/patterns",
     "./packages/patterns/auth",
+    "./packages/pure-json",
     "./packages/runner",
     "./packages/runtime-client",
     "./packages/shell",
