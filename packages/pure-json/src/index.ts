@@ -1,4 +1,4 @@
 export {
   findJsonUnfaithfulValues,
   type JsonUnfaithfulValue,
-} from "./json-faithfulness.ts";
+} from "@/json-faithfulness.ts";

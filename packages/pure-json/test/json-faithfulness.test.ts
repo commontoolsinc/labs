@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 
-import { findJsonUnfaithfulValues } from "./json-faithfulness.ts";
+import { findJsonUnfaithfulValues } from "@commonfabric/pure-json";
 
 Deno.test("findJsonUnfaithfulValues: accepts JSON-faithful shapes", () => {
   // The whitelist: null, booleans, strings, finite numbers other than -0,

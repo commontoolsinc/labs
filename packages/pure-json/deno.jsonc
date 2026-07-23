@@ -3,9 +3,27 @@
   "compilerOptions": {
     "noUncheckedIndexedAccess": true
   },
+  "imports": {
+    "@/": "./src/"
+  },
   "tasks": {
-    // --no-check: this package is type-checked by `deno task check` (tasks/check.sh).
-    "test": "deno test --no-check"
+    "check": "deno check .",
+    "just-test": {
+      "description": "Run unit tests",
+      "command": "deno test"
+    },
+    "test": {
+      "description": "Type check & run tests",
+      "dependencies": [
+        "check",
+        "just-test"
+      ]
+    }
+  },
+  "test": {
+    "include": [
+      "test/**/*.test.ts"
+    ]
   },
   "exports": {
     ".": "./src/index.ts"
