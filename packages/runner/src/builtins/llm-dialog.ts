@@ -31,6 +31,13 @@ import {
 } from "./llm-schemas.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isBoolean, isObject, isRecord } from "@commonfabric/utils/types";
+import type { JSONSchemaObj } from "../builder/types.ts";
+import {
+  ARRAY_SUBSCHEMA_KEYS,
+  mapSubschemas,
+  RECORD_SUBSCHEMA_KEYS,
+  SINGLE_SUBSCHEMA_KEYS,
+} from "../schema-walk.ts";
 
 // Message schema that mints the `LlmDerived` provenance stamp (Epic D1).
 // Recorded as the schema write-policy input for each model-produced message's
@@ -384,7 +391,7 @@ function simplifySchemaForContext(
   depth: number = 0,
   maxDepth: number = 3,
 ): JSONSchema {
-  if (typeof schema !== "object" || schema === null) {
+  if (!isRecord(schema)) {
     return schema;
   }
 
@@ -407,52 +414,32 @@ function simplifySchemaForContext(
     "asCell",
     "default",
     "required",
-    "additionalProperties",
   ];
 
   // Maximum enum values to preserve (to prevent bloat)
   const MAX_ENUM_VALUES = 10;
 
+  // Shallow pass: filter keys, then let mapSubschemas rewrite the kept
+  // subschema keywords below.
   for (const [key, value] of Object.entries(schemaObj)) {
-    // Skip $defs and $ref - these can be huge with recursive types
-    if (key === "$defs" || key === "$ref") {
-      continue;
-    }
-
-    // Skip $-prefixed keys (like $UI schemas) - these are internal/VDOM
+    // Skip $-prefixed keys: $defs/$ref can be huge with recursive types, and
+    // keys like $UI are internal/VDOM
     if (key.startsWith("$")) {
       continue;
     }
 
-    // Handle properties recursively
-    if (key === "properties" && typeof value === "object" && value !== null) {
-      const simplifiedProps: Record<string, unknown> = {};
-      for (const [propKey, propValue] of Object.entries(value)) {
-        // Skip $-prefixed properties ($UI, $TYPE, etc.) - these are internal/VDOM
-        if (propKey.startsWith("$")) {
-          continue;
-        }
-        if (typeof propValue === "object" && propValue !== null) {
-          simplifiedProps[propKey] = simplifySchemaForContext(
-            propValue as JSONSchema,
-            depth + 1,
-            maxDepth,
-          );
-        } else {
-          simplifiedProps[propKey] = propValue;
-        }
-      }
-      simplified[key] = simplifiedProps;
+    // Keep properties, dropping $-prefixed ones ($UI, $TYPE, etc. are
+    // internal/VDOM); their values are simplified by the walk below
+    if (key === "properties" && isRecord(value)) {
+      simplified[key] = Object.fromEntries(
+        Object.entries(value).filter(([name]) => !name.startsWith("$")),
+      );
       continue;
     }
 
-    // Handle items recursively (for arrays)
-    if (key === "items" && typeof value === "object" && value !== null) {
-      simplified[key] = simplifySchemaForContext(
-        value as JSONSchema,
-        depth + 1,
-        maxDepth,
-      );
+    // Keep the other subschema-bearing keywords for the walk below
+    if (SIMPLIFY_SUBSCHEMA_KEYS.has(key)) {
+      simplified[key] = value;
       continue;
     }
 
@@ -467,33 +454,38 @@ function simplifySchemaForContext(
       continue;
     }
 
-    // Handle anyOf/oneOf/allOf recursively
+    // Preserve semantic markers and other primitive values, but skip complex
+    // objects not handled above
     if (
-      (key === "anyOf" || key === "oneOf" || key === "allOf") &&
-      Array.isArray(value)
+      PRESERVE_KEYS.includes(key) || typeof value !== "object" ||
+      value === null
     ) {
-      simplified[key] = value.map((v) =>
-        typeof v === "object" && v !== null
-          ? simplifySchemaForContext(v as JSONSchema, depth + 1, maxDepth)
-          : v
-      );
-      continue;
-    }
-
-    // Preserve keys from PRESERVE_KEYS list
-    if (PRESERVE_KEYS.includes(key)) {
-      simplified[key] = value;
-      continue;
-    }
-
-    // Preserve other primitive values, but skip complex objects not handled above
-    if (typeof value !== "object" || value === null) {
       simplified[key] = value;
     }
   }
 
-  return simplified as JSONSchema;
+  return mapSubschemas(
+    simplified as JSONSchemaObj,
+    (child) =>
+      // Draft-07 array-form `items`; the 2020-12 tuple form is `prefixItems`,
+      // which mapSubschemas already walks element-wise.
+      Array.isArray(child)
+        ? child.map((element) =>
+          simplifySchemaForContext(element, depth + 1, maxDepth)
+        ) as unknown as JSONSchema
+        : simplifySchemaForContext(child, depth + 1, maxDepth),
+  );
 }
+
+// The subschema-bearing keywords simplifySchemaForContext keeps (and recurses
+// into). The never-emitted tier (`contains`, `if`/`then`/`else`, ...) is
+// deliberately absent: passing those through would make them look supported.
+// `properties` is handled separately to drop $-prefixed names first.
+const SIMPLIFY_SUBSCHEMA_KEYS: ReadonlySet<string> = new Set([
+  ...SINGLE_SUBSCHEMA_KEYS,
+  ...ARRAY_SUBSCHEMA_KEYS,
+  ...RECORD_SUBSCHEMA_KEYS,
+]);
 
 function observationLinkForValue(
   value: unknown,
