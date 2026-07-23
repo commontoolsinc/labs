@@ -69,6 +69,14 @@ export interface SchedulerActionInfo {
   writes?: string[];
 }
 
+/** Content-free action metadata safe to transfer to a runtime host. */
+export interface HostSchedulerActionInfo {
+  patternName?: string;
+  moduleName?: string;
+  readCount?: number;
+  writeCount?: number;
+}
+
 export interface SchedulerEventPreflightStats {
   visitCount: number;
   dirtyInputCount: number;
@@ -302,6 +310,29 @@ export type RuntimeTelemetryMarker = {
 export type RuntimeTelemetryMarkerResult = RuntimeTelemetryMarker & {
   timeStamp: number;
 };
+
+type WithoutInternalTelemetryDetails<Marker extends { type: string }> =
+  Marker["type"] extends
+    | "scheduler.invocation"
+    | "scheduler.event.drop" ? Omit<Marker, "eventId">
+    : Marker["type"] extends "scheduler.event.commit"
+      ? Omit<Marker, "eventId" | "writes" | "writesTruncated">
+    : Marker;
+
+type WithHostSchedulerActionInfo<Marker> = Marker extends {
+  actionInfo?: SchedulerActionInfo;
+} ? Omit<Marker, "actionInfo"> & { actionInfo?: HostSchedulerActionInfo }
+  : Marker extends { handlerInfo?: SchedulerActionInfo }
+    ? Omit<Marker, "handlerInfo"> & { handlerInfo?: HostSchedulerActionInfo }
+  : Marker;
+
+/** Telemetry marker safe to transfer from a runtime worker to its host. */
+export type HostRuntimeTelemetryMarker = RuntimeTelemetryMarkerResult extends
+  infer Marker
+  ? Marker extends { type: string }
+    ? WithHostSchedulerActionInfo<WithoutInternalTelemetryDetails<Marker>>
+  : never
+  : never;
 
 export class RuntimeTelemetryEvent
   extends CustomEvent<{ marker: RuntimeTelemetryMarker }> {

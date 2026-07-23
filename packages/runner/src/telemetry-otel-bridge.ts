@@ -25,9 +25,9 @@ import {
   type Tracer,
 } from "@opentelemetry/api";
 import type {
+  HostRuntimeTelemetryMarker,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
-  RuntimeTelemetryMarkerResult,
 } from "./telemetry.ts";
 
 export interface OtelBridgeOptions {
@@ -67,7 +67,7 @@ export interface OtelBridgeOptions {
 
 export interface RuntimeTelemetryOtelBridge {
   /** Translate a single marker into spans/metrics. Safe to call for any type. */
-  handleMarker(marker: RuntimeTelemetryMarkerResult): void;
+  handleMarker(marker: HostRuntimeTelemetryMarker): void;
   /** Close any spans still open (e.g. storage ops without a completion). */
   shutdown(): void;
 }
@@ -272,7 +272,7 @@ export function createRuntimeTelemetryOtelBridge(
     }
   };
 
-  const handleMarker = (marker: RuntimeTelemetryMarkerResult): void => {
+  const handleMarker = (marker: HostRuntimeTelemetryMarker): void => {
     switch (marker.type) {
       case "scheduler.run":
         runs.add(
