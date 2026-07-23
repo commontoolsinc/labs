@@ -36,10 +36,11 @@
 //  (b) transport parity: the same served flow over the C3.10a co-hosted
 //      link — two Servers sharing nothing but the serializing duplex.
 //
-// Dated pointers (2026-07-18): C3.5 consumes the stamps as the vector
-// input basis and lifts the unserved posture; C3.8's apply fence
-// re-validates stamped epochs by equality; C3.10b owns link-loss
-// pending-read disposition and reruns these fixtures over its
+// Dated pointers (2026-07-18): C3.5 (built) consumes the stamps as the
+// vector input basis — served results also land in the host's
+// served-stamp ledger (`v2-execution-vector-basis-test.ts`); C3.8's
+// apply fence re-validates stamped epochs by equality; C3.10b owns
+// link-loss pending-read disposition and reruns these fixtures over its
 // reconnect contract.
 //
 // Barrier-driven except where the timeout IS the subject: every other
@@ -480,7 +481,10 @@ Deno.test("C3.4 (a): a space-lane claimed attempt under the live lease reads a B
     assertEquals(requests[0].toSpace, READ_SPACE);
     assertEquals(requests[0].actingPrincipal.principal, SPONSOR);
     assertEquals(requests[0].actingPrincipal.contextKey, "space");
-    assertEquals(requests[0].actingPrincipal.claim?.pieceId, SCHEDULER_PIECE_ID);
+    assertEquals(
+      requests[0].actingPrincipal.claim?.pieceId,
+      SCHEDULER_PIECE_ID,
+    );
     assertEquals(results.length, 1, "one foreign-point-read.result frame");
     assertEquals(results[0].requestId, requests[0].requestId);
 
@@ -626,7 +630,11 @@ Deno.test("C3.4 (c)/C3A4: rotation, claim revocation, user-lane drain, and sessi
     }
 
     // -- sponsor rotation (lease release + re-acquire) ----------------
-    const preRotation = await issueClaim(harness.server, harness.lease, "space");
+    const preRotation = await issueClaim(
+      harness.server,
+      harness.lease,
+      "space",
+    );
     const served = await harness.server.executorForeignPointRead(
       harness.lease,
       {

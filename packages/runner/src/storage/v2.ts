@@ -42,6 +42,7 @@ import {
   getServerPrimaryExecutionDocSetWatchConfig,
   type LegacyBackgroundExclusion,
   type LegacyBackgroundExclusionStatus,
+  mergeInputBasisVectors,
   parseSessionExecutionContextKey,
   type PatchOp,
   type PendingRead,
@@ -203,6 +204,62 @@ const cloneActionSettlement = (
   cloneIfNecessary(
     settlement as unknown as FabricValue,
   ) as unknown as ActionSettlement;
+
+/**
+ * Successful-settlement frontier merge for one exact claim incarnation —
+ * the runner-side settlement coalescer (used by the early-settlement cache
+ * and pending-settlement coalescing). Scalar basis takes the max; the
+ * accepted-data barrier keeps every contributing gate (max acceptedCommitSeq
+ * survives); and since C3.5 the vector basis merges per component under the
+ * C3A15 vacuous union (`mergeInputBasisVectors`) — a component either side
+ * lacks rides through, never zeroes (C3A14: this fresh literal is a
+ * settlement CARRIER; dropping the vector here would strand or prematurely
+ * drop held foreign-read overlays). Exported for tests — the merged vector
+ * is not client-observable until C3.9's drop rule consumes it.
+ */
+export const mergeSuccessfulExecutionSettlementRecords = (
+  current: ActionSettlement,
+  next: ActionSettlement,
+): ActionSettlement => {
+  const inputBasisSeq = current.inputBasisSeq > next.inputBasisSeq
+    ? current.inputBasisSeq
+    : next.inputBasisSeq;
+  const inputBasis = mergeInputBasisVectors(
+    current.inputBasis,
+    next.inputBasis,
+  );
+  const currentAcceptedCommitSeq = current.outcome === "committed"
+    ? current.acceptedCommitSeq
+    : undefined;
+  const nextAcceptedCommitSeq = next.outcome === "committed"
+    ? next.acceptedCommitSeq
+    : undefined;
+  const requiredAcceptedCommitSeq = currentAcceptedCommitSeq === undefined
+    ? nextAcceptedCommitSeq
+    : nextAcceptedCommitSeq === undefined ||
+        currentAcceptedCommitSeq > nextAcceptedCommitSeq
+    ? currentAcceptedCommitSeq
+    : nextAcceptedCommitSeq;
+  return requiredAcceptedCommitSeq === undefined
+    ? {
+      branch: next.branch,
+      claim: next.claim,
+      inputBasisSeq,
+      ...(inputBasis !== undefined ? { inputBasis } : {}),
+      outcome: "no-op",
+      ...(next.diagnosticCode === undefined
+        ? {}
+        : { diagnosticCode: next.diagnosticCode }),
+    }
+    : {
+      branch: next.branch,
+      claim: next.claim,
+      inputBasisSeq,
+      ...(inputBasis !== undefined ? { inputBasis } : {}),
+      outcome: "committed",
+      acceptedCommitSeq: requiredAcceptedCommitSeq,
+    };
+};
 
 const logger = getLogger("storage.v2", {
   enabled: true,
@@ -5432,39 +5489,8 @@ class SpaceReplica implements ISpaceReplica {
     current: ActionSettlement,
     next: ActionSettlement,
   ): ActionSettlement {
-    const inputBasisSeq = current.inputBasisSeq > next.inputBasisSeq
-      ? current.inputBasisSeq
-      : next.inputBasisSeq;
-    const currentAcceptedCommitSeq = current.outcome === "committed"
-      ? current.acceptedCommitSeq
-      : undefined;
-    const nextAcceptedCommitSeq = next.outcome === "committed"
-      ? next.acceptedCommitSeq
-      : undefined;
-    const requiredAcceptedCommitSeq = currentAcceptedCommitSeq === undefined
-      ? nextAcceptedCommitSeq
-      : nextAcceptedCommitSeq === undefined ||
-          currentAcceptedCommitSeq > nextAcceptedCommitSeq
-      ? currentAcceptedCommitSeq
-      : nextAcceptedCommitSeq;
     return cloneActionSettlement(
-      requiredAcceptedCommitSeq === undefined
-        ? {
-          branch: next.branch,
-          claim: next.claim,
-          inputBasisSeq,
-          outcome: "no-op",
-          ...(next.diagnosticCode === undefined
-            ? {}
-            : { diagnosticCode: next.diagnosticCode }),
-        }
-        : {
-          branch: next.branch,
-          claim: next.claim,
-          inputBasisSeq,
-          outcome: "committed",
-          acceptedCommitSeq: requiredAcceptedCommitSeq,
-        },
+      mergeSuccessfulExecutionSettlementRecords(current, next),
     );
   }
 
@@ -5915,6 +5941,12 @@ class SpaceReplica implements ISpaceReplica {
     const unresolved = matching.some((overlay) =>
       overlay.unresolvedBasisLocalSeqs.size > 0
     );
+    // C3.9 pointer (dated 2026-07-18): this drop compare is deliberately
+    // SCALAR-ONLY — a C3.5 vector settlement behaves byte-identically to
+    // its scalar here until C3.9 generalizes the overlay basis per
+    // component under the C3A15 coverage relation (absent settlement
+    // component vacuously covers; present-but-older never). Nothing in
+    // this path may read `settlement.inputBasis` as zero-or-satisfied.
     const covered = matching.filter((overlay) =>
       overlay.unresolvedBasisLocalSeqs.size === 0 &&
       overlay.basisSeq <= settlement.inputBasisSeq

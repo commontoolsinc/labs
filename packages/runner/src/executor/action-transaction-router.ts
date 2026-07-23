@@ -126,6 +126,21 @@ export interface ExecutorActionTransactionRouterOptions {
     sourceAction: object,
     addresses: readonly IMemorySpaceAddress[],
   ) => void;
+  /**
+   * C3.5: the stamped mount entries backing this attempt's foreign reads —
+   * {space, id, seq} per held read-only mount document, queried at claim
+   * attach so the commit asserts what the mount actually holds. The host
+   * validates every stamp against its own served-point-read record and
+   * strips mismatches (the Worker cannot fabricate a basis), so this
+   * carriage is assertion, never authority. Wired by the executor Worker
+   * from `HostStorageManager.foreignDocument`; absent (or an empty result)
+   * attaches nothing — the attempt settles scalar-only under the C3A15
+   * vacuous rule.
+   */
+  readonly foreignReadStampsForAction?: (
+    sourceAction: object,
+    addresses: readonly IMemorySpaceAddress[],
+  ) => readonly { space: string; id: string; seq: number }[] | undefined;
   /** Live claim of `sourceAction` ON THE COMMIT'S OWNING LANE (C1.9c): one
    * action object can hold one live claim per lane, and only the lane a
    * commit runs under may attach its claim. Callers ignoring `lane` keep the
@@ -336,15 +351,21 @@ export function createExecutorActionTransactionRouter(
     }
     // C3.4: report the observation's foreign READ surface so the Worker
     // can key its foreign-mount refreshes (see the option docblock).
-    if (options.onForeignReadSurface !== undefined) {
-      const foreignReads = foreignReadDocumentAddresses(
-        routedObservation,
-        options.servedSpace,
-      );
-      if (foreignReads.length > 0) {
-        options.onForeignReadSurface(sourceAction, foreignReads);
-      }
+    const foreignReads = options.onForeignReadSurface !== undefined ||
+        options.foreignReadStampsForAction !== undefined
+      ? foreignReadDocumentAddresses(routedObservation, options.servedSpace)
+      : [];
+    if (
+      options.onForeignReadSurface !== undefined && foreignReads.length > 0
+    ) {
+      options.onForeignReadSurface(sourceAction, foreignReads);
     }
+    // C3.5: the stamps this attempt's claimed commit will assert (see the
+    // option docblock) — queried once per route, attached with the claim
+    // assertion below.
+    const foreignReadStamps = foreignReads.length > 0
+      ? options.foreignReadStampsForAction?.(sourceAction, foreignReads)
+      : undefined;
     const staticDecision = classifyStaticActionServability(
       routedObservation,
       options.servedSpace,
@@ -435,7 +456,12 @@ export function createExecutorActionTransactionRouter(
       ? undefined
       : options.permanentUnservedReasonForAction?.(sourceAction, liveClaim);
     if (permanentUnservedReason !== undefined) {
-      attachClaimAssertion(input.commit, observationForClaim, liveClaim!);
+      attachClaimAssertion(
+        input.commit,
+        observationForClaim,
+        liveClaim!,
+        foreignReadStamps,
+      );
       return unservedRoute(
         reported,
         options,
@@ -453,7 +479,12 @@ export function createExecutorActionTransactionRouter(
           : "broker-required"
         : staticDecision.reason;
       if (liveClaim !== undefined) {
-        attachClaimAssertion(input.commit, observationForClaim, liveClaim);
+        attachClaimAssertion(
+          input.commit,
+          observationForClaim,
+          liveClaim,
+          foreignReadStamps,
+        );
         return unservedRoute(
           reported,
           options,
@@ -485,7 +516,12 @@ export function createExecutorActionTransactionRouter(
     );
     if (dynamicReason !== undefined) {
       if (liveClaim !== undefined) {
-        attachClaimAssertion(input.commit, observationForClaim, liveClaim);
+        attachClaimAssertion(
+          input.commit,
+          observationForClaim,
+          liveClaim,
+          foreignReadStamps,
+        );
         return unservedRoute(
           reported,
           options,
@@ -532,7 +568,12 @@ export function createExecutorActionTransactionRouter(
       };
     }
 
-    attachClaimAssertion(input.commit, observationForClaim, liveClaim);
+    attachClaimAssertion(
+      input.commit,
+      observationForClaim,
+      liveClaim,
+      foreignReadStamps,
+    );
     if (routedObservation.transactionKind === "action-run") {
       options.onActionTransaction?.("authoritative");
       logger.debug("execution-server-authoritative-action-run", () => [
@@ -1219,6 +1260,7 @@ function attachClaimAssertion(
   commit: ActionTransactionRouteInput["commit"],
   observation: SchedulerActionObservation,
   claim: ExecutionClaim,
+  foreignReadStamps?: readonly { space: string; id: string; seq: number }[],
 ): void {
   commit.schedulerObservation = {
     ...observation,
@@ -1227,5 +1269,10 @@ function attachClaimAssertion(
       leaseGeneration: claim.leaseGeneration,
       claimGeneration: claim.claimGeneration,
     },
+    // C3.5: the Worker's foreign read stamp assertion rides beside the
+    // claim assertion (both transient; the host validates and strips).
+    ...(foreignReadStamps !== undefined && foreignReadStamps.length > 0
+      ? { foreignReadStamps }
+      : {}),
   };
 }

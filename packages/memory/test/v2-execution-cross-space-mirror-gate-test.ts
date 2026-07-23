@@ -9,15 +9,18 @@
 // lanes. Denial is a silent drop of the mirror only, counted in
 // `executionStats.crossSpaceMirrorsWithheld`.
 //
-// Pre-C3.5 the engine's claimed-action firewall still rejects foreign
-// READ addresses on SERVED attempts (`foreign-space-surface`, C3A2 —
-// the relax is C3.5's), so the executor-authored foreign-reading rows
-// that exist today are UNSERVED-attempt discovery rows: a claimed
-// attempt reporting `executionUnservedAttempt` persists its discovered
-// foreign surface without provenance, floored at the acting identity's
-// session context (`schedulerStaticContextFloor`'s crossesSpace rule).
+// Since C3.5 (built 2026-07-18) the engine's claimed-action firewall
+// ADMITS space-scoped foreign READ addresses on served attempts (the
+// C3A2 relax — `v2-execution-vector-basis-test.ts` owns that side), but
+// the runner-side servability classifier stays conservative until C3.6,
+// so the executor-authored foreign-reading rows the REAL flow produces
+// today are still UNSERVED-attempt discovery rows: a claimed attempt
+// reporting `executionUnservedAttempt` persists its discovered foreign
+// surface without provenance, floored at the acting identity's session
+// context (`schedulerStaticContextFloor`'s crossesSpace rule — the C3.5
+// floor relax is provenance-gated and unserved attempts carry none).
 // These fixtures drive exactly that channel; C3.11's two-space gate
-// re-covers both C3.3 halves once C3.5/C3.6 relax served attempts.
+// re-covers both C3.3 halves once C3.6 relaxes the classifier.
 //
 // Fixture map (plan row C3.3b; amendment C3A5):
 //  (a) executor-authored (claimed, space-lane sponsor) observation with

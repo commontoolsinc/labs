@@ -2159,11 +2159,14 @@ export interface HostStorageManagerOptions {
  * `seq` is the read space's stamped COVERING seq (the serve host's
  * serverSeq at the read) and `authorizationEpoch` the acting principal's
  * effective epoch there — both in the READ space's domains, never merged
- * into home watermarks. THE C3.5 SEAM (dated 2026-07-18): the vector
- * input basis consumes exactly (space, seq) per consulted entry, and
- * C3.8's apply fence re-validates `authorizationEpoch` by equality —
- * both read the mount through {@link HostStorageManager.foreignDocument}
- * / {@link HostStorageManager.foreignMountEntries}.
+ * into home watermarks. C3.5 (built 2026-07-18) consumes exactly
+ * (space, seq) per consulted entry through
+ * {@link HostStorageManager.foreignDocument}: the executor Worker asserts
+ * held entries as `foreignReadStamps` with its claimed commits, and the
+ * HOST validates them against its own served-read record before the
+ * engine authors the vector. C3.8's apply fence re-validates
+ * `authorizationEpoch` by equality (dated 2026-07-18; the stamp rides
+ * provenance's per-component `authorizationEpoch` for it).
  */
 export interface ForeignMountEntry {
   space: string;

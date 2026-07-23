@@ -69,6 +69,14 @@ export interface SchedulerActionObservation {
   inputBasisSeq?: InputBasisSeq;
   /** Transient selector for the exact host claim used by this attempt. */
   executionClaimAssertion?: ExecutionClaimAssertion;
+  /**
+   * C3.5: transient Worker assertion of the stamped foreign point reads
+   * this attempt consumed from its read-only mount ({space, id, seq} in the
+   * READ space's seq domain). The host validates each stamp against its own
+   * served-point-read record and strips the assertion — like
+   * `executionClaimAssertion`, it never persists.
+   */
+  foreignReadStamps?: readonly { space: string; id: string; seq: number }[];
   /** Present only after an authenticated executor commit is accepted. */
   executionProvenance?: ActionExecutionProvenance;
   observedAtLocalSeq?: number;

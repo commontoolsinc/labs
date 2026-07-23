@@ -43,6 +43,7 @@ import {
   parseSessionExecutionContextKey,
   type PatchOp,
   principalOfUserContextKey,
+  type ProvenanceInputBasisComponent,
   type Reference,
   type SchedulerActionSnapshotCursor,
   type SchedulerExecutionContextKey,
@@ -1134,6 +1135,22 @@ export interface ApplyCommitOptions {
    * the commit's claim assertions and rejects a mismatching value.
    */
   actingContext?: SchedulerExecutionContextKey;
+  /**
+   * C3.5: HOST-VALIDATED foreign basis components per claimed observation
+   * localSeq. The engine cannot verify a foreign seq itself (C3A13), so the
+   * host validates the Worker's asserted `foreignReadStamps` against its own
+   * served-point-read records and passes only components it actually served
+   * over the authenticated C3.1 link, at most one per foreign space
+   * (seq = max consumed stamp, epoch = min — see
+   * `ProvenanceInputBasisComponent`). Host-only — never ClientCommit wire
+   * input. The engine authors provenance's vector from these, restricted to
+   * spaces the observation actually declares foreign reads for; the home
+   * component is engine-authored from the accepted scalar.
+   */
+  foreignInputBases?: ReadonlyMap<
+    number,
+    readonly ProvenanceInputBasisComponent[]
+  >;
 }
 
 export interface AppliedRevision {
@@ -1481,6 +1498,15 @@ export interface ResolvedSchedulerObservationAddress
   scopeKey: string;
 }
 
+/** C3.5: one Worker-asserted foreign read stamp — see
+ * {@link SchedulerActionObservation.foreignReadStamps}. */
+export interface ForeignReadStampAssertion {
+  space: string;
+  id: EntityId;
+  /** The read space's stamped covering seq (its own domain, positive). */
+  seq: number;
+}
+
 export type SchedulerWriteAddress = SchedulerObservationAddress & {
   scopeKey?: string;
 };
@@ -1513,6 +1539,18 @@ export interface SchedulerActionObservation {
   inputBasisSeq?: InputBasisSeq;
   /** Transient exact-claim assertion; validated by the bound executor host. */
   executionClaimAssertion?: ExecutionClaimAssertion;
+  /**
+   * C3.5: transient Worker assertion of the stamped foreign point reads the
+   * attempt consumed from its read-only mount — {space, id, seq} per read,
+   * in the READ space's seq domain. Like `executionClaimAssertion` it is a
+   * request field, never persisted: the HOST validates each stamp against
+   * its own served-point-read records (C3A13 — the engine cannot verify a
+   * foreign seq itself) and passes only host-validated components into the
+   * accept transaction; the engine strips this field from the canonical
+   * accepted observation. An asserted stamp the host never served is
+   * dropped, exactly like the asserted scalar.
+   */
+  foreignReadStamps?: readonly ForeignReadStampAssertion[];
   /**
    * Transient report that the host discarded a claimed action as one whole
    * transaction. Valid only on an observation-only exact claimed attempt and
@@ -1583,6 +1621,16 @@ const isSchedulerObservationAddress = (value: unknown): boolean =>
   Array.isArray(value.path) &&
   value.path.every((part) => typeof part === "string");
 
+const isForeignReadStampAssertion = (value: unknown): boolean =>
+  isSchedulerRecord(value) &&
+  typeof value.space === "string" && value.space.length > 0 &&
+  typeof value.id === "string" && value.id.length > 0 &&
+  Number.isSafeInteger(value.seq) && Number(value.seq) > 0;
+
+const isForeignReadStampAssertionArray = (value: unknown): boolean =>
+  Array.isArray(value) && value.length <= 256 &&
+  value.every(isForeignReadStampAssertion);
+
 const isSchedulerAddressArray = (value: unknown): boolean =>
   Array.isArray(value) && value.every(isSchedulerObservationAddress);
 
@@ -1607,6 +1655,11 @@ export const schedulerObservationFromValue = (
     !isSchedulerRecord(value) ||
     "executionContextKey" in value ||
     "execution_context_key" in value ||
+    // C3.5: the vector basis is host/engine output riding on provenance and
+    // settlements — a wire observation naming it is malformed (reserved),
+    // like the emitted context key above.
+    "inputBasis" in value ||
+    "input_basis" in value ||
     (value.version !== 1 && value.version !== 2) ||
     (value.ownerSpace !== undefined && typeof value.ownerSpace !== "string") ||
     typeof value.branch !== "string" || typeof value.pieceId !== "string" ||
@@ -1631,6 +1684,8 @@ export const schedulerObservationFromValue = (
         Number(value.inputBasisSeq) < 0)) ||
     (value.executionClaimAssertion !== undefined &&
       !isExecutionClaimAssertion(value.executionClaimAssertion)) ||
+    (value.foreignReadStamps !== undefined &&
+      !isForeignReadStampAssertionArray(value.foreignReadStamps)) ||
     (value.executionUnservedAttempt !== undefined &&
       !isExecutionUnservedAttempt(value.executionUnservedAttempt)) ||
     (value.observedAtLocalSeq !== undefined &&
@@ -4149,6 +4204,15 @@ export const upsertMirroredSchedulerObservation = (
   options: UpsertSchedulerObservationOptions & {
     originExecutionContextKey: SchedulerExecutionContextKey;
     readToMirrorWindow?: MirroredReadToMirrorWindowOptions;
+    /**
+     * C3.5 (C3A16): the mirror-hosting (READ) space's cause-coverage seq —
+     * the vector basis component for that space when the mirrored
+     * observation carries one, else 0 (consume nothing — C3A15 vacuous).
+     * Without it a provenance-carrying mirror would inherit the HOME
+     * scalar and consume read-space cause rows through a foreign-domain
+     * number.
+     */
+    causeCoverageSeq?: number;
   },
 ): UpsertSchedulerObservationResult =>
   engine.database.transaction(upsertSchedulerObservationTransaction).immediate(
@@ -6048,13 +6112,6 @@ const schedulerSummaryWriteAddresses = (
   ...summary.directOutputs,
 ];
 
-const schedulerSummaryAddresses = (
-  summary: CompleteActionScopeSummary,
-): SchedulerObservationAddress[] => [
-  ...schedulerSummaryReadAddresses(summary),
-  ...schedulerSummaryWriteAddresses(summary),
-];
-
 /** READ-side observed surface — see {@link schedulerSummaryReadAddresses}. */
 const schedulerObservationReadAddresses = (
   observation: SchedulerActionObservation,
@@ -6251,11 +6308,36 @@ const assertLaneScopedAddress = (
   servedSpace: string,
   scopeContext: SchedulerScopeContext,
   laneScopeKey: LaneScopeKey,
-  /** Present on READ-side surfaces only (CA3): the lane's admissible read
-   * chain. Absent = write-side, exact-lane admission (§4). */
-  chainReadScopeKeys?: ReadonlySet<string>,
+  /** Which §4 surface class the address belongs to. READ side carries the
+   * lane's admissible read chain (CA3) — undefined for the space lane,
+   * which has no chain; WRITE side keeps exact-lane admission. The side
+   * marker is explicit (not inferred from the chain set) because C3.5's
+   * foreign-read relax must apply on the SPACE lane too, whose chain set
+   * is undefined. */
+  side:
+    | { surface: "read"; chainReadScopeKeys?: ReadonlySet<string> }
+    | { surface: "write" },
 ): void => {
   if (address.space !== servedSpace) {
+    // C3.5 (blocker C3A2): the fourth reject site relaxes for READ
+    // addresses ONLY — a space-scoped foreign READ (summary reads and
+    // observation reads) is admitted, because C3.4 gives claimed attempts
+    // an authenticated, ACL-checked, stamped read path into foreign spaces
+    // and C3.5's vector basis accounts for what was consumed. Everything
+    // else keeps the reject byte-identical: write-side surfaces, and
+    // user/session-scoped foreign reads (decision #3: v1 foreign reads
+    // are space-scoped only — the read host cannot resolve a foreign lane
+    // instance). "Default branch" needs no check here: the address carries
+    // no branch dimension, and C3.4's point read resolves the read space's
+    // default branch by construction (decision #4 — the wire has no branch
+    // field). A foreign PIECE cannot reach this site: the trusted summary
+    // requires piece.space === ownerSpace === servedSpace upstream.
+    if (
+      side.surface === "read" &&
+      resolveScopeKey(address.scope, scopeContext) === DEFAULT_SCOPE_KEY
+    ) {
+      return;
+    }
     rejectExecutionAction(
       "foreign-space-surface",
       `surface ${address.id} belongs to ${address.space}, not ${servedSpace}`,
@@ -6263,6 +6345,9 @@ const assertLaneScopedAddress = (
   }
   const resolved = resolveScopeKey(address.scope, scopeContext);
   if (resolved === DEFAULT_SCOPE_KEY) return;
+  const chainReadScopeKeys = side.surface === "read"
+    ? side.chainReadScopeKeys
+    : undefined;
   if (
     chainReadScopeKeys !== undefined
       ? !chainReadScopeKeys.has(resolved)
@@ -6381,7 +6466,7 @@ const assertExecutionActionTransaction = (
       options.servedSpace,
       options.scopeContext,
       laneScopeKey,
-      chainReadScopeKeys,
+      { surface: "read", chainReadScopeKeys },
     );
   }
   for (const address of schedulerSummaryWriteAddresses(summary)) {
@@ -6390,6 +6475,7 @@ const assertExecutionActionTransaction = (
       options.servedSpace,
       options.scopeContext,
       laneScopeKey,
+      { surface: "write" },
     );
   }
   for (const address of schedulerObservationReadAddresses(observation)) {
@@ -6398,7 +6484,7 @@ const assertExecutionActionTransaction = (
       options.servedSpace,
       options.scopeContext,
       laneScopeKey,
-      chainReadScopeKeys,
+      { surface: "read", chainReadScopeKeys },
     );
   }
   for (const address of schedulerObservationWriteAddresses(observation)) {
@@ -6407,6 +6493,7 @@ const assertExecutionActionTransaction = (
       options.servedSpace,
       options.scopeContext,
       laneScopeKey,
+      { surface: "write" },
     );
   }
   if (schedulerRuntimeWritesExceedSummary(observation, summary)) {
@@ -6543,6 +6630,26 @@ const assertExecutionActionTransaction = (
   }
 };
 
+/**
+ * C3.5: true for the addresses whose foreignness no longer demotes the
+ * context floor of a HOST-ACCEPTED claimed attempt — space-scoped foreign
+ * READS. The gate is the observation's `executionProvenance`, which only the
+ * engine's accept path attaches (asserted values are stripped): a claimed
+ * attempt's foreign reads went through C3.4's per-read ACL check for the
+ * acting principal and settle with a vector basis, so they are not evidence
+ * of session-private observation. CLIENT observations keep the conservative
+ * crossesSpace → session demotion byte-identically — a client's cross-space
+ * read is performed under its own session credentials and stays
+ * session-owned (the pre-C3.6 posture the C3.3a wake fixtures pin).
+ */
+function claimedForeignReadFloorExempt(
+  observation: SchedulerActionObservation,
+  address: SchedulerObservationAddress,
+): boolean {
+  return observation.executionProvenance !== undefined &&
+    normalizeSchedulerScope(address.scope) === "space";
+}
+
 function schedulerStaticContextFloor(
   observation: SchedulerActionObservation,
 ): SchedulerContextScope {
@@ -6552,12 +6659,24 @@ function schedulerStaticContextFloor(
     return "session";
   }
 
-  const addresses = schedulerSummaryAddresses(summary).map(
+  const readAddresses = schedulerSummaryReadAddresses(summary).map(
     normalizeSchedulerAddress,
   );
-  const crossesSpace = addresses.some((address) =>
-    address.space !== ownerSpace
+  const writeAddresses = schedulerSummaryWriteAddresses(summary).map(
+    normalizeSchedulerAddress,
   );
+  const addresses = [...readAddresses, ...writeAddresses];
+  // C3.5: summary READS are floor-exempt when claimedForeignReadFloorExempt
+  // admits them; every non-read summary surface (writes, envelopes, direct
+  // outputs) keeps demoting on foreignness — foreign writes have no v1
+  // story and reject at the firewall anyway. (The piece rides the read
+  // list but is never foreign here: the trusted summary requires
+  // piece.space === ownerSpace.)
+  const crossesSpace =
+    readAddresses.some((address) =>
+      address.space !== ownerSpace &&
+      !claimedForeignReadFloorExempt(observation, address)
+    ) || writeAddresses.some((address) => address.space !== ownerSpace);
   if (
     addresses.some((address) =>
       normalizeSchedulerScope(address.scope) === "session"
@@ -6593,6 +6712,12 @@ function schedulerRuntimeContextFloor(
       }) ||
         [...observation.reads, ...observation.shallowReads].some((address) =>
           normalizeSchedulerAddress(address).space !== ownerSpace &&
+          // C3.5: a host-accepted claimed attempt's space-scoped foreign
+          // READ no longer demotes to session — envelope-covered or not
+          // (dynamic link-following foreign reads are part of the admitted
+          // class and enter the vector basis). Client observations keep
+          // the conservative demotion byte-identically.
+          !claimedForeignReadFloorExempt(observation, address) &&
           !schedulerAddressCoveredBy(address, summary.reads)
         ))) ||
     (summary === undefined &&
@@ -8183,6 +8308,7 @@ const applyCommitTransaction = (
     executionLeaseFence,
     sqliteAttachments,
     actingContext,
+    foreignInputBases,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
   const sessionKey = resolveCommitSessionKey(sessionId, principal);
@@ -8299,6 +8425,7 @@ const applyCommitTransaction = (
       batch: schedulerObservationBatch,
       executionClaims,
       executionLeaseFence,
+      foreignInputBases,
     });
   }
 
@@ -8316,6 +8443,7 @@ const applyCommitTransaction = (
       schedulerObservation,
       executionClaim: executionClaims?.get(commit.localSeq),
       executionLeaseFence,
+      foreignInputBasis: foreignInputBases?.get(commit.localSeq),
     });
   }
 
@@ -8338,6 +8466,7 @@ const applyCommitTransaction = (
       space,
       principal,
       inputBasisSeq,
+      foreignInputBasis: foreignInputBases?.get(commit.localSeq),
       executionClaim,
       ...(executionClaim !== undefined
         ? {
@@ -9066,6 +9195,67 @@ const claimKeyFromExecutionClaim = (
   runtimeFingerprint: claim.runtimeFingerprint,
 });
 
+/**
+ * C3.5: author the accepted vector basis for one served claimed attempt.
+ * Foreign components come ONLY from `hostComponents` — the host-validated
+ * served-point-read stamps (never the Worker's assertion, which was
+ * stripped) — and are further restricted to spaces the observation actually
+ * declares space-scoped foreign READS for: a component naming a space the
+ * commit declared no read for is dropped here (the C3A13 fixture leg — a
+ * validated stamp is authority to READ, not license to widen the basis).
+ * The home component is engine-authored from the accepted scalar, so
+ * `scalar ≡ home component` holds by construction. Components sort by space
+ * for a deterministic wire shape. Returns undefined when no foreign
+ * component survives — scalar-only attempts stay byte-identical.
+ */
+const authorAcceptedInputBasis = (
+  observation: SchedulerActionObservation,
+  servedSpace: string | undefined,
+  inputBasisSeq: InputBasisSeq,
+  hostComponents: readonly ProvenanceInputBasisComponent[] | undefined,
+): readonly ProvenanceInputBasisComponent[] | undefined => {
+  if (
+    hostComponents === undefined || hostComponents.length === 0 ||
+    servedSpace === undefined
+  ) {
+    return undefined;
+  }
+  const declaredForeignReadSpaces = new Set<string>();
+  const summary = trustedSchedulerScopeSummary(observation);
+  for (
+    const address of [
+      ...observation.reads,
+      ...observation.shallowReads,
+      ...(summary?.reads ?? []),
+    ]
+  ) {
+    if (
+      address.space !== servedSpace &&
+      normalizeSchedulerScope(address.scope) === "space"
+    ) {
+      declaredForeignReadSpaces.add(address.space);
+    }
+  }
+  const kept = new Map<string, ProvenanceInputBasisComponent>();
+  for (const component of hostComponents) {
+    if (
+      component.space === servedSpace ||
+      !declaredForeignReadSpaces.has(component.space)
+    ) {
+      continue;
+    }
+    const held = kept.get(component.space);
+    if (held === undefined || component.seq > held.seq) {
+      kept.set(component.space, component);
+    }
+  }
+  if (kept.size === 0) return undefined;
+  return [
+    { space: servedSpace, seq: inputBasisSeq },
+    ...kept.values(),
+  ].sort((a, b) => a.space < b.space ? -1 : a.space > b.space ? 1 : 0);
+};
+
 const acceptedSchedulerObservation = (
   observation: SchedulerActionObservation,
   options: {
@@ -9073,6 +9263,9 @@ const acceptedSchedulerObservation = (
     space?: string;
     principal?: string;
     inputBasisSeq: InputBasisSeq;
+    /** C3.5 host-validated foreign components (see
+     * `ApplyCommitOptions.foreignInputBases`). */
+    foreignInputBasis?: readonly ProvenanceInputBasisComponent[];
     executionClaim?: ExecutionClaim;
     causedBy?: readonly number[];
   },
@@ -9084,12 +9277,16 @@ const acceptedSchedulerObservation = (
   const assertedClaim = observation.executionClaimAssertion;
   const unservedAttempt = observation.executionUnservedAttempt;
   // Reserved fields are host outputs. Strip any wire/Worker assertion before
-  // constructing the canonical accepted observation.
+  // constructing the canonical accepted observation. `foreignReadStamps` is
+  // the Worker's REQUEST-side stamp assertion (C3.5): the host already
+  // validated it into `options.foreignInputBasis`, so the raw assertion is
+  // stripped exactly like the asserted scalar.
   const {
     inputBasisSeq: _assertedBasis,
     executionClaimAssertion: _assertedClaim,
     executionUnservedAttempt: _unservedAttempt,
     executionProvenance: _assertedProvenance,
+    foreignReadStamps: _assertedForeignReadStamps,
     ...untrustedObservation
   } = observation;
   const claim = options.executionClaim;
@@ -9128,6 +9325,18 @@ const acceptedSchedulerObservation = (
       "execution claim incarnation does not match the accepted scheduler action",
     );
   }
+  // C3.5: the vector authors only for SERVED attempts (committed / no-op /
+  // failed). An unserved attempt discarded the authority transfer whole —
+  // its settlement's basis stays the scalar, and its provenance never
+  // claims foreign coverage the discarded run did not apply.
+  const inputBasis = unservedAttempt === undefined
+    ? authorAcceptedInputBasis(
+      observation,
+      options.space,
+      options.inputBasisSeq,
+      options.foreignInputBasis,
+    )
+    : undefined;
   const provenance: ActionExecutionProvenance = {
     claim: claimKeyFromExecutionClaim(claim),
     onBehalfOf: options.principal,
@@ -9137,6 +9346,7 @@ const acceptedSchedulerObservation = (
       .filter((sourceSeq) => Number.isSafeInteger(sourceSeq) && sourceSeq > 0)
       .sort((left, right) => left - right),
     inputBasisSeq: options.inputBasisSeq,
+    ...(inputBasis !== undefined ? { inputBasis } : {}),
   };
   return {
     provenance,
@@ -9352,6 +9562,7 @@ const applySchedulerObservationOnlyCommit = (
     schedulerObservation,
     executionClaim,
     executionLeaseFence,
+    foreignInputBasis,
   }: {
     sessionId: SessionId;
     scopeSessionId: SessionId;
@@ -9367,6 +9578,8 @@ const applySchedulerObservationOnlyCommit = (
     schedulerObservation: SchedulerActionObservation;
     executionClaim?: ExecutionClaim;
     executionLeaseFence?: ExecutionLeaseFence;
+    /** C3.5 host-validated foreign components for THIS observation. */
+    foreignInputBasis?: readonly ProvenanceInputBasisComponent[];
   },
 ): AppliedCommit => {
   const scopePrincipal = actingPrincipal ?? principal;
@@ -9455,6 +9668,7 @@ const applySchedulerObservationOnlyCommit = (
     space,
     principal,
     inputBasisSeq,
+    foreignInputBasis,
     executionClaim,
     ...(executionClaim !== undefined
       ? {
@@ -9600,6 +9814,7 @@ const applySchedulerObservationBatchCommit = (
     batch,
     executionClaims,
     executionLeaseFence,
+    foreignInputBases,
   }: {
     sessionId: SessionId;
     scopeSessionId: SessionId;
@@ -9613,6 +9828,11 @@ const applySchedulerObservationBatchCommit = (
     batch: NonNullable<ClientCommit["schedulerObservationBatch"]>;
     executionClaims?: ReadonlyMap<number, ExecutionClaim>;
     executionLeaseFence?: ExecutionLeaseFence;
+    /** C3.5 host-validated foreign components, keyed by item localSeq. */
+    foreignInputBases?: ReadonlyMap<
+      number,
+      readonly ProvenanceInputBasisComponent[]
+    >;
   },
 ): AppliedCommit => {
   const results: AppliedSchedulerObservationResult[] = [];
@@ -9636,6 +9856,7 @@ const applySchedulerObservationBatchCommit = (
         .schedulerObservation as SchedulerActionObservation,
       executionClaim: executionClaims?.get(item.localSeq),
       executionLeaseFence,
+      foreignInputBasis: foreignInputBases?.get(item.localSeq),
     });
     hasNewObservation ||= !isAppliedCommitReplay(result);
     results.push(result.schedulerObservationResults![0]);

@@ -615,7 +615,9 @@ const foreignReadClaimRef = (
  * lane when it holds one, else the action's representative claim). The
  * intermediate posture stays pinned: stamped documents LAND in the
  * mount; nothing here relaxes servability, so the rerun's attempt still
- * settles unserved until C3.5/C3.6.
+ * settles unserved until C3.6 relaxes the classifier (C3.5, built
+ * 2026-07-18, relaxed the ENGINE firewall and made the mount entries the
+ * asserted vector basis — see `foreignReadStampsForAction`).
  *
  * Fail-closed and bounded: a denied/failed/fenced read lands nothing
  * and is NOT retried — one attempt per (action, address) per wake; the
@@ -995,6 +997,24 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
         }
         foreignReadTargetsByAction.set(sourceAction, targets);
       },
+      // C3.5: assert the mount's stamped entries for the attempt's foreign
+      // reads with the claimed commit (space-scoped only — decision #3;
+      // unmounted documents contribute nothing and the attempt settles
+      // scalar-only for them under the vacuous rule). The host validates
+      // every stamp against its own served-point-read record; this is
+      // assertion, never authority.
+      foreignReadStampsForAction: (_sourceAction, addresses) => {
+        const manager = storage;
+        if (manager === null) return undefined;
+        const stamps: { space: string; id: string; seq: number }[] = [];
+        for (const address of addresses) {
+          if ((address.scope ?? "space") !== "space") continue;
+          const entry = manager.foreignDocument(address.space, address.id);
+          if (entry === undefined) continue;
+          stamps.push({ space: entry.space, id: entry.id, seq: entry.seq });
+        }
+        return stamps.length > 0 ? stamps : undefined;
+      },
       claimForAction: (action, lane) => liveClaimForLane(action, lane),
       permanentUnservedReasonForAction,
       onCandidate: (candidate, sourceAction) => {
@@ -1137,12 +1157,14 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     // C3.4 (2026-07-18): the wake now ALSO refreshes the read-only
     // foreign mount — authenticated point reads under the matched
     // action's live claim land stamped documents keyed
-    // (space, id, scopeKey) — but the intermediate posture stays
-    // pinned: the engine's foreign-space-surface fence and the
-    // servability classifier (`foreign-read-space`) are untouched, so
-    // the rerun's attempt still settles canonically unserved and
-    // clients fail open to their own replicas until C3.5's vector
-    // basis + C3.6's servability stage lift the fence.
+    // (space, id, scopeKey). C3.5 (built 2026-07-18) relaxed the
+    // engine's foreign-space-surface fence for space-scoped foreign
+    // READS and turned mount entries into the asserted vector basis,
+    // but the runner-side servability classifier
+    // (`foreign-read-space` / `dynamic-foreign-read-space`) is
+    // deliberately untouched, so the rerun's attempt still settles
+    // canonically unserved and clients fail open to their own
+    // replicas until C3.6's servability stage lifts the classifier.
     onForeignWake(notice) {
       const stalePieceIds = new Set<string>();
       for (const reader of notice.staleForeignReaders) {

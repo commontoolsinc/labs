@@ -18,6 +18,15 @@ export type ServerExecutionControlMetrics = Readonly<{
   leaseFenceRejects: number;
   leaseFenceRejectCauses: Readonly<Record<string, number>>;
   actionFirewallRejects: number;
+  /** C3.3b: observation mirrors withheld at the acting-principal READ
+   * gate (the denial's only footprint). */
+  crossSpaceMirrorsWithheld: number;
+  /** C3.5 (C3A13): Worker-asserted foreign read stamps dropped at host
+   * validation — no matching served point-read record (the strip's only
+   * footprint). */
+  foreignBasisAssertionsStripped: number;
+  /** C3.5: host-validated foreign basis components handed to the engine. */
+  foreignBasisComponentsValidated: number;
   acceptedCommitIndexLookups: number;
   acceptedCommitIndexTargetCandidates: number;
   acceptedCommitIndexDemandedPieces: number;

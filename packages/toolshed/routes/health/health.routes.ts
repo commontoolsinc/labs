@@ -78,6 +78,11 @@ export const ServerExecutionControlMetricsSchema = z.object({
   leaseFenceRejects: nonNegativeIntegerSchema,
   leaseFenceRejectCauses: z.record(z.string(), nonNegativeIntegerSchema),
   actionFirewallRejects: nonNegativeIntegerSchema,
+  // C3.3b/C3.5 cross-space counters: withheld mirrors, stripped
+  // Worker-asserted basis stamps, and host-validated basis components.
+  crossSpaceMirrorsWithheld: nonNegativeIntegerSchema,
+  foreignBasisAssertionsStripped: nonNegativeIntegerSchema,
+  foreignBasisComponentsValidated: nonNegativeIntegerSchema,
   acceptedCommitIndexLookups: nonNegativeIntegerSchema,
   acceptedCommitIndexTargetCandidates: nonNegativeIntegerSchema,
   acceptedCommitIndexDemandedPieces: nonNegativeIntegerSchema,

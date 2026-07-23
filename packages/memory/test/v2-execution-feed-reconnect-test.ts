@@ -560,6 +560,105 @@ Deno.test("resume carries a successful settlement frontier evicted from the boun
   }
 });
 
+Deno.test("C3.5 (C3A14/C3A15): the frontier coalescer merges vector bases per component and the resume snapshot carries the union", async () => {
+  const server = createServer(
+    "memory-v2-execution-feed-vector-frontier",
+    { maxExecutionEvents: 2 },
+  );
+  const firstMessages: ServerMessage[] = [];
+  const first = server.connect((message) => firstMessages.push(message));
+  let sponsor: Awaited<ReturnType<typeof acquireSponsorLease>> | undefined;
+  let second: ReturnType<Server["connect"]> | undefined;
+  try {
+    const firstAuth = await hello(first, firstMessages);
+    const opened = await open(first, firstMessages, "open", firstAuth, {});
+    assertExists(opened.ok?.sync?.execution);
+    sponsor = await acquireSponsorLease(server);
+    const acknowledgedFeedSeq = opened.ok.sync.execution.toFeedSeq;
+    first.close();
+
+    const live = await server.setExecutionClaim(
+      sponsor.lease,
+      claimInput("action:vector-settled", "computation"),
+    );
+    assertExists(live);
+    const spaceB = "did:key:z6Mk-feed-vector-b";
+    const spaceC = "did:key:z6Mk-feed-vector-c";
+    // Two settlements of one incarnation with HETEROGENEOUS component
+    // sets: the coalesced frontier must take the per-component maximum
+    // and UNION the components (C3A15's vacuous rule — the second
+    // settlement's missing C component does not erase the first's).
+    assertEquals(
+      server.publishActionSettlement({
+        branch: "",
+        claim: live,
+        inputBasisSeq: toInputBasisSeq(5),
+        inputBasis: [
+          { space: SPACE, seq: toInputBasisSeq(5) },
+          { space: spaceB, seq: toInputBasisSeq(9) },
+          { space: spaceC, seq: toInputBasisSeq(2) },
+        ],
+        outcome: "no-op",
+      }),
+      true,
+    );
+    assertEquals(
+      server.publishActionSettlement({
+        branch: "",
+        claim: live,
+        inputBasisSeq: toInputBasisSeq(7),
+        inputBasis: [
+          { space: SPACE, seq: toInputBasisSeq(7) },
+          { space: spaceB, seq: toInputBasisSeq(4) },
+        ],
+        outcome: "no-op",
+      }),
+      true,
+    );
+    // Evict the retained events so the resume snapshot must rebuild from
+    // the coalesced frontier (the C3A14 carrier under test).
+    const noise = await server.setExecutionClaim(
+      sponsor.lease,
+      claimInput("action:vector-noise", "computation"),
+    );
+    assertExists(noise);
+    assertEquals(server.revokeExecutionClaim(noise), true);
+
+    const secondMessages: ServerMessage[] = [];
+    second = server.connect((message) => secondMessages.push(message));
+    const secondAuth = await hello(second, secondMessages);
+    const resumed = await open(
+      second,
+      secondMessages,
+      "resume",
+      secondAuth,
+      {
+        sessionId: opened.ok.sessionId,
+        sessionToken: opened.ok.sessionToken,
+        seenSeq: opened.ok.serverSeq,
+        executionFeedSeq: acknowledgedFeedSeq,
+      },
+    );
+    const snapshot = resumed.ok?.sync?.execution?.snapshot;
+    assertExists(snapshot);
+    const frontier = snapshot.settlementFrontiers?.[0];
+    assertExists(frontier);
+    // Scalar max + per-component max under the vacuous union, sorted by
+    // space (home, then B/C by lexicographic order of the dids).
+    assertEquals(frontier.inputBasisSeq, toInputBasisSeq(7));
+    assertEquals(frontier.inputBasis, [
+      { space: spaceB, seq: toInputBasisSeq(9) },
+      { space: spaceC, seq: toInputBasisSeq(2) },
+      { space: SPACE, seq: toInputBasisSeq(7) },
+    ]);
+  } finally {
+    second?.close();
+    sponsor?.connection.close();
+    first.close();
+    await server.close();
+  }
+});
+
 Deno.test("server-primary resume rejects missing graduated execution subcapabilities", async () => {
   const server = createServer("memory-v2-execution-feed-resume-subcaps");
   const firstMessages: ServerMessage[] = [];

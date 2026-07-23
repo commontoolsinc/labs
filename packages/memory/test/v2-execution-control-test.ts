@@ -2372,19 +2372,25 @@ Deno.test("claimed transactions reject foreign and unsupported surfaces", async 
     );
     const output = "of:foreign-firewall-output";
     const base = claimedSpaceObservation(foreignClaim, output);
-    const foreignRead = {
+    // C3.5 (C3A2): space-scoped foreign READS are now admitted at the
+    // engine firewall — the read-side matrix lives in
+    // v2-execution-vector-basis-test.ts. WRITE surfaces keep the reject
+    // byte-identical; this fixture pins the write side.
+    const foreignWrite = {
       space: "did:key:z6Mk-foreign-firewall-space",
       scope: "space" as const,
-      id: "of:foreign-input",
+      id: "of:foreign-output",
       path: ["value"],
     };
     const foreignObservation = {
       ...base,
       completeActionScopeSummary: {
         ...base.completeActionScopeSummary,
-        reads: [foreignRead],
+        writes: [...base.completeActionScopeSummary.writes, foreignWrite],
       },
-      reads: [foreignRead],
+      actualChangedWrites: [...base.actualChangedWrites, foreignWrite],
+      currentKnownWrites: [...base.currentKnownWrites, foreignWrite],
+      declaredWrites: [...base.declaredWrites, foreignWrite],
     };
     const foreignError = await assertRejects(() =>
       session.transact({

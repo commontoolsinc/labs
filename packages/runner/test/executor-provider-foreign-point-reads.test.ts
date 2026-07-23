@@ -5,7 +5,10 @@
 // onto a foreign read), the Worker's read-only per-(foreign space) mount
 // keyed (space, id, scopeKey), fail-closed consumption, and the pinned
 // intermediate posture: stamped data LANDS while the attempt still
-// settles canonically unserved (`foreign-read-space`) until C3.5/C3.6.
+// settles canonically unserved (`foreign-read-space`) until C3.6 relaxes
+// the servability classifier (C3.5 relaxed the ENGINE's fourth reject
+// site and landed the vector basis, 2026-07-18 — the router-level
+// posture here is unchanged: the STATIC classifier still refuses).
 //
 // Fixture map (plan row C3.4; the memory-side file
 // `packages/memory/test/v2-execution-cross-space-point-read-test.ts`
@@ -37,12 +40,16 @@
 //      reads a foreign space still routes UNSERVED with
 //      `foreign-read-space` (canonical claim assertion attached) while
 //      `onForeignReadSurface` reports the deduped, path-rooted foreign
-//      READ addresses the wake-refresh consumes — the seam C3.5 lifts.
+//      READ addresses the wake-refresh consumes; since C3.5 the router
+//      ALSO attaches the Worker's `foreignReadStamps` assertion (from
+//      `foreignReadStampsForAction`) beside the claim assertion — the
+//      carriage C3.6's classifier relax inherits unchanged.
 //
-// Dated pointers (2026-07-18): C3.5 consumes mount entries as the
-// vector input basis and lifts the unserved posture; C3.6 relaxes the
-// servability classifier behind the dial; C3.8 re-validates stamped
-// epochs at the apply fence; C3.10b owns link-loss pending reads.
+// Dated pointers: C3.6 relaxes the servability classifier behind the
+// dial (the `dynamic-foreign-read-space` arm of the per-attempt firewall
+// is C3.6's too — C3.5 deliberately left the whole runner classifier
+// conservative); C3.8 re-validates stamped epochs at the apply fence;
+// C3.10b owns link-loss pending reads.
 import { assert, assertEquals, assertStrictEquals } from "@std/assert";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import {
@@ -748,12 +755,19 @@ Deno.test("C3.4 (posture): a claimed foreign-read attempt still settles canonica
   }> = [];
   const diagnostics: ExecutorCandidateDiagnostic[] = [];
   const settled: string[] = [];
+  const stampQueries: Array<readonly IMemorySpaceAddress[]> = [];
   const router = createExecutorActionTransactionRouter({
     servedSpace: ROUTER_SPACE,
     branch: "",
     claimForAction: () => claim,
     onForeignReadSurface: (sourceAction, addresses) =>
       surfaces.push({ sourceAction, addresses }),
+    // C3.5: the stamp carriage — queried with the SAME deduped foreign
+    // read surface, attached beside the claim assertion.
+    foreignReadStampsForAction: (_sourceAction, addresses) => {
+      stampQueries.push(addresses);
+      return [{ space: READ_SPACE, id: FOREIGN_INPUT.id, seq: 41 }];
+    },
     onCandidate: () => {
       throw new Error("a claimed unservable attempt must not re-candidate");
     },
@@ -772,13 +786,17 @@ Deno.test("C3.4 (posture): a claimed foreign-read attempt still settles canonica
   });
   // The pinned intermediate posture: point reads may land stamped data
   // in the mount, but the attempt STILL settles canonically unserved —
-  // the servability classifier is untouched until C3.6.
+  // the servability classifier is untouched until C3.6 (C3.5 relaxed the
+  // ENGINE firewall only; the router's static classify still refuses).
   assertEquals(route.disposition, "unserved");
   assert(route.disposition === "unserved");
   assertEquals(route.diagnosticCode, "foreign-read-space");
   route.onSettled?.();
   assertEquals(settled, ["foreign-read-space"]);
-  // The canonical unserved settle carries the exact claim assertion.
+  // The canonical unserved settle carries the exact claim assertion AND
+  // (C3.5) the Worker's stamp assertion — the same attach point the
+  // upstream claimed route uses, so C3.6's classifier relax inherits the
+  // carriage without router changes.
   assertEquals(
     (commit.schedulerObservation as Record<string, unknown>)
       .executionClaimAssertion,
@@ -788,6 +806,16 @@ Deno.test("C3.4 (posture): a claimed foreign-read attempt still settles canonica
       claimGeneration: 4,
     },
   );
+  assertEquals(
+    (commit.schedulerObservation as Record<string, unknown>)
+      .foreignReadStamps,
+    [{ space: READ_SPACE, id: FOREIGN_INPUT.id, seq: 41 }],
+  );
+  assertEquals(stampQueries.length, 1);
+  assertEquals(stampQueries[0].map((address) => address.id), [
+    FOREIGN_INPUT.id,
+    "of:xpr-foreign:router-second",
+  ]);
   // The C3.5 seam: the foreign READ surface reported once, deduped by
   // (space, scope, id) and path-rooted — the exact key shape the
   // Worker's mount refresh consumes.

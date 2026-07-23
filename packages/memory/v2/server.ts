@@ -58,6 +58,8 @@ import {
   type GraphQueryResult,
   type GraphQueryTrigger,
   type HelloMessage,
+  type InputBasisComponent,
+  inputBasisComponentForSpace,
   type LegacyBackgroundExclusion,
   type LegacyBackgroundExclusionAcquireRequest,
   type LegacyBackgroundExclusionReleaseRequest,
@@ -68,6 +70,7 @@ import {
   type MemoryProtocolFlags,
   type Operation,
   parseMemoryProtocolFlags,
+  type ProvenanceInputBasisComponent,
   type ResponseMessage,
   type SchedulerActionSnapshotQuery,
   type SchedulerExecutionContextKey,
@@ -97,6 +100,7 @@ import {
   type SqliteRegisterDiskSourceResult,
   type SqliteResultColumn,
   toDocumentPath,
+  toInputBasisSeq,
   type TransactRequest,
   type V2Error,
   type WatchAddRequest,
@@ -512,8 +516,11 @@ export const FOREIGN_POINT_READ_TIMEOUT = "foreign-read-timeout";
  * authorization-epoch stamp for the ACTING principal (C3.2's table,
  * read in the same synchronous engine section as the document — see
  * `answerForeignPointRead`). C3.5's vector input basis consumes
- * (space, seq); C3.8's apply fence re-validates `authorizationEpoch`
- * by equality (both dated 2026-07-18, neither built here).
+ * (space, seq) — built 2026-07-18: a served result also lands in the
+ * host's `#servedForeignReadStamps` ledger, the validation source for
+ * Worker-asserted basis stamps; C3.8's apply fence re-validates
+ * `authorizationEpoch` by equality (dated 2026-07-18, not built here —
+ * the provenance component carries the stamp for it).
  */
 export type ExecutorForeignPointReadOutcome =
   | {
@@ -1942,7 +1949,74 @@ export class Server {
     readSpace: string;
     resolve: (outcome: ExecutorForeignPointReadOutcome) => void;
     timer: ReturnType<typeof setTimeout>;
+    /** C3.5: the requesting claim's incarnation key — served results are
+     * recorded into `#servedForeignReadStamps` under this key. */
+    claimIncarnationKey: string;
+    /** C3.5: the requested document id (the result wire carries none). */
+    docId: string;
   }>();
+
+  /**
+   * C3.5: the home host's OWN record of served foreign point reads — the
+   * validation source for Worker-asserted `foreignReadStamps` (C3A13: the
+   * engine cannot verify a foreign seq; the Worker cannot be trusted to).
+   * Keyed by claim incarnation key → `space\0id` → recent served stamps.
+   * Only results that passed the pending-map answering-space check land
+   * here, so every recorded stamp arrived over the link authoritative for
+   * its space. A bounded window of recent stamps per document (not just
+   * the latest) keeps the designed-in mid-run mount refresh (a foreign
+   * wake racing a long run) from falsely stripping the run's slightly
+   * older — but genuinely served — stamp. Entries die with their claim
+   * incarnation (lazy sweep against `#executionClaims`).
+   */
+  #servedForeignReadStamps = new Map<
+    string,
+    Map<string, {
+      seq: number;
+      authorizationEpoch: ForeignAuthorizationEpochStamp;
+    }[]>
+  >();
+  static readonly #SERVED_FOREIGN_STAMPS_PER_DOC = 4;
+
+  /** Drop served-stamp records whose claim incarnation is no longer live.
+   * Called from the record and validate paths — the ledger can never
+   * outgrow live executor claims by more than the in-flight window. */
+  #sweepServedForeignReadStamps(): void {
+    if (this.#servedForeignReadStamps.size === 0) return;
+    const live = new Set(
+      [...this.#executionClaims.values()].map(executionClaimIncarnationKey),
+    );
+    for (const key of this.#servedForeignReadStamps.keys()) {
+      if (!live.has(key)) this.#servedForeignReadStamps.delete(key);
+    }
+  }
+
+  /** C3.5: record one served foreign point read for later Worker-assertion
+   * validation. Bounded per (claim, doc); newest last. */
+  #recordServedForeignReadStamp(
+    claimIncarnationKey: string,
+    readSpace: string,
+    docId: string,
+    stamp: { seq: number; authorizationEpoch: ForeignAuthorizationEpochStamp },
+  ): void {
+    this.#sweepServedForeignReadStamps();
+    let docs = this.#servedForeignReadStamps.get(claimIncarnationKey);
+    if (docs === undefined) {
+      docs = new Map();
+      this.#servedForeignReadStamps.set(claimIncarnationKey, docs);
+    }
+    const key = `${readSpace}\0${docId}`;
+    let stamps = docs.get(key);
+    if (stamps === undefined) {
+      stamps = [];
+      docs.set(key, stamps);
+    }
+    if (stamps.some((held) => held.seq === stamp.seq)) return;
+    stamps.push(stamp);
+    while (stamps.length > Server.#SERVED_FOREIGN_STAMPS_PER_DOC) {
+      stamps.shift();
+    }
+  }
 
   #recordSchemaEnsured(key: string): void {
     this.#ensuredSchemas.set(key, true);
@@ -2177,6 +2251,17 @@ export class Server {
     // (the home-side observation is untouched), so this counter is the
     // denial's only footprint — see canMirrorSchedulerObservationToSpace.
     crossSpaceMirrorsWithheld: 0,
+    // C3.5 (C3A13, B.4-style counting): Worker-asserted foreign read
+    // stamps DROPPED at host validation because no matching served
+    // point-read record exists for the asserting claim incarnation — a
+    // fabricated seq, a stamp served to another claim, or a record aged
+    // out. The strip is silent by design (the attempt still settles,
+    // minus the component — vacuous coverage), so this counter is its
+    // only footprint.
+    foreignBasisAssertionsStripped: 0,
+    // C3.5: host-validated foreign basis components handed to the engine
+    // (at most one per (attempt, space)).
+    foreignBasisComponentsValidated: 0,
     acceptedCommitIndexLookups: 0,
     acceptedCommitIndexTargetCandidates: 0,
     acceptedCommitIndexDemandedPieces: 0,
@@ -4150,6 +4235,109 @@ export class Server {
     return claims.size > 0 ? claims : undefined;
   }
 
+  /**
+   * C3.5: turn each claimed observation's Worker-asserted
+   * `foreignReadStamps` into HOST-VALIDATED provenance components, keyed by
+   * localSeq for `ApplyCommitOptions.foreignInputBases`.
+   *
+   * The validation source is `#servedForeignReadStamps` — the host's own
+   * record of what it served THIS claim incarnation over the authenticated
+   * link (C3A13): an asserted (space, id, seq) is admitted iff a recorded
+   * served stamp matches it EXACTLY; everything else is dropped and counted
+   * (`foreignBasisAssertionsStripped`) — the vector analogue of the
+   * asserted-scalar strip, failing toward vacuous coverage, never toward a
+   * fabricated basis. Per space, the surviving stamps aggregate to one
+   * component: seq = max (the covering frontier), epoch = min (C3.8's
+   * equality fence must fail if ANY consumed read predates an authorization
+   * change; epochs only grow, so min is the strictest stamped value).
+   *
+   * The engine applies the remaining authority checks (declared-read
+   * restriction, home-component authorship, the strip of raw assertions) —
+   * this method never touches the commit itself.
+   */
+  #foreignInputBasesForCommit(
+    executionClaims: ReadonlyMap<number, ExecutionClaim> | undefined,
+    observations: readonly CommitSchedulerObservation[],
+  ):
+    | ReadonlyMap<number, readonly ProvenanceInputBasisComponent[]>
+    | undefined {
+    if (executionClaims === undefined) return undefined;
+    let swept = false;
+    const bases = new Map<
+      number,
+      readonly ProvenanceInputBasisComponent[]
+    >();
+    for (const { localSeq, observation } of observations) {
+      const asserted = observation.foreignReadStamps;
+      if (asserted === undefined || asserted.length === 0) continue;
+      const claim = executionClaims.get(localSeq);
+      if (claim === undefined) {
+        this.executionStats.foreignBasisAssertionsStripped += asserted.length;
+        continue;
+      }
+      if (!swept) {
+        this.#sweepServedForeignReadStamps();
+        swept = true;
+      }
+      const served = this.#servedForeignReadStamps.get(
+        executionClaimIncarnationKey(claim),
+      );
+      const perSpace = new Map<string, {
+        seq: number;
+        epoch: ForeignAuthorizationEpochStamp;
+      }>();
+      for (const assertion of asserted) {
+        const match = served
+          ?.get(`${assertion.space}\0${assertion.id}`)
+          ?.find((stamp) => stamp.seq === assertion.seq);
+        if (
+          match === undefined ||
+          match.authorizationEpoch.space !== assertion.space
+        ) {
+          this.executionStats.foreignBasisAssertionsStripped += 1;
+          continue;
+        }
+        const held = perSpace.get(assertion.space);
+        if (held === undefined) {
+          perSpace.set(assertion.space, {
+            seq: match.seq,
+            epoch: match.authorizationEpoch,
+          });
+          continue;
+        }
+        if (held.epoch.principal !== match.authorizationEpoch.principal) {
+          // Defensive: one claim incarnation resolves ONE acting principal
+          // (the lease sponsor or the bound lane grant), so per-space
+          // stamps cannot legitimately disagree. Fail the whole space
+          // toward vacuous rather than pick a side.
+          this.executionStats.foreignBasisAssertionsStripped += 1;
+          perSpace.delete(assertion.space);
+          continue;
+        }
+        perSpace.set(assertion.space, {
+          seq: Math.max(held.seq, match.seq),
+          epoch: held.epoch.epoch <= match.authorizationEpoch.epoch
+            ? held.epoch
+            : match.authorizationEpoch,
+        });
+      }
+      if (perSpace.size === 0) continue;
+      const components = [...perSpace.entries()].map((
+        [space, { seq, epoch }],
+      ): ProvenanceInputBasisComponent => ({
+        space,
+        seq: toInputBasisSeq(seq),
+        authorizationEpoch: {
+          principal: epoch.principal,
+          epoch: epoch.epoch,
+        },
+      }));
+      this.executionStats.foreignBasisComponentsValidated += components.length;
+      bases.set(localSeq, components);
+    }
+    return bases.size > 0 ? bases : undefined;
+  }
+
   #executionControlSync(
     session: SessionState,
     event: ExecutionControlEvent,
@@ -5283,6 +5471,36 @@ export class Server {
       settlement.inputBasisSeq < 0
     ) {
       return false;
+    }
+    // C3.5: vector coherence — when present, the vector must contain
+    // exactly one component for the settlement's own space and it must
+    // equal the scalar (the engine authors them from one value; a caller
+    // whose vector disagrees with its scalar is malformed), no duplicate
+    // spaces, and every foreign component a positive stamped seq (served
+    // stamps are positive by wire contract; the home scalar may be 0 for
+    // a no-read attempt).
+    if (settlement.inputBasis !== undefined) {
+      const components = settlement.inputBasis;
+      const spaces = new Set(components.map((component) => component.space));
+      const home = inputBasisComponentForSpace(
+        components,
+        settlement.claim.space,
+      );
+      if (
+        components.length === 0 ||
+        spaces.size !== components.length ||
+        home === undefined ||
+        home.seq !== settlement.inputBasisSeq ||
+        components.some((component) =>
+          typeof component.space !== "string" ||
+          component.space.length === 0 ||
+          !Number.isSafeInteger(component.seq) ||
+          component.seq < 0 ||
+          (component.space !== settlement.claim.space && component.seq < 1)
+        )
+      ) {
+        return false;
+      }
     }
     if (
       settlement.outcome === "committed"
@@ -6762,6 +6980,13 @@ export class Server {
             schedulerObservations,
           );
           exactClaimedActionAttempt = executionClaims !== undefined;
+          // C3.5: validate Worker-asserted foreign read stamps against the
+          // host's own served-point-read records BEFORE the engine authors
+          // any basis (the engine receives only host-validated components).
+          const foreignInputBases = this.#foreignInputBasesForCommit(
+            executionClaims,
+            schedulerObservations,
+          );
           const previousReadSpaces = new Map<number, Set<string>>();
           for (const { localSeq, observation } of schedulerObservations) {
             const previousSnapshots = Engine.listSchedulerActionSnapshots(
@@ -6832,6 +7057,7 @@ export class Server {
                     executionClaims,
                     executionLeaseFence,
                     sqliteAttachments,
+                    foreignInputBases,
                   });
                 } finally {
                   persistSpan.end();
@@ -9411,6 +9637,7 @@ export class Server {
         executionClaimAssertion: _assertedClaim,
         executionUnservedAttempt: _unservedAttempt,
         executionProvenance: _assertedProvenance,
+        foreignReadStamps: _assertedForeignReadStamps,
         ...requestedObservation
       } = observation;
       return {
@@ -9433,11 +9660,27 @@ export class Server {
     this.executionStats.acceptedActionAttempts +=
       commit.actionAttempts?.length ?? 0;
     for (const attempt of commit.actionAttempts ?? []) {
+      // C3.5 (C3A14: this literal is a settlement CARRIER): the vector
+      // projects from provenance as {space, seq} — the epoch stamps stay
+      // host-side on provenance for C3.8's apply fence; settlements are
+      // client-visible. NOTE (C3A19, ruling owned by C3.11): a vector
+      // settlement exposes foreign space id + seq progression to every
+      // session the home delivery predicate matches — declared-and-counted
+      // vs delivery-time stripping is recorded there, not decided here.
+      const inputBasis = attempt.provenance.inputBasis === undefined
+        ? undefined
+        : attempt.provenance.inputBasis.map((
+          component,
+        ): InputBasisComponent => ({
+          space: component.space,
+          seq: component.seq,
+        }));
       const settlement: ActionSettlement = attempt.outcome === "committed"
         ? {
           branch: attempt.claim.branch,
           claim: attempt.claim,
           inputBasisSeq: attempt.provenance.inputBasisSeq,
+          ...(inputBasis !== undefined ? { inputBasis } : {}),
           outcome: "committed",
           acceptedCommitSeq: attempt.acceptedCommitSeq,
         }
@@ -9445,6 +9688,7 @@ export class Server {
           branch: attempt.claim.branch,
           claim: attempt.claim,
           inputBasisSeq: attempt.provenance.inputBasisSeq,
+          ...(inputBasis !== undefined ? { inputBasis } : {}),
           outcome: attempt.outcome,
           ...(attempt.outcome === "unserved"
             ? { diagnosticCode: attempt.diagnosticCode }
@@ -9949,10 +10193,23 @@ export class Server {
       writerSessionId: message.writerSessionId,
       originExecutionContextKey: message.originExecutionContextKey,
       observation,
-      // C3A16 pointer (2026-07-18): like the pre-C3.1b direct call, no
-      // `causeCoverageSeq` rides here, so the upsert's cause consumption
-      // still crosses seq domains; C3.5's vector (read-space component)
-      // owns the fix — do not add an interim value as part of routing.
+      // C3.5 (C3A16): cause rows in THIS engine carry the READ space's
+      // seqs, while a provenance-carrying observation's scalar is the
+      // HOME space's — inheriting it (the upsert's fallback) consumes
+      // read-space causes through a home-domain number. Pass the vector's
+      // READ-SPACE component instead; a settlement without a component for
+      // this space covers NOTHING here (C3A15 vacuous: 0 consumes no
+      // cause row, seqs are ≥ 1). Ordinary client observations keep the
+      // clear-all fallback byte-identically — their mirror semantics
+      // predate the vector and carry no provenance.
+      ...(observation.executionProvenance !== undefined
+        ? {
+          causeCoverageSeq: inputBasisComponentForSpace(
+            observation.executionProvenance.inputBasis,
+            context.space,
+          )?.seq ?? 0,
+        }
+        : {}),
       ...(windowDirtySeq >= 1
         ? {
           readToMirrorWindow: {
@@ -10807,7 +11064,11 @@ export class Server {
   #resolveForeignReadActingAuthority(
     lease: ExecutionLeaseHandle,
     claimRef: ExecutorForeignPointReadClaimRef,
-  ): { principal: string; contextKey: SchedulerExecutionContextKey } {
+  ): {
+    principal: string;
+    contextKey: SchedulerExecutionContextKey;
+    claim: ExecutionClaim;
+  } {
     const authority = this.#executionLeaseAuthorities.get(lease);
     const owned = this.#ownedExecutionLeases.get(
       executionLeaseKey(lease.space, lease.branch),
@@ -10839,17 +11100,27 @@ export class Server {
       throw foreignReadAuthorityRejection();
     }
     if (live.contextKey === "space") {
-      return { principal: authority.handle.onBehalfOf, contextKey: "space" };
+      return {
+        principal: authority.handle.onBehalfOf,
+        contextKey: "space",
+        claim: live,
+      };
     }
     const binding = this.#executionClaimLaneBindings.get(claimKey);
     if (binding === undefined) {
       throw foreignReadAuthorityRejection();
     }
     const grant = this.#liveLaneGrantForKey(binding.laneKey);
-    if (grant === undefined || grant.laneGeneration !== binding.laneGeneration) {
+    if (
+      grant === undefined || grant.laneGeneration !== binding.laneGeneration
+    ) {
       throw foreignReadAuthorityRejection();
     }
-    return { principal: grant.principal, contextKey: live.contextKey };
+    return {
+      principal: grant.principal,
+      contextKey: live.contextKey,
+      claim: live,
+    };
   }
 
   /**
@@ -10880,9 +11151,11 @@ export class Server {
    *    C3A13).
    *
    * The result's `served.seq`/`authorizationEpoch` land in the READ
-   * space's domains: callers must never merge them into home watermarks
-   * (C3.5's vector basis is the consumer; C3.10b owns link-loss pending
-   * disposition — both dated 2026-07-18).
+   * space's domains: callers must never merge them into home watermarks.
+   * C3.5 (built 2026-07-18) consumes them as the vector basis — the
+   * served stamp is recorded per claim incarnation for later assertion
+   * validation; C3.10b owns link-loss pending disposition (dated
+   * 2026-07-18).
    */
   async executorForeignPointRead(
     lease: ExecutionLeaseHandle,
@@ -10930,6 +11203,12 @@ export class Server {
       readSpace,
       resolve: pending.resolve,
       timer,
+      // C3.5: served results record under this exact incarnation so a
+      // later claimed commit's asserted stamps validate against what THIS
+      // claim was actually served (a rotated/reissued claim never inherits
+      // a predecessor's stamps).
+      claimIncarnationKey: executionClaimIncarnationKey(liveActing.claim),
+      docId: address.id,
     });
     try {
       this.#crossSpaceRouter.link(lease.space, readSpace).send({
@@ -11110,6 +11389,22 @@ export class Server {
     this.#pendingForeignPointReads.delete(message.requestId);
     clearTimeout(pending.timer);
     const result = message.result;
+    if (result.status === "served") {
+      // C3.5: the host's own served-stamp record — the ONLY source the
+      // vector's foreign components validate against (C3A13). Recording
+      // happens strictly after the answering-space check above, so a
+      // stamp can only enter under the space its authoritative host
+      // answered for.
+      this.#recordServedForeignReadStamp(
+        pending.claimIncarnationKey,
+        context.fromSpace,
+        pending.docId,
+        {
+          seq: result.seq,
+          authorizationEpoch: result.authorizationEpoch,
+        },
+      );
+    }
     pending.resolve(
       result.status === "served"
         ? {

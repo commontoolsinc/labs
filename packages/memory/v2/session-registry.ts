@@ -3,6 +3,7 @@ import {
   executionClaimIncarnationKey,
   ExecutionControlEvent,
   type ExecutionSettlementFrontier,
+  mergeInputBasisVectors,
   SessionDescriptor,
   SessionToken,
   WatchSpec,
@@ -367,6 +368,13 @@ export class SessionRegistry {
         ? event.settlement.acceptedCommitSeq
         : current.requiredAcceptedCommitSeq
       : current?.requiredAcceptedCommitSeq;
+    // C3.5 (C3A14: this coalescer is a settlement carrier): the vector
+    // merges per component under the C3A15 vacuous union — a component
+    // one settlement lacks rides through from the other, never zeroes.
+    const inputBasis = mergeInputBasisVectors(
+      current?.inputBasis,
+      event.settlement.inputBasis,
+    );
     session.executionSettlementFrontiers.set(key, {
       branch: event.settlement.branch,
       claim: event.settlement.claim,
@@ -374,6 +382,7 @@ export class SessionRegistry {
           event.settlement.inputBasisSeq > current.inputBasisSeq
         ? event.settlement.inputBasisSeq
         : current.inputBasisSeq,
+      ...(inputBasis !== undefined ? { inputBasis } : {}),
       throughFeedSeq: feedSeq,
       ...(requiredAcceptedCommitSeq === undefined
         ? {}

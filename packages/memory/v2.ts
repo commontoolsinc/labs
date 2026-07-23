@@ -540,10 +540,52 @@ export const toAcceptedCommitSeq = (value: number): AcceptedCommitSeq => {
 };
 
 /**
+ * C3.5: one per-space component of the vector input basis. `seq` is in the
+ * NAMED space's seq domain — components are never comparable across spaces,
+ * and a component for the settlement's own (home) space always equals the
+ * scalar `inputBasisSeq` by construction.
+ *
+ * Coverage relation (C3A15, pinned once for every consumer): a settlement or
+ * frontier with NO component for a space vacuously covers nothing and drops
+ * nothing for that space — absent is never zero and never satisfied; a
+ * present-but-older component never covers. Merges therefore UNION components
+ * and take the per-component maximum ({@link mergeInputBasisVectors}).
+ */
+export interface InputBasisComponent {
+  space: string;
+  seq: InputBasisSeq;
+}
+
+/**
+ * C3.5: a provenance basis component — the settlement component plus the
+ * C3.4 read-time authorization-epoch stamp for foreign spaces (the value
+ * stamped by the read host in the same synchronous section as the document
+ * read; C3.8's apply fence re-validates it by EQUALITY, dated 2026-07-18).
+ * The home component carries no stamp — home authority is fenced by the
+ * lease/claim machinery, not epochs. When one attempt consumed several
+ * stamped reads of one space, `seq` is their maximum (the covering frontier)
+ * and `epoch` the MINIMUM stamped epoch, so C3.8's equality check fails if
+ * ANY consumed read predates an authorization change.
+ */
+export interface ProvenanceInputBasisComponent extends InputBasisComponent {
+  authorizationEpoch?: { principal: string; epoch: number };
+}
+
+/**
  * Host-authored metadata for one accepted server action transaction.
  * `onBehalfOf` is execution authority, not semantic authorship. The host
  * derives it from the authenticated sponsor session and derives the basis from
  * the validated commit reads; Worker/client values are never authoritative.
+ *
+ * `inputBasis` (C3.5) is the additive vector basis: present ONLY when the
+ * attempt consumed validated foreign point reads, always containing the home
+ * component (≡ `inputBasisSeq`) plus one component per consumed foreign
+ * space, sorted by space. Foreign components are admissible only from the
+ * home HOST's own served-point-read records (C3A13): the host validates the
+ * Worker's asserted stamps against what it actually served over the
+ * authenticated C3.1 link and the engine authors from those host-validated
+ * values — a Worker/client-supplied component is stripped exactly like the
+ * asserted scalar.
  */
 export interface ActionExecutionProvenance {
   claim: ActionClaimKey;
@@ -552,6 +594,7 @@ export interface ActionExecutionProvenance {
   claimGeneration: number;
   causedBy: number[];
   inputBasisSeq: InputBasisSeq;
+  inputBasis?: readonly ProvenanceInputBasisComponent[];
 }
 
 export interface ExecutionClaimSetEvent {
@@ -572,6 +615,12 @@ export type ActionSettlement =
     branch: BranchName;
     claim: ExecutionClaim;
     inputBasisSeq: InputBasisSeq;
+    /** C3.5 vector basis (see {@link InputBasisComponent}): absent for
+     * same-space attempts (scalar-only settlements are byte-identical to
+     * pre-C3.5); when present it includes the home component ≡
+     * `inputBasisSeq`. Epoch stamps stay on provenance — settlements are
+     * client-visible and carry {space, seq} only. */
+    inputBasis?: readonly InputBasisComponent[];
     outcome: "committed";
     acceptedCommitSeq: AcceptedCommitSeq;
     diagnosticCode?: never;
@@ -580,6 +629,7 @@ export type ActionSettlement =
     branch: BranchName;
     claim: ExecutionClaim;
     inputBasisSeq: InputBasisSeq;
+    inputBasis?: readonly InputBasisComponent[];
     outcome: "no-op" | "failed" | "unserved";
     acceptedCommitSeq?: never;
     diagnosticCode?: string;
@@ -616,6 +666,10 @@ export interface ExecutionSettlementFrontier {
   branch: BranchName;
   claim: ExecutionClaim;
   inputBasisSeq: InputBasisSeq;
+  /** C3.5 vector basis, coalesced per component under the C3A15 vacuous
+   * union ({@link mergeInputBasisVectors}). Absent when every summarized
+   * settlement was scalar-only. */
+  inputBasis?: readonly InputBasisComponent[];
   throughFeedSeq: number;
   requiredAcceptedCommitSeq?: AcceptedCommitSeq;
 }
@@ -628,15 +682,59 @@ export const actionSettlementFromFrontier = (
       branch: frontier.branch,
       claim: frontier.claim,
       inputBasisSeq: frontier.inputBasisSeq,
+      // C3A14: the frontier-reconstructed settlement is a settlement
+      // CARRIER — dropping the vector here would strand or prematurely
+      // drop held foreign-read overlays across reconnects.
+      ...(frontier.inputBasis !== undefined
+        ? { inputBasis: frontier.inputBasis }
+        : {}),
       outcome: "no-op",
     }
     : {
       branch: frontier.branch,
       claim: frontier.claim,
       inputBasisSeq: frontier.inputBasisSeq,
+      ...(frontier.inputBasis !== undefined
+        ? { inputBasis: frontier.inputBasis }
+        : {}),
       outcome: "committed",
       acceptedCommitSeq: frontier.requiredAcceptedCommitSeq,
     };
+
+/**
+ * C3.5/C3A15: the ONLY merge for vector bases — union components by space
+ * and keep the per-space maximum. The union arm IS the vacuous
+ * missing-component rule: a component absent on one side rides through
+ * unchanged (absent never means zero), and a present-but-older component
+ * never wins. Result components are sorted by space for a deterministic
+ * wire shape; both-undefined stays undefined (scalar-only settlements
+ * merge byte-identically to pre-C3.5).
+ */
+export const mergeInputBasisVectors = (
+  left: readonly InputBasisComponent[] | undefined,
+  right: readonly InputBasisComponent[] | undefined,
+): readonly InputBasisComponent[] | undefined => {
+  if (left === undefined) return right;
+  if (right === undefined) return left;
+  const merged = new Map<string, InputBasisComponent>();
+  for (const component of [...left, ...right]) {
+    const held = merged.get(component.space);
+    if (held === undefined || component.seq > held.seq) {
+      merged.set(component.space, component);
+    }
+  }
+  return [...merged.values()].sort((a, b) =>
+    a.space < b.space ? -1 : a.space > b.space ? 1 : 0
+  );
+};
+
+/** C3.5: the component a basis carries for `space`, or undefined — and
+ * undefined MUST be treated as vacuous by every consumer (C3A15). */
+export const inputBasisComponentForSpace = (
+  basis: readonly InputBasisComponent[] | undefined,
+  space: string,
+): InputBasisComponent | undefined =>
+  basis?.find((component) => component.space === space);
 
 export interface ExecutionFeedBatch {
   fromFeedSeq: number;
