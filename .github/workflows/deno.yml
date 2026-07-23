@@ -20,6 +20,14 @@ jobs:
   # ---------------------------------------------------------------------------
   # Tier 0 – These jobs all start immediately with no dependencies
   # ---------------------------------------------------------------------------
+  dashboard:
+    name: "Dashboard"
+    if: ${{ github.event_name == 'pull_request' }}
+    uses: ./.github/workflows/dashboard-image.yml
+    permissions:
+      contents: read
+      id-token: write
+
   check:
     name: "Check"
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -987,6 +995,43 @@ jobs:
           path: perf-metrics-backfill.json
           retention-days: 90
           if-no-files-found: ignore
+
+  pr-ci:
+    name: "PR CI"
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    needs:
+      - dashboard
+      - check
+      - cfcheck
+      - test
+      - runner-test
+      - build-toolshed
+      - build-bg-piece-service
+      - build-cf
+      - generated-patterns-integration-test
+      - package-integration-test
+      - cli-integration-test
+      - pattern-integration-test
+      - pattern-reload-integration-test
+      - pattern-unit-test
+      - perf-check
+    permissions: {}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: 🔎 Verify pull request jobs
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          failures=$(jq -r '
+            to_entries[]
+            | select(.value.result != "success")
+            | "\(.key): \(.value.result)"
+          ' <<< "$JOB_RESULTS")
+
+          if [[ -n "$failures" ]]; then
+            printf 'Unsuccessful pull request jobs:\n%s\n' "$failures"
+            exit 1
+          fi
 
   attest-binaries:
     name: "Attest and Upload Binaries"

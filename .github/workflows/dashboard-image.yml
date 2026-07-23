@@ -1,19 +1,8 @@
 name: Dashboard Image
 
 on:
+  workflow_call:
   push:
-    branches: [main]
-    paths:
-      - "Dockerfile.dashboard"
-      - "packages/dashboard/**"
-      - "scripts/ci-gantt.ts"
-      - "deno.jsonc"
-      - "deno.lock"
-      - ".dockerignore"
-      - ".github/actions/deno-setup/**"
-      - ".github/actions/deno-install/**"
-      - ".github/workflows/dashboard-image.yml"
-  pull_request:
     branches: [main]
     paths:
       - "Dockerfile.dashboard"
@@ -30,7 +19,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: dashboard-image-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -124,7 +113,7 @@ jobs:
   publish:
     name: Publish dashboard image
     needs: [dashboard_tests, dashboard_build, publish_authorization]
-    if: ${{ needs.publish_authorization.outputs.allowed == 'true' }}
+    if: ${{ !cancelled() && needs.publish_authorization.outputs.allowed == 'true' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     permissions:
@@ -243,3 +232,48 @@ jobs:
             echo "- Tag: \`${IMAGE}:${SOURCE_SHA}\`"
             echo "- Digest: \`${IMAGE}@${DIGEST}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  dashboard_ci:
+    name: Dashboard CI
+    needs:
+      - dashboard_tests
+      - dashboard_build
+      - publish_authorization
+      - publish
+    if: ${{ always() }}
+    permissions: {}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: 🔎 Verify dashboard jobs
+        env:
+          AUTHORIZATION_RESULT: ${{ needs.publish_authorization.result }}
+          BUILD_RESULT: ${{ needs.dashboard_build.result }}
+          PUBLISH_ALLOWED: ${{ needs.publish_authorization.outputs.allowed }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+          TEST_RESULT: ${{ needs.dashboard_tests.result }}
+        shell: bash
+        run: |
+          failures=()
+
+          [[ "$TEST_RESULT" == "success" ]] ||
+            failures+=("dashboard_tests: ${TEST_RESULT}")
+          [[ "$BUILD_RESULT" == "success" ]] ||
+            failures+=("dashboard_build: ${BUILD_RESULT}")
+          [[ "$AUTHORIZATION_RESULT" == "success" ]] ||
+            failures+=("publish_authorization: ${AUTHORIZATION_RESULT}")
+
+          if [[ "$PUBLISH_ALLOWED" == "true" ]]; then
+            [[ "$PUBLISH_RESULT" == "success" ]] ||
+              failures+=("publish: ${PUBLISH_RESULT}")
+          elif [[ "$PUBLISH_ALLOWED" == "false" ]]; then
+            [[ "$PUBLISH_RESULT" == "skipped" ]] ||
+              failures+=("publish: ${PUBLISH_RESULT}")
+          else
+            failures+=("publish_authorization output: ${PUBLISH_ALLOWED:-missing}")
+          fi
+
+          if (( ${#failures[@]} > 0 )); then
+            printf 'Unsuccessful dashboard jobs:\n'
+            printf '%s\n' "${failures[@]}"
+            exit 1
+          fi
