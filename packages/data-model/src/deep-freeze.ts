@@ -307,6 +307,13 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
       break;
     }
 
+    case "symbol": {
+      // Only registry-interned symbols are `FabricValue`s; unique (uninterned)
+      // symbols are not portable across realms and are rejected, matching
+      // `isFabricValue()` / `isFabricValueLayer()`.
+      return Symbol.keyFor(value) !== undefined;
+    }
+
     default: {
       // It's a primitive. Return here for efficiency, rather than do the
       // heavyweight setup for recursive tracing.
@@ -321,8 +328,9 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
   let cacheableByIdentity = true;
   const checkValue = (item: unknown): boolean => {
     if (typeof item === "function") return false;
+    if (typeof item === "symbol") return Symbol.keyFor(item) !== undefined;
     if (item === null || typeof item !== "object") {
-      // It's a non-function primitive.
+      // It's a non-function, non-symbol primitive.
       return true;
     } else if (seen.has(item)) {
       return true;

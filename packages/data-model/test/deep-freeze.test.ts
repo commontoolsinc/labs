@@ -375,6 +375,29 @@ describe("deep-freeze", () => {
     });
   });
 
+  describe("`isDeepFrozenFabricValue()` symbols", () => {
+    // Only registry-interned symbols are `FabricValue`s; unique (uninterned)
+    // symbols are not portable across realms and are rejected, consistent with
+    // `isFabricValue()` / `isFabricValueLayer()`.
+    it("returns `true` for an interned symbol", () => {
+      expect(isDeepFrozenFabricValue(Symbol.for("k"))).toBe(true);
+    });
+
+    it("returns `false` for a unique (uninterned) symbol", () => {
+      expect(isDeepFrozenFabricValue(Symbol("k"))).toBe(false);
+    });
+
+    it("returns `false` for a frozen tree reaching a unique symbol", () => {
+      const tree = Object.freeze({ a: 1, s: Symbol("nope") });
+      expect(isDeepFrozenFabricValue(tree)).toBe(false);
+    });
+
+    it("returns `true` for a frozen tree reaching only interned symbols", () => {
+      const tree = Object.freeze({ a: 1, s: Symbol.for("ok") });
+      expect(isDeepFrozenFabricValue(tree)).toBe(true);
+    });
+  });
+
   describe("`isDeepFrozenFabricValue()` identity cache", () => {
     it("does not revalidate an already-proven frozen Fabric value", () => {
       let childReads = 0;
