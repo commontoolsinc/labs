@@ -103,7 +103,7 @@ export function formatPatternIdentity(
     : `cf:module/${patternRef.identity}#${patternRef.symbol}`;
 }
 
-function renderPieceSummaries(
+export function renderPieceSummaries(
   pieces: Array<{
     id: string;
     name?: string;

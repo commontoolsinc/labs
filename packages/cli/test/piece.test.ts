@@ -16,6 +16,7 @@ import {
 } from "@commonfabric/runner/storage/cache.deno";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { cf, checkStderr, stripAnsi } from "./utils.ts";
 import {
@@ -35,6 +36,7 @@ import {
 } from "../lib/piece.ts";
 import { pieceId, SlugResolutionError } from "@commonfabric/piece";
 import { setResultCell } from "../../runner/src/result-utils.ts";
+import { toCell } from "../../runner/src/back-to-cell.ts";
 import {
   formatPatternIdentity,
   formatPatternRef,
@@ -973,6 +975,188 @@ describe("cli piece parsing", () => {
     );
   });
 
+  it("searches named array properties and skips result metadata", async () => {
+    const input: unknown[] = ["ordinary array value"];
+    Object.defineProperty(input, "annotation", {
+      enumerable: true,
+      value: "needle in a named array property",
+    });
+    const result: unknown[] = [];
+    Object.defineProperty(result, "$NAME", {
+      enumerable: true,
+      value: "needle only in ignored result metadata",
+    });
+    const cell = (value: unknown) => ({
+      pull: () => Promise.resolve(value),
+    });
+    const controller = {
+      getAllPieces: () =>
+        Promise.resolve([{
+          id: "of:named-array-property",
+          name: () => "Named array property",
+          getPatternRef: () => Promise.resolve(undefined),
+          input: { getCell: () => Promise.resolve(cell(input)) },
+          result: { getCell: () => Promise.resolve(cell(result)) },
+        }]),
+    };
+    const config = { apiUrl: API_URL, space: SPACE, identity: ID };
+    const deps = {
+      loadManager: () => Promise.resolve({} as any),
+      createController: () => controller as any,
+    };
+
+    expect(
+      await searchPieces(config, "named array property", deps),
+    ).toEqual([{
+      id: "of:named-array-property",
+      name: "Named array property",
+      patternRef: undefined,
+    }]);
+    expect(
+      await searchPieces(config, "ignored result metadata", deps),
+    ).toEqual([]);
+  });
+
+  it("reports unreadable iterators, cell proxies, and Fabric values", async () => {
+    const iteratorError = new Error("array keys are not readable");
+    const unreadableArray = new Proxy<unknown[]>([], {
+      ownKeys: () => {
+        throw iteratorError;
+      },
+    });
+    const cellProxyError = new Error("cell proxy lost its backing cell");
+    const unreadableCellProxy = {
+      [toCell]: () => {
+        throw cellProxyError;
+      },
+    };
+    const stringError = new Error("Fabric string representation unavailable");
+    class UnrepresentableFabricValue extends FabricSpecialObject {
+      override toString(): string {
+        throw stringError;
+      }
+    }
+    const fabricValue = new UnrepresentableFabricValue();
+    const cell = (value: unknown) => ({
+      pull: () => Promise.resolve(value),
+    });
+    const piece = (id: string, input: unknown) => ({
+      id,
+      name: () => id,
+      getPatternRef: () => Promise.resolve(undefined),
+      input: { getCell: () => Promise.resolve(cell(input)) },
+      result: { getCell: () => Promise.resolve(cell({})) },
+    });
+    const controller = {
+      getAllPieces: () =>
+        Promise.resolve([
+          piece("of:unreadable-array-iterator", unreadableArray),
+          piece("of:unreadable-cell-proxy", unreadableCellProxy),
+          piece("of:unrepresentable-fabric-value", fabricValue),
+        ]),
+    };
+    const errors: unknown[] = [];
+
+    expect(
+      await searchPieces(
+        { apiUrl: API_URL, space: SPACE, identity: ID },
+        "absent search value",
+        {
+          loadManager: () => Promise.resolve({} as any),
+          createController: () => controller as any,
+          reportSearchError: (_pieceId, _source, error) => errors.push(error),
+        },
+      ),
+    ).toEqual([]);
+    expect(errors).toContain(iteratorError);
+    expect(errors).toContain(cellProxyError);
+    expect(errors).toContain(stringError);
+    expect(errors.map(String).some((error) => error.includes("no `[CODEC]`")))
+      .toBe(true);
+  });
+
+  it("warns when input and result data cannot be read", async () => {
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...values: unknown[]) => warnings.push(values.join(" "));
+    try {
+      const controller = {
+        getAllPieces: () =>
+          Promise.resolve([{
+            id: "of:unreadable-data",
+            name: () => "Unreadable data",
+            getPatternRef: () => Promise.resolve(undefined),
+            input: {
+              getCell: () => Promise.reject(new Error("input unavailable")),
+            },
+            result: {
+              getCell: () => Promise.reject("result unavailable"),
+            },
+          }]),
+      };
+
+      expect(
+        await searchPieces(
+          { apiUrl: API_URL, space: SPACE, identity: ID },
+          "needle",
+          {
+            loadManager: () => Promise.resolve({} as any),
+            createController: () => controller as any,
+          },
+        ),
+      ).toEqual([]);
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    expect(warnings).toEqual([
+      "Warning: Could not read input data for piece of:unreadable-data: input unavailable",
+      "Warning: Could not read result data for piece of:unreadable-data: result unavailable",
+    ]);
+  });
+
+  it("returns a match when its metadata cannot be read", async () => {
+    const nameError = new Error("piece name unavailable");
+    const patternError = new Error("pattern reference unavailable");
+    const cell = (value: unknown) => ({
+      pull: () => Promise.resolve(value),
+    });
+    const controller = {
+      getAllPieces: () =>
+        Promise.resolve([{
+          id: "of:unreadable-metadata",
+          name: () => {
+            throw nameError;
+          },
+          getPatternRef: () => Promise.reject(patternError),
+          input: { getCell: () => Promise.resolve(cell("needle")) },
+          result: { getCell: () => Promise.resolve(cell({})) },
+        }]),
+    };
+    const errors: Array<{ source: string; error: unknown }> = [];
+
+    expect(
+      await searchPieces(
+        { apiUrl: API_URL, space: SPACE, identity: ID },
+        "needle",
+        {
+          loadManager: () => Promise.resolve({} as any),
+          createController: () => controller as any,
+          reportSearchError: (_pieceId, source, error) =>
+            errors.push({ source, error }),
+        },
+      ),
+    ).toEqual([{
+      id: "of:unreadable-metadata",
+      name: undefined,
+      patternRef: undefined,
+    }]);
+    expect(errors).toEqual([
+      { source: "metadata", error: nameError },
+      { source: "metadata", error: patternError },
+    ]);
+  });
+
   it("uses full Unicode case folding and canonical normalization", async () => {
     const cell = (value: unknown) => ({
       pull: () => Promise.resolve(value),
@@ -1484,6 +1668,181 @@ describe("cli piece parsing", () => {
       expect(
         await searchPieces(config, "unregistered keyless", deps),
       ).toEqual([]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("deduplicates cells and rejects values whose owner cannot be read", async () => {
+    const signer = await Identity.fromPassphrase(
+      "cf piece search traversal edge coverage test",
+    );
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+    });
+
+    try {
+      const space = signer.did();
+      const textSchema = {
+        type: "object",
+        properties: { text: { type: "string" } },
+        required: ["text"],
+        additionalProperties: false,
+      } as const;
+      const emptySchema = {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      } as const;
+      const rootSchema = {
+        type: "object",
+        properties: { field: { type: "string" } },
+        required: ["field"],
+        additionalProperties: false,
+      } as const;
+      const tx = runtime.edit();
+      const repeatedCell = runtime.getCell(
+        space,
+        "piece-search-repeated-cell",
+        textSchema,
+        tx,
+      );
+      repeatedCell.set({ text: "repeated cell haystack" });
+      const repeatedProxySource = runtime.getCell(
+        space,
+        "piece-search-repeated-proxy",
+        textSchema,
+        tx,
+      );
+      repeatedProxySource.set({ text: "repeated proxy haystack" });
+      const ownedProxySource = runtime.getCell(
+        space,
+        "piece-search-owned-proxy-coverage",
+        textSchema,
+        tx,
+      );
+      ownedProxySource.set({ text: "owned proxy coverage needle" });
+      const ownerResult = runtime.getCell(
+        space,
+        "piece-search-owner-result-coverage",
+        emptySchema,
+        tx,
+      );
+      ownerResult.set({});
+      setResultCell(ownedProxySource, ownerResult);
+
+      const brokenRoot = runtime.getCell(
+        space,
+        "piece-search-broken-source-root",
+        rootSchema,
+        tx,
+      );
+      brokenRoot.set({ field: "unreachable source value" });
+      const brokenSource = runtime.getCell(
+        space,
+        "piece-search-broken-source-child",
+        { type: "string" },
+        tx,
+      );
+      brokenSource.set("unreachable source value");
+      await tx.commit();
+      await runtime.idle();
+
+      const sourceError = new Error("source ownership unavailable");
+      const brokenSourceView = new Proxy(brokenSource, {
+        get(target, property) {
+          if (property === "resolveAsCell") {
+            return () => {
+              throw sourceError;
+            };
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const brokenRootView = new Proxy(brokenRoot, {
+        get(target, property) {
+          if (property === "key") {
+            return () => brokenSourceView;
+          }
+          if (property === "pull") {
+            return () => Promise.resolve({ field: "unreachable source value" });
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+
+      const ownerId = pieceId(ownerResult);
+      if (ownerId === undefined) {
+        throw new Error("Expected the owner result to have a piece ID");
+      }
+      const repeatedProxy = repeatedProxySource.getAsQueryResult();
+      const ownedProxy = ownedProxySource.getAsQueryResult();
+      const cell = (value: unknown) => ({
+        pull: () => Promise.resolve(value),
+      });
+      const piece = (id: string, name: string, input: unknown) => ({
+        id,
+        name: () => name,
+        getPatternRef: () => Promise.resolve(undefined),
+        input: { getCell: () => Promise.resolve(cell(input)) },
+        result: { getCell: () => Promise.resolve(cell({})) },
+      });
+      const controller = {
+        getAllPieces: () =>
+          Promise.resolve([
+            piece("of:owned-proxy-referrer", "Referrer", [ownedProxy]),
+            piece(ownerId, "Owner", "owned proxy coverage needle"),
+            piece("of:repeated-cell", "Repeated cell", [
+              repeatedCell,
+              repeatedCell,
+            ]),
+            piece("of:repeated-proxy", "Repeated proxy", [
+              repeatedProxy,
+              repeatedProxy,
+            ]),
+            {
+              id: "of:broken-source-owner",
+              name: () => "Broken source owner",
+              getPatternRef: () => Promise.resolve(undefined),
+              input: { getCell: () => Promise.resolve(brokenRootView) },
+              result: { getCell: () => Promise.resolve(cell({})) },
+            },
+          ]),
+      };
+      const errors: Array<{
+        pieceId: string;
+        source: "input data" | "result data" | "metadata";
+        error: unknown;
+      }> = [];
+
+      expect(
+        await searchPieces(
+          { apiUrl: API_URL, space: SPACE, identity: ID },
+          "owned proxy coverage needle",
+          {
+            loadManager: () => Promise.resolve({} as any),
+            createController: () => controller as any,
+            reportSearchError: (pieceId, source, error) =>
+              errors.push({ pieceId, source, error }),
+          },
+        ),
+      ).toEqual([{
+        id: ownerId,
+        name: "Owner",
+        patternRef: undefined,
+      }]);
+      expect(errors.length).toBeGreaterThan(0);
+      expect(
+        errors.every(({ pieceId, source, error }) =>
+          pieceId === "of:broken-source-owner" && source === "input data" &&
+          error === sourceError
+        ),
+      ).toBe(true);
     } finally {
       await runtime.dispose();
       await storageManager.close();
