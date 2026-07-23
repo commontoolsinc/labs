@@ -1073,10 +1073,10 @@ describe("checkAndUpdateDefaultPattern", () => {
   });
 
   it("failed swap-setup leaves the running pattern in place", async () => {
-    // The fail-closed half of the swap-setup contract: when the incoming
-    // pattern's argument schema rejects the existing argument, the watcher
-    // logs pattern-swap-setup-error and must NOT tear down the running
-    // nodes — a bad update leaves a working piece, not a dead one.
+    // The fail-closed half of the atomic swap-setup contract: when the incoming
+    // pattern's argument schema rejects the existing argument, the update
+    // transaction itself must be rejected. A bad update leaves the old pointer,
+    // graph, and running nodes intact.
     const SOURCE_INCOMPATIBLE = [
       "import { pattern } from 'commonfabric';",
       "export default pattern<{ mustHave: string }>(({ mustHave }) => ({",
@@ -1097,19 +1097,16 @@ describe("checkAndUpdateDefaultPattern", () => {
     stub.setSource(SOURCE_INCOMPATIBLE);
     const restore = shadowLoadProbe(staleRef.identity, "undefined");
     try {
-      // The update itself proceeds (identity swaps at the meta layer)…
-      expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
+      expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
     } finally {
       restore();
     }
     await runtime.idle();
-    // …but the swap-setup for the incompatible program fails closed: the
-    // piece is not left dead (starting it does not throw), and the failure
-    // was logged rather than swallowed.
     const after = (await manager.getDefaultPattern(true))!;
     await runtime.idle();
-    // Functional pin, not just existence: the OLD pattern's nodes are still
-    // the ones running — its result reads back — after the refused swap.
+    expect(getPatternIdentityRef(after)).toEqual(staleRef);
+    // Functional pin, not just metadata: the old pattern's nodes remain live
+    // after the candidate setup is rejected.
     expect(after.key("marker").get()).toBe("v1");
   });
 
@@ -1209,7 +1206,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(afterEvent.key("count").get()).toBe(1);
   });
 
-  it("failed cold-start repair stays fail-closed and leaves the doc healable", async () => {
+  it("failed legacy cold-start repair stays fail-closed and leaves the doc healable", async () => {
     // The repair's own failure contract: when the one-shot setup repair
     // cannot commit, the ORIGINAL start error must surface (not the repair's),
     // and the doc must be left exactly as it was — the next boot's repair
@@ -1225,11 +1222,24 @@ describe("checkAndUpdateDefaultPattern", () => {
       },
     });
     const root = (await manager.getDefaultPattern(false))!;
-    const staleRef = getPatternIdentityRef(root)!;
     await manager.stopPiece(root);
 
     stub.setSource(SOURCE_V3_HANDLER);
-    const restoreProbe = shadowLoadProbe(staleRef.identity, "undefined");
+    const targetId = await identityForSource(
+      SOURCE_V3_HANDLER,
+      {},
+      HOME_PATTERN_URL,
+    );
+    // Forge the legacy split-brain state produced by the old pointer-only
+    // updater: the identity moved, but replacement setup never ran.
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: targetId,
+        symbol: "default",
+      });
+    });
+    expect(error).toBeUndefined();
+
     const rt = runtime as unknown as {
       runSynced: (...args: unknown[]) => Promise<unknown>;
     };
@@ -1243,7 +1253,6 @@ describe("checkAndUpdateDefaultPattern", () => {
       thrown = error;
     } finally {
       rt.runSynced = originalRunSynced;
-      restoreProbe();
     }
     // The original start failure surfaces, not the repair's own error.
     expect(String(thrown)).toContain("Handler used as lift");

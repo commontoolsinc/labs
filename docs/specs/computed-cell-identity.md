@@ -119,6 +119,31 @@ Generated entries record and match their `patternIdentity` in addition to
 partial cause and kind; named entries continue to match by partial cause and kind
 (`packages/runner/src/runner.ts`, `materializeDerivedInternalCells`).
 
+There is one rollout compatibility rule. A piece materialized before generated
+causes were versioned has generated manifest entries with no
+`patternIdentity`. While that piece still points at the same pattern artifact,
+the runner continues to use its legacy ids instead of resetting it merely
+because the runtime changed. The next real pattern update atomically
+materializes pattern-versioned cells and moves the result projection to them.
+Old documents are not deleted; once no current manifest or projection names
+them, they are orphaned historical data.
+
+The transformer emits stable `.for(...)` causes for many authored declarations
+and result paths, but not for every reactive value. Dynamic computed properties,
+some callback-created values, and direct child-pattern calls can still fall
+through to `$generated`. Most observed examples are replayable UI
+intermediates or streams, but this is not a semantic guarantee: an untagged
+non-replayable builtin result can also be generated, and named state below a
+generated child-pattern result inherits that generated ancestor's churn.
+Durable state survives an update only when its complete identity ancestry is
+stable.
+
+Pattern-versioned identity is a runtime format change. A client that predates
+it cannot derive the new ids after an update. Automatic updates therefore need
+a coordinated runtime rollout: unchanged legacy pieces remain compatible, but
+an old client must not keep executing a piece after a newer client has moved
+that piece to a pattern-versioned generated graph.
+
 ### Transaction provenance
 
 The runner already distinguishes recompute transactions from event-handler

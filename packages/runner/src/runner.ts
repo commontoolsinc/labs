@@ -50,6 +50,7 @@ import {
   createSigilLinkFromParsedLink,
   getDerivedInternalCell,
   getDerivedInternalCellLink,
+  getEffectiveGeneratedInternalCellPatternIdentity,
   getMetaCell,
   getMetaLink,
   isAliasBinding,
@@ -110,7 +111,6 @@ import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import {
   getArtifactEntryRef,
-  getGeneratedInternalCellPatternIdentity,
   isTrustedBuilderArtifact,
   resolveOriginal,
 } from "./builder/pattern-metadata.ts";
@@ -1148,7 +1148,8 @@ export class Runner {
     const manifest: InternalCellDescriptor[] = [];
 
     for (const descriptor of descriptors) {
-      const patternIdentity = getGeneratedInternalCellPatternIdentity(
+      const patternIdentity = getEffectiveGeneratedInternalCellPatternIdentity(
+        resultCell,
         descriptor,
       );
       const derivedCell = getDerivedInternalCell(
@@ -2781,18 +2782,13 @@ export class Runner {
     // batched instantiation commit loses and reverts — stranding the optimistic
     // writes that the resumed actions then depend on. Pulling them here keeps
     // that commit read-mostly.
-    // Resolving each sub-pattern node's output redirect chain needs a
-    // transaction (resolveLink reads link metadata). The walk only reads, so the
-    // transaction is discarded afterward.
-    const resolveTx = this.runtime.edit();
-    this.collectResumeOwnedCells(
+    await this.collectResumeOwnedCells(
       pattern,
       resultCell,
       cells,
       new Set(),
-      resolveTx,
+      false,
     );
-    resolveTx.abort("collectResumeOwnedCells: read-only resolution");
 
     // Sync all the previously computed results.
     if (pattern.resultSchema !== undefined) {
@@ -2897,100 +2893,110 @@ export class Runner {
   // result cell to bound the walk against a cyclic reference. This only pulls
   // cells, so a node shape it cannot resolve contributes nothing rather than
   // misbehaving.
-  private collectResumeOwnedCells(
+  private async collectResumeOwnedCells(
     pattern: Pattern,
     resultCell: Cell<any>,
     out: Cell<any>[],
     seen: Set<string>,
-    tx: IExtendedStorageTransaction,
-  ): void {
+    syncResultCell = true,
+  ): Promise<void> {
+    // Copies of nested patterns can be created before their module artifact is
+    // indexed. Resolving the ref propagates the owning identity lazily to the
+    // copy's generated descriptors before we derive the cells to pre-sync.
+    void getArtifactEntryRef(pattern);
+
     const link = resultCell.getAsNormalizedFullLink();
     const key = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
     if (seen.has(key)) return;
     seen.add(key);
 
+    if (syncResultCell) await resultCell.sync();
     for (const descriptor of pattern.derivedInternalCells ?? []) {
       out.push(getDerivedInternalCell(resultCell, descriptor));
     }
 
-    // May be undefined: this walk runs before setup writes the meta on fresh
-    // first runs, and child result cells are not synced yet on a cold-cache
-    // resume. That is fine for binding — unwrapOneLevelAndBindtoDoc only needs
-    // the argument link when an output actually aliases the argument doc, and
-    // throws otherwise. Substituting a different document instead would derive
-    // the wrong `resultFor` identity and pre-sync the wrong owned-cell subtree
-    // (CT-1897).
+    // May be undefined on a fresh first run. That is fine for binding —
+    // unwrapOneLevelAndBindtoDoc only needs the argument link when an output
+    // actually aliases the argument doc, and throws otherwise. Substituting a
+    // different document would derive the wrong `resultFor` identity and
+    // pre-sync the wrong owned-cell subtree (CT-1897).
     const argumentLink = getMetaLink(resultCell, "argument");
-
-    for (const node of pattern.nodes) {
-      const module = node.module;
-      if (module.type !== "pattern" || !isPattern(module.implementation)) {
-        continue;
-      }
-      const childPattern = module.implementation;
-      const targetSpace = module.targetSpace ?? resultCell.space;
-      const childScope = patternDefaultScope(childPattern) ??
-        module.defaultScope;
-      // Resolve the node's reserved output spot the way instantiatePatternNode
-      // does: unwrap one level (so a deferred-alias output is decremented and
-      // followed) and follow the write-redirect chain to its resolved end (a
-      // pattern node reserves one result cell). The minting path keys the child
-      // result cell on the fully resolved redirect, so deriving from the same
-      // resolved spot yields the same `resultFor` identity the child's setup
-      // mints; the unresolved head of a multi-hop binding would be a different
-      // cell, pre-syncing the wrong owned-cell subtree.
-      let spotLink: NormalizedFullLink | undefined;
-      try {
-        const unwrappedOutputs = unwrapOneLevelAndBindtoDoc(
-          this.runtime.cfc,
-          node.outputs,
-          argumentLink,
-          resultCell,
-        );
-        spotLink = firstResolvedOutputRedirect(
-          this.runtime,
-          tx,
-          unwrappedOutputs,
-          resultCell,
-        );
-      } catch (error) {
-        // A node whose outputs cannot be bound (e.g. they alias the argument
-        // doc while the argument link is unavailable) or resolved contributes
-        // nothing rather than breaking the resume walk; log it so a resume
-        // that silently skips its owned-cell pre-sync is diagnosable.
-        logger.warn("resume-owned-cells", () => [
-          "skipping a sub-pattern node whose outputs did not bind or resolve",
-          error,
-        ]);
-        continue;
-      }
-      if (spotLink === undefined) continue;
-      let childResultCell = this.runtime.getCell(
-        targetSpace,
-        {
-          resultFor: {
-            space: spotLink.space,
-            id: spotLink.id,
-            path: [...spotLink.path],
+    const children: Array<{ pattern: Pattern; resultCell: Cell<any> }> = [];
+    // Resolving sub-pattern output redirects reads link metadata through a
+    // transaction. Finish those reads before awaiting the recursive syncs.
+    const tx = this.runtime.edit();
+    try {
+      for (const node of pattern.nodes) {
+        const module = node.module;
+        if (module.type !== "pattern" || !isPattern(module.implementation)) {
+          continue;
+        }
+        const childPattern = module.implementation;
+        const targetSpace = module.targetSpace ?? resultCell.space;
+        const childScope = patternDefaultScope(childPattern) ??
+          module.defaultScope;
+        // Resolve the node's reserved output spot the way
+        // instantiatePatternNode does: unwrap one level (so a deferred-alias
+        // output is decremented and followed) and follow the write-redirect
+        // chain to its resolved end (a pattern node reserves one result cell).
+        let spotLink: NormalizedFullLink | undefined;
+        try {
+          const unwrappedOutputs = unwrapOneLevelAndBindtoDoc(
+            this.runtime.cfc,
+            node.outputs,
+            argumentLink,
+            resultCell,
+          );
+          spotLink = firstResolvedOutputRedirect(
+            this.runtime,
+            tx,
+            unwrappedOutputs,
+            resultCell,
+          );
+        } catch (error) {
+          // A node whose outputs cannot be bound or resolved contributes
+          // nothing rather than breaking the best-effort resume walk.
+          logger.warn("resume-owned-cells", () => [
+            "skipping a sub-pattern node whose outputs did not bind or resolve",
+            error,
+          ]);
+          continue;
+        }
+        if (spotLink === undefined) continue;
+        let childResultCell = this.runtime.getCell(
+          targetSpace,
+          {
+            resultFor: {
+              space: spotLink.space,
+              id: spotLink.id,
+              path: [...spotLink.path],
+            },
           },
-        },
-        childPattern.resultSchema,
-      );
-      if (childScope !== undefined && childScope !== "space") {
-        const childLink = childResultCell.getAsNormalizedFullLink();
-        childResultCell = this.runtime.getCellFromLink({
-          ...childLink,
-          scope: childScope,
-        });
+          childPattern.resultSchema,
+        );
+        if (childScope !== undefined && childScope !== "space") {
+          const childLink = childResultCell.getAsNormalizedFullLink();
+          childResultCell = this.runtime.getCellFromLink({
+            ...childLink,
+            scope: childScope,
+          });
+        }
+        children.push({ pattern: childPattern, resultCell: childResultCell });
       }
-      this.collectResumeOwnedCells(
-        childPattern,
-        childResultCell,
-        out,
-        seen,
-        tx,
-      );
+    } finally {
+      tx.abort("collectResumeOwnedCells: read-only resolution");
     }
+
+    await Promise.all(
+      children.map((child) =>
+        this.collectResumeOwnedCells(
+          child.pattern,
+          child.resultCell,
+          out,
+          seen,
+        )
+      ),
+    );
   }
 
   /**
