@@ -1,5 +1,6 @@
 import {
   computed,
+  Default,
   equals,
   handler,
   NAME,
@@ -50,13 +51,29 @@ type SpaceEntry = {
 export type HomeOutput = {
   [NAME]: string;
   [UI]: unknown;
-  favorites: Writable<Favorite[]>;
-  journal: Writable<JournalEntry[]>;
-  spaces: Writable<SpaceEntry[]>;
-  defaultAppUrl: Writable<string>;
-  profiles: TrustedProfileList;
+  // Post-genesis data fields carry a `Default<>` so the runtime can materialize
+  // this pattern over a home root doc that predates the field. Without it, CFC
+  // schema-merge refuses the setup commit ("required field <name> needs a
+  // default to preserve old documents"), which — via the cold-start setup
+  // repair — leaves an unloadable home bricked. Continues #4901's seefeldb-
+  // approved "post-genesis DATA fields ride Default<>" line (bio/isEditing did);
+  // favorites-manager already uses the same idiom for its own favorites list.
+  favorites: Writable<Favorite[] | Default<[]>>;
+  journal: Writable<JournalEntry[] | Default<[]>>;
+  spaces: Writable<SpaceEntry[] | Default<[]>>;
+  defaultAppUrl: Writable<string | Default<"">>;
+  // The profile list/mru are CFC-wrapped (WriteAuthorizedBy), so their default
+  // goes OUTSIDE the wrapper — `Default<Cfc<…>, []>`, exactly as profile-home
+  // spells externalLinks/verifiedIdentities. An absent list on an old home root
+  // (created before #3830 added profiles) defaults to empty — a valid
+  // pre-first-profile state with no elements, hence no WriteAuthorizedBy claims
+  // to verify. The contract still governs every real element once one is
+  // appended via the trusted create surface, so this adds no authorization
+  // surface; it only lets an old doc merge. defaultProfile needs none: it is
+  // already `… | undefined`, hence not required.
+  profiles: Default<TrustedProfileList, []>;
   defaultProfile: TrustedDefaultProfile;
-  mru: TrustedProfileMru;
+  mru: Default<TrustedProfileMru, []>;
   createProfile: Stream<CreateProfileEvent>;
   addFavorite: Stream<{
     piece: Writable<{ [NAME]?: string }>;
