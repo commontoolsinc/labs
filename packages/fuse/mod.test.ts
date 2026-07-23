@@ -4,8 +4,6 @@ import {
   appendDecodedJsonPath,
   bufferForNoHandleTruncate,
   cfcWritebackXattrResultErrno,
-  closeKernelFileHandle,
-  createFuseOperationState,
   createSupervisorStatusWriter,
   decodeFuseNamespaceName,
   DEFAULT_CFC_XATTR_NAMESPACE,
@@ -18,6 +16,10 @@ import {
   writeUnavailableErrno,
 } from "./mod.ts";
 import { HandleMap } from "./handles.ts";
+import {
+  closeKernelFileHandle,
+  createFuseOperationState,
+} from "./operation-wiring.ts";
 import {
   ATTRCACHE_TIMEOUT_MAX_SECONDS,
   buildMountFuseArgs,

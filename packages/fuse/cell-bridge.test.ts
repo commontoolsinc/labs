@@ -574,6 +574,7 @@ Deno.test("CellBridge removes partial state after a late connection failure", as
     syncAgain: Set<string>;
   };
   const connectionFailure = new Error("manifest generation failed");
+  let partialEntityIno = 0n;
   internals.updateIndexJson = (state) => {
     const cancel = () => {
       cancellations++;
@@ -582,6 +583,7 @@ Deno.test("CellBridge removes partial state after a late connection failure", as
     state.pieceSubs.set("partial-piece", [cancel]);
     tree.addDir(state.piecesIno, "partial-piece");
     const entityIno = tree.addDir(state.entitiesIno, "partial-entity");
+    partialEntityIno = entityIno;
     internals.entitySubscriptions.set(entityIno, [cancel]);
     internals.unhydratedEntityRoots.set(entityIno, {});
     internals.pendingEntityHydrations.set(
@@ -622,6 +624,17 @@ Deno.test("CellBridge removes partial state after a late connection failure", as
   assertEquals(bridge.spaces.has("home"), false);
   assertEquals(bridge.knownSpaces.has("home"), false);
   assertEquals(bridge.isConnecting("home"), false);
+  assertNotEquals(partialEntityIno, 0n);
+  assertEquals(internals.entitySubscriptions.has(partialEntityIno), false);
+  assertEquals(internals.unhydratedEntityRoots.has(partialEntityIno), false);
+  assertEquals(internals.pendingEntityHydrations.has(partialEntityIno), false);
+  assertEquals(internals.entityProjectionLru.has(partialEntityIno), false);
+  assertEquals(
+    internals.entityProjectionEvictionCandidates.has(partialEntityIno),
+    false,
+  );
+  assertEquals(internals.entityProjectionUseOrder.has(partialEntityIno), false);
+  assertEquals(internals.pendingEntityRemovals.has(partialEntityIno), false);
   assertEquals(internals.pendingPieceHydrations.has("home"), false);
   assertEquals(internals.pieceSyncs.has("home"), false);
   assertEquals(internals.syncAgain.has("home"), false);

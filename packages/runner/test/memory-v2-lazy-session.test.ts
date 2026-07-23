@@ -336,20 +336,20 @@ describe("Memory v2 entity identifier capabilities", () => {
   });
 
   it("propagates an unavailable page from a paginated listing server", async () => {
-    let listCalls = 0;
+    const requests: unknown[] = [];
     const { storage, provider } = entityListingStorage({
       entityIdListing: true,
       entityIdPagination: true,
     }, {
-      listEntityIds: () => {
-        listCalls++;
+      listEntityIds: (options?: unknown) => {
+        requests.push(options);
         return Promise.resolve(undefined);
       },
     });
 
     try {
       expect(await provider.listEntityIds!()).toBeUndefined();
-      expect(listCalls).toBe(1);
+      expect(requests).toEqual([{}]);
     } finally {
       await storage.close();
     }
