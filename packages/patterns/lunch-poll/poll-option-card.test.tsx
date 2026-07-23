@@ -212,7 +212,7 @@ export default pattern(() => {
   );
 
   // Stored art ⇒ artSyncState "stored" ⇒ no keep affordance.
-  const assert_no_keep_button_when_stored = computed(() =>
+  const assert_no_keep_button_when_stored = assert(() =>
     readValue(card.artSyncState) === "stored" &&
     findNodeByProp(
         card[UI],
@@ -238,7 +238,7 @@ export default pattern(() => {
     setOptionImage,
   });
 
-  const assert_keep_button_when_generated = computed(() =>
+  const assert_keep_button_when_generated = assert(() =>
     readValue(generatingCard.artSyncState) === "generated" &&
     findNodeByProp(
         generatingCard[UI],
@@ -259,7 +259,7 @@ export default pattern(() => {
     }
   });
 
-  const assert_keep_sends_generated_image = computed(() => {
+  const assert_keep_sends_generated_image = assert(() => {
     const event = readValue(lastSetOptionImage);
     return typeof event === "object" && event !== null &&
       readValue((event as SetOptionImageEvent).optionId) === "opt-tacos" &&
