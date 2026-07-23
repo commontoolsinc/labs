@@ -648,7 +648,6 @@ export default pattern<Input, Output>(
     });
 
     const aiResponse = generateObject<AIResponseSuggestion>({
-      model: "anthropic:claude-sonnet-4-5",
       system: RESPONSE_SYSTEM_PROMPT,
       prompt: currentExpandedPrompt,
     });

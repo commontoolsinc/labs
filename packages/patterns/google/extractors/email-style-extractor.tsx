@@ -240,7 +240,6 @@ Extract the writing style patterns from these emails.`;
       schema: STYLE_SCHEMA,
       system:
         "You are an expert linguist analyzing email writing patterns. Extract consistent style patterns across all provided emails. Be specific and use examples from the actual text.",
-      model: "anthropic:claude-sonnet-4-5",
     });
 
     // Auto-save LLM result to persistent Writable
