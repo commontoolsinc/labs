@@ -17,7 +17,12 @@ import {
 } from "./runtime-processor.ts";
 import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
 import { cfcAtom } from "@commonfabric/api/cfc";
-import { type RuntimeFetch, runtimePresets } from "@commonfabric/runner";
+import {
+  type HostRuntimeTelemetryMarker,
+  type RuntimeFetch,
+  runtimePresets,
+  type RuntimeTelemetryMarkerResult,
+} from "@commonfabric/runner";
 import {
   type CellRef,
   type CfcLabelView,
@@ -31,10 +36,11 @@ import {
   getCell,
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
-import { Runtime } from "@commonfabric/runner";
+import { Runtime, RuntimeTelemetry } from "@commonfabric/runner";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import * as V2Storage from "../../runner/src/storage/v2.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
+import type { URI } from "../../runner/src/storage/interface.ts";
 
 const cfcSigner = await Identity.fromPassphrase(
   "runtime-processor-cfc-label-tests",
@@ -843,141 +849,536 @@ describe("sanitizeForPostMessage", () => {
 });
 
 describe("telemetryMarkerForHost", () => {
-  it("keeps event correlations and detailed writes inside the runtime worker", () => {
-    const marker = telemetryMarkerForHost({
-      type: "scheduler.event.commit",
-      eventId: "evt:did:key:private",
-      handlerId: "handler:private",
-      readCount: 2,
-      writeCount: 3,
-      changedWriteCount: 1,
-      writes: ["value/did:key:private/title"],
-      writesTruncated: true,
-      handlerInfo: {
-        patternName: "Topics",
-        reads: ["did:key:private/of:fid1:private/title"],
-        writes: ["did:key:private/of:fid1:private/description"],
-      },
-      timeStamp: 1,
-    });
-
-    expect(marker).toEqual({
-      type: "scheduler.event.commit",
-      handlerId: "handler:private",
-      readCount: 2,
-      writeCount: 3,
-      changedWriteCount: 1,
-      handlerInfo: {
-        patternName: "Topics",
-        readCount: 1,
-        writeCount: 1,
-      },
-      timeStamp: 1,
-    });
-    expect(JSON.stringify(marker)).not.toContain("evt:");
-    expect(JSON.stringify(marker)).not.toContain("value/did:");
-    expect(JSON.stringify(marker)).not.toContain("of:fid1:");
-  });
-
-  it("summarizes nested action metadata for every host-facing marker", () => {
-    const actionInfo = {
-      moduleName: "topics.tsx",
-      reads: ["did:key:private/of:fid1:private/title"],
-      writes: [
-        "did:key:private/of:fid1:private/title",
-        "did:key:private/of:fid1:private/description",
-      ],
-    };
-
-    expect(telemetryMarkerForHost({
-      type: "scheduler.run.complete",
-      actionId: "action",
-      actionInfo,
-      durationMs: 1,
-      timeStamp: 1,
-    })).toEqual({
-      type: "scheduler.run.complete",
-      actionId: "action",
-      actionInfo: {
-        moduleName: "topics.tsx",
-        readCount: 1,
-        writeCount: 2,
-      },
-      durationMs: 1,
-      timeStamp: 1,
-    });
-
-    const invocation = telemetryMarkerForHost({
-      type: "scheduler.invocation",
-      eventId: "evt:private",
-      handlerId: "handler",
-      handlerInfo: actionInfo,
-      timeStamp: 1,
-    });
-    expect(invocation).toEqual({
-      type: "scheduler.invocation",
-      handlerId: "handler",
-      handlerInfo: {
-        moduleName: "topics.tsx",
-        readCount: 1,
-        writeCount: 2,
-      },
-      timeStamp: 1,
-    });
-    expect(JSON.stringify(invocation)).not.toContain("did:key:");
-
-    const preflight = telemetryMarkerForHost({
-      type: "scheduler.event.preflight",
-      handlerId: "handler",
-      handlerInfo: actionInfo,
+  const privateSentinel =
+    "private did:example:secret fid1:secret https://private.example/path error /private/path Topics preview";
+  const timeStamp = 1;
+  const actionInfo = {
+    patternName: privateSentinel,
+    moduleName: privateSentinel,
+    reads: [privateSentinel],
+    writes: [privateSentinel],
+  };
+  const stats = {
+    visitCount: 1,
+    dirtyInputCount: 2,
+    resultTrueCount: 3,
+    workSetAddCount: 4,
+    reverseDependencyActionCount: 5,
+    reverseDependencyEdgeCount: 6,
+    logReadCount: 7,
+    logShallowReadCount: 8,
+    writerCandidateCount: 9,
+    writerOverlapCount: 10,
+    directWriterCount: 11,
+    hotActions: [{
+      actionId: privateSentinel,
+      actionType: "effect" as const,
+      visitCount: 1,
+      dirtyInputCount: 1,
+      resultTrueCount: 1,
+      reverseDependencyEdgeCount: 1,
+      maxDirectWriterCount: 1,
+      dirty: true,
+      pending: true,
       readCount: 1,
-      shallowReadCount: 0,
-      dirtySizeBefore: 0,
-      pendingSizeBefore: 0,
-      dirtyDependencyCount: 0,
-      hasDirtyDependencies: false,
-      skipped: false,
-      populateMs: 0,
-      txToLogMs: 0,
-      depCommitMs: 0,
-      collectMs: 0,
-      scheduleMs: 0,
-      stats: {
-        visitCount: 0,
-        dirtyInputCount: 0,
-        resultTrueCount: 0,
-        workSetAddCount: 0,
-        reverseDependencyActionCount: 0,
-        reverseDependencyEdgeCount: 0,
-        logReadCount: 0,
-        logShallowReadCount: 0,
-        writerCandidateCount: 0,
-        writerOverlapCount: 0,
-        directWriterCount: 0,
+      shallowReadCount: 1,
+      writeCount: 1,
+    }],
+    hotFanoutActions: [{
+      actionId: privateSentinel,
+      actionType: "computation" as const,
+      visitCount: 1,
+      dirtyInputCount: 1,
+      resultTrueCount: 1,
+      reverseDependencyEdgeCount: 1,
+      maxDirectWriterCount: 1,
+      dirty: true,
+      pending: true,
+      readCount: 1,
+      shallowReadCount: 1,
+      writeCount: 1,
+    }],
+    rootDirectWriters: [{
+      actionId: privateSentinel,
+      actionType: "unknown" as const,
+      visitCount: 1,
+      dirtyInputCount: 1,
+      resultTrueCount: 1,
+      reverseDependencyEdgeCount: 1,
+      maxDirectWriterCount: 1,
+      dirty: true,
+      pending: true,
+      readCount: 1,
+      shallowReadCount: 1,
+      writeCount: 1,
+    }],
+  };
+  const aggregateStats = {
+    visitCount: 1,
+    dirtyInputCount: 2,
+    resultTrueCount: 3,
+    workSetAddCount: 4,
+    reverseDependencyActionCount: 5,
+    reverseDependencyEdgeCount: 6,
+    logReadCount: 7,
+    logShallowReadCount: 8,
+    writerCandidateCount: 9,
+    writerOverlapCount: 10,
+    directWriterCount: 11,
+    hotActionCount: 1,
+    hotFanoutActionCount: 1,
+    rootDirectWriterCount: 1,
+  };
+
+  it("projects every runtime marker to an exact aggregate-safe host shape", () => {
+    const cases = [
+      {
+        input: {
+          type: "scheduler.run",
+          actionId: privateSentinel,
+          actionInfo,
+          error: privateSentinel,
+          timeStamp,
+        },
+        output: { type: "scheduler.run", timeStamp, ok: false },
       },
-      timeStamp: 1,
-    });
-    if (preflight.type !== "scheduler.event.preflight") {
-      throw new Error("Expected a scheduler.event.preflight marker");
+      {
+        input: {
+          type: "scheduler.run.complete",
+          actionId: privateSentinel,
+          actionInfo,
+          durationMs: 2,
+          timeStamp,
+        },
+        output: {
+          type: "scheduler.run.complete",
+          timeStamp,
+          durationMs: 2,
+          ok: true,
+        },
+      },
+      {
+        input: {
+          type: "scheduler.settle",
+          durationMs: 2,
+          iterations: 3,
+          settledEarly: true,
+          seedCount: 4,
+          workSetSize: 5,
+          timeStamp,
+        },
+        output: {
+          type: "scheduler.settle",
+          timeStamp,
+          durationMs: 2,
+          iterations: 3,
+          settledEarly: true,
+          seedCount: 4,
+          workSetSize: 5,
+        },
+      },
+      {
+        input: {
+          type: "cell.update",
+          change: {
+            address: { id: privateSentinel as URI, path: [privateSentinel] },
+            before: privateSentinel,
+            after: privateSentinel,
+          },
+          error: privateSentinel,
+          timeStamp,
+        },
+        output: { type: "cell.update", timeStamp },
+      },
+      {
+        input: {
+          type: "scheduler.invocation",
+          eventId: privateSentinel,
+          handlerId: privateSentinel,
+          handlerInfo: actionInfo,
+          error: privateSentinel,
+          timeStamp,
+        },
+        output: { type: "scheduler.invocation", timeStamp, ok: false },
+      },
+      {
+        input: {
+          type: "scheduler.event.commit",
+          eventId: privateSentinel,
+          handlerId: privateSentinel,
+          handlerInfo: actionInfo,
+          readCount: 2,
+          writeCount: 3,
+          changedWriteCount: 1,
+          writes: [privateSentinel],
+          writesTruncated: true,
+          error: privateSentinel,
+          permanentRejection: "receipt-exists" as const,
+          retryAttempt: 4,
+          backoffMs: 5,
+          terminal: "rule" as const,
+          timeStamp,
+        },
+        output: {
+          type: "scheduler.event.commit",
+          timeStamp,
+          readCount: 2,
+          writeCount: 3,
+          changedWriteCount: 1,
+          ok: false,
+          permanentRejection: "receipt-exists" as const,
+          retryAttempt: 4,
+          backoffMs: 5,
+          terminal: "rule" as const,
+        },
+      },
+      {
+        input: {
+          type: "scheduler.event.drop",
+          eventId: privateSentinel,
+          reason: "preflight" as const,
+          timeStamp,
+        },
+        output: {
+          type: "scheduler.event.drop",
+          timeStamp,
+          reason: "preflight" as const,
+        },
+      },
+      {
+        input: {
+          type: "scheduler.event.preflight",
+          handlerId: privateSentinel,
+          handlerInfo: actionInfo,
+          readCount: 1,
+          shallowReadCount: 2,
+          dirtySizeBefore: 3,
+          pendingSizeBefore: 4,
+          dirtyDependencyCount: 5,
+          hasDirtyDependencies: true,
+          skipped: false,
+          populateMs: 6,
+          txToLogMs: 7,
+          depCommitMs: 8,
+          collectMs: 9,
+          scheduleMs: 10,
+          stats,
+          error: privateSentinel,
+          timeStamp,
+        },
+        output: {
+          type: "scheduler.event.preflight",
+          timeStamp,
+          readCount: 1,
+          shallowReadCount: 2,
+          dirtySizeBefore: 3,
+          pendingSizeBefore: 4,
+          dirtyDependencyCount: 5,
+          hasDirtyDependencies: true,
+          skipped: false,
+          populateMs: 6,
+          txToLogMs: 7,
+          depCommitMs: 8,
+          collectMs: 9,
+          scheduleMs: 10,
+          stats: aggregateStats,
+          ok: false,
+        },
+      },
+      {
+        input: {
+          type: "storage.push.start",
+          id: privateSentinel,
+          operation: privateSentinel,
+          localSeq: 1,
+          spaceDid: privateSentinel,
+          error: privateSentinel,
+          timeStamp,
+        },
+        output: { type: "storage.push.start", timeStamp, ok: false },
+      },
+      {
+        input: {
+          type: "storage.push.complete",
+          id: privateSentinel,
+          sessionId: privateSentinel,
+          error: privateSentinel,
+          timeStamp,
+        },
+        output: { type: "storage.push.complete", timeStamp, ok: false },
+      },
+      {
+        input: {
+          type: "storage.push.error",
+          id: privateSentinel,
+          sessionId: privateSentinel,
+          error: privateSentinel,
+          timeStamp,
+        },
+        output: { type: "storage.push.error", timeStamp, ok: false as const },
+      },
+      {
+        input: {
+          type: "storage.pull.start",
+          id: privateSentinel,
+          operation: privateSentinel,
+          error: privateSentinel,
+          timeStamp,
+        },
+        output: { type: "storage.pull.start", timeStamp, ok: false },
+      },
+      {
+        input: {
+          type: "storage.pull.complete",
+          id: privateSentinel,
+          error: privateSentinel,
+          timeStamp,
+        },
+        output: { type: "storage.pull.complete", timeStamp, ok: false },
+      },
+      {
+        input: {
+          type: "storage.pull.error",
+          id: privateSentinel,
+          error: privateSentinel,
+          timeStamp,
+        },
+        output: { type: "storage.pull.error", timeStamp, ok: false as const },
+      },
+      {
+        input: {
+          type: "storage.connection.update",
+          status: "error" as const,
+          attempt: 2,
+          error: privateSentinel,
+          timeStamp,
+        },
+        output: {
+          type: "storage.connection.update",
+          timeStamp,
+          status: "error" as const,
+          attempt: 2,
+          ok: false,
+        },
+      },
+      {
+        input: {
+          type: "storage.subscription.add",
+          id: privateSentinel,
+          error: privateSentinel,
+          timeStamp,
+        },
+        output: { type: "storage.subscription.add", timeStamp, ok: false },
+      },
+      {
+        input: {
+          type: "storage.subscription.remove",
+          id: privateSentinel,
+          error: privateSentinel,
+          timeStamp,
+        },
+        output: { type: "storage.subscription.remove", timeStamp, ok: false },
+      },
+      {
+        input: {
+          type: "scheduler.graph.snapshot",
+          graph: {
+            nodes: [{
+              id: privateSentinel,
+              type: "effect" as const,
+              isDirty: true,
+              isPending: true,
+              preview: privateSentinel,
+              reads: [privateSentinel],
+              writes: [privateSentinel],
+              patternIdentity: {
+                identity: privateSentinel,
+                symbol: privateSentinel,
+              },
+            }],
+            edges: [{
+              from: privateSentinel,
+              to: privateSentinel,
+              cells: [privateSentinel],
+            }],
+            timestamp: 0,
+          },
+          timeStamp,
+        },
+        output: {
+          type: "scheduler.graph.snapshot",
+          timeStamp,
+          nodeCount: 1,
+          edgeCount: 1,
+        },
+      },
+      {
+        input: {
+          type: "scheduler.subscribe",
+          actionId: privateSentinel,
+          isEffect: true,
+          timeStamp,
+        },
+        output: { type: "scheduler.subscribe", timeStamp, isEffect: true },
+      },
+      {
+        input: {
+          type: "scheduler.dependencies.update",
+          actionId: privateSentinel,
+          reads: [privateSentinel],
+          writes: [privateSentinel, privateSentinel],
+          timeStamp,
+        },
+        output: {
+          type: "scheduler.dependencies.update",
+          timeStamp,
+          readCount: 1,
+          writeCount: 2,
+        },
+      },
+      {
+        input: {
+          type: "scheduler.non-settling",
+          busyTime: 2,
+          windowDuration: 3,
+          busyRatio: 4,
+          timeStamp,
+        },
+        output: {
+          type: "scheduler.non-settling",
+          timeStamp,
+          busyTime: 2,
+          windowDuration: 3,
+          busyRatio: 4,
+        },
+      },
+    ] satisfies readonly {
+      input: RuntimeTelemetryMarkerResult;
+      output: HostRuntimeTelemetryMarker;
+    }[];
+
+    for (const { input, output } of cases) {
+      const marker = telemetryMarkerForHost(input);
+      expect(marker).toEqual(output);
+      const serialized = JSON.stringify(marker);
+      for (
+        const forbidden of [
+          privateSentinel,
+          "did:",
+          "fid1:",
+          "https://",
+          "/private/path",
+          "Topics",
+          "preview",
+        ]
+      ) {
+        expect(serialized).not.toContain(forbidden);
+      }
     }
-    expect(preflight.handlerInfo).toEqual({
-      moduleName: "topics.tsx",
-      readCount: 1,
-      writeCount: 2,
+  });
+});
+
+describe("RuntimeProcessor telemetry lifecycle", () => {
+  const createTelemetryProcessor = () => {
+    const schedulerCalls: boolean[] = [];
+    let retains = 0;
+    let releases = 0;
+    let disposals = 0;
+    let synchronizations = 0;
+    let removals = 0;
+    const telemetry = new RuntimeTelemetry();
+    const retain = telemetry.retainDetailedEventCommitTelemetry.bind(telemetry);
+    telemetry.retainDetailedEventCommitTelemetry = () => {
+      retains++;
+      const release = retain();
+      return () => {
+        releases++;
+        release();
+      };
+    };
+    const runtime = {
+      scheduler: {
+        setEventPreflightTelemetryEnabled(enabled: boolean) {
+          schedulerCalls.push(enabled);
+        },
+      },
+      storageManager: {
+        synced: () => {
+          synchronizations++;
+          return Promise.resolve();
+        },
+      },
+      dispose: () => {
+        disposals++;
+        return Promise.resolve();
+      },
+    } as unknown as Runtime;
+    const remove = telemetry.removeEventListener.bind(telemetry);
+    telemetry.removeEventListener = (type, listener, options) => {
+      removals++;
+      remove(type, listener, options);
+    };
+    const processor = Reflect.construct(RuntimeProcessor, [
+      runtime,
+      {},
+      {},
+      "did:key:z6MkTelemetryTest",
+      cfcSigner,
+      telemetry,
+    ]) as RuntimeProcessor;
+    return {
+      processor,
+      schedulerCalls,
+      counts: () => ({
+        retains,
+        releases,
+        disposals,
+        synchronizations,
+        removals,
+      }),
+    };
+  };
+
+  it("retains and releases detailed event telemetry exactly once", () => {
+    const { processor, schedulerCalls, counts } = createTelemetryProcessor();
+    processor.setTelemetryEnabled({
+      type: RequestType.SetTelemetryEnabled,
+      enabled: true,
     });
-    expect(JSON.stringify(preflight)).not.toContain("did:key:");
+    processor.setTelemetryEnabled({
+      type: RequestType.SetTelemetryEnabled,
+      enabled: true,
+    });
+    expect(schedulerCalls).toEqual([true]);
+    expect(counts()).toMatchObject({ retains: 1, releases: 0 });
+
+    processor.setTelemetryEnabled({
+      type: RequestType.SetTelemetryEnabled,
+      enabled: false,
+    });
+    processor.setTelemetryEnabled({
+      type: RequestType.SetTelemetryEnabled,
+      enabled: false,
+    });
+    expect(schedulerCalls).toEqual([true, false]);
+    expect(counts()).toMatchObject({ retains: 1, releases: 1 });
   });
 
-  it("keeps only aggregate drop details when crossing the worker boundary", () => {
-    expect(telemetryMarkerForHost({
-      type: "scheduler.event.drop",
-      eventId: "evt:private",
-      reason: "preflight",
-      timeStamp: 1,
-    })).toEqual({
-      type: "scheduler.event.drop",
-      reason: "preflight",
-      timeStamp: 1,
+  it("releases detailed telemetry during disposal", async () => {
+    const { processor, counts } = createTelemetryProcessor();
+    processor.setTelemetryEnabled({
+      type: RequestType.SetTelemetryEnabled,
+      enabled: true,
+    });
+    const disposal = processor.dispose();
+    expect(processor.dispose()).toBe(disposal);
+    await disposal;
+    expect(counts()).toMatchObject({
+      retains: 1,
+      releases: 1,
+      removals: 1,
+      synchronizations: 1,
+      disposals: 1,
     });
   });
 });

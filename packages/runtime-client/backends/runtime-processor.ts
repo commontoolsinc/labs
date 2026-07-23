@@ -35,12 +35,11 @@ import {
   type SigilLink,
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
-import type { RuntimeTelemetryMarkerResult } from "@commonfabric/runner";
-import {
-  type HostSchedulerActionInfo,
-  linkRefPayload,
-  type SchedulerActionInfo,
-} from "@commonfabric/runner/shared";
+import type {
+  RuntimeTelemetryMarkerResult,
+  SchedulerEventPreflightStats,
+} from "@commonfabric/runner";
+import { linkRefPayload } from "@commonfabric/runner/shared";
 import {
   cfcLabelViewForCell,
   createRenderConfidentialityResolver,
@@ -183,66 +182,159 @@ export function telemetryMarkerForHost(
 ): HostRuntimeTelemetryMarker {
   switch (marker.type) {
     case "scheduler.run":
-    case "scheduler.run.complete": {
-      const { actionInfo, ...safe } = marker;
       return {
-        ...safe,
-        ...(actionInfo
-          ? { actionInfo: telemetryActionInfoForHost(actionInfo) }
-          : {}),
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        ok: marker.error === undefined,
       };
-    }
-    case "scheduler.invocation": {
-      const { eventId: _eventId, handlerInfo, ...safe } = marker;
+    case "scheduler.run.complete":
       return {
-        ...safe,
-        ...(handlerInfo
-          ? { handlerInfo: telemetryActionInfoForHost(handlerInfo) }
-          : {}),
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        durationMs: marker.durationMs,
+        ok: marker.error === undefined,
       };
-    }
-    case "scheduler.event.drop": {
-      const { eventId: _eventId, ...safe } = marker;
-      return safe;
-    }
-    case "scheduler.event.commit": {
-      const {
-        eventId: _eventId,
-        writes: _writes,
-        writesTruncated: _writesTruncated,
-        handlerInfo,
-        ...safe
-      } = marker;
+    case "scheduler.settle":
       return {
-        ...safe,
-        ...(handlerInfo
-          ? { handlerInfo: telemetryActionInfoForHost(handlerInfo) }
-          : {}),
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        durationMs: marker.durationMs,
+        iterations: marker.iterations,
+        settledEarly: marker.settledEarly,
+        seedCount: marker.seedCount,
+        workSetSize: marker.workSetSize,
       };
-    }
+    case "cell.update":
+      return { type: marker.type, timeStamp: marker.timeStamp };
+    case "scheduler.invocation":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        ok: marker.error === undefined,
+      };
+    case "scheduler.event.commit":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        readCount: marker.readCount,
+        writeCount: marker.writeCount,
+        changedWriteCount: marker.changedWriteCount,
+        ok: marker.error === undefined,
+        ...(marker.permanentRejection === undefined
+          ? {}
+          : { permanentRejection: marker.permanentRejection }),
+        ...(marker.retryAttempt === undefined
+          ? {}
+          : { retryAttempt: marker.retryAttempt }),
+        ...(marker.backoffMs === undefined
+          ? {}
+          : { backoffMs: marker.backoffMs }),
+        ...(marker.terminal === undefined ? {} : { terminal: marker.terminal }),
+      };
+    case "scheduler.event.drop":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        reason: marker.reason,
+      };
     case "scheduler.event.preflight": {
-      const { handlerInfo, ...safe } = marker;
       return {
-        ...safe,
-        ...(handlerInfo
-          ? { handlerInfo: telemetryActionInfoForHost(handlerInfo) }
-          : {}),
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        readCount: marker.readCount,
+        shallowReadCount: marker.shallowReadCount,
+        dirtySizeBefore: marker.dirtySizeBefore,
+        pendingSizeBefore: marker.pendingSizeBefore,
+        dirtyDependencyCount: marker.dirtyDependencyCount,
+        hasDirtyDependencies: marker.hasDirtyDependencies,
+        skipped: marker.skipped,
+        populateMs: marker.populateMs,
+        txToLogMs: marker.txToLogMs,
+        depCommitMs: marker.depCommitMs,
+        collectMs: marker.collectMs,
+        scheduleMs: marker.scheduleMs,
+        stats: telemetryPreflightStatsForHost(marker.stats),
+        ok: marker.error === undefined,
       };
     }
-    default:
-      return marker;
+    case "storage.push.start":
+    case "storage.push.complete":
+    case "storage.pull.start":
+    case "storage.pull.complete":
+    case "storage.subscription.add":
+    case "storage.subscription.remove":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        ok: marker.error === undefined,
+      };
+    case "storage.push.error":
+    case "storage.pull.error":
+      return { type: marker.type, timeStamp: marker.timeStamp, ok: false };
+    case "storage.connection.update":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        status: marker.status,
+        attempt: marker.attempt,
+        ok: marker.error === undefined,
+      };
+    case "scheduler.graph.snapshot":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        nodeCount: marker.graph.nodes.length,
+        edgeCount: marker.graph.edges.length,
+      };
+    case "scheduler.subscribe":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        isEffect: marker.isEffect,
+      };
+    case "scheduler.dependencies.update":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        readCount: marker.reads.length,
+        writeCount: marker.writes.length,
+      };
+    case "scheduler.non-settling":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        busyTime: marker.busyTime,
+        windowDuration: marker.windowDuration,
+        busyRatio: marker.busyRatio,
+      };
   }
+
+  return assertNeverTelemetryMarker(marker);
 }
 
-function telemetryActionInfoForHost(
-  info: SchedulerActionInfo,
-): HostSchedulerActionInfo {
-  const { reads, writes, ...safe } = info;
+function telemetryPreflightStatsForHost(
+  stats: SchedulerEventPreflightStats,
+) {
   return {
-    ...safe,
-    ...(reads ? { readCount: reads.length } : {}),
-    ...(writes ? { writeCount: writes.length } : {}),
+    visitCount: stats.visitCount,
+    dirtyInputCount: stats.dirtyInputCount,
+    resultTrueCount: stats.resultTrueCount,
+    workSetAddCount: stats.workSetAddCount,
+    reverseDependencyActionCount: stats.reverseDependencyActionCount,
+    reverseDependencyEdgeCount: stats.reverseDependencyEdgeCount,
+    logReadCount: stats.logReadCount,
+    logShallowReadCount: stats.logShallowReadCount,
+    writerCandidateCount: stats.writerCandidateCount,
+    writerOverlapCount: stats.writerOverlapCount,
+    directWriterCount: stats.directWriterCount,
+    hotActionCount: stats.hotActions?.length ?? 0,
+    hotFanoutActionCount: stats.hotFanoutActions?.length ?? 0,
+    rootDirectWriterCount: stats.rootDirectWriters?.length ?? 0,
   };
+}
+
+function assertNeverTelemetryMarker(marker: never): never {
+  throw new Error(`Unhandled runtime telemetry marker: ${marker}`);
 }
 
 /**
