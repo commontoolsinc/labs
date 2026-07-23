@@ -21,6 +21,7 @@ import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { forEachSubschema } from "../schema-walk.ts";
+import { arrayMatchesPositionally } from "../schema-match.ts";
 import { normalizeCellScope } from "../scope.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import type {
@@ -2897,38 +2898,19 @@ const policySchemaMatchesValue = (
     );
   }
   if (Array.isArray(value)) {
-    // 2020-12 array semantics, mirroring validateAgainstSchema: tuple slots
-    // condition their exact position, `items` conditions the positions past
-    // them. Before prefixItems was handled here, a tuple-shaped condition
-    // fell through to `return true` and vacuously matched any array.
-    const prefixItems = Array.isArray(schema.prefixItems)
-      ? schema.prefixItems
-      : undefined;
-    if (prefixItems !== undefined) {
-      const slots = Math.min(prefixItems.length, value.length);
-      for (let index = 0; index < slots; index++) {
-        if (
-          !policySchemaMatchesValue(
-            prefixItems[index],
-            value[index],
-            schemaRoot,
-          )
-        ) {
-          return false;
-        }
-      }
-    }
-    if (typeof schema.items === "object" && schema.items !== null) {
-      const itemSchema = schema.items;
-      for (
-        let index = prefixItems?.length ?? 0;
-        index < value.length;
-        index++
-      ) {
-        if (!policySchemaMatchesValue(itemSchema, value[index], schemaRoot)) {
-          return false;
-        }
-      }
+    // Shared position rule (schema-match.ts): tuple slots condition their
+    // exact position, `items` conditions the positions past them. Before
+    // prefixItems was handled here, a tuple-shaped condition fell through
+    // to `return true` and vacuously matched any array.
+    if (
+      !arrayMatchesPositionally(
+        schema,
+        value,
+        (childSchema, childValue) =>
+          policySchemaMatchesValue(childSchema, childValue, schemaRoot),
+      )
+    ) {
+      return false;
     }
   }
   return true;

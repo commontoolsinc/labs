@@ -163,6 +163,55 @@ describe("resolveSchema", () => {
       expect(narrowed.ifc).toEqual({ integrity: ["string-branch"] });
     });
 
+    it("narrows tuple (prefixItems) branches by slot values", () => {
+      // CT-1895: a prefixItems-only branch matched ANY array (the matcher
+      // fell through to true), so the wrong union branch could be selected
+      // for tuple values.
+      const schema: JSONSchema = {
+        anyOf: [
+          {
+            type: "array",
+            prefixItems: [{ const: "point" }, { type: "number" }],
+            ifc: { integrity: ["point-branch"] },
+          },
+          {
+            type: "array",
+            prefixItems: [{ const: "label" }, { type: "string" }],
+            ifc: { integrity: ["label-branch"] },
+          },
+        ],
+      };
+
+      const narrowed = expectNontrivial(
+        resolveSchemaForValue(schema, ["label", "x"]),
+      );
+
+      expect(narrowed.anyOf).toBe(undefined);
+      expect(narrowed.ifc).toEqual({ integrity: ["label-branch"] });
+    });
+
+    it("matches items only past the tuple slots", () => {
+      const schema: JSONSchema = {
+        anyOf: [
+          {
+            type: "array",
+            // Slot 0 is a string the rest schema would reject; items must
+            // only constrain the elements past the tuple arity.
+            prefixItems: [{ type: "string" }],
+            items: { type: "number" },
+            ifc: { integrity: ["tuple-branch"] },
+          },
+          { type: "string" },
+        ],
+      };
+
+      const narrowed = expectNontrivial(
+        resolveSchemaForValue(schema, ["cmd", 1, 2]),
+      );
+
+      expect(narrowed.ifc).toEqual({ integrity: ["tuple-branch"] });
+    });
+
     it("narrows union branches with nested refs to parent defs", () => {
       const schema: JSONSchema = {
         anyOf: [

@@ -23,6 +23,7 @@ import {
 } from "@commonfabric/data-model/schema-utils";
 import { createCell, isCell } from "./cell.ts";
 import { forEachSubschema } from "./schema-walk.ts";
+import { arrayMatchesPositionally } from "./schema-match.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
@@ -292,12 +293,21 @@ const matchesConcreteValue = (
     );
   }
 
-  if (
-    Array.isArray(value) && typeof resolved.items === "object" &&
-    resolved.items !== null
-  ) {
-    const itemSchema = branchWithParentDefs(resolved, resolved.items);
-    return value.every((item) => matchesConcreteValue(itemSchema, item));
+  if (Array.isArray(value)) {
+    // Shared position rule (schema-match.ts): tuple slots match their exact
+    // position, `items` matches only the positions past them. A
+    // prefixItems-only schema previously fell through to `return true`,
+    // letting ANY array match — so the wrong anyOf/oneOf branch could be
+    // selected for tuple values.
+    return arrayMatchesPositionally(
+      resolved,
+      value,
+      (childSchema, childValue) =>
+        matchesConcreteValue(
+          branchWithParentDefs(resolved, childSchema),
+          childValue,
+        ),
+    );
   }
 
   return true;
