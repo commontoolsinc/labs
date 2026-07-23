@@ -20,6 +20,7 @@ export interface HarnessCredentialStore {
     updater: (
       current: HarnessCredential | undefined,
     ) => Promise<HarnessCredential | undefined> | HarnessCredential | undefined,
+    signal?: AbortSignal,
   ): Promise<HarnessCredential | undefined>;
   delete(
     ownerKey: string,
@@ -42,7 +43,11 @@ const credentialKey = (ownerKey: string, providerId: string): string =>
 class KeyedMutationQueue {
   readonly #tails = new Map<string, Promise<void>>();
 
-  async run<T>(key: string, operation: () => Promise<T>): Promise<T> {
+  async run<T>(
+    key: string,
+    operation: () => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
     const previous = this.#tails.get(key) ?? Promise.resolve();
     let release!: () => void;
     const current = new Promise<void>((resolve) => {
@@ -50,15 +55,36 @@ class KeyedMutationQueue {
     });
     const tail = previous.catch(() => {}).then(() => current);
     this.#tails.set(key, tail);
-    await previous.catch(() => {});
+    const clearTail = () => {
+      if (this.#tails.get(key) === tail) this.#tails.delete(key);
+    };
+    void tail.then(clearTail, clearTail);
     try {
+      const turn = previous.catch(() => {});
+      if (signal === undefined) {
+        await turn;
+      } else {
+        signal.throwIfAborted();
+        await new Promise<void>((resolve, reject) => {
+          const onAbort = () => reject(signal.reason);
+          signal.addEventListener("abort", onAbort, { once: true });
+          void turn.then(() => {
+            signal.removeEventListener("abort", onAbort);
+            resolve();
+          });
+        });
+        signal.throwIfAborted();
+      }
       return await operation();
     } finally {
       release();
-      if (this.#tails.get(key) === tail) this.#tails.delete(key);
     }
   }
 }
+
+// File-store instances in one process share this queue so cancellation can
+// stop before entering an advisory-lock wait held by another local instance.
+const fileMutationQueue = new KeyedMutationQueue();
 
 export class InMemoryHarnessCredentialStore implements HarnessCredentialStore {
   readonly #credentials = new Map<string, HarnessCredential>();
@@ -87,6 +113,7 @@ export class InMemoryHarnessCredentialStore implements HarnessCredentialStore {
     updater: (
       current: HarnessCredential | undefined,
     ) => Promise<HarnessCredential | undefined> | HarnessCredential | undefined,
+    signal?: AbortSignal,
   ): Promise<HarnessCredential | undefined> {
     const key = credentialKey(ownerKey, providerId);
     return this.#queue.run(key, async () => {
@@ -97,7 +124,7 @@ export class InMemoryHarnessCredentialStore implements HarnessCredentialStore {
       if (next === undefined) this.#credentials.delete(key);
       else this.#credentials.set(key, structuredClone(next));
       return next === undefined ? undefined : structuredClone(next);
-    });
+    }, signal);
   }
 
   async delete(
@@ -231,7 +258,10 @@ export class FileHarnessCredentialStore implements HarnessCredentialStore {
     }
   }
 
-  async #withFileLock<T>(operation: () => Promise<T>): Promise<T> {
+  async #withFileLock<T>(
+    operation: () => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
     await this.#ensurePrivateDirectory();
     const lockPath = `${this.path}.lock`;
     let lockFile: Deno.FsFile;
@@ -251,17 +281,30 @@ export class FileHarnessCredentialStore implements HarnessCredentialStore {
       );
       lockFile = await Deno.open(lockPath, { read: true, write: true });
     }
+    let locked = false;
+    let closed = false;
+    const closeWhileWaiting = () => {
+      if (!locked && !closed) {
+        closed = true;
+        lockFile.close();
+      }
+    };
     try {
       await this.#assertPrivateRegularFile(
         lockPath,
         "credential store lock",
         false,
       );
+      signal?.throwIfAborted();
+      signal?.addEventListener("abort", closeWhileWaiting, { once: true });
       await lockFile.lock(true);
+      locked = true;
+      signal?.throwIfAborted();
       return await operation();
     } finally {
-      await lockFile.unlock().catch(() => {});
-      lockFile.close();
+      signal?.removeEventListener("abort", closeWhileWaiting);
+      if (locked) await lockFile.unlock().catch(() => {});
+      if (!closed) lockFile.close();
     }
   }
 
@@ -337,25 +380,34 @@ export class FileHarnessCredentialStore implements HarnessCredentialStore {
     updater: (
       current: HarnessCredential | undefined,
     ) => Promise<HarnessCredential | undefined> | HarnessCredential | undefined,
+    signal?: AbortSignal,
   ): Promise<HarnessCredential | undefined> {
     // Every mutation rewrites the whole document. The stable advisory lock
     // serializes read/modify/write transactions across processes as well as
     // across distinct store instances in this process.
-    return this.#withFileLock(async () => {
-      const document = await this.#read();
-      const currentProviders = Object.hasOwn(document.owners, ownerKey)
-        ? document.owners[ownerKey]
-        : undefined;
-      const current = currentProviders?.[providerId];
-      const next = await updater(current);
-      const providers = { ...(currentProviders ?? {}) };
-      if (next === undefined) delete providers[providerId];
-      else providers[providerId] = next;
-      if (Object.keys(providers).length === 0) delete document.owners[ownerKey];
-      else setOwn(document.owners, ownerKey, providers);
-      await this.#write(document);
-      return next;
-    });
+    return fileMutationQueue.run(
+      this.path,
+      () =>
+        this.#withFileLock(async () => {
+          const document = await this.#read();
+          const currentProviders = Object.hasOwn(document.owners, ownerKey)
+            ? document.owners[ownerKey]
+            : undefined;
+          const current = currentProviders?.[providerId];
+          const next = await updater(current);
+          const providers = { ...(currentProviders ?? {}) };
+          if (next === undefined) delete providers[providerId];
+          else providers[providerId] = next;
+          if (Object.keys(providers).length === 0) {
+            delete document.owners[ownerKey];
+          } else {
+            setOwn(document.owners, ownerKey, providers);
+          }
+          await this.#write(document);
+          return next;
+        }, signal),
+      signal,
+    );
   }
 
   async delete(

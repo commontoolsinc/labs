@@ -326,6 +326,7 @@ export class OpenAICodexCredentialResolver {
           }
           return await readTokenResponse(response, "refresh", this.#now());
         },
+        signal,
       );
     } catch (error) {
       if (signal?.aborted) throw abortReason(signal);

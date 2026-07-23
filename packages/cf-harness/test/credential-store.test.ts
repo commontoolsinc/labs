@@ -2,6 +2,7 @@ import { assertEquals, assertRejects } from "@std/assert";
 import { join } from "@std/path";
 import {
   FileHarnessCredentialStore,
+  type HarnessCredentialStore,
   InMemoryHarnessCredentialStore,
 } from "../src/auth/credential-store.ts";
 import type { OpenAICodexOAuthCredential } from "../src/auth/types.ts";
@@ -16,6 +17,60 @@ const credential = (
   refreshToken,
   expiresAt: 4_000_000_000_000,
   accountId: `account-${owner}`,
+});
+
+const assertQueuedUpdateCanAbort = async (
+  store: HarnessCredentialStore,
+): Promise<void> => {
+  await store.set("local", "openai-codex", credential("local"));
+  let releaseFirst!: () => void;
+  const holdFirst = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  let markFirstStarted!: () => void;
+  const firstStarted = new Promise<void>((resolve) => {
+    markFirstStarted = resolve;
+  });
+  const first = store.update("local", "openai-codex", async (current) => {
+    markFirstStarted();
+    await holdFirst;
+    return current;
+  });
+  await firstStarted;
+
+  let secondUpdaterRan = false;
+  const controller = new AbortController();
+  const second = store.update(
+    "local",
+    "openai-codex",
+    (current) => {
+      secondUpdaterRan = true;
+      return current;
+    },
+    controller.signal,
+  );
+  controller.abort(new DOMException("queued update canceled", "AbortError"));
+  await assertRejects(
+    () => second,
+    DOMException,
+    "queued update canceled",
+  );
+  assertEquals(secondUpdaterRan, false);
+
+  releaseFirst();
+  await first;
+  await store.update("local", "openai-codex", (current) => current);
+};
+
+Deno.test("in-memory credential store cancels queued mutations", async () => {
+  await assertQueuedUpdateCanAbort(new InMemoryHarnessCredentialStore());
+});
+
+Deno.test("file credential store cancels queued local lock waits", async () => {
+  const root = await Deno.makeTempDir();
+  await assertQueuedUpdateCanAbort(
+    new FileHarnessCredentialStore({ path: join(root, "auth.json") }),
+  );
 });
 
 Deno.test("file credential store is owner-isolated, atomic, and private", async () => {
