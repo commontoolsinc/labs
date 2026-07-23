@@ -72,7 +72,7 @@ export type HomeOutput = {
   // surface; it only lets an old doc merge. defaultProfile needs none: it is
   // already `… | undefined`, hence not required.
   profiles: Default<TrustedProfileList, []>;
-  defaultProfile: TrustedDefaultProfile;
+  defaultProfile?: TrustedDefaultProfile;
   mru: Default<TrustedProfileMru, []>;
   createProfile: Stream<CreateProfileEvent>;
   addFavorite: Stream<{
