@@ -58,11 +58,10 @@ describe("Error.isError under SES lockdown", () => {
     });
 
     it("installs nothing when handed a non-function", () => {
-      // How a runtime without `Error.isError` declines. Every runtime we run
-      // on has it, but an older browser would not, and there the shim must
-      // define nothing rather than define the property as `undefined` — which
-      // fails SES's `isError: fn` permit and gets stripped back out with an
-      // unpermitted-intrinsic report on every lockdown.
+      // How a runtime without `Error.isError` declines. The pinned browser
+      // integration runtime takes this path. The shim defines nothing because
+      // an `undefined` property fails SES's `isError: fn` permit and gets
+      // stripped back out with an unpermitted-intrinsic report.
       //
       // `null` rather than the `undefined` a real such runtime would supply:
       // an explicit `undefined` argument re-triggers the parameter default and

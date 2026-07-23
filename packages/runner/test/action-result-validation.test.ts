@@ -36,6 +36,34 @@ describe("normalizeSandboxResult", () => {
     expect((value.error as FabricError).type).toBe("TypeError");
   });
 
+  it("canonicalizes errors when `Error.isError` is unavailable", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(Error, "isError");
+    Object.defineProperty(Error, "isError", {
+      value: undefined,
+      writable: true,
+      configurable: true,
+    });
+
+    try {
+      const {
+        normalizeSandboxResult: normalizeWithoutNativeErrorCheck,
+      } = await import(
+        "../src/sandbox/result-normalization.ts?error-is-error-unavailable"
+      );
+      const normalized = normalizeWithoutNativeErrorCheck(
+        new TypeError("fabric"),
+      );
+      expect(normalized.value).toBeInstanceOf(FabricError);
+      expect((normalized.value as FabricError).type).toBe("TypeError");
+    } finally {
+      if (descriptor) {
+        Object.defineProperty(Error, "isError", descriptor);
+      } else {
+        delete (Error as { isError?: unknown }).isError;
+      }
+    }
+  });
+
   it("preserves opaque leaves while normalizing their siblings", () => {
     const reactive = { [isReactiveMarker]: true };
     const cellLink = linkRefFrom({ id: "of:test" });

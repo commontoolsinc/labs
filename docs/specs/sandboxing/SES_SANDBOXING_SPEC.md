@@ -752,6 +752,11 @@ Notes:
   `packages/runner/src/sandbox/error-taming.ts`. The phase call reveals
   `globalThis.hardenIntrinsics`, which the runtime deletes afterwards so the
   host realm's global surface matches the one-call form.
+- An engine that does not provide `Error.isError` before lockdown has no
+  intrinsic to restore. Native error classification falls back to
+  `instanceof Error` there. This recognizes SES errors because the repaired
+  constructors share the host error prototype hierarchy. General
+  cross-realm error recognition requires the native method.
 - `overrideTaming: "severe"` remains the compatibility default.
 - `localeTaming: "unsafe"` is load-bearing only together with the pre-lockdown
   vetted shim in `packages/runner/src/sandbox/locale-taming.ts`, which replaces

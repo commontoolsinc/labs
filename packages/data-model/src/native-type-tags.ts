@@ -44,6 +44,20 @@ export const NATIVE_TAGS = Object.freeze(
 export type NativeTag = typeof NATIVE_TAGS[keyof typeof NATIVE_TAGS];
 
 /**
+ * Checks whether a value is a native `Error`.
+ *
+ * `Error.isError()` recognizes errors from other realms when the engine
+ * provides it. Engines without it fall back to `instanceof`, which recognizes
+ * errors that share the current realm's prototype hierarchy.
+ */
+export function isNativeError(value: unknown): value is Error {
+  const isError = (Error as { isError?: (value: unknown) => boolean }).isError;
+  return typeof isError === "function"
+    ? isError(value)
+    : value instanceof Error;
+}
+
+/**
  * Maps a constructor to its native-instance tag. Returns the tag string if
  * the constructor is a recognized type (JS builtins or system-defined
  * special primitives), or `null` otherwise.
@@ -123,10 +137,9 @@ export function tagFromNativeClass(
  *
  * Dispatches via the value's constructor (O(1) switch in `tagFromNativeClass`,
  * which matches `Error` subclasses via `prototype instanceof Error`). Falls
- * back to `Error.isError()` and `Array.isArray()` for values whose constructor
- * is unreachable -- a severed prototype, or another realm -- since the internal
- * slot survives where a constructor lookup does not, and to a prototype check
- * for null-prototype objects.
+ * back to native error detection and `Array.isArray()` for values whose
+ * constructor is unreachable -- a severed prototype, or another realm -- and
+ * to a prototype check for null-prototype objects.
  *
  * For tags that have pass-through handling (`Object`, `Array`) or no dedicated
  * handler (`null`), a per-instance `hasToJSON()` check upgrades the tag to
@@ -160,9 +173,8 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     // `Error`s with no reachable constructor -- e.g. one whose prototype has
     // been severed, or one from another realm. An ordinary subclass (including
     // `DOMException`) never gets here: `tagFromNativeClass()` matches it via
-    // `prototype instanceof Error`. The internal slot survives either way,
-    // which is what `Error.isError()` reads.
-    if (Error.isError(value)) return NATIVE_TAGS.Error;
+    // `prototype instanceof Error`.
+    if (isNativeError(value)) return NATIVE_TAGS.Error;
 
     // `FabricInstance` values (object-like protocol types).
     if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;

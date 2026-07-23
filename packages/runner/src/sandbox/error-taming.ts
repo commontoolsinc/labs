@@ -38,7 +38,8 @@
 /**
  * The real `Error.isError`, captured before lockdown can replace the
  * constructor holding it. `undefined` on a runtime that predates the method,
- * in which case there is nothing to restore and nothing to fake.
+ * in which case there is nothing to restore. Error classification falls back
+ * to the shared prototype hierarchy on those runtimes.
  */
 const FERAL_IS_ERROR: unknown = (Error as { isError?: unknown }).isError;
 
