@@ -62,9 +62,18 @@ export type HomeOutput = {
   journal: Writable<JournalEntry[] | Default<[]>>;
   spaces: Writable<SpaceEntry[] | Default<[]>>;
   defaultAppUrl: Writable<string | Default<"">>;
-  profiles: TrustedProfileList;
+  // The profile list/mru are CFC-wrapped (WriteAuthorizedBy), so their default
+  // goes OUTSIDE the wrapper — `Default<Cfc<…>, []>`, exactly as profile-home
+  // spells externalLinks/verifiedIdentities. An absent list on an old home root
+  // (created before #3830 added profiles) defaults to empty — a valid
+  // pre-first-profile state with no elements, hence no WriteAuthorizedBy claims
+  // to verify. The contract still governs every real element once one is
+  // appended via the trusted create surface, so this adds no authorization
+  // surface; it only lets an old doc merge. defaultProfile needs none: it is
+  // already `… | undefined`, hence not required.
+  profiles: Default<TrustedProfileList, []>;
   defaultProfile: TrustedDefaultProfile;
-  mru: TrustedProfileMru;
+  mru: Default<TrustedProfileMru, []>;
   createProfile: Stream<CreateProfileEvent>;
   addFavorite: Stream<{
     piece: Writable<{ [NAME]?: string }>;

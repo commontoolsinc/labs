@@ -44,6 +44,24 @@ describe("estuary vintage-tolerance: home data fields carry defaults", () => {
     expect(home).toContain('defaultAppUrl: Writable<string | Default<"">>');
   });
 
+  // CFC-wrapped lists: the default goes OUTSIDE the WriteAuthorizedBy wrapper
+  // (`Default<Cfc<…>, []>`), matching profile-home's externalLinks. profiles/mru
+  // entered HomeOutput in #3830 — much later than favorites (#2478) — so a home
+  // root that predates them (or is old enough to predate favorites) needs these
+  // to merge. An empty default carries no elements, so no writer claim is
+  // asserted; the profile-owner-cfc / writer-claim suites pin that invariant.
+  it("profiles rides Default<TrustedProfileList, []> (wrapper-outside)", () => {
+    expect(home).toContain("profiles: Default<TrustedProfileList, []>");
+  });
+
+  it("mru rides Default<TrustedProfileMru, []> (wrapper-outside)", () => {
+    expect(home).toContain("mru: Default<TrustedProfileMru, []>");
+  });
+
+  it("defaultProfile stays bare — already optional (| undefined), not required", () => {
+    expect(home).toContain("defaultProfile: TrustedDefaultProfile;");
+  });
+
   it("Default is imported (the spellings above are inert without it)", () => {
     expect(home).toContain("Default");
     expect(home).toMatch(/from "commonfabric"/);
