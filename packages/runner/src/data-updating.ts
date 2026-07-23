@@ -149,7 +149,9 @@ const labelHasValues = (
 const cfcLabelViewHasValues = (view: CfcLabelView | undefined): boolean =>
   view?.entries.some((entry) => labelHasValues(entry.label)) ?? false;
 
-const schemaIfcOverlapsPath = (
+// Exported for unit testing of the overlap predicate. Not part of the
+// public surface.
+export const schemaIfcOverlapsPath = (
   schema: JSONSchema | undefined,
   basePath: readonly string[],
   sourcePath: readonly string[],
@@ -178,8 +180,28 @@ const schemaIfcOverlapsPath = (
         }
       }
     }
-    if (current.type === "array" && current.items !== undefined) {
-      return visit(current.items, [...path, "*"]);
+    if (current.type === "array") {
+      // Tuple slots overlap at their concrete index. `items` keeps its
+      // unconditional `*` segment even beside prefixItems: this predicate
+      // only decides whether a schema-policy input MIGHT cover the written
+      // path, so over-matching errs safe (the input is recorded and
+      // evaluated), unlike walkIfcSchema's minted entries where a `*`
+      // covering the slots would over-taint them.
+      if (Array.isArray(current.prefixItems)) {
+        for (let index = 0; index < current.prefixItems.length; index++) {
+          if (
+            visit(
+              current.prefixItems[index] as JSONSchema,
+              [...path, String(index)],
+            )
+          ) {
+            return true;
+          }
+        }
+      }
+      if (current.items !== undefined) {
+        return visit(current.items, [...path, "*"]);
+      }
     }
     return false;
   };
