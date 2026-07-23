@@ -119,7 +119,9 @@ Supported scenarios are `names`, `create-topics`, `noops`, `titles`, `comments`,
 the original scenarios; `--scenario=all` adds root oscillation.
 `--profile=conflicts` is intentionally small and deterministic: 2 topics, 2
 users, 2 sessions per user, a 10ms WebSocket frame delay, 4 rounds, and only
-`root-oscillation`; `--quick` keeps that topology but uses 2 rounds. Every
+`root-oscillation`; `--profile=conflicts --quick` keeps that topology but uses 2
+rounds. Standalone `--quick` instead selects the small matrix: 2 topics, 2
+users, 1 round, 2 typing steps, and the ordinary matrix scenarios. Every
 explicit dimension or `--scenario` overrides profile defaults.
 `root-oscillation` has each worker read the stored topics link array locally,
 preserve those links, and prepare the reversed whole-root value between two

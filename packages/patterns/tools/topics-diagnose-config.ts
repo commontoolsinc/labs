@@ -82,6 +82,34 @@ export interface RootOscillationMetadata {
 
 export { writePathShape } from "../integration/telemetry-path-shape.ts";
 
+const VALUE_OPTIONS = new Set([
+  "profile",
+  "program",
+  "topics",
+  "users",
+  "rounds",
+  "typing-steps",
+  "sessions-per-user",
+  "ws-delay-ms",
+  "scenario",
+  "cases",
+]);
+
+/** Reject unknown, positional, malformed, and repeated bare CLI tokens. */
+function validateArgs(args: readonly string[]): void {
+  let quickCount = 0;
+  for (const arg of args) {
+    if (arg === "--quick") {
+      quickCount++;
+      continue;
+    }
+    const match = /^--([a-z-]+)=(.*)$/.exec(arg);
+    if (match !== null && VALUE_OPTIONS.has(match[1])) continue;
+    throw new Error(`unsupported diagnostics argument: ${arg}`);
+  }
+  if (quickCount > 1) throw new Error("--quick may be provided once");
+}
+
 function explicitArg(
   args: readonly string[],
   name: string,
@@ -161,6 +189,7 @@ function profileFromArgs(args: readonly string[]): TopicsDiagnosticsProfile {
 export function configFromArgs(
   args: readonly string[],
 ): TopicsDiagnosticsConfig {
+  validateArgs(args);
   const quick = args.includes("--quick");
   const profile = profileFromArgs(args);
   const conflicts = profile === "conflicts";
@@ -211,6 +240,7 @@ export function casesFromArgs(
   args: readonly string[],
   config: TopicsDiagnosticsConfig,
 ): TopicsDiagnosticsCase[] {
+  validateArgs(args);
   const raw = explicitArg(args, "cases");
   const cases = raw === undefined
     ? config.topicCounts.flatMap((topics) =>
