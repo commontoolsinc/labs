@@ -161,8 +161,8 @@ describe("lunch poll: two users vote on a shared option", () => {
         "both runtimes idle",
         () =>
           Promise.all([
-            waitForRuntimeIdle(hostPage, { timeout: PROPAGATION_TIMEOUT }),
-            waitForRuntimeIdle(guestPage, { timeout: PROPAGATION_TIMEOUT }),
+            waitForRuntimeIdle(hostPage),
+            waitForRuntimeIdle(guestPage),
           ]),
       );
 
@@ -175,8 +175,7 @@ describe("lunch poll: two users vote on a shared option", () => {
       await clickCfButton(hostPage, "#lp-join-button");
       await timer.run(
         "host joined (name in roster)",
-        () =>
-          waitForText(hostPage, "body", HOST, { timeout: PROPAGATION_TIMEOUT }),
+        () => waitForText(hostPage, "body", HOST),
       );
 
       // Guest joins second. The board shows a participant count, not a full
@@ -188,12 +187,8 @@ describe("lunch poll: two users vote on a shared option", () => {
         "both join lands (count reaches 2)",
         () =>
           Promise.all([
-            waitForText(hostPage, "body", "2 joined", {
-              timeout: PROPAGATION_TIMEOUT,
-            }),
-            waitForText(guestPage, "body", GUEST, {
-              timeout: PROPAGATION_TIMEOUT,
-            }),
+            waitForText(hostPage, "body", "2 joined"),
+            waitForText(guestPage, "body", GUEST),
           ]),
       );
 
@@ -204,12 +199,8 @@ describe("lunch poll: two users vote on a shared option", () => {
         "option A propagates to both",
         () =>
           Promise.all([
-            waitForText(hostPage, "body", OPTION_A, {
-              timeout: PROPAGATION_TIMEOUT,
-            }),
-            waitForText(guestPage, "body", OPTION_A, {
-              timeout: PROPAGATION_TIMEOUT,
-            }),
+            waitForText(hostPage, "body", OPTION_A),
+            waitForText(guestPage, "body", OPTION_A),
           ]),
       );
 
@@ -231,12 +222,8 @@ describe("lunch poll: two users vote on a shared option", () => {
         "both browsers see 2 love it (merge)",
         () =>
           Promise.all([
-            waitForText(hostPage, "body", "2 love it", {
-              timeout: PROPAGATION_TIMEOUT,
-            }),
-            waitForText(guestPage, "body", "2 love it", {
-              timeout: PROPAGATION_TIMEOUT,
-            }),
+            waitForText(hostPage, "body", "2 love it"),
+            waitForText(guestPage, "body", "2 love it"),
           ]),
       );
 
@@ -262,12 +249,8 @@ describe("lunch poll: two users vote on a shared option", () => {
       await fillCfInput(hostPage, "#lp-add-option-input", OPTION_B);
       await clickCfButton(hostPage, "#lp-add-option-button");
       await Promise.all([
-        waitForText(hostPage, "body", OPTION_B, {
-          timeout: PROPAGATION_TIMEOUT,
-        }),
-        waitForText(guestPage, "body", OPTION_B, {
-          timeout: PROPAGATION_TIMEOUT,
-        }),
+        waitForText(hostPage, "body", OPTION_B),
+        waitForText(guestPage, "body", OPTION_B),
       ]);
       await clickCfButton(guestPage, voteButton(OPTION_B, "red"));
       // The third vote (red on option B) lands on both browsers — the count
@@ -278,15 +261,9 @@ describe("lunch poll: two users vote on a shared option", () => {
         "option B vote lands (3 votes); option A unchanged",
         () =>
           Promise.all([
-            waitForText(hostPage, "body", "3 votes", {
-              timeout: PROPAGATION_TIMEOUT,
-            }),
-            waitForText(guestPage, "body", "3 votes", {
-              timeout: PROPAGATION_TIMEOUT,
-            }),
-            waitForText(hostPage, "body", "2 love it", {
-              timeout: PROPAGATION_TIMEOUT,
-            }),
+            waitForText(hostPage, "body", "3 votes"),
+            waitForText(guestPage, "body", "3 votes"),
+            waitForText(hostPage, "body", "2 love it"),
           ]),
       );
     } finally {

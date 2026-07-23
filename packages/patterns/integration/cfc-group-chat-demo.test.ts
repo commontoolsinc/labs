@@ -349,7 +349,6 @@ async function waitForAuthorshipState(
         });
       },
       {
-        timeout: CFC_GROUP_CHAT_TIMEOUT,
         args: [containerSelector, expectedText],
       },
     );
@@ -449,7 +448,6 @@ async function waitForInvalidAuthorshipState(
         });
       },
       {
-        timeout: CFC_GROUP_CHAT_TIMEOUT,
         args: [containerSelector, IMPORTED_MESSAGE_MARKERS],
       },
     );
