@@ -357,18 +357,30 @@ propagate](#how-flags-propagate).
   execution). The issuance preflight enforces this: it refuses (soft decline)
   unless BOTH the stage and the advertisement hold AND the delivery cohort
   uniformly negotiates the subcapability.
-- **Status on 2026-07-18.** Implemented: the servability relax on both the
-  static and dynamic classifiers, the `crossSpaceReadSpaces` capability
-  threaded executor-router → CandidateClaim → issuance, the host issuance
-  preflight (per-space acting-READ binding + cohort gate), and the claim's
-  recorded `crossSpaceReadSpaces`. The composed wake→read→serve loop settles
-  SERVED with the vector basis under the stage. Off in production pending the
-  C3.7–C3.11 chain (idle-revocation binding, apply-time fence, client drop
-  rule, and the two-space gate).
-- **Path to removal.** Enable the `cross-space-read` claim-rank stage per the
-  plan's rollout sequencing once C3.7–C3.11 land, fold the dial into
-  `serverPrimaryExecution` alongside the claim-rank dial when cross-space
-  reads graduate, then delete the option and its Worker/router plumbing.
+- **Status on 2026-07-23 (C3 complete).** Implemented end-to-end: the
+  servability relax on both the static and dynamic classifiers, the
+  `crossSpaceReadSpaces` capability threaded executor-router → CandidateClaim
+  → issuance, the host issuance preflight (per-space acting-READ binding +
+  cohort gate), the claim's recorded `crossSpaceReadSpaces`, the C3.7
+  idle-revocation epoch binding, the C3.8 apply-time fence, and the C3.9
+  client vector-overlay drop rule — over both the in-process and co-hosted
+  transports (C3.10a/b). The composed wake→read→serve loop settles SERVED
+  with the vector basis and the client drops the overlay exactly once — each
+  step verified clause-by-clause at the memory + runner integration levels,
+  over both transports. The composed default-run two-space patterns gate
+  (`packages/patterns/integration/server-execution-cross-space-gate.test.ts`,
+  C3.11) is the owed top-level acceptance that runs the whole loop through a
+  real pool Worker and client Runtime. **Still off in production:** enabling
+  the `cross-space-read` claim-rank stage in a deployment is a rollout
+  decision, not part of C3 — the option changes nothing observable until
+  that stage AND the `cross-space-claims-v1` advertisement go live in the
+  deployment, so the flag remains programmatic-only, flipped only by the C3
+  gate fixtures.
+- **Path to removal.** The C3.7–C3.11 chain has landed; graduation is now a
+  rollout decision. Enable the `cross-space-read` claim-rank stage per the
+  plan's rollout sequencing, fold the dial into `serverPrimaryExecution`
+  alongside the claim-rank dial when cross-space reads graduate, then delete
+  the option and its Worker/router plumbing.
 
 ### `serverPrimaryExecutionDocSetWatch`
 

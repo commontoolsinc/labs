@@ -1281,20 +1281,50 @@ Rules that keep this sound:
 
 ### 6.8 Cross-space
 
-The scheduler may discover foreign-space reads or writes only at runtime.
-That uncertainty is why v1 authority is positive and whole-action: any known
-cross-space surface prevents a claim, and any dynamically discovered one
-causes the staged transaction to abort and its claim to be revoked. Clients
-then rerun and commit the complete action exactly as today. There is no
-`unservablePieces` document and no stale window waiting for an exception to
-propagate.
+Cross-space **reads** are server-primary as of C3 (landed 2026-07-18/23,
+implementation-plan Phase 4); cross-space **writes** stay
+client-authoritative until C4 (dual leases plus the coordinated-commit
+protocol §5 names as its reviewed entry prerequisite). The mechanism is a
+**protocol between hosts, not in-process calls between engines** — engines
+are passive substrate, and every cross-space touch (foreign-reader
+subscription, authenticated foreign point read, authorization-epoch
+propagation, and the vector input basis) crosses a `CrossSpaceTransport`
+at the `Server`↔`Server` boundary (context-lattice-execution.md §5). Two
+transports implement that protocol *identically*: the **in-process**
+transport (two spaces hosted in one `Server`, FIFO per link) and the
+**co-hosted** link (two `Server` instances joined by a serializing
+duplex). Both target **co-hosted, low-latency, reliable** hosts in the
+same deployment locality — an explicit, load-bearing assumption that
+permits synchronous-ish point reads and epoch checks without
+partition-tolerance machinery. Geo-distributed hosts are a later transport
+with its own design (§9 gap register).
+
+**Trust is link-authoritative (C3A13).** A foreign vector-basis component
+— a `{space, seq}` stamp on a settlement — is admitted only when the home
+host receives it over the authenticated link from the host **routed as
+authoritative for that space**; Worker- and client-supplied components are
+stripped exactly like the scalar, and a component arriving on a link not
+routed to its space is discarded. The link's routing table, not a
+per-stamp signature, is the authority — which is why the co-hosted
+assumption set is load-bearing: a misrouted or compromised host can only
+ever stamp the spaces routed to it. Per-stamp cryptographic signatures,
+which would relax the seam to untrusted transports, are deferred (§9 gap
+register).
+
+Positive authority stays whole-action. A claimed foreign READ is served
+once the settlement carries the vector basis and the executor's provider
+performs the point read under the *acting principal's* authority (the same
+ACL path as that user's client session); permission changes are fenced by
+a per-(space, principal) authorization epoch — an idle ACL revocation
+revokes the claim, and a revocation between the point read and the home
+apply settles the whole attempt canonically unserved. A foreign WRITE
+surface — known, or discovered dynamically at runtime — still prevents or
+revokes the claim, and the client reruns and commits the complete action
+exactly as today. There is no `unservablePieces` document and no stale
+window waiting for an exception to propagate.
 
 Client feeds continue following remote links through the requesting user's
-ordinary sessions. Server-side cross-space reads may be added later after
-permission continuity, multi-space input-basis vectors, wake subscriptions,
-and ownership are specified. Cross-space derived writes additionally need
-coordination between both spaces' executor leases; ordinary convergent
-co-writing is not sufficient for server-primary authority.
+ordinary sessions.
 
 ---
 
@@ -1405,7 +1435,9 @@ means a design doc/decision is required before implementation.
 | G6 | Transformer/runner enforcement of one direct root result binding; update hand-built tests | producer eligibility | implemented; no migration |
 | G7 | Authenticated branch-qualified demand + reconnect claim snapshots + ordered doc-set delta feed carrying commit/settlement sequence barriers; closure export | B/feed | demand, reconnect snapshot, and ordered data/control barriers implemented; exact closure export remains later |
 | G8 | (retired — reactive interpreter de-scoped from this design, §3.4; its gates are tracked in its own specs) | — | retired |
-| G9 | Cross-space basis vectors, permissions, wake, and dual-space ownership | later expansion | explicitly client-authority in v1 |
+| G9 | Cross-space basis vectors, permissions, wake, and dual-space ownership | later expansion | cross-space READS implemented (C3, 2026-07-18/23: vector input basis, foreign-readers wake index, ACL-checked foreign point reads, per-(space,principal) authorization epochs, over the in-process and co-hosted transports); cross-space WRITES remain client-authority pending C4 (dual leases + coordinated commit) |
+| G19 | Geo-distributed cross-space transport (partition-tolerant links across deployment localities) | cross-space beyond co-hosted | needs-spec: §5's protocol targets co-hosted, low-latency, reliable hosts; the in-process and co-hosted transports are built (C3), a WAN transport with its own partition/timeout design is undesigned |
+| G20 | Per-stamp cryptographic signatures on foreign vector-basis components | cross-space trust on untrusted transports | needs-spec: C3 trust is link-authoritative (C3A13 — the routing table gates which host may stamp which space, sound for co-hosted deployments); signing individual `{space, seq}` stamps to relax the seam to untrusted/geo-distributed transports is deferred here and gates G19 |
 | G10 | Actual-read `inputBasisSeq` plus no-op/failure/unserved `ActionSettlement` and committed `acceptedCommitSeq` gating | B reconciliation | accepted-read basis, nominal sequence types, host-derived provenance, committed/no-op/failed run emission, and client data gate implemented; W1.3 and W1.4 emit canonical unserved attempts, including permanent builtin servability failures |
 | G11 | Server builtin egress parity, relative serving-origin resolution, redirect/DNS revalidation | claimed async | implemented for v1; durable quotas/ledger remain G12 |
 | G12 | Durable streaming, quotas, circuit breakers, and cross-engine effect ledger | async hardening/failover | later; v1 preserves current behavior |

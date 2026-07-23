@@ -2234,6 +2234,57 @@ dropping the cohort metadata.
 
 #### C3 — cross-space reads: work-order decomposition (2026-07-17)
 
+**Status — C3 cross-space READS: mechanism complete + verified; C3.11's
+composed gate owed (2026-07-23).** The mechanism landed C3.1 through
+C3.10b, and C3.11's parent-document closeout landed with this status; the
+composed default-run two-space patterns gate remains owed (see the end of
+this section). Landed WOs: C3.1/C3.1b protocol substrate + mirror/dirt
+carriage (f3c4e1e97 /
+6d88916ca); C3.2 foreign authorization epochs (d6d58fa5e); C3.3a/C3.3b
+foreign wake pipeline + executor-authored mirroring (731e62374 /
+e580a4dbb); C3.4 foreign point reads (ccf407a7a); C3.5 vector input
+basis + engine relax (73a85df60); C3.6/C3.6b servability stage +
+`cross-space-claims-v1` cohort gate (3b9671c9d); C3.7 idle-revocation epoch
+binding (4afacbf6d); C3.8 home-apply fence (183c07d1a); C3.9 client
+vector-overlay drop (3542cb150); C3.10a/C3.10b co-hosted link + transport
+parity + reconnect (e580a4dbb / 4b3f58c7b). Each §7 gate clause is bound
+green at the memory + runner integration levels, over BOTH the in-process
+and co-hosted transports: the overlay drops exactly once
+(`client-execution-overlay-vector.test.ts`, 10/10 — C3A14/C3A15/C3A19);
+foreign point reads serve and fail-closed
+(`executor-provider-foreign-point-reads.test.ts`, 5/5); idle ACL
+revocation revokes (`v2-execution-cross-space-idle-revocation-test.ts` —
+C3.7); a read-vs-apply bump settles the whole attempt unserved
+(`v2-execution-cross-space-apply-fence-test.ts`, 7/7 — C3.8); and the
+wake/point-read/fence/reconnect + cross-space-read claim run identically
+over the co-hosted link (`v2-execution-cross-space-cohosted-c3-10b-test.ts`,
+6/6 — C3.10b). C3.11's parent-document closeout landed with this status
+(README §6.8 → the cross-engine protocol contract; README §9 gap-register
+rows G19 geo-distributed transport / G20 per-stamp signatures; the §5 seam
+wording host↔host/engines-passive; the §7 sketch-table + §8 R6 register
+rows; the C3A19 settlement-metadata owner decision;
+EXPERIMENTAL_OPTIONS.md follow-through; `deno task check-docs` green).
+**Residuals:** cross-space WRITES are C4 (dual leases + coordinated
+commit); the geo-distributed transport (G19) and per-stamp signatures
+(G20, the C3A13 deferral) remain undesigned; the C3A19 declare-and-count
+vs strip metadata ruling stands as the one open owner decision (§5,
+declare-and-count implemented); the C2.10 settlement-latency budget stays
+provisional. **Owed by C3.11 and not yet landed:** the composed default-run
+two-space patterns gate
+(`packages/patterns/integration/server-execution-cross-space-gate.test.ts`)
+— the top-level acceptance that composes the memory + runner fixtures above
+into one real loop: transport-parameterized over the single-Server
+in-process leg and the two-linked-`Server` co-hosted leg (C3.10a
+`crossSpaceLinkSocketPair`), a real `SharedExecutionPool` + Deno Worker, and
+a client wired through `spaceHostMap`, binding each §7 clause end-to-end.
+The constituent correctness is already proven clause-by-clause at the memory
+and runner integration levels (the fixtures cited above, all green over both
+transports); the gate is the composition proof, and is the first place a
+REAL authored pattern is executed server-side across the space boundary (no
+prior test does — expect a composition defect to surface and be root-fixed,
+the C2.9/C2.10 precedent). CI-budget clause (C3A23): its own
+patterns-integration shard or a named runtime ceiling in the file header.
+
 Mapped against the landed substrate, which carries more than §5's wording
 admits: cross-space read **indexing already exists** —
 `scheduler_read_index` rows carry a `read_space` distinct from

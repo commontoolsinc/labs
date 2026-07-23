@@ -339,10 +339,14 @@ before C3 lands is restricted to single-space cases. Multi-host is a
 **requirement**, not a deferred gap. The design consequence: the
 cross-engine seam below (accepted-commit subscription for foreign wake,
 authenticated foreign point reads, authorization-epoch propagation, and
-the vector basis) is specified as a **protocol between engines, not as
-in-process calls** — today's same-process primitives become its first
-transport, and the first step beyond co-residency targets **co-hosted
-hosts: low-latency, reliable links** (same deployment locality). That
+the vector basis) is specified as a **protocol between hosts —
+`Server`↔`Server`, with engines passive substrate — not as in-process
+calls between engines** (decision #1, ratified at the 2026-07-17 panel and
+code-verified: every cross-space touch lives in `Server`, engines never
+reach across the space boundary; C3A21). Today's same-process primitives
+become its first transport, and the first step beyond co-residency targets
+**co-hosted hosts: low-latency, reliable links** (same deployment
+locality). That
 assumption set is explicit and load-bearing: it permits synchronous-ish
 point reads and epoch checks without partition-tolerance machinery;
 geo-distributed hosts are a later transport with its own design. C3 built
@@ -375,6 +379,25 @@ transports.
   home-space confirmed value reflects B-state newer than what the client
   displays from B. Accepted, brief, self-healing, and counted, exactly as
   §B.4 counts its window.
+- **The settlement-metadata channel is an explicit owner decision, not a
+  silent leak (C3A19 — the one open owner decision of C3, like C2.10's
+  provisional latency budget).** A vector settlement carries the foreign
+  component's `{space, seq}` to every session the home delivery predicate
+  matches, so a session whose principal lacks READ on space B learns B's
+  id and a monotonic seq (never B's contents — the point read runs under
+  the *acting* principal, and B's document never rides the settlement).
+  Two contracts close this, and the owner picks one:
+  **(a) declare-and-count** — accept the id+seq exposure as a bounded
+  metadata window and surface it beside the divergence counter through a
+  `routeDiagnostics` counter (this is what C3.9 **implements** today,
+  matching how §B.4 counts rather than hides its window); or
+  **(b) strip** — filter foreign components out of settlements delivered
+  to sessions whose principal lacks READ on that component's space
+  (a delivery-time filter in `#sessionAcceptsClaim`'s settlement arm),
+  accepting scalar-only reconciliation for those sessions. The table
+  carries this explicitly rather than shipping (a) by default without a
+  recorded ruling; flipping to (b) is a localized delivery-arm change, not
+  a protocol change.
 - **Foreign permission changes are fenced by an authorization epoch, not
   just named.** "Losing access revokes the claim" has a TOCTOU hole
   without a mechanism: the foreign ACL can change after the point read and
@@ -476,7 +499,7 @@ Interactions:
 
 | Surface | Change |
 | --- | --- |
-| `packages/runner/src/scheduler/servability.ts` | context-rank classification instead of space-only rejection: `non-space-*-scope` reasons become lane-selection outcomes; broader-instance lane writes are validated as scope-naming links (§4); cross-space reads stay inadmissible until C3, cross-space writes until C4 |
+| `packages/runner/src/scheduler/servability.ts` | context-rank classification instead of space-only rejection: `non-space-*-scope` reasons become lane-selection outcomes; broader-instance lane writes are validated as scope-naming links (§4); cross-space reads are admitted behind the `cross-space-read` claim-rank stage as of C3 (landed 2026-07-18/23), cross-space writes stay inadmissible until C4 |
 | `packages/runner/src/executor/executor-worker.ts` | one Runtime per lane (session/user lanes constructed on demand inside the same Worker), lane-keyed candidate/claim maps; acting context threaded to the provider. **The Worker replica must be re-keyed by effective scope key** — the client replica keys documents by declared scope because a client is single-session; a multi-lane replica holding two sessions' instances of one id collides otherwise. This re-keying (doc map, pending versions, overlays, unresolvable-read rebase, provider sync frames, lane-tagged read resolution) is the intra-Worker confidentiality boundary and is load-bearing, not a refactor detail |
 | `packages/runner/src/storage/v2-host-provider.ts` | `actingContext` on commits; host validation against claim contextKey + the live lane grant (per-lane generation); scoped point queries under the acting principal |
 | `packages/memory/v2/server.ts` / `engine.ts` | claims/settlements/wake queries keyed by contextKey (schema already carries it); lane grants with per-lane generations and host-side drain on session death; context-scoped control-event delivery (§2); the `context-lattice-claims-v1` subcapability gate on lane opening (§6); session-lane demand derivation; foreign-readers index and vector basis (C3) |
@@ -532,7 +555,7 @@ that claim is a design bug.
 | R3 | Unverified implementations (no verified provenance, so no `impl:` fingerprint) | fingerprint prefix | **defect class, target zero** (owner, 2026-07-15). **Diagnosed 2026-07-15**: the population is raw builtins and nothing else (`map`/`wish`/`ifElse`; `ifElse` is structural — JSX conditionals lower to it); authored code is fully provenance-covered (zero `cf:module/` rejections). Fix: static `cf:builtin/<id>:v1` identity for every canonical-registry builtin, then per-builtin computation descriptors — plan §4.6 W2.11/W2.15 |
 | R4 | Actions without a complete scope summary | summary-presence bit | **defect class, target zero** (same ruling). **Diagnosed 2026-07-15**: five offenders, two causes — the certificate gate rejects opaque/passthrough *reads* that post-C0 no longer need bounding (three read-only computeds), and the direct `lift()`/`derive()` builder form has no certificate path at all (both backlinks lifts). One (`computeIndex`) has a data-dependent write surface and is served as a **materializer** — envelope-granular write bounds derived per-run from resolved inputs, idle-priority scheduling (owner, 2026-07-15; no pattern redesign). Fix: plan §4.6 W2.12–W2.14, W2.16 |
 | R5 | Builtins outside the server registries | static registry lookup | explicit worklist (owner, 2026-07-17), replacing "as needed": effects lacking a server implementation — `llm`, `sqliteQuery` (broker implementations); computation builtins lacking descriptors — `streamData`, `llmDialog`, `compileAndRun`, `sqliteDatabase`, `navigateTo`, `inspectConfLabel` (W2.15-shape descriptors, priority-ordered by fixture incidence). `wish` is R13 |
-| R6 | Cross-space reads (until C3), cross-space writes (until C4 + coordinated-commit design) | per-address space compare | **C3 is pre-ship** (owner, 2026-07-15): shipping evaluation before C3 uses single-space cases only. Multi-host is a **requirement**, not a gap — §5 defines the cross-engine seam as a protocol whose first transport beyond in-process targets co-hosted, low-latency, reliable hosts. The 2026-07-17 C3 decomposition (implementation-plan Phase 4) binds that seam at the host↔host boundary (engines passive) and widens the protocol with mirror/dirt carriage and authorization-epoch machinery (panel amendments C3A1/C3A7/C3A21; §5's wording is amended at C3.11) |
+| R6 | Cross-space **writes** (until C4 + coordinated-commit design); cross-space **reads resolved through C3** | per-address space compare | **Cross-space READS landed with C3** (2026-07-18/23, implementation-plan Phase 4): the cross-engine seam is a host↔host protocol (engines passive; §5's wording amended here) with mirror/dirt carriage, per-(space,principal) authorization epochs, foreign-readers wake index, ACL-checked foreign point reads, and the vector input basis, exercised identically over the in-process and co-hosted transports (panel amendments C3A1/C3A7/C3A13/C3A21). C3 was pre-ship (owner, 2026-07-15); before it, shipping evaluation used single-space cases only. Cross-space WRITES stay client-authoritative until C4's dual leases + coordinated commit |
 | R7 | user/session contexts before their rank enables (C1/C2 staging) | lattice rank | C1/C2 shipping; temporary by construction. **Both ranks' mechanisms are landed (C1 2026-07-17, C2 complete 2026-07-18 — plan Phase 4), so what remains of this row is staged rank-dial *enablement* (§6 rollout sequencing), not construction.** Observable pre-C2 as counted `claim-context-mismatch` lease-fence rejects (a space claim whose run's context floor evaluates above space is fenced by design; the client computes fail-open — measured ~1 per few flag-on default-app runs, 2026-07-15). The placement guard tolerated exactly this cause until C2; its return to hard-zero was the named C2 acceptance criterion, and **the tolerance is retired (C2.10, 2026-07-18)**: the guard's tolerated registry holds only the two by-design drain causes, and every mismatch counts as unexpected again (plan row C2.10 carries the evidence) |
 | R8 | User-lane work while the principal has zero sessions | host lane state | resolved for v1: session-anchored (simplest); the later delegation design restores offline continuation correctly and owns its consent question |
 | R9 | Spaces owned by the legacy background service | host exclusion lock | not in use (owner, 2026-07-15); the exclusion interlock stays as a defensive lock and registry unification is deprioritized |
@@ -619,11 +642,20 @@ parent edit of its own: the C1.11 sentence was written against §2's full
 chain-scoped contract, and C2.6's named-session delivery narrowing made
 its session half literally true — a reconnect snapshot now carries
 exactly the claims the session routes at every rank; verified at C2
-closure, 2026-07-18.) Landing with **C3**: README §6.8's
-cross-space text is replaced by the cross-engine protocol contract (§5),
-including the co-hosted transport and its low-latency/reliability
-assumptions; a gap-register row is added only for the geo-distributed
-transport, which remains undesigned. Until the C3 edits land, §6.8's
-cross-space text predates the protocol contract — accurate-by-vacuity
-for every deployed configuration, since cross-space execution ships
-only with C3.
+closure, 2026-07-18.) Landing with **C3** (landed with C3.11, 2026-07-23): README §6.8's
+cross-space text is replaced by the cross-engine protocol contract (§5) —
+the host↔host seam, the C3A13 link-authoritative trust statement, the
+co-hosted transport and its low-latency/reliability assumptions, and both
+built transports (in-process + co-hosted); README §9 gap-register rows are
+added for the geo-distributed transport (G19, undesigned) and for
+per-stamp signatures (G20, the C3A13 deferral), and G9's status records
+reads landed / writes-C4; the R6 register row (§8) and the §5 seam wording
+(host↔host, engines passive — decision #1) and the §7 sketch-table
+servability row are amended here; and the C3A19 settlement-metadata ruling
+(§5) is recorded as an explicit owner decision. The clauses this design's
+C3 gate names are verified clause-by-clause, green over both transports, at
+the memory + runner integration levels; the composed default-run two-space
+patterns gate
+(`packages/patterns/integration/server-execution-cross-space-gate.test.ts`,
+transport-parameterized over the in-process and co-hosted harnesses) is the
+top-level acceptance owed by C3.11.
