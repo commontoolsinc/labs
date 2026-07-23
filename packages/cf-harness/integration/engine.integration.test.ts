@@ -478,6 +478,90 @@ Deno.test({
 });
 
 Deno.test({
+  name:
+    "cf-harness integration: a real sandbox path-escape is a tool result, not a run-fatal error",
+  ignore: !INTEGRATION,
+  permissions: { env: true, read: true, run: true, write: true },
+  async fn() {
+    await withHarness(
+      "integration-tool-error-recovery",
+      async (engine) => {
+        const requests: Array<{
+          messages: Array<{ role: string; content: string }>;
+        }> = [];
+        const loop = new CfHarnessPromptLoop({
+          apiKey: "test-key",
+          engine,
+          maxModelTurns: 3,
+          fetchFn: (_input, init) => {
+            const request = JSON.parse(String(init?.body ?? "{}")) as {
+              messages: Array<{ role: string; content: string }>;
+            };
+            requests.push(request);
+            // Turn 1: the model tries to `ls` the container root. cwd "/"
+            // escapes the sandbox roots, so the real DockerRunscSandbox
+            // `resolvePath` throws — the exact D9 scenario that used to kill
+            // the whole run on turn 1.
+            const payload = requests.length === 1
+              ? {
+                choices: [{
+                  index: 0,
+                  message: {
+                    role: "assistant",
+                    content: "",
+                    tool_calls: [{
+                      id: "call-escape",
+                      type: "function",
+                      function: {
+                        name: "bash",
+                        arguments: JSON.stringify({ command: "ls", cwd: "/" }),
+                      },
+                    }],
+                  },
+                }],
+              }
+              : {
+                choices: [{
+                  index: 0,
+                  message: {
+                    role: "assistant",
+                    content: "recovered after the sandbox rejected the path",
+                  },
+                }],
+              };
+            return Promise.resolve(
+              new Response(JSON.stringify(payload), { status: 200 }),
+            );
+          },
+        });
+
+        const result = await loop.runPrompt({
+          model: "gpt-5.4",
+          prompt: "List the container root.",
+        });
+
+        // The run completed instead of dying on the path-escape throw.
+        assertEquals(result.runState.status, "completed");
+        assertEquals(
+          result.finalAssistantText,
+          "recovered after the sandbox rejected the path",
+        );
+        // The model got a second turn: the error was fed back as a tool result.
+        assertEquals(requests.length, 2);
+        const toolMessage = requests[1].messages.at(-1);
+        assertEquals(toolMessage?.role, "tool");
+        assertStringIncludes(
+          toolMessage?.content ?? "",
+          "tool_execution_failed",
+        );
+        assertStringIncludes(toolMessage?.content ?? "", "path escapes");
+      },
+      { cfcEnforcementMode: "observe" },
+    );
+  },
+});
+
+Deno.test({
   name: "cf-harness integration: local Labs deno task cf help runs in sandbox",
   ignore: !CF_CLI_INTEGRATION,
   permissions: { env: true, read: true, run: true, write: true },
