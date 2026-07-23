@@ -20,7 +20,7 @@ in the same change.
 > flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-07-15. Each flag's section carries the date its status
+**Last reviewed:** 2026-07-23. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -32,7 +32,7 @@ was last checked against the code.
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (same-toolshed system sources, including all roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete flag | implemented, on in the shell |
-| [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | off | Robin McCollum (in development) | graduate to always-on with the computed-cell write-conflict policy | in development on robin/feat-computed-cell-identity-p2 (redesigned: `computed:` URI scheme) |
+| [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | on | Robin McCollum (#4659) | graduate to unconditional behavior, then delete flag | implemented, on by default |
 | [`cfcEnforcementMode`](#cfcenforcementmode) | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse) | `enforce-explicit` | Bernhard Seefeld (#3263) | tighten default toward `enforce-strict` | active; ladder is permanent |
 | [`cfcFlowLabels`](#cfcflowlabels) | `RuntimeOptions.cfcFlowLabels` | `off` | Bernhard Seefeld (#4011) | move toward `persist` | implemented, staged rollout |
 | [`cfcWriteFloor`](#cfcwritefloor) | `RuntimeOptions.cfcWriteFloor` | `off` | Bernhard Seefeld (#4479) | move toward `enforce` | implemented, staged rollout |
@@ -59,9 +59,9 @@ B](#appendix-b-related-toggles-that-are-not-experimental-flags).
 These flags make up the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). They
 are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
-`undefined`, which means "take the built-in default". `commitPreconditions`
-defaults on; the other flags in this category default off unless their section
-says otherwise.
+`undefined`, which means "take the built-in default". `commitPreconditions` and
+`computedCellIds` default on; the other flags in this category default off
+unless their section says otherwise.
 
 The mapping from environment variable to flag is defined once, canonically, as
 `EXPERIMENTAL_ENV_VARS` in
@@ -276,7 +276,7 @@ propagate](#how-flags-propagate).
 - **Toggle via.** `EXPERIMENTAL_COMPUTED_CELL_IDS` environment variable
   (through the canonical env registry) or
   `RuntimeOptions.experimental.computedCellIds`.
-- **Added by.** Robin McCollum, on the computed-cell-identity branch (spec:
+- **Added by.** Robin McCollum, in #4659 (spec:
   [`docs/specs/computed-cell-identity.md`](../specs/computed-cell-identity.md)).
 - **Purpose.** Mints kind-schemed entity ids (`computed:fid1:<hash>`, the
   `computed:` URI scheme replacing `of:`) for derived internal cells. The
@@ -288,19 +288,19 @@ propagate](#how-flags-propagate).
   reference. The flag gates minting only; readers accept both id forms
   unconditionally, so it can flip either way without a migration — but see the
   version-skew note below.
-- **Current default and planned end state.** Off by default. Graduates to
-  always-on together with the computed-cell write-conflict policy (ack-and-drop
-  for stale all-computed commits), then the flag is deleted. The flag is the
-  rollout gate for version skew: clients predating the `computed:` scheme
-  throw on such ids arriving via sync, so it must not graduate until every
-  syncing client carries the readers (old servers are safe — an unknown
-  scheme parses as no kind and stays strict).
-- **Status on 2026-07-15.** In development on
-  `robin/feat-computed-cell-identity-p2`: phase 1 (kind-schemed minting,
-  redesigned from a retired kind-in-hash-tag format that never shipped)
-  implemented behind the flag. Phase 2 (ack-and-drop of stale all-computed
-  commits) is split into its own follow-up PR with its own flag, so this
-  branch changes no conflict semantics.
+- **Current default and planned end state.** On by default. An explicit
+  `false` remains a rollback override for version skew while the flag soaks;
+  clients predating the `computed:` scheme throw on such ids arriving via sync
+  (old servers are safe — an unknown scheme parses as no kind and stays
+  strict). Once the rollout is stable, make minting unconditional and delete
+  the flag. The computed-cell write-conflict policy (ack-and-drop for stale
+  all-computed commits) remains a separately gated follow-up.
+- **Status on 2026-07-23.** Kind-schemed minting landed in #4659 and is on by
+  default. Readers accept both schemes unconditionally, and explicit `false`
+  retains the legacy `of:` minting behavior as a temporary rollback path.
+- **Path to removal.** Confirm all syncing clients carry `computed:`-aware
+  readers and the default-on rollout has soaked; then remove the environment
+  mapping, runtime option, builder guard, and legacy rollback tests.
 
 ---
 

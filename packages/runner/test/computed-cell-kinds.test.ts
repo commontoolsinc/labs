@@ -43,7 +43,6 @@ describe("computed cell kinds", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { computedCellIds: true },
     });
     frame = pushFrame({
       space,
@@ -330,12 +329,14 @@ describe("computed cell kinds", () => {
     });
 
     it("mints nothing when the flag is off", async () => {
-      // Replace the flag-on runtime from beforeEach with a default one.
+      // Replace the default-on runtime from beforeEach with an explicit
+      // rollback override.
       popFrame(frame);
       await runtime.dispose();
       runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
+        experimental: { computedCellIds: false },
       });
       frame = pushFrame({
         space,
@@ -379,7 +380,7 @@ describe("computed cell kinds", () => {
         await otherStorageManager.close();
       }
 
-      // The original flag-on runtime remains the active frame. Constructing
+      // The original default-on runtime remains the active frame. Constructing
       // and disposing the flag-off runtime above must not change its behavior.
       const double = lift((x: number) => x * 2);
       const flagOnPattern = pattern<{ x: number }>(({ x }) => ({

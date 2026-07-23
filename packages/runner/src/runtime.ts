@@ -208,7 +208,8 @@ export interface ExperimentalOptions {
   /**
    * Mint computed-scheme entity ids (`computed:fid1:<hash>`) for derived
    * internal cells classified as replayable by the builder. Gates minting
-   * only; readers accept both forms unconditionally. See
+   * only; readers accept both forms unconditionally. Defaults to on; pass
+   * `false` as a temporary rollback override. See
    * `docs/specs/computed-cell-identity.md`.
    */
   computedCellIds?: boolean | undefined;
@@ -901,8 +902,8 @@ export class Runtime {
 
     // Unlike ambient flags, computedCellIds is consumed from this Runtime's
     // builder frame. Normalize its local default after override logging so an
-    // omitted option does not appear as an explicit `false` override.
-    this.experimental.computedCellIds ??= false;
+    // omitted option does not appear as an explicit `true` override.
+    this.experimental.computedCellIds ??= true;
 
     // Propagate experimental flags to their ambient control points, then read
     // back the effective state so `experimental.*` reflects what is actually in
