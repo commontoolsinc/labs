@@ -1,6 +1,10 @@
 // The main-build tile's streak: how long the tip conclusion has held on main.
 // Canned runs, no network. See tiles.test.ts for the rest of this tile's contract.
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import {
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import { LOOM_REPO, REPO } from "../config.ts";
 import type { Ctx, Run } from "../types.ts";
 import { labsCi, loomCi } from "./main-build.ts";
@@ -249,6 +253,43 @@ Deno.test("labs ci: an observed failure survives a rerun without another API res
   );
 });
 
+Deno.test("labs ci: a malformed required attempt is rejected", async () => {
+  const id = 60;
+  const active = run({
+    id,
+    status: "in_progress",
+    conclusion: null,
+    run_attempt: 2,
+    head_sha: "latest",
+    run_started_at: ago(5),
+  });
+  const malformed = run({
+    id,
+    status: "completed",
+    conclusion: null,
+    run_attempt: 1,
+    head_sha: "latest",
+    run_started_at: ago(30),
+  });
+  const olderSuccess = run({
+    id: 160,
+    conclusion: "success",
+    head_sha: "older",
+    run_started_at: ago(90),
+  });
+
+  await withGithubAttempt(malformed, async (urls) => {
+    await assertRejects(
+      () => labsCi.collect(ctx([active, olderSuccess])),
+      Error,
+      `GitHub run ${id} attempt 1 did not include a completed conclusion`,
+    );
+    assertEquals(urls, [
+      `https://api.github.com/repos/${REPO}/actions/runs/${id}/attempts/1`,
+    ]);
+  });
+});
+
 Deno.test("labs ci: a repeated failure keeps the streak from the prior attempt", async () => {
   const id = 52;
   const firstAttempt = run({
@@ -356,6 +397,38 @@ Deno.test("labs ci: a cold completed rerun backfills its prior result", async ()
       `https://api.github.com/repos/${REPO}/actions/runs/57/attempts/1`,
     ]);
   });
+});
+
+Deno.test("labs ci: an unavailable optional attempt preserves the known verdict", async () => {
+  const id = 61;
+  const secondAttempt = run({
+    id,
+    conclusion: "success",
+    run_attempt: 2,
+    head_sha: "latest",
+    run_started_at: ago(5),
+  });
+  const olderFailure = run({
+    id: 161,
+    conclusion: "failure",
+    head_sha: "older",
+    run_started_at: ago(90),
+  });
+
+  await withGithubAttempt(
+    new Error("attempt endpoint unavailable"),
+    async (urls) => {
+      const view = await labsCi.collect(
+        ctx([secondAttempt, olderFailure]),
+      );
+      assertEquals(view.status, "good");
+      assertEquals(view.value, "passing");
+      assertEquals(view.sub, "green for 5m");
+      assertEquals(urls, [
+        `https://api.github.com/repos/${REPO}/actions/runs/${id}/attempts/1`,
+      ]);
+    },
+  );
 });
 
 Deno.test("labs ci: a missed attempt breaks the cached streak", async () => {
