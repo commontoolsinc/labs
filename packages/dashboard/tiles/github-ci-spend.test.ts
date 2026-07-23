@@ -455,6 +455,45 @@ Deno.test("ci spend: Blacksmith invoice, runner, storage, and threshold form one
   assertEquals(v.duration, 10 * D);
 });
 
+Deno.test("ci spend: a Blacksmith invoice without daily history still supplies MTD and forecast totals", async () => {
+  const at = (now: string) =>
+    view(
+      now,
+      blacksmithRouteSet(
+        now,
+        [],
+        undefined,
+        undefined,
+        ORG,
+        {
+          invoice: { amount: 150, currency: "USD" },
+          threshold: 300,
+        },
+      ),
+      BLACKSMITH_ENV,
+    );
+
+  const early = await at("2026-01-10T09:00:00Z");
+  assertEquals(early.value, "~$332/mo");
+  assertEquals(early.aside, '<span class="hmtd">$150 MTD</span>');
+  assertEquals(early.sub, undefined);
+  assertEquals(early.status, "warn");
+  assertEquals(
+    early.extra,
+    '<p class="sub"><span class="swatch" style="background:#f59e0b"></span> Blacksmith $150 • Budget $300</p>',
+  );
+  assertEquals(early.duration, 0);
+  assertEquals(early.href, "https://app.blacksmith.sh/");
+  assertEquals(early.hint, "billing ↗");
+
+  const ongoing = await at("2026-01-20T09:00:00Z");
+  assertEquals(ongoing.value, "~$245/mo");
+  assertEquals(ongoing.aside, '<span class="hmtd">$150 MTD</span>');
+  assertEquals(ongoing.status, "good");
+  assertEquals(ongoing.extra, early.extra);
+  assertEquals(ongoing.duration, 0);
+});
+
 Deno.test("ci spend: malformed Blacksmith costs never read as a green zero", async () => {
   const now = "2026-01-20T09:00:00Z";
   const malformedDaily = blacksmithRouteSet(now, [
