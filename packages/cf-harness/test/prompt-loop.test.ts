@@ -410,6 +410,80 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
   );
 });
 
+Deno.test("CfHarnessPromptLoop surfaces a tool-execution failure as a tool result instead of failing the run", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      // runShell rejects for the model's bash command, mirroring a sandbox
+      // path-escape (`resolvePath` throw) or command timeout
+      // (`ProcessTimeoutError`) — the class that used to kill the whole run.
+      sandboxRuntime: new FakeSandboxRuntime(
+        [],
+        new Error("path escapes allowed sandbox roots: /"),
+      ),
+      runId: "run-tool-error",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-1",
+                type: "function",
+                function: {
+                  name: "bash",
+                  arguments: JSON.stringify({ command: "ls /" }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "The path was rejected; I stayed under /workspace.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({ prompt: "Explore the filesystem." });
+
+  // The run completed instead of dying on the first failed tool call.
+  assertEquals(result.runState.status, "completed");
+  assertEquals(
+    result.finalAssistantText,
+    "The path was rejected; I stayed under /workspace.",
+  );
+  // The model got a second turn: the error was fed back, not treated as fatal.
+  assertEquals(fetchCalls.length, 2);
+  // The failed tool call is recorded in the transcript as a tool result that
+  // carries the offending path, so it stays recoverable from artifacts.
+  const toolMessage = result.transcript.find((message) =>
+    message.role === "tool"
+  );
+  assert(toolMessage !== undefined);
+  assertStringIncludes(toolMessage.content, "tool_execution_failed");
+  assertStringIncludes(
+    toolMessage.content,
+    "path escapes allowed sandbox roots: /",
+  );
+});
+
 Deno.test("CfHarnessPromptLoop forwards abort signals to gateway requests", async () => {
   const controller = new AbortController();
   let seenSignal: RequestInit["signal"];

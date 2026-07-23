@@ -2431,7 +2431,33 @@ export class CfHarnessPromptLoop {
         ...optionalPolicyEventIndexes(policyEventIndexes),
         errorDetail: toErrorDetail(error),
       });
-      throw error;
+      // A cancelled run must stay fatal: never turn an abort into a tool
+      // result the loop would keep iterating on.
+      if (signal?.aborted) {
+        throw error;
+      }
+      // Otherwise a tool-execution failure — a sandbox path-escape
+      // (`resolvePath` throws "path escapes allowed sandbox roots"), a
+      // command timeout (`ProcessTimeoutError`), or a failed subagent — is
+      // something the MODEL can react to, not a reason to kill the whole
+      // run. Surface it as a tool result instead of rethrowing into the
+      // run-fatal catch (topics board: "cf-harness: tool-call failures are
+      // run-fatal (path escape, 20s timeout)"). The offending path/command
+      // rides in the error message, so it lands in the persisted transcript
+      // and stays recoverable from artifacts even though the tool-input
+      // summary is digested for sensitivity.
+      return {
+        toolMessage: {
+          role: "tool",
+          toolCallId: toolCall.id,
+          toolName: toolCall.function.name,
+          content: JSON.stringify({
+            error: "tool_execution_failed",
+            toolId: toolCall.function.name,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        },
+      };
     }
     const modelOutputResult = await this.#modelFacingToolOutput(
       toolCall.function.name,
