@@ -420,17 +420,14 @@ describe("deep-freeze", () => {
   });
 
   // Cycle coverage for `deepFreeze()`'s arms (per the function's doc-comment
-  // 4-arm dispatch) and the analogous arms of `checkValue` inside
-  // `isDeepFrozenFabricValue`. Arm 1 (necessarily-or-known-deep-frozen) and
-  // Arm 2 (`FabricPrimitive`) are structurally cycle-free (leaf / no outbound
-  // references), so cycle tests only apply to Arm 4 (plain-object / array
-  // fallback) here. Arm 3 (`FabricInstance` via `[DEEP_FREEZE]`) cycles are
-  // covered in `fabric-instances/native-conversion.test.ts`.
+  // 4-arm dispatch) and for `isDeepFrozenFabricValue()`, which composes
+  // `isFabricValue()` and `isDeepFrozen()` -- each threading its own
+  // cycle-tracking set (`seen` / `inProgress`) through its recursion.
   //
-  // Termination assertion: a cycle without shared-`inProgress` threading would
-  // manifest as `RangeError: Maximum call stack size exceeded` (a clean fast
-  // throw, not a hang). `.not.toThrow()` is the discriminating assertion for
-  // "this call terminates."
+  // Termination assertion: a cycle without such threading would manifest as
+  // `RangeError: Maximum call stack size exceeded` (a clean fast throw, not a
+  // hang). `.not.toThrow()` is the discriminating assertion for "this call
+  // terminates."
   describe("cycle behavior", () => {
     describe("`deepFreeze()` (plain object / array)", () => {
       it("terminates on a self-referential plain object", () => {
@@ -468,10 +465,10 @@ describe("deep-freeze", () => {
     });
 
     describe("`isDeepFrozenFabricValue()` (regression pin)", () => {
-      // `checkValue` inside `isDeepFrozenFabricValue` maintains a closure-
-      // captured `seen` set, so it is currently cycle-safe across Arms 3 and
-      // 4 via that closure. These tests pin that property so a future fix
-      // does not regress it.
+      // `isDeepFrozenFabricValue()` composes `isFabricValue()` and
+      // `isDeepFrozen()`, each of which threads its own cycle-tracking set
+      // through its recursion, so the composition is cycle-safe. These tests
+      // pin that property so a future change does not regress it.
       it("terminates on a deep-frozen self-referential plain object", () => {
         const a: Record<string, unknown> = { x: 1 };
         a.self = a;
