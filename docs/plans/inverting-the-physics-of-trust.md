@@ -245,18 +245,24 @@ you.
 
 ## The whole unlock
 
-For forty years we have structurally underproduced software, for two
-reasons: it was expensive to create, and the same-origin paradigm
-verticalized the world. LLMs removed the expense. The paradigm is a
-design choice.
-Personal computing was supposed to make computers personal; instead, it
-made people subordinate to software. This is the way back: a personal
-fabric that everyone can own, woven into a society-scale common
-fabric. If the singularity comes, let it be plural: exuberant,
-creative, messy — billions of experiments in flourishing, not one
-experiment in species-wide management.
+Software is alchemy: something outside ourselves that extends our
+agency. And data compounds — every source combined with every other
+multiplies what the alchemy can do. That is an enormous store of
+potential for humanity, and almost all of it is still locked in silos
+guarded by goblins: for forty years we have structurally underproduced
+software, because it was expensive to create, and walled off what we
+did produce, because the trust model allowed nothing else. Personal computing was supposed to make
+computers personal; instead, it made people subordinate to software.
 
-And none of it survives without the inversion. The fabric has your
+LLMs make software infinite. But infinite software on the wrong
+substrate does not change the world; it just makes more islands. On the
+right substrate it becomes the way back: a personal fabric that
+everyone can own, woven into a society-scale common fabric. If the
+singularity comes, let it be plural: exuberant, creative, messy —
+billions of experiments in flourishing, not one experiment in
+species-wide management.
+
+And none of it works without the inversion. The fabric has your
 intentions woven in, structurally guiding what it can and cannot do —
 not as some hastily jury-rigged solution on top. Inverting the physics
 of trust is the whole unlock.
