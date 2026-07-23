@@ -677,13 +677,21 @@ interface TopicsContentProjection {
   createdAt: number;
   createdBy?: TopicsAuthorProjection;
   createdByName: string;
+  bodyUpdatedBy?: TopicsAuthorProjection;
+  bodyUpdatedAt: number;
   comments: {
     author?: TopicsAuthorProjection;
     authorName: string;
     body: string;
     sentAt: number;
   }[];
-  links: { kind: string; url: string; label: string }[];
+  links: {
+    kind: string;
+    url: string;
+    label: string;
+    addedBy?: TopicsAuthorProjection;
+    addedAt: number;
+  }[];
 }
 
 interface TopicsAuthorProjection {
@@ -714,6 +722,8 @@ function topicsContentProjection(
     createdByName: typeof values.createdByName === "string"
       ? values.createdByName
       : "",
+    bodyUpdatedBy: topicsAuthorProjection(values.bodyUpdatedBy),
+    bodyUpdatedAt: asTopicsNumber(values.bodyUpdatedAt),
     comments: asTopicsRecordArray(values.comments).map((comment) => ({
       author: topicsAuthorProjection(comment.author),
       authorName: typeof comment.authorName === "string"
@@ -726,6 +736,8 @@ function topicsContentProjection(
       kind: typeof link.kind === "string" ? link.kind : "",
       url: typeof link.url === "string" ? link.url : "",
       label: typeof link.label === "string" ? link.label : "",
+      addedBy: topicsAuthorProjection(link.addedBy),
+      addedAt: asTopicsNumber(link.addedAt),
     })),
   };
 }
