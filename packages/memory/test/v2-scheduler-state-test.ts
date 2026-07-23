@@ -4,6 +4,7 @@ import { Database } from "@db/sqlite";
 import {
   type AppliedCommit,
   applyCommit as applyCommitEngine,
+  applyCommitWithOutcome as applyCommitWithOutcomeEngine,
   close,
   createBranch,
   type Engine,
@@ -47,6 +48,15 @@ const DIRECT_TEST_SCOPE_CONTEXT = {
 
 const applyCommit: typeof applyCommitEngine = (engine, options) =>
   applyCommitEngine(engine, {
+    ...options,
+    principal: options.principal ?? DIRECT_TEST_SCOPE_CONTEXT.principal,
+  });
+
+const applyCommitWithOutcome: typeof applyCommitWithOutcomeEngine = (
+  engine,
+  options,
+) =>
+  applyCommitWithOutcomeEngine(engine, {
     ...options,
     principal: options.principal ?? DIRECT_TEST_SCOPE_CONTEXT.principal,
   });
@@ -555,6 +565,61 @@ Deno.test("memory v2 accepts observation-only commits without semantic revisions
       `SELECT count(*) AS count FROM scheduler_observation`,
     ).get() as { count: number };
     assertEquals(observationRows.count, 1);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 apply outcomes distinguish first application from replay", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const semantic = {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set" as const,
+        id: "of:outcome-semantic",
+        value: { value: true },
+      }],
+    };
+    const observationOnly = {
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: observationForAction("outcome:single"),
+    };
+    const batch = {
+      localSeq: 3,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservationBatch: [
+        {
+          localSeq: 4,
+          reads: { confirmed: [], pending: [] },
+          schedulerObservation: observationForAction("outcome:batch:one"),
+        },
+        {
+          localSeq: 5,
+          reads: { confirmed: [], pending: [] },
+          schedulerObservation: observationForAction("outcome:batch:two"),
+        },
+      ],
+    };
+
+    for (const commit of [semantic, observationOnly, batch]) {
+      const first = applyCommitWithOutcome(engine, {
+        sessionId: "session:apply-outcome",
+        commit,
+      });
+      const replay = applyCommitWithOutcome(engine, {
+        sessionId: "session:apply-outcome",
+        commit,
+      });
+      assertEquals(first.replayed, false);
+      assertEquals(replay.replayed, true);
+    }
   } finally {
     close(engine);
     await Deno.remove(path);
