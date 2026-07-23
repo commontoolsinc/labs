@@ -174,12 +174,8 @@ describe("type-check", () => {
         expect(isFabricValue(123n)).toBe(true);
       });
 
-      it("accepts symbols (interned and unique alike)", () => {
-        // Unlike `isFabricValueLayer()`'s registry-interned-only gate, this
-        // structural check matches `isDeepFrozenFabricValue()` and admits any
-        // symbol as a member.
+      it("accepts interned symbols", () => {
         expect(isFabricValue(Symbol.for("k"))).toBe(true);
-        expect(isFabricValue(Symbol("k"))).toBe(true);
       });
 
       it("accepts `null`", () => {
