@@ -26,6 +26,39 @@ as `cf piece ls`. Human-readable output uses the same columns as `piece ls`.
 matches. If part of a piece cannot be read, the command reports a warning on
 standard error and continues searching that piece and the rest of the space.
 
+## Output Conventions
+
+- stdout carries command output only; hints and diagnostics go to stderr.
+  `piece get` prints plain JSON, except an absent value prints the literal
+  `undefined` — which is not valid JSON, so test for it before parsing. It is
+  `undefined` rather than `null` on purpose: loom's fresh-space readback gate
+  tolerates `undefined` as a transient, and `null` would hard-fail its deploy
+  gate (see the `-q` note below and the PR compatibility rationale).
+- ANSI colors are emitted only when stdout is a TTY. `--no-color` or
+  `NO_COLOR=1` disables them everywhere (including Cliffy help/usage output);
+  `FORCE_COLOR=1`/`CLICOLOR_FORCE=1` forces them when piped. The policy is
+  applied in `lib/color-mode.ts`; the `@std/fmt/colors` import-map pin in
+  `deno.jsonc` must track Cliffy's own `@std/fmt` dependency range (guarded by
+  `test/color-mode.test.ts`).
+- `-q/--quiet` (on `piece`/`wish` subcommands) suppresses the stderr hint and
+  next-step blocks. It deliberately does NOT change the log floor: consumers
+  parse `--quiet` runs' stderr for runtime warnings (Loom's stale-root heal
+  greps for `load-pattern-by-identity-source-miss`). Use `--log-level error` to
+  drop warnings; the two compose.
+- `piece call` accepts its payload as an inline JSON argument, `-` for stdin, an
+  implicit pipe (no payload argument), or schema-derived flags after `--`.
+- A `piece get` path that doesn't resolve prints a one-line error on stderr and
+  exits 1 — it is a data error, not a usage error.
+- The launcher spawns the child CLI with `deno run --quiet` so Deno's own
+  warnings (npm "Ignored build scripts" banner) never reach users.
+
+## Built Binary
+
+`deno task build-binaries --cli-only` compiles the CLI to `dist/cf` — fully
+cwd-independent with no Deno startup noise, the recommended entry point for
+agents and scripts. Rebuild after every `git pull`: a stale binary rejects newer
+flags and can hit wire-protocol skew against an updated server.
+
 ## Launcher Contract
 
 `packages/cli/launcher.ts` is the stable Deno launcher for consumers that need

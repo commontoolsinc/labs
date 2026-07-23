@@ -151,8 +151,58 @@ export function localPatternEntry(
   };
 }
 
-function pieceCallRawArgs(tail: string[], literalArgs: string[]): string[] {
+/**
+ * A `piece get` failure caused by a data condition rather than bad arguments:
+ * a path that doesn't resolve, or a result schema that can't project the
+ * stored data (PieceResultProjectionError). Reported as a plain error on
+ * stderr with exit 1, never as a Cliffy ValidationError (which would dump the
+ * usage screen and read as an arg-parse failure).
+ */
+export function isPieceGetDataError(error: unknown): error is Error {
+  return error instanceof PieceResultProjectionError ||
+    (error instanceof Error &&
+      error.message.startsWith("Cannot access path"));
+}
+
+/**
+ * Build the stderr report for a `piece get` failure. Returns null when the
+ * error is not a data error (the caller should rethrow). `message` is the
+ * one-line error; `hint` is an optional next-step tip. A projection error
+ * already carries its own `--step` guidance, and an input-mode read has
+ * nothing more to suggest — only a result-mode unresolved path gets the
+ * `--input` tip.
+ */
+export function pieceGetDataErrorReport(
+  error: unknown,
+  opts: { input?: boolean; piece?: string },
+): { message: string; hint?: string } | null {
+  if (!isPieceGetDataError(error)) return null;
+  if (error instanceof PieceResultProjectionError || opts.input) {
+    return { message: error.message };
+  }
+  return {
+    message: error.message,
+    hint: cliText(
+      `TIP: The path was read from the result cell. If the field is an input, retry with --input, or run 'cf piece inspect --piece ${opts.piece} ...' to see both cells.`,
+    ),
+  };
+}
+
+export function pieceCallRawArgs(
+  tail: string[],
+  literalArgs: string[],
+): string[] {
   if (literalArgs.length > 0) {
+    // Schema-derived flags after `--`. A payload token before `--` (inline
+    // JSON or the `-` stdin sentinel) would be silently dropped here, so
+    // reject the combination loudly instead — the same no-op this family of
+    // fixes is stamping out. Mirrors the `tail.length > 1` rejection below.
+    if (tail.length > 0) {
+      throw new ValidationError(
+        'Pass either a payload argument (inline JSON or "-" for stdin) or ' +
+          'schema-derived flags after "--", not both.',
+      );
+    }
     return literalArgs;
   }
 
@@ -172,6 +222,17 @@ function pieceCallRawArgs(tail: string[], literalArgs: string[]): string[] {
     );
   }
 
+  // Explicit two-token stdin sentinels (a JSON/value flag plus "-"), forwarded
+  // to the exec layer so the friendly surface matches `cf exec` and the bare
+  // "-" form. Without this they'd hit the multi-argument rejection below.
+  if (
+    tail.length === 2 && tail[1] === "-" &&
+    (tail[0] === "--json" || tail[0] === "--json-file" ||
+      tail[0] === "--value-file")
+  ) {
+    return [tail[0], "-"];
+  }
+
   if (tail[0] === "--json") {
     if (tail.length === 1) {
       // --json alone is a no-op: cf piece call always outputs JSON.
@@ -186,6 +247,12 @@ function pieceCallRawArgs(tail: string[], literalArgs: string[]): string[] {
     throw new ValidationError(
       'Use a single inline JSON argument or "--" before schema-derived flags.',
     );
+  }
+
+  // "-" is the conventional stdin sentinel; route it through the existing
+  // --json-file stdin path so empty stdin still fails loudly.
+  if (tail[0] === "-") {
+    return ["--json-file", "-"];
   }
 
   return ["--json", tail[0]];
@@ -814,6 +881,7 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
   )
   .arguments("[path:string]")
   .action(async (options, pathString) => {
+    setQuietMode(!!options.quiet);
     const pieceConfig = parsePieceOptions(options);
     const pathSegments = pathString ? parseCellPath(pathString) : [];
     try {
@@ -823,11 +891,18 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
       });
       render(value, { json: true });
     } catch (error) {
-      if (
-        error instanceof PieceResultProjectionError ||
-        error instanceof Error && error.message.startsWith("Cannot access path")
-      ) {
-        throw new ValidationError(error.message, { exitCode: 1 });
+      // A read that fails on a data condition — the path doesn't resolve, or
+      // the result schema can't project the stored data (PieceResultProjection
+      // Error) — is a data error, not a usage error. Report it on stderr
+      // instead of letting Cliffy dump the help screen over it.
+      const report = pieceGetDataErrorReport(error, {
+        input: options.input,
+        piece: pieceConfig.piece,
+      });
+      if (report) {
+        console.error(report.message);
+        if (report.hint) hint(report.hint);
+        Deno.exit(1);
       }
       throw error;
     }
@@ -907,6 +982,12 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
     ),
     `Call the "setName" handler with JSON arguments on piece "${RAW_EX_COMP
       .piece!}".`,
+  )
+  .example(
+    cliText(
+      `echo '{"value":"My Name"}' | cf piece call ${EX_ID} ${EX_COMP_PIECE} setName -`,
+    ),
+    `Read the JSON payload from stdin ("-" is the stdin sentinel).`,
   )
   .example(
     cliText(`cf piece call ${EX_ID} ${EX_COMP_PIECE} search -- --query milk`),

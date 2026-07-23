@@ -300,6 +300,34 @@ describe("parseExecArgs", () => {
     expect(result.input).toBeUndefined();
   });
 
+  it('treats "--json -" as the stdin sentinel for non-object schemas', () => {
+    const result = parseExecArgs(
+      makeSpec("handler", { type: "number" }),
+      ["--json", "-"],
+    );
+
+    expect(result.readJsonFromStdin).toBe(true);
+    expect(result.usedJsonInput).toBe(true);
+    expect(result.input).toBeUndefined();
+  });
+
+  it('treats "--json -" as the stdin sentinel for object schemas', () => {
+    const result = parseExecArgs(
+      makeSpec("tool", {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      }),
+      ["--json", "-"],
+    );
+
+    expect(result.readJsonFromStdin).toBe(true);
+    expect(result.usedJsonInput).toBe(true);
+    expect(result.input).toBeUndefined();
+  });
+
   it("preserves omitted non-object inputs as undefined", () => {
     const primitive = parseExecArgs(
       makeSpec("handler", { type: "number" }),

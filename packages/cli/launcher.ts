@@ -243,6 +243,10 @@ export const buildCfLauncherCommand = (
   command: options.denoPath,
   args: [
     "run",
+    // Suppress Deno's own diagnostics (npm "Ignored build scripts" banner,
+    // download progress) — they print ANSI to stderr on every invocation and
+    // are noise for CLI consumers. CLI/runtime output is unaffected.
+    "--quiet",
     "--config",
     options.configPath,
     "--allow-net",
