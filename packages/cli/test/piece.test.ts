@@ -1752,6 +1752,32 @@ describe("cli piece parsing", () => {
       await runtime.idle();
 
       const sourceError = new Error("source ownership unavailable");
+      let repeatedCellPulls = 0;
+      const repeatedCellView = new Proxy(repeatedCell, {
+        get(target, property) {
+          if (property === "pull") {
+            return async () => {
+              repeatedCellPulls++;
+              return await target.pull();
+            };
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      let repeatedProxyMaterializations = 0;
+      const repeatedProxyCellView = new Proxy(repeatedProxySource, {
+        get(target, property) {
+          if (property === "asSchema") {
+            return (schema?: JSONSchema) => {
+              repeatedProxyMaterializations++;
+              return target.asSchema(schema);
+            };
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
       const brokenSourceView = new Proxy(brokenSource, {
         get(target, property) {
           if (property === "resolveAsCell") {
@@ -1780,7 +1806,9 @@ describe("cli piece parsing", () => {
       if (ownerId === undefined) {
         throw new Error("Expected the owner result to have a piece ID");
       }
-      const repeatedProxy = repeatedProxySource.getAsQueryResult();
+      const repeatedProxy = {
+        [toCell]: () => repeatedProxyCellView,
+      };
       const ownedProxy = ownedProxySource.getAsQueryResult();
       const cell = (value: unknown) => ({
         pull: () => Promise.resolve(value),
@@ -1798,8 +1826,8 @@ describe("cli piece parsing", () => {
             piece("of:owned-proxy-referrer", "Referrer", [ownedProxy]),
             piece(ownerId, "Owner", "owned proxy coverage needle"),
             piece("of:repeated-cell", "Repeated cell", [
-              repeatedCell,
-              repeatedCell,
+              repeatedCellView,
+              repeatedCellView,
             ]),
             piece("of:repeated-proxy", "Repeated proxy", [
               repeatedProxy,
@@ -1819,23 +1847,29 @@ describe("cli piece parsing", () => {
         source: "input data" | "result data" | "metadata";
         error: unknown;
       }> = [];
+      const searchDeps = {
+        loadManager: () => Promise.resolve({} as any),
+        createController: () => controller as any,
+        reportSearchError: (
+          pieceId: string,
+          source: "input data" | "result data" | "metadata",
+          error: unknown,
+        ) => errors.push({ pieceId, source, error }),
+      };
 
       expect(
         await searchPieces(
           { apiUrl: API_URL, space: SPACE, identity: ID },
           "owned proxy coverage needle",
-          {
-            loadManager: () => Promise.resolve({} as any),
-            createController: () => controller as any,
-            reportSearchError: (pieceId, source, error) =>
-              errors.push({ pieceId, source, error }),
-          },
+          searchDeps,
         ),
       ).toEqual([{
         id: ownerId,
         name: "Owner",
         patternRef: undefined,
       }]);
+      expect(repeatedCellPulls).toBe(1);
+      expect(repeatedProxyMaterializations).toBe(1);
       expect(errors.length).toBeGreaterThan(0);
       expect(
         errors.every(({ pieceId, source, error }) =>
@@ -1843,6 +1877,20 @@ describe("cli piece parsing", () => {
           error === sourceError
         ),
       ).toBe(true);
+
+      errors.length = 0;
+      expect(
+        await searchPieces(
+          { apiUrl: API_URL, space: SPACE, identity: ID },
+          "unreachable source value",
+          searchDeps,
+        ),
+      ).toEqual([]);
+      expect(errors).toContainEqual({
+        pieceId: "of:broken-source-owner",
+        source: "input data",
+        error: sourceError,
+      });
     } finally {
       await runtime.dispose();
       await storageManager.close();

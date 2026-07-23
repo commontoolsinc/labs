@@ -268,10 +268,7 @@ export const piece = new Command()
     `Display a list of all pieces in "${RAW_EX_COMP.space}".`,
   )
   .option("--json", "Output machine-readable JSON.")
-  .action(async (options) => {
-    const pieces = await listPieces(parseSpaceOptions(options));
-    renderPieceSummaries(pieces, !!options.json);
-  })
+  .action(listPiecesFromCommand)
   /* piece search */
   .command("search", "Search readable input and result data in every piece.")
   .usage(`${spaceUsage} <query>`)
@@ -285,10 +282,7 @@ export const piece = new Command()
   )
   .arguments("<query:string>")
   .option("--json", "Output machine-readable JSON.")
-  .action(async (options, query) => {
-    const pieces = await searchPieces(parseSpaceOptions(options), query);
-    renderPieceSummaries(pieces, !!options.json);
-  })
+  .action(searchPiecesFromCommand)
   /* piece new */
   .command("new", "Create a new piece with a pattern.")
   .usage(spaceUsage)
@@ -1073,6 +1067,42 @@ export interface PieceCLIOptions {
   repository?: string;
   root?: string;
   dangerouslyAllowIncompatibleSchema?: boolean;
+}
+
+export interface PieceSummaryCLIOptions extends PieceCLIOptions {
+  json?: boolean;
+}
+
+export interface PieceListCommandDependencies {
+  listPieces?: typeof listPieces;
+  renderPieceSummaries?: typeof renderPieceSummaries;
+}
+
+export async function listPiecesFromCommand(
+  options: PieceSummaryCLIOptions,
+  deps: PieceListCommandDependencies = {},
+): Promise<void> {
+  const pieces = await (deps.listPieces ?? listPieces)(
+    parseSpaceOptions(options),
+  );
+  (deps.renderPieceSummaries ?? renderPieceSummaries)(pieces, !!options.json);
+}
+
+export interface PieceSearchCommandDependencies {
+  searchPieces?: typeof searchPieces;
+  renderPieceSummaries?: typeof renderPieceSummaries;
+}
+
+export async function searchPiecesFromCommand(
+  options: PieceSummaryCLIOptions,
+  query: string,
+  deps: PieceSearchCommandDependencies = {},
+): Promise<void> {
+  const pieces = await (deps.searchPieces ?? searchPieces)(
+    parseSpaceOptions(options),
+    query,
+  );
+  (deps.renderPieceSummaries ?? renderPieceSummaries)(pieces, !!options.json);
 }
 
 /** Injectable dependencies for testing the `piece setsrc` command boundary. */

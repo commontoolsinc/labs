@@ -1,6 +1,10 @@
 import { expect } from "@std/expect";
 import { decode } from "@commonfabric/utils/encoding";
-import { renderPieceSummaries } from "../commands/piece.ts";
+import {
+  listPiecesFromCommand,
+  renderPieceSummaries,
+  searchPiecesFromCommand,
+} from "../commands/piece.ts";
 
 function captureStdout(fn: () => void): string {
   let captured = "";
@@ -58,4 +62,91 @@ Deno.test("piece summaries render human and JSON output", () => {
   expect(table).toContain("<unknown>");
 
   expect(captureStdout(() => renderPieceSummaries([], false))).toBe("");
+});
+
+Deno.test("piece search command parses options and renders matches", async () => {
+  const matches = [{ id: "of:notes", name: "Notes" }];
+  let searched:
+    | {
+      config: {
+        apiUrl: string;
+        space: string;
+        identity: string;
+      };
+      query: string;
+    }
+    | undefined;
+  let rendered:
+    | {
+      pieces: Parameters<typeof renderPieceSummaries>[0];
+      json: boolean;
+    }
+    | undefined;
+
+  await searchPiecesFromCommand(
+    {
+      apiUrl: "https://cf.dev/",
+      space: "common-knowledge",
+      identity: "/tmp/estuary.key",
+      json: true,
+    },
+    "Hixie",
+    {
+      searchPieces: (config, query) => {
+        searched = { config, query };
+        return Promise.resolve(matches);
+      },
+      renderPieceSummaries: (pieces, json) => {
+        rendered = { pieces, json };
+      },
+    },
+  );
+
+  expect(searched).toEqual({
+    config: {
+      apiUrl: "https://cf.dev",
+      space: "common-knowledge",
+      identity: "/tmp/estuary.key",
+    },
+    query: "Hixie",
+  });
+  expect(rendered).toEqual({ pieces: matches, json: true });
+});
+
+Deno.test("piece list command parses options and renders pieces", async () => {
+  const pieces = [{ id: "of:tasks", name: "Tasks" }];
+  let listedConfig: {
+    apiUrl: string;
+    space: string;
+    identity: string;
+  } | undefined;
+  let rendered:
+    | {
+      pieces: Parameters<typeof renderPieceSummaries>[0];
+      json: boolean;
+    }
+    | undefined;
+
+  await listPiecesFromCommand(
+    {
+      url: "https://cf.dev/common-knowledge",
+      identity: "/tmp/estuary.key",
+    },
+    {
+      listPieces: (config) => {
+        listedConfig = config;
+        return Promise.resolve(pieces);
+      },
+      renderPieceSummaries: (summaries, json) => {
+        rendered = { pieces: summaries, json };
+      },
+    },
+  );
+
+  expect(listedConfig).toEqual({
+    apiUrl: "https://cf.dev",
+    space: "common-knowledge",
+    identity: "/tmp/estuary.key",
+  });
+  expect(rendered).toEqual({ pieces, json: false });
 });
