@@ -630,6 +630,11 @@ export class MultiRuntimeHarness {
     if (options.sessions.length === 0) {
       throw new Error("MultiRuntimeHarness needs at least one session");
     }
+    if (options.aggregateOnlyDiagnostics && options.apiUrl) {
+      throw new Error(
+        "aggregate-only diagnostics require the local in-process memory server",
+      );
+    }
     propagateExperimentalEnvToServerRealm();
     const spaceName = options.spaceName ?? crypto.randomUUID();
     const server = options.apiUrl ? undefined : StandaloneMemoryServer.start({

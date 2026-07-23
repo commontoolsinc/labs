@@ -1,213 +1,28 @@
-import { assertEquals, assertRejects, assertThrows } from "@std/assert";
-import { MultiRuntimeHarness } from "../integration/multi-runtime-harness.ts";
-import {
-  casesFromArgs,
-  configFromArgs,
-  deriveTelemetry,
-  rootOscillationMetadata,
-  writePathShape,
-} from "./topics-diagnose-config.ts";
+import { assertEquals, assertRejects } from "@std/assert";
+import { MultiRuntimeHarness } from "./multi-runtime-harness.ts";
 import {
   graphSummary,
   reportSafeErrorCode,
   runTopicsDiagnostics,
   settleSummary,
   TopicsDiagnosticsError,
-} from "./topics-diagnose.ts";
+} from "../tools/topics-diagnose.ts";
 
-Deno.test("Topics diagnostics validates explicit matrix arguments", () => {
-  const config = configFromArgs([
-    "--topics=2,4",
-    "--users=1,3",
-    "--rounds=2",
-    "--typing-steps=3",
-    "--sessions-per-user=2",
-    "--ws-delay-ms=5",
-    "--scenario=comments,bodies",
-  ]);
-  assertEquals(config.topicCounts, [2, 4]);
-  assertEquals(config.userCounts, [1, 3]);
-  assertEquals(config.scenarios, ["comments", "bodies"]);
-  assertEquals(casesFromArgs(["--cases=2x1,4x3"], config), [
-    { topics: 2, users: 1 },
-    { topics: 4, users: 3 },
-  ]);
-  assertThrows(() => configFromArgs(["--topics="]));
-  assertThrows(() => configFromArgs(["--users=0"]));
-  assertThrows(() => configFromArgs(["--scenario=unknown"]));
-  assertThrows(() => casesFromArgs(["--cases=2by3"], config));
-});
+// Covered by tools/topics-diagnose-config.test.ts.
 
-Deno.test("Topics diagnostics requires two topics for crossrefs only", () => {
-  const crossrefs = configFromArgs(["--scenario=crossrefs"]);
-  assertThrows(() => casesFromArgs(["--cases=1x1"], crossrefs));
-  const generatedCrossrefs = configFromArgs([
-    "--topics=1",
-    "--users=1",
-    "--scenario=crossrefs",
-  ]);
-  assertThrows(() => casesFromArgs([], generatedCrossrefs));
-  const comments = configFromArgs(["--scenario=comments"]);
-  assertEquals(casesFromArgs(["--cases=1x1"], comments), [{
-    topics: 1,
-    users: 1,
-  }]);
-});
+// Covered by tools/topics-diagnose-config.test.ts.
 
-Deno.test("Topics diagnostics applies conflicts profile defaults before explicit overrides", () => {
-  const conflicts = configFromArgs(["--profile=conflicts"]);
-  assertEquals(conflicts, {
-    profile: "conflicts",
-    program: "topics/main.tsx",
-    topicCounts: [2],
-    userCounts: [2],
-    rounds: 4,
-    typingSteps: 2,
-    sessionsPerUser: 2,
-    wsDelayMs: 10,
-    scenarios: ["root-oscillation"],
-  });
-  assertEquals(configFromArgs(["--profile=conflicts", "--quick"]).rounds, 2);
+// Covered by tools/topics-diagnose-config.test.ts.
 
-  const overridden = configFromArgs([
-    "--profile=conflicts",
-    "--topics=3",
-    "--users=4",
-    "--rounds=7",
-    "--typing-steps=6",
-    "--sessions-per-user=1",
-    "--ws-delay-ms=0",
-    "--scenario=comments",
-  ]);
-  assertEquals(overridden.topicCounts, [3]);
-  assertEquals(overridden.userCounts, [4]);
-  assertEquals(overridden.rounds, 7);
-  assertEquals(overridden.typingSteps, 6);
-  assertEquals(overridden.sessionsPerUser, 1);
-  assertEquals(overridden.wsDelayMs, 0);
-  assertEquals(overridden.scenarios, ["comments"]);
-  assertThrows(() => configFromArgs(["--profile=missing"]));
-});
+// Covered by tools/topics-diagnose-config.test.ts.
 
-Deno.test("Topics diagnostics keeps root oscillation opt-in for matrix runs", () => {
-  assertEquals(configFromArgs(["--quick"]).scenarios, [
-    "names",
-    "create-topics",
-    "noops",
-    "titles",
-    "comments",
-    "links",
-    "bodies",
-    "crossrefs",
-  ]);
-  assertEquals(
-    configFromArgs(["--quick", "--scenario=all"]).scenarios.at(-1),
-    "root-oscillation",
-  );
-});
+// Covered by tools/topics-diagnose-config.test.ts.
 
-Deno.test("Topics diagnostics validates root oscillation topology", () => {
-  const oneTopic = configFromArgs([
-    "--profile=conflicts",
-    "--topics=1",
-  ]);
-  assertThrows(() => casesFromArgs([], oneTopic));
-  const oneSession = configFromArgs([
-    "--profile=conflicts",
-    "--users=1",
-    "--sessions-per-user=1",
-  ]);
-  assertThrows(() => casesFromArgs([], oneSession));
-  const zeroRounds = configFromArgs([
-    "--profile=conflicts",
-    "--rounds=0",
-  ]);
-  assertThrows(() => casesFromArgs([], zeroRounds));
-  const oneRound = configFromArgs([
-    "--profile=conflicts",
-    "--rounds=1",
-  ]);
-  assertEquals(casesFromArgs([], oneRound), [{ topics: 2, users: 2 }]);
-});
+// Covered by tools/topics-diagnose-config.test.ts.
 
-Deno.test("Topics diagnostics derives write amplification ratios without negatives", () => {
-  const telemetry = {
-    invocationCount: 2,
-    distinctInvokedEventCount: 2,
-    distinctSuccessfulEventCount: 1,
-    distinctDroppedEventCount: 1,
-    droppedEventsByReason: {
-      "piece-load": 0,
-      lineage: 1,
-      preflight: 0,
-      "load-gate": 0,
-    },
-    permanentRejectionsByReason: {
-      "origin-committed": 0,
-      "receipt-exists": 1,
-    },
-    commitMarkerCount: 3,
-    directCommitCount: 0,
-    successfulCommitCount: 2,
-    failedAttemptCount: 1,
-    terminalFailureCount: 0,
-    retryMarkerCount: 1,
-    maxRetryAttempt: 2,
-    readCount: 4,
-    writeCount: 5,
-    changedWriteCount: 3,
-    writesTruncatedCount: 0,
-    writesByPathShape: { "value/*": 3 },
-  };
-  assertEquals(deriveTelemetry(telemetry, 2), {
-    changedWritesPerSubmittedOperation: 1.5,
-    attemptedWritesPerSubmittedOperation: 2.5,
-    elidedNoopCandidateWrites: 2,
-  });
-  assertEquals(deriveTelemetry({ ...telemetry, changedWriteCount: 8 }, 0), {
-    changedWritesPerSubmittedOperation: 0,
-    attemptedWritesPerSubmittedOperation: 0,
-    elidedNoopCandidateWrites: 0,
-  });
-});
+// Covered by tools/topics-diagnose-config.test.ts.
 
-Deno.test("Topics diagnostics redacts write path keys", () => {
-  const shape = writePathShape("value/did:key:private/topic-content/17");
-  assertEquals(shape, "value/*/*/#");
-  assertEquals(shape.includes("did:key"), false);
-  assertEquals(shape.includes("content"), false);
-});
-
-Deno.test("Topics diagnostics reports bounded root oscillation repeat metadata", () => {
-  assertEquals(rootOscillationMetadata([]), {
-    distinctStateCount: 0,
-    targetWriteCount: 0,
-    twoStepEligibleCount: 0,
-    twoStepRepeatCount: 0,
-    twoStepRepeatRatio: null,
-  });
-  assertEquals(rootOscillationMetadata([0]), {
-    distinctStateCount: 1,
-    targetWriteCount: 1,
-    twoStepEligibleCount: 0,
-    twoStepRepeatCount: 0,
-    twoStepRepeatRatio: null,
-  });
-  assertEquals(rootOscillationMetadata([0, 1]), {
-    distinctStateCount: 2,
-    targetWriteCount: 2,
-    twoStepEligibleCount: 0,
-    twoStepRepeatCount: 0,
-    twoStepRepeatRatio: null,
-  });
-  assertEquals(rootOscillationMetadata([0, 1, 0, 1]), {
-    distinctStateCount: 2,
-    targetWriteCount: 4,
-    twoStepEligibleCount: 2,
-    twoStepRepeatCount: 2,
-    twoStepRepeatRatio: 1,
-  });
-});
+// Covered by tools/topics-diagnose-config.test.ts.
 
 Deno.test("Topics diagnostics maps report errors to fixed safe codes", () => {
   assertEquals(
@@ -487,4 +302,19 @@ Deno.test("Topics diagnostics RPC responses are aggregate-only", async () => {
   } finally {
     await harness.dispose();
   }
+});
+
+Deno.test("aggregate-only diagnostics reject remote storage before worker creation", async () => {
+  await assertRejects(
+    () =>
+      MultiRuntimeHarness.create({
+        programPath: new URL("../topics/main.tsx", import.meta.url).pathname,
+        rootPath: new URL("..", import.meta.url).pathname,
+        aggregateOnlyDiagnostics: true,
+        apiUrl: new URL("https://example.invalid/"),
+        sessions: ["remote-rejected"],
+      }),
+    Error,
+    "aggregate-only diagnostics require the local in-process memory server",
+  );
 });
