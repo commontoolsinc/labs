@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { isRecord } from "@commonfabric/utils/types";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 
 import type {
   JSONSchemaMutable,
@@ -431,7 +432,13 @@ export class SchemaGenerator implements ISchemaGenerator {
     // Try to find a formatter that supports this type
     for (const formatter of this.formatters) {
       if (formatter.supportsType(type, context)) {
-        const result = formatter.formatType(type, context);
+        // Deep-freeze each formatted (sub)schema as it is produced. Generation
+        // is bottom-up, so a nested schema is frozen before any enclosing
+        // formatter composes or deduplicates it; the value model's hash cache
+        // is keyed on deep-frozen identity, so a frozen subtree is hashed once
+        // and then reused wherever it recurs. `deepFreeze` short-circuits on
+        // already-frozen input, so the bottom-up sweep stays cheap.
+        const result = deepFreeze(formatter.formatType(type, context));
 
         // If this is a named type (all-named policy), store in definitions.
         // We already computed namedKey above with wrapper checks, so reuse it.
@@ -666,16 +673,23 @@ export class SchemaGenerator implements ISchemaGenerator {
     type: ts.Type,
     context: GenerationContext,
   ): JSONSchemaMutable {
-    if (typeof schema !== "object") return schema;
+    if (typeof schema !== "object" || !isRecord(schema)) return schema;
 
     const docInfo = extractDocFromType(type, context.typeChecker);
-    if (docInfo.firstDoc && isRecord(schema) && !("description" in schema)) {
-      (schema as Record<string, unknown>).description = docInfo.firstDoc;
+    const addDescription = !!docInfo.firstDoc && !("description" in schema);
+    // `attachDocTags` runs whenever a string description is present -- either
+    // one we are about to add, or one already there.
+    if (!addDescription && typeof schema.description !== "string") {
+      return schema;
     }
-    if (isRecord(schema) && typeof schema.description === "string") {
-      attachDocTags(schema as Record<string, unknown>, schema.description);
+    // `schema` is a formatted schema and is deep-frozen; attach to a mutable
+    // shallow copy.
+    const out = { ...schema } as Record<string, unknown>;
+    if (addDescription) out.description = docInfo.firstDoc;
+    if (typeof out.description === "string") {
+      attachDocTags(out, out.description);
     }
-    return schema;
+    return out as JSONSchemaMutable;
   }
 
   /**

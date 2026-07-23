@@ -294,7 +294,7 @@ export class ObjectFormatter implements TypeFormatter {
       }
 
       // Delegate to the main generator (specific formatters handle wrappers/defaults)
-      const generated = this.schemaGenerator.formatChildType(
+      let generated = this.schemaGenerator.formatChildType(
         resolvedPropType,
         context,
         propTypeNode,
@@ -302,6 +302,9 @@ export class ObjectFormatter implements TypeFormatter {
       // Attach property description from JSDoc (if any)
       const { text, all } = extractDocFromSymbolAndDecls(prop, checker);
       if (text && isRecord(generated)) {
+        // `generated` is a formatted sub-schema and is deep-frozen; attach to a
+        // mutable shallow copy.
+        generated = { ...generated };
         const conflicts = all.filter((s) => s && s !== text);
         (generated as Record<string, unknown>).description = text;
         attachDocTags(generated as Record<string, unknown>, text);
@@ -336,7 +339,7 @@ export class ObjectFormatter implements TypeFormatter {
     const numberIndex = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
     const chosenIndex = stringIndex ?? numberIndex;
     if (chosenIndex) {
-      const apSchema = this.schemaGenerator.formatChildType(
+      let apSchema = this.schemaGenerator.formatChildType(
         chosenIndex,
         context,
         undefined,
@@ -359,6 +362,8 @@ export class ObjectFormatter implements TypeFormatter {
         }
       }
       if (foundDocs.length > 0 && isRecord(apSchema)) {
+        // Frozen sub-schema; attach to a mutable shallow copy.
+        apSchema = { ...apSchema };
         (apSchema as Record<string, unknown>).description = foundDocs[0]!;
         attachDocTags(apSchema as Record<string, unknown>, foundDocs[0]!);
         if (foundDocs.length > 1) {

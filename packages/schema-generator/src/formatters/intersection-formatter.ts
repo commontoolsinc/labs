@@ -194,8 +194,12 @@ export class IntersectionFormatter implements TypeFormatter {
                 const priorComment = typeof existing.$comment === "string"
                   ? existing.$comment as string
                   : undefined;
-                (existing as Record<string, unknown>).$comment = priorComment ??
-                  DOC_CONFLICT_COMMENT;
+                // `existing` is a formatted property schema and is deep-frozen;
+                // store an updated copy rather than mutating it.
+                mergedProps[key] = {
+                  ...(existing as Record<string, unknown>),
+                  $comment: priorComment ?? DOC_CONFLICT_COMMENT,
+                } as JSONSchemaObjMutable;
                 logger.warn(
                   "schema-gen",
                   () => `Intersection doc conflict for '${key}'; using first`,
@@ -270,8 +274,16 @@ export class IntersectionFormatter implements TypeFormatter {
       missingSources: string[];
     },
   ): JSONSchemaObjMutable {
-    const { schema, docTexts, documentedSources, missingSources } = data;
-    if (!isRecord(schema)) return schema;
+    const {
+      schema: originalSchema,
+      docTexts,
+      documentedSources,
+      missingSources,
+    } = data;
+    if (!isRecord(originalSchema)) return originalSchema;
+    // `originalSchema` is a formatted schema and is deep-frozen; the doc
+    // attachments below mutate, so work on a mutable shallow copy.
+    const schema = { ...originalSchema } as JSONSchemaObjMutable;
 
     const uniqueDocTexts = docTexts.filter((doc, index, arr) =>
       arr.indexOf(doc) === index

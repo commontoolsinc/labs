@@ -285,7 +285,12 @@ export class CommonFabricFormatter implements TypeFormatter {
               ? { not: true, default: defaultValue }
               : { default: defaultValue }) as JSONSchemaObjMutable;
           }
-          (valueSchema as Record<string, unknown>).default = defaultValue;
+          // Rebuild rather than mutate: `valueSchema` is a formatted
+          // sub-schema and is deep-frozen.
+          return {
+            ...(valueSchema as Record<string, unknown>),
+            default: defaultValue,
+          } as JSONSchemaObjMutable;
         }
       }
 
@@ -957,7 +962,12 @@ export class CommonFabricFormatter implements TypeFormatter {
           ? { not: true, default: defaultValue }
           : { default: defaultValue }) as JSONSchemaObjMutable;
       }
-      (valueSchema as any).default = defaultValue;
+      // Rebuild rather than mutate: `valueSchema` is a formatted sub-schema and
+      // is deep-frozen.
+      return {
+        ...(valueSchema as Record<string, unknown>),
+        default: defaultValue,
+      } as JSONSchemaObjMutable;
     }
 
     return valueSchema;
