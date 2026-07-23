@@ -14,7 +14,7 @@ import {
   StorageManager as StorageManagerV2,
 } from "../src/storage/v2.ts";
 import { createBuilder } from "../src/builder/factory.ts";
-import type { Pattern } from "../src/builder/types.ts";
+import type { Cell, Pattern } from "../src/builder/types.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -419,6 +419,66 @@ describe("resume owned-cell walk: scoped sub-pattern", () => {
     await sm1?.close();
     await sm2?.close();
     await server?.close();
+  });
+
+  it("deduplicates shared child results and ignores children without outputs", async () => {
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm1,
+    });
+    try {
+      const root = runtime.getCell(space, "resume-owned-dedup-root");
+      const sharedSpot = runtime.getCell(space, "resume-owned-shared-spot");
+      const sharedOutput = sharedSpot.getAsWriteRedirectLink({ base: root });
+      const child: Pattern = {
+        argumentSchema: {},
+        resultSchema: {},
+        derivedInternalCells: [{ partialCause: "owned" }],
+        result: {},
+        nodes: [],
+      };
+      const childNode = {
+        module: { type: "pattern" as const, implementation: child },
+        inputs: {},
+        outputs: sharedOutput as unknown as Pattern["nodes"][number]["outputs"],
+      };
+      const outer: Pattern = {
+        argumentSchema: {},
+        resultSchema: {},
+        result: {},
+        nodes: [
+          childNode,
+          childNode,
+          {
+            module: { type: "pattern", implementation: child },
+            inputs: {},
+            outputs: {},
+          },
+        ],
+      };
+      const owned: Cell<unknown>[] = [];
+      const runner = runtime.runner as unknown as {
+        collectResumeOwnedCells(
+          pattern: Pattern,
+          resultCell: Cell<unknown>,
+          out: Cell<unknown>[],
+          seen: Set<string>,
+          syncResultCell?: boolean,
+        ): Promise<void>;
+      };
+
+      await runner.collectResumeOwnedCells(
+        outer,
+        root,
+        owned,
+        new Set(),
+        false,
+      );
+
+      expect(owned).toHaveLength(1);
+    } finally {
+      await runtime.dispose();
+    }
   });
 
   it("re-scopes a user-scoped nested sub-pattern across a cold resume", async () => {
