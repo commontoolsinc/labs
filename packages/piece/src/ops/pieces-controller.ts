@@ -3,6 +3,7 @@ import {
   entityIdFrom,
   type EnvReader,
   experimentalOptionsFromEnv,
+  getPatternIdentityRef,
   type JSONSchema,
   type MemorySpace,
   type ModuleByteCache,
@@ -578,10 +579,87 @@ export class PiecesController<T = unknown> {
       rootToStart = await this.#manager.getDefaultPattern(false) ?? root;
     }
 
-    await timePiecesPhase(
-      "ensureDefaultPattern.startPiece",
-      () => this.#manager.startPiece(rootToStart, DEFAULT_ROOT_RUN_OPTIONS),
-    );
+    try {
+      await timePiecesPhase(
+        "ensureDefaultPattern.startPiece",
+        () => this.#manager.startPiece(rootToStart, DEFAULT_ROOT_RUN_OPTIONS),
+      );
+    } catch (startError) {
+      // Cold-start setup repair. checkAndUpdateDefaultPattern moves
+      // patternIdentity WITHOUT running the setup phase ("Never calls run()"),
+      // and Runner.start() of a not-running piece instantiates the stored
+      // identity directly — also without setup. A root whose identity moved
+      // while it was not running (the bricked-space heal: no watcher existed
+      // to swap it in place) therefore boots over a doc that never
+      // materialized the pattern's internal cells — handler
+      // `{ "$stream": true }` markers included — and dies at instantiation
+      // ("Handler used as lift", the 2026-07-22 estuary failure). This also
+      // covers docs ALREADY left in that state by an earlier session: their
+      // identity compares current, so no further swap will ever fire.
+      //
+      // run() (setup + start) is the sanctioned repair: with an unchanged
+      // pattern pointer the setup phase is idempotent — it only materializes
+      // missing internal cells and writes no argument (none supplied). Fail
+      // closed: if the repair cannot proceed or fails, surface the ORIGINAL
+      // start error; nothing is torn down or overwritten.
+      const runtime = this.#manager.runtime;
+      const ref = getPatternIdentityRef(rootToStart);
+      if (ref === undefined) throw startError;
+      let pattern;
+      try {
+        pattern = await runtime.patternManager.loadPatternByIdentity(
+          ref.identity,
+          ref.symbol,
+          this.#manager.getSpace(),
+        );
+      } catch {
+        throw startError;
+      }
+      if (pattern === undefined) throw startError;
+      pieceUpdateLogger.warn(
+        "cold-start-setup-repair",
+        () => [
+          "startEnsuredDefaultPattern: start failed; re-running setup for",
+          `${ref.identity}#${ref.symbol}`,
+          startError,
+        ],
+      );
+      const repairPattern = pattern;
+      // Detach any transaction view the resolved root carries: getDefault-
+      // Pattern hands back a cell bound to a read-only tx, and runSynced
+      // would otherwise adopt it for the setup writes.
+      const writableRoot = rootToStart.withTx();
+      // runSynced does not plumb schedulePatternUpdate, so the repair may let
+      // the lazy updater schedule one redundant check post-start. Benign: the
+      // awaited checkAndUpdateDefaultPattern above already reconciled, so the
+      // check observes a current identity and no-ops.
+      //
+      // expectedPatternIdentity is the repair precondition, not a formality:
+      // it atomically rejects a repair superseded by a concurrent source
+      // update (the identity is re-asserted inside every setup retry), and it
+      // makes runSynced THROW on a setup-commit failure instead of logging
+      // and continuing — without it this catch never sees commit-level
+      // failures and a dead root would be reported as a successful start.
+      try {
+        await timePiecesPhase(
+          "ensureDefaultPattern.coldStartSetupRepair",
+          () =>
+            runtime.runSynced(writableRoot, repairPattern, undefined, {
+              expectedPatternIdentity: ref,
+            }),
+        );
+      } catch (repairError) {
+        pieceUpdateLogger.warn(
+          "cold-start-setup-repair-failed",
+          () => [
+            "startEnsuredDefaultPattern: setup repair failed",
+            `${ref.identity}#${ref.symbol}`,
+            repairError,
+          ],
+        );
+        throw startError;
+      }
+    }
     await timePiecesPhase(
       "ensureDefaultPattern.runtime.idle",
       () => this.#manager.runtime.idle(),

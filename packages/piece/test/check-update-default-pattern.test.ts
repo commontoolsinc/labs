@@ -1108,7 +1108,248 @@ describe("checkAndUpdateDefaultPattern", () => {
     // was logged rather than swallowed.
     const after = (await manager.getDefaultPattern(true))!;
     await runtime.idle();
-    expect(after).toBeDefined();
+    // Functional pin, not just existence: the OLD pattern's nodes are still
+    // the ones running — its result reads back — after the refused swap.
+    expect(after.key("marker").get()).toBe("v1");
+  });
+
+  it("cold-boot swap: handler-bearing replacement heals a root that was NOT running", async () => {
+    // The real estuary bricked-space shape, which the running-piece test
+    // above cannot see: a bricked root never STARTED (its stored source
+    // fails to load), so there is no patternIdentity watcher when the swap
+    // lands. ensureDefaultPattern reconciles BEFORE start
+    // (startEnsuredDefaultPattern -> checkAndUpdateDefaultPattern), then
+    // cold-starts the piece — and Runner.startCore's initial instantiation
+    // does not run the setup phase, so the incoming pattern's
+    // { "$stream": true } markers were never materialized on the reused doc.
+    await setupHome({ systemPatternAutoUpdate: true });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    const staleRef = getPatternIdentityRef(root)!;
+
+    // The piece is NOT running when the swap lands — the defining difference
+    // from the watcher-path test above.
+    await manager.stopPiece(root);
+
+    stub.setSource(SOURCE_V3_HANDLER);
+    const restore = shadowLoadProbe(staleRef.identity, "undefined");
+    try {
+      // The real boot entry: reconcile-before-start, then cold start.
+      await controller.ensureDefaultPattern();
+    } finally {
+      restore();
+    }
+    await runtime.idle();
+
+    // Re-resolve: the controller's cell is a pre-heal transaction view.
+    const after = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(
+      await identityForSource(SOURCE_V3_HANDLER, {}, HOME_PATTERN_URL),
+    );
+    // Functional pin: the pattern body ran its setup (count materialized)…
+    expect(after.key("count").get()).toBe(0);
+    // …and the handler's stream marker actually works end-to-end.
+    (after.key("bump") as unknown as { send: (e: unknown) => void }).send({});
+    await runtime.idle();
+    await (after as unknown as { pull: () => Promise<unknown> }).pull();
+    const afterEvent = (await manager.getDefaultPattern(false))!;
+    expect(afterEvent.key("count").get()).toBe(1);
+  });
+
+  it("cold start heals a doc whose identity already moved without setup", async () => {
+    // The CURRENT durable state of an estuary space bricked by the deployed
+    // build: the 2026-07-22 flow already CAS-wrote patternIdentity to the
+    // official pattern (checkAndUpdateDefaultPattern "Never calls run()"),
+    // but no setup ever committed, so the doc has no internal-cell manifest
+    // entries or stream markers for that pattern. On the next boot the
+    // identity compares current, so no further swap fires — the doc must be
+    // healed at cold start itself.
+    await setupHome({ systemPatternAutoUpdate: true });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    await manager.stopPiece(root);
+
+    stub.setSource(SOURCE_V3_HANDLER);
+    const targetId = await identityForSource(
+      SOURCE_V3_HANDLER,
+      {},
+      HOME_PATTERN_URL,
+    );
+    // Model the already-committed swap: identity points at the CURRENT
+    // official pattern, doc still set up for SOURCE_V1 (marker-less for V3).
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: targetId,
+        symbol: "default",
+      });
+    });
+    expect(error).toBeUndefined();
+
+    await controller.ensureDefaultPattern();
+    await runtime.idle();
+
+    // Re-resolve: the controller's cell is a pre-heal transaction view.
+    const after = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(targetId);
+    expect(after.key("count").get()).toBe(0);
+    (after.key("bump") as unknown as { send: (e: unknown) => void }).send({});
+    await runtime.idle();
+    await (after as unknown as { pull: () => Promise<unknown> }).pull();
+    const afterEvent = (await manager.getDefaultPattern(false))!;
+    expect(afterEvent.key("count").get()).toBe(1);
+  });
+
+  it("failed cold-start repair stays fail-closed and leaves the doc healable", async () => {
+    // The repair's own failure contract: when the one-shot setup repair
+    // cannot commit, the ORIGINAL start error must surface (not the repair's),
+    // and the doc must be left exactly as it was — the next boot's repair
+    // attempt still heals it. Driven at the runSynced boundary because the
+    // in-process failure classes (arg validation) are skipped for an
+    // unchanged identity (samePattern), so a commit-layer failure is the
+    // realistic remaining one.
+    await setupHome({ systemPatternAutoUpdate: true });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    const staleRef = getPatternIdentityRef(root)!;
+    await manager.stopPiece(root);
+
+    stub.setSource(SOURCE_V3_HANDLER);
+    const restoreProbe = shadowLoadProbe(staleRef.identity, "undefined");
+    const rt = runtime as unknown as {
+      runSynced: (...args: unknown[]) => Promise<unknown>;
+    };
+    const originalRunSynced = rt.runSynced.bind(runtime);
+    rt.runSynced = () =>
+      Promise.reject(new Error("repair backend unavailable"));
+    let thrown: unknown;
+    try {
+      await controller.ensureDefaultPattern();
+    } catch (error) {
+      thrown = error;
+    } finally {
+      rt.runSynced = originalRunSynced;
+      restoreProbe();
+    }
+    // The original start failure surfaces, not the repair's own error.
+    expect(String(thrown)).toContain("Handler used as lift");
+    expect(String(thrown)).not.toContain("repair backend unavailable");
+
+    // Nothing was torn down or corrupted: with the repair path restored, the
+    // very next boot heals the same doc end-to-end.
+    await controller.ensureDefaultPattern();
+    await runtime.idle();
+    const after = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(
+      await identityForSource(SOURCE_V3_HANDLER, {}, HOME_PATTERN_URL),
+    );
+    expect(after.key("count").get()).toBe(0);
+    (after.key("bump") as unknown as { send: (e: unknown) => void }).send({});
+    await runtime.idle();
+    await (after as unknown as { pull: () => Promise<unknown> }).pull();
+    const afterEvent = (await manager.getDefaultPattern(false))!;
+    expect(afterEvent.key("count").get()).toBe(1);
+  });
+
+  it("repair guards rethrow the original start error when the pattern cannot be resolved", async () => {
+    // The repair's admission guards, driven through the real boot entry.
+    // Cold start of a doc in the already-swapped state whose (current)
+    // identity cannot be loaded: the repair's own load sees the same
+    // outcome, and each guard must surface the ORIGINAL start error.
+    await setupHome({ systemPatternAutoUpdate: true });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    await manager.stopPiece(root);
+    stub.setSource(SOURCE_V3_HANDLER);
+    const targetId = await identityForSource(
+      SOURCE_V3_HANDLER,
+      {},
+      HOME_PATTERN_URL,
+    );
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: targetId,
+        symbol: "default",
+      });
+    });
+    expect(error).toBeUndefined();
+
+    // Guard: the repair's loadPatternByIdentity resolves undefined.
+    let restore = shadowLoadProbe(targetId, "undefined");
+    let thrown: unknown;
+    try {
+      await controller.ensureDefaultPattern();
+    } catch (e) {
+      thrown = e;
+    } finally {
+      restore();
+    }
+    expect(thrown).toBeDefined();
+
+    // Guard: the repair's loadPatternByIdentity rejects outright.
+    restore = shadowLoadProbe(targetId, "reject");
+    thrown = undefined;
+    try {
+      await controller.ensureDefaultPattern();
+    } catch (e) {
+      thrown = e;
+    } finally {
+      restore();
+    }
+    expect(thrown).toBeDefined();
+
+    // With the probes gone the same doc still heals — the guards left it
+    // untouched.
+    await controller.ensureDefaultPattern();
+    await runtime.idle();
+    const after = (await manager.getDefaultPattern(false))!;
+    expect(after.key("count").get()).toBe(0);
+  });
+
+  it("repair guard rethrows the original start error for a malformed identity ref", async () => {
+    // A root whose patternIdentity meta is present but malformed: start
+    // fails, and the repair cannot even name a pattern to load — the
+    // ref-undefined guard must surface the original start failure.
+    await setupHome({ systemPatternAutoUpdate: true });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    await manager.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", { malformed: true });
+    });
+    expect(error).toBeUndefined();
+
+    let thrown: unknown;
+    try {
+      await controller.ensureDefaultPattern();
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeDefined();
   });
 
   it("replaces an unloadable stale sourceless space root", async () => {
