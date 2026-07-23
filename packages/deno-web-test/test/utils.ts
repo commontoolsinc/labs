@@ -4,6 +4,9 @@ import { parse as parseJsonc } from "@std/jsonc";
 
 const dirname = import.meta.dirname as string;
 const CLI_PATH = path.join(dirname, "..", "cli.ts");
+const ROOT_PATH = path.join(dirname, "..", "..", "..");
+const ROOT_CONFIG_PATH = path.join(ROOT_PATH, "deno.jsonc");
+const ROOT_LOCK_PATH = path.join(ROOT_PATH, "deno.lock");
 const DenoWebTestCache: Map<string, Promise<Deno.CommandOutput>> = new Map();
 
 // Runs deno-web-test in `projectDir` and caches
@@ -47,6 +50,25 @@ export const runDenoWebTest = async (
   }).output();
   if (!installSuccess) {
     throw new Error("Failed to run `deno install`");
+  }
+
+  // The task targets a module outside the copied project, so cache that
+  // module separately. Deno 2.9 no longer warms this graph through the
+  // project's `deno install`.
+  const { success: cacheSuccess } = await new Deno.Command(Deno.execPath(), {
+    args: [
+      "cache",
+      "--frozen",
+      "--config",
+      ROOT_CONFIG_PATH,
+      "--lock",
+      ROOT_LOCK_PATH,
+      CLI_PATH,
+    ],
+    cwd: tmpProjectPath,
+  }).output();
+  if (!cacheSuccess) {
+    throw new Error("Failed to cache deno-web-test dependencies");
   }
 
   const output = new Deno.Command(Deno.execPath(), {
