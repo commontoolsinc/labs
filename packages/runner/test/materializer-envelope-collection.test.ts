@@ -102,6 +102,28 @@ describe("materializer envelope collection", () => {
     expect(envelopes.length).toBe(1);
     expect(envelopes[0].id).toBe(targetCell.getAsNormalizedFullLink().id);
   });
+
+  it("collects cell-branded tuple (prefixItems) slot positions", () => {
+    // CT-1895: the walker never descended prefixItems, so asCell/writeonly
+    // markers in tuple slots escaped write tracking.
+    const resultCell = runtime.getCell(space, "envelope-tuple-result");
+    const targetCell = runtime.getCell<number>(space, "envelope-tuple-target");
+    const argumentSchema = {
+      type: "object",
+      properties: {
+        route: {
+          type: "array",
+          prefixItems: [{ type: "number", asCell: ["cell"] }],
+        },
+      },
+    };
+    const inputs = {
+      route: [targetCell.getAsWriteRedirectLink({ base: resultCell })],
+    };
+    const envelopes = collect(argumentSchema, inputs, resultCell, [["route"]]);
+    expect(envelopes.length).toBe(1);
+    expect(envelopes[0].id).toBe(targetCell.getAsNormalizedFullLink().id);
+  });
 });
 
 // The branch at the runner's envelope-derivation site: presence of
