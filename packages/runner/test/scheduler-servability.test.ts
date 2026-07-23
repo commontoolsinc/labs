@@ -1766,3 +1766,235 @@ describe("runtime context floor with a read-only certificate (W2.12/FB30)", () =
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// C3.6 cross-space-read servability: the `foreign-read-space` reject becomes a
+// stage-gated, space-scoped admission carrying a `crossSpaceReadSpaces`
+// capability, while foreign WRITES / scoped-foreign reads / foreign owner+piece
+// stay rejected byte-identically (decision #3). Both classifiers mirror.
+// ---------------------------------------------------------------------------
+describe("C3.6 cross-space-read servability", () => {
+  const otherForeign = "did:key:foreign-b" as const;
+  const foreignRead = (scope: "space" | "user" | "session" = "space") =>
+    address("of:foreign-input", { space: foreignSpace, scope });
+
+  describe("static classifier", () => {
+    it("stage OFF: a space-scoped foreign read stays foreign-read-space", () => {
+      const c = withSummary({ reads: [address("of:input"), foreignRead()] });
+      // Omitted and explicit-false are identical to the pre-C3.6 verdict.
+      expect(classifyStaticActionServability(c, servedSpace)).toEqual({
+        status: "unservable",
+        reason: "foreign-read-space",
+      });
+      expect(
+        classifyStaticActionServability(c, servedSpace, undefined, false),
+      ).toEqual({ status: "unservable", reason: "foreign-read-space" });
+    });
+
+    it("stage ON: a space-scoped foreign read is claim-ready carrying its space", () => {
+      const c = withSummary({ reads: [address("of:input"), foreignRead()] });
+      expect(
+        classifyStaticActionServability(c, servedSpace, undefined, true),
+      ).toEqual({
+        status: "claim-ready",
+        actionKind: "computation",
+        crossSpaceReadSpaces: [foreignSpace],
+      });
+    });
+
+    it("stage ON: multiple foreign reads dedup and sort into the capability", () => {
+      const c = withSummary({
+        reads: [
+          address("of:input"),
+          address("of:f1", { space: otherForeign }),
+          address("of:f2", { space: foreignSpace }),
+          address("of:f3", { space: foreignSpace }), // dup space, deduped
+        ],
+      });
+      const result = classifyStaticActionServability(
+        c,
+        servedSpace,
+        undefined,
+        true,
+      );
+      expect(result.status).toBe("claim-ready");
+      // Sorted for a stable claim key: "did:key:foreign" < "did:key:foreign-b".
+      expect(
+        (result as { crossSpaceReadSpaces?: readonly string[] })
+          .crossSpaceReadSpaces,
+      ).toEqual([foreignSpace, otherForeign].toSorted());
+    });
+
+    it("stage ON: a scoped (user/session) foreign read stays rejected (decision #3)", () => {
+      for (const scope of ["user", "session"] as const) {
+        const c = withSummary({
+          reads: [address("of:input"), foreignRead(scope)],
+        });
+        expect(
+          classifyStaticActionServability(c, servedSpace, undefined, true),
+        ).toEqual({ status: "unservable", reason: "foreign-read-scope" });
+      }
+    });
+
+    it("stage ON: foreign WRITE / owner / piece stay rejected byte-identically", () => {
+      expect(
+        classifyStaticActionServability(
+          withSummary({
+            materializerWriteEnvelopes: [
+              address("of:side-write", { space: foreignSpace }),
+            ],
+          }),
+          servedSpace,
+          undefined,
+          true,
+        ),
+      ).toEqual({ status: "unservable", reason: "foreign-write-space" });
+      expect(
+        classifyStaticActionServability(
+          candidate({ ownerSpace: foreignSpace }),
+          servedSpace,
+          undefined,
+          true,
+        ),
+      ).toEqual({ status: "unservable", reason: "foreign-owner-space" });
+      expect(
+        classifyStaticActionServability(
+          withSummary({ piece: address("of:piece", { space: foreignSpace }) }),
+          servedSpace,
+          undefined,
+          true,
+        ),
+      ).toEqual({ status: "unservable", reason: "foreign-piece-space" });
+    });
+
+    it("stage ON but no foreign read: byte-identical claim-ready (no capability field)", () => {
+      expect(
+        classifyStaticActionServability(
+          candidate(),
+          servedSpace,
+          undefined,
+          true,
+        ),
+      ).toEqual({ status: "claim-ready", actionKind: "computation" });
+    });
+
+    it("cross-space-read composes ORTHOGONALLY with a user lane (both fields)", () => {
+      const c = withSummary({
+        reads: [address("of:input", { scope: "user" }), foreignRead()],
+      });
+      expect(
+        classifyStaticActionServability(
+          c,
+          servedSpace,
+          { userContext: true },
+          true,
+        ),
+      ).toEqual({
+        status: "claim-ready",
+        actionKind: "computation",
+        contextRank: "user",
+        crossSpaceReadSpaces: [foreignSpace],
+      });
+    });
+  });
+
+  describe("dynamic firewall mirror", () => {
+    function observation(
+      reads: IMemorySpaceAddress[],
+    ): SchedulerActionObservation {
+      const output = address("of:output");
+      return {
+        version: 2,
+        ownerSpace: servedSpace,
+        branch: "",
+        pieceId: "space:of:piece",
+        processGeneration: 1,
+        actionId: "action-1",
+        actionKind: "computation",
+        implementationFingerprint: "impl:computation-v1",
+        runtimeFingerprint: "runner:scheduler:v3",
+        observedAtSeq: 0,
+        transactionKind: "action-run",
+        reads,
+        shallowReads: [],
+        actualChangedWrites: [output],
+        currentKnownWrites: [output],
+        declaredWrites: [output],
+        materializerWriteEnvelopes: [],
+        completeActionScopeSummary: candidate()
+          .completeActionScopeSummary as CompleteActionScopeSummary,
+        status: "success",
+      };
+    }
+
+    const routeInput = (
+      observed: SchedulerActionObservation,
+    ): ActionTransactionRouteInput => ({
+      space: servedSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: "of:output", scope: "space", value: { value: 1 } },
+        ],
+        schedulerObservation: observed,
+      },
+      sourceAction: {},
+    });
+
+    const spaceContext = (crossSpaceRead: boolean) => ({
+      servedSpace,
+      branch: "",
+      crossSpaceRead,
+    });
+
+    it("stage OFF: an observed space-scoped foreign read is dynamic-foreign-read-space", () => {
+      const observed = observation([address("of:input"), foreignRead()]);
+      expect(
+        dynamicActionTransactionUnservableReason(
+          routeInput(observed),
+          observed,
+          spaceContext(false),
+        ),
+      ).toBe("dynamic-foreign-read-space");
+    });
+
+    it("stage ON: an observed space-scoped foreign read is admitted", () => {
+      const observed = observation([address("of:input"), foreignRead()]);
+      expect(
+        dynamicActionTransactionUnservableReason(
+          routeInput(observed),
+          observed,
+          spaceContext(true),
+        ),
+      ).toBeUndefined();
+    });
+
+    it("stage ON: an observed scoped foreign read is dynamic-foreign-read-scope", () => {
+      const observed = observation([address("of:input"), foreignRead("user")]);
+      expect(
+        dynamicActionTransactionUnservableReason(
+          routeInput(observed),
+          observed,
+          spaceContext(true),
+        ),
+      ).toBe("dynamic-foreign-read-scope");
+    });
+
+    it("an observed foreign WRITE stays dynamic-foreign-write-space at both stages", () => {
+      for (const stage of [false, true]) {
+        const observed = observation([address("of:input")]);
+        observed.actualChangedWrites = [
+          address("of:output", { space: foreignSpace }),
+        ];
+        expect(
+          dynamicActionTransactionUnservableReason(
+            routeInput(observed),
+            observed,
+            spaceContext(stage),
+          ),
+        ).toBe("dynamic-foreign-write-space");
+      }
+    });
+  });
+});

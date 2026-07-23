@@ -266,6 +266,23 @@ export interface ExperimentalOptions {
    */
   serverPrimaryExecutionSessionRankCandidates?: boolean | undefined;
   /**
+   * Let the executor Worker admit FOREIGN-space, space-scoped READ surfaces
+   * (context-lattice C3.6): a computation — or supported builtin effect —
+   * whose read surface names a foreign space classifies claim-ready with a
+   * `crossSpaceReadSpaces` capability, and the executor issues a
+   * cross-space-read claim (the host re-verifies the acting principal's
+   * foreign READ per space at issuance and soft-declines otherwise). Default
+   * off: foreign reads classify exactly as the pre-C3.6 executor does
+   * (`foreign-read-space`, unservable), byte-identical. Foreign-read admission
+   * is ORTHOGONAL to the rank dials — it is a capability, not a fifth lane —
+   * so it composes with any of space/user/session candidacy. Programmatic-only
+   * and, per the CA4/C3A17 ordering invariant, never enabled outside gate
+   * fixtures until the memory-side `serverPrimaryExecutionClaimRank` reaches
+   * the `cross-space-read` stage AND the host advertises the
+   * `cross-space-claims-v1` cohort gate.
+   */
+  serverPrimaryExecutionCrossSpaceReadCandidates?: boolean | undefined;
+  /**
    * The client half of the F3 doc-set watch subcapability (feed protocol):
    * when on, and the peer advertises `serverPrimaryExecutionDocSetWatchV1`,
    * the client replica exports its held-doc closure as an additive `docs`

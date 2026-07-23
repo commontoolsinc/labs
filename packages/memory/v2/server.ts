@@ -81,6 +81,7 @@ import {
   type SchedulerWritersForTargetsResult,
   type ServerMessage,
   serverPrimaryExecutionClaimRankAtLeast,
+  serverPrimaryExecutionCrossSpaceReadsEnabled,
   serverPrimaryExecutionGraphRetirementAdmits,
   type SessionAckRequest,
   type SessionAckResult,
@@ -894,6 +895,52 @@ type OwnedExecutionLease = {
 
 type ExecutionClaimInput = ActionClaimKey;
 
+/**
+ * C3.6: host-side issuance options for
+ * {@link Server.setExecutionClaim}/{@link Server.trySetExecutionClaim} that
+ * deliberately do NOT participate in the client/server shared action identity
+ * (kept OUT of {@link ExecutionClaimInput} = {@link ActionClaimKey}). Today it
+ * carries only the candidate executor's discovered foreign-read surface; the
+ * host canonicalizes it ({@link normalizeCrossSpaceReadSpaces}) and, under the
+ * cross-space-read stage, binds the acting principal's foreign READ per space
+ * before recording the resulting `crossSpaceReadSpaces` on the claim. Absent
+ * (or an empty surface) keeps issuance byte-identical to pre-C3.6.
+ */
+type ExecutionClaimIssueOptions = {
+  /**
+   * FOREIGN spaces the candidate's action reads (raw, as the runner
+   * discovered them — the home space and duplicates are dropped at issuance).
+   * The runner supplies this only when the classifier admitted foreign reads
+   * under its `serverPrimaryExecutionCrossSpaceReadCandidates` experimental
+   * option; an ordinary same-space candidate omits it and every cross-space
+   * branch stays dormant.
+   */
+  readonly foreignReadSpaces?: readonly string[];
+};
+
+/**
+ * Canonicalize a candidate's raw foreign-read surface into a claim's
+ * `crossSpaceReadSpaces` set (C3.6): drop the home space (a same-space read is
+ * never cross-space), drop empties/non-strings, dedup, and SORT for a stable
+ * key. Returns a frozen array; empty ⇒ an ordinary same-space claim (the
+ * caller then omits the field entirely, so the claim stays byte-identical to
+ * a pre-C3.6 one). Sorting makes issuance deterministic and keeps C3.7's
+ * per-(space, principal, epoch) sidecar key order-independent.
+ */
+const normalizeCrossSpaceReadSpaces = (
+  spaces: readonly string[] | undefined,
+  homeSpace: string,
+): readonly string[] => {
+  if (spaces === undefined || spaces.length === 0) return Object.freeze([]);
+  const deduped = new Set<string>();
+  for (const space of spaces) {
+    if (typeof space === "string" && space.length > 0 && space !== homeSpace) {
+      deduped.add(space);
+    }
+  }
+  return Object.freeze([...deduped].sort());
+};
+
 type BoundExecutionSession = {
   readonly connectionId: string;
   readonly sessionToken: SessionToken;
@@ -1056,6 +1103,16 @@ class Connection {
       this.#clientFlags?.serverPrimaryExecutionContextLatticeClaimsV1 ===
         true &&
       this.#serverFlags?.serverPrimaryExecutionContextLatticeClaimsV1 === true;
+  }
+
+  /** cross-space-claims-v1 (C3.6b): layered above claim routing — a
+   * connection that cannot route space claims can never route cross-space
+   * ones. Never part of missesRequiredExecutionCapability: a mixed fleet is
+   * valid by design and the A11 cohort gate handles it at attach. */
+  get serverPrimaryExecutionCrossSpaceClaimsV1(): boolean {
+    return this.serverPrimaryExecutionClaimRoutingV1 &&
+      this.#clientFlags?.serverPrimaryExecutionCrossSpaceClaimsV1 === true &&
+      this.#serverFlags?.serverPrimaryExecutionCrossSpaceClaimsV1 === true;
   }
 
   /** doc-set watch (F3): layered above the base feed capability — a connection
@@ -3903,9 +3960,22 @@ export class Server {
    */
   #sessionAcceptsClaim(
     session: SessionState,
-    claim: ActionClaimKey,
+    claim: ActionClaimKey & { crossSpaceReadSpaces?: readonly string[] },
   ): boolean {
     if (!session.serverPrimaryExecutionV1) return false;
+    // C3.6b delivery gate: a cross-space-read-capable claim (a non-empty
+    // `crossSpaceReadSpaces`) delivers ONLY to sessions negotiating
+    // cross-space-claims-v1 — the amendment-11 subcapability narrowing,
+    // mirroring the context-lattice gate below. A same-space claim (the
+    // overwhelming default) has no marker and this is inert, so pre-C3.6
+    // delivery stays byte-identical.
+    if (
+      claim.crossSpaceReadSpaces !== undefined &&
+      claim.crossSpaceReadSpaces.length > 0 &&
+      !session.serverPrimaryExecutionCrossSpaceClaimsV1
+    ) {
+      return false;
+    }
     if (claim.contextKey !== "space") {
       if (!session.serverPrimaryExecutionContextLatticeClaimsV1) return false;
       const sessionIdentity = Engine.parseSessionExecutionContextKey(
@@ -3934,12 +4004,19 @@ export class Server {
     return false;
   }
 
-  #eventClaim(event: ExecutionControlEvent): ActionClaimKey {
+  #eventClaim(
+    event: ExecutionControlEvent,
+  ): ActionClaimKey & { crossSpaceReadSpaces?: readonly string[] } {
     switch (event.type) {
       case "session.execution.claim.set":
         return event.claim;
       case "session.execution.claim.revoke":
-        return event.claim;
+        // C3.6b: fold the revoke's cross-space-read marker back onto the
+        // canonical key so the delivery gate narrows the revoke to the same
+        // cohort as the claim.set (see #publishExecutionClaimRevoke).
+        return event.crossSpaceReadSpaces !== undefined
+          ? { ...event.claim, crossSpaceReadSpaces: event.crossSpaceReadSpaces }
+          : event.claim;
       case "session.execution.settlement":
         return event.settlement.claim;
     }
@@ -4483,6 +4560,13 @@ export class Server {
       claim: Object.freeze(canonicalActionClaimKey(claim)),
       leaseGeneration: claim.leaseGeneration,
       claimGeneration: claim.claimGeneration,
+      // C3.6b: carry the cross-space-read marker so the delivery gate reaches
+      // exactly the negotiating cohort the claim.set did. Omitted for the
+      // same-space default, keeping the revoke byte-identical to pre-C3.6.
+      ...(claim.crossSpaceReadSpaces !== undefined &&
+          claim.crossSpaceReadSpaces.length > 0
+        ? { crossSpaceReadSpaces: claim.crossSpaceReadSpaces }
+        : {}),
     }));
   }
 
@@ -4598,6 +4682,50 @@ export class Server {
         this.#drainSessionLane(grant);
       }
     }
+  }
+
+  /**
+   * C3.6b amendment-11 fence (the cross-space-read analog of
+   * `#fenceLanesForNonNegotiatingAttach`): on an attach that does NOT
+   * negotiate cross-space-claims-v1, REVOKE every live cross-space-read claim
+   * whose delivery cohort this attaching session belongs to — the attaching
+   * session can never receive such a claim (delivery gate), so it would run
+   * the foreign-reading action client-primary beside the host's claimed run.
+   * Cohort membership follows the claim's OWN contextKey rank (C3A18,
+   * matching `#crossSpaceReadClaimCohortNegotiates`): a session-lane claim of
+   * THIS session id, a user-lane claim of this principal, or — when this
+   * session negotiates routing — any space-lane claim of the space. Synchronous
+   * (like the lane fence): the revoke publishes before the open response
+   * releases and before `attachExecutionFeed` builds this session's snapshot,
+   * so the attaching session never observes the fenced claim. */
+  #fenceCrossSpaceReadClaimsForNonNegotiatingAttach(
+    space: string,
+    principal: string | undefined,
+    sessionId: string,
+    negotiatesRouting: boolean,
+  ): void {
+    for (const [key, claim] of [...this.#executionClaims]) {
+      if (
+        claim.space !== space || claim.crossSpaceReadSpaces === undefined ||
+        claim.crossSpaceReadSpaces.length === 0
+      ) {
+        continue;
+      }
+      const sessionIdentity = Engine.parseSessionExecutionContextKey(
+        claim.contextKey,
+      );
+      const userPrincipal = Engine.principalOfUserContextKey(claim.contextKey);
+      const inCohort = sessionIdentity !== undefined
+        ? sessionIdentity.sessionId === sessionId
+        : userPrincipal !== undefined
+        ? principal !== undefined && userPrincipal === principal
+        : negotiatesRouting; // space lane: only routing sessions are in cohort
+      if (!inCohort) continue;
+      this.#executionClaims.delete(key);
+      this.#executionClaimLaneBindings.delete(key);
+      this.#publishExecutionClaimRevoke(claim);
+    }
+    this.#scheduleExecutionClaimExpiry();
   }
 
   /** Connected-session anchoring predicate (amendment 17): sessions attached
@@ -5114,11 +5242,176 @@ export class Server {
     }
   }
 
+  /**
+   * C3.6 issuance preflight (C3A17): bind a cross-space-read claim's authority
+   * before it is recorded. Runs ONLY when the candidate declared a non-empty
+   * foreign-read surface. Every refusal is a SOFT decline — it throws
+   * {@link ExecutionLeaseAuthorityError}, so `trySetExecutionClaim` returns
+   * `null` and the client keeps running the foreign-reading action locally
+   * under its own authority (no escalation): a stage-off, mixed-cohort, or
+   * access-denied issuance fails open exactly like a lost lease.
+   *
+   * Three gates, in cheapest-first order (no wire traffic until the local
+   * ones pass):
+   *
+   * 1. The cross-space-read STAGE
+   *    ({@link serverPrimaryExecutionCrossSpaceReadsEnabled} — the rank dial's
+   *    fourth ladder entry) AND the host's own `cross-space-claims-v1`
+   *    advertisement must BOTH hold. This is the CA4/C3A17 ordering
+   *    invariant: the stage is never live without the C3.6b subcapability
+   *    that fences delivery, so a dial-on host that never advertised the
+   *    subcapability issues nothing.
+   * 2. The delivery COHORT (C3.6b) must uniformly negotiate
+   *    `cross-space-claims-v1` — the mixed-version race prevention. A cohort
+   *    member that does not negotiate it never receives the claim, so it
+   *    would run the same foreign-reading action client-primary beside the
+   *    host: refuse to issue rather than race two authorities.
+   * 3. Per foreign read space, the ACTING principal must hold READ — resolved
+   *    through the SAME `#authorizeMessageWithEngine(READ)` the C3.3b mirror
+   *    gate and the C3.4 point read use, on the READ space's own engine
+   *    (in-process/co-hosted = the local hosted engine; a peer-routed read
+   *    space's link-side binding round-trip is C3.10b, and until it lands a
+   *    peer-routed read soft-declines here). The acting principal is supplied
+   *    by the caller: the lease sponsor for the space lane (sponsor rotation
+   *    flips it), the bound lane grant's principal for user/session lanes.
+   *
+   * The per-space engine opens are awaits; the caller's re-sample block after
+   * this returns is their authority boundary (the `#setExecutionClaim`
+   * discipline — a lane that drained inside these awaits is caught there).
+   */
+  async #assertCrossSpaceReadIssuance(
+    claimInput: ExecutionClaimInput,
+    foreignReadSpaces: readonly string[],
+    actingPrincipal: string,
+  ): Promise<void> {
+    if (
+      !serverPrimaryExecutionCrossSpaceReadsEnabled() ||
+      !this.memoryProtocolFlags().serverPrimaryExecutionCrossSpaceClaimsV1
+    ) {
+      throw new ExecutionLeaseAuthorityError(
+        "cross-space-read claim issuance requires the cross-space-read stage " +
+          "and the cross-space-claims-v1 advertisement (C3A17 ordering " +
+          "invariant)",
+      );
+    }
+    if (!this.#crossSpaceReadClaimCohortNegotiates(claimInput)) {
+      throw new ExecutionLeaseAuthorityError(
+        "cross-space-read claim issuance requires the delivery cohort to " +
+          "uniformly negotiate cross-space-claims-v1 (C3.6b mixed-version " +
+          "race)",
+      );
+    }
+    for (const readSpace of foreignReadSpaces) {
+      await this.#assertForeignReadAccessForIssuance(
+        readSpace,
+        actingPrincipal,
+      );
+    }
+  }
+
+  /**
+   * C3.6b delivery-cohort gate for a cross-space-read claim, keyed by the
+   * claim's OWN contextKey rank (the derivation rule, C3A18 — a cross-space
+   * read's derivation is whatever lane context the claim runs under):
+   *
+   * - `session:<p>:<s>` → the owning session's OWN negotiation only (the C2.3
+   *   per-session pattern): a session-lane claim only ever suppresses its
+   *   named session, and that session's negotiation flag is recomputed on
+   *   every attach, so a sibling session's version can never gate it.
+   * - `user:<p>` → the lane principal's whole session cohort (the C1.7
+   *   principal-wide pattern, via {@link sessionsForPrincipal}): a user-lane
+   *   claim is deliverable to every session of the principal, so all must
+   *   negotiate or one would run the action client-primary.
+   * - `space` → the (space, branch) routing-negotiating session cohort: a
+   *   space-lane claim is deliverable to every routing session in the space,
+   *   so every routing session must ALSO negotiate cross-space-claims-v1.
+   *   Non-routing (legacy) sessions never suppress ANY claim and are outside
+   *   the routed cohort the base system already reasons about — matching
+   *   `#sessionAcceptsClaim`, which delivers computation claims only to
+   *   routing sessions.
+   */
+  #crossSpaceReadClaimCohortNegotiates(
+    claimInput: ExecutionClaimInput,
+  ): boolean {
+    const sessionIdentity = Engine.parseSessionExecutionContextKey(
+      claimInput.contextKey,
+    );
+    if (sessionIdentity !== undefined) {
+      const session = this.#sessions.get(
+        claimInput.space,
+        sessionIdentity.sessionId,
+      );
+      return session !== null &&
+        session.serverPrimaryExecutionCrossSpaceClaimsV1;
+    }
+    const userPrincipal = Engine.principalOfUserContextKey(
+      claimInput.contextKey,
+    );
+    if (userPrincipal !== undefined) {
+      return this.sessionsForPrincipal(claimInput.space, userPrincipal).every(
+        (session) => session.serverPrimaryExecutionCrossSpaceClaimsV1,
+      );
+    }
+    return this.#sessions.sessionsForSpace(claimInput.space).every((session) =>
+      session.ownerConnectionId !== null &&
+        !this.#connections.has(session.ownerConnectionId)
+        ? true // bound to a connection this server no longer tracks — excluded
+        : !session.serverPrimaryExecutionClaimRoutingV1 ||
+          session.serverPrimaryExecutionCrossSpaceClaimsV1
+    );
+  }
+
+  /**
+   * Bind the acting principal's foreign READ on one read space at issuance
+   * (C3.6), mirroring the C3.3b mirror gate / C3.4 point read resolution:
+   * `#authorizeMessageWithEngine(READ)` on the READ space's own engine. A
+   * refusal throws (soft decline — see `#assertCrossSpaceReadIssuance`). The
+   * read space is soft-declined when it cannot be authority-verified here:
+   * unhostable, or peer-routed (whose link-side READ binding round-trip is
+   * C3.10b — until it lands, a peer-routed foreign read never issues a claim
+   * and the client keeps running locally). In-process/co-hosted read spaces
+   * open the local hosted engine, so send host == read host and the local
+   * consult IS the read host's check.
+   */
+  async #assertForeignReadAccessForIssuance(
+    readSpace: string,
+    actingPrincipal: string,
+  ): Promise<void> {
+    if (!(await this.ensureCrossSpaceHosting(readSpace))) {
+      throw new ExecutionLeaseAuthorityError(
+        `cross-space-read claim issuance cannot host read space ${readSpace}`,
+      );
+    }
+    if (
+      this.#crossSpaceRouter.transport.routing?.peerHostFor(readSpace) !==
+        undefined
+    ) {
+      throw new ExecutionLeaseAuthorityError(
+        `cross-space-read claim issuance defers peer-routed read space ` +
+          `${readSpace} to C3.10b's link-side READ binding`,
+      );
+    }
+    const engine = await this.openHostedEngine(readSpace);
+    if (
+      this.#authorizeMessageWithEngine(
+        engine,
+        readSpace,
+        actingPrincipal,
+        "READ",
+      ) !== null
+    ) {
+      throw new ExecutionLeaseAuthorityError(
+        `acting principal lacks READ on cross-space read space ${readSpace}`,
+      );
+    }
+  }
+
   async setExecutionClaim(
     lease: ExecutionLeaseHandle,
     claimInput: ExecutionClaimInput,
+    options?: ExecutionClaimIssueOptions,
   ): Promise<ExecutionClaim> {
-    return await this.#setExecutionClaim(lease, claimInput);
+    return await this.#setExecutionClaim(lease, claimInput, options);
   }
 
   /** Attempt claim admission from a live executor. Demand and lease lifecycle
@@ -5128,9 +5421,10 @@ export class Server {
   async trySetExecutionClaim(
     lease: ExecutionLeaseHandle,
     claimInput: ExecutionClaimInput,
+    options?: ExecutionClaimIssueOptions,
   ): Promise<ExecutionClaim | null> {
     try {
-      return await this.#setExecutionClaim(lease, claimInput);
+      return await this.#setExecutionClaim(lease, claimInput, options);
     } catch (error) {
       if (error instanceof ExecutionLeaseAuthorityError) return null;
       throw error;
@@ -5140,9 +5434,18 @@ export class Server {
   async #setExecutionClaim(
     lease: ExecutionLeaseHandle,
     claimInput: ExecutionClaimInput,
+    options?: ExecutionClaimIssueOptions,
   ): Promise<ExecutionClaim> {
     this.#validateExecutionClaimInput(claimInput);
     this.#assertExecutionClaimCapabilityEnabled(claimInput);
+    // C3.6: the deduped FOREIGN read spaces this action consumes (the
+    // candidate's discovered foreign-read surface, canonicalized here). Empty
+    // ⇒ an ordinary same-space claim, and every cross-space branch below is
+    // dormant — issuance stays byte-identical to pre-C3.6.
+    const foreignReadSpaces = normalizeCrossSpaceReadSpaces(
+      options?.foreignReadSpaces,
+      claimInput.space,
+    );
     // Amendment 12 (session lanes since C2.3, CA1): bind the live lane
     // grant — user or session rank — before the first await; every
     // re-sample below re-validates the same incarnation so a drain fencing
@@ -5219,6 +5522,24 @@ export class Server {
         "execution lease is not active and authorized",
       );
     }
+    // C3.6 issuance preflight (C3A17): a cross-space-read claim binds the
+    // acting principal's foreign READ per read space and the delivery
+    // cohort's cross-space-claims-v1 negotiation. The acting principal is the
+    // read-side mirror of C3.4's live-authority resolution: the lease sponsor
+    // for the space lane (`current.onBehalfOf` — sponsor rotation flips it),
+    // the bound lane grant's principal for user/session lanes (C3A4's
+    // enumeration). Every refusal is a SOFT decline (ExecutionLeaseAuthority
+    // Error ⇒ trySet returns null ⇒ the client keeps running locally under
+    // its own authority — no escalation), so a stage-off/mixed-cohort/denied
+    // issuance fails open exactly like a lost lease. The foreign-engine opens
+    // are awaits; the re-sample block below is their authority boundary.
+    if (foreignReadSpaces.length > 0) {
+      await this.#assertCrossSpaceReadIssuance(
+        claimInput,
+        foreignReadSpaces,
+        laneGrant === null ? current.onBehalfOf : laneGrant.principal,
+      );
+    }
     this.expireExecutionClaims(claimNow);
     // Expiry publication can synchronously notify lifecycle listeners. Fence a
     // drain requested by that notification before installing new authority.
@@ -5254,6 +5575,13 @@ export class Server {
       leaseGeneration: current.leaseGeneration,
       claimGeneration,
       expiresAt: Math.min(claimNow + ttlMs, current.expiresAt),
+      // C3.6: record the host-verified foreign read spaces on the claim so
+      // the C3.6b delivery gate narrows on one signal, and C3.7 keys its
+      // epoch sidecar off the same set. Frozen array; absent when empty so a
+      // same-space claim stays byte-identical.
+      ...(foreignReadSpaces.length > 0
+        ? { crossSpaceReadSpaces: Object.freeze([...foreignReadSpaces]) }
+        : {}),
     });
     this.#executionClaims.set(key, claim);
     if (laneGrant !== null && laneKey !== undefined) {
@@ -6729,6 +7057,8 @@ export class Server {
             connection.serverPrimaryExecutionBuiltinPassivityV1,
           serverPrimaryExecutionContextLatticeClaimsV1:
             connection.serverPrimaryExecutionContextLatticeClaimsV1,
+          serverPrimaryExecutionCrossSpaceClaimsV1:
+            connection.serverPrimaryExecutionCrossSpaceClaimsV1,
           serverPrimaryExecutionDocSetWatchV1:
             connection.serverPrimaryExecutionDocSetWatchV1,
         },
@@ -6754,6 +7084,18 @@ export class Server {
           message.space,
           principal,
           opened.sessionId,
+        );
+      }
+      // C3.6b amendment-11 fence (same locus, same timing): an attach that
+      // does not negotiate cross-space-claims-v1 revokes the live
+      // cross-space-read claims of every cohort it joins, before the snapshot
+      // builds and the open response releases.
+      if (!connection.serverPrimaryExecutionCrossSpaceClaimsV1) {
+        this.#fenceCrossSpaceReadClaimsForNonNegotiatingAttach(
+          message.space,
+          principal,
+          opened.sessionId,
+          connection.serverPrimaryExecutionClaimRoutingV1,
         );
       }
       const catchup = opened.resumed === true

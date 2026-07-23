@@ -260,6 +260,18 @@ export interface MemoryProtocolFlags {
    */
   serverPrimaryExecutionContextLatticeClaimsV1: boolean;
   /**
+   * Subcapability of claim routing (C3.6b, `cross-space-claims-v1`): the
+   * client understands execution claims whose action reads FOREIGN spaces and
+   * suppresses its own local run of such an action, deferring the
+   * foreign-read derivation to the host's claimed commit. Sessions without it
+   * never receive a cross-space-read-capable claim, and their attach fences
+   * any live cross-space-read claim of the same delivery cohort (the A11
+   * cohort gate, mirroring context-lattice-claims-v1). Absent parses to
+   * false; layered above claim routing — a connection that cannot route space
+   * claims can never route cross-space ones. A mixed fleet stays valid.
+   */
+  serverPrimaryExecutionCrossSpaceClaimsV1: boolean;
+  /**
    * Subcapability (F3 feed protocol): the peer understands the additive `docs`
    * WatchSpec kind — server-membership doc-set watches whose members receive
    * per-wave point-read deltas rather than schema-graph re-traversal. Sessions
@@ -299,6 +311,7 @@ export type WireMemoryProtocolFlags = {
   serverPrimaryExecutionClaimRoutingV1?: boolean;
   serverPrimaryExecutionBuiltinPassivityV1?: boolean;
   serverPrimaryExecutionContextLatticeClaimsV1?: boolean;
+  serverPrimaryExecutionCrossSpaceClaimsV1?: boolean;
   serverPrimaryExecutionDocSetWatchV1?: boolean;
   schedulerWriterLookup?: boolean;
   commitPreconditions?: boolean;
@@ -446,6 +459,20 @@ export interface ExecutionClaim extends ActionClaimKey {
   claimGeneration: number;
   /** Unix milliseconds assigned by the host clock. */
   expiresAt: number;
+  /**
+   * C3.6: the FOREIGN spaces this claim's action reads under the
+   * cross-space-read stage — host-authored at issuance from the candidate's
+   * discovered foreign-read surface, after the issuance preflight bound the
+   * acting principal's READ on each (see the server's `#setExecutionClaim`).
+   * Deliberately NOT part of {@link canonicalActionClaimKey}: it is an
+   * issuance property, never a component of the client/server shared action
+   * identity, so the claim's map key and every equality/chain comparison stay
+   * byte-identical. A present, non-empty value marks the claim
+   * cross-space-read-capable — the single signal the C3.6b delivery gate
+   * (`#sessionAcceptsClaim`) narrows on. Absent (the overwhelming default)
+   * keeps the claim identical to a pre-C3.6 one.
+   */
+  crossSpaceReadSpaces?: readonly string[];
 }
 
 /** Unambiguous key for one exact lease + action claim incarnation. */
@@ -608,6 +635,16 @@ export interface ExecutionClaimRevokeEvent {
   claim: ActionClaimKey;
   leaseGeneration: number;
   claimGeneration: number;
+  /**
+   * C3.6b: mirrors the revoked claim's {@link ExecutionClaim.crossSpaceReadSpaces}
+   * so the delivery gate (`#sessionAcceptsClaim`) narrows the revoke to the
+   * same `cross-space-claims-v1` cohort the claim.set reached — a session that
+   * never received the (foreign-reading) claim must not receive its revoke and
+   * fire a spurious fail-open rerun. The `claim` field itself stays the
+   * canonical key (byte-identical for the pre-C3.6 revoke); this sibling
+   * marker is present only for cross-space-read claims.
+   */
+  crossSpaceReadSpaces?: readonly string[];
 }
 
 export type ActionSettlement =
@@ -1401,6 +1438,7 @@ let syncSchemaTableEnabled = true;
 let serverPrimaryExecutionEnabled = false;
 let serverPrimaryExecutionClaimRank: ServerPrimaryExecutionClaimRank = "space";
 let serverPrimaryExecutionContextLatticeClaimsEnabled = false;
+let serverPrimaryExecutionCrossSpaceClaimsEnabled = false;
 let serverPrimaryExecutionDocSetWatchEnabled = false;
 let serverPrimaryExecutionGraphRetirementSpaces: ReadonlySet<string> =
   new Set();
@@ -1441,30 +1479,55 @@ export function resetServerPrimaryExecutionConfig(): void {
 
 /**
  * Highest context rank the host ISSUES execution claims for (context-lattice
- * design §6: one internal dial, staged space → user → session → cross-space).
- * Issuance-side only — never negotiated on the wire; the engine's commit-time
- * guards stay rank-independent. The value is a LADDER, not a set: the
- * `session` stage admits user-rank claims too (space < user < session — a
- * host that may issue narrower claims may issue every broader-in-chain rank
- * beneath them). The default admits only the shared space lane; C1 work
- * enables `user` inside its gate fixtures, C2 enables `session` inside its
- * gate fixtures. Registered in docs/development/EXPERIMENTAL_OPTIONS.md as
- * `serverPrimaryExecutionClaimRank`.
+ * design §6: one internal dial, staged space → user → session →
+ * cross-space-read). Issuance-side only — never negotiated on the wire; the
+ * engine's commit-time guards stay rank-independent. The value is a LADDER,
+ * not a set: the `session` stage admits user-rank claims too (space < user <
+ * session — a host that may issue narrower claims may issue every
+ * broader-in-chain rank beneath them). The default admits only the shared
+ * space lane; C1 work enables `user` inside its gate fixtures, C2 enables
+ * `session` inside its gate fixtures.
+ *
+ * `cross-space-read` (C3.6) is the FOURTH ladder entry, above `session`. It
+ * is not a fourth CONTEXT rank — foreign-read admission is orthogonal to the
+ * space/user/session chain (a claim of ANY context rank may read foreign
+ * spaces). The ladder placement means the stage IMPLIES every rank beneath
+ * it (a host issuing cross-space-read claims also issues session/user/space
+ * claims, §6), while `serverPrimaryExecutionCrossSpaceReadsEnabled` — the
+ * predicate the issuance preflight consults — is true only AT this stage.
+ * Structurally never enabled outside fixtures until C3.6b's
+ * cross-space-claims-v1 cohort gate is in place (the CA4-style ordering
+ * invariant, C3A17). Registered in docs/development/EXPERIMENTAL_OPTIONS.md
+ * as `serverPrimaryExecutionClaimRank`.
  */
-export type ServerPrimaryExecutionClaimRank = "space" | "user" | "session";
+export type ServerPrimaryExecutionClaimRank =
+  | "space"
+  | "user"
+  | "session"
+  | "cross-space-read";
 
 const SERVER_PRIMARY_EXECUTION_CLAIM_RANK_ORDER: Record<
   ServerPrimaryExecutionClaimRank,
   number
-> = { space: 0, user: 1, session: 2 };
+> = { space: 0, user: 1, session: 2, "cross-space-read": 3 };
 
 /** Ladder comparison for the rank dial: is the configured stage at least
- * `rank`? (`session` ⇒ `user` ⇒ `space`, context-lattice §6.) */
+ * `rank`? (`cross-space-read` ⇒ `session` ⇒ `user` ⇒ `space`,
+ * context-lattice §6.) */
 export const serverPrimaryExecutionClaimRankAtLeast = (
   rank: ServerPrimaryExecutionClaimRank,
 ): boolean =>
   SERVER_PRIMARY_EXECUTION_CLAIM_RANK_ORDER[serverPrimaryExecutionClaimRank] >=
     SERVER_PRIMARY_EXECUTION_CLAIM_RANK_ORDER[rank];
+
+/** Whether the dial admits FOREIGN space-scoped reads under an issued claim
+ * (C3.6): true only when the stage has reached the `cross-space-read` ladder
+ * entry. Named apart from the raw `serverPrimaryExecutionClaimRankAtLeast`
+ * call so the issuance preflight and the servability seam read one predicate,
+ * and so the orthogonality is legible — this gates a CAPABILITY (foreign
+ * reads), not a fourth context rank. */
+export const serverPrimaryExecutionCrossSpaceReadsEnabled = (): boolean =>
+  serverPrimaryExecutionClaimRankAtLeast("cross-space-read");
 
 export function setServerPrimaryExecutionClaimRankConfig(
   rank?: ServerPrimaryExecutionClaimRank,
@@ -1501,6 +1564,33 @@ export function getServerPrimaryExecutionContextLatticeClaimsConfig(): boolean {
 
 export function resetServerPrimaryExecutionContextLatticeClaimsConfig(): void {
   serverPrimaryExecutionContextLatticeClaimsEnabled = false;
+}
+
+/**
+ * Ambient runtime flag for the cross-space-claims-v1 subcapability (C3.6b):
+ * whether this server ADVERTISES cross-space-read claim delivery. Defaults
+ * off; a mixed fleet stays valid either way — the A11 cohort gate fences
+ * cross-space-read claims around a delivery cohort that did not uniformly
+ * negotiate it rather than rejecting the sessions. Gated one stage above the
+ * claim-rank dial's `cross-space-read` entry: this advertises the wire
+ * subcapability, `serverPrimaryExecutionCrossSpaceReadsEnabled` (the rank
+ * dial) admits issuance; the ordering invariant (C3A17) is that issuance is
+ * refused unless BOTH hold, so the stage is never live without the gate.
+ * Registered in docs/development/EXPERIMENTAL_OPTIONS.md as
+ * `serverPrimaryExecutionCrossSpaceClaimsV1`.
+ */
+export function setServerPrimaryExecutionCrossSpaceClaimsConfig(
+  enabled?: boolean,
+): void {
+  serverPrimaryExecutionCrossSpaceClaimsEnabled = enabled ?? false;
+}
+
+export function getServerPrimaryExecutionCrossSpaceClaimsConfig(): boolean {
+  return serverPrimaryExecutionCrossSpaceClaimsEnabled;
+}
+
+export function resetServerPrimaryExecutionCrossSpaceClaimsConfig(): void {
+  serverPrimaryExecutionCrossSpaceClaimsEnabled = false;
 }
 
 /**
@@ -1653,6 +1743,11 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   serverPrimaryExecutionContextLatticeClaimsV1:
     getServerPrimaryExecutionConfig() &&
     getServerPrimaryExecutionContextLatticeClaimsConfig(),
+  // Layered subcapability of claim routing (C3.6b): its own dial defaults off,
+  // so enabling server-primary execution alone never turns it on. The
+  // connection getter chain enforces the layering above claim routing.
+  serverPrimaryExecutionCrossSpaceClaimsV1: getServerPrimaryExecutionConfig() &&
+    getServerPrimaryExecutionCrossSpaceClaimsConfig(),
   // Layered subcapability of the base feed capability: its own dial defaults
   // off, so enabling server-primary execution alone never turns it on.
   serverPrimaryExecutionDocSetWatchV1: getServerPrimaryExecutionConfig() &&
@@ -1743,6 +1838,15 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const serverPrimaryExecutionCrossSpaceClaimsV1 =
+    value.serverPrimaryExecutionCrossSpaceClaimsV1;
+  if (
+    serverPrimaryExecutionCrossSpaceClaimsV1 !== undefined &&
+    typeof serverPrimaryExecutionCrossSpaceClaimsV1 !== "boolean"
+  ) {
+    return null;
+  }
+
   const serverPrimaryExecutionDocSetWatchV1 =
     value.serverPrimaryExecutionDocSetWatchV1;
   if (
@@ -1804,6 +1908,10 @@ export const parseMemoryProtocolFlags = (
     // must never be treated as accepting them.
     serverPrimaryExecutionContextLatticeClaimsV1:
       serverPrimaryExecutionContextLatticeClaimsV1 === true,
+    // Absent-false: an older peer that never heard of cross-space claims must
+    // never be treated as accepting a cross-space-read claim (C3.6b).
+    serverPrimaryExecutionCrossSpaceClaimsV1:
+      serverPrimaryExecutionCrossSpaceClaimsV1 === true,
     // Absent-false: an older peer that never heard of doc-set watches must
     // never be treated as accepting the `docs` kind.
     serverPrimaryExecutionDocSetWatchV1:
@@ -1833,6 +1941,8 @@ export const wireMemoryProtocolFlags = (
     flags.serverPrimaryExecutionBuiltinPassivityV1,
   serverPrimaryExecutionContextLatticeClaimsV1:
     flags.serverPrimaryExecutionContextLatticeClaimsV1,
+  serverPrimaryExecutionCrossSpaceClaimsV1:
+    flags.serverPrimaryExecutionCrossSpaceClaimsV1,
   serverPrimaryExecutionDocSetWatchV1:
     flags.serverPrimaryExecutionDocSetWatchV1,
   schedulerWriterLookup: flags.schedulerWriterLookup,

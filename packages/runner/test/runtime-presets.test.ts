@@ -298,6 +298,28 @@ describe("runtimePresets conformance (CT-1814)", () => {
   });
 
   describe("experimentalOptionsFromEnv", () => {
+    // C3A20 (FB14 discipline): the FULL flag keyset is a committed golden. A
+    // new ExperimentalOptions flag must be registered in EXPERIMENTAL_ENV_VARS
+    // (the `satisfies Record<keyof ExperimentalOptions, ...>` clause enforces
+    // that at compile time) AND appear here — so a flag added without a
+    // deliberate registry decision fails by design. C3.6 adds
+    // `serverPrimaryExecutionCrossSpaceReadCandidates`.
+    it("pins the exhaustive experimental flag keyset (C3A20)", () => {
+      expect(Object.keys(EXPERIMENTAL_ENV_VARS).toSorted()).toEqual([
+        "commitPreconditions",
+        "eagerSourceAnnotation",
+        "modernCellRep",
+        "persistentSchedulerState",
+        "serverPrimaryExecution",
+        "serverPrimaryExecutionCrossSpaceReadCandidates",
+        "serverPrimaryExecutionDocSetWatch",
+        "serverPrimaryExecutionSessionRankCandidates",
+        "serverPrimaryExecutionUserRankCandidates",
+        "systemPatternAutoUpdate",
+        "systemPatternAutoUpdateHome",
+      ].toSorted());
+    });
+
     it("consults exactly the env-wired canonical mapping", () => {
       const read: string[] = [];
       experimentalOptionsFromEnv((name) => {

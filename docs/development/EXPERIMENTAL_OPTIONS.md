@@ -32,6 +32,7 @@ was last checked against the code.
 | [`serverPrimaryExecution`](#serverprimaryexecution) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (server-primary execution W0.6) | graduate after the phased authority rollout, then delete flag | implemented, off by default |
 | [`serverPrimaryExecutionUserRankCandidates`](#serverprimaryexecutionuserrankcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C1.5a) | fold into `serverPrimaryExecution` once user lanes graduate | implemented, off by default |
 | [`serverPrimaryExecutionSessionRankCandidates`](#serverprimaryexecutionsessionrankcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C2.5) | fold into `serverPrimaryExecution` once session lanes graduate | implemented and gate-bound (C2 complete 2026-07-18), off by default |
+| [`serverPrimaryExecutionCrossSpaceReadCandidates`](#serverprimaryexecutioncrossspacereadcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C3.6) | fold into `serverPrimaryExecution` once cross-space reads graduate | implemented, off by default (CA4/C3A17 ordering-bound: inert until the `cross-space-read` claim-rank stage AND the `cross-space-claims-v1` cohort gate are both live) |
 | [`serverPrimaryExecutionDocSetWatch`](#serverprimaryexecutiondocsetwatch) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH` env, or `RuntimeOptions.experimental`; bridges the memory-side `setServerPrimaryExecutionDocSetWatchConfig()` (negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution F3 server / F4 client) | fold into `serverPrimaryExecution` once the feed graduates, then retire the negotiation | implemented, off by default |
 | [`serverPrimaryExecutionGraphRetirement`](#serverprimaryexecutiongraphretirement) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES` env (comma-separated space DIDs or `*`), applied at server construction; ambient `setServerPrimaryExecutionGraphRetirementConfig(spaces)` (host-internal, per-space, not negotiated) | empty set (absent-false: no space admitted to the doc-set surface) | Bernhard Seefeld (server-side execution F5; FW5 admission redesign) | fold into `serverPrimaryExecution` once the feed graduates | implemented, empty by default |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
@@ -48,8 +49,9 @@ was last checked against the code.
 | [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
-| [`serverPrimaryExecutionClaimRank`](#serverprimaryexecutionclaimrank) | `setServerPrimaryExecutionClaimRankConfig()` (host-internal, not negotiated) | `space` (space rank only) | Bernhard Seefeld (server-side execution C1.1b; `session` stage C2.1) | fold into `serverPrimaryExecution` once every context rank graduates | implemented through the session stage (C2 complete 2026-07-18), space-only by default |
+| [`serverPrimaryExecutionClaimRank`](#serverprimaryexecutionclaimrank) | `setServerPrimaryExecutionClaimRankConfig()` (host-internal, not negotiated) | `space` (space rank only) | Bernhard Seefeld (server-side execution C1.1b; `session` stage C2.1; `cross-space-read` stage C3.6) | fold into `serverPrimaryExecution` once every context rank graduates | implemented through the `cross-space-read` stage (C3.6), space-only by default |
 | [`serverPrimaryExecutionContextLatticeClaimsV1`](#serverprimaryexecutioncontextlatticeclaimsv1) | `setServerPrimaryExecutionContextLatticeClaimsConfig()` (then negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution C1.7) | fold into `serverPrimaryExecution` once the lattice ranks graduate, then retire the negotiation | implemented (user + session delivery), off by default |
+| [`serverPrimaryExecutionCrossSpaceClaimsV1`](#serverprimaryexecutioncrossspaceclaimsv1) | `setServerPrimaryExecutionCrossSpaceClaimsConfig()` (then negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution C3.6b) | fold into `serverPrimaryExecution` once cross-space reads graduate, then retire the negotiation | implemented (delivery gate + amendment-11 attach fence), off by default |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
 
@@ -313,6 +315,60 @@ propagate](#how-flags-propagate).
   provisional latency budget), fold the dial into `serverPrimaryExecution`
   alongside the claim-rank dial once every rank graduates (the §6 removal
   path), then delete the option and its Worker/pool plumbing.
+
+### `serverPrimaryExecutionCrossSpaceReadCandidates`
+
+- **Toggle via.**
+  `RuntimeOptions.experimental.serverPrimaryExecutionCrossSpaceReadCandidates`
+  only. Mapped to `null` in the canonical `EXPERIMENTAL_ENV_VARS` registry —
+  deliberately programmatic-only; C3 gate fixtures flip it together with the
+  memory-side `serverPrimaryExecutionClaimRank` dial's `cross-space-read`
+  stage and the host's `cross-space-claims-v1` advertisement.
+- **Added by.** Bernhard Seefeld, in server-side execution C3.6 (cross-space
+  read servability + issuance admission, 2026-07-18).
+- **Purpose.** Admits FOREIGN-space, space-scoped READ surfaces in the
+  executor Worker (context-lattice design §6, C3). When on, a computation —
+  or supported builtin effect — whose read surface names a foreign space
+  classifies `claim-ready` carrying a `crossSpaceReadSpaces` capability
+  (rather than the pre-C3.6 `foreign-read-space` unservable verdict), the
+  executor router threads those spaces onto the CandidateClaim, and the host
+  issues a **cross-space-read claim** after its issuance preflight binds the
+  ACTING principal's foreign READ per space (the same
+  `#authorizeMessageWithEngine(READ)` resolution the C3.3b mirror gate and the
+  C3.4 point read use, on the read space's host). Foreign-read admission is
+  ORTHOGONAL to the rank dials — it is a capability, not a fifth lane — so a
+  space/user/session-lane claim may all gain it, and it composes with any
+  candidacy rank. Foreign WRITES (`foreign-write-space`) and scoped
+  (user/session) foreign reads (`foreign-read-scope`) stay rejected at every
+  stage (decision #3: v1 foreign reads are space-scoped, default-branch only).
+- **Current default and planned end state.** Off by default: a foreign read
+  surface classifies exactly as the pre-C3.6 executor does
+  (`foreign-read-space`, unservable), and same-space classification is
+  byte-identical. Enabling it alone changes nothing observable in production:
+  claim ISSUANCE is additionally gated by the host's claim-rank dial reaching
+  the `cross-space-read` stage AND the host's `cross-space-claims-v1`
+  advertisement, so a soft decline (client keeps running locally) is the
+  worst case even if the runner flag is set in isolation.
+- **CA4/C3A17 ordering invariant.** The `cross-space-read` claim-rank stage is
+  structurally never enabled outside gate fixtures until the
+  `cross-space-claims-v1` delivery cohort gate (C3.6b) is in place — a
+  dial-on host that never advertised the subcapability would issue claims a
+  non-negotiating cohort member would run client-primary beside it (double
+  execution). The issuance preflight enforces this: it refuses (soft decline)
+  unless BOTH the stage and the advertisement hold AND the delivery cohort
+  uniformly negotiates the subcapability.
+- **Status on 2026-07-18.** Implemented: the servability relax on both the
+  static and dynamic classifiers, the `crossSpaceReadSpaces` capability
+  threaded executor-router → CandidateClaim → issuance, the host issuance
+  preflight (per-space acting-READ binding + cohort gate), and the claim's
+  recorded `crossSpaceReadSpaces`. The composed wake→read→serve loop settles
+  SERVED with the vector basis under the stage. Off in production pending the
+  C3.7–C3.11 chain (idle-revocation binding, apply-time fence, client drop
+  rule, and the two-space gate).
+- **Path to removal.** Enable the `cross-space-read` claim-rank stage per the
+  plan's rollout sequencing once C3.7–C3.11 land, fold the dial into
+  `serverPrimaryExecution` alongside the claim-rank dial when cross-space
+  reads graduate, then delete the option and its Worker/router plumbing.
 
 ### `serverPrimaryExecutionDocSetWatch`
 
@@ -847,13 +903,13 @@ the per-epic implementation notes).
 ### `serverPrimaryExecutionClaimRank`
 
 - **Toggle via.**
-  `setServerPrimaryExecutionClaimRankConfig("space" | "user" | "session")`
+  `setServerPrimaryExecutionClaimRankConfig("space" | "user" | "session" | "cross-space-read")`
   in [`packages/memory/v2.ts`](../../packages/memory/v2.ts). Host-internal and
   owner-invisible: it is never negotiated on the wire and has no environment
-  variable; C1/C2 flip it programmatically inside their gate fixtures.
+  variable; C1/C2/C3 flip it programmatically inside their gate fixtures.
 - **Added by.** Bernhard Seefeld, in server-side execution C1.1b (the
   context-lattice rank dial, 2026-07-16); the `session` stage landed with
-  C2.1 (2026-07-17).
+  C2.1 (2026-07-17), the `cross-space-read` stage with C3.6 (2026-07-18).
 - **Purpose.** The issuance-side rank dial from the
   [context-lattice design §6](../specs/server-side-execution/context-lattice-execution.md):
   the highest context rank the host ISSUES execution claims for, staged
@@ -883,8 +939,16 @@ the per-epic implementation notes).
   quadratic spurious-rerun source — is **lifted: C2.6 landed 2026-07-17**
   (session-context control events route only to the named session), so the
   session stage may now be enabled wherever the plan's rollout sequencing
-  allows. The cross-space ranks are not yet part of the accepted value set
-  and arrive with C3+. The end state is every rank enabled.
+  allows. The `cross-space-read` stage is the FOURTH ladder entry (C3.6,
+  2026-07-18) — NOT a fourth context rank (foreign-read admission is
+  orthogonal to the space/user/session chain: a claim of any rank may read
+  foreign spaces), but a ladder placement that IMPLIES session rank, so a
+  host at `cross-space-read` also issues session/user/space claims. It gates
+  the foreign-read CAPABILITY (`serverPrimaryExecutionCrossSpaceReadsEnabled`,
+  consulted by the C3.6 issuance preflight) and is enabled only inside C3 gate
+  fixtures, and — per the CA4/C3A17 ordering invariant — never outside them
+  until the `cross-space-claims-v1` cohort gate (C3.6b) is in place. The end
+  state is every rank enabled.
 - **Status on 2026-07-18.** Implemented through the session stage, which is
   complete end-to-end (plan C2 status, 2026-07-18): C2.1 landed the ladder
   + canonical `session:<did>:<sessionId>` wire validation per CA12; C2.3
@@ -952,6 +1016,51 @@ the per-epic implementation notes).
   `serverPrimaryExecution` is on (fold into the required-capability set),
   delete the config function, and retire the per-connection negotiation with
   an R7-style retirement for stragglers.
+
+### `serverPrimaryExecutionCrossSpaceClaimsV1`
+
+- **Toggle via.** `setServerPrimaryExecutionCrossSpaceClaimsConfig()` in
+  [`packages/memory/v2.ts`](../../packages/memory/v2.ts) — programmatic-only,
+  like the context-lattice subcapability it mirrors; no environment variable.
+  The resulting capability IS negotiated per connection: both peers advertise
+  the absent-false wire flag, and the connection getter chain layers it above
+  `serverPrimaryExecutionClaimRoutingV1` (a connection that cannot route space
+  claims can never route cross-space ones).
+- **Added by.** Bernhard Seefeld, in server-side execution C3.6b
+  (cross-space-read claim delivery cohort gate, 2026-07-18).
+- **Purpose.** The cross-space-read claim-delivery subcapability
+  ([design §6](../specs/server-side-execution/context-lattice-execution.md),
+  adversarial-review amendment C3A18): a session that negotiated it may
+  RECEIVE an execution claim whose action reads foreign spaces (a claim with a
+  non-empty `crossSpaceReadSpaces`), narrowed by the same single delivery
+  predicate (`#sessionAcceptsClaim`) as the context-lattice subcapability.
+  Sessions without it never receive a cross-space-read claim — they would run
+  the foreign-reading action client-primary, so delivering it would risk
+  double execution. The subcapability drives an amendment-11 attach fence
+  keyed by the claim's OWN contextKey rank (C3A18): a non-negotiating attach
+  revokes the live cross-space-read claims of every cohort it joins — a
+  session-lane claim of its session id, a user-lane claim of its principal, or
+  (when it negotiates routing) any space-lane claim of the space — before its
+  open response releases. The ISSUANCE preflight enforces the same cohort
+  uniformly (the mixed-version race prevention): a cross-space-read claim is
+  refused (soft decline) unless the whole delivery cohort negotiates it.
+  Deliberately NOT part of the required-capability check: a mixed fleet is
+  valid, with the fence + issuance gate (not rejection) protecting against
+  double execution.
+- **Current default and planned end state.** Off by default — absent from
+  every handshake, zero delivery-path change, no cross-space-read claims to
+  fence (production issues none until the claim-rank `cross-space-read` stage
+  flips). Enabled inside the C3 gate fixtures alongside the matching claim-rank
+  stage. The end state is every supported client negotiating it.
+- **Status on 2026-07-18.** Implemented (C3.6b): wire flag, connection getter
+  chain, per-attach session capability, the cross-space-read narrowing on
+  `#sessionAcceptsClaim` (live publishes, revokes carrying the marker,
+  reconnect snapshots, and settlement frontiers alike), the issuance cohort
+  gate, and the amendment-11 attach fence.
+- **Path to removal.** Graduate with the C3 cross-space rollout: once every
+  supported client negotiates it, require it whenever `serverPrimaryExecution`
+  is on, delete the config function, and retire the per-connection negotiation
+  with an R7-style retirement for stragglers.
 
 > Five neighbours in the same handshake are related but are not runtime-toggleable
 > experimental flags:

@@ -33,6 +33,20 @@ export const STATIC_ACTION_UNSERVABLE_REASONS = [
   "foreign-owner-space",
   "foreign-piece-space",
   "foreign-read-space",
+  // C3.6: a FOREIGN-space read that is not space-scoped (a user/session-scoped
+  // foreign address) — rejected at every dial stage (decision #3: v1 foreign
+  // reads are space-scoped only; the read host holds no lane grant for a
+  // foreign lane, so a scoped foreign resolution would have to trust a
+  // wire-asserted lane). Distinct from `foreign-read-space` so the
+  // stage-gated space-scoped relax and the permanently-rejected scoped case
+  // are separable in telemetry.
+  "foreign-read-scope",
+  // C3.6: the acting principal lacks READ on a foreign read space. The static
+  // classifier cannot see ACL state, so this is surfaced by the executor
+  // router when the host SOFT-DECLINES a cross-space-read claim (the issuance
+  // preflight bound the acting principal's foreign READ and refused). Kept in
+  // this registry as the canonical diagnostic name for that decline.
+  "foreign-read-access-denied",
   "foreign-write-space",
   "non-space-piece-scope",
   "non-space-read-scope",
@@ -72,6 +86,15 @@ export type StaticActionServability =
      * candidates (review CA9). Absent means space rank, keeping the
      * space-only result shape byte-identical. */
     contextRank?: "user" | "session";
+    /** C3.6: the FOREIGN spaces this action's space-scoped reads consume,
+     * admitted under the cross-space-read stage (deduped, sorted). Present
+     * only when the stage was enabled AND the action reads a foreign space —
+     * the single signal that makes the executor router issue a
+     * cross-space-read claim (the host re-verifies acting READ per space at
+     * issuance). Foreign-read admission is rank-independent, so this rides
+     * ORTHOGONAL to `contextRank`. Absent keeps the result byte-identical to
+     * a same-space classification. */
+    crossSpaceReadSpaces?: readonly string[];
   }
   | {
     status: "broker-required";
@@ -84,6 +107,10 @@ export type StaticActionServability =
      * exactly that rank. Absent means space rank, keeping the space-only
      * result shape byte-identical. */
     contextRank?: "user" | "session";
+    /** C3.6: same as the claim-ready arm — foreign-read admission is
+     * kind-independent (a supported builtin effect may read a foreign space
+     * too). Absent keeps the result byte-identical. */
+    crossSpaceReadSpaces?: readonly string[];
   }
   | {
     status: "unservable";
@@ -133,6 +160,14 @@ export interface ActionTransactionServabilityContext {
    * user-context claim over an all-space surface must keep suppressing
    * byte-identically (A10 chain continuity), so the backstop stays off. */
   readonly laneActingCommit?: boolean;
+  /** C3.6 cross-space-read stage (default OFF): mirrors the static
+   * classifier's `crossSpaceRead` at the per-attempt firewall — a space-scoped
+   * foreign-space READ discovered in the observation's read surface is
+   * admitted rather than rejected `dynamic-foreign-read-space`. Foreign WRITES
+   * (`dynamic-foreign-write-space`) and scoped foreign reads
+   * (`dynamic-foreign-read-scope`) stay rejected at every stage (decision #3).
+   * Off the stage the firewall is byte-identical. */
+  readonly crossSpaceRead?: boolean;
 }
 
 /**
@@ -266,6 +301,19 @@ export function classifyStaticActionServability(
   value: unknown,
   servedSpace: MemorySpace,
   lane?: StaticActionServabilityLane,
+  /**
+   * C3.6 cross-space-read stage (default OFF): when true, a space-scoped,
+   * foreign-space READ is ADMITTED rather than rejected `foreign-read-space` —
+   * its space joins the result's `crossSpaceReadSpaces` and the executor
+   * router issues a cross-space-read claim (the host re-verifies acting READ
+   * per space at issuance). This is a DIAL STAGE orthogonal to lane rank (a
+   * claim of any context rank may read foreign spaces), never a fifth lane —
+   * hence a separate parameter, not a `StaticActionServabilityLane` field.
+   * Foreign WRITES and scoped (user/session) foreign reads stay rejected at
+   * every stage (decision #3). With the stage off the classifier is
+   * byte-identical to the pre-C3.6 behavior.
+   */
+  crossSpaceRead?: boolean,
 ): StaticActionServability {
   if (!isRecord(value)) {
     return unservable("malformed-candidate");
@@ -385,9 +433,26 @@ export function classifyStaticActionServability(
     return unservable("malformed-static-surface");
   }
 
+  // C3.6: the foreign spaces this action's space-scoped reads admit under the
+  // cross-space-read stage (deduped; sorted into the result below). Stays
+  // empty for a same-space action, so the result is byte-identical then.
+  const crossSpaceReadSpaces = new Set<string>();
   for (const read of summary.reads) {
     if (read.space !== servedSpace) {
-      return unservable("foreign-read-space");
+      // A foreign-space read. Off the stage every foreign read stays
+      // `foreign-read-space` (byte-identical). On the stage a SPACE-scoped
+      // foreign read is admitted — its space joins the cross-space-read set
+      // and the host re-verifies the acting principal's READ at issuance —
+      // while a scoped (user/session) foreign address stays rejected
+      // (decision #3: v1 foreign reads are space-scoped only).
+      if (crossSpaceRead !== true) {
+        return unservable("foreign-read-space");
+      }
+      if (scopeOf(read) !== "space") {
+        return unservable("foreign-read-scope");
+      }
+      crossSpaceReadSpaces.add(read.space);
+      continue;
     }
     if (scopeOf(read) !== "space") {
       if (!laneAdmitsScope(read.scope, laneRank)) {
@@ -428,16 +493,28 @@ export function classifyStaticActionServability(
     return unservable("malformed-output-surface");
   }
 
+  // C3.6: the sorted, frozen foreign-read capability rides ORTHOGONAL to
+  // contextRank (foreign-read admission is rank-independent). Absent when the
+  // action reads no foreign space, keeping the result byte-identical.
+  const crossSpaceReads = crossSpaceReadSpaces.size > 0
+    ? Object.freeze([...crossSpaceReadSpaces].sort())
+    : undefined;
   return actionKind === "effect"
     ? {
       status: "broker-required",
       actionKind,
       ...(scopedRank !== undefined ? { contextRank: scopedRank } : {}),
+      ...(crossSpaceReads !== undefined
+        ? { crossSpaceReadSpaces: crossSpaceReads }
+        : {}),
     }
     : {
       status: "claim-ready",
       actionKind,
       ...(scopedRank !== undefined ? { contextRank: scopedRank } : {}),
+      ...(crossSpaceReads !== undefined
+        ? { crossSpaceReadSpaces: crossSpaceReads }
+        : {}),
     };
 }
 
@@ -526,6 +603,7 @@ export function dynamicActionTransactionUnservableReason(
       context.servedSpace,
       "read",
       laneRank,
+      context.crossSpaceRead === true,
     );
     if (reason !== undefined) return reason;
   }
@@ -669,8 +747,19 @@ function dynamicAddressReason(
   servedSpace: MemorySpace,
   kind: "read" | "write",
   laneRank: LaneRank,
+  crossSpaceRead?: boolean,
 ): string | undefined {
-  if (address.space !== servedSpace) return `dynamic-foreign-${kind}-space`;
+  if (address.space !== servedSpace) {
+    // C3.6: a SPACE-scoped foreign READ is admitted under the stage (mirrors
+    // the static classifier); a scoped foreign read stays rejected
+    // (decision #3), and foreign WRITES reject at every stage.
+    if (kind === "read" && crossSpaceRead === true) {
+      return scopeOf(address) === "space"
+        ? undefined
+        : "dynamic-foreign-read-scope";
+    }
+    return `dynamic-foreign-${kind}-space`;
+  }
   if (!laneAdmitsScope(address.scope, laneRank)) {
     return `dynamic-non-space-${kind}-scope`;
   }

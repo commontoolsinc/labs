@@ -91,6 +91,17 @@ export interface ExecutorActionTransactionRouterOptions {
    * fabricated from `lanePrincipal`).
    */
   readonly sessionRankCandidates?: boolean;
+  /**
+   * C3.6 cross-space-read stage, default OFF and ORTHOGONAL to the rank dials
+   * (foreign-read admission is a capability, not a lane): when true, an action
+   * whose read surface names a foreign space classifies claim-ready carrying a
+   * `crossSpaceReadSpaces` capability, and this router threads those spaces to
+   * the candidate so the host issues a cross-space-read claim (which the host
+   * re-verifies against the acting principal's foreign READ, soft-declining
+   * otherwise). Off, foreign reads classify `foreign-read-space` unservable,
+   * byte-identical. Composes with any of space/user/session candidacy.
+   */
+  readonly crossSpaceReadCandidates?: boolean;
   /** Principal of this Worker's acting context — the canonical `user:<did>`
    * candidate keys are constructed from it (amendment 18 helpers only). */
   readonly lanePrincipal?: string;
@@ -211,6 +222,7 @@ export function createExecutorActionTransactionRouter(
     sourceAction: object,
     candidateKeys: readonly ActionClaimKey[],
     builtinId: ReturnType<typeof prepareSupportedBuiltinObservation>,
+    crossSpaceReadSpaces?: readonly string[],
   ): void => {
     if (candidateKeys.length === 0) return;
     let lanes = reported.get(sourceAction);
@@ -226,12 +238,27 @@ export function createExecutorActionTransactionRouter(
         // lifecycle, not candidacy, owns it now.
         continue;
       }
-      const encoded = JSON.stringify(keyed);
+      // C3.6: fold the foreign-read capability into the dedupe key so a
+      // change to the discovered foreign-read surface re-candidates (the host
+      // must re-bind READ for the new spaces), never suppresses behind a
+      // stale surface.
+      const encoded = JSON.stringify(
+        crossSpaceReadSpaces !== undefined && crossSpaceReadSpaces.length > 0
+          ? { keyed, crossSpaceReadSpaces }
+          : keyed,
+      );
       if (lanes.get(keyed.contextKey) === encoded) continue;
       lanes.set(keyed.contextKey, encoded);
       options.onCandidate({
         claimKey: keyed,
         ...(builtinId !== undefined ? { builtinId } : {}),
+        // C3.6: a non-empty foreign-read surface makes the host issue a
+        // cross-space-read claim (re-verified per space at issuance). Absent
+        // for the same-space default — the candidate stays byte-identical.
+        ...(crossSpaceReadSpaces !== undefined &&
+            crossSpaceReadSpaces.length > 0
+          ? { crossSpaceReadSpaces }
+          : {}),
       }, sourceAction);
     }
   };
@@ -374,7 +401,16 @@ export function createExecutorActionTransactionRouter(
         : userLaneEnabled
         ? { userContext: true }
         : undefined,
+      options.crossSpaceReadCandidates === true,
     );
+    // C3.6: the foreign-read capability the classifier admitted (present only
+    // under the stage AND a foreign read surface) — threaded to the candidate
+    // so the host issues a cross-space-read claim. Rank-independent, so it
+    // rides beside contextRank untouched.
+    const crossSpaceReadSpaces = staticDecision.status === "claim-ready" ||
+        staticDecision.status === "broker-required"
+      ? staticDecision.crossSpaceReadSpaces
+      : undefined;
     // The candidate context rank follows the static classification — the
     // NARROWEST admitted rank (C2.2's claim-ready contextRank; the
     // broker-required arm carries the same field since C2.8's scoped-lane
@@ -512,6 +548,9 @@ export function createExecutorActionTransactionRouter(
         // on the lane, so the engine's §4 broad scope-naming backstop
         // applies at this seam too.
         laneActingCommit: contextRank !== "space",
+        // C3.6: mirror the static stage at the per-attempt firewall so a
+        // discovered foreign space-scoped read is admitted, not rejected.
+        crossSpaceRead: options.crossSpaceReadCandidates === true,
       },
     );
     if (dynamicReason !== undefined) {
@@ -563,7 +602,12 @@ export function createExecutorActionTransactionRouter(
           // The action proved servable; a later unservable regression is new
           // information and must report again.
           reportedUnservable.delete(sourceAction);
-          emitCandidates(sourceAction, candidateKeys, builtinId);
+          emitCandidates(
+            sourceAction,
+            candidateKeys,
+            builtinId,
+            crossSpaceReadSpaces,
+          );
         },
       };
     }
@@ -594,7 +638,12 @@ export function createExecutorActionTransactionRouter(
         ? () => {
           options.onAttemptStarted?.(liveClaim, sourceAction);
           if (vouchForSiblingLanes) {
-            emitCandidates(sourceAction, candidateKeys, builtinId);
+            emitCandidates(
+              sourceAction,
+              candidateKeys,
+              builtinId,
+              crossSpaceReadSpaces,
+            );
           }
         }
         : undefined;

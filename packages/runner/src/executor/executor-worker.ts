@@ -153,7 +153,15 @@ const laneDemands = new Map<
  * requires. */
 const userCandidateTemplates = new Map<
   string,
-  { action: Action; claimKey: ActionClaimKey; builtinId?: string }
+  {
+    action: Action;
+    claimKey: ActionClaimKey;
+    builtinId?: string;
+    // C3.6: a scoped-lane action's foreign-read surface, so a candidate
+    // synthesized onto a lane that opens LATER still issues a cross-space-read
+    // claim (foreign-read admission is rank-independent).
+    crossSpaceReadSpaces?: readonly string[];
+  }
 >();
 const userCandidateTemplateKey = (key: ActionClaimKey): string =>
   `${key.pieceId}\0${key.actionId}`;
@@ -524,6 +532,10 @@ const emitTemplateCandidatesForLane = (contextKey: string): void => {
         ...(template.builtinId !== undefined
           ? { builtinId: template.builtinId }
           : {}),
+        ...(template.crossSpaceReadSpaces !== undefined &&
+            template.crossSpaceReadSpaces.length > 0
+          ? { crossSpaceReadSpaces: template.crossSpaceReadSpaces }
+          : {}),
       },
       template.action,
     );
@@ -541,7 +553,13 @@ const candidateDemandGeneration = (contextKey: string): number =>
 /** Register and post one candidate claim (C1.9c: shared by the router's
  * route-time per-lane emission and the late-lane template emission). */
 const postCandidate = (
-  candidate: { claimKey: ActionClaimKey; builtinId?: string },
+  candidate: {
+    claimKey: ActionClaimKey;
+    builtinId?: string;
+    // C3.6: carried through so the spread below preserves the foreign-read
+    // surface onto the posted candidate-claim message.
+    crossSpaceReadSpaces?: readonly string[];
+  },
   action: Action,
 ): void => {
   candidateActions.set(claimKey(candidate.claimKey), action);
@@ -559,6 +577,10 @@ const postCandidate = (
       claimKey: candidate.claimKey,
       ...(candidate.builtinId !== undefined
         ? { builtinId: candidate.builtinId }
+        : {}),
+      ...(candidate.crossSpaceReadSpaces !== undefined &&
+          candidate.crossSpaceReadSpaces.length > 0
+        ? { crossSpaceReadSpaces: candidate.crossSpaceReadSpaces }
         : {}),
     });
   }
@@ -970,6 +992,11 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       // session identity source is the host's lane-grant machinery).
       sessionRankCandidates: request.experimental
         ?.serverPrimaryExecutionSessionRankCandidates === true,
+      // C3.6: foreign space-scoped read admission, ORTHOGONAL to the rank
+      // dials above (a capability, not a lane). Off, foreign reads classify
+      // unservable byte-identically.
+      crossSpaceReadCandidates: request.experimental
+        ?.serverPrimaryExecutionCrossSpaceReadCandidates === true,
       lanePrincipal: request.principal,
       // C1.9c: a user-rank action produces one candidate per OPEN lane whose
       // demand slice covers its piece. Before any lane is wired the router's

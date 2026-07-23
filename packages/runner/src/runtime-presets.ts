@@ -193,6 +193,11 @@ export const EXPERIMENTAL_ENV_VARS = {
   // dial above; the CA4 ordering invariant forbids ambient enablement
   // before C2.6 lands, so no env exposure.
   serverPrimaryExecutionSessionRankCandidates: null,
+  // C3 rollout dial (cross-space-read, C3.6): fixture-only like the rank
+  // dials above; the CA4/C3A17 ordering invariant forbids ambient enablement
+  // until the memory-side `cross-space-read` stage AND the
+  // `cross-space-claims-v1` cohort gate are both in place, so no env exposure.
+  serverPrimaryExecutionCrossSpaceReadCandidates: null,
   serverPrimaryExecutionDocSetWatch:
     "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH",
   eagerSourceAnnotation: "EXPERIMENTAL_EAGER_SOURCE_ANNOTATION",

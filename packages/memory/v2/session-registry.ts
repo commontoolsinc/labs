@@ -54,6 +54,11 @@ export type SessionState = {
   /** C1.7: recomputed on EVERY attach (new/resume/takeover), so a takeover
    * from a connection without the subcapability downgrades the session. */
   serverPrimaryExecutionContextLatticeClaimsV1: boolean;
+  /** C3.6b: recomputed on every attach like the other subcapabilities. Gates
+   * whether this session may RECEIVE a cross-space-read-capable claim; a
+   * non-negotiating attach fences live cross-space-read claims of its
+   * delivery cohort (the A11 gate). */
+  serverPrimaryExecutionCrossSpaceClaimsV1: boolean;
   /** F3: recomputed on every attach, like the other subcapabilities. Gates
    * whether this session may register the `docs` WatchSpec kind. */
   serverPrimaryExecutionDocSetWatchV1: boolean;
@@ -130,6 +135,7 @@ export class SessionRegistry {
       serverPrimaryExecutionClaimRoutingV1?: boolean;
       serverPrimaryExecutionBuiltinPassivityV1?: boolean;
       serverPrimaryExecutionContextLatticeClaimsV1?: boolean;
+      serverPrimaryExecutionCrossSpaceClaimsV1?: boolean;
       serverPrimaryExecutionDocSetWatchV1?: boolean;
     } = {},
   ): OpenSessionState {
@@ -211,6 +217,8 @@ export class SessionRegistry {
         capabilities.serverPrimaryExecutionBuiltinPassivityV1 === true,
       serverPrimaryExecutionContextLatticeClaimsV1:
         capabilities.serverPrimaryExecutionContextLatticeClaimsV1 === true,
+      serverPrimaryExecutionCrossSpaceClaimsV1:
+        capabilities.serverPrimaryExecutionCrossSpaceClaimsV1 === true,
       serverPrimaryExecutionDocSetWatchV1:
         capabilities.serverPrimaryExecutionDocSetWatchV1 === true,
       executionFeedSeq,

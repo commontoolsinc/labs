@@ -92,6 +92,13 @@ export interface CandidateClaim {
    * wired. Stale closure candidates are ignored after a demanded-root
    * shrink or a lane reset rebuilds their portion of the runtime graph. */
   readonly demandGeneration?: number;
+  /** C3.6: the FOREIGN spaces this candidate's action reads (space DIDs, not
+   * credentials — same class as the contextKey's principal DID that already
+   * crosses the executor IPC per amendment 23). Present only under the
+   * cross-space-read stage and a foreign read surface; the host re-verifies
+   * the acting principal's READ per space at issuance and records the
+   * verified set on the claim. Absent keeps the candidate byte-identical. */
+  readonly crossSpaceReadSpaces?: readonly string[];
 }
 
 /** Executor-channel shape of one lane's demand slice (A24): the pool's
@@ -747,14 +754,31 @@ class DenoSpaceExecutor implements SpaceExecutor {
       this.#failed
     ) return;
 
+    // C3.6: a candidate carrying a foreign-read surface asks the host for a
+    // cross-space-read claim; the host re-verifies the acting principal's READ
+    // per space (and the delivery cohort's cross-space-claims-v1 negotiation)
+    // and SOFT-DECLINES to null otherwise — the client then keeps running the
+    // foreign-reading action locally under its own authority.
+    const crossSpaceReadSpaces = candidate.crossSpaceReadSpaces;
     const claim = await this.#server.trySetExecutionClaim(
       this.#startOptions.lease,
       key,
+      crossSpaceReadSpaces !== undefined && crossSpaceReadSpaces.length > 0
+        ? { foreignReadSpaces: crossSpaceReadSpaces }
+        : undefined,
     );
     if (claim === null) {
       this.#onCandidateDiagnostic?.({
         claimKey: key,
-        diagnosticCode: "claim-authority-lost",
+        // A soft-declined cross-space-read candidate is reported with the
+        // foreign-read-specific code (the dominant cause is the acting
+        // principal lacking READ on a read space — the C3.6 acceptance
+        // sketch's `foreign-read-access-denied`); an ordinary candidate keeps
+        // the generic lost-authority code.
+        diagnosticCode: crossSpaceReadSpaces !== undefined &&
+            crossSpaceReadSpaces.length > 0
+          ? "foreign-read-access-denied"
+          : "claim-authority-lost",
       });
       return;
     }
