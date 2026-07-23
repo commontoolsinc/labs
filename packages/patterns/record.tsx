@@ -31,6 +31,7 @@ import {
   getAddableTypes,
   getDefinition,
 } from "./record/registry.ts";
+import { getNextUnusedLabel } from "./record/standard-labels.ts";
 // Import Note directly - we create it inline with proper linkPattern
 // (avoids global state for passing Record's pattern JSON)
 import Note from "./notes/note.tsx";
@@ -39,45 +40,6 @@ import { TypePickerModule } from "./type-picker.tsx";
 import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
 import { getResultSchema } from "./record/extraction/schema-utils.ts";
 import type { SubPieceEntry, TrashedSubPieceEntry } from "./record/types.ts";
-
-// ===== Standard Labels for Smart Defaults =====
-// When adding a second module of same type, pick next unused standard label
-const STANDARD_LABELS: Record<string, string[]> = {
-  email: ["Personal", "Work", "School", "Other"],
-  phone: ["Mobile", "Home", "Work", "Other"],
-  address: ["Home", "Work", "Billing", "Shipping", "Other"],
-};
-
-// Helper to get next unused standard label for a module type
-function getNextUnusedLabel(
-  type: string,
-  existingPieces: readonly SubPieceEntry[],
-): string | undefined {
-  const standards = STANDARD_LABELS[type];
-  if (!standards || standards.length === 0) return undefined;
-
-  // Collect labels already used by modules of this type
-  const usedLabels = new Set<string>();
-  for (const entry of existingPieces) {
-    if (entry.type === type) {
-      try {
-        // Access the label field from the piece pattern output
-        // Property access is reactive - framework handles Cell unwrapping
-        // deno-lint-ignore no-explicit-any
-        const piece = entry.piece as any;
-        const labelValue = piece?.label;
-        if (typeof labelValue === "string" && labelValue) {
-          usedLabels.add(labelValue);
-        }
-      } catch {
-        // Ignore errors from pieces without label field
-      }
-    }
-  }
-
-  // Return first unused standard label (or undefined if all used)
-  return standards.find((label) => !usedLabels.has(label));
-}
 
 // ===== Types =====
 
@@ -302,6 +264,7 @@ const addSubPiece = handler<
     collapsed: false,
     piece,
     schema,
+    label: nextLabel,
   }]);
   sat.set("");
 });
@@ -603,12 +566,17 @@ const handleAddModule = handler<
 
   const current = sc.get() || [];
 
-  // Get smart default label for modules that support it
+  // Get smart default label for modules that support it. initialData may carry
+  // an explicit label that overrides the smart default; record the effective
+  // label on the entry so the next add can see it.
   const nextLabel = getNextUnusedLabel(type, current);
   const initialValues = {
     ...(nextLabel ? { label: nextLabel } : {}),
     ...initialData,
   };
+  const entryLabel = typeof initialValues.label === "string"
+    ? initialValues.label
+    : undefined;
 
   // Create the module - special cases handled
   let piece: unknown;
@@ -641,6 +609,7 @@ const handleAddModule = handler<
     collapsed: false,
     piece,
     schema,
+    label: entryLabel,
   }]);
 
   if (result) {
@@ -816,6 +785,7 @@ const createSibling = handler<
     pinned: false,
     collapsed: false,
     piece,
+    label: nextLabel,
   });
   sc.set(updated);
 });
