@@ -418,6 +418,11 @@ jobs:
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
 
+      - name: ⏳ Wait for Toolshed to be ready
+        uses: ./.github/actions/wait-for-toolshed
+        with:
+          url: http://localhost:8000
+
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
       - name: 🛡️ Disable AppArmor restriction for browser tests
