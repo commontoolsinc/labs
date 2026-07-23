@@ -7,6 +7,7 @@ import {
 } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import {
+  attachOtelBridgeWhenInitialized,
   executeWorkerRequest,
   formatConsoleMessage,
   handleWorkerMessage,
@@ -19,6 +20,7 @@ import {
   workerConsoleContext,
 } from "../src/worker.ts";
 import { WorkerIPCMessageType } from "../src/worker-ipc.ts";
+import { RuntimeTelemetry } from "@commonfabric/runner";
 
 const TEST_DID = "did:key:z6Mktestspace";
 const OTHER_DID = "did:key:z6Mkotherspace";
@@ -26,6 +28,19 @@ const PIECE_ID = `fid1:${"a".repeat(54)}`;
 
 try {
   resetWorkerStateForTesting();
+
+  // No provider is registered in this subprocess, which is the same state the
+  // fail-open OTel initializer leaves after setup failure.
+  const telemetry = new RuntimeTelemetry();
+  assertEquals(
+    attachOtelBridgeWhenInitialized(
+      telemetry,
+      TEST_DID as never,
+      TEST_DID as never,
+    ),
+    null,
+  );
+  assertEquals(telemetry.detailedEventCommitTelemetryEnabled, false);
 
   assertEquals(workerConsoleContext(undefined), "Worker(NO_SPACE)");
   assertEquals(workerConsoleContext(TEST_DID as never), `Worker(${TEST_DID})`);

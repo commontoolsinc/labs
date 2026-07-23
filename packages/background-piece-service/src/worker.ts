@@ -17,6 +17,7 @@ import { env } from "./env.ts";
 import {
   getMeter,
   getTracer,
+  getTracerProvider,
   initOpenTelemetry,
   shutdownOpenTelemetry,
 } from "./otel.ts";
@@ -47,6 +48,34 @@ let runtime: Runtime | null = null;
 let detachOtelBridge: (() => void) | null = null;
 const loadedPieces = new Map<string, Cell<{ bgUpdater: Stream<unknown> }>>();
 let streamValidator = isStream;
+
+/** Attach detailed runtime telemetry only after the canonical OTel init succeeds. */
+export function attachOtelBridgeWhenInitialized(
+  telemetry: Runtime["telemetry"],
+  spaceDid: DID,
+  userDid: DID,
+): (() => void) | null {
+  if (getTracerProvider() === undefined) return null;
+  return attachRuntimeTelemetryOtelBridge(telemetry, {
+    tracer: getTracer(),
+    meter: getMeter(),
+    attributes: {
+      "ct.runtime": "bg-piece",
+    },
+    spanAttributes: {
+      "space.did": spaceDid,
+      "user.did": userDid,
+    },
+    // Metric datapoints don't inherit resource attributes in SigNoz, so stamp
+    // the scoping labels explicitly (metrics only — on spans these live on the
+    // resource, and duplicating them as span attributes makes the bare key
+    // ambiguous in queries).
+    metricAttributes: {
+      "service.name": env.OTEL_SERVICE_NAME,
+      "deployment.environment": env.ENV,
+    },
+  });
+}
 
 export function recordLatestError(e: ErrorWithContext): void {
   latestError = e;
@@ -190,27 +219,11 @@ export async function initialize(
   // Do not attach a no-op bridge when OTel is disabled: attaching retains the
   // runtime's detailed event-commit telemetry until cleanup. Enabled workers
   // retain the bridge and detach it during cleanup after runtime disposal.
-  if (env.OTEL_ENABLED) {
-    detachOtelBridge = attachRuntimeTelemetryOtelBridge(runtime.telemetry, {
-      tracer: getTracer(),
-      meter: getMeter(),
-      attributes: {
-        "ct.runtime": "bg-piece",
-      },
-      spanAttributes: {
-        "space.did": spaceId,
-        "user.did": identity.did(),
-      },
-      // Metric datapoints don't inherit resource attributes in SigNoz, so stamp
-      // the scoping labels explicitly (metrics only — on spans these live on the
-      // resource, and duplicating them as span attributes makes the bare key
-      // ambiguous in queries).
-      metricAttributes: {
-        "service.name": env.OTEL_SERVICE_NAME,
-        "deployment.environment": env.ENV,
-      },
-    });
-  }
+  detachOtelBridge = attachOtelBridgeWhenInitialized(
+    runtime.telemetry,
+    spaceId,
+    identity.did(),
+  );
 
   manager = new PieceManager(currentSession, runtime);
   await manager.ready;
