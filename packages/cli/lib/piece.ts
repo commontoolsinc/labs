@@ -57,6 +57,7 @@ import {
   type CliRuntimeErrorRecord,
   detectCallableKind,
   executeResolvedCallable,
+  runtimeErrorLog,
 } from "./callable.ts";
 import { executeCallableCommand } from "./callable-command.ts";
 import {
@@ -1073,7 +1074,16 @@ export async function newPiece(
         entry,
       ),
   );
+  // A piece whose pattern never settles leaves `pieces.create` awaiting a
+  // scheduler `idle()` that never resolves, and the runtime surfaces no
+  // event that a start has definitively failed (a thrown pattern reports its
+  // error and still resolves; a stuck async load reports nothing). This
+  // wall-clock bound is the only thing that turns that hang into a message.
+  // When it fires, report the actual runtime error the pattern recorded while
+  // starting rather than only pointing at the server logs.
   const PIECE_START_TIMEOUT_MS = 60_000;
+  const runtimeErrors = runtimeErrorLog(manager.runtime);
+  const errorCountBefore = runtimeErrors.length;
   const piece = await timeCliPhase("newPiece.create", () => {
     const createPromise = pieces.create(program, {
       repository: entry.repository,
@@ -1082,11 +1092,15 @@ export async function newPiece(
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
+        const recorded = runtimeErrors.slice(errorCountBefore).at(-1)?.message;
+        const detail = recorded !== undefined
+          ? `A runtime error was reported while it started: ${recorded}`
+          : `Check toolshed logs for runtime errors.`;
         reject(
           new Error(
             `Piece created but failed to start within ${
               PIECE_START_TIMEOUT_MS / 1000
-            }s. ` + `Check toolshed logs for runtime errors.`,
+            }s. ${detail}`,
           ),
         );
       }, PIECE_START_TIMEOUT_MS);
