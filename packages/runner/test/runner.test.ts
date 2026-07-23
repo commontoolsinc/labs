@@ -2023,6 +2023,68 @@ describe("setup/start", () => {
     changedTx.abort();
   });
 
+  it("keeps the stored-argument guard when a linked target does not sync", async () => {
+    const setupTx = runtime.edit();
+    const targetCell = runtime.getCell(
+      space,
+      "stored setup argument unavailable linked target",
+      undefined,
+      setupTx,
+    );
+    targetCell.set({ name: "Ada" });
+    const argumentCell = runtime.getCell(
+      space,
+      "stored setup argument with unavailable target",
+      undefined,
+      setupTx,
+    );
+    argumentCell.setRaw({
+      profile: targetCell.getAsWriteRedirectLink(),
+    });
+    const resultCell = runtime.getCell(
+      space,
+      "stored setup argument unavailable target result",
+      undefined,
+      setupTx,
+    );
+    resultCell.setMetaRaw(
+      "argument",
+      argumentCell.getAsWriteRedirectLink(),
+    );
+    await setupTx.commit();
+    await runtime.idle();
+
+    const originalGetCellFromLink = runtime.getCellFromLink;
+    const targetLink = targetCell.getAsNormalizedFullLink();
+    let targetSyncs = 0;
+    Reflect.set(runtime, "getCellFromLink", (...args: unknown[]) => {
+      const cell = Reflect.apply(
+        originalGetCellFromLink,
+        runtime,
+        args,
+      ) as ReturnType<typeof runtime.getCellFromLink>;
+      if (
+        areNormalizedLinksSame(cell.getAsNormalizedFullLink(), targetLink)
+      ) {
+        Reflect.set(cell, "sync", () => {
+          targetSyncs++;
+          return targetSyncs === 1
+            ? Promise.reject(new Error("linked target unavailable"))
+            : Promise.resolve();
+        });
+      }
+      return cell;
+    });
+
+    try {
+      const guard = await runtime.runner.syncStoredSetupArgument(resultCell);
+      expect(targetSyncs).toBe(2);
+      expect(guard(resultCell)).toBe(true);
+    } finally {
+      Reflect.set(runtime, "getCellFromLink", originalGetCellFromLink);
+    }
+  });
+
   it("setup with cell argument and start reacts to cell updates", async () => {
     const pattern: Pattern = {
       argumentSchema: {

@@ -271,6 +271,12 @@ const EX_ID = `--identity ./my.key`;
 const EX_URL = `--url ${RAW_EX_URL}`;
 const EX_COMP = `--api-url ${RAW_EX_COMP.apiUrl} --space ${RAW_EX_COMP.space}`;
 const EX_COMP_PIECE = `${EX_COMP} --piece ${RAW_EX_COMP.piece!}`;
+const PIECE_REGISTRY_LINK_EXAMPLE = [
+  cliText(
+    `cf piece link ${EX_ID} ${EX_COMP} fid1:abc123 fid1:piece1/pieceRegistry`,
+  ),
+  `Link the well-known "pieceRegistry" list to a piece field.`,
+] as const;
 
 // Enhanced description with workflow tips
 function pieceEnvStatus(): string {
@@ -750,12 +756,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     ),
     `Link scoped cell instances using @user or @session on the piece ID.`,
   )
-  .example(
-    cliText(
-      `cf piece link ${EX_ID} ${EX_COMP} fid1:abc123 fid1:piece1/pieceRegistry`,
-    ),
-    `Link the well-known "pieceRegistry" list to a piece field.`,
-  )
+  .example(...PIECE_REGISTRY_LINK_EXAMPLE)
   .example(
     cliText(
       `cf piece link ${EX_ID} ${EX_COMP} sqlite:/data/reference.db fid1:piece1/refDb`,

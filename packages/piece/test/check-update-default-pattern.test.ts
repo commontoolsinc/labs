@@ -294,6 +294,27 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(after).toBe(await identityForSource(SOURCE_V1));
   });
 
+  it("stops an update when disposal follows the current-pattern probe", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const originalLoad = runtime.patternManager.loadPatternByIdentity;
+    let dispose: Promise<void> | undefined;
+    runtime.patternManager.loadPatternByIdentity = (() => {
+      dispose = runtime.patternUpdater.dispose();
+      return Promise.resolve(undefined);
+    }) as typeof runtime.patternManager.loadPatternByIdentity;
+
+    try {
+      expect(
+        await controller.checkAndUpdateDefaultPattern(piece.getCell()),
+      ).toBe("current");
+      await dispose;
+      expect(stub.sourceFetches()).toBe(1);
+    } finally {
+      runtime.patternManager.loadPatternByIdentity = originalLoad;
+    }
+  });
+
   it("leaves a root without a pattern identity untouched", async () => {
     await setup({ systemPatternAutoUpdate: true });
     const piece = await controller.ensureDefaultPattern();
