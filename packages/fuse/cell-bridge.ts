@@ -342,16 +342,24 @@ export class CellBridge {
   >();
   private pendingEntityHydrations = new Map<bigint, Promise<boolean>>();
   private entityProjectionLru = new Map<bigint, UnhydratedEntityRootInfo>();
+  private entityProjectionEvictionCandidates = new Map<
+    bigint,
+    UnhydratedEntityRootInfo
+  >();
+  private entityProjectionUseOrder = new Map<bigint, number>();
+  private nextEntityProjectionUseOrder = 0;
   private entityProjectionLookupRefs = new Map<bigint, bigint>();
   private entityProjectionLookupOwners = new Map<
     bigint,
     EntityProjectionLookupOwner
   >();
+  private entityProjectionLookupOwnerInodes = new Map<bigint, Set<bigint>>();
   private entityProjectionOpenRefs = new Map<bigint, number>();
   private entityProjectionOpenOwners = new Map<
     bigint,
     EntityProjectionOpenOwner
   >();
+  private entityProjectionOpenOwnerInodes = new Map<bigint, Set<bigint>>();
   private pendingEntityRemovals = new Map<bigint, UnhydratedEntityRootInfo>();
   private entitySubscriptions = new Map<bigint, Cancel[]>();
   private piecePropRoots = new Map<bigint, PiecePropRootInfo>();
@@ -839,6 +847,8 @@ export class CellBridge {
       this.unhydratedEntityRoots.delete(ino);
       this.pendingEntityHydrations.delete(ino);
       this.entityProjectionLru.delete(ino);
+      this.entityProjectionEvictionCandidates.delete(ino);
+      this.entityProjectionUseOrder.delete(ino);
       this.clearEntityProjectionReferences(ino);
       this.pendingEntityRemovals.delete(ino);
       this.unregisterPieceRoot(ino);
@@ -958,6 +968,13 @@ export class CellBridge {
     const owner = this.entityProjectionLookupOwners.get(ino);
     const rootIno = owner?.rootIno ?? this.entityProjectionRootForInode(ino);
     if (rootIno === undefined) return;
+    if (owner === undefined) {
+      this.indexEntityProjectionOwner(
+        this.entityProjectionLookupOwnerInodes,
+        rootIno,
+        ino,
+      );
+    }
     this.entityProjectionLookupOwners.set(ino, {
       rootIno,
       count: (owner?.count ?? 0n) + count,
@@ -966,6 +983,7 @@ export class CellBridge {
       rootIno,
       (this.entityProjectionLookupRefs.get(rootIno) ?? 0n) + count,
     );
+    this.entityProjectionEvictionCandidates.delete(rootIno);
   }
 
   releaseEntityProjectionLookup(ino: bigint, count = 1n): void {
@@ -981,6 +999,11 @@ export class CellBridge {
       });
     } else {
       this.entityProjectionLookupOwners.delete(ino);
+      this.unindexEntityProjectionOwner(
+        this.entityProjectionLookupOwnerInodes,
+        owner.rootIno,
+        ino,
+      );
     }
     const remaining =
       (this.entityProjectionLookupRefs.get(owner.rootIno) ?? 0n) - released;
@@ -990,6 +1013,7 @@ export class CellBridge {
       this.entityProjectionLookupRefs.delete(owner.rootIno);
     }
     this.finishPendingEntityRemoval(owner.rootIno);
+    this.refreshEntityProjectionEvictionCandidate(owner.rootIno);
     this.trimEntityProjectionCache();
   }
 
@@ -997,6 +1021,13 @@ export class CellBridge {
     const owner = this.entityProjectionOpenOwners.get(ino);
     const rootIno = owner?.rootIno ?? this.entityProjectionRootForInode(ino);
     if (rootIno === undefined) return;
+    if (owner === undefined) {
+      this.indexEntityProjectionOwner(
+        this.entityProjectionOpenOwnerInodes,
+        rootIno,
+        ino,
+      );
+    }
     this.entityProjectionOpenOwners.set(ino, {
       rootIno,
       count: (owner?.count ?? 0) + 1,
@@ -1005,6 +1036,7 @@ export class CellBridge {
       rootIno,
       (this.entityProjectionOpenRefs.get(rootIno) ?? 0) + 1,
     );
+    this.entityProjectionEvictionCandidates.delete(rootIno);
   }
 
   releaseEntityProjectionOpen(ino: bigint): void {
@@ -1017,6 +1049,11 @@ export class CellBridge {
       });
     } else {
       this.entityProjectionOpenOwners.delete(ino);
+      this.unindexEntityProjectionOwner(
+        this.entityProjectionOpenOwnerInodes,
+        owner.rootIno,
+        ino,
+      );
     }
     const remaining = (this.entityProjectionOpenRefs.get(owner.rootIno) ?? 0) -
       1;
@@ -1026,22 +1063,48 @@ export class CellBridge {
       this.entityProjectionOpenRefs.delete(owner.rootIno);
     }
     this.finishPendingEntityRemoval(owner.rootIno);
+    this.refreshEntityProjectionEvictionCandidate(owner.rootIno);
     this.trimEntityProjectionCache();
+  }
+
+  private indexEntityProjectionOwner(
+    index: Map<bigint, Set<bigint>>,
+    rootIno: bigint,
+    ino: bigint,
+  ): void {
+    let inodes = index.get(rootIno);
+    if (inodes === undefined) {
+      inodes = new Set();
+      index.set(rootIno, inodes);
+    }
+    inodes.add(ino);
+  }
+
+  private unindexEntityProjectionOwner(
+    index: Map<bigint, Set<bigint>>,
+    rootIno: bigint,
+    ino: bigint,
+  ): void {
+    const inodes = index.get(rootIno);
+    if (inodes === undefined) return;
+    inodes.delete(ino);
+    if (inodes.size === 0) index.delete(rootIno);
   }
 
   private clearEntityProjectionReferences(rootIno: bigint): void {
     this.entityProjectionLookupRefs.delete(rootIno);
     this.entityProjectionOpenRefs.delete(rootIno);
-    for (const [ino, owner] of this.entityProjectionLookupOwners) {
-      if (owner.rootIno === rootIno) {
-        this.entityProjectionLookupOwners.delete(ino);
-      }
+    for (
+      const ino of this.entityProjectionLookupOwnerInodes.get(rootIno) ??
+        []
+    ) {
+      this.entityProjectionLookupOwners.delete(ino);
     }
-    for (const [ino, owner] of this.entityProjectionOpenOwners) {
-      if (owner.rootIno === rootIno) {
-        this.entityProjectionOpenOwners.delete(ino);
-      }
+    this.entityProjectionLookupOwnerInodes.delete(rootIno);
+    for (const ino of this.entityProjectionOpenOwnerInodes.get(rootIno) ?? []) {
+      this.entityProjectionOpenOwners.delete(ino);
     }
+    this.entityProjectionOpenOwnerInodes.delete(rootIno);
   }
 
   private isEntityProjectionDirectory(ino: bigint): boolean {
@@ -2512,20 +2575,42 @@ export class CellBridge {
   ): void {
     this.entityProjectionLru.delete(ino);
     this.entityProjectionLru.set(ino, info);
+    this.entityProjectionUseOrder.set(
+      ino,
+      ++this.nextEntityProjectionUseOrder,
+    );
+    this.refreshEntityProjectionEvictionCandidate(ino);
     this.trimEntityProjectionCache(ino);
   }
 
+  private refreshEntityProjectionEvictionCandidate(ino: bigint): void {
+    this.entityProjectionEvictionCandidates.delete(ino);
+    const info = this.entityProjectionLru.get(ino);
+    if (
+      info === undefined || this.pendingEntityHydrations.has(ino) ||
+      this.entityProjectionHasReferences(ino)
+    ) {
+      return;
+    }
+    this.entityProjectionEvictionCandidates.set(ino, info);
+  }
+
   private trimEntityProjectionCache(protectedIno?: bigint): void {
-    if (this.entityProjectionLru.size <= this.maxEntityProjections) return;
-    for (const [ino, info] of this.entityProjectionLru) {
-      if (this.entityProjectionLru.size <= this.maxEntityProjections) break;
-      if (
-        ino === protectedIno || this.pendingEntityHydrations.has(ino) ||
-        this.entityProjectionHasReferences(ino)
-      ) {
-        continue;
+    while (this.entityProjectionLru.size > this.maxEntityProjections) {
+      let oldestIno: bigint | undefined;
+      let oldestInfo: UnhydratedEntityRootInfo | undefined;
+      let oldestUseOrder = Number.POSITIVE_INFINITY;
+      for (const [ino, info] of this.entityProjectionEvictionCandidates) {
+        if (ino === protectedIno) continue;
+        const useOrder = this.entityProjectionUseOrder.get(ino);
+        if (useOrder !== undefined && useOrder < oldestUseOrder) {
+          oldestIno = ino;
+          oldestInfo = info;
+          oldestUseOrder = useOrder;
+        }
       }
-      this.removeEntityProjection(info.state, info.entityId);
+      if (oldestIno === undefined || oldestInfo === undefined) return;
+      this.removeEntityProjection(oldestInfo.state, oldestInfo.entityId);
     }
   }
 
@@ -2552,6 +2637,8 @@ export class CellBridge {
 
     this.pendingEntityRemovals.delete(ino);
     this.entityProjectionLru.delete(ino);
+    this.entityProjectionEvictionCandidates.delete(ino);
+    this.entityProjectionUseOrder.delete(ino);
     this.unhydratedEntityRoots.delete(ino);
     this.cancelEntitySubscriptions(ino);
     this.unregisterPieceRoot(ino);
@@ -2587,6 +2674,8 @@ export class CellBridge {
       entityId,
     };
     this.entityProjectionLru.delete(entityIno);
+    this.entityProjectionEvictionCandidates.delete(entityIno);
+    this.entityProjectionUseOrder.delete(entityIno);
     this.unhydratedEntityRoots.delete(entityIno);
     this.cancelEntitySubscriptions(entityIno);
     this.pendingEntityRemovals.set(entityIno, info);
@@ -2726,9 +2815,11 @@ export class CellBridge {
         this.pendingEntityHydrations.delete(entityIno);
       }
       this.finishPendingEntityRemoval(entityIno);
+      this.refreshEntityProjectionEvictionCandidate(entityIno);
       this.trimEntityProjectionCache();
     });
     this.pendingEntityHydrations.set(entityIno, pending);
+    this.entityProjectionEvictionCandidates.delete(entityIno);
     return pending;
   }
 

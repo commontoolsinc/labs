@@ -594,6 +594,19 @@ cleanup() {
   if [ -n "${IDENTITY:-}" ]; then
     rm -f "$IDENTITY"
   fi
+  if [ -n "${MEMORY_PROXY_PID:-}" ]; then
+    kill "$MEMORY_PROXY_PID" 2>/dev/null || true
+    wait "$MEMORY_PROXY_PID" 2>/dev/null || true
+  fi
+  if [ -n "${MEMORY_TRACE:-}" ]; then
+    rm -f "$MEMORY_TRACE"
+  fi
+  if [ -n "${MEMORY_PROXY_READY:-}" ]; then
+    rm -f "$MEMORY_PROXY_READY"
+  fi
+  if [ -n "${MEMORY_PROXY_STATE:-}" ]; then
+    rmdir "$MEMORY_PROXY_STATE" 2>/dev/null || true
+  fi
   if [ -n "${NO_ARG_HANDLER_ERR:-}" ]; then
     rm -f "$NO_ARG_HANDLER_ERR"
   fi
@@ -656,7 +669,26 @@ PIECE_ID=$(cf piece new --main-export "$CUSTOM_EXPORT" $SPACE_ARGS "$PATTERN_SRC
 echo "Created piece: $PIECE_ID"
 cf piece step $SPACE_ARGS --piece "$PIECE_ID"
 echo "Stepped piece: $PIECE_ID"
-MOUNT_OUTPUT=$(cf fuse mount "$MOUNTPOINT" --api-url="$API_URL" --identity="$IDENTITY" --space="$SPACE" --background --dangerously-allow-incompatible-schema)
+ENTITY_PAYLOAD_MARKER="FUSE_ENTITY_LIST_PAYLOAD_50c21a1f"
+printf '{"lastMessage":"%s","messageCount":0,"legacyCount":0,"messages":[]}\n' \
+  "$ENTITY_PAYLOAD_MARKER" |
+  cf piece set $SPACE_ARGS --piece "$PIECE_ID" "" --input
+
+MEMORY_PROXY_STATE=$(mktemp -d)
+MEMORY_TRACE="$MEMORY_PROXY_STATE/frames"
+MEMORY_PROXY_READY="$MEMORY_PROXY_STATE/ready"
+mkfifo "$MEMORY_PROXY_READY"
+deno run --allow-net --allow-write="$MEMORY_TRACE" \
+  "$SCRIPT_DIR/fuse-memory-proxy.ts" "$API_URL" "$MEMORY_TRACE" \
+  >"$MEMORY_PROXY_READY" &
+MEMORY_PROXY_PID=$!
+if ! IFS= read -r FUSE_API_URL <"$MEMORY_PROXY_READY"; then
+  error "FUSE memory proxy exited before reporting its listening address."
+fi
+rm -f "$MEMORY_PROXY_READY"
+MEMORY_PROXY_READY=""
+
+MOUNT_OUTPUT=$(cf fuse mount "$MOUNTPOINT" --api-url="$FUSE_API_URL" --identity="$IDENTITY" --space="$SPACE" --background --dangerously-allow-incompatible-schema)
 echo "$MOUNT_OUTPUT"
 
 MOUNT_PID="${MOUNT_OUTPUT#*PID }"
@@ -688,6 +720,20 @@ if ! kill -0 "$MOUNT_PID" >/dev/null 2>&1; then
   error "Fuse daemon exited immediately after reporting mount readiness."
 fi
 
+ENTITIES_DIR="$MOUNTPOINT/$SPACE/entities"
+wait_for_path "$ENTITIES_DIR"
+MOUNTED_ENTITY_DIRS=$(find "$ENTITIES_DIR" -mindepth 1 -maxdepth 1 -type d -print)
+if [ -z "$MOUNTED_ENTITY_DIRS" ]; then
+  error "Mounted entities directory did not contain any entity directories."
+fi
+if ! grep -Fq "$PIECE_ID" "$MEMORY_TRACE"; then
+  error "Listing mounted entity directories did not transfer the known entity identifier."
+fi
+if grep -Fq "$ENTITY_PAYLOAD_MARKER" "$MEMORY_TRACE"; then
+  error "Listing mounted entity directories transferred entity payload bytes."
+fi
+success "Listing every mounted entity directory transfers identifiers without entity payload bytes"
+
 wait_for_path "$MOUNTPOINT/$SPACE/pieces"
 
 PIECE_NAME="Fuse-Exec-Fixture"
@@ -709,8 +755,6 @@ fi
 
 ENTITY_BARE_ID="${ENTITY_ID#of:}"
 ENTITY_DEEP_PROBE="${FUSE_DEEP_ENTITY_PROBE:-0}"
-ENTITIES_DIR="$MOUNTPOINT/$SPACE/entities"
-wait_for_path "$ENTITIES_DIR"
 ENTITY_DIR=$(resolve_entity_dir "$ENTITIES_DIR" "$ENTITY_ID" || true)
 if [ -z "$ENTITY_DIR" ]; then
   error "Timed out waiting for entity directory entry for $ENTITY_ID."

@@ -40,6 +40,18 @@ import { encodeFuseComponent } from "./path-codec.ts";
 
 const decoder = new TextDecoder();
 
+class IterationCountingMap<K, V> extends Map<K, V> {
+  iteratedEntries = 0;
+
+  override *[Symbol.iterator](): MapIterator<[K, V]> {
+    for (const entry of super[Symbol.iterator]()) {
+      this.iteratedEntries++;
+      yield entry;
+    }
+    return undefined;
+  }
+}
+
 interface FakeCell {
   schema: Record<string, unknown> | undefined;
   get(): unknown;
@@ -600,6 +612,58 @@ Deno.test("FUSE operations reserve concurrent exact entity lookups", async () =>
   assertEquals(tree.getNode(firstIno!), undefined);
   assertNotEquals(tree.getNode(secondIno!), undefined);
   operations.forget(secondIno!, 1n);
+});
+
+Deno.test("CellBridge cache work stays linear while lookup references remain", async () => {
+  const entityCount = 2_000;
+  const ids = Array.from(
+    { length: entityCount },
+    (_, index) => `of:fid1:retained-${index.toString().padStart(4, "0")}`,
+  );
+  const liveIds = new Set(ids);
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: () =>
+      Promise.resolve(
+        {
+          getSpace: () => "did:key:zRetainedEntitySpace",
+          entityIdExists: (id: string) => Promise.resolve(liveIds.has(id)),
+        } as unknown as SpaceState["manager"],
+      ),
+    maxEntityProjections: 1,
+  });
+  const lru = new IterationCountingMap<bigint, unknown>();
+  const candidates = new IterationCountingMap<bigint, unknown>();
+  const lookupOwners = new IterationCountingMap<bigint, unknown>();
+  const internals = bridge as unknown as {
+    entityProjectionLru: Map<bigint, unknown>;
+    entityProjectionEvictionCandidates: Map<bigint, unknown>;
+    entityProjectionLookupOwners: Map<bigint, unknown>;
+  };
+  internals.entityProjectionLru = lru;
+  internals.entityProjectionEvictionCandidates = candidates;
+  internals.entityProjectionLookupOwners = lookupOwners;
+  bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
+  const state = await bridge.connectSpace("home");
+  const operations = new FuseOperationState(tree, bridge);
+  const inodes: bigint[] = [];
+
+  for (const id of ids) {
+    const ino = await operations.prepareLookup(
+      state.entitiesIno,
+      encodeFuseComponent(id),
+    );
+    assertNotEquals(ino, undefined);
+    inodes.push(ino!);
+  }
+  assertEquals(tree.getChildren(state.entitiesIno).length, entityCount);
+
+  for (const ino of inodes) operations.forget(ino, 1n);
+
+  assertEquals(tree.getChildren(state.entitiesIno).length, 1);
+  assertEquals(lru.iteratedEntries, 0);
+  assertEquals(lookupOwners.iteratedEntries, 0);
+  assertEquals(candidates.iteratedEntries <= entityCount * 2, true);
 });
 
 Deno.test("CellBridge defers projection eviction until lookup and open references close", async () => {
