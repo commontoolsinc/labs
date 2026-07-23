@@ -7,6 +7,7 @@ import {
   actionClaimMapKey,
   type BranchName,
   canonicalSchedulerPieceIdForDemandRoot,
+  type DocsReadExecutionClaimRef,
   type ExecutionClaim,
   executionClaimIncarnationKey,
   parseSessionExecutionContextKey,
@@ -37,6 +38,7 @@ import {
 import type { ExecutorExecutionMetricsSnapshot } from "./shared-execution-pool.ts";
 import {
   type AcceptedCommitNotice,
+  type ForeignWakeNotice,
   HostStorageManager,
 } from "../storage/v2-host-provider.ts";
 import {
@@ -579,6 +581,89 @@ const postCandidate = (
  * reported by the router from real observations (C1.9b). */
 const laneSurfacesByAction = new WeakMap<object, IMemorySpaceAddress[]>();
 
+/** C3.4 foreign read surface: each routed action's FOREIGN-space read
+ * addresses, reported by the router from real observations. Keyed per
+ * action (WeakMap — retired actions release their targets); the inner
+ * map dedupes by (space, scope, id). A foreign wake consults this to
+ * refresh the Worker's read-only foreign mount for exactly the matched
+ * actions' addresses in the waking read space. */
+let foreignReadTargetsByAction = new WeakMap<
+  object,
+  Map<string, IMemorySpaceAddress>
+>();
+
+/** Project the wire claim reference of one live claim (identity + bound
+ * generations — never credentials; the host derives space/branch from
+ * the channel's lease binding). */
+const foreignReadClaimRef = (
+  claim: ExecutionClaim,
+): DocsReadExecutionClaimRef => ({
+  contextKey: claim.contextKey,
+  pieceId: claim.pieceId,
+  actionId: claim.actionId,
+  actionKind: claim.actionKind,
+  implementationFingerprint: claim.implementationFingerprint,
+  runtimeFingerprint: claim.runtimeFingerprint,
+  leaseGeneration: claim.leaseGeneration,
+  claimGeneration: claim.claimGeneration,
+});
+
+/**
+ * C3.4: refresh the foreign mount for one waking read space — issue an
+ * authenticated point read per registered space-scoped foreign address
+ * of each matched action, under that action's LIVE claim (the wake's
+ * lane when it holds one, else the action's representative claim). The
+ * intermediate posture stays pinned: stamped documents LAND in the
+ * mount; nothing here relaxes servability, so the rerun's attempt still
+ * settles unserved until C3.5/C3.6.
+ *
+ * Fail-closed and bounded: a denied/failed/fenced read lands nothing
+ * and is NOT retried — one attempt per (action, address) per wake; the
+ * next wake (or claimed rerun) is the only re-trigger. Scoped foreign
+ * addresses are skipped (decision #3: unservable v1 — the send side
+ * would reject them anyway).
+ */
+const refreshForeignMountForWake = async (
+  notice: ForeignWakeNotice,
+): Promise<void> => {
+  const manager = storage;
+  if (manager === null) return;
+  for (const reader of notice.staleForeignReaders) {
+    const identity = schedulerIdentityKeyForStaleReader(reader);
+    const action = identity === undefined
+      ? undefined
+      : actionsBySchedulerIdentity.get(identity);
+    if (action === undefined) continue;
+    const claim = reader.executionContextKey !== "space"
+      ? liveClaimForLane(action, reader.executionContextKey) ??
+        claimForActionRun(action)
+      : claimForActionRun(action);
+    if (claim === undefined) continue;
+    const targets = foreignReadTargetsByAction.get(action);
+    if (targets === undefined) continue;
+    for (const address of targets.values()) {
+      if (address.space !== notice.readSpace) continue;
+      if ((address.scope ?? "space") !== "space") continue;
+      try {
+        await manager.readForeignDoc(
+          notice.readSpace,
+          foreignReadClaimRef(claim),
+          { id: address.id },
+        );
+      } catch (error) {
+        // Constant-shape authority rejections and denials are expected
+        // fail-closed outcomes here (the wake raced a rotation/drain).
+        console.warn(
+          "executor foreign mount refresh failed (fail-closed)",
+          notice.readSpace,
+          address.id,
+          error,
+        );
+      }
+    }
+  }
+};
+
 /** Per-lane hydration ledger (C1.9b): document sync tasks keyed by
  * `scope\0id`, valid for one lane demand generation. Drains, re-anchors,
  * and resetClaims drop the record so the next claimed activation
@@ -812,6 +897,10 @@ const replaceDemand = async (
     claimsByAction = new WeakMap<object, Map<string, ExecutionClaim>>();
     laneRunPins = new WeakMap<object, string>();
     laneRunsByAction = new WeakMap<object, string>();
+    foreignReadTargetsByAction = new WeakMap<
+      object,
+      Map<string, IMemorySpaceAddress>
+    >();
     pendingLaneRerunsByAction = new WeakMap<object, Set<string>>();
   }
   for (const [pieceId, cell] of demanded) {
@@ -893,6 +982,18 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       },
       onLaneSurface: (sourceAction, addresses) => {
         laneSurfacesByAction.set(sourceAction, [...addresses]);
+      },
+      // C3.4: register each routed action's foreign READ addresses so a
+      // foreign wake can refresh the mount for exactly those documents.
+      onForeignReadSurface: (sourceAction, addresses) => {
+        const targets = new Map<string, IMemorySpaceAddress>();
+        for (const address of addresses) {
+          targets.set(
+            `${address.space}\0${address.scope ?? "space"}\0${address.id}`,
+            address,
+          );
+        }
+        foreignReadTargetsByAction.set(sourceAction, targets);
       },
       claimForAction: (action, lane) => liveClaimForLane(action, lane),
       permanentUnservedReasonForAction,
@@ -1032,13 +1133,16 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     // accepted-commit notice — matched live registration reruns (lane-
     // pinned when a live lane claim owns the row), unmatched identities
     // fall back to the selective closure pull — but with NO document
-    // wave: the changed documents live in the READ space, which this
-    // Worker cannot mount until C3.4 (`docKey` has no space dimension).
-    // Pinned pre-C3.4 posture: the rerun re-reads home replicas only,
-    // the action's foreign read keeps it unservable
-    // (`foreign-read-space`), the attempt settles canonically unserved,
-    // and clients fail open to their own replicas. C3.4's point reads +
-    // C3.5's vector basis turn this same wake into a served rerun.
+    // wave (the changed documents live in the READ space's seq domain).
+    // C3.4 (2026-07-18): the wake now ALSO refreshes the read-only
+    // foreign mount — authenticated point reads under the matched
+    // action's live claim land stamped documents keyed
+    // (space, id, scopeKey) — but the intermediate posture stays
+    // pinned: the engine's foreign-space-surface fence and the
+    // servability classifier (`foreign-read-space`) are untouched, so
+    // the rerun's attempt still settles canonically unserved and
+    // clients fail open to their own replicas until C3.5's vector
+    // basis + C3.6's servability stage lift the fence.
     onForeignWake(notice) {
       const stalePieceIds = new Set<string>();
       for (const reader of notice.staleForeignReaders) {
@@ -1060,6 +1164,15 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
         }
       }
       selectiveWake?.push([...stalePieceIds]);
+      // C3.4: mount refresh rides the serialized work queue (never
+      // concurrent with runs), one bounded attempt per wake. Advisory:
+      // an unexpected failure warns — the mount simply stays stale and
+      // the attempt stays unserved (fail closed), never a Worker fatal.
+      void enqueue(() => refreshForeignMountForWake(notice)).catch(
+        (error) => {
+          console.warn("executor foreign mount refresh pass failed", error);
+        },
+      );
     },
   });
   // A demand shrink stops removed roots; the scheduler unregisters exactly
@@ -1374,6 +1487,10 @@ const stop = async (): Promise<void> => {
   claimsByAction = new WeakMap<object, Map<string, ExecutionClaim>>();
   laneRunPins = new WeakMap<object, string>();
   laneRunsByAction = new WeakMap<object, string>();
+  foreignReadTargetsByAction = new WeakMap<
+    object,
+    Map<string, IMemorySpaceAddress>
+  >();
   pendingLaneRerunsByAction = new WeakMap<object, Set<string>>();
   if (shutdownError !== undefined) throw shutdownError;
 };

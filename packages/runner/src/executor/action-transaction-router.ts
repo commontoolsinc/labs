@@ -116,6 +116,16 @@ export interface ExecutorActionTransactionRouterOptions {
     sourceAction: object,
     addresses: readonly IMemorySpaceAddress[],
   ) => void;
+  /** C3.4 foreign read surface: the FOREIGN-space READ addresses the routed
+   * observation consumes (reads + shallowReads whose space differs from the
+   * served space), deduped by (space, scope, id) and path-rooted. The Worker
+   * registers them per action so a foreign wake can refresh its read-only
+   * foreign mount through authenticated point reads. Reported independently
+   * of the lane dials — foreign-read admission is rank-independent (C3.6). */
+  readonly onForeignReadSurface?: (
+    sourceAction: object,
+    addresses: readonly IMemorySpaceAddress[],
+  ) => void;
   /** Live claim of `sourceAction` ON THE COMMIT'S OWNING LANE (C1.9c): one
    * action object can hold one live claim per lane, and only the lane a
    * commit runs under may attach its claim. Callers ignoring `lane` keep the
@@ -322,6 +332,17 @@ export function createExecutorActionTransactionRouter(
       const laneSurface = laneScopedDocumentAddresses(routedObservation);
       if (laneSurface.length > 0) {
         options.onLaneSurface(sourceAction, laneSurface);
+      }
+    }
+    // C3.4: report the observation's foreign READ surface so the Worker
+    // can key its foreign-mount refreshes (see the option docblock).
+    if (options.onForeignReadSurface !== undefined) {
+      const foreignReads = foreignReadDocumentAddresses(
+        routedObservation,
+        options.servedSpace,
+      );
+      if (foreignReads.length > 0) {
+        options.onForeignReadSurface(sourceAction, foreignReads);
       }
     }
     const staticDecision = classifyStaticActionServability(
@@ -1096,6 +1117,39 @@ function unservedRoute(
  * writes, and therefore the exact set the Worker must hydrate under a lane
  * before running there.
  */
+/**
+ * C3.4: the observation's foreign READ surface — every read/shallowRead
+ * address (observation legs plus the trusted summary's reads) whose space
+ * differs from the served space, deduped by (space, scope, id) and
+ * path-rooted (a point read fetches the document; path narrowing is the
+ * consumer's). READS ONLY, deliberately: foreign writes have no v1
+ * story (they reject at every layer), so reporting them would only
+ * invite a consumer to treat them as refreshable inputs.
+ */
+function foreignReadDocumentAddresses(
+  observation: SchedulerActionObservation,
+  servedSpace: string,
+): IMemorySpaceAddress[] {
+  const summary = observation.completeActionScopeSummary;
+  const sources: readonly (readonly IMemorySpaceAddress[])[] = [
+    observation.reads,
+    observation.shallowReads,
+    ...(summary === undefined ? [] : [summary.reads]),
+  ];
+  const result = new Map<string, IMemorySpaceAddress>();
+  for (const addresses of sources) {
+    for (const address of addresses) {
+      if (address.space === servedSpace) continue;
+      const key = `${address.space}\0${address.scope ?? "space"}\0` +
+        address.id;
+      if (!result.has(key)) {
+        result.set(key, { ...address, path: [] });
+      }
+    }
+  }
+  return [...result.values()];
+}
+
 function laneScopedDocumentAddresses(
   observation: SchedulerActionObservation,
 ): IMemorySpaceAddress[] {

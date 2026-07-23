@@ -2,6 +2,8 @@ import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import {
   type CellScope,
   type ClientCommit,
+  type DocsReadExecutionClaimRef,
+  type DocsReadRequest,
   encodeMemoryBoundary,
   type EntityDocument,
   type EntitySnapshot,
@@ -31,6 +33,8 @@ import * as MemoryClient from "@commonfabric/memory/v2/client";
 import {
   type AcceptedCommitEvent,
   type ExecutionLeaseHandle,
+  type ExecutorForeignPointReadOutcome,
+  FOREIGN_POINT_READ_SCOPED_ADDRESS,
   type ForeignWakeEvent,
   parseClientMessage,
   type Server,
@@ -92,14 +96,17 @@ export interface AcceptedCommitNotice {
  * Reader identities carry `ownerSpace` = the home space, matching the
  * stale-reader identity shape the Worker's wake consumption keys on.
  *
- * Pre-C3.4 posture (pinned): the Worker CANNOT read the foreign data —
- * `docKey` has no space dimension and no foreign point read exists — so
- * this notice only marks/schedules: the matched action re-runs against
- * its home replica, its foreign read keeps it unservable
- * (`foreign-read-space`), and the attempt settles canonically unserved —
- * clients fall back and re-run with their own foreign replicas. C3.4
- * adds the read-side mount + point reads; C3.5's vector basis then lets
- * the rerun settle served with a foreign component.
+ * Intermediate posture since C3.4 (pinned, dated 2026-07-18): the
+ * Worker CAN now read the foreign data — the wake may refresh the
+ * read-only foreign mount via authenticated point reads
+ * ({@link HostStorageManager.readForeignDoc}), and stamped documents
+ * land keyed (space, id, scopeKey) — but SERVING stays fenced: the
+ * engine's `foreign-space-surface` firewall and the servability
+ * classifier (`foreign-read-space`) are untouched, so a claimed attempt
+ * consuming foreign data still settles canonically unserved and clients
+ * fall back to their own replicas. C3.5's vector basis + engine relax
+ * and C3.6's servability stage lift that fence; this notice's
+ * consumption stays mark/schedule/refresh until then.
  */
 export interface ForeignWakeNotice {
   space: string;
@@ -338,6 +345,132 @@ export function createHostProviderChannel(
     );
   };
 
+  const sendOk = (requestId: string, ok: unknown) => {
+    if (disposed) return;
+    hostPort.postMessage(
+      {
+        type: "memory",
+        payload: encodeMemoryBoundary({ type: "response", requestId, ok }),
+      } satisfies ProviderPortMessage,
+    );
+  };
+
+  /**
+   * C3.4: the foreign arm the relaxed space guard routes to — a Worker
+   * `docs.read` naming a FOREIGN space on a lease-bound channel. It never
+   * reaches `connection.receive` (the session is home-space-bound) and
+   * never passes `pinBranch` (structurally: the home branch cannot be
+   * stamped onto a foreign read — decision #4's default-branch pairing
+   * is the read HOST's, and the fixture pins the served branch as the
+   * read space's default). The home host validates read-time authority
+   * (C3A4) and forwards over the cross-space router; this arm only
+   * validates the FRAME:
+   *
+   * - the claim reference is required (the read acts under a claimed
+   *   attempt; the home host resolves the LIVE authority it names);
+   * - `actingContext` is rejected — the claim's `contextKey` is the one
+   *   lane source (two context carriers could skew);
+   * - `branch`/`atSeq` selectors are rejected, not ignored (decision #4:
+   *   default-branch only; the stamp IS the read's seq bound — silently
+   *   dropping either would hide an addressing bug);
+   * - exactly ONE document per request (the wire point read is
+   *   per-document; batching is an additive later extension);
+   * - a user/session-scoped address is refused HERE with the named code
+   *   (decision #3's send-side half; the serve side re-enforces it).
+   */
+  const serveForeignPointRead = async (
+    parsed: DocsReadRequest,
+  ): Promise<void> => {
+    const fail = (name: string, message: string) =>
+      sendError(parsed.requestId, { name, message });
+    if (options.executionLease === undefined) {
+      // Unreachable via receive() (the guard only routes lease-bound
+      // channels here); kept as the fail-closed backstop.
+      fail(
+        "AuthorizationError",
+        `executor provider is bound to ${options.space}`,
+      );
+      return;
+    }
+    if (parsed.executionClaim === undefined) {
+      fail(
+        "ProtocolError",
+        "foreign point reads require an execution claim reference",
+      );
+      return;
+    }
+    if (parsed.actingContext !== undefined) {
+      fail(
+        "ProtocolError",
+        "foreign point reads carry their lane on the claim reference — " +
+          "actingContext is not accepted",
+      );
+      return;
+    }
+    if (parsed.query.branch !== undefined) {
+      fail(
+        "ProtocolError",
+        "foreign point reads resolve the read space's default branch — " +
+          "a branch selector is not accepted (decision #4)",
+      );
+      return;
+    }
+    if (parsed.query.atSeq !== undefined) {
+      fail(
+        "ProtocolError",
+        "foreign point reads have no atSeq — the served stamp is the " +
+          "read's sequence bound",
+      );
+      return;
+    }
+    if (parsed.query.docs.length !== 1) {
+      fail(
+        "ProtocolError",
+        "foreign point reads address exactly one document per request",
+      );
+      return;
+    }
+    const doc = parsed.query.docs[0];
+    if (doc.scope !== undefined && doc.scope !== "space") {
+      // Decision #3 (send side): v1 foreign reads are space-scoped only.
+      fail(
+        "QueryError",
+        `${FOREIGN_POINT_READ_SCOPED_ADDRESS}: v1 foreign point reads ` +
+          "resolve space-scoped addresses only",
+      );
+      return;
+    }
+    let outcome: ExecutorForeignPointReadOutcome;
+    try {
+      outcome = await options.server.executorForeignPointRead(
+        options.executionLease,
+        {
+          readSpace: parsed.space,
+          claim: parsed.executionClaim,
+          address: { id: doc.id, ...(doc.scope ? { scope: doc.scope } : {}) },
+        },
+      );
+    } catch (error) {
+      // The C3A4 constant-shape authority rejection (and any host
+      // failure) rides to the Worker as the typed error response.
+      fail(
+        error instanceof Error && error.name ? error.name : "QueryError",
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+    if (outcome.status === "served") {
+      sendOk(parsed.requestId, outcome);
+      return;
+    }
+    // denied/failed are fail-closed for the Worker: typed errors whose
+    // message LEADS with the named code (the mount lands nothing).
+    fail(
+      outcome.status === "denied" ? "AuthorizationError" : "QueryError",
+      `${outcome.code}: foreign point read ${outcome.status}`,
+    );
+  };
+
   const receive = async (payload: string): Promise<void> => {
     const parsed = parseClientMessage(payload);
     if (parsed === null) {
@@ -347,6 +480,17 @@ export function createHostProviderChannel(
     }
     const requestedSpace = messageSpace(parsed);
     if (requestedSpace !== undefined && requestedSpace !== options.space) {
+      // C3.4: the provider space guard relaxes for READS ONLY — a
+      // lease-bound channel's foreign `docs.read` becomes an
+      // authenticated foreign point read (served via the host API, off
+      // the session path entirely). EVERY other message type naming a
+      // foreign space — transact, graph.query, watches, scheduler
+      // surfaces — keeps the byte-identical rejection below
+      // (regression-pinned: foreign writes still reject at this guard).
+      if (parsed.type === "docs.read" && options.executionLease !== undefined) {
+        await serveForeignPointRead(parsed);
+        return;
+      }
       sendError(requestIdOf(parsed), {
         name: "AuthorizationError",
         message: `executor provider is bound to ${options.space}`,
@@ -846,6 +990,9 @@ class HostReplicaSession implements ReplicaSession {
     private readonly transport: MessagePortTransport,
     private readonly branch: BranchName,
     private readonly supportsExecutionDemand: boolean,
+    private readonly foreignRequest: (
+      message: Record<string, unknown>,
+    ) => Promise<unknown>,
     private readonly onAcceptedCommitWillIntegrate?: (
       notice: AcceptedCommitNotice,
     ) => void,
@@ -1021,6 +1168,39 @@ class HostReplicaSession implements ReplicaSession {
 
   noteAppliedCommit(seq: number): void {
     this.session.noteAppliedCommit(seq);
+  }
+
+  /**
+   * C3.4: issue one executor foreign point read through the provider
+   * channel — a `docs.read` frame naming the FOREIGN space, carrying the
+   * claim reference of the attempt it acts under. Deliberately OFF the
+   * `session.readDocs` path: that path folds the result's `serverSeq`
+   * into the HOME session watermark, and a foreign read's stamp lives in
+   * the READ space's seq domain — merging the two is the C1.5b cross-
+   * domain confidentiality/soundness class this method exists to avoid.
+   * The home host validates read-time authority (C3A4) and the read
+   * host runs the ACL check for the acting principal; a rejection
+   * surfaces as the typed error `client.request` throws (the constant
+   * C1.3 fence shape rides end-to-end).
+   */
+  readForeignDoc(
+    readSpace: string,
+    claim: DocsReadExecutionClaimRef,
+    address: { id: string; scope?: CellScope },
+  ): Promise<ExecutorForeignPointReadOutcome> {
+    return this.foreignRequest({
+      type: "docs.read",
+      requestId: crypto.randomUUID(),
+      space: readSpace,
+      sessionId: this.session.sessionId,
+      executionClaim: claim,
+      query: {
+        docs: [{
+          id: address.id,
+          ...(address.scope !== undefined ? { scope: address.scope } : {}),
+        }],
+      },
+    }) as Promise<ExecutorForeignPointReadOutcome>;
   }
 
   queryGraph(
@@ -1827,6 +2007,22 @@ class HostSessionFactory implements SessionFactory {
   #session: HostReplicaSession | null = null;
   readonly supportsExecutionDemand: boolean;
 
+  /** C3.4: the manager's foreign point-read leg (see
+   * {@link HostReplicaSession.readForeignDoc}). */
+  readForeignDoc(
+    readSpace: string,
+    claim: DocsReadExecutionClaimRef,
+    address: { id: string; scope?: CellScope },
+  ): Promise<ExecutorForeignPointReadOutcome> {
+    const session = this.#session;
+    if (session === null) {
+      return Promise.reject(
+        new Error("executor provider session is not mounted"),
+      );
+    }
+    return session.readForeignDoc(readSpace, claim, address);
+  }
+
   constructor(
     private readonly port: MessagePort,
     private readonly space: MemorySpace,
@@ -1876,6 +2072,7 @@ class HostSessionFactory implements SessionFactory {
       transport,
       this.branch,
       this.supportsExecutionDemand,
+      (message) => client.request(message),
       this.onAcceptedCommitWillIntegrate,
       this.onAcceptedCommitIntegrated,
       this.onForeignWake,
@@ -1950,13 +2147,123 @@ export interface HostStorageManagerOptions {
   onForeignWake?: (notice: ForeignWakeNotice) => void;
 }
 
+/**
+ * C3.4: one stamped document in the Worker's read-only foreign mount.
+ * The row's identity is (space, id, scopeKey) — the mount is PER-SPACE
+ * replica structure (`ForeignSpaceMount` below), never a space-blind
+ * cache: the Worker replica's `docKey` has no space dimension, so a flat
+ * id-keyed map would collide two spaces' same-id documents — the C1.5b
+ * confidentiality-boundary class. v1 entries are always `scopeKey:
+ * "space"` (decision #3: space-scoped foreign reads only).
+ *
+ * `seq` is the read space's stamped COVERING seq (the serve host's
+ * serverSeq at the read) and `authorizationEpoch` the acting principal's
+ * effective epoch there — both in the READ space's domains, never merged
+ * into home watermarks. THE C3.5 SEAM (dated 2026-07-18): the vector
+ * input basis consumes exactly (space, seq) per consulted entry, and
+ * C3.8's apply fence re-validates `authorizationEpoch` by equality —
+ * both read the mount through {@link HostStorageManager.foreignDocument}
+ * / {@link HostStorageManager.foreignMountEntries}.
+ */
+export interface ForeignMountEntry {
+  space: string;
+  id: string;
+  scopeKey: "space";
+  seq: number;
+  branch: BranchName;
+  document: EntityDocument | null;
+  authorizationEpoch: { space: string; principal: string; epoch: number };
+}
+
+/** Per-(foreign space) mount: the space's entries keyed by
+ * `scopeKey\0id` (the docKey shape, minus the space dimension the mount
+ * itself carries). */
+interface ForeignSpaceMount {
+  readonly space: string;
+  readonly docs: Map<string, ForeignMountEntry>;
+}
+
+const foreignMountDocKey = (id: string, scopeKey: string): string =>
+  `${scopeKey}\0${id}`;
+
 /** StorageManager construction available inside the executor Worker. */
 export class HostStorageManager extends StorageManager {
   readonly #hostSessionFactory: HostSessionFactory;
+  /** C3.4: per-space foreign mounts, keyed by the foreign space. */
+  readonly #foreignMounts = new Map<string, ForeignSpaceMount>();
 
   private constructor(options: Options, factory: HostSessionFactory) {
     super(options, factory);
     this.#hostSessionFactory = factory;
+  }
+
+  /**
+   * C3.4: issue a foreign point read under the given claimed attempt and
+   * — on `served` — land the stamped document in this Worker's foreign
+   * mount. Fail-closed consumption: `denied`/`failed` outcomes and
+   * transport/authority errors land NOTHING (the mount holds only
+   * stamped, authorized data), and this method never retries — the
+   * caller's trigger (a foreign wake, a rerun) bounds attempts.
+   *
+   * Mount ingestion is monotonic per (space, id, scopeKey): an entry
+   * replaces the held one only at a strictly newer stamped seq, so a
+   * delayed response can never roll the mount backwards (the same
+   * last-writer discipline as the server-side mirror upsert).
+   */
+  async readForeignDoc(
+    readSpace: string,
+    claim: DocsReadExecutionClaimRef,
+    address: { id: string; scope?: CellScope },
+  ): Promise<ExecutorForeignPointReadOutcome> {
+    const outcome = await this.#hostSessionFactory.readForeignDoc(
+      readSpace,
+      claim,
+      address,
+    );
+    if (outcome.status !== "served") return outcome;
+    let mount = this.#foreignMounts.get(readSpace);
+    if (mount === undefined) {
+      mount = { space: readSpace, docs: new Map() };
+      this.#foreignMounts.set(readSpace, mount);
+    }
+    const key = foreignMountDocKey(address.id, "space");
+    const held = mount.docs.get(key);
+    if (held === undefined || held.seq < outcome.seq) {
+      mount.docs.set(key, {
+        space: readSpace,
+        id: address.id,
+        scopeKey: "space",
+        seq: outcome.seq,
+        branch: outcome.branch,
+        document: outcome.document,
+        authorizationEpoch: outcome.authorizationEpoch,
+      });
+    }
+    return outcome;
+  }
+
+  /** C3.4: the mount's read surface — one (space, id, scopeKey "space")
+   * entry, or undefined when no served read has landed it. */
+  foreignDocument(
+    space: string,
+    id: string,
+  ): ForeignMountEntry | undefined {
+    return this.#foreignMounts.get(space)?.docs.get(
+      foreignMountDocKey(id, "space"),
+    );
+  }
+
+  /** C3.4: every held entry of one foreign space's mount (C3.5's basis
+   * enumeration seam; empty for an unmounted space). */
+  foreignMountEntries(space: string): readonly ForeignMountEntry[] {
+    const mount = this.#foreignMounts.get(space);
+    return mount === undefined ? [] : [...mount.docs.values()];
+  }
+
+  /** C3.4: the foreign spaces currently mounted (test/diagnostic
+   * surface). */
+  foreignMountSpaces(): readonly string[] {
+    return [...this.#foreignMounts.keys()];
   }
 
   static connect(options: HostStorageManagerOptions): HostStorageManager {

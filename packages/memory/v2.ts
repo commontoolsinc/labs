@@ -814,6 +814,26 @@ export interface DocsReadResult {
   entities: EntitySnapshot[];
 }
 
+/**
+ * C3.4: the claimed attempt an executor FOREIGN point read acts under —
+ * a claim REFERENCE (identity + bound generations), never credentials.
+ * Rides `docs.read` ONLY when the frame names a foreign space through a
+ * lease-bound executor provider channel; the direct (home) serve path
+ * rejects a frame carrying it. The claim's space/branch are deliberately
+ * absent: the host derives them from the channel's lease binding, so a
+ * frame cannot point the liveness consult at another lane's claim.
+ */
+export interface DocsReadExecutionClaimRef {
+  contextKey: SchedulerExecutionContextKey;
+  pieceId: string;
+  actionId: string;
+  actionKind: ActionClaimKey["actionKind"];
+  implementationFingerprint: string;
+  runtimeFingerprint: string;
+  leaseGeneration: number;
+  claimGeneration: number;
+}
+
 /** F2 executor-feed point reads (FA5): the replica-maintenance read that
  * replaces per-wave graph re-traversal for docs the reader already holds.
  * Carries the C1.4b `actingContext` seam from day one (FA6). */
@@ -824,6 +844,9 @@ export interface DocsReadRequest {
   sessionId: SessionId;
   /** See {@link GraphQueryRequest.actingContext}. */
   actingContext?: SchedulerExecutionContextKey;
+  /** C3.4 foreign point reads only — see
+   * {@link DocsReadExecutionClaimRef}. */
+  executionClaim?: DocsReadExecutionClaimRef;
   query: DocsReadQuery;
 }
 

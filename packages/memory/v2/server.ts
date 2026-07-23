@@ -6,13 +6,17 @@ import {
   CrossSpaceHostRouter,
   type CrossSpaceLaneDemand,
   type CrossSpaceMessage,
+  type CrossSpacePointReadAddress,
   CrossSpaceProtocolError,
   type CrossSpaceTransport,
   type ForeignAuthorizationEpochBump,
   type ForeignAuthorizationEpochQuery,
   type ForeignAuthorizationEpochQueryResult,
+  type ForeignAuthorizationEpochStamp,
   type ForeignDirtyMark,
   type ForeignObservationMirror,
+  type ForeignPointRead,
+  type ForeignPointReadResult,
   type ForeignReaderIdentity,
   type ForeignReadersSubscribe,
   type ForeignReadersSubscribeApplied,
@@ -32,7 +36,9 @@ import {
   type ClientMessage,
   dbNeedsColumnProvenance,
   decodeMemoryBoundary,
+  DEFAULT_BRANCH,
   type DocSetWatchSpec,
+  type DocsReadExecutionClaimRef,
   type DocsReadRequest,
   type DocsReadResult,
   encodeMemoryBoundary,
@@ -445,6 +451,99 @@ const laneReadRejection = (): V2Error =>
     "ExecutionLeaseFenceError",
     "lane-generation-stale: execution lane grant is fenced or superseded",
   );
+
+/**
+ * C3.4/C3A4: constant-shape rejection for a foreign point read whose
+ * acting authority is not LIVE home-side — the read-side mirror of the
+ * commit fence's `claim-not-live`/`lane-generation-stale` causes. ONE
+ * constant for the whole read-authority class, deliberately: a released
+ * or rotated lease, a revoked/expired claim, and a drained lane grant
+ * (user or session) all reject byte-identically, so no caller can use
+ * the shape as an oracle for WHICH authority died (the C1.3 constancy
+ * discipline; the commit fence keeps its two distinguishable causes —
+ * they are host-stat diagnostics on a path that already holds the
+ * authority objects). Thrown as the engine's `ExecutionLeaseFenceError`
+ * so the family is literal, with fenceCause `claim-not-live`.
+ */
+const foreignReadAuthorityRejection = (): Engine.ExecutionLeaseFenceError =>
+  new Engine.ExecutionLeaseFenceError(
+    "claim-not-live",
+    "claim-not-live: foreign point read requires live acting authority " +
+      "at the bound generations",
+  );
+
+/**
+ * C3.4 denied/failed code vocabulary of the foreign-point-read serve
+ * arm (the C3.1 result message left the `code` set to this WO). One
+ * exported list so C3.6's unservable-code registration and the runner's
+ * consumers bind names, not string literals.
+ *
+ * - `foreign-read-access-denied` — the acting principal lacks READ on
+ *   the read space under `#authorizeMessageWithEngine` (the ONLY
+ *   authorization denial; matches C3.6's named unservable code).
+ * - `foreign-read-scoped-address` — decision #3 (2026-07-17): v1
+ *   foreign reads are SPACE-scoped only; a user/session-scoped address
+ *   is refused at the send side AND the serve side with this code (see
+ *   `answerForeignPointRead` for the v1 scope-resolution rule).
+ * - `foreign-read-unhosted` — the addressed space is not hosted by the
+ *   answering host (or, home-side, resolvable by no host).
+ * - `foreign-read-unavailable` — the read space exists but cannot serve
+ *   (genesis-empty seq domain, send/link failure, host shutdown).
+ * - `foreign-read-malformed` — the address did not resolve as a
+ *   readable document address.
+ * - `foreign-read-timeout` — the home host's pending-request timeout
+ *   elapsed with no result (fail closed; C3.10b owns link-loss pending
+ *   disposition, dated 2026-07-18).
+ */
+export const FOREIGN_POINT_READ_DENIED_ACCESS = "foreign-read-access-denied";
+export const FOREIGN_POINT_READ_SCOPED_ADDRESS = "foreign-read-scoped-address";
+export const FOREIGN_POINT_READ_UNHOSTED = "foreign-read-unhosted";
+export const FOREIGN_POINT_READ_UNAVAILABLE = "foreign-read-unavailable";
+export const FOREIGN_POINT_READ_MALFORMED = "foreign-read-malformed";
+export const FOREIGN_POINT_READ_TIMEOUT = "foreign-read-timeout";
+
+/**
+ * C3.4: outcome of one executor foreign point read as the home host
+ * returns it to the provider channel. `served` carries the read space's
+ * stamped covering seq (the read-space seq domain — NEVER merged into
+ * home watermarks), the resolved branch (v1: the read space's default
+ * branch, decision #4), the document snapshot (null for absent AND
+ * deleted — the point-read wire does not distinguish them), and the
+ * authorization-epoch stamp for the ACTING principal (C3.2's table,
+ * read in the same synchronous engine section as the document — see
+ * `answerForeignPointRead`). C3.5's vector input basis consumes
+ * (space, seq); C3.8's apply fence re-validates `authorizationEpoch`
+ * by equality (both dated 2026-07-18, neither built here).
+ */
+export type ExecutorForeignPointReadOutcome =
+  | {
+    status: "served";
+    space: string;
+    seq: number;
+    branch: BranchName;
+    document: EntityDocument | null;
+    authorizationEpoch: ForeignAuthorizationEpochStamp;
+  }
+  | { status: "denied"; code: string }
+  | { status: "failed"; code: string };
+
+/**
+ * C3.4: the claimed attempt a foreign point read acts under, as the
+ * provider channel names it. `space`/`branch` are deliberately absent —
+ * the home host derives them from the LEASE the channel is bound to, so
+ * a caller cannot point the liveness consult at another lane's claim
+ * table entry.
+ */
+export interface ExecutorForeignPointReadClaimRef {
+  contextKey: SchedulerExecutionContextKey;
+  pieceId: string;
+  actionId: string;
+  actionKind: ActionClaimKey["actionKind"];
+  implementationFingerprint: string;
+  runtimeFingerprint: string;
+  leaseGeneration: number;
+  claimGeneration: number;
+}
 
 const toPreconditionFailedError = (
   error: unknown,
@@ -1827,6 +1926,24 @@ export class Server {
     { floor: number; byPrincipal: Map<string, number> }
   >();
 
+  /**
+   * C3.4: in-flight foreign point reads awaiting their result, keyed by
+   * `requestId` (unique per issuance — `crypto.randomUUID`). Each entry
+   * resolves from the inbound `foreign-point-read.result` arm, from its
+   * fail-closed timeout (`foreign-read-timeout`), or from server close
+   * (`foreign-read-unavailable`) — never left dangling. `readSpace` binds
+   * the ANSWERING space: a result whose `fromSpace` differs from the
+   * space this request was addressed to is dropped, on top of the
+   * codec's stamp.space === fromSpace rule (C3A13) and C3.10a's
+   * link-gate — so even a confused in-process peer cannot satisfy a
+   * pending read for a space it does not speak for.
+   */
+  #pendingForeignPointReads = new Map<string, {
+    readSpace: string;
+    resolve: (outcome: ExecutorForeignPointReadOutcome) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
   #recordSchemaEnsured(key: string): void {
     this.#ensuredSchemas.set(key, true);
     if (this.#ensuredSchemas.size > this.#ensuredSchemasMax) {
@@ -1894,6 +2011,11 @@ export class Server {
         hostId?: string;
         leaseTtlMs?: number;
         drainTimeoutMs?: number;
+        /** C3.4: fail-closed bound on one foreign point read's pending
+         * result (default 10s). Timers, not barriers, deliberately: the
+         * timeout exists exactly for the case where no answering event
+         * will ever arrive (C3.10b owns link-loss disposition). */
+        foreignPointReadTimeoutMs?: number;
       };
       /**
        * C3.10a: the cross-space transport this host's router runs over.
@@ -5318,6 +5440,16 @@ export class Server {
       clearTimeout(this.#executionLeaseExpiryTimer);
       this.#executionLeaseExpiryTimer = null;
     }
+    // C3.4 teardown: fail every pending foreign point read closed —
+    // never strand an awaiting provider channel on a closing host.
+    for (const [requestId, pending] of this.#pendingForeignPointReads) {
+      clearTimeout(pending.timer);
+      this.#pendingForeignPointReads.delete(requestId);
+      pending.resolve({
+        status: "failed",
+        code: FOREIGN_POINT_READ_UNAVAILABLE,
+      });
+    }
     // C3.3a teardown: stop new reconciles, release every pending C3A10
     // ack barrier (fail-open — a closing host must not strand a chain),
     // and drain in-flight subscription work before the engines close.
@@ -6997,6 +7129,20 @@ export class Server {
     message: DocsReadRequest,
   ): Promise<ResponseMessage<DocsReadResult>> {
     const startedAt = performance.now();
+    // C3.4: a claim reference rides docs.read ONLY on the executor
+    // provider's FOREIGN arm, which never reaches this direct serve
+    // path. A home/direct read carrying one is a protocol error, not an
+    // ignorable extra — silently dropping it would hide a misrouted
+    // foreign read as a healthy home read.
+    if (message.executionClaim !== undefined) {
+      return respondTypedError<DocsReadResult>(
+        message.requestId,
+        toError(
+          "ProtocolError",
+          "executionClaim rides only executor foreign point reads",
+        ),
+      );
+    }
     const session = this.#sessions.get(message.space, message.sessionId);
     if (session === null) {
       return respondTypedError<DocsReadResult>(
@@ -9700,14 +9846,28 @@ export class Server {
           () => this.answerForeignAuthorizationEpochQuery(message, context),
         );
         return;
+      // C3.4 (2026-07-18): the point-read arms — the last C3.1
+      // vocabulary without an inbound consumer (the former warn-drop
+      // default). The request rides the per-space apply chain (engine
+      // read — order behind in-flight inbound applies, like the epoch
+      // query); the result is a synchronous correlation resolution
+      // (like the bump: no engine, requestId-keyed, order-insensitive).
+      case "foreign-point-read":
+        this.queueCrossSpaceInboundApply(
+          context.space,
+          () => this.answerForeignPointRead(message, context),
+        );
+        return;
+      case "foreign-point-read.result":
+        this.applyForeignPointReadResult(message, context);
+        return;
       default:
-        // C3.1 vocabulary without an inbound consumer yet (2026-07-18,
-        // C3.3a landed the subscribe/notice arms): point reads (and
-        // their results) land with C3.4. Dropping here is
-        // side-effect-free by construction.
+        // Every current C3.1 message type has an inbound consumer; an
+        // ADDITIVE future type parses (additive-tolerant read) and
+        // drops here, side-effect-free by construction.
         console.warn(
-          `cross-space message ${message.type} for ${context.space} has ` +
-            "no inbound consumer yet (dropped)",
+          `cross-space message ${(message as CrossSpaceMessage).type} for ` +
+            `${context.space} has no inbound consumer (dropped)`,
         );
     }
   }
@@ -10611,6 +10771,358 @@ export class Server {
         : snapshot.epochs.filter((entry) => requested.has(entry.principal)),
     });
   }
+
+  /**
+   * C3.4/C3A4 read-time authority liveness: resolve the ACTING principal
+   * of a foreign point read from the LIVE home-side authority, or throw
+   * the constant-shape rejection ({@link foreignReadAuthorityRejection})
+   * — in which case NO foreign request is issued.
+   *
+   * The consult mirrors the commit fence's authority sources exactly
+   * (never a second definition):
+   *
+   * - every lane: the channel's lease handle must be the CURRENT owned
+   *   authority for its (space, branch) — not superseded, not draining —
+   *   and the claim's bound `leaseGeneration` must be the lease's own
+   *   (rotation mints a new generation, so a rotated sponsor fails here
+   *   even before the claim-sweep is consulted);
+   * - the claim must still be LIVE in `#executionClaims` at its exact
+   *   (leaseGeneration, claimGeneration) — the same map the commit
+   *   fence and `hasLiveExecutionClaim` consult; claims die with the
+   *   lease (`#revokeExecutionClaimsForLease`) and with lane drains, so
+   *   this is where release/rotation/drain surface;
+   * - scoped lanes (user AND session — C3A4's enumeration): the live
+   *   lane grant at the `#executionClaimLaneBindings`-bound
+   *   `laneGeneration`, via the shared `#liveLaneGrantForKey` consult
+   *   the commit fence's `laneAuthority` closure uses. The acting
+   *   principal is the GRANT's principal (the C2.4 discipline: authority
+   *   resolves from the live registry, never from a caller-supplied
+   *   string).
+   *
+   * Space-lane acting principal: the current owned lease's `onBehalfOf`
+   * (the sponsor). Deliberate asymmetry, recorded by C3.3b's report:
+   * read-time authority resolves from LIVE authority — the CURRENT
+   * sponsor — never from any accepted-row snapshot of a past sponsor.
+   */
+  #resolveForeignReadActingAuthority(
+    lease: ExecutionLeaseHandle,
+    claimRef: ExecutorForeignPointReadClaimRef,
+  ): { principal: string; contextKey: SchedulerExecutionContextKey } {
+    const authority = this.#executionLeaseAuthorities.get(lease);
+    const owned = this.#ownedExecutionLeases.get(
+      executionLeaseKey(lease.space, lease.branch),
+    );
+    if (
+      authority === undefined || authority !== owned ||
+      authority.drainRequested ||
+      claimRef.leaseGeneration !== authority.handle.leaseGeneration
+    ) {
+      throw foreignReadAuthorityRejection();
+    }
+    this.expireExecutionClaims();
+    const claimKey = actionClaimMapKey({
+      branch: lease.branch,
+      space: lease.space,
+      contextKey: claimRef.contextKey,
+      pieceId: claimRef.pieceId,
+      actionId: claimRef.actionId,
+      actionKind: claimRef.actionKind,
+      implementationFingerprint: claimRef.implementationFingerprint,
+      runtimeFingerprint: claimRef.runtimeFingerprint,
+    });
+    const live = this.#executionClaims.get(claimKey);
+    if (
+      live === undefined ||
+      live.leaseGeneration !== claimRef.leaseGeneration ||
+      live.claimGeneration !== claimRef.claimGeneration
+    ) {
+      throw foreignReadAuthorityRejection();
+    }
+    if (live.contextKey === "space") {
+      return { principal: authority.handle.onBehalfOf, contextKey: "space" };
+    }
+    const binding = this.#executionClaimLaneBindings.get(claimKey);
+    if (binding === undefined) {
+      throw foreignReadAuthorityRejection();
+    }
+    const grant = this.#liveLaneGrantForKey(binding.laneKey);
+    if (grant === undefined || grant.laneGeneration !== binding.laneGeneration) {
+      throw foreignReadAuthorityRejection();
+    }
+    return { principal: grant.principal, contextKey: live.contextKey };
+  }
+
+  /**
+   * C3.4: an executor foreign point read under the acting context — the
+   * home-host half of the wire flow. The provider channel calls this for
+   * a Worker `docs.read` naming a foreign space; the read space's host
+   * answers via {@link answerForeignPointRead}.
+   *
+   * Order of operations (each side of every await re-samples authority —
+   * the `setExecutionClaim` discipline):
+   *
+   * 1. v1 address restriction (decision #3, send side): a user/session-
+   *    scoped address fails with `foreign-read-scoped-address` before
+   *    ANY authority consult or wire traffic. Space-scoped and
+   *    undeclared (≡ space) addresses proceed.
+   * 2. C3A4 read-time liveness
+   *    ({@link #resolveForeignReadActingAuthority}); a dead/rotated/
+   *    drained authority throws the constant shape with NO foreign
+   *    request issued.
+   * 3. Hosting resolution for the read space (may await store checks) —
+   *    then liveness AGAIN (the await is an authority boundary).
+   * 4. Send `foreign-point-read` over the router — local peer =
+   *    in-process loopback; remote = the C3.10a link (`channelTo`
+   *    resolves which) — and await the correlated result under the
+   *    fail-closed timeout. The request's `actingPrincipal` carries the
+   *    resolved principal, the lane contextKey, and the claim REFERENCE
+   *    (audit/diagnostics — never credentials; trust is host-level,
+   *    C3A13).
+   *
+   * The result's `served.seq`/`authorizationEpoch` land in the READ
+   * space's domains: callers must never merge them into home watermarks
+   * (C3.5's vector basis is the consumer; C3.10b owns link-loss pending
+   * disposition — both dated 2026-07-18).
+   */
+  async executorForeignPointRead(
+    lease: ExecutionLeaseHandle,
+    request: {
+      readSpace: string;
+      claim: ExecutorForeignPointReadClaimRef;
+      address: { id: EntityId; scope?: CellScope; path?: readonly string[] };
+    },
+  ): Promise<ExecutorForeignPointReadOutcome> {
+    const { readSpace, claim, address } = request;
+    if (
+      typeof readSpace !== "string" || readSpace.length === 0 ||
+      readSpace === lease.space
+    ) {
+      return { status: "failed", code: FOREIGN_POINT_READ_MALFORMED };
+    }
+    if (address.scope !== undefined && address.scope !== "space") {
+      return { status: "failed", code: FOREIGN_POINT_READ_SCOPED_ADDRESS };
+    }
+    // First liveness fence BEFORE any async work: a dead authority must
+    // reject without so much as a hosting probe.
+    this.#resolveForeignReadActingAuthority(lease, claim);
+    this.registerCrossSpaceHostedSpace(lease.space);
+    if (!(await this.ensureCrossSpaceHosting(readSpace))) {
+      return { status: "failed", code: FOREIGN_POINT_READ_UNHOSTED };
+    }
+    // The hosting resolution awaited: authority may have died meanwhile.
+    // Re-resolve (and use the RE-resolved principal) so a rotation that
+    // landed inside the await rejects instead of reading as the old
+    // sponsor.
+    const liveActing = this.#resolveForeignReadActingAuthority(lease, claim);
+    const requestId = `xsp-point-read:${crypto.randomUUID()}`;
+    const timeoutMs =
+      this.options.executionControl?.foreignPointReadTimeoutMs ?? 10_000;
+    const pending = Promise.withResolvers<ExecutorForeignPointReadOutcome>();
+    const timer = setTimeout(() => {
+      if (this.#pendingForeignPointReads.delete(requestId)) {
+        pending.resolve({
+          status: "failed",
+          code: FOREIGN_POINT_READ_TIMEOUT,
+        });
+      }
+    }, timeoutMs);
+    this.#pendingForeignPointReads.set(requestId, {
+      readSpace,
+      resolve: pending.resolve,
+      timer,
+    });
+    try {
+      this.#crossSpaceRouter.link(lease.space, readSpace).send({
+        type: "foreign-point-read",
+        requestId,
+        address: {
+          id: address.id,
+          scope: "space",
+          path: [...(address.path ?? [])],
+        },
+        actingPrincipal: {
+          principal: liveActing.principal,
+          contextKey: liveActing.contextKey,
+          claim: {
+            pieceId: claim.pieceId,
+            actionId: claim.actionId,
+            leaseGeneration: claim.leaseGeneration,
+            claimGeneration: claim.claimGeneration,
+          },
+        },
+      });
+    } catch (error) {
+      clearTimeout(timer);
+      this.#pendingForeignPointReads.delete(requestId);
+      console.warn("foreign point read send failed:", error);
+      return { status: "failed", code: FOREIGN_POINT_READ_UNAVAILABLE };
+    }
+    return await pending.promise;
+  }
+
+  /**
+   * C3.4 serve arm (read host): answer one authenticated foreign point
+   * read. Queued on the per-space inbound apply chain (like the epoch
+   * query): the engine read must order behind in-flight inbound applies
+   * for this space.
+   *
+   * The ACL check IS `#authorizeMessageWithEngine` — the same resolution
+   * the session read path and C3.3b's mirror gate use, for the ACTING
+   * principal the home host resolved from live authority; never a second
+   * capability definition. Dial semantics ride along unchanged: acl
+   * "off" admits, "observe" warns-and-admits shortfalls (invalid ACL
+   * still fails closed), "enforce" denies.
+   *
+   * v1 scope-resolution rule (decision #3, recorded 2026-07-18): a
+   * foreign point read resolves ONLY the space-scoped instance —
+   * `readState` under scope "space", scopeKey "space". The acting
+   * context arrives in the message, but it does NOT select a lane
+   * instance here: the read host holds no lane grant for a foreign lane
+   * (grants live in the HOME host's registries), so a scoped resolution
+   * would have to trust a wire-asserted lane — exactly what the C2.4
+   * grant-session discipline forbids. Scoped addresses therefore reject
+   * with `foreign-read-scoped-address` at the send side AND here;
+   * lifting the restriction requires a protocol extension that carries
+   * verifiable lane-resolution authority, not a serve-side relax.
+   *
+   * THE STAMP TRANSACTION (decision recorded 2026-07-18): the ACL
+   * check, the document read, the covering seq, and the epoch stamp are
+   * read in ONE synchronous section after the engine open — no await
+   * between them. The engine applies commits synchronously inside
+   * transact turns on this same event loop, and the ACL apply bumps the
+   * epoch table in the SAME engine transaction as the ACL commit
+   * (C3.2), so nothing can interleave: decision, document, seq, and
+   * epoch are mutually consistent — one engine transaction in effect
+   * without opening one. This holds identically on a co-hosted read
+   * host (same code, its own event loop). What it does NOT provide is
+   * cross-host freshness at APPLY time — that is C3.8's fence
+   * (re-validate stamped epochs by equality), dated 2026-07-18.
+   *
+   * Branch: v1 reads resolve at the read space's DEFAULT branch
+   * (decision #4) — the wire address carries no branch field at all.
+   * `seq` stamps the read space's covering serverSeq at the read (what
+   * C3.5's vector component consumes; also the C3A9 stamp the mirrored-
+   * observation upsert compares). A genesis-empty read space (serverSeq
+   * 0) has no seq domain to stamp — it answers
+   * `foreign-read-unavailable` rather than minting an unencodable
+   * zero-seq stamp (the wire pins served seqs positive).
+   */
+  private async answerForeignPointRead(
+    message: ForeignPointRead,
+    context: CrossSpaceDeliveryContext,
+  ): Promise<void> {
+    const answer = (result: ForeignPointReadResult["result"]): void => {
+      try {
+        this.#crossSpaceRouter.link(context.space, context.fromSpace).send({
+          type: "foreign-point-read.result",
+          requestId: message.requestId,
+          result,
+        });
+      } catch (error) {
+        // The C3.1b no-ack discipline: a failed answer send warns; the
+        // home side's timeout is the fail-closed backstop.
+        console.warn("foreign point read answer send failed:", error);
+      }
+    };
+    const address: CrossSpacePointReadAddress = message.address;
+    if (address.scope !== undefined && address.scope !== "space") {
+      answer({
+        status: "failed",
+        code: FOREIGN_POINT_READ_SCOPED_ADDRESS,
+      });
+      return;
+    }
+    let engine: Engine.Engine;
+    try {
+      engine = await this.openHostedEngine(context.space);
+    } catch {
+      answer({ status: "failed", code: FOREIGN_POINT_READ_UNHOSTED });
+      return;
+    }
+    // --- the synchronous stamp-transaction section (no awaits below) ---
+    const principal = message.actingPrincipal.principal;
+    const deny = this.#authorizeMessageWithEngine(
+      engine,
+      context.space,
+      principal,
+      "READ",
+    );
+    if (deny !== null) {
+      answer({ status: "denied", code: FOREIGN_POINT_READ_DENIED_ACCESS });
+      return;
+    }
+    const seq = Engine.serverSeq(engine);
+    if (seq === 0) {
+      answer({ status: "failed", code: FOREIGN_POINT_READ_UNAVAILABLE });
+      return;
+    }
+    let state: Engine.EntityState | null;
+    try {
+      state = Engine.readState(engine, { id: address.id, scope: "space" });
+    } catch {
+      answer({ status: "failed", code: FOREIGN_POINT_READ_MALFORMED });
+      return;
+    }
+    answer({
+      status: "served",
+      seq,
+      branch: state?.branch ?? DEFAULT_BRANCH,
+      document: state?.document ?? null,
+      authorizationEpoch: {
+        space: context.space,
+        principal,
+        epoch: Engine.effectiveAuthorizationEpoch(engine, principal),
+      },
+    });
+  }
+
+  /**
+   * C3.4 result arm (home host): resolve the pending request the
+   * `requestId` correlates. Synchronous, like the epoch bump — no engine
+   * is involved, correlation is by unique id, and a late/duplicate/
+   * unknown result drops with a warning (its pending entry already
+   * resolved by answer, timeout, or close — all fail-closed). The
+   * answering-space check (`fromSpace` vs the space the request was
+   * addressed to) is the pending-map half of C3A13; the codec's
+   * stamp.space === fromSpace rule already bound the stamp to the
+   * envelope, so together a result can only satisfy a read it actually
+   * answers.
+   */
+  private applyForeignPointReadResult(
+    message: ForeignPointReadResult,
+    context: CrossSpaceDeliveryContext,
+  ): void {
+    const pending = this.#pendingForeignPointReads.get(message.requestId);
+    if (pending === undefined) {
+      console.warn(
+        `foreign point read result ${message.requestId} has no pending ` +
+          "request (late, duplicate, or unknown — dropped)",
+      );
+      return;
+    }
+    if (pending.readSpace !== context.fromSpace) {
+      console.warn(
+        `foreign point read result ${message.requestId} answered by ` +
+          `${context.fromSpace}, expected ${pending.readSpace} (dropped)`,
+      );
+      return;
+    }
+    this.#pendingForeignPointReads.delete(message.requestId);
+    clearTimeout(pending.timer);
+    const result = message.result;
+    pending.resolve(
+      result.status === "served"
+        ? {
+          status: "served",
+          space: context.fromSpace,
+          seq: result.seq,
+          branch: result.branch,
+          document: result.document,
+          authorizationEpoch: result.authorizationEpoch,
+        }
+        : result,
+    );
+  }
 }
 
 const isSchedulerExecutionContextKey = (
@@ -10743,6 +11255,47 @@ const parsedActingContext = (
     ? { actingContext: parsed.actingContext as SchedulerExecutionContextKey }
     : {};
 
+/**
+ * C3.4: additive claim reference on `docs.read` — the executor foreign
+ * point read's acting-attempt identity. Shape-checked strictly: a
+ * malformed record is DROPPED (the field simply does not parse), and the
+ * consuming paths then fail closed — the provider's foreign arm requires
+ * a parsed claim, and the direct serve path rejects any parsed one.
+ */
+const parsedDocsReadExecutionClaim = (
+  parsed: Record<string, unknown>,
+): { executionClaim?: DocsReadExecutionClaimRef } => {
+  const raw = parsed.executionClaim;
+  if (
+    isRecord(raw) &&
+    isSchedulerExecutionContextKey(raw.contextKey) &&
+    typeof raw.pieceId === "string" && raw.pieceId.length > 0 &&
+    typeof raw.actionId === "string" && raw.actionId.length > 0 &&
+    (raw.actionKind === "computation" || raw.actionKind === "effect" ||
+      raw.actionKind === "event-handler") &&
+    typeof raw.implementationFingerprint === "string" &&
+    typeof raw.runtimeFingerprint === "string" &&
+    typeof raw.leaseGeneration === "number" &&
+    isPositiveSafeInteger(raw.leaseGeneration) &&
+    typeof raw.claimGeneration === "number" &&
+    isPositiveSafeInteger(raw.claimGeneration)
+  ) {
+    return {
+      executionClaim: {
+        contextKey: raw.contextKey,
+        pieceId: raw.pieceId,
+        actionId: raw.actionId,
+        actionKind: raw.actionKind,
+        implementationFingerprint: raw.implementationFingerprint,
+        runtimeFingerprint: raw.runtimeFingerprint,
+        leaseGeneration: raw.leaseGeneration,
+        claimGeneration: raw.claimGeneration,
+      },
+    };
+  }
+  return {};
+};
+
 /** FA5/FB12: the optional graph.query trigger attribution. Closed enum —
  * anything else is dropped (untriggered), so a caller can never mint
  * arbitrary traversal-bucket keys over the wire. */
@@ -10860,6 +11413,7 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       ...parsedActingContext(parsed),
+      ...parsedDocsReadExecutionClaim(parsed),
       query: parsed.query as unknown as DocsReadRequest["query"],
     };
   }
