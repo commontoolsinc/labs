@@ -98,6 +98,20 @@ export function routeClientActionTransaction(
     : claim.contextKey.startsWith("session:")
     ? "session"
     : "user";
+  // C3.9: the cross-space-claims-v1 suppression. A host-issued claim whose
+  // `crossSpaceReadSpaces` is present and non-empty certifies that the host
+  // bound the acting principal's READ on those foreign spaces at issuance —
+  // the negotiating client TRUSTS that claim and admits the foreign read at
+  // both firewalls (the C3.6 stage flag, gated on the claim rather than a
+  // build dial), routing the whole action to a claimed overlay so it DEFERS
+  // to the host's claimed commit instead of running the foreign-read
+  // derivation client-primary fail-open (the C3.6 CA4 posture). Absent or
+  // empty keeps every foreign read unservable and byte-identical to pre-C3.9:
+  // a mixed-fleet client without the claim still computes it locally. This is
+  // orthogonal to lane rank — a claim of any context rank may name foreign
+  // reads (servability.ts `crossSpaceRead` is a stage, never a fifth lane).
+  const claimCoversCrossSpaceRead = claim.crossSpaceReadSpaces !== undefined &&
+    claim.crossSpaceReadSpaces.length > 0;
   const staticDecision = classifyStaticActionServability(
     observation,
     input.space,
@@ -106,6 +120,7 @@ export function routeClientActionTransaction(
       : claimRank === "user"
       ? { userContext: true }
       : undefined,
+    claimCoversCrossSpaceRead,
   );
   const expectedStaticStatus = claim.actionKind === "effect"
     ? "broker-required"
@@ -123,7 +138,12 @@ export function routeClientActionTransaction(
   const diagnosticCode = dynamicActionTransactionUnservableReason(
     input,
     observation,
-    { servedSpace: input.space, branch: claim.branch, contextRank: claimRank },
+    {
+      servedSpace: input.space,
+      branch: claim.branch,
+      contextRank: claimRank,
+      crossSpaceRead: claimCoversCrossSpaceRead,
+    },
   );
   if (diagnosticCode !== undefined) {
     options.onDiagnostic?.({ diagnosticCode, claim });

@@ -551,3 +551,104 @@ Deno.test("another session's claim upstreams even for session-scoped surfaces", 
     );
   }
 });
+
+// --- C3.9: the cooperative client SUPPRESSES its own run of a claimed
+// cross-space-read action (the cross-space-claims-v1 payoff). A foreign
+// read that stays unservable client-side today runs CLIENT-PRIMARY fail-open
+// (the C3.6 CA4 posture); once the host issues a claim naming that foreign
+// read (`crossSpaceReadSpaces`), the negotiating client defers to the host's
+// claimed commit instead of running the derivation itself.
+
+const FOREIGN_INPUT = "of:client-action-router-foreign-input";
+
+/** An action whose read surface includes ONE space-scoped foreign read
+ * (OTHER_SPACE). Off the cross-space-read stage every consumer classifies
+ * this `foreign-read-space` (static) and fails open. */
+const crossSpaceObservation = () => {
+  const base = observation();
+  const foreignRead = {
+    space: OTHER_SPACE,
+    scope: "space" as const,
+    id: FOREIGN_INPUT,
+    path: ["value"],
+  };
+  return {
+    ...base,
+    reads: [...base.reads, foreignRead],
+    completeActionScopeSummary: {
+      ...base.completeActionScopeSummary,
+      reads: [...base.completeActionScopeSummary.reads, foreignRead],
+    },
+  };
+};
+
+const crossSpaceCommit = (): ClientCommit => ({
+  ...commit(),
+  schedulerObservation: crossSpaceObservation(),
+});
+
+Deno.test("C3.9: a cross-space-read claim suppresses the client's own foreign-read run", () => {
+  // The subcapability payoff: a claim naming the foreign read space defers the
+  // whole action to the host's claimed commit — the foreign-read address that
+  // WAS unservable client-side now suppresses because the claim covers it.
+  const live = claim({ crossSpaceReadSpaces: [OTHER_SPACE] });
+  assertEquals(
+    routeClientActionTransaction(
+      { space: SPACE, commit: crossSpaceCommit(), sourceAction },
+      { claims: [live], ownContextKeys: ownChain, builtinPassivity: false },
+    ),
+    { disposition: "local", kind: "claimed-overlay", claim: live },
+  );
+});
+
+Deno.test("C3.9: a foreign-read action WITHOUT a cross-space-read claim still fails open (mixed fleet)", () => {
+  // The C3.6 mixed-fleet posture: a claim that does NOT name the foreign read
+  // (no `crossSpaceReadSpaces`) leaves the foreign read unservable client-side,
+  // so the client computes it CLIENT-PRIMARY and commits upstream fail-open,
+  // under the static `foreign-read-space` diagnostic.
+  const diagnostics: ClientActionRouteDiagnostic[] = [];
+  assertEquals(
+    routeClientActionTransaction(
+      { space: SPACE, commit: crossSpaceCommit(), sourceAction },
+      {
+        claims: [claim()],
+        ownContextKeys: ownChain,
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      },
+    ),
+    { disposition: "upstream" },
+  );
+  assertEquals(diagnostics.at(-1)?.diagnosticCode, "foreign-read-space");
+});
+
+Deno.test("C3.9: an empty crossSpaceReadSpaces does NOT suppress (byte-identical to no claim)", () => {
+  // Presence is the signal; an empty set is treated as no cross-space claim,
+  // so a foreign read still fails open. Guards against `[] === truthy` bugs.
+  const diagnostics: ClientActionRouteDiagnostic[] = [];
+  assertEquals(
+    routeClientActionTransaction(
+      { space: SPACE, commit: crossSpaceCommit(), sourceAction },
+      {
+        claims: [claim({ crossSpaceReadSpaces: [] })],
+        ownContextKeys: ownChain,
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      },
+    ),
+    { disposition: "upstream" },
+  );
+  assertEquals(diagnostics.at(-1)?.diagnosticCode, "foreign-read-space");
+});
+
+Deno.test("C3.9: a same-space claim carrying crossSpaceReadSpaces still routes a same-space action locally", () => {
+  // The cross-space signal must not perturb the ordinary same-space overlay
+  // path: an action with no foreign read routes claimed-overlay exactly as
+  // today even when the (unrelated) claim names foreign spaces.
+  const live = claim({ crossSpaceReadSpaces: [OTHER_SPACE] });
+  assertEquals(
+    routeClientActionTransaction(
+      { space: SPACE, commit: commit(), sourceAction },
+      { claims: [live], ownContextKeys: ownChain, builtinPassivity: false },
+    ),
+    { disposition: "local", kind: "claimed-overlay", claim: live },
+  );
+});

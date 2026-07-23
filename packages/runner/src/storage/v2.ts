@@ -1086,6 +1086,63 @@ export class StorageManager implements IStorageManager {
     this.#providers.get(space)?.replica.pruneExecutionLane(lane);
   }
 
+  /**
+   * C3.9: the cross-replica read the vector overlay basis needs — the confirmed
+   * input revision (and any pending-source translation) each foreign read space
+   * contributes, read from that space's OWN replica. `homeSpace` reads are
+   * dropped (the home component is the scalar basis); a foreign space the
+   * client never opened contributes no component (the overlay simply tracks no
+   * basis for it — vacuously covered at the drop rule). This is the
+   * StorageManager as the only holder of multiple SpaceReplicas (§5): the
+   * per-space vector correlation lives here.
+   */
+  private captureForeignExecutionBasis(
+    homeSpace: MemorySpace,
+    reads: readonly ForeignReadRef[],
+  ): ForeignExecutionBasisCapture {
+    const bySpace = new Map<string, ForeignReadRef[]>();
+    for (const read of reads) {
+      if (read.space === homeSpace) continue;
+      let list = bySpace.get(read.space);
+      if (list === undefined) {
+        list = [];
+        bySpace.set(read.space, list);
+      }
+      list.push(read);
+    }
+    const resolved = new Map<string, number>();
+    const unresolved = new Map<string, Set<number>>();
+    for (const [space, spaceReads] of bySpace) {
+      const provider = this.#providers.get(space as MemorySpace);
+      if (provider === undefined) continue;
+      const contribution = provider.replica.confirmedExecutionBasisForReads(
+        spaceReads,
+      );
+      resolved.set(space, contribution.seq);
+      if (contribution.unresolved.size > 0) {
+        unresolved.set(space, contribution.unresolved);
+      }
+    }
+    return { resolved, unresolved };
+  }
+
+  /**
+   * C3.9: broadcast a confirmed source commit to sibling replicas so a foreign
+   * (space-B) confirmation resolves the unresolved B component of a cross-space
+   * overlay held in another (space-A) replica. Bounded by the open-space count;
+   * a replica holding no overlay tracking that space's pending source no-ops.
+   */
+  private propagateForeignSourceConfirmation(
+    space: MemorySpace,
+    localSeq: number,
+    seq: number,
+  ): void {
+    for (const [otherSpace, provider] of this.#providers) {
+      if (otherSpace === space) continue;
+      provider.replica.noteForeignSourceConfirmed(space, localSeq, seq);
+    }
+  }
+
   static open(options: Options) {
     const dynamicHosts = new Map<string, string>();
     const manager = new this(
@@ -1298,6 +1355,10 @@ export class StorageManager implements IStorageManager {
           this.clientExecutionEffectInFlight(action),
         executionActionsForClaimKey: (key) =>
           this.executionActionsForClaimKey(key),
+        captureForeignExecutionBasis: (reads) =>
+          this.captureForeignExecutionBasis(space, reads),
+        onSourceCommitConfirmed: (localSeq, seq) =>
+          this.propagateForeignSourceConfirmation(space, localSeq, seq),
         supportsExecutionDemand:
           this.#sessionFactory.supportsExecutionDemand === true,
         createSession: this.#sessionFactory.supportsAclBootstrap === true
@@ -1959,6 +2020,23 @@ type ProviderOptions = {
   ) => SchedulerExecutionContextKey | undefined;
   supportsExecutionDemand: boolean;
   createSession: () => Promise<ReplicaSessionHandle>;
+  /**
+   * C3.9 cross-space overlay basis (StorageManager-mediated): capture each
+   * foreign read space's confirmed input revision from that space's OWN replica
+   * at overlay creation. Absent everywhere the space lane is the only cross-
+   * replica context (single-space managers, executor storage); a same-space
+   * overlay never calls it, so the vector path stays inert and byte-identical.
+   */
+  captureForeignExecutionBasis?: (
+    reads: readonly ForeignReadRef[],
+  ) => ForeignExecutionBasisCapture;
+  /**
+   * C3.9: announce a confirmed home-space source commit so the manager can
+   * correlate it into foreign-read overlays held in SIBLING replicas (a
+   * space-B confirmation resolving an unresolved B component of an overlay held
+   * in space A's replica). Absent leaves the confirmation local-only.
+   */
+  onSourceCommitConfirmed?: (localSeq: number, seq: number) => void;
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
   getTelemetry?: () => TelemetrySink | undefined;
   /** FA4/FB7: same-step latch release on membership retraction — the manager
@@ -2159,9 +2237,65 @@ type ClaimedOverlayGeneration = {
    * partitions HOST authority, not this client-local replica. */
   readonly lane: SchedulerExecutionContextKey;
   readonly createdAt: number;
+  /** Home-space component of the input basis (the scalar basis, as pre-C3.9). */
   basisSeq: number;
   readonly unresolvedBasisLocalSeqs: Set<number>;
+  /**
+   * C3.9 vector basis: the FOREIGN components of the overlay's per-space input
+   * basis (space DID → confirmed input revision), captured at overlay creation
+   * from each foreign read space's OWN replica (StorageManager-mediated). Empty
+   * for a same-space overlay — the vector path is then inert and every drop
+   * decision is byte-identical to the pre-C3.9 scalar rule.
+   */
+  readonly foreignBasis: Map<string, number>;
+  /**
+   * C3.9: foreign components still awaiting a pending-source translation
+   * (space DID → the foreign replica's unconfirmed source localSeqs). The
+   * cross-replica analog of {@link unresolvedBasisLocalSeqs}: the foreign
+   * read consumed a client-local pending write in that space, so the true
+   * basis is that write's eventual confirmed seq. StorageManager correlates
+   * the foreign replica's confirmation stream in and resolves it. An overlay
+   * with any non-empty set is not yet coverable (its foreign basis can still
+   * rise above a settlement's component).
+   */
+  readonly unresolvedForeignBasis: Map<string, Set<number>>;
   readonly touched: readonly { id: URI; scope?: CellScope }[];
+};
+
+/**
+ * C3.9 (C3A19): the computable divergence comparand, surfaced as a
+ * routeDiagnostics code. Incremented at an authoritative overlay drop for each
+ * tracked foreign space whose settlement component STRICTLY exceeds the
+ * overlay's captured foreign basis — the revealed home value reflects foreign
+ * state newer than what the client's own foreign replica had confirmed when the
+ * overlay was created. The §5 vector divergence window (the analog of §B.4's
+ * scalar window) is ACCEPTED, brief, self-healing, and COUNTED — never blocked.
+ *
+ * Owner ruling (C3A19, recorded not resolved): the settlement-metadata channel
+ * is DECLARED and counted — a settlement's foreign {space, seq} components reach
+ * every session the home delivery predicate matches, so this counter measures a
+ * real (accepted) exposure window. The alternative — STRIPPING foreign
+ * components from settlements delivered to sessions whose principal lacks READ
+ * on that space (a delivery-time filter in the session-registry's
+ * `#sessionAcceptsClaim` settlement arm, accepting scalar-only reconciliation
+ * for those sessions) — is intentionally NOT taken here; that filter lives in
+ * the host session registry (out of the runner's scope) and would be the
+ * owner's to flip.
+ */
+const CROSS_SPACE_BASIS_DIVERGENCE_DIAGNOSTIC = "cross-space-basis-divergence";
+
+/** C3.9: one foreign read address to capture an input-basis component for. */
+type ForeignReadRef = { space: string; id: URI; scope?: CellScope };
+
+/**
+ * C3.9: the foreign input-basis components captured for one overlay at
+ * creation. `resolved` is the max confirmed input revision per foreign space;
+ * `unresolved` is the pending-source localSeqs whose confirmed seq is the true
+ * basis (see {@link ClaimedOverlayGeneration.unresolvedForeignBasis}).
+ */
+type ForeignExecutionBasisCapture = {
+  resolved: Map<string, number>;
+  unresolved: Map<string, Set<number>>;
 };
 
 type ExecutionRoutingDiagnosticRecord = {
@@ -2294,6 +2428,13 @@ class SpaceReplica implements ISpaceReplica {
   readonly #executionActionsForClaimKey: (
     key: ActionClaimKey,
   ) => readonly object[];
+  /** C3.9: capture foreign read spaces' confirmed input revisions at overlay
+   * creation (StorageManager-mediated cross-replica read). */
+  readonly #captureForeignExecutionBasis?: (
+    reads: readonly ForeignReadRef[],
+  ) => ForeignExecutionBasisCapture;
+  /** C3.9: announce a confirmed source commit for cross-replica correlation. */
+  readonly #onSourceCommitConfirmed?: (localSeq: number, seq: number) => void;
   /** Owning lane of a source action's transactions (C1.5b): the executor
    * Worker resolves a claimed action to its claim's contextKey so commits
    * assert exactly one lane (A6) and key their documents by it. */
@@ -2452,6 +2593,8 @@ class SpaceReplica implements ISpaceReplica {
     this.#actionTransactionRouter = options.actionTransactionRouter;
     this.#clientExecutionEffectInFlight = options.clientExecutionEffectInFlight;
     this.#executionActionsForClaimKey = options.executionActionsForClaimKey;
+    this.#captureForeignExecutionBasis = options.captureForeignExecutionBasis;
+    this.#onSourceCommitConfirmed = options.onSourceCommitConfirmed;
     this.#executionLaneForAction = options.executionLaneForAction;
   }
 
@@ -5656,6 +5799,8 @@ class SpaceReplica implements ISpaceReplica {
         basisSeq = Math.max(basisSeq, confirmed);
       }
     }
+    const { foreignBasis, unresolvedForeignBasis } = this
+      .captureOverlayForeignBasis(commit);
     const overlay: ClaimedOverlayGeneration = {
       localSeq,
       claim,
@@ -5664,6 +5809,8 @@ class SpaceReplica implements ISpaceReplica {
       createdAt: performance.now(),
       basisSeq,
       unresolvedBasisLocalSeqs,
+      foreignBasis,
+      unresolvedForeignBasis,
       touched: [...new Map(touched.map((entry) => [
         docKey(entry.id, entry.scope, lane),
         entry,
@@ -5679,6 +5826,109 @@ class SpaceReplica implements ISpaceReplica {
       { actionId: claim.actionId, localSeq, basisSeq },
     ]);
     return overlay;
+  }
+
+  /**
+   * C3.9: capture the FOREIGN components of a cross-space-read overlay's input
+   * basis from each foreign read space's OWN replica at overlay creation
+   * (StorageManager-mediated). A same-space overlay reads no foreign space, so
+   * this returns empty maps and the overlay stays scalar-only — the drop rule
+   * is then byte-identical to pre-C3.9. Foreign reads are space-scoped only (v1
+   * decision #3), so every captured component keys the space lane / space scope.
+   */
+  private captureOverlayForeignBasis(
+    commit: ClientCommit,
+  ): {
+    foreignBasis: Map<string, number>;
+    unresolvedForeignBasis: Map<string, Set<number>>;
+  } {
+    const foreignBasis = new Map<string, number>();
+    const unresolvedForeignBasis = new Map<string, Set<number>>();
+    const capture = this.#captureForeignExecutionBasis;
+    if (capture === undefined) return { foreignBasis, unresolvedForeignBasis };
+    const observation = commit.schedulerObservation;
+    if (!isSchedulerActionObservation(observation)) {
+      return { foreignBasis, unresolvedForeignBasis };
+    }
+    const foreignReads: ForeignReadRef[] = [];
+    for (const read of observation.reads) {
+      const space = read.space;
+      if (space === undefined || space === this.#space) continue;
+      foreignReads.push({ space, id: read.id as URI, scope: "space" });
+    }
+    if (foreignReads.length === 0) {
+      return { foreignBasis, unresolvedForeignBasis };
+    }
+    const captured = capture(foreignReads);
+    for (const [space, seq] of captured.resolved) foreignBasis.set(space, seq);
+    for (const [space, localSeqs] of captured.unresolved) {
+      if (localSeqs.size > 0) {
+        unresolvedForeignBasis.set(space, new Set(localSeqs));
+      }
+    }
+    return { foreignBasis, unresolvedForeignBasis };
+  }
+
+  /**
+   * C3.9: the confirmed input-basis contribution of `reads` in THIS replica's
+   * space — the max confirmed input revision plus any newest pending SOURCE
+   * localSeqs (unresolved until the host confirms them; the cross-replica
+   * analog of the home pending-source translation). Called by the
+   * StorageManager on a FOREIGN replica while a sibling captures a cross-space
+   * overlay's vector basis. Shadow and claimed-overlay pending versions never
+   * receive a confirmation-assigned seq, so they are excluded — importing them
+   * would strand the overlay's foreign component forever.
+   */
+  confirmedExecutionBasisForReads(
+    reads: readonly ForeignReadRef[],
+  ): { seq: number; unresolved: Set<number> } {
+    let seq = 0;
+    const unresolved = new Set<number>();
+    for (const read of reads) {
+      const record = this.#docs.get(docKey(read.id, read.scope, "space"));
+      if (record === undefined) continue;
+      seq = Math.max(seq, record.confirmed.seq);
+      for (let index = record.pending.length - 1; index >= 0; index--) {
+        const localSeq = record.pending[index]!.localSeq;
+        if (
+          this.#shadowLocalSeqs.has(localSeq) ||
+          this.#claimedOverlays.has(localSeq)
+        ) {
+          continue;
+        }
+        // The newest genuine pending source on this address gates the basis.
+        unresolved.add(localSeq);
+        break;
+      }
+    }
+    return { seq, unresolved };
+  }
+
+  /**
+   * C3.9: a FOREIGN replica confirmed one of its source commits. Resolve any
+   * overlay foreign component that was waiting on it (the cross-replica analog
+   * of {@link noteSourceCommitConfirmed}) and re-drive settlement
+   * reconciliation, so a settlement that was awaiting the foreign translation
+   * can now cover and drop. No-op for a replica holding no overlay tracking
+   * that space's pending source — the common case for the broadcast.
+   */
+  noteForeignSourceConfirmed(
+    space: string,
+    localSeq: number,
+    seq: number,
+  ): void {
+    let changed = false;
+    for (const overlay of this.#claimedOverlays.values()) {
+      const pending = overlay.unresolvedForeignBasis.get(space);
+      if (pending === undefined || !pending.delete(localSeq)) continue;
+      overlay.foreignBasis.set(
+        space,
+        Math.max(overlay.foreignBasis.get(space) ?? 0, seq),
+      );
+      if (pending.size === 0) overlay.unresolvedForeignBasis.delete(space);
+      changed = true;
+    }
+    if (changed) this.reconcilePendingExecutionSettlements();
   }
 
   /**
@@ -5743,6 +5993,10 @@ class SpaceReplica implements ISpaceReplica {
       changed = true;
     }
     if (changed) this.reconcilePendingExecutionSettlements();
+    // C3.9: announce every confirmed source commit for cross-replica
+    // correlation — a space-B confirmation resolves the unresolved B component
+    // of a cross-space-read overlay held in a sibling (home-space) replica.
+    this.#onSourceCommitConfirmed?.(localSeq, seq);
   }
 
   private noteSourceCommitRejected(localSeq: number): void {
@@ -5939,17 +6193,19 @@ class SpaceReplica implements ISpaceReplica {
     }
 
     const unresolved = matching.some((overlay) =>
-      overlay.unresolvedBasisLocalSeqs.size > 0
+      this.overlayHasUnresolvedBasis(overlay)
     );
-    // C3.9 pointer (dated 2026-07-18): this drop compare is deliberately
-    // SCALAR-ONLY — a C3.5 vector settlement behaves byte-identically to
-    // its scalar here until C3.9 generalizes the overlay basis per
-    // component under the C3A15 coverage relation (absent settlement
-    // component vacuously covers; present-but-older never). Nothing in
-    // this path may read `settlement.inputBasis` as zero-or-satisfied.
+    // C3.9 (C3A15): the drop compare generalizes per component. An overlay is
+    // covered only when EVERY component of the settlement's vector covers the
+    // overlay's basis for that space — the HOME component (the scalar
+    // inputBasisSeq, always present) AND every PRESENT foreign component. An
+    // absent settlement component vacuously covers (it names no requirement, so
+    // a rerun that dropped a foreign read still drops on home coverage); a
+    // present-but-older foreign component never covers (it blocks). Scalar-only
+    // settlements carry no `inputBasis`, so the vector loop is empty and the
+    // decision is byte-identical to the pre-C3.9 rule.
     const covered = matching.filter((overlay) =>
-      overlay.unresolvedBasisLocalSeqs.size === 0 &&
-      overlay.basisSeq <= settlement.inputBasisSeq
+      this.settlementCoversOverlay(settlement, overlay)
     );
     if (covered.length === 0) {
       logger.debug("execution-overlay-retained", () => [
@@ -5977,12 +6233,89 @@ class SpaceReplica implements ISpaceReplica {
       ]);
       return true;
     }
+    // C3A19: count the accepted vector divergence window at the authoritative
+    // drop, before the overlay is gone (the comparand needs the overlay's
+    // captured foreign basis).
+    for (const overlay of covered) {
+      this.noteExecutionVectorDivergence(settlement, overlay);
+    }
     const coveredSeqs = new Set(covered.map((overlay) => overlay.localSeq));
     this.dropClaimedOverlays(
       (overlay) => coveredSeqs.has(overlay.localSeq),
       { dirtyProducer: false, diagnosticCode: `claim-${settlement.outcome}` },
     );
     return unresolved;
+  }
+
+  /** C3.9: true while any component of the overlay's vector basis — the home
+   * pending sources OR any foreign pending-source translation — is still
+   * unresolved. Such an overlay is not yet coverable: its basis can still rise
+   * above a settlement component once the pending source confirms. */
+  private overlayHasUnresolvedBasis(
+    overlay: ClaimedOverlayGeneration,
+  ): boolean {
+    if (overlay.unresolvedBasisLocalSeqs.size > 0) return true;
+    for (const pending of overlay.unresolvedForeignBasis.values()) {
+      if (pending.size > 0) return true;
+    }
+    return false;
+  }
+
+  /**
+   * C3.9 (C3A15) drop coverage: does this settlement's vector cover the
+   * overlay's basis on EVERY component? The home component is the unchanged
+   * scalar compare. For the vector, iterate the SETTLEMENT'S components (§5:
+   * "every component of the settlement's vector covers the overlay's basis for
+   * that space") — a present foreign component must be >= the overlay's
+   * captured basis for that space (present-but-older blocks); a foreign space
+   * the overlay tracked but the settlement OMITS imposes no requirement (absent
+   * vacuously covers). A space the settlement names but the overlay never read
+   * is vacuously covered from the overlay side. Foreign seqs are per-space
+   * domains — never compared across spaces or against the home scalar.
+   */
+  private settlementCoversOverlay(
+    settlement: ActionSettlement,
+    overlay: ClaimedOverlayGeneration,
+  ): boolean {
+    if (this.overlayHasUnresolvedBasis(overlay)) return false;
+    if (overlay.basisSeq > settlement.inputBasisSeq) return false;
+    const homeSpace = settlement.claim.space;
+    for (const component of settlement.inputBasis ?? []) {
+      if (component.space === homeSpace) continue;
+      const overlayForeign = overlay.foreignBasis.get(component.space);
+      // Absent overlay component: the overlay never read this space (vacuous).
+      if (overlayForeign === undefined) continue;
+      // Present-but-older: the settlement read this space STALER than the
+      // overlay's speculative run — it cannot supersede the overlay yet.
+      if (overlayForeign > component.seq) return false;
+    }
+    return true;
+  }
+
+  /**
+   * C3.9 (C3A19): count the accepted vector divergence window at an
+   * authoritative drop — a settlement foreign component STRICTLY newer than the
+   * overlay's captured basis for that space means the revealed home value
+   * reflects foreign state the client's own foreign replica had not confirmed
+   * when the overlay was created (the §5 window, the analog of §B.4's scalar
+   * window). Surfaced as a routeDiagnostics code; accepted, brief,
+   * self-healing, and never a block on the drop.
+   */
+  private noteExecutionVectorDivergence(
+    settlement: ActionSettlement,
+    overlay: ClaimedOverlayGeneration,
+  ): void {
+    const homeSpace = settlement.claim.space;
+    for (const component of settlement.inputBasis ?? []) {
+      if (component.space === homeSpace) continue;
+      const overlayForeign = overlay.foreignBasis.get(component.space);
+      if (overlayForeign !== undefined && component.seq > overlayForeign) {
+        this.noteExecutionRouteDiagnostic(
+          settlement.branch,
+          CROSS_SPACE_BASIS_DIVERGENCE_DIAGNOSTIC,
+        );
+      }
+    }
   }
 
   private reconcilePendingExecutionSettlements(): void {
