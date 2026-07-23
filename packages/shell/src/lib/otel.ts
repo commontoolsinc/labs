@@ -9,7 +9,7 @@
 //
 // Only type-only imports appear at the top; they are erased at build time and
 // never pull the OTel packages into the default bundle.
-import type { RuntimeTelemetryMarkerResult } from "@commonfabric/runtime-client";
+import type { HostRuntimeTelemetryMarker } from "@commonfabric/runtime-client";
 
 // localStorage key that gates telemetry — the same flag the debugger controller
 // toggles (packages/shell/src/lib/debugger-controller.ts).
@@ -32,7 +32,7 @@ export interface InitBrowserOtelOptions {
  */
 export interface BrowserTelemetry {
   /** Feed one RuntimeTelemetry marker into the OTel bridge. */
-  handleMarker(marker: RuntimeTelemetryMarkerResult): void;
+  handleMarker(marker: HostRuntimeTelemetryMarker): void;
   /**
    * Update the space.did stamped on subsequent spans. The runtime (and this
    * sink) lives across space navigations, so the host must keep this current.
