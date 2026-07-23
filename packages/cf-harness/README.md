@@ -4,10 +4,17 @@
 built as a general Common Fabric agent runtime, with Loom as the first target
 use case.
 
-The package is intentionally early and experimental. It already has a real
-execution core, a bounded prompt/tool loop, persistence, resumability, a thin
-operator CLI, explicit Agent Skills preload, and the first pass of CFC-aware
+The package is experimental but already integrated into Loom and Pattern
+Factory. It has a real execution core, bounded batch and interactive prompt/tool
+loops, durable artifacts and resumability, an operator CLI, explicit Agent
+Skills support, constrained delegation profiles, and CFC-aware mediation and
 deny/recovery shaping.
+
+For a concise status and lifecycle-aware documentation map, start with
+[docs/README.md](docs/README.md) and
+[docs/CURRENT_STATE.md](docs/CURRENT_STATE.md). The package's draft conformance
+claim is in [docs/IMPLEMENTATION_PROFILE.md](docs/IMPLEMENTATION_PROFILE.md);
+remaining work is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Why This Exists
 
@@ -569,7 +576,11 @@ export CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR="$HOME/.local/share/runsc-cfc
 
 ## Related Docs
 
-- [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)
-- [LOOM_MIGRATION_NOTES.md](docs/LOOM_MIGRATION_NOTES.md)
+- [cf-harness documentation map](docs/README.md)
+- [current implementation state](docs/CURRENT_STATE.md)
+- [Agent Harness implementation profile](docs/IMPLEMENTATION_PROFILE.md)
+- [roadmap](docs/ROADMAP.md)
+- [skills support design and contract](docs/SKILLS_SUPPORT_SPEC.md)
 - [runner README](../runner/README.md)
+- `specs/agent-harness/` in the sibling `specs` repo
 - `specs/cfc/18-runtime-implementation-profiles.md` in the sibling `specs` repo

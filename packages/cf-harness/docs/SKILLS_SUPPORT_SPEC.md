@@ -1,19 +1,20 @@
-# cf-harness Skills Support Spec
+# cf-harness Skills Support Design and Contract
 
 Date: 2026-04-30
 
+Status: live implementation-specific contract; future sections are non-normative
+
 ## Purpose
 
-Add first-class Agent Skills support to `cf-harness` so Common Fabric product
+Define first-class Agent Skills support in `cf-harness` so Common Fabric product
 workflows can supply durable, task-specific operating knowledge without stuffing
 large documentation bundles into every prompt.
 
 The near-term motivating case is Pattern Factory. Its Claude and Codex paths
 depend heavily on repo-local skills such as `pattern-dev`, `pattern-implement`,
 `pattern-ui`, `pattern-test`, `pattern-critic`, `agent-browser`, and `cf`. The
-current `cf-harness` Pattern Factory build smoke does not have comparable skill
-support, so it lacks the implementation guidance that existing runtimes use to
-reach acceptable quality.
+`cf-harness` now supplies those skills to Pattern Factory through explicit,
+phase-owned preload and profile-scoped child policy.
 
 This spec defines a supported path for skill discovery, activation, provenance,
 and CFC-aware handling in `cf-harness`.
@@ -38,11 +39,10 @@ and `description`, then point to canonical repo docs. Examples:
   `docs/common/ai/pattern-testing-guide.md`.
 - `skills/cf/SKILL.md` provides current CLI command guidance.
 
-`cf-harness` now uses `skillsRoot?: string` in `src/config.ts` for explicit
-skill preload. The CLI, prompt loop, and artifact store persist the discovered
-registry and activation artifacts. The registry is also being extended to
-snapshot supporting resources that are actually present in the configured skill
-directories at run start.
+`cf-harness` uses `skillsRoot?: string` in `src/config.ts` for explicit skill
+preload. The CLI, prompt loop, and artifact store persist the discovered
+registry and activation artifacts. The registry snapshots supporting resources
+that are present in the configured skill directories at run start.
 
 ## External Models Reviewed
 
@@ -107,7 +107,7 @@ metadata and container path. See
 - Managing user-global skill directories outside an explicitly configured root.
 - Running skill scripts automatically or without an exact operator allowlist.
 - Treating `allowed-tools` as a permission grant.
-- Full Pattern Factory fulfillment in the same slice.
+- Defining Pattern Factory's general orchestration or fulfillment contract.
 - Implementing a broad filesystem discovery tool as a prerequisite.
 
 ## Skill Compatibility Contract
@@ -147,8 +147,8 @@ Validation should be lenient where that improves compatibility:
 
 ## Supporting Resource Index
 
-Supporting resources should be discovered automatically from the filesystem at
-runtime. Normal skills should not need a hand-authored resource manifest.
+Supporting resources are discovered automatically from the filesystem at
+runtime. Normal skills do not need a hand-authored resource manifest.
 
 At run start, `cf-harness` should snapshot every accepted skill directory and
 record a resource index inside `skill-registry.json`. This index is bounded by
@@ -175,7 +175,7 @@ Each resource record should include:
 - diagnostics
 - for `scripts/**`: executable bit, shebang when present, and inferred runtime
 
-Resource discovery must:
+Resource discovery:
 
 - skip the root `SKILL.md`
 - sort paths deterministically
@@ -316,13 +316,13 @@ before model exposure.
 
 ## CLI and Config Surface
 
-Use the existing config field:
+The current config field is:
 
 ```ts
 skillsRoot?: string;
 ```
 
-Add CLI flags:
+The current CLI flags are:
 
 ```text
 --skills-root <path>      Skill root containing <name>/SKILL.md
@@ -331,7 +331,7 @@ Add CLI flags:
 --no-skill-catalog        Disable automatic skill catalog disclosure
 ```
 
-Recommended v1 behavior:
+Current v1 behavior:
 
 - If `--skills-root` is absent, skills are disabled.
 - `--skills-root` must resolve within `--workspace` unless a future trusted
@@ -348,12 +348,9 @@ Recommended v1 behavior:
 Do not auto-discover user-global skill roots in the first slice. That keeps the
 trust boundary simple and avoids host-specific behavior in batch/product runs.
 
-## First Implementation Slice
+## Explicit Preload
 
-The first slice should implement explicit skill preloading, not fully dynamic
-model-driven activation.
-
-Status: implemented for package CLI runs. The harness now scans an explicitly
+Status: implemented. The harness scans an explicitly
 configured `--skills-root`, accepts repeatable `--skill` preload names, injects
 the selected `SKILL.md` files as configured context before the task prompt, and
 persists `skill-registry.json` and `skill-activations.json`.
@@ -605,24 +602,24 @@ receive additional raw context through the return channel.
 
 ## Pattern Factory Wiring
 
-Pattern Factory should not depend on model-driven skill selection in the first
-slice. Its launcher already knows the phase, so it can pass explicit skills.
+Pattern Factory does not depend on model-driven skill selection. Its launcher
+knows the phase and passes exact skills.
 
-Recommended initial mapping:
+The default mapping is:
 
-| Phase         | Explicit skills                                                                |
-| ------------- | ------------------------------------------------------------------------------ |
-| `spec`        | none initially, possibly future `pattern-dev` if specs need framework concepts |
-| `ux_design`   | none initially, or future design-specific skill if one is created              |
-| `ui_design`   | `pattern-ui`                                                                   |
-| `build`       | `pattern-dev`, `pattern-implement`, `cf`                                       |
-| `critic`      | `pattern-critic`                                                               |
-| `manual_test` | `pattern-test`, `agent-browser`, `cf`                                          |
+| Phase | Explicit skills |
+|---|---|
+| `spec` | none |
+| `ux_design` | none |
+| `ui_design` | `pattern-ui`, `lit-component` |
+| `build` | `pattern-dev`, `pattern-schema`, `pattern-implement`, `pattern-test`, `pattern-debug`, `pattern-ui`, `cf`, `pattern-deploy` |
+| `critic` | `pattern-critic`, `pattern-dev`, `pattern-test`, `pattern-debug`, `pattern-ui` |
+| `manual_test` | `agent-browser`, `cf`, `pattern-deploy`, `pattern-debug`, `pattern-test` |
+| `grade` | none |
+| `summarize` | none |
 
-The build phase is the immediate beneficiary. It should receive `pattern-dev`,
-`pattern-implement`, and likely `cf`, while still keeping parent tools narrow.
-The skill text can point the model to exact docs; the harness can provide
-`read_file` and `write_file` without granting broad `bash`.
+The launcher keeps phase tools separate from skill content. Loading a skill does
+not grant `bash`, file writes, browser access, or script execution.
 
 For Pattern Factory's symlinked layout, prefer passing the canonical labs root:
 
@@ -638,73 +635,36 @@ The harness should expose sandbox paths in injected text, for example:
 
 This avoids ambiguity between host paths and sandbox paths.
 
-## Implementation Plan
+## Delivery Status
 
-### Slice 1: Explicit Skill Preload
-
-- Add `src/skills/registry.ts` for scanning, frontmatter parsing, validation,
-  and digesting.
-- Add `src/contracts/skill.ts` for registry and activation artifacts.
-- Add CLI flags `--skills-root`, `--skill`, and `--no-skill-catalog`.
-- Thread `skillsRoot` and explicit skills through config and prompt loop setup.
-- Inject explicit skill context blocks before the task prompt.
-- Persist `skill-registry.json` and `skill-activations.json`.
-- Add unit tests for parsing, traversal, symlink containment, duplicates, and
-  CLI parsing.
-
-### Slice 2: Pattern Factory Build Wiring
-
-- Pass `--skills-root` and explicit build skills from Pattern Factory's
-  `cf-harness` build phase.
-- Keep parent tool allowance at `read_file write_file`.
-- Re-run a local build smoke and compare output quality against the previous
-  no-skills attempt.
-
-### Slice 3: Dynamic `load_skill` Tool
-
-- Register `load_skill` only when a valid skill catalog exists.
-- Put available skills in the tool description or system catalog.
-- Return full `SKILL.md` content and supporting file lists on demand.
-- Add activation dedupe and transcript/resume behavior.
-
-### Slice 4: Subagent Skill Policy
-
-- Add optional `skills` to `delegate_task`.
-- Add profile-level allowed skill patterns.
-- Record child skill activations in child artifacts.
-- Keep parent return channel summary-only.
-
-### Slice 5: Richer Policy
-
-- Interpret `allowed-tools` as an optional narrowing rule.
-- Add user-level or organization-level skill roots if product needs them.
-- Add remote skill bundle installation only after trust and provenance policy is
-  explicit.
+| Capability | Status |
+|---|---|
+| Explicit skill root, discovery, preload, registry, activation, and resume artifacts | implemented |
+| Indexed supporting-resource reads | implemented |
+| Exact allowlisted sandbox Deno/Bash skill scripts | implemented |
+| Profile-scoped host skill scripts for the leased browser child | implemented |
+| Pattern Factory phase-specific skills | implemented |
+| Explicit child-profile skill policy and summary-only parent return | implemented |
+| Model-driven dynamic `load_skill` activation | not implemented; future design above |
+| User/global/remote skill installation | not planned without a product requirement and trust design |
 
 ## Open Questions
 
 - Should `--skills-root` accept multiple roots now, or stay singular until a
   concrete product need appears?
-- Should explicit `--skill` preload include raw frontmatter, or strip
-  frontmatter after parsing? Raw full-file loading is simpler and preserves
-  compatibility metadata; stripped body is cleaner.
 - In batch resume, should skill digest drift fail closed by default? This spec
   recommends yes, but operator mode might prefer a warning.
-- Should `allowed-tools` be enforced as a narrowing rule in slice 1, or left
-  advisory until dynamic activation exists?
-- Should Pattern Factory's `ui_design` phase receive `pattern-ui` immediately,
-  or wait until build quality is recovered first?
+- What stable policy vocabulary should govern model-driven catalog visibility
+  before a `load_skill` tool is added?
+- If multiple roots are ever supported, how should precedence, duplicate names,
+  and trust tiers be represented in artifacts?
 
-## Recommendation
+## Current Direction
 
-Pause further Pattern Factory build orchestration until `cf-harness` can preload
-explicit skills.
-
-Implement Slice 1 in `labs` first. Then wire only the Pattern Factory build
-phase to pass explicit skills and repeat the local smoke. This should improve
-build output quality without expanding the parent tool surface or committing to
-full model-driven skill discovery before the core provenance and CFC semantics
-are in place.
+Keep explicit caller preload as the stable product path. Add dynamic model-driven
+activation only in response to a concrete workflow that cannot select skills at
+the adapter boundary, and only after catalog visibility, provenance, resume,
+and child-policy semantics are specified and tested.
 
 [agent-skills-spec]: https://agentskills.io/specification
 [agent-skills-client]: https://agentskills.io/client-implementation/adding-skills-support

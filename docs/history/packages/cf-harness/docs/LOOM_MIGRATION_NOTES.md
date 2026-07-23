@@ -1,3 +1,11 @@
+---
+status: historical
+created: 2026-04-17
+archived: 2026-07-22
+reason: "Pre-integration assessment; Loom now has batch and opt-in interactive cf-harness adapters."
+superseded-by: packages/cf-harness/docs/CURRENT_STATE.md
+---
+
 # Loom Migration Notes
 
 This note captures the current understanding of how Loom uses Codex today and
