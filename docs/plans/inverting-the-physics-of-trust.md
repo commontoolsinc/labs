@@ -49,7 +49,7 @@ microkernel for networked software in the AI era.
 - the flow-checking machinery
 - the sandboxing
 - a reactive, multiplayer-by-default storage layer with keypair identity
-- roughly two hundred running patterns, including a live demonstration
+- well over a hundred running patterns, including a live demonstration
   of prompt injection being structurally contained
   (`packages/patterns/cfc-agent-prompt-injection-demo/`)
 - an attestation pipeline running on Intel TDX hardware
