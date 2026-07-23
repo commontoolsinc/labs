@@ -25,6 +25,7 @@ import {
   pattern,
   Stream,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commonfabric";
@@ -33,7 +34,7 @@ import Event, { COLORS, generateId } from "./event.tsx";
 
 // ============ TYPES ============
 
-type EventPiece = {
+export type EventPiece = {
   [NAME]?: string;
   title?: string;
   date?: string;
@@ -65,6 +66,7 @@ interface Input {
 }
 
 export interface Output {
+  [UI]: VNode;
   title: string;
   events: EventPiece[];
   mentionable: EventPiece[];
@@ -227,7 +229,7 @@ const showNewEventModal = handler<
 >((_, { showNewEventPrompt }) => showNewEventPrompt.set(true));
 
 // Handler to create event and close modal (stays on calendar)
-const createEventHandler = handler<
+export const createEventHandler = handler<
   void,
   {
     newEventTitle: Writable<string>;
@@ -272,7 +274,7 @@ const createEventHandler = handler<
 });
 
 // Handler to create event and stay in modal
-const createEventAndContinue = handler<
+export const createEventAndContinue = handler<
   void,
   {
     newEventTitle: Writable<string>;
@@ -335,7 +337,7 @@ const handleBacklinkClick = handler<
 >((_, { piece }) => navigateTo(piece));
 
 // LLM-callable handler: Create a single event
-const handleCreateEvent = handler<
+export const handleCreateEvent = handler<
   { title: string; date: string; startTime: string; endTime: string },
   { events: Writable<EventPiece[]>; pieceRegistry: Writable<EventPiece[]> }
 >(({ title, date, startTime, endTime }, { events, pieceRegistry }) => {

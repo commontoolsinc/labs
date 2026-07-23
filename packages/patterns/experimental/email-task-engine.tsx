@@ -83,7 +83,7 @@ interface TaskAnalysis {
 }
 
 // Note type from wish
-type NotePiece = {
+export type NotePiece = {
   [NAME]?: string;
   content?: string;
   title?: string;
@@ -179,8 +179,8 @@ const fetchLabels = handler<
 /**
  * Execute an edit-note suggestion
  */
-const executeEditNote = handler<
-  unknown,
+export const executeEditNote = handler<
+  Record<string, never>,
   {
     removeLabels: Stream<{ messageId: string; labels: string[] }>;
     emailId: string;
@@ -268,8 +268,8 @@ const executeEditNote = handler<
 /**
  * Execute a create-note suggestion
  */
-const executeCreateNote = handler<
-  unknown,
+export const executeCreateNote = handler<
+  Record<string, never>,
   {
     removeLabels: Stream<{ messageId: string; labels: string[] }>;
     emailId: string;

@@ -168,6 +168,11 @@ export interface CellBridgeOptions {
   projectionGeneration?: string;
   statusProvider?: () => Record<string, unknown>;
   onCfcProjectionRebuilt?: () => void;
+  reconnectManagerLoader?: (config: {
+    apiUrl: string;
+    space: string;
+    identity: string;
+  }) => Promise<PieceManager>;
 }
 
 /** Result of resolving an inode to a writable cell path. */
@@ -315,6 +320,7 @@ export class CellBridge {
   private explicitCfcProjectionGeneration: string | undefined;
   private statusProvider: (() => Record<string, unknown>) | undefined;
   private onCfcProjectionRebuilt: (() => void) | undefined;
+  private reconnectManagerLoader: CellBridgeOptions["reconnectManagerLoader"];
 
   private startedAt = new Date().toISOString();
   /**
@@ -364,7 +370,8 @@ export class CellBridge {
   private async _attemptReconnect(): Promise<void> {
     for (const [spaceName, state] of this.spaces) {
       try {
-        const { loadManager } = await import("../cli/lib/piece.ts");
+        const loadManager = this.reconnectManagerLoader ??
+          (await import("../cli/lib/piece.ts")).loadManager;
         const manager = await loadManager({
           apiUrl: this.apiUrl,
           space: spaceName,
@@ -414,6 +421,7 @@ export class CellBridge {
     this.explicitCfcProjectionGeneration = options.projectionGeneration;
     this.statusProvider = options.statusProvider;
     this.onCfcProjectionRebuilt = options.onCfcProjectionRebuilt;
+    this.reconnectManagerLoader = options.reconnectManagerLoader;
   }
 
   init(config: {

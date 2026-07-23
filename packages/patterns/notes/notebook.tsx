@@ -90,6 +90,12 @@ export interface NotebookOutput extends NotebookPiece {
   cancelNewNestedNotebook: Stream<void>;
   startEditTitle: Stream<void>;
   stopEditTitle: Stream<void>;
+  goToAllNotes: Stream<void>;
+  createNoteFromPrompt: Stream<void>;
+  createAnotherNoteFromPrompt: Stream<void>;
+  createNestedNotebookFromPrompt: Stream<void>;
+  createAnotherNestedNotebookFromPrompt: Stream<void>;
+  createNotebookFromSelectionPrompt: Stream<void>;
   // Test-accessible state
   selectedNoteIndices: number[];
   selectedCount: number;
@@ -1528,6 +1534,20 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       cancelNewNestedNotebook: cancelNewNestedNotebookPromptAction,
       startEditTitle: startEditingTitleAction,
       stopEditTitle: stopEditingTitleAction,
+      goToAllNotes: goToAllNotesAction,
+      createNoteFromPrompt: createNoteAction,
+      createAnotherNoteFromPrompt: createAnotherNoteAction,
+      createNestedNotebookFromPrompt: createNestedNotebookAction,
+      createAnotherNestedNotebookFromPrompt: createAnotherNestedNotebookAction,
+      createNotebookFromSelectionPrompt: createNotebookFromPrompt({
+        newNotebookName,
+        showNewNotebookPrompt,
+        pendingNotebookAction,
+        selectedNoteIndices,
+        notes,
+        pieceRegistry,
+        notebooks,
+      }),
       // Test-accessible state
       selectedNoteIndices,
       selectedCount,

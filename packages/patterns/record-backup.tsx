@@ -20,7 +20,9 @@ import {
   NAME,
   navigateTo,
   pattern,
+  type Stream,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commonfabric";
@@ -74,9 +76,12 @@ interface ImportResult {
 
 interface Input {
   importJson: string | Default<"">;
+  addPiece?: Stream<{ piece: Writable<RecordPiece> }>;
 }
 
 export interface Output {
+  [NAME]: string;
+  [UI]: VNode;
   exportedJson: string;
   importJson: string;
   recordCount: number;
@@ -85,7 +90,7 @@ export interface Output {
 
 // ===== Type for Record piece =====
 
-interface RecordPiece {
+export interface RecordPiece {
   "#record"?: boolean;
   title?: string;
   subPieces?: SubPieceEntry[];
@@ -418,10 +423,10 @@ const importRecords = handler<
   Record<string, never>,
   {
     importJson: Writable<string>;
-    pieceRegistry: Writable<RecordPiece[]>;
+    addPiece: Stream<{ piece: Writable<RecordPiece> }>;
     importResult: Writable<ImportResult | null>;
   }
->((_, { importJson, pieceRegistry, importResult }) => {
+>((_, { importJson, addPiece, importResult }) => {
   const jsonText = importJson.get();
   const parseResult = parseImportJson(jsonText);
 
@@ -539,14 +544,13 @@ const importRecords = handler<
 
       // Create the Record with all its modules
       // deno-lint-ignore no-explicit-any
-      const record = (Record as any)({
+      const record: Writable<RecordPiece> = (Record as any)({
         title: recordData.title,
         subPieces: subPieces,
         trashedSubPieces: trashedSubPieces,
       });
 
-      // Register the imported record.
-      pieceRegistry.push(record as RecordPiece);
+      addPiece.send({ piece: record });
       createdRecords.push(record);
       result.imported++;
     } catch (e) {
@@ -618,11 +622,16 @@ const handleFileUpload = handler<
 
 // ===== The Pattern =====
 
-export default pattern<Input, Output>(({ importJson }) => {
+export default pattern<Input, Output>((input) => {
+  const { importJson, addPiece: addPieceInput } = input;
   // Get all pieces in the space
   const pieceRegistry = wish<RecordPiece[]>({
     query: "#pieceRegistry",
   }).result!;
+  const defaultWish = wish<{
+    addPiece: Stream<{ piece: Writable<RecordPiece> }>;
+  }>({ query: "#default" });
+  const addPiece = addPieceInput ?? defaultWish.result!.addPiece;
 
   // Current time, sourced from the reactive #now cell (coarsened to 1s).
   const nowCell = wish<number>({ query: "#now" });
@@ -745,7 +754,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                 <cf-button
                   onClick={importRecords({
                     importJson,
-                    pieceRegistry,
+                    addPiece,
                     importResult,
                   })}
                   variant="primary"
