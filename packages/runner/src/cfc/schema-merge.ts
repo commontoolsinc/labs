@@ -332,6 +332,13 @@ const assertNoDivergentIfcBranches = (
   }
 };
 
+// A stream slot (`asCell: ["stream"]`) is a runtime-materialized capability
+// marker, not stored document data — see the additive-required exemption in
+// `mergeRequired`.
+const isStreamSlot = (schema: JSONSchema | undefined): boolean =>
+  isRecord(schema) && Array.isArray(schema.asCell) &&
+  schema.asCell.includes("stream");
+
 const mergeRequired = (
   existing: readonly string[] | undefined,
   candidate: readonly string[] | undefined,
@@ -346,6 +353,21 @@ const mergeRequired = (
       continue;
     }
     const property = mergedProperties[name];
+    // A newly-required field must carry a default so an old document that
+    // predates the field can still be read (the default synthesizes the
+    // missing value). This guard is about PRESERVABLE DOCUMENT DATA, so it
+    // does not apply to a stream slot: `asCell: ["stream"]` is a
+    // runtime-materialized capability marker, not stored data. Pattern setup
+    // re-materializes every stream marker on each run, so an old doc that
+    // lacks one has no value to preserve and there is no meaningful default a
+    // `Stream<…>` field could declare. Without this exemption, materializing a
+    // handler-rich pattern (e.g. home.tsx) over a doc that predates its
+    // handlers fails additive-required — the estuary cold-start-setup-repair
+    // cascade, where each defaulted DATA field just unmasked the next
+    // required-no-default handler.
+    if (isStreamSlot(property)) {
+      continue;
+    }
     if (!isRecord(property) || property.default === undefined) {
       throw new Error(
         `required field ${name} needs a default to preserve old documents`,
