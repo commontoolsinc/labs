@@ -1,5 +1,31 @@
 # @commonfabric/cli
 
+## Piece data search
+
+`cf piece search <query>` reads every piece in the selected space and returns
+the pieces whose input or result data contains the query. Matching uses full
+Unicode case folding and canonical normalization over nested object keys and
+scalar values. Canonically equivalent text matches, and a match cannot stop
+partway through one character's multi-letter fold. Readable nested cell values
+are included when they belong to the piece being searched. A cell owned by
+another piece is searched only with that owner, not with every piece that links
+to it. Data owned by a piece absent from the piece registry is not attributed to
+its referrers. A cell with no piece ownership metadata remains searchable
+through each piece that links to it. Opaque, write-only, comparable, stream, and
+SQLite cell handles are not read. Piece IDs, names, and pattern metadata are
+returned for context, but they do not count as searchable data.
+
+```bash
+cf piece search --space team-space "invoice 1042"
+cf piece search --space team-space --json invoice
+```
+
+The command accepts the same identity, API URL, space, and combined URL options
+as `cf piece ls`. Human-readable output uses the same columns as `piece ls`.
+`--json` returns an array for scripts, including an empty array when no piece
+matches. If part of a piece cannot be read, the command reports a warning on
+standard error and continues searching that piece and the rest of the space.
+
 ## Launcher Contract
 
 `packages/cli/launcher.ts` is the stable Deno launcher for consumers that need

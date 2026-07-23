@@ -21,6 +21,7 @@ import {
   removePiece,
   resetHomePattern,
   savePiecePattern,
+  searchPieces,
   setCellValue,
   setHomePattern,
   setPiecePattern,
@@ -100,6 +101,38 @@ export function formatPatternIdentity(
   return patternRef === undefined
     ? "<unknown>"
     : `cf:module/${patternRef.identity}#${patternRef.symbol}`;
+}
+
+export function renderPieceSummaries(
+  pieces: Array<{
+    id: string;
+    name?: string;
+    patternRef?: PiecePatternRef;
+    error?: string;
+  }>,
+  json: boolean,
+): void {
+  if (json) {
+    render(
+      pieces.map((piece) => ({
+        id: piece.id,
+        name: piece.name ?? null,
+        patternRef: piece.patternRef ?? null,
+      })),
+      { json: true },
+    );
+    return;
+  }
+
+  const rows = [
+    ["ID", "NAME", "PATTERN"],
+    ...pieces.map((piece) => [
+      piece.id,
+      piece.error ? `<error: ${piece.error}>` : (piece.name ?? "<unnamed>"),
+      piece.error ? "" : formatPatternRef(piece.patternRef),
+    ]),
+  ];
+  if (rows.length > 1) render(Table.from(rows).toString());
 }
 
 export function localPatternEntry(
@@ -235,37 +268,21 @@ export const piece = new Command()
     `Display a list of all pieces in "${RAW_EX_COMP.space}".`,
   )
   .option("--json", "Output machine-readable JSON.")
-  .action(async (options) => {
-    const pieces = await listPieces(parseSpaceOptions(options));
-    if (options.json) {
-      render(
-        pieces.map((p) => ({
-          id: p.id,
-          name: p.name ?? null,
-          patternRef: p.patternRef ?? null,
-        })),
-        { json: true },
-      );
-      return;
-    }
-    const piecesData = [
-      ["ID", "NAME", "PATTERN"],
-      ...(pieces.map(
-        (data) => [
-          data.id,
-          data.error ? `<error: ${data.error}>` : (data.name ?? "<unnamed>"),
-          data.error ? "" : formatPatternRef(data.patternRef),
-        ],
-      )),
-    ];
-    if (piecesData.length === 1) {
-      // Only header fields -- render nothing.
-      return;
-    }
-    render(
-      Table.from(piecesData).toString(),
-    );
-  })
+  .action(listPiecesFromCommand)
+  /* piece search */
+  .command("search", "Search readable input and result data in every piece.")
+  .usage(`${spaceUsage} <query>`)
+  .example(
+    cliText(`cf piece search ${EX_ID} ${EX_COMP} "meeting notes"`),
+    `Find pieces containing "meeting notes" in nested input or result data.`,
+  )
+  .example(
+    cliText(`cf piece search ${EX_ID} ${EX_URL} invoice --json`),
+    `Return matching pieces as machine-readable JSON.`,
+  )
+  .arguments("<query:string>")
+  .option("--json", "Output machine-readable JSON.")
+  .action(searchPiecesFromCommand)
   /* piece new */
   .command("new", "Create a new piece with a pattern.")
   .usage(spaceUsage)
@@ -1050,6 +1067,42 @@ export interface PieceCLIOptions {
   repository?: string;
   root?: string;
   dangerouslyAllowIncompatibleSchema?: boolean;
+}
+
+export interface PieceSummaryCLIOptions extends PieceCLIOptions {
+  json?: boolean;
+}
+
+export interface PieceListCommandDependencies {
+  listPieces?: typeof listPieces;
+  renderPieceSummaries?: typeof renderPieceSummaries;
+}
+
+export async function listPiecesFromCommand(
+  options: PieceSummaryCLIOptions,
+  deps: PieceListCommandDependencies = {},
+): Promise<void> {
+  const pieces = await (deps.listPieces ?? listPieces)(
+    parseSpaceOptions(options),
+  );
+  (deps.renderPieceSummaries ?? renderPieceSummaries)(pieces, !!options.json);
+}
+
+export interface PieceSearchCommandDependencies {
+  searchPieces?: typeof searchPieces;
+  renderPieceSummaries?: typeof renderPieceSummaries;
+}
+
+export async function searchPiecesFromCommand(
+  options: PieceSummaryCLIOptions,
+  query: string,
+  deps: PieceSearchCommandDependencies = {},
+): Promise<void> {
+  const pieces = await (deps.searchPieces ?? searchPieces)(
+    parseSpaceOptions(options),
+    query,
+  );
+  (deps.renderPieceSummaries ?? renderPieceSummaries)(pieces, !!options.json);
 }
 
 /** Injectable dependencies for testing the `piece setsrc` command boundary. */

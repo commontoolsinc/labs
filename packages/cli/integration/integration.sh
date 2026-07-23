@@ -275,7 +275,29 @@ run_piece_values() {
 
   # Test input flag operations
   test_json_value "Input flag set" "userData" '{"user":{"name":"test"}}' "--input"
-  test_value "Nested input path" "userData/user/name" '"inputValue"' '"inputValue"' "--input"
+  test_value \
+    "Nested input path" \
+    "userData/user/name" \
+    '"piece-search-input-value-7301"' \
+    '"piece-search-input-value-7301"' \
+    "--input"
+
+  echo '"piece-search-result-value-9146"' |
+    cf piece set $SPACE_ARGS --piece $PIECE_ID stringField
+  SEARCH_INPUT=$(cf piece search $SPACE_ARGS --json "INPUT-VALUE-7301")
+  echo "$SEARCH_INPUT" | jq -e --arg id "$PIECE_ID" \
+    'length == 1 and .[0].id == $id' > /dev/null ||
+    error "Piece search should find nested input data case-insensitively"
+  SEARCH_RESULT=$(cf piece search $SPACE_ARGS --json "RESULT-VALUE-9146")
+  echo "$SEARCH_RESULT" | jq -e --arg id "$PIECE_ID" \
+    'length == 1 and .[0].id == $id' > /dev/null ||
+    error "Piece search should find nested result data case-insensitively"
+  SEARCH_NONE=$(cf piece search $SPACE_ARGS --json "piece-search-absent-5283")
+  echo "$SEARCH_NONE" | jq -e 'length == 0' > /dev/null ||
+    error "Piece search should return an empty JSON array when nothing matches"
+  SEARCH_NAME=$(cf piece search $SPACE_ARGS --json "Simple counter:")
+  echo "$SEARCH_NAME" | jq -e 'length == 0' > /dev/null ||
+    error "Piece search should not match a piece name"
 
   echo "Testing piece step..."
 

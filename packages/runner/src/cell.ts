@@ -27,6 +27,7 @@ import {
   isInternedSchema,
 } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { ReadonlyCell } from "@commonfabric/api";
 import type { SqliteParamsWire } from "@commonfabric/memory/v2";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
@@ -691,6 +692,10 @@ export class CellImpl<T extends FabricValue>
 
     this._kind = kind ?? "cell";
     this._cfcLabelView = cloneCfcLabelView(_cfcLabelView);
+  }
+
+  isReadableCell(): boolean {
+    return this._kind === "cell" || this._kind === "readonly";
   }
 
   [cfcLabelViewSymbol](): CfcLabelView | undefined {
@@ -3180,6 +3185,13 @@ export function convertCellsToLinks(
  */
 export function isCell(value: any): value is Cell<any> {
   return value instanceof CellImpl;
+}
+
+/** Check whether a cell capability permits reading its stored value. */
+export function isReadableCell(
+  value: any,
+): value is Cell<any> | ReadonlyCell<any> {
+  return value instanceof CellImpl && value.isReadableCell();
 }
 
 /**

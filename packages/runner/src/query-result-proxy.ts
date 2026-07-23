@@ -533,10 +533,13 @@ export function createQueryResultProxy<T>(
     ownKeys: () => {
       const readTx = runtime.readTx(tx);
       const current = readTx.readValueOrThrow(link, SHAPE_READ);
-      if (isRecord(current) || Array.isArray(current)) {
-        return Reflect.ownKeys(current);
+      const keys = isRecord(current) || Array.isArray(current)
+        ? Reflect.ownKeys(current)
+        : Reflect.ownKeys(value);
+      if (Array.isArray(proxyTarget) && !keys.includes("length")) {
+        keys.push("length");
       }
-      return Reflect.ownKeys(value);
+      return keys;
     },
     getOwnPropertyDescriptor: (target, prop) => {
       if (Array.isArray(target) && prop === "length") {

@@ -135,6 +135,7 @@
     "npm:stoker@^2.0.1": "2.0.1_@hono+zod-openapi@1.5.1__hono@4.12.31__zod@4.4.3_hono@4.12.31",
     "npm:turndown@^7.2.4": "7.2.4",
     "npm:typescript@6.0.3": "6.0.3",
+    "npm:unicode-case-folding@1.1.1": "1.1.1",
     "npm:zod@^4.4.3": "4.4.3"
   },
   "jsr": {
@@ -1908,6 +1909,9 @@
       "integrity": "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==",
       "bin": true
     },
+    "unicode-case-folding@1.1.1": {
+      "integrity": "sha512-ZAYziAnMTBisO2dT5tyGvBFMNsIfonOS/BZTd3UZaKWtXMOZqK8s8HRUCrlKxGCTeCxCuCjS/6HW+4a6G+rbzw=="
+    },
     "w3c-keyname@2.2.8": {
       "integrity": "sha512-dpojBhNsCNN7T82Tm7k26A6G9ML3NkhDsnw9n/eoxSRlVBB4CEtIQ/KTCLI2Fwf3ataSXRhYFkQi3SlnFwPvPQ=="
     },
@@ -1983,6 +1987,7 @@
       "npm:multiformats@^14.0.4",
       "npm:ses@^2.2.0",
       "npm:turndown@^7.2.4",
+      "npm:unicode-case-folding@1.1.1",
       "npm:zod@^4.4.3"
     ],
     "members": {
