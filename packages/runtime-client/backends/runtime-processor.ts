@@ -35,7 +35,12 @@ import {
   type SigilLink,
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
-import { linkRefPayload } from "@commonfabric/runner/shared";
+import type { RuntimeTelemetryMarkerResult } from "@commonfabric/runner";
+import {
+  type HostSchedulerActionInfo,
+  linkRefPayload,
+  type SchedulerActionInfo,
+} from "@commonfabric/runner/shared";
 import {
   cfcLabelViewForCell,
   createRenderConfidentialityResolver,
@@ -152,7 +157,7 @@ import {
   type RenderDeclassificationPolicy,
   WorkerReconciler,
 } from "@commonfabric/html/worker";
-import type { VDomOp } from "../protocol/types.ts";
+import type { HostRuntimeTelemetryMarker, VDomOp } from "../protocol/types.ts";
 import type { JSONValue, RuntimeOptions } from "@commonfabric/runner";
 import {
   postContextualRuntimeError,
@@ -168,6 +173,77 @@ const cfcLabelLogger = getLogger("runtime-client.cfc-label", {
   enabled: true,
   level: "error",
 });
+
+/**
+ * Keep event correlation and detailed write addresses in the worker. The host
+ * needs aggregate counts and fixed categories, not identifier-bearing joins.
+ */
+export function telemetryMarkerForHost(
+  marker: RuntimeTelemetryMarkerResult,
+): HostRuntimeTelemetryMarker {
+  switch (marker.type) {
+    case "scheduler.run":
+    case "scheduler.run.complete": {
+      const { actionInfo, ...safe } = marker;
+      return {
+        ...safe,
+        ...(actionInfo
+          ? { actionInfo: telemetryActionInfoForHost(actionInfo) }
+          : {}),
+      };
+    }
+    case "scheduler.invocation": {
+      const { eventId: _eventId, handlerInfo, ...safe } = marker;
+      return {
+        ...safe,
+        ...(handlerInfo
+          ? { handlerInfo: telemetryActionInfoForHost(handlerInfo) }
+          : {}),
+      };
+    }
+    case "scheduler.event.drop": {
+      const { eventId: _eventId, ...safe } = marker;
+      return safe;
+    }
+    case "scheduler.event.commit": {
+      const {
+        eventId: _eventId,
+        writes: _writes,
+        writesTruncated: _writesTruncated,
+        handlerInfo,
+        ...safe
+      } = marker;
+      return {
+        ...safe,
+        ...(handlerInfo
+          ? { handlerInfo: telemetryActionInfoForHost(handlerInfo) }
+          : {}),
+      };
+    }
+    case "scheduler.event.preflight": {
+      const { handlerInfo, ...safe } = marker;
+      return {
+        ...safe,
+        ...(handlerInfo
+          ? { handlerInfo: telemetryActionInfoForHost(handlerInfo) }
+          : {}),
+      };
+    }
+    default:
+      return marker;
+  }
+}
+
+function telemetryActionInfoForHost(
+  info: SchedulerActionInfo,
+): HostSchedulerActionInfo {
+  const { reads, writes, ...safe } = info;
+  return {
+    ...safe,
+    ...(reads ? { readCount: reads.length } : {}),
+    ...(writes ? { writeCount: writes.length } : {}),
+  };
+}
 
 /**
  * PageId intake: accepts both the bare tagged hash (`fid1:<hash>`, the
@@ -1383,7 +1459,7 @@ export class RuntimeProcessor {
     const marker = (event as RuntimeTelemetryEvent).marker;
     self.postMessage({
       type: NotificationType.Telemetry,
-      marker,
+      marker: telemetryMarkerForHost(marker),
     });
   };
 

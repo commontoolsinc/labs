@@ -10,7 +10,6 @@ import type {
   ActionRunTraceEntry,
   JSONSchema,
   PatternCoverageData,
-  RuntimeTelemetryMarkerResult,
   SchedulerDiagnosisResult,
   SchedulerGraphSnapshot,
   SettleStats,
@@ -63,7 +62,7 @@ export type RuntimeClientEvents = {
   console: [ConsoleNotification];
   navigaterequest: [{ cell: CellHandle }];
   error: [ErrorNotification];
-  telemetry: [RuntimeTelemetryMarkerResult];
+  telemetry: [TelemetryNotification["marker"]];
   pendingwriteschange: [{ pending: boolean }];
 };
 

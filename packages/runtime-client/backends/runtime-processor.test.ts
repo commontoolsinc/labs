@@ -13,6 +13,7 @@ import {
   RuntimeProcessor,
   sanitizeForPostMessage,
   shouldReconcileHomeRoot,
+  telemetryMarkerForHost,
 } from "./runtime-processor.ts";
 import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
 import { cfcAtom } from "@commonfabric/api/cfc";
@@ -837,6 +838,146 @@ describe("sanitizeForPostMessage", () => {
           handler: "[Function]",
         },
       });
+    });
+  });
+});
+
+describe("telemetryMarkerForHost", () => {
+  it("keeps event correlations and detailed writes inside the runtime worker", () => {
+    const marker = telemetryMarkerForHost({
+      type: "scheduler.event.commit",
+      eventId: "evt:did:key:private",
+      handlerId: "handler:private",
+      readCount: 2,
+      writeCount: 3,
+      changedWriteCount: 1,
+      writes: ["value/did:key:private/title"],
+      writesTruncated: true,
+      handlerInfo: {
+        patternName: "Topics",
+        reads: ["did:key:private/of:fid1:private/title"],
+        writes: ["did:key:private/of:fid1:private/description"],
+      },
+      timeStamp: 1,
+    });
+
+    expect(marker).toEqual({
+      type: "scheduler.event.commit",
+      handlerId: "handler:private",
+      readCount: 2,
+      writeCount: 3,
+      changedWriteCount: 1,
+      handlerInfo: {
+        patternName: "Topics",
+        readCount: 1,
+        writeCount: 1,
+      },
+      timeStamp: 1,
+    });
+    expect(JSON.stringify(marker)).not.toContain("evt:");
+    expect(JSON.stringify(marker)).not.toContain("value/did:");
+    expect(JSON.stringify(marker)).not.toContain("of:fid1:");
+  });
+
+  it("summarizes nested action metadata for every host-facing marker", () => {
+    const actionInfo = {
+      moduleName: "topics.tsx",
+      reads: ["did:key:private/of:fid1:private/title"],
+      writes: [
+        "did:key:private/of:fid1:private/title",
+        "did:key:private/of:fid1:private/description",
+      ],
+    };
+
+    expect(telemetryMarkerForHost({
+      type: "scheduler.run.complete",
+      actionId: "action",
+      actionInfo,
+      durationMs: 1,
+      timeStamp: 1,
+    })).toEqual({
+      type: "scheduler.run.complete",
+      actionId: "action",
+      actionInfo: {
+        moduleName: "topics.tsx",
+        readCount: 1,
+        writeCount: 2,
+      },
+      durationMs: 1,
+      timeStamp: 1,
+    });
+
+    const invocation = telemetryMarkerForHost({
+      type: "scheduler.invocation",
+      eventId: "evt:private",
+      handlerId: "handler",
+      handlerInfo: actionInfo,
+      timeStamp: 1,
+    });
+    expect(invocation).toEqual({
+      type: "scheduler.invocation",
+      handlerId: "handler",
+      handlerInfo: {
+        moduleName: "topics.tsx",
+        readCount: 1,
+        writeCount: 2,
+      },
+      timeStamp: 1,
+    });
+    expect(JSON.stringify(invocation)).not.toContain("did:key:");
+
+    const preflight = telemetryMarkerForHost({
+      type: "scheduler.event.preflight",
+      handlerId: "handler",
+      handlerInfo: actionInfo,
+      readCount: 1,
+      shallowReadCount: 0,
+      dirtySizeBefore: 0,
+      pendingSizeBefore: 0,
+      dirtyDependencyCount: 0,
+      hasDirtyDependencies: false,
+      skipped: false,
+      populateMs: 0,
+      txToLogMs: 0,
+      depCommitMs: 0,
+      collectMs: 0,
+      scheduleMs: 0,
+      stats: {
+        visitCount: 0,
+        dirtyInputCount: 0,
+        resultTrueCount: 0,
+        workSetAddCount: 0,
+        reverseDependencyActionCount: 0,
+        reverseDependencyEdgeCount: 0,
+        logReadCount: 0,
+        logShallowReadCount: 0,
+        writerCandidateCount: 0,
+        writerOverlapCount: 0,
+        directWriterCount: 0,
+      },
+      timeStamp: 1,
+    });
+    if (preflight.type !== "scheduler.event.preflight") {
+      throw new Error("Expected a scheduler.event.preflight marker");
+    }
+    expect(preflight.handlerInfo).toEqual({
+      moduleName: "topics.tsx",
+      readCount: 1,
+      writeCount: 2,
+    });
+    expect(JSON.stringify(preflight)).not.toContain("did:key:");
+  });
+
+  it("keeps only aggregate drop details when crossing the worker boundary", () => {
+    expect(telemetryMarkerForHost({
+      type: "scheduler.event.drop",
+      eventId: "evt:private",
+      reason: "preflight",
+      timeStamp: 1,
+    })).toEqual({
+      type: "scheduler.event.drop",
+      reason: "preflight",
+      timeStamp: 1,
     });
   });
 });
