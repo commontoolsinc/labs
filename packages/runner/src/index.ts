@@ -1,6 +1,7 @@
 export { Runtime } from "./runtime.ts";
 export type {
   ConsoleHandler,
+  ConsoleHandlerOutput,
   ErrorHandler,
   ErrorWithContext as RuntimeErrorWithContext,
   ExperimentalOptions, // Space-model feature flags; see ExperimentalOptions in runtime.ts

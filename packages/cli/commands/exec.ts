@@ -20,7 +20,6 @@ export const exec = new Command()
     "Run a mounted tool using its default verb.",
   )
   .stopEarly()
-  .useRawArgs()
   .arguments("<mountedFile:string> [tail...:string]")
   .action(async (_options, mountedFile, ...tail) => {
     try {

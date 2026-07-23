@@ -119,6 +119,7 @@ import {
 import { popFrame, pushFrame } from "./builder/pattern.ts";
 import type { Frame } from "./builder/types.ts";
 import type { ConsoleMessage } from "./interface.ts";
+import type { ConsoleMethod } from "./harness/console.ts";
 import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
@@ -168,9 +169,15 @@ export const DEFAULT_MAX_RETRIES = 5;
 
 export type { IExtendedStorageTransaction, IStorageProvider, MemorySpace };
 
+export interface ConsoleHandlerOutput {
+  method: ConsoleMethod;
+  args: any[];
+  target?: Console;
+}
+
 export type ConsoleHandler = (
   message: ConsoleMessage,
-) => any[];
+) => any[] | ConsoleHandlerOutput;
 
 export type ErrorWithContext = Error & {
   action: Action;

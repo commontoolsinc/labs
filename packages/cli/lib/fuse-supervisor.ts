@@ -38,7 +38,7 @@ export interface FuseSupervisorOptions {
   supervisorPid?: number;
 }
 
-/** Parsed hidden-command flags used to launch a FUSE supervisor. */
+/** Parsed command flags used to launch a FUSE supervisor. */
 export interface FuseSupervisorCliOptions {
   apiUrl?: string;
   identity?: string;
@@ -58,7 +58,7 @@ export interface FuseSupervisorCliOptions {
   supervisorStatus?: string;
 }
 
-/** Convert hidden CLI command options into the supervisor's runtime contract. */
+/** Convert CLI command options into the supervisor's runtime contract. */
 export function fuseSupervisorOptions(
   options: FuseSupervisorCliOptions,
   mountpoint: string,
