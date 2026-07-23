@@ -1,10 +1,10 @@
-// OpenTelemetry bridge for the runtime's existing telemetry stream.
+// OpenTelemetry bridge for runtime telemetry at two privacy levels.
 //
-// This does NOT add a parallel instrumentation layer. It subscribes to the
-// SAME `RuntimeTelemetry` event bus that the debug tooling consumes (see
-// telemetry.ts / runtime-client) and translates each `RuntimeTelemetryMarker`
-// into OpenTelemetry spans and metrics. The debug tooling keeps working
-// unchanged; OTel is just a second consumer of one event stream.
+// Worker/server callers feed detailed RuntimeTelemetry markers from the
+// RuntimeTelemetry EventTarget. Browser hosts feed HostRuntimeTelemetryMarker,
+// the aggregate-only projection received over the worker-to-host boundary.
+// Detailed markers can supply diagnostic span attributes; host markers produce
+// only metrics available from their safe aggregate fields.
 //
 // It depends ONLY on `@opentelemetry/api` (interface-only, side-effect free), so
 // importing it never pulls the OTel SDK into a bundle and never forces
@@ -12,10 +12,10 @@
 // owns its SDK provider setup and passes a Tracer + Meter in. When no provider
 // is registered the API returns no-op instruments, so the bridge is inert.
 //
-// Reuse across runtimes: the worker/server side exposes an EventTarget
-// (`runtime.telemetry`); the main thread / browser receives the same markers via
-// `runtime-client.on("telemetry", ...)`. Both feed `handleMarker()`, so one
-// translation table serves all three execution contexts.
+// Reuse across runtimes: the worker/server side exposes `runtime.telemetry`,
+// while the browser host receives its sanitized projection through
+// `runtime-client.on("telemetry", ...)`. `handleMarker()` selects the detailed
+// or aggregate translator without widening the worker-to-host payload.
 
 import {
   type Attributes,
@@ -28,6 +28,7 @@ import type {
   HostRuntimeTelemetryMarker,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
+  RuntimeTelemetryMarkerResult,
 } from "./telemetry.ts";
 
 export interface OtelBridgeOptions {
@@ -66,8 +67,10 @@ export interface OtelBridgeOptions {
 }
 
 export interface RuntimeTelemetryOtelBridge {
-  /** Translate a single marker into spans/metrics. Safe to call for any type. */
-  handleMarker(marker: HostRuntimeTelemetryMarker): void;
+  /** Translate a detailed runtime or aggregate-safe host marker into telemetry. */
+  handleMarker(
+    marker: HostRuntimeTelemetryMarker | RuntimeTelemetryMarkerResult,
+  ): void;
   /** Close any spans still open (e.g. storage ops without a completion). */
   shutdown(): void;
 }
@@ -98,9 +101,8 @@ export function attachRuntimeTelemetryOtelBridge(
 }
 
 /**
- * Create a bridge whose `handleMarker` can be wired to any marker source —
- * an EventTarget listener (worker/server) or `runtime-client.on("telemetry")`
- * (main thread / browser).
+ * Create a bridge for detailed EventTarget markers (worker/server) and
+ * aggregate-safe `runtime-client.on("telemetry")` markers (browser host).
  */
 export function createRuntimeTelemetryOtelBridge(
   options: OtelBridgeOptions,
@@ -272,7 +274,7 @@ export function createRuntimeTelemetryOtelBridge(
     }
   };
 
-  const handleMarker = (marker: HostRuntimeTelemetryMarker): void => {
+  const handleRuntimeMarker = (marker: RuntimeTelemetryMarkerResult): void => {
     switch (marker.type) {
       case "scheduler.run":
         runs.add(
@@ -443,12 +445,140 @@ export function createRuntimeTelemetryOtelBridge(
     }
   };
 
+  const handleHostMarker = (marker: HostRuntimeTelemetryMarker): void => {
+    switch (marker.type) {
+      case "scheduler.run":
+        runs.add(1, mattrs({ "ct.error": !marker.ok }));
+        break;
+      case "scheduler.run.complete":
+        actionDuration.record(
+          marker.durationMs,
+          mattrs({ "ct.error": !marker.ok }),
+        );
+        break;
+      case "scheduler.settle":
+        settleDuration.record(marker.durationMs, mattrs());
+        settleIterations.record(marker.iterations, mattrs());
+        break;
+      case "scheduler.invocation":
+        invocations.add(1, mattrs());
+        break;
+      case "cell.update":
+        cellUpdates.add(1, mattrs());
+        break;
+      case "scheduler.event.commit": {
+        const attributes = mattrs({
+          "ct.commit.terminal": marker.terminal ?? "none",
+          "ct.error": !marker.ok,
+        });
+        commits.add(1, attributes);
+        commitWrites.record(marker.writeCount, attributes);
+        commitChangedWrites.record(marker.changedWriteCount, attributes);
+        commitNoopCandidates.record(
+          Math.max(0, marker.writeCount - marker.changedWriteCount),
+          attributes,
+        );
+        commitReads.record(marker.readCount, attributes);
+        if (marker.backoffMs !== undefined) commitRetries.add(1, attributes);
+        break;
+      }
+      case "scheduler.event.preflight": {
+        const total = marker.populateMs + marker.txToLogMs +
+          marker.depCommitMs + marker.collectMs + marker.scheduleMs;
+        const attributes = mattrs();
+        preflightPhase.populate.record(marker.populateMs, attributes);
+        preflightPhase.txToLog.record(marker.txToLogMs, attributes);
+        preflightPhase.depCommit.record(marker.depCommitMs, attributes);
+        preflightPhase.collect.record(marker.collectMs, attributes);
+        preflightPhase.schedule.record(marker.scheduleMs, attributes);
+        preflightPhase.total.record(total, attributes);
+        preflightDirtyDeps.record(marker.dirtyDependencyCount, attributes);
+        break;
+      }
+      case "scheduler.non-settling":
+        busyRatio.record(marker.busyRatio, mattrs());
+        nonSettling.add(1, mattrs());
+        break;
+      case "storage.connection.update":
+        storageConnection.add(
+          1,
+          mattrs({
+            "ct.connection.status": marker.status,
+            "ct.connection.attempt": marker.attempt,
+          }),
+        );
+        break;
+      case "storage.subscription.add":
+        subscriptions.add(1, mattrs());
+        break;
+      case "storage.subscription.remove":
+        subscriptions.add(-1, mattrs());
+        break;
+      case "scheduler.event.drop":
+      case "storage.push.start":
+      case "storage.push.complete":
+      case "storage.push.error":
+      case "storage.pull.start":
+      case "storage.pull.complete":
+      case "storage.pull.error":
+      case "scheduler.graph.snapshot":
+      case "scheduler.subscribe":
+      case "scheduler.dependencies.update":
+        break;
+    }
+  };
+
+  const handleMarker = (
+    marker: HostRuntimeTelemetryMarker | RuntimeTelemetryMarkerResult,
+  ): void => {
+    if (isHostRuntimeTelemetryMarker(marker)) {
+      handleHostMarker(marker);
+      return;
+    }
+    handleRuntimeMarker(marker);
+  };
+
   const shutdown = () => {
     for (const { span } of openOps.values()) span.end();
     openOps.clear();
   };
 
   return { handleMarker, shutdown };
+}
+
+function isHostRuntimeTelemetryMarker(
+  marker: HostRuntimeTelemetryMarker | RuntimeTelemetryMarkerResult,
+): marker is HostRuntimeTelemetryMarker {
+  switch (marker.type) {
+    case "scheduler.run":
+    case "scheduler.run.complete":
+    case "scheduler.invocation":
+    case "scheduler.event.commit":
+    case "scheduler.event.preflight":
+    case "storage.push.start":
+    case "storage.push.complete":
+    case "storage.push.error":
+    case "storage.pull.start":
+    case "storage.pull.complete":
+    case "storage.pull.error":
+    case "storage.connection.update":
+    case "storage.subscription.add":
+    case "storage.subscription.remove":
+      return "ok" in marker;
+    case "scheduler.graph.snapshot":
+      return "nodeCount" in marker;
+    case "scheduler.dependencies.update":
+      return "readCount" in marker;
+    case "cell.update":
+      return !("change" in marker);
+    case "scheduler.event.drop":
+      return !("eventId" in marker);
+    case "scheduler.subscribe":
+      return !("actionId" in marker);
+    case "scheduler.settle":
+    case "scheduler.non-settling":
+      return true;
+  }
 }
 
 function nowMs(): number {

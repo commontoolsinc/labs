@@ -13,6 +13,7 @@ import {
   createRuntimeTelemetryOtelBridge,
 } from "../src/telemetry-otel-bridge.ts";
 import {
+  type HostRuntimeTelemetryMarker,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
   type RuntimeTelemetryMarkerResult,
@@ -301,6 +302,161 @@ describe("createRuntimeTelemetryOtelBridge", () => {
     bridge.handleMarker(marker({ type: "scheduler.dependencies.update" }));
     bridge.handleMarker(marker({ type: "scheduler.graph.snapshot" }));
     bridge.handleMarker(marker({ type: "scheduler.subscribe" }));
+    expect(meterCalls).toHaveLength(0);
+    expect(spans).toHaveLength(0);
+  });
+
+  it("records aggregate host markers without creating detailed spans", () => {
+    const stats = {
+      visitCount: 1,
+      dirtyInputCount: 2,
+      resultTrueCount: 3,
+      workSetAddCount: 4,
+      reverseDependencyActionCount: 5,
+      reverseDependencyEdgeCount: 6,
+      logReadCount: 7,
+      logShallowReadCount: 8,
+      writerCandidateCount: 9,
+      writerOverlapCount: 10,
+      directWriterCount: 11,
+      hotActionCount: 12,
+      hotFanoutActionCount: 13,
+      rootDirectWriterCount: 14,
+    };
+    const markers = [
+      { type: "scheduler.run", timeStamp: 1, ok: false },
+      { type: "cell.update", timeStamp: 1 },
+      { type: "scheduler.invocation", timeStamp: 1, ok: false },
+      {
+        type: "scheduler.run.complete",
+        timeStamp: 1,
+        durationMs: 20,
+        ok: false,
+      },
+      {
+        type: "scheduler.settle",
+        timeStamp: 1,
+        durationMs: 21,
+        iterations: 2,
+        settledEarly: false,
+        seedCount: 3,
+        workSetSize: 4,
+      },
+      {
+        type: "scheduler.event.commit",
+        timeStamp: 1,
+        readCount: 5,
+        writeCount: 6,
+        changedWriteCount: 4,
+        ok: false,
+        backoffMs: 7,
+        terminal: "rule",
+      },
+      {
+        type: "scheduler.event.preflight",
+        timeStamp: 1,
+        readCount: 1,
+        shallowReadCount: 2,
+        dirtySizeBefore: 3,
+        pendingSizeBefore: 4,
+        dirtyDependencyCount: 5,
+        hasDirtyDependencies: true,
+        skipped: false,
+        populateMs: 6,
+        txToLogMs: 7,
+        depCommitMs: 8,
+        collectMs: 9,
+        scheduleMs: 10,
+        stats,
+        ok: false,
+      },
+      {
+        type: "scheduler.non-settling",
+        timeStamp: 1,
+        busyTime: 2,
+        windowDuration: 3,
+        busyRatio: 0.75,
+      },
+      {
+        type: "storage.connection.update",
+        timeStamp: 1,
+        status: "error",
+        attempt: 2,
+        ok: false,
+      },
+      { type: "storage.subscription.add", timeStamp: 1, ok: false },
+      { type: "storage.subscription.remove", timeStamp: 1, ok: false },
+    ] satisfies HostRuntimeTelemetryMarker[];
+
+    for (const hostMarker of markers) bridge.handleMarker(hostMarker);
+
+    expect(meterCalls.map((call) => call.instrument)).toEqual([
+      "ct.scheduler.runs",
+      "ct.cell.updates",
+      "ct.scheduler.invocations",
+      "ct.scheduler.action.duration_ms",
+      "ct.scheduler.settle.duration_ms",
+      "ct.scheduler.settle.iterations",
+      "ct.scheduler.commits",
+      "ct.scheduler.commit.writes",
+      "ct.scheduler.commit.changed_writes",
+      "ct.scheduler.commit.noop_candidate_writes",
+      "ct.scheduler.commit.reads",
+      "ct.scheduler.commit.retries",
+      "ct.scheduler.preflight.populate_ms",
+      "ct.scheduler.preflight.tx_to_log_ms",
+      "ct.scheduler.preflight.dep_commit_ms",
+      "ct.scheduler.preflight.collect_ms",
+      "ct.scheduler.preflight.schedule_ms",
+      "ct.scheduler.preflight.total_ms",
+      "ct.scheduler.preflight.dirty_dependency_count",
+      "ct.scheduler.busy_ratio",
+      "ct.scheduler.non_settling.events",
+      "ct.storage.connection.updates",
+      "ct.storage.subscriptions",
+      "ct.storage.subscriptions",
+    ]);
+    expect(meterCalls[0].attributes).toEqual({ "ct.error": true });
+    expect(meterCalls[3].attributes).toEqual({ "ct.error": true });
+    expect(meterCalls[6].attributes).toEqual({
+      "ct.commit.terminal": "rule",
+      "ct.error": true,
+    });
+    expect(meterCalls[16].value).toBe(10);
+    expect(meterCalls[17].value).toBe(40);
+    expect(meterCalls[21].attributes).toEqual({
+      "ct.connection.status": "error",
+      "ct.connection.attempt": 2,
+    });
+    expect(spans).toHaveLength(0);
+  });
+
+  it("ignores host-only marker types across every discriminator family", () => {
+    const ignored = [
+      { type: "scheduler.event.drop", timeStamp: 1, reason: "preflight" },
+      {
+        type: "scheduler.graph.snapshot",
+        timeStamp: 1,
+        nodeCount: 2,
+        edgeCount: 3,
+      },
+      { type: "scheduler.subscribe", timeStamp: 1, isEffect: true },
+      {
+        type: "scheduler.dependencies.update",
+        timeStamp: 1,
+        readCount: 2,
+        writeCount: 3,
+      },
+      { type: "storage.push.start", timeStamp: 1, ok: false },
+      { type: "storage.push.complete", timeStamp: 1, ok: false },
+      { type: "storage.push.error", timeStamp: 1, ok: false },
+      { type: "storage.pull.start", timeStamp: 1, ok: false },
+      { type: "storage.pull.complete", timeStamp: 1, ok: false },
+      { type: "storage.pull.error", timeStamp: 1, ok: false },
+    ] satisfies HostRuntimeTelemetryMarker[];
+
+    for (const hostMarker of ignored) bridge.handleMarker(hostMarker);
+
     expect(meterCalls).toHaveLength(0);
     expect(spans).toHaveLength(0);
   });
