@@ -6,13 +6,13 @@ import { NameSchema } from "@commonfabric/runner/schemas";
 import {
   CellHandle,
   FavoritesManager,
+  HostRuntimeTelemetryMarker,
   JSONValue,
   PageHandle,
   Program,
   RuntimeClient,
   RuntimeClientEvents,
   RuntimeClientOptions,
-  RuntimeTelemetryMarkerResult,
 } from "@commonfabric/runtime-client";
 import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -109,7 +109,7 @@ export type RuntimeInternalsCallbacks = {
  * embedder owns SDK setup and passes the sink in. Absent = zero added work.
  */
 export interface RuntimeTelemetrySink {
-  handleMarker(marker: RuntimeTelemetryMarkerResult): void;
+  handleMarker(marker: HostRuntimeTelemetryMarker): void;
   shutdown(): void | Promise<void>;
 }
 
@@ -306,7 +306,7 @@ export class RuntimeInternals extends EventTarget {
     { promise: Promise<PageHandle<NameSchema>>; started: boolean }
   > = new Map();
   // TODO(runtime-worker-refactor)
-  #telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
+  #telemetryMarkers: HostRuntimeTelemetryMarker[] = [];
   // Optional OTel sink (browser telemetry enabled). Inert when undefined.
   #telemetrySink?: RuntimeTelemetrySink;
 
@@ -330,7 +330,7 @@ export class RuntimeInternals extends EventTarget {
     return this.#client;
   }
 
-  telemetry(): RuntimeTelemetryMarkerResult[] {
+  telemetry(): HostRuntimeTelemetryMarker[] {
     return this.#telemetryMarkers;
   }
 
@@ -614,7 +614,7 @@ export class RuntimeInternals extends EventTarget {
     console.error("[RuntimeClient Error]", event);
   };
 
-  #onTelemetry = (marker: RuntimeTelemetryMarkerResult) => {
+  #onTelemetry = (marker: HostRuntimeTelemetryMarker) => {
     this.#telemetryMarkers.push(marker);
     this.dispatchEvent(new CustomEvent("telemetryupdate"));
     // Additionally translate the marker into OTel spans/metrics when a sink is
