@@ -232,8 +232,24 @@ const settleLinked = async (fixture: LinkedServers): Promise<void> => {
   throw new Error("linked servers did not quiesce");
 };
 
+/**
+ * C3.10b cross-host BARRIER plumbing — the link-sync flush the mirror path
+ * awaits (L1 fix) and the reconnect dirt-resync pull. These are transport
+ * barriers, not carriage/wake SEMANTICS, so the semantic-transcript taps
+ * below exclude them (the L1/L2/reconnect fixtures assert their EFFECT —
+ * the mirror lands, the query resolves after the answer, the reader wakes —
+ * directly, not by counting the plumbing frames).
+ */
+const BARRIER_FRAME_TYPES = new Set([
+  "foreign-link-sync",
+  "foreign-link-sync.ack",
+  "foreign-dirty-resync",
+  "foreign-dirty-resync.result",
+]);
+
 /** Tap the INBOUND payload frames of one host's side of the link (the
- * link channel fans in only frames received from the socket). */
+ * link channel fans in only frames received from the socket), excluding the
+ * C3.10b barrier plumbing (see {@link BARRIER_FRAME_TYPES}). */
 const tapInbound = (
   transport: CoHostedCrossSpaceTransport,
   routedSpace: string,
@@ -244,7 +260,9 @@ const tapInbound = (
   const messages: CrossSpaceMessage[] = [];
   transport.channelTo(routedSpace).onMessage((wire) => {
     const parsed = parseCrossSpaceMessage(wire);
-    if (parsed.ok) messages.push(parsed.message);
+    if (parsed.ok && !BARRIER_FRAME_TYPES.has(parsed.message.type)) {
+      messages.push(parsed.message);
+    }
   });
   return {
     messages,
@@ -515,10 +533,10 @@ Deno.test("C3.10a carriage + three-way split: mirrors/dirt cross the link into t
 });
 
 // ---------------------------------------------------------------------------
-// (L1) The recorded mirror-barrier leak, pinned deterministically.
+// (L1 FIXED, C3.10b) The mirror path awaits a cross-host apply barrier.
 // ---------------------------------------------------------------------------
 
-Deno.test("C3.10a recorded leak (L1, for C3.10b): the transact resolves while its mirror frame is still in flight on the link", async () => {
+Deno.test("C3.10b (L1 fixed): the transact resolves only AFTER B applied its mirror row — the cross-host apply barrier closes the C3.10a leak", async () => {
   setPersistentSchedulerStateConfig(true);
   const fixture = await linkServers();
   const clientA = await MemoryClient.connect({
@@ -549,29 +567,24 @@ Deno.test("C3.10a recorded leak (L1, for C3.10b): the transact resolves while it
         actionId: "pattern.tsx:computed:1",
       }).snapshots.length;
 
-    const release = fixture.pair.holdDelivery();
-    // In-process, this transact's response was CONTRACTUALLY ordered
-    // after the mirror row applied (the same-host application barrier,
-    // carriage test (a)). Over the link the barrier's pending set is
-    // host-local, so the response resolves with the frame CAPTIVE in
-    // the duplex — B provably lacks the row. C3.10b owns the cross-host
-    // ack/barrier; do not "fix" this here.
+    // C3.10a recorded this transact resolving with the mirror frame CAPTIVE
+    // in the duplex (B provably lacks the row). C3.10b closes it: the mirror
+    // path flushes each PEER target with a cross-host apply barrier
+    // (`foreign-link-sync` → the read host acks it only after draining the
+    // mirror on its inbound apply chain), so the transact resolves ONLY after
+    // B applied the row — no settle, no hold-release needed.
     await owner.transact({
       localSeq: 1,
       reads: { confirmed: [], pending: [] },
       operations: [],
       schedulerObservation: observation([FOREIGN_SOURCE]),
     });
-    await internalsOf(fixture.serverA).settleCrossSpaceDeliveries();
     assertEquals(
       mirroredRows(),
-      0,
-      "the transact resolved while the mirror was still in flight (the " +
-        "same-host barrier does not extend across the link — C3.10b)",
+      1,
+      "the transact awaited the peer applying its mirror (L1 barrier closed " +
+        "the leak)",
     );
-    release();
-    await settleLinked(fixture);
-    assertEquals(mirroredRows(), 1, "the mirror landed after release");
   } finally {
     await clientA.close().catch(() => {});
     await clientB.close().catch(() => {});
@@ -584,7 +597,7 @@ Deno.test("C3.10a recorded leak (L1, for C3.10b): the transact resolves while it
 // (d) + (L2): the C3.2 epoch flows over the link.
 // ---------------------------------------------------------------------------
 
-Deno.test("C3.10a epoch flows: B's ACL bumps cross the link into A's remote cache; the epoch query round-trips (its same-host settle recorded as L2)", async () => {
+Deno.test("C3.10a/b epoch flows: B's ACL bumps cross the link into A's remote cache; the epoch query round-trip resolves AFTER its answer (L2 response barrier)", async () => {
   setPersistentSchedulerStateConfig(true);
   const BOB = "did:key:z6Mk-xsp-cohosted-bob";
   const fixture = await linkServers();
@@ -645,24 +658,41 @@ Deno.test("C3.10a epoch flows: B's ACL bumps cross the link into A's remote cach
       "the per-principal bump crossed the link",
     );
 
-    // (L2b) The query round-trip. The method's own settle is same-host
-    // (the in-process stand-in for C3.10b's response barrier), so over
-    // the link it resolves BEFORE its answer arrives — pinned with the
-    // hold: no query.result frame has reached A when the call returns.
+    // (L2b FIXED, C3.10b) The query round-trip now awaits the CROSS-HOST
+    // response barrier (correlated by requestId), not the same-host settle:
+    // with delivery held, the call does NOT resolve; only once the answer
+    // crosses does it return with the merged snapshot. Pinned by starting the
+    // query WITHOUT awaiting, holding delivery, and proving it is still
+    // pending.
     const resultsBefore = queryResultsAtA();
     const releaseQuery = fixture.pair.holdDelivery();
-    await serverA.queryForeignAuthorizationEpochs(
+    let queryResolved = false;
+    const queryDone = serverA.queryForeignAuthorizationEpochs(
       HOME_SPACE,
       READ_SPACE,
       [ALICE, BOB],
-    );
+    ).then((value) => {
+      queryResolved = true;
+      return value;
+    });
+    // Drain the microtask/timer queues (a macrotask hop); delivery is HELD, so
+    // the answer cannot cross and the query must still be pending. (Cannot use
+    // whenQuiet here — it only resolves once the hold is released.)
+    await new Promise((resolve) => setTimeout(resolve, 0));
     assertEquals(
-      queryResultsAtA(),
-      resultsBefore,
-      "the query resolved before its answer crossed the link (L2 — " +
-        "C3.10b owns the response barrier)",
+      queryResolved,
+      false,
+      "the query awaits its answer over the link (L2 response barrier) — it " +
+        "does not resolve while delivery is held",
     );
+    assertEquals(queryResultsAtA(), resultsBefore, "no answer crossed yet");
     releaseQuery();
+    await queryDone;
+    assertEquals(
+      queryResolved,
+      true,
+      "the query resolved once its answer crossed the link",
+    );
     await settleLinked(fixture);
     assertEquals(queryResultsAtA(), resultsBefore + 1);
     const answer = atA.messages.findLast(

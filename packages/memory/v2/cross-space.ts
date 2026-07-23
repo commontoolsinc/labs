@@ -483,6 +483,61 @@ export interface ForeignAuthorizationEpochQueryResult
   epochs: readonly { principal: string; epoch: number }[];
 }
 
+/**
+ * C3.10b (2026-07-18): a general cross-host APPLY barrier. The sender
+ * emits `foreign-link-sync` to a peer space; the peer queues the ack on
+ * that space's inbound apply chain (so it drains strictly AFTER every
+ * frame that preceded the sync on the FIFO link has been applied) and
+ * replies `foreign-link-sync.ack`. When the ack returns, the sender
+ * knows every prior frame it sent on this link toward that space is
+ * APPLIED on the peer — the cross-host equivalent of the same-host
+ * `settleCrossSpaceDeliveries` barrier the in-process transport got for
+ * free (C3.10a's recorded L1 leak: over the link a mirror frame is in
+ * flight when the transact resolves). `requestId` correlates the pair.
+ */
+export interface ForeignLinkSync extends CrossSpaceEnvelope {
+  type: "foreign-link-sync";
+  requestId: string;
+}
+
+/** Peer → sender: the {@link ForeignLinkSync} ack (see there). */
+export interface ForeignLinkSyncAck extends CrossSpaceEnvelope {
+  type: "foreign-link-sync.ack";
+  requestId: string;
+}
+
+/**
+ * C3.10b reconnect dirt resync (C3A12 b): home host → read host, on link
+ * re-establishment, pull the dirt the home missed during the outage.
+ * `cursorSeq` is the home's durable per-link applied-dirt cursor (the
+ * highest `direct_dirty_seq` it applied for this (link, read space, home
+ * space) before the loss); the read host answers with the mirrored
+ * reader rows it owns for this home space whose `direct_dirty_seq`
+ * strictly exceeds it. `requestId` correlates the response barrier.
+ */
+export interface ForeignDirtyResync extends CrossSpaceEnvelope {
+  type: "foreign-dirty-resync";
+  requestId: string;
+  cursorSeq: number;
+}
+
+/**
+ * Read host → home host: the {@link ForeignDirtyResync} answer. `readers`
+ * are the mirrored reader identities (owner = the home space) dirtied
+ * past the home's cursor; `throughSeq` is the highest `direct_dirty_seq`
+ * scanned (0 when nothing was missed) — the home advances its applied-
+ * dirt cursor to it and marks the readers durably dirty, so the
+ * re-register barrier's post-ack scan wakes them exactly once. Idempotent
+ * and reorder-safe: the home's max-merge on `direct_dirty_seq` and the
+ * cursor advance never regress.
+ */
+export interface ForeignDirtyResyncResult extends CrossSpaceEnvelope {
+  type: "foreign-dirty-resync.result";
+  requestId: string;
+  readers: readonly ForeignReaderIdentity[];
+  throughSeq: number;
+}
+
 /** Every cross-space wire message (C3.1 vocabulary + C3.1b carriage). */
 export type CrossSpaceMessage =
   | ForeignReadersSubscribe
@@ -495,7 +550,11 @@ export type CrossSpaceMessage =
   | ForeignPointReadResult
   | ForeignAuthorizationEpochBump
   | ForeignAuthorizationEpochQuery
-  | ForeignAuthorizationEpochQueryResult;
+  | ForeignAuthorizationEpochQueryResult
+  | ForeignLinkSync
+  | ForeignLinkSyncAck
+  | ForeignDirtyResync
+  | ForeignDirtyResyncResult;
 
 export type CrossSpaceMessageType = CrossSpaceMessage["type"];
 
@@ -1155,6 +1214,49 @@ const PAYLOAD_READERS: Record<CrossSpaceMessageType, PayloadReader> = {
         requestId: raw.requestId,
         epochFloor: raw.epochFloor,
         epochs,
+      },
+    };
+  },
+  "foreign-link-sync": (raw) => {
+    if (!isNonEmptyString(raw.requestId)) {
+      return { detail: "requestId must be a non-empty string" };
+    }
+    return { fields: { requestId: raw.requestId } };
+  },
+  "foreign-link-sync.ack": (raw) => {
+    if (!isNonEmptyString(raw.requestId)) {
+      return { detail: "requestId must be a non-empty string" };
+    }
+    return { fields: { requestId: raw.requestId } };
+  },
+  "foreign-dirty-resync": (raw) => {
+    if (!isNonEmptyString(raw.requestId)) {
+      return { detail: "requestId must be a non-empty string" };
+    }
+    // 0 is legitimate: a home that applied no dirt for this link before the
+    // loss pulls everything the read host owns.
+    if (!isNonNegativeSafeInteger(raw.cursorSeq)) {
+      return { detail: "cursorSeq must be a non-negative integer" };
+    }
+    return {
+      fields: { requestId: raw.requestId, cursorSeq: raw.cursorSeq },
+    };
+  },
+  "foreign-dirty-resync.result": (raw) => {
+    if (!isNonEmptyString(raw.requestId)) {
+      return { detail: "requestId must be a non-empty string" };
+    }
+    // 0 is legitimate: nothing was missed during the outage.
+    if (!isNonNegativeSafeInteger(raw.throughSeq)) {
+      return { detail: "throughSeq must be a non-negative integer" };
+    }
+    const readers = readReaderIdentities(raw.readers);
+    if ("detail" in readers) return readers;
+    return {
+      fields: {
+        requestId: raw.requestId,
+        readers: readers.readers,
+        throughSeq: raw.throughSeq,
       },
     };
   },

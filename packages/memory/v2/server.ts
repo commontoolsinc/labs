@@ -2,6 +2,7 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import { resolveSpaceStoreUrl } from "./storage-path.ts";
 import {
+  type CrossSpaceChannel,
   type CrossSpaceDeliveryContext,
   CrossSpaceHostRouter,
   type CrossSpaceLaneDemand,
@@ -14,6 +15,10 @@ import {
   type ForeignAuthorizationEpochQueryResult,
   type ForeignAuthorizationEpochStamp,
   type ForeignDirtyMark,
+  type ForeignDirtyResync,
+  type ForeignDirtyResyncResult,
+  type ForeignLinkSync,
+  type ForeignLinkSyncAck,
   type ForeignObservationMirror,
   type ForeignPointRead,
   type ForeignPointReadResult,
@@ -508,6 +513,18 @@ export const FOREIGN_POINT_READ_MALFORMED = "foreign-read-malformed";
 export const FOREIGN_POINT_READ_TIMEOUT = "foreign-read-timeout";
 
 /**
+ * C3.10b: the sentinel address a cross-space-read claim ISSUANCE probe reads
+ * to bind the acting principal's foreign READ on a PEER read space over the
+ * link. The read-host serve arm (`answerForeignPointRead`) runs the SAME
+ * `#authorizeMessageWithEngine(READ)` check for any address, so a probe read
+ * of a (typically absent) sentinel resolves `served` with the epoch stamp
+ * when the principal holds READ, `denied` when it does not — exactly the
+ * {hasRead, epoch} the local-read-space branch gets from its synchronous
+ * engine consult. No document ever rides back (the id is never written).
+ */
+const FOREIGN_READ_BINDING_PROBE_ID = "of:cross-space:read-binding-probe";
+
+/**
  * C3.4: outcome of one executor foreign point read as the home host
  * returns it to the provider channel. `served` carries the read space's
  * stamped covering seq (the read-space seq domain — NEVER merged into
@@ -534,6 +551,20 @@ export type ExecutorForeignPointReadOutcome =
   }
   | { status: "denied"; code: string }
   | { status: "failed"; code: string };
+
+/**
+ * C3.7/C3.10b: one bound foreign-authorization epoch a cross-space-read
+ * claim was issued under — the {(space, principal, epoch)} an epoch bump
+ * revalidates by equality (C3A3). `linkId` is set ONLY when the read
+ * space is peer-routed: it names the co-hosted link the epoch was resolved
+ * over, so C3.10b can (a) revoke on that link's loss (C3A12 dead-link
+ * revocation) and (b) count the arm-(ii) residual-window closures on it.
+ * A locally-hosted (in-process/co-hosted-local) read space leaves it
+ * undefined — byte-identical to the pre-C3.10b `ForeignAuthorizationEpochStamp`.
+ */
+interface BoundForeignReadEpoch extends ForeignAuthorizationEpochStamp {
+  linkId?: string;
+}
 
 /**
  * C3.4: the claimed attempt a foreign point read acts under, as the
@@ -1853,7 +1884,7 @@ export class Server {
    */
   #executionClaimForeignReadEpochs = new Map<
     string,
-    readonly ForeignAuthorizationEpochStamp[]
+    readonly BoundForeignReadEpoch[]
   >();
   #ownedExecutionLeases = new Map<string, OwnedExecutionLease>();
   #executionInvalidationStartedAt = new Map<string, number>();
@@ -1956,7 +1987,14 @@ export class Server {
     string,
     Map<
       string,
-      { generation: number; laneDemands: readonly CrossSpaceLaneDemand[] }
+      {
+        generation: number;
+        laneDemands: readonly CrossSpaceLaneDemand[];
+        /** C3.10b: the link this registration arrived on — so the read host
+         * drops it when that link's incarnation dies (C3A12). Undefined for
+         * the in-process loopback (which never dies). */
+        linkId?: string;
+      }
     >
   >();
   /**
@@ -1989,6 +2027,36 @@ export class Server {
   #pendingForeignSubscriptionWork = new Set<Promise<void>>();
   #foreignSubscriptionsClosed = false;
   #foreignWakeListeners = new Map<string, Set<ForeignWakeListener>>();
+  /** C3.10b: link-lifecycle unsubscribes (per-channel `onLifecycle` plus the
+   * transport `onChannel`), released on server close. */
+  #crossSpaceLinkLifecycleDetachers = new Set<() => void>();
+  /** C3.10b: in-flight reconnect dirt-resync pulls, keyed by `requestId`.
+   * Resolves from the `foreign-dirty-resync.result` arm, a fail-closed
+   * timeout, or server close. */
+  #pendingForeignDirtResyncs = new Map<string, {
+    homeSpace: string;
+    readSpace: string;
+    linkId: string;
+    resolve: () => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+  /** C3.10b: in-flight cross-host apply barriers (L1 mirror flush), keyed by
+   * `requestId`. Resolves from the `foreign-link-sync.ack` arm, a fail-OPEN
+   * timeout, or server close. `peerSpace` binds the answering space. */
+  #pendingForeignLinkSyncs = new Map<string, {
+    peerSpace: string;
+    resolve: () => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+  /** C3.10b (L2 fix): in-flight epoch-table queries awaiting their answer,
+   * keyed by `requestId` — the CROSS-HOST response barrier the same-host
+   * settle stood in for. Resolves from the `.query.result` arm, a fail-closed
+   * timeout, or server close. `authoritySpace` binds the answering space. */
+  #pendingForeignEpochQueries = new Map<string, {
+    authoritySpace: string;
+    resolve: () => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
   /**
    * C3.2 (2026-07-18): the receiving-side store for REMOTE authorization
    * epochs — what this host remembers about PEER spaces, fed by inbound
@@ -2039,6 +2107,26 @@ export class Server {
     claimIncarnationKey: string;
     /** C3.5: the requested document id (the result wire carries none). */
     docId: string;
+  }>();
+
+  /**
+   * C3.10b: in-flight cross-space-read ISSUANCE probes (the peer arm of the
+   * C3.6 READ-binding preflight), keyed by `requestId`. Distinct from
+   * `#pendingForeignPointReads` because a probe is NOT tied to a live claim
+   * (issuance is deciding whether to mint one) and records NO served stamp —
+   * it resolves only {hasRead, epoch}. `readSpace` binds the ANSWERING space
+   * (the C3A13 pending-map half). Resolves from the point-read result arm,
+   * the fail-closed timeout, or server close — never left dangling.
+   */
+  #pendingForeignReadBindings = new Map<string, {
+    readSpace: string;
+    resolve: (
+      outcome:
+        | { status: "served"; epoch: number }
+        | { status: "denied" }
+        | { status: "failed" },
+    ) => void;
+    timer: ReturnType<typeof setTimeout>;
   }>();
 
   /**
@@ -2206,6 +2294,19 @@ export class Server {
     ) {
       this.registerCrossSpaceHostedSpace(space);
     }
+    // C3.10b: watch every link channel's lifecycle — `closed` drives the
+    // home host's unilateral dead-link claim revocation and the read host's
+    // subscription drop (C3A12); `reconnected` drives the resync drill. The
+    // in-process transport has no routing face, so this is dormant single-host
+    // (no reconnect, no revocation) — byte-identical.
+    const routing = options.crossSpaceTransport?.routing;
+    if (routing !== undefined) {
+      this.#crossSpaceLinkLifecycleDetachers.add(
+        routing.onChannel((channel) =>
+          this.#watchCrossSpaceLinkLifecycle(channel)
+        ),
+      );
+    }
   }
 
   nowSeconds(): number {
@@ -2347,6 +2448,30 @@ export class Server {
     // C3.5: host-validated foreign basis components handed to the engine
     // (at most one per (attempt, space)).
     foreignBasisComponentsValidated: 0,
+    // C3.10b (C3A7 co-hosted arm ii — the COUNTED DIVERGENCE metric):
+    // cross-space-read claims revoked by a post-hoc REMOTE epoch bump over a
+    // co-hosted link (peer-bound epoch). Over the link the apply fence reads
+    // the home host's LAST-RECEIVED epoch, so a bump in flight at fence time
+    // can land after the commit applies — a bounded residual window (bounded
+    // to one in-flight link segment by the single-multiplexed FIFO ordering)
+    // that C3.7's post-merge revalidation closes by revoking the now-stale
+    // claim. This counts those closures. Conservatively a SUPERSET of genuine
+    // post-apply divergences: the home cannot observe whether a revoked claim
+    // had actually committed under the stale epoch, so an idle revocation
+    // over the link counts too (over-count is the honest direction — it never
+    // hides a divergence). In-process (loopback) revocations are handled by
+    // the synchronous local-bump arm first, so they never reach this counter.
+    crossSpaceCoHostedFenceResidualRevocations: 0,
+    // C3.10b (C3A12 dead-link revocation): cross-space-read claims revoked
+    // because the link carrying their bound foreign epoch was lost (a `closed`
+    // lifecycle event). The bound (link, space) becomes untrustworthy, so the
+    // home host fails closed and revokes unilaterally — over-revoke, never
+    // under-revoke (C3A3).
+    crossSpaceDeadLinkClaimRevocations: 0,
+    // C3.10b (C3A12 reconnect): completed reconnect resync drills (epoch
+    // resync + dirt resync + subscription re-register) driven off the link's
+    // `reconnected` lifecycle event.
+    crossSpaceReconnectResyncs: 0,
     acceptedCommitIndexLookups: 0,
     acceptedCommitIndexTargetCandidates: 0,
     acceptedCommitIndexDemandedPieces: 0,
@@ -4464,14 +4589,34 @@ export class Server {
    * its reads served against it), so the pre-resolve is a cached, immediate
    * await.
    *
-   * A peer-routed read space is deliberately LEFT OUT of the map, so the
-   * resolver returns `undefined` for it — fail closed. C3.8 is in-process only
-   * (C3A8) and issuance soft-declines peer-routed foreign reads
-   * (`#assertForeignReadAccessForIssuance`), so a bound claim never carries a
-   * peer component here today; C3.10b wires the peer arm
-   * (`effectiveRemoteAuthorizationEpoch` over the link's epoch cache) and owns
-   * the co-hosted half of C3A7's ruling. Returns `undefined` when the commit
-   * carries no foreign epoch components at all — the fence stays dormant.
+   * C3.10b co-hosted arm (C3A7 arm ii — the CHOSEN ruling, see below):
+   * a peer-routed read space resolves the home host's LAST-RECEIVED epoch
+   * from the remote cache (`effectiveRemoteAuthorizationEpoch` keyed by the
+   * link's stable id), NOT its live table (which is on the peer). This is
+   * the honest BOUNDED-window fence: a bump B sent that is still in flight at
+   * fence time is invisible, so the commit can apply against a stale epoch —
+   * a bounded residual window (one in-flight link segment, by the single-
+   * multiplexed FIFO ordering) that C3.7's post-merge revalidation closes by
+   * revoking the now-stale claim (counted:
+   * `crossSpaceCoHostedFenceResidualRevocations`). undefined (never learned)
+   * still fails closed (C3A3).
+   *
+   * ── Why arm (ii), not (i) (justified against C3.8's in-process ruling) ──
+   * The engine consults this resolver SYNCHRONOUSLY inside the home commit
+   * transaction (passive-engine decision #1 — `applyCommit` is synchronous).
+   * Arm (i)'s epoch-hold handshake needs an async validate-and-pin round trip
+   * to the peer INSIDE that transaction, which the synchronous apply cannot
+   * take, and it couples B's ACL-bump client response to A's apply latency —
+   * a liveness cost the co-hosted assumption set (low-latency, reliable link)
+   * does not need. The C3.8 row already committed to arm (ii) for in-process
+   * (exact there because bump and fence read the SAME table on ONE event
+   * loop — a degenerate zero window); this EXTENDS the same receive-order
+   * semantics to co-hosted with the window honestly non-zero and metered.
+   * The transport declares `receiveOrderFencing` + single-multiplexed FIFO —
+   * exactly what arm (ii) relies on to keep the window bounded.
+   *
+   * Returns `undefined` when the commit carries no foreign epoch components
+   * at all — the fence stays dormant.
    */
   async #foreignAuthorizationEpochResolverForCommit(
     foreignInputBases:
@@ -4491,13 +4636,21 @@ export class Server {
     }
     if (foreignSpaces.size === 0) return undefined;
     const localReadEngines = new Map<string, Engine.Engine>();
+    const peerLinkIdBySpace = new Map<string, string>();
     for (const space of foreignSpaces) {
-      // Peer-routed spaces are C3.10b's; leaving them unresolved fails the
-      // fence closed for them (the safe default until the peer arm lands).
       if (
         this.#crossSpaceRouter.transport.routing?.peerHostFor(space) !==
           undefined
       ) {
+        // C3.10b (C3A7 co-hosted arm ii): the read space's live epoch table
+        // is on the PEER host — the home fence reads the home host's
+        // LAST-RECEIVED epoch instead (the max-merged remote cache, fed by
+        // the FIFO link in the read host's commit order). Capture the link's
+        // STABLE id now so the synchronous resolver below can look it up.
+        peerLinkIdBySpace.set(
+          space,
+          this.#crossSpaceRouter.transport.channelTo(space).linkId,
+        );
         continue;
       }
       if (!(await this.ensureCrossSpaceHosting(space))) continue;
@@ -4505,11 +4658,24 @@ export class Server {
     }
     return (space, principal) => {
       const engine = localReadEngines.get(space);
-      // Unknown / peer / unhostable → undefined → the engine fence treats it
-      // as stale (fail closed, C3A3). Locally hosted → the LIVE table read,
-      // synchronous, at fence time.
-      if (engine === undefined) return undefined;
-      return Engine.effectiveAuthorizationEpoch(engine, principal);
+      if (engine !== undefined) {
+        // LOCAL arm (C3.8 in-process, EXACT): the LIVE table read at fence
+        // time, synchronous, zero residual window.
+        return Engine.effectiveAuthorizationEpoch(engine, principal);
+      }
+      const linkId = peerLinkIdBySpace.get(space);
+      if (linkId !== undefined) {
+        // PEER arm (C3A7 arm ii): the home host's LAST-RECEIVED epoch.
+        // undefined (never learned over this link) fails the fence closed
+        // (C3A3). A bump that B sent but that is still IN FLIGHT at fence
+        // time is invisible here — the BOUNDED residual window (bounded to
+        // one in-flight link segment by the single-multiplexed FIFO
+        // ordering) that C3.7's post-merge revalidation closes by revoking
+        // the now-stale claim once the bump lands (counted as a divergence).
+        return this.effectiveRemoteAuthorizationEpoch(linkId, space, principal);
+      }
+      // Unknown / unhostable → undefined → fail closed (C3A3).
+      return undefined;
     };
   }
 
@@ -5371,11 +5537,12 @@ export class Server {
    * 3. Per foreign read space, the ACTING principal must hold READ — resolved
    *    through the SAME `#authorizeMessageWithEngine(READ)` the C3.3b mirror
    *    gate and the C3.4 point read use, on the READ space's own engine
-   *    (in-process/co-hosted = the local hosted engine; a peer-routed read
-   *    space's link-side binding round-trip is C3.10b, and until it lands a
-   *    peer-routed read soft-declines here). The acting principal is supplied
-   *    by the caller: the lease sponsor for the space lane (sponsor rotation
-   *    flips it), the bound lane grant's principal for user/session lanes.
+   *    (in-process/co-hosted-local = the local hosted engine; a peer-routed
+   *    read space resolves READ + epoch OVER THE LINK via C3.10b's
+   *    `#bindForeignReadOverLink` probe, fail-closed on decline). The acting
+   *    principal is supplied by the caller: the lease sponsor for the space
+   *    lane (sponsor rotation flips it), the bound lane grant's principal for
+   *    user/session lanes.
    *
    * The per-space engine opens are awaits; the caller's re-sample block after
    * this returns is their authority boundary (the `#setExecutionClaim`
@@ -5409,15 +5576,83 @@ export class Server {
     // and the epoch read share one synchronous engine section
     // (`#assertForeignReadAccessForIssuance`), so the bound epoch is exactly
     // the granting ACL's generation.
-    const boundEpochs: ForeignAuthorizationEpochStamp[] = [];
+    const boundEpochs: BoundForeignReadEpoch[] = [];
     for (const readSpace of foreignReadSpaces) {
-      const epoch = await this.#assertForeignReadAccessForIssuance(
+      const bound = await this.#assertForeignReadAccessForIssuance(
+        claimInput.space,
         readSpace,
         actingPrincipal,
       );
-      boundEpochs.push({ space: readSpace, principal: actingPrincipal, epoch });
+      boundEpochs.push({
+        space: readSpace,
+        principal: actingPrincipal,
+        epoch: bound.epoch,
+        ...(bound.linkId !== undefined ? { linkId: bound.linkId } : {}),
+      });
     }
     return boundEpochs;
+  }
+
+  /**
+   * C3.10b peer arm of the C3.6 READ binding: resolve the acting principal's
+   * READ on a PEER read space, over the link, by a `foreign-point-read`
+   * probe of {@link FOREIGN_READ_BINDING_PROBE_ID}. The read host runs the
+   * exact `#authorizeMessageWithEngine(READ)` the local branch runs and
+   * answers with its epoch stamp, so `served` ⇒ {hasRead, epoch}, `denied` ⇒
+   * no READ, and any failure or timeout fails CLOSED (the client keeps
+   * running locally under its own authority — a soft decline). The probe
+   * records NO served stamp (issuance has no live claim yet) and correlates
+   * through its own pending map. `homeSpace` must be registered (the caller's
+   * lease is held, so it is) — belt-registered here defensively.
+   */
+  async #bindForeignReadOverLink(
+    homeSpace: string,
+    readSpace: string,
+    principal: string,
+  ): Promise<{ status: "served"; epoch: number } | { status: "declined" }> {
+    this.registerCrossSpaceHostedSpace(homeSpace);
+    const requestId = `xsp-read-binding:${crypto.randomUUID()}`;
+    const timeoutMs =
+      this.options.executionControl?.foreignPointReadTimeoutMs ?? 10_000;
+    const pending = Promise.withResolvers<
+      | { status: "served"; epoch: number }
+      | { status: "denied" }
+      | { status: "failed" }
+    >();
+    const timer = setTimeout(() => {
+      if (this.#pendingForeignReadBindings.delete(requestId)) {
+        pending.resolve({ status: "failed" });
+      }
+    }, timeoutMs);
+    this.#pendingForeignReadBindings.set(requestId, {
+      readSpace,
+      resolve: pending.resolve,
+      timer,
+    });
+    try {
+      this.#crossSpaceRouter.link(homeSpace, readSpace).send({
+        type: "foreign-point-read",
+        requestId,
+        address: {
+          id: FOREIGN_READ_BINDING_PROBE_ID,
+          scope: "space",
+          path: [],
+        },
+        // The serve arm authorizes on `principal` and ignores contextKey
+        // (v1 resolves the space instance only), so "space" is the honest
+        // probe context; the binding gates the whole claim, per read space.
+        actingPrincipal: { principal, contextKey: "space" },
+      });
+    } catch (error) {
+      clearTimeout(timer);
+      this.#pendingForeignReadBindings.delete(requestId);
+      console.warn("foreign read-binding probe send failed:", error);
+      return { status: "declined" };
+    }
+    const outcome = await pending.promise;
+    return outcome.status === "served"
+      ? { status: "served", epoch: outcome.epoch }
+      : { status: "declined" };
   }
 
   /**
@@ -5477,28 +5712,26 @@ export class Server {
    * (C3.6), mirroring the C3.3b mirror gate / C3.4 point read resolution:
    * `#authorizeMessageWithEngine(READ)` on the READ space's own engine. A
    * refusal throws (soft decline — see `#assertCrossSpaceReadIssuance`). The
-   * read space is soft-declined when it cannot be authority-verified here:
-   * unhostable, or peer-routed (whose link-side READ binding round-trip is
-   * C3.10b — until it lands, a peer-routed foreign read never issues a claim
-   * and the client keeps running locally). In-process/co-hosted read spaces
-   * open the local hosted engine, so send host == read host and the local
-   * consult IS the read host's check.
+   * read space is soft-declined when it cannot be authority-verified:
+   * unhostable, or (peer-routed) the link-side probe declined.
    *
-   * C3.7 (2026-07-18): returns the foreign authorization epoch this READ
-   * was authorized under — read from C3.2's LOCAL `authorization_epoch`
-   * table in the SAME synchronous engine section as the READ authz check
-   * (no await between them, so no TOCTOU: the epoch stamped is exactly the
-   * generation the granting ACL is at). A locally-hosted read space always
-   * resolves a known number (`effectiveAuthorizationEpoch` is 0 at genesis,
-   * never undefined); a peer-routed one would read the remote cache
-   * (`effectiveRemoteAuthorizationEpoch`, undefined=unknown), but the
-   * peer-routed branch soft-declines above, so a BOUND claim always carries
-   * a known epoch (the caller asserts it).
+   * Two arms by hosting:
+   * - LOCAL (in-process / co-hosted-local): open the hosted engine and read
+   *   the READ decision + epoch in ONE synchronous section (no await
+   *   between), so no TOCTOU — the epoch is exactly the granting ACL's
+   *   generation. `effectiveAuthorizationEpoch` is 0 at genesis, never
+   *   undefined, so a bound claim always carries a known epoch.
+   * - PEER (C3.10b): the ACL lives on the peer host, so the READ and its
+   *   epoch round-trip the link as a `foreign-point-read` probe
+   *   (`#bindForeignReadOverLink`), fail-closed on decline/timeout. The
+   *   returned `linkId` binds the claim to the link so a loss revokes it
+   *   (C3A12).
    */
   async #assertForeignReadAccessForIssuance(
+    homeSpace: string,
     readSpace: string,
     actingPrincipal: string,
-  ): Promise<number> {
+  ): Promise<{ epoch: number; linkId?: string }> {
     if (!(await this.ensureCrossSpaceHosting(readSpace))) {
       throw new ExecutionLeaseAuthorityError(
         `cross-space-read claim issuance cannot host read space ${readSpace}`,
@@ -5508,10 +5741,26 @@ export class Server {
       this.#crossSpaceRouter.transport.routing?.peerHostFor(readSpace) !==
         undefined
     ) {
-      throw new ExecutionLeaseAuthorityError(
-        `cross-space-read claim issuance defers peer-routed read space ` +
-          `${readSpace} to C3.10b's link-side READ binding`,
+      // C3.10b peer arm: the read space's ACL lives on the peer host, so the
+      // READ and its epoch are resolved OVER THE LINK (the same host-boundary
+      // shape as C3.4's point read). Bind the link's STABLE id so a link loss
+      // revokes this claim (C3A12) and the arm-(ii) residual window is
+      // countable. A declined probe (denied / failed / timeout) soft-declines
+      // — the client keeps running locally, exactly like a lost lease.
+      const linkId =
+        this.#crossSpaceRouter.transport.channelTo(readSpace).linkId;
+      const bound = await this.#bindForeignReadOverLink(
+        homeSpace,
+        readSpace,
+        actingPrincipal,
       );
+      if (bound.status !== "served") {
+        throw new ExecutionLeaseAuthorityError(
+          `acting principal could not bind READ on peer-routed cross-space ` +
+            `read space ${readSpace} over the link (soft decline)`,
+        );
+      }
+      return { epoch: bound.epoch, linkId };
     }
     const engine = await this.openHostedEngine(readSpace);
     if (
@@ -5528,7 +5777,9 @@ export class Server {
     }
     // Same synchronous section as the READ check above (no intervening
     // await): the bound epoch is the generation this exact ACL grant is at.
-    return Engine.effectiveAuthorizationEpoch(engine, actingPrincipal);
+    return {
+      epoch: Engine.effectiveAuthorizationEpoch(engine, actingPrincipal),
+    };
   }
 
   async setExecutionClaim(
@@ -5658,7 +5909,7 @@ export class Server {
     // its own authority — no escalation), so a stage-off/mixed-cohort/denied
     // issuance fails open exactly like a lost lease. The foreign-engine opens
     // are awaits; the re-sample block below is their authority boundary.
-    let boundForeignEpochs: readonly ForeignAuthorizationEpochStamp[] = [];
+    let boundForeignEpochs: readonly BoundForeignReadEpoch[] = [];
     if (foreignReadSpaces.length > 0) {
       boundForeignEpochs = await this.#assertCrossSpaceReadIssuance(
         claimInput,
@@ -5666,10 +5917,11 @@ export class Server {
         laneGrant === null ? current.onBehalfOf : laneGrant.principal,
       );
       // C3.7 fail-closed invariant (C3A3): a bound claim always carries a
-      // KNOWN epoch. A locally-hosted read space resolves a number; a
-      // peer-routed one (which would read the remote cache, undefined =
-      // unknown) soft-declines above. Assert defensively so a future
-      // peer-routed relax cannot silently bind an unknown epoch.
+      // KNOWN epoch. A locally-hosted read space resolves a number in-engine;
+      // a peer-routed one binds the peer host's answer over the link (C3.10b's
+      // probe), and a declined/timed-out probe THREW above rather than
+      // returning — so reaching here means every read space bound. Assert
+      // defensively so no path silently binds an unknown epoch.
       if (
         boundForeignEpochs.length !== foreignReadSpaces.length ||
         boundForeignEpochs.some((entry) => !Number.isSafeInteger(entry.epoch))
@@ -6147,6 +6399,32 @@ export class Server {
         code: FOREIGN_POINT_READ_UNAVAILABLE,
       });
     }
+    // C3.10b teardown: fail every pending issuance READ-binding probe closed
+    // (soft decline — a closing host issues nothing), and release every
+    // pending reconnect/barrier round-trip so a closing host never strands an
+    // awaiting drill.
+    for (const [requestId, binding] of this.#pendingForeignReadBindings) {
+      clearTimeout(binding.timer);
+      this.#pendingForeignReadBindings.delete(requestId);
+      binding.resolve({ status: "failed" });
+    }
+    for (const [requestId, pending] of this.#pendingForeignDirtResyncs) {
+      clearTimeout(pending.timer);
+      this.#pendingForeignDirtResyncs.delete(requestId);
+      pending.resolve();
+    }
+    for (const [requestId, pending] of this.#pendingForeignLinkSyncs) {
+      clearTimeout(pending.timer);
+      this.#pendingForeignLinkSyncs.delete(requestId);
+      pending.resolve();
+    }
+    for (const [requestId, pending] of this.#pendingForeignEpochQueries) {
+      clearTimeout(pending.timer);
+      this.#pendingForeignEpochQueries.delete(requestId);
+      pending.resolve();
+    }
+    for (const detach of this.#crossSpaceLinkLifecycleDetachers) detach();
+    this.#crossSpaceLinkLifecycleDetachers.clear();
     // C3.3a teardown: stop new reconciles, release every pending C3A10
     // ack barrier (fail-open — a closing host must not strand a chain),
     // and drain in-flight subscription work before the engines close.
@@ -9941,6 +10219,7 @@ export class Server {
       sessionId: scopeContext.sessionId,
     };
     let sent = false;
+    const peerTargets = new Set<string>();
     for (const space of mirrorSpaces) {
       // In-process stand-in for the peer host's own store-backed hosting
       // registration (C3.10a replaces this with real space→host routing):
@@ -10014,13 +10293,23 @@ export class Server {
         } as unknown as Record<string, unknown>,
       });
       sent = true;
+      if (peerRouted) peerTargets.add(space);
     }
     if (sent) {
-      // Same-host application barrier: today's contract is that this
-      // method resolves only after the mirror rows are durably applied
-      // (transact awaits it before responding). Cross-host, C3.10b owns
-      // the equivalent ack/barrier semantics.
+      // Same-host application barrier: this method resolves only after the
+      // mirror rows are durably applied (transact awaits it before
+      // responding). This covers loopback (in-process) targets byte-
+      // identically.
       await this.settleCrossSpaceDeliveries();
+      // C3.10b (L1 fix): a PEER target's mirror is a frame in flight — the
+      // same-host settle above does not cover the peer's apply. Flush each
+      // peer with a cross-host apply barrier so the transact resolves only
+      // after the peer applied its mirror rows (the C3.10a recorded L1 leak,
+      // closed). Fail-open per flush (the barrier must not wedge the write
+      // path); the peer's own idempotent upsert reconciles a lost flush.
+      for (const peerSpace of peerTargets) {
+        await this.#settleCrossHostApply(ownerSpace, peerSpace);
+      }
     }
   }
 
@@ -10617,6 +10906,32 @@ export class Server {
       case "foreign-point-read.result":
         this.applyForeignPointReadResult(message, context);
         return;
+      // C3.10b (2026-07-18): the reconnect/barrier arms. The dirt-resync query
+      // and the link-sync flush ride the per-space apply chain so they drain
+      // behind in-flight applies (the sync's whole point); the resync result
+      // rides it too (engine dirt write ordered like a dirt mark); the sync
+      // ack is a synchronous correlation resolution (like the epoch bump).
+      case "foreign-dirty-resync":
+        this.queueCrossSpaceInboundApply(
+          context.space,
+          () => this.answerForeignDirtResync(message, context),
+        );
+        return;
+      case "foreign-dirty-resync.result":
+        this.queueCrossSpaceInboundApply(
+          context.space,
+          () => this.applyForeignDirtResyncResult(message, context),
+        );
+        return;
+      case "foreign-link-sync":
+        this.queueCrossSpaceInboundApply(
+          context.space,
+          () => this.applyForeignLinkSync(message, context),
+        );
+        return;
+      case "foreign-link-sync.ack":
+        this.applyForeignLinkSyncAck(message, context);
+        return;
       default:
         // Every current C3.1 message type has an inbound consumer; an
         // ADDITIVE future type parses (additive-tolerant read) and
@@ -10856,6 +11171,7 @@ export class Server {
     byHome.set(subscriptionKey, {
       generation: message.subscriptionGeneration,
       laneDemands: message.laneDemands,
+      linkId: context.linkId,
     });
     const drained = this.#schedulerSideEffectsByOwnerSpace.get(context.space) ??
       Promise.resolve();
@@ -11366,18 +11682,18 @@ export class Server {
   }
 
   /**
-   * C3.2 (2026-07-18): issue a `foreign-authorization-epoch.query` from
-   * `homeSpace` to `authoritySpace`'s host and settle same-host
-   * delivery, returning the post-merge remote snapshot (undefined when
-   * the authority answered nothing — e.g. unhosted). The inbound
-   * `.query.result` arm max-merges into `#remoteAuthorizationEpochs`
-   * keyed by the answering link, so no request/response correlation
-   * state is needed: an epoch answer is trustworthy per C3A13 because
-   * it arrived on a link speaking for `authoritySpace`, not because we
-   * remember asking. Consumers: C3.7's re-issuance preflight and
-   * C3.10b's reconnect resync (resync the epoch table before ANY claim
-   * re-issuance — C3A12); the same-host settle here is the in-process
-   * stand-in for C3.10b's cross-host response barrier.
+   * C3.2 (2026-07-18) / C3.10b (L2 fix, 2026-07-18): issue a
+   * `foreign-authorization-epoch.query` from `homeSpace` to `authoritySpace`'s
+   * host and await its ANSWER — the CROSS-HOST response barrier (correlated by
+   * `requestId`) that C3.10a's same-host settle stood in for. Returns the
+   * post-merge remote snapshot (undefined when the authority is unreachable/
+   * unhosted, or the answer timed out — fail closed). The `.query.result` arm
+   * max-merges into `#remoteAuthorizationEpochs` keyed by the answering link
+   * (the answer is trustworthy per C3A13 because it arrived on a link speaking
+   * for `authoritySpace`); the pending map only supplies the barrier — a
+   * confused answer for the wrong space still cannot pollute another space's
+   * cache. Consumers: C3.7's re-issuance preflight and C3.10b's reconnect
+   * resync (resync the epoch table before ANY claim re-issuance — C3A12).
    */
   async queryForeignAuthorizationEpochs(
     homeSpace: string,
@@ -11388,21 +11704,36 @@ export class Server {
     | undefined
   > {
     this.registerCrossSpaceHostedSpace(homeSpace);
-    // In-process stand-in for the peer host's own hosting registration
-    // (see mirrorSchedulerObservation): a store-materialized authority
-    // re-registers lazily; a never-hosted name drops at the router.
-    await this.ensureCrossSpaceHosting(authoritySpace);
+    // A never-hosted authority is unreachable: the send would drop at the
+    // router with no answer, so short-circuit rather than block on the barrier.
+    if (!(await this.ensureCrossSpaceHosting(authoritySpace))) return undefined;
     const link = this.#crossSpaceRouter.link(homeSpace, authoritySpace);
-    link.send({
-      type: "foreign-authorization-epoch.query",
-      requestId: `xsp-epoch-query:${crypto.randomUUID()}`,
-      ...(principals !== undefined ? { principals } : {}),
-    });
-    await this.settleCrossSpaceDeliveries();
-    return this.remoteAuthorizationEpochSnapshot(
-      link.linkId,
+    const requestId = `xsp-epoch-query:${crypto.randomUUID()}`;
+    const timeoutMs =
+      this.options.executionControl?.foreignPointReadTimeoutMs ?? 10_000;
+    const pending = Promise.withResolvers<void>();
+    const timer = setTimeout(() => {
+      if (this.#pendingForeignEpochQueries.delete(requestId)) pending.resolve();
+    }, timeoutMs);
+    this.#pendingForeignEpochQueries.set(requestId, {
       authoritySpace,
-    );
+      resolve: pending.resolve,
+      timer,
+    });
+    try {
+      link.send({
+        type: "foreign-authorization-epoch.query",
+        requestId,
+        ...(principals !== undefined ? { principals } : {}),
+      });
+    } catch (error) {
+      clearTimeout(timer);
+      this.#pendingForeignEpochQueries.delete(requestId);
+      console.warn("cross-space epoch query send failed:", error);
+      return this.remoteAuthorizationEpochSnapshot(link.linkId, authoritySpace);
+    }
+    await pending.promise;
+    return this.remoteAuthorizationEpochSnapshot(link.linkId, authoritySpace);
   }
 
   /**
@@ -11550,6 +11881,16 @@ export class Server {
       if (effective !== undefined && entry.epoch >= effective) continue;
       if (this.revokeExecutionClaim(claim)) {
         revoked += 1;
+        // C3.10b (C3A7 arm ii): a claim bound over a co-hosted link that a
+        // post-hoc REMOTE bump revoked is a residual-window closure — the
+        // fence read a stale last-received epoch and the bump caught up.
+        // (Loopback/in-process claims are already revoked by the synchronous
+        // local-bump arm, so `revokeExecutionClaim` returns false for them
+        // and they never reach here — this counts only genuine co-hosted
+        // post-hoc revocations.)
+        if (entry.linkId !== undefined) {
+          this.executionStats.crossSpaceCoHostedFenceResidualRevocations += 1;
+        }
         this.#dropOrphanedForeignReaderSubscription(
           claim.space,
           authoritySpace,
@@ -11583,6 +11924,430 @@ export class Server {
       }
     }
     this.dropForeignReaderSubscriptionsForHome(readSpace, homeSpace);
+  }
+
+  // ====================================================================
+  // C3.10b — the link-lifecycle drills (C3A12): loss detection + unilateral
+  // dead-link revocation, and the reconnect resync (epoch → dirt → re-register).
+  // ====================================================================
+
+  /** The stable link id `space` routes over, or undefined when `space` is not
+   * peer-routed (locally hosted or unknown). */
+  #linkIdForRoutedSpace(space: string): string | undefined {
+    if (
+      this.#crossSpaceRouter.transport.routing?.peerHostFor(space) === undefined
+    ) {
+      return undefined;
+    }
+    return this.#crossSpaceRouter.transport.channelTo(space).linkId;
+  }
+
+  /** Subscribe one link channel's lifecycle (C3.10b). Fired for every channel
+   * the transport surfaces; the SAME channel object persists across reconnects
+   * (its incarnation bumps), so this subscribes exactly once per link. */
+  #watchCrossSpaceLinkLifecycle(channel: CrossSpaceChannel): void {
+    const detach = channel.onLifecycle((event) => {
+      if (event.kind === "closed") {
+        this.#onCrossSpaceLinkLost(channel.linkId);
+      } else if (event.kind === "reconnected") {
+        // Track the drill so `settleForeignReaderSubscriptions` awaits it and
+        // fixtures see a settled reconnect; fail-open on any error.
+        this.trackForeignSubscriptionWork(
+          this.#onCrossSpaceLinkReconnected(channel.linkId).catch((error) => {
+            console.warn("cross-space reconnect resync failed:", error);
+          }),
+        );
+      }
+    });
+    this.#crossSpaceLinkLifecycleDetachers.add(detach);
+  }
+
+  /**
+   * C3A12 link-loss handling. On both hosts: the home host UNILATERALLY
+   * revokes every cross-space-read claim whose bound epoch was resolved over
+   * the dead link (the (link, space) is no longer verifiable — fail closed);
+   * the read host drops the inbound subscription state for the dead
+   * incarnation; and this host evicts the remote-epoch cache for the link so
+   * nothing vouches for a dead link's epochs until a reconnect resyncs them.
+   * Roles are data-driven: a host with no claims/subscriptions over the link
+   * no-ops the corresponding arm.
+   */
+  #onCrossSpaceLinkLost(linkId: string): void {
+    this.#revokeCrossSpaceReadClaimsForDeadLink(linkId);
+    this.#dropForeignReaderSubscriptionsForDeadLink(linkId);
+    for (const key of [...this.#remoteAuthorizationEpochs.keys()]) {
+      if (key.slice(0, key.indexOf("\0")) === linkId) {
+        this.#remoteAuthorizationEpochs.delete(key);
+      }
+    }
+  }
+
+  /** C3A12 dead-link revocation (home host): revoke every cross-space-read
+   * claim carrying a foreign epoch bound over `linkId`. Unconditional and
+   * unilateral — a lost link makes the bound epoch untrustworthy, so fail
+   * closed (over-revoke, never under-revoke). */
+  #revokeCrossSpaceReadClaimsForDeadLink(linkId: string): void {
+    if (this.#executionClaimForeignReadEpochs.size === 0) return;
+    for (const [key, claim] of [...this.#executionClaims]) {
+      const bindings = this.#executionClaimForeignReadEpochs.get(key);
+      if (bindings === undefined) continue;
+      const dead = bindings.filter((bound) => bound.linkId === linkId);
+      if (dead.length === 0) continue;
+      if (this.revokeExecutionClaim(claim)) {
+        this.executionStats.crossSpaceDeadLinkClaimRevocations += 1;
+        for (const bound of dead) {
+          this.#dropOrphanedForeignReaderSubscription(claim.space, bound.space);
+        }
+      }
+    }
+  }
+
+  /** C3A12 (read host): drop every inbound foreign-reader subscription that
+   * arrived over the dead link incarnation. A reconnect re-registers from the
+   * home's current demand under a fresh (higher) generation. */
+  #dropForeignReaderSubscriptionsForDeadLink(linkId: string): void {
+    for (
+      const [readSpace, byHome] of [
+        ...this.foreignReaderSubscriptionsByReadSpace,
+      ]
+    ) {
+      for (const [subscriptionKey, entry] of [...byHome]) {
+        if (entry.linkId === linkId) byHome.delete(subscriptionKey);
+      }
+      if (byHome.size === 0) {
+        this.foreignReaderSubscriptionsByReadSpace.delete(readSpace);
+      }
+    }
+  }
+
+  /**
+   * C3A12 reconnect resync (home host). On link re-establishment, for every
+   * (homeSpace, branch, readSpace) stream that rides this link:
+   *  (c) EPOCH RESYNC FIRST — query the read host's current epoch table over
+   *      the link and merge, then revalidate bound claims. This runs before
+   *      any claim re-issuance, so a claim minted after reconnect binds the
+   *      FRESH epoch (a stale reader whose read space bumped during the outage
+   *      is refused — the bound epoch lost to the higher floor).
+   *  (b) DIRT RESYNC — pull the read host's owner_space=home rows dirtied past
+   *      the durable per-link cursor and mark them dirty in the home engine
+   *      (no wake yet), advancing the cursor.
+   *  (a) RE-REGISTER — reset the stale live subscription generation so the
+   *      reconciler re-subscribes under the C3A10 barrier; its post-ack
+   *      direct-dirty scan wakes the resynced dirt EXACTLY ONCE (the single
+   *      wake source — the dirt resync deliberately does not wake).
+   */
+  async #onCrossSpaceLinkReconnected(linkId: string): Promise<void> {
+    if (this.#foreignSubscriptionsClosed) return;
+    const streams: { homeSpace: string; branch: string; readSpace: string }[] =
+      [];
+    for (const stateKey of this.foreignReaderSubscriptionsByHomeSpace.keys()) {
+      const parts = stateKey.split("\0");
+      if (parts.length < 3) continue;
+      const homeSpace = parts[0];
+      const branch = parts[1];
+      const readSpace = parts.slice(2).join("\0");
+      if (this.#linkIdForRoutedSpace(readSpace) !== linkId) continue;
+      streams.push({ homeSpace, branch, readSpace });
+    }
+    if (streams.length === 0) return;
+
+    // (c) epoch resync — before any re-issuance.
+    const authorities = new Map<string, string>(); // readSpace -> a homeSpace
+    for (const { homeSpace, readSpace } of streams) {
+      if (!authorities.has(readSpace)) authorities.set(readSpace, homeSpace);
+    }
+    for (const [readSpace, homeSpace] of authorities) {
+      if (this.#foreignSubscriptionsClosed) return;
+      try {
+        await this.queryForeignAuthorizationEpochs(homeSpace, readSpace);
+      } catch (error) {
+        console.warn("reconnect epoch resync failed:", error);
+      }
+      this.revalidateCrossSpaceReadClaimsAgainstRemoteEpoch(readSpace, linkId);
+    }
+
+    // (b) dirt resync — land missed dirt in the home engine (no wake).
+    for (const { homeSpace, branch, readSpace } of streams) {
+      if (this.#foreignSubscriptionsClosed) return;
+      try {
+        await this.#resyncForeignDirtOverLink(
+          homeSpace,
+          branch,
+          readSpace,
+          linkId,
+        );
+      } catch (error) {
+        console.warn("reconnect dirt resync failed:", error);
+      }
+    }
+
+    // (a) re-register — force a fresh subscribe; the post-ack scan wakes once.
+    const reconciled = new Set<string>();
+    for (const { homeSpace, branch, readSpace } of streams) {
+      const stateKey = `${homeSpace}\0${branch}\0${readSpace}`;
+      const state = this.foreignReaderSubscriptionsByHomeSpace.get(stateKey);
+      if (state !== undefined) {
+        state.liveGeneration = undefined;
+        state.liveLaneDemandsKey = undefined;
+      }
+      const reconcileKey = `${homeSpace}\0${branch}`;
+      if (reconciled.has(reconcileKey)) continue;
+      reconciled.add(reconcileKey);
+      this.scheduleForeignReaderSubscriptionReconcile(homeSpace, branch);
+    }
+    this.executionStats.crossSpaceReconnectResyncs += 1;
+  }
+
+  /**
+   * C3A12 dirt resync round-trip (home host): send the durable per-link
+   * applied-dirt cursor to the read host and await the mirrored reader rows
+   * it owns for `homeSpace` dirtied past it. The result arm applies them to
+   * the home engine and advances the cursor. Fail-closed on timeout (the
+   * reconcile re-register is still the wake backstop). Barrier is the
+   * response, not a settle.
+   */
+  async #resyncForeignDirtOverLink(
+    homeSpace: string,
+    branch: string,
+    readSpace: string,
+    linkId: string,
+  ): Promise<void> {
+    if (!(await this.ensureCrossSpaceHosting(readSpace))) return;
+    this.registerCrossSpaceHostedSpace(homeSpace);
+    const cursorSeq = this.crossSpaceAppliedDirtCursors.get(
+      `${linkId}\0${readSpace}\0${homeSpace}`,
+    ) ?? 0;
+    const requestId = `xsp-dirt-resync:${crypto.randomUUID()}`;
+    const timeoutMs =
+      this.options.executionControl?.foreignPointReadTimeoutMs ?? 10_000;
+    const pending = Promise.withResolvers<void>();
+    const timer = setTimeout(() => {
+      if (this.#pendingForeignDirtResyncs.delete(requestId)) pending.resolve();
+    }, timeoutMs);
+    this.#pendingForeignDirtResyncs.set(requestId, {
+      homeSpace,
+      readSpace,
+      linkId,
+      resolve: pending.resolve,
+      timer,
+    });
+    try {
+      this.#crossSpaceRouter.link(homeSpace, readSpace).send({
+        type: "foreign-dirty-resync",
+        requestId,
+        cursorSeq,
+      });
+    } catch (error) {
+      clearTimeout(timer);
+      this.#pendingForeignDirtResyncs.delete(requestId);
+      console.warn("foreign dirt resync send failed:", error);
+      return;
+    }
+    // The `branch` is carried only to key the reconcile that follows; the
+    // scan the read host runs is owner-space wide (demand-independent), so
+    // the resync catches parked dirt too (the §4 obligation).
+    void branch;
+    await pending.promise;
+  }
+
+  /**
+   * C3A12 dirt resync serve arm (read host): scan this read space's engine for
+   * the mirrored reader rows it owns for the requesting home space
+   * (`fromSpace`) whose `direct_dirty_seq` exceeds the home's cursor, and
+   * answer with their identities plus the highest seq scanned. Owner-space
+   * wide (demand-independent) so a parked home space still resyncs. Queued on
+   * the read space's inbound apply chain — the engine read orders behind
+   * in-flight applies.
+   */
+  private async answerForeignDirtResync(
+    message: ForeignDirtyResync,
+    context: CrossSpaceDeliveryContext,
+  ): Promise<void> {
+    let readers: ForeignReaderIdentity[] = [];
+    let throughSeq = 0;
+    try {
+      const engine = await this.openHostedEngine(context.space);
+      const rows = engine.database.prepare(
+        "SELECT branch, piece_id, process_generation, action_id, " +
+          "execution_context_key, direct_dirty_seq " +
+          "FROM scheduler_action_state " +
+          "WHERE owner_space = :owner AND direct_dirty_seq IS NOT NULL " +
+          "AND direct_dirty_seq > :cursor " +
+          "ORDER BY direct_dirty_seq",
+      ).all({ owner: context.fromSpace, cursor: message.cursorSeq }) as {
+        branch: string;
+        piece_id: string;
+        process_generation: number;
+        action_id: string;
+        execution_context_key: string;
+        direct_dirty_seq: number;
+      }[];
+      readers = rows.map((row) => ({
+        branch: row.branch,
+        pieceId: row.piece_id,
+        processGeneration: row.process_generation,
+        actionId: row.action_id,
+        executionContextKey: row
+          .execution_context_key as SchedulerExecutionContextKey,
+      }));
+      for (const row of rows) {
+        if (row.direct_dirty_seq > throughSeq) {
+          throughSeq = row.direct_dirty_seq;
+        }
+      }
+    } catch (error) {
+      console.warn("foreign dirt resync scan failed:", error);
+    }
+    try {
+      this.#crossSpaceRouter.link(context.space, context.fromSpace).send({
+        type: "foreign-dirty-resync.result",
+        requestId: message.requestId,
+        readers,
+        throughSeq,
+      });
+    } catch (error) {
+      console.warn("foreign dirt resync answer send failed:", error);
+    }
+  }
+
+  /**
+   * C3A12 dirt resync apply arm (home host): mark the resynced reader rows
+   * durably dirty in the home engine and advance the applied-dirt cursor.
+   * Deliberately NO wake — the re-register barrier's post-ack scan is the
+   * single wake source (exactly-once). Resolves the pending round-trip.
+   */
+  private async applyForeignDirtResyncResult(
+    message: ForeignDirtyResyncResult,
+    context: CrossSpaceDeliveryContext,
+  ): Promise<void> {
+    const pending = this.#pendingForeignDirtResyncs.get(message.requestId);
+    if (pending !== undefined && pending.readSpace !== context.fromSpace) {
+      console.warn(
+        `foreign dirt resync result ${message.requestId} answered by ` +
+          `${context.fromSpace}, expected ${pending.readSpace} (dropped)`,
+      );
+      return;
+    }
+    try {
+      if (message.readers.length > 0) {
+        const engine = await this.openHostedEngine(context.space);
+        const byBranch = new Map<BranchName, ForeignReaderIdentity[]>();
+        for (const reader of message.readers) {
+          const group = byBranch.get(reader.branch);
+          if (group === undefined) byBranch.set(reader.branch, [reader]);
+          else group.push(reader);
+        }
+        for (const [branch, readers] of byBranch) {
+          Engine.markSchedulerActionsDirectDirty(engine, {
+            branch,
+            ownerSpace: context.space,
+            dirtySeq: Math.max(1, message.throughSeq),
+            actions: readers.map((reader) =>
+              ({
+                branch: reader.branch,
+                ownerSpace: context.space,
+                pieceId: reader.pieceId,
+                processGeneration: reader.processGeneration,
+                actionId: reader.actionId,
+                executionContextKey: reader.executionContextKey,
+              }) as Engine.SchedulerReaderIndexEntry
+            ),
+          });
+        }
+      }
+      if (message.throughSeq > 0) {
+        const cursorKey =
+          `${context.linkId}\0${context.fromSpace}\0${context.space}`;
+        const cursor = this.crossSpaceAppliedDirtCursors.get(cursorKey) ?? 0;
+        if (message.throughSeq > cursor) {
+          this.crossSpaceAppliedDirtCursors.set(cursorKey, message.throughSeq);
+        }
+      }
+    } finally {
+      if (pending !== undefined) {
+        this.#pendingForeignDirtResyncs.delete(message.requestId);
+        clearTimeout(pending.timer);
+        pending.resolve();
+      }
+    }
+  }
+
+  /**
+   * C3.10b cross-host apply barrier serve arm (the L1 fix): the read host
+   * answers a `foreign-link-sync` with its ack ONLY after this frame reaches
+   * the head of the read space's inbound apply chain — i.e. after every frame
+   * that preceded the sync on the FIFO link (the mirror it flushes) has
+   * applied. Because this method is itself queued on that chain, its running
+   * IS the drain; it just emits the ack.
+   */
+  private applyForeignLinkSync(
+    message: ForeignLinkSync,
+    context: CrossSpaceDeliveryContext,
+  ): Promise<void> {
+    try {
+      this.#crossSpaceRouter.link(context.space, context.fromSpace).send({
+        type: "foreign-link-sync.ack",
+        requestId: message.requestId,
+      });
+    } catch (error) {
+      console.warn("foreign link-sync ack send failed:", error);
+    }
+    return Promise.resolve();
+  }
+
+  /**
+   * C3.10b cross-host apply barrier ack arm (home host): resolve the pending
+   * sync. Late/unknown acks drop (the sender already resolved by ack, timeout,
+   * or close — all fail-open for a flush).
+   */
+  private applyForeignLinkSyncAck(
+    message: ForeignLinkSyncAck,
+    context: CrossSpaceDeliveryContext,
+  ): void {
+    const pending = this.#pendingForeignLinkSyncs.get(message.requestId);
+    if (pending === undefined) return;
+    if (pending.peerSpace !== context.fromSpace) return;
+    this.#pendingForeignLinkSyncs.delete(message.requestId);
+    clearTimeout(pending.timer);
+    pending.resolve();
+  }
+
+  /**
+   * C3.10b (L1 fix): await the peer applying everything this host has sent
+   * toward `peerSpace` on the link up to now — the cross-host equivalent of
+   * the same-host `settleCrossSpaceDeliveries` barrier. Fail-OPEN on timeout
+   * (a flush that could not confirm must not wedge the write path). Used by
+   * the mirror path so a transact resolves only after the peer applied its
+   * mirror rows.
+   */
+  async #settleCrossHostApply(
+    homeSpace: string,
+    peerSpace: string,
+  ): Promise<void> {
+    const requestId = `xsp-link-sync:${crypto.randomUUID()}`;
+    const timeoutMs =
+      this.options.executionControl?.foreignPointReadTimeoutMs ?? 10_000;
+    const pending = Promise.withResolvers<void>();
+    const timer = setTimeout(() => {
+      if (this.#pendingForeignLinkSyncs.delete(requestId)) pending.resolve();
+    }, timeoutMs);
+    this.#pendingForeignLinkSyncs.set(requestId, {
+      peerSpace,
+      resolve: pending.resolve,
+      timer,
+    });
+    try {
+      this.#crossSpaceRouter.link(homeSpace, peerSpace).send({
+        type: "foreign-link-sync",
+        requestId,
+      });
+    } catch (error) {
+      clearTimeout(timer);
+      this.#pendingForeignLinkSyncs.delete(requestId);
+      console.warn("foreign link-sync send failed:", error);
+      return;
+    }
+    await pending.promise;
   }
 
   /**
@@ -11681,6 +12446,13 @@ export class Server {
         { kind: "principal", principal },
         epoch,
       );
+    }
+    // C3.10b (L2 fix): release the cross-host response barrier for this query.
+    const pending = this.#pendingForeignEpochQueries.get(message.requestId);
+    if (pending !== undefined && pending.authoritySpace === context.fromSpace) {
+      this.#pendingForeignEpochQueries.delete(message.requestId);
+      clearTimeout(pending.timer);
+      pending.resolve();
     }
   }
 
@@ -12056,6 +12828,28 @@ export class Server {
     message: ForeignPointReadResult,
     context: CrossSpaceDeliveryContext,
   ): void {
+    // C3.10b: an issuance READ-binding probe correlates here too (it rides the
+    // same `foreign-point-read` message). Route it first — a probe records no
+    // served stamp and resolves only {hasRead, epoch}.
+    const binding = this.#pendingForeignReadBindings.get(message.requestId);
+    if (binding !== undefined) {
+      if (binding.readSpace !== context.fromSpace) {
+        console.warn(
+          `foreign read-binding result ${message.requestId} answered by ` +
+            `${context.fromSpace}, expected ${binding.readSpace} (dropped)`,
+        );
+        return;
+      }
+      this.#pendingForeignReadBindings.delete(message.requestId);
+      clearTimeout(binding.timer);
+      const result = message.result;
+      binding.resolve(
+        result.status === "served"
+          ? { status: "served", epoch: result.authorizationEpoch.epoch }
+          : { status: result.status === "denied" ? "denied" : "failed" },
+      );
+      return;
+    }
     const pending = this.#pendingForeignPointReads.get(message.requestId);
     if (pending === undefined) {
       console.warn(

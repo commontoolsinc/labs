@@ -551,6 +551,76 @@ Deno.test("C3.10a lifecycle: socket loss closes the link — routes retire, chan
   transport.close();
 });
 
+Deno.test("C3.10b reconnect: a new socket for a closed peer rebinds the SAME channel — `reconnected` fires, incarnation bumps, linkId is stable, delivery resumes", async () => {
+  const { transport, link, peer, pair } = attachRawLink();
+  peer.hello(HOST_B, [SPACE_B]);
+  await link.opened;
+  // Capture the PERSISTED channel and its subscriptions BEFORE the loss — the
+  // reconnect must rebind this exact object so router/server subscriptions
+  // survive.
+  const channel = transport.channelTo(SPACE_B);
+  const originalLinkId = channel.linkId;
+  const lifecycle: string[] = [];
+  channel.onLifecycle((event) => lifecycle.push(event.kind));
+  const delivered: string[] = [];
+  channel.onMessage((wire) => delivered.push(wire));
+
+  // Lose the link.
+  pair.sockets[1].close();
+  await pair.whenQuiet();
+  assertEquals(lifecycle, ["closed"]);
+  assertEquals(channel.state, "closed");
+
+  // Reconnect: a fresh socket to the SAME transport + a fresh hello for the
+  // same peer id. This is a reconnect (the prior incarnation closed), not a
+  // duplicate.
+  const pair2 = crossSpaceLinkSocketPair();
+  const link2 = transport.attachLink(pair2.sockets[0]);
+  const peer2 = rawPeer(pair2.sockets[1]);
+  peer2.hello(HOST_B, [SPACE_B]);
+  await link2.opened;
+  await pair2.whenQuiet();
+
+  assertEquals(lifecycle, ["closed", "reconnected"], "reconnected fired");
+  assertEquals(channel.state, "open", "the persisted channel reopened");
+  assertEquals(channel.incarnation, 2, "incarnation bumped on reconnect");
+  assertEquals(channel.linkId, originalLinkId, "linkId is stable (C3A12 keys)");
+  assertEquals(
+    transport.channelTo(SPACE_B).linkId,
+    originalLinkId,
+    "the route re-adopted the reconnected link",
+  );
+
+  // Delivery resumes on the SAME subscription: a payload from the peer over
+  // the new incarnation reaches the onMessage handler registered pre-loss.
+  peer2.send(rawDirtyMark(originalLinkId, SPACE_B, SPACE_A));
+  await pair2.whenQuiet();
+  assertEquals(delivered.length, 1, "a frame delivered over the reconnection");
+  transport.close();
+});
+
+Deno.test("C3.10b reconnect: a LIVE duplicate still refuses — a reconnect only rebinds a CLOSED incarnation", async () => {
+  const { transport, link, peer } = attachRawLink();
+  peer.hello(HOST_B, [SPACE_B]);
+  await link.opened;
+  assertEquals(transport.channelTo(SPACE_B).incarnation, 1);
+
+  // A second attach for the SAME (still-live) peer id is a duplicate, not a
+  // reconnect — its `opened` rejects and the live channel is untouched.
+  const pair2 = crossSpaceLinkSocketPair();
+  const dupLink = transport.attachLink(pair2.sockets[0]);
+  const dupPeer = rawPeer(pair2.sockets[1]);
+  dupPeer.hello(HOST_B, [SPACE_B]);
+  await assertRejects(() => dupLink.opened, CrossSpaceProtocolError);
+  assertEquals(
+    transport.channelTo(SPACE_B).incarnation,
+    1,
+    "the live channel's incarnation is untouched by the refused duplicate",
+  );
+  assertEquals(transport.channelTo(SPACE_B).state, "open");
+  transport.close();
+});
+
 // ---------------------------------------------------------------------------
 // (g) Module boundary.
 // ---------------------------------------------------------------------------

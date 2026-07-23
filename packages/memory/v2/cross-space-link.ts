@@ -93,9 +93,12 @@ import {
  *   durable per-link state (the applied-dirt cursor, subscription
  *   state, epoch cache) by stable linkId. A per-connection random id
  *   would silently orphan those keys on every reconnect.
- * - `incarnation` — 1 for every C3.10a link: one attach = one
- *   incarnation. Reconnect (a new incarnation on the same linkId, dead
- *   state dropped by incarnation compare) is C3.10b's drill.
+ * - `incarnation` — 1 at first open; C3.10b BUMPS it on each reconnect
+ *   (a new socket attaching for a peer whose prior incarnation closed
+ *   rebinds the SAME persisted channel, so the router/server
+ *   subscriptions survive, and fires `reconnected`). Consumers drop
+ *   dead-incarnation state by comparing it (C3A12). A LIVE duplicate
+ *   still refuses `duplicate-link`.
  * - peer → declared spaces — THE C3A13 stamp-trust mechanism: a
  *   stamp's space claim is trusted BECAUSE the link it arrived on is
  *   bound to that host's identity for those spaces. Enforced at the
@@ -153,14 +156,15 @@ import {
  * ruling to record; C3.10b states the co-hosted half of C3A7 through
  * this same declaration (dated 2026-07-18).
  *
- * **NOT built here (dated pointers, per the C3.10a row):**
- * - C3.10b (2026-07-18): reconnect + cursor resync (incarnation bumps,
- *   the durable per-link dirt cursor pull, epoch-table resync before
- *   claim re-issuance), transport parity for the wake/point-read/fence
- *   fixtures, the co-hosted half of the C3A7 fence-arm ruling
- *   (bump-vs-consult interleavings), and link-loss claim revocation.
- *   A closed link here just closes: routes retire, channels report
- *   closed, lifecycle fires `closed` — nothing revokes.
+ * **Built by C3.10b (2026-07-18), on this substrate:** reconnect —
+ * the incarnation bump + persisted-channel rebind above — so the home
+ * host's `onLifecycle` `reconnected` drives its re-register / dirt
+ * resync / epoch resync, and the `closed` event drives unilateral
+ * dead-link claim revocation. The link module still only fires the
+ * lifecycle events; the resync/revocation policy lives in the host
+ * (server.ts), off these events.
+ *
+ * **NOT built here (dated pointers):**
  * - Gap register (C3.11): per-stamp signatures; the geo-distributed
  *   transport.
  * - Deployment endpoint wiring: mounting a link acceptor beside
@@ -582,8 +586,18 @@ export class CoHostedCrossSpaceTransport implements CrossSpaceTransport {
   #loopback = new InProcessCrossSpaceTransport();
   #configured: readonly string[];
   #localSpaces = new Set<string>();
-  /** Open links by peer hostId (one multiplexed link per host pair). */
+  /** The CURRENT live link impl per peer hostId (one multiplexed link per
+   * host pair). Cleared when that impl's socket closes; a reconnect sets a
+   * fresh impl. */
   #links = new Map<string, LinkImpl>();
+  /**
+   * C3.10b: the PERSISTED channel per peer hostId. Outlives individual link
+   * incarnations — a socket loss closes the current impl but keeps the
+   * channel so a reconnect rebinds the SAME object (its router/server
+   * onMessage/onLifecycle subscriptions survive), bumping `incarnation` and
+   * firing `reconnected`. Dropped only when the transport closes.
+   */
+  #channels = new Map<string, LinkChannel>();
   /** Attached links still in (or failed) handshake, so close() reaps them. */
   #attachedLinks = new Set<LinkImpl>();
   /** space → the open link whose peer declared it. */
@@ -659,8 +673,14 @@ export class CoHostedCrossSpaceTransport implements CrossSpaceTransport {
     for (const link of [...this.#attachedLinks]) {
       link.close();
     }
+    // Permanently retire persisted channels (a transport close is not a
+    // reconnectable socket loss): fire `closed` for any still-open channel.
+    for (const channel of this.#channels.values()) {
+      channel.retire();
+    }
     this.#attachedLinks.clear();
     this.#links.clear();
+    this.#channels.clear();
     this.#routes.clear();
     this.#channelSubscribers.clear();
     this.#loopback.close();
@@ -706,14 +726,38 @@ export class CoHostedCrossSpaceTransport implements CrossSpaceTransport {
     return this.#links.get(peerHostId);
   }
 
-  /** A link completed its hello: bind identity + routes, surface the
-   * channel to router subscribers. Returns false when the peer id is
-   * already linked (duplicate-link refusal is the caller's). */
-  linkOpened(link: LinkImpl, peerHostId: string): boolean {
-    if (this.#closed) return false;
-    if (this.#links.has(peerHostId)) return false;
+  /**
+   * A link completed its hello: bind it as the current impl for its peer,
+   * adopt its routes, and resolve the channel. Returns the channel plus
+   * whether this was a RECONNECT (a persisted channel for a now-closed
+   * prior incarnation was rebound and its `incarnation` bumped) or a FRESH
+   * open (a new channel to announce). Returns undefined when a LIVE channel
+   * already holds the peer slot — the caller refuses `duplicate-link`.
+   * (C3.10b: this is where reconnect keeps the channel identity stable.)
+   */
+  bindLink(
+    link: LinkImpl,
+    peerHostId: string,
+    linkId: string,
+    accepted: ReadonlySet<string>,
+  ): { channel: LinkChannel; reconnected: boolean } | undefined {
+    if (this.#closed) return undefined;
+    const existing = this.#channels.get(peerHostId);
+    if (existing !== undefined && existing.isLive()) {
+      return undefined;
+    }
     this.#links.set(peerHostId, link);
-    return true;
+    this.reconcileRoutes(link, accepted);
+    if (existing === undefined) {
+      const channel = new LinkChannel(link, linkId);
+      this.#channels.set(peerHostId, channel);
+      return { channel, reconnected: false };
+    }
+    // Reconnect: the persisted channel was closed with the prior incarnation;
+    // rebind it to this impl and bump its incarnation (dead-incarnation state
+    // is dropped by incarnation compare — C3A12).
+    existing.rebind(link);
+    return { channel: existing, reconnected: true };
   }
 
   announceChannel(channel: CrossSpaceChannel): void {
@@ -750,6 +794,13 @@ export class CoHostedCrossSpaceTransport implements CrossSpaceTransport {
     if (link.peerHostId !== undefined) {
       if (this.#links.get(link.peerHostId) === link) {
         this.#links.delete(link.peerHostId);
+        // C3.10b: the current impl for this peer just closed. Transition the
+        // PERSISTED channel to closed (firing `closed` for the home host's
+        // dead-link revocation) but keep it in `#channels` so a reconnect
+        // rebinds this exact object. A stale impl (already superseded by a
+        // reconnect) never reaches here as the current impl, so it cannot
+        // knock a live channel down.
+        this.#channels.get(link.peerHostId)?.onImplClosed(link);
       }
     }
     for (const [space, routed] of [...this.#routes]) {
@@ -835,10 +886,6 @@ class LinkImpl implements CoHostedCrossSpaceLink {
 
   openChannel(): CrossSpaceChannel | undefined {
     return this.#channel;
-  }
-
-  channelState(): CrossSpaceLinkState {
-    return this.#state === "open" ? "open" : "closed";
   }
 
   sendWire(wire: string): void {
@@ -1012,7 +1059,13 @@ class LinkImpl implements CoHostedCrossSpaceLink {
       accepted.add(space);
     }
     this.#peerSpaces = accepted;
-    if (!this.#transport.linkOpened(this, control.hostId)) {
+    const binding = this.#transport.bindLink(
+      this,
+      control.hostId,
+      this.#linkId,
+      accepted,
+    );
+    if (binding === undefined) {
       this.#refuse(
         "duplicate-link",
         `host ${control.hostId} is already linked`,
@@ -1020,10 +1073,24 @@ class LinkImpl implements CoHostedCrossSpaceLink {
       return;
     }
     this.#state = "open";
-    this.#transport.reconcileRoutes(this, accepted);
-    this.#channel = new LinkChannel(this, this.#linkId);
-    this.#transport.announceChannel(this.#channel);
-    this.#channel.fireLifecycle({ kind: "open", incarnation: 1 });
+    this.#channel = binding.channel;
+    if (binding.reconnected) {
+      // C3.10b reconnect: `bindLink` rebound the persisted channel to THIS
+      // impl and bumped its incarnation. Fire `reconnected` on the same
+      // object — the router's onMessage and the server's onLifecycle
+      // subscriptions are intact, so no re-announce; the home host's
+      // resync/re-register drills off this event.
+      this.#channel.fireLifecycle({
+        kind: "reconnected",
+        incarnation: this.#channel.incarnation,
+      });
+    } else {
+      this.#transport.announceChannel(this.#channel);
+      this.#channel.fireLifecycle({
+        kind: "open",
+        incarnation: this.#channel.incarnation,
+      });
+    }
     // The local set may have grown between our hello and the peer's;
     // FIFO ensures this lands before any frame relying on it.
     this.syncLocalDeclaration();
@@ -1125,15 +1192,18 @@ class LinkImpl implements CoHostedCrossSpaceLink {
     this.#state = "closed";
     this.#detachFrame();
     this.#detachClose();
+    // C3.10b: `linkClosed` transitions the persisted channel to closed (via
+    // `onImplClosed`) — that is the single place `closed` fires, so a reconnect
+    // firing `reconnected` and a loss firing `closed` never race a double
+    // event, and a stale/superseded impl (already replaced by a reconnect)
+    // cannot knock the live channel down.
     this.#transport.linkClosed(this);
     try {
       this.#socket.close();
     } catch {
       // already closed
     }
-    if (wasOpen) {
-      this.#channel?.fireLifecycle({ kind: "closed" });
-    } else {
+    if (!wasOpen) {
       this.#rejectOpened(
         new CrossSpaceProtocolError(
           "link-closed",
@@ -1145,15 +1215,24 @@ class LinkImpl implements CoHostedCrossSpaceLink {
 }
 
 /**
- * The {@link CrossSpaceChannel} face of one open link. Exists only
- * once the link is open (routes cannot resolve to it earlier), so the
- * router always observes a bound linkId. Incarnation is 1 for every
- * C3.10a link (see the module docblock's C3A12 notes).
+ * The {@link CrossSpaceChannel} face of one link identity. Created when
+ * the link first opens (routes cannot resolve to it earlier, so the
+ * router always observes a bound linkId) and PERSISTED across reconnects
+ * (C3.10b): a socket loss closes the current {@link LinkImpl} but this
+ * object survives so the router's `onMessage` and the server's
+ * `onLifecycle` subscriptions stay bound. `incarnation` starts at 1 and
+ * bumps on each reconnect; consumers drop dead-incarnation state by
+ * comparing it (C3A12).
  */
 class LinkChannel implements CrossSpaceChannel {
   readonly linkId: string;
-  readonly incarnation = 1;
+  #incarnation = 1;
+  /** The CURRENT impl frames send through / arrive on. Swapped on reconnect. */
   #link: LinkImpl;
+  /** The current impl is closed (outage window, awaiting reconnect). */
+  #closed = false;
+  /** The transport closed — permanent, never reconnects. */
+  #retired = false;
   #messageHandlers = new Set<(wire: string) => void>();
   #lifecycleHandlers = new Set<
     (event: CrossSpaceLinkLifecycleEvent) => void
@@ -1164,8 +1243,12 @@ class LinkChannel implements CrossSpaceChannel {
     this.linkId = linkId;
   }
 
+  get incarnation(): number {
+    return this.#incarnation;
+  }
+
   get state(): CrossSpaceLinkState {
-    return this.#link.channelState();
+    return this.#closed ? "closed" : "open";
   }
 
   send(wire: string): void {
@@ -1189,6 +1272,40 @@ class LinkChannel implements CrossSpaceChannel {
       } catch (error) {
         console.warn("cross-space lifecycle handler failed", error);
       }
+    }
+  }
+
+  /** True while a live impl backs this channel — the duplicate-link gate. */
+  isLive(): boolean {
+    return !this.#closed && !this.#retired;
+  }
+
+  /** C3.10b: the peer's current impl closed (socket loss). Fire `closed`
+   * exactly once and enter the outage window; the object persists so a
+   * later reconnect rebinds it. A stale impl (already superseded) is
+   * ignored so it cannot knock a live channel down. */
+  onImplClosed(link: LinkImpl): void {
+    if (link !== this.#link || this.#closed) return;
+    this.#closed = true;
+    this.fireLifecycle({ kind: "closed" });
+  }
+
+  /** C3.10b: a reconnected impl took the peer slot — swap to it, bump the
+   * incarnation, and reopen. `reconnected` is fired by the caller (LinkImpl)
+   * after this, on the same handler set. */
+  rebind(link: LinkImpl): void {
+    this.#link = link;
+    this.#incarnation += 1;
+    this.#closed = false;
+  }
+
+  /** Transport close: permanent retirement (fire `closed` if still open). */
+  retire(): void {
+    if (this.#retired) return;
+    this.#retired = true;
+    if (!this.#closed) {
+      this.#closed = true;
+      this.fireLifecycle({ kind: "closed" });
     }
   }
 
