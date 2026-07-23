@@ -2125,14 +2125,25 @@ function toolInputRequiredIntegrityFailure(
       }
     }
   }
-  // Array items: a floor under `items` gates every model-supplied element
-  // (e.g. `recipients: { items: { ifc: { requiredIntegrity } } }`).
-  if (isRecord(schema.items) && Array.isArray(value)) {
+  // Array elements: a tuple slot's floor gates its exact position, and a
+  // floor under `items` gates the positions past the slots (2020-12,
+  // matching the sanitizer's semantics — e.g.
+  // `recipients: { items: { ifc: { requiredIntegrity } } }`). Tuple slots
+  // previously went entirely ungated: this walk never descended
+  // prefixItems.
+  if (Array.isArray(value)) {
+    const prefixItems = Array.isArray(schema.prefixItems)
+      ? schema.prefixItems
+      : undefined;
     for (let index = 0; index < value.length; index++) {
+      const slotSchema = prefixItems !== undefined && index < prefixItems.length
+        ? prefixItems[index]
+        : schema.items;
+      if (!isRecord(slotSchema)) continue;
       const failure = toolInputRequiredIntegrityFailure(
         runtime,
         space,
-        schema.items,
+        slotSchema,
         value[index],
         `${path}[${index}]`,
         trust,
