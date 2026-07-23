@@ -306,6 +306,136 @@ describe("mergeCfcSchemaEnvelopes", () => {
     });
   });
 
+  it("merges tuple (prefixItems) slots slot-wise", () => {
+    // CT-1895: the {...left, ...right} spread let one side's prefixItems
+    // win wholesale, dropping the other side's slot ifc/defaults.
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "array",
+      prefixItems: [
+        {
+          type: "string",
+          ifc: { confidentiality: ["secret"] },
+        },
+        { type: "number" },
+      ],
+    }, {
+      type: "array",
+      prefixItems: [
+        { type: "string", default: "cmd" },
+        { type: "number" },
+      ],
+    });
+
+    const slots = (merged as JSONSchemaObj).prefixItems as JSONSchemaObj[];
+    // Slot 0 carries BOTH sides' contributions: the existing ifc and the
+    // candidate default.
+    expect((slots[0].ifc as { confidentiality?: string[] }).confidentiality)
+      .toEqual(["secret"]);
+    expect(slots[0].default).toBe("cmd");
+  });
+
+  it("keeps slots only one side declares", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "array",
+      prefixItems: [{ type: "string", ifc: { confidentiality: ["secret"] } }],
+    }, {
+      type: "array",
+      prefixItems: [{ type: "string" }, { type: "number", default: 3 }],
+    });
+
+    const slots = (merged as JSONSchemaObj).prefixItems as JSONSchemaObj[];
+    expect(slots.length).toBe(2);
+    expect((slots[0].ifc as { confidentiality?: string[] }).confidentiality)
+      .toEqual(["secret"]);
+    expect(slots[1]).toEqual({ type: "number", default: 3 });
+  });
+
+  it("merges a rest items claim into the other side's extra tuple slots", () => {
+    // 2020-12: a side's `items` speaks for every index past its slots — so
+    // its claim about index 1 must land in the longer side's slot 1, not be
+    // silently reinterpreted as "indices >= 2" by the merged arity.
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "array",
+      prefixItems: [{ type: "string" }],
+      items: { type: "number", ifc: { confidentiality: ["x"] } },
+    }, {
+      type: "array",
+      prefixItems: [{ type: "string" }, { type: "number", default: 3 }],
+    });
+
+    const slots = (merged as JSONSchemaObj).prefixItems as JSONSchemaObj[];
+    expect((slots[1].ifc as { confidentiality?: string[] }).confidentiality)
+      .toEqual(["x"]);
+    expect(slots[1].default).toBe(3);
+    // The rest claim itself survives for indices past all slots.
+    const items = (merged as JSONSchemaObj).items as JSONSchemaObj;
+    expect((items.ifc as { confidentiality?: string[] }).confidentiality)
+      .toEqual(["x"]);
+  });
+
+  it("merges an items-only side into a side introducing prefixItems", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "array",
+      items: { type: "number", ifc: { confidentiality: ["x"] } },
+    }, {
+      type: "array",
+      prefixItems: [{ type: "number", default: 1 }],
+    });
+
+    const slots = (merged as JSONSchemaObj).prefixItems as JSONSchemaObj[];
+    expect((slots[0].ifc as { confidentiality?: string[] }).confidentiality)
+      .toEqual(["x"]);
+    expect(slots[0].default).toBe(1);
+  });
+
+  it("merges a rest additionalProperties claim into the other side's named keys", () => {
+    // The record twin of the items/prefixItems rule: an object-valued
+    // additionalProperties speaks for every undeclared key, so its claim
+    // merges into keys only the other side names.
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "object",
+      additionalProperties: {
+        type: "string",
+        ifc: { confidentiality: ["x"] },
+      },
+    }, {
+      type: "object",
+      properties: { name: { type: "string", default: "d" } },
+    });
+
+    const props = (merged as JSONSchemaObj).properties as Record<
+      string,
+      JSONSchemaObj
+    >;
+    expect((props.name.ifc as { confidentiality?: string[] }).confidentiality)
+      .toEqual(["x"]);
+    expect(props.name.default).toBe("d");
+    // The rest claim itself survives for undeclared keys.
+    const additional = (merged as JSONSchemaObj)
+      .additionalProperties as JSONSchemaObj;
+    expect((additional.ifc as { confidentiality?: string[] }).confidentiality)
+      .toEqual(["x"]);
+  });
+
+  it("merges object-valued additionalProperties from both sides", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "object",
+      additionalProperties: {
+        type: "string",
+        ifc: { confidentiality: ["x"] },
+      },
+    }, {
+      type: "object",
+      additionalProperties: { type: "string", default: "d" },
+    });
+
+    const additional = (merged as JSONSchemaObj)
+      .additionalProperties as JSONSchemaObj;
+    expect((additional.ifc as { confidentiality?: string[] }).confidentiality)
+      .toEqual(["x"]);
+    expect(additional.default).toBe("d");
+  });
+
   it("keeps candidate items when only the candidate declares them", () => {
     const merged = mergeCfcSchemaEnvelopes({
       type: "array",

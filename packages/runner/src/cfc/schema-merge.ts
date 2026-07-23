@@ -403,17 +403,46 @@ const mergeSchemaNode = (
     );
   }
 
-  const mergedProperties: Record<string, JSONSchema> = {
-    ...(left.properties ?? {}),
-  };
-  for (const [key, value] of Object.entries(right.properties ?? {})) {
-    mergedProperties[key] = key in mergedProperties
-      ? mergeSchemaNode(
-        mergedProperties[key],
-        value,
-        `${path}/${key}`,
-      )
-      : value;
+  // A side's claim about a named key is its properties[key] where declared,
+  // else its object-valued additionalProperties (the rest claim covering
+  // every undeclared key) — the record twin of the prefixItems/items rule
+  // below. So a key only one side names still merges with the other side's
+  // rest claim rather than winning wholesale.
+  const leftAdditional = typeof left.additionalProperties === "object" &&
+      left.additionalProperties !== null
+    ? left.additionalProperties
+    : undefined;
+  const rightAdditional = typeof right.additionalProperties === "object" &&
+      right.additionalProperties !== null
+    ? right.additionalProperties
+    : undefined;
+  const mergedProperties: Record<string, JSONSchema> = {};
+  for (
+    const key of new Set([
+      ...Object.keys(left.properties ?? {}),
+      ...Object.keys(right.properties ?? {}),
+    ])
+  ) {
+    const leftClaim = left.properties?.[key] ?? leftAdditional;
+    const rightClaim = right.properties?.[key] ?? rightAdditional;
+    mergedProperties[key] = leftClaim !== undefined &&
+        rightClaim !== undefined
+      ? mergeSchemaNode(leftClaim, rightClaim, `${path}/${key}`)
+      : (rightClaim ?? leftClaim)!;
+  }
+
+  // Object-valued rest claims merge like items; boolean forms keep the
+  // spread's right-wins behavior (closed-object union semantics are
+  // CT-1898's question, not this merge's).
+  let mergedAdditionalProperties = left.additionalProperties;
+  if (leftAdditional !== undefined && rightAdditional !== undefined) {
+    mergedAdditionalProperties = mergeSchemaNode(
+      leftAdditional,
+      rightAdditional,
+      `${path}/*`,
+    );
+  } else if (right.additionalProperties !== undefined) {
+    mergedAdditionalProperties = right.additionalProperties;
   }
 
   let mergedItems = left.items;
@@ -421,6 +450,40 @@ const mergeSchemaNode = (
     mergedItems = mergeSchemaNode(left.items, right.items, `${path}/*`);
   } else if (right.items !== undefined) {
     mergedItems = right.items;
+  }
+
+  // Tuple slots merge slot-wise like properties — the `{...left, ...right}`
+  // spread below would otherwise let one side's prefixItems win wholesale,
+  // dropping the other side's slot ifc/defaults. A side's claim about slot
+  // index i is its prefixItems[i] where declared, else its rest `items`
+  // (2020-12: `items` speaks for every index past that side's slots). So a
+  // shorter side's `items` claim merges into the longer side's extra slots,
+  // and a side introducing prefixItems beside an items-only side merges
+  // each slot with that `items` claim rather than winning wholesale.
+  let mergedPrefixItems: JSONSchema[] | undefined;
+  if (left.prefixItems !== undefined || right.prefixItems !== undefined) {
+    const slotClaim = (
+      side: typeof left,
+      index: number,
+    ): JSONSchema | undefined =>
+      side.prefixItems !== undefined && index < side.prefixItems.length
+        ? side.prefixItems[index]
+        : side.items;
+    const length = Math.max(
+      left.prefixItems?.length ?? 0,
+      right.prefixItems?.length ?? 0,
+    );
+    const slots: JSONSchema[] = [];
+    for (let index = 0; index < length; index++) {
+      const leftSlot = slotClaim(left, index);
+      const rightSlot = slotClaim(right, index);
+      slots.push(
+        leftSlot !== undefined && rightSlot !== undefined
+          ? mergeSchemaNode(leftSlot, rightSlot, `${path}/${index}`)
+          : (rightSlot ?? leftSlot)!,
+      );
+    }
+    mergedPrefixItems = slots;
   }
 
   // `$defs` is not merged: `{...left, ...right}` lets a `right` envelope that
@@ -437,6 +500,12 @@ const mergeSchemaNode = (
       ? { properties: mergedProperties }
       : {}),
     ...(mergedItems !== undefined ? { items: mergedItems } : {}),
+    ...(mergedPrefixItems !== undefined
+      ? { prefixItems: mergedPrefixItems }
+      : {}),
+    ...(mergedAdditionalProperties !== undefined
+      ? { additionalProperties: mergedAdditionalProperties }
+      : {}),
     ifc: mergeIfc(left.ifc, right.ifc, path),
     required: mergeRequired(left.required, right.required, mergedProperties),
     default: mergeDefaults(left.default, right.default),
