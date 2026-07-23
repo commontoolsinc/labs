@@ -460,25 +460,6 @@ async function runCase(
   const selected = new Set(config.scenarios);
   const representative = sessions[0];
   try {
-    if (selected.has("names")) {
-      phases.push(
-        await phase("display-name-handler-updates", harness, async () => {
-          const operations = sessions.flatMap((session, index) =>
-            Array.from(
-              { length: config.typingSteps },
-              (_entry, step) =>
-                session.topicsDiagnosticsSend(
-                  "setMyName",
-                  { name: `diagnostic-user-${index + 1}-${step + 1}` },
-                  { idle: false },
-                ),
-            )
-          );
-          return await submittedOutcomes(operations);
-        }),
-      );
-    }
-
     const concurrentCreation = selected.has("create-topics");
     const createName = concurrentCreation
       ? "concurrent-topic-creation"
@@ -491,6 +472,7 @@ async function runCase(
               "addTopic",
               {
                 title: `diagnostic-topic-${index + 1}`,
+                agentName: "Topics Diagnostics",
               },
             );
             if (!outcome.ok) {
@@ -504,7 +486,10 @@ async function runCase(
           (_entry, index) =>
             sessions[index % sessions.length].topicsDiagnosticsSend(
               "addTopic",
-              { title: `diagnostic-topic-${index + 1}` },
+              {
+                title: `diagnostic-topic-${index + 1}`,
+                agentName: "Topics Diagnostics",
+              },
               { idle: false },
             ),
         );
@@ -574,6 +559,7 @@ async function runCase(
                   "addComment",
                 ], {
                   body: `diagnostic-comment-${index + 1}-${round + 1}`,
+                  agentName: "Topics Diagnostics",
                 }, { idle: false }),
             )
           );
@@ -604,6 +590,7 @@ async function runCase(
                     round + 1
                   }`,
                   label: "diagnostic-link",
+                  agentName: "Topics Diagnostics",
                 }, { idle: false }),
             )
           );
@@ -632,6 +619,7 @@ async function runCase(
                   "setBody",
                 ], {
                   body: `diagnostic-body-${index + 1}-${round + 1}`,
+                  agentName: "Topics Diagnostics",
                 }, { idle: false }),
             )
           );

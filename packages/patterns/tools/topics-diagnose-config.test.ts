@@ -59,7 +59,6 @@ Deno.test("Topics diagnostics applies profile and quick defaults", () => {
   });
   assertEquals(configFromArgs(["--profile=conflicts", "--quick"]).rounds, 2);
   assertEquals(configFromArgs(["--quick"]).scenarios, [
-    "names",
     "create-topics",
     "noops",
     "titles",

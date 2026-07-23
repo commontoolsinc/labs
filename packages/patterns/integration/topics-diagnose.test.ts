@@ -138,15 +138,21 @@ Deno.test("Topics diagnostics RPC responses are aggregate-only", async () => {
     assertEquals(harness.pieceId, "aggregate-only");
     const [first, second] = harness.sessions;
     const adds = await Promise.all([
-      first.topicsDiagnosticsSend("addTopic", { title: "diagnostic-topic-1" }),
-      second.topicsDiagnosticsSend("addTopic", { title: "diagnostic-topic-2" }),
+      first.topicsDiagnosticsSend("addTopic", {
+        title: "diagnostic-topic-1",
+        agentName: "Diagnostics A",
+      }),
+      second.topicsDiagnosticsSend("addTopic", {
+        title: "diagnostic-topic-2",
+        agentName: "Diagnostics B",
+      }),
     ]);
     await harness.diagnosticsBarrier();
     const summary = await first.topicsDiagnosticsSummary();
     await Promise.all(harness.sessions.map((session) => session.telemetry()));
     const sameValueOutcome = await first.topicsDiagnosticsSend(
       ["topics", 0, "setBody"],
-      { body: "" },
+      { body: "", agentName: "Diagnostics A" },
       { idle: false },
     );
     await harness.diagnosticsBarrier();

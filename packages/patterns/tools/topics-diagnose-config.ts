@@ -1,5 +1,4 @@
 export const ALL_TOPICS_SCENARIOS = [
-  "names",
   "create-topics",
   "noops",
   "titles",
