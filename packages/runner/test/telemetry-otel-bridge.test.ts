@@ -13,6 +13,7 @@ import {
   createRuntimeTelemetryOtelBridge,
 } from "../src/telemetry-otel-bridge.ts";
 import {
+  RuntimeTelemetry,
   RuntimeTelemetryEvent,
   type RuntimeTelemetryMarkerResult,
 } from "../src/telemetry.ts";
@@ -102,6 +103,7 @@ describe("createRuntimeTelemetryOtelBridge", () => {
   const setup = (options: {
     attributes?: Attributes;
     metricAttributes?: Attributes;
+    spanAttributes?: Attributes;
   } = {}) => {
     const m = makeRecordingMeter();
     const t = makeRecordingTracer();
@@ -133,30 +135,52 @@ describe("createRuntimeTelemetryOtelBridge", () => {
     }]);
   });
 
-  it("counts commits, changed writes, and retries only when retrying", () => {
+  it("records commit amplification and counts every scheduled retry", () => {
     bridge.handleMarker(marker({
       type: "scheduler.event.commit",
+      eventId: "evt:private:0:of:stream",
+      readCount: 6,
+      writeCount: 7,
       changedWriteCount: 4,
       retryAttempt: 1,
+      backoffMs: 1,
     }));
     expect(meterCalls.map((c) => c.instrument)).toEqual([
       "ct.scheduler.commits",
+      "ct.scheduler.commit.writes",
       "ct.scheduler.commit.changed_writes",
+      "ct.scheduler.commit.noop_candidate_writes",
+      "ct.scheduler.commit.reads",
+      "ct.scheduler.commit.retries",
     ]);
+    expect(meterCalls[1].value).toBe(7);
+    expect(meterCalls[2].value).toBe(4);
+    expect(meterCalls[3].value).toBe(3);
+    expect(meterCalls[4].value).toBe(6);
+    for (const call of meterCalls) {
+      expect(call.attributes?.eventId).toBeUndefined();
+      expect(call.attributes?.["ct.event_id"]).toBeUndefined();
+    }
 
     meterCalls.length = 0;
     bridge.handleMarker(marker({
       type: "scheduler.event.commit",
+      readCount: 1,
+      writeCount: 2,
       changedWriteCount: 2,
       retryAttempt: 3,
-      terminal: "completed",
+      terminal: "convergence",
     }));
     expect(meterCalls.map((c) => c.instrument)).toEqual([
       "ct.scheduler.commits",
+      "ct.scheduler.commit.writes",
       "ct.scheduler.commit.changed_writes",
-      "ct.scheduler.commit.retries",
+      "ct.scheduler.commit.noop_candidate_writes",
+      "ct.scheduler.commit.reads",
     ]);
-    expect(meterCalls[0].attributes?.["ct.commit.terminal"]).toBe("completed");
+    expect(meterCalls[0].attributes?.["ct.commit.terminal"]).toBe(
+      "convergence",
+    );
   });
 
   it("records every preflight phase and a retroactive span", () => {
@@ -314,6 +338,40 @@ describe("createRuntimeTelemetryOtelBridge", () => {
     expect(spans[0].attributes["user.did"]).toBe("did:key:alice");
   });
 
+  it("stamps span-only attributes on spans but never metrics", () => {
+    setup({
+      attributes: { "ct.runtime": "harness" },
+      spanAttributes: { "user.did": "did:key:alice" },
+    });
+    bridge.handleMarker(marker({ type: "cell.update" }));
+    bridge.handleMarker(marker({
+      id: "op-span-only",
+      type: "storage.push.start",
+      operation: "send",
+    }));
+    expect(meterCalls[0].attributes).toEqual({ "ct.runtime": "harness" });
+    expect(spans[0].attributes).toEqual({
+      "ct.runtime": "harness",
+      "user.did": "did:key:alice",
+      "ct.storage.kind": "push",
+      "ct.storage.operation": "send",
+    });
+  });
+
+  it("attributes every commit histogram with pattern attribution", () => {
+    bridge.handleMarker(marker({
+      type: "scheduler.event.commit",
+      readCount: 2,
+      writeCount: 3,
+      changedWriteCount: 1,
+      handlerInfo: { patternName: "topics", moduleName: "topic" },
+    }));
+    for (const call of meterCalls) {
+      expect(call.attributes?.["ct.pattern"]).toBe("topics");
+      expect(call.attributes?.["ct.module"]).toBe("topic");
+    }
+  });
+
   it("closes in-flight storage spans on shutdown", () => {
     bridge.handleMarker(marker({
       id: "op-5",
@@ -454,6 +512,26 @@ describe("scheduler.run.complete / scheduler.settle / storage join keys", () => 
 });
 
 describe("attachRuntimeTelemetryOtelBridge", () => {
+  it("retains detailed event commit telemetry until detached", () => {
+    const m = makeRecordingMeter();
+    const t = makeRecordingTracer();
+    const telemetry = new RuntimeTelemetry();
+    const retainedElsewhere = telemetry.retainDetailedEventCommitTelemetry();
+
+    const detach = attachRuntimeTelemetryOtelBridge(telemetry, {
+      tracer: t.tracer,
+      meter: m.meter,
+    });
+    expect(telemetry.detailedEventCommitTelemetryEnabled).toBe(true);
+
+    retainedElsewhere();
+    expect(telemetry.detailedEventCommitTelemetryEnabled).toBe(true);
+    detach();
+    expect(telemetry.detailedEventCommitTelemetryEnabled).toBe(false);
+    detach();
+    expect(telemetry.detailedEventCommitTelemetryEnabled).toBe(false);
+  });
+
   it("feeds telemetry events through the bridge until detached", () => {
     const m = makeRecordingMeter();
     const t = makeRecordingTracer();

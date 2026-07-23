@@ -101,6 +101,13 @@ export interface SchedulerEventPreflightActionSummary {
   writeCount: number;
 }
 
+/** Fixed, content-free reasons an event can be dropped before dispatch. */
+export type SchedulerEventDropReason =
+  | "piece-load"
+  | "lineage"
+  | "preflight"
+  | "load-gate";
+
 // ============================================================
 // Diagnosis types for non-settling / non-idempotent detection
 // ============================================================
@@ -169,16 +176,24 @@ export type RuntimeTelemetryMarker = {
   error?: string;
 } | {
   type: "scheduler.invocation";
+  /** Internal-only correlation key. Never export this as an OTel attribute. */
+  eventId: string;
   handlerId: string;
   handlerInfo?: SchedulerActionInfo;
   error?: string;
 } | {
   type: "scheduler.event.commit";
+  /** Internal-only correlation key. Never export this as an OTel attribute. */
+  eventId: string;
   handlerId: string;
   handlerInfo?: SchedulerActionInfo;
+  /** Scheduler dependency reads performed by this commit attempt. */
   readCount: number;
+  /** Changed writes plus deduplicated non-overlapping no-op candidate targets. */
   writeCount: number;
+  /** Paths locally changed by this attempt, including speculative failed retries. */
   changedWriteCount: number;
+  /** Capped structural addresses for changed writes only. */
   writes: string[];
   writesTruncated?: boolean;
   error?: string;
@@ -194,6 +209,12 @@ export type RuntimeTelemetryMarker = {
    * deterministic server-side commit-rule refusal (never retried).
    */
   terminal?: "permanent" | "convergence" | "rule";
+} | {
+  /** A final pre-dispatch outcome, categorized without event content. */
+  type: "scheduler.event.drop";
+  /** Internal-only correlation key. Never export this as an OTel attribute. */
+  eventId: string;
+  reason: SchedulerEventDropReason;
 } | {
   type: "scheduler.event.preflight";
   handlerId: string;
@@ -298,6 +319,7 @@ export class RuntimeTelemetryEvent
 
 export class RuntimeTelemetry extends EventTarget {
   #storageTelemetry: StorageTelemetry;
+  #detailedEventCommitTelemetryLeases = 0;
 
   constructor() {
     super();
@@ -306,6 +328,26 @@ export class RuntimeTelemetry extends EventTarget {
 
   submit(marker: RuntimeTelemetryMarker) {
     this.dispatchEvent(new RuntimeTelemetryEvent(marker));
+  }
+
+  /** Whether a consumer has requested detailed event-commit telemetry. */
+  get detailedEventCommitTelemetryEnabled(): boolean {
+    return this.#detailedEventCommitTelemetryLeases > 0;
+  }
+
+  /**
+   * Request detailed event-commit telemetry until the returned release function
+   * is called. Releases are idempotent so independent consumers cannot disable
+   * each other's demand.
+   */
+  retainDetailedEventCommitTelemetry(): () => void {
+    this.#detailedEventCommitTelemetryLeases++;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.#detailedEventCommitTelemetryLeases--;
+    };
   }
 
   processInspectorCommand(command: Inspector.BroadcastCommand) {

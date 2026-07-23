@@ -25,6 +25,7 @@ import {
   type Tracer,
 } from "@opentelemetry/api";
 import type {
+  RuntimeTelemetry,
   RuntimeTelemetryEvent,
   RuntimeTelemetryMarkerResult,
 } from "./telemetry.ts";
@@ -35,10 +36,15 @@ export interface OtelBridgeOptions {
   /**
    * Attributes stamped on every emitted span and metric — the dimensions the
    * markers themselves don't carry. Set here once at attach time from the host's
-   * session/identity, e.g.:
-   *   { "user.did": principal, "space.did": space, "ct.runtime": "bg-piece" }
+   * host context, e.g. `{ "ct.runtime": "bg-piece" }`. Put high-cardinality
+   * identity dimensions in `spanAttributes` instead.
    */
   attributes?: Attributes;
+  /**
+   * Attributes stamped on SPANS ONLY, merged over `attributes`. Use for trace
+   * pivots such as identities that would create excessive metric cardinality.
+   */
+  spanAttributes?: Attributes;
   /**
    * Attributes stamped on METRICS ONLY, merged over `attributes`. Backends
    * don't map OTel resource attributes onto metric datapoint labels, so pass
@@ -72,10 +78,14 @@ export interface RuntimeTelemetryOtelBridge {
  * in-flight spans.
  */
 export function attachRuntimeTelemetryOtelBridge(
-  telemetry: EventTarget,
+  telemetry:
+    & EventTarget
+    & Partial<Pick<RuntimeTelemetry, "retainDetailedEventCommitTelemetry">>,
   options: OtelBridgeOptions,
 ): () => void {
   const bridge = createRuntimeTelemetryOtelBridge(options);
+  const releaseDetailedEventCommitTelemetry = telemetry
+    .retainDetailedEventCommitTelemetry?.();
   const listener = (event: Event) => {
     bridge.handleMarker((event as RuntimeTelemetryEvent).marker);
   };
@@ -83,6 +93,7 @@ export function attachRuntimeTelemetryOtelBridge(
   return () => {
     telemetry.removeEventListener("telemetry", listener);
     bridge.shutdown();
+    releaseDetailedEventCommitTelemetry?.();
   };
 }
 
@@ -97,9 +108,12 @@ export function createRuntimeTelemetryOtelBridge(
   const { tracer, meter } = options;
   const actionRunSpanThresholdMs = options.actionRunSpanThresholdMs ?? 10;
   const base = options.attributes ?? {};
+  const spanBase = options.spanAttributes
+    ? { ...base, ...options.spanAttributes }
+    : base;
   const attrs = (extra?: Attributes): Attributes =>
-    extra ? { ...base, ...extra } : base;
-  // Metric datapoints get the extra scoping labels; spans keep `base` only.
+    extra ? { ...spanBase, ...extra } : spanBase;
+  // Metric datapoints get metric-only labels; spans keep span-only labels.
   const mbase = options.metricAttributes
     ? { ...base, ...options.metricAttributes }
     : base;
@@ -126,6 +140,16 @@ export function createRuntimeTelemetryOtelBridge(
     "ct.scheduler.commit.changed_writes",
     { description: "Changed writes per commit" },
   );
+  const commitWrites = meter.createHistogram("ct.scheduler.commit.writes", {
+    description: "Changed writes plus classified no-op candidates per commit",
+  });
+  const commitNoopCandidates = meter.createHistogram(
+    "ct.scheduler.commit.noop_candidate_writes",
+    { description: "Deduplicated non-overlapping no-op candidates per commit" },
+  );
+  const commitReads = meter.createHistogram("ct.scheduler.commit.reads", {
+    description: "Scheduler dependency reads per commit",
+  });
   // Per-phase preflight timings — the scheduler's own breakdown of where an
   // event's cost goes. These are the multi-user hot-path signals.
   const preflightPhase = {
@@ -294,26 +318,39 @@ export function createRuntimeTelemetryOtelBridge(
         settleIterations.record(marker.iterations, mattrs());
         break;
       case "scheduler.invocation":
+        // eventId is intentionally internal correlation state. Do not attach it
+        // to OTel attributes or spans.
         invocations.add(1, mattrs(patternAttrs(marker.handlerInfo)));
         break;
       case "cell.update":
         cellUpdates.add(1, mattrs());
         break;
       case "scheduler.event.commit": {
-        commits.add(
-          1,
-          mattrs({
-            ...patternAttrs(marker.handlerInfo),
-            "ct.commit.terminal": marker.terminal ?? "none",
-            "ct.error": !!marker.error,
-          }),
+        // eventId is intentionally internal correlation state. Do not attach it
+        // to OTel attributes or spans.
+        const commitAttributes = {
+          ...patternAttrs(marker.handlerInfo),
+          "ct.commit.terminal": marker.terminal ?? "none",
+          "ct.error": !!marker.error,
+        };
+        const metricAttributes = mattrs(commitAttributes);
+        commits.add(1, metricAttributes);
+        commitWrites.record(marker.writeCount, metricAttributes);
+        commitChangedWrites.record(marker.changedWriteCount, metricAttributes);
+        commitNoopCandidates.record(
+          Math.max(0, marker.writeCount - marker.changedWriteCount),
+          metricAttributes,
         );
-        commitChangedWrites.record(marker.changedWriteCount, mattrs());
-        if (marker.retryAttempt && marker.retryAttempt > 1) {
-          commitRetries.add(1, mattrs(patternAttrs(marker.handlerInfo)));
+        commitReads.record(marker.readCount, metricAttributes);
+        if (marker.backoffMs !== undefined) {
+          commitRetries.add(1, metricAttributes);
         }
         break;
       }
+      case "scheduler.event.drop":
+        // Local diagnostics correlate these internally; OTel deliberately gets
+        // neither event IDs nor a new event-level cardinality dimension.
+        break;
       case "scheduler.event.preflight": {
         const total = marker.populateMs + marker.txToLogMs +
           marker.depCommitMs +
