@@ -427,11 +427,11 @@ Deno.test("discord online: a gateway that refuses the connection -> gray with th
   });
 });
 
-Deno.test("discord history: an unreadable store starts from an empty history", async () => {
+Deno.test("discord history: a missing store starts empty; a damaged store fails closed", async () => {
   // ensureLoaded runs at most once per process, so only one path through its try is
   // reachable that way. loadHistory is the same read without the once-only flag.
-  // Every one of these is a first-run or a damaged store, and none of them is an
-  // error the tile should see: the contract is to start empty and carry on.
+  // A first run has no file and starts empty. Malformed data must surface rather
+  // than being overwritten by the next successfully collected sample.
   const real = Deno.readTextFile;
   const loadWith = async (read: () => Promise<string>): Promise<string | null> => {
     Deno.readTextFile = read as typeof Deno.readTextFile;
@@ -444,9 +444,15 @@ Deno.test("discord history: an unreadable store starts from an empty history", a
   };
   try {
     assertEquals(await loadWith(() => Promise.reject(new Deno.errors.NotFound("no file yet"))), null);
-    assertEquals(await loadWith(() => Promise.resolve("{ not json")), null);
-    assertEquals(await loadWith(() => Promise.resolve('{"not": "an array"}')), null);
-    assertEquals(await loadWith(() => Promise.resolve('[{"t":"nope"}]')), null);
+    assertStringIncludes((await loadWith(() => Promise.resolve("{ not json"))) ?? "", "could not load Discord history");
+    assertStringIncludes(
+      (await loadWith(() => Promise.resolve('{"not": "an array"}'))) ?? "",
+      "history is not an array of samples",
+    );
+    assertStringIncludes(
+      (await loadWith(() => Promise.resolve('[{"t":"nope"}]'))) ?? "",
+      "history contains no valid samples",
+    );
   } finally {
     Deno.readTextFile = real;
   }

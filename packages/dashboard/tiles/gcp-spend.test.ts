@@ -78,7 +78,7 @@ Deno.test("cloud spend: yesterday's total for the table's own project, under bud
   );
   assertEquals(result.status, "good"); // 412.34 <= 500
   assertEquals(result.value, "$412/day");
-  assertEquals(result.sub, "yesterday · project spend");
+  assertEquals(result.sub, "yesterday · billing account spend");
 
   // The query runs in the project the table names, which is where the service
   // account holds Job User.
