@@ -49,6 +49,9 @@ results uniformly, mounts any drill-down routes a tile declares, and pushes new
 tile markup as each independent collection completes. Every registered tile has
 a gray placeholder labelled with its id in its registered position until its
 first collection completes, so slow collectors do not leave holes in the board.
+A later ticker pass skips a tile or shared workflow fetch that is still
+updating. It starts every other due collection, so pending work does not pause
+the rest of the dashboard.
 A tile whose `collect()` throws is desaturated to a gray "unknown" — it keeps
 its last-known value and shows a short reason (e.g. "source unreachable"), with
 the full error in the server log — so one unreachable source never blanks or
