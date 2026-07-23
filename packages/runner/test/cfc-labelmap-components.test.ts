@@ -187,4 +187,114 @@ describe("CFC labelMap component origins", () => {
       await storageManager.close();
     }
   });
+
+  it("mints declared entries for tuple (prefixItems) slots at their index", async () => {
+    // CT-1895: walkIfcSchema never descended prefixItems, so an ifc on a
+    // tuple slot minted no labelMap entry — tuple data under-tainted.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const guarded = internSchema(
+        {
+          type: "object",
+          properties: {
+            pair: {
+              type: "array",
+              prefixItems: [
+                { type: "string", ifc: { confidentiality: ["secret"] } },
+                { type: "number" },
+              ],
+            },
+          },
+        } satisfies JSONSchema,
+        true,
+      );
+
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-components-tuple-slot",
+        guarded.schema,
+        tx,
+      );
+      cell.set({ pair: ["hush", 7] });
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const persistedId = parseLink(cell.getAsLink()).id!;
+      const entries = replicaEntries(storageManager, persistedId);
+      // The slot label lands at its concrete index, not a `*` wildcard.
+      const slot = entries.find((e) =>
+        e.path.length === 2 && e.path[0] === "pair" && e.path[1] === "0"
+      );
+      expect(slot).toBeDefined();
+      expect(slot!.origin).toBe("declared");
+      expect(slot!.label.confidentiality).toEqual(["secret"]);
+      // The unlabeled slot mints nothing.
+      expect(entries.some((e) => e.path[1] === "1")).toBe(false);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("a labeled items rest schema beside prefixItems mints no wildcard entry", async () => {
+    // `items`' `*` entry matches ANY index, including the tuple slots — but
+    // with prefixItems present, `items` covers only the indices past the
+    // slots. Like additionalProperties beside named properties, the mixed
+    // shape mints no `*` entry (exclusion semantics §3.3 forbids expressing
+    // "every index except the slots"); the slots still mint at their index.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const guarded = internSchema(
+        {
+          type: "object",
+          properties: {
+            pair: {
+              type: "array",
+              prefixItems: [
+                { type: "string", ifc: { confidentiality: ["secret"] } },
+              ],
+              items: { type: "number", ifc: { confidentiality: ["rest"] } },
+            },
+          },
+        } satisfies JSONSchema,
+        true,
+      );
+
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-components-tuple-rest",
+        guarded.schema,
+        tx,
+      );
+      cell.set({ pair: ["hush", 7] });
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const persistedId = parseLink(cell.getAsLink()).id!;
+      const entries = replicaEntries(storageManager, persistedId);
+      const slot = entries.find((e) =>
+        e.path.length === 2 && e.path[0] === "pair" && e.path[1] === "0"
+      );
+      expect(slot).toBeDefined();
+      expect(slot!.label.confidentiality).toEqual(["secret"]);
+      expect(
+        entries.some((e) => e.path[0] === "pair" && e.path[1] === "*"),
+      ).toBe(false);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 });

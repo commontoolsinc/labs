@@ -20,6 +20,7 @@ import type { FabricValue } from "@commonfabric/api";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
+import { forEachSubschema } from "../schema-walk.ts";
 import { normalizeCellScope } from "../scope.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import type {
@@ -2032,28 +2033,11 @@ const walkIfcSchema = (
       });
     }
 
-    if (resolved.properties) {
-      for (const [key, child] of Object.entries(resolved.properties)) {
-        walkIfcSchema(child, [...path, key], entries, childRoot, nextActive);
-      }
-    }
-    const compound = [
-      ...(resolved.anyOf ?? []),
-      ...(resolved.oneOf ?? []),
-      ...(resolved.allOf ?? []),
-    ];
-    for (const child of compound) {
-      walkIfcSchema(child, path, entries, childRoot, nextActive);
-    }
-    if (typeof resolved.items === "object" && resolved.items !== null) {
-      walkIfcSchema(
-        resolved.items,
-        [...path, "*"],
-        entries,
-        childRoot,
-        nextActive,
-      );
-    }
+    // Keyword descent via the shared walk, so the vocabulary cannot silently
+    // drift from schema-walk's (a missed keyword here fails open:
+    // under-tainting). The visitor owns the path rule per keyword — that
+    // part is this walker's semantics, not the walk's.
+    //
     // Record-only `additionalProperties` descends as the same `*` segment
     // arrays get from `items` (template-population §4) — RESTRICTED to
     // record-only objects (no NAMED property). The restriction is
@@ -2068,20 +2052,77 @@ const walkIfcSchema = (
     // all of them; schema helpers routinely emit that wrapper shape, and
     // skipping it would silently drop the declared map label (codex/cubic
     // review on this PR).
-    if (
-      (resolved.properties === undefined ||
-        Object.keys(resolved.properties).length === 0) &&
-      typeof resolved.additionalProperties === "object" &&
-      resolved.additionalProperties !== null
-    ) {
-      walkIfcSchema(
-        resolved.additionalProperties,
-        [...path, "*"],
-        entries,
-        childRoot,
-        nextActive,
-      );
-    }
+    const recordOnly = resolved.properties === undefined ||
+      Object.keys(resolved.properties).length === 0;
+    // `items` is subject to the same limitation as `additionalProperties`:
+    // with `prefixItems` present it covers only the indices PAST the tuple
+    // slots, but a `*` entry matches ANY index — including the slots — so a
+    // mixed tuple-plus-rest schema would over-taint the slot positions.
+    // Expressing "every index except the slots" needs the exclusion
+    // semantics §3.3 forbids, so the mixed case mints no `*` entry for the
+    // rest schema (the slots still mint at their concrete indices below).
+    const tupleFree = !Array.isArray(resolved.prefixItems) ||
+      resolved.prefixItems.length === 0;
+    forEachSubschema(resolved, (child, keyword, key, index) => {
+      switch (keyword) {
+        case "properties":
+          walkIfcSchema(child, [...path, key!], entries, childRoot, nextActive);
+          break;
+        case "anyOf":
+        case "oneOf":
+        case "allOf":
+          walkIfcSchema(child, path, entries, childRoot, nextActive);
+          break;
+        case "items":
+          if (tupleFree) {
+            walkIfcSchema(
+              child,
+              [...path, "*"],
+              entries,
+              childRoot,
+              nextActive,
+            );
+          }
+          break;
+        case "prefixItems":
+          // Tuple slots mint at their concrete index — unlike `items`' `*`
+          // entry, a slot label applies to exactly that position.
+          walkIfcSchema(
+            child,
+            [...path, String(index!)],
+            entries,
+            childRoot,
+            nextActive,
+          );
+          break;
+        case "additionalProperties":
+          if (recordOnly) {
+            walkIfcSchema(
+              child,
+              [...path, "*"],
+              entries,
+              childRoot,
+              nextActive,
+            );
+          }
+          break;
+        case "not":
+          // Negation describes what the value must NOT be. Minting
+          // label/policy entries from it would enforce an author's negated
+          // branch as if it labeled real data — deliberately skipped (unlike
+          // joinSchema, where unioning `not` atoms into the LUB is a safe
+          // over-taint).
+          break;
+        default:
+          // A keyword schema-walk knows but this walker has no path rule
+          // for: descend at the parent's own path — labels join at the
+          // position (over-taint, fail-safe) rather than being silently
+          // dropped (under-taint, fail-open). Give new keywords an explicit
+          // case above.
+          walkIfcSchema(child, path, entries, childRoot, nextActive);
+          break;
+      }
+    });
     return entries;
   }
 };
