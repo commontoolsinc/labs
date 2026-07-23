@@ -65,6 +65,42 @@ describe("Schema - Default Values", () => {
       expect(value.age).toBe(30);
     });
 
+    it("processes tuple (prefixItems) defaults against their slot schemas", () => {
+      // CT-1895: prefixItems-only schemas skipped array default processing
+      // entirely, so nested defaults inside tuple elements never resolved.
+      const c = runtime.getCell<{ name: string }>(
+        space,
+        "tuple defaults slot processing 1",
+        undefined,
+        tx,
+      );
+      c.set({ name: "t" });
+
+      const schema = {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          pair: {
+            type: "array",
+            default: [{}, {}],
+            prefixItems: [
+              {
+                type: "object",
+                properties: { x: { type: "number", default: 1 } },
+              },
+              {
+                type: "object",
+                properties: { y: { type: "number", default: 2 } },
+              },
+            ],
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const value = c.asSchema(schema).get();
+      expect(value.pair).toEqual([{ x: 1 }, { y: 2 }]);
+    });
+
     it("should resolve defaults when using $ref in property schemas", () => {
       const schema = {
         $defs: {
