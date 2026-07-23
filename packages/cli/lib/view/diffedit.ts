@@ -980,9 +980,10 @@ export function createDiffHighlighter(
 ): Highlighter {
   let text = initialText;
   const initialRaw = initialText.split("\n");
+  const initialModel = seed ? null : parseDiff(initialText);
   let lines: Line[] = (seed ??
     initialRaw.map((line, index) =>
-      diffLineRender(line, diffFileNameAt(initialRaw, index))
+      diffLineRender(line, diffFileNameAt(initialRaw, index, initialModel))
     )).slice();
   return {
     get lines() {
@@ -1002,8 +1003,9 @@ export function createDiffHighlighter(
       ) {
         s++;
       }
+      const model = parseDiff(next);
       const recoloured = newRaw.slice(p, newRaw.length - s).map((l, i) =>
-        diffLineRender(l, diffFileNameAt(newRaw, p + i))
+        diffLineRender(l, diffFileNameAt(newRaw, p + i, model))
       );
       lines = lines.slice(0, p).concat(
         recoloured,
@@ -1099,10 +1101,12 @@ function diffLineRender(lineText: string, fileName?: string): Line {
 function diffFileNameAt(
   rawLines: string[],
   lineIdx: number,
+  model: DiffModel | null,
 ): string | undefined {
-  const oldSide = rawLines[lineIdx]?.startsWith("-") ?? false;
+  const oldSide = model?.lines[lineIdx]?.kind === "del";
   let fallback: string | undefined;
   for (let i = Math.min(lineIdx, rawLines.length - 1); i >= 0; i--) {
+    if (model?.lines[i]?.kind !== "meta") continue;
     const l = rawLines[i];
     if (l.startsWith("+++ ")) {
       const path = parserFileName(l.slice(4).split("\t")[0]);
