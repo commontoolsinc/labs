@@ -41,9 +41,11 @@ function ctx(
   };
 }
 
+let nextRunId = 1;
+
 function run(over: Partial<Run>): Run {
   return {
-    id: 1,
+    id: nextRunId++,
     status: "completed",
     conclusion: "success",
     run_attempt: 1,
