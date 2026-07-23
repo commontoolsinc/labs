@@ -2602,6 +2602,22 @@ non-exported case reaches provenance through the `__cfReg` registration sink
 — the gap guarded by
 `packages/runner/test/cfc-nonexported-binding-identity.test.ts`.
 
+> **TODO (review after 2026-09-15): retire the pre-`moduleIdentity` aged-data
+> exceptions.** The writeAuthorizedBy path carries several compatibility
+> allowances purely so integrity works over data written before claims were
+> `moduleIdentity`-anchored: the one-leading-segment spelling tolerance in
+> reconciliation (`writerClaimFilesCorrespond`), stamp adoption onto stored
+> *unstamped* claims, the legacy `bundleId` stamp arm, and the unstamped
+> minting path for callers that omit the identity map. Claims born stamped
+> (labs#4871) mean every write now anchors on `moduleIdentity`, so aged
+> claims **self-heal on their next write** — once no pre-anchoring data
+> remains, these exceptions can be deleted and verification tightened to
+> require an exact `moduleIdentity` match. Revisit around mid-September 2026:
+> confirm the aged-data population has drained (or force a rewrite sweep),
+> then remove the tolerance in `writer-claim-correspondence.ts`, the
+> unstamped-adoption branch in `reconcileWriterClaimStamp`, the `bundleId`
+> arm, and this note. (Berni's ask on the labs#4871 review.)
+
 No fixture in `test/fixtures/**` exercises `__cfBindVerifiedBinding` as of
 this writing; the annotation paths are covered by `test/cfc-authoring.test.ts`
 and the runner tests above.
