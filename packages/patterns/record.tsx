@@ -31,6 +31,7 @@ import {
   getAddableTypes,
   getDefinition,
 } from "./record/registry.ts";
+import { getNextUnusedLabel } from "./record/standard-labels.ts";
 // Import Note directly - we create it inline with proper linkPattern
 // (avoids global state for passing Record's pattern JSON)
 import Note from "./notes/note.tsx";
@@ -39,38 +40,6 @@ import { TypePickerModule } from "./type-picker.tsx";
 import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
 import { getResultSchema } from "./record/extraction/schema-utils.ts";
 import type { SubPieceEntry, TrashedSubPieceEntry } from "./record/types.ts";
-
-// ===== Standard Labels for Smart Defaults =====
-// When adding a second module of same type, pick next unused standard label
-const STANDARD_LABELS: Record<string, string[]> = {
-  email: ["Personal", "Work", "School", "Other"],
-  phone: ["Mobile", "Home", "Work", "Other"],
-  address: ["Home", "Work", "Billing", "Shipping", "Other"],
-};
-
-// Helper to get next unused standard label for a module type
-function getNextUnusedLabel(
-  type: string,
-  existingPieces: readonly SubPieceEntry[],
-): string | undefined {
-  const standards = STANDARD_LABELS[type];
-  if (!standards || standards.length === 0) return undefined;
-
-  // Collect labels already assigned to modules of this type. The label is read
-  // from the entry, which records the label chosen when the module was created.
-  // The label on the sub-piece itself is not readable here: SubPieceEntry.piece
-  // is typed `unknown`, whose schema (`{ type: "unknown" }`) the runner reads
-  // back as undefined rather than materializing.
-  const usedLabels = new Set<string>();
-  for (const entry of existingPieces) {
-    if (entry.type === type && typeof entry.label === "string" && entry.label) {
-      usedLabels.add(entry.label);
-    }
-  }
-
-  // Return first unused standard label (or undefined if all used)
-  return standards.find((label) => !usedLabels.has(label));
-}
 
 // ===== Types =====
 

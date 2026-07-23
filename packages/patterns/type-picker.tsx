@@ -22,6 +22,7 @@ import {
   NAME,
   pattern,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
@@ -56,6 +57,7 @@ interface TypePickerInput {
 
 export interface TypePickerOutput {
   dismissed?: boolean | Default<false>;
+  [UI]: VNode;
 }
 
 // ===== Handlers =====
