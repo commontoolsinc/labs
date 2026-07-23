@@ -42,6 +42,13 @@ Deno.test("Topics diagnostics rejects malformed and unsupported CLI tokens", () 
   ) {
     assertThrows(() => configFromArgs(args));
   }
+  assertThrows(() => configFromArgs(["--rounds=1", "--rounds=2"]));
+  assertThrows(() => configFromArgs(["--rounds=1.5"]));
+  assertThrows(() => configFromArgs(["--scenario="]));
+  assertThrows(() => configFromArgs(["--scenario=all,comments"]));
+  assertThrows(() => configFromArgs(["--profile=unknown"]));
+  assertThrows(() => configFromArgs(["--program="]));
+  assertThrows(() => casesFromArgs(["--cases="], configFromArgs(["--quick"])));
 });
 
 Deno.test("Topics diagnostics applies profile and quick defaults", () => {
@@ -133,4 +140,71 @@ Deno.test("Topics diagnostics derives content-free telemetry summaries", () => {
   );
   assertEquals(rootOscillationMetadata([0, 1, 0, 1]).twoStepRepeatRatio, 1);
   assertEquals(rootOscillationMetadata([0]).twoStepRepeatRatio, null);
+});
+
+Deno.test("Topics diagnostics reduces sparse telemetry and only reports path shapes", () => {
+  const config = configFromArgs([
+    "--quick",
+    "--program=topics/main.tsx",
+    "--scenario=comments,comments",
+    "--rounds=0",
+    "--typing-steps=0",
+    "--ws-delay-ms=0",
+  ]);
+  assertEquals(config.scenarios, ["comments"]);
+  assertEquals(casesFromArgs(["--cases=2x1,2x1"], config), [
+    { topics: 2, users: 1 },
+    { topics: 2, users: 1 },
+  ]);
+  assertEquals(
+    deriveTelemetry({
+      invocationCount: 0,
+      distinctInvokedEventCount: 0,
+      distinctSuccessfulEventCount: 0,
+      distinctDroppedEventCount: 0,
+      droppedEventsByReason: {
+        "piece-load": 0,
+        lineage: 0,
+        preflight: 0,
+        "load-gate": 0,
+      },
+      permanentRejectionsByReason: {
+        "origin-committed": 0,
+        "receipt-exists": 0,
+      },
+      commitMarkerCount: 0,
+      directCommitCount: 0,
+      successfulCommitCount: 0,
+      failedAttemptCount: 0,
+      terminalFailureCount: 0,
+      retryMarkerCount: 0,
+      maxRetryAttempt: 0,
+      readCount: 0,
+      writeCount: 1,
+      changedWriteCount: 3,
+      writesTruncatedCount: 0,
+      writesByPathShape: {},
+    }, 0),
+    {
+      changedWritesPerSubmittedOperation: 0,
+      attemptedWritesPerSubmittedOperation: 0,
+      elidedNoopCandidateWrites: 0,
+    },
+  );
+  assertEquals(writePathShape("value/actual-topic/12"), "value/*/#");
+  assertEquals(writePathShape("value/actual-topic/private-key"), "value/*/*");
+  assertEquals(rootOscillationMetadata([]), {
+    distinctStateCount: 0,
+    targetWriteCount: 0,
+    twoStepEligibleCount: 0,
+    twoStepRepeatCount: 0,
+    twoStepRepeatRatio: null,
+  });
+  assertEquals(rootOscillationMetadata([0, 1, 1]), {
+    distinctStateCount: 2,
+    targetWriteCount: 3,
+    twoStepEligibleCount: 1,
+    twoStepRepeatCount: 0,
+    twoStepRepeatRatio: 0,
+  });
 });
