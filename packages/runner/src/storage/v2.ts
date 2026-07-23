@@ -1691,11 +1691,14 @@ class SpaceReplica implements ISpaceReplica {
   #queuedWatchRefreshScheduled = false;
   #watchRefreshFlushing = false;
 
+  #settings: IRemoteStorageProviderSettings;
+
   constructor(options: ProviderOptions) {
     this.#space = options.space;
     this.#subscription = options.subscription;
     this.#createSession = options.createSession;
     this.#getTelemetry = options.getTelemetry ?? (() => undefined);
+    this.#settings = options.settings;
   }
 
   did(): MemorySpace {
@@ -2284,17 +2287,28 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private scheduleWatchRefreshFlush(): void {
+    // EXPERIMENTAL: when concurrent refresh is enabled, the single-flight
+    // `#watchRefreshFlushing` gate is ignored so a batch flushes as soon as it
+    // is scheduled, even while a prior refresh is still awaiting its response.
+    // Same-tick coalescing (via `#queuedWatchRefreshScheduled` + the merge in
+    // `enqueueWatchRefresh`) is unchanged; only the cross-RTT serialization is
+    // lifted.
+    const singleFlight = this.#settings.experimentalConcurrentWatchRefresh !==
+      true;
     if (
       this.#queuedWatchRefresh === null ||
       this.#queuedWatchRefreshScheduled ||
-      this.#watchRefreshFlushing
+      (singleFlight && this.#watchRefreshFlushing)
     ) {
       return;
     }
     this.#queuedWatchRefreshScheduled = true;
     queueMicrotask(() => {
       this.#queuedWatchRefreshScheduled = false;
-      if (this.#watchRefreshFlushing || this.#queuedWatchRefresh === null) {
+      if (
+        (singleFlight && this.#watchRefreshFlushing) ||
+        this.#queuedWatchRefresh === null
+      ) {
         return;
       }
       const batch = this.#queuedWatchRefresh;

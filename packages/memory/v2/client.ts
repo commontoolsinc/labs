@@ -34,6 +34,16 @@ import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
 
+// EXPERIMENT toggle (default off): when true, `watchAddSync` fires its network
+// request outside the serialized watch-mutation chain so multiple watch.add
+// round trips overlap on the wire. Module-level so it can be flipped for
+// measurement without threading a setting through the runner; a real rollout
+// would gate this off the storage settings flag instead.
+export let __concurrentWatchRefresh = false;
+export function __setConcurrentWatchRefresh(value: boolean): void {
+  __concurrentWatchRefresh = value;
+}
+
 export interface Transport {
   send(payload: string): Promise<void>;
   close(): Promise<void>;
@@ -669,14 +679,24 @@ export class SpaceSession {
 
   async watchAddSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
     this.#assertOpen();
-    return await this.runWatchMutation(async () => {
-      const result = await this.client.request<WatchAddResult>({
+    const sendRequest = () =>
+      this.client.request<WatchAddResult>({
         type: "session.watch.add",
         requestId: crypto.randomUUID(),
         space: this.space,
         sessionId: this.#sessionId,
         watches,
       });
+    // EXPERIMENT (concurrent watch refresh): fire the network request BEFORE
+    // entering the serialized mutation chain, so multiple watch.add round trips
+    // overlap on the wire. The chain still serializes the VIEW application
+    // (`#watchSpecs` / `#watchView.applySync`) in request-issue order, so
+    // ordering guarantees are preserved — only the request/response wait is
+    // lifted out of the critical section. Default path (flag off) is unchanged:
+    // request and apply both run inside the serialized section.
+    const eager = __concurrentWatchRefresh ? sendRequest() : undefined;
+    return await this.runWatchMutation(async () => {
+      const result = await (eager ?? sendRequest());
       this.noteResult(result.serverSeq);
       this.#watchSpecs = [
         ...new Map(

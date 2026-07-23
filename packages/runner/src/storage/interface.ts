@@ -317,6 +317,18 @@ export interface IRemoteStorageProviderSettings {
    * abort.
    */
   connectionTimeout: number;
+
+  /**
+   * EXPERIMENTAL (default off): allow more than one watch-refresh round trip
+   * to be in flight per space at once. Today a single-flight guard
+   * (`#watchRefreshFlushing`) holds every refresh after the first until the
+   * prior response lands, so traversal-driven pulls discovered a tick apart —
+   * even with no data dependency between them — serialize into one-RTT-each
+   * frames instead of fanning out. With this on, a batch flushes as soon as it
+   * is scheduled; same-tick microtask coalescing is unchanged. Off preserves
+   * the exact current behavior.
+   */
+  experimentalConcurrentWatchRefresh?: boolean;
 }
 
 export interface LocalStorageOptions {
