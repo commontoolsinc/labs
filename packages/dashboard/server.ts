@@ -18,6 +18,7 @@
 //   DISCORD_BOT_TOKEN, DISCORD_GUILD_ID   online-by-role tile
 //   GH_TOKEN                          GitHub tiles; org Members read also powers
 //                                     the organization-users tile
+//   BLACKSMITH_API_TOKEN              Blacksmith share of the ci-spend tile
 
 import { CI_WORKFLOW, PORT, REPO } from "./config.ts";
 import { TILES } from "./registry.ts";
