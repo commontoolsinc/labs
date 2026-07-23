@@ -195,7 +195,7 @@ thread, typed links out. Deliberately minimal — no statuses, labels, or
 assignees. The board derives the corpus's prose reference graph (topic fids
 pasted in bodies/comments/link URLs → navigable crossref chips, never
 persisted). Demonstrates: reading-list-style piece-in-list composition,
-`PerUser` display-name on a shared piece, mergeable comment appends,
+profile-native authorship on a shared piece, mergeable comment appends,
 session-scoped drafts, read-side derived backlinks over sibling pieces
 (`resolveAsCell().entityId` for piece identity), `multiUserTest` coverage.
 
@@ -207,7 +207,6 @@ PerUser, mergeable, backlinks, crossrefs, references, graph
 ```ts
 interface TopicsInput {
   topics?: Writable<TopicPiece[] | Default<[]>>;
-  myName?: PerUser<Writable<string | Default<"">>>;
 }
 // TopicInput additionally takes mentionable?: Writable<TopicPiece[]> — the
 // board's own list, wired at creation, for detail-page Connections.
@@ -221,9 +220,7 @@ interface TopicsOutput {
   mentionable: TopicPiece[];
   topicCount: number;
   crossrefs: TopicCrossref[]; // { fid, topic, refsOut, referencedBy }
-  myName: string;
-  addTopic: Stream<{ title: string }>;
-  setMyName: Stream<{ name: string }>;
+  addTopic: Stream<{ title: string; agentName: string }>;
 }
 ```
 

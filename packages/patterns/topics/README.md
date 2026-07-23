@@ -107,16 +107,16 @@ deno run --frozen -A packages/patterns/tools/topics-diagnose.ts --profile=confli
 # Explicit matrix and a focused scenario subset.
 deno run --frozen -A packages/patterns/tools/topics-diagnose.ts \
   --cases=2x2,8x4 --rounds=3 --typing-steps=5 \
-  --scenario=names,comments,bodies
+  --scenario=comments,bodies
 
 # Two sessions per identity with deliberate storage-frame delay.
 deno run --frozen -A packages/patterns/tools/topics-diagnose.ts \
   --topics=4 --users=2 --sessions-per-user=2 --ws-delay-ms=10
 ```
 
-Supported scenarios are `names`, `create-topics`, `noops`, `titles`, `comments`,
-`links`, `bodies`, `crossrefs`, and `root-oscillation`. The matrix default keeps
-the original scenarios; `--scenario=all` adds root oscillation.
+Supported scenarios are `create-topics`, `noops`, `titles`, `comments`, `links`,
+`bodies`, `crossrefs`, and `root-oscillation`. The matrix default keeps the
+original scenarios; `--scenario=all` adds root oscillation.
 `--profile=conflicts` is intentionally small and deterministic: 2 topics, 2
 users, 2 sessions per user, a 10ms WebSocket frame delay, 4 rounds, and only
 `root-oscillation`; `--profile=conflicts --quick` keeps that topology but uses 2
@@ -129,18 +129,16 @@ sessions. Its diagnostic-only harness operation replaces the containing
 document's `value` record (preserving siblings), so canonical memory telemetry
 records a literal `/value` patch rather than nested `/value/topics/*` diffs. It
 requires at least two topics and two total sessions. The `noops` phase repeats
-each topic's current title and body so write elision is measured directly.
-`names` sends `setMyName` handler traffic: Topics does not expose the writable
-UI-bound display-name input as an output. When `create-topics` is not selected,
-setup creates the seed topics serially so focused profiles begin from a known
-baseline. Each target is prepared from the same confirmed root in two sessions
-then committed concurrently; the accepted root write and stale conflict/revert
-are both observed before the next target. Phase snapshots use an event-driven
-drain of delayed frames, worker synchronization, and server refreshes before
-counter reset or collection. `--program`, `--topics`, `--users`, `--rounds`,
-`--typing-steps`, `--sessions-per-user`, `--ws-delay-ms`, and
-`--cases=TOPICSxUSERS` are also available; invalid explicit values fail instead
-of falling back.
+each topic's current title and body so write elision is measured directly. When
+`create-topics` is not selected, setup creates the seed topics serially so
+focused profiles begin from a known baseline. Each target is prepared from the
+same confirmed root in two sessions then committed concurrently; the accepted
+root write and stale conflict/revert are both observed before the next target.
+Phase snapshots use an event-driven drain of delayed frames, worker
+synchronization, and server refreshes before counter reset or collection.
+`--program`, `--topics`, `--users`, `--rounds`, `--typing-steps`,
+`--sessions-per-user`, `--ws-delay-ms`, and `--cases=TOPICSxUSERS` are also
+available; invalid explicit values fail instead of falling back.
 
 Each phase reports logical submitted operations plus direct set/push accepted
 and rejected outcomes; queued stream sends are submitted, not accepted. It also
@@ -182,12 +180,14 @@ contender. `twoStepEligibleCount` is `max(0, target writes - 2)`. It contains no
 links, IDs, values, or fingerprints. When no two-step comparison is eligible,
 its ratio is `null`; a one-round conflict profile remains valid and still
 measures accepted root writes and stale conflicts. Final convergence reports
-only a boolean equality result and per-session cardinality arrays; private
-comparison data and the user-supplied program path are never serialized. Failed
-cases use only fixed diagnostic error codes, never exception messages or input
-content: `invalid-configuration`, `harness-initialization-failed`,
-`phase-verification-failed`, `phase-operation-failed`,
-`root-oscillation-failed`, `convergence-failed`, or `unknown-error`.
+only a boolean equality result and per-session cardinality arrays; the private
+equality token includes durable topic, comment, link, and structured author
+snapshots, but neither that data nor the user-supplied program path is
+serialized. Failed cases use only fixed diagnostic error codes, never exception
+messages or input content: `invalid-configuration`,
+`harness-initialization-failed`, `phase-verification-failed`,
+`phase-operation-failed`, `root-oscillation-failed`, `convergence-failed`, or
+`unknown-error`.
 
 Canonical byte definitions and the oscillation sequence shape are stable local
 diagnostic signals. Their totals, accepted/rejected outcomes, conflict counts,
