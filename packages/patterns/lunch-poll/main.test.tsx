@@ -162,13 +162,15 @@ const COLLIDING_INITIAL_USERS: User[] = [
 export default pattern(() => {
   const poll = CozyPoll({});
 
-  // Reference times derive from the one-shot `#now` wish (the pattern body
-  // cannot read the ambient clock — mirrors how the pattern under test gets
-  // its own "today"): "yesterday" for the seeded stale vote, and the day key
-  // the pattern is expected to filter to. Both read as unresolved
-  // (undefined / "") until `#now` resolves; the dependent assertions guard
-  // that window and the harness re-evaluates them once the wish lands.
-  const nowCell = wish<number>({ query: "#now" });
+  // Reference times derive from the interval `#now/300` wish — the same
+  // shared ticking clock the pattern under test runs on (the pattern body
+  // cannot read the ambient clock; the bare one-shot `#now` would freeze at
+  // first capture, which is exactly what the poll must not do): "yesterday"
+  // for the seeded stale vote, and the day key the pattern is expected to
+  // filter to. Both read as unresolved (undefined / "") until the wish
+  // resolves; the dependent assertions guard that window and the harness
+  // re-evaluates them once the wish lands.
+  const nowCell = wish<number>({ query: "#now/300" });
   const staleCastAt = computed(() =>
     nowCell.result == null ? undefined : nowCell.result - 86_400_000
   );
@@ -536,7 +538,7 @@ export default pattern(() => {
 
   // === Current-day vote filter ===
 
-  // The header renders the session's date, and `todayDate` exposes the local
+  // The header renders the current date, and `todayDate` exposes the local
   // day key the votes are filtered to. The `todayKey !== ""` guard holds the
   // assertion false until this pattern's `#now` wish resolves.
   const assert_today_header_renders = computed(() =>
