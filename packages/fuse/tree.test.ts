@@ -117,6 +117,64 @@ Deno.test("CFC directory entry ordering is sorted once when read", () => {
   );
 });
 
+Deno.test("CFC entry updates rebuild a missing lookup index", () => {
+  const tree = new FsTree();
+  const annotator = new CfcProjectionAnnotator(tree, {
+    space: "did:key:zSpace",
+    generation: "generation-1",
+    labelView: { version: 1, entries: [] },
+  });
+  const parentIno = tree.addDir(tree.rootIno, "values", "object");
+  annotator.annotateJsonDirectory(parentIno, [], { first: "old" });
+  const firstIno = tree.addFile(parentIno, "first", "old", "string");
+  annotator.annotateJsonScalar(firstIno, ["first"], "old");
+  annotator.annotateEntry(parentIno, "first", firstIno);
+
+  const indexes = (tree as unknown as {
+    cfcEntryIndexes: Map<bigint, Map<string, number>>;
+  }).cfcEntryIndexes;
+  indexes.delete(parentIno);
+
+  annotator.annotateEntry(parentIno, "first", firstIno);
+  assertEquals(indexes.get(parentIno)?.get("first"), 0);
+  assertEquals(
+    tree.getCfcAnnotation(parentIno)?.entries?.entries.length,
+    1,
+  );
+});
+
+Deno.test("removing an unannotated child leaves CFC entries unchanged", () => {
+  const tree = new FsTree();
+  const annotator = new CfcProjectionAnnotator(tree, {
+    space: "did:key:zSpace",
+    generation: "generation-1",
+    labelView: { version: 1, entries: [] },
+  });
+  const parentIno = tree.addDir(tree.rootIno, "values", "object");
+  annotator.annotateJsonDirectory(parentIno, [], { kept: "value" });
+  const keptIno = tree.addFile(parentIno, "kept", "value", "string");
+  annotator.annotateJsonScalar(keptIno, ["kept"], "value");
+  annotator.annotateEntry(parentIno, "kept", keptIno);
+  tree.addFile(parentIno, "unannotated", "temporary", "string");
+
+  tree.removeChild(parentIno, "unannotated");
+
+  assertEquals(
+    tree.getCfcAnnotation(parentIno)?.entries?.entries.map((entry) =>
+      entry.name
+    ),
+    ["kept"],
+  );
+});
+
+Deno.test("detachChild rejects a missing parent or child", () => {
+  const tree = new FsTree();
+  const parentIno = tree.addDir(tree.rootIno, "parent");
+
+  assertEquals(tree.detachChild(999_999n, "child"), undefined);
+  assertEquals(tree.detachChild(parentIno, "child"), undefined);
+});
+
 Deno.test("rename across parents updates paths transitively", () => {
   const tree = new FsTree();
   const src = tree.addDir(tree.rootIno, "src");

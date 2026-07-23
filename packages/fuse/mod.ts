@@ -234,6 +234,29 @@ export function rootSpaceLookupNames(name: string): {
   };
 }
 
+export function createFuseOperationState(
+  tree: FsTree,
+  bridge: CellBridge | null,
+): FuseOperationState {
+  return new FuseOperationState(
+    tree,
+    bridge,
+    (ino) =>
+      Boolean(
+        bridge?.resolveWritePath(ino) || bridge?.resolveSourceWritePath(ino),
+      ),
+  );
+}
+
+export function closeKernelFileHandle(
+  handles: HandleMap,
+  bridge: Pick<CellBridge, "releaseEntityProjectionOpen"> | null,
+  fh: bigint,
+): void {
+  const closed = handles.close(fh);
+  if (closed) bridge?.releaseEntityProjectionOpen(closed.ino);
+}
+
 function readBuffer(ptr: Deno.PointerValue, size: bigint): Uint8Array {
   const length = Number(size);
   const data = new Uint8Array(length);
@@ -726,19 +749,7 @@ export async function main(argv: string[] = Deno.args) {
 
   // File handle tracking for write support
   const handles = new HandleMap();
-  const fuseOperations = new FuseOperationState(
-    tree,
-    bridge,
-    (ino) =>
-      Boolean(
-        bridge?.resolveWritePath(ino) || bridge?.resolveSourceWritePath(ino),
-      ),
-  );
-
-  function closeKernelFileHandle(fh: bigint): void {
-    const closed = handles.close(fh);
-    if (closed) bridge?.releaseEntityProjectionOpen(closed.ino);
-  }
+  const fuseOperations = createFuseOperationState(tree, bridge);
 
   function virtualFileRangeErrno(
     offset: number,
@@ -1377,7 +1388,7 @@ export async function main(argv: string[] = Deno.args) {
         writeFileInfo(fi, fh);
         replyWithRetainedState(
           () => fuse.symbols.fuse_reply_open(req, fi),
-          () => closeKernelFileHandle(fh),
+          () => closeKernelFileHandle(handles, bridge, fh),
         );
         return;
       }
@@ -1459,7 +1470,7 @@ export async function main(argv: string[] = Deno.args) {
       writeFileInfo(fi, fh);
       replyWithRetainedState(
         () => fuse.symbols.fuse_reply_open(req, fi),
-        () => closeKernelFileHandle(fh),
+        () => closeKernelFileHandle(handles, bridge, fh),
       );
     },
   );
@@ -2343,7 +2354,7 @@ export async function main(argv: string[] = Deno.args) {
         if (writeTarget?.kind !== "ignored") {
           const errno = disconnectedWriteErrno(bridge);
           if (errno !== null) {
-            closeKernelFileHandle(fh);
+            closeKernelFileHandle(handles, bridge, fh);
             fuse.symbols.fuse_reply_err(req, errno);
             return;
           }
@@ -2368,16 +2379,18 @@ export async function main(argv: string[] = Deno.args) {
           });
         }
         if (flushPromise) {
-          flushPromise.finally(() => closeKernelFileHandle(fh));
+          flushPromise.finally(() =>
+            closeKernelFileHandle(handles, bridge, fh)
+          );
         } else {
           // scheduleFlush path — close after the scheduled timer fires.
           // The handle stays alive until then; scheduleFlush already
           // captures the handle reference.
-          queueMicrotask(() => closeKernelFileHandle(fh));
+          queueMicrotask(() => closeKernelFileHandle(handles, bridge, fh));
         }
       } else {
         fuse.symbols.fuse_reply_err(req, 0);
-        closeKernelFileHandle(fh);
+        closeKernelFileHandle(handles, bridge, fh);
       }
     },
   );
@@ -2635,7 +2648,7 @@ export async function main(argv: string[] = Deno.args) {
             ),
           () => {
             bridge.releaseEntityProjectionLookup(ino);
-            closeKernelFileHandle(fh);
+            closeKernelFileHandle(handles, bridge, fh);
           },
         );
         return;
@@ -2702,7 +2715,7 @@ export async function main(argv: string[] = Deno.args) {
           ),
         () => {
           bridge.releaseEntityProjectionLookup(ino);
-          closeKernelFileHandle(fh);
+          closeKernelFileHandle(handles, bridge, fh);
         },
       );
 

@@ -15,6 +15,26 @@ const signer = await Identity.fromPassphrase("memory-v2-lazy-session");
 const space = signer.did();
 const type = "application/json" as const;
 
+function entityListingStorage(
+  serverFlags: Record<string, boolean>,
+  session: Record<string, unknown>,
+) {
+  const storage = TestStorageManager.create({
+    as: signer,
+    memoryHost: new URL("memory://"),
+  }, {
+    create: () =>
+      Promise.resolve({
+        client: {
+          serverFlags,
+          close: () => Promise.resolve(),
+        } as never,
+        session: session as never,
+      }),
+  });
+  return { storage, provider: storage.open(space) };
+}
+
 class TestEmulatedStorageManager extends EmulatedStorageManager {
   static emulateWithServerFactory(
     options: Omit<V2StorageOptions, "memoryHost" | "spaceHostMap">,
@@ -257,6 +277,82 @@ describe("Memory v2 lazy session creation", () => {
 
     await storage.close();
     expect(closes).toBe(1);
+  });
+});
+
+describe("Memory v2 entity identifier capabilities", () => {
+  it("does not send identifier RPCs that the server did not advertise", async () => {
+    let listCalls = 0;
+    let lookupCalls = 0;
+    const { storage, provider } = entityListingStorage({}, {
+      listEntityIds: () => {
+        listCalls++;
+        return Promise.resolve({ serverSeq: 1, ids: [] });
+      },
+      entityIdExists: () => {
+        lookupCalls++;
+        return Promise.resolve({ serverSeq: 1, exists: true });
+      },
+    });
+
+    try {
+      expect(provider.getReplica()).toBe(space);
+      expect(await provider.listEntityIds!()).toBeUndefined();
+      expect(await provider.listEntityIdPage!()).toBeUndefined();
+      expect(await provider.entityIdExists!("of:fid1:missing-capability"))
+        .toBeUndefined();
+      expect(listCalls).toBe(0);
+      expect(lookupCalls).toBe(0);
+    } finally {
+      await storage.close();
+    }
+  });
+
+  it("uses the unpaginated listing RPC for a server without pagination", async () => {
+    const requests: unknown[] = [];
+    const { storage, provider } = entityListingStorage({
+      entityIdListing: true,
+      entityIdPagination: false,
+    }, {
+      listEntityIds: (options?: unknown) => {
+        requests.push(options);
+        return Promise.resolve({
+          serverSeq: 4,
+          ids: ["of:fid1:legacy-a", "of:fid1:legacy-b"],
+        });
+      },
+    });
+
+    try {
+      expect(await provider.listEntityIds!()).toEqual([
+        "of:fid1:legacy-a",
+        "of:fid1:legacy-b",
+      ]);
+      expect(await provider.listEntityIdPage!({ limit: 1 })).toBeUndefined();
+      expect(requests).toEqual([undefined]);
+    } finally {
+      await storage.close();
+    }
+  });
+
+  it("propagates an unavailable page from a paginated listing server", async () => {
+    let listCalls = 0;
+    const { storage, provider } = entityListingStorage({
+      entityIdListing: true,
+      entityIdPagination: true,
+    }, {
+      listEntityIds: () => {
+        listCalls++;
+        return Promise.resolve(undefined);
+      },
+    });
+
+    try {
+      expect(await provider.listEntityIds!()).toBeUndefined();
+      expect(listCalls).toBe(1);
+    } finally {
+      await storage.close();
+    }
   });
 });
 
