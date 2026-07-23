@@ -143,6 +143,7 @@ const readTokenResponse = async (
   response: Response,
   operation: "exchange" | "refresh",
   now: number,
+  existingRefreshToken?: string,
 ): Promise<OpenAICodexOAuthCredential> => {
   if (!response.ok) {
     let code: string | undefined;
@@ -182,9 +183,13 @@ const readTokenResponse = async (
       `OpenAI Codex token ${operation} returned invalid JSON`,
     );
   }
+  const refreshToken = json.refresh_token === undefined &&
+      operation === "refresh"
+    ? existingRefreshToken
+    : json.refresh_token;
   if (
     typeof json.access_token !== "string" ||
-    typeof json.refresh_token !== "string" ||
+    typeof refreshToken !== "string" ||
     typeof json.expires_in !== "number" || !Number.isFinite(json.expires_in)
   ) {
     throw new OpenAICodexAuthError(
@@ -197,7 +202,7 @@ const readTokenResponse = async (
     type: "oauth",
     providerId: OPENAI_CODEX_PROVIDER_ID,
     accessToken: json.access_token,
-    refreshToken: json.refresh_token,
+    refreshToken,
     expiresAt: now + json.expires_in * 1000,
     accountId: extractOpenAICodexAccountId(idToken, json.access_token),
   };
@@ -350,6 +355,7 @@ export class OpenAICodexCredentialResolver {
             response,
             "refresh",
             this.#now(),
+            latest.refreshToken,
           );
           return credential;
         },

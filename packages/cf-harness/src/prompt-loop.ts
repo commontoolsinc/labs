@@ -21,6 +21,7 @@ import {
 } from "./contracts/observation.ts";
 import type { HarnessImageAttachment } from "./contracts/image.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
+import { harnessCredentialOwnersEqual } from "./contracts/run-manifest.ts";
 import {
   createHarnessCfcPolicySnapshot,
   type HarnessParentToolAllowance,
@@ -1671,6 +1672,34 @@ export class CfHarnessPromptLoop {
         `model client provider ${this.modelClient.providerId} does not match configured provider ${this.engine.config.modelProvider}`,
       );
     }
+    if (this.engine.config.modelProvider === "openai-codex") {
+      const clientOwner = this.modelClient.credentialOwner;
+      if (clientOwner === undefined) {
+        throw new Error(
+          "openai-codex model client must declare its credential owner",
+        );
+      }
+      const runState = this.engine.getRunState();
+      const manifestOwner = runState.runManifest?.credentialOwner;
+      if (
+        manifestOwner !== undefined &&
+        !harnessCredentialOwnersEqual(clientOwner, manifestOwner)
+      ) {
+        throw new Error(
+          "openai-codex model client does not match run manifest credential owner",
+        );
+      }
+      const configuredOwnerKey = runState.credentialOwnerKey ??
+        this.engine.config.credentialOwnerKey;
+      if (
+        manifestOwner === undefined && configuredOwnerKey !== undefined &&
+        clientOwner.ownerKey !== configuredOwnerKey
+      ) {
+        throw new Error(
+          "openai-codex model client does not match configured credential owner",
+        );
+      }
+    }
     this.#maxModelTurns = options.maxModelTurns ?? DEFAULT_MAX_MODEL_TURNS;
     this.#parentToolAllowanceMode = options.allowedToolIds === undefined
       ? "all-builtins"
@@ -2608,8 +2637,16 @@ export class CfHarnessPromptLoop {
       this.engine.config.modelProvider;
     const subagentSequence = nextSubagentSequence(parentRunState);
     const childRunId = `${parentRunState.runId}.subagent.${subagentSequence}`;
+    const childLineage = {
+      role: "subagent" as const,
+      rootRunId: parentRunState.lineage?.rootRunId ?? parentRunState.runId,
+      parentRunId: parentRunState.runId,
+      parentToolCallId: options.toolCall.id,
+      depth: (parentRunState.lineage?.depth ?? 0) + 1,
+    };
     const childEngine = new CfHarnessEngine({
       runId: childRunId,
+      lineage: childLineage,
       sandboxRuntime: this.engine.sandbox,
       sandbox: this.engine.config.sandbox,
       workspaceHostPath: this.engine.workspaceHostPath,
@@ -2645,6 +2682,9 @@ export class CfHarnessPromptLoop {
         ? { browserAccess: this.#browserAccess }
         : {}),
       cfcEnforcementMode: parentRunState.cfcEnforcementMode,
+      ...(parentRunState.runManifest !== undefined
+        ? { runManifest: parentRunState.runManifest }
+        : {}),
     });
     const childCreatedState = childEngine.getRunState();
     const childSkillContextMessages: string[] = [];
@@ -2685,6 +2725,13 @@ export class CfHarnessPromptLoop {
       createdAt: childCreatedState.createdAt,
       inputSummary: await createSubagentInputSummary(delegateInput),
     };
+    await this.engine.recordSubagentRun({
+      type: "cf-harness.subagent-run-ref",
+      parentToolCallId: options.toolCall.id,
+      childRunId,
+      status: "running",
+      manifest,
+    });
     const childLoop = new CfHarnessPromptLoop({
       engine: childEngine,
       modelClient: this.modelClient,

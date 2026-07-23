@@ -14,7 +14,6 @@ import {
   appendHarnessFailureRecord,
   appendHarnessPolicyDecision,
   appendHarnessPolicyEvent,
-  appendHarnessSubagentRun,
   appendHarnessToolOutput,
   createHarnessRunState,
   type HarnessRunState,
@@ -31,6 +30,7 @@ import {
   setHarnessSkillRegistry,
   setHarnessSkillResourceReads,
   setHarnessSkillScriptExecutions,
+  setHarnessSubagentRun,
   setHarnessTranscriptPath,
 } from "./run-state.ts";
 import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-model-context.ts";
@@ -68,7 +68,10 @@ import type {
   HarnessSkillResourceRead,
   HarnessSkillScriptExecution,
 } from "./contracts/skill.ts";
-import type { HarnessSubagentRunRef } from "./contracts/subagent.ts";
+import type {
+  HarnessSubagentLineage,
+  HarnessSubagentRunRef,
+} from "./contracts/subagent.ts";
 import {
   createToolResultRef,
   type ToolOutputId,
@@ -168,6 +171,7 @@ export interface CreateHarnessEngineOptions
   extends ResolveHarnessConfigOptions {
   runId?: string;
   runState?: HarnessRunState;
+  lineage?: HarnessSubagentLineage;
   workspaceHostPath?: string;
   sandboxImage?: string;
   sandboxDockerRuntime?: string;
@@ -325,6 +329,15 @@ export class CfHarnessEngine {
     }
     if (
       options.runState !== undefined && recordedProvider === "openai-codex" &&
+      options.model !== undefined && options.runState.model !== undefined &&
+      options.model !== options.runState.model
+    ) {
+      throw new Error(
+        `resumed openai-codex run model ${options.runState.model} does not match requested model ${options.model}`,
+      );
+    }
+    if (
+      options.runState !== undefined && recordedProvider === "openai-codex" &&
       options.runState.credentialOwnerKey !== undefined &&
       options.credentialOwnerKey !== undefined &&
       options.credentialOwnerKey !== options.runState.credentialOwnerKey
@@ -432,6 +445,7 @@ export class CfHarnessEngine {
         artifactRoot: this.artifactStore?.runRoot,
         runManifest: this.config.runManifest,
         runManifestPath: this.config.runManifestPath,
+        lineage: options.lineage,
         now: this.#now(),
       });
     this.#outputSequence = this.#runState.toolOutputs.length;
@@ -645,7 +659,7 @@ export class CfHarnessEngine {
   async recordSubagentRun(
     subagentRun: HarnessSubagentRunRef,
   ): Promise<HarnessRunState> {
-    this.#runState = appendHarnessSubagentRun(
+    this.#runState = setHarnessSubagentRun(
       this.#runState,
       subagentRun,
       this.#now(),

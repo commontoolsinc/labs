@@ -165,6 +165,75 @@ Deno.test("CfHarnessPromptLoop rejects known provider/client mismatches", () => 
   );
 });
 
+Deno.test("CfHarnessPromptLoop requires an exact Codex credential owner binding", () => {
+  const owner = {
+    type: "cf-harness.credential-owner-ref" as const,
+    version: 1 as const,
+    ownerKey: "loom:user-a",
+    tenantKey: "tenant-a",
+  };
+  const codexClient = (
+    credentialOwner?: typeof owner,
+  ): HarnessModelClient => ({
+    providerId: "openai-codex",
+    ...(credentialOwner !== undefined ? { credentialOwner } : {}),
+    complete: () => Promise.reject(new Error("unused")),
+  });
+  const codexEngine = (
+    credentialOwnerKey: string,
+    manifestOwner?: typeof owner,
+  ) =>
+    new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      modelProvider: "openai-codex",
+      credentialOwnerKey,
+      ...(manifestOwner !== undefined
+        ? {
+          runManifest: {
+            type: "cf-harness.loom-run-manifest" as const,
+            version: 1 as const,
+            source: "loom" as const,
+            modelProvider: "openai-codex" as const,
+            credentialOwner: manifestOwner,
+          },
+        }
+        : {}),
+      cfcEnforcementMode: "disabled",
+    });
+
+  assertThrows(
+    () =>
+      new CfHarnessPromptLoop({
+        engine: codexEngine(owner.ownerKey),
+        modelClient: codexClient(),
+      }),
+    Error,
+    "openai-codex model client must declare its credential owner",
+  );
+  assertThrows(
+    () =>
+      new CfHarnessPromptLoop({
+        engine: codexEngine(owner.ownerKey),
+        modelClient: codexClient({ ...owner, ownerKey: "loom:user-b" }),
+      }),
+    Error,
+    "does not match configured credential owner",
+  );
+  assertThrows(
+    () =>
+      new CfHarnessPromptLoop({
+        engine: codexEngine(owner.ownerKey, owner),
+        modelClient: codexClient({ ...owner, tenantKey: "tenant-b" }),
+      }),
+    Error,
+    "does not match run manifest credential owner",
+  );
+  new CfHarnessPromptLoop({
+    engine: codexEngine(owner.ownerKey, owner),
+    modelClient: codexClient(owner),
+  });
+});
+
 Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through the shared CFC loop", async () => {
   const sandbox = new FakeSandboxRuntime();
   let turns = 0;
@@ -344,6 +413,11 @@ Deno.test("Codex profile model overrides fail the child without aborting the par
   let modelTurns = 0;
   const modelClient: HarnessModelClient = {
     providerId: "openai-codex",
+    credentialOwner: {
+      type: "cf-harness.credential-owner-ref",
+      version: 1,
+      ownerKey: "local",
+    },
     complete: () => {
       modelTurns += 1;
       return Promise.resolve({

@@ -204,15 +204,16 @@ export const createHarnessRunTimeline = (
     });
   }
   for (const subagentRun of options.runState.subagentRuns ?? []) {
+    const childState = subagentRun.runState;
     push({
       kind: "subagent_run",
-      at: subagentRun.runState.endedAt ?? subagentRun.runState.updatedAt ??
+      at: childState?.endedAt ?? childState?.updatedAt ??
         subagentRun.manifest.createdAt,
       toolCallId: subagentRun.parentToolCallId,
       childRunId: subagentRun.childRunId,
       subagentStatus: subagentRun.status,
-      status: subagentRun.runState.status,
-      terminalReason: subagentRun.runState.terminalReason,
+      status: childState?.status ?? subagentRun.status,
+      terminalReason: childState?.terminalReason,
     });
   }
   for (

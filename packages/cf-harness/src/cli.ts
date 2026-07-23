@@ -2237,6 +2237,11 @@ export const runCfHarnessCli = async (
     if (parsed.resumeRun !== undefined) {
       const readRunArtifacts = deps.readRunArtifacts ?? readHarnessRunArtifacts;
       const artifacts = await readRunArtifacts(parsed.resumeRun);
+      if (artifacts.runState.lineage?.role === "subagent") {
+        throw new Error(
+          `Cannot resume subagent run ${artifacts.runState.runId} as a top-level run; resume root run ${artifacts.runState.lineage.rootRunId} instead.`,
+        );
+      }
       const recordedProvider = artifacts.runState.modelProvider ??
         "openai-compatible-gateway";
       const requestedProvider = parsed.modelProvider ??
@@ -2290,13 +2295,6 @@ export const runCfHarnessCli = async (
           "Loom openai-codex runs require an authenticated credential owner reference",
         );
       }
-      const modelClient = await createSelectedModelClient({
-        provider: modelProvider,
-        credentialOwner,
-        loom,
-        harnessHome: parsed.harnessHome,
-        deps,
-      });
       const engine = new CfHarnessEngine({
         runState: artifacts.runState,
         artifactRoot: parsed.artifactRoot,
@@ -2341,6 +2339,13 @@ export const runCfHarnessCli = async (
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
         ...(additionalMounts.length > 0 ? { additionalMounts } : {}),
+      });
+      const modelClient = await createSelectedModelClient({
+        provider: modelProvider,
+        credentialOwner,
+        loom,
+        harnessHome: parsed.harnessHome,
+        deps,
       });
       activateEngine(engine);
       const loop = createPromptLoop({

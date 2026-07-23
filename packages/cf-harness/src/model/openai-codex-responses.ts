@@ -6,6 +6,8 @@ import type {
   HarnessTranscriptMessage,
 } from "../contracts/transcript.ts";
 import type { HarnessFetch } from "../contracts/http-fetch.ts";
+import { sha256 } from "@commonfabric/content-hash";
+import { encodeHex } from "@std/encoding/hex";
 import {
   type HarnessCredentialOwnerRef,
   harnessCredentialOwnersEqual,
@@ -43,6 +45,18 @@ export interface OpenAICodexResponsesClientOptions {
 
 type ResponsesInputItem = Record<string, unknown>;
 
+const MAX_PROVIDER_AFFINITY_KEY_LENGTH = 64;
+
+const providerRunAffinityKey = (runId: string): string => {
+  if (runId.length <= MAX_PROVIDER_AFFINITY_KEY_LENGTH) return runId;
+  const digest = encodeHex(sha256(new TextEncoder().encode(runId))).slice(
+    0,
+    40,
+  );
+  const prefixLength = MAX_PROVIDER_AFFINITY_KEY_LENGTH - digest.length - 1;
+  return `${runId.slice(0, prefixLength)}-${digest}`;
+};
+
 const textBytes = (text: string): number =>
   new TextEncoder().encode(text).byteLength;
 
@@ -65,13 +79,21 @@ const redactCredentialValues = (
 
 const continuationOutput = (
   continuation: HarnessProviderContinuation | undefined,
+  model: string,
 ): ResponsesInputItem[] => {
   if (continuation?.providerId !== "openai-codex") return [];
   const state = continuation.state;
   if (typeof state !== "object" || state === null || Array.isArray(state)) {
     return [];
   }
-  const output = (state as Record<string, unknown>).output;
+  const record = state as Record<string, unknown>;
+  if (record.version !== 1 || typeof record.sourceModel !== "string") return [];
+  if (record.sourceModel !== model) {
+    throw new Error(
+      `openai-codex continuation model ${record.sourceModel} does not match requested model ${model}`,
+    );
+  }
+  const output = record.output;
   if (!Array.isArray(output)) return [];
   return output.flatMap((item) =>
     typeof item === "object" && item !== null &&
@@ -86,14 +108,16 @@ const continuationOutput = (
 const continuationFunctionCallItemId = (
   continuation: HarnessProviderContinuation | undefined,
   callId: string,
+  model: string,
 ): string | undefined => {
   if (
     continuation?.providerId !== "openai-codex" ||
     typeof continuation.state !== "object" || continuation.state === null ||
     Array.isArray(continuation.state)
   ) return undefined;
-  const ids = (continuation.state as Record<string, unknown>)
-    .functionCallItemIds;
+  const record = continuation.state as Record<string, unknown>;
+  if (record.version !== 1 || record.sourceModel !== model) return undefined;
+  const ids = record.functionCallItemIds;
   if (typeof ids !== "object" || ids === null || Array.isArray(ids)) {
     return undefined;
   }
@@ -126,6 +150,7 @@ const materializeUserContent = async (
 
 const toResponsesInput = async (
   transcript: readonly HarnessTranscriptMessage[],
+  model: string,
 ): Promise<{ instructions: string; input: ResponsesInputItem[] }> => {
   const instructions = transcript.filter((message) => message.role === "system")
     .map((message) => message.content).join("\n\n") ||
@@ -141,7 +166,7 @@ const toResponsesInput = async (
         break;
       }
       case "assistant":
-        input.push(...continuationOutput(message.providerContinuation));
+        input.push(...continuationOutput(message.providerContinuation, model));
         if (message.content.length > 0) {
           input.push({
             type: "message",
@@ -159,6 +184,7 @@ const toResponsesInput = async (
           const itemId = continuationFunctionCallItemId(
             message.providerContinuation,
             call.id,
+            model,
           );
           input.push({
             type: "function_call",
@@ -272,6 +298,7 @@ async function* parseSse(
 
 const normalizeTerminalResponse = (
   response: Record<string, unknown>,
+  sourceModel: string,
 ): HarnessAssistantTranscriptMessage => {
   const status = response.status;
   if (
@@ -304,6 +331,10 @@ const normalizeTerminalResponse = (
           content.type === "output_text" && typeof content.text === "string"
         ) {
           text.push(content.text);
+        } else if (
+          content.type === "refusal" && typeof content.refusal === "string"
+        ) {
+          text.push(content.refusal);
         }
       }
     } else if (item.type === "function_call") {
@@ -348,6 +379,8 @@ const normalizeTerminalResponse = (
         providerContinuation: {
           providerId: "openai-codex",
           state: {
+            version: 1,
+            sourceModel,
             ...(typeof response.id === "string"
               ? { responseId: response.id }
               : {}),
@@ -522,9 +555,11 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
     }
     const credential = await this.#resolver.resolve(request.signal);
     if (request.signal?.aborted) throw abortReason(request.signal);
-    const converted = await toResponsesInput(request.transcript);
+    const converted = await toResponsesInput(request.transcript, request.model);
     if (request.signal?.aborted) throw abortReason(request.signal);
     const responseTools = toResponsesTools(request.tools);
+    const affinityKey = providerRunAffinityKey(request.runId);
+    const requestId = crypto.randomUUID();
     const body = JSON.stringify({
       model: request.model,
       store: false,
@@ -534,7 +569,7 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
       ...(responseTools.length > 0 ? { tools: responseTools } : {}),
       text: { verbosity: "low" },
       include: ["reasoning.encrypted_content"],
-      prompt_cache_key: request.runId,
+      prompt_cache_key: affinityKey,
       tool_choice: "auto",
       parallel_tool_calls: true,
     });
@@ -553,8 +588,8 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
           "OpenAI-Beta": "responses=experimental",
           accept: "text/event-stream",
           "content-type": "application/json",
-          "session-id": request.runId,
-          "x-client-request-id": request.runId,
+          "session-id": affinityKey,
+          "x-client-request-id": requestId,
         },
         body,
         signal: request.signal,
@@ -670,7 +705,7 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
       ? terminal.usage as Record<string, unknown>
       : undefined;
     return {
-      assistant: normalizeTerminalResponse(terminal),
+      assistant: normalizeTerminalResponse(terminal, request.model),
       ...(usage !== undefined
         ? {
           usage: {

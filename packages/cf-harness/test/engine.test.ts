@@ -140,6 +140,51 @@ Deno.test("CfHarnessEngine constructs in enforce mode without CFC transports", (
   assertEquals(engine.getRunState().cfcEnforcementMode, "enforce-strict");
 });
 
+Deno.test("CfHarnessEngine rejects only cross-model Codex resume", () => {
+  const resumedState = (
+    modelProvider: "openai-codex" | "openai-compatible-gateway",
+  ): HarnessRunState => ({
+    runId: `resume-${modelProvider}`,
+    status: "failed",
+    createdAt: "2026-07-23T20:00:00.000Z",
+    updatedAt: "2026-07-23T20:00:01.000Z",
+    cfcEnforcementMode: "disabled",
+    currentDir: "/workspace",
+    model: "gpt-recorded",
+    modelProvider,
+    ...(modelProvider === "openai-codex"
+      ? { credentialOwnerKey: "local" }
+      : {}),
+    policyEvents: [],
+    toolOutputs: [],
+    failureRecords: [],
+  });
+
+  new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runState: resumedState("openai-codex"),
+    model: "gpt-recorded",
+    credentialOwnerKey: "local",
+  });
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState: resumedState("openai-codex"),
+        model: "gpt-different",
+        credentialOwnerKey: "local",
+      }),
+    Error,
+    "resumed openai-codex run model gpt-recorded does not match requested model gpt-different",
+  );
+  new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runState: resumedState("openai-compatible-gateway"),
+    model: "gpt-different",
+    gatewayAuthMode: "none",
+  });
+});
+
 Deno.test("CfHarnessEngine refuses to run a tool in enforce mode without CFC transports", async () => {
   const engine = new CfHarnessEngine({
     runId: "run-1",

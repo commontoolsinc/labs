@@ -125,6 +125,65 @@ Deno.test("Codex Responses client sends the pinned owner-authenticated request",
   assertEquals(body.prompt_cache_key, "run-123");
 });
 
+Deno.test("Codex Responses client bounds stable run affinity identifiers", async () => {
+  const longRunId = `${"parent-run-".repeat(8)}subagent.123`;
+  const requests: Array<{ headers: Headers; body: Record<string, unknown> }> =
+    [];
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: (_input, init) => {
+      requests.push({
+        headers: new Headers(init?.headers),
+        body: JSON.parse(String(init?.body)),
+      });
+      return Promise.resolve(sse({
+        type: "response.completed",
+        response: {
+          status: "completed",
+          output: [{
+            type: "message",
+            content: [{ type: "output_text", text: "done" }],
+          }],
+        },
+      }));
+    },
+  });
+  const complete = () =>
+    client.complete({
+      model: "gpt-5.4",
+      transcript: [{ role: "user" as const, content: "hi" }],
+      tools: [],
+      nativeModelToolIds: [],
+      runId: longRunId,
+    });
+
+  await complete();
+  await complete();
+
+  const affinityKeys = requests.map((request) =>
+    String(request.body.prompt_cache_key)
+  );
+  assertEquals(affinityKeys[0].length <= 64, true);
+  assertEquals(affinityKeys[0], affinityKeys[1]);
+  assertEquals(affinityKeys[0].startsWith("parent-run-"), true);
+  assertEquals(
+    requests.map((request) => request.headers.get("session-id")),
+    affinityKeys,
+  );
+  const requestIds = requests.map((request) =>
+    request.headers.get("x-client-request-id")
+  );
+  assertEquals(
+    requestIds.every((requestId) =>
+      requestId !== null &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+        .test(requestId)
+    ),
+    true,
+  );
+  assertEquals(requestIds[0] === requestIds[1], false);
+});
+
 Deno.test("Codex Responses client normalizes tool calls and preserves encrypted continuation", async () => {
   const requestBodies: Array<Record<string, unknown>> = [];
   const client = new OpenAICodexResponsesClient({
@@ -168,6 +227,21 @@ Deno.test("Codex Responses client normalizes tool calls and preserves encrypted 
     "openai-codex",
   );
   assertEquals(
+    result.assistant.providerContinuation?.state,
+    {
+      version: 1,
+      sourceModel: "gpt-5.4",
+      responseId: "resp_tools",
+      output: [{
+        type: "reasoning",
+        id: "rs_1",
+        encrypted_content: "encrypted-state",
+        summary: [],
+      }],
+      functionCallItemIds: { call_1: "fc_1" },
+    },
+  );
+  assertEquals(
     (result.assistant.providerContinuation?.state as { output: unknown[] })
       .output[0],
     {
@@ -198,6 +272,36 @@ Deno.test("Codex Responses client normalizes tool calls and preserves encrypted 
     replayInput.find((item) => item.type === "function_call")?.id,
     "fc_1",
   );
+});
+
+Deno.test("Codex Responses client surfaces refusal-only output", async () => {
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: () =>
+      Promise.resolve(sse({
+        type: "response.completed",
+        response: {
+          status: "completed",
+          output: [{
+            type: "message",
+            content: [{
+              type: "refusal",
+              refusal: "I cannot help with that request.",
+            }],
+          }],
+        },
+      })),
+  });
+
+  const result = await client.complete({
+    model: "gpt-5.4",
+    transcript: [{ role: "user", content: "hi" }],
+    tools: [],
+    nativeModelToolIds: [],
+    runId: "run-refusal",
+  });
+
+  assertEquals(result.assistant.content, "I cannot help with that request.");
 });
 
 Deno.test("Codex Responses client rejects streams without a terminal event", async () => {

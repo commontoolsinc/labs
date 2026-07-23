@@ -4125,6 +4125,124 @@ Deno.test("resume preserves the recorded Codex provider and continuation", async
   ]);
 });
 
+Deno.test("top-level CLI resume rejects subagent lineage before creating a model client", async () => {
+  const { io, stderr } = createIoBuffers();
+  let modelClientsCreated = 0;
+  const exitCode = await runCfHarnessCli(
+    ["--resume-run", "/tmp/project/.cf-harness-artifacts/root.subagent.1"],
+    {
+      io,
+      cwd: "/tmp/project",
+      env: {},
+      readRunArtifacts: () =>
+        Promise.resolve({
+          runRoot: "/tmp/project/.cf-harness-artifacts/root.subagent.1",
+          runStatePath:
+            "/tmp/project/.cf-harness-artifacts/root.subagent.1/run-state.json",
+          transcriptPath:
+            "/tmp/project/.cf-harness-artifacts/root.subagent.1/transcript.json",
+          runState: {
+            runId: "root.subagent.1",
+            status: "failed" as const,
+            createdAt: "2026-07-23T20:00:00.000Z",
+            updatedAt: "2026-07-23T20:00:01.000Z",
+            cfcEnforcementMode: "disabled" as const,
+            currentDir: "/workspace",
+            model: "gpt-5.4",
+            modelProvider: "openai-codex" as const,
+            credentialOwnerKey: "local",
+            lineage: {
+              role: "subagent" as const,
+              rootRunId: "root",
+              parentRunId: "root",
+              parentToolCallId: "call-child",
+              depth: 1,
+            },
+            policyEvents: [],
+            toolOutputs: [],
+          },
+          transcript: [{ role: "user" as const, content: "Continue" }],
+        }),
+      createModelClient: () => {
+        modelClientsCreated += 1;
+        return {
+          providerId: "openai-codex",
+          credentialOwner: {
+            type: "cf-harness.credential-owner-ref",
+            version: 1,
+            ownerKey: "local",
+          },
+          complete: () => Promise.reject(new Error("must not run")),
+        };
+      },
+    },
+  );
+
+  assertEquals(exitCode, 1);
+  assertEquals(modelClientsCreated, 0);
+  assertEquals(stderr, [
+    "Cannot resume subagent run root.subagent.1 as a top-level run; resume root run root instead.\n",
+  ]);
+});
+
+Deno.test("Codex cross-model resume fails before creating a model client", async () => {
+  const { io, stderr } = createIoBuffers();
+  let modelClientsCreated = 0;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--resume-run",
+      "/tmp/project/.cf-harness-artifacts/run-codex-model",
+      "--model",
+      "gpt-different",
+    ],
+    {
+      io,
+      cwd: "/tmp/project",
+      env: {},
+      readRunArtifacts: () =>
+        Promise.resolve({
+          runRoot: "/tmp/project/.cf-harness-artifacts/run-codex-model",
+          runStatePath:
+            "/tmp/project/.cf-harness-artifacts/run-codex-model/run-state.json",
+          transcriptPath:
+            "/tmp/project/.cf-harness-artifacts/run-codex-model/transcript.json",
+          runState: {
+            runId: "run-codex-model",
+            status: "failed" as const,
+            createdAt: "2026-07-23T20:00:00.000Z",
+            updatedAt: "2026-07-23T20:00:01.000Z",
+            cfcEnforcementMode: "disabled" as const,
+            currentDir: "/workspace",
+            model: "gpt-recorded",
+            modelProvider: "openai-codex" as const,
+            credentialOwnerKey: "local",
+            policyEvents: [],
+            toolOutputs: [],
+          },
+          transcript: [{ role: "user" as const, content: "Continue" }],
+        }),
+      createModelClient: () => {
+        modelClientsCreated += 1;
+        return {
+          providerId: "openai-codex",
+          credentialOwner: {
+            type: "cf-harness.credential-owner-ref",
+            version: 1,
+            ownerKey: "local",
+          },
+          complete: () => Promise.reject(new Error("must not run")),
+        };
+      },
+    },
+  );
+
+  assertEquals(exitCode, 1);
+  assertEquals(modelClientsCreated, 0);
+  assertEquals(stderr, [
+    "resumed openai-codex run model gpt-recorded does not match requested model gpt-different\n",
+  ]);
+});
+
 Deno.test("resume rejects manifest provider and credential-owner switches", async () => {
   const recordedOwner = {
     type: "cf-harness.credential-owner-ref" as const,

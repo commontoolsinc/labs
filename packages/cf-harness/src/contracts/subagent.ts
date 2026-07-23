@@ -69,6 +69,14 @@ export type HarnessSubagentRunStatus = "completed" | "failed";
 export type HarnessSubagentReturnChannel =
   typeof DEFAULT_SUBAGENT_RETURN_CHANNEL;
 
+export interface HarnessSubagentLineage {
+  role: "subagent";
+  rootRunId: string;
+  parentRunId: string;
+  parentToolCallId: string;
+  depth: number;
+}
+
 export interface HarnessSubagentReturnPolicy {
   type: "cf-harness.subagent-return-policy";
   channel: HarnessSubagentReturnChannel;
@@ -255,17 +263,34 @@ export interface HarnessSubagentResult {
   structuredReturn?: HarnessSubagentStructuredReturn;
 }
 
-export interface HarnessSubagentRunRef {
+interface HarnessSubagentRunRefBase {
   type: "cf-harness.subagent-run-ref";
   parentToolCallId: string;
-  outputId?: string;
   childRunId: string;
-  status: HarnessSubagentRunStatus;
-  summary: string;
   manifest: HarnessSubagentRunManifest;
+}
+
+export interface HarnessRunningSubagentRunRef
+  extends HarnessSubagentRunRefBase {
+  status: "running";
+  outputId?: never;
+  summary?: never;
+  runState?: never;
+  structuredReturn?: never;
+}
+
+export interface HarnessTerminalSubagentRunRef
+  extends HarnessSubagentRunRefBase {
+  status: HarnessSubagentRunStatus;
+  outputId?: string;
+  summary: string;
   runState: HarnessSubagentRunStateSummary;
   structuredReturn?: HarnessSubagentStructuredReturn;
 }
+
+export type HarnessSubagentRunRef =
+  | HarnessRunningSubagentRunRef
+  | HarnessTerminalSubagentRunRef;
 
 export interface DelegateTaskToolInput {
   goal: string;

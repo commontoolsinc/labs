@@ -1004,6 +1004,13 @@ Deno.test({
         messages: Array<{ role: string; content: string }>;
         tools: Array<{ function: { name: string } }>;
       }> = [];
+      const credentialOwner = {
+        type: "cf-harness.credential-owner-ref" as const,
+        version: 1 as const,
+        ownerKey: "loom:user-a",
+        tenantKey: "loom:tenant-a",
+      };
+      let runningSubagentRef: unknown;
       const loop = new CfHarnessPromptLoop({
         apiKey: "test-key",
         engine: new CfHarnessEngine({
@@ -1011,14 +1018,30 @@ Deno.test({
           sandboxRuntime: new FakeSandboxRuntime(),
           runId: "run-subagent-persisted",
           model: "gpt-5.4",
+          runManifest: {
+            type: "cf-harness.loom-run-manifest",
+            version: 1,
+            source: "loom",
+            credentialOwner,
+          },
           cfcEnforcementMode: "enforce-explicit",
         }),
-        fetchFn: (_input, init) => {
+        fetchFn: async (_input, init) => {
           const body = JSON.parse(String(init?.body)) as {
             messages: Array<{ role: string; content: string }>;
             tools: Array<{ function: { name: string } }>;
           };
           requestBodies.push(body);
+          if (requestBodies.length === 2) {
+            const parentWhileChildRunning = await readHarnessRunState(
+              join(
+                artifactRoot,
+                "run-subagent-persisted",
+                "run-state.json",
+              ),
+            );
+            runningSubagentRef = parentWhileChildRunning.subagentRuns?.[0];
+          }
           const payload = requestBodies.length === 1
             ? {
               choices: [{
@@ -1059,9 +1082,7 @@ Deno.test({
                 },
               }],
             };
-          return Promise.resolve(
-            new Response(JSON.stringify(payload), { status: 200 }),
-          );
+          return new Response(JSON.stringify(payload), { status: 200 });
         },
       });
 
@@ -1116,6 +1137,9 @@ Deno.test({
         "run-subagent-persisted.subagent.1",
       );
       assertEquals(subagentRun.status, "completed");
+      if (subagentRun.status === "running") {
+        throw new Error("expected terminal subagent run ref");
+      }
       assertEquals(subagentRun.summary, "Child artifact summary.");
       assertEquals(subagentRun.manifest.allowedToolIds, [
         "bash",
@@ -1139,8 +1163,24 @@ Deno.test({
         true,
       );
       assertEquals(subagentRun.runState.artifactRoot, childRunRoot);
+      assertEquals(runningSubagentRef, {
+        type: "cf-harness.subagent-run-ref",
+        parentToolCallId: "call-subagent-persisted",
+        childRunId: "run-subagent-persisted.subagent.1",
+        status: "running",
+        manifest: subagentRun.manifest,
+      });
 
       assertEquals(childState.runId, "run-subagent-persisted.subagent.1");
+      assertEquals(childState.lineage, {
+        role: "subagent",
+        rootRunId: "run-subagent-persisted",
+        parentRunId: "run-subagent-persisted",
+        parentToolCallId: "call-subagent-persisted",
+        depth: 1,
+      });
+      assertEquals(childState.runManifest?.source, "loom");
+      assertEquals(childState.runManifest?.credentialOwner, credentialOwner);
       assertEquals(childState.status, "completed");
       assertEquals(childState.artifactRoot, childRunRoot);
       assertEquals(
@@ -1364,9 +1404,16 @@ Deno.test({
         JSON.stringify(delegateToolOutput).includes("raw-child-detail"),
         false,
       );
+      const persistedSubagentRun = persistedState.subagentRuns?.[0];
+      if (
+        persistedSubagentRun === undefined ||
+        persistedSubagentRun.status === "running"
+      ) {
+        throw new Error("expected terminal persisted subagent run ref");
+      }
       assertEquals(
         parentFailure,
-        persistedState.subagentRuns?.[0]?.runState.primaryFailure as
+        persistedSubagentRun.runState.primaryFailure as
           | Record<string, unknown>
           | undefined,
       );

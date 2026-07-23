@@ -210,6 +210,12 @@ and `0600`, and updates replace the file atomically. `cf-harness` never imports
 or shares `~/.codex/auth.json`. A failed refresh does not fall back to
 `OPENAI_API_KEY`, the Common Tools gateway, or unauthenticated mode.
 
+Resume a root run with `--resume-run <run-root-or-run-state.json>`. Codex resume
+keeps the recorded provider, model, exact credential owner, and encrypted
+provider continuation; requesting another model is rejected before credentials
+or provider traffic. Child runs are recorded with their root/parent lineage and
+cannot be resumed directly as top-level runs—resume the root run instead.
+
 The gateway and subscription routes have different billing, workspace policy,
 retention, and model availability. The model catalog is read live from the
 selected subscription; an explicit unavailable model fails instead of being
@@ -284,9 +290,9 @@ export CF_HARNESS_GATEWAY_AUTH_MODE=none
 export CF_HARNESS_MODEL=gpt-oss-120b
 ```
 
-CLI flags take precedence over these variables; `CF_HARNESS_MODEL` is ignored on
-`--resume-run` (the resumed run keeps its recorded model unless `--model` is
-passed explicitly).
+CLI flags take precedence over these variables. `CF_HARNESS_MODEL` is ignored on
+`--resume-run`; an explicitly different `--model` is also rejected for Codex
+runs because its encrypted continuation is model-bound.
 
 On hosts without the `runsc-cfc` Docker runtime (or where the installed CFC
 policy does not label the workspace mount, which makes in-sandbox file reads
