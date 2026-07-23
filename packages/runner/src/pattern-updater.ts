@@ -5,9 +5,11 @@ import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   getPatternIdentityRef,
   getPatternRepository,
+  getPatternSetupIdentityRef,
   getPatternSource,
   setPatternSource,
 } from "./runner.ts";
+import type { Pattern } from "./builder/types.ts";
 import type { Runtime } from "./runtime.ts";
 
 const logger = getLogger("runner.pattern-update", {
@@ -158,6 +160,7 @@ export class PatternUpdater {
       if (runningRef === undefined) return "current";
       const storedSource = getPatternSource(resultCell);
       const storedRepository = getPatternRepository(resultCell);
+      const storedSetupRef = getPatternSetupIdentityRef(resultCell);
       if (storedRepository !== undefined) return "current";
 
       let source = storedSource;
@@ -185,8 +188,11 @@ export class PatternUpdater {
 
       const stillMatches = (candidate: Cell<unknown>): boolean => {
         const candidateRef = getPatternIdentityRef(candidate);
+        const candidateSetupRef = getPatternSetupIdentityRef(candidate);
         return candidateRef?.identity === runningRef.identity &&
           candidateRef.symbol === runningRef.symbol &&
+          candidateSetupRef?.identity === storedSetupRef?.identity &&
+          candidateSetupRef?.symbol === storedSetupRef?.symbol &&
           getPatternSource(candidate) === storedSource &&
           getPatternRepository(candidate) === storedRepository;
       };
@@ -269,26 +275,34 @@ export class PatternUpdater {
         }
       }
 
+      let currentPatternNeedingSetup: Pattern | undefined;
       if (advertisedIdentity === runningRef.identity) {
         if (mode.kind === "instantiated") {
           return storedSource === undefined
             ? await repairProvenance()
             : "current";
         }
-        let loadable = false;
+        let currentPattern: Pattern | undefined;
         try {
-          loadable = await runtime.patternManager.loadPatternByIdentity(
+          currentPattern = await runtime.patternManager.loadPatternByIdentity(
             runningRef.identity,
             runningRef.symbol,
             space,
-          ) !== undefined;
+          );
         } catch {
           // Continue through the identity-authorized source path below.
         }
-        if (loadable) {
-          return storedSource === undefined
-            ? await repairProvenance()
-            : "current";
+        if (currentPattern !== undefined) {
+          if (
+            storedSetupRef?.identity !== runningRef.identity ||
+            storedSetupRef.symbol !== runningRef.symbol
+          ) {
+            currentPatternNeedingSetup = currentPattern;
+          } else {
+            return storedSource === undefined
+              ? await repairProvenance()
+              : "current";
+          }
         }
       }
 
@@ -300,13 +314,18 @@ export class PatternUpdater {
       const targetSymbol = mode.kind === "default-root"
         ? "default"
         : runningRef.symbol;
-      const resolved = await runtime.harness.resolve(
-        new HttpProgramResolver(target.href, revalidatingFetch),
-      );
-      const pattern = await runtime.patternManager.compilePattern(
-        { ...resolved, mainExport: targetSymbol },
-        { space },
-      );
+      let pattern: Pattern;
+      if (currentPatternNeedingSetup !== undefined) {
+        pattern = currentPatternNeedingSetup;
+      } else {
+        const resolved = await runtime.harness.resolve(
+          new HttpProgramResolver(target.href, revalidatingFetch),
+        );
+        pattern = await runtime.patternManager.compilePattern(
+          { ...resolved, mainExport: targetSymbol },
+          { space },
+        );
+      }
       const entryRef = runtime.patternManager.getArtifactEntryRef(pattern);
       if (
         entryRef === undefined ||
@@ -322,6 +341,7 @@ export class PatternUpdater {
         return "current";
       }
       if (
+        currentPatternNeedingSetup === undefined &&
         entryRef.identity === runningRef.identity &&
         entryRef.symbol === runningRef.symbol
       ) {
@@ -330,22 +350,42 @@ export class PatternUpdater {
           : "current";
       }
 
+      const argumentStillMatches = mode.kind === "default-root"
+        ? await runtime.syncStoredSetupArgument(resultCell)
+        : undefined;
+
       const result = await runtime.editWithRetry((tx) => {
         if (!canWrite(tx)) return false;
+        const candidate = resultCell.withTx(tx);
+        if (
+          argumentStillMatches !== undefined &&
+          !argumentStillMatches(candidate)
+        ) {
+          return false;
+        }
         if (staleSourcelessRoot) {
-          resultCell.withTx(tx).setMetaRaw("displacedPattern", {
+          candidate.setMetaRaw("displacedPattern", {
             identity: runningRef.identity,
             symbol: runningRef.symbol,
             displacedAt: Date.now(),
           });
         }
-        resultCell.withTx(tx).setMetaRaw("patternIdentity", entryRef);
+        if (mode.kind === "default-root") {
+          void runtime.setup(tx, pattern, undefined, candidate, {
+            prepareForResume: true,
+            ...(currentPatternNeedingSetup === undefined
+              ? {}
+              : { reapplyStoredSetup: true }),
+          });
+        } else {
+          candidate.setMetaRaw("patternIdentity", entryRef);
+        }
         setPatternSource(resultCell, tx, source);
         return true;
       });
       if (result.error) {
         logger.warn("swap-failed", () => [
-          "pattern identity swap failed",
+          "pattern update setup failed",
           space,
           result.error,
         ]);
