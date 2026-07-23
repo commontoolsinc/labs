@@ -16,10 +16,7 @@ import {
   TypeWithInternals,
 } from "../type-utils.ts";
 import { isRecord } from "@commonfabric/utils/types";
-import {
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { dedupeByValueEqual } from "../value-equality.ts";
 
 // Simple primitive schemas only have these keys (possibly just one)
@@ -1050,11 +1047,8 @@ export class UnionFormatter implements TypeFormatter {
       // so we don't need to add it to the list, and we can just return.
       return false;
     }
-    if (
-      anyOf.some((option) =>
-        valueEqual(option as FabricValue, cur as FabricValue)
-      )
-    ) {
+    const curHash = hashStringOf(cur);
+    if (anyOf.some((option) => hashStringOf(option) === curHash)) {
       return false;
     }
     // See if we can merge into one of the anyOf options

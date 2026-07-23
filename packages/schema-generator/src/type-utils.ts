@@ -1,9 +1,6 @@
 import ts from "typescript";
 
-import {
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { JSONSchemaMutable } from "@commonfabric/api";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { getPropertyNameText } from "./typescript/property-name.ts";
@@ -1045,10 +1042,10 @@ export function extractDefaultValueFromBrandedMembers(
     if (agreed === undefined) {
       agreed = extracted;
     } else if (
-      !valueEqual(agreed.value as FabricValue, extracted.value as FabricValue)
+      hashStringOf(agreed.value) !== hashStringOf(extracted.value)
     ) {
       // Genuine disagreement between two branded members is ambiguous; bail.
-      // `valueEqual` (Object.is at leaves) is the honest comparison here: a
+      // The canonical content hash is the honest comparison here: a
       // `JSON.stringify` round-trip would call `-0` and `0` equal, and both
       // `NaN` and `Infinity` equal (each renders `null`), and would spuriously
       // disagree on equal objects written in a different key order.
