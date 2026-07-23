@@ -2697,8 +2697,10 @@ export class Runner {
     // findAllWriteRedirectCells itself only walks sigil links. Without the
     // argument meta link the bindings cannot be bound, so the node walk is
     // skipped — the pre-sync is best-effort, and binding against a substitute
-    // document would pre-sync the wrong cells (see CT-1897 for the same
-    // defaulting bug in collectResumeOwnedCells).
+    // document would pre-sync the wrong cells (CT-1897). Skipping wholesale is
+    // right here because node inputs nearly always alias the argument doc;
+    // collectResumeOwnedCells instead passes the possibly-missing link through
+    // and skips per-node, since sub-pattern outputs rarely alias it.
     const argumentMetaLink = getMetaLink(resultCell, "argument");
     if (argumentMetaLink === undefined) {
       // Instrumentation for how often the meta link is missing here (fresh
@@ -2899,6 +2901,15 @@ export class Runner {
       out.push(getDerivedInternalCell(resultCell, descriptor));
     }
 
+    // May be undefined: this walk runs before setup writes the meta on fresh
+    // first runs, and child result cells are not synced yet on a cold-cache
+    // resume. That is fine for binding — unwrapOneLevelAndBindtoDoc only needs
+    // the argument link when an output actually aliases the argument doc, and
+    // throws otherwise. Substituting a different document instead would derive
+    // the wrong `resultFor` identity and pre-sync the wrong owned-cell subtree
+    // (CT-1897).
+    const argumentLink = getMetaLink(resultCell, "argument");
+
     for (const node of pattern.nodes) {
       const module = node.module;
       if (module.type !== "pattern" || !isPattern(module.implementation)) {
@@ -2916,16 +2927,14 @@ export class Runner {
       // resolved spot yields the same `resultFor` identity the child's setup
       // mints; the unresolved head of a multi-hop binding would be a different
       // cell, pre-syncing the wrong owned-cell subtree.
-      const argumentLink = getMetaLink(resultCell, "argument") ??
-        resultCell.getAsNormalizedFullLink();
-      const unwrappedOutputs = unwrapOneLevelAndBindtoDoc(
-        this.runtime.cfc,
-        node.outputs,
-        argumentLink,
-        resultCell,
-      );
       let spotLink: NormalizedFullLink | undefined;
       try {
+        const unwrappedOutputs = unwrapOneLevelAndBindtoDoc(
+          this.runtime.cfc,
+          node.outputs,
+          argumentLink,
+          resultCell,
+        );
         spotLink = firstResolvedOutputRedirect(
           this.runtime,
           tx,
@@ -2933,11 +2942,12 @@ export class Runner {
           resultCell,
         );
       } catch (error) {
-        // A node shape that cannot be resolved contributes nothing rather than
-        // breaking the resume walk; log it so a resume that silently skips its
-        // owned-cell pre-sync is diagnosable.
+        // A node whose outputs cannot be bound (e.g. they alias the argument
+        // doc while the argument link is unavailable) or resolved contributes
+        // nothing rather than breaking the resume walk; log it so a resume
+        // that silently skips its owned-cell pre-sync is diagnosable.
         logger.warn("resume-owned-cells", () => [
-          "skipping a sub-pattern node whose output redirect did not resolve",
+          "skipping a sub-pattern node whose outputs did not bind or resolve",
           error,
         ]);
         continue;

@@ -393,7 +393,7 @@ function sendValueToBindingInner<T>(
  *
  * @param cfc - The ContextualFlowControl object, which we need to get the schema at sub-paths
  * @param binding - The binding to unwrap.
- * @param argumentCellLink - The link to the argument cell
+ * @param argumentCellLink - The link to the argument cell or undefined if not available.
  * @param resultCell - The result cell used to resolve result aliases
  * @param options - Optional configuration.
  * @param options.targetSchema - Schema for the binding being produced. Source
@@ -404,7 +404,7 @@ function sendValueToBindingInner<T>(
 export function unwrapOneLevelAndBindtoDoc<T, U>(
   cfc: ContextualFlowControl,
   binding: T,
-  argumentCellLink: NormalizedFullLink,
+  argumentCellLink: NormalizedFullLink | undefined,
   resultCell: AnyCell<unknown>,
   options?: UnwrapOneLevelOptions,
 ): T {
@@ -465,13 +465,16 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
         );
       } else {
         // Resolve the special values for "argument" and "result".
+        if (alias.cell !== "argument" && alias.cell !== "result") {
+          throw new Error("Invalid pseudo-alias cell: " + alias.cell);
+        }
         const link = alias.cell === "argument"
           ? argumentCellLink
-          : alias.cell === "result"
-          ? resultCellLink
-          : undefined;
+          : resultCellLink;
         if (link === undefined) {
-          throw new Error("Invalid pseudo-alias cell: " + alias.cell);
+          throw new Error(
+            "Cannot bind argument alias: no argument cell link available",
+          );
         }
         const path = alias.path;
         // we might have a schema in the alias, but if not, we may have one
