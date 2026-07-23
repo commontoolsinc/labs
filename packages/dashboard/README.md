@@ -594,10 +594,14 @@ its embedded tsnet).
 
 **Build, push, deploy**
 
-`.github/workflows/dashboard-image.yml` runs only when the dashboard image,
-dashboard package, Gantt drill-down, Deno dependency metadata, or the workflow
-itself changes. Pull requests always run the dashboard tests and an amd64 image
-build without cloud credentials.
+On pull requests, the Deno workflow calls
+`.github/workflows/dashboard-image.yml` as a reusable workflow. Every pull
+request runs the dashboard tests and an amd64 image build without cloud
+credentials. The internal `Dashboard CI` job verifies the dashboard workflow,
+and the required `PR CI` job waits for that result. Main-branch pushes start the
+Dashboard Image workflow directly only when the dashboard image, dashboard
+package, Gantt drill-down, Deno dependency metadata, or the workflow itself
+changes.
 
 For organization-member pull requests, a passing dashboard test and image build
 publish the source commit as `dev-dashboard:<full-sha>`. A controlled rerun may

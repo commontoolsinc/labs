@@ -18,6 +18,27 @@ same rough band. As a default, stop when:
 At that point, keep the timing instrumentation and wait for a concrete trigger
 instead of continuing to split jobs proactively.
 
+## Required Pull Request Checks
+
+Configure merge protection to require `PR CI`.
+
+`PR CI` runs after every pull request validation job in `deno.yml`. It runs
+after failed and skipped dependencies. It fails unless every dependency
+succeeded. Add each new pull request validation job to its `needs` list. Its
+dependencies include the reusable Dashboard Image workflow.
+
+The Dashboard Image workflow's internal `Dashboard CI` job waits for the
+dashboard tests, image build, publish authorization, and any authorized
+publish. The reusable workflow reports that result to `PR CI`. Do not require
+`Dashboard CI` separately in merge protection.
+
+Keep pull request path filters out of workflows that provide required checks.
+GitHub leaves a required check pending when a path filter prevents its workflow
+from starting.
+
+Require checks from other GitHub Apps separately. A GitHub Actions job cannot
+depend on a check produced by another app.
+
 ## Revisit Triggers
 
 Revisit CI wall-time optimization when at least one of these holds across
