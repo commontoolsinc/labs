@@ -633,10 +633,20 @@ export class PiecesController<T = unknown> {
       // the lazy updater schedule one redundant check post-start. Benign: the
       // awaited checkAndUpdateDefaultPattern above already reconciled, so the
       // check observes a current identity and no-ops.
+      //
+      // expectedPatternIdentity is the repair precondition, not a formality:
+      // it atomically rejects a repair superseded by a concurrent source
+      // update (the identity is re-asserted inside every setup retry), and it
+      // makes runSynced THROW on a setup-commit failure instead of logging
+      // and continuing — without it this catch never sees commit-level
+      // failures and a dead root would be reported as a successful start.
       try {
         await timePiecesPhase(
           "ensureDefaultPattern.coldStartSetupRepair",
-          () => runtime.runSynced(writableRoot, repairPattern),
+          () =>
+            runtime.runSynced(writableRoot, repairPattern, undefined, {
+              expectedPatternIdentity: ref,
+            }),
         );
       } catch (repairError) {
         pieceUpdateLogger.warn(

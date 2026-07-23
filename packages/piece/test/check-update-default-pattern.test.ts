@@ -1209,6 +1209,62 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(afterEvent.key("count").get()).toBe(1);
   });
 
+  it("failed cold-start repair stays fail-closed and leaves the doc healable", async () => {
+    // The repair's own failure contract: when the one-shot setup repair
+    // cannot commit, the ORIGINAL start error must surface (not the repair's),
+    // and the doc must be left exactly as it was — the next boot's repair
+    // attempt still heals it. Driven at the runSynced boundary because the
+    // in-process failure classes (arg validation) are skipped for an
+    // unchanged identity (samePattern), so a commit-layer failure is the
+    // realistic remaining one.
+    await setupHome({ systemPatternAutoUpdate: true });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    const staleRef = getPatternIdentityRef(root)!;
+    await manager.stopPiece(root);
+
+    stub.setSource(SOURCE_V3_HANDLER);
+    const restoreProbe = shadowLoadProbe(staleRef.identity, "undefined");
+    const rt = runtime as unknown as {
+      runSynced: (...args: unknown[]) => Promise<unknown>;
+    };
+    const originalRunSynced = rt.runSynced.bind(runtime);
+    rt.runSynced = () =>
+      Promise.reject(new Error("repair backend unavailable"));
+    let thrown: unknown;
+    try {
+      await controller.ensureDefaultPattern();
+    } catch (error) {
+      thrown = error;
+    } finally {
+      rt.runSynced = originalRunSynced;
+      restoreProbe();
+    }
+    // The original start failure surfaces, not the repair's own error.
+    expect(String(thrown)).toContain("Handler used as lift");
+    expect(String(thrown)).not.toContain("repair backend unavailable");
+
+    // Nothing was torn down or corrupted: with the repair path restored, the
+    // very next boot heals the same doc end-to-end.
+    await controller.ensureDefaultPattern();
+    await runtime.idle();
+    const after = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(
+      await identityForSource(SOURCE_V3_HANDLER, {}, HOME_PATTERN_URL),
+    );
+    expect(after.key("count").get()).toBe(0);
+    (after.key("bump") as unknown as { send: (e: unknown) => void }).send({});
+    await runtime.idle();
+    await (after as unknown as { pull: () => Promise<unknown> }).pull();
+    const afterEvent = (await manager.getDefaultPattern(false))!;
+    expect(afterEvent.key("count").get()).toBe(1);
+  });
+
   it("replaces an unloadable stale sourceless space root", async () => {
     // The fallback covers every space's DEFAULT pattern, not just home
     // (widened by the flag owner after a non-home field report): a root
