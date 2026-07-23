@@ -283,23 +283,40 @@ runtime-neutral digest:
 const hashes = computeModuleHashes(authoredProgram, {
   runtimeFingerprint: "",
 });
+const normalizedExports = Object.entries(publicSubpaths)
+  .sort(([a], [b]) => utf8Compare(a, b))
+  .map(([subpath, filename]) => [subpath, filename]);
 const runtimeNeutralProgramDigest = hashStringOf({
   v: "cf/runtime-neutral-program-digest/v1",
   main: authoredProgram.main,
   modules: [...hashes]
     .sort(([a], [b]) => utf8Compare(a, b))
     .map(([filename, identity]) => [filename, identity]),
+  exports: normalizedExports,
 });
 ```
 
 The input is the explicitly enumerated canonical authored program before adding
 fabric-mounted files or synthetic retention links. It includes every enumerated
 authored file, including an unreachable sibling and an authored declaration
-file. Each per-module identity includes the canonical filename, normalized
-source, internal import graph, and external specifier text, including fabric
-pins. The digest excludes the selected export, which revision comparison checks
-separately. It is comparison metadata rather than a fabric URL, executable
-identity, or revert target.
+file. It also includes the normalized exact public-subpath map from the
+immutable authored-program manifest. A program with no explicit subpaths uses
+an empty map; its entry remains implicitly public through `main`. Each
+per-module identity includes the canonical filename, normalized source,
+internal import graph, and external specifier text, including fabric pins. The
+digest excludes the selected executable export, which revision comparison
+checks separately. It is comparison metadata rather than a fabric URL,
+executable identity, or revert target.
+
+`publicSubpaths` is required lifecycle input alongside the repository's current
+`Program` shape. The existing `Program` interface has only `main` and `files`.
+Adding the map to source ingestion and retained manifests is required work; the
+digest code above describes the target algorithm rather than current behavior.
+
+Changing only the public-subpath map changes the manifest identity and this
+digest. It does not change any per-module identity or the executable entry
+identity. Piece lifecycle history therefore records a source-only revision and
+propagates it to followers without rebuilding unchanged modules.
 
 The lifecycle source service must materialize that complete `Program` before
 import-closure resolution. The current `ProgramResolver` interface cannot
@@ -538,7 +555,8 @@ identity over a shared set of module documents.
 Piece revision history separately uses the immutable
 `cf/authored-program-manifest/v1` value from
 [piece-source-lifecycle.md](piece-source-lifecycle.md) to bind the canonical main
-and every authored file, including files outside that executable graph.
+and every authored file, including files outside that executable graph. The
+same manifest binds the exact public-subpath map.
 
 This replaces the whole-program `PatternMeta` store after the flag flip (the two
 coexist behind the flag until then). The compiler-version and `sesValidated`
