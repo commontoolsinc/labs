@@ -1,5 +1,6 @@
 import {
   computed,
+  Default,
   equals,
   handler,
   NAME,
@@ -50,10 +51,17 @@ type SpaceEntry = {
 export type HomeOutput = {
   [NAME]: string;
   [UI]: unknown;
-  favorites: Writable<Favorite[]>;
-  journal: Writable<JournalEntry[]>;
-  spaces: Writable<SpaceEntry[]>;
-  defaultAppUrl: Writable<string>;
+  // Post-genesis data fields carry a `Default<>` so the runtime can materialize
+  // this pattern over a home root doc that predates the field. Without it, CFC
+  // schema-merge refuses the setup commit ("required field <name> needs a
+  // default to preserve old documents"), which — via the cold-start setup
+  // repair — leaves an unloadable home bricked. Continues #4901's seefeldb-
+  // approved "post-genesis DATA fields ride Default<>" line (bio/isEditing did);
+  // favorites-manager already uses the same idiom for its own favorites list.
+  favorites: Writable<Favorite[] | Default<[]>>;
+  journal: Writable<JournalEntry[] | Default<[]>>;
+  spaces: Writable<SpaceEntry[] | Default<[]>>;
+  defaultAppUrl: Writable<string | Default<"">>;
   profiles: TrustedProfileList;
   defaultProfile: TrustedDefaultProfile;
   mru: TrustedProfileMru;
