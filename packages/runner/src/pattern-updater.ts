@@ -275,8 +275,23 @@ export class PatternUpdater {
         }
       }
 
+      // Default-pattern routes select their official `default` export. Every
+      // ordinary source preserves the piece's selected export across versions.
+      // Besides matching the root creation contract, this lets a root recover
+      // when its persisted symbol itself is obsolete or corrupt.
+      const targetSymbol = mode.kind === "default-root"
+        ? "default"
+        : runningRef.symbol;
+      const runningTargetIsAdvertised =
+        advertisedIdentity === runningRef.identity &&
+        runningRef.symbol === targetSymbol;
+      const setupNeedsRepair = mode.kind === "default-root" &&
+        runningTargetIsAdvertised &&
+        (storedSetupRef?.identity !== runningRef.identity ||
+          storedSetupRef?.symbol !== runningRef.symbol);
+
       let currentPatternNeedingSetup: Pattern | undefined;
-      if (advertisedIdentity === runningRef.identity) {
+      if (runningTargetIsAdvertised) {
         if (mode.kind === "instantiated") {
           return storedSource === undefined
             ? await repairProvenance()
@@ -293,10 +308,7 @@ export class PatternUpdater {
           // Continue through the identity-authorized source path below.
         }
         if (currentPattern !== undefined) {
-          if (
-            storedSetupRef?.identity !== runningRef.identity ||
-            storedSetupRef.symbol !== runningRef.symbol
-          ) {
+          if (setupNeedsRepair) {
             currentPatternNeedingSetup = currentPattern;
           } else {
             return storedSource === undefined
@@ -307,13 +319,6 @@ export class PatternUpdater {
       }
 
       if (signal.aborted) return "current";
-      // Default-pattern routes select their official `default` export. Every
-      // ordinary source preserves the piece's selected export across versions.
-      // Besides matching the root creation contract, this lets a root recover
-      // when its persisted symbol itself is obsolete or corrupt.
-      const targetSymbol = mode.kind === "default-root"
-        ? "default"
-        : runningRef.symbol;
       let pattern: Pattern;
       if (currentPatternNeedingSetup !== undefined) {
         pattern = currentPatternNeedingSetup;
@@ -341,7 +346,7 @@ export class PatternUpdater {
         return "current";
       }
       if (
-        currentPatternNeedingSetup === undefined &&
+        !setupNeedsRepair &&
         entryRef.identity === runningRef.identity &&
         entryRef.symbol === runningRef.symbol
       ) {
@@ -373,9 +378,7 @@ export class PatternUpdater {
         if (mode.kind === "default-root") {
           void runtime.setup(tx, pattern, undefined, candidate, {
             prepareForResume: true,
-            ...(currentPatternNeedingSetup === undefined
-              ? {}
-              : { reapplyStoredSetup: true }),
+            ...(setupNeedsRepair ? { reapplyStoredSetup: true } : {}),
           });
         } else {
           candidate.setMetaRaw("patternIdentity", entryRef);
