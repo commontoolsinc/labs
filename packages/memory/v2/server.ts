@@ -1827,6 +1827,34 @@ export class Server {
     string,
     { laneKey: string; laneGeneration: number }
   >();
+  /**
+   * C3.7 (2026-07-18) — the foreign-authorization-epoch sidecar. For each
+   * live cross-space-read claim (one whose `crossSpaceReadSpaces` is
+   * non-empty), the bound {(space, principal, epoch)} set the issuance
+   * preflight authorized each foreign READ under (C3.6's
+   * `#assertCrossSpaceReadIssuance` captures the effective epoch in the
+   * same synchronous engine section as the READ check). An
+   * `ForeignAuthorizationEpochBump` (local apply or inbound) covering a
+   * bound entry revokes the idle claim — the §7 "revocation while idle"
+   * gate.
+   *
+   * Keyed identically to `#executionClaimLaneBindings` (`actionClaimMapKey`)
+   * and torn down at every one of its delete sites, so the two sidecars
+   * share the claim's exact incarnation lifecycle — the "keyed to the
+   * shared `#executionClaimLaneBindings` map" instruction (C3A17). A
+   * PARALLEL map rather than an extra field on the lane-binding record
+   * because the lane-binding map is populated ONLY for scoped-rank claims
+   * (a space-lane cross-space claim has no lane entry), while an epoch
+   * binding must cover every rank; and the two concerns (lane generation
+   * vs foreign authorization epoch) are orthogonal.
+   *
+   * Empty for same-space claims (the map never gains an entry) — every
+   * revocation path below is dormant and byte-identical to pre-C3.7.
+   */
+  #executionClaimForeignReadEpochs = new Map<
+    string,
+    readonly ForeignAuthorizationEpochStamp[]
+  >();
   #ownedExecutionLeases = new Map<string, OwnedExecutionLease>();
   #executionInvalidationStartedAt = new Map<string, number>();
   #executionLeaseAuthorities = new WeakMap<
@@ -3283,6 +3311,7 @@ export class Server {
       ) continue;
       this.#executionClaims.delete(key);
       this.#executionClaimLaneBindings.delete(key);
+      this.#executionClaimForeignReadEpochs.delete(key);
       this.#publishExecutionClaimRevoke(claim);
       revoked += 1;
     }
@@ -4601,6 +4630,7 @@ export class Server {
       if (claim.expiresAt > now) continue;
       this.#executionClaims.delete(key);
       this.#executionClaimLaneBindings.delete(key);
+      this.#executionClaimForeignReadEpochs.delete(key);
       this.#publishExecutionClaimRevoke(claim);
       expired += 1;
     }
@@ -4614,6 +4644,7 @@ export class Server {
       if (claim.space !== space) continue;
       this.#executionClaims.delete(key);
       this.#executionClaimLaneBindings.delete(key);
+      this.#executionClaimForeignReadEpochs.delete(key);
       this.#publishExecutionClaimRevoke(claim);
       revoked += 1;
     }
@@ -4723,6 +4754,7 @@ export class Server {
       if (!inCohort) continue;
       this.#executionClaims.delete(key);
       this.#executionClaimLaneBindings.delete(key);
+      this.#executionClaimForeignReadEpochs.delete(key);
       this.#publishExecutionClaimRevoke(claim);
     }
     this.#scheduleExecutionClaimExpiry();
@@ -5106,6 +5138,7 @@ export class Server {
       }
       this.#executionClaims.delete(claimKey);
       this.#executionClaimLaneBindings.delete(claimKey);
+      this.#executionClaimForeignReadEpochs.delete(claimKey);
       this.#publishExecutionClaimRevoke(claim);
     }
     this.#scheduleExecutionClaimExpiry();
@@ -5283,7 +5316,7 @@ export class Server {
     claimInput: ExecutionClaimInput,
     foreignReadSpaces: readonly string[],
     actingPrincipal: string,
-  ): Promise<void> {
+  ): Promise<readonly ForeignAuthorizationEpochStamp[]> {
     if (
       !serverPrimaryExecutionCrossSpaceReadsEnabled() ||
       !this.memoryProtocolFlags().serverPrimaryExecutionCrossSpaceClaimsV1
@@ -5301,12 +5334,21 @@ export class Server {
           "race)",
       );
     }
+    // C3.7: the preflight also CAPTURES the foreign authorization epoch each
+    // READ was authorized under, so the claim binds the {(space, principal,
+    // epoch)} set an epoch bump revalidates against. The READ authz check
+    // and the epoch read share one synchronous engine section
+    // (`#assertForeignReadAccessForIssuance`), so the bound epoch is exactly
+    // the granting ACL's generation.
+    const boundEpochs: ForeignAuthorizationEpochStamp[] = [];
     for (const readSpace of foreignReadSpaces) {
-      await this.#assertForeignReadAccessForIssuance(
+      const epoch = await this.#assertForeignReadAccessForIssuance(
         readSpace,
         actingPrincipal,
       );
+      boundEpochs.push({ space: readSpace, principal: actingPrincipal, epoch });
     }
+    return boundEpochs;
   }
 
   /**
@@ -5372,11 +5414,22 @@ export class Server {
    * and the client keeps running locally). In-process/co-hosted read spaces
    * open the local hosted engine, so send host == read host and the local
    * consult IS the read host's check.
+   *
+   * C3.7 (2026-07-18): returns the foreign authorization epoch this READ
+   * was authorized under — read from C3.2's LOCAL `authorization_epoch`
+   * table in the SAME synchronous engine section as the READ authz check
+   * (no await between them, so no TOCTOU: the epoch stamped is exactly the
+   * generation the granting ACL is at). A locally-hosted read space always
+   * resolves a known number (`effectiveAuthorizationEpoch` is 0 at genesis,
+   * never undefined); a peer-routed one would read the remote cache
+   * (`effectiveRemoteAuthorizationEpoch`, undefined=unknown), but the
+   * peer-routed branch soft-declines above, so a BOUND claim always carries
+   * a known epoch (the caller asserts it).
    */
   async #assertForeignReadAccessForIssuance(
     readSpace: string,
     actingPrincipal: string,
-  ): Promise<void> {
+  ): Promise<number> {
     if (!(await this.ensureCrossSpaceHosting(readSpace))) {
       throw new ExecutionLeaseAuthorityError(
         `cross-space-read claim issuance cannot host read space ${readSpace}`,
@@ -5404,6 +5457,9 @@ export class Server {
         `acting principal lacks READ on cross-space read space ${readSpace}`,
       );
     }
+    // Same synchronous section as the READ check above (no intervening
+    // await): the bound epoch is the generation this exact ACL grant is at.
+    return Engine.effectiveAuthorizationEpoch(engine, actingPrincipal);
   }
 
   async setExecutionClaim(
@@ -5533,12 +5589,27 @@ export class Server {
     // its own authority — no escalation), so a stage-off/mixed-cohort/denied
     // issuance fails open exactly like a lost lease. The foreign-engine opens
     // are awaits; the re-sample block below is their authority boundary.
+    let boundForeignEpochs: readonly ForeignAuthorizationEpochStamp[] = [];
     if (foreignReadSpaces.length > 0) {
-      await this.#assertCrossSpaceReadIssuance(
+      boundForeignEpochs = await this.#assertCrossSpaceReadIssuance(
         claimInput,
         foreignReadSpaces,
         laneGrant === null ? current.onBehalfOf : laneGrant.principal,
       );
+      // C3.7 fail-closed invariant (C3A3): a bound claim always carries a
+      // KNOWN epoch. A locally-hosted read space resolves a number; a
+      // peer-routed one (which would read the remote cache, undefined =
+      // unknown) soft-declines above. Assert defensively so a future
+      // peer-routed relax cannot silently bind an unknown epoch.
+      if (
+        boundForeignEpochs.length !== foreignReadSpaces.length ||
+        boundForeignEpochs.some((entry) => !Number.isSafeInteger(entry.epoch))
+      ) {
+        throw new ExecutionLeaseAuthorityError(
+          "cross-space-read claim issuance could not bind a known foreign " +
+            "authorization epoch for every read space (fail closed, C3A3)",
+        );
+      }
     }
     this.expireExecutionClaims(claimNow);
     // Expiry publication can synchronously notify lifecycle listeners. Fence a
@@ -5589,6 +5660,16 @@ export class Server {
         laneKey,
         laneGeneration: laneGrant.laneGeneration,
       });
+    }
+    // C3.7: record the foreign-authorization-epoch binding synchronous with
+    // the claim install (same section as the claim.set publish), keyed
+    // identically to the lane binding — so an epoch bump revalidates the
+    // exact {(space, principal, epoch)} set this claim was issued under.
+    if (boundForeignEpochs.length > 0) {
+      this.#executionClaimForeignReadEpochs.set(
+        key,
+        Object.freeze([...boundForeignEpochs]),
+      );
     }
     this.executionStats.claimsIssued += 1;
     this.executionStats.claimsIssuedByContextKey[claim.contextKey] =
@@ -5747,6 +5828,7 @@ export class Server {
     }
     this.#executionClaims.delete(key);
     this.#executionClaimLaneBindings.delete(key);
+    this.#executionClaimForeignReadEpochs.delete(key);
     this.#publishExecutionClaimRevoke(live);
     this.#scheduleExecutionClaimExpiry();
     return true;
@@ -6025,6 +6107,7 @@ export class Server {
     this.#executionDemandSessionTokens.clear();
     this.#executionDemandListeners.clear();
     this.#executionClaims.clear();
+    this.#executionClaimForeignReadEpochs.clear();
     this.#boundExecutionSessions.clear();
     this.#ownedExecutionLeases.clear();
     this.#executionInvalidationStartedAt.clear();
@@ -10732,14 +10815,15 @@ export class Server {
   }
 
   /**
-   * C3A6/C3.7 seam (dated 2026-07-18, deliberately NOT wired yet): drop
-   * every live subscription a home space holds on `readSpace` — the
-   * read-host half of revocation cleanup. C3.7's epoch-bump revocation
-   * calls this (plus mirrored-row tombstoning, its own scope) when the
-   * last authorized reader of a demand pair loses access, so the read
-   * host stops emitting `ForeignStaleReaders` toward a home host with no
-   * live authorized reader. Discoverable-by-name on purpose; C3.2's
-   * epoch machinery is not consumed in C3.3a.
+   * C3A6/C3.7 seam (dated 2026-07-18): drop every live subscription a home
+   * space holds on `readSpace` — the read-host half of revocation cleanup.
+   * WIRED in C3.7 (2026-07-18) via `#dropOrphanedForeignReaderSubscription`:
+   * an epoch-bump revocation that empties a home space's live cross-space
+   * claims reading `readSpace` calls this so the read host stops emitting
+   * `ForeignStaleReaders` toward a home host with no live authorized
+   * reader. The mirrored-row tombstone question was decided the other way
+   * (rows are read-surface-derived host-trust metadata, not tombstoned —
+   * see the C3A6 ruling above `applyForeignAuthorizationEpochBump`).
    */
   private dropForeignReaderSubscriptionsForHome(
     readSpace: string,
@@ -11150,6 +11234,13 @@ export class Server {
     if (bumps === undefined || bumps.length === 0) {
       return false;
     }
+    // C3.7: this host authored an ACL change on `space` (a read space it
+    // hosts). Before fanning the bump to peers, revoke every idle home
+    // claim reading `space` whose bound epoch the bump made stale — the
+    // §7 revocation-while-idle gate for the local-authored case. Runs
+    // synchronously here (the same section as the fan-out) so a co-hosted
+    // home claim dies in this commit, ahead of the loopback redelivery.
+    this.#revokeIdleCrossSpaceReadClaimsForLocalBump(space, bumps);
     let sent = false;
     try {
       this.registerCrossSpaceHostedSpace(space);
@@ -11295,11 +11386,167 @@ export class Server {
   }
 
   /**
+   * C3.7 idle revocation — LOCAL-authored arm. A commit on a read space
+   * THIS host hosts recorded epoch bumps in `authorization_epoch` (C3.2's
+   * transactional bump); revoke every live cross-space-read claim (in ANY
+   * home space this host serves) whose bound epoch for the bumped read
+   * space is now stale — the §7 "revocation while idle" gate.
+   *
+   * Bump-carried and precise: a floor bump (target = floor) covers every
+   * bound principal; a per-principal bump covers only that principal's
+   * bindings (C3A4 lane-principal precision — a session-lane claim revokes
+   * on the LANE principal's B-access loss, not the sponsor's). Every bump's
+   * epoch is `1 + MAX(table)` (see `applyAuthorizationEpochBumps`), so it
+   * strictly exceeds any live binding it targets; the `> entry.epoch` guard
+   * is defensive against a redelivered/equal value. Revoked through the
+   * existing `revokeExecutionClaim` path; the C3A6 subscription cleanup
+   * follows because authorization was genuinely lost (see the ruling above
+   * `applyForeignAuthorizationEpochBump`). Same-space claims have no
+   * binding entry, so the whole scan is dormant/byte-identical for them.
+   */
+  #revokeIdleCrossSpaceReadClaimsForLocalBump(
+    space: string,
+    bumps: readonly Engine.AuthorizationEpochBump[],
+  ): void {
+    if (this.#executionClaimForeignReadEpochs.size === 0) return;
+    for (const [key, claim] of [...this.#executionClaims]) {
+      const entry = this.#executionClaimForeignReadEpochs.get(key)
+        ?.find((bound) => bound.space === space);
+      if (entry === undefined) continue;
+      const covered = bumps.some((bump) =>
+        bump.epoch > entry.epoch &&
+        (bump.target.kind === "floor" ||
+          bump.target.principal === entry.principal)
+      );
+      if (!covered) continue;
+      if (this.revokeExecutionClaim(claim)) {
+        this.#dropOrphanedForeignReaderSubscription(claim.space, space);
+      }
+    }
+  }
+
+  /**
+   * C3.7 idle revocation — REMOTE-inbound arm (and the reconnect/eviction
+   * revalidation hook; the full reconnect resync is C3.10b/C3A12). Re-
+   * validate every live cross-space-read claim reading `authoritySpace`
+   * over `linkId` against the REMOTE epoch cache by the C3A3 equality
+   * discipline: a bound epoch strictly below the effective remote epoch is
+   * STALE, and an effective epoch this host cannot resolve at all
+   * (undefined — cache eviction / host restart) FAILS CLOSED. Both revoke —
+   * over-revocation is safe, under-revocation is a hole (C3A3's documented
+   * posture). Returns the count revoked.
+   *
+   * The inbound bump arm calls this AFTER merging the bump (so the freshly
+   * merged epoch is visible); a caller modelling eviction/restart calls it
+   * with an unknown (linkId, authoritySpace) to exercise the fail-closed
+   * leg. Per-principal precision rides `effectiveRemoteAuthorizationEpoch`
+   * (max(principal row, floor)): a bump that moved only another principal's
+   * row leaves this binding's effective epoch unchanged, so it survives.
+   * Soft-private (discoverable-by-name) for fixtures and the future
+   * reconnect path.
+   */
+  revalidateCrossSpaceReadClaimsAgainstRemoteEpoch(
+    authoritySpace: string,
+    linkId: string,
+  ): number {
+    if (this.#executionClaimForeignReadEpochs.size === 0) return 0;
+    let revoked = 0;
+    for (const [key, claim] of [...this.#executionClaims]) {
+      const entry = this.#executionClaimForeignReadEpochs.get(key)
+        ?.find((bound) => bound.space === authoritySpace);
+      if (entry === undefined) continue;
+      const effective = this.effectiveRemoteAuthorizationEpoch(
+        linkId,
+        authoritySpace,
+        entry.principal,
+      );
+      if (effective !== undefined && entry.epoch >= effective) continue;
+      if (this.revokeExecutionClaim(claim)) {
+        revoked += 1;
+        this.#dropOrphanedForeignReaderSubscription(
+          claim.space,
+          authoritySpace,
+        );
+      }
+    }
+    return revoked;
+  }
+
+  /**
+   * C3A6 revocation cleanup (a) — the DEMAND-pair unsubscribe, refcounted
+   * against live cross-space-read claims. After a claim reading `readSpace`
+   * is revoked BY AN EPOCH BUMP (authorization loss), drop the read host's
+   * foreign-reader subscription toward `homeSpace` IFF no other live
+   * cross-space-read claim in `homeSpace` still reads `readSpace` — so the
+   * read host stops emitting `ForeignStaleReaders` for a demand whose last
+   * authorized reader lost access. See the C3A6 ruling above
+   * `applyForeignAuthorizationEpochBump` for why this fires ONLY on the
+   * authorization-loss path and is a best-effort immediate stop.
+   */
+  #dropOrphanedForeignReaderSubscription(
+    homeSpace: string,
+    readSpace: string,
+  ): void {
+    for (const claim of this.#executionClaims.values()) {
+      if (
+        claim.space === homeSpace &&
+        claim.crossSpaceReadSpaces?.includes(readSpace)
+      ) {
+        return; // another live cross-space claim still needs this subscription
+      }
+    }
+    this.dropForeignReaderSubscriptionsForHome(readSpace, homeSpace);
+  }
+
+  /**
    * Inbound `foreign-authorization-epoch.bump`: max-merge into the
-   * remote cache. Synchronous — no engine is involved, and monotonic
-   * merge makes application order-insensitive (redelivery/reorder never
-   * regresses), so this needs neither the per-space apply chain nor an
-   * ack.
+   * remote cache, THEN run C3.7's idle revocation for the claims reading
+   * the bumping space over this link. Synchronous — no engine is involved,
+   * and monotonic merge makes application order-insensitive
+   * (redelivery/reorder never regresses), so this needs neither the
+   * per-space apply chain nor an ack.
+   *
+   * ── C3A6 revocation-cleanup ruling (2026-07-18) ──────────────────────
+   * When an epoch bump revokes a cross-space-read claim, C3A6 asks the
+   * host to ALSO retire the residual foreign-reader plumbing the claim's
+   * action planted, OR record an explicit ruling that residual rows/notices
+   * are host-trust-level metadata (B.4-style). This build does BOTH, split
+   * by mechanism:
+   *
+   *  (a) SUBSCRIPTIONS — actively unsubscribed, refcounted against live
+   *      cross-space claims (`#dropOrphanedForeignReaderSubscription`),
+   *      but ONLY on this authorization-loss path — NOT on expiry/drain.
+   *      Verified: the C3.3a subscription registry is DEMAND-derived (the
+   *      home reconciler computes desired subscriptions from demanded
+   *      pieces ∩ the read-index, independent of claims), so a claim
+   *      revoke does NOT retire demand. An UNCONDITIONAL per-revoke drop is
+   *      therefore unsafe: routine churn (sponsor rotation, expiry+re-issue)
+   *      revokes-and-reissues while the demand — and the need to wake on B
+   *      commits — persists, and a drop would open a missed-wake window
+   *      until the reconciler re-subscribes (missed foreign wakes are the
+   *      one thing the design forbids). On the authorization-loss path the
+   *      re-issue soft-declines (no READ), so there is nothing to miss —
+   *      the drop is safe and stops the notice stream immediately. It is
+   *      best-effort: the demand-derived reconciler stays the steady-state
+   *      owner and may re-subscribe on its next trigger; any notice in that
+   *      interim is the metadata window below.
+   *  (b) MIRROR ROWS — NOT tombstoned. The executor-authored mirror rows
+   *      (C3.3b) are UPSERT-ONLY (C3.1b/C3.3b verified: no removal
+   *      semantics) and keyed by the ACTION's read surface; they retract
+   *      via the existing read-surface-driven path (the action's reads
+   *      change or the action dies), which a claim revoke does not touch (a
+   *      revoked claim leaves the action's read surface intact). Actively
+   *      tombstoning them on revoke would fight that owner and re-appear on
+   *      the next executor observation. Residual mirror rows for a demand
+   *      whose principal lost READ are host-trust-level metadata: in v1
+   *      both spaces are co-resident under ONE host's trust boundary (the
+   *      in-process / co-hosted transport is the only transport; the cross-
+   *      host link is C3.10b), so nothing crosses a trust boundary; they
+   *      are inert once (a) stops notice emission, and the home action's
+   *      re-issue re-runs the C3.6 preflight and soft-declines — running
+   *      client-primary, never re-consuming B. Counted B.4-style: a bounded,
+   *      self-healing, non-escalating window. Pinned by fixture (c).
+   * ─────────────────────────────────────────────────────────────────────
    */
   private applyForeignAuthorizationEpochBump(
     message: ForeignAuthorizationEpochBump,
@@ -11310,6 +11557,15 @@ export class Server {
       context.fromSpace,
       message.target,
       message.epoch,
+    );
+    // C3.7: the merge just raised this host's knowledge of the bumping
+    // space's epochs; revoke any idle claim whose bound epoch is now stale
+    // (or unknown — fail closed). Redundant with the LOCAL arm when the
+    // bump rode the loopback from a co-hosted read space (the claim is
+    // already gone), and the SOLE trigger for a genuinely remote peer.
+    this.revalidateCrossSpaceReadClaimsAgainstRemoteEpoch(
+      context.fromSpace,
+      context.linkId,
     );
   }
 
