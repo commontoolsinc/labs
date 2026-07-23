@@ -299,8 +299,17 @@ const uiContractsFromSchemaInternal = (
     );
   }
 
+  // `items` mints a `*` entry, subject to the same limitation as the ifc
+  // walker (walkIfcSchema): with prefixItems present, `items` governs only
+  // the indices past the tuple slots, but `pathPatternMatches`' `*` matches
+  // ANY index — so the mixed tuple-plus-rest shape mints no `*` entry, and
+  // the slots mint at their concrete index below.
+  const tupleFree = !Array.isArray(resolvedSchema.prefixItems) ||
+    resolvedSchema.prefixItems.length === 0;
   if (
-    isRecord(resolvedSchema.items) || typeof resolvedSchema.items === "boolean"
+    tupleFree &&
+    (isRecord(resolvedSchema.items) ||
+      typeof resolvedSchema.items === "boolean")
   ) {
     entries.push(
       ...uiContractsFromSchemaInternal(
@@ -310,6 +319,19 @@ const uiContractsFromSchemaInternal = (
         seenRefs,
       ),
     );
+  }
+
+  if (Array.isArray(resolvedSchema.prefixItems)) {
+    for (let index = 0; index < resolvedSchema.prefixItems.length; index++) {
+      entries.push(
+        ...uiContractsFromSchemaInternal(
+          resolvedSchema.prefixItems[index] as JSONSchema,
+          childRoot,
+          [...path, String(index)],
+          seenRefs,
+        ),
+      );
+    }
   }
 
   return entries;

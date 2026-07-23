@@ -209,6 +209,40 @@ describe("CFC UI contract matching", () => {
     ).toBe(true);
   });
 
+  it("collects contracts declared in tuple (prefixItems) slots at their index", () => {
+    // CT-1895: contracts in tuple element schemas were never collected, so
+    // a declared UI contract on a slot went unenforced.
+    const contracts = uiContractsFromSchema({
+      type: "array",
+      prefixItems: [
+        { type: "number" },
+        trustedPatternUiActionSchema,
+      ],
+    });
+
+    expect(contracts).toEqual([{
+      path: ["1"],
+      contract: {
+        helper: "UiAction",
+        action: "SubmitDirectCommand",
+        trustedPattern: "TrustedDirectCommandSurface",
+        requiredEventIntegrity: ["TrustedDirectCommandSurface"],
+      },
+    }]);
+  });
+
+  it("mints no wildcard entry for items beside prefixItems", () => {
+    // Same rule as the ifc walker: a `*` entry matches ANY index including
+    // the tuple slots, but `items` governs only the indices past them.
+    const contracts = uiContractsFromSchema({
+      type: "array",
+      prefixItems: [{ type: "number" }],
+      items: trustedPatternUiActionSchema,
+    });
+
+    expect(contracts).toEqual([]);
+  });
+
   it("keeps sibling ifc metadata when resolving local $refs", () => {
     const contracts = uiContractsFromSchema({
       type: "array",
