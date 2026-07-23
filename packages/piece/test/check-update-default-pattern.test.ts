@@ -374,7 +374,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(getPatternSetupIdentityRef(repairedRoot)).toEqual(currentRef);
   });
 
-  it("repairs argument setup after a metadata-only update", async () => {
+  it("repairs argument setup from source after a metadata-only update", async () => {
     const argumentSourceV1 = [
       "import { pattern } from 'commonfabric';",
       "interface Input { label?: string; }",
@@ -417,16 +417,84 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(getPatternSetupIdentityRef(metadataOnlyRoot)).toEqual(originalRef);
     expect(manager.getArgument(metadataOnlyRoot).get()).toEqual({});
 
-    expect(
-      await controller.checkAndUpdateDefaultPattern(metadataOnlyRoot),
-    ).toBe("updated");
+    const originalLoad = runtime.patternManager.loadPatternByIdentity;
+    let blockedCurrentLoad = false;
+    runtime.patternManager.loadPatternByIdentity =
+      ((identity, symbol, space) => {
+        if (
+          !blockedCurrentLoad && identity === currentRef.identity &&
+          symbol === currentRef.symbol
+        ) {
+          blockedCurrentLoad = true;
+          return Promise.resolve(undefined);
+        }
+        return originalLoad.call(
+          runtime.patternManager,
+          identity,
+          symbol,
+          space,
+        );
+      }) as typeof runtime.patternManager.loadPatternByIdentity;
+
+    try {
+      expect(
+        await controller.checkAndUpdateDefaultPattern(metadataOnlyRoot),
+      ).toBe("updated");
+    } finally {
+      runtime.patternManager.loadPatternByIdentity = originalLoad;
+    }
     await runtime.idle();
     const repairedRoot = (await manager.getDefaultPattern(false))!;
     const repairedArgument = manager.getArgument(repairedRoot);
     await repairedArgument.pull();
 
+    expect(blockedCurrentLoad).toBe(true);
     expect(repairedArgument.get()).toEqual({ count: 2 });
     expect(getPatternSetupIdentityRef(repairedRoot)).toEqual(currentRef);
+  });
+
+  it("repairs a loadable default root with the wrong export symbol", async () => {
+    const source = [
+      "import { pattern } from 'commonfabric';",
+      "export const alternate = pattern<{ items?: string[] }>(() => ({ marker: 'alternate' }));",
+      "export default pattern<{ items?: string[] }>(() => ({ marker: 'default' }));",
+      "",
+    ].join("\n");
+    stub.setSource(source);
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    await manager.stopPiece(root);
+
+    const alternatePattern = await runtime.patternManager.compilePattern(
+      {
+        main: DEFAULT_APP_PATTERN_URL,
+        mainExport: "alternate",
+        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: source }],
+      },
+      { space: manager.getSpace() },
+    );
+    const alternateRef = runtime.patternManager.getArtifactEntryRef(
+      alternatePattern,
+    )!;
+    await runtime.setup(undefined, alternatePattern, {}, root, {
+      prepareForResume: true,
+    });
+    const alternateRoot = (await manager.getDefaultPattern(false))!;
+
+    expect(getPatternIdentityRef(alternateRoot)).toEqual(alternateRef);
+    expect(getPatternSetupIdentityRef(alternateRoot)).toEqual(alternateRef);
+    expect(alternateRef.symbol).toBe("alternate");
+
+    expect(await controller.checkAndUpdateDefaultPattern(alternateRoot)).toBe(
+      "updated",
+    );
+    const repairedRoot = (await manager.getDefaultPattern(false))!;
+    const repairedRef = getPatternIdentityRef(repairedRoot)!;
+
+    expect(repairedRef.identity).toBe(alternateRef.identity);
+    expect(repairedRef.symbol).toBe("default");
+    expect(getPatternSetupIdentityRef(repairedRoot)).toEqual(repairedRef);
   });
 
   it("abandons setup when the argument changes after synchronization", async () => {
@@ -1550,6 +1618,7 @@ describe("checkAndUpdateDefaultPattern", () => {
       });
     });
     expect(error).toBeUndefined();
+    runtime.experimental.systemPatternAutoUpdate = false;
 
     // Guard: the repair's loadPatternByIdentity resolves undefined.
     let restore = shadowLoadProbe(targetId, "undefined");
@@ -1577,6 +1646,7 @@ describe("checkAndUpdateDefaultPattern", () => {
 
     // With the probes gone the same doc still heals — the guards left it
     // untouched.
+    runtime.experimental.systemPatternAutoUpdate = true;
     await controller.ensureDefaultPattern();
     await runtime.idle();
     const after = (await manager.getDefaultPattern(false))!;
