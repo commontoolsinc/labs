@@ -33,6 +33,7 @@ describe("Topics nested stream dispatch across isolated runtimes", () => {
       programPath: PROGRAM_PATH,
       rootPath: ROOT_PATH,
       diagnostics: true,
+      bootstrapProfile: true,
       sessions: ["alice", "bob"],
     });
     alice = harness.session("alice");
@@ -44,12 +45,16 @@ describe("Topics nested stream dispatch across isolated runtimes", () => {
   });
 
   it("dispatches a Topic child handler by path and propagates its result", async () => {
-    await alice.send("addTopic", { title: "Nested handler topic" });
+    await alice.send("addTopic", {
+      title: "Nested handler topic",
+      agentName: "Alice",
+    });
     await harness.diagnosticsBarrier();
     await bob.telemetry();
 
     await bob.send(["topics", 0, "addComment"], {
       body: "A nested stream invocation",
+      agentName: "Bob",
     });
 
     await harness.diagnosticsBarrier();
@@ -101,6 +106,7 @@ describe("Topics nested stream dispatch across isolated runtimes", () => {
       programPath: PROGRAM_PATH,
       rootPath: ROOT_PATH,
       diagnostics: true,
+      bootstrapProfile: true,
       sessions: [
         { label: "cold-alice", wsDelayMs: 0 },
         { label: "cold-bob", wsDelayMs: 0 },
@@ -112,13 +118,13 @@ describe("Topics nested stream dispatch across isolated runtimes", () => {
       await Promise.all([
         coldAlice.send(
           "addTopic",
-          { title: "Cold nested handler topic A" },
+          { title: "Cold nested handler topic A", agentName: "Cold Alice" },
           undefined,
           { idle: false },
         ),
         coldBob.send(
           "addTopic",
-          { title: "Cold nested handler topic B" },
+          { title: "Cold nested handler topic B", agentName: "Cold Bob" },
           undefined,
           { idle: false },
         ),
@@ -134,6 +140,7 @@ describe("Topics nested stream dispatch across isolated runtimes", () => {
             kind: "web",
             url: "https://example.invalid/diagnostic/alice",
             label: "Alice diagnostic link",
+            agentName: "Cold Alice",
           },
           undefined,
           { idle: false },
@@ -144,6 +151,7 @@ describe("Topics nested stream dispatch across isolated runtimes", () => {
             kind: "web",
             url: "https://example.invalid/diagnostic/bob",
             label: "Bob diagnostic link",
+            agentName: "Cold Bob",
           },
           undefined,
           { idle: false },
@@ -205,8 +213,14 @@ describe("Topics nested stream dispatch across isolated runtimes", () => {
   });
 
   it("preserves raw Topic links through a containing-document root reorder", async () => {
-    await alice.send("addTopic", { title: "First linked topic" });
-    await alice.send("addTopic", { title: "Second linked topic" });
+    await alice.send("addTopic", {
+      title: "First linked topic",
+      agentName: "Alice",
+    });
+    await alice.send("addTopic", {
+      title: "Second linked topic",
+      agentName: "Alice",
+    });
     await harness.diagnosticsBarrier();
 
     const rawTopics = await alice.readRaw(["topics"]);

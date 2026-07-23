@@ -98,6 +98,8 @@ export interface MultiRuntimeHarnessOptions {
   diagnostics?: boolean;
   /** Keep Topics diagnostic data in workers; parent receives fixed aggregates only. */
   aggregateOnlyDiagnostics?: boolean;
+  /** Seed each worker identity's home space with a minimal profile for Topics. */
+  bootstrapProfile?: boolean;
   sessions: (string | MultiRuntimeSessionSpec)[];
   spaceName?: string;
   /**
@@ -665,6 +667,8 @@ export class MultiRuntimeHarness {
           apiUrl,
           diagnostics: options.diagnostics === true,
           aggregateOnlyDiagnostics: options.aggregateOnlyDiagnostics === true,
+          bootstrapProfile: options.aggregateOnlyDiagnostics === true ||
+            options.bootstrapProfile === true,
           diagnosticMutationsEnabled: options.diagnostics === true &&
             !options.apiUrl,
           ...(normalized.wsDelayMs !== undefined
@@ -702,6 +706,8 @@ export class MultiRuntimeHarness {
         apiUrl,
         diagnostics: options.diagnostics === true,
         aggregateOnlyDiagnostics: options.aggregateOnlyDiagnostics === true,
+        bootstrapProfile: options.aggregateOnlyDiagnostics === true ||
+          options.bootstrapProfile === true,
         aggregateBootstrapCreator: bootstrapChannel !== undefined,
         ...(bootstrapChannel
           ? {

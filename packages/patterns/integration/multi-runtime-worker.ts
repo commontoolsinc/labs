@@ -295,6 +295,53 @@ let convergencePublishChannels: BroadcastChannel[] = [];
 let privateTopicsEqualityToken: string | undefined;
 let restoreAggregateConsole: (() => void) | undefined;
 
+async function seedDeterministicProfile(): Promise<void> {
+  const runtime = controller().manager().runtime;
+  const userDid = runtime.userIdentityDID;
+  const profileDid = (await Identity.fromPassphrase(
+    `topics-diagnostics-profile:${userDid}`,
+    { implementation: "noble" },
+  )).did();
+  const profileDefaultId = "topics-diagnostics-profile-default";
+
+  const profileTx = runtime.edit();
+  const profileDefault = runtime.getCell<unknown>(
+    profileDid,
+    profileDefaultId,
+    undefined,
+    profileTx,
+  );
+  profileDefault.set({
+    name: "Topics Diagnostics",
+    initialNameApplied: "Topics Diagnostics",
+    avatar: "",
+    bio: "",
+    elements: [],
+  });
+  runtime.getSpaceCell(profileDid, undefined, profileTx).key("defaultPattern")
+    .set(profileDefault);
+  await profileTx.commit();
+  await runtime.idle();
+
+  const homeTx = runtime.edit();
+  const homeDefault = runtime.getCell<unknown>(
+    userDid,
+    "topics-diagnostics-home-default",
+    undefined,
+    homeTx,
+  );
+  const profileLink = runtime.getCell<unknown>(
+    profileDid,
+    profileDefaultId,
+    undefined,
+    homeTx,
+  );
+  homeDefault.key("profiles").set([profileLink]);
+  runtime.getHomeSpaceCell(homeTx).key("defaultPattern").set(homeDefault);
+  await homeTx.commit();
+  await runtime.idle();
+}
+
 function suppressAggregateConsole(): void {
   if (restoreAggregateConsole) return;
   const debug = console.debug;
@@ -628,9 +675,32 @@ interface TopicsContentProjection {
   title: string;
   body: string;
   createdAt: number;
+  createdBy?: TopicsAuthorProjection;
   createdByName: string;
-  comments: { authorName: string; body: string; sentAt: number }[];
+  comments: {
+    author?: TopicsAuthorProjection;
+    authorName: string;
+    body: string;
+    sentAt: number;
+  }[];
   links: { kind: string; url: string; label: string }[];
+}
+
+interface TopicsAuthorProjection {
+  kind: string;
+  name: string;
+  avatar: string;
+}
+
+function topicsAuthorProjection(
+  value: unknown,
+): TopicsAuthorProjection | undefined {
+  if (!isRecord(value)) return undefined;
+  return {
+    kind: typeof value.kind === "string" ? value.kind : "",
+    name: typeof value.name === "string" ? value.name : "",
+    avatar: typeof value.avatar === "string" ? value.avatar : "",
+  };
 }
 
 function topicsContentProjection(
@@ -640,10 +710,12 @@ function topicsContentProjection(
     title: typeof values.title === "string" ? values.title : "",
     body: typeof values.body === "string" ? values.body : "",
     createdAt: asTopicsNumber(values.createdAt),
+    createdBy: topicsAuthorProjection(values.createdBy),
     createdByName: typeof values.createdByName === "string"
       ? values.createdByName
       : "",
     comments: asTopicsRecordArray(values.comments).map((comment) => ({
+      author: topicsAuthorProjection(comment.author),
       authorName: typeof comment.authorName === "string"
         ? comment.authorName
         : "",
@@ -750,6 +822,7 @@ const handlers: Record<
     aggregateBootstrapChannel: creatorChannel,
     aggregateBootstrapParticipants: creatorParticipants,
     diagnosticMutationsEnabled: enableDiagnosticMutations,
+    bootstrapProfile,
     wsDelayMs,
   }) {
     if (cc) {
@@ -789,6 +862,7 @@ const handlers: Record<
     diagnosticsEnabled = diagnostics === true;
     diagnosticMutationsEnabled = enableDiagnosticMutations === true;
     diagnosticsActivityGeneration = 0;
+    if (bootstrapProfile === true) await seedDeterministicProfile();
     if (diagnosticsEnabled) {
       const runtime = controller().manager().runtime;
       const scheduler = runtime.scheduler;
@@ -1166,7 +1240,7 @@ const handlers: Record<
       }) as TopicsDiagnosticsOperationOutcome;
       const sendOutcome = await handlers.topicsDiagnosticsSend({
         target: ["topics", topicIndex, "setBody"],
-        event: { body: bodyValue },
+        event: { body: bodyValue, agentName: "Topics Diagnostics" },
         idle,
       }) as TopicsDiagnosticsOperationOutcome;
       const ok = setOutcome.ok && sendOutcome.ok;
@@ -1428,7 +1502,7 @@ const handlers: Record<
       if (!fid) return topicsOperationFailure();
       return await handlers.topicsDiagnosticsSend({
         target: ["topics", sourceIndex, "setBody"],
-        event: { body: `Reference ${fid}` },
+        event: { body: `Reference ${fid}`, agentName: "Topics Diagnostics" },
         idle,
       }) as TopicsDiagnosticsOperationOutcome;
     } catch {
