@@ -553,9 +553,10 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         "openai-codex does not support provider-native tools in this release",
       );
     }
-    const credential = await this.#resolver.resolve(request.signal);
     if (request.signal?.aborted) throw abortReason(request.signal);
     const converted = await toResponsesInput(request.transcript, request.model);
+    if (request.signal?.aborted) throw abortReason(request.signal);
+    const credential = await this.#resolver.resolve(request.signal);
     if (request.signal?.aborted) throw abortReason(request.signal);
     const responseTools = toResponsesTools(request.tools);
     const affinityKey = providerRunAffinityKey(request.runId);

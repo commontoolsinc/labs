@@ -228,6 +228,15 @@ Deno.test("CfHarnessPromptLoop requires an exact Codex credential owner binding"
     Error,
     "does not match run manifest credential owner",
   );
+  assertThrows(
+    () =>
+      new CfHarnessPromptLoop({
+        engine: codexEngine("loom:user-b", owner),
+        modelClient: codexClient(owner),
+      }),
+    Error,
+    "does not match configured credential owner",
+  );
   new CfHarnessPromptLoop({
     engine: codexEngine(owner.ownerKey, owner),
     modelClient: codexClient(owner),

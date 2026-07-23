@@ -274,6 +274,48 @@ Deno.test("Codex Responses client normalizes tool calls and preserves encrypted 
   );
 });
 
+Deno.test("Codex Responses client rejects cross-model continuation before resolving credentials", async () => {
+  let credentialResolutions = 0;
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: {
+      resolve: () => {
+        credentialResolutions += 1;
+        return Promise.resolve(credential);
+      },
+    },
+    fetchFn: () => Promise.reject(new Error("provider must not be called")),
+  });
+
+  await assertRejects(
+    () =>
+      client.complete({
+        model: "gpt-5.5",
+        transcript: [{
+          role: "assistant",
+          content: "",
+          providerContinuation: {
+            providerId: "openai-codex",
+            state: {
+              version: 1,
+              sourceModel: "gpt-5.4",
+              output: [{
+                type: "reasoning",
+                id: "rs_model_bound",
+                encrypted_content: "encrypted-state",
+              }],
+            },
+          },
+        }],
+        tools: [],
+        nativeModelToolIds: [],
+        runId: "run-cross-model-continuation",
+      }),
+    Error,
+    "continuation model gpt-5.4 does not match requested model gpt-5.5",
+  );
+  assertEquals(credentialResolutions, 0);
+});
+
 Deno.test("Codex Responses client surfaces refusal-only output", async () => {
   const client = new OpenAICodexResponsesClient({
     credentialResolver: { resolve: () => Promise.resolve(credential) },

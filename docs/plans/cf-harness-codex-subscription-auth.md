@@ -4,7 +4,7 @@ Status: Implemented in `cf-harness` and covered by automated tests. Remaining
 shipping gates are live-account smoke tests, security review, root validation
 under the repository-supported Deno version, and Loom host/UI policy wiring.
 
-Validation snapshot (2026-07-23): all 496 `cf-harness` tests pass; direct type
+Validation snapshot (2026-07-23): all 497 `cf-harness` tests pass; direct type
 checking, package lint/format, docs checks, unused-dependency checks, and diff
 whitespace checks pass. The aggregate root `deno task check` stops at its
 version guard because this workspace has Deno 2.9.3 while the repository

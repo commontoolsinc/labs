@@ -1692,7 +1692,7 @@ export class CfHarnessPromptLoop {
       const configuredOwnerKey = runState.credentialOwnerKey ??
         this.engine.config.credentialOwnerKey;
       if (
-        manifestOwner === undefined && configuredOwnerKey !== undefined &&
+        configuredOwnerKey !== undefined &&
         clientOwner.ownerKey !== configuredOwnerKey
       ) {
         throw new Error(
