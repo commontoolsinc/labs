@@ -207,6 +207,8 @@ PerUser, mergeable, backlinks, crossrefs, references, graph
 ```ts
 interface TopicsInput {
   topics?: Writable<TopicPiece[] | Default<[]>>;
+  /** @deprecated Read-only compatibility for pre-profile boards. */
+  myName?: PerUser<Writable<string | Default<"">>>;
 }
 // TopicInput additionally takes mentionable?: Writable<TopicPiece[]> — the
 // board's own list, wired at creation, for detail-page Connections.
@@ -220,7 +222,9 @@ interface TopicsOutput {
   mentionable: TopicPiece[];
   topicCount: number;
   crossrefs: TopicCrossref[]; // { fid, topic, refsOut, referencedBy }
+  newTitle?: PerSession<Writable<string>>;
   addTopic: Stream<{ title: string; agentName: string }>;
+  submitTopic: Stream<void>; // profile-authored browser composer
 }
 ```
 
