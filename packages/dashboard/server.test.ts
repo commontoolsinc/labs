@@ -3,7 +3,12 @@
 // binds a port or reaches a source; the tiles are stand-ins with a canned
 // collect(), registered under the ids the real registry uses so their views
 // reach the page.
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import {
   broadcast,
   clients,
@@ -497,6 +502,81 @@ Deno.test("overlapping ticks skip an updating run source and refresh another sou
     await first;
   }
   assertEquals(slowCollections, 1);
+});
+
+Deno.test("an unexpected standalone collection failure releases the tile for its next refresh", async () => {
+  let collections = 0;
+  const unreadable: TileView = {
+    label: "unreadable standalone view",
+    get status(): TileView["status"] {
+      throw new Error("standalone view cannot be copied");
+    },
+  };
+  const tile: Tile = {
+    id: "standalone-cleanup-probe",
+    intervalMs: 0,
+    collect(_ctx, publish): Promise<TileView> {
+      collections++;
+      if (collections === 1) {
+        publish?.(unreadable);
+        throw new Error("standalone collection failed");
+      }
+      return Promise.resolve({
+        label: "recovered standalone view",
+        status: "good",
+      });
+    },
+  };
+
+  await assertRejects(
+    () => tick([tile]),
+    Error,
+    "standalone view cannot be copied",
+  );
+  await tick([tile]);
+  assertEquals(collections, 2, "the failed update no longer keeps the tile active");
+});
+
+Deno.test("an unexpected source collection failure releases its source and tiles", async () => {
+  const source = { repo: "test/source-cleanup", workflow: "ci.yml" };
+  let fetches = 0;
+  let collections = 0;
+  const unreadable: TileView = {
+    label: "unreadable source view",
+    get status(): TileView["status"] {
+      throw new Error("source view cannot be copied");
+    },
+  };
+  const sourceCtx: Ctx = {
+    runs: () => Promise.resolve([]),
+    runsFor: () => {
+      fetches++;
+      return Promise.resolve([]);
+    },
+    env: () => undefined,
+  };
+  const tile: Tile = {
+    id: "source-cleanup-probe",
+    intervalMs: 0,
+    runSources: [source],
+    collect(_ctx, publish): Promise<TileView> {
+      collections++;
+      if (collections === 1) {
+        publish?.(unreadable);
+        throw new Error("source collection failed");
+      }
+      return Promise.resolve({ label: "recovered source view", status: "good" });
+    },
+  };
+
+  await assertRejects(
+    () => tick([tile], sourceCtx),
+    Error,
+    "source view cannot be copied",
+  );
+  await tick([tile], sourceCtx);
+  assertEquals(fetches, 2, "the failed update no longer keeps the source active");
+  assertEquals(collections, 2, "the failed update no longer keeps the tile active");
 });
 
 Deno.test("a multi-source tile stays active until every source update completes", async () => {
