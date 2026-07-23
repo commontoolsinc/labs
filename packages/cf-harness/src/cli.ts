@@ -43,6 +43,7 @@ import {
 import {
   HARNESS_CREDENTIAL_OWNER_REF_TYPE,
   type HarnessCredentialOwnerRef,
+  harnessCredentialOwnersEqual,
   type HarnessRunManifest,
   parseLoomRunManifestJson,
 } from "./contracts/run-manifest.ts";
@@ -1459,13 +1460,6 @@ const localCredentialOwner = (
   ownerKey,
 });
 
-const credentialOwnersEqual = (
-  left: HarnessCredentialOwnerRef,
-  right: HarnessCredentialOwnerRef,
-): boolean =>
-  left.type === right.type && left.version === right.version &&
-  left.ownerKey === right.ownerKey && left.tenantKey === right.tenantKey;
-
 const createSelectedModelClient = async (options: {
   provider: HarnessModelProviderId;
   credentialOwner: HarnessCredentialOwnerRef;
@@ -1490,7 +1484,10 @@ const createSelectedModelClient = async (options: {
     if (
       options.loom &&
       (client.credentialOwner === undefined ||
-        !credentialOwnersEqual(client.credentialOwner, options.credentialOwner))
+        !harnessCredentialOwnersEqual(
+          client.credentialOwner,
+          options.credentialOwner,
+        ))
     ) {
       throw new Error(
         "Loom model client credential owner does not match the run manifest",
@@ -1506,7 +1503,10 @@ const createSelectedModelClient = async (options: {
       );
     }
     const resolverOwnerMatches = resolver.credentialOwner !== undefined
-      ? credentialOwnersEqual(resolver.credentialOwner, options.credentialOwner)
+      ? harnessCredentialOwnersEqual(
+        resolver.credentialOwner,
+        options.credentialOwner,
+      )
       : options.credentialOwner.tenantKey === undefined &&
         resolver.ownerKey === credentialOwnerKey;
     if (!resolverOwnerMatches) {
@@ -2270,7 +2270,10 @@ export const runCfHarnessCli = async (
         localCredentialOwner(artifacts.runState.credentialOwnerKey ?? "local");
       if (
         runManifest?.credentialOwner !== undefined &&
-        !credentialOwnersEqual(runManifest.credentialOwner, credentialOwner)
+        !harnessCredentialOwnersEqual(
+          runManifest.credentialOwner,
+          credentialOwner,
+        )
       ) {
         throw new Error(
           "resume credential owner mismatch: requested owner does not match the recorded run",

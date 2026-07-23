@@ -127,6 +127,49 @@ Deno.test("Codex credential refresh is serialized per owner and persists rotatio
   );
 });
 
+Deno.test("Codex credential refresh persists rotation before reporting a late abort", async () => {
+  const store = new InMemoryHarnessCredentialStore();
+  await store.set("local", "openai-codex", {
+    type: "oauth",
+    providerId: "openai-codex",
+    accessToken: "expired-access",
+    refreshToken: "refresh-old",
+    expiresAt: 1,
+    accountId: "acct-1",
+  });
+  const controller = new AbortController();
+  const reason = new Error("abort after refresh response");
+  const resolver = new OpenAICodexCredentialResolver({
+    store,
+    ownerKey: "local",
+    now: () => 10_000,
+    fetchFn: () => {
+      controller.abort(reason);
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            access_token: jwt({
+              "https://api.openai.com/auth": {
+                chatgpt_account_id: "acct-1",
+              },
+            }),
+            refresh_token: "refresh-new",
+            expires_in: 3600,
+          }),
+          { status: 200 },
+        ),
+      );
+    },
+  });
+
+  const error = await assertRejects(() => resolver.resolve(controller.signal));
+  assertStrictEquals(error, reason);
+  assertEquals(
+    (await store.get("local", "openai-codex"))?.refreshToken,
+    "refresh-new",
+  );
+});
+
 Deno.test("Codex credential resolution never falls back after revocation", async () => {
   const store = new InMemoryHarnessCredentialStore();
   await store.set("local", "openai-codex", {

@@ -3,6 +3,7 @@ import {
   assertRejects,
   assertStrictEquals,
   assertStringIncludes,
+  assertThrows,
 } from "@std/assert";
 import {
   OPENAI_CODEX_MODELS_URL,
@@ -37,6 +38,41 @@ const sse = (...events: unknown[]): Response =>
     events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
     { status: 200, headers: { "content-type": "text/event-stream" } },
   );
+
+Deno.test("Codex Responses client rejects conflicting credential owner bindings", () => {
+  const owner = {
+    type: "cf-harness.credential-owner-ref" as const,
+    version: 1 as const,
+    ownerKey: "loom:user-a",
+    tenantKey: "loom-a",
+  };
+
+  assertThrows(
+    () =>
+      new OpenAICodexResponsesClient({
+        credentialResolver: {
+          ownerKey: owner.ownerKey,
+          credentialOwner: owner,
+          resolve: () => Promise.resolve(credential),
+        },
+        credentialOwner: { ...owner, tenantKey: "loom-b" },
+      }),
+    Error,
+    "credential resolver owner does not match the client owner",
+  );
+  assertThrows(
+    () =>
+      new OpenAICodexResponsesClient({
+        credentialResolver: {
+          ownerKey: "loom:user-b",
+          credentialOwner: owner,
+          resolve: () => Promise.resolve(credential),
+        },
+      }),
+    Error,
+    "credential resolver owner does not match the client owner",
+  );
+});
 
 Deno.test("Codex Responses client sends the pinned owner-authenticated request", async () => {
   let request: { input: URL | RequestInfo; init?: RequestInit } | undefined;

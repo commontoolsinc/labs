@@ -6,7 +6,10 @@ import type {
   HarnessTranscriptMessage,
 } from "../contracts/transcript.ts";
 import type { HarnessFetch } from "../contracts/http-fetch.ts";
-import type { HarnessCredentialOwnerRef } from "../contracts/run-manifest.ts";
+import {
+  type HarnessCredentialOwnerRef,
+  harnessCredentialOwnersEqual,
+} from "../contracts/run-manifest.ts";
 import { defaultHarnessFetch } from "../contracts/http-fetch.ts";
 import { materializeImageAttachmentContentPart } from "../image-attachments.ts";
 import type { OpenAICodexOAuthCredential } from "../auth/types.ts";
@@ -398,8 +401,25 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
 
   constructor(options: OpenAICodexResponsesClientOptions) {
     this.#resolver = options.credentialResolver;
-    const credentialOwner = options.credentialOwner ??
-      options.credentialResolver.credentialOwner;
+    const resolverOwner = options.credentialResolver.credentialOwner;
+    const credentialOwner = options.credentialOwner ?? resolverOwner;
+    if (
+      credentialOwner !== undefined && resolverOwner !== undefined &&
+      !harnessCredentialOwnersEqual(credentialOwner, resolverOwner)
+    ) {
+      throw new Error(
+        "Codex credential resolver owner does not match the client owner",
+      );
+    }
+    if (
+      credentialOwner !== undefined &&
+      options.credentialResolver.ownerKey !== undefined &&
+      credentialOwner.ownerKey !== options.credentialResolver.ownerKey
+    ) {
+      throw new Error(
+        "Codex credential resolver owner does not match the client owner",
+      );
+    }
     this.credentialOwner = credentialOwner === undefined
       ? undefined
       : structuredClone(credentialOwner);

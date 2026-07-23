@@ -351,11 +351,11 @@ export class OpenAICodexCredentialResolver {
             "refresh",
             this.#now(),
           );
-          if (signal?.aborted) throw abortReason(signal);
           return credential;
         },
         signal,
       );
+      if (signal?.aborted) throw abortReason(signal);
     } catch (error) {
       if (signal?.aborted) throw abortReason(signal);
       if (error instanceof OpenAICodexAuthError) throw error;
