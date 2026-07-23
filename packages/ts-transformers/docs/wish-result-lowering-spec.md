@@ -14,13 +14,13 @@ const w = wish<T>(...);                              // (1) two-step named
 const x = w.result;
 
 const { result } = wish<T>(...);                     // (2) single-level destructure
-const { result: { allPieces } } = wish<T>(...);      // (3) nested destructure
+const { result: { pieceRegistry } } = wish<T>(...);  // (3) nested destructure
 
 const x = wish<T>(...).result;                       // (4) one-line direct
-const x = wish<T>(...).result.allPieces;             // (5) one-line chained
-const { allPieces } = wish<T>(...).result;           // (6) one-line + destructure
-const { allPieces } = wish<T>(...).result!;          // (7) with non-null assertion
-const { allPieces } = (wish<T>(...) as U).result;    // (8) with cast
+const x = wish<T>(...).result.pieceRegistry;         // (5) one-line chained
+const { pieceRegistry } = wish<T>(...).result;       // (6) one-line + destructure
+const { pieceRegistry } = wish<T>(...).result!;      // (7) with non-null assertion
+const { pieceRegistry } = (wish<T>(...) as U).result; // (8) with cast
 ```
 
 Shapes (4)–(8) are handled by a pre-pass (`rewriteInlineReactiveOriginChains`)
@@ -40,9 +40,9 @@ When the destructure root is a fresh opaque-origin call
 - `allowIfSet: true` makes multi-binding destructures
   (`const { a, b } = wish(...)`) order-deterministic: the first leaf in source
   order wins, the rest are no-ops.
-- Honest to user intent — the user wrote `const { allPieces } = wish(...)`, so
-  the cell takes its identity from `allPieces`, the name they actually chose.
-  The synthesized `__cf_destructure_N` is invisible scaffolding.
+- Honest to user intent — the user wrote `const { pieceRegistry } = wish(...)`,
+  so the cell takes its identity from `pieceRegistry`, the name they actually
+  chose. The synthesized `__cf_destructure_N` is invisible scaffolding.
 - Avoids a regression we hit when attaching `.for(...)` to the root:
   `isOpaqueSourceExpression` didn't recognize `<opaque>.for(...)` as a source,
   so downstream walker tracking broke.

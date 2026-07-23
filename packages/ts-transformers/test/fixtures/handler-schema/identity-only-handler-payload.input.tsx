@@ -9,14 +9,14 @@ type MentionablePiece = {
 
 const addPiece = handler<
   { piece: MentionablePiece },
-  { allPieces: Writable<MentionablePiece[]> }
->((event, { allPieces }) => {
+  { pieceRegistry: Writable<MentionablePiece[]> }
+>((event, { pieceRegistry }) => {
   const piece = event?.piece;
   if (!piece) return;
 
-  const current = allPieces.get();
+  const current = pieceRegistry.get();
   if (!current.some((c) => equals(c, piece))) {
-    allPieces.push(piece);
+    pieceRegistry.push(piece);
   }
 });
 

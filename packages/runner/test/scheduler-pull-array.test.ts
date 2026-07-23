@@ -165,7 +165,7 @@ describe("pull mode array reactivity", () => {
   it("should trigger computation when array source changes via push", async () => {
     // This tests: when a source array has an element pushed, a computation
     // that reads it should be marked dirty and re-run on pull.
-    // This simulates: visiblePieces = computed(() => allPieces.filter(...))
+    // This simulates: visiblePieces = computed(() => pieceRegistry.filter(...))
 
     const sourceArray = runtime.getCell<{ name: string; hidden: boolean }[]>(
       space,
@@ -312,12 +312,12 @@ describe("pull mode array reactivity", () => {
     cancel();
   });
 
-  it("should notify renderer when allPieces array is pushed (Notes UI simulation)", async () => {
+  it("should notify renderer when pieceRegistry is pushed (Notes UI simulation)", async () => {
     // This simulates the actual Notes UI flow:
-    // - Space has allPieces Cell (array of pieces)
-    // - visiblePieces computation filters allPieces
+    // - Space has a pieceRegistry Cell (array of pieces)
+    // - visiblePieces computation filters pieceRegistry
     // - Renderer effect observes visiblePieces and renders the list
-    // - User creates a new note which pushes to allPieces
+    // - User creates a new note which pushes to pieceRegistry
     // - Renderer should be notified and re-render with new note
 
     // Define schemas for realistic data
@@ -330,7 +330,7 @@ describe("pull mode array reactivity", () => {
       required: ["name"],
     } as const satisfies JSONSchema;
 
-    const allPiecesSchema = {
+    const pieceRegistrySchema = {
       type: "array",
       items: pieceSchema,
     } as const satisfies JSONSchema;
@@ -339,14 +339,14 @@ describe("pull mode array reactivity", () => {
       type: "object",
       properties: {
         // Not using asCell: ["cell"] here - we want inline array data for simplicity
-        allPieces: allPiecesSchema,
+        pieceRegistry: pieceRegistrySchema,
       },
     } as const satisfies JSONSchema;
 
-    // Create space cell with allPieces
+    // Create space cell with pieceRegistry
     const spaceCell = runtime.getCell(space, "notes-ui-space", spaceSchema, tx);
     spaceCell.set({
-      allPieces: [
+      pieceRegistry: [
         { name: "Existing Note 1", isHidden: false },
         { name: "Hidden Note", isHidden: true },
       ],
@@ -354,8 +354,8 @@ describe("pull mode array reactivity", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    // Get the allPieces subcell
-    const allPiecesCell = spaceCell.key("allPieces");
+    // Get the pieceRegistry subcell
+    const pieceRegistryCell = spaceCell.key("pieceRegistry");
 
     // Create visiblePieces cell for computed output
     const visiblePiecesCell = runtime.getCell(
@@ -371,11 +371,11 @@ describe("pull mode array reactivity", () => {
     // Track renderer notifications
     const renderedValues: { name: string }[][] = [];
 
-    // Create computation: visiblePieces = allPieces.filter(c => !c.isHidden)
+    // Create computation: visiblePieces = pieceRegistry.filter(c => !c.isHidden)
     const computeVisiblePieces: Action = function computeVisiblePieces(
       actionTx,
     ) {
-      const pieces = allPiecesCell.withTx(actionTx).get() ?? [];
+      const pieces = pieceRegistryCell.withTx(actionTx).get() ?? [];
       // Now pieces should be an array since we don't have asCell: ["cell"]
       const visible = pieces.filter((c) => !c.isHidden);
       visiblePiecesCell.withTx(actionTx).send(visible);
@@ -385,7 +385,9 @@ describe("pull mode array reactivity", () => {
     runtime.scheduler.subscribe(
       computeVisiblePieces,
       {
-        reads: [toMemorySpaceAddress(allPiecesCell.getAsNormalizedFullLink())],
+        reads: [
+          toMemorySpaceAddress(pieceRegistryCell.getAsNormalizedFullLink()),
+        ],
         shallowReads: [],
         writes: [
           toMemorySpaceAddress(visiblePiecesCell.getAsNormalizedFullLink()),
@@ -410,10 +412,10 @@ describe("pull mode array reactivity", () => {
       { name: "Existing Note 1", isHidden: false },
     ]);
 
-    // Simulate creating a new note and pushing to allPieces
+    // Simulate creating a new note and pushing to pieceRegistry
     // (This is what happens when user creates a note in notebook.tsx)
     const createNoteTx = runtime.edit();
-    allPiecesCell.withTx(createNoteTx).push({
+    pieceRegistryCell.withTx(createNoteTx).push({
       name: "New Note",
       isHidden: false,
     });
@@ -433,14 +435,14 @@ describe("pull mode array reactivity", () => {
     runtime.scheduler.unsubscribe(computeVisiblePieces);
   });
 
-  it("should handle nested cell updates in allPieces pattern", async () => {
-    // More complex test: allPieces contains cell references (like real usage)
+  it("should handle nested cell updates in pieceRegistry", async () => {
+    // More complex test: pieceRegistry contains cell references (like real usage)
     // When a new piece is pushed, the renderer should see it
 
     const spaceSchema = {
       type: "object",
       properties: {
-        allPieces: {
+        pieceRegistry: {
           type: "array",
           items: { type: "object" },
           // Not using asCell: ["cell"] - testing inline array data
@@ -448,18 +450,18 @@ describe("pull mode array reactivity", () => {
       },
     } as const satisfies JSONSchema;
 
-    // Create space with allPieces - start with 1 item like the first test
+    // Create space with pieceRegistry - start with 1 item like the first test
     const spaceCell = runtime.getCell(
       space,
-      "nested-allpieces-space",
+      "nested-piece-registry-space",
       spaceSchema,
       tx,
     );
-    spaceCell.set({ allPieces: [{ name: "Initial Piece" }] });
+    spaceCell.set({ pieceRegistry: [{ name: "Initial Piece" }] });
     await tx.commit();
     tx = runtime.edit();
 
-    const allPiecesCell = spaceCell.key("allPieces");
+    const pieceRegistryCell = spaceCell.key("pieceRegistry");
 
     // Track what the "renderer" sees
     const renderedPieceCount: number[] = [];
@@ -476,14 +478,16 @@ describe("pull mode array reactivity", () => {
     tx = runtime.edit();
 
     const countPieces: Action = function countPieces(actionTx) {
-      const pieces = allPiecesCell.withTx(actionTx).get() ?? [];
+      const pieces = pieceRegistryCell.withTx(actionTx).get() ?? [];
       countCell.withTx(actionTx).send(pieces.length);
     };
 
     runtime.scheduler.subscribe(
       countPieces,
       {
-        reads: [toMemorySpaceAddress(allPiecesCell.getAsNormalizedFullLink())],
+        reads: [
+          toMemorySpaceAddress(pieceRegistryCell.getAsNormalizedFullLink()),
+        ],
         shallowReads: [],
         writes: [toMemorySpaceAddress(countCell.getAsNormalizedFullLink())],
       },
@@ -503,7 +507,7 @@ describe("pull mode array reactivity", () => {
 
     // Push first new piece (total should be 2)
     const tx1 = runtime.edit();
-    allPiecesCell.withTx(tx1).push({ name: "Piece 1" });
+    pieceRegistryCell.withTx(tx1).push({ name: "Piece 1" });
     await tx1.commit();
 
     await runtime.scheduler.idle();
@@ -511,7 +515,7 @@ describe("pull mode array reactivity", () => {
 
     // Push second piece (total should be 3)
     const tx2 = runtime.edit();
-    allPiecesCell.withTx(tx2).push({ name: "Piece 2" });
+    pieceRegistryCell.withTx(tx2).push({ name: "Piece 2" });
     await tx2.commit();
 
     await runtime.scheduler.idle();
@@ -519,7 +523,7 @@ describe("pull mode array reactivity", () => {
 
     // Push third piece (total should be 4)
     const tx3 = runtime.edit();
-    allPiecesCell.withTx(tx3).push({ name: "Piece 3" });
+    pieceRegistryCell.withTx(tx3).push({ name: "Piece 3" });
     await tx3.commit();
 
     await runtime.scheduler.idle();
@@ -546,14 +550,14 @@ describe("pull mode array reactivity", () => {
       },
     } as const satisfies JSONSchema;
 
-    // Create allPieces array with initial data
-    const allPiecesCell = runtime.getCell(
+    // Create pieceRegistry with initial data
+    const pieceRegistryCell = runtime.getCell(
       space,
-      "nav-flow-allpieces",
+      "nav-flow-piece-registry",
       arraySchema,
       tx,
     );
-    allPiecesCell.set([{ name: "Initial Note" }]);
+    pieceRegistryCell.set([{ name: "Initial Note" }]);
     await tx.commit();
     tx = runtime.edit();
 
@@ -571,16 +575,18 @@ describe("pull mode array reactivity", () => {
     // Track what renderer sees
     const renderedValues: { name: string }[][] = [];
 
-    // Computation: copy allPieces to visiblePieces
+    // Computation: copy pieceRegistry to visiblePieces
     const computeVisible: Action = function computeVisible(actionTx) {
-      const pieces = allPiecesCell.withTx(actionTx).get() ?? [];
+      const pieces = pieceRegistryCell.withTx(actionTx).get() ?? [];
       visiblePiecesCell.withTx(actionTx).send([...pieces]);
     };
 
     runtime.scheduler.subscribe(
       computeVisible,
       {
-        reads: [toMemorySpaceAddress(allPiecesCell.getAsNormalizedFullLink())],
+        reads: [
+          toMemorySpaceAddress(pieceRegistryCell.getAsNormalizedFullLink()),
+        ],
         shallowReads: [],
         writes: [
           toMemorySpaceAddress(visiblePiecesCell.getAsNormalizedFullLink()),
@@ -609,7 +615,7 @@ describe("pull mode array reactivity", () => {
 
     // STEP 3: Create note while on another page (push while unsubscribed)
     const createTx = runtime.edit();
-    allPiecesCell.withTx(createTx).push({ name: "New Note" });
+    pieceRegistryCell.withTx(createTx).push({ name: "New Note" });
     await createTx.commit();
 
     // STEP 4: Navigate back (remount default app, resubscribe renderer)
@@ -648,14 +654,14 @@ describe("pull mode array reactivity", () => {
       },
     } as const satisfies JSONSchema;
 
-    // Create allPieces array with initial data
-    const allPiecesCell = runtime.getCell(
+    // Create pieceRegistry with initial data
+    const pieceRegistryCell = runtime.getCell(
       space,
-      "full-nav-allpieces",
+      "full-nav-piece-registry",
       arraySchema,
       tx,
     );
-    allPiecesCell.set([{ name: "Initial Note" }]);
+    pieceRegistryCell.set([{ name: "Initial Note" }]);
     await tx.commit();
     tx = runtime.edit();
 
@@ -673,9 +679,9 @@ describe("pull mode array reactivity", () => {
     // Track what renderer sees
     const renderedValues: { name: string }[][] = [];
 
-    // Computation: copy allPieces to visiblePieces
+    // Computation: copy pieceRegistry to visiblePieces
     const computeVisible: Action = function computeVisible(actionTx) {
-      const pieces = allPiecesCell.withTx(actionTx).get() ?? [];
+      const pieces = pieceRegistryCell.withTx(actionTx).get() ?? [];
       visiblePiecesCell.withTx(actionTx).send([...pieces]);
     };
 
@@ -683,7 +689,9 @@ describe("pull mode array reactivity", () => {
     let cancelComputation = runtime.scheduler.subscribe(
       computeVisible,
       {
-        reads: [toMemorySpaceAddress(allPiecesCell.getAsNormalizedFullLink())],
+        reads: [
+          toMemorySpaceAddress(pieceRegistryCell.getAsNormalizedFullLink()),
+        ],
         shallowReads: [],
         writes: [
           toMemorySpaceAddress(visiblePiecesCell.getAsNormalizedFullLink()),
@@ -711,14 +719,16 @@ describe("pull mode array reactivity", () => {
 
     // STEP 3: Create note while on another page
     const createTx = runtime.edit();
-    allPiecesCell.withTx(createTx).push({ name: "New Note" });
+    pieceRegistryCell.withTx(createTx).push({ name: "New Note" });
     await createTx.commit();
 
     // STEP 4: Navigate back - resubscribe BOTH computation AND renderer
     cancelComputation = runtime.scheduler.subscribe(
       computeVisible,
       {
-        reads: [toMemorySpaceAddress(allPiecesCell.getAsNormalizedFullLink())],
+        reads: [
+          toMemorySpaceAddress(pieceRegistryCell.getAsNormalizedFullLink()),
+        ],
         shallowReads: [],
         writes: [
           toMemorySpaceAddress(visiblePiecesCell.getAsNormalizedFullLink()),
@@ -764,14 +774,14 @@ describe("pull mode array reactivity", () => {
       },
     } as const satisfies JSONSchema;
 
-    // Create allPieces array with initial data
-    const allPiecesCell = runtime.getCell(
+    // Create pieceRegistry with initial data
+    const pieceRegistryCell = runtime.getCell(
       space,
-      "pattern-remount-allpieces",
+      "pattern-remount-piece-registry",
       arraySchema,
       tx,
     );
-    allPiecesCell.set([{ name: "Initial Note" }]);
+    pieceRegistryCell.set([{ name: "Initial Note" }]);
     await tx.commit();
     tx = runtime.edit();
 
@@ -792,14 +802,16 @@ describe("pull mode array reactivity", () => {
 
     // FIRST MOUNT: Create computation #1
     const computeVisible1: Action = function computeVisible1(actionTx) {
-      const pieces = allPiecesCell.withTx(actionTx).get() ?? [];
+      const pieces = pieceRegistryCell.withTx(actionTx).get() ?? [];
       visiblePiecesCell.withTx(actionTx).send([...pieces]);
     };
 
     let cancelComputation = runtime.scheduler.subscribe(
       computeVisible1,
       {
-        reads: [toMemorySpaceAddress(allPiecesCell.getAsNormalizedFullLink())],
+        reads: [
+          toMemorySpaceAddress(pieceRegistryCell.getAsNormalizedFullLink()),
+        ],
         shallowReads: [],
         writes: [
           toMemorySpaceAddress(visiblePiecesCell.getAsNormalizedFullLink()),
@@ -827,19 +839,21 @@ describe("pull mode array reactivity", () => {
 
     // PUSH while unmounted
     const createTx = runtime.edit();
-    allPiecesCell.withTx(createTx).push({ name: "New Note" });
+    pieceRegistryCell.withTx(createTx).push({ name: "New Note" });
     await createTx.commit();
 
     // REMOUNT: Create computation #2 (NEW action, but SAME output cell)
     const computeVisible2: Action = function computeVisible2(actionTx) {
-      const pieces = allPiecesCell.withTx(actionTx).get() ?? [];
+      const pieces = pieceRegistryCell.withTx(actionTx).get() ?? [];
       visiblePiecesCell.withTx(actionTx).send([...pieces]);
     };
 
     cancelComputation = runtime.scheduler.subscribe(
       computeVisible2,
       {
-        reads: [toMemorySpaceAddress(allPiecesCell.getAsNormalizedFullLink())],
+        reads: [
+          toMemorySpaceAddress(pieceRegistryCell.getAsNormalizedFullLink()),
+        ],
         shallowReads: [],
         writes: [
           toMemorySpaceAddress(visiblePiecesCell.getAsNormalizedFullLink()),

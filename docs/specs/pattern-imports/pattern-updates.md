@@ -204,21 +204,27 @@ cf:[[//toolshed.url]/space/][slug]
 ## In-place apply
 
 The apply is: ensure the new closure is loadable in the space
-(`compilePattern(program, { space })` writes source + compiled docs), then
-write `{ identity, symbol }` to the piece's `patternIdentity` meta. During space
-open, `ensureDefaultPattern` performs this write before calling `startPiece`,
-so an obsolete pattern that cannot load can be replaced before bootstrap. If
-the piece is already running, the
+(`compilePattern(program, { space })` writes source + compiled docs), then use
+the normal pattern setup path to install the new result schema, result
+projection, `{ identity, symbol }`, and `patternSetupIdentity` completion marker
+on the existing result cell. The completion marker is not a pattern pointer;
+it records which identity had its complete setup staged. During space open,
+`ensureDefaultPattern` performs this transaction before calling `startPiece`,
+and the updated root still takes the persisted-result dependency-sync path
+before its first start. This lets an obsolete pattern that cannot load be
+replaced before bootstrap without reading unsynchronized owned cells as their
+schema defaults. If the piece is already running, the
 watcher cancels its old reactive nodes and re-instantiates the new pattern onto
 the **same result cell**.
 
-- **Survives**: the result cell's entity and inbound links; any state cells the
-  new pattern still reads (addressed by stable key/cause).
-- **Does not survive**: data under keys the new pattern drops or renames — the
-  **schema-compat crux**, and the boundary between the two hazard cases
-  ("missing data" vs "stuck/wrong"). The mitigating discipline is an authoring
-  one: durable state addressed by stable key/cause, not positionally. We do
-  **not** gate on a pre-apply schema dry-run in v1.
+- **Survives**: the result cell's entity and inbound links; top-level result
+  fields added by the new projection; any state cells the new pattern still
+  reads through a stable key or cause.
+- **Does not migrate automatically**: data whose owned-cell key changes. The
+  pattern must keep reading the old cause long enough to copy that data into
+  the new cell. This is the **schema-compat crux**, and the boundary between
+  the two hazard cases ("missing data" vs "stuck/wrong"). We do **not** gate on
+  a pre-apply schema dry-run in v1.
 
 ## System-source patterns — the loop
 
@@ -270,9 +276,10 @@ transaction, and only then start it:
    exactly `{ identity: currentId, symbol: "default" }`; otherwise leave it
    pinned.
 4. If `currentId === running patternIdentity.identity`, probe that exact stored
-   artifact. A successful load is done (and may back-fill proven provenance).
-   A missing or unloadable artifact continues to repair rather than taking the
-   fast path.
+   artifact. A successful load is done only when `patternSetupIdentity` matches
+   the running identity (and may back-fill proven provenance). A missing
+   artifact, an unloadable artifact, or an absent or stale setup completion
+   marker continues to repair rather than taking the fast path.
 5. Revalidate `{host}{url}` and every module in its complete authored import
    closure with the same `no-cache` fetch policy, then compile with
    the route's official `default` export. Apply only when the compiler supplies
@@ -280,10 +287,12 @@ transaction, and only then start it:
    `default`; never synthesize a ref or fall back around `?identity`. A fetch,
    compile, evaluation,
    missing-entry-ref, or identity-mismatch failure leaves the root metadata
-   unchanged.
-6. Provenance repair and identity replacement are transactional
-   compare-and-swap writes: the captured identity, source, and repository must
-   still match on every retry, so a concurrent custom-root replacement wins.
+   unchanged. Use the normal pattern setup path to install the candidate result
+   schema, projection, identity, and setup completion marker.
+6. Provenance repair and pattern setup are transactional compare-and-swap
+   writes: the captured identity, setup completion marker, source, and
+   repository must still match on every retry, so a concurrent custom-root
+   replacement wins.
 7. Start the reconciled root. A newly created root skips the check because it
    was compiled from the current source in the same ensure operation; a root
    discovered after a creation race is treated as persisted and reconciled.

@@ -29,7 +29,7 @@ const addPiece = handler({
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
-        allPieces: {
+        pieceRegistry: {
             type: "array",
             items: {
                 type: "unknown",
@@ -38,14 +38,14 @@ const addPiece = handler({
             asCell: ["cell"]
         }
     },
-    required: ["allPieces"]
-} as const satisfies __cfHelpers.JSONSchema, (event, { allPieces }) => {
+    required: ["pieceRegistry"]
+} as const satisfies __cfHelpers.JSONSchema, (event, { pieceRegistry }) => {
     const piece = event?.piece;
     if (!piece)
         return;
-    const current = allPieces.get();
+    const current = pieceRegistry.get();
     if (!current.some((c) => equals(c, piece))) {
-        allPieces.push(piece);
+        pieceRegistry.push(piece);
     }
 });
 const trackRecent = handler({

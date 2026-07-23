@@ -274,9 +274,9 @@ snapshot string used for hashtag search, following the favorites pattern:
 explicit tag if supplied, otherwise a serialized schema/description snapshot.
 `userTags` stores user-supplied tags without `#`.
 
-The profile default pattern may also include an internal `allPieces` list if
+The profile default pattern may also include an internal `pieceRegistry` if
 that is useful for rendering, but external code must depend on `elements` and
-`addElement`, not `allPieces`.
+`addElement`, not `pieceRegistry`.
 
 ## Profile Default Pattern Selection
 

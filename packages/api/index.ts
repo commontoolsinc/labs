@@ -356,6 +356,8 @@ export type MetaLinkField =
  * The `argument` field links a result cell to its argument cell
  * The `internal` field contains a manifest with links to derived internal cells.
  * The `schema` field stores the schema for a result cell
+ * The `patternSetupIdentity` field records the pattern identity whose complete
+ * setup state was installed on a result cell.
  * The `result` field lets a result cell link to its parent result cell,
  * and also lets the argument and derived internal cells link back to the result cell.
  *
@@ -368,6 +370,7 @@ export type MetaLinkField =
 export type MetaField =
   | MetaLinkField
   | "patternIdentity" // content-addressed {identity, symbol} pattern reference
+  | "patternSetupIdentity" // setup-completion {identity, symbol} marker
   | "patternSource" // provenance: the source a piece tracks for updates (a
   // toolshed pattern path, or later a `cf:` fabric ref)
   | "patternRepository" // optional caller-supplied repository locator

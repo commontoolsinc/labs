@@ -10,11 +10,37 @@
  *
  * Run: deno task cf test packages/patterns/notes/note.test.tsx --verbose
  */
-import { action, computed, NAME, pattern } from "commonfabric";
+import {
+  action,
+  computed,
+  NAME,
+  pattern,
+  UI,
+  wish,
+  Writable,
+} from "commonfabric";
+import { findNode, propsOf } from "../test/vnode-helpers.ts";
 import Note, { bareMentionId } from "./note.tsx";
 import Notebook from "./notebook.tsx";
 
+type BacklinkStream = {
+  send: (event: {
+    detail: { piece: unknown; navigate: boolean };
+  }) => void;
+};
+
+const backlinkStreamOf = (subject: { [UI]: unknown }): BacklinkStream => {
+  const editor = findNode(
+    subject[UI],
+    (node) => propsOf(node)?.["onbacklink-create"] !== undefined,
+  );
+  return propsOf(editor)?.["onbacklink-create"] as BacklinkStream;
+};
+
 export default pattern(() => {
+  const pieceRegistry = wish<Writable<Array<{ title?: string }>>>({
+    query: "#pieceRegistry",
+  }).result!;
   const note = Note({
     title: "Test Note",
     content: "Line one\nLine two\nLine three",
@@ -65,6 +91,15 @@ export default pattern(() => {
     content: "I am linkable",
 
     isHidden: false,
+  });
+
+  const backlinkNote = Note({
+    title: "Backlink Subject",
+    content: "",
+  });
+  const backlinkTarget = Note({
+    title: "Backlink Target",
+    content: "",
   });
 
   // ==========================================================================
@@ -135,6 +170,12 @@ export default pattern(() => {
 
   const action_append_link = action(() => {
     note.appendLink.send({ piece: linkTarget });
+  });
+
+  const action_create_backlink = action(() => {
+    backlinkStreamOf(backlinkNote).send({
+      detail: { piece: backlinkTarget, navigate: false },
+    });
   });
 
   // ==========================================================================
@@ -286,6 +327,9 @@ export default pattern(() => {
   const assert_mentioned_after_link = computed(
     () => note.mentioned.length === 1,
   );
+  const assert_backlink_registers_piece = computed(() =>
+    pieceRegistry.get().some((piece) => piece.title === "Backlink Target")
+  );
 
   // The wiki-link embed contract: `of:` strips (the renderer re-adds it),
   // bare ids pass through, and `computed:` is REJECTED — the bare embed
@@ -371,6 +415,8 @@ export default pattern(() => {
       { assertion: assert_parented_note_unchanged },
 
       // === Append wiki-link ===
+      { action: action_create_backlink },
+      { assertion: assert_backlink_registers_piece },
       { action: action_append_link },
       { assertion: assert_link_appended },
       { assertion: assert_mentioned_after_link },
@@ -383,5 +429,7 @@ export default pattern(() => {
     noteInNotebookB,
     noteNoParent,
     linkTarget,
+    backlinkNote,
+    backlinkTarget,
   };
 });

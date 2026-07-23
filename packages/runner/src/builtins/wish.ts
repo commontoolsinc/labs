@@ -37,6 +37,7 @@ import {
 import { setRunnableName } from "../runner-utils.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import { scopedCell } from "./scope-policy.ts";
+import { isLegacyPieceRegistryRoot } from "../piece-helpers.ts";
 
 const wishFlowLogger = getLogger("runner.wish-flow", {
   enabled: true,
@@ -177,7 +178,7 @@ function getResolutionKind(parsed: ParsedWishTarget): string {
     case "#mentionable":
     case "#summaryIndex":
     case "#knowledgeGraph":
-    case "#allPieces":
+    case "#pieceRegistry":
     case "#recent":
     case "#now":
       return "space-target";
@@ -1236,31 +1237,46 @@ function resolveSpaceTarget(
     "#summaryIndex": ["defaultPattern", "summaryIndex"],
     "#knowledgeGraph": ["defaultPattern", "knowledgeGraph"],
 
-    "#allPieces": ["defaultPattern", "allPieces"],
     "#recent": ["defaultPattern", "recentPieces"],
     "#suggestions": ["defaultPattern", "suggestionHistory"],
   };
 
+  const registryTarget = parsed.key === "#pieceRegistry";
   const pathPrefix = pathForKey[parsed.key];
-  if (!pathPrefix) return null;
+  if (!registryTarget && !pathPrefix) return null;
+
+  const resolutionFor = (spaceCell: Cell<unknown>): BaseResolution => {
+    if (!registryTarget) {
+      return { cell: spaceCell, pathPrefix: [...pathPrefix!] };
+    }
+
+    const defaultPattern = spaceCell.key("defaultPattern").resolveAsCell();
+    const registryKey = isLegacyPieceRegistryRoot(defaultPattern)
+      ? "allPieces"
+      : "pieceRegistry";
+    return {
+      cell: spaceCell,
+      pathPrefix: ["defaultPattern", registryKey],
+    };
+  };
 
   const results: BaseResolution[] = [];
 
   // "." or no scope → include current space (backward compat)
   if (!ctx.scope || ctx.scope.includes(".")) {
-    results.push({ cell: getSpaceCell(ctx), pathPrefix: [...pathPrefix] });
+    results.push(resolutionFor(getSpaceCell(ctx)));
   }
 
   // "~" → include home space
   if (ctx.scope?.includes("~") && ctx.runtime.userIdentityDID) {
     const homeSpaceCell = getHomeSpaceCell(ctx);
-    results.push({ cell: homeSpaceCell, pathPrefix: [...pathPrefix] });
+    results.push(resolutionFor(homeSpaceCell));
   }
 
   // Arbitrary DIDs → include each space
   for (const did of getArbitraryDIDs(ctx.scope)) {
     const didSpaceCell = getSpaceCellForDID(ctx.runtime, did, ctx.tx);
-    results.push({ cell: didSpaceCell, pathPrefix: [...pathPrefix] });
+    results.push(resolutionFor(didSpaceCell));
   }
 
   if (results.length === 0) {
@@ -1279,7 +1295,8 @@ function resolveSpaceTarget(
  * Main resolution function - dispatches to appropriate resolver based on target type.
  *
  * Resolution paths:
- * 1. Well-known space targets (/, #default, #mentionable, #allPieces, #recent, #now)
+ * 1. Well-known space targets (/, #default, #mentionable, #pieceRegistry,
+ *    #recent, #now)
  * 2. Well-known home space targets (#favorites, #journal, #learned, #profile)
  * 3. Hashtag search (arbitrary #tags in favorites/mentionables)
  */
@@ -1672,14 +1689,22 @@ function wishStateSchemaForResult(schema: unknown): JSONSchema | undefined {
   // Materialize once and share the instance for both slots — internSchema
   // canonicalizes the wrapper, so the duplicate reference is fine.
   const resultSchema = schemaAsCell(schema);
-  const candidateSchema = resultSchema;
+  // Fragment references resolve from the wish-state schema root after the
+  // requested schema is nested under result and candidates.
+  const schemaWithDefinitions = resultSchema as Record<string, unknown> & {
+    $defs?: Record<string, JSONSchema>;
+  };
+  const { $defs, ...nestedSchemaObject } = schemaWithDefinitions;
+  const nestedResultSchema = nestedSchemaObject as JSONSchema;
+  const candidateSchema = nestedResultSchema;
   return internSchema({
+    ...($defs === undefined ? {} : { $defs }),
     type: "object",
     properties: {
       result: {
         anyOf: [
           { type: "undefined" },
-          resultSchema,
+          nestedResultSchema,
         ],
       },
       candidates: {

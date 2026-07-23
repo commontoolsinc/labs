@@ -6,7 +6,7 @@
  * process so the full event → preflight → handler → commit → settle →
  * recompute path can be profiled and optimized without a browser:
  *
- * - a home doc holds a list of LINKS to per-note docs (like allPieces),
+ * - a home doc holds a list of LINKS to per-note docs (like pieceRegistry),
  * - a lifted view derives display rows from the list (reads every note:
  *   link resolution + schema traverse + hashing, the integration's read mix),
  * - a live sink subscribes to the derived view (like the home UI),

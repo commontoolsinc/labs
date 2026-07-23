@@ -1267,7 +1267,7 @@ export class RuntimeProcessor {
 
   async handlePageGetAll(request: PageGetAllRequest): Promise<CellResponse> {
     const { pieceManager } = this.getSpaceCtx(request.space);
-    const piecesCell = await pieceManager.getPieces();
+    const piecesCell = await pieceManager.getPieceRegistry();
     return {
       cell: createCellRef(piecesCell),
     };

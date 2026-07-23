@@ -539,6 +539,7 @@
     "piece",
     "pieceCell",
     "pieceId",
+    "pieceRegistry",
     "popFrame",
     "populateDependencies",
     "preflightCompiledBundle",

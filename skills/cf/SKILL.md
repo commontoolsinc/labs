@@ -289,7 +289,7 @@ mounts; auto-discovered spaces may appear writable but silently drop writes.
 
 ## References
 
-- `packages/patterns/system/default-app.tsx` - System pieces (allPieces list
+- `packages/patterns/system/default-app.tsx` - System pieces (pieceRegistry
   lives here)
 - `docs/common/workflows/handlers-cli-testing.md` - Handler testing
 - `docs/development/debugging/cli-debugging.md` - CLI debugging

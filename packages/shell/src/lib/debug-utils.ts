@@ -291,7 +291,7 @@ export function summarizeDebugValue(value: unknown): DebugValueSummary {
     looksLike.push("runtime-metadata-doc");
   }
   if (
-    internalKeys?.includes("allPieces") ||
+    internalKeys?.includes("pieceRegistry") ||
     internalKeys?.includes("visiblePieces")
   ) {
     looksLike.push("default-app-or-home-state");

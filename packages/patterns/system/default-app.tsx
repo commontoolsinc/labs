@@ -7,6 +7,7 @@ import {
   pattern,
   Stream,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -19,6 +20,7 @@ import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
 import SummaryIndex from "./summary-index.tsx";
 import Notebook from "../notes/notebook.tsx";
 import PieceGrid from "./piece-grid.tsx";
+import { migratePieceRegistry } from "./piece-registry-migration.ts";
 
 type MinimalPiece = {
   [NAME]?: string;
@@ -30,6 +32,7 @@ type PiecesListInput = void;
 // Pattern returns only UI, no data outputs (only symbol properties)
 export interface PiecesListOutput {
   [key: string]: unknown;
+  [UI]: VNode;
   backlinksIndex: {
     mentionable: MentionablePiece[] | undefined;
   };
@@ -37,7 +40,7 @@ export interface PiecesListOutput {
   // Declared (not just index-signature) so the schema surfaces them to
   // external callers and tests: the runtime reads outputs through the
   // declared type.
-  allPieces: MentionablePiece[];
+  pieceRegistry: MentionablePiece[];
   addPiece: Stream<{ piece: Writable<MentionablePiece> }>;
 }
 
@@ -55,20 +58,20 @@ const removePiece = handler<
   Record<string, never>,
   {
     piece: Writable<MinimalPiece>;
-    allPieces: Writable<MinimalPiece[]>;
+    pieceRegistry: Writable<MinimalPiece[]>;
   }
 >((_, state) => {
-  const allPiecesValue = state.allPieces.get();
-  const index = allPiecesValue.findIndex(
+  const registeredPieces = state.pieceRegistry.get();
+  const index = registeredPieces.findIndex(
     (c: any) => c && state.piece.equals(c),
   );
 
   if (index !== -1) {
-    const pieceListCopy = [...allPiecesValue];
+    const pieceListCopy = [...registeredPieces];
     console.log("pieceListCopy before", pieceListCopy.length);
     pieceListCopy.splice(index, 1);
     console.log("pieceListCopy after", pieceListCopy.length);
-    state.allPieces.set(pieceListCopy);
+    state.pieceRegistry.set(pieceListCopy);
   }
 });
 
@@ -120,18 +123,18 @@ const menuNewNotebook = handler<void, { menuOpen: Writable<boolean> }>(
   },
 );
 
-// Handler: Add piece to allPieces if not already present. The event field is
-// declared as a cell so it arrives as one (the shell sends a piece cell);
+// Handler: Add a piece to the registry if not already present. The event field
+// is declared as a cell so it arrives as one (the shell sends a piece cell);
 // addUnique then dedups by link, so concurrent registrations of the same
 // piece resolve to one entry and adds of distinct pieces merge, without
 // reading the whole list.
 const addPiece = handler<
   { piece: Writable<MentionablePiece> },
-  { allPieces: Writable<MentionablePiece[]> }
->((event, { allPieces }) => {
+  { pieceRegistry: Writable<MentionablePiece[]> }
+>((event, { pieceRegistry }) => {
   const piece = event?.piece;
   if (!piece) return;
-  allPieces.addUnique(piece);
+  pieceRegistry.addUnique(piece);
 });
 
 // Handler: Track piece as recently used (add to front, maintain max)
@@ -149,8 +152,26 @@ const trackRecent = handler<
 
 export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // OWN the data cells (not from wish)
-  const allPieces = new Writable<MentionablePiece[]>([]);
+  const legacyPieceRegistry = new Writable<MentionablePiece[]>([]).for(
+    "allPieces",
+  );
+  const pieceRegistry = new Writable<MentionablePiece[]>([]);
+  // TODO(2026-08-21): Remove the retired allPieces cell and
+  // pieceRegistryMigrationComplete state.
+  const pieceRegistryMigrationComplete = new Writable(false).for(
+    "pieceRegistryMigrationComplete",
+  );
   const recentPieces = new Writable<MentionablePiece[]>([]);
+
+  // Copy the retired owned cell into the new registry once. Existing canonical
+  // state wins when both cells contain data.
+  computed(() => {
+    migratePieceRegistry(
+      legacyPieceRegistry,
+      pieceRegistry,
+      pieceRegistryMigrationComplete,
+    );
+  });
 
   // Dropdown menu state
   const menuOpen = new Writable(false);
@@ -159,7 +180,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // (prevents transient hash-only pills during reactive updates)
   // NOTE: Use truthy check, not === true, because piece.isHidden is a proxy object
   const visiblePieces = computed(() =>
-    allPieces.get().filter((piece) => {
+    pieceRegistry.get().filter((piece) => {
       if (!piece) return false;
       if (piece.isHidden) return false;
       const name = piece?.[NAME];
@@ -167,7 +188,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     })
   );
 
-  const index = BacklinksIndex({ allPieces });
+  const index = BacklinksIndex({ pieceRegistry });
   const summaryIdx = SummaryIndex({});
 
   const gridView = PieceGrid({ pieces: visiblePieces });
@@ -344,7 +365,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                           <cf-button
                             size="sm"
                             variant="ghost"
-                            onClick={removePiece({ piece, allPieces })}
+                            onClick={removePiece({ piece, pieceRegistry })}
                           >
                             🗑️
                           </cf-button>
@@ -360,10 +381,10 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
       </cf-screen>
     ),
     // Exported data
-    allPieces,
+    pieceRegistry,
     recentPieces,
     // Exported handlers (bound to state cells for external callers)
-    addPiece: addPiece({ allPieces }),
+    addPiece: addPiece({ pieceRegistry }),
     trackRecent: trackRecent({ recentPieces }),
   };
 });

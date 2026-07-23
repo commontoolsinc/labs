@@ -1575,18 +1575,18 @@ describe("piece pull materialization", () => {
       targetController.id,
       ["input"],
     );
-    const originalGetPieces = manager.getPieces.bind(manager);
-    manager.getPieces = () =>
+    const originalGetPieceRegistry = manager.getPieceRegistry.bind(manager);
+    manager.getPieceRegistry = () =>
       Promise.resolve({
         get: () => [source, target],
-      } as unknown as Awaited<ReturnType<typeof manager.getPieces>>);
+      } as unknown as Awaited<ReturnType<typeof manager.getPieceRegistry>>);
     try {
       expect((await targetController.readingFrom()).map((piece) => piece.id))
         .toEqual([sourceController.id]);
       expect((await sourceController.readBy()).map((piece) => piece.id))
         .toEqual([targetController.id]);
     } finally {
-      manager.getPieces = originalGetPieces;
+      manager.getPieceRegistry = originalGetPieceRegistry;
     }
   });
 

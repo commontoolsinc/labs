@@ -14,6 +14,7 @@ import { Runtime } from "../src/runtime.ts";
 import {
   extractDefaultValues,
   getPatternIdentityRef,
+  getPatternSetupIdentityRef,
   mergeObjects,
   mergeSchemaDefaults,
   schemaAcceptsOpaqueCellValue,
@@ -1923,6 +1924,162 @@ describe("setup/start", () => {
     await resultCell.pull();
   });
 
+  it("guards stored setup state when no argument was recorded", async () => {
+    const resultCell = runtime.getCell(
+      space,
+      "stored setup argument absent result",
+    );
+    const guard = await runtime.runner.syncStoredSetupArgument(resultCell);
+
+    expect(guard(resultCell)).toBe(true);
+
+    const tx = runtime.edit();
+    const argumentCell = runtime.getCell(
+      space,
+      "stored setup argument unexpected argument",
+      undefined,
+      tx,
+    );
+    argumentCell.set({ value: 1 });
+    const candidate = runtime.getCell(
+      space,
+      "stored setup argument unexpected candidate",
+      undefined,
+      tx,
+    );
+    candidate.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+
+    expect(guard(candidate)).toBe(false);
+    tx.abort();
+  });
+
+  it("guards the stored argument link, value, and linked targets", async () => {
+    const setupTx = runtime.edit();
+    const targetCell = runtime.getCell(
+      space,
+      "stored setup argument linked target",
+      undefined,
+      setupTx,
+    );
+    targetCell.set({ name: "Ada" });
+    const argumentCell = runtime.getCell(
+      space,
+      "stored setup argument value",
+      undefined,
+      setupTx,
+    );
+    argumentCell.setRaw({
+      profile: targetCell.getAsWriteRedirectLink(),
+    });
+    const resultCell = runtime.getCell(
+      space,
+      "stored setup argument result",
+      undefined,
+      setupTx,
+    );
+    resultCell.setMetaRaw(
+      "argument",
+      argumentCell.getAsWriteRedirectLink(),
+    );
+    await setupTx.commit();
+    await runtime.idle();
+
+    const guard = await runtime.runner.syncStoredSetupArgument(resultCell);
+    expect(guard(resultCell)).toBe(true);
+
+    const noLinkCandidate = runtime.getCell(
+      space,
+      "stored setup argument no link candidate",
+    );
+    expect(guard(noLinkCandidate)).toBe(false);
+
+    const differentTx = runtime.edit();
+    const differentArgument = runtime.getCell(
+      space,
+      "stored setup argument different value",
+      undefined,
+      differentTx,
+    );
+    differentArgument.set({ value: 2 });
+    const differentCandidate = runtime.getCell(
+      space,
+      "stored setup argument different candidate",
+      undefined,
+      differentTx,
+    );
+    differentCandidate.setMetaRaw(
+      "argument",
+      differentArgument.getAsWriteRedirectLink(),
+    );
+    expect(guard(differentCandidate)).toBe(false);
+    differentTx.abort();
+
+    const changedTx = runtime.edit();
+    argumentCell.withTx(changedTx).setRaw({
+      profile: targetCell.getAsWriteRedirectLink(),
+      changed: true,
+    });
+    expect(guard(resultCell.withTx(changedTx))).toBe(false);
+    changedTx.abort();
+  });
+
+  it("keeps the stored-argument guard when a linked target does not sync", async () => {
+    const setupTx = runtime.edit();
+    const targetCell = runtime.getCell(
+      space,
+      "stored setup argument unavailable linked target",
+      undefined,
+      setupTx,
+    );
+    targetCell.set({ name: "Ada" });
+    const argumentCell = runtime.getCell(
+      space,
+      "stored setup argument with unavailable target",
+      undefined,
+      setupTx,
+    );
+    argumentCell.setRaw({
+      profile: targetCell.getAsWriteRedirectLink(),
+    });
+    const resultCell = runtime.getCell(
+      space,
+      "stored setup argument unavailable target result",
+      undefined,
+      setupTx,
+    );
+    resultCell.setMetaRaw(
+      "argument",
+      argumentCell.getAsWriteRedirectLink(),
+    );
+    await setupTx.commit();
+    await runtime.idle();
+
+    const originalSyncCell = runtime.storageManager.syncCell;
+    const targetLink = targetCell.getAsNormalizedFullLink();
+    let targetSyncs = 0;
+    Reflect.set(runtime.storageManager, "syncCell", (cell: unknown) => {
+      const linkedCell = cell as typeof targetCell;
+      if (
+        areNormalizedLinksSame(
+          linkedCell.getAsNormalizedFullLink(),
+          targetLink,
+        )
+      ) {
+        targetSyncs++;
+        return Promise.reject(new Error("linked target unavailable"));
+      }
+      return Reflect.apply(originalSyncCell, runtime.storageManager, [cell]);
+    });
+
+    try {
+      const guard = await runtime.runner.syncStoredSetupArgument(resultCell);
+      expect(targetSyncs).toBe(1);
+      expect(guard(resultCell)).toBe(true);
+    } finally {
+      Reflect.set(runtime.storageManager, "syncCell", originalSyncCell);
+    }
+  });
+
   it("setup with cell argument and start reacts to cell updates", async () => {
     const pattern: Pattern = {
       argumentSchema: {
@@ -2122,6 +2279,32 @@ describe("runner utils", () => {
       })).toBeDefined();
     }
     expect(observedAccessorKinds).toEqual([]);
+  });
+
+  it("reads the identity installed by completed setup", () => {
+    const resultCell = runtime.getCell(
+      space,
+      "completed setup identity",
+      undefined,
+      tx,
+    );
+
+    expect(getPatternSetupIdentityRef(resultCell)).toBeUndefined();
+
+    resultCell.setMetaRaw("patternSetupIdentity", {
+      identity: "pattern-identity",
+      symbol: "main",
+    });
+    expect(getPatternSetupIdentityRef(resultCell)).toEqual({
+      identity: "pattern-identity",
+      symbol: "main",
+    });
+
+    resultCell.setMetaRaw("patternSetupIdentity", {
+      identity: 42,
+      symbol: "main",
+    });
+    expect(getPatternSetupIdentityRef(resultCell)).toBeUndefined();
   });
 
   describe("extractDefaultValues", () => {

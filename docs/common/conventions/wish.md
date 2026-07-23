@@ -232,7 +232,7 @@ The `scope` parameter can redirect or fan the others out across other spaces.
 | `/path/to/prop`     | Nested property of the current space cell               |
 | `#default`          | Default pattern of the current space                    |
 | `#mentionable`      | Mentionable pieces in the current space                 |
-| `#allPieces`        | All pieces in the current space                         |
+| `#pieceRegistry`    | All pieces registered in the current space              |
 | `#recent`           | Recently-used pieces in the current space               |
 | `#suggestions`      | Suggestion history of the current space                 |
 | `#summaryIndex`     | Summary index of the current space                      |
@@ -327,5 +327,5 @@ const defaultApp = wish<{ addPiece: Stream<{ piece: MentionablePiece }> }>({
 defaultApp.result.addPiece.send({ piece: newPiece });
 ```
 
-Do **not** wish for `allPieces` as a `Writable` — see
+Do **not** wish for `pieceRegistry` as a `Writable` — see
 [Adding Pieces](adding-pieces.md).

@@ -49,7 +49,7 @@ subscribes lazily:
    input and result cells.
 2. Unsubscribe after a period of inactivity (no FUSE operations touching
    that piece for N minutes).
-3. The piece list itself (`allPieces`) is always subscribed.
+3. The piece registry itself (`pieceRegistry`) is always subscribed.
 
 ## Caching Strategy
 

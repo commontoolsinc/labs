@@ -3,12 +3,15 @@ import { expect } from "@std/expect";
 import {
   getPatternIdentityRef,
   getPatternRepository,
+  getPatternSetupIdentityRef,
   getPatternSource,
+  parseLink,
   resolveEntryIdentity,
   Runtime,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
+import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import { PieceManager } from "../src/manager.ts";
 import {
   DEFAULT_APP_PATTERN_URL,
@@ -291,6 +294,31 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(after).toBe(await identityForSource(SOURCE_V1));
   });
 
+  it("stops an update when disposal follows the current-pattern probe", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const originalLoad = runtime.patternManager.loadPatternByIdentity;
+    let dispose: Promise<void> | undefined;
+    let probeRuns = 0;
+    runtime.patternManager.loadPatternByIdentity = (() => {
+      probeRuns++;
+      dispose = runtime.patternUpdater.dispose();
+      return Promise.resolve(undefined);
+    }) as typeof runtime.patternManager.loadPatternByIdentity;
+
+    try {
+      expect(
+        await controller.checkAndUpdateDefaultPattern(piece.getCell()),
+      ).toBe("current");
+      expect(probeRuns).toBe(1);
+      expect(dispose).toBeDefined();
+      await dispose!;
+      expect(stub.sourceFetches()).toBe(1);
+    } finally {
+      runtime.patternManager.loadPatternByIdentity = originalLoad;
+    }
+  });
+
   it("leaves a root without a pattern identity untouched", async () => {
     await setup({ systemPatternAutoUpdate: true });
     const piece = await controller.ensureDefaultPattern();
@@ -324,6 +352,323 @@ describe("checkAndUpdateDefaultPattern", () => {
     const idV2 = getPatternIdentityRef(root)?.identity;
     expect(idV2).toBe(await identityForSource(SOURCE_V2));
     expect(idV2).not.toBe(idV1);
+  });
+
+  it("repairs a metadata-only update when the result schema is unchanged", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    const originalRef = getPatternIdentityRef(root)!;
+    expect(getPatternSetupIdentityRef(root)).toEqual(originalRef);
+    expect(root.key("marker").get()).toBe("v1");
+    await manager.stopPiece(root);
+
+    stub.setSource(SOURCE_V2);
+    const currentPattern = await runtime.patternManager.compilePattern(
+      {
+        main: DEFAULT_APP_PATTERN_URL,
+        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: SOURCE_V2 }],
+      },
+      { space: manager.getSpace() },
+    );
+    const currentRef = runtime.patternManager.getArtifactEntryRef(
+      currentPattern,
+    )!;
+    expect(currentRef.identity).toBe(await identityForSource(SOURCE_V2));
+    expect(currentPattern.resultSchema).toEqual(root.getMetaRaw("schema"));
+
+    const metadataUpdate = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", currentRef);
+    });
+    expect(metadataUpdate.error).toBeUndefined();
+    const metadataOnlyRoot = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(metadataOnlyRoot)).toEqual(currentRef);
+    expect(getPatternSetupIdentityRef(metadataOnlyRoot)).toEqual(originalRef);
+
+    await manager.startPiece(metadataOnlyRoot);
+    expect(metadataOnlyRoot.key("marker").get()).toBe("v1");
+
+    expect(
+      await controller.checkAndUpdateDefaultPattern(metadataOnlyRoot),
+    ).toBe("updated");
+    await runtime.idle();
+    const repairedRoot = (await manager.getDefaultPattern(false))!;
+    await repairedRoot.pull();
+
+    expect(repairedRoot.key("marker").get()).toBe("v2");
+    expect(getPatternSetupIdentityRef(repairedRoot)).toEqual(currentRef);
+  });
+
+  it("repairs argument setup from source after a metadata-only update", async () => {
+    const argumentSourceV1 = [
+      "import { pattern } from 'commonfabric';",
+      "interface Input { label?: string; }",
+      "export default pattern<Input>(() => ({ marker: 'v1' }));",
+      "",
+    ].join("\n");
+    const argumentSourceV2 = [
+      "import { Default, pattern } from 'commonfabric';",
+      "interface Input { label?: string; count: number | Default<2>; }",
+      "export default pattern<Input>(({ count }) => ({ marker: 'v2:' + count }));",
+      "",
+    ].join("\n");
+    stub.setSource(argumentSourceV1);
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    const originalRef = getPatternIdentityRef(root)!;
+    expect(manager.getArgument(root).get()).toEqual({});
+    await manager.stopPiece(root);
+
+    stub.setSource(argumentSourceV2);
+    const currentPattern = await runtime.patternManager.compilePattern(
+      {
+        main: DEFAULT_APP_PATTERN_URL,
+        files: [{
+          name: DEFAULT_APP_PATTERN_URL,
+          contents: argumentSourceV2,
+        }],
+      },
+      { space: manager.getSpace() },
+    );
+    const currentRef = runtime.patternManager.getArtifactEntryRef(
+      currentPattern,
+    )!;
+    const metadataUpdate = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", currentRef);
+    });
+    expect(metadataUpdate.error).toBeUndefined();
+    const metadataOnlyRoot = (await manager.getDefaultPattern(false))!;
+    expect(getPatternSetupIdentityRef(metadataOnlyRoot)).toEqual(originalRef);
+    expect(manager.getArgument(metadataOnlyRoot).get()).toEqual({});
+
+    const originalLoad = runtime.patternManager.loadPatternByIdentity;
+    let blockedCurrentLoad = false;
+    runtime.patternManager.loadPatternByIdentity =
+      ((identity, symbol, space) => {
+        if (
+          !blockedCurrentLoad && identity === currentRef.identity &&
+          symbol === currentRef.symbol
+        ) {
+          blockedCurrentLoad = true;
+          return Promise.resolve(undefined);
+        }
+        return originalLoad.call(
+          runtime.patternManager,
+          identity,
+          symbol,
+          space,
+        );
+      }) as typeof runtime.patternManager.loadPatternByIdentity;
+
+    try {
+      expect(
+        await controller.checkAndUpdateDefaultPattern(metadataOnlyRoot),
+      ).toBe("updated");
+    } finally {
+      runtime.patternManager.loadPatternByIdentity = originalLoad;
+    }
+    await runtime.idle();
+    const repairedRoot = (await manager.getDefaultPattern(false))!;
+    const repairedArgument = manager.getArgument(repairedRoot);
+    await repairedArgument.pull();
+
+    expect(blockedCurrentLoad).toBe(true);
+    expect(repairedArgument.get()).toEqual({ count: 2 });
+    expect(getPatternSetupIdentityRef(repairedRoot)).toEqual(currentRef);
+  });
+
+  it("repairs a loadable default root with the wrong export symbol", async () => {
+    const source = [
+      "import { pattern } from 'commonfabric';",
+      "export const alternate = pattern<{ items?: string[] }>(() => ({ marker: 'alternate' }));",
+      "export default pattern<{ items?: string[] }>(() => ({ marker: 'default' }));",
+      "",
+    ].join("\n");
+    stub.setSource(source);
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    await manager.stopPiece(root);
+
+    const alternatePattern = await runtime.patternManager.compilePattern(
+      {
+        main: DEFAULT_APP_PATTERN_URL,
+        mainExport: "alternate",
+        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: source }],
+      },
+      { space: manager.getSpace() },
+    );
+    const alternateRef = runtime.patternManager.getArtifactEntryRef(
+      alternatePattern,
+    )!;
+    await runtime.setup(undefined, alternatePattern, {}, root, {
+      prepareForResume: true,
+    });
+    const alternateRoot = (await manager.getDefaultPattern(false))!;
+
+    expect(getPatternIdentityRef(alternateRoot)).toEqual(alternateRef);
+    expect(getPatternSetupIdentityRef(alternateRoot)).toEqual(alternateRef);
+    expect(alternateRef.symbol).toBe("alternate");
+
+    expect(await controller.checkAndUpdateDefaultPattern(alternateRoot)).toBe(
+      "updated",
+    );
+    const repairedRoot = (await manager.getDefaultPattern(false))!;
+    const repairedRef = getPatternIdentityRef(repairedRoot)!;
+
+    expect(repairedRef.identity).toBe(alternateRef.identity);
+    expect(repairedRef.symbol).toBe("default");
+    expect(getPatternSetupIdentityRef(repairedRoot)).toEqual(repairedRef);
+  });
+
+  it("abandons setup when the argument changes after synchronization", async () => {
+    const argumentSourceV1 = [
+      "import { pattern } from 'commonfabric';",
+      "interface Input { label?: string; }",
+      "export default pattern<Input>(() => ({ marker: 'v1' }));",
+      "",
+    ].join("\n");
+    const argumentSourceV2 = [
+      "import { Default, pattern } from 'commonfabric';",
+      "interface Input { label?: string; count: number | Default<2>; }",
+      "export default pattern<Input>(({ count }) => ({ marker: 'v2:' + count }));",
+      "",
+    ].join("\n");
+    stub.setSource(argumentSourceV1);
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    const originalRef = getPatternIdentityRef(root)!;
+    await piece.setInput({ label: "before" });
+
+    stub.setSource(argumentSourceV2);
+    const originalSync = runtime.syncStoredSetupArgument.bind(runtime);
+    let changedArgument = false;
+    runtime.syncStoredSetupArgument = async (cell) => {
+      const guard = await originalSync(cell);
+      if (!changedArgument) {
+        changedArgument = true;
+        const changed = await runtime.editWithRetry((tx) => {
+          manager.getArgument(cell).withTx(tx).set({ label: "after" });
+        });
+        expect(changed.error).toBeUndefined();
+      }
+      return guard;
+    };
+
+    try {
+      expect(await controller.checkAndUpdateDefaultPattern(root)).toBe(
+        "current",
+      );
+    } finally {
+      runtime.syncStoredSetupArgument = originalSync;
+    }
+
+    const unchangedRoot = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(unchangedRoot)).toEqual(originalRef);
+    expect(manager.getArgument(unchangedRoot).get()).toEqual({
+      label: "after",
+    });
+
+    expect(
+      await controller.checkAndUpdateDefaultPattern(unchangedRoot),
+    ).toBe("updated");
+    const updatedRoot = (await manager.getDefaultPattern(false))!;
+    const updatedArgument = manager.getArgument(updatedRoot);
+    await updatedArgument.pull();
+    expect(updatedArgument.get()).toEqual({ label: "after", count: 2 });
+  });
+
+  it("abandons setup when a modern argument link changes after synchronization", async () => {
+    const argumentSourceV1 = [
+      "import { pattern } from 'commonfabric';",
+      "interface Profile { name: string; }",
+      "interface Input { profile?: Profile; }",
+      "export default pattern<Input>(() => ({ marker: 'v1' }));",
+      "",
+    ].join("\n");
+    const argumentSourceV2 = argumentSourceV1.replace(
+      "marker: 'v1'",
+      "marker: 'v2'",
+    );
+    stub.setSource(argumentSourceV1);
+    await setup({ systemPatternAutoUpdate: true, modernCellRep: true });
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    const originalRef = getPatternIdentityRef(root)!;
+    const profilePattern = await runtime.patternManager.compilePattern(
+      {
+        main: "/setup-argument-profile.ts",
+        files: [{
+          name: "/setup-argument-profile.ts",
+          contents: [
+            "import { pattern } from 'commonfabric';",
+            "interface Input { name: string; }",
+            "export default pattern<Input>(({ name }) => ({ name }));",
+            "",
+          ].join("\n"),
+        }],
+      },
+      { space: manager.getSpace() },
+    );
+    const profileBefore = await manager.runPersistent<{ name: string }>(
+      profilePattern,
+      { name: "before" },
+      "setup argument profile before",
+    );
+    const profileAfter = await manager.runPersistent<{ name: string }>(
+      profilePattern,
+      { name: "after" },
+      "setup argument profile after",
+    );
+    await piece.setInput({ profile: profileBefore });
+    const initialRawArgument = manager.getArgument(root).getRawUntyped() as {
+      profile?: unknown;
+    };
+    expect(initialRawArgument.profile).toBeInstanceOf(FabricLink);
+    expect(
+      parseLink(initialRawArgument.profile, manager.getArgument(root))?.id,
+    ).toBe(profileBefore.getAsNormalizedFullLink().id);
+
+    stub.setSource(argumentSourceV2);
+    const originalSync = runtime.syncStoredSetupArgument.bind(runtime);
+    let changedArgument = false;
+    runtime.syncStoredSetupArgument = async (cell) => {
+      const guard = await originalSync(cell);
+      if (!changedArgument) {
+        changedArgument = true;
+        const changed = await runtime.editWithRetry((tx) => {
+          manager.getArgument(cell).withTx(tx).set({ profile: profileAfter });
+        });
+        expect(changed.error).toBeUndefined();
+      }
+      return guard;
+    };
+
+    try {
+      expect(await controller.checkAndUpdateDefaultPattern(root)).toBe(
+        "current",
+      );
+    } finally {
+      runtime.syncStoredSetupArgument = originalSync;
+    }
+
+    const unchangedRoot = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(unchangedRoot)).toEqual(originalRef);
+    const unchangedArgument = manager.getArgument(unchangedRoot);
+    const unchangedRawArgument = unchangedArgument.getRawUntyped() as {
+      profile?: unknown;
+    };
+    expect(unchangedRawArgument.profile).toBeInstanceOf(FabricLink);
+    expect(parseLink(unchangedRawArgument.profile, unchangedArgument)?.id)
+      .toBe(profileAfter.getAsNormalizedFullLink().id);
+    const currentArgumentGuard = await runtime.syncStoredSetupArgument(
+      unchangedRoot,
+    );
+    const guardTx = runtime.edit();
+    expect(currentArgumentGuard(unchangedRoot.withTx(guardTx))).toBe(true);
+    guardTx.abort();
   });
 
   it("reconciles an unloadable stale root before ensure starts it", async () => {
@@ -1072,11 +1417,9 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(after.key("count").get()).toBe(0);
   });
 
-  it("failed swap-setup leaves the running pattern in place", async () => {
-    // The fail-closed half of the swap-setup contract: when the incoming
-    // pattern's argument schema rejects the existing argument, the watcher
-    // logs pattern-swap-setup-error and must NOT tear down the running
-    // nodes — a bad update leaves a working piece, not a dead one.
+  it("failed root setup leaves the running pattern in place", async () => {
+    // Default-root updates stage setup in the update transaction. An argument
+    // validation failure leaves the existing identity and running graph intact.
     const SOURCE_INCOMPATIBLE = [
       "import { pattern } from 'commonfabric';",
       "export default pattern<{ mustHave: string }>(({ mustHave }) => ({",
@@ -1097,19 +1440,14 @@ describe("checkAndUpdateDefaultPattern", () => {
     stub.setSource(SOURCE_INCOMPATIBLE);
     const restore = shadowLoadProbe(staleRef.identity, "undefined");
     try {
-      // The update itself proceeds (identity swaps at the meta layer)…
-      expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
+      expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
     } finally {
       restore();
     }
     await runtime.idle();
-    // …but the swap-setup for the incompatible program fails closed: the
-    // piece is not left dead (starting it does not throw), and the failure
-    // was logged rather than swallowed.
     const after = (await manager.getDefaultPattern(true))!;
     await runtime.idle();
-    // Functional pin, not just existence: the OLD pattern's nodes are still
-    // the ones running — its result reads back — after the refused swap.
+    expect(getPatternIdentityRef(after)).toEqual(staleRef);
     expect(after.key("marker").get()).toBe("v1");
   });
 
@@ -1225,11 +1563,25 @@ describe("checkAndUpdateDefaultPattern", () => {
       },
     });
     const root = (await manager.getDefaultPattern(false))!;
-    const staleRef = getPatternIdentityRef(root)!;
     await manager.stopPiece(root);
 
     stub.setSource(SOURCE_V3_HANDLER);
-    const restoreProbe = shadowLoadProbe(staleRef.identity, "undefined");
+    const currentPattern = await runtime.patternManager.compilePattern(
+      {
+        main: HOME_PATTERN_URL,
+        files: [{ name: HOME_PATTERN_URL, contents: SOURCE_V3_HANDLER }],
+      },
+      { space: manager.getSpace() },
+    );
+    const currentRef = runtime.patternManager.getArtifactEntryRef(
+      currentPattern,
+    )!;
+    const metadataUpdate = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", currentRef);
+    });
+    expect(metadataUpdate.error).toBeUndefined();
+    runtime.experimental.systemPatternAutoUpdate = false;
+
     const rt = runtime as unknown as {
       runSynced: (...args: unknown[]) => Promise<unknown>;
     };
@@ -1243,7 +1595,6 @@ describe("checkAndUpdateDefaultPattern", () => {
       thrown = error;
     } finally {
       rt.runSynced = originalRunSynced;
-      restoreProbe();
     }
     // The original start failure surfaces, not the repair's own error.
     expect(String(thrown)).toContain("Handler used as lift");
@@ -1292,6 +1643,7 @@ describe("checkAndUpdateDefaultPattern", () => {
       });
     });
     expect(error).toBeUndefined();
+    runtime.experimental.systemPatternAutoUpdate = false;
 
     // Guard: the repair's loadPatternByIdentity resolves undefined.
     let restore = shadowLoadProbe(targetId, "undefined");
@@ -1319,6 +1671,7 @@ describe("checkAndUpdateDefaultPattern", () => {
 
     // With the probes gone the same doc still heals — the guards left it
     // untouched.
+    runtime.experimental.systemPatternAutoUpdate = true;
     await controller.ensureDefaultPattern();
     await runtime.idle();
     const after = (await manager.getDefaultPattern(false))!;

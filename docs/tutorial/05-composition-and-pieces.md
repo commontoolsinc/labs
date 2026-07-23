@@ -54,7 +54,7 @@ another piece) does roughly this (see `packages/piece/src/manager.ts`):
    **result cell** to hold what the pattern returns; metadata links the
    piece to its pattern source.
 3. The piece is added to the space's piece list (the space's default
-   pattern maintains `allPieces` and exposes an `addPiece` stream — note,
+   pattern maintains `pieceRegistry` and exposes an `addPiece` stream — note,
    even space management is "just a pattern").
 4. From then on, any runtime that opens the space can load the piece: the
    pattern graph is re-instantiated over the argument cell, and the result
