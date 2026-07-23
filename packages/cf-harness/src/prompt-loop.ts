@@ -1826,6 +1826,7 @@ export class CfHarnessPromptLoop {
         "a model must be configured before running the prompt loop",
       );
     }
+    this.engine.bindRunModel(model);
     const transcript: HarnessTranscriptMessage[] = [...options.transcript];
     const maxModelTurns = options.maxModelTurns ?? this.#maxModelTurns;
     const toolActivity: HarnessToolActivity[] = [];

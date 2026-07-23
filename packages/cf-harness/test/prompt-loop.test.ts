@@ -243,6 +243,100 @@ Deno.test("CfHarnessPromptLoop requires an exact Codex credential owner binding"
   });
 });
 
+Deno.test("CfHarnessPromptLoop preserves a resumed Codex model binding at runTranscript", async () => {
+  const resumedState: HarnessRunState = {
+    runId: "run-resumed-codex-library",
+    status: "failed",
+    createdAt: "2026-07-23T20:00:00.000Z",
+    updatedAt: "2026-07-23T20:00:01.000Z",
+    cfcEnforcementMode: "disabled",
+    currentDir: "/workspace",
+    model: "gpt-recorded",
+    modelProvider: "openai-codex",
+    credentialOwnerKey: "local",
+    policyEvents: [],
+    toolOutputs: [],
+    failureRecords: [],
+  };
+  let modelCalls = 0;
+  const loop = new CfHarnessPromptLoop({
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runState: resumedState,
+      credentialOwnerKey: "local",
+    }),
+    modelClient: {
+      providerId: "openai-codex",
+      credentialOwner: {
+        type: "cf-harness.credential-owner-ref",
+        version: 1,
+        ownerKey: "local",
+      },
+      complete: () => {
+        modelCalls += 1;
+        return Promise.resolve({
+          assistant: { role: "assistant", content: "unused" },
+        });
+      },
+    },
+  });
+
+  await assertRejects(
+    () =>
+      loop.runTranscript({
+        transcript: [{ role: "user", content: "Continue." }],
+        model: "gpt-different",
+      }),
+    Error,
+    "resumed openai-codex run model gpt-recorded does not match requested model gpt-different",
+  );
+  assertEquals(modelCalls, 0);
+});
+
+Deno.test("CfHarnessPromptLoop persists a fresh Codex model selection before the first turn", async () => {
+  let selectedModel: string | undefined;
+  const loop = new CfHarnessPromptLoop({
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-fresh-codex-library",
+      modelProvider: "openai-codex",
+      model: "gpt-configured-default",
+      credentialOwnerKey: "local",
+      cfcEnforcementMode: "disabled",
+    }),
+    modelClient: {
+      providerId: "openai-codex",
+      credentialOwner: {
+        type: "cf-harness.credential-owner-ref",
+        version: 1,
+        ownerKey: "local",
+      },
+      complete: (request) => {
+        selectedModel = request.model;
+        return Promise.resolve({
+          assistant: { role: "assistant", content: "done" },
+        });
+      },
+    },
+  });
+
+  const result = await loop.runTranscript({
+    transcript: [{ role: "user", content: "Begin." }],
+    model: "gpt-selected",
+  });
+  assertEquals(selectedModel, "gpt-selected");
+  assertEquals(result.runState.model, "gpt-selected");
+  await assertRejects(
+    () =>
+      loop.runTranscript({
+        transcript: result.transcript,
+        model: "gpt-second-selection",
+      }),
+    Error,
+    "openai-codex run model gpt-selected does not match requested model gpt-second-selection",
+  );
+});
+
 Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through the shared CFC loop", async () => {
   const sandbox = new FakeSandboxRuntime();
   let turns = 0;

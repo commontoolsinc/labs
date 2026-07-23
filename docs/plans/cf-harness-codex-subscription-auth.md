@@ -4,7 +4,7 @@ Status: Implemented in `cf-harness` and covered by automated tests. Remaining
 shipping gates are live-account smoke tests, security review, root validation
 under the repository-supported Deno version, and Loom host/UI policy wiring.
 
-Validation snapshot (2026-07-23): all 497 `cf-harness` tests pass; direct type
+Validation snapshot (2026-07-23): all 500 `cf-harness` tests pass; direct type
 checking, package lint/format, docs checks, unused-dependency checks, and diff
 whitespace checks pass. The aggregate root `deno task check` stops at its
 version guard because this workspace has Deno 2.9.3 while the repository
@@ -424,6 +424,9 @@ Expected files:
 - [x] Version continuation state, bind it to the source model, and reject
   cross-model Codex resume before resolving credentials or contacting the
   provider.
+- [x] Enforce the recorded Codex model at the exported prompt-loop boundary,
+  including transcript-only library resume, and persist a fresh run's first
+  selected model before its first turn.
 
 ### Stage 3 completion gate
 
@@ -511,6 +514,9 @@ Expected files:
 - [x] Persist a running child reference in the parent before the child starts,
   then replace it with the terminal summary; reject direct top-level resume of
   child artifacts with guidance to resume the root.
+- [x] Apply the child-resume guard at the exported engine boundary; whole-tree
+  restorers must supply typed trusted root/parent context matching the child's
+  persisted lineage.
 - [x] Profile model overrides must name a model available from the same provider
   or fail before starting the child.
 - [x] Do not allow one child profile to switch from subscription auth to a

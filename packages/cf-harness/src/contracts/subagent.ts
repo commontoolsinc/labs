@@ -77,6 +77,14 @@ export interface HarnessSubagentLineage {
   depth: number;
 }
 
+export interface HarnessSubagentResumeContext {
+  type: "cf-harness.subagent-resume-context";
+  version: 1;
+  rootRunId: string;
+  parentRunId: string;
+  parentToolCallId: string;
+}
+
 export interface HarnessSubagentReturnPolicy {
   type: "cf-harness.subagent-return-policy";
   channel: HarnessSubagentReturnChannel;

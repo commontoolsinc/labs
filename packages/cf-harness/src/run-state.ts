@@ -265,6 +265,16 @@ export const setHarnessRunStatus = (
   };
 };
 
+export const setHarnessRunModel = (
+  state: HarnessRunState,
+  model: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  model,
+  updatedAt: now,
+});
+
 export const appendHarnessToolOutput = (
   state: HarnessRunState,
   output: ToolResultRef,

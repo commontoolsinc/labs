@@ -24,6 +24,7 @@ import {
   setHarnessPromptSlotBinding,
   setHarnessRunCurrentDir,
   setHarnessRunManifestPath,
+  setHarnessRunModel,
   setHarnessRunReportPath,
   setHarnessRunStatus,
   setHarnessSkillActivations,
@@ -70,6 +71,7 @@ import type {
 } from "./contracts/skill.ts";
 import type {
   HarnessSubagentLineage,
+  HarnessSubagentResumeContext,
   HarnessSubagentRunRef,
 } from "./contracts/subagent.ts";
 import {
@@ -172,6 +174,7 @@ export interface CreateHarnessEngineOptions
   runId?: string;
   runState?: HarnessRunState;
   lineage?: HarnessSubagentLineage;
+  subagentResumeContext?: HarnessSubagentResumeContext;
   workspaceHostPath?: string;
   sandboxImage?: string;
   sandboxDockerRuntime?: string;
@@ -313,10 +316,38 @@ export class CfHarnessEngine {
   readonly #now: () => string;
   readonly #hostMounts: readonly HostSandboxMount[];
   readonly #ownedRunscConfig?: DockerRunscSandboxConfig;
+  readonly #resumedRun: boolean;
+  #runModelBound: boolean;
   #cfcTransportChecked = false;
 
   constructor(options: CreateHarnessEngineOptions = {}) {
     this.#now = options.now ?? (() => new Date().toISOString());
+    this.#resumedRun = options.runState !== undefined;
+    this.#runModelBound = this.#resumedRun;
+    const resumedLineage = options.runState?.lineage;
+    if (resumedLineage !== undefined) {
+      const resumeContext = options.subagentResumeContext;
+      if (resumeContext === undefined) {
+        throw new Error(
+          `resumed subagent run ${
+            options.runState!.runId
+          } requires trusted parent resume context`,
+        );
+      }
+      if (
+        resumeContext.type !== "cf-harness.subagent-resume-context" ||
+        resumeContext.version !== 1 ||
+        resumeContext.rootRunId !== resumedLineage.rootRunId ||
+        resumeContext.parentRunId !== resumedLineage.parentRunId ||
+        resumeContext.parentToolCallId !== resumedLineage.parentToolCallId
+      ) {
+        throw new Error(
+          `resumed subagent run ${
+            options.runState!.runId
+          } does not match trusted parent resume context`,
+        );
+      }
+    }
     const recordedProvider = options.runState?.modelProvider ??
       "openai-compatible-gateway";
     if (
@@ -453,6 +484,26 @@ export class CfHarnessEngine {
 
   getRunState(): HarnessRunState {
     return structuredClone(this.#runState);
+  }
+
+  bindRunModel(model: string): HarnessRunState {
+    const recordedModel = this.#runState.model;
+    if (
+      this.#runState.modelProvider === "openai-codex" &&
+      this.#runModelBound &&
+      recordedModel !== undefined && recordedModel !== model
+    ) {
+      throw new Error(
+        `${
+          this.#resumedRun ? "resumed " : ""
+        }openai-codex run model ${recordedModel} does not match requested model ${model}`,
+      );
+    }
+    if (recordedModel !== model) {
+      this.#runState = setHarnessRunModel(this.#runState, model, this.#now());
+    }
+    this.#runModelBound = true;
+    return this.getRunState();
   }
 
   appendFailureRecord(failure: HarnessFailureRecord): HarnessRunState {

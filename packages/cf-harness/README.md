@@ -215,6 +215,10 @@ keeps the recorded provider, model, exact credential owner, and encrypted
 provider continuation; requesting another model is rejected before credentials
 or provider traffic. Child runs are recorded with their root/parent lineage and
 cannot be resumed directly as top-level runs—resume the root run instead.
+Library callers receive the same guards: `runTranscript()` binds the first
+selected Codex model into run state and cannot override a resumed binding, while
+a whole-tree restorer must supply a matching typed `subagentResumeContext` when
+it reconstructs a child beneath its trusted root/parent session.
 
 The gateway and subscription routes have different billing, workspace policy,
 retention, and model availability. The model catalog is read live from the
