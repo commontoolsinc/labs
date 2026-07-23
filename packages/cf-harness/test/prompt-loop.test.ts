@@ -33,6 +33,10 @@ import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import type { OpenAIChatCompletionRequest } from "../src/gateway/openai-client.ts";
 import type { HarnessRunState } from "../src/run-state.ts";
 import type { HarnessSkillActivations } from "../src/contracts/skill.ts";
+import type { HarnessModelClient } from "../src/model/client.ts";
+import { InMemoryHarnessCredentialStore } from "../src/auth/credential-store.ts";
+import { OpenAICodexCredentialResolver } from "../src/auth/openai-codex.ts";
+import { OpenAICodexResponsesClient } from "../src/model/openai-codex-responses.ts";
 
 const directPromptSlotBinding: PromptSlotBinding = {
   type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
@@ -137,6 +141,161 @@ class FakeProcessRunner implements ProcessRunner {
     );
   }
 }
+
+Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through the shared CFC loop", async () => {
+  const sandbox = new FakeSandboxRuntime();
+  let turns = 0;
+  const modelClient: HarnessModelClient = {
+    providerId: "test-provider",
+    complete(request) {
+      turns += 1;
+      assertEquals(request.model, "test-model");
+      return Promise.resolve(
+        turns === 1
+          ? {
+            assistant: {
+              role: "assistant",
+              content: "",
+              toolCalls: [{
+                id: "call-read",
+                type: "function",
+                function: {
+                  name: "read_file",
+                  arguments: JSON.stringify({ path: "missing.txt" }),
+                },
+              }],
+            },
+          }
+          : {
+            assistant: { role: "assistant", content: "done" },
+          },
+      );
+    },
+  };
+  const loop = new CfHarnessPromptLoop({
+    modelClient,
+    engine: new CfHarnessEngine({
+      sandboxRuntime: sandbox,
+      runId: "run-model-client",
+      model: "test-model",
+      cfcEnforcementMode: "enforce-strict",
+    }),
+  });
+
+  const result = await loop.runPrompt({ prompt: "Read a file." });
+
+  assertEquals(result.finalAssistantText, "done");
+  assertEquals(turns, 2);
+  assertEquals(
+    sandbox.shellRequests.filter((request) =>
+      !request.command.includes(CAPABILITY_PROBE_SENTINEL)
+    ).length,
+    0,
+  );
+  assertEquals(result.runState.policyEvents[0]?.severity, "denied");
+  assertEquals(result.transcript[2]?.role, "tool");
+});
+
+Deno.test("Codex parent and child loops share one serialized credential refresh", async () => {
+  const jwt = (accountId: string): string => {
+    const encode = (value: unknown) =>
+      btoa(JSON.stringify(value)).replaceAll("+", "-").replaceAll("/", "_")
+        .replace(/=+$/, "");
+    return `${encode({ alg: "none" })}.${
+      encode({
+        "https://api.openai.com/auth": { chatgpt_account_id: accountId },
+      })
+    }.`;
+  };
+  const responseEvent = (output: unknown[]): Response =>
+    new Response(
+      `data: ${
+        JSON.stringify({
+          type: "response.completed",
+          response: { status: "completed", output },
+        })
+      }\n\n`,
+      { status: 200 },
+    );
+  const store = new InMemoryHarnessCredentialStore();
+  await store.set("loom:user-1", "openai-codex", {
+    type: "oauth",
+    providerId: "openai-codex",
+    accessToken: "expired-access-secret",
+    refreshToken: "initial-refresh-secret",
+    expiresAt: 0,
+    accountId: "account-1",
+  });
+  let refreshes = 0;
+  let modelTurns = 0;
+  const resolver = new OpenAICodexCredentialResolver({
+    store,
+    ownerKey: "loom:user-1",
+    now: () => 100_000,
+    fetchFn: () => {
+      refreshes += 1;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            access_token: jwt("account-1"),
+            refresh_token: "rotated-refresh-secret",
+            expires_in: 3600,
+          }),
+          { status: 200 },
+        ),
+      );
+    },
+  });
+  const modelClient = new OpenAICodexResponsesClient({
+    credentialResolver: resolver,
+    fetchFn: (_input, init) => {
+      assertEquals(
+        new Headers(init?.headers).get("authorization")?.startsWith("Bearer "),
+        true,
+      );
+      modelTurns += 1;
+      if (modelTurns === 1) {
+        return Promise.resolve(responseEvent([{
+          type: "function_call",
+          call_id: "call-delegate",
+          name: "delegate_task",
+          arguments: JSON.stringify({ goal: "Return a short summary." }),
+        }]));
+      }
+      return Promise.resolve(responseEvent([{
+        type: "message",
+        content: [{
+          type: "output_text",
+          text: modelTurns === 2 ? "Child summary." : "Parent done.",
+        }],
+      }]));
+    },
+  });
+  const loop = new CfHarnessPromptLoop({
+    modelClient,
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-codex-delegate",
+      model: "gpt-5.4",
+      modelProvider: "openai-codex",
+      credentialOwnerKey: "loom:user-1",
+      cfcEnforcementMode: "disabled",
+    }),
+  });
+
+  const result = await loop.runPrompt({ prompt: "Delegate this." });
+
+  assertEquals(result.finalAssistantText, "Parent done.");
+  assertEquals(refreshes, 1);
+  assertEquals(modelTurns, 3);
+  assertEquals(
+    result.runState.subagentRuns?.[0]?.manifest.modelProvider,
+    "openai-codex",
+  );
+  const serialized = JSON.stringify(result.runState.subagentRuns);
+  assertEquals(serialized.includes("initial-refresh-secret"), false);
+  assertEquals(serialized.includes("rotated-refresh-secret"), false);
+});
 
 class FailingArtifactStore implements HarnessArtifactStore {
   readonly artifactRoot = "/tmp/cf-harness-artifacts";
@@ -1795,6 +1954,7 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override and
         profile: string;
         model: string;
         modelSource: string;
+        modelProvider?: string;
         allowedToolIds: string[];
         hostToolIds: string[];
         nativeModelToolIds: string[];
@@ -1829,6 +1989,10 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override and
   assertEquals(output.subagent.manifest.profile, "web_search");
   assertEquals(output.subagent.manifest.model, "gemini-3.5-flash");
   assertEquals(output.subagent.manifest.modelSource, "profile");
+  assertEquals(
+    output.subagent.manifest.modelProvider,
+    "openai-compatible-gateway",
+  );
   assertEquals(output.subagent.manifest.allowedToolIds, []);
   assertEquals(output.subagent.manifest.hostToolIds, []);
   assertEquals(output.subagent.manifest.nativeModelToolIds, ["google_search"]);

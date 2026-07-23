@@ -1,0 +1,575 @@
+import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import {
+  OPENAI_CODEX_MODELS_URL,
+  OpenAICodexResponsesClient,
+} from "../src/model/openai-codex-responses.ts";
+import type { OpenAICodexOAuthCredential } from "../src/auth/types.ts";
+import { createHarnessImageAttachment } from "../src/image-attachments.ts";
+
+const credential: OpenAICodexOAuthCredential = {
+  type: "oauth",
+  providerId: "openai-codex",
+  accessToken: "access-secret",
+  refreshToken: "refresh-secret",
+  expiresAt: Date.now() + 60_000,
+  accountId: "acct-123",
+};
+
+const sse = (...events: unknown[]): Response =>
+  new Response(
+    events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
+    { status: 200, headers: { "content-type": "text/event-stream" } },
+  );
+
+Deno.test("Codex Responses client sends the pinned owner-authenticated request", async () => {
+  let request: { input: URL | RequestInfo; init?: RequestInit } | undefined;
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: (input, init) => {
+      request = { input, init };
+      return Promise.resolve(sse({
+        type: "response.completed",
+        response: {
+          id: "resp_1",
+          status: "completed",
+          output: [{
+            type: "message",
+            id: "msg_1",
+            role: "assistant",
+            content: [{ type: "output_text", text: "hello" }],
+          }],
+        },
+      }));
+    },
+  });
+
+  const result = await client.complete({
+    model: "gpt-5.4",
+    transcript: [
+      { role: "system", content: "system" },
+      { role: "user", content: "hi" },
+    ],
+    tools: [],
+    nativeModelToolIds: [],
+    runId: "run-123",
+  });
+
+  assertEquals(result.assistant.content, "hello");
+  assertEquals(
+    String(request?.input),
+    "https://chatgpt.com/backend-api/codex/responses",
+  );
+  const headers = new Headers(request?.init?.headers);
+  assertEquals(headers.get("authorization"), "Bearer access-secret");
+  assertEquals(headers.get("chatgpt-account-id"), "acct-123");
+  assertEquals(headers.get("originator"), "cf-harness");
+  assertEquals(headers.get("session-id"), "run-123");
+  const body = JSON.parse(String(request?.init?.body));
+  assertEquals(body.store, false);
+  assertEquals(body.stream, true);
+  assertEquals(body.instructions, "system");
+  assertEquals(body.prompt_cache_key, "run-123");
+});
+
+Deno.test("Codex Responses client normalizes tool calls and preserves encrypted continuation", async () => {
+  const requestBodies: Array<Record<string, unknown>> = [];
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: (_input, init) => {
+      requestBodies.push(JSON.parse(String(init?.body)));
+      return Promise.resolve(sse({
+        type: "response.completed",
+        response: {
+          id: "resp_tools",
+          status: "completed",
+          output: [{
+            type: "reasoning",
+            id: "rs_1",
+            encrypted_content: "encrypted-state",
+            summary: [],
+          }, {
+            type: "function_call",
+            id: "fc_1",
+            call_id: "call_1",
+            name: "read_file",
+            arguments: '{"path":"README.md"}',
+          }],
+        },
+      }));
+    },
+  });
+
+  const result = await client.complete({
+    model: "gpt-5.4",
+    transcript: [{ role: "user", content: "read" }],
+    tools: [],
+    nativeModelToolIds: [],
+    runId: "run-tools",
+  });
+
+  assertEquals(result.assistant.toolCalls?.[0]?.id, "call_1");
+  assertEquals(result.assistant.toolCalls?.[0]?.function.name, "read_file");
+  assertEquals(
+    result.assistant.providerContinuation?.providerId,
+    "openai-codex",
+  );
+  assertEquals(
+    (result.assistant.providerContinuation?.state as { output: unknown[] })
+      .output[0],
+    {
+      type: "reasoning",
+      id: "rs_1",
+      encrypted_content: "encrypted-state",
+      summary: [],
+    },
+  );
+  await client.complete({
+    model: "gpt-5.4",
+    transcript: [
+      { role: "user", content: "read" },
+      result.assistant,
+      {
+        role: "tool",
+        toolCallId: "call_1",
+        toolName: "read_file",
+        content: "file contents",
+      },
+    ],
+    tools: [],
+    nativeModelToolIds: [],
+    runId: "run-tools",
+  });
+  const replayInput = requestBodies[1].input as Array<Record<string, unknown>>;
+  assertEquals(
+    replayInput.find((item) => item.type === "function_call")?.id,
+    "fc_1",
+  );
+});
+
+Deno.test("Codex Responses client rejects streams without a terminal event", async () => {
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: () =>
+      Promise.resolve(
+        sse({ type: "response.output_text.delta", delta: "partial" }),
+      ),
+  });
+
+  await assertRejects(
+    () =>
+      client.complete({
+        model: "gpt-5.4",
+        transcript: [{ role: "user", content: "hi" }],
+        tools: [],
+        nativeModelToolIds: [],
+        runId: "run-eof",
+      }),
+    Error,
+    "ended without a terminal response event",
+  );
+});
+
+Deno.test("Codex Responses client rejects malformed SSE JSON", async () => {
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: () =>
+      Promise.resolve(
+        new Response("data: {not-json}\n\n", { status: 200 }),
+      ),
+  });
+
+  await assertRejects(
+    () =>
+      client.complete({
+        model: "gpt-5.4",
+        transcript: [{ role: "user", content: "hi" }],
+        tools: [],
+        nativeModelToolIds: [],
+        runId: "run-malformed",
+      }),
+    Error,
+    "malformed JSON",
+  );
+});
+
+Deno.test("Codex Responses client keeps multiple tool calls and failure outputs ordered", async () => {
+  const requestBodies: Array<Record<string, unknown>> = [];
+  let requestCount = 0;
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: (_input, init) => {
+      requestBodies.push(JSON.parse(String(init?.body)));
+      requestCount += 1;
+      return Promise.resolve(sse({
+        type: "response.completed",
+        response: {
+          status: "completed",
+          output: requestCount === 1
+            ? [{
+              type: "function_call",
+              id: "fc-1",
+              call_id: "call-1",
+              name: "read_file",
+              arguments: '{"path":"one"}',
+            }, {
+              type: "function_call",
+              id: "fc-2",
+              call_id: "call-2",
+              name: "read_file",
+              arguments: '{"path":"two"}',
+            }]
+            : [{
+              type: "message",
+              content: [{ type: "output_text", text: "handled" }],
+            }],
+        },
+      }));
+    },
+  });
+
+  const first = await client.complete({
+    model: "gpt-5.4",
+    transcript: [{ role: "user", content: "read both" }],
+    tools: [],
+    nativeModelToolIds: [],
+    runId: "run-multiple",
+  });
+  assertEquals(first.assistant.toolCalls?.map((call) => call.id), [
+    "call-1",
+    "call-2",
+  ]);
+
+  await client.complete({
+    model: "gpt-5.4",
+    transcript: [{ role: "user", content: "read both" }, first.assistant, {
+      role: "tool",
+      toolCallId: "call-1",
+      toolName: "read_file",
+      content: '{"error":"not found"}',
+    }, {
+      role: "tool",
+      toolCallId: "call-2",
+      toolName: "read_file",
+      content: "second contents",
+    }],
+    tools: [],
+    nativeModelToolIds: [],
+    runId: "run-multiple",
+  });
+
+  const replay = requestBodies[1].input as Array<Record<string, unknown>>;
+  assertEquals(
+    replay.filter((item) => item.type === "function_call_output").map((
+      item,
+    ) => [item.call_id, item.output]),
+    [
+      ["call-1", '{"error":"not found"}'],
+      ["call-2", "second contents"],
+    ],
+  );
+});
+
+Deno.test("Codex Responses client maps bounded image attachments", async () => {
+  const directory = await Deno.makeTempDir();
+  try {
+    const imagePath = `${directory}/tiny.png`;
+    await Deno.writeFile(
+      imagePath,
+      new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+    const attachment = await createHarnessImageAttachment({
+      workspaceHostPath: directory,
+      cwd: directory,
+      path: imagePath,
+    });
+    let requestBody: Record<string, unknown> | undefined;
+    const client = new OpenAICodexResponsesClient({
+      credentialResolver: { resolve: () => Promise.resolve(credential) },
+      fetchFn: (_input, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return Promise.resolve(sse({
+          type: "response.completed",
+          response: { status: "completed", output: [] },
+        }));
+      },
+    });
+
+    await client.complete({
+      model: "gpt-5.4",
+      transcript: [{
+        role: "user",
+        content: "inspect",
+        imageAttachments: [attachment],
+      }],
+      tools: [],
+      nativeModelToolIds: [],
+      runId: "run-image",
+    });
+
+    const input = requestBody?.input as Array<Record<string, unknown>>;
+    const content = input[0].content as Array<Record<string, unknown>>;
+    assertStringIncludes(
+      String(content[1].image_url),
+      "data:image/png;base64,",
+    );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("Codex Responses client rejects incomplete tool calls", async () => {
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: () =>
+      Promise.resolve(sse({
+        type: "response.completed",
+        response: {
+          status: "completed",
+          output: [{
+            type: "function_call",
+            call_id: "call-1",
+            name: "read_file",
+          }],
+        },
+      })),
+  });
+
+  await assertRejects(
+    () =>
+      client.complete({
+        model: "gpt-5.4",
+        transcript: [{ role: "user", content: "hi" }],
+        tools: [],
+        nativeModelToolIds: [],
+        runId: "run-incomplete-call",
+      }),
+    Error,
+    "incomplete tool call",
+  );
+});
+
+Deno.test("Codex Responses client parses CRLF SSE split across byte boundaries", async () => {
+  const payload = JSON.stringify({
+    type: "response.completed",
+    response: {
+      id: "resp_split",
+      status: "completed",
+      usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
+      output: [{
+        type: "message",
+        content: [{ type: "output_text", text: "split works" }],
+      }],
+    },
+  });
+  const chunks = [`data: ${payload}\r`, "\n\r", "\n"];
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      const next = chunks.shift();
+      if (next === undefined) controller.close();
+      else controller.enqueue(new TextEncoder().encode(next));
+    },
+  });
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: () => Promise.resolve(new Response(body, { status: 200 })),
+  });
+
+  const result = await client.complete({
+    model: "gpt-5.4",
+    transcript: [{ role: "user", content: "hi" }],
+    tools: [],
+    nativeModelToolIds: [],
+    runId: "run-split",
+  });
+
+  assertEquals(result.assistant.content, "split works");
+  assertEquals(result.usage, {
+    inputTokens: 3,
+    outputTokens: 2,
+    totalTokens: 5,
+  });
+});
+
+Deno.test("Codex Responses client rejects conflicting duplicate tool-call ids", async () => {
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: () =>
+      Promise.resolve(sse({
+        type: "response.completed",
+        response: {
+          status: "completed",
+          output: [{
+            type: "function_call",
+            call_id: "call-1",
+            name: "read_file",
+            arguments: "{}",
+          }, {
+            type: "function_call",
+            call_id: "call-1",
+            name: "write_file",
+            arguments: "{}",
+          }],
+        },
+      })),
+  });
+
+  await assertRejects(
+    () =>
+      client.complete({
+        model: "gpt-5.4",
+        transcript: [{ role: "user", content: "hi" }],
+        tools: [],
+        nativeModelToolIds: [],
+        runId: "run-duplicate",
+      }),
+    Error,
+    "conflicting duplicate tool-call ids",
+  );
+});
+
+Deno.test("Codex model discovery is live, owner-authenticated, and ordered", async () => {
+  let requestedUrl = "";
+  let requestedHeaders = new Headers();
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: (input, init) => {
+      requestedUrl = String(input);
+      requestedHeaders = new Headers(init?.headers);
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            models: [{
+              slug: "model-b",
+              display_name: "Model B",
+              description: "first",
+              input_modalities: ["text", "image"],
+              supported_reasoning_levels: [{ effort: "high" }],
+              supports_parallel_tool_calls: true,
+            }, {
+              slug: "model-a",
+              display_name: "Model A",
+              input_modalities: ["text"],
+              supported_reasoning_levels: [],
+              supports_parallel_tool_calls: false,
+            }],
+          }),
+          { status: 200 },
+        ),
+      );
+    },
+  });
+
+  const models = await client.listModels();
+
+  assertEquals(
+    new URL(requestedUrl).origin + new URL(requestedUrl).pathname,
+    OPENAI_CODEX_MODELS_URL,
+  );
+  assertEquals(
+    new URL(requestedUrl).searchParams.get("client_version"),
+    "0.0.0",
+  );
+  assertEquals(requestedHeaders.get("authorization"), "Bearer access-secret");
+  assertEquals(requestedHeaders.get("chatgpt-account-id"), "acct-123");
+  assertEquals(models.map((model) => model.id), ["model-b", "model-a"]);
+  assertEquals(models[0].inputModalities, ["text", "image"]);
+  assertEquals(models[0].supportedReasoningEfforts, ["high"]);
+});
+
+Deno.test("Codex Responses quota errors are concise and do not retain response bodies", async () => {
+  const attempts: unknown[] = [];
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error: { message: "access-secret account acct-123" },
+          }),
+          { status: 429 },
+        ),
+      ),
+  });
+
+  const error = await assertRejects(() =>
+    client.complete({
+      model: "gpt-5.4",
+      transcript: [{ role: "user", content: "hi" }],
+      tools: [],
+      nativeModelToolIds: [],
+      runId: "run-quota",
+      onAttempt: (attempt) => {
+        attempts.push(attempt);
+      },
+    })
+  );
+
+  assertEquals((error as Error).message, "OpenAI Codex usage limit reached");
+  const serialized = JSON.stringify(attempts);
+  assertEquals(serialized.includes("access-secret"), false);
+  assertEquals(serialized.includes("acct-123"), false);
+  assertStringIncludes(serialized, '"httpStatus":429');
+});
+
+Deno.test("Codex transport errors redact credential and account values", async () => {
+  const attempts: unknown[] = [];
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: () =>
+      Promise.reject(
+        new Error(
+          "failed with access-secret refresh-secret for acct-123",
+        ),
+      ),
+  });
+
+  const error = await assertRejects(() =>
+    client.complete({
+      model: "gpt-5.4",
+      transcript: [{ role: "user", content: "hi" }],
+      tools: [],
+      nativeModelToolIds: [],
+      runId: "run-redaction",
+      onAttempt: (attempt) => {
+        attempts.push(attempt);
+      },
+    })
+  );
+
+  const serialized = `${(error as Error).message}${JSON.stringify(attempts)}`;
+  assertEquals(serialized.includes("access-secret"), false);
+  assertEquals(serialized.includes("refresh-secret"), false);
+  assertEquals(serialized.includes("acct-123"), false);
+  assertStringIncludes(serialized, "[redacted]");
+});
+
+Deno.test("Codex Responses abort cancels an active stream without retry", async () => {
+  let canceled = false;
+  let requests = 0;
+  const body = new ReadableStream<Uint8Array>({
+    cancel() {
+      canceled = true;
+    },
+  });
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: () => {
+      requests += 1;
+      return Promise.resolve(new Response(body, { status: 200 }));
+    },
+  });
+  const controller = new AbortController();
+  const completion = client.complete({
+    model: "gpt-5.4",
+    transcript: [{ role: "user", content: "hi" }],
+    tools: [],
+    nativeModelToolIds: [],
+    runId: "run-abort",
+    signal: controller.signal,
+  });
+  controller.abort(new DOMException("cancel test", "AbortError"));
+
+  await assertRejects(() => completion, DOMException, "cancel test");
+  assertEquals(canceled, true);
+  assertEquals(requests, 1);
+});

@@ -217,6 +217,8 @@ Deno.test({
         endedAt: "2026-04-15T21:00:05.000Z",
         terminalReason: "tool_completed",
         cfcEnforcementMode: "observe",
+        modelProvider: "openai-compatible-gateway",
+        modelAuthSource: "api-key",
         cfcInvocationContexts: [{
           type: "cf-harness.cfc-invocation-context",
           version: 1,
@@ -243,6 +245,10 @@ Deno.test({
         capabilitySnapshot: {
           type: "cf-harness.capability-snapshot",
           at: "2026-04-15T21:00:01.000Z",
+          model: {
+            providerId: "openai-compatible-gateway",
+            authSource: "api-key",
+          },
           cfc: {
             enforcementMode: "observe",
             absenceBehavior: "observe-only",
@@ -589,6 +595,11 @@ Deno.test({
       assertEquals(persistedReport.runId, "run-loop-persisted");
       assertEquals(persistedReport.status, "completed");
       assertEquals(persistedReport.model, "gpt-5.4");
+      assertEquals(
+        persistedReport.modelProvider,
+        "openai-compatible-gateway",
+      );
+      assertEquals(persistedReport.modelAuthSource, "api-key");
       assertEquals(persistedReport.modelTurns, 2);
       assertEquals(persistedReport.finalAssistantText, "Persisted summary.");
       assertEquals(persistedReport.cfcPolicySnapshot, persistedPolicySnapshot);
@@ -629,6 +640,11 @@ Deno.test({
         resultRef: result.runState.toolOutputs[0],
       });
       assertEquals(persistedReport.gatewayAttempts?.length, 2);
+      assertEquals(persistedReport.modelAttempts?.length, 2);
+      assertEquals(
+        persistedReport.modelAttempts?.map((attempt) => attempt.providerId),
+        ["openai-compatible-gateway", "openai-compatible-gateway"],
+      );
       assertEquals(
         persistedReport.gatewayAttempts?.map((attempt) => attempt.sequence),
         [1, 2],

@@ -170,6 +170,29 @@ Why:
 - to support current Common Tools gateway expectations
 - to make local operator debugging less ambiguous
 
+### Stage G2: Codex subscription auth and provider transport
+
+- provider-neutral `HarnessModelClient` seam keeps the existing bounded
+  prompt/tool loop and CFC mediation shared by every provider
+- separate `openai-codex` provider using the pinned OpenCode/pi-compatible
+  browser PKCE and device-code OAuth contract
+- dedicated owner-keyed local credential storage with atomic private writes and
+  serialized refresh-token rotation; no Codex CLI credential import
+- fixed-origin ChatGPT Codex Responses SSE transport with encrypted reasoning
+  continuation, tool-call-id preservation, and provider-neutral diagnostics
+- explicit CLI login/status/logout, provider selection, live model listing, and
+  provider-stable resume
+- Loom run-manifest owner reference plus trusted host injection for batch and
+  interactive use; personal subscriptions are never selected from ambient
+  process state
+
+Why:
+
+- to let local and Loom users explicitly fund harness runs from their supported
+  ChatGPT/Codex subscription without changing who owns the model/tool loop
+- to prevent a service-wide credential, local operator credential, or API-key
+  fallback from crossing user and workload boundaries
+
 ### Stage H: Minimal subagent delegation
 
 - built-in `delegate_task` tool descriptor

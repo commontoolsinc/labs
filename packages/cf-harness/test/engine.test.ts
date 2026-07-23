@@ -109,6 +109,8 @@ Deno.test("CfHarnessEngine builds a default docker-runsc sandbox when given a wo
     updatedAt: "2026-04-15T19:00:00.000Z",
     cfcEnforcementMode: "enforce-explicit",
     currentDir: "/workspace",
+    modelProvider: "openai-compatible-gateway",
+    modelAuthSource: "api-key",
     policyEvents: [],
     toolOutputs: [],
     failureRecords: [],

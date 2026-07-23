@@ -16,10 +16,12 @@ export const DEFAULT_GATEWAY_BASE_URL = "https://llm.stage.commontools.dev/";
 export const DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE =
   "enforce-explicit" as const satisfies CfcEnforcementMode;
 export type HarnessGatewayAuthMode = "bearer" | "none";
+export type HarnessModelProviderId =
+  | "openai-compatible-gateway"
+  | "openai-codex";
+export type HarnessModelAuthSource = "api-key" | "none" | "owner-bound-oauth";
 
-export interface HarnessConfig {
-  gatewayBaseUrl: string;
-  gatewayAuthMode: HarnessGatewayAuthMode;
+interface HarnessCommonConfig {
   cwd?: string;
   model?: string;
   vmTarget?: string;
@@ -36,7 +38,26 @@ export interface HarnessConfig {
   runManifestPath?: string;
 }
 
+export type HarnessConfig =
+  & HarnessCommonConfig
+  & (
+    | {
+      modelProvider: "openai-compatible-gateway";
+      gatewayBaseUrl: string;
+      gatewayAuthMode: HarnessGatewayAuthMode;
+      credentialOwnerKey?: never;
+    }
+    | {
+      modelProvider: "openai-codex";
+      credentialOwnerKey: string;
+      gatewayBaseUrl?: never;
+      gatewayAuthMode?: never;
+    }
+  );
+
 export interface ResolveHarnessConfigOptions {
+  modelProvider?: HarnessModelProviderId;
+  credentialOwnerKey?: string;
   gatewayBaseUrl?: string;
   gatewayAuthMode?: HarnessGatewayAuthMode;
   gatewayAuthModeOverride?: string | HarnessGatewayAuthMode;
@@ -146,37 +167,60 @@ export const resolveGatewayAuthMode = (
 
 export const resolveHarnessConfig = (
   options: ResolveHarnessConfigOptions = {},
-): HarnessConfig => ({
-  gatewayBaseUrl: normalizeGatewayBaseUrl(
-    options.gatewayBaseUrl ?? DEFAULT_GATEWAY_BASE_URL,
-  ),
-  gatewayAuthMode: resolveGatewayAuthMode(options),
-  ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-  ...(options.model !== undefined ? { model: options.model } : {}),
-  ...(options.vmTarget !== undefined ? { vmTarget: options.vmTarget } : {}),
-  ...(options.skillsRoot !== undefined
-    ? { skillsRoot: options.skillsRoot }
-    : {}),
-  ...(options.allowedSkillScripts !== undefined
-    ? { allowedSkillScripts: options.allowedSkillScripts }
-    : {}),
-  skillScriptExecutionTarget: options.skillScriptExecutionTarget ?? "sandbox",
-  ...(options.browserAccess !== undefined
-    ? { browserAccess: options.browserAccess }
-    : {}),
-  ...(options.artifactRoot !== undefined
-    ? { artifactRoot: options.artifactRoot }
-    : {}),
-  ...(options.trustSnapshot !== undefined
-    ? { trustSnapshot: options.trustSnapshot }
-    : {}),
-  ...(options.sandbox !== undefined ? { sandbox: options.sandbox } : {}),
-  ...(options.runManifest !== undefined
-    ? { runManifest: options.runManifest }
-    : {}),
-  ...(options.runManifestPath !== undefined
-    ? { runManifestPath: options.runManifestPath }
-    : {}),
-  cfcEnforcementMode: resolveCfcEnforcementMode(options),
-  cfcEnforcementModeSource: resolveCfcEnforcementModeSource(options),
-});
+): HarnessConfig => {
+  const modelProvider = options.modelProvider ?? "openai-compatible-gateway";
+  if (
+    modelProvider === "openai-codex" &&
+    (options.gatewayBaseUrl !== undefined ||
+      options.gatewayAuthMode !== undefined ||
+      options.gatewayAuthModeOverride !== undefined)
+  ) {
+    throw new Error(
+      "gateway URL/auth configuration cannot be combined with openai-codex",
+    );
+  }
+  const common: HarnessCommonConfig = {
+    ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+    ...(options.model !== undefined ? { model: options.model } : {}),
+    ...(options.vmTarget !== undefined ? { vmTarget: options.vmTarget } : {}),
+    ...(options.skillsRoot !== undefined
+      ? { skillsRoot: options.skillsRoot }
+      : {}),
+    ...(options.allowedSkillScripts !== undefined
+      ? { allowedSkillScripts: options.allowedSkillScripts }
+      : {}),
+    skillScriptExecutionTarget: options.skillScriptExecutionTarget ?? "sandbox",
+    ...(options.browserAccess !== undefined
+      ? { browserAccess: options.browserAccess }
+      : {}),
+    ...(options.artifactRoot !== undefined
+      ? { artifactRoot: options.artifactRoot }
+      : {}),
+    ...(options.trustSnapshot !== undefined
+      ? { trustSnapshot: options.trustSnapshot }
+      : {}),
+    ...(options.sandbox !== undefined ? { sandbox: options.sandbox } : {}),
+    ...(options.runManifest !== undefined
+      ? { runManifest: options.runManifest }
+      : {}),
+    ...(options.runManifestPath !== undefined
+      ? { runManifestPath: options.runManifestPath }
+      : {}),
+    cfcEnforcementMode: resolveCfcEnforcementMode(options),
+    cfcEnforcementModeSource: resolveCfcEnforcementModeSource(options),
+  };
+  return modelProvider === "openai-codex"
+    ? {
+      ...common,
+      modelProvider,
+      credentialOwnerKey: options.credentialOwnerKey ?? "local",
+    }
+    : {
+      ...common,
+      modelProvider,
+      gatewayBaseUrl: normalizeGatewayBaseUrl(
+        options.gatewayBaseUrl ?? DEFAULT_GATEWAY_BASE_URL,
+      ),
+      gatewayAuthMode: resolveGatewayAuthMode(options),
+    };
+};

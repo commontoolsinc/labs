@@ -390,6 +390,13 @@ export class CfHarnessEngine {
         cfcEnforcementMode: this.config.cfcEnforcementMode,
         currentDir,
         model: this.config.model,
+        modelProvider: this.config.modelProvider,
+        modelAuthSource: this.config.modelProvider === "openai-codex"
+          ? "owner-bound-oauth"
+          : this.config.gatewayAuthMode === "none"
+          ? "none"
+          : "api-key",
+        credentialOwnerKey: this.config.credentialOwnerKey,
         artifactRoot: this.artifactStore?.runRoot,
         runManifest: this.config.runManifest,
         runManifestPath: this.config.runManifestPath,
@@ -772,6 +779,10 @@ export class CfHarnessEngine {
           cfcEnforcementMode: this.#runState.cfcEnforcementMode,
           runManifest: this.#runState.runManifest,
           runManifestPath: this.#runState.runManifestPath,
+          modelProvider: this.config.modelProvider,
+          ...(this.config.modelProvider === "openai-compatible-gateway"
+            ? { gatewayAuthMode: this.config.gatewayAuthMode }
+            : {}),
         },
       );
       let capabilitiesPath: string | undefined;

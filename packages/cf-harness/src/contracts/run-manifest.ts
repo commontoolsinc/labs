@@ -21,6 +21,16 @@ export interface LoomRunManifestCfc {
   labelSource?: "loom-run-manifest";
 }
 
+export const HARNESS_CREDENTIAL_OWNER_REF_TYPE =
+  "cf-harness.credential-owner-ref" as const;
+
+export interface HarnessCredentialOwnerRef {
+  type: typeof HARNESS_CREDENTIAL_OWNER_REF_TYPE;
+  version: 1;
+  ownerKey: string;
+  tenantKey?: string;
+}
+
 export interface LoomRunManifest {
   type: typeof LOOM_RUN_MANIFEST_TYPE;
   version: 1;
@@ -31,6 +41,8 @@ export interface LoomRunManifest {
   dispatchClass?: string;
   capabilityProfile?: string;
   model?: string;
+  modelProvider?: "openai-compatible-gateway" | "openai-codex";
+  credentialOwner?: HarnessCredentialOwnerRef;
   workspace?: LoomRunManifestWorkspace;
   promptSlot?: PromptSlotBinding;
   cfc?: LoomRunManifestCfc;
@@ -82,6 +94,31 @@ const normalizeLoomRunManifestCfc = (
   };
 };
 
+const normalizeCredentialOwnerRef = (
+  input: unknown,
+): HarnessCredentialOwnerRef | undefined => {
+  if (input === undefined) return undefined;
+  if (!isJsonObject(input)) {
+    throw new Error("run manifest credentialOwner must be a JSON object");
+  }
+  if (
+    input.type !== HARNESS_CREDENTIAL_OWNER_REF_TYPE || input.version !== 1 ||
+    typeof input.ownerKey !== "string" || input.ownerKey.trim() === "" ||
+    input.ownerKey.trim() !== input.ownerKey ||
+    (input.tenantKey !== undefined &&
+      (typeof input.tenantKey !== "string" || input.tenantKey.trim() === "" ||
+        input.tenantKey.trim() !== input.tenantKey))
+  ) {
+    throw new Error("invalid run manifest credentialOwner reference");
+  }
+  return {
+    type: HARNESS_CREDENTIAL_OWNER_REF_TYPE,
+    version: 1,
+    ownerKey: input.ownerKey,
+    ...(input.tenantKey !== undefined ? { tenantKey: input.tenantKey } : {}),
+  };
+};
+
 export const normalizeLoomRunManifest = (
   input: unknown,
 ): LoomRunManifest => {
@@ -102,6 +139,16 @@ export const normalizeLoomRunManifest = (
     ? undefined
     : normalizePromptSlotBinding(input.promptSlot);
   const cfc = normalizeLoomRunManifestCfc(input.cfc);
+  if (
+    input.modelProvider !== undefined &&
+    input.modelProvider !== "openai-compatible-gateway" &&
+    input.modelProvider !== "openai-codex"
+  ) {
+    throw new Error(
+      `unsupported run manifest modelProvider: ${String(input.modelProvider)}`,
+    );
+  }
+  const credentialOwner = normalizeCredentialOwnerRef(input.credentialOwner);
   return {
     ...input,
     type: LOOM_RUN_MANIFEST_TYPE,
@@ -109,6 +156,7 @@ export const normalizeLoomRunManifest = (
     source: "loom",
     ...(promptSlot !== undefined ? { promptSlot } : {}),
     ...(cfc !== undefined ? { cfc } : {}),
+    ...(credentialOwner !== undefined ? { credentialOwner } : {}),
   } as LoomRunManifest;
 };
 

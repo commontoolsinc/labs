@@ -26,6 +26,10 @@ import type {
   HarnessFailureRecord,
 } from "./diagnostics.ts";
 import { selectPrimaryHarnessFailure } from "./diagnostics.ts";
+import type {
+  HarnessModelAuthSource,
+  HarnessModelProviderId,
+} from "./config.ts";
 
 export type HarnessRunStatus =
   | "pending"
@@ -52,6 +56,9 @@ export interface HarnessRunState {
   promptSlotBinding?: PromptSlotBinding;
   currentDir: string;
   model?: string;
+  modelProvider?: HarnessModelProviderId;
+  modelAuthSource?: HarnessModelAuthSource;
+  credentialOwnerKey?: string;
   artifactRoot?: string;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -90,6 +97,9 @@ export interface CreateHarnessRunStateOptions {
   promptSlotBinding?: PromptSlotBinding;
   currentDir: string;
   model?: string;
+  modelProvider?: HarnessModelProviderId;
+  modelAuthSource?: HarnessModelAuthSource;
+  credentialOwnerKey?: string;
   artifactRoot?: string;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -137,6 +147,13 @@ export const createHarnessRunState = (
       : {}),
     currentDir: options.currentDir,
     ...(options.model !== undefined ? { model: options.model } : {}),
+    modelProvider: options.modelProvider ?? "openai-compatible-gateway",
+    ...(options.modelAuthSource !== undefined
+      ? { modelAuthSource: options.modelAuthSource }
+      : {}),
+    ...(options.credentialOwnerKey !== undefined
+      ? { credentialOwnerKey: options.credentialOwnerKey }
+      : {}),
     ...(options.artifactRoot !== undefined
       ? { artifactRoot: options.artifactRoot }
       : {}),

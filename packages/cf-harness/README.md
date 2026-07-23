@@ -53,7 +53,8 @@ What works today:
   local/private target blocking, extracted text/links, and raw bounded response
   retention in tool-output artifacts; `web_fetch` is intentionally not part of
   the default parent tool surface
-- bounded OpenAI-compatible prompt/tool loop
+- provider-neutral bounded prompt/tool loop with OpenAI-compatible gateway and
+  opt-in ChatGPT/Codex subscription transports
 - interactive chat NDJSON stdio transport with opt-in SQLite session, turn, and
   event persistence
 - single-child subagent delegation with fresh child prompt context, explicit
@@ -65,9 +66,8 @@ What works today:
 - persisted run state, transcript, run reports, Loom run manifests, capability
   snapshots, and tool outputs, plus explicit skill registry and activation
   artifacts
-- run-report gateway attempt diagnostics with chat-completion request size,
-  timing, HTTP status, selected response headers/request IDs, and non-OK
-  response body excerpts
+- provider-neutral run-report model-attempt diagnostics; the compatibility
+  gateway retains its existing gateway-attempt records
 - transcript-based resumability
 - package-local operator CLI
 - explicit Agent Skills preload via `--skills-root` and repeatable `--skill`
@@ -97,6 +97,9 @@ network confinement model.
 - configurable gateway auth mode:
   - `bearer`
   - `none`
+- explicit `openai-codex` subscription provider with browser PKCE and headless
+  device login, refresh-token rotation, live model discovery, resume, and
+  owner-bound Loom integration
 
 What is not done yet:
 
@@ -119,6 +122,10 @@ What is not done yet:
   - core execution engine, run state, tool execution
 - [src/prompt-loop.ts](src/prompt-loop.ts)
   - bounded prompt/tool loop
+- [src/model/](src/model)
+  - provider-neutral model client, gateway adapter, and Codex Responses adapter
+- [src/auth/](src/auth)
+  - owner-keyed credential store and OpenAI Codex OAuth flows
 - [src/cli.ts](src/cli.ts)
   - package-local operator CLI
 - [src/interactive-chat-stdio.ts](src/interactive-chat-stdio.ts)
@@ -137,6 +144,9 @@ What is not done yet:
   - environment-gated real `runsc-cfc` integration tests
 - [docs/SKILLS_SUPPORT_SPEC.md](docs/SKILLS_SUPPORT_SPEC.md)
   - staged Agent Skills support design
+- [../../docs/plans/cf-harness-codex-subscription-auth.md](../../docs/plans/cf-harness-codex-subscription-auth.md)
+  - researched implementation plan for opt-in local and Loom Codex subscription
+    auth with per-user credential ownership
 
 ## Commands
 
@@ -168,6 +178,76 @@ deno task run -- \
   --gateway-auth-mode none \
   --prompt "Summarize the cf-harness package structure." \
   --print-transcript
+```
+
+ChatGPT/Codex subscription mode is a separate, explicit provider. It does not
+use an OpenAI Platform API key:
+
+```bash
+cd packages/cf-harness
+
+# Browser PKCE login (default) or headless device login.
+deno task run -- auth login openai-codex
+deno task run -- auth login openai-codex --device
+
+# Inspect connection health and the live, subscription-scoped model catalog.
+deno task run -- auth status openai-codex
+deno task run -- models openai-codex
+
+# Run through the same bounded loop and CFC mediation as the gateway provider.
+deno task run -- \
+  --workspace ../.. \
+  --model-provider openai-codex \
+  --model gpt-5.5 \
+  --prompt "Summarize the cf-harness package structure."
+
+deno task run -- auth logout openai-codex
+```
+
+Local credentials live under `CF_HARNESS_HOME` (by default
+`~/.cf-harness/auth.json`). The directory and file are created with modes `0700`
+and `0600`, and updates replace the file atomically. `cf-harness` never imports
+or shares `~/.codex/auth.json`. A failed refresh does not fall back to
+`OPENAI_API_KEY`, the Common Tools gateway, or unauthenticated mode.
+
+The gateway and subscription routes have different billing, workspace policy,
+retention, and model availability. The model catalog is read live from the
+selected subscription; an explicit unavailable model fails instead of being
+silently substituted.
+
+### Loom subscription binding
+
+Loom support uses the same `openai-codex` protocol and model client, but never
+the local filesystem credential store. A trusted Loom host must:
+
+- require the initiating user to connect ChatGPT/Codex explicitly;
+- put `modelProvider: "openai-codex"` and a `cf-harness.credential-owner-ref` in
+  the Loom run manifest;
+- resolve that opaque owner in Loom's encrypted secret backend and inject an
+  owner-bound credential resolver/model client into `cf-harness`;
+- apply the same binding to batch, resume, subagent, and interactive runs.
+
+Tokens and account ids must not be placed in manifests, Cells, Spaces, stdio
+messages, session databases, command lines, or artifacts. A Loom Codex run
+without an authenticated owner reference or injected resolver fails closed. For
+interactive service processes, inject the owner-bound client through
+`basePromptLoopOptions`; do not accept a token through the NDJSON request.
+
+The manifest-side, non-secret selection looks like:
+
+```json
+{
+  "type": "cf-harness.loom-run-manifest",
+  "version": 1,
+  "source": "loom",
+  "modelProvider": "openai-codex",
+  "credentialOwner": {
+    "type": "cf-harness.credential-owner-ref",
+    "version": 1,
+    "ownerKey": "loom:principal-opaque-id",
+    "tenantKey": "loom:tenant-opaque-id"
+  }
+}
 ```
 
 Local open-weight model via any OpenAI-compatible server (llama.cpp shown; LM

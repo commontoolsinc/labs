@@ -15,6 +15,7 @@ import {
   type HarnessInteractivePromptLoopFactory,
 } from "../src/interactive-chat-service.ts";
 import type {
+  CreateHarnessPromptLoopOptions,
   HarnessPromptLoopResult,
   RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
@@ -139,6 +140,56 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
     ],
     allowedSubagentProfiles: ["default"],
   });
+});
+
+Deno.test("interactive service preserves an owner-bound Codex client across turns", async () => {
+  const modelClient = {
+    providerId: "openai-codex",
+    complete: () => Promise.reject(new Error("unused in injected loop")),
+  } as const;
+  const loopOptions: CreateHarnessPromptLoopOptions[] = [];
+  const service = new HarnessInteractiveChatService({
+    basePromptLoopOptions: {
+      modelProvider: "openai-codex",
+      credentialOwnerKey: "loom:user-1",
+      modelClient,
+    },
+    createPromptLoop: (options) => {
+      loopOptions.push(options);
+      return {
+        runTranscript: (runOptions) =>
+          Promise.resolve(makeResult(runOptions, "Done.")),
+      };
+    },
+    now: nextIsoNow(),
+  });
+  await service.handleRequest({
+    type: HARNESS_CHAT_REQUEST_TYPE,
+    protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+    requestId: "req-owner-session",
+    method: "start_session",
+    params: {
+      sessionId: "session-owner",
+      workspace: { hostPath: "/workspace" },
+      model: "gpt-5.4",
+    },
+  });
+  await service.handleRequest({
+    type: HARNESS_CHAT_REQUEST_TYPE,
+    protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+    requestId: "req-owner-turn",
+    method: "start_turn",
+    params: {
+      sessionId: "session-owner",
+      turnId: "turn-owner",
+      input: { text: "Hi" },
+    },
+  });
+  await service.waitForTurn("session-owner", "turn-owner");
+
+  assertEquals(loopOptions[0].modelProvider, "openai-codex");
+  assertEquals(loopOptions[0].credentialOwnerKey, "loom:user-1");
+  assertEquals(loopOptions[0].modelClient, modelClient);
 });
 
 Deno.test("interactive service forces comment-thread turns to read-only prompt-loop options", async () => {
