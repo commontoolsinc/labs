@@ -414,7 +414,8 @@ export class Scheduler {
   private eventQueue: QueuedEvent[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
   readonly lineage = new SpeculationLineage({
-    dropQueuedEvent: (event, reason) => this.dropEvent(event, reason),
+    dropQueuedEvent: (event, reason) =>
+      this.dropEvent(event, "lineage", reason),
     queueExecution: () => this.queueExecution(),
     onError: (error) => logger.error("lineage", () => [error]),
   });
@@ -2477,8 +2478,8 @@ export class Scheduler {
       releaseLineageEvent: (originTx, queuedEvent) => {
         this.lineage.release(originTx, queuedEvent);
       },
-      dropEvent: (queuedEvent, reason) => {
-        this.dropEvent(queuedEvent, reason);
+      dropEvent: (queuedEvent, dropReason, reason) => {
+        this.dropEvent(queuedEvent, dropReason, reason);
       },
       recordLineageEvent: (originTx, queuedEvent) => {
         this.lineage.recordEvent(originTx, queuedEvent);
@@ -2760,12 +2761,17 @@ export class Scheduler {
     const detail = error instanceof Error ? error.message : String(error);
     this.dropEvent(
       event,
+      "load-gate",
       `Event dropped: required replica load failed before dispatch (${detail})`,
     );
     this.queueExecution();
   }
 
-  private dropEvent(event: QueuedEvent, reason: string): void {
+  private dropEvent(
+    event: QueuedEvent,
+    dropReason: import("../telemetry.ts").SchedulerEventDropReason,
+    reason: string,
+  ): void {
     if (this.headEventLoadPark?.eventId === event.id) {
       this.headEventLoadPark = null;
     }
@@ -2781,6 +2787,7 @@ export class Scheduler {
         },
       },
       event,
+      dropReason,
       reason,
     );
   }

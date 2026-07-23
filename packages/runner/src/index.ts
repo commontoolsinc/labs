@@ -102,6 +102,7 @@ export {
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
 } from "./storage/reactivity-log.ts";
+export { classifyTelemetryWriteCounts } from "./scheduler/reactivity.ts";
 export { resolveLink } from "./link-resolution.ts";
 export {
   areLinksSame,
