@@ -175,7 +175,9 @@ export const getModels = createRoute({
   path: "/api/ai/llm/models",
   method: "get",
   tags,
-  query: GetModelsRouteQueryParams,
+  request: {
+    query: GetModelsRouteQueryParams,
+  },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(
       ModelsResponseSchema.openapi({
