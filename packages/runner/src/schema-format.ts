@@ -62,6 +62,23 @@ export interface SchemaFormatOptions {
  * // → "string[]"
  *
  * @example
+ * // Tuples (prefixItems)
+ * schemaToTypeString({
+ *   type: "array",
+ *   prefixItems: [{ type: "string" }, { type: "number" }]
+ * })
+ * // → "[string, number]"
+ *
+ * @example
+ * // An `items` schema alongside `prefixItems` becomes a rest element
+ * schemaToTypeString({
+ *   type: "array",
+ *   prefixItems: [{ type: "string" }],
+ *   items: { type: "number" }
+ * })
+ * // → "[string, ...number[]]"
+ *
+ * @example
  * // Enums as union literals
  * schemaToTypeString({ enum: ["open", "closed"] })
  * // → '"open" | "closed"'
@@ -199,8 +216,19 @@ function schemaToTypeStringInner(
   if (type === "boolean") return "boolean";
   if (type === "null") return "null";
 
-  // Handle arrays
+  // Handle arrays; tuples render as TypeScript tuple types, with a uniform
+  // `items` schema alongside `prefixItems` becoming a rest element
   if (type === "array") {
+    if (Array.isArray(s.prefixItems)) {
+      const slots = (s.prefixItems as JSONSchema[]).map((slot) =>
+        schemaToTypeString(slot, nextOpts)
+      );
+      if (s.items && typeof s.items === "object") {
+        const itemType = schemaToTypeString(s.items as JSONSchema, nextOpts);
+        slots.push(`...${itemType}[]`);
+      }
+      return `[${slots.join(", ")}]`;
+    }
     if (s.items && typeof s.items === "object") {
       const itemType = schemaToTypeString(s.items as JSONSchema, nextOpts);
       return `${itemType}[]`;

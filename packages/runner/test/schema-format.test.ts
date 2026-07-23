@@ -18,6 +18,41 @@ Deno.test("schemaToTypeString converts arrays", () => {
   assertEquals(schemaToTypeString(schema), "string[]");
 });
 
+Deno.test("schemaToTypeString converts tuples (prefixItems)", () => {
+  // CT-1895: tuples used to render as "unknown[]"
+  const schema: any = {
+    type: "array",
+    prefixItems: [
+      { type: "string" },
+      { type: "object", properties: { x: { type: "number" } } },
+    ],
+  };
+  assertEquals(
+    schemaToTypeString(schema),
+    "[string, {\n  x?: number\n}]",
+  );
+});
+
+Deno.test("schemaToTypeString renders items alongside prefixItems as a rest element", () => {
+  const schema: any = {
+    type: "array",
+    prefixItems: [{ type: "string" }, { type: "number" }],
+    items: { type: "boolean" },
+  };
+  assertEquals(schemaToTypeString(schema), "[string, number, ...boolean[]]");
+});
+
+Deno.test("schemaToTypeString abbreviates tuples at max depth", () => {
+  const schema: any = {
+    type: "object",
+    properties: {
+      pair: { type: "array", prefixItems: [{ type: "string" }] },
+    },
+  };
+  const result = schemaToTypeString(schema, { maxDepth: 1 });
+  assert(result.includes("pair?: [...]"));
+});
+
 Deno.test("schemaToTypeString converts objects with properties", () => {
   const schema: any = {
     type: "object",
