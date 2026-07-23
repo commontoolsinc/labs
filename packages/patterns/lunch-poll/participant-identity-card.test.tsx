@@ -85,6 +85,30 @@ export default pattern(() => {
     profileIdentity.joinAs.send({});
   });
 
+  const action_use_different_name = action(() => {
+    const button = findByProp(
+      profileIdentity[UI],
+      "aria-label",
+      "Use a different name",
+    );
+    const onClick = propsOf(button)?.onClick;
+    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
+      (onClick as { send: (event: Record<string, never>) => void }).send({});
+    }
+  });
+
+  const action_cancel_different_name = action(() => {
+    const button = findByProp(
+      profileIdentity[UI],
+      "aria-label",
+      "Use my profile name instead",
+    );
+    const onClick = propsOf(button)?.onClick;
+    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
+      (onClick as { send: (event: Record<string, never>) => void }).send({});
+    }
+  });
+
   const action_update_canonical_profile = action(() => {
     aliceProfile.set({
       initialNameApplied: "Alice Updated",
@@ -146,6 +170,14 @@ export default pattern(() => {
     return hasText(ui, "Join as Profile Alice") &&
       findByProp(ui, "data-profile-identity", "canonical") !== undefined &&
       findByProp(ui, "aria-label", "Use a different name") !== undefined;
+  });
+
+  const assert_profile_manual_entry_renders = computed(() => {
+    const ui = profileIdentity[UI];
+    return findByProp(ui, "id", "lp-join-name") !== undefined &&
+      findByProp(ui, "aria-label", "Use my profile name instead") !==
+        undefined &&
+      findByProp(ui, "data-profile-identity", "canonical") === undefined;
   });
 
   const assert_empty_send_noop = computed(() =>
@@ -214,6 +246,10 @@ export default pattern(() => {
     tests: [
       { assertion: assert_initial },
       { assertion: assert_manual_fallback_renders },
+      { assertion: assert_profile_first_renders },
+      { action: action_use_different_name },
+      { assertion: assert_profile_manual_entry_renders },
+      { action: action_cancel_different_name },
       { assertion: assert_profile_first_renders },
       { action: action_join_empty },
       { assertion: assert_empty_send_noop },
