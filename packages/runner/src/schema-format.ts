@@ -15,7 +15,7 @@ export interface SchemaFormatOptions {
   defs?: Record<string, JSONSchema>;
   /** Current recursion depth (internal use) */
   depth?: number;
-  /** Maximum recursion depth before abbreviating (default: 3) */
+  /** Maximum recursion depth before abbreviating (default: 4) */
   maxDepth?: number;
   /** Current indentation level (internal use) */
   indent?: number;
