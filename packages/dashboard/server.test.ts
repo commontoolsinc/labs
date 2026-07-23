@@ -235,6 +235,64 @@ Deno.test("per-collector updates keep a red handoff's incident age", async () =>
   assertEquals(faviconRedSinceInPage(), "null");
 });
 
+Deno.test("simultaneous collector completions keep a red handoff's incident age", async () => {
+  const realNow = Date.now;
+  const startedAt = realNow() + 1_000;
+  let now = startedAt;
+  Date.now = () => now;
+  const modelGood: TileView = {
+    label: "simultaneous model spend",
+    status: "good",
+    value: "passing",
+  };
+  const modelBad: TileView = {
+    label: "simultaneous model spend",
+    status: "bad",
+    value: "failed",
+  };
+  const gcpGood: TileView = {
+    label: "simultaneous gcp spend",
+    status: "good",
+    value: "passing",
+  };
+  const gcpBad: TileView = {
+    label: "simultaneous gcp spend",
+    status: "bad",
+    value: "failed",
+  };
+  const model = deferred<TileView>();
+  const gcp = deferred<TileView>();
+  let handoff: Promise<void> | undefined;
+  try {
+    await tick([
+      fake("model-spend", () => modelBad),
+      fake("gcp-spend", () => gcpGood),
+    ]);
+    const redSince = faviconRedSinceInPage();
+    assertEquals(redSince, String(startedAt));
+
+    now = startedAt + 1_000;
+    handoff = tick([
+      fake("model-spend", () => model.promise),
+      fake("gcp-spend", () => gcp.promise),
+    ]);
+    model.resolve(modelGood);
+    gcp.resolve(gcpBad);
+    await handoff;
+
+    assertEquals(faviconRedSinceInPage(), redSince);
+  } finally {
+    model.resolve(modelGood);
+    gcp.resolve(gcpGood);
+    await handoff;
+    await tick([
+      fake("model-spend", () => modelGood),
+      fake("gcp-spend", () => gcpGood),
+    ]);
+    Date.now = realNow;
+  }
+});
+
 Deno.test("a tile stays wide through failures and keeps its last good view", async () => {
   await tick([fake("recent-runs", () => {
     throw new Error("HTTP 404: Not Found");
@@ -275,17 +333,132 @@ Deno.test("the ticker leaves a tile alone until its interval has elapsed", async
   assertEquals((await (await handle(req("/healthz"))).json()).at, at, "and nothing is reported as changed");
 });
 
-Deno.test("a tick that is still running makes the next tick a no-op", async () => {
-  let release = (_: TileView) => {};
-  const slow = tick([fake("labs-ci", () => new Promise<TileView>((r) => release = r))]);
-  let collects = 0;
-  await tick([fake("loom-ci", () => {
-    collects++;
-    return { label: "loom ci", status: "good", value: "passing" };
-  })]);
-  assertEquals(collects, 0, "the overlapping tick collected nothing");
-  release({ label: "labs ci", status: "good", value: "passing" });
-  await slow;
+Deno.test("overlapping ticks skip a tile already updating and collect other due tiles", async () => {
+  const slow = deferred<TileView>();
+  let duplicateCollects = 0;
+  let otherCollects = 0;
+  const first = tick([fake("overlap-slow", () => slow.promise)]);
+
+  await tick([
+    fake("overlap-slow", () => {
+      duplicateCollects++;
+      return { label: "duplicate", status: "good" };
+    }),
+    fake("overlap-fast", () => {
+      otherCollects++;
+      return { label: "fast", status: "good" };
+    }),
+  ]);
+
+  assertEquals(duplicateCollects, 0, "the updating tile is not collected twice");
+  assertEquals(otherCollects, 1, "another due tile is still collected");
+  slow.resolve({ label: "slow", status: "good" });
+  await first;
+});
+
+Deno.test("overlapping ticks skip an updating run source and refresh another source", async () => {
+  const slowSource = { repo: "test/overlap-slow", workflow: "ci.yml" };
+  const fastSource = { repo: "test/overlap-fast", workflow: "ci.yml" };
+  const slowRuns = deferred<Run[]>();
+  let slowFetches = 0;
+  let fastFetches = 0;
+  let slowCollections = 0;
+  let fastCollections = 0;
+  const sourceCtx: Ctx = {
+    runs: () => slowRuns.promise,
+    runsFor: (repo) => {
+      if (repo === slowSource.repo) {
+        slowFetches++;
+        return slowRuns.promise;
+      }
+      fastFetches++;
+      return Promise.resolve([]);
+    },
+    env: () => undefined,
+  };
+  const slowTile: Tile = {
+    id: "overlap-source-slow",
+    intervalMs: 0,
+    runSources: [slowSource],
+    collect: () => {
+      slowCollections++;
+      return Promise.resolve({ label: "slow source", status: "good" });
+    },
+  };
+  const fastTile: Tile = {
+    id: "overlap-source-fast",
+    intervalMs: 0,
+    runSources: [fastSource],
+    collect: () => {
+      fastCollections++;
+      return Promise.resolve({ label: "fast source", status: "good" });
+    },
+  };
+  const first = tick([slowTile], sourceCtx);
+
+  try {
+    await tick([slowTile, fastTile], sourceCtx);
+    assertEquals(slowFetches, 1, "the updating source is not fetched twice");
+    assertEquals(slowCollections, 0, "the slow source has not completed");
+    assertEquals(fastFetches, 1, "another due source is fetched");
+    assertEquals(fastCollections, 1, "another source's tile is collected");
+  } finally {
+    slowRuns.resolve([]);
+    await first;
+  }
+  assertEquals(slowCollections, 1);
+});
+
+Deno.test("a multi-source tile stays active until every source update completes", async () => {
+  const slowSource = { repo: "test/multi-source-slow", workflow: "ci.yml" };
+  const fastSource = { repo: "test/multi-source-fast", workflow: "ci.yml" };
+  const slowRuns = deferred<Run[]>();
+  let slowFetches = 0;
+  let fastFetches = 0;
+  let collections = 0;
+  const sourceCtx: Ctx = {
+    runs: () => slowRuns.promise,
+    runsFor: (repo) => {
+      if (repo === slowSource.repo) {
+        slowFetches++;
+        return slowRuns.promise;
+      }
+      fastFetches++;
+      return Promise.resolve([]);
+    },
+    env: () => undefined,
+  };
+  const tile: Tile = {
+    id: "overlap-multi-source",
+    intervalMs: 0,
+    runSources: [slowSource, fastSource],
+    collect: () => {
+      collections++;
+      return Promise.resolve({ label: "multi source", status: "good" });
+    },
+  };
+  let published = () => {};
+  const firstPublication = new Promise<void>((resolve) => published = resolve);
+  const client = {
+    enqueue() {
+      published();
+    },
+  } as unknown as ReadableStreamDefaultController<Uint8Array>;
+  clients.add(client);
+  const first = tick([tile], sourceCtx);
+
+  try {
+    await firstPublication;
+    assertEquals(collections, 1, "the ready source collected the tile");
+    await tick([tile], sourceCtx);
+    assertEquals(slowFetches, 1, "the pending source was not fetched again");
+    assertEquals(fastFetches, 1, "the completed source still skips the active tile");
+  } finally {
+    clients.delete(client);
+    slowRuns.resolve([]);
+    await first;
+  }
+  assertEquals(collections, 2, "the pending source completes its original collection");
 });
 
 Deno.test("each completed collection is published while slower tiles are still running", async () => {
@@ -704,13 +877,10 @@ Deno.test("routes: a tile's drill-down path wins over the page; anything else is
   assertEquals((await (await handle(req("/healthz"))).json()).ok, true);
 });
 
-Deno.test("start: serves the handler on the configured port and keeps collecting", async () => {
-  // A tick in flight makes start()'s own first tick a no-op, so this reaches no source.
-  let release = (_: TileView) => {};
-  const inflight = tick([fake("labs-ci", () => new Promise<TileView>((r) => release = r))]);
-
+Deno.test("start: serves the handler on the configured port and keeps collecting", () => {
   const served: { opts: Deno.ServeTcpOptions; handler: unknown }[] = [];
   const logged: string[] = [];
+  let collections = 0;
   const log = console.log;
   console.log = (m: string) => logged.push(m);
   let timer = 0;
@@ -719,7 +889,9 @@ Deno.test("start: serves the handler on the configured port and keeps collecting
       served.push({ opts, handler });
       opts.onListen?.({ transport: "tcp", hostname: "localhost", port: PORT });
       return undefined;
-    }) as unknown as typeof Deno.serve).timer;
+    }) as unknown as typeof Deno.serve, () => {
+      collections++;
+    }).timer;
   } finally {
     clearInterval(timer);
     console.log = log;
@@ -729,7 +901,5 @@ Deno.test("start: serves the handler on the configured port and keeps collecting
   assertEquals(served[0].handler, handle, "every request goes through the one handler");
   assertStringIncludes(logged[0], `http://localhost:${PORT}`);
   assertStringIncludes(logged[0], `${TILES.length} tiles registered`);
-
-  release({ label: "labs ci", status: "good", value: "passing" });
-  await inflight;
+  assertEquals(collections, 1, "startup collects immediately");
 });
