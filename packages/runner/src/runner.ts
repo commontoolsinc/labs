@@ -3572,8 +3572,22 @@ export class Runner {
         }
       }
 
-      if (Array.isArray(currentValue) && schema.items !== undefined) {
-        for (const item of currentValue) visit(schema.items, item);
+      if (Array.isArray(currentValue)) {
+        // A tuple slot covers its exact index; `items` covers the indices
+        // past the slots (2020-12). prefixItems-only schemas previously
+        // skipped elements entirely.
+        const prefixItems = Array.isArray(schema.prefixItems)
+          ? schema.prefixItems
+          : undefined;
+        for (let index = 0; index < currentValue.length; index++) {
+          const slotSchema =
+            prefixItems !== undefined && index < prefixItems.length
+              ? prefixItems[index]
+              : schema.items;
+          if (slotSchema !== undefined) {
+            visit(slotSchema, currentValue[index]);
+          }
+        }
       }
       if (
         schema.additionalProperties !== undefined &&
