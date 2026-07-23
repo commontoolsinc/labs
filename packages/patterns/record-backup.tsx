@@ -76,7 +76,6 @@ interface ImportResult {
 
 interface Input {
   importJson: string | Default<"">;
-  addPiece?: Stream<{ piece: Writable<RecordPiece> }>;
 }
 
 export interface Output {
@@ -623,15 +622,15 @@ const handleFileUpload = handler<
 // ===== The Pattern =====
 
 export default pattern<Input, Output>((input) => {
-  const { importJson, addPiece: addPieceInput } = input;
+  const { importJson } = input;
   // Get all pieces in the space
   const pieceRegistry = wish<RecordPiece[]>({
     query: "#pieceRegistry",
   }).result!;
-  const defaultWish = wish<{
-    addPiece: Stream<{ piece: Writable<RecordPiece> }>;
-  }>({ query: "#default" });
-  const addPiece = addPieceInput ?? defaultWish.result!.addPiece;
+  const addPiece = wish<Stream<{ piece: Writable<RecordPiece> }>>({
+    query: "#default",
+    path: ["addPiece"],
+  }).result!;
 
   // Current time, sourced from the reactive #now cell (coarsened to 1s).
   const nowCell = wish<number>({ query: "#now" });
