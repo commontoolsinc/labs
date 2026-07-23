@@ -138,21 +138,3 @@ export async function clickButtonWithTitle(
   await settleAndClickNoteButton(page, "cf-button, button", "title", title);
   return true;
 }
-
-export async function findButtonWithText(
-  page: Page,
-  searchText: string,
-): Promise<any | null> {
-  try {
-    const buttons = await page.$$("cf-button, button, a", {
-      strategy: "pierce",
-    });
-    for (const button of buttons) {
-      const text = await button.innerText();
-      if (text?.trim().includes(searchText)) return button;
-    }
-    return null;
-  } catch (_) {
-    return null;
-  }
-}
