@@ -3833,13 +3833,9 @@ export class WorkerReconciler {
     } else if (value === null || value === undefined || value === false) {
       return "";
     } else if (typeof value === "object") {
-      // Handle unresolved alias objects
-      if (value && "$alias" in value) {
-        return "";
-      } else {
-        console.warn("unexpected object when value was expected", value);
-        return JSON.stringify(value);
-      }
+      // Objects are not expected here - warn and render their JSON as a fallback
+      console.warn("unexpected object when value was expected", value);
+      return JSON.stringify(value);
     }
     return String(value);
   }

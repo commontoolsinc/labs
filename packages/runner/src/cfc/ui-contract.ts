@@ -549,9 +549,10 @@ const eventEnvelopePayloads = (
 // contract-bearing link can sit nested inside a `$ctx` entry (e.g.
 // `myHandler({ config: { savedTitle: state.x } })`) rather than at its top
 // level. Walk plain objects/arrays to collect every reachable bound link. A
-// link (sigil or legacy alias) is always a leaf: never descend into its
-// envelope, even when it is rejected below — its internals are not addressable
-// `$ctx` links. Only an absolute (full) link contributes a candidate; parse
+// sigil link is always a leaf: never descend into its envelope, even when it
+// is rejected below — its internals are not addressable `$ctx` links.
+// (`$alias` records are not links and are walked as ordinary data.) Only an
+// absolute (full) link contributes a candidate; parse
 // WITHOUT a base so a relative link stays relative and fails the full-link
 // check, rather than inheriting the write target's id/space/scope (which would
 // make the same-document guard vacuous).

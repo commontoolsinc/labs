@@ -29,7 +29,6 @@ const { FRONTEND_URL } = env;
 // slightly while still exercising persisted scheduler-state reuse.
 const NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT = 150;
 const NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT = 90;
-const NOTEBOOK_RELOAD_TIMEOUT_MS = 180_000;
 
 const EXPECT_PERSISTENT_SCHEDULER_STATE = (() => {
   const raw = Deno.env.get("CF_EXPECT_PERSISTENT_SCHEDULER_STATE");
@@ -118,10 +117,9 @@ describe("default-app notebook reload integration test", () => {
 
     await waitForCondition(page, notebookSourceStateMatches, {
       args: [noteCreates],
-      timeout: NOTEBOOK_RELOAD_TIMEOUT_MS,
     });
 
-    await waitForRuntimeSynced(page, { timeout: NOTEBOOK_RELOAD_TIMEOUT_MS });
+    await waitForRuntimeSynced(page);
 
     const startedAt = performance.now();
     await page.reload({ waitUntil: "load" });
@@ -130,9 +128,8 @@ describe("default-app notebook reload integration test", () => {
 
     await waitForCondition(page, notebookReloadRendered, {
       args: [noteCreates],
-      timeout: NOTEBOOK_RELOAD_TIMEOUT_MS,
     });
-    await waitForRuntimeIdle(page, { timeout: NOTEBOOK_RELOAD_TIMEOUT_MS });
+    await waitForRuntimeIdle(page);
 
     const reloadRenderState = await collectNotebookRenderState(page);
     assertEquals(reloadRenderState.noteCount, noteCreates);

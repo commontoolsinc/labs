@@ -52,11 +52,13 @@ import {
   getDerivedInternalCellLink,
   getMetaCell,
   getMetaLink,
+  isAliasBinding,
   isCellLink,
   isSigilLink,
   isWriteRedirectLink,
   KeepAsCell,
   type NormalizedFullLink,
+  parseAliasBinding,
   parseLink,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
@@ -244,8 +246,11 @@ const recordOutputSchemaPolicyInputs = (
     return;
   }
 
-  if (isWriteRedirectLink(outputBinding)) {
-    const bindingLink = parseLink(outputBinding, resultCell);
+  if (isWriteRedirectLink(outputBinding) || isAliasBinding(outputBinding)) {
+    const bindingBase = resultCell.getAsNormalizedFullLink();
+    const bindingLink = isAliasBinding(outputBinding)
+      ? parseAliasBinding(outputBinding, bindingBase)
+      : parseLink(outputBinding, bindingBase);
     // Output-redirect resolution is result-plumbing machinery
     // (machineryRead, same family as sendValueToBinding's walk): its reads
     // must not consume `*`-path membership templates (bot review on this
@@ -335,8 +340,11 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
   resultCell: Cell<any>, // used as the base for output bindings
   outputBinding: unknown,
 ): void => {
-  if (isWriteRedirectLink(outputBinding)) {
-    const bindingLink = parseLink(outputBinding, resultCell);
+  if (isWriteRedirectLink(outputBinding) || isAliasBinding(outputBinding)) {
+    const bindingBase = resultCell.getAsNormalizedFullLink();
+    const bindingLink = isAliasBinding(outputBinding)
+      ? parseAliasBinding(outputBinding, bindingBase)
+      : parseLink(outputBinding, bindingBase);
     // Result-plumbing machinery, as in recordOutputSchemaPolicyInputs.
     const link = tx.runWithAmbientReadMeta(
       machineryRead,
@@ -384,10 +392,13 @@ const schemaForRawBuiltinRootOutputBinding = (
   resultCell: Cell<any>, // used as the base for output bindings
   outputBinding: unknown,
 ): JSONSchema | undefined => {
-  if (!isWriteRedirectLink(outputBinding)) {
+  if (!isWriteRedirectLink(outputBinding) && !isAliasBinding(outputBinding)) {
     return undefined;
   }
-  const bindingLink = parseLink(outputBinding, resultCell);
+  const bindingBase = resultCell.getAsNormalizedFullLink();
+  const bindingLink = isAliasBinding(outputBinding)
+    ? parseAliasBinding(outputBinding, bindingBase)
+    : parseLink(outputBinding, bindingBase);
   // Result-plumbing machinery, as in recordOutputSchemaPolicyInputs.
   const link = tx.runWithAmbientReadMeta(
     machineryRead,
@@ -449,11 +460,14 @@ function firstResolvedOutputRedirect(
   binding: unknown,
   baseCell: Cell<any>,
 ): NormalizedFullLink | undefined {
-  if (isWriteRedirectLink(binding)) {
+  if (isWriteRedirectLink(binding) || isAliasBinding(binding)) {
+    const bindingBase = baseCell.getAsNormalizedFullLink();
     return resolveLink(
       runtime,
       tx,
-      parseLink(binding, baseCell),
+      isAliasBinding(binding)
+        ? parseAliasBinding(binding, bindingBase)
+        : parseLink(binding, bindingBase),
       "writeRedirect",
     );
   }
@@ -492,9 +506,18 @@ const recordSetupProjectionPolicyInputs = (
     return;
   }
 
+  // Sigil redirects only, deliberately NOT paired with `isAliasBinding`: the
+  // projection is about to be STORED (argument via diffAndUpdate, result via
+  // setRawUntyped), and in stored data only sigil links function as
+  // redirects — a residual `$alias` record (e.g. a still-deferred binding of
+  // an embedded pattern) is inert there. The prepare gate agrees: marker
+  // verification requires the stored value to be a sigil redirect
+  // (`setupProjectionSourceMatchesValue`), and recording a marker for an
+  // alias would wrongly widen `writeIsPatternSetupInitialization`'s
+  // trusted-initialization exemption to a path nothing redirects to.
   if (isWriteRedirectLink(projection)) {
     const target = resultCell.getAsNormalizedFullLink();
-    const source = parseLink(projection, resultCell);
+    const source = parseLink(projection, target);
     tx.recordCfcWritePolicyInput({
       kind: "structural-provenance",
       target: {
@@ -1605,6 +1628,43 @@ export class Runner {
     // (the only pattern pointer); a keyless pattern writes none, so its watcher
     // is inert by design (keyless patterns change only via a fresh run()).
     const setupPatternWatcher = () => {
+      // A hot-swap targets a DIFFERENT program over this piece's existing doc:
+      // the incoming pattern's internal cells — handler { "$stream": true }
+      // markers included — and its argument-schema defaults have never been
+      // materialized here. A fresh start() does that in its setup phase;
+      // skipping it makes every handler node of the incoming pattern fail as
+      // "Handler used as lift" at instantiation (the 2026-07-22 estuary
+      // home-root swap failure). Run the same setup state first, and only
+      // tear down the old nodes once it commits — a failed setup leaves the
+      // running pattern in place instead of a dead piece.
+      const swapToPattern = (
+        loaded: Pattern | NodeFactory<unknown, unknown>,
+        newRef: { identity: string; symbol: string },
+      ) => {
+        const pattern = this.resolveToPattern(loaded as Pattern);
+        const setupTx = this.runtime.edit();
+        try {
+          this.applySetupState(
+            setupTx,
+            pattern,
+            newRef,
+            false,
+            undefined,
+            resultCell,
+          );
+          this.runtime.prepareTxForCommit(setupTx);
+          setupTx.commit();
+        } catch (error) {
+          logger.error(
+            "pattern-swap-setup-error",
+            `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
+            error,
+          );
+          return;
+        }
+        cancelNodes?.();
+        instantiatePattern(pattern);
+      };
       addCancel(
         resultCell.sinkMeta("patternIdentity", (newValue) => {
           if (!active || startLifecycleEpoch !== this.lifecycleEpoch) return;
@@ -1620,8 +1680,7 @@ export class Runner {
             newRef.symbol,
           ) as Pattern | undefined;
           if (live) {
-            cancelNodes?.();
-            instantiatePattern(this.resolveToPattern(live));
+            swapToPattern(live, newRef);
             return;
           }
           // Async load for a pattern change after initial start. Errors are
@@ -1648,8 +1707,7 @@ export class Runner {
               logger.info("pattern changed", {
                 to: { ref: newRef, pattern: loaded },
               });
-              cancelNodes?.();
-              instantiatePattern(this.resolveToPattern(loaded));
+              swapToPattern(loaded, newRef);
             })
             .catch((err) => {
               if (!active || startLifecycleEpoch !== this.lifecycleEpoch) {
@@ -2633,22 +2691,70 @@ export class Runner {
     // scanned after the main sync wave (see below).
     const argumentCells: Cell<any>[] = [];
 
-    // Sync all the inputs and outputs of the pattern nodes.
-    for (const node of pattern.nodes) {
-      const inputs = findAllWriteRedirectCells(node.inputs, resultCell);
-      const outputs = findAllWriteRedirectCells(node.outputs, resultCell);
-
-      // TODO(seefeld): This ignores schemas provided by modules, so it might
-      // still fetch a lot.
-      [...inputs, ...outputs].forEach((link) => {
-        cells.push(this.runtime.getCellFromLink(link));
-      });
-      inputs.forEach((link) => {
-        argumentCells.push(this.runtime.getCellFromLink(link));
-      });
-    }
+    // Sync all the inputs and outputs of the pattern nodes. Bindings are
+    // unwrapped (bound to the argument/result documents) first, so named-cell
+    // and partialCause aliases resolve to the documents they actually denote;
+    // findAllWriteRedirectCells itself only walks sigil links. Without the
+    // argument meta link the bindings cannot be bound, so the node walk is
+    // skipped — the pre-sync is best-effort, and binding against a substitute
+    // document would pre-sync the wrong cells (see CT-1897 for the same
+    // defaulting bug in collectResumeOwnedCells).
     const argumentMetaLink = getMetaLink(resultCell, "argument");
-    if (argumentMetaLink) {
+    if (argumentMetaLink === undefined) {
+      // Instrumentation for how often the meta link is missing here (fresh
+      // first runs are expected to hit this; resumes should not).
+      logger.warn("resume-pre-sync", () => [
+        "argument meta link missing; skipping node pre-sync",
+        {
+          resultCell: resultCell.getAsNormalizedFullLink().id,
+          nodes: pattern.nodes.length,
+        },
+      ]);
+    } else {
+      for (const node of pattern.nodes) {
+        let inputs: NormalizedFullLink[];
+        let outputs: NormalizedFullLink[];
+        try {
+          inputs = findAllWriteRedirectCells(
+            unwrapOneLevelAndBindtoDoc(
+              this.runtime.cfc,
+              node.inputs,
+              argumentMetaLink,
+              resultCell,
+              { derivedInternalCells: pattern.derivedInternalCells },
+            ),
+            resultCell,
+          );
+          outputs = findAllWriteRedirectCells(
+            unwrapOneLevelAndBindtoDoc(
+              this.runtime.cfc,
+              node.outputs,
+              argumentMetaLink,
+              resultCell,
+              { derivedInternalCells: pattern.derivedInternalCells },
+            ),
+            resultCell,
+          );
+        } catch (error) {
+          // A node whose bindings cannot be bound contributes nothing rather
+          // than breaking the pre-sync walk; log it so a resume that silently
+          // skips a node's pre-sync is diagnosable.
+          logger.warn("resume-pre-sync", () => [
+            "skipping a node whose bindings did not unwrap",
+            error,
+          ]);
+          continue;
+        }
+
+        // TODO(seefeld): This ignores schemas provided by modules, so it might
+        // still fetch a lot.
+        [...inputs, ...outputs].forEach((link) => {
+          cells.push(this.runtime.getCellFromLink(link));
+        });
+        inputs.forEach((link) => {
+          argumentCells.push(this.runtime.getCellFromLink(link));
+        });
+      }
       argumentCells.push(this.runtime.getCellFromLink(argumentMetaLink));
     }
 
@@ -3080,7 +3186,7 @@ export class Runner {
         default:
           throw new Error(`Unknown module type: ${module.type}`);
       }
-    } else if (isWriteRedirectLink(module)) {
+    } else if (isWriteRedirectLink(module) || isAliasBinding(module)) {
       // TODO(seefeld): Implement, a dynamic node
     } else {
       throw new Error(`Unknown module: ${toCompactDebugString(module)}`);
@@ -3379,6 +3485,11 @@ export class Runner {
     };
 
     const visit = (schema: unknown, currentValue: unknown): void => {
+      // Sigil-only, deliberately NOT paired with `isAliasBinding`: the value
+      // is post-unwrap, where the only `$alias` records left belong to
+      // embedded Pattern values (their `defer` bookkeeping resolves them at
+      // that pattern's own instantiation) — parsing one here would read it at
+      // the wrong nesting level.
       if (isWriteRedirectLink(currentValue)) {
         const link = parseLink(currentValue, resultCell);
         links.push({
@@ -3576,6 +3687,9 @@ export class Runner {
   } {
     if (!isRecord(inputs) || !("$event" in inputs)) return {};
 
+    // Sigil-only: `$event` is builder-generated and always unwraps to a sigil
+    // link; a residual `$alias` here could only be an embedded pattern's
+    // binding, which must not be followed at this level.
     let value: FabricValue = inputs.$event as FabricValue;
     let lastLink: NormalizedFullLink | undefined;
     while (isWriteRedirectLink(value)) {

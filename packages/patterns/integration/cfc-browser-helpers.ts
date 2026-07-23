@@ -155,11 +155,6 @@ const fillAndVerify = async (
     return false;
   }
 
-  phase("scrolling");
-  input.scrollIntoView({ block: "center", inline: "center" });
-  await new Promise((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(resolve))
-  );
   // Rendered, not on-screen: the fill drives the field through focus and
   // dispatched events rather than a coordinate click, so its viewport position
   // never bears on whether the value takes.
@@ -211,27 +206,23 @@ const fillAndVerify = async (
   return verified;
 };
 
-// Scroll the cf-button behind `selector` into view and tag its inner click
-// target so the test can resolve and click exactly that element. A click target
-// that is still detached, or not rendered — laid out, and not display:none or
+// Tag the inner click target of the cf-button behind `selector` so the test can
+// resolve and click exactly that element. A click target that is still
+// detached, or not rendered — laid out, and not display:none or
 // visibility:hidden — is left untagged, so a re-check on the next DOM mutation
 // retries the mark once the control renders. The check is viewport-independent:
 // the click scrolls the element into view itself, so a control below the fold
 // is markable. It reads the click target alone because hiding the host or any
 // ancestor reaches the inner button either way: display:none zeroes its box,
 // and visibility:hidden inherits into its computed visibility.
-const markForClick = async (
+const markForClick = (
   probe: ProbeApi,
   selector: string,
   token: string,
   attr: string,
-): Promise<boolean> => {
+): boolean => {
   const target = probe.collect(selector)[0] as HTMLElement | undefined;
   if (!target) return false;
-  target.scrollIntoView({ block: "center", inline: "center" });
-  await new Promise((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(resolve))
-  );
   const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
     | HTMLElement
     | null) ?? target;
@@ -240,26 +231,21 @@ const markForClick = async (
   return true;
 };
 
-// Scroll the `index`-th element matching `selector` into view and tag it once it
-// is rendered. Unlike `markForClick`, the selector here already resolves to the
-// clickable elements, so the match is tagged directly rather than reached
-// through a host's shadow root. The check is viewport-independent for the same
-// reason as `markForClick`: the click scrolls the element into view itself, so
-// requiring it on-screen at tagging time only invites a wait that never
-// satisfies.
-const markNthForClick = async (
+// Tag the `index`-th element matching `selector` once it is rendered. Unlike
+// `markForClick`, the selector here already resolves to the clickable elements,
+// so the match is tagged directly rather than reached through a host's shadow
+// root. The check is viewport-independent for the same reason as `markForClick`:
+// the click scrolls the element into view itself, so requiring it on-screen at
+// tagging time only invites a wait that never satisfies.
+const markNthForClick = (
   probe: ProbeApi,
   selector: string,
   index: number,
   token: string,
   attr: string,
-): Promise<boolean> => {
+): boolean => {
   const target = probe.collect(selector)[index] as HTMLElement | undefined;
   if (!target) return false;
-  target.scrollIntoView({ block: "center", inline: "center" });
-  await new Promise((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(resolve))
-  );
   if (!target.isConnected || !probe.isRendered(target)) return false;
   target.setAttribute(attr, token);
   return true;
@@ -273,22 +259,18 @@ const markNthForClick = async (
 // on-screen requirement, since the trusted click scrolls the target into view
 // before dispatching. Disabled-ness is asked of both, because a host can carry
 // an `aria-disabled` its inner control does not.
-const markTrustedAction = async (
+const markTrustedAction = (
   probe: ProbeApi,
   action: string,
   token: string,
   attr: string,
-): Promise<boolean> => {
+): boolean => {
   const isDisabled = (element: HTMLElement): boolean =>
     element.hasAttribute("disabled") ||
     element.getAttribute("aria-disabled") === "true";
 
   for (const element of probe.collect(`[data-ui-action="${action}"]`)) {
     const target = element as HTMLElement;
-    target.scrollIntoView({ block: "center", inline: "center" });
-    await new Promise((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(resolve))
-    );
     const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
       | HTMLElement
       | null) ?? target;
@@ -328,12 +310,11 @@ const markTrustedAction = async (
 
 // Resolve once the shell's reactive view has caught up to runtime state and is
 // interactive, so a click lands on a bound handler. Waits for the shell to
-// expose `viewSettled` (notification-driven), then awaits the settle.
-async function settleView(
-  page: Page,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
-): Promise<void> {
-  await waitForCondition(page, viewSettledReady, { timeout });
+// expose `viewSettled` (notification-driven), then awaits the settle. Neither
+// wait takes a timeout: the readiness poll carries `waitForCondition`'s built-in
+// safety net, and the settle itself awaits a real promise.
+export async function settleView(page: Page): Promise<void> {
+  await waitForCondition(page, viewSettledReady);
   await awaitViewSettled(page);
 }
 
@@ -386,7 +367,6 @@ export async function clickTrustedAction(
     // click it exactly once. Marking attaches the provenance listener, so the
     // single click is the trusted dispatch we record.
     await waitForCondition(page, markTrustedAction, {
-      timeout,
       args: [action, token, CLICK_TARGET_ATTR],
     });
     const button = await page.waitForSelector(
@@ -426,7 +406,7 @@ export async function submitViaEnter(
   inputSelector: string,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  await settleView(page, { timeout });
+  await settleView(page);
   const input = await page.waitForSelector(inputSelector, {
     strategy: "pierce",
     timeout,
@@ -442,11 +422,6 @@ export async function clickTrustedActionAndWaitForText(
   text: string,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  // Single timeout budget shared across the fast path, settle, click, and the
-  // wait for the effect.
-  const deadline = Date.now() + timeout;
-  const remaining = () => Math.max(1, deadline - Date.now());
-
   let actionProbe: TrustedActionProbe | undefined;
   let textProbe: TextProbe | undefined;
 
@@ -460,8 +435,8 @@ export async function clickTrustedActionAndWaitForText(
   // trusted click lands; re-dispatching on a later tick is what double-fires
   // and corrupts the event provenance, so we never re-click.
   try {
-    await settleView(page, { timeout: remaining() });
-    await clickTrustedAction(page, action, { timeout: remaining() });
+    await settleView(page);
+    await clickTrustedAction(page, action, { timeout });
   } catch (cause) {
     actionProbe = await readTrustedActionProbe(page, action).catch(() =>
       undefined
@@ -480,9 +455,7 @@ export async function clickTrustedActionAndWaitForText(
   // optimistic perUser/perSpace write whose chip trails the commit is caught by
   // the same wait.
   try {
-    await waitForTextWhileSettling(page, selector, text, {
-      timeout: remaining(),
-    });
+    await waitForTextWhileSettling(page, selector, text, { timeout });
   } catch (cause) {
     actionProbe ??= await readTrustedActionProbe(page, action).catch(() =>
       undefined
@@ -501,11 +474,9 @@ export async function waitForText(
   page: Page,
   selector: string,
   text: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   try {
     await waitForCondition(page, textPresent, {
-      timeout,
       args: [selector, text],
     });
   } catch (cause) {
@@ -523,11 +494,9 @@ export async function waitForTextAbsent(
   page: Page,
   selector: string,
   text: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   try {
     await waitForCondition(page, textAbsent, {
-      timeout,
       args: [selector, text],
     });
   } catch (cause) {
@@ -553,7 +522,6 @@ export async function fillCfInput(
       await presentation.typeIntoCfInput(selector, value, timeout);
     } else {
       await waitForCondition(page, fillAndVerify, {
-        timeout,
         args: [selector, value],
       });
     }
@@ -600,18 +568,15 @@ export async function readCfInputValue(
 
 export async function waitForRuntimeIdle(
   page: Page,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  await waitForCondition(page, runtimeIdle, { timeout });
+  await waitForCondition(page, runtimeIdle);
 }
 
 export async function waitForActiveSpaceRoot(
   page: Page,
   expectedSpace: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   await waitForCondition(page, activeSpaceRootReady, {
-    timeout,
     args: [expectedSpace],
   });
 }
@@ -620,11 +585,9 @@ export async function waitForDisabled(
   page: Page,
   selector: string,
   disabled: boolean,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   try {
     await waitForCondition(page, buttonDisabledIs, {
-      timeout,
       args: [selector, disabled],
     });
   } catch (cause) {
@@ -651,7 +614,6 @@ export async function clickCfButton(
     // exactly once; the mark is the predicate, so the re-check on each DOM
     // mutation retries finding the button without re-clicking anything.
     await waitForCondition(page, markForClick, {
-      timeout,
       args: [selector, token, CLICK_TARGET_ATTR],
     });
   } catch (cause) {
@@ -687,7 +649,6 @@ export async function clickNthCfButton(
   const token = `cf-nth-button-${crypto.randomUUID()}`;
   try {
     await waitForCondition(page, markNthForClick, {
-      timeout,
       args: [selector, index, token, CLICK_TARGET_ATTR],
     });
   } catch (cause) {
@@ -733,10 +694,6 @@ export async function clickCfButtonAndWaitForText(
   text: string,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  // Single timeout budget shared across settle, click, and wait-for-effect.
-  const deadline = Date.now() + timeout;
-  const remaining = () => Math.max(1, deadline - Date.now());
-
   let textProbe: TextProbe | undefined;
 
   // Fast path: the effect may already be present (idempotent re-entry).
@@ -752,8 +709,8 @@ export async function clickCfButtonAndWaitForText(
   // can double-fire, and against a dismissable overlay the repeat clicks
   // dismiss it). See docs/development/UI_TESTING.md.
   try {
-    await settleView(page, { timeout: remaining() });
-    await clickCfButton(page, buttonSelector, { timeout: remaining() });
+    await settleView(page);
+    await clickCfButton(page, buttonSelector, { timeout });
   } catch (cause) {
     textProbe = await readTextProbe(page, textSelector).catch(() => undefined);
     throw new Error(
@@ -769,9 +726,7 @@ export async function clickCfButtonAndWaitForText(
   // few cycles after the click — including an optimistic perUser/perSpace write
   // whose chip trails the commit — is captured without ever re-clicking.
   try {
-    await waitForTextWhileSettling(page, textSelector, text, {
-      timeout: remaining(),
-    });
+    await waitForTextWhileSettling(page, textSelector, text, { timeout });
   } catch (cause) {
     textProbe = await readTextProbe(page, textSelector).catch(() => undefined);
     throw new Error(
@@ -785,11 +740,10 @@ export async function clickCfButtonAndWaitForText(
 
 export async function waitForRuntimeSynced(
   page: Page,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   // Quiescence isn't a per-space question: allSynced awaits every space the
   // worker has opened.
-  await waitForCondition(page, runtimeSynced, { timeout });
+  await waitForCondition(page, runtimeSynced);
 }
 
 export type SchedulerLoadSummary = {

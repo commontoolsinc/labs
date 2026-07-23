@@ -94,7 +94,6 @@ export class PresentationInteractions {
       input?.scrollIntoView({ block: "center", inline: "center" });
     });
     await waitForCondition(this.#page, cfInputIsFillable, {
-      timeout,
       args: [selector],
     });
     await this.#moveCursorToElement(host);

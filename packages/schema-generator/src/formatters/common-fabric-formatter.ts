@@ -8,6 +8,7 @@ import {
   wrapperKindToBrand,
 } from "../typescript/cell-brand.ts";
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
+import { numberFromExpression } from "../typescript/numeric-expression.ts";
 import type {
   AsCellEntry,
   JSONSchemaMutable,
@@ -1993,9 +1994,10 @@ export class CommonFabricFormatter implements TypeFormatter {
       return expr.text;
     }
 
-    // Handle numeric literals
-    if (ts.isNumericLiteral(expr)) {
-      return Number(expr.text);
+    // Handle numeric literals, including signed and non-finite ones
+    const numeric = numberFromExpression(expr, context.typeChecker);
+    if (numeric !== undefined) {
+      return numeric;
     }
 
     // Handle boolean literals
