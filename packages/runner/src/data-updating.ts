@@ -1,4 +1,5 @@
 import { isObject, isRecord } from "@commonfabric/utils/types";
+import { forEachSubschema } from "./schema-walk.ts";
 import {
   fabricFromNativeValue,
   type FabricPlainObject,
@@ -159,6 +160,14 @@ export const schemaIfcOverlapsPath = (
   if (schema === undefined || typeof schema === "boolean") {
     return false;
   }
+  // Keyword descent via the shared walk. This predicate only decides
+  // whether a schema-policy input MIGHT cover the written path — a true
+  // records and evaluates the input — so over-matching errs safe. That is
+  // why `items`/`additionalProperties` keep unconditional `*` segments even
+  // beside prefixItems/properties (unlike walkIfcSchema's minted entries,
+  // where a `*` covering named positions would over-taint them), and why
+  // combinator branches and `not` descend at the same path. Tuple slots
+  // overlap at their concrete index.
   const visit = (
     current: JSONSchema,
     path: readonly string[],
@@ -173,37 +182,16 @@ export const schemaIfcOverlapsPath = (
     ) {
       return true;
     }
-    if (current.type === "object" && isRecord(current.properties)) {
-      for (const [key, child] of Object.entries(current.properties)) {
-        if (visit(child as JSONSchema, [...path, key])) {
-          return true;
-        }
-      }
-    }
-    if (current.type === "array") {
-      // Tuple slots overlap at their concrete index. `items` keeps its
-      // unconditional `*` segment even beside prefixItems: this predicate
-      // only decides whether a schema-policy input MIGHT cover the written
-      // path, so over-matching errs safe (the input is recorded and
-      // evaluated), unlike walkIfcSchema's minted entries where a `*`
-      // covering the slots would over-taint them.
-      if (Array.isArray(current.prefixItems)) {
-        for (let index = 0; index < current.prefixItems.length; index++) {
-          if (
-            visit(
-              current.prefixItems[index] as JSONSchema,
-              [...path, String(index)],
-            )
-          ) {
-            return true;
-          }
-        }
-      }
-      if (current.items !== undefined) {
-        return visit(current.items, [...path, "*"]);
-      }
-    }
-    return false;
+    return forEachSubschema(current, (child, keyword, key, index) => {
+      const childPath = keyword === "properties"
+        ? [...path, key!]
+        : keyword === "prefixItems"
+        ? [...path, String(index!)]
+        : keyword === "items" || keyword === "additionalProperties"
+        ? [...path, "*"]
+        : path;
+      return visit(child, childPath);
+    });
   };
   return visit(schema, basePath);
 };

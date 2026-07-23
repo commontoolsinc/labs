@@ -2170,4 +2170,21 @@ describe("schemaIfcOverlapsPath", () => {
     } as const satisfies JSONSchema;
     expect(schemaIfcOverlapsPath(restSchema, [], ["list", "3"])).toBe(true);
   });
+
+  it("sees labels inside combinator branches (shared-walk descent)", () => {
+    // Gained by the forEachSubschema rework: ifc under an anyOf branch was
+    // previously invisible to the predicate (fail-open).
+    const branchSchema = {
+      type: "object",
+      properties: {
+        field: {
+          anyOf: [
+            { type: "string", ifc: { confidentiality: ["x"] } },
+            { type: "number" },
+          ],
+        },
+      },
+    } as const satisfies JSONSchema;
+    expect(schemaIfcOverlapsPath(branchSchema, [], ["field"])).toBe(true);
+  });
 });
