@@ -259,7 +259,6 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
         edges: allEdgesFromBase,
       }),
     },
-    model: "anthropic:claude-sonnet-4-5" as const,
     builtinTools: false,
     resultSchema: toSchema<GraphAnnotations>(),
   };
