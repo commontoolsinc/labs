@@ -357,9 +357,9 @@ const incrementAtPath = (
   if (path.length === 0) {
     throw new Error("increment requires a non-root path");
   }
-  if (by === 0) {
+  if (!Number.isFinite(by) || by === 0) {
     throw new Error(
-      `increment requires a non-zero amount at ${encodePointer(path)}`,
+      `increment requires a finite non-zero amount at ${encodePointer(path)}`,
     );
   }
   const current = readNumberOrAbsent(root, path);
