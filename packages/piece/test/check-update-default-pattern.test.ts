@@ -1324,11 +1324,9 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(after.key("count").get()).toBe(0);
   });
 
-  it("failed swap-setup leaves the running pattern in place", async () => {
-    // The fail-closed half of the swap-setup contract: when the incoming
-    // pattern's argument schema rejects the existing argument, the watcher
-    // logs pattern-swap-setup-error and must NOT tear down the running
-    // nodes — a bad update leaves a working piece, not a dead one.
+  it("failed root setup leaves the running pattern in place", async () => {
+    // Default-root updates stage setup in the update transaction. An argument
+    // validation failure leaves the existing identity and running graph intact.
     const SOURCE_INCOMPATIBLE = [
       "import { pattern } from 'commonfabric';",
       "export default pattern<{ mustHave: string }>(({ mustHave }) => ({",
@@ -1349,19 +1347,14 @@ describe("checkAndUpdateDefaultPattern", () => {
     stub.setSource(SOURCE_INCOMPATIBLE);
     const restore = shadowLoadProbe(staleRef.identity, "undefined");
     try {
-      // The update itself proceeds (identity swaps at the meta layer)…
-      expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
+      expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
     } finally {
       restore();
     }
     await runtime.idle();
-    // …but the swap-setup for the incompatible program fails closed: the
-    // piece is not left dead (starting it does not throw), and the failure
-    // was logged rather than swallowed.
     const after = (await manager.getDefaultPattern(true))!;
     await runtime.idle();
-    // Functional pin, not just existence: the OLD pattern's nodes are still
-    // the ones running — its result reads back — after the refused swap.
+    expect(getPatternIdentityRef(after)).toEqual(staleRef);
     expect(after.key("marker").get()).toBe("v1");
   });
 
@@ -1477,11 +1470,25 @@ describe("checkAndUpdateDefaultPattern", () => {
       },
     });
     const root = (await manager.getDefaultPattern(false))!;
-    const staleRef = getPatternIdentityRef(root)!;
     await manager.stopPiece(root);
 
     stub.setSource(SOURCE_V3_HANDLER);
-    const restoreProbe = shadowLoadProbe(staleRef.identity, "undefined");
+    const currentPattern = await runtime.patternManager.compilePattern(
+      {
+        main: HOME_PATTERN_URL,
+        files: [{ name: HOME_PATTERN_URL, contents: SOURCE_V3_HANDLER }],
+      },
+      { space: manager.getSpace() },
+    );
+    const currentRef = runtime.patternManager.getArtifactEntryRef(
+      currentPattern,
+    )!;
+    const metadataUpdate = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", currentRef);
+    });
+    expect(metadataUpdate.error).toBeUndefined();
+    runtime.experimental.systemPatternAutoUpdate = false;
+
     const rt = runtime as unknown as {
       runSynced: (...args: unknown[]) => Promise<unknown>;
     };
@@ -1495,7 +1502,6 @@ describe("checkAndUpdateDefaultPattern", () => {
       thrown = error;
     } finally {
       rt.runSynced = originalRunSynced;
-      restoreProbe();
     }
     // The original start failure surfaces, not the repair's own error.
     expect(String(thrown)).toContain("Handler used as lift");
