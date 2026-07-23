@@ -451,6 +451,7 @@ export class RuntimeProcessor {
   private subscriptions = new Map<string, Cancel>();
   private telemetry: RuntimeTelemetry;
   #telemetryEnabled = false;
+  #releaseDetailedEventCommitTelemetry: (() => void) | undefined;
 
   // VDOM mounts: mountId -> { reconciler, cancel }
   private vdomMounts = new Map<
@@ -728,6 +729,8 @@ export class RuntimeProcessor {
     this._isDisposed = true;
     this.disposingPromise = (async () => {
       this.telemetry.removeEventListener("telemetry", this.#onTelemetry);
+      this.#releaseDetailedEventCommitTelemetry?.();
+      this.#releaseDetailedEventCommitTelemetry = undefined;
       try {
         this.#siteTableCancel?.();
         this.#siteTableCancel = undefined;
@@ -1344,8 +1347,16 @@ export class RuntimeProcessor {
   }
 
   setTelemetryEnabled(request: SetTelemetryEnabledRequest): void {
+    if (request.enabled === this.#telemetryEnabled) return;
     this.#telemetryEnabled = request.enabled;
     this.runtime.scheduler.setEventPreflightTelemetryEnabled(request.enabled);
+    if (request.enabled) {
+      this.#releaseDetailedEventCommitTelemetry = this.telemetry
+        .retainDetailedEventCommitTelemetry();
+    } else {
+      this.#releaseDetailedEventCommitTelemetry?.();
+      this.#releaseDetailedEventCommitTelemetry = undefined;
+    }
   }
 
   resetLoggerBaselines(_: any): void {
