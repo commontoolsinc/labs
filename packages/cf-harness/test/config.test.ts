@@ -175,7 +175,7 @@ Deno.test("resolveHarnessConfig normalizes the gateway base URL", () => {
   assertEquals(config.cfcEnforcementModeSource, "default");
 });
 
-Deno.test("resolveHarnessConfig represents openai-codex without gateway fields", () => {
+Deno.test("resolveHarnessConfig preserves legacy gateway fields for openai-codex callers", () => {
   const config = resolveHarnessConfig({
     modelProvider: "openai-codex",
     credentialOwnerKey: "loom:user-1",
@@ -183,6 +183,8 @@ Deno.test("resolveHarnessConfig represents openai-codex without gateway fields",
   assertEquals(config, {
     modelProvider: "openai-codex",
     credentialOwnerKey: "loom:user-1",
+    gatewayBaseUrl: DEFAULT_GATEWAY_BASE_URL,
+    gatewayAuthMode: "bearer",
     skillScriptExecutionTarget: "sandbox",
     cfcEnforcementMode: "enforce-explicit",
     cfcEnforcementModeSource: "default",

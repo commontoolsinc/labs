@@ -213,6 +213,7 @@ export const exchangeOpenAICodexAuthorizationCode = async (options: {
       OPENAI_CODEX_TOKEN_URL,
       {
         method: "POST",
+        redirect: "error",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
           grant_type: "authorization_code",
@@ -265,7 +266,8 @@ export class OpenAICodexCredentialResolver {
     return this.#ownerKey;
   }
 
-  async resolve(): Promise<OpenAICodexOAuthCredential> {
+  async resolve(signal?: AbortSignal): Promise<OpenAICodexOAuthCredential> {
+    if (signal?.aborted) throw abortReason(signal);
     let current: OpenAICodexOAuthCredential | undefined;
     try {
       current = await this.#store.get(
@@ -291,6 +293,7 @@ export class OpenAICodexCredentialResolver {
         this.#ownerKey,
         OPENAI_CODEX_PROVIDER_ID,
         async (latest) => {
+          if (signal?.aborted) throw abortReason(signal);
           if (!latest) {
             throw new OpenAICodexAuthError(
               "revoked",
@@ -304,14 +307,17 @@ export class OpenAICodexCredentialResolver {
           try {
             response = await this.#fetchFn(OPENAI_CODEX_TOKEN_URL, {
               method: "POST",
+              redirect: "error",
               headers: { "Content-Type": "application/x-www-form-urlencoded" },
               body: new URLSearchParams({
                 grant_type: "refresh_token",
                 refresh_token: latest.refreshToken,
                 client_id: OPENAI_CODEX_CLIENT_ID,
               }),
+              signal,
             });
           } catch (error) {
+            if (signal?.aborted) throw abortReason(signal);
             throw new OpenAICodexAuthError(
               "network",
               "OpenAI Codex token refresh failed before receiving a response",
@@ -322,6 +328,7 @@ export class OpenAICodexCredentialResolver {
         },
       );
     } catch (error) {
+      if (signal?.aborted) throw abortReason(signal);
       if (error instanceof OpenAICodexAuthError) throw error;
       throw new OpenAICodexAuthError(
         "storage",
@@ -349,6 +356,7 @@ export const startOpenAICodexDeviceAuthorization = async (options: {
     OPENAI_CODEX_DEVICE_START_URL,
     {
       method: "POST",
+      redirect: "error",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ client_id: OPENAI_CODEX_CLIENT_ID }),
       signal: options.signal,
@@ -423,6 +431,7 @@ export const completeOpenAICodexDeviceAuthorization = async (options: {
     await wait(intervalMs, options.signal);
     const response = await fetchFn(OPENAI_CODEX_DEVICE_TOKEN_URL, {
       method: "POST",
+      redirect: "error",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         device_auth_id: options.device.deviceAuthId,
@@ -526,7 +535,6 @@ export const loginOpenAICodexWithBrowser = async (options: {
         return new Response("Not found", { status: 404 });
       }
       if (url.searchParams.get("state") !== flow.state) {
-        settle({ status: "failed", error: new Error("OAuth state mismatch") });
         return new Response("State mismatch", { status: 400 });
       }
       const code = url.searchParams.get("code");

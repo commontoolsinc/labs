@@ -225,13 +225,21 @@ the local filesystem credential store. A trusted Loom host must:
   the Loom run manifest;
 - resolve that opaque owner in Loom's encrypted secret backend and inject an
   owner-bound credential resolver/model client into `cf-harness`;
-- apply the same binding to batch, resume, subagent, and interactive runs.
+- create one interactive service instance per authenticated credential owner; do
+  not multiplex owners through one service process;
+- apply the same host-verified binding to batch dispatch before enabling Loom.
 
 Tokens and account ids must not be placed in manifests, Cells, Spaces, stdio
 messages, session databases, command lines, or artifacts. A Loom Codex run
 without an authenticated owner reference or injected resolver fails closed. For
 interactive service processes, inject the owner-bound client through
-`basePromptLoopOptions`; do not accept a token through the NDJSON request.
+`basePromptLoopOptions` and its matching full owner reference through
+`credentialOwner`. The service constructor rejects Codex without this fixed
+process owner. Do not accept an owner or token through the NDJSON request.
+
+This package provides the Loom integration seam; the Loom host still must
+authenticate the initiating principal, enforce workspace policy, and prove
+cross-user isolation before product rollout.
 
 The manifest-side, non-secret selection looks like:
 

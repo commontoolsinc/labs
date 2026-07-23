@@ -30,6 +30,7 @@ import {
   resolveHarnessChatPolicy,
 } from "./contracts/interactive-chat.ts";
 import { BROWSER_SUBAGENT_PROFILE } from "./contracts/subagent.ts";
+import type { HarnessCredentialOwnerRef } from "./contracts/run-manifest.ts";
 import type {
   HarnessAssistantTranscriptMessage,
   HarnessToolTranscriptMessage,
@@ -55,6 +56,11 @@ export type HarnessInteractiveChatEventListener = (
 
 export interface CreateHarnessInteractiveChatServiceOptions {
   basePromptLoopOptions?: CreateHarnessPromptLoopOptions;
+  /**
+   * The single authenticated owner bound to this service process. Required
+   * for openai-codex; interactive requests cannot select or replace it.
+   */
+  credentialOwner?: HarnessCredentialOwnerRef;
   createPromptLoop?: HarnessInteractivePromptLoopFactory;
   now?: () => string;
   randomUUID?: () => string;
@@ -302,6 +308,23 @@ export class HarnessInteractiveChatService {
 
   constructor(options: CreateHarnessInteractiveChatServiceOptions = {}) {
     this.#basePromptLoopOptions = options.basePromptLoopOptions ?? {};
+    const codexConfigured =
+      this.#basePromptLoopOptions.modelProvider === "openai-codex" ||
+      this.#basePromptLoopOptions.modelClient?.providerId === "openai-codex";
+    if (codexConfigured && options.credentialOwner === undefined) {
+      throw new Error(
+        "openai-codex interactive services require one explicit authenticated credential owner",
+      );
+    }
+    if (
+      codexConfigured &&
+      this.#basePromptLoopOptions.credentialOwnerKey !==
+        options.credentialOwner!.ownerKey
+    ) {
+      throw new Error(
+        "interactive service credential owner does not match the owner-bound model client",
+      );
+    }
     this.#createPromptLoop = options.createPromptLoop ??
       defaultPromptLoopFactory;
     this.#now = options.now ?? (() => new Date().toISOString());

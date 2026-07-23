@@ -82,6 +82,7 @@ Deno.test("Codex credential refresh is serialized per owner and persists rotatio
     ownerKey: "loom:user-1",
     now: () => 10_000,
     fetchFn: (_input, init) => {
+      assertEquals(init?.redirect, "error");
       refreshes += 1;
       assertEquals(String(init?.body).includes("refresh-old"), true);
       return Promise.resolve(
@@ -148,6 +149,7 @@ Deno.test("Codex browser login validates state and persists only after exchange"
       assertEquals(response.status, 200);
     },
     fetchFn: (_input, init) => {
+      assertEquals(init?.redirect, "error");
       assertStringIncludes(String(init?.body), "code=browser-code");
       return Promise.resolve(
         new Response(
@@ -174,29 +176,100 @@ Deno.test("Codex browser login validates state and persists only after exchange"
   );
 });
 
-Deno.test("Codex browser login rejects CSRF mismatch without token exchange", async () => {
+Deno.test("Codex credential refresh honors pre-abort and releases its owner lock on mid-refresh abort", async () => {
+  const store = new InMemoryHarnessCredentialStore();
+  await store.set("local", "openai-codex", {
+    type: "oauth",
+    providerId: "openai-codex",
+    accessToken: "expired-access",
+    refreshToken: "refresh-secret",
+    expiresAt: 0,
+    accountId: "acct-1",
+  });
+  let fetches = 0;
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const resolver = new OpenAICodexCredentialResolver({
+    store,
+    ownerKey: "local",
+    now: () => 100_000,
+    fetchFn: (_input, init) => {
+      fetches += 1;
+      assertEquals(init?.redirect, "error");
+      markStarted();
+      return new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        signal?.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+      });
+    },
+  });
+  const preAborted = new AbortController();
+  preAborted.abort(new DOMException("pre-aborted refresh", "AbortError"));
+  await assertRejects(
+    () => resolver.resolve(preAborted.signal),
+    DOMException,
+    "pre-aborted refresh",
+  );
+  assertEquals(fetches, 0);
+
+  const midRefresh = new AbortController();
+  const resolving = resolver.resolve(midRefresh.signal);
+  await started;
+  midRefresh.abort(new DOMException("mid-refresh abort", "AbortError"));
+  await assertRejects(
+    () => resolving,
+    DOMException,
+    "mid-refresh abort",
+  );
+  assertEquals(fetches, 1);
+  await store.set("local", "openai-codex", {
+    type: "oauth",
+    providerId: "openai-codex",
+    accessToken: "other-access",
+    refreshToken: "other-refresh",
+    expiresAt: 4_000_000_000_000,
+    accountId: "other-account",
+  });
+});
+
+Deno.test("Codex browser login ignores wrong-state callbacks and accepts the valid callback", async () => {
   const store = new InMemoryHarnessCredentialStore();
   let exchanges = 0;
-  await assertRejects(
-    () =>
-      loginOpenAICodexWithBrowser({
-        authService: new OpenAICodexAuthService(store, "local"),
-        onAuthorizationUrl: async () => {
-          const response = await fetch(
-            "http://localhost:1455/auth/callback?code=bad&state=wrong",
-          );
-          assertEquals(response.status, 400);
-        },
-        fetchFn: () => {
-          exchanges += 1;
-          return Promise.reject(new Error("must not exchange"));
-        },
-      }),
-    Error,
-    "OAuth state mismatch",
-  );
-  assertEquals(exchanges, 0);
-  assertEquals(await store.get("local", "openai-codex"), undefined);
+  const result = await loginOpenAICodexWithBrowser({
+    authService: new OpenAICodexAuthService(store, "local"),
+    onAuthorizationUrl: async (authorizationUrl) => {
+      const wrong = await fetch(
+        "http://localhost:1455/auth/callback?code=bad&state=wrong",
+      );
+      assertEquals(wrong.status, 400);
+      const state = new URL(authorizationUrl).searchParams.get("state");
+      const valid = await fetch(
+        `http://localhost:1455/auth/callback?code=good&state=${state}`,
+      );
+      assertEquals(valid.status, 200);
+    },
+    fetchFn: (_input, init) => {
+      exchanges += 1;
+      assertStringIncludes(String(init?.body), "code=good");
+      return Promise.resolve(
+        new Response(JSON.stringify({
+          access_token: jwt({
+            "https://api.openai.com/auth": {
+              chatgpt_account_id: "acct-after-wrong-state",
+            },
+          }),
+          refresh_token: "refresh-after-wrong-state",
+          expires_in: 3600,
+        })),
+      );
+    },
+  });
+  assertEquals(exchanges, 1);
+  assertEquals(result.accountId, "acct-after-wrong-state");
 });
 
 Deno.test("Codex browser login cancellation closes the callback listener", async () => {

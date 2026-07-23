@@ -38,22 +38,17 @@ interface HarnessCommonConfig {
   runManifestPath?: string;
 }
 
-export type HarnessConfig =
-  & HarnessCommonConfig
-  & (
-    | {
-      modelProvider: "openai-compatible-gateway";
-      gatewayBaseUrl: string;
-      gatewayAuthMode: HarnessGatewayAuthMode;
-      credentialOwnerKey?: never;
-    }
-    | {
-      modelProvider: "openai-codex";
-      credentialOwnerKey: string;
-      gatewayBaseUrl?: never;
-      gatewayAuthMode?: never;
-    }
-  );
+/**
+ * Resolved harness configuration. The gateway fields remain required for
+ * backward-compatible library access; `modelProvider` determines whether they
+ * are active. The Codex provider ignores them and uses `credentialOwnerKey`.
+ */
+export interface HarnessConfig extends HarnessCommonConfig {
+  modelProvider: HarnessModelProviderId;
+  gatewayBaseUrl: string;
+  gatewayAuthMode: HarnessGatewayAuthMode;
+  credentialOwnerKey?: string;
+}
 
 export interface ResolveHarnessConfigOptions {
   modelProvider?: HarnessModelProviderId;
@@ -209,18 +204,19 @@ export const resolveHarnessConfig = (
     cfcEnforcementMode: resolveCfcEnforcementMode(options),
     cfcEnforcementModeSource: resolveCfcEnforcementModeSource(options),
   };
-  return modelProvider === "openai-codex"
-    ? {
-      ...common,
-      modelProvider,
-      credentialOwnerKey: options.credentialOwnerKey ?? "local",
-    }
-    : {
-      ...common,
-      modelProvider,
-      gatewayBaseUrl: normalizeGatewayBaseUrl(
-        options.gatewayBaseUrl ?? DEFAULT_GATEWAY_BASE_URL,
-      ),
-      gatewayAuthMode: resolveGatewayAuthMode(options),
-    };
+  return {
+    ...common,
+    modelProvider,
+    gatewayBaseUrl: normalizeGatewayBaseUrl(
+      modelProvider === "openai-compatible-gateway"
+        ? options.gatewayBaseUrl ?? DEFAULT_GATEWAY_BASE_URL
+        : DEFAULT_GATEWAY_BASE_URL,
+    ),
+    gatewayAuthMode: modelProvider === "openai-compatible-gateway"
+      ? resolveGatewayAuthMode(options)
+      : "bearer",
+    ...(modelProvider === "openai-codex"
+      ? { credentialOwnerKey: options.credentialOwnerKey ?? "local" }
+      : {}),
+  };
 };

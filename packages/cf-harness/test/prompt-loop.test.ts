@@ -30,7 +30,10 @@ import type {
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
-import type { OpenAIChatCompletionRequest } from "../src/gateway/openai-client.ts";
+import {
+  type OpenAIChatCompletionRequest,
+  OpenAICompatibleGatewayClient,
+} from "../src/gateway/openai-client.ts";
 import type { HarnessRunState } from "../src/run-state.ts";
 import type { HarnessSkillActivations } from "../src/contracts/skill.ts";
 import type { HarnessModelClient } from "../src/model/client.ts";
@@ -196,6 +199,26 @@ Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through
   assertEquals(result.transcript[2]?.role, "tool");
 });
 
+Deno.test("CfHarnessPromptLoop preserves the public gatewayClient compatibility surface", () => {
+  const gatewayClient = new OpenAICompatibleGatewayClient({
+    baseUrl: "https://llm.stage.commontools.dev/",
+    authMode: "none",
+  });
+  const loop = new CfHarnessPromptLoop({
+    gatewayClient,
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-gateway-client-compat",
+      model: "gpt-5.4",
+      gatewayAuthMode: "none",
+      cfcEnforcementMode: "disabled",
+    }),
+  });
+
+  const typedGatewayClient: OpenAICompatibleGatewayClient = loop.gatewayClient;
+  assertEquals(typedGatewayClient, gatewayClient);
+});
+
 Deno.test("Codex parent and child loops share one serialized credential refresh", async () => {
   const jwt = (accountId: string): string => {
     const encode = (value: unknown) =>
@@ -344,12 +367,18 @@ Deno.test("Codex profile model overrides fail the child without aborting the par
     throw new Error("expected delegate_task tool message");
   }
   const output = JSON.parse(toolMessage.content) as {
-    subagent: { status: string; summary: string };
+    subagent: {
+      status: string;
+      summary: string;
+      runState: { status: string; failureCount: number };
+    };
   };
 
   assertEquals(result.finalAssistantText, "Parent recovered.");
   assertEquals(modelTurns, 2);
   assertEquals(output.subagent.status, "failed");
+  assertEquals(output.subagent.runState.status, "failed");
+  assertEquals(output.subagent.runState.failureCount, 1);
   assertStringIncludes(
     output.subagent.summary,
     "is not available from provider openai-codex",

@@ -64,6 +64,7 @@ Deno.test("Codex Responses client sends the pinned owner-authenticated request",
   assertEquals(headers.get("chatgpt-account-id"), "acct-123");
   assertEquals(headers.get("originator"), "cf-harness");
   assertEquals(headers.get("session-id"), "run-123");
+  assertEquals(request?.init?.redirect, "error");
   const body = JSON.parse(String(request?.init?.body));
   assertEquals(body.store, false);
   assertEquals(body.stream, true);
@@ -430,11 +431,13 @@ Deno.test("Codex Responses client rejects conflicting duplicate tool-call ids", 
 Deno.test("Codex model discovery is live, owner-authenticated, and ordered", async () => {
   let requestedUrl = "";
   let requestedHeaders = new Headers();
+  let requestedRedirect: RequestRedirect | undefined;
   const client = new OpenAICodexResponsesClient({
     credentialResolver: { resolve: () => Promise.resolve(credential) },
     fetchFn: (input, init) => {
       requestedUrl = String(input);
       requestedHeaders = new Headers(init?.headers);
+      requestedRedirect = init?.redirect;
       return Promise.resolve(
         new Response(
           JSON.stringify({
@@ -471,6 +474,7 @@ Deno.test("Codex model discovery is live, owner-authenticated, and ordered", asy
   );
   assertEquals(requestedHeaders.get("authorization"), "Bearer access-secret");
   assertEquals(requestedHeaders.get("chatgpt-account-id"), "acct-123");
+  assertEquals(requestedRedirect, "error");
   assertEquals(models.map((model) => model.id), ["model-b", "model-a"]);
   assertEquals(models[0].inputModalities, ["text", "image"]);
   assertEquals(models[0].supportedReasoningEfforts, ["high"]);
@@ -552,7 +556,12 @@ Deno.test("Codex Responses abort cancels an active stream without retry", async 
     },
   });
   const client = new OpenAICodexResponsesClient({
-    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    credentialResolver: {
+      resolve: (signal) => {
+        assertEquals(signal, controller.signal);
+        return Promise.resolve(credential);
+      },
+    },
     fetchFn: () => {
       requests += 1;
       return Promise.resolve(new Response(body, { status: 200 }));
@@ -572,6 +581,67 @@ Deno.test("Codex Responses abort cancels an active stream without retry", async 
   await assertRejects(() => completion, DOMException, "cancel test");
   assertEquals(canceled, true);
   assertEquals(requests, 1);
+});
+
+Deno.test("Codex Responses returns on the first terminal event and cancels a keep-alive stream", async () => {
+  let canceled = false;
+  const payload = JSON.stringify({
+    type: "response.completed",
+    response: {
+      status: "completed",
+      output: [{
+        type: "message",
+        content: [{ type: "output_text", text: "done before EOF" }],
+      }],
+    },
+  });
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(`data: ${payload}\n\n`));
+    },
+    cancel() {
+      canceled = true;
+    },
+  });
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: () => Promise.resolve(new Response(body, { status: 200 })),
+  });
+
+  const result = await client.complete({
+    model: "gpt-5.4",
+    transcript: [{ role: "user", content: "hi" }],
+    tools: [],
+    nativeModelToolIds: [],
+    runId: "run-terminal-keep-alive",
+  });
+
+  assertEquals(result.assistant.content, "done before EOF");
+  assertEquals(canceled, true);
+});
+
+Deno.test("Codex Responses recognizes response.failed as terminal", async () => {
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: () =>
+      Promise.resolve(sse({
+        type: "response.failed",
+        response: { status: "failed", output: [] },
+      })),
+  });
+
+  await assertRejects(
+    () =>
+      client.complete({
+        model: "gpt-5.4",
+        transcript: [{ role: "user", content: "hi" }],
+        tools: [],
+        nativeModelToolIds: [],
+        runId: "run-response-failed",
+      }),
+    Error,
+    "ended with status failed",
+  );
 });
 
 Deno.test("Codex Responses cancels the stream after malformed SSE", async () => {

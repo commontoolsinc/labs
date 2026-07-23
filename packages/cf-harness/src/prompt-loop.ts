@@ -1629,6 +1629,7 @@ const evaluateToolPolicy = (
 export class CfHarnessPromptLoop {
   readonly engine: CfHarnessEngine;
   readonly modelClient: HarnessModelClient;
+  readonly #gatewayClient?: OpenAICompatibleGatewayClient;
   readonly #maxModelTurns: number;
   readonly #allowedToolIds: ReadonlySet<BuiltinToolId>;
   readonly #nativeModelToolIds: readonly LLMNativeModelToolId[];
@@ -1638,14 +1639,8 @@ export class CfHarnessPromptLoop {
 
   constructor(options: CreateHarnessPromptLoopOptions = {}) {
     this.engine = options.engine ?? new CfHarnessEngine(options);
-    if (options.modelClient !== undefined) {
-      this.modelClient = options.modelClient;
-    } else if (this.engine.config.modelProvider === "openai-codex") {
-      throw new Error(
-        "openai-codex requires an injected owner-bound model client",
-      );
-    } else {
-      const gatewayClient = options.gatewayClient ??
+    if (this.engine.config.modelProvider === "openai-compatible-gateway") {
+      this.#gatewayClient = options.gatewayClient ??
         new OpenAICompatibleGatewayClient({
           baseUrl: this.engine.config.gatewayBaseUrl,
           authMode: this.engine.config.gatewayAuthMode,
@@ -1653,7 +1648,19 @@ export class CfHarnessPromptLoop {
           apiKeySource: options.apiKeySource,
           fetchFn: options.fetchFn,
         });
-      this.modelClient = new OpenAICompatibleGatewayModelClient(gatewayClient);
+    } else {
+      this.#gatewayClient = options.gatewayClient;
+    }
+    if (options.modelClient !== undefined) {
+      this.modelClient = options.modelClient;
+    } else if (this.engine.config.modelProvider === "openai-codex") {
+      throw new Error(
+        "openai-codex requires an injected owner-bound model client",
+      );
+    } else {
+      this.modelClient = new OpenAICompatibleGatewayModelClient(
+        this.#gatewayClient!,
+      );
     }
     this.#maxModelTurns = options.maxModelTurns ?? DEFAULT_MAX_MODEL_TURNS;
     this.#parentToolAllowanceMode = options.allowedToolIds === undefined
@@ -1670,6 +1677,16 @@ export class CfHarnessPromptLoop {
           : []),
     );
     this.#browserAccess = options.browserAccess;
+  }
+
+  /** @deprecated Prefer `modelClient`; unavailable for `openai-codex`. */
+  get gatewayClient(): OpenAICompatibleGatewayClient {
+    if (this.#gatewayClient === undefined) {
+      throw new Error(
+        "gatewayClient is unavailable for provider openai-codex",
+      );
+    }
+    return this.#gatewayClient;
   }
 
   #parentToolAllowance(): HarnessParentToolAllowance {
@@ -2740,6 +2757,12 @@ export class CfHarnessPromptLoop {
       subagentStatus = "failed";
       childModelTurns = promptLoopModelTurnsFromError(error) ?? childModelTurns;
       summary = `Subagent failed: ${toErrorDetail(error)}`;
+      const childState = childEngine.getRunState();
+      if (childState.status !== "failed") {
+        childEngine.appendFailureFromError(error, { source: "run_error" });
+        childEngine.setRunStatus("failed", "prompt_loop_error");
+        await childEngine.persistRunState();
+      }
     }
     const childRunState = childEngine.getRunState();
     const subagent: HarnessSubagentResult = {

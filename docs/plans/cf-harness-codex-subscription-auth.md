@@ -474,9 +474,10 @@ Expected files:
   request-scoped credential resolver into `cf-harness`.
 - [ ] Make connect, status, disconnect, and provider selection available in the
   Loom user experience before enabling Loom runs with this provider.
-- [x] Apply the same binding to interactive chat, batch runs, resume, and
-  subagents. Background or resumed work must retain the original credential
-  owner and fail closed if that authorization is revoked.
+- [ ] Apply the same trusted-principal binding in the Loom host to interactive
+  chat and batch dispatch. The harness seam retains the selected owner for
+  resume and subagents, and an interactive service instance is restricted to
+  one explicitly injected owner; authenticating that owner remains host work.
 - [x] Stdio and other shared processes must receive an explicit owner-bound
   resolver from their host; they must not inherit the local operator's
   filesystem credential implicitly.
@@ -490,7 +491,7 @@ Expected files:
 - [x] Existing gateway invocations remain byte-for-byte equivalent at the
   configuration boundary.
 - [x] Local subscription use always requires an explicit provider selection.
-- [x] Loom integration tests prove two concurrent users cannot observe, refresh,
+- [ ] Loom integration tests prove two concurrent users cannot observe, refresh,
   disconnect, or invoke with each other's credentials.
 - [ ] A Loom run without an authenticated credential owner, explicit provider
   choice, or required workspace permission fails before the first model request.

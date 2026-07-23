@@ -24,7 +24,7 @@ export const OPENAI_CODEX_MODELS_URL =
 const OPENAI_CODEX_CLIENT_VERSION = "0.0.0";
 
 export interface OpenAICodexCredentialResolverLike {
-  resolve(): Promise<OpenAICodexOAuthCredential>;
+  resolve(signal?: AbortSignal): Promise<OpenAICodexOAuthCredential>;
 }
 
 export interface OpenAICodexResponsesClientOptions {
@@ -399,11 +399,12 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
   async listModels(
     signal?: AbortSignal,
   ): Promise<readonly HarnessModelCatalogEntry[]> {
-    const credential = await this.#resolver.resolve();
+    const credential = await this.#resolver.resolve(signal);
     const url = new URL(OPENAI_CODEX_MODELS_URL);
     url.searchParams.set("client_version", OPENAI_CODEX_CLIENT_VERSION);
     const response = await this.#fetchFn(url, {
       method: "GET",
+      redirect: "error",
       headers: {
         Authorization: `Bearer ${credential.accessToken}`,
         "chatgpt-account-id": credential.accountId,
@@ -475,7 +476,7 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         "openai-codex does not support provider-native tools in this release",
       );
     }
-    const credential = await this.#resolver.resolve();
+    const credential = await this.#resolver.resolve(request.signal);
     const converted = await toResponsesInput(request.transcript);
     const responseTools = toResponsesTools(request.tools);
     const body = JSON.stringify({
@@ -497,6 +498,7 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
     try {
       response = await this.#fetchFn(this.#endpoint, {
         method: "POST",
+        redirect: "error",
         headers: {
           Authorization: `Bearer ${credential.accessToken}`,
           "chatgpt-account-id": credential.accountId,
@@ -599,7 +601,7 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
       }
       if (
         type === "response.completed" || type === "response.done" ||
-        type === "response.incomplete"
+        type === "response.incomplete" || type === "response.failed"
       ) {
         if (
           typeof event.response !== "object" || event.response === null ||
@@ -610,6 +612,7 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
           );
         }
         terminal = event.response as Record<string, unknown>;
+        break;
       }
     }
     if (!terminal) {

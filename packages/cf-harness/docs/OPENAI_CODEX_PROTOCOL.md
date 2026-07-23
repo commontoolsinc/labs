@@ -36,7 +36,9 @@ Reviewed sources:
 Authorization-code exchange sends `grant_type`, `client_id`, `code`,
 `code_verifier`, and `redirect_uri` as form data. Refresh sends
 `grant_type=refresh_token`, `refresh_token`, and `client_id`. A refresh response
-may rotate the refresh token and must be persisted atomically.
+may rotate the refresh token and must be persisted atomically. Every OAuth and
+Codex API fetch rejects HTTP redirects so credential-bearing bodies, account
+headers, and prompts cannot leave the pinned origins.
 
 ## Pinned Responses contract
 

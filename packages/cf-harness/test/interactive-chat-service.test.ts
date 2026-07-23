@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import {
   createHarnessChatEventEnvelope,
   createHarnessChatSessionStatus,
@@ -149,6 +149,12 @@ Deno.test("interactive service preserves an owner-bound Codex client across turn
   } as const;
   const loopOptions: CreateHarnessPromptLoopOptions[] = [];
   const service = new HarnessInteractiveChatService({
+    credentialOwner: {
+      type: "cf-harness.credential-owner-ref",
+      version: 1,
+      ownerKey: "loom:user-1",
+      tenantKey: "loom-tenant-1",
+    },
     basePromptLoopOptions: {
       modelProvider: "openai-codex",
       credentialOwnerKey: "loom:user-1",
@@ -190,6 +196,42 @@ Deno.test("interactive service preserves an owner-bound Codex client across turn
   assertEquals(loopOptions[0].modelProvider, "openai-codex");
   assertEquals(loopOptions[0].credentialOwnerKey, "loom:user-1");
   assertEquals(loopOptions[0].modelClient, modelClient);
+});
+
+Deno.test("interactive Codex services require one matching process owner", () => {
+  const modelClient = {
+    providerId: "openai-codex",
+    complete: () => Promise.reject(new Error("unused")),
+  } as const;
+  assertThrows(
+    () =>
+      new HarnessInteractiveChatService({
+        basePromptLoopOptions: {
+          modelProvider: "openai-codex",
+          credentialOwnerKey: "loom:user-1",
+          modelClient,
+        },
+      }),
+    Error,
+    "require one explicit authenticated credential owner",
+  );
+  assertThrows(
+    () =>
+      new HarnessInteractiveChatService({
+        credentialOwner: {
+          type: "cf-harness.credential-owner-ref",
+          version: 1,
+          ownerKey: "loom:user-2",
+        },
+        basePromptLoopOptions: {
+          modelProvider: "openai-codex",
+          credentialOwnerKey: "loom:user-1",
+          modelClient,
+        },
+      }),
+    Error,
+    "does not match",
+  );
 });
 
 Deno.test("interactive service forces comment-thread turns to read-only prompt-loop options", async () => {
