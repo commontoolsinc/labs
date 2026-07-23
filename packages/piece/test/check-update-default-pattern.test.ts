@@ -1108,7 +1108,9 @@ describe("checkAndUpdateDefaultPattern", () => {
     // was logged rather than swallowed.
     const after = (await manager.getDefaultPattern(true))!;
     await runtime.idle();
-    expect(after).toBeDefined();
+    // Functional pin, not just existence: the OLD pattern's nodes are still
+    // the ones running — its result reads back — after the refused swap.
+    expect(after.key("marker").get()).toBe("v1");
   });
 
   it("cold-boot swap: handler-bearing replacement heals a root that was NOT running", async () => {
