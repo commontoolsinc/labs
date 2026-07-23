@@ -295,7 +295,6 @@ async function markCfButtonByText(page: Page, label: string, token: string) {
       const clickTarget = (host.shadowRoot?.querySelector("[data-cf-button]") as
         | HTMLElement
         | null) ?? host;
-      clickTarget.scrollIntoView({ block: "center", inline: "center" });
       clickTarget.setAttribute("data-cfc-mark", targetToken);
       return true;
     }

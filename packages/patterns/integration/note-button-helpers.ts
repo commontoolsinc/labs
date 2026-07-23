@@ -13,22 +13,22 @@ import { settleView } from "./cfc-browser-helpers.ts";
 const NOTE_BUTTON_CLICK_TARGET_ATTR = "data-cfc-note-button-target";
 
 // Serialized into the page by waitForCondition: find the first rendered
-// button/link whose text or title matches, scroll it into view, and stamp its
-// inner click target with `token`. "Rendered" means laid out and not
-// display:none/visibility:hidden — the same elements the innerText scan the
-// poll used could see — and is viewport-independent, so a match below the fold
-// is scrolled in rather than skipped. Returns false until a match exists, so
+// button/link whose text or title matches and stamp its inner click target with
+// `token`. "Rendered" means laid out and not display:none/visibility:hidden —
+// the same elements the innerText scan the poll used could see — and is
+// viewport-independent, so a match below the fold is still tagged: the click
+// scrolls the element into view itself. Returns false until a match exists, so
 // the wait re-checks on the next DOM mutation instead of the caller retrying a
 // bare find-and-click loop. Self-contained — it closes over nothing in this
 // module — so it can be serialized and run in the page.
-const markNoteButton = async (
+const markNoteButton = (
   probe: ProbeApi,
   selector: string,
   match: "includes" | "exact" | "title",
   needle: string,
   token: string,
   attr: string,
-): Promise<boolean> => {
+): boolean => {
   const target = probe.collect(selector).find((element) => {
     if (!probe.isRendered(element)) return false;
     if (match === "title") return element.getAttribute("title") === needle;
@@ -36,10 +36,6 @@ const markNoteButton = async (
     return match === "exact" ? text === needle : text.includes(needle);
   }) as HTMLElement | undefined;
   if (!target) return false;
-  target.scrollIntoView({ block: "center", inline: "center" });
-  await new Promise((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(resolve))
-  );
   const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
     | HTMLElement
     | null) ?? target;
