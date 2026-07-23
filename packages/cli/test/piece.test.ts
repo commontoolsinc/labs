@@ -414,6 +414,18 @@ describe("cli piece parsing", () => {
     expect(code).toBe(0);
   });
 
+  it("documents the piece registry in link help", async () => {
+    const { code, stdout, stderr } = await cf("piece link --help");
+    checkStderr(stderr);
+    const output = stripAnsi(stdout.join("\n"));
+    expect(code).toBe(0);
+    expect(output).toContain("fid1:piece1/pieceRegistry");
+    expect(output).toContain(
+      'Link the well-known "pieceRegistry" list to a piece field.',
+    );
+    expect(output).not.toContain("allPieces");
+  });
+
   describe("parseLink", () => {
     it("should parse piece ID only", () => {
       const result = parseLink("piece1");
