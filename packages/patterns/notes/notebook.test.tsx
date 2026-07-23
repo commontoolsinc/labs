@@ -21,8 +21,7 @@
  *
  * Run: deno task cf test packages/patterns/notes/notebook.test.tsx --verbose
  */
-import { action, computed, pattern } from "commonfabric";
-import { NAME } from "commonfabric";
+import { action, computed, NAME, pattern } from "commonfabric";
 import Notebook from "./notebook.tsx";
 import Note from "./note.tsx";
 
@@ -69,6 +68,24 @@ export default pattern(() => {
         title: "Note B",
         content: "Content B",
 
+        isHidden: true,
+      }),
+    ],
+    isHidden: false,
+  });
+
+  const modalNotebook = Notebook({
+    title: "Modal Actions",
+    notes: [],
+    isHidden: false,
+  });
+
+  const promptNotebook = Notebook({
+    title: "Prompt Actions",
+    notes: [
+      Note({
+        title: "Prompt Note",
+        content: "Prompt content",
         isHidden: true,
       }),
     ],
@@ -166,6 +183,32 @@ export default pattern(() => {
         { title: "Nested Note 1", content: "Content 1" },
       ],
     });
+  });
+
+  const action_go_to_all_notes = action(() => {
+    modalNotebook.goToAllNotes.send();
+  });
+
+  const action_create_another_note = action(() => {
+    modalNotebook.showNewNoteModal.send();
+    modalNotebook.createAnotherNoteFromPrompt.send();
+  });
+
+  const action_create_note_from_modal = action(() => {
+    modalNotebook.createNoteFromPrompt.send();
+  });
+
+  const action_create_another_nested_notebook = action(() => {
+    modalNotebook.showNewNotebookModal.send();
+    modalNotebook.createAnotherNestedNotebookFromPrompt.send();
+  });
+
+  const action_create_nested_notebook_from_modal = action(() => {
+    modalNotebook.createNestedNotebookFromPrompt.send();
+  });
+
+  const action_create_notebook_from_prompt = action(() => {
+    promptNotebook.createNotebookFromSelectionPrompt.send();
   });
 
   // ==========================================================================
@@ -371,6 +414,29 @@ export default pattern(() => {
     notebook.noteCount === 3
   );
 
+  const assert_go_to_all_notes_leaves_notebook_intact = computed(() =>
+    modalNotebook.title === "Modal Actions"
+  );
+  const assert_create_another_note_keeps_modal_open = computed(() =>
+    modalNotebook.noteCount === 1 && modalNotebook.showNewNotePrompt === true
+  );
+  const assert_create_note_closes_modal = computed(() =>
+    modalNotebook.noteCount === 2 && modalNotebook.showNewNotePrompt === false
+  );
+  const assert_create_another_notebook_keeps_modal_open = computed(() =>
+    modalNotebook.noteCount === 3 &&
+    modalNotebook.showNewNestedNotebookPrompt === true
+  );
+  const assert_create_notebook_closes_modal = computed(() =>
+    modalNotebook.noteCount === 4 &&
+    modalNotebook.showNewNestedNotebookPrompt === false
+  );
+  const assert_prompt_creates_notebook = computed(() =>
+    promptNotebook.noteCount === 2 &&
+    promptNotebook.showNewNotebookPrompt === false &&
+    promptNotebook.selectedCount === 0
+  );
+
   // ==========================================================================
   // Test Sequence
   // ==========================================================================
@@ -448,10 +514,26 @@ export default pattern(() => {
       // === Bulk create notes ===
       { action: action_create_multiple_notes },
       { assertion: assert_note_count_after_bulk },
+
+      // === Registry-backed UI actions ===
+      { action: action_go_to_all_notes },
+      { assertion: assert_go_to_all_notes_leaves_notebook_intact },
+      { action: action_create_another_note },
+      { assertion: assert_create_another_note_keeps_modal_open },
+      { action: action_create_note_from_modal },
+      { assertion: assert_create_note_closes_modal },
+      { action: action_create_another_nested_notebook },
+      { assertion: assert_create_another_notebook_keeps_modal_open },
+      { action: action_create_nested_notebook_from_modal },
+      { assertion: assert_create_notebook_closes_modal },
+      { action: action_create_notebook_from_prompt },
+      { assertion: assert_prompt_creates_notebook },
     ],
     notebook,
     emptyNotebook,
     selectionNotebook,
     dupNotebook,
+    modalNotebook,
+    promptNotebook,
   };
 });

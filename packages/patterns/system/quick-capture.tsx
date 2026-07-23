@@ -88,7 +88,7 @@ const captureHandler = handler<
 
 // ===== Note/Notebook creation handlers =====
 
-const createNoteHandler = handler<
+export const createNoteHandler = handler<
   { title: string; content: string },
   { pieceRegistry: Writable<MentionablePiece[]> }
 >(({ title, content }, { pieceRegistry }) => {
@@ -100,7 +100,7 @@ const createNoteHandler = handler<
   return note;
 });
 
-const createNotebookHandler = handler<
+export const createNotebookHandler = handler<
   { title: string; notes?: Array<{ title: string; content: string }> },
   { pieceRegistry: Writable<MentionablePiece[]> }
 >(({ title, notes: notesData }, { pieceRegistry }) => {

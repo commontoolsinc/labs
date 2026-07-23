@@ -11,7 +11,8 @@
  *
  * Run: deno task cf test packages/patterns/system/default-app.test.tsx --root packages/patterns --verbose
  */
-import { action, computed, pattern } from "commonfabric";
+import { action, computed, pattern, UI } from "commonfabric";
+import { findElementByExactText, propsOf } from "../test/vnode-helpers.ts";
 import DefaultApp from "./default-app.tsx";
 import Note from "../notes/note.tsx";
 
@@ -24,6 +25,12 @@ const addPieceOf = (subject: Record<string, unknown>, piece: unknown) =>
 
 const piecesLengthOf = (subject: Record<string, unknown>) =>
   [...((subject.pieceRegistry as unknown[]) ?? [])].length;
+
+const clickFirstRemove = (subject: { [UI]: unknown }) => {
+  const button = findElementByExactText(subject[UI], "cf-button", "🗑️");
+  const onClick = propsOf(button)?.onClick;
+  (onClick as { send: (event: Record<string, never>) => void }).send({});
+};
 
 export default pattern(() => {
   const subject = DefaultApp();
@@ -42,6 +49,7 @@ export default pattern(() => {
   const action_register_other_note = action(() =>
     addPieceOf(subject, otherNote)
   );
+  const action_remove_first_note = action(() => clickFirstRemove(subject));
 
   const assert_starts_empty = computed(() => piecesLengthOf(subject) === 0);
 
@@ -58,6 +66,9 @@ export default pattern(() => {
   const assert_distinct_piece_lands = computed(() =>
     piecesLengthOf(subject) === 2
   );
+  const assert_remove_updates_registry = computed(() =>
+    piecesLengthOf(subject) === 1
+  );
 
   return {
     tests: [
@@ -71,6 +82,9 @@ export default pattern(() => {
 
       { action: action_register_other_note },
       { assertion: assert_distinct_piece_lands },
+
+      { action: action_remove_first_note },
+      { assertion: assert_remove_updates_registry },
     ],
     subject,
   };

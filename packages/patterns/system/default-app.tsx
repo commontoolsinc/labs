@@ -7,6 +7,7 @@ import {
   pattern,
   Stream,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -19,6 +20,7 @@ import BacklinksIndex, { type MentionablePiece } from "./backlinks-index.tsx";
 import SummaryIndex from "./summary-index.tsx";
 import Notebook from "../notes/notebook.tsx";
 import PieceGrid from "./piece-grid.tsx";
+import { migratePieceRegistry } from "./piece-registry-migration.ts";
 
 type MinimalPiece = {
   [NAME]?: string;
@@ -30,6 +32,7 @@ type PiecesListInput = void;
 // Pattern returns only UI, no data outputs (only symbol properties)
 export interface PiecesListOutput {
   [key: string]: unknown;
+  [UI]: VNode;
   backlinksIndex: {
     mentionable: MentionablePiece[] | undefined;
   };
@@ -163,12 +166,11 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // Copy the retired owned cell into the new registry once. Existing canonical
   // state wins when both cells contain data.
   computed(() => {
-    if (pieceRegistryMigrationComplete.get()) return;
-    const legacyPieces = legacyPieceRegistry.get();
-    if (legacyPieces.length > 0 && pieceRegistry.get().length === 0) {
-      pieceRegistry.set([...legacyPieces]);
-    }
-    pieceRegistryMigrationComplete.set(true);
+    migratePieceRegistry(
+      legacyPieceRegistry,
+      pieceRegistry,
+      pieceRegistryMigrationComplete,
+    );
   });
 
   // Dropdown menu state
