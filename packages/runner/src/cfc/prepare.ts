@@ -1028,7 +1028,9 @@ const schemasEqualIgnoringWriterStamp = (
     stripWriterIdentityStamp(right),
   );
 
-const storedSchemaCoversCandidateEnvelope = (
+// Exported for unit testing of the merge-skip decision. Not part of the
+// public CFC surface.
+export const storedSchemaCoversCandidateEnvelope = (
   stored: JSONSchema | undefined,
   candidate: JSONSchema | undefined,
 ): boolean => {
@@ -1056,6 +1058,36 @@ const storedSchemaCoversCandidateEnvelope = (
         child as JSONSchema,
       )
     );
+  }
+
+  // Tuple slots: when either side declares prefixItems, coverage requires
+  // slot-wise coverage — otherwise the items branch below would judge
+  // envelopes "covered" while their tuple slots differ, and the candidate's
+  // slot info would be dropped instead of merged (fail-open). A stored side
+  // with slots the candidate lacks also fails closed: the stored rest
+  // `items` does not speak for the slot positions the candidate's `items`
+  // covers.
+  if (
+    candidate.prefixItems !== undefined || stored.prefixItems !== undefined
+  ) {
+    if (
+      !Array.isArray(candidate.prefixItems) ||
+      !Array.isArray(stored.prefixItems) ||
+      candidate.prefixItems.length > stored.prefixItems.length
+    ) {
+      return false;
+    }
+    const storedSlots = stored.prefixItems;
+    if (
+      !candidate.prefixItems.every((slot, index) =>
+        storedSchemaCoversCandidateEnvelope(storedSlots[index], slot)
+      )
+    ) {
+      return false;
+    }
+    // Slots covered; the rest `items` (if any) is judged by the shared
+    // branch below. A slots-only candidate reaches the conservative
+    // `return false` (merge) the same way.
   }
 
   if (

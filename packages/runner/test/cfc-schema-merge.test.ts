@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { JSONSchemaObj } from "../src/builder/types.ts";
 import { mergeCfcSchemaEnvelopes } from "../src/cfc/schema-merge.ts";
+import { storedSchemaCoversCandidateEnvelope } from "../src/cfc/prepare.ts";
 
 describe("mergeCfcSchemaEnvelopes", () => {
   // C5: `observes` is a scalar consumption class, not a set-like claim.
@@ -661,5 +662,65 @@ describe("mergeCfcSchemaEnvelopes", () => {
         approved: { type: "boolean" },
       },
     });
+  });
+});
+
+// CT-1895: the merge-skip decision judged envelopes "covered" via the items
+// branch while their tuple slots differed, dropping the candidate's slot
+// info instead of merging it (fail-open: coverage=true skips the merge).
+describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
+  it("differing tuple slots are not judged covered by matching items", () => {
+    const stored = {
+      type: "array",
+      prefixItems: [{ type: "string" }],
+      items: { type: "number" },
+    } as const;
+    const candidate = {
+      type: "array",
+      prefixItems: [{ type: "string", default: "x" }],
+      items: { type: "number" },
+    } as const;
+    expect(storedSchemaCoversCandidateEnvelope(stored, candidate)).toBe(false);
+  });
+
+  it("covers slot-wise when stored slots cover every candidate slot", () => {
+    const stored = {
+      type: "array",
+      prefixItems: [{ type: "string" }, { type: "number" }],
+      items: { type: "number" },
+    } as const;
+    const candidate = {
+      type: "array",
+      prefixItems: [{ type: "string" }],
+      items: { type: "number" },
+    } as const;
+    expect(storedSchemaCoversCandidateEnvelope(stored, candidate)).toBe(true);
+  });
+
+  it("fails closed when the candidate declares more slots than stored", () => {
+    const stored = {
+      type: "array",
+      prefixItems: [{ type: "string" }],
+      items: { type: "number" },
+    } as const;
+    const candidate = {
+      type: "array",
+      prefixItems: [{ type: "string" }, { type: "number" }],
+      items: { type: "number" },
+    } as const;
+    expect(storedSchemaCoversCandidateEnvelope(stored, candidate)).toBe(false);
+  });
+
+  it("stored-only prefixItems fails closed — rest items do not speak for slots", () => {
+    const stored = {
+      type: "array",
+      prefixItems: [{ type: "string" }],
+      items: { type: "number" },
+    } as const;
+    const candidate = {
+      type: "array",
+      items: { type: "number" },
+    } as const;
+    expect(storedSchemaCoversCandidateEnvelope(stored, candidate)).toBe(false);
   });
 });
