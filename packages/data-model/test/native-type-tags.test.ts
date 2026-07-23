@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
+  isNativeError,
   NATIVE_TAGS,
   tagFromNativeClass,
   tagFromNativeValue,
@@ -97,6 +98,28 @@ describe("native-type-tags", () => {
     it("returns `Object` tag for null-prototype objects (no constructor)", () => {
       const obj = Object.create(null);
       expect(tagFromNativeValue(obj)).toBe(NATIVE_TAGS.Object);
+    });
+
+    it("classifies values when `Error.isError` is unavailable", () => {
+      const descriptor = Object.getOwnPropertyDescriptor(Error, "isError");
+      Object.defineProperty(Error, "isError", {
+        value: undefined,
+        writable: true,
+        configurable: true,
+      });
+
+      try {
+        expect(isNativeError(new Error("test"))).toBe(true);
+        expect(tagFromNativeValue(Object.create(null))).toBe(
+          NATIVE_TAGS.Object,
+        );
+      } finally {
+        if (descriptor) {
+          Object.defineProperty(Error, "isError", descriptor);
+        } else {
+          delete (Error as { isError?: unknown }).isError;
+        }
+      }
     });
 
     it("returns `HasToJSON` tag for plain objects with `toJSON()`", () => {
