@@ -35,11 +35,11 @@ function cellTraversalKey(cell: Cell<any>): string {
   return JSON.stringify([space, id, path]);
 }
 
-function followResultCellChain(
+async function followResultCellChain(
   runtime: Runtime,
   rootCell: Cell<any>,
   tx: IExtendedStorageTransaction,
-): Cell<any> | undefined {
+): Promise<Cell<any> | undefined> {
   let currentCell = rootCell;
   const visited = new Set<string>();
   let depth = 0;
@@ -54,6 +54,7 @@ function followResultCellChain(
     }
     visited.add(key);
 
+    await currentCell.sync();
     const resultLink = getMetaLink(currentCell, "result");
     if (resultLink === undefined) return currentCell;
 
@@ -110,11 +111,12 @@ export async function ensurePieceRunning(
 
       // If this is an internal/argument/derived cell, find the result cell that
       // owns the chain.
-      const resultCell = followResultCellChain(runtime, rootCell, tx);
+      const resultCell = await followResultCellChain(runtime, rootCell, tx);
       if (resultCell === undefined) return false;
 
       // If rootCell is a result cell, it will carry a `{ identity, symbol }`
       // pattern pointer.
+      await resultCell.sync();
       const identityRef = readPatternIdentity(resultCell);
       if (!identityRef) {
         logger.debug("ensure-piece", () => [
