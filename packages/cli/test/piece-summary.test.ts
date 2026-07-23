@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { decode } from "@commonfabric/utils/encoding";
 import {
   listPiecesFromCommand,
+  piece,
   renderPieceSummaries,
   searchPiecesFromCommand,
 } from "../commands/piece.ts";
@@ -62,6 +63,18 @@ Deno.test("piece summaries render human and JSON output", () => {
   expect(table).toContain("<unknown>");
 
   expect(captureStdout(() => renderPieceSummaries([], false))).toBe("");
+});
+
+Deno.test("piece registers its list and search command handlers", () => {
+  const actionHandler = (name: string): unknown =>
+    (piece.getCommand(name) as unknown as
+      | { actionHandler?: unknown }
+      | undefined)?.actionHandler;
+
+  expect(actionHandler("ls")).toBe(listPiecesFromCommand);
+  expect(actionHandler("search")).toBe(
+    searchPiecesFromCommand,
+  );
 });
 
 Deno.test("piece search command parses options and renders matches", async () => {
