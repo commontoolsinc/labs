@@ -1265,6 +1265,93 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(afterEvent.key("count").get()).toBe(1);
   });
 
+  it("repair guards rethrow the original start error when the pattern cannot be resolved", async () => {
+    // The repair's admission guards, driven through the real boot entry.
+    // Cold start of a doc in the already-swapped state whose (current)
+    // identity cannot be loaded: the repair's own load sees the same
+    // outcome, and each guard must surface the ORIGINAL start error.
+    await setupHome({ systemPatternAutoUpdate: true });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    await manager.stopPiece(root);
+    stub.setSource(SOURCE_V3_HANDLER);
+    const targetId = await identityForSource(
+      SOURCE_V3_HANDLER,
+      {},
+      HOME_PATTERN_URL,
+    );
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: targetId,
+        symbol: "default",
+      });
+    });
+    expect(error).toBeUndefined();
+
+    // Guard: the repair's loadPatternByIdentity resolves undefined.
+    let restore = shadowLoadProbe(targetId, "undefined");
+    let thrown: unknown;
+    try {
+      await controller.ensureDefaultPattern();
+    } catch (e) {
+      thrown = e;
+    } finally {
+      restore();
+    }
+    expect(thrown).toBeDefined();
+
+    // Guard: the repair's loadPatternByIdentity rejects outright.
+    restore = shadowLoadProbe(targetId, "reject");
+    thrown = undefined;
+    try {
+      await controller.ensureDefaultPattern();
+    } catch (e) {
+      thrown = e;
+    } finally {
+      restore();
+    }
+    expect(thrown).toBeDefined();
+
+    // With the probes gone the same doc still heals — the guards left it
+    // untouched.
+    await controller.ensureDefaultPattern();
+    await runtime.idle();
+    const after = (await manager.getDefaultPattern(false))!;
+    expect(after.key("count").get()).toBe(0);
+  });
+
+  it("repair guard rethrows the original start error for a malformed identity ref", async () => {
+    // A root whose patternIdentity meta is present but malformed: start
+    // fails, and the repair cannot even name a pattern to load — the
+    // ref-undefined guard must surface the original start failure.
+    await setupHome({ systemPatternAutoUpdate: true });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    await manager.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", { malformed: true });
+    });
+    expect(error).toBeUndefined();
+
+    let thrown: unknown;
+    try {
+      await controller.ensureDefaultPattern();
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeDefined();
+  });
+
   it("replaces an unloadable stale sourceless space root", async () => {
     // The fallback covers every space's DEFAULT pattern, not just home
     // (widened by the flag owner after a non-home field report): a root
