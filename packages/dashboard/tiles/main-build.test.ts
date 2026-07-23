@@ -253,41 +253,53 @@ Deno.test("labs ci: an observed failure survives a rerun without another API res
   );
 });
 
-Deno.test("labs ci: a malformed required attempt is rejected", async () => {
-  const id = 60;
-  const active = run({
-    id,
-    status: "in_progress",
-    conclusion: null,
-    run_attempt: 2,
-    head_sha: "latest",
-    run_started_at: ago(5),
-  });
-  const malformed = run({
-    id,
-    status: "completed",
-    conclusion: null,
-    run_attempt: 1,
-    head_sha: "latest",
-    run_started_at: ago(30),
-  });
-  const olderSuccess = run({
-    id: 160,
-    conclusion: "success",
-    head_sha: "older",
-    run_started_at: ago(90),
-  });
+Deno.test("labs ci: a malformed required attempt is rejected", async (t) => {
+  const cases: { name: string; overrides: Partial<Run> }[] = [
+    { name: "wrong run id", overrides: { id: 999 } },
+    { name: "wrong attempt", overrides: { run_attempt: 2 } },
+    { name: "unfinished status", overrides: { status: "in_progress" } },
+    { name: "missing conclusion", overrides: { conclusion: null } },
+  ];
 
-  await withGithubAttempt(malformed, async (urls) => {
-    await assertRejects(
-      () => labsCi.collect(ctx([active, olderSuccess])),
-      Error,
-      `GitHub run ${id} attempt 1 did not include a completed conclusion`,
-    );
-    assertEquals(urls, [
-      `https://api.github.com/repos/${REPO}/actions/runs/${id}/attempts/1`,
-    ]);
-  });
+  for (const [index, { name, overrides }] of cases.entries()) {
+    await t.step(name, async () => {
+      const id = 600 + index;
+      const active = run({
+        id,
+        status: "in_progress",
+        conclusion: null,
+        run_attempt: 2,
+        head_sha: "latest",
+        run_started_at: ago(5),
+      });
+      const malformed = run({
+        id,
+        status: "completed",
+        conclusion: "success",
+        run_attempt: 1,
+        head_sha: "latest",
+        run_started_at: ago(30),
+        ...overrides,
+      });
+      const olderSuccess = run({
+        id: 1600 + index,
+        conclusion: "success",
+        head_sha: "older",
+        run_started_at: ago(90),
+      });
+
+      await withGithubAttempt(malformed, async (urls) => {
+        await assertRejects(
+          () => labsCi.collect(ctx([active, olderSuccess])),
+          Error,
+          `GitHub run ${id} attempt 1 did not include a completed conclusion`,
+        );
+        assertEquals(urls, [
+          `https://api.github.com/repos/${REPO}/actions/runs/${id}/attempts/1`,
+        ]);
+      });
+    });
+  }
 });
 
 Deno.test("labs ci: a repeated failure keeps the streak from the prior attempt", async () => {
@@ -408,9 +420,9 @@ Deno.test("labs ci: an unavailable optional attempt preserves the known verdict"
     head_sha: "latest",
     run_started_at: ago(5),
   });
-  const olderFailure = run({
+  const olderSuccess = run({
     id: 161,
-    conclusion: "failure",
+    conclusion: "success",
     head_sha: "older",
     run_started_at: ago(90),
   });
@@ -419,7 +431,7 @@ Deno.test("labs ci: an unavailable optional attempt preserves the known verdict"
     new Error("attempt endpoint unavailable"),
     async (urls) => {
       const view = await labsCi.collect(
-        ctx([secondAttempt, olderFailure]),
+        ctx([secondAttempt, olderSuccess]),
       );
       assertEquals(view.status, "good");
       assertEquals(view.value, "passing");
