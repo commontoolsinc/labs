@@ -2054,34 +2054,29 @@ describe("setup/start", () => {
     await setupTx.commit();
     await runtime.idle();
 
-    const originalGetCellFromLink = runtime.getCellFromLink;
+    const originalSyncCell = runtime.storageManager.syncCell;
     const targetLink = targetCell.getAsNormalizedFullLink();
     let targetSyncs = 0;
-    Reflect.set(runtime, "getCellFromLink", (...args: unknown[]) => {
-      const cell = Reflect.apply(
-        originalGetCellFromLink,
-        runtime,
-        args,
-      ) as ReturnType<typeof runtime.getCellFromLink>;
+    Reflect.set(runtime.storageManager, "syncCell", (cell: unknown) => {
+      const linkedCell = cell as typeof targetCell;
       if (
-        areNormalizedLinksSame(cell.getAsNormalizedFullLink(), targetLink)
+        areNormalizedLinksSame(
+          linkedCell.getAsNormalizedFullLink(),
+          targetLink,
+        )
       ) {
-        Reflect.set(cell, "sync", () => {
-          targetSyncs++;
-          return targetSyncs === 1
-            ? Promise.reject(new Error("linked target unavailable"))
-            : Promise.resolve();
-        });
+        targetSyncs++;
+        return Promise.reject(new Error("linked target unavailable"));
       }
-      return cell;
+      return Reflect.apply(originalSyncCell, runtime.storageManager, [cell]);
     });
 
     try {
       const guard = await runtime.runner.syncStoredSetupArgument(resultCell);
-      expect(targetSyncs).toBe(2);
+      expect(targetSyncs).toBe(1);
       expect(guard(resultCell)).toBe(true);
     } finally {
-      Reflect.set(runtime, "getCellFromLink", originalGetCellFromLink);
+      Reflect.set(runtime.storageManager, "syncCell", originalSyncCell);
     }
   });
 

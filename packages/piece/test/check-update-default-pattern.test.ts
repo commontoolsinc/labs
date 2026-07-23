@@ -299,7 +299,9 @@ describe("checkAndUpdateDefaultPattern", () => {
     const piece = await controller.ensureDefaultPattern();
     const originalLoad = runtime.patternManager.loadPatternByIdentity;
     let dispose: Promise<void> | undefined;
+    let probeRuns = 0;
     runtime.patternManager.loadPatternByIdentity = (() => {
+      probeRuns++;
       dispose = runtime.patternUpdater.dispose();
       return Promise.resolve(undefined);
     }) as typeof runtime.patternManager.loadPatternByIdentity;
@@ -308,7 +310,9 @@ describe("checkAndUpdateDefaultPattern", () => {
       expect(
         await controller.checkAndUpdateDefaultPattern(piece.getCell()),
       ).toBe("current");
-      await dispose;
+      expect(probeRuns).toBe(1);
+      expect(dispose).toBeDefined();
+      await dispose!;
       expect(stub.sourceFetches()).toBe(1);
     } finally {
       runtime.patternManager.loadPatternByIdentity = originalLoad;
