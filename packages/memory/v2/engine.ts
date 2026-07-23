@@ -1151,6 +1151,28 @@ export interface ApplyCommitOptions {
     number,
     readonly ProvenanceInputBasisComponent[]
   >;
+  /**
+   * C3.8 (2026-07-18): the home-apply authorization-epoch fence resolver —
+   * the cross-space TOCTOU close. HOST-supplied, synchronous, consulted
+   * INSIDE this commit transaction (once per foreign provenance component,
+   * BEFORE any row applies) for the CURRENT effective authorization epoch of
+   * a foreign `(space, principal)`. The host reads it live at fence time from
+   * the read space's own `authorization_epoch` table (locally-hosted /
+   * in-process) or the peer epoch cache (co-hosted — C3.10b); `undefined`
+   * means the host cannot resolve the epoch at all (unknown / evicted) and
+   * the fence treats it as STALE (fail closed, C3A3). The engine never opens
+   * a foreign engine itself (decision #1, engines stay passive): a foreign
+   * space is the host's to resolve, so this seam is the only path by which
+   * the apply fence learns a foreign space's current epoch. Absent (or
+   * consulted for a same-space attempt with no foreign components) the fence
+   * is dormant and byte-identical to pre-C3.8. See
+   * `assertForeignAuthorizationEpochsCurrent` for the equality rule and the
+   * C3A7 in-process/co-hosted arm ruling.
+   */
+  resolveForeignAuthorizationEpoch?: (
+    space: string,
+    principal: string,
+  ) => number | undefined;
 }
 
 export interface AppliedRevision {
@@ -6630,6 +6652,91 @@ const assertExecutionActionTransaction = (
   }
 };
 
+// ---------------------------------------------------------------------------
+// C3.8 (2026-07-18) — the home-apply authorization-epoch fence (the
+// cross-space TOCTOU close).
+//
+// C3.5 stamps every foreign provenance component with the authorization
+// epoch the read host served it under (`authorizationEpoch`), a value that
+// is READ-TIME-CONSISTENT ONLY (C3.4's flag): it certifies the granting
+// ACL's generation at the instant of the point read, and nothing more. C3.7
+// binds those epochs to the claim and revokes it when a bump arrives WHILE
+// THE CLAIM IS IDLE (the §7 "revocation while idle" gate). This fence is the
+// SECOND, distinct §7 gate: the read-to-APPLY window. A bump can land after
+// the foreign read is stamped but before the home commit applies, with the
+// claim never idle in between — C3.7 never fires, yet the attempt is about to
+// commit rows derived from an authority it no longer holds. So the accept
+// transaction re-validates every carried foreign epoch, by EQUALITY against
+// the CURRENT effective epoch, BEFORE any row of a claimed attempt applies.
+//
+// EQUALITY, not monotone (`>=`). The forward bump (current > carried) is
+// exactly the TOCTOU case: the ACL moved on between the read and the apply, so
+// the stamped authority is stale even though it is numerically LOWER than
+// current. A monotone "current is at least as new as carried" check accepts
+// precisely that case and is the bug this fence exists to prevent (the
+// discrimination leg). Equality also fails closed on a BACKWARD move — a host
+// restart / epoch-table reset makes current < carried — which over-revokes,
+// never under-revokes (C3A3). And an epoch the host cannot resolve at all
+// (`undefined` — peer/unknown/evicted) is stale by the same fail-closed rule.
+//
+// A stale component settles the WHOLE attempt canonically unserved, no
+// partial apply: the fence throws the fence-error family's new constant cause
+// `foreign-authorization-stale` from inside the IMMEDIATE transaction, which
+// rolls the whole commit back exactly as the lease/lane fences and the
+// `foreign-space-surface` firewall reject do — the §B.2 whole-action rule. The
+// client reruns fail-open: a fresh run re-reads B under the new ACL and either
+// re-stamps at the current epoch or is denied at read time.
+//
+// C3A7 — the forced-binary ruling, recorded here IN CODE. Over the co-hosted
+// link, apply-time revalidation reads the home host's LAST-RECEIVED epoch for
+// the peer space, and FIFO-per-link does not order a peer ACL bump (a
+// different link/direction) against this point read — a bump in flight can
+// land AFTER the apply, leaving a bounded residual window. That is a real
+// window with two resolutions (i: a synchronous apply-time epoch RPC adding an
+// RTT to every cross-space claimed commit; ii: ordering pinned to a single
+// link plus a bounded residual window the gate honestly restates). C3.8's
+// acceptance is IN-PROCESS ONLY (C3A8): over the in-process transport the C3.2
+// bump is applied in the read space's own SAME-PROCESS transaction and this
+// fence reads that SAME `authorization_epoch` table synchronously, both on one
+// event loop — so the bump and the read sit on ONE ordered path and no bump
+// can interleave the home apply's synchronous section. The in-process arm is
+// therefore option (ii) with a ZERO-WIDTH residual window: the fence is EXACT.
+// The co-hosted arm (the residual window, or the synchronous-RPC alternative)
+// is C3.10b's to resolve and bind; C3.11 folds this fixture in over both
+// transports.
+const assertForeignAuthorizationEpochsCurrent = (
+  provenance: ActionExecutionProvenance,
+  resolveForeignAuthorizationEpoch:
+    | ((space: string, principal: string) => number | undefined)
+    | undefined,
+): void => {
+  const components = provenance.inputBasis;
+  if (components === undefined) return;
+  for (const component of components) {
+    const stamp = component.authorizationEpoch;
+    // The home component carries no stamp — home authority is fenced by the
+    // lease/claim machinery, not epochs. Only foreign components are fenced.
+    if (stamp === undefined) continue;
+    const current = resolveForeignAuthorizationEpoch?.(
+      component.space,
+      stamp.principal,
+    );
+    // `undefined` = the host cannot resolve this (space, principal) =
+    // unknown = stale (fail closed). Otherwise EQUALITY: any drift from the
+    // read-time stamp — the forward TOCTOU bump above all — is stale.
+    if (current === undefined || current !== stamp.epoch) {
+      throw new ExecutionLeaseFenceError(
+        "foreign-authorization-stale",
+        `foreign authorization epoch for ${stamp.principal} on ` +
+          `${component.space} changed between the stamped read (epoch ` +
+          `${stamp.epoch}) and the home apply (` +
+          `${current === undefined ? "unknown" : `epoch ${current}`}) — ` +
+          "the whole claimed attempt settles unserved",
+      );
+    }
+  }
+};
+
 /**
  * C3.5: true for the addresses whose foreignness no longer demotes the
  * context floor of a HOST-ACCEPTED claimed attempt — space-scoped foreign
@@ -8309,6 +8416,7 @@ const applyCommitTransaction = (
     sqliteAttachments,
     actingContext,
     foreignInputBases,
+    resolveForeignAuthorizationEpoch,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
   const sessionKey = resolveCommitSessionKey(sessionId, principal);
@@ -8426,6 +8534,7 @@ const applyCommitTransaction = (
       executionClaims,
       executionLeaseFence,
       foreignInputBases,
+      resolveForeignAuthorizationEpoch,
     });
   }
 
@@ -8444,6 +8553,7 @@ const applyCommitTransaction = (
       executionClaim: executionClaims?.get(commit.localSeq),
       executionLeaseFence,
       foreignInputBasis: foreignInputBases?.get(commit.localSeq),
+      resolveForeignAuthorizationEpoch,
     });
   }
 
@@ -8518,6 +8628,17 @@ const applyCommitTransaction = (
     claims: executionClaims === undefined ? [] : [...executionClaims.values()],
     requireExactClaim: commit.operations.length > 0,
   });
+
+  // C3.8: the home-apply epoch fence — after the lease/lane authority fences
+  // and the whole-action firewall, before any row applies. Dormant for a
+  // same-space attempt (no foreign components); a stale foreign epoch rolls
+  // the whole transaction back unserved (`foreign-authorization-stale`).
+  if (acceptedObservation?.provenance !== undefined) {
+    assertForeignAuthorizationEpochsCurrent(
+      acceptedObservation.provenance,
+      resolveForeignAuthorizationEpoch,
+    );
+  }
 
   // C3.2: capture the authority-visible ACL state BEFORE the operations
   // apply. The predicate matches the server's `commitTouchesAclDoc`
@@ -9563,6 +9684,7 @@ const applySchedulerObservationOnlyCommit = (
     executionClaim,
     executionLeaseFence,
     foreignInputBasis,
+    resolveForeignAuthorizationEpoch,
   }: {
     sessionId: SessionId;
     scopeSessionId: SessionId;
@@ -9580,6 +9702,11 @@ const applySchedulerObservationOnlyCommit = (
     executionLeaseFence?: ExecutionLeaseFence;
     /** C3.5 host-validated foreign components for THIS observation. */
     foreignInputBasis?: readonly ProvenanceInputBasisComponent[];
+    /** C3.8 apply-fence resolver (see `ApplyCommitOptions`). */
+    resolveForeignAuthorizationEpoch?: (
+      space: string,
+      principal: string,
+    ) => number | undefined;
   },
 ): AppliedCommit => {
   const scopePrincipal = actingPrincipal ?? principal;
@@ -9710,6 +9837,20 @@ const applySchedulerObservationOnlyCommit = (
     principal,
     claims: executionClaim === undefined ? [] : [executionClaim],
   });
+  // C3.8: the home-apply epoch fence for a served observation-only attempt
+  // (no-op / failed with foreign reads). An unserved-attempt marker authors
+  // no foreign basis (its `inputBasis` is undefined), so the fence is
+  // dormant for it; a same-space attempt likewise carries no foreign
+  // component. Runs before the observation row is upserted.
+  if (
+    accepted.provenance !== undefined &&
+    accepted.unservedDiagnosticCode === undefined
+  ) {
+    assertForeignAuthorizationEpochsCurrent(
+      accepted.provenance,
+      resolveForeignAuthorizationEpoch,
+    );
+  }
   if (dropReason) {
     recordSchedulerObservationReplay(engine, {
       branch,
@@ -9815,6 +9956,7 @@ const applySchedulerObservationBatchCommit = (
     executionClaims,
     executionLeaseFence,
     foreignInputBases,
+    resolveForeignAuthorizationEpoch,
   }: {
     sessionId: SessionId;
     scopeSessionId: SessionId;
@@ -9833,6 +9975,11 @@ const applySchedulerObservationBatchCommit = (
       number,
       readonly ProvenanceInputBasisComponent[]
     >;
+    /** C3.8 apply-fence resolver (see `ApplyCommitOptions`). */
+    resolveForeignAuthorizationEpoch?: (
+      space: string,
+      principal: string,
+    ) => number | undefined;
   },
 ): AppliedCommit => {
   const results: AppliedSchedulerObservationResult[] = [];
@@ -9857,6 +10004,7 @@ const applySchedulerObservationBatchCommit = (
       executionClaim: executionClaims?.get(item.localSeq),
       executionLeaseFence,
       foreignInputBasis: foreignInputBases?.get(item.localSeq),
+      resolveForeignAuthorizationEpoch,
     });
     hasNewObservation ||= !isAppliedCommitReplay(result);
     results.push(result.schedulerObservationResults![0]);

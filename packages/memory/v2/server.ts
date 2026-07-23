@@ -4444,6 +4444,75 @@ export class Server {
     return bases.size > 0 ? bases : undefined;
   }
 
+  /**
+   * C3.8: build the home-apply epoch fence's resolver for a commit carrying
+   * foreign provenance components. The engine (passive — decision #1) cannot
+   * open a foreign engine itself, so THIS host supplies a SYNCHRONOUS
+   * `(space, principal) => currentEpoch | undefined` lookup that
+   * `Engine.applyCommit` consults inside the home commit transaction, before
+   * any row applies (`ApplyCommitOptions.resolveForeignAuthorizationEpoch`).
+   *
+   * Exactness argument (C3A7 in-process arm, C3A8): the read space's engine
+   * is pre-resolved HERE, before the transaction (async `openHostedEngine`),
+   * but the epoch VALUE is read at FENCE TIME, synchronously inside the
+   * transaction, off that engine's own `authorization_epoch` table — the same
+   * table C3.2's bump writes transactionally, on the same event loop. Pre-
+   * reading the value instead would reopen the very read-to-apply window this
+   * fence closes; reading it live at fence time, with no `await` between the
+   * engine handle and the point read, makes the in-process fence EXACT (zero
+   * residual window). The read space is ALREADY open (the claim was issued and
+   * its reads served against it), so the pre-resolve is a cached, immediate
+   * await.
+   *
+   * A peer-routed read space is deliberately LEFT OUT of the map, so the
+   * resolver returns `undefined` for it — fail closed. C3.8 is in-process only
+   * (C3A8) and issuance soft-declines peer-routed foreign reads
+   * (`#assertForeignReadAccessForIssuance`), so a bound claim never carries a
+   * peer component here today; C3.10b wires the peer arm
+   * (`effectiveRemoteAuthorizationEpoch` over the link's epoch cache) and owns
+   * the co-hosted half of C3A7's ruling. Returns `undefined` when the commit
+   * carries no foreign epoch components at all — the fence stays dormant.
+   */
+  async #foreignAuthorizationEpochResolverForCommit(
+    foreignInputBases:
+      | ReadonlyMap<number, readonly ProvenanceInputBasisComponent[]>
+      | undefined,
+  ): Promise<
+    ((space: string, principal: string) => number | undefined) | undefined
+  > {
+    if (foreignInputBases === undefined) return undefined;
+    const foreignSpaces = new Set<string>();
+    for (const components of foreignInputBases.values()) {
+      for (const component of components) {
+        if (component.authorizationEpoch !== undefined) {
+          foreignSpaces.add(component.space);
+        }
+      }
+    }
+    if (foreignSpaces.size === 0) return undefined;
+    const localReadEngines = new Map<string, Engine.Engine>();
+    for (const space of foreignSpaces) {
+      // Peer-routed spaces are C3.10b's; leaving them unresolved fails the
+      // fence closed for them (the safe default until the peer arm lands).
+      if (
+        this.#crossSpaceRouter.transport.routing?.peerHostFor(space) !==
+          undefined
+      ) {
+        continue;
+      }
+      if (!(await this.ensureCrossSpaceHosting(space))) continue;
+      localReadEngines.set(space, await this.openHostedEngine(space));
+    }
+    return (space, principal) => {
+      const engine = localReadEngines.get(space);
+      // Unknown / peer / unhostable → undefined → the engine fence treats it
+      // as stale (fail closed, C3A3). Locally hosted → the LIVE table read,
+      // synchronous, at fence time.
+      if (engine === undefined) return undefined;
+      return Engine.effectiveAuthorizationEpoch(engine, principal);
+    };
+  }
+
   #executionControlSync(
     session: SessionState,
     event: ExecutionControlEvent,
@@ -7412,6 +7481,23 @@ export class Server {
             executionClaims,
             schedulerObservations,
           );
+          // C3.8: the home-apply epoch fence resolver. Pre-resolves the read
+          // spaces' (already-open) engines now; the engine reads their live
+          // epoch tables synchronously at fence time, before any row applies.
+          //
+          // The `await` is taken ONLY when the commit carries foreign
+          // components (a bound cross-space executor commit). Every other
+          // commit — the entire non-cross-space population — skips it, so the
+          // authorization-check-beside-apply atomicity the enforce path relies
+          // on (a concurrent post-revocation write must be denied, never land
+          // in the window between its auth check and its apply) stays
+          // byte-identical. A cross-space executor commit is itself re-fenced
+          // IN-transaction (the lease fence's `authorize` re-resolves
+          // capability, plus this epoch fence), so its pre-apply await opens no
+          // new authorization window.
+          const resolveForeignAuthorizationEpoch =
+            foreignInputBases === undefined ? undefined : await this
+              .#foreignAuthorizationEpochResolverForCommit(foreignInputBases);
           const previousReadSpaces = new Map<number, Set<string>>();
           for (const { localSeq, observation } of schedulerObservations) {
             const previousSnapshots = Engine.listSchedulerActionSnapshots(
@@ -7483,6 +7569,7 @@ export class Server {
                     executionLeaseFence,
                     sqliteAttachments,
                     foreignInputBases,
+                    resolveForeignAuthorizationEpoch,
                   });
                 } finally {
                   persistSpan.end();
