@@ -877,7 +877,7 @@ describe("Schema - Link Resolution", () => {
       expect(isCell(result.$ctx.add)).toBe(true);
 
       // The stream cell must be created at the redirect target inside
-      // processCell, not at the input cell's own location.
+      // resultCell, not at the input cell's own location.
       const streamLink = result.$ctx.add.getAsNormalizedFullLink();
       expect(streamLink.id).toBe(resultCell.getAsNormalizedFullLink().id);
       expect(streamLink.path).toEqual(["internal", "dialog", "add"]);

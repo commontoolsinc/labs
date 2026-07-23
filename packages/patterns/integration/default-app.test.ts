@@ -1432,16 +1432,6 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
         stack.includes("_CellImpl.setRawUntyped") &&
         stack.includes("Runner.setupInternal")
       ) {
-        const runnerLine = stack.match(/runner\.ts:(\d+)/)?.[1];
-        if (runnerLine) {
-          const line = Number(runnerLine);
-          if (line >= 300 && line < 330) {
-            return "setup:processCell.setRawUntyped";
-          }
-          if (line >= 330 && line < 360) {
-            return "setup:resultCell.setRawUntyped";
-          }
-        }
         return "setup:setRawUntyped";
       }
       if (stack.includes("_CellImpl.setRawUntyped")) {

@@ -337,11 +337,11 @@ const recordSchemaPolicyInputForLink = (
 const recordRawBuiltinBindingSchemaPolicyInputs = (
   tx: IExtendedStorageTransaction,
   runtime: Runtime,
-  processCell: Cell<any>,
+  resultCell: Cell<any>, // used as the base for output bindings
   outputBinding: unknown,
 ): void => {
   if (isWriteRedirectLink(outputBinding) || isAliasBinding(outputBinding)) {
-    const bindingBase = processCell.getAsNormalizedFullLink();
+    const bindingBase = resultCell.getAsNormalizedFullLink();
     const bindingLink = isAliasBinding(outputBinding)
       ? parseAliasBinding(outputBinding, bindingBase)
       : parseLink(outputBinding, bindingBase);
@@ -367,7 +367,7 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
       recordRawBuiltinBindingSchemaPolicyInputs(
         tx,
         runtime,
-        processCell,
+        resultCell,
         child,
       )
     );
@@ -379,7 +379,7 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
       recordRawBuiltinBindingSchemaPolicyInputs(
         tx,
         runtime,
-        processCell,
+        resultCell,
         child,
       );
     }
@@ -389,13 +389,13 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
 const schemaForRawBuiltinRootOutputBinding = (
   tx: IExtendedStorageTransaction,
   runtime: Runtime,
-  processCell: Cell<any>,
+  resultCell: Cell<any>, // used as the base for output bindings
   outputBinding: unknown,
 ): JSONSchema | undefined => {
   if (!isWriteRedirectLink(outputBinding) && !isAliasBinding(outputBinding)) {
     return undefined;
   }
-  const bindingBase = processCell.getAsNormalizedFullLink();
+  const bindingBase = resultCell.getAsNormalizedFullLink();
   const bindingLink = isAliasBinding(outputBinding)
     ? parseAliasBinding(outputBinding, bindingBase)
     : parseLink(outputBinding, bindingBase);
@@ -613,7 +613,6 @@ type ResolvedJavaScriptModule = {
 type JavaScriptNodeContext = BoundNodeIO & {
   tx: IExtendedStorageTransaction;
   module: Module;
-  processCell: Cell<any>;
   resultCell: Cell<any>;
   addCancel: AddCancel;
   pattern: Pattern;
@@ -3143,7 +3142,6 @@ export class Runner {
             inputBindings,
             outputBindings,
             resultCell,
-            resultCell,
             addCancel,
             pattern,
             schedulerRehydration,
@@ -3155,7 +3153,6 @@ export class Runner {
             module,
             inputBindings,
             outputBindings,
-            resultCell,
             resultCell,
             addCancel,
             pattern,
@@ -3200,7 +3197,6 @@ export class Runner {
     inputBindings: FabricValue,
     outputBindings: FabricValue,
     resultCell: Cell<any>,
-    baseCell: Cell<any>,
     pattern: Pattern,
   ): BoundNodeIO {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
@@ -3221,8 +3217,8 @@ export class Runner {
     return {
       inputs,
       outputs,
-      reads: findAllWriteRedirectCells(inputs, baseCell),
-      writes: findAllWriteRedirectCells(outputs, baseCell),
+      reads: findAllWriteRedirectCells(inputs, resultCell),
+      writes: findAllWriteRedirectCells(outputs, resultCell),
     };
   }
 
@@ -3351,7 +3347,7 @@ export class Runner {
 
   private populateHandlerEventSchedulerReads(
     argumentSchema: JSONSchema | undefined,
-    processCell: Cell<any>,
+    resultCell: Cell<any>,
     event: unknown,
     depTx: IExtendedStorageTransaction,
   ): void {
@@ -3372,7 +3368,7 @@ export class Runner {
         { definitions: argumentSchema.definitions }),
     };
     const inputsCell = this.runtime.getImmutableCell(
-      processCell.space,
+      resultCell.space,
       { $event: event },
       undefined,
       depTx,
@@ -3385,7 +3381,7 @@ export class Runner {
   private collectWritableCellArgumentLinks(
     argumentSchema: JSONSchema | undefined,
     value: unknown,
-    processCell: Cell<any>,
+    resultCell: Cell<any>,
     writeInputPaths?: readonly (readonly string[])[],
   ): NormalizedFullLink[] {
     const links: NormalizedFullLink[] = [];
@@ -3424,7 +3420,7 @@ export class Runner {
         (asCell.includes("cell") || asCell.includes("writeonly"))
       ) {
         if (shouldCollectPath(path)) {
-          links.push(...findAllWriteRedirectCells(currentValue, processCell));
+          links.push(...findAllWriteRedirectCells(currentValue, resultCell));
         }
         return;
       }
@@ -3466,7 +3462,7 @@ export class Runner {
   private collectArgumentSchedulerReadLinks(
     argumentSchema: JSONSchema | undefined,
     value: unknown,
-    processCell: Cell<any>,
+    resultCell: Cell<any>,
   ): NormalizedFullLink[] {
     const links: NormalizedFullLink[] = [];
     const seen = new WeakMap<object, Set<unknown>>();
@@ -3495,7 +3491,7 @@ export class Runner {
       // that pattern's own instantiation) — parsing one here would read it at
       // the wrong nesting level.
       if (isWriteRedirectLink(currentValue)) {
-        const link = parseLink(currentValue, processCell);
+        const link = parseLink(currentValue, resultCell);
         links.push({
           ...link,
           schema: link.schema ?? schemaWithRootDefinitions(
@@ -3844,12 +3840,12 @@ export class Runner {
     result: any,
     resultHasReactives: boolean,
     frame: Frame,
-    processCell: Cell<any>,
+    patternResultCell: Cell<any>,
     addCancel: AddCancel,
     cause: Record<string, any>,
   ): any {
     const receiptCell = this.runtime.getCell(
-      processCell.space,
+      patternResultCell.space,
       { resultFor: cause },
       undefined,
       tx,
@@ -3922,7 +3918,7 @@ export class Runner {
         const setup = this.setupDeferredHandlerResultPattern(
           tx,
           resultPattern,
-          processCell.space,
+          patternResultCell.space,
           cause,
           true,
         );
@@ -4211,7 +4207,6 @@ export class Runner {
   private instantiateJavaScriptHandlerNode(
     {
       module,
-      processCell,
       resultCell,
       addCancel,
       pattern,
@@ -4258,7 +4253,7 @@ export class Runner {
       let popFrameAfterReturn = true;
       try {
         const inputsCell = this.runtime.getImmutableCell(
-          processCell.space,
+          resultCell.space,
           eventInputs,
           undefined,
           tx,
@@ -4340,7 +4335,7 @@ export class Runner {
               normalized.value,
               normalized.hasReactive,
               frame,
-              processCell,
+              resultCell,
               addCancel,
               cause,
             );
@@ -4397,7 +4392,7 @@ export class Runner {
           $event: event,
         };
         const inputsCell = this.runtime.getImmutableCell(
-          processCell.space,
+          resultCell.space,
           eventInputs,
           undefined,
         );
@@ -4434,9 +4429,9 @@ export class Runner {
 
     // Tag the handler with its owning pattern instance so the delivery shaper
     // can group a pattern's input across its several streams into one shaping
-    // window (per-pattern coalescing, W3). The process cell is stable per
+    // window (per-pattern coalescing, W3). The result cell is stable per
     // instance, so all of one instance's handlers share this id.
-    const instanceLink = processCell.getAsNormalizedFullLink();
+    const instanceLink = resultCell.getAsNormalizedFullLink();
     const wrappedHandler = Object.assign(handler, {
       reads,
       writes,
@@ -4452,7 +4447,7 @@ export class Runner {
     const schedulerReads = this.collectArgumentSchedulerReadLinks(
       module.argumentSchema,
       inputs,
-      processCell,
+      resultCell,
     );
     const declaredSchedulerReads = schedulerReads.length > 0
       ? schedulerReads
@@ -4462,7 +4457,7 @@ export class Runner {
         this.populateDeclaredSchedulerReads(declaredSchedulerReads, depTx);
         this.populateHandlerEventSchedulerReads(
           module.argumentSchema,
-          processCell,
+          resultCell,
           event,
           depTx,
         );
@@ -4474,7 +4469,7 @@ export class Runner {
           $event: event,
         };
         const inputsCell = this.runtime.getImmutableCell(
-          processCell.space,
+          resultCell.space,
           eventInputs,
           undefined,
           depTx,
@@ -4498,8 +4493,7 @@ export class Runner {
     {
       tx,
       module,
-      processCell,
-      resultCell: patternResultCell,
+      resultCell,
       addCancel,
       pattern,
       fn,
@@ -4518,7 +4512,7 @@ export class Runner {
     }
 
     const inputsCell = this.runtime.getImmutableCell(
-      patternResultCell.space,
+      resultCell.space,
       inputs,
       undefined,
       tx,
@@ -4541,7 +4535,7 @@ export class Runner {
       const frame = this.createPatternFrame(
         resultFor,
         pattern,
-        patternResultCell,
+        resultCell,
         tx,
         false,
         policyFacingIdentity,
@@ -4550,8 +4544,6 @@ export class Runner {
       if (policyFacingIdentity) {
         tx.setCfcImplementationIdentity(policyFacingIdentity);
       }
-
-      const resultCell = patternResultCell;
 
       const handleErrorOutput = (error: unknown) => {
         // RetryImmediately is an internal control-flow signal: re-throw it
@@ -4717,7 +4709,7 @@ export class Runner {
     // scheduler identity on reload.
     this.applyImplementationHash(action, fn);
     const instanceKey = schedulerActionInstanceKey({
-      process: processCell.getAsNormalizedFullLink(),
+      process: resultCell.getAsNormalizedFullLink(),
       reads,
       writes,
     });
@@ -4741,14 +4733,14 @@ export class Runner {
         ? this.collectWritableCellArgumentLinks(
           module.argumentSchema,
           inputs,
-          processCell,
+          resultCell,
           module.materializerWriteInputPaths,
         )
         : this.moduleHasOpaqueResult(module)
         ? this.collectWritableCellArgumentLinks(
           module.argumentSchema,
           inputs,
-          processCell,
+          resultCell,
         )
         : []);
     const hasMaterializerWriteEnvelopes = materializerWriteEnvelopes.length > 0;
@@ -4768,16 +4760,16 @@ export class Runner {
     ]);
     const structuralMetaLinks = module.completeSchedulerScopeSummary === true
       ? (["pattern", "argument", "result"] as const)
-        .map((field) => getMetaLink(patternResultCell, field))
+        .map((field) => getMetaLink(resultCell, field))
         .filter((link): link is NormalizedFullLink => link !== undefined)
       : [];
     const internalMetaLink = module.completeSchedulerScopeSummary === true
-      ? getMetaCell(patternResultCell, "internal", tx)
+      ? getMetaCell(resultCell, "internal", tx)
         .getAsNormalizedFullLink()
       : undefined;
     const derivedInternalLinks = module.completeSchedulerScopeSummary === true
       ? (pattern.derivedInternalCells ?? []).map((descriptor) =>
-        getDerivedInternalCellLink(patternResultCell, descriptor)
+        getDerivedInternalCellLink(resultCell, descriptor)
       )
       : [];
     const wrappedAction = Object.assign(action, {
@@ -4789,7 +4781,7 @@ export class Runner {
         ? {
           completeSchedulerScopeSummary: {
             complete: true as const,
-            piece: patternResultCell.getAsNormalizedFullLink(),
+            piece: resultCell.getAsNormalizedFullLink(),
             // The callback's declared reads are only part of the action's
             // structurally fixed read surface. Reads follow static redirects;
             // the runner also materializes the immutable argument container
@@ -4800,7 +4792,7 @@ export class Runner {
               ...reads,
               ...redirectReadTargets.targets,
               inputsCell.getAsNormalizedFullLink(),
-              processCell.getAsNormalizedFullLink(),
+              resultCell.getAsNormalizedFullLink(),
               ...structuralMetaLinks,
               ...(internalMetaLink ? [internalMetaLink] : []),
               ...derivedInternalLinks,
@@ -4831,7 +4823,6 @@ export class Runner {
     module: Module,
     inputBindings: FabricValue,
     outputBindings: FabricValue,
-    processCell: Cell<any>,
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
@@ -4848,7 +4839,6 @@ export class Runner {
           inputBindings,
           outputBindings,
           resultCell,
-          processCell,
           pattern,
         ),
     );
@@ -4856,7 +4846,6 @@ export class Runner {
     const context: JavaScriptNodeContext = {
       tx,
       module,
-      processCell,
       resultCell,
       addCancel,
       pattern,
@@ -4868,7 +4857,7 @@ export class Runner {
 
     const { streamLink, eventTarget } = this.resolveJavaScriptStreamLink(
       io.inputs,
-      processCell.getAsNormalizedFullLink(),
+      resultCell.getAsNormalizedFullLink(),
       tx,
     );
     if (streamLink) {
@@ -5027,7 +5016,6 @@ export class Runner {
     module: Module,
     inputBindings: FabricValue,
     outputBindings: FabricValue,
-    processCell: Cell<any>,
     resultCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
@@ -5078,7 +5066,7 @@ export class Runner {
     const opaqueInputKeys = opaqueArgumentKeys(module.argumentSchema);
     const inputCells = findAllWriteRedirectCells(
       mappedInputBindings,
-      processCell,
+      resultCell,
       opaqueInputKeys.size > 0
         ? { skipTopLevelKeys: opaqueInputKeys }
         : undefined,
@@ -5087,11 +5075,11 @@ export class Runner {
     // event preflight.
     const outputCells = findAllWriteRedirectCells(
       mappedOutputBindings,
-      processCell,
+      resultCell,
     );
 
     const inputsCell = this.runtime.getImmutableCell(
-      processCell.space,
+      resultCell.space,
       mappedInputBindings,
       undefined,
       tx,
@@ -5106,7 +5094,7 @@ export class Runner {
       this.runtime,
       tx,
       mappedOutputBindings,
-      processCell,
+      resultCell,
     );
 
     // The output spot's *declared* scope is not inherently on the resolved link
@@ -5127,7 +5115,7 @@ export class Runner {
       ? pushFrameFromCause(undefined, {
         runtime: this.runtime,
         tx,
-        space: processCell.space,
+        space: resultCell.space,
         implementationIdentity: builtinIdentity,
       })
       : undefined;
@@ -5139,13 +5127,13 @@ export class Runner {
           const outputBindingSchema = schemaForRawBuiltinRootOutputBinding(
             tx,
             this.runtime,
-            processCell,
+            resultCell,
             mappedOutputBindings,
           );
           recordRawBuiltinBindingSchemaPolicyInputs(
             tx,
             this.runtime,
-            processCell,
+            resultCell,
             mappedOutputBindings,
           );
           recordRawBuiltinResultSchemaPolicyInput(
@@ -5168,7 +5156,7 @@ export class Runner {
         addCancel,
         {
           inputs: inputsCell,
-          parents: processCell.entityId,
+          parents: resultCell.entityId,
           ...(resolvedOutputSpot
             ? {
               outputSpot: {
@@ -5179,7 +5167,7 @@ export class Runner {
             }
             : {}),
         },
-        processCell,
+        resultCell,
         this.runtime,
         outputBinding,
         // The resumed-from-synced-state flag is passed out-of-band (a behavioral
