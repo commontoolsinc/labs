@@ -19,6 +19,7 @@ import {
   toDocumentPath,
 } from "../v2.ts";
 import { createGraphFixture } from "./v2-graph.fixture.ts";
+import { StandaloneMemoryServer } from "../v2/standalone.ts";
 
 const HELLO_FLAGS = getMemoryProtocolFlags();
 const HELLO = {
@@ -27,6 +28,22 @@ const HELLO = {
   flags: HELLO_FLAGS,
 } as const;
 const TEST_AUDIENCE = "did:key:z6Mk-memory-v2-server-test-audience";
+
+Deno.test("standalone memory exposes aggregate diagnostic controls", async () => {
+  const server = StandaloneMemoryServer.start({
+    commitTelemetry: true,
+    aggregateOnlyDiagnostics: true,
+  });
+  try {
+    await server.flushSessions();
+    await server.flushDiagnosticsSessions();
+    await server.waitForDiagnosticsReceives();
+    assertEquals(server.diagnosticsActivityGeneration(), 0);
+    assertEquals(server.commitTelemetry().transactCount, 0);
+  } finally {
+    await server.close();
+  }
+});
 
 const tick = async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
