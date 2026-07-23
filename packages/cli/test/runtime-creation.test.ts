@@ -112,10 +112,15 @@ describe("CLI runtime creation", () => {
         manager.getSpace(),
         "piece-navigation-target",
       );
-      const added = Promise.withResolvers<void>();
+      let navigationTask: Promise<unknown> | undefined;
       let registryReads = 0;
       let registeredTargets: unknown[] | undefined;
-      Reflect.set(created!.storageManager, "synced", () => Promise.resolve());
+      Reflect.set(created!.storageManager, "synced", () => ({
+        then: (onFulfilled: () => unknown) => {
+          navigationTask = Promise.resolve().then(onFulfilled);
+          return navigationTask;
+        },
+      }));
       manager.getPieceRegistry = (() => {
         registryReads++;
         return Promise.resolve({
@@ -124,12 +129,12 @@ describe("CLI runtime creation", () => {
       }) as unknown as typeof manager.getPieceRegistry;
       manager.add = ((targets) => {
         registeredTargets = targets;
-        added.resolve();
         return Promise.resolve();
       }) as typeof manager.add;
 
       created!.navigateCallback!(target);
-      await added.promise;
+      expect(navigationTask).toBeDefined();
+      await navigationTask;
 
       expect(registryReads).toBe(1);
       expect(registeredTargets).toEqual([target]);
