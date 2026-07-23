@@ -86,6 +86,8 @@ already does). `docs/development/skill-audit.md` covers what keeps those facts
 honest, including the `deno task check-skill-facts` tripwire that fails CI when
 a path or import a skill cites stops resolving.
 
+For reading or changing Topics on Estuary, use `skills/topics/SKILL.md`.
+
 #### Useful Pattern documentation
 
 **Start here:**
