@@ -17,6 +17,7 @@ export interface WishCommandOptions {
   scope?: string[];
   quiet?: boolean;
   allowEmpty?: boolean;
+  json?: boolean;
 }
 
 /** Injectable effects so the action body is unit-testable in-process. */
@@ -83,6 +84,7 @@ export async function wishAction(
     query: target,
     path,
     scope,
+    jsonOutput: true,
   });
 
   if (error && result === null && !options.allowEmpty) {
@@ -157,6 +159,10 @@ export const wish = new Command()
   .option(
     "--allow-empty",
     "On an empty/failed wish, print 'null' and exit 0 instead of erroring.",
+  )
+  .option(
+    "--json",
+    "Select JSON output explicitly. This command always outputs JSON.",
   )
   .example(
     cliText(`cf wish '#profile' -i ./claude.key`),

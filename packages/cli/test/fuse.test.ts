@@ -1096,7 +1096,7 @@ describe("FUSE supervisor command construction", () => {
     )).resolves.toBeUndefined();
   });
 
-  it("maps hidden CLI options into the supervisor contract", () => {
+  it("maps CLI options into the supervisor contract", () => {
     expect(fuseSupervisorOptions({
       apiUrl: "http://localhost:8000",
       identity: "/tmp/id.key",
@@ -1236,7 +1236,7 @@ describe("FUSE supervisor command construction", () => {
     expect(child.args).not.toContain("/repo/packages/cli/mod.ts");
   });
 
-  it("represents the compiled supervisor-spawned FUSE child as a hidden subcommand", () => {
+  it("represents the compiled supervisor-spawned FUSE child as a direct subcommand", () => {
     const child = buildFuseChildCommand({
       mountpoint: "/mnt",
       apiUrl: "http://localhost:8000",

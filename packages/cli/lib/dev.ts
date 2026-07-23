@@ -16,11 +16,14 @@ import {
   runtimePresets,
   type RuntimeProgram,
 } from "@commonfabric/runner";
+import { stderrConsoleHandler } from "./json-output.ts";
 
 const FABRIC_IMPORTS_REQUIRE_SPACE_MESSAGE =
   "fabric imports require a space context (options.fabricImports)";
 
-export async function createRuntime() {
+export async function createRuntime(
+  options: { consoleToStderr?: boolean } = {},
+) {
   const { StorageManager } = await import(
     "@commonfabric/runner/storage/cache.deno"
   );
@@ -29,11 +32,17 @@ export async function createRuntime() {
   });
   // Shared first-party posture (CT-1814); emulated storage is the local-dev
   // delta and stays visible here.
-  return new Runtime(runtimePresets.localDev({
+  const runtimeOptions = runtimePresets.localDev({
     apiUrl: new URL(import.meta.url),
     storageManager,
     experimental: experimentalOptionsFromEnv(Deno.env.get),
-  }));
+  });
+  return new Runtime({
+    ...runtimeOptions,
+    ...(options.consoleToStderr
+      ? { consoleHandler: stderrConsoleHandler }
+      : {}),
+  });
 }
 
 export interface ProcessOptions {
@@ -46,12 +55,22 @@ export interface ProcessOptions {
   mainExport?: string;
   verboseErrors?: boolean;
   space?: string;
+  patternJson?: boolean;
+}
+
+export interface ProcessResult {
+  output: string;
+  main?: Record<string, unknown>;
+  transformed?: string;
+  patternJson?: string;
 }
 
 export async function process(
   options: ProcessOptions,
-): Promise<{ output: string; main?: Record<string, unknown> }> {
-  const runtime = await createRuntime();
+): Promise<ProcessResult> {
+  const runtime = await createRuntime({
+    consoleToStderr: options.patternJson,
+  });
   // Compile/evaluate through the runtime's OWN harness, not a second Engine.
   // Verified-load registration, source maps, and module hashes all live on the
   // engine that evaluates the bundle; the runner and the builder's source-
@@ -75,8 +94,11 @@ export async function process(
   if (options.mainExport) {
     program.mainExport = options.mainExport;
   }
+  let transformed: string | undefined;
   const getTransformedProgram = options.showTransformed
-    ? renderTransformed
+    ? (program: Program) => {
+      transformed = formatTransformed(program);
+    }
     : undefined;
   const { id, graph, mainSpecifier, resolvedPins } = await engine
     .compileToRecordGraph(
@@ -109,7 +131,7 @@ export async function process(
   }
 
   if (!options.run) {
-    return { output };
+    return { output, transformed };
   }
 
   const { main } = engine.evaluateRecordGraph(
@@ -118,14 +140,33 @@ export async function process(
     mainSpecifier,
     program.files,
   );
-  return { output, main };
+  const patternJson = options.patternJson && main
+    ? serializeMainExport(main, options.mainExport)
+    : undefined;
+  return { output, main, transformed, patternJson };
 }
 
-function renderTransformed(program: Program) {
-  for (const { contents, name } of program.files) {
-    console.log(`// transformed: ${name}`);
-    console.log(contents);
+export function serializeMainExport(
+  exports: Record<string, unknown>,
+  mainExportName?: string,
+): string {
+  const exportName = mainExportName ?? "default";
+  const mainExport = exportName in exports ? exports[exportName] : exports;
+  try {
+    const value = JSON.stringify(mainExport, null, 2);
+    if (value === undefined) {
+      throw new Error("Main export not serializable.");
+    }
+    return value;
+  } catch (_) {
+    throw new Error("Main export not serializable.");
   }
+}
+
+function formatTransformed(program: Program): string {
+  return program.files
+    .map(({ contents, name }) => `// transformed: ${name}\n${contents}`)
+    .join("\n");
 }
 
 /**
@@ -133,7 +174,7 @@ function renderTransformed(program: Program) {
  * specifiers to the engine's FabricAwareResolver. Malformed cf: specifiers
  * fail here with their parse error; valid ones either pass through
  * (`"allow"`) or trigger the requires-a-space error (`"reject"`, for compiles
- * with no fabric context). Shared by `cf dev`/`cf check` and `cf deps`.
+ * with no fabric context). Shared by `cf check` and `cf deps`.
  */
 export async function collectLocalProgram(
   resolver: ProgramResolver,

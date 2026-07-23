@@ -446,15 +446,18 @@ run_piece_call() {
     error "Top-level callable help should work without the delimiter"
   echo "$CALL_HELP" | grep -q "cf piece call ... search <json>" ||
     error "Piece-call help should describe JSON input without --json"
+  echo "$CALL_HELP" | grep -q "cf piece call ... search --json \[<json>\]" ||
+    error "Piece-call help should describe explicit --json input"
 
   CALL_HELP_JSON=$(cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --help --json)
   echo "$CALL_HELP_JSON" | jq -e '.inputSchema.properties.query.type == "string"' > /dev/null ||
     error "Top-level --help --json should return the machine-readable schema"
 
-  # --json is now a registered no-op on cf piece call (CT-1393): agents expect
-  # it to work because it's valid on all other piece subcommands.
-  cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --json < /dev/null > /dev/null 2>&1 ||
-    error "Redundant --json should be accepted (no-op) on cf piece call"
+  JSON_TOOL_RESULT=$(cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --json '{"query":"json-input"}')
+  assert_json_eq \
+    "$JSON_TOOL_RESULT" \
+    '{"query":"json-input","help":"","source":"bound-source","summary":"bound-source:json-input:"}' \
+    "Explicit inline --json should pass the complete tool input"
 
   cf piece call $SPACE_ARGS --piece $CALLABLE_PIECE_ID recordMessage -- --message "piece-flags"
   RESULT=$(cf piece get $SPACE_ARGS --piece $CALLABLE_PIECE_ID lastMessage)

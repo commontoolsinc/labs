@@ -40,6 +40,7 @@ import { parseCellPath } from "@commonfabric/runner";
 import { UI } from "@commonfabric/runner";
 import ports from "@commonfabric/ports" with { type: "json" };
 import type { PiecePatternRef } from "@commonfabric/piece/ops";
+import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;
@@ -199,8 +200,9 @@ export function pieceCallRawArgs(
     // fixes is stamping out. Mirrors the `tail.length > 1` rejection below.
     if (tail.length > 0) {
       throw new ValidationError(
-        'Pass either a payload argument (inline JSON or "-" for stdin) or ' +
-          'schema-derived flags after "--", not both.',
+        'Callable arguments cannot appear on both sides of "--". ' +
+          'Pass either a payload argument (inline JSON or "-" for stdin) ' +
+          'or schema-derived flags after "--", not both.',
       );
     }
     return literalArgs;
@@ -234,13 +236,7 @@ export function pieceCallRawArgs(
   }
 
   if (tail[0] === "--json") {
-    if (tail.length === 1) {
-      // --json alone is a no-op: cf piece call always outputs JSON.
-      // Return machine-readable schema (same as --help --json) to exit cleanly.
-      return ["--help", "--json"];
-    }
-    // --json followed by other args: existing behavior (forward as-is).
-    return ["--json"];
+    return tail;
   }
 
   if (tail.length > 1) {
@@ -256,6 +252,27 @@ export function pieceCallRawArgs(
   }
 
   return ["--json", tail[0]];
+}
+
+export function writePieceRenderStatus(
+  message: string,
+  jsonOutput: boolean,
+): void {
+  if (jsonOutput) {
+    console.error(message);
+  } else {
+    console.log(message);
+  }
+}
+
+export function handlePieceRenderNoUi(
+  error: Error,
+  jsonOutput: boolean,
+): void {
+  if (jsonOutput) {
+    throw error;
+  }
+  render("<piece has no UI>");
 }
 
 // Override usage, since we do not "require" args that can be reflected by env vars.
@@ -308,6 +325,12 @@ TIPS:
 export const piece = new Command()
   .name("piece")
   .description(pieceDescription)
+  .error((error, command) => {
+    const args = command.getMainCommand().getRawArgs();
+    if (reservesStdoutForCommandOutput(args)) {
+      throw error;
+    }
+  })
   .default("help")
   .globalOption("-q,--quiet", "Suppress hints and next-step suggestions")
   .globalOption(
@@ -675,11 +698,17 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
 
     try {
       if (options.watch) {
-        console.log("Watching for changes... Press Ctrl+C to exit.\n");
+        writePieceRenderStatus(
+          "Watching for changes... Press Ctrl+C to exit.\n",
+          !!options.json,
+        );
 
         // Initial render
         const pieceData = await inspectPiece(pieceConfig);
-        console.log(`Rendering piece: ${pieceData.name || pieceConfig.piece}`);
+        writePieceRenderStatus(
+          `Rendering piece: ${pieceData.name || pieceConfig.piece}`,
+          !!options.json,
+        );
 
         let renderCount = 0;
         const cleanup = await renderPiece(pieceConfig, {
@@ -687,7 +716,10 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
           start: options.start,
           onUpdate: (html) => {
             renderCount++;
-            console.log(`\n--- Render #${renderCount} ---`);
+            writePieceRenderStatus(
+              `\n--- Render #${renderCount} ---`,
+              !!options.json,
+            );
             if (options.json) {
               render({ html, renderCount }, { json: true });
             } else {
@@ -698,7 +730,7 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
 
         // Handle Ctrl+C gracefully
         Deno.addSignalListener("SIGINT", () => {
-          console.log("\nStopping watch mode...");
+          writePieceRenderStatus("\nStopping watch mode...", !!options.json);
           cleanup();
           Deno.exit(0);
         });
@@ -717,7 +749,7 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
       }
     } catch (error) {
       if (error instanceof Error && error.message.includes("has no UI")) {
-        render("<piece has no UI>");
+        handlePieceRenderNoUi(error, !!options.json);
       } else {
         throw error;
       }
@@ -879,10 +911,17 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     "--step",
     "Start and recompute the piece in this session before reading",
   )
+  .option(
+    "--json",
+    "Select JSON output explicitly. This command always outputs JSON.",
+  )
   .arguments("[path:string]")
   .action(async (options, pathString) => {
     setQuietMode(!!options.quiet);
-    const pieceConfig = parsePieceOptions(options);
+    const pieceConfig = {
+      ...parsePieceOptions(options),
+      jsonOutput: true,
+    };
     const pathSegments = pathString ? parseCellPath(pathString) : [];
     try {
       const value = await getCellValue(pieceConfig, pathSegments, {
@@ -970,7 +1009,16 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
     render(map);
   })
   /* piece call */
-  .command("call", "Invoke a callable within a piece")
+  .command(
+    "call",
+    `Invoke a callable within a piece.
+
+The callable name separates piece-call options from the callable's arguments.
+Arguments after the callable use the same parser as cf exec. Use --json with an
+optional inline value for complete JSON input; bare --json reads JSON from
+stdin. Use --help --json for machine-readable schema help. A single positional
+JSON value is accepted. Put schema-derived flags after --.`,
+  )
   .usage(pieceUsage)
   .example(
     cliText(`cf piece call ${EX_ID} ${EX_COMP_PIECE} increment`),
@@ -990,21 +1038,23 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
     `Read the JSON payload from stdin ("-" is the stdin sentinel).`,
   )
   .example(
+    cliText(
+      `cf piece call ${EX_ID} ${EX_COMP_PIECE} setName --json '{"value":"My Name"}'`,
+    ),
+    "Call a handler with explicit inline JSON input.",
+  )
+  .example(
     cliText(`cf piece call ${EX_ID} ${EX_COMP_PIECE} search -- --query milk`),
     `Run the "search" tool using schema-derived flags after "--".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
-  .option(
-    "--json",
-    "Input/output format (JSON is the only supported format; this flag is a no-op)",
-  )
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")
   .action(async function (options, callableName, ...tail) {
     try {
       setQuietMode(!!options.quiet);
-      const pieceConfig = parsePieceOptions(options);
       const rawArgs = pieceCallRawArgs(tail, this.getLiteralArgs());
+      const pieceConfig = parsePieceOptions(options);
       const result = await executePieceCallable(
         pieceConfig,
         callableName,
@@ -1018,11 +1068,20 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
         render(result.outputText);
         return;
       }
-      render(`Called handler "${callableName}" on piece ${pieceConfig.piece}`);
+      const confirmation =
+        `Called handler "${callableName}" on piece ${pieceConfig.piece}`;
+      if (result.parsed.usedJsonInput) {
+        console.error(confirmation);
+      } else {
+        render(confirmation);
+      }
       hint(cliText(`NEXT STEPS:
   → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
   → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`));
     } catch (error) {
+      if (error instanceof ValidationError) {
+        throw error;
+      }
       const message = error instanceof Error ? error.message : String(error);
       console.error(message);
       Deno.exit(1);
@@ -1148,6 +1207,7 @@ export interface PieceCLIOptions {
   repository?: string;
   root?: string;
   dangerouslyAllowIncompatibleSchema?: boolean;
+  json?: boolean;
 }
 
 export interface PieceSummaryCLIOptions extends PieceCLIOptions {
@@ -1284,6 +1344,7 @@ export function parseSpaceOptions(
   const output: Partial<PieceConfig> = {
     identity: absPath(input.identity),
   };
+  if (input.json) output.jsonOutput = true;
 
   if (input.url) {
     const { apiUrl, space, piece, pieceScope } = parseUrl(input.url);

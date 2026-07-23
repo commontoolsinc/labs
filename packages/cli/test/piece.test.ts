@@ -269,6 +269,15 @@ describe("cli piece parsing", () => {
       url: FULL_URL,
       identity: ID,
     })).toMatchObject(expected);
+    expect(
+      parsePieceOptions({
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: ID,
+        piece: PIECE,
+        json: true,
+      }).jsonOutput,
+    ).toBe(true);
   });
 
   it("parsePieceOptions() parses scope suffixes from piece ids and urls", () => {

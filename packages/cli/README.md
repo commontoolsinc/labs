@@ -29,11 +29,7 @@ standard error and continues searching that piece and the rest of the space.
 ## Output Conventions
 
 - stdout carries command output only; hints and diagnostics go to stderr.
-  `piece get` prints plain JSON, except an absent value prints the literal
-  `undefined` — which is not valid JSON, so test for it before parsing. It is
-  `undefined` rather than `null` on purpose: loom's fresh-space readback gate
-  tolerates `undefined` as a transient, and `null` would hard-fail its deploy
-  gate (see the `-q` note below and the PR compatibility rationale).
+  `piece get` prints JSON and represents an absent value as `null`.
 - ANSI colors are emitted only when stdout is a TTY. `--no-color` or
   `NO_COLOR=1` disables them everywhere (including Cliffy help/usage output);
   `FORCE_COLOR=1`/`CLICOLOR_FORCE=1` forces them when piped. The policy is
@@ -113,3 +109,59 @@ deno run --allow-run --allow-env --allow-read vendor/labs/packages/cli/launcher.
 
 Use `--launcher-help` for launcher-specific help. Normal CLI flags such as
 `--help` are passed through to `cf`.
+
+## JSON command contract
+
+An invocation that contains `--json` reserves stdout for JSON. Status text and
+errors go to stderr. If a command does not support `--json`, it rejects the
+option without printing command help to stdout. Static `--help` and `--json`
+cannot be combined. Callable schema help is the exception because it is JSON:
+use `cf exec <mounted-file> --help --json` or
+`cf piece call ... <callable> --help --json`.
+
+The supported output switches are:
+
+- `cf inspect ... --json` serializes an inspector result. `inspect html` does
+  not have a JSON representation, so `html` and `--json` are mutually exclusive.
+  `inspect graph --dot` and `--json` are also mutually exclusive.
+- `cf piece ls`, `piece search`, `piece inspect`, `piece view`, and
+  `piece render` use `--json` as an output switch. `piece render --watch --json`
+  writes only JSON render records to stdout; watch status goes to stderr.
+  Rendering a piece without a UI fails instead of returning an empty successful
+  JSON stream.
+- `cf piece get` and `cf wish` always return JSON. Their `--json` options are
+  accepted, documented no-ops for callers that select JSON explicitly.
+- `cf check --json` compiles without evaluating and prints one object with a
+  `files` array. Each entry has the input `path` and the compiled module bodies
+  in `output`.
+
+`cf check --json`, `--show-transformed`, and `--pattern-json` are three mutually
+exclusive stdout modes. The command buffers all three modes until every input
+succeeds. A failure therefore leaves stdout empty instead of mixing successful
+output with later errors.
+
+For `cf exec`, `--json` belongs after the mounted callable path. For
+`cf piece call`, it belongs after the callable name. In both commands, it
+selects complete JSON input:
+
+```bash
+cf exec /tmp/cf/home/pieces/notes/result/search.tool --json '{"query":"milk"}'
+printf '%s' '{"query":"milk"}' |
+  cf exec /tmp/cf/home/pieces/notes/result/search.tool --json
+
+cf piece call ... search --json '{"query":"milk"}'
+printf '%s' '{"query":"milk"}' | cf piece call ... search --json
+```
+
+Bare `--json` reads stdin. An inline value immediately after it is parsed as the
+complete input. `piece call` also accepts a single positional JSON value. Put
+schema-derived piece-call flags after `--`, for example
+`cf piece call ... search -- --query milk`. Use `-- --json-file <path>` for a
+piece-call JSON file. These rules keep the options before the callable name for
+`piece call` itself and the arguments after the name for the invoked callable.
+
+## Command visibility
+
+Every registered top-level command appears in `cf --help`. The direct
+`fuse-daemon` and `fuse-supervisor` entry points are visible because packaged
+launchers use them.

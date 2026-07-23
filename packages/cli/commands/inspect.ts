@@ -2,13 +2,14 @@
 //
 // Thin CLI surface over @commonfabric/state-inspector. Reads the durable SQLite
 // store the server already wrote (no live runtime, no capture) and answers
-// who/what/when + cross-space convergence questions. Every command takes --json.
+// who/what/when + cross-space convergence questions. Data commands take --json;
+// the HTML renderer rejects it.
 //
 // Space DBs are auto-discovered (no need to pass absolute paths): pass a DID,
 // DID-prefix, a space NAME (resolved the same way the runtime derives it), or a
 // file path as <space>. `cf inspect spaces` lists what's found.
 
-import { Command } from "@cliffy/command";
+import { Command, ValidationError } from "@cliffy/command";
 import { Table } from "@cliffy/table";
 import {
   annotate,
@@ -59,6 +60,7 @@ import {
 } from "@commonfabric/state-inspector";
 import { signFirstPartyHttpRequest } from "@commonfabric/runner/toolshed-http-auth";
 import { loadIdentity } from "../lib/identity.ts";
+import { hasJsonArgument } from "../lib/json-output.ts";
 
 function humanSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
@@ -244,7 +246,12 @@ export const inspect = new Command()
   .description(
     "Offline autopsy of local memory v2 space DBs (state, history, convergence).",
   )
-  .default("help")
+  .error((error, command) => {
+    const args = command.getMainCommand().getRawArgs();
+    if (hasJsonArgument(args)) {
+      throw error;
+    }
+  })
   .globalOption("--json", "Output machine-readable JSON.")
   .globalOption(
     "--remote [url:string]",
@@ -255,6 +262,14 @@ export const inspect = new Command()
     "--identity <path:string>",
     "Identity keyfile used to sign --remote dump requests (default CF_IDENTITY).",
   )
+  .action(function (options) {
+    if (options.json) {
+      throw new ValidationError(
+        'Option "--json" requires an inspect data subcommand.',
+      );
+    }
+    this.showHelp();
+  })
   /* inspect spaces */
   .command(
     "spaces",
@@ -869,7 +884,9 @@ export const inspect = new Command()
   .option("--root <entity:string>", "Restrict to one entity's neighborhood.")
   .option("--depth <n:number>", "Hops around --root.", { default: 2 })
   .option("--no-links", "Omit data-link edges (keep structural edges only).")
-  .option("--dot", "Emit Graphviz DOT (pipe to: dot -Tsvg).")
+  .option("--dot", "Emit Graphviz DOT (pipe to: dot -Tsvg).", {
+    conflicts: ["json"],
+  })
   .option("--limit <n:number>", "Max entities to reconstruct.", {
     default: 5000,
   })
@@ -966,6 +983,11 @@ export const inspect = new Command()
     "Live shell base origin for deep links (e.g. https://host).",
   )
   .action(async (options, space) => {
+    if (options.json) {
+      throw new ValidationError(
+        'Option "--json" and the "html" command are mutually exclusive.',
+      );
+    }
     const s = await openByToken(space, options);
     try {
       const bundle = buildInspectorBundle(s, {

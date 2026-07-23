@@ -625,7 +625,9 @@ export class Scheduler {
       const { method, args } = e as ConsoleEvent;
       const metadata = getPieceMetadataFromFrame();
       const result = this.consoleHandler({ metadata, method, args });
-      console[method].apply(console, result);
+      const output = Array.isArray(result) ? { method, args: result } : result;
+      const target = output.target ?? console;
+      target[output.method].apply(target, output.args);
     });
   }
 

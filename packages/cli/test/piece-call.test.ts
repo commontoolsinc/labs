@@ -13,6 +13,45 @@ import {
 } from "../commands/piece.ts";
 
 describe("executePieceCallable", () => {
+  it("reserves stdout before resolving a callable with no arguments", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refresh",
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+    });
+    let managerConfig: unknown;
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "refresh",
+      [],
+      {
+        loadManager: (config) => {
+          managerConfig = config;
+          return Promise.resolve(harness.manager);
+        },
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+      },
+    );
+
+    expect(managerConfig).toEqual({
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/test-identity.pem",
+      jsonOutput: true,
+      piece: "fid1:piece-123",
+      space: "home",
+    });
+  });
+
   it("invokes handlers from schema-derived flags", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
@@ -539,7 +578,12 @@ describe("executePieceCallable", () => {
       "cf piece call ... search -- [run] --query <string>",
     );
     expect(result.helpText).toContain("JSON input:");
-    expect(result.helpText).toContain("Pass inline JSON as the next argument");
+    expect(result.helpText).toContain(
+      "Pass inline JSON as one positional argument or after `--json`",
+    );
+    expect(result.helpText).toContain(
+      "cf piece call ... search --json [<json>]",
+    );
     expect(result.helpText).toContain("query: string");
     expect(result.helpText).toContain("Flags after `--`:");
     expect(result.helpText).not.toContain(

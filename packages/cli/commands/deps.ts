@@ -13,7 +13,7 @@ import { render } from "../lib/render.ts";
 import { cliText } from "../lib/cli-name.ts";
 
 // Typed as Command<any> because cliffy's accumulated option generics don't
-// survive registration in main.ts (same idiom as createDevCommand).
+// survive registration in main.ts (the same idiom as the check command).
 // deno-lint-ignore no-explicit-any
 export const deps: Command<any> = new Command()
   .name("deps")
@@ -46,7 +46,7 @@ export const deps: Command<any> = new Command()
     const config = parseSpaceOptions(options);
     const manager = await loadManager(config);
     const filePath = absPath(file);
-    // Walk the whole local program (the same walk cf dev/check uses), so pins
+    // Walk the whole local program (the same walk cf check uses), so pins
     // in sibling files the entry imports are updated too, not just the entry.
     const fsRoot = dirname(filePath);
     const resolver = new FileSystemProgramResolver(filePath);
