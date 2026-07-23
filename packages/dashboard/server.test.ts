@@ -333,6 +333,96 @@ Deno.test("the ticker leaves a tile alone until its interval has elapsed", async
   assertEquals((await (await handle(req("/healthz"))).json()).at, at, "and nothing is reported as changed");
 });
 
+Deno.test("an update still running after one minute stays gray until it completes", async () => {
+  const realNow = Date.now;
+  const startedAt = realNow() + 10_000;
+  let now = startedAt;
+  Date.now = () => now;
+  const lastView: TileView = {
+    label: "pending model spend",
+    status: "good",
+    value: "last value",
+    sub: "last detail",
+    extra: "<span>last chart</span>",
+  };
+  const finalView: TileView = {
+    label: "pending model spend",
+    status: "good",
+    value: "fresh value",
+    sub: "fresh detail",
+    extra: "<span>fresh chart</span>",
+  };
+  const final = deferred<TileView>();
+  let publishIntermediate = (_view: TileView) => {};
+  const tile: Tile = {
+    id: "model-spend",
+    intervalMs: 0,
+    async collect(_ctx, publish) {
+      publishIntermediate = publish ?? publishIntermediate;
+      return await final.promise;
+    },
+  };
+  const messages: string[] = [];
+  const client = {
+    enqueue(value: Uint8Array) {
+      messages.push(dec.decode(value));
+    },
+  } as unknown as ReadableStreamDefaultController<Uint8Array>;
+  let collection: Promise<void> | undefined;
+  try {
+    await tick([fake("model-spend", () => lastView)]);
+    now++;
+    collection = tick([tile]);
+    clients.add(client);
+
+    now += 59_999;
+    await tick([tile]);
+    assert(tileHtml("pending model spend").startsWith(`good" data-tile-id="model-spend">`));
+    assertEquals(messages.length, 0);
+
+    now++;
+    await tick([tile]);
+    const stale = tileHtml("pending model spend");
+    assert(stale.startsWith(`unknown" data-tile-id="model-spend">`));
+    assertStringIncludes(stale, "last value");
+    assertStringIncludes(stale, "refresh still pending");
+    assertStringIncludes(stale, "last chart");
+    assertEquals(messages.length, 1, "the stale transition is published");
+
+    now += 15_000;
+    await tick([tile]);
+    assertEquals(messages.length, 1, "later ticks do not repeat the stale transition");
+
+    publishIntermediate({
+      label: "pending model spend",
+      status: "good",
+      value: "new cached value",
+      sub: "new cached detail",
+      extra: "<span>new cached chart</span>",
+    });
+    const intermediate = tileHtml("pending model spend");
+    assert(intermediate.startsWith(`unknown" data-tile-id="model-spend">`));
+    assertStringIncludes(intermediate, "new cached value");
+    assertStringIncludes(intermediate, "refresh still pending");
+    assertStringIncludes(intermediate, "new cached chart");
+
+    final.resolve(finalView);
+    await collection;
+    const fresh = tileHtml("pending model spend");
+    assert(fresh.startsWith(`good" data-tile-id="model-spend">`));
+    assertStringIncludes(fresh, "fresh value");
+    assertStringIncludes(fresh, "fresh detail");
+  } finally {
+    clients.delete(client);
+    final.resolve(finalView);
+    try {
+      await collection;
+    } finally {
+      Date.now = realNow;
+    }
+  }
+});
+
 Deno.test("overlapping ticks skip a tile already updating and collect other due tiles", async () => {
   const slow = deferred<TileView>();
   let duplicateCollects = 0;
@@ -410,9 +500,13 @@ Deno.test("overlapping ticks skip an updating run source and refresh another sou
 });
 
 Deno.test("a multi-source tile stays active until every source update completes", async () => {
+  const realNow = Date.now;
+  let now = realNow() + 20_000;
+  Date.now = () => now;
   const slowSource = { repo: "test/multi-source-slow", workflow: "ci.yml" };
   const fastSource = { repo: "test/multi-source-fast", workflow: "ci.yml" };
   const slowRuns = deferred<Run[]>();
+  const fastRuns = deferred<Run[]>();
   let slowFetches = 0;
   let fastFetches = 0;
   let collections = 0;
@@ -424,41 +518,73 @@ Deno.test("a multi-source tile stays active until every source update completes"
         return slowRuns.promise;
       }
       fastFetches++;
-      return Promise.resolve([]);
+      return fastRuns.promise;
     },
     env: () => undefined,
   };
   const tile: Tile = {
-    id: "overlap-multi-source",
+    id: "recent-runs",
     intervalMs: 0,
     runSources: [slowSource, fastSource],
     collect: () => {
       collections++;
-      return Promise.resolve({ label: "multi source", status: "good" });
+      return Promise.resolve({
+        label: "multi source",
+        status: "good",
+        value: "fresh source value",
+      });
     },
   };
-  let published = () => {};
-  const firstPublication = new Promise<void>((resolve) => published = resolve);
-  const client = {
-    enqueue() {
-      published();
-    },
-  } as unknown as ReadableStreamDefaultController<Uint8Array>;
-  clients.add(client);
-  const first = tick([tile], sourceCtx);
+  let first: Promise<void> | undefined;
+  let client: ReadableStreamDefaultController<Uint8Array> | undefined;
 
   try {
+    await tick([fake("recent-runs", () => ({
+      label: "multi source",
+      status: "good",
+      value: "last source value",
+    }))]);
+    now++;
+    first = tick([tile], sourceCtx);
+
+    now += 60_000;
+    await tick([tile], sourceCtx);
+    const stale = tileHtml("multi source");
+    assert(stale.startsWith(`unknown wide" data-tile-id="recent-runs">`));
+    assertStringIncludes(stale, "last source value");
+    assertStringIncludes(stale, "refresh still pending");
+
+    let published = () => {};
+    const firstPublication = new Promise<void>((resolve) => published = resolve);
+    client = {
+      enqueue() {
+        published();
+      },
+    } as unknown as ReadableStreamDefaultController<Uint8Array>;
+    clients.add(client);
+    fastRuns.resolve([]);
     await firstPublication;
     assertEquals(collections, 1, "the ready source collected the tile");
+    const partiallyComplete = tileHtml("multi source");
+    assert(partiallyComplete.startsWith(`unknown wide" data-tile-id="recent-runs">`));
+    assertStringIncludes(partiallyComplete, "fresh source value");
+    assertStringIncludes(partiallyComplete, "refresh still pending");
+
     await tick([tile], sourceCtx);
     assertEquals(slowFetches, 1, "the pending source was not fetched again");
     assertEquals(fastFetches, 1, "the completed source still skips the active tile");
   } finally {
-    clients.delete(client);
+    if (client) clients.delete(client);
     slowRuns.resolve([]);
-    await first;
+    fastRuns.resolve([]);
+    try {
+      await first;
+    } finally {
+      Date.now = realNow;
+    }
   }
   assertEquals(collections, 2, "the pending source completes its original collection");
+  assert(tileHtml("multi source").startsWith(`good wide" data-tile-id="recent-runs">`));
 });
 
 Deno.test("each completed collection is published while slower tiles are still running", async () => {
@@ -553,6 +679,8 @@ Deno.test("each run source publishes its dependent tiles as one batch", async ()
 });
 
 Deno.test("a ready source publishes while an older combined collection is still running", async () => {
+  const realNow = Date.now;
+  let now = realNow() + 30_000;
   const labsSource = { repo: "test/labs-independent", workflow: "ci.yml" };
   const loomSource = { repo: "test/loom-independent", workflow: "ci.yml" };
   const labs = deferred<Run[]>();
@@ -590,7 +718,6 @@ Deno.test("a ready source publishes while an older combined collection is still 
     sourceTile("loom-ci", "independent loom", [loomSource]),
     combined,
   ];
-
   const messages: string[] = [];
   let published = (_message: string) => {};
   const nextMessage = () => new Promise<string>((resolve) => published = resolve);
@@ -601,17 +728,30 @@ Deno.test("a ready source publishes while an older combined collection is still 
       published(message);
     },
   } as unknown as ReadableStreamDefaultController<Uint8Array>;
-  clients.add(client);
-  const refresh = tick(tiles, sourceCtx);
+  let refresh: Promise<void> | undefined;
+  Date.now = () => now;
   try {
+    await tick([fake("recent-runs", () => ({
+      label: "independent recent",
+      status: "good",
+      value: "prior combined",
+    }))]);
+    clients.add(client);
+    refresh = tick(tiles, sourceCtx);
     labs.resolve([sourceRun(4, "labs ready")]);
     await oldCollectionStarted;
+
+    now += 60_000;
+    await tick(tiles, sourceCtx);
+    assertStringIncludes(tileHtml("independent recent"), "refresh still pending");
+    messages.length = 0;
 
     const loomUpdate = nextMessage();
     loom.resolve([sourceRun(5, "loom ready")]);
     const first = updateFromEvent(await loomUpdate);
     assertStringIncludes(first.gridHtml, "independent loom");
     assertStringIncludes(first.wideHtml, "labs ready, loom ready");
+    assertStringIncludes(first.wideHtml, `unknown wide" data-tile-id="recent-runs">`);
     assert(!first.gridHtml.includes("independent labs"));
     publishOld({ label: "independent recent", status: "bad", value: "older cached merge" });
     assertEquals(messages.length, 1);
@@ -622,6 +762,7 @@ Deno.test("a ready source publishes while an older combined collection is still 
     const second = updateFromEvent(await labsUpdate);
     assertStringIncludes(second.gridHtml, "independent labs");
     assertStringIncludes(second.wideHtml, "labs ready, loom ready");
+    assertStringIncludes(second.wideHtml, `good wide" data-tile-id="recent-runs">`);
     assertEquals(messages.length, 2);
     await refresh;
   } finally {
@@ -629,7 +770,11 @@ Deno.test("a ready source publishes while an older combined collection is still 
     labs.resolve([]);
     loom.resolve([]);
     oldCollection.resolve(undefined);
-    await refresh;
+    try {
+      await refresh;
+    } finally {
+      Date.now = realNow;
+    }
   }
 });
 

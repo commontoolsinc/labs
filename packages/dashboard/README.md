@@ -51,7 +51,9 @@ a gray placeholder labelled with its id in its registered position until its
 first collection completes, so slow collectors do not leave holes in the board.
 A later ticker pass skips a tile or shared workflow fetch that is still
 updating. It starts every other due collection, so pending work does not pause
-the rest of the dashboard.
+the rest of the dashboard. A collection that remains active for one minute
+turns its tile gray with "refresh still pending" while retaining its last value
+and visuals. Its completed view replaces that pending state.
 A tile whose `collect()` throws is desaturated to a gray "unknown" — it keeps
 its last-known value and shows a short reason (e.g. "source unreachable"), with
 the full error in the server log — so one unreachable source never blanks or
