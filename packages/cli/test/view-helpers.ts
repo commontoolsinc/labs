@@ -69,6 +69,21 @@ interface Bar {
 }
 `;
 
+/** Valid TypeScript that triggers a compiler crash when parsed as TSX. The
+ * generic arrow enters JSX recovery. The later private member produces a
+ * malformed private identifier. */
+export const TS_PARSER_REGRESSION =
+  `export const identity = <T>(value: T): T => {
+  return value;
+};
+class Tx {
+  #floor = 0;
+  set(mode: number): void {
+    if (mode < this.#floor) {}
+  }
+}
+`;
+
 /** Encode a string to bytes for the key decoder. */
 export function bytes(s: string): Uint8Array {
   return new TextEncoder().encode(s);

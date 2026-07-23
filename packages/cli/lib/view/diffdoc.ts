@@ -263,8 +263,8 @@ export function buildDiffDocument(
         mapping,
         definitions,
         hunks,
-        // A deleted file's new path is /dev/null (absent), so fall back to the
-        // old path; otherwise a removed .md reads as TypeScript.
+        newFileName: file.newPath ?? file.oldPath,
+        oldFileName: file.oldPath ?? file.newPath,
         markdown: isMarkdownPath(file.newPath ?? file.oldPath),
       }));
     }
@@ -347,7 +347,10 @@ interface HunkCtx {
   mapping: FileMapping | undefined;
   definitions: Map<string, Definition[]>;
   hunks: DiffHunkInfo[];
-  /** The file is Markdown, so fragment-parsed lines are coloured as Markdown. */
+  /** Paths whose extensions select the new- and old-side fragment parsers. */
+  newFileName: string | undefined;
+  oldFileName: string | undefined;
+  /** The new-side workspace file is Markdown, so headings form its structure. */
   markdown: boolean;
 }
 
@@ -461,9 +464,9 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
     newFragment,
     lines,
     rawLines,
-    ctx.markdown,
+    ctx.newFileName,
   );
-  applyFragmentSpans(oldFragment, lines, rawLines, ctx.markdown);
+  applyFragmentSpans(oldFragment, lines, rawLines, ctx.oldFileName);
 
   // --- structure ---------------------------------------------------------
   // Verified hunks remap the workspace file's own nodes (precise ranges, live
@@ -647,12 +650,12 @@ function applyFragmentSpans(
   fragment: { diffLine: number; code: string }[],
   lines: MutableLine[],
   rawLines: string[],
-  markdown: boolean,
+  fileName: string | undefined,
 ): Document | null {
   if (fragment.length === 0) return null;
   const parsed = parseDocument(
     fragment.map((f) => f.code).join("\n"),
-    markdown ? "fragment.md" : undefined,
+    fileName,
   );
   for (let i = 0; i < fragment.length; i++) {
     const { diffLine } = fragment[i];

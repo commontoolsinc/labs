@@ -271,6 +271,41 @@ Deno.test("diff doc: missing workspace file still highlights and structures via 
   assert(hunk.label.includes("(no workspace file)"), `label: ${hunk.label}`);
 });
 
+Deno.test("diff doc: fragment parsing follows the file extension", () => {
+  const diff = `diff --git a/generic.ts b/generic.ts
+--- a/generic.ts
++++ b/generic.ts
+@@ -0,0 +1 @@
++const identity = <T>(value: T): T => value;
+`;
+  const model = parseDiff(diff)!;
+  const { doc } = buildDiffDocument(diff, model, NO_WS);
+  const parameter = doc.lines[4].spans.find((span) => span.text === "value");
+  assertEquals(
+    parameter?.cls,
+    "parameter",
+    "a .ts fragment uses TypeScript rather than TSX",
+  );
+});
+
+Deno.test("diff doc: renamed fragments use each side's extension", () => {
+  const diff = `diff --git a/generic.ts b/generic.tsx
+--- a/generic.ts
++++ b/generic.tsx
+@@ -1 +1 @@
+-const identity = <T>(value: T): T => value;
++const view = <div>ready</div>;
+`;
+  const model = parseDiff(diff)!;
+  const { doc } = buildDiffDocument(diff, model, NO_WS);
+  const oldParameter = doc.lines[4].spans.find((span) => span.text === "value");
+  assertEquals(
+    oldParameter?.cls,
+    "parameter",
+    "the removed .ts line uses the old TypeScript path",
+  );
+});
+
 Deno.test("diff doc: a drifted workspace line unmaps the whole hunk", () => {
   const { root, ws, done } = tempWorkspace();
   try {
