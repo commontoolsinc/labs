@@ -3,7 +3,6 @@ import {
   env,
   Page,
   type ProbeApi,
-  waitFor,
   waitForCondition,
 } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
@@ -20,7 +19,6 @@ import {
   clickButtonWithExactText,
   clickButtonWithText,
   clickButtonWithTitle,
-  findButtonWithText,
 } from "../note-button-helpers.ts";
 import { resolveSpaceDid } from "@commonfabric/lib-shell";
 
@@ -97,11 +95,6 @@ describe("default-app notebook reload integration test", () => {
       await clickButtonWithTitle(page, "New Note"),
       "Expected New Note click to succeed",
     );
-    await waitFor(async () => {
-      await awaitViewSettled(page);
-      return !!(await findButtonWithText(page, "Create Another"));
-    });
-    await waitFor(async () => await resetEventInvocationTrace(page));
 
     const noteCreates = 7;
     for (let i = 0; i < noteCreates - 1; i++) {
@@ -248,45 +241,6 @@ async function collectBrowserLoadMetrics(page: Page): Promise<{
       ),
       postRenderStableMs: round(postRenderStableMs)!,
     };
-  });
-}
-
-async function resetEventInvocationTrace(page: Page): Promise<boolean> {
-  return await page.evaluate(async () => {
-    const api = globalThis.commonfabric as {
-      rt?: {
-        setTelemetryEnabled?: (enabled: boolean) => Promise<void>;
-        on?: (event: string, handler: (marker: unknown) => void) => void;
-        off?: (event: string, handler: (marker: unknown) => void) => void;
-        idle?: () => Promise<void>;
-      };
-      __eventInvocationTrace?: unknown[];
-      __eventInvocationTraceHandler?: (marker: unknown) => void;
-    } | undefined;
-    const rt = api?.rt;
-    if (!api || !rt?.setTelemetryEnabled || !rt.on || !rt.off) return false;
-
-    if (api.__eventInvocationTraceHandler) {
-      rt.off("telemetry", api.__eventInvocationTraceHandler);
-    }
-
-    api.__eventInvocationTrace = [];
-    api.__eventInvocationTraceHandler = (marker: unknown) => {
-      const type = marker && typeof marker === "object"
-        ? (marker as { type?: unknown }).type
-        : undefined;
-      if (
-        type === "scheduler.invocation" ||
-        type === "scheduler.event.commit" ||
-        type === "scheduler.event.preflight"
-      ) {
-        api.__eventInvocationTrace?.push(marker);
-      }
-    };
-    rt.on("telemetry", api.__eventInvocationTraceHandler);
-    await rt.setTelemetryEnabled(true);
-    await rt.idle?.();
-    return true;
   });
 }
 

@@ -18,7 +18,6 @@ import {
   clickButtonWithExactText,
   clickButtonWithText,
   clickButtonWithTitle,
-  findButtonWithText,
 } from "./note-button-helpers.ts";
 import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
@@ -489,9 +488,7 @@ describe("default-app flow test", () => {
       }
 
       console.log(`Navigate back to space page (note ${noteIndex})...`);
-      await waitFor(async () => {
-        return await clickPieceLinkWithText(page, spaceName);
-      });
+      await clickPieceLinkWithText(page, spaceName);
       try {
         await shell.waitForState({ view: { spaceName }, identity });
       } catch (error) {
@@ -752,13 +749,16 @@ describe("default-app flow test", () => {
         await clickButtonWithTitle(page, "New Note"),
         "Expected New Note click to succeed",
       );
-      // The click is delivered; wait until its effect — the open modal with its
-      // "Create Another" button — has rendered and become interactive.
-      await waitFor(async () => {
-        await awaitViewSettled(page);
-        return !!(await findButtonWithText(page, "Create Another"));
-      });
-      await waitFor(async () => await resetEventInvocationTrace(page));
+      // Arm the event-invocation trace before the note creations, whose markers
+      // this test's failure diagnostics read. clickButtonWithTitle settled the
+      // view, so the runtime has exposed its telemetry methods and the reset
+      // runs once with its success asserted. The first "Create Another" click
+      // below settles the view and waits for the button to render, so no
+      // separate wait for the modal is needed here.
+      assert(
+        await resetEventInvocationTrace(page),
+        "Expected the event invocation trace to reset",
+      );
 
       const noteCreates = 7;
       for (let i = 0; i < noteCreates - 1; i++) {
@@ -3346,48 +3346,51 @@ async function collectNavigationDiagnostics(page: Page): Promise<unknown> {
   });
 }
 
+// Serialized into the page by waitForCondition: find the space link whose
+// visible text contains `searchText` and activate it, reporting whether one was
+// found. Prefers the shell breadcrumb before falling back to generic anchors:
+// the selectors are tried one at a time, because a combined selector matches in
+// document order and lets an unrelated descendant <a> containing the space name
+// win. Activation uses DOM click() rather than an Astral coordinate click,
+// which can hit a transient overlay even after resolving the right node. The
+// predicate finds and clicks in one page-side pass, so the click lands on the
+// element the search just resolved with no window for a re-render in between;
+// waitForCondition stops the instant it returns true, so the click fires once.
+const findAndClickPieceLink = (
+  probe: ProbeApi,
+  searchText: string,
+): boolean => {
+  for (
+    const selector of [
+      ".header-space",
+      "#header-space-link",
+      "#header-space",
+      "a",
+    ]
+  ) {
+    const link = probe.collect(selector).find((element) =>
+      (element as HTMLElement).innerText?.trim().includes(searchText)
+    ) as HTMLElement | undefined;
+    if (link) {
+      link.click();
+      return true;
+    }
+  }
+  return false;
+};
+
+// Wait for the space link to render, then activate it once.
 async function clickPieceLinkWithText(
   page: Page,
   searchText: string,
-): Promise<boolean> {
+): Promise<void> {
   try {
-    return await page.evaluate((searchText: string) => {
-      const roots: Array<Document | ShadowRoot> = [document];
-      for (let index = 0; index < roots.length; index++) {
-        for (const element of roots[index].querySelectorAll("*")) {
-          if ((element as HTMLElement).shadowRoot) {
-            roots.push((element as HTMLElement).shadowRoot!);
-          }
-        }
-      }
-
-      // Prefer the shell breadcrumb before falling back to generic anchors.
-      // A combined selector is returned in document order, so an unrelated
-      // descendant <a> containing the space name can otherwise win the race.
-      for (
-        const selector of [
-          ".header-space",
-          "#header-space-link",
-          "#header-space",
-          "a",
-        ]
-      ) {
-        for (const root of roots) {
-          for (const link of root.querySelectorAll<HTMLElement>(selector)) {
-            if (link.innerText.trim().includes(searchText)) {
-              // Use the DOM activation behavior. Astral's coordinate click can
-              // hit a transient overlay even after resolving the right node.
-              link.click();
-              return true;
-            }
-          }
-        }
-      }
-
-      return false;
-    }, { args: [searchText] });
-  } catch (_) {
-    return false;
+    await waitForCondition(page, findAndClickPieceLink, { args: [searchText] });
+  } catch (cause) {
+    throw new Error(
+      `Unable to find a space link matching "${searchText}" to click`,
+      { cause },
+    );
   }
 }
 

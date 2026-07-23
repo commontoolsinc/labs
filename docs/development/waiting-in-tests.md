@@ -519,27 +519,22 @@ joined across two different browser pages (both must show both voters).
 binding, so it cannot express a two-page condition; the cross-browser
 propagation wait stays a poll.
 
-### Instrumentation one-shots, and a few unconverted UI waits
+### Instrumentation one-shots
 
 `packages/patterns/integration/default-app.test.ts` keeps `waitFor` for one-shot
-instrumentation: arm a trace, reset a logger, install a telemetry handler. Each
-such call returns false only until a runtime API is present, so it observes
-runtime API readiness rather than a UI condition, and it is profiling scaffolding
-rather than an assertion. Most of them sit behind a `CF_CAPTURE_*` environment
-gate. If converted, await a runtime-ready signal directly rather than installing
-a DOM waiter.
+instrumentation: arm a trace, reset a logger baseline. Each such call returns
+false only until a runtime API is present, so it observes runtime API readiness
+rather than a UI condition, and it is profiling scaffolding rather than an
+assertion. Every one sits behind a `CF_CAPTURE_*` environment gate that defaults
+to off, so a normal run never reaches them.
 
-`packages/patterns/integration/reload/default-app-notebook.test.ts` keeps one
-wait of that shape — it arms the event-invocation telemetry handler, which is the
-one instrumentation wait that runs ungated in both files.
-
-The rest of the waits in these two files are ordinary UI conditions, and a poll
-is not the right tool for them. They are simply not converted yet: both files
-wait for the note modal's "Create Another" button to render, and
-`default-app.test.ts` also retries a piece-link click until the link is found. A
-`waitForCondition` predicate would express each of them. Converting them would
-not take either file off the allowlist, because the instrumentation waits keep
-both files importing `waitFor`.
+The notebook regression test in that same file resets the event-invocation trace
+on every pass, and needs no wait for it. The reset returns false only until the
+runtime exposes its telemetry methods, and the click that opened the note modal
+settled the view, so those methods are already present; the reset is called once
+and its success asserted. A wait on runtime-API readiness would have been no
+better, because that condition flips with no DOM mutation behind it and would
+fall back to the in-page waiter's coarse backstop for something already true.
 
 ### A shared state primitive
 
