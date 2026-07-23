@@ -174,8 +174,11 @@ describe("type-check", () => {
         expect(isFabricValue(123n)).toBe(true);
       });
 
-      it("accepts interned symbols", () => {
+      it("accepts interned symbols but rejects unique ones", () => {
+        // Registry-interned symbols are portable and are members; unique
+        // (uninterned) symbols are not, matching `isFabricValueLayer()`.
         expect(isFabricValue(Symbol.for("k"))).toBe(true);
+        expect(isFabricValue(Symbol("k"))).toBe(false);
       });
 
       it("accepts `null`", () => {
@@ -286,6 +289,11 @@ describe("type-check", () => {
         const arr = [1, 2] as unknown[] & { extra?: number };
         arr.extra = 42;
         expect(isFabricValue({ data: arr })).toBe(false);
+      });
+
+      it("rejects a unique (uninterned) symbol reached within the graph", () => {
+        expect(isFabricValue({ a: 1, s: Symbol("nope") })).toBe(false);
+        expect(isFabricValue([Symbol("nope")])).toBe(false);
       });
     });
 

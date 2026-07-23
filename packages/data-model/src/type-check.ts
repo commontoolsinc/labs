@@ -90,8 +90,13 @@ export function isFabricValue(value: unknown): value is FabricValue {
   // allocating the cycle-tracking set or the recursion closure below.
   if (typeof value === "function") {
     return false;
+  } else if (typeof value === "symbol") {
+    // Only registry-interned symbols are `FabricValue`s; unique (uninterned)
+    // symbols are not portable across realms and are rejected, matching
+    // `isFabricValueLayer()`.
+    return Symbol.keyFor(value) !== undefined;
   } else if (value === null || typeof value !== "object") {
-    // A non-function primitive -- a direct `FabricValue` member.
+    // A non-function, non-symbol primitive -- a direct `FabricValue` member.
     return true;
   }
 
@@ -100,8 +105,9 @@ export function isFabricValue(value: unknown): value is FabricValue {
   const seen = new Set<object>();
   const check = (item: unknown): boolean => {
     if (typeof item === "function") return false;
+    if (typeof item === "symbol") return Symbol.keyFor(item) !== undefined;
     if (item === null || typeof item !== "object") {
-      // A non-function primitive.
+      // A non-function, non-symbol primitive.
       return true;
     } else if (seen.has(item)) {
       // Already being validated higher in the recursion; treat as a member for
