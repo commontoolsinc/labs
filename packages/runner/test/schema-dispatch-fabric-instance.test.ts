@@ -12,7 +12,14 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import {
+  FabricError,
+  FabricLink,
+} from "@commonfabric/data-model/fabric-instances";
+import {
+  resetModernCellRepConfig,
+  setModernCellRepConfig,
+} from "@commonfabric/data-model/cell-rep";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type {
@@ -39,6 +46,7 @@ const traverserOver = (
   // `includeMeta: false` (the query path's setting) enables the plain-schema
   // fast path (`traverseCells` gates it off otherwise).
   includeMeta = true,
+  linkedValues: Record<string, FabricValue> = {},
 ) => {
   const store = new Map<string, Revision<State>>();
   const type = "application/json" as const;
@@ -50,6 +58,16 @@ const traverserOver = (
     cause: hashOf({ the: type, of: entity }),
     since: 1,
   });
+  for (const [linkedUri, value] of Object.entries(linkedValues)) {
+    const linkedEntity = linkedUri as URI as Entity;
+    store.set(`${linkedEntity}/${type}`, {
+      the: type,
+      of: linkedEntity,
+      is: { value },
+      cause: hashOf({ the: type, of: linkedEntity }),
+      since: 1,
+    });
+  }
   const manager = new StoreObjectManager(store);
   const managedTx = new ManagedStorageTransaction(manager);
   const storeTx = new ExtendedStorageTransaction(managedTx);
@@ -91,6 +109,44 @@ describe("value-type dispatch: FabricSpecialObject subclasses", () => {
     expect((result as Record<string, unknown>).field).toBeInstanceOf(
       FabricBytes,
     );
+  });
+
+  it("routes a modern FabricLink through pointer traversal", () => {
+    setModernCellRepConfig(true);
+    try {
+      const link = new FabricLink({
+        id: "of:dispatch-link-target",
+        space: "did:null:null",
+        scope: "space",
+        path: [],
+      });
+      const { traverser, doc } = traverserOver(
+        "of:dispatch-link-source",
+        link,
+        {
+          path: ["value"],
+          schema: {
+            type: "object",
+            properties: { name: { type: "string" } },
+            required: ["name"],
+          },
+        },
+        true,
+        {
+          "of:dispatch-link-target": {
+            name: "linked",
+          } as FabricValue,
+        },
+      );
+
+      const result = traverser.traverse(doc);
+
+      expect(result.error).toBeUndefined();
+      expect(result.ok).toEqual({ name: "linked" });
+      expect(traverser.traversePointerCalls).toBe(1);
+    } finally {
+      resetModernCellRepConfig();
+    }
   });
 
   it("fails loudly on a FabricInstance (not yet handled)", () => {
