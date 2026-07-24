@@ -18,13 +18,18 @@
  * initialData overrides the default. Replacing getNextUnusedLabel's body with
  * `return undefined` now fails the label assertions.
  *
- * The list starts empty. The lift that seeds a notes module and a type picker
- * assigns its result to a variable nothing reads, and an unconsumed lift does
- * not run; the list stays empty here even with `$UI` mounted.
+ * Seeding is demand-gated. A fresh Record fills its list with a pinned Notes
+ * module and a TypePicker, but only once the module list is rendered: the seeder
+ * (`seedRecord` in record.tsx) writes those entries when `allEntriesWithIndex`
+ * reads its result, and a computation the runtime never demands never runs. The
+ * add-module cases below drive `subject`, whose UI is never rendered, so its
+ * list stays empty and the adds land from index 0 — the headless path an
+ * addModule caller takes. A second Record, `renderedSubject`, is driven through
+ * a `{ render }` step to pin the seeded Notes + TypePicker entries.
  *
  * Run: deno task cf test packages/patterns/record.test.tsx --root packages/patterns --verbose
  */
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, computed, pattern, UI, Writable } from "commonfabric";
 import RecordPattern from "./record.tsx";
 
 interface AddResult {
@@ -41,6 +46,45 @@ export default pattern(() => {
     subPieces: [],
     trashedSubPieces: [],
   });
+
+  // A separate Record used only to exercise the seeding path: rendering its UI
+  // demands `seedRecord`, which fills the empty list with the default modules.
+  const renderedSubject = RecordPattern({
+    title: "Rendered Record",
+    subPieces: [],
+    trashedSubPieces: [],
+  });
+
+  // Before anything reads the module list, the seeder has not run.
+  const assert_rendered_starts_empty = computed(() =>
+    [...(renderedSubject.subPieces ?? [])].length === 0
+  );
+
+  // After a render step demands the module list, the Record holds exactly the
+  // seeded pair: a pinned Notes module followed by the TypePicker.
+  const assert_rendered_seeded = computed(() => {
+    const entries = [...(renderedSubject.subPieces ?? [])];
+    return entries.length === 2 &&
+      entries[0]?.type === "notes" && entries[0]?.pinned === true &&
+      entries[1]?.type === "type-picker" && entries[1]?.pinned === false;
+  });
+
+  // A module added to the already-seeded Record lands after the two seeded
+  // entries (the seed is not repeated, and the add does not disturb it).
+  const renderedAdd = new Writable<AddResult>();
+  const action_rendered_add_email = action(() => {
+    renderedSubject.addModule!.send({ type: "email", result: renderedAdd });
+  });
+  const assert_rendered_add_after_seeds = computed(() => {
+    const entries = [...(renderedSubject.subPieces ?? [])];
+    return entries.length === 3 &&
+      entries[0]?.type === "notes" &&
+      entries[1]?.type === "type-picker" &&
+      entries[2]?.type === "email";
+  });
+  const assert_rendered_add_result = computed(() =>
+    renderedAdd.get()?.moduleIndex === 2
+  );
 
   // Each add reports into its own cell so the assertions can tell the adds
   // apart rather than reading whichever one wrote last.
@@ -198,6 +242,17 @@ export default pattern(() => {
 
   return {
     tests: [
+      // Seeding: empty until the module list is rendered, then the default
+      // Notes + TypePicker pair appears, and a later add lands after them.
+      { assertion: assert_rendered_starts_empty },
+      { render: renderedSubject[UI] },
+      { assertion: assert_rendered_seeded },
+      { action: action_rendered_add_email },
+      { assertion: assert_rendered_add_after_seeds },
+      { assertion: assert_rendered_add_result },
+
+      // Add-module behavior runs against the never-rendered `subject`, which
+      // stays empty, so the adds land from index 0.
       { assertion: assert_starts_empty },
 
       { action: action_add_first_email },
