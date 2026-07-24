@@ -157,6 +157,11 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
       messages: await Promise.all(request.transcript.map(toOpenAIChatMessage)),
       tools: [...tools, ...toNativeModelTools(request.nativeModelToolIds)],
       tool_choice: "auto",
+      // OpenAI's reasoning models default reasoning on at the gateway, but
+      // Chat Completions rejects reasoning together with function tools.
+      // cf-harness needs function tools here, so make the compatible setting
+      // explicit instead of inheriting a provider/model default.
+      reasoning_effort: "none",
     };
     const response = await this.gatewayClient.createChatCompletionJson(
       payload,
