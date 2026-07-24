@@ -28,10 +28,6 @@ import type { Auth } from "../gmail-importer.tsx";
 export interface GmailClientConfig {
   /** How many times the client will retry after an HTTP failure */
   retries?: number;
-  /** In milliseconds, the delay between making any subsequent requests due to failure */
-  delay?: number;
-  /** In milliseconds, the amount to permanently increment to the `delay` on every 429 response */
-  delayIncrement?: number;
   /** Enable verbose console logging */
   debugMode?: boolean;
   /**
@@ -194,14 +190,10 @@ export function gmailClient(
   auth: Writable<Auth>,
   {
     retries = 3,
-    delay: initialDelay = 1000,
-    delayIncrement = 100,
     debugMode = false,
     onRefresh,
   }: GmailClientConfig = {},
 ): GmailClient {
-  let delay = initialDelay;
-
   async function refreshAuth(): Promise<void> {
     if (onRefresh) {
       debugLog(debugMode, "Refreshing auth token via external callback...");
@@ -315,9 +307,6 @@ export function gmailClient(
 
     if (status === 401) {
       await refreshAuth();
-    } else if (status === 429) {
-      delay += delayIncrement;
-      debugLog(debugMode, `Rate limited, incrementing delay to ${delay}`);
     }
 
     return googleRequest(url, _options, remainingRetries - 1);
