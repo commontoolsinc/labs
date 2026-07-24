@@ -1186,6 +1186,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option("--json", "Output machine-readable JSON.")
   .action(async (options) => {
+    setQuietMode(!!options.quiet);
     const pieceConfig = parsePieceOptions(options);
     const verbs = await listPieceCallables(pieceConfig);
     if (options.json) {
