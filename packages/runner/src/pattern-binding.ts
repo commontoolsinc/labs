@@ -4,6 +4,10 @@ import {
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import {
+  FabricInstance,
+  FabricPrimitive,
+} from "@commonfabric/data-model/interface";
 import { isPattern, type JSONSchema, type JSONValue } from "./builder/types.ts";
 import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
 import { type AnyCell } from "./cell.ts";
@@ -495,6 +499,17 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           { includeSchema: true, overwrite: "redirect" },
         );
       }
+    } else if (binding instanceof FabricPrimitive) {
+      // An opaque leaf; return it as-is ahead of the record rebuild below,
+      // which would otherwise reconstruct it from its (empty) own properties.
+      return binding;
+    } else if (binding instanceof FabricInstance) {
+      // TODO(danfuzz): a `FabricInstance` binding is not yet handled -- it
+      // needs processing by its codec contents. Fail loudly until that exists.
+      throw new Error(
+        `Cannot yet handle \`${binding.constructor.name}\` (a ` +
+          "`FabricInstance`) as a pattern binding.",
+      );
     } else if (Array.isArray(binding)) {
       return binding.map((value, index) =>
         convert(

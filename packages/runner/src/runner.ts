@@ -2,6 +2,7 @@ import {
   fabricFromNativeValue,
   type FabricValue,
   nativeFromFabricValue,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import {
   getPersistentSchedulerStateConfig,
@@ -1091,11 +1092,13 @@ export class Runner {
     ) {
       result = { ...result, [NAME]: previousResult[NAME] };
     }
-    // TODO(danfuzz): This compares a runtime result value with `deepEqual`,
-    // which mishandles `FabricValue` (same-class `FabricPrimitive`s, with state
-    // in private `#fields` and zero own-props, compare equal regardless of
-    // value). Use a Fabric-aware equality for value comparison.
-    if (!deepEqual(result, previousResult)) {
+    // Convert-and-freeze (default): a deep-frozen value lets the storage write
+    // boundary's `cloneIfNecessary` identity-pass instead of
+    // deep-cloning-to-freeze. Converting before the no-op gate makes both sides
+    // of the comparison `FabricValue`s — the stored value is one already — so
+    // the gate compares what a write would actually store.
+    const fabricResult = fabricFromNativeValue(result);
+    if (!valueEqual(fabricResult, previousResult)) {
       recordSetupProjectionPolicyInputs(
         tx,
         this.runtime,
@@ -1103,12 +1106,7 @@ export class Runner {
         pattern.resultSchema,
         result,
       );
-      // Convert-and-freeze (default): a deep-frozen value lets the storage
-      // write boundary's `cloneIfNecessary` identity-pass instead of
-      // deep-cloning-to-freeze.
-      writableResultCell.setRawUntyped(
-        fabricFromNativeValue(result),
-      );
+      writableResultCell.setRawUntyped(fabricResult);
     }
   }
 
