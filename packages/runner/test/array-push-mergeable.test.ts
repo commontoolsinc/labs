@@ -556,6 +556,26 @@ describe("mergeable array appends", () => {
       await rt1.dispose();
     }
   });
+
+  // A non-finite amount is not a meaningful increment for a concurrent-sum
+  // counter (it would set the counter to an absorbing `NaN`/`±Infinity`), so it
+  // is rejected before any local write or mergeable-op record.
+  it("increment(non-finite) throws", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx = rt1.edit();
+      const cell = rt1.getCell<number>(space, COUNTER_CAUSE, numberSchema, tx);
+      expect(() => cell.increment(NaN)).toThrow();
+      expect(() => cell.increment(Infinity)).toThrow();
+      expect(() => cell.increment(-Infinity)).toThrow();
+      await tx.commit();
+    } finally {
+      await rt1.dispose();
+    }
+  });
 });
 
 // A "keyed collection": a list whose elements are separate entities, each

@@ -475,6 +475,23 @@ Deno.test("memory v2 increment rejects a zero amount", () => {
   assert(threw, "a zero increment must throw");
 });
 
+// A non-finite `by` is meaningless for a concurrent-sum counter and would set
+// the counter to an absorbing `NaN`/`±Infinity`, so it is rejected alongside a
+// zero amount. (`-0 === 0`, so negative zero is already caught by the zero gate.)
+Deno.test("memory v2 increment rejects a non-finite amount", () => {
+  for (const by of [NaN, Infinity, -Infinity]) {
+    let threw = false;
+    try {
+      applyPatch({ value: { count: 1 } }, [
+        { op: "increment", path: "/value/count", by },
+      ]);
+    } catch {
+      threw = true;
+    }
+    assert(threw, `increment by ${by} must throw`);
+  }
+});
+
 // `remove-by-value` removes every element equal to the given value (by stored
 // value), idempotently, and is a no-op on a missing/non-array target.
 Deno.test("memory v2 remove-by-value removes matching elements", () => {

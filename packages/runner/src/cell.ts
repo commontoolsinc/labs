@@ -1603,10 +1603,10 @@ export class CellImpl<T extends FabricValue>
           "help: use in handlers only, ensure cell is typed as number",
       );
     }
-    if (by === 0) {
+    if (!Number.isFinite(by) || by === 0) {
       throw new Error(
-        "Cell.increment() requires a non-zero amount\n" +
-          "help: a zero increment is a no-op; drop the call",
+        "Cell.increment() requires a finite non-zero amount\n" +
+          "help: a zero or non-finite increment is not a meaningful change",
       );
     }
     if (!this.synced) this.sync();
