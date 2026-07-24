@@ -11,6 +11,7 @@ import type {
 import {
   isConflictRejection,
   isPermanentRejection,
+  isStorageTransactionInconsistent,
   isTerminalRejection,
 } from "../storage/rejection.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
@@ -128,14 +129,22 @@ export function watchReactiveActionCommit(state: {
       error,
     );
 
-    // A reactive compute is not a transactional retrier. A CONFLICT (stale read)
-    // means one of its inputs moved: the authoritative version is ahead of this
-    // replica, and the action's read set is stale until the replica catches up
-    // (the conflict's `readyToRetry` gates exactly that catch-up). Re-arm the
-    // subscription, wait for the catch-up, then re-run the action against the
-    // fresh state. A conflict is a WAIT, not a failure, so it does NOT consume
-    // the retry budget — otherwise sustained contention would exhaust the budget
-    // and strand the compute as a zombie against rolled-back data.
+    // A reactive compute is not a transactional retrier. A stale-basis rejection
+    // means the value the action read is no longer current, so re-running against
+    // fresh state and committing again converges. Two rejections are stale-basis.
+    // A CONFLICT is an upstream stale read: the authoritative version is ahead of
+    // this replica, and the action's read set is stale until the replica catches
+    // up (the conflict's `readyToRetry` gates exactly that catch-up). A
+    // STORAGE-TRANSACTION-INCONSISTENT is the local analogue: a value the
+    // transaction read changed on this replica between the read and the commit,
+    // which re-running against the settled replica resolves. It carries no
+    // `readyToRetry`, so the re-queue below runs it afresh once the local write
+    // completes. Re-arm the subscription, wait for any catch-up, then re-run.
+    // Both are a WAIT, not a failure, so neither consumes the retry budget —
+    // otherwise sustained contention would exhaust the budget and strand the
+    // compute as a zombie against rolled-back data. Only a rejection that
+    // re-running cannot resolve (transport, malformed store) takes the bounded
+    // budget below.
     //
     // Reader-dirty propagation also re-triggers the action when the catch-up
     // write lands as a fresh notification, but that does not cover every
@@ -146,7 +155,7 @@ export function watchReactiveActionCommit(state: {
     // reader-dirty is a redundant fast path (the re-dirty/pending/queue calls
     // coalesce). Restore the consumed trigger reads (§8.9.2) so the re-run's
     // transaction still carries their flow labels.
-    if (isConflictRejection(error)) {
+    if (isConflictRejection(error) || isStorageTransactionInconsistent(error)) {
       // Re-arm immediately (restore the consumed trigger reads §8.9.2, then
       // resubscribe) so the subscription stays fresh and a concurrent
       // reader-dirty can re-trigger the action while we wait for the catch-up.
@@ -192,11 +201,12 @@ export function watchReactiveActionCommit(state: {
     }
 
     // Non-conflict failures are NOT re-triggered by reader-dirty — a transient
-    // transport error, or the path-blind local StorageTransactionInconsistent
-    // guard that fires before the engine's granular matcher — so they still
-    // warrant a bounded retry. On every attempt we still resubscribe, so even
-    // after the budget is exhausted the action is re-triggered when its input
-    // data changes.
+    // transport or malformed-store error — so they still warrant a bounded
+    // retry to make progress. Unlike a stale basis (a conflict or the local
+    // same-replica-race guard, both handled off-budget above), re-running does
+    // not resolve them, so the budget bounds the wasted attempts. On every
+    // attempt we still resubscribe, so even after the budget is exhausted the
+    // action is re-triggered when its input data changes.
     const retries = (state.retries.get(state.action) ?? 0) + 1;
     state.retries.set(state.action, retries);
     if (retries < MAX_RETRIES_FOR_REACTIVE) {
