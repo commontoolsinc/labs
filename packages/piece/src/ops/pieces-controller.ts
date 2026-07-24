@@ -19,6 +19,7 @@ import {
 import type { CellScope } from "@commonfabric/api";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { type NameSchema, nameSchema } from "@commonfabric/runner/schemas";
+import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
 import { PieceManager } from "../index.ts";
 import { PieceController } from "./piece-controller.ts";
 import { compileProgram } from "./utils.ts";
@@ -68,6 +69,41 @@ const pieceUpdateLogger = getLogger("piece.update", {
 
 /** Backward-compatible name for the result of a pattern update check. */
 export type UpdateOutcome = PatternUpdateOutcome;
+
+/**
+ * A cold-start setup repair failed specifically because the CFC SCHEMA
+ * MIGRATION rejected the commit — the pinned pattern loads but cannot migrate
+ * the reused doc onto a now-required field that carries no default (the estuary
+ * `favorites` case). This is the ONLY repair-failure class the runnability
+ * backstop ({@link PiecesController.healDefaultRootByRollForward}) acts on;
+ * every other failure stays fail-closed.
+ *
+ * The bare `CFC enforcement rejected commit` prefix is NOT a safe trigger: the
+ * runner emits it for prepared-digest races, unprepared transactions, and
+ * policy/provenance rejections too (`extended-storage-transaction.ts`), none of
+ * which are repaired by repointing the root's pattern identity. So we require
+ * the machine-stable migration token the CFC prepare tags onto this class
+ * (`migration-reason.ts`). Matching a token in the message — not the error
+ * class — is what survives the plain-`Error` re-wrap the runner applies at its
+ * setup-commit boundary (`runner.ts`), keeping producer and consumer in
+ * lockstep across that boundary and across packages.
+ *
+ * Crucially we match the token only in its FRAMED reason position — `: <token>:
+ * ` — the exact shape the prepare catch emits (`${token}: ${message}` recorded
+ * as a reason, surfaced by the commit as `…not prepared: ${reason}`). A bare
+ * `includes(token)` would also match the token appearing incidentally inside an
+ * UNRELATED, user-influenced error — e.g. an ordinary incompatible-type merge
+ * failure at a property path literally named `/cfc-schema-migration-incompatible`
+ * — and wrongly authorize a root replacement for a non-additive incompatibility.
+ * The `: … : ` framing cannot be produced by a path or value that merely
+ * contains the token string.
+ */
+const FRAMED_MIGRATION_REASON =
+  `: ${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: `;
+const isCfcMigrationRejection = (error: unknown): boolean =>
+  error instanceof Error &&
+  error.message.startsWith("CFC enforcement rejected commit") &&
+  error.message.includes(FRAMED_MIGRATION_REASON);
 
 // This module can load outside Deno (browser-safe storage import above), so
 // env reads are guarded like PIECE_TRACE_TIMINGS: absent env ⇒ defaults.
@@ -649,15 +685,39 @@ export class PiecesController<T = unknown> {
             }),
         );
       } catch (repairError) {
+        // Escalate to the RUNNABILITY backstop on EXACTLY one signal: the
+        // pinned pattern LOADS but its setup-commit was REJECTED BY THE CFC
+        // MIGRATION — the estuary case, where an old root's required field
+        // predates its `Default<>` or a handler stream predates its exemption.
+        // "Loadable" is not "runnable"; re-running the same identity can only
+        // fail identically, so roll the root forward to the space's CURRENT
+        // official pattern (which migrates the reused doc cleanly). This fires
+        // only on a failed migration, so a root that already runs — current
+        // official, or a custom root that migrates cleanly — never reaches it,
+        // and custom-root protection is preserved for free.
+        //
+        // Any OTHER repair failure (transient storage/commit error, backend
+        // unavailable, …) is NOT evidence the pinned pattern is wrong. It stays
+        // FAIL-CLOSED: surface the ORIGINAL start error, change nothing, let
+        // the next boot retry. This gate is what keeps a transient blip from
+        // swapping a healthy root's identity out from under it.
+        if (!isCfcMigrationRejection(repairError)) {
+          throw startError;
+        }
         pieceUpdateLogger.warn(
           "cold-start-setup-repair-failed",
           () => [
-            "startEnsuredDefaultPattern: setup repair failed",
+            "startEnsuredDefaultPattern: setup repair rejected by CFC " +
+            "migration; rolling forward",
             `${ref.identity}#${ref.symbol}`,
             repairError,
           ],
         );
-        throw startError;
+        rootToStart = await this.healDefaultRootByRollForward(
+          rootToStart,
+          ref,
+          repairError,
+        );
       }
     }
     await timePiecesPhase(
@@ -670,6 +730,211 @@ export class PiecesController<T = unknown> {
     );
 
     return new PieceController<NameSchema>(this.#manager, rootToStart);
+  }
+
+  /**
+   * Runnability backstop for {@link startEnsuredDefaultPattern}'s cold-start
+   * repair. Reached only when the pinned pattern's OWN setup repair was
+   * REJECTED BY THE CFC MIGRATION (gated by {@link isCfcMigrationRejection}) —
+   * a root that loads but cannot run (the estuary `favorites`/handler-stream
+   * case). Rolls the root forward to the space's CURRENT official pattern and
+   * materializes THAT over the reused doc.
+   *
+   * Outcome is one of exactly two, each legible — no operator left
+   * reverse-engineering scattered `$stream`/`needs a default` messages:
+   *
+   *   1. Healed: identity now points at the official pattern, its setup
+   *      committed, the reused doc materialized against it.
+   *   2. A single CLEAR error naming WHY — the pinned pattern's migration
+   *      failure and where the roll-forward stopped (compile, identity, swap,
+   *      or the official pattern's own materialize).
+   *
+   * On atomicity: the identity swap and the materialize are two commits, not
+   * one (runSynced owns its own setup transaction and asserts the identity is
+   * already pinned, so the swap must precede it). If the swap commits but the
+   * materialize then fails, the root is left pinned to the official identity
+   * but un-setup — the SAME "already moved" state the same-identity repair
+   * heals on the next boot (see the cold-start "already moved" test), never a
+   * worse state than the pinned-and-unmigratable root we started from. The
+   * error still surfaces, so the failed boot is not silent.
+   *
+   * Returns the healed root cell so the caller starts/returns the swapped-in
+   * pattern rather than the stale pinned view.
+   */
+  private async healDefaultRootByRollForward(
+    rootToStart: Cell<NameSchema>,
+    pinnedRef: { identity: string; symbol: string },
+    migrationError: unknown,
+  ): Promise<Cell<NameSchema>> {
+    const runtime = this.#manager.runtime;
+    const space = this.#manager.getSpace();
+    // Reuse the canonical official-URL derivation (home.tsx for the home DID,
+    // default-app.tsx otherwise) — never hard-code home here.
+    const officialUrlPath = deriveSystemPatternUrl(space, runtime);
+    const msg = (error: unknown) =>
+      error instanceof Error ? error.message : String(error);
+    const clearError = (reason: string, cause: unknown) =>
+      new Error(
+        `default-root heal failed for ${space}: pinned pattern ` +
+          `${pinnedRef.identity}#${pinnedRef.symbol} failed CFC migration ` +
+          `(${msg(migrationError)}) and roll-forward to official ` +
+          `${officialUrlPath} ${reason}`,
+        { cause },
+      );
+
+    // Fetch + compile the official source, mirroring pattern-updater's #check.
+    // Force ETag revalidation (`cache: "no-cache"`): the roll-forward exists to
+    // ESCAPE a stale pinned pattern, so compiling a stale HTTP-cached source
+    // would defeat the heal — it could "roll forward" to the same aged bytes.
+    // A 304 still reuses unchanged bytes; we just never trust the cache blind.
+    const revalidatingFetch: typeof globalThis.fetch = (input, init) =>
+      runtime.fetch(input, { ...init, cache: "no-cache" });
+    // Resolve against the host that actually SERVES this space, not the global
+    // apiUrl. A mapped space is served by its own host (`mappedHostFor`); the
+    // system pattern must be fetched and compiled from there, or a mapped space
+    // could roll forward onto the WRONG host's system pattern. `hostForSpace`
+    // is the same `mappedHostFor(space) ?? apiUrl` resolution PatternUpdater
+    // uses for its own roll-forward.
+    const officialUrl = new URL(officialUrlPath, runtime.hostForSpace(space));
+    let officialPattern;
+    let officialRef;
+    try {
+      const resolved = await runtime.harness.resolve(
+        new HttpProgramResolver(officialUrl.href, revalidatingFetch),
+      );
+      officialPattern = await runtime.patternManager.compilePattern(
+        // Default-root routes select the official `default` export.
+        { ...resolved, mainExport: "default" },
+        { space },
+      );
+      officialRef = runtime.patternManager.getArtifactEntryRef(officialPattern);
+    } catch (compileError) {
+      // Chain the ACTUAL compile failure as `cause` (not the migration error):
+      // the migration reason is already named in the message, and the compile
+      // stack is the new information here.
+      throw clearError(
+        `could not be compiled (${msg(compileError)})`,
+        compileError,
+      );
+    }
+    if (officialRef === undefined) {
+      throw clearError("did not yield an entry identity", migrationError);
+    }
+    // Already current: the pinned pattern IS the official entry (same identity
+    // AND symbol) but failed for some other reason. Re-materializing the exact
+    // same entry would fail identically, so do not loop — surface the clear
+    // error now. Compare BOTH identity and symbol: a root pinned to the current
+    // artifact under an obsolete/other symbol (e.g. a persisted export that is
+    // no longer `default`) is NOT already-official — rolling it forward to the
+    // official `default` entry is exactly the recovery, so it must not
+    // short-circuit here. This mirrors PatternUpdater's identity+symbol gate.
+    if (
+      officialRef.identity === pinnedRef.identity &&
+      officialRef.symbol === pinnedRef.symbol
+    ) {
+      throw clearError(
+        `is already the pinned entry ${officialRef.identity}#` +
+          `${officialRef.symbol}, so the migration cannot be repaired by ` +
+          `rolling forward`,
+        migrationError,
+      );
+    }
+
+    // Atomic swap: record the displaced pinned ref for recovery, move
+    // patternIdentity to the official entry, stamp official provenance. One
+    // tx — it commits together or aborts, leaving the root untouched.
+    //
+    // Precondition guard (fail-closed): re-read the root's identity INSIDE the
+    // transaction and proceed only if it still equals the pinned ref we
+    // diagnosed. `editWithRetry` reruns this callback against fresh state on
+    // conflict, so without the guard a concurrent heal (another boot, the
+    // pattern updater) that already repointed the root would be blindly
+    // clobbered by our stale `officialRef`. Returning `false` aborts the write
+    // without committing — precedent: pattern-updater's `stillMatches`/
+    // `canWrite`. `result.ok === false` (no error) then means "superseded".
+    const swapResult = await runtime.editWithRetry((tx) => {
+      const rootTx = rootToStart.withTx(tx);
+      const currentRef = getPatternIdentityRef(rootTx);
+      if (
+        currentRef?.identity !== pinnedRef.identity ||
+        currentRef?.symbol !== pinnedRef.symbol
+      ) {
+        return false;
+      }
+      rootTx.setMetaRaw("displacedPattern", {
+        identity: pinnedRef.identity,
+        symbol: pinnedRef.symbol,
+        displacedAt: Date.now(),
+      });
+      rootTx.setMetaRaw("patternIdentity", officialRef);
+      setPatternSource(rootToStart, tx, officialUrlPath);
+      return true;
+    });
+    if (swapResult.error) {
+      // Chain the actual commit failure as `cause` (the migration reason is
+      // already in the message).
+      throw clearError(
+        `identity swap could not commit (${msg(swapResult.error)})`,
+        swapResult.error,
+      );
+    }
+    if (!swapResult.ok) {
+      // The root was repointed by a concurrent heal between the failed repair
+      // and this swap. We must NOT overwrite the newer identity (the whole
+      // point of the precondition) — but we also must NOT return it as a
+      // success: this is the cold-start path, so the caller does not start or
+      // materialize what we hand back, and the concurrent heal may still be
+      // mid-flight (the repoint commits BEFORE its own materialize). Claiming
+      // success here would surface an unstarted, un-setup root. Fail closed
+      // with a clear, accurate error; nothing was overwritten, and the next
+      // boot observes the settled root and starts/repairs it through the
+      // ordinary path.
+      pieceUpdateLogger.warn(
+        "default-root-roll-forward-superseded",
+        () => [
+          "startEnsuredDefaultPattern: root identity changed before roll-forward;",
+          `leaving concurrent heal in place for ${space}`,
+        ],
+      );
+      throw clearError(
+        "was superseded by a concurrent heal (the root identity changed " +
+          "before the swap); left in place for the next boot to start",
+        migrationError,
+      );
+    }
+
+    // Re-resolve so the materialize observes the committed patternIdentity
+    // (the caller's cell is a pre-swap transaction view), then materialize the
+    // OFFICIAL pattern. expectedPatternIdentity asserts the just-committed
+    // identity and makes runSynced THROW on a setup-commit failure rather than
+    // log-and-continue — so an official pattern that ALSO cannot migrate the
+    // doc surfaces here as the clear error below, not a silently-dead root.
+    const swappedRoot = await this.#manager.getDefaultPattern(false) ??
+      rootToStart;
+    try {
+      await timePiecesPhase(
+        "ensureDefaultPattern.rollForwardMaterialize",
+        () =>
+          runtime.runSynced(swappedRoot.withTx(), officialPattern, undefined, {
+            expectedPatternIdentity: officialRef,
+          }),
+      );
+    } catch (materializeError) {
+      throw clearError(
+        `also failed CFC migration (${msg(materializeError)})`,
+        materializeError,
+      );
+    }
+
+    pieceUpdateLogger.warn(
+      "default-root-rolled-forward",
+      () => [
+        "startEnsuredDefaultPattern: healed by roll-forward to official",
+        `${pinnedRef.identity}#${pinnedRef.symbol} ->`,
+        `${officialRef.identity}#${officialRef.symbol}`,
+      ],
+    );
+    return swappedRoot;
   }
 
   /**

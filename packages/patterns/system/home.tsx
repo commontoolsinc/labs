@@ -69,10 +69,14 @@ export type HomeOutput = {
   // pre-first-profile state with no elements, hence no WriteAuthorizedBy claims
   // to verify. The contract still governs every real element once one is
   // appended via the trusted create surface, so this adds no authorization
-  // surface; it only lets an old doc merge. defaultProfile needs none: it is
-  // already `… | undefined`, hence not required.
+  // surface; it only lets an old doc merge. defaultProfile needs no default:
+  // the `?` marker is what drops it from the generated schema's `required`
+  // list, so the additive-required guard never applies. (Requiredness is
+  // decided by the `?` marker, NOT by the value type — a bare
+  // `defaultProfile: T | undefined` would still be required-with-no-default and
+  // would trip the guard; the marker is doing the work here.)
   profiles: Default<TrustedProfileList, []>;
-  defaultProfile: TrustedDefaultProfile;
+  defaultProfile?: TrustedDefaultProfile;
   mru: Default<TrustedProfileMru, []>;
   createProfile: Stream<CreateProfileEvent>;
   addFavorite: Stream<{

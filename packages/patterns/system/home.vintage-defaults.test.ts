@@ -58,8 +58,16 @@ describe("estuary vintage-tolerance: home data fields carry defaults", () => {
     expect(home).toContain("mru: Default<TrustedProfileMru, []>");
   });
 
-  it("defaultProfile stays bare — already optional (| undefined), not required", () => {
-    expect(home).toContain("defaultProfile: TrustedDefaultProfile;");
+  // #4933 left defaultProfile as `defaultProfile: TrustedDefaultProfile;`
+  // believing its `… | undefined` value type made it non-required. It does
+  // NOT: the schema-generator decides `required` from the presence of a `?`
+  // optional marker (schema-generator.ts `if (!member.questionToken)`), not
+  // from the value type — so the bare spelling emitted defaultProfile as
+  // required-with-no-default and the cold-start repair threw on it, one layer
+  // past the six data fields above. The `?` is the fix that makes it genuinely
+  // optional (dropped from `required`), so no default is needed.
+  it("defaultProfile is optional (?) — the value-type-only assumption was wrong", () => {
+    expect(home).toContain("defaultProfile?: TrustedDefaultProfile;");
   });
 
   it("Default is imported (the spellings above are inert without it)", () => {

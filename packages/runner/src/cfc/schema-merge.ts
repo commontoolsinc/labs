@@ -3,7 +3,9 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import { forEachSubschema } from "../schema-walk.ts";
+import { ContextualFlowControl } from "../cfc.ts";
 import { normalizeClause } from "./clause.ts";
+import { CfcSchemaMigrationError } from "./migration-reason.ts";
 import { writerClaimFilesCorrespond } from "./writer-claim-correspondence.ts";
 
 const IFC_KEYS = [
@@ -341,6 +343,22 @@ const assertNoDivergentIfcBranches = (
   }
 };
 
+// A stream slot is a runtime-materialized capability marker, not stored
+// document data — see the additive-required exemption in `mergeRequired`.
+//
+// Only the field's IMMEDIATE OUTER slot decides what it is, so read the first
+// `asCell` entry (mirroring the canonical stream test in link-utils.ts and
+// schema.ts, which both key on `getAsCellValues(schema).at(0)`). A bare
+// `.includes("stream")` was wrong twice: it exempted `["cell", "stream"]` — a
+// CELL of a stream, whose outer slot is a cell and which therefore holds
+// preservable data — and it missed the scoped-descriptor dialect
+// (`[{ kind: "stream", scope: … }]`), which is a string only under the legacy
+// form. `getAsCellKind` normalizes both dialects.
+const isStreamSlot = (schema: JSONSchema | undefined): boolean =>
+  ContextualFlowControl.getAsCellKind(
+    ContextualFlowControl.getAsCellValues(schema).at(0),
+  ) === "stream";
+
 const mergeRequired = (
   existing: readonly string[] | undefined,
   candidate: readonly string[] | undefined,
@@ -355,8 +373,26 @@ const mergeRequired = (
       continue;
     }
     const property = mergedProperties[name];
+    // A newly-required field must carry a default so an old document that
+    // predates the field can still be read (the default synthesizes the
+    // missing value). This guard is about PRESERVABLE DOCUMENT DATA, so it
+    // does not apply to a stream slot: `asCell: ["stream"]` is a
+    // runtime-materialized capability marker, not stored data. Pattern setup
+    // re-materializes every stream marker on each run, so an old doc that
+    // lacks one has no value to preserve and there is no meaningful default a
+    // `Stream<…>` field could declare. Without this exemption, materializing a
+    // handler-rich pattern (e.g. home.tsx) over a doc that predates its
+    // handlers fails additive-required — the estuary cold-start-setup-repair
+    // cascade, where each defaulted DATA field just unmasked the next
+    // required-no-default handler.
+    if (isStreamSlot(property)) {
+      continue;
+    }
     if (!isRecord(property) || property.default === undefined) {
-      throw new Error(
+      // Typed so the CFC prepare catch can tag this as the recoverable
+      // schema-migration class (see migration-reason.ts) without sniffing the
+      // message. The message text stays human-readable and unchanged.
+      throw new CfcSchemaMigrationError(
         `required field ${name} needs a default to preserve old documents`,
       );
     }
