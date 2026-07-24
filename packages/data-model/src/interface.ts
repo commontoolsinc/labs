@@ -133,10 +133,10 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
  * can contradict, or change after, the value's frozen state -- once a
  * `FabricValue` graph is deeply frozen, its contents are fixed. (For a
  * `FabricInstance`, the analogous obligation is on its `[IS_DEEP_FROZEN]`
- * report; see `BaseFabricInstance`.) `isDeepFrozen()` /
- * `isDeepFrozenFabricValue()` rely on this to cache deep-frozen proofs by root
- * identity without re-validating; a value that violates it can corrupt
- * data-model invariants, as any broken contract can.
+ * report; see `BaseFabricInstance`.) The rest of the system -- the data model
+ * in general, and `isDeepFrozen()` specifically -- relies on this to cache
+ * deep-frozen proofs by root identity without re-validating; a value that
+ * violates it can corrupt data-model invariants, as any broken contract can.
  */
 export type FabricValue =
   // -- Primitives --
