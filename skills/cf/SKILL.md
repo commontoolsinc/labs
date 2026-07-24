@@ -227,7 +227,14 @@ deno task cf piece get --piece ID totalSpent ...
 
 # Equivalent one-session read (required for session-scoped computed output):
 deno task cf piece get --piece ID totalSpent --step ...
+```
 
+A path-less `piece get` (whole result) degrades outputs it cannot reach — values
+living in another session's/user's scope are simply absent from the returned
+object rather than voiding the whole read. Use `--step` when you need those
+members materialized in your own session.
+
+```bash
 # After calling a handler:
 deno task cf piece call --piece ID addItem '{"title": "Test"}'
 deno task cf piece step --piece ID ...  # Required!

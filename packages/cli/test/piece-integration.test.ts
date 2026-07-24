@@ -28,6 +28,8 @@ const REPO_ROOT = resolve(import.meta.dirname!, "../../..");
 const NOTE_PATTERN = `${REPO_ROOT}/packages/patterns/notes/note.tsx`;
 const SESSION_RESULT_PATTERN =
   `${REPO_ROOT}/packages/cli/test/fixtures/session-derived-result.tsx`;
+const SESSION_SCOPED_PATTERN =
+  `${REPO_ROOT}/packages/cli/test/fixtures/session-scoped-result.tsx`;
 
 const NOTE_CONTENT = "Hello world";
 const REPOSITORY = "https://github.com/commontoolsinc/labs";
@@ -40,6 +42,7 @@ const noteEntry: EntryConfig = {
 
 let pieceId = "";
 let sessionResultPieceId = "";
+let sessionScopedPieceId = "";
 let flags = "";
 let identityPath = "";
 let spaceConfig: SpaceConfig;
@@ -89,6 +92,13 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
       mainPath: SESSION_RESULT_PATTERN,
       rootPath: REPO_ROOT,
     }, { start: false });
+    // Deployed STARTED: the deploying session materializes `sessionEcho` in
+    // its own session scope, which later fresh CLI sessions cannot read —
+    // the lunch-poll deploy-gate shape.
+    sessionScopedPieceId = await newPiece(spaceConfig, {
+      mainPath: SESSION_SCOPED_PATTERN,
+      rootPath: REPO_ROOT,
+    });
     await callPieceHandler(
       { ...spaceConfig, piece: pieceId },
       "setTitle",
@@ -144,6 +154,22 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("stored data is present");
     expect(stderr.join("\n")).toContain("--step");
+  });
+
+  it("path-less get degrades unreachable session-scoped members instead of voiding", async () => {
+    // Regression pin for the lunch-poll deploy-gate bug: a fresh CLI session
+    // reading a piece whose REQUIRED output lives in another session's scope
+    // must get the rest of the object (exit 0), not `undefined` and not the
+    // #4874 projection error. The unreachable member is simply absent.
+    const scopedFlags =
+      `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${sessionScopedPieceId}`;
+    const { code, stdout, stderr } = await integrationCf(
+      `piece get ${scopedFlags}`,
+    );
+    expect(code, stderr.join("\n")).toBe(0);
+    const json = JSON.parse(stdout.join(""));
+    expect(json.stable).toBe("always-visible");
+    expect("sessionEcho" in json).toBe(false);
   });
 
   it("steps and reads session-scoped computed results atomically", async () => {

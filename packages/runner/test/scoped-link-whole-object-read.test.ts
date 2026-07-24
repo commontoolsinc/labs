@@ -6,24 +6,37 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
-import { resolveCellPath } from "../src/piece-helpers.ts";
+import {
+  cellWithScopedLinkRequiredsRelaxed,
+  resolveCellPath,
+  schemaWithScopedLinkRequiredsRelaxed,
+} from "../src/piece-helpers.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import type { Cell } from "../src/cell.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 // Whole-object piece reads void on scoped links (CLI `cf piece get` with no
-// path returns undefined while every child path works).
+// path returned undefined while every child path worked).
 //
-// Mechanism under test: the piece result cell is NOT schema-less — the CLI
-// read path recovers the durable result schema via
-// getResultCellWithSourceSchema, and pattern result schemas mark every output
-// property `required` (ts-transformers). When one property's stored value is
-// a link into a session/user-scoped doc that this replica's session never
-// wrote, the link target reads notFound (value undefined); a strict property
-// schema (e.g. {type:"string"}) rejects undefined, the property is dropped
-// from the assembled object, and traverseObjectWithSchema's `required` check
-// then voids the ENTIRE object (traverse.ts, "Missing required property" ->
+// Mechanism: the piece result cell is NOT schema-less — the CLI read path
+// recovers the durable result schema via getResultCellWithSourceSchema, and
+// pattern result schemas mark every output property `required`
+// (ts-transformers). When one property's stored value is a link into a
+// session/user-scoped doc that this replica's session never wrote, the link
+// target reads notFound (value undefined); a strict property schema (e.g.
+// {type:"string"}) rejects undefined, the property is dropped from the
+// assembled object, and traverseObjectWithSchema's `required` check then
+// voids the ENTIRE object (traverse.ts, "Missing required property" ->
 // return undefined). Child-path reads narrow the schema below the container,
 // so the parent's `required` check never runs and they resolve fine.
+//
+// The strict void itself is BY DESIGN (#4746 removed the element-level
+// absent-target grace: partial visibility must be expressed in the schema).
+// The fix lives at the piece read boundary:
+// schemaWithScopedLinkRequiredsRelaxed derives a projection schema whose
+// `required` no longer claims properties stored as narrower-scoped links,
+// and PiecePropIo.get reads through it — expressing partial visibility in
+// the schema, exactly as #4746 prescribes.
 class SharedServerStorageManager extends EmulatedStorageManager {
   static connectTo(
     server: MemoryV2Server.Server,
@@ -187,7 +200,7 @@ describe("whole-object read over a session-scoped link", () => {
     }
   });
 
-  it("fresh session: whole-object read under the required schema returns the plain properties (THE BUG: currently undefined)", async () => {
+  it("characterization: strict required schema voids the whole object for a fresh session (by design, #4746)", async () => {
     const { rt, close } = freshReader();
     try {
       const container = rt.getCell(
@@ -196,11 +209,123 @@ describe("whole-object read over a session-scoped link", () => {
         requiredResultSchema,
       );
       const value = await container.pull();
-      // Desired behavior: the unreadable scoped property reads as absent,
-      // but the plain properties survive. Actual behavior today: the
-      // `required` check voids the whole object -> value is undefined.
+      // The raw read under the unrelaxed schema voids: the session-scoped
+      // `myDraft` target is absent for this session, the required check
+      // rejects, and the whole object reads undefined. This is the strict
+      // semantics #4746 restored — the piece read boundary must derive a
+      // relaxed projection schema (below) instead of expecting the traverser
+      // to tolerate the hole.
+      expect(value).toBeUndefined();
+    } finally {
+      await close();
+    }
+  });
+
+  it("THE FIX: fresh session whole-object read through the relaxed projection returns the plain properties", async () => {
+    const { rt, close } = freshReader();
+    try {
+      const container = rt.getCell(
+        space,
+        CONTAINER_CAUSE,
+        requiredResultSchema,
+      );
+      await container.pull();
+      // The same derivation PiecePropIo.get applies before resolveCellPath.
+      const projected = cellWithScopedLinkRequiredsRelaxed(container);
+      const value = (await projected.pull()) as {
+        question?: string;
+        count?: number;
+        myDraft?: string;
+      };
       expect(value?.question).toBe("Where should we eat?");
       expect(value?.count).toBe(3);
+      // The unmaterializable scoped member degrades instead of voiding.
+      expect(value?.myDraft ?? null).toBeNull();
+      // Child-path reads through the projected cell still work.
+      expect(resolveCellPath(projected, ["question"])).toBe(
+        "Where should we eat?",
+      );
+    } finally {
+      await close();
+    }
+  });
+
+  it("THE FIX: the writer's own session still reads the scoped member through the relaxed projection", async () => {
+    // Relaxing `required` must not COST anything where the value resolves:
+    // the owning session sees the full object either way.
+    const container = writerRt.getCell(
+      space,
+      CONTAINER_CAUSE,
+      requiredResultSchema,
+    );
+    const projected = cellWithScopedLinkRequiredsRelaxed(container);
+    const value = await projected.pull();
+    expect(value?.question).toBe("Where should we eat?");
+    expect(value?.myDraft).toBe("only-visible-in-writer-session");
+  });
+
+  it("schema derivation: drops only scoped-link requireds, preserves identity when nothing to relax", async () => {
+    const { rt, close } = freshReader();
+    try {
+      const container = rt.getCell(
+        space,
+        CONTAINER_CAUSE,
+        requiredResultSchema,
+      );
+      await container.pull();
+      const raw = container.getRaw();
+      const relaxed = schemaWithScopedLinkRequiredsRelaxed(
+        requiredResultSchema,
+        raw,
+        container as unknown as Cell<unknown>,
+      ) as { required?: string[] };
+      // Only the scoped-link property leaves `required`.
+      expect(relaxed.required).toEqual(["question", "count"]);
+
+      // Identity preserved when the raw value holds no narrower-scoped links.
+      const plainRaw = { question: "q", count: 1, myDraft: "inline" };
+      expect(
+        schemaWithScopedLinkRequiredsRelaxed(
+          requiredResultSchema,
+          plainRaw,
+          container as unknown as Cell<unknown>,
+        ),
+      ).toBe(requiredResultSchema);
+    } finally {
+      await close();
+    }
+  });
+
+  it("strictness preserved: a genuinely missing plain required property still voids", async () => {
+    // A doc that simply lacks a required (non-link) property must keep strict
+    // semantics through the relaxed projection — the grace is scoped-link
+    // shaped, not a blanket required-relaxation.
+    const tx = writerRt.edit();
+    const incomplete = writerRt.getCell(
+      space,
+      "incomplete-container",
+      {
+        type: "object",
+        properties: requiredResultSchema.properties,
+      } as const,
+      tx,
+    );
+    incomplete.set({ question: "only a question" } as never);
+    const result = await tx.commit();
+    expect(result.error).toBeUndefined();
+    await writerStorage.synced();
+
+    const { rt, close } = freshReader();
+    try {
+      const cell = rt.getCell(
+        space,
+        "incomplete-container",
+        requiredResultSchema,
+      );
+      await cell.pull();
+      const projected = cellWithScopedLinkRequiredsRelaxed(cell);
+      const value = await projected.pull();
+      expect(value).toBeUndefined();
     } finally {
       await close();
     }

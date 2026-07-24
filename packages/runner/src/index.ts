@@ -238,9 +238,11 @@ export { ACLManager } from "./acl-manager.ts";
 export {
   cellEntityIdString,
   type CellPath,
+  cellWithScopedLinkRequiredsRelaxed,
   compileAndSavePattern,
   parseCellPath,
   resolveCellPath,
+  schemaWithScopedLinkRequiredsRelaxed,
 } from "./piece-helpers.ts";
 export type { ModuleByteCache } from "./runtime.ts";
 export type { CompiledModuleArtifact } from "./harness/types.ts";

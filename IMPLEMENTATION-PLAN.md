@@ -1,7 +1,9 @@
 # Implementation plan: path-less piece read returns `undefined` while every child path resolves
 
-Status: research complete, plan ready for review. Nothing here is implemented
-yet. Worktree: `~/Code/worktrees/labs/pathless-piece-read` (branch
+Status: IMPLEMENTED on this branch (see "Implementation outcome" at the bottom —
+the fix landed at the piece read boundary, NOT in traverse; Phase 1 as
+originally drafted was overruled by the #4746 precedent found during
+implementation). Worktree: `~/Code/worktrees/labs/pathless-piece-read` (branch
 `fix/pathless-piece-read` off `f723939df`).
 
 ## Why
@@ -279,3 +281,51 @@ Consequences for the plan:
   `undefined` — every observed caller (CLI, Loom gate) treats that as failure,
   so partial-object is strictly more informative. State it loudly in the PR body
   regardless.
+
+## Implementation outcome (what actually landed on this branch)
+
+The plan's Phase 1 (a traverse-level `absentLinkTarget` failure kind + gated
+`required` tolerance) was **abandoned before writing it**, on new evidence:
+[#4746](https://github.com/commontoolsinc/labs/pull/4746) (ubik2, merged
+2026-07-15) deliberately REMOVED the B2 element-level grace and litigated
+exactly that distinction — "for a required property, [absent target and failed
+schema] both mean the property does not match. Callers that want partial
+visibility should express that in the schema." Re-introducing an absent-target
+tolerance in the traverser would revert an intentional, recent design decision.
+
+What landed instead — partial visibility expressed in the schema, at the piece
+read boundary:
+
+- `schemaWithScopedLinkRequiredsRelaxed(schema, rawValue, base)` in
+  [piece-helpers.ts](packages/runner/src/piece-helpers.ts): derives a projection
+  schema whose `required` no longer claims properties whose STORED value is a
+  link into a narrower-than-space scope (user/session). Recurses through inline
+  records only; links are boundaries; arrays are deliberately untouched (#4746
+  territory); identity-preserving when there is nothing to relax.
+- `cellWithScopedLinkRequiredsRelaxed(cell)`: applies it to a cell carrying a
+  schema, re-schema'ing via `asSchema` only when something changed.
+- `PiecePropIo.get`
+  ([piece-controller.ts](packages/piece/src/ops/piece-controller.ts)) reads
+  through the relaxed projection before `resolveCellPath` — healing
+  `cf piece get` (path-less and pathed), `inspect`, and every consumer of
+  `piece.result.get()` / `piece.input.get()`, for already-persisted schemas too.
+  Traverse, scheduler, and reactive reads are untouched.
+
+Tests:
+
+- [scoped-link-whole-object-read.test.ts](packages/runner/test/scoped-link-whole-object-read.test.ts):
+  9 steps — controls, the strict void as an explicit #4746 characterization, the
+  fix (fresh session gets the partial object; owner session still sees
+  everything), schema-derivation unit checks (only scoped-link requireds drop;
+  identity preserved), and strictness preservation (a genuinely missing plain
+  required property still voids).
+- New CLI fixture `session-scoped-result.tsx` + integration case: a STARTED
+  deploy with a required perSession-derived output; a fresh CLI session's
+  path-less get exits 0 with the stable member present (the lunch-poll
+  deploy-gate shape, pinned e2e — closes the "nothing pins the e2e success" gap
+  the bisect exposed).
+
+Phase 2 (CLI signal gap for schema-less results) and Phase 3 (schema-generator
+emitting honest optionality) remain follow-ups; Phase 2's urgency is reduced
+because the projection now returns partial objects instead of `undefined` for
+this class.
