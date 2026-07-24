@@ -100,6 +100,43 @@ function throwComputeWrapCompilerBug(
   );
 }
 
+/**
+ * True when the node (or its original) carries a real source range — i.e. it
+ * is authored pattern code the author can act on, not a compiler-synthesized
+ * tree. Mirrors `hasAuthoredSourceSite` in expression-site-policy.ts, which
+ * cannot be imported here because that module already imports from this one.
+ */
+function hasAuthoredSourceRange(node: ts.Node): boolean {
+  if (node.getSourceFile() && node.pos >= 0) {
+    return true;
+  }
+
+  const original = ts.getOriginalNode(node);
+  return original !== node &&
+    !!original.getSourceFile() &&
+    original.pos >= 0;
+}
+
+function reportOwnedBoundaryComputationDiagnostic(
+  culprit: ts.Expression,
+  boundary: ts.Expression,
+  context: TransformationContext,
+): void {
+  const calleeText = ts.isCallExpression(boundary)
+    ? getNodeSnippet(boundary.expression, context.sourceFile, 60)
+    : getNodeSnippet(boundary, context.sourceFile, 60);
+  context.reportDiagnosticOnce({
+    severity: "error",
+    type: "reactive:call-argument-computation",
+    message:
+      `Reactive computation \`${
+        getNodeSnippet(culprit, context.sourceFile)
+      }\` cannot be compiled inline in the arguments of \`${calleeText}(...)\`. ` +
+      "Hoist it to a body-level const or computed(...) and pass that value instead.",
+    node: culprit,
+  });
+}
+
 function findSupportedPatternBoundaryAncestor(
   node: ts.Expression,
   container: ts.Expression,
@@ -128,12 +165,31 @@ function findSupportedPatternBoundaryAncestor(
   return undefined;
 }
 
-export function assertValidComputeWrapCandidate(
+/**
+ * Guard consulted before an emitter adds a compute wrapper around `culprit`.
+ * Returns true when the wrap is consistent with the shared reactive-context
+ * classification.
+ *
+ * Two disagreement shapes exist:
+ *
+ * - The culprit is already classified compute. Always an internal invariant
+ *   violation (synthetic-marking / classifier drift) — throws.
+ * - The culprit sits inside an owned pattern boundary (a builder,
+ *   lift-applied, or array-method call), which owns lowering for its own
+ *   argument subtree. An *authored* culprit here is reachable from the
+ *   language surface — e.g. a reactive computation written inline in a
+ *   bound-handler's builder arguments (`join({ profile: profile ??
+ *   profileWish.result })`) — so it is reported as an author-facing
+ *   `reactive:call-argument-computation` diagnostic and the caller must skip
+ *   the wrap (returns false). A synthetic culprit in that position is still
+ *   an internal bug — throws.
+ */
+export function validateComputeWrapCandidate(
   culprit: ts.Expression,
   container: ts.Expression,
   containerLabel: string,
   context: TransformationContext,
-): void {
+): boolean {
   const culpritContext = context.getReactiveContext(culprit);
 
   if (culpritContext.kind === "compute") {
@@ -152,6 +208,15 @@ export function assertValidComputeWrapCandidate(
     context,
   );
   if (supportedBoundary) {
+    if (hasAuthoredSourceRange(culprit)) {
+      reportOwnedBoundaryComputationDiagnostic(
+        culprit,
+        supportedBoundary,
+        context,
+      );
+      return false;
+    }
+
     throwComputeWrapCompilerBug(
       `The emitter identified a node inside an already-supported pattern boundary: \`${
         getNodeSnippet(supportedBoundary, context.sourceFile)
@@ -162,6 +227,8 @@ export function assertValidComputeWrapCandidate(
       context,
     );
   }
+
+  return true;
 }
 
 export function findPendingComputeWrapCandidate(

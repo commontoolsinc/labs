@@ -4,9 +4,9 @@ import { getCellKind } from "@commonfabric/schema-generator/cell-brand";
 import { classifyOpaquePathTerminalCall } from "../../opaque-roots.ts";
 import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 import {
-  assertValidComputeWrapCandidate,
   findPendingComputeWrapCandidate,
   isJsxLocalRewriteContainer,
+  validateComputeWrapCandidate,
 } from "./compute-wrap-invariants.ts";
 import { isValueComputationExpressionKind } from "../../../utils/expression.ts";
 import type { Emitter } from "../types.ts";
@@ -104,12 +104,17 @@ export function rewriteHelperOwnedExpression(
     !hasSyntheticComputeCallbackAncestor(pendingRewrite, context) &&
     !isAlreadySyntheticComputeOwned(pendingRewrite, context)
   ) {
-    assertValidComputeWrapCandidate(
+    const valid = validateComputeWrapCandidate(
       pendingRewrite,
       assertContainer ?? expression,
       containerLabel,
       context,
     );
+    if (!valid) {
+      // Reported as an author-facing diagnostic. Skip the forced value-lift
+      // below as well — it would wrap the very computation the guard refused.
+      return expression;
+    }
 
     const derived = createReactiveWrapperForExpression(
       expression,

@@ -9,9 +9,9 @@ import {
 } from "../../../ast/mod.ts";
 import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 import {
-  assertValidComputeWrapCandidate,
   findPendingComputeWrapCandidate,
   isJsxLocalRewriteContainer,
+  validateComputeWrapCandidate,
 } from "./compute-wrap-invariants.ts";
 import { unwrapExpression } from "../../../utils/expression.ts";
 
@@ -94,12 +94,16 @@ function processBranch(
       return rewriteChildren(expr) || expr;
     }
 
-    assertValidComputeWrapCandidate(
+    const valid = validateComputeWrapCandidate(
       pendingRewrite,
       expr,
       "ternary branch",
       context,
     );
+    if (!valid) {
+      // Reported as an author-facing diagnostic; skip the branch wrap.
+      return rewriteChildren(expr) || expr;
+    }
 
     const derived = createReactiveWrapperForExpression(
       expr,
