@@ -88,7 +88,7 @@ describe("debounce and throttling", () => {
     expect(runCount).toBe(0);
 
     // Wait for debounce period
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await clock.tick(100);
     await cell.pull();
 
     // Now it should have run
@@ -126,14 +126,14 @@ describe("debounce and throttling", () => {
         },
         {},
       );
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await clock.tick(10);
     }
 
     // Should not have run yet (debounce keeps resetting)
     expect(runCount).toBe(0);
 
     // Wait for debounce to complete
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await clock.tick(100);
     await cell.pull();
 
     // Should have run only once
@@ -175,7 +175,7 @@ describe("debounce and throttling", () => {
     expect(runCount).toBe(0);
 
     // Wait for debounce
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await clock.tick(100);
     await cell.pull();
 
     expect(runCount).toBe(1);
@@ -224,21 +224,21 @@ describe("debounce and throttling", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    await result.pull();
+    await clock.settle();
     expect(runCount).toBe(1);
     expect(result.get()).toBe(10);
 
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await clock.tick(25);
     source.withTx(tx).send(3);
     await tx.commit();
     tx = runtime.edit();
 
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    await result.pull();
+    await clock.tick(30);
+    await clock.settle();
     expect(runCount).toBe(1);
     expect(result.get()).toBe(10);
 
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    await clock.tick(40);
     await runtime.idle();
     await result.pull();
 
@@ -280,7 +280,7 @@ describe("debounce and throttling", () => {
     cancel();
 
     // Wait past the debounce period
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await clock.tick(150);
     await runtime.idle();
 
     // Action should NOT have run because we unsubscribed
@@ -307,7 +307,7 @@ describe("debounce and throttling", () => {
 
     // Let the settle pass arm the debounce wake. The first run is deferred, so
     // the effect has not run yet.
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await clock.tick(20);
     expect(runCount).toBe(0);
 
     // idle() is blocked behind the armed wake + idle-blocking effect.
@@ -349,7 +349,7 @@ describe("debounce and throttling", () => {
 
       local.runtime.scheduler.dispose();
 
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await clock.tick(100);
 
       expect(runCount).toBe(0);
     } finally {
@@ -584,7 +584,7 @@ describe("debounce and throttling", () => {
     expect(runCount).toBe(0);
 
     // Wait for debounce
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await clock.tick(100);
     await result.pull();
 
     // Should have run

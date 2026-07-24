@@ -3014,7 +3014,7 @@ describe("runner utils", () => {
       const runner = runtime.runner as any;
       const originalSync = runner.syncCellsForRunningPattern.bind(runner);
       runner.syncCellsForRunningPattern = async (...args: any[]) => {
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await clock.settle();
         return originalSync(...args);
       };
 

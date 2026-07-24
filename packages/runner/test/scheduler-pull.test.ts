@@ -135,7 +135,7 @@ describe("pull-based scheduling", () => {
     tx = runtime.edit();
 
     // Give time for the storage notification to process
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await runtime.idle();
 
     // In pull mode with no effect depending on this computation,
     // the computation should be marked dirty but not run

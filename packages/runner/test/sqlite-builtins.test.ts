@@ -138,7 +138,12 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
         await runtime.idle();
         expect(view.get().pending).toBe(true);
 
-        await runtime.settled();
+        // The slow server read is a frozen test-side timer. Begin the settled()
+        // wait, fire the read, and confirm settled() stayed open until the flush
+        // wrote the result back.
+        const settledPromise = runtime.settled();
+        await clock.tick(50);
+        await settledPromise;
         const v = view.get();
         expect(v.pending).toBe(false);
         expect(v.error).toBeUndefined();

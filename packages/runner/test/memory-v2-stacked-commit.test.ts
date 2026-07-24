@@ -571,7 +571,7 @@ const createHarness = () => {
     pushSync: (options: PushSyncOptions) => transport.pushSync(options),
     close: async () => {
       await storageManager.close();
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      await clock.tick(30);
     },
   };
 };
@@ -923,7 +923,7 @@ const waitForCondition = async (
     if (predicate()) {
       return;
     }
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await clock.tick(5);
   }
   throw new Error(`timed out waiting for ${label}`);
 };
@@ -1889,7 +1889,7 @@ Deno.test("memory v2 stacked commits: conflict rejection delivered before the wi
           ?.debug ?? 0) > conflictBaseline,
       "the conflict rejection to reach the runner",
     );
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await clock.tick(30);
 
     // Rejection processed-but-held: the commit promise must not settle, the
     // optimistic value stays visible, and no revert is emitted before the

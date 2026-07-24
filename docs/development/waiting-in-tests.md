@@ -326,6 +326,58 @@ sanitizer reports at once rather than letting the sleep pass by luck. No test in
 the package needs a real positive-delay timer; one that did would deadlock and
 announce itself.
 
+## The runner suite: advancing the runtime's own timers
+
+`packages/runner` has the same preload (`packages/runner/test/clock-preload.ts`,
+wired through `--preload` on the package test task) and the same rule for test
+sleeps, but it cannot simply freeze positive-delay timers the way the reconciler
+tests do. Runner's own reactivity is time-coupled: the scheduler, the wake
+shaper, and storage arm positive-delay timers — throttle and debounce windows,
+committed-write backoff, conflict retries — that `runtime.idle()`,
+`cell.pull()`, and commit then await. Freeze those and a plain reactive test
+deadlocks on the runtime's own machinery, not on any sleep it wrote.
+
+So the runner clock sorts a positive-delay `setTimeout` by who scheduled it,
+using the immediate stack frame:
+
+- A timer scheduled from `src/` — the runtime's own — **auto-advances**: when
+  the event loop would otherwise go idle, logical time jumps to the earliest
+  pending one and fires it, in fire order, with `Date.now` and `performance.now`
+  moving in lockstep. So a throttle window or a backoff retry elapses instantly
+  and deterministically, and the reactive waits above resolve on their own, with
+  no real time passing.
+- A timer scheduled from a `test/` file — a wall-clock sleep — **freezes**, so a
+  test that waits on one still deadlocks and the sanitizer reports it. Delete
+  the sleep and wait on `runtime.idle()`/`cell.pull()`/`runtime.settled()`,
+  which now settle on their own.
+
+Because the runner tests are mostly `describe`/`it` blocks, whose callbacks
+receive the framework's context rather than the one the preload wraps, the
+controls are a global `clock` (typed in `test/clock.d.ts`) rather than methods
+on the test context. `clock.settle()` drains reactive work without moving time,
+and pauses auto-advance while it does, so a test can observe a state partway
+through a window before the timer that ends it fires. `clock.tick(ms)` advances
+logical time explicitly, firing the runtime's and the test's own timers, so a
+test that genuinely measures time — a throttle expiring, a debounce trailing
+run, a backoff schedule — steps through its windows deterministically instead of
+sleeping. An intermediate "has not fired yet" check uses `clock.settle()`; the
+step that lets the window elapse uses `clock.tick`. `clock.reset()` returns
+logical time to zero and drops pending timers: one frozen clock wraps a whole
+`describe`, so a suite whose cases each read absolute coarsened time (the `#now`
+grid tests) calls it from `beforeEach` to start each case from a known instant.
+
+Three files stay on the real clock, listed with their reasons at the top of the
+preload. A resume runtime drives a real loopback memory-client transport whose
+connect/mount/sync does not complete under the fake clock, so the resume
+deadlocks. A multi-space mergeable-commit test asserts on the retry-backoff
+_windowing_ of transient rejections — which rejection fails fast versus is
+retried within a window — a distinction auto-advance collapses. And a
+nested-subagent generateObject aborts its delegate tool because the tool-calling
+path's own timeout auto-advances against the subagent's outbox progress rather
+than the wall clock, so the delegate reports "tool call timed out" before it
+completes. These are the honest exceptions: the clock they need is the real one,
+and their own sleeps are the honest way to wait.
+
 ## Proving a negative
 
 A test that asserts something never happens has no event of its own to wait for.

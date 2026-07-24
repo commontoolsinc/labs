@@ -127,7 +127,7 @@ describe("Conflict Reproduction", () => {
     // Give time for async conflict notifications to be processed
     // The conflict happens during the optimistic transaction retry,
     // which completes asynchronously after runtime.idle()
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await runtime.idle();
 
     // Verify that conflicts were NOT captured
     expect(conflictErrors.length).toBe(0);
@@ -196,7 +196,7 @@ describe("Conflict Reproduction", () => {
     expect(result.get().sequence).toBe(1);
 
     // Give time for async conflict notifications
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await runtime.idle();
 
     // Verify that NO conflicts were captured
     expect(conflictErrors.length).toBe(0);

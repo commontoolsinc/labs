@@ -162,7 +162,7 @@ Deno.test("StorageManager.close drains a watch long-poll still in flight", async
   // with "Promise resolution is still pending...".
   void provider.sync("of:storage-close-watch-inflight" as URI);
   // Let the pull reach the transport before closing.
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await clock.settle();
 
   // close() must resolve without waiting on the withheld watch response: a
   // close() that blocked on the in-flight read would deadlock here. The default

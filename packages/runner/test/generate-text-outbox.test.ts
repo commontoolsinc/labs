@@ -186,7 +186,7 @@ describe("generateText outbox mechanism", () => {
       action(rejectedTx);
       const rejectedResult = await rejectedTx.commit();
       expect(rejectedResult.error).toBeDefined();
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await runtime.idle();
       expect(sendRequestCalls).toEqual([]);
 
       const retryTx = runtime.edit();
@@ -263,7 +263,7 @@ describe("generateText outbox mechanism", () => {
       action(rejectedTx);
       const rejectedResult = await rejectedTx.commit();
       expect(rejectedResult.error).toBeDefined();
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await runtime.idle();
       expect(sendRequestCalls).toEqual([]);
 
       const retryTx = runtime.edit();

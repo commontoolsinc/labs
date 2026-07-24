@@ -40,7 +40,7 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
 
     fetchCalls = [];
     originalFetch = globalThis.fetch;
-    globalThis.fetch = async (
+    globalThis.fetch = (
       input: string | URL | Request,
       init?: RequestInit,
     ) => {
@@ -52,26 +52,30 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
 
       fetchCalls.push({ url, init });
 
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
       if (url.endsWith("/text")) {
-        return new Response("hello fetch builtins", {
-          status: 200,
-          headers: { "Content-Type": "text/plain; charset=utf-8" },
-        });
+        return Promise.resolve(
+          new Response("hello fetch builtins", {
+            status: 200,
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+          }),
+        );
       }
       if (url.endsWith("/binary")) {
-        return new Response(BINARY_BODY.slice(), {
-          status: 200,
-          headers: { "Content-Type": "Image/PNG; some=param" },
-        });
+        return Promise.resolve(
+          new Response(BINARY_BODY.slice(), {
+            status: 200,
+            headers: { "Content-Type": "Image/PNG; some=param" },
+          }),
+        );
       }
-      return new Response(
-        JSON.stringify({ name: "widget", count: 3, extra: "ignored" }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ name: "widget", count: 3, extra: "ignored" }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       );
     };
   });
@@ -100,9 +104,7 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
     await result.pull();
-    await new Promise((resolve) => setTimeout(resolve, 200));
     await result.pull();
 
     return result.get() as { pending: any; result: any; error: any };
@@ -272,7 +274,6 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
     tx = runtime.edit();
 
     await resultCell.pull();
-    await new Promise((resolve) => setTimeout(resolve, 200));
     await resultCell.pull();
 
     expect((resultCell.get() as { result: unknown }).result).toBe(
@@ -286,7 +287,6 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
     tx = runtime.edit();
 
     await resultCell.pull();
-    await new Promise((resolve) => setTimeout(resolve, 100));
     await resultCell.pull();
 
     const cleared = resultCell.get() as {

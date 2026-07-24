@@ -50,7 +50,7 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
     // Mock fetch
     fetchCalls = [];
     originalFetch = globalThis.fetch;
-    globalThis.fetch = async (
+    globalThis.fetch = (
       input: string | URL | Request,
       init?: RequestInit,
     ) => {
@@ -62,15 +62,14 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
 
       fetchCalls.push({ url, init });
 
-      // Simulate a small delay
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      return new Response(
-        JSON.stringify({ mocked: true, url }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ mocked: true, url }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       );
     };
   });
@@ -94,14 +93,8 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
     }, resultCell);
     tx.commit();
 
-    // Give promises time to resolve
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
     // Pull the result to trigger computation
     await result.pull();
-
-    // Wait even more to ensure all transactions are committed
-    await new Promise((resolve) => setTimeout(resolve, 200));
     await result.pull();
 
     const rawData = result.get() as {
@@ -146,7 +139,6 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
     tx.commit();
 
     await result.pull();
-    await new Promise((resolve) => setTimeout(resolve, 200));
     await result.pull();
 
     expect(fetchCalls.length).toBeGreaterThan(0);
@@ -184,12 +176,11 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
     try {
       tx.commit();
       await result.pull();
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await runtime.idle();
 
       expect(committed).toBe(true);
       expect(fetchCalls.length).toBeGreaterThan(0);
       expect(fetchCalls[0].url).toContain("/api/pre-commit");
-      await new Promise((resolve) => setTimeout(resolve, 100));
     } finally {
       txPrototype.commit = originalTxCommit;
       wrapperPrototype.commit = originalWrapperCommit;
@@ -229,7 +220,6 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
       }, resultCell);
       tx.commit();
       await result.pull();
-      await new Promise((resolve) => setTimeout(resolve, 50));
 
       const expectedHash = computeInputHashFromValue({
         url: "http://mock-test-server.local/api/idempotency",
@@ -319,9 +309,6 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
     // Pull first to trigger computation (starts the fetch)
     await resultCell1.pull();
     await resultCell2.pull();
-
-    // Wait for async promises to resolve
-    await new Promise((resolve) => setTimeout(resolve, 200));
 
     // Pull again to get final results
     const data1 = (await resultCell1.pull()) as { result?: unknown };
