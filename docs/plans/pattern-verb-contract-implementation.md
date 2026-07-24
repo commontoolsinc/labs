@@ -87,14 +87,17 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   it reaches the piece's **durable** schema — the dependency verb discovery
   named; mapping spec update in
   `docs/specs/schema-generator/ts_to_json_schema_mapping.md`.
-- **runner:** plain-return projection — the receipt-only branch
-  (`runner.ts:3713-3725`) writes the validated plain return instead of `{}`,
-  behind a new experimental option (registry entry in
-  `docs/development/EXPERIMENTAL_OPTIONS.md` with owner and end state:
-  default-off → flip after Phase 4's integration proof → fold in). Spec note
-  in scheduler-v2 §7.6 (receipt content), and
-  `packages/runner/test/scheduler-event-receipts.test.ts` extended for both
-  plain and reactive-bearing returns.
+- ~~**runner:** plain-return projection~~ — **done (C4)**:
+  `plainResultReceipts`, default-off, env-reachable
+  (`EXPERIMENTAL_PLAIN_RESULT_RECEIPTS`); registry entry in
+  `EXPERIMENTAL_OPTIONS.md`, scheduler-v2 §7.6 receipt-content note, both
+  flag states tested in `scheduler-event-receipts.test.ts`.
+- **C1 design fork, decide first:** `Stream<T>` is a branded-cell interface
+  wired through a one-slot HKT (`AsStream`, `packages/api/index.ts:1239`), so
+  `Stream<T, R = void>` ripples through the cell-type machinery; the
+  alternative is a separate declared-result carrier (e.g.
+  `StreamWithResult<T, R> extends Stream<T>`) that only the schema layer
+  interprets. Settle this at the top of the C1 PR.
 - **Exit:** a CTS pattern declares a verb returning `AddTopicResult`; the
   result schema appears in the durable schema; under the flag, both plain and
   reactive returns are readable in the receipt cell.
