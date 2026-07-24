@@ -17,11 +17,18 @@ import { unwrapExpression } from "../utils/expression.ts";
  *       const __cfAssertOk: boolean =
  *         __cfHelpers.assertCapture(__cfAssertParts, "a + b", a + b) <=
  *         __cfHelpers.assertCapture(__cfAssertParts, "c", c);
- *       return { ok: __cfAssertOk, source: "a + b <= c", parts: __cfAssertParts };
+ *       return {
+ *         ok: __cfAssertOk,
+ *         source: "a + b <= c",
+ *         parts: __cfHelpers.assertRenderParts(__cfAssertOk, __cfAssertParts),
+ *       };
  *     })
  *
  * `assertCapture` returns its value unchanged, so operand order and semantics
- * are untouched. Everything after this stage lowers the call as a `computed`
+ * are untouched. It stashes each operand's resolved value rather than rendering
+ * it; `assertRenderParts` renders them into the record's `parts`, but only when
+ * the assertion failed — a passing assertion never pays to render an operand it
+ * would not report. Everything after this stage lowers the call as a `computed`
  * (the runtime export registry maps `assert` onto `computed`), which rewrites
  * `a + b` into `a.get() + b.get()` inside the capture arguments as usual.
  *
@@ -249,7 +256,18 @@ function createRecordReturn(
           "source",
           factory.createStringLiteral(sourceTextOf(resultExpression)),
         ),
-        factory.createPropertyAssignment("parts", partsIdentifier),
+        // Rendering the recorded operands is deferred to here, and to only the
+        // failing path: `assertRenderParts` returns an empty list when `ok` is
+        // true, so a passing assertion never renders an operand.
+        factory.createPropertyAssignment(
+          "parts",
+          context.cfHelpers.createHelperCall(
+            "assertRenderParts",
+            resultExpression,
+            undefined,
+            [okIdentifier, partsIdentifier],
+          ),
+        ),
       ], true),
     ),
   ], true);
@@ -264,7 +282,7 @@ function isOwnReturnScope(node: ts.Node): boolean {
     ts.isClassExpression(node);
 }
 
-/** `const __cfAssertParts: { src: string; rendered: string }[] = [];` */
+/** `const __cfAssertParts: { src: string; value: unknown }[] = [];` */
 function createPartsDeclaration(
   partsIdentifier: ts.Identifier,
   context: TransformationContext,
@@ -276,11 +294,34 @@ function createPartsDeclaration(
       factory.createVariableDeclaration(
         partsIdentifier,
         undefined,
-        factory.createArrayTypeNode(createPartTypeNode(context)),
+        factory.createArrayTypeNode(createRawPartTypeNode(context)),
         factory.createArrayLiteralExpression([], false),
       ),
     ], ts.NodeFlags.Const),
   );
+}
+
+/**
+ * `{ src: string; value: unknown }` — the shape `assertCapture` records into
+ * the intermediate array before `assertRenderParts` renders it. The value is
+ * held raw so a passing assertion never renders it.
+ */
+function createRawPartTypeNode(context: TransformationContext): ts.TypeNode {
+  const { factory } = context;
+  return factory.createTypeLiteralNode([
+    factory.createPropertySignature(
+      undefined,
+      "src",
+      undefined,
+      factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+    ),
+    factory.createPropertySignature(
+      undefined,
+      "value",
+      undefined,
+      factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+    ),
+  ]);
 }
 
 /**

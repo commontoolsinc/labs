@@ -171,13 +171,24 @@ assert(() => a + b <= c);
 // Output (outline): each operand of the top-level operator is recorded under
 // its authored source text, and `assertCapture` returns it unchanged.
 assert((): { ok: boolean; source: string; parts: ... } => {
-  const __cfAssertParts: { src: string; rendered: string }[] = [];
+  const __cfAssertParts: { src: string; value: unknown }[] = [];
   const __cfAssertOk: boolean =
     __cfHelpers.assertCapture(__cfAssertParts, "a + b", a + b) <=
     __cfHelpers.assertCapture(__cfAssertParts, "c", c);
-  return { ok: __cfAssertOk, source: "a + b <= c", parts: __cfAssertParts };
+  return {
+    ok: __cfAssertOk,
+    source: "a + b <= c",
+    parts: __cfHelpers.assertRenderParts(__cfAssertOk, __cfAssertParts),
+  };
 });
 ```
+
+`assertCapture` stashes each operand's resolved value rather than rendering it.
+`assertRenderParts` renders those values into the record's `parts`, but only
+when the assertion failed: it returns an empty list when `ok` is true. A passing
+assertion — the common case — therefore never renders an operand it would not
+report, which keeps assertion-heavy tests from paying a diagnostics cost on
+every evaluation.
 
 Recorded: the operands of a comparison or arithmetic operator, the arguments of
 a call, the operand of `!`, and, for `&&`, `||`, `??` and `?:`, each side along

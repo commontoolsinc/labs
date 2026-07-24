@@ -239,15 +239,57 @@ Deno.test("assert does not capture a body's own binding of its local names", asy
     { src: "__cfAssertParts", value: "__cfAssertParts" },
   ]);
 
-  // The record's `parts` refers to the emitted local, not the author's.
+  // The record's `parts` renders the emitted local, not the author's binding.
+  // It reads `assertRenderParts(ok, __cfAssertParts_N)`, so the recorded array
+  // is the render call's second argument.
   const parts = collect(root, ts.isPropertyAssignment).find((property) =>
     ts.isIdentifier(property.name) && property.name.text === "parts"
   );
-  const partsTarget = parts && ts.isIdentifier(parts.initializer)
-    ? parts.initializer.text
+  const partsArg = parts && ts.isCallExpression(parts.initializer)
+    ? parts.initializer.arguments[1]
+    : undefined;
+  const partsTarget = partsArg && ts.isIdentifier(partsArg)
+    ? partsArg.text
     : undefined;
   assertEquals(partsTarget !== "__cfAssertParts", true);
   assertEquals(partsTarget?.startsWith("__cfAssertParts"), true);
+});
+
+Deno.test("assert defers operand rendering to a failing-path helper", async () => {
+  const root = await transformed(patternSource(`
+  const check = assert(() => a.get() <= c.get());
+  return { check };`));
+
+  // The record's `parts` is not the recorded array itself but a call that
+  // renders it only when the assertion failed. `assertRenderParts(ok, parts)`
+  // returns an empty list when `ok` is true, so a passing assertion pays
+  // nothing to render operands it will never report.
+  const parts = collect(root, ts.isPropertyAssignment).find((property) =>
+    ts.isIdentifier(property.name) && property.name.text === "parts"
+  );
+  const call = parts?.initializer;
+  assertEquals(call !== undefined && ts.isCallExpression(call), true);
+
+  const callExpr = call as ts.CallExpression;
+  assertEquals(
+    ts.isPropertyAccessExpression(callExpr.expression) &&
+      callExpr.expression.name.text === "assertRenderParts",
+    true,
+  );
+
+  // The verdict decides whether to render, and the recorded operands are what
+  // it renders: `assertRenderParts(__cfAssertOk, __cfAssertParts)`.
+  const [okArg, partsArg] = callExpr.arguments;
+  assertEquals(
+    okArg !== undefined && ts.isIdentifier(okArg) &&
+      okArg.text.startsWith("__cfAssertOk"),
+    true,
+  );
+  assertEquals(
+    partsArg !== undefined && ts.isIdentifier(partsArg) &&
+      partsArg.text.startsWith("__cfAssertParts"),
+    true,
+  );
 });
 
 Deno.test("a local assert is not mistaken for the commonfabric one", async () => {

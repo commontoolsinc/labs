@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { type AssertRecord, JSONSchemaObj } from "@commonfabric/api";
+import {
+  type AssertRawPart,
+  type AssertRecord,
+  JSONSchemaObj,
+} from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import {
   type Frame,
@@ -17,6 +21,7 @@ import {
   action,
   assert,
   assertCapture,
+  assertRenderParts,
   handler,
   isEagerSourceAnnotationEnabled,
   lift,
@@ -184,29 +189,58 @@ describe("module", () => {
     // back untouched, or wrapping an operand would change what the assertion
     // computes.
     it("returns the value it was given", () => {
-      const parts: { src: string; rendered: string }[] = [];
+      const parts: AssertRawPart[] = [];
       expect(assertCapture(parts, "a + b", 3)).toBe(3);
 
       const object = { name: "Coffee" };
       expect(assertCapture(parts, "item", object)).toBe(object);
     });
 
-    it("records the source text and the rendered value", () => {
-      const parts: { src: string; rendered: string }[] = [];
+    it("records the source text and the raw value, without rendering it", () => {
+      // Rendering is deferred to `assertRenderParts`, so the value is stashed
+      // as-is here — a passing assertion never renders it.
+      const parts: AssertRawPart[] = [];
+      const object = { name: "Coffee" };
       assertCapture(parts, "a + b", 3);
-      assertCapture(parts, "items", [1, -2]);
+      assertCapture(parts, "item", object);
 
       expect(parts).toEqual([
-        { src: "a + b", rendered: "3" },
-        { src: "items", rendered: "[1,-2]" },
+        { src: "a + b", value: 3 },
+        { src: "item", value: object },
       ]);
+      // The recorded value is the object itself, not a copy or a rendering.
+      expect(parts[1]!.value).toBe(object);
     });
 
     it("appends in the order it is called", () => {
-      const parts: { src: string; rendered: string }[] = [];
+      const parts: AssertRawPart[] = [];
       assertCapture(parts, "first", 1);
       assertCapture(parts, "second", 2);
       expect(parts.map((part) => part.src)).toEqual(["first", "second"]);
+    });
+  });
+
+  describe("assertRenderParts function", () => {
+    // The record's `parts` runs through this. On the passing path it renders
+    // nothing — that is what keeps a passing assertion from paying to render
+    // operands it will never report.
+    it("renders nothing for a passing assertion", () => {
+      const parts: AssertRawPart[] = [
+        { src: "a + b", value: 3 },
+        { src: "items", value: [1, -2] },
+      ];
+      expect(assertRenderParts(true, parts)).toEqual([]);
+    });
+
+    it("renders each captured value for a failing assertion", () => {
+      const parts: AssertRawPart[] = [
+        { src: "a + b", value: 3 },
+        { src: "items", value: [1, -2] },
+      ];
+      expect(assertRenderParts(false, parts)).toEqual([
+        { src: "a + b", rendered: "3" },
+        { src: "items", rendered: "[1,-2]" },
+      ]);
     });
   });
 

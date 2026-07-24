@@ -83,6 +83,16 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
     category: "ignored",
     reactiveOrigin: false,
   },
+  // `assertRenderParts` renders the operands `assertCapture` recorded into the
+  // assert record's `parts`, and only when the assertion failed.
+  // AssertDiagnosticsTransformer emits the call; authored code does not. It
+  // takes plain data and returns plain data, so like `assertCapture` it
+  // originates nothing reactive and is a plain call.
+  {
+    exportName: "assertRenderParts",
+    category: "ignored",
+    reactiveOrigin: false,
+  },
   {
     exportName: "render",
     category: "builder",
