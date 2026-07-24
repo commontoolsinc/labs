@@ -247,11 +247,17 @@ const uiContractsFromSchemaInternal = (
     Array.isArray(resolvedSchema.allOf);
   const hasItems = isRecord(resolvedSchema.items) ||
     typeof resolvedSchema.items === "boolean";
+  // prefixItems counts as children too (PR #4969 review): an unknown-typed
+  // tuple with a contract-bearing $defs entry must not mint that contract
+  // at the array's own path — the slot that references the definition mints
+  // it at its index via the descent below.
+  const hasPrefixItems = Array.isArray(resolvedSchema.prefixItems);
   if (
     contract === undefined &&
     !hasProperties &&
     !hasCompoundSchemas &&
     !hasItems &&
+    !hasPrefixItems &&
     resolvedSchema.type === "unknown" &&
     isRecord(resolvedSchema.$defs)
   ) {

@@ -253,6 +253,30 @@ describe("CFC UI contract matching", () => {
     }]);
   });
 
+  it("does not fall back to $defs contracts for unknown-typed tuples", () => {
+    // PR #4969 review: the $defs fallback's no-children guard did not count
+    // prefixItems, so an unknown-typed tuple with one contract-bearing
+    // definition minted that contract at the array's own path — enforced
+    // for every array write instead of just the referencing slot.
+    const contracts = uiContractsFromSchema({
+      type: "unknown",
+      prefixItems: [
+        { $ref: "#/$defs/Action" },
+        { type: "number" },
+      ],
+      $defs: {
+        Action: trustedPatternUiActionSchema,
+      },
+    } as never);
+
+    // Only the referencing slot mints, at its concrete index — no
+    // root-path entry.
+    expect(contracts.map((entry) => entry.path)).toEqual([["0"]]);
+    expect((contracts[0].contract as { action?: string }).action).toBe(
+      "SubmitDirectCommand",
+    );
+  });
+
   it("keeps sibling ifc metadata when resolving local $refs", () => {
     const contracts = uiContractsFromSchema({
       type: "array",
