@@ -149,6 +149,36 @@ describe("value-type dispatch: FabricSpecialObject subclasses", () => {
     }
   });
 
+  it("follows a modern FabricLink under an unconstrained schema", () => {
+    setModernCellRepConfig(true);
+    try {
+      const link = new FabricLink({
+        id: "of:unconstrained-link-target",
+        space: "did:null:null",
+        scope: "space",
+        path: [],
+      });
+      const { traverser, doc } = traverserOver(
+        "of:unconstrained-link-source",
+        link,
+        { path: ["value"], schema: true },
+        true,
+        {
+          "of:unconstrained-link-target": {
+            name: "linked",
+          } as FabricValue,
+        },
+      );
+
+      const result = traverser.traverse(doc);
+
+      expect(result.error).toBeUndefined();
+      expect(result.ok).toEqual({ name: "linked" });
+    } finally {
+      resetModernCellRepConfig();
+    }
+  });
+
   it("fails loudly on a FabricInstance (not yet handled)", () => {
     // A `FabricInstance` is not a fully-opaque leaf: leafing it whole (as
     // this arm did for any `FabricSpecialObject`) silently hides that its

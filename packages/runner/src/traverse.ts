@@ -1520,14 +1520,16 @@ export abstract class BaseObjectTraverser {
       // An opaque leaf: return it intact ahead of the record branch below.
       // Placed after the array arm so array reads skip the `instanceof`.
       return doc.value;
-    } else if (doc.value instanceof FabricInstance) {
+    } else if (
+      doc.value instanceof FabricInstance && !isSigilLink(doc.value)
+    ) {
       // TODO(danfuzz): a `FabricInstance` should be descended by its codec
       // contents, which does not exist yet. This path carries live instance
       // traffic today (the fetch builtins store a `FabricError` result value
       // that is read back through here), so unlike the schema-`default`
       // paths it cannot fail loudly yet: the instance leafs through whole.
       return doc.value;
-    } else if (isRecord(doc.value)) {
+    } else if (isRecord(doc.value) || isSigilLink(doc.value)) {
       // First, see if we need special handling
       if (isSigilLink(doc.value)) {
         // Check coverage before getAtPath/followPointer adds this link target
