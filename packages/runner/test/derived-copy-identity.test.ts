@@ -81,6 +81,7 @@ describe("entry-ref resolution through copies", () => {
     const ref = { identity: "ignored", symbol: "default" };
     setArtifactEntryRef("not-an-artifact", ref);
     expect(getArtifactEntryRef("not-an-artifact")).toBeUndefined();
+    expect(resolveOriginal("not-an-artifact")).toBe("not-an-artifact");
   });
 
   it("resolves a ref registered BEFORE the copy (eager)", () => {
