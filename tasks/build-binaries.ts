@@ -550,6 +550,9 @@ export async function runBuildBinaries(
       "--allow-ffi",
       "--allow-net",
       "--allow-write",
+      // --background re-runs this binary as a detached server child, so the
+      // compiled binary needs permission to spawn itself.
+      "--allow-run",
     ],
     binaries: requestedBinaries(args),
   });

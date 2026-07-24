@@ -414,14 +414,14 @@ jobs:
           TOOLSHED_PORT: 8000
         run: |
           chmod +x ./common-binaries/toolshed
+          # --background spawns the server, waits until it has bound its port,
+          # then returns, so the test steps never race a not-yet-listening
+          # server. The server logs to --log-file, which the launcher prints on
+          # success and dumps if the server exits before binding.
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
-          ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
-
-      - name: ⏳ Wait for Toolshed to be ready
-        uses: ./.github/actions/wait-for-toolshed
-        with:
-          url: http://localhost:8000
+          ./common-binaries/toolshed --port="$TOOLSHED_PORT" \
+            --background --log-file="$RUNNER_TEMP/toolshed.log"
 
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
@@ -538,12 +538,11 @@ jobs:
           # Set tools to path
           # Integration script needs `cf`
           echo "${{ github.workspace }}/common-binaries" >> $GITHUB_PATH
-          CFTS_AI_GATEWAY_URL="" MEMORY_URL="$TOOLSHED_URL" API_URL="$TOOLSHED_URL" ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
-
-      - name: ⏳ Wait for Toolshed to be ready
-        uses: ./.github/actions/wait-for-toolshed
-        with:
-          url: http://localhost:${{ matrix.toolshed_port }}
+          # --background waits until the server has bound its port before it
+          # returns, so the test steps never race a not-yet-listening server.
+          CFTS_AI_GATEWAY_URL="" MEMORY_URL="$TOOLSHED_URL" API_URL="$TOOLSHED_URL" \
+            ./common-binaries/toolshed --port="$TOOLSHED_PORT" \
+            --background --log-file="$RUNNER_TEMP/toolshed.log"
 
       - name: 📦 Install CLI integration dependencies
         uses: ./.github/actions/apt-install
@@ -697,14 +696,12 @@ jobs:
       - name: 🔌 Start Toolshed server for testing
         run: |
           chmod +x ./common-binaries/toolshed
+          # --background waits until the server has bound its port before it
+          # returns, so the test steps never race a not-yet-listening server.
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
-          ./common-binaries/toolshed &
-
-      - name: ⏳ Wait for Toolshed to be ready
-        uses: ./.github/actions/wait-for-toolshed
-        with:
-          url: http://localhost:8000
+          ./common-binaries/toolshed \
+            --background --log-file="$RUNNER_TEMP/toolshed.log"
 
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled

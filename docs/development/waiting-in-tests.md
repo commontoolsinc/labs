@@ -6,11 +6,13 @@ the two pieces of machinery whose timing is easy to guess wrong, the check that
 keeps new polling `waitFor` out of the integration suites, and the specific
 places where a bounded `waitFor` poll is still the right tool.
 
-The same principle applies to production code, and the last two sections cover
+The same principle applies to production code, and the last three sections cover
 it there: [Production reconnect backoff](#production-reconnect-backoff), a
-deliberate exception because nothing announces that a downed server is back, and
+deliberate exception because nothing announces that a downed server is back;
 [The FUSE mount handshake](#the-fuse-mount-handshake), a cross-process readiness
-signal carried by a pipe.
+signal carried by a pipe; and [the toolshed background
+handshake](#the-toolshed-background-handshake), the same pipe-carried signal
+applied to starting the server.
 
 ## Why avoid `waitFor`
 
@@ -970,3 +972,34 @@ indefinitely — which is what a foreground mount does too, and the user interru
 it or a CI job limit catches it. Every way the pair can actually fail ends the
 read instead. A ceiling over the read would instead fail a mount that would have
 succeeded on a loaded machine, the ceiling this note warns about throughout.
+
+## The toolshed background handshake
+
+`toolshed --background` carries the same pipe-borne readiness signal into
+starting the server. The command spawns a second copy of itself as the server,
+waits until that copy reports it has bound its port, and only then returns. A
+caller that runs it starts the toolshed and moves straight on to work that needs
+it, with no readiness poll of its own. The CI integration jobs start the
+toolshed this way and go straight to their tests.
+
+Readiness travels over the child's stdout. The child writes a single marker line
+the moment `Deno.serve`'s `onListen` fires — the point the port is listening and
+a connection stops being refused — and the parent reads that pipe until the
+marker arrives. The read wakes on the write, so the wait resolves on the event
+with no poll interval. Failure ends the read the same way the FUSE handshake's
+does: if the child exits before it binds, its stdout closes, the parent reaches
+end of stream without the marker, and the command fails with the child's exit
+code and prints the child's log.
+
+The child keeps the pipe clean by sending its own logs to a file rather than to
+stdout, so once the parent has read the marker and detached, the child never
+writes the pipe again and a later log cannot land on a closed reader. Its stderr
+is discarded for the same reason: a detached server that inherited a launcher's
+stderr would hold a descriptor the launcher waits on after it has moved on. The
+one line the parent needs is on stdout; everything else the server says is in its
+log file.
+
+There is no deadline on this read either. A server that neither binds nor exits
+blocks the command, which is what a foreground start does too, and the outer job
+limit catches it. A per-command ceiling would instead fail a start that a loaded
+machine would have completed.
