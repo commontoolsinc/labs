@@ -87,11 +87,23 @@ export type UpdateOutcome = PatternUpdateOutcome;
  * class — is what survives the plain-`Error` re-wrap the runner applies at its
  * setup-commit boundary (`runner.ts`), keeping producer and consumer in
  * lockstep across that boundary and across packages.
+ *
+ * Crucially we match the token only in its FRAMED reason position — `: <token>:
+ * ` — the exact shape the prepare catch emits (`${token}: ${message}` recorded
+ * as a reason, surfaced by the commit as `…not prepared: ${reason}`). A bare
+ * `includes(token)` would also match the token appearing incidentally inside an
+ * UNRELATED, user-influenced error — e.g. an ordinary incompatible-type merge
+ * failure at a property path literally named `/cfc-schema-migration-incompatible`
+ * — and wrongly authorize a root replacement for a non-additive incompatibility.
+ * The `: … : ` framing cannot be produced by a path or value that merely
+ * contains the token string.
  */
+const FRAMED_MIGRATION_REASON =
+  `: ${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: `;
 const isCfcMigrationRejection = (error: unknown): boolean =>
   error instanceof Error &&
   error.message.startsWith("CFC enforcement rejected commit") &&
-  error.message.includes(CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON);
+  error.message.includes(FRAMED_MIGRATION_REASON);
 
 // This module can load outside Deno (browser-safe storage import above), so
 // env reads are guarded like PIECE_TRACE_TIMINGS: absent env ⇒ defaults.
@@ -852,9 +864,16 @@ export class PiecesController<T = unknown> {
       );
     }
     if (!swapResult.ok) {
-      // The root was healed/repointed out from under us between the failed
-      // repair and this swap. Do not overwrite the newer identity; let the
-      // caller re-resolve and start whatever now holds the root.
+      // The root was repointed by a concurrent heal between the failed repair
+      // and this swap. We must NOT overwrite the newer identity (the whole
+      // point of the precondition) — but we also must NOT return it as a
+      // success: this is the cold-start path, so the caller does not start or
+      // materialize what we hand back, and the concurrent heal may still be
+      // mid-flight (the repoint commits BEFORE its own materialize). Claiming
+      // success here would surface an unstarted, un-setup root. Fail closed
+      // with a clear, accurate error; nothing was overwritten, and the next
+      // boot observes the settled root and starts/repairs it through the
+      // ordinary path.
       pieceUpdateLogger.warn(
         "default-root-roll-forward-superseded",
         () => [
@@ -862,7 +881,11 @@ export class PiecesController<T = unknown> {
           `leaving concurrent heal in place for ${space}`,
         ],
       );
-      return await this.#manager.getDefaultPattern(false) ?? rootToStart;
+      throw clearError(
+        "was superseded by a concurrent heal (the root identity changed " +
+          "before the swap); left in place for the next boot to start",
+        migrationError,
+      );
     }
 
     // Re-resolve so the materialize observes the committed patternIdentity

@@ -5,6 +5,7 @@ import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { mergeCfcSchemaEnvelopes } from "../src/cfc/schema-merge.ts";
+import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "../src/cfc/migration-reason.ts";
 import { NAME, UI } from "../src/builder/types.ts";
 import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 
@@ -191,6 +192,97 @@ describe("CFC additive-required default preserves old documents", () => {
       // And favorites materialized to its defaulted empty list.
       const favorites = home.key("favorites");
       expect(favorites.get() ?? []).toEqual([]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  // The producer→consumer token contract, end to end at the runner layer:
+  // mergeRequired throws CfcSchemaMigrationError → the prepare catch records it
+  // as a TAGGED reason → the COMMIT rejection message carries the framed
+  // `: <token>: ` the piece backstop keys on. The piece tests synthesize this
+  // string; this test proves the runner actually produces it, so the two ends
+  // stay in lockstep if either side's wording drifts.
+  it("frames a real additive-required-no-default commit rejection with the migration token", async () => {
+    const storageManager = StorageManager.emulate({ as: alice });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+    });
+    const space = alice.did();
+    const ROOT = "legacy-home-root-reject";
+    const seedMeta = (tx: ReturnType<typeof runtime.edit>) => {
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({ id: `trust-${space}`, actingPrincipal: space });
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: OWNER_WRITER,
+      });
+    };
+    try {
+      // 1. Seed a cfc-relevant root under a schema requiring [NAME, UI, owner].
+      {
+        const tx = runtime.edit();
+        seedMeta(tx);
+        const cell = runtime.getCell(space, ROOT, legacyHomeSchema(space), tx);
+        cell.set({ [NAME]: "Legacy", [UI]: null, owner: "alice" });
+        const target = cell.getAsNormalizedFullLink();
+        tx.recordCfcWritePolicyInput({
+          kind: "trusted-event",
+          target: {
+            space: target.space,
+            scope: target.scope,
+            id: target.id,
+            path: ["owner"],
+          },
+          eventId: "seed-owner",
+          provenance: { origin: "dom", trusted: true },
+        });
+        tx.prepareCfc();
+        expect((await tx.commit()).ok).toBeDefined();
+      }
+
+      // 2. Re-commit the same root under a schema that ADDS a required field
+      //    with NO default — the additive-required migration the guard refuses.
+      const augmented: JSONSchema = {
+        type: "object",
+        properties: {
+          [NAME]: { type: "string" },
+          [UI]: { type: "unknown" },
+          owner: ownerProtectedString(space),
+          secret: { type: "string" },
+        },
+        required: [NAME, UI, "owner", "secret"],
+      };
+      const tx = runtime.edit();
+      seedMeta(tx);
+      const cell = runtime.getCell(space, ROOT, augmented, tx);
+      cell.set({ [NAME]: "Legacy", [UI]: null, owner: "alice", secret: "x" });
+      const target = cell.getAsNormalizedFullLink();
+      tx.recordCfcWritePolicyInput({
+        kind: "trusted-event",
+        target: {
+          space: target.space,
+          scope: target.scope,
+          id: target.id,
+          path: ["owner"],
+        },
+        eventId: "reject-owner",
+        provenance: { origin: "dom", trusted: true },
+      });
+      tx.prepareCfc();
+      const res = await tx.commit();
+
+      // Rejected — and the message carries the FRAMED token (not a bare
+      // occurrence), exactly what `isCfcMigrationRejection` matches.
+      expect(res.error).toBeDefined();
+      const message = res.error?.message ?? "";
+      expect(message).toContain("CFC enforcement rejected commit");
+      expect(message).toContain(
+        `: ${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: `,
+      );
+      expect(message).toContain("required field secret needs a default");
     } finally {
       await runtime.dispose();
       await storageManager.close();
