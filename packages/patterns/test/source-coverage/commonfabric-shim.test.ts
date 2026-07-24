@@ -1,3 +1,51 @@
+/**
+ * The `commonfabric` module the pattern source-coverage harness runs patterns
+ * against. See `pattern-source-coverage.test.ts` for the harness itself: it runs
+ * changed pattern modules as plain code under Deno's V8 coverage, deliberately
+ * without the transformer + sandbox + runtime, and its generated import map
+ * points `commonfabric` at this file.
+ *
+ * So this stands in for the real `commonfabric` surface, and is two things at
+ * once:
+ *
+ * - Fakes for the reactive primitives (`pattern`, `handler`, `computed`,
+ *   `lift`, `Cell`/`Writable`, streams, `wish`, `fetch*`, …). These normally
+ *   need the live runtime; here they are synchronous, runtime-free stand-ins
+ *   that just let the authored source execute so its lines are counted. Their
+ *   return values are scaffolding — the harness asserts on rendered output, not
+ *   on what these produce — so keep them minimal.
+ * - Real re-exports of the pure, runtime-free `data-model` helpers (`valueEqual`,
+ *   `toCompactDebugString`, `toIndentedDebugString`). Faking these would both
+ *   duplicate real code and rob the harness of a bonus: because the child
+ *   inherits `DENO_COVERAGE_DIR`, running the real ones gives `data-model` (and
+ *   its foundation deps) coverage credit for the paths the pattern runtime
+ *   exercises.
+ *
+ * Anything a pattern imports from `commonfabric` must be exported here, or that
+ * pattern fails to load in the child (not caught by `deno check`).
+ *
+ * Not a test despite the name: the `.test.ts` suffix is what gets this file
+ * type-checked, via the patterns test task's `.test.ts` file glob (the child
+ * runs it under `--no-check`, and nothing else imports it from a checked
+ * module).
+ */
+
+//
+// Real implementation pass-through
+//
+
+// The generated child import map resolves the transitive
+// `data-model`/`content-hash`/`leb128` graph these pull in.
+export { valueEqual } from "@commonfabric/data-model/fabric-value";
+export {
+  toCompactDebugString,
+  toIndentedDebugString,
+} from "@commonfabric/data-model/value-debug";
+
+//
+// Stubs
+//
+
 export type BuiltInLLMMessage = Record<string, unknown>;
 export type BuiltInLLMTool = Record<string, unknown>;
 export type Default<T> = T;
@@ -352,19 +400,6 @@ export function str(
 export function equals(left: unknown, right: unknown): boolean {
   if (left === right) return true;
   return JSON.stringify(left) === JSON.stringify(right);
-}
-
-export function valueEqual(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) return true;
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-export function toIndentedDebugString(value: unknown): string {
-  return JSON.stringify(value, null, 2);
-}
-
-export function toCompactDebugString(value: unknown): string {
-  return JSON.stringify(value);
 }
 
 export function getPatternEnvironment(): { apiUrl: URL } {
