@@ -132,6 +132,7 @@ describe("executePieceCallable", () => {
     expect(result.resultRef).toEqual({
       id: "of:tool-result-cell",
       space: "did:key:test-home",
+      scope: "space",
     });
   });
 
@@ -196,7 +197,7 @@ describe("executePieceCallable", () => {
       toolResult: { ok: true },
     });
 
-    await executePieceCallable(
+    const result = await executePieceCallable(
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
@@ -213,6 +214,9 @@ describe("executePieceCallable", () => {
     );
 
     expect(harness.tracker.toolResultScope).toBe("user");
+    // The returned handle preserves the scope — dropping it would silently
+    // retarget a user-scoped result to the space-scoped instance.
+    expect(result.resultRef?.scope).toBe("user");
   });
 
   it("reads primitive handler input from --value-file", async () => {
@@ -697,6 +701,7 @@ function createPieceCallableHarness(options: {
     getAsNormalizedFullLink: () => ({
       id: "of:tool-result-cell",
       space: "did:key:test-home",
+      scope: options.callableScope ?? "space",
     }),
   };
 

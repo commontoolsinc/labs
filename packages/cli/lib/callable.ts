@@ -101,10 +101,13 @@ export interface CallableExecutionDeps {
   uuid?: () => string;
 }
 
-/** Durable address of a tool's per-invocation result cell. */
+/** Durable address of a tool's per-invocation result cell. The scope is part
+ * of the address: reopening a user- or session-scoped cell without it
+ * resolves the space-scoped instance — a different cell. */
 export interface CallableResultRef {
   space: string;
   id: string;
+  scope: CellScope;
 }
 
 export interface ExecutedCallable {
@@ -421,7 +424,14 @@ export async function executeResolvedCallable(
   return {
     outputText: JSON.stringify(outputValue, null, 2),
     ...(resultLink?.id && resultLink?.space
-      ? { resultRef: { space: resultLink.space, id: resultLink.id } }
+      ? {
+        resultRef: {
+          space: resultLink.space,
+          id: resultLink.id,
+          // Absent scope on a normalized link means the space scope.
+          scope: resultLink.scope ?? "space",
+        },
+      }
       : {}),
   };
 }
