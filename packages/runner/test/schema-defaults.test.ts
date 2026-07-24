@@ -135,6 +135,58 @@ describe("Schema - Default Values", () => {
       expect(value.pair).toEqual([{ x: 1 }]);
     });
 
+    it("allows any value in boolean-true tuple slots", () => {
+      const c = runtime.getCell<{ name: string }>(
+        space,
+        "tuple defaults true slot 1",
+        undefined,
+        tx,
+      );
+      c.set({ name: "t" });
+
+      const schema = {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          pair: {
+            type: "array",
+            default: [5],
+            prefixItems: [true],
+          },
+        },
+      } as unknown as JSONSchema;
+
+      const value = c.asSchema(schema).get() as { pair?: unknown };
+      expect(value.pair).toEqual([5]);
+    });
+
+    it("rejects default elements past the slots of a closed tuple", () => {
+      const c = runtime.getCell<{ name: string }>(
+        space,
+        "tuple defaults closed 1",
+        undefined,
+        tx,
+      );
+      c.set({ name: "t" });
+
+      const schema = {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          pair: {
+            type: "array",
+            default: ["a", "b"],
+            prefixItems: [{ type: "string" }],
+            items: false,
+          },
+        },
+      } as unknown as JSONSchema;
+
+      expect(() => c.asSchema(schema).get()).toThrow(
+        /items: false conflicts/,
+      );
+    });
+
     it("should resolve defaults when using $ref in property schemas", () => {
       const schema = {
         $defs: {

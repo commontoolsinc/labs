@@ -446,6 +446,18 @@ describe("mergeCfcSchemaEnvelopes", () => {
     expect(proto.default).toBe("d");
   });
 
+  it("keeps the candidate's boolean additionalProperties via the spread", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "object",
+      properties: { a: { type: "string" } },
+    }, {
+      type: "object",
+      properties: { a: { type: "string" } },
+      additionalProperties: true,
+    });
+    expect((merged as JSONSchemaObj).additionalProperties).toBe(true);
+  });
+
   it("merges object-valued additionalProperties from both sides", () => {
     const merged = mergeCfcSchemaEnvelopes({
       type: "object",
@@ -918,6 +930,39 @@ describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
         type: "string",
         ifc: { confidentiality: ["x"] },
       },
+    } as const;
+    expect(storedSchemaCoversCandidateEnvelope(stored, candidate)).toBe(false);
+  });
+
+  it("boolean rest claims must match exactly for coverage", () => {
+    const stored = {
+      type: "object",
+      properties: { a: { type: "string" }, b: { type: "number" } },
+      additionalProperties: false,
+    } as const;
+    const covered = {
+      type: "object",
+      properties: { a: { type: "string" } },
+      additionalProperties: false,
+    } as const;
+    const open = {
+      type: "object",
+      properties: { a: { type: "string" } },
+      additionalProperties: true,
+    } as const;
+    expect(storedSchemaCoversCandidateEnvelope(stored, covered)).toBe(true);
+    expect(storedSchemaCoversCandidateEnvelope(stored, open)).toBe(false);
+  });
+
+  it("fails closed when only the candidate declares prefixItems", () => {
+    const stored = {
+      type: "array",
+      items: { type: "number" },
+    } as const;
+    const candidate = {
+      type: "array",
+      prefixItems: [{ type: "number" }],
+      items: { type: "number" },
     } as const;
     expect(storedSchemaCoversCandidateEnvelope(stored, candidate)).toBe(false);
   });

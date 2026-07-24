@@ -120,6 +120,21 @@ Deno.test("schemaToTypeString parenthesizes union rest elements", () => {
   );
 });
 
+Deno.test("schemaToTypeString parenthesizes intersection rest elements", () => {
+  assertEquals(
+    schemaToTypeString({
+      type: "array",
+      prefixItems: [{ type: "string" }],
+      items: {
+        type: "object",
+        properties: { a: { type: "string" } },
+        additionalProperties: { type: "number" },
+      },
+    } as any),
+    "[string, ...({\n  a?: string\n} & Record<string, number>)[]]",
+  );
+});
+
 Deno.test("schemaToTypeString escapes string literals and renders JSON constants", () => {
   // PR #4969 review: `"a"b"` was emitted for a legal string constant, and
   // object/array constants rendered as "[object Object]".
@@ -149,6 +164,13 @@ Deno.test("schemaToTypeString survives recursive $defs", () => {
   assertEquals(
     schemaToTypeString({ $ref: "#/$defs/A" } as any, { defs: mutual }),
     "A",
+  );
+});
+
+Deno.test("schemaToTypeString renders type arrays at the depth cap", () => {
+  assertEquals(
+    schemaToTypeString({ type: ["string", "null"] } as any, { maxDepth: 0 }),
+    "string | null",
   );
 });
 

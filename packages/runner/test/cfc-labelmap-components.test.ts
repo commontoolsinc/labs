@@ -204,6 +204,9 @@ describe("CFC labelMap component origins", () => {
           properties: {
             pair: {
               type: "array",
+              // The negated branch is deliberately NOT minted (its ifc must
+              // not label real data); walking past it is pinned here.
+              not: { type: "string", ifc: { confidentiality: ["negated"] } },
               prefixItems: [
                 { type: "string", ifc: { confidentiality: ["secret"] } },
                 { type: "number" },
