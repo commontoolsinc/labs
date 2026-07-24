@@ -354,18 +354,16 @@ export function equals(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-export function valueEqual(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) return true;
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-export function toIndentedDebugString(value: unknown): string {
-  return JSON.stringify(value, null, 2);
-}
-
-export function toCompactDebugString(value: unknown): string {
-  return JSON.stringify(value);
-}
+// Pure `data-model` helpers with no runtime dependency: use the real
+// implementations rather than fakes, so patterns exercise (and this harness
+// reports coverage of) the same code the pattern runtime runs. The child's
+// import map (built in `pattern-source-coverage.test.ts`) wires up the
+// transitive `data-model`/`content-hash`/`leb128` graph this pulls in.
+export { valueEqual } from "@commonfabric/data-model/fabric-value";
+export {
+  toCompactDebugString,
+  toIndentedDebugString,
+} from "@commonfabric/data-model/value-debug";
 
 export function getPatternEnvironment(): { apiUrl: URL } {
   return { apiUrl: new URL("http://localhost/") };
