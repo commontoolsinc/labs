@@ -585,17 +585,14 @@ export class PiecesController<T = unknown> {
         () => this.#manager.startPiece(rootToStart, DEFAULT_ROOT_RUN_OPTIONS),
       );
     } catch (startError) {
-      // Cold-start setup repair. checkAndUpdateDefaultPattern moves
-      // patternIdentity WITHOUT running the setup phase ("Never calls run()"),
-      // and Runner.start() of a not-running piece instantiates the stored
-      // identity directly — also without setup. A root whose identity moved
-      // while it was not running (the bricked-space heal: no watcher existed
-      // to swap it in place) therefore boots over a doc that never
-      // materialized the pattern's internal cells — handler
-      // `{ "$stream": true }` markers included — and dies at instantiation
-      // ("Handler used as lift", the 2026-07-22 estuary failure). This also
-      // covers docs ALREADY left in that state by an earlier session: their
-      // identity compares current, so no further swap will ever fire.
+      // Cold-start setup repair for legacy split-brain documents.
+      // PatternUpdater now commits replacement setup and patternIdentity
+      // atomically. Older runtimes moved only the pointer, however, so a root
+      // can already exist whose stored identity names a graph that was never
+      // set up. Runner.start() instantiates that stored identity directly and
+      // can fail because internal cells — handler `{ "$stream": true }`
+      // markers included — are missing. Since the identity already compares
+      // current, no later update check will repair such a document.
       //
       // run() (setup + start) is the sanctioned repair: with an unchanged
       // pattern pointer the setup phase is idempotent — it only materializes

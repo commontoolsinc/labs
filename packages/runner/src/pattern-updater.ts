@@ -339,7 +339,12 @@ export class PatternUpdater {
             displacedAt: Date.now(),
           });
         }
-        resultCell.withTx(tx).setMetaRaw("patternIdentity", entryRef);
+        // Prepare the complete replacement graph atomically with the pointer:
+        // internal-cell manifests/defaults/backlinks, argument/result schemas,
+        // and the result projection must all agree before the watcher can
+        // instantiate the new nodes. setup() performs its transaction-bound
+        // work synchronously and returns an already-resolved promise here.
+        void runtime.setup(tx, pattern, undefined, resultCell);
         setPatternSource(resultCell, tx, source);
         return true;
       });

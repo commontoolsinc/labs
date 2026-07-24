@@ -28,7 +28,7 @@ published-pattern updates remain design.
 
 ## Last Updated
 
-2026-07-22
+2026-07-23
 
 ## Motivation
 
@@ -75,7 +75,7 @@ published-pattern updates remain design.
 | Mechanism | Where | Role here |
 |---|---|---|
 | Pattern pointer `patternIdentity = {identity, symbol}` on the piece result cell | `runner.ts` (`applySetupState` / `getPatternIdentityRef`) | The thing an update rewrites |
-| **In-place re-run watcher** — `setupPatternWatcher` sinks the `patternIdentity` meta; on change it cancels the old pattern's nodes and re-instantiates the new pattern **onto the same result cell** | `runner.ts` (enabled unless `doNotUpdateOnPatternChange`) | Applies a metadata swap when the piece is already running; at space open, bootstrap reads the reconciled metadata directly |
+| **In-place re-run watcher** — `setupPatternWatcher` sinks the `patternIdentity` meta; on change it cancels the old pattern's nodes and re-instantiates the new pattern **onto the same result cell** | `runner.ts` (enabled unless `doNotUpdateOnPatternChange`) | Activates a replacement graph after its setup metadata and projection commit atomically with the pointer; at space open, bootstrap reads that prepared state directly |
 | `PatternUpdater` | `packages/runner/src/pattern-updater.ts` | Shared identity lookup, verified closure compile, provenance repair, and compare-and-swap for awaited roots and background ordinary-piece checks |
 | Space root: `spaceCell.defaultPattern` link → root piece → `patternIdentity` | `packages/piece/src/manager.ts` (`linkDefaultPattern`/`getDefaultPattern`) | What a system update rewrites |
 | `ensureDefaultPattern` (resolve → reconcile → start) / `recreateDefaultPattern` (manual, **not** state-preserving) | `packages/piece/src/ops/pieces-controller.ts` | The automatic self-heal hook (ensure) and the state-losing escape hatch (recreate); both URL-based creation paths stamp `patternSource` |
@@ -106,12 +106,14 @@ Two decisions carry the whole design:
    authored entry filename and stamp it after that same-origin route proves it
    implements `?identity`.
 2. **Update = resolve `patternSource` → current identity; if it differs from
-   the persisted `patternIdentity.identity`, write the new `{identity, symbol}`
-   to the piece's `patternIdentity` meta.** At space open this happens before
-   root bootstrap, so `start()` loads the reconciled identity. Every other
-   pattern starts first; its successful instantiation commit launches a
-   fire-and-forget check, and the existing watcher re-instantiates a verified
-   replacement in place. No new apply machinery.
+   the persisted `patternIdentity.identity`, run the replacement pattern's
+   setup in the compare-and-swap transaction.** Setup writes the new
+   `{identity, symbol}` together with its internal-cell manifest, defaults,
+   backlinks, schemas, and result projection. At space open this happens before
+   root bootstrap, so `start()` loads prepared state. Every other pattern starts
+   first; its successful instantiation commit launches a fire-and-forget check,
+   and the existing watcher re-instantiates the verified, already-prepared
+   replacement in place.
 
 A root created before provenance stamping may be admitted to this loop only
 when its stored `{ identity, symbol }` exactly equals the advertised current
@@ -204,13 +206,17 @@ cf:[[//toolshed.url]/space/][slug]
 ## In-place apply
 
 The apply is: ensure the new closure is loadable in the space
-(`compilePattern(program, { space })` writes source + compiled docs), then
-write `{ identity, symbol }` to the piece's `patternIdentity` meta. During space
-open, `ensureDefaultPattern` performs this write before calling `startPiece`,
+(`compilePattern(program, { space })` writes source + compiled docs), then run
+its setup in the same compare-and-swap transaction that changes
+`patternIdentity`. This atomically installs the new internal-cell manifest and
+defaults, reciprocal result backlinks, schemas, and result projection. A bare
+pointer write is not a supported update operation: it can make new nodes write
+cells that the old projection does not expose. During space open,
+`ensureDefaultPattern` applies the prepared state before calling `startPiece`,
 so an obsolete pattern that cannot load can be replaced before bootstrap. If
-the piece is already running, the
-watcher cancels its old reactive nodes and re-instantiates the new pattern onto
-the **same result cell**.
+the piece is already running, the watcher observes the committed pointer,
+cancels its old reactive nodes, and re-instantiates the new pattern onto the
+**same result cell**.
 
 - **Survives**: the result cell's entity and inbound links; any state cells the
   new pattern still reads (addressed by stable key/cause).
@@ -281,9 +287,11 @@ transaction, and only then start it:
    compile, evaluation,
    missing-entry-ref, or identity-mismatch failure leaves the root metadata
    unchanged.
-6. Provenance repair and identity replacement are transactional
-   compare-and-swap writes: the captured identity, source, and repository must
-   still match on every retry, so a concurrent custom-root replacement wins.
+6. Provenance repair and replacement setup are transactional compare-and-swap
+   writes: the captured identity, source, and repository must still match on
+   every retry, so a concurrent custom-root replacement wins. Replacement setup
+   commits the pointer, internal manifest/defaults/backlinks, schemas, and
+   result projection together.
 7. Start the reconciled root. A newly created root skips the check because it
    was compiled from the current source in the same ensure operation; a root
    discovered after a creation race is treated as persisted and reconciled.
@@ -305,10 +313,11 @@ awaits the check from `start()`:
 4. On a changed identity, revalidate and compile the whole closure with the
    running ref's export symbol. Require both the compiler-produced identity and
    symbol to equal the advertised identity and existing symbol.
-5. Compare-and-swap `{ patternIdentity, patternSource, patternRepository }`.
-   A concurrent setsrc/custom replacement wins. A successful swap wakes the
-   already-installed watcher; fetch, compile, evaluation, mismatch, and commit
-   failures leave the current graph running.
+5. Compare-and-swap `{ patternIdentity, patternSource, patternRepository }`
+   while running replacement setup in that same transaction. A concurrent
+   setsrc/custom replacement wins. A successful prepared swap wakes the
+   already-installed watcher; fetch, compile, evaluation, setup validation,
+   mismatch, and commit failures leave the current graph running.
 
 ## End-to-end identity check
 

@@ -4,12 +4,14 @@ import {
   brandTrustedBuilderArtifact,
   brandTrustedPattern,
   getArtifactEntryRef,
+  getGeneratedInternalCellPatternIdentity,
   isTrustedBuilderArtifact,
   isTrustedPattern,
   noteDerivedCopy,
   resolveOriginal,
   setArtifactEntryRef,
 } from "../src/builder/pattern-metadata.ts";
+import { getEffectiveGeneratedInternalCellPatternIdentity } from "../src/link-utils.ts";
 
 /**
  * Derived-copy identity carry (PR B of
@@ -28,6 +30,14 @@ const patternShape = () => ({
   resultSchema: { type: "object" as const },
   nodes: [],
   result: {},
+});
+
+const patternWithInternals = () => ({
+  ...patternShape(),
+  derivedInternalCells: [
+    { partialCause: { $generated: 0 } },
+    { partialCause: "named-state" },
+  ],
 });
 
 describe("noteDerivedCopy trust carry", () => {
@@ -67,6 +77,13 @@ describe("noteDerivedCopy trust carry", () => {
 });
 
 describe("entry-ref resolution through copies", () => {
+  it("ignores non-object artifacts", () => {
+    const ref = { identity: "ignored", symbol: "default" };
+    setArtifactEntryRef("not-an-artifact", ref);
+    expect(getArtifactEntryRef("not-an-artifact")).toBeUndefined();
+    expect(resolveOriginal("not-an-artifact")).toBe("not-an-artifact");
+  });
+
   it("resolves a ref registered BEFORE the copy (eager)", () => {
     const original = brandTrustedPattern(patternShape());
     setArtifactEntryRef(original, { identity: "id-eager", symbol: "default" });
@@ -100,5 +117,58 @@ describe("entry-ref resolution through copies", () => {
       identity: "first",
       symbol: "a",
     });
+  });
+});
+
+describe("generated internal-cell pattern identity", () => {
+  it("associates only generated descriptors with the artifact ref", () => {
+    const pattern = brandTrustedPattern(patternWithInternals());
+    const ref = { identity: "pattern-v1", symbol: "default" };
+    setArtifactEntryRef(pattern, ref);
+
+    expect(
+      getGeneratedInternalCellPatternIdentity(
+        pattern.derivedInternalCells[0],
+      ),
+    ).toEqual(ref);
+    expect(
+      getGeneratedInternalCellPatternIdentity(
+        pattern.derivedInternalCells[1],
+      ),
+    ).toBeUndefined();
+  });
+
+  it("associates a pre-index copy lazily when its ref is resolved", () => {
+    const original = brandTrustedPattern(patternWithInternals());
+    const copy = patternWithInternals();
+    noteDerivedCopy(copy, original);
+    const ref = { identity: "pattern-v2", symbol: "op" };
+    setArtifactEntryRef(original, ref);
+
+    expect(getArtifactEntryRef(copy)).toEqual(ref);
+    expect(
+      getGeneratedInternalCellPatternIdentity(copy.derivedInternalCells[0]),
+    ).toEqual(ref);
+  });
+
+  it("uses the versioned identity when the current manifest is absent", () => {
+    const pattern = brandTrustedPattern(patternWithInternals());
+    const ref = { identity: "pattern-v3", symbol: "default" };
+    setArtifactEntryRef(pattern, ref);
+
+    const resultCell = {
+      getMetaRaw(field: string) {
+        return field === "patternIdentity" ? ref : undefined;
+      },
+    } as unknown as Parameters<
+      typeof getEffectiveGeneratedInternalCellPatternIdentity
+    >[0];
+
+    expect(
+      getEffectiveGeneratedInternalCellPatternIdentity(
+        resultCell,
+        pattern.derivedInternalCells[0],
+      ),
+    ).toEqual(ref);
   });
 });

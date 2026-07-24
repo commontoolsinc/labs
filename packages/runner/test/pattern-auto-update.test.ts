@@ -7,6 +7,7 @@ import {
   type Cell,
   getPatternIdentityRef,
   getPatternSource,
+  parseLink,
   resolveEntryIdentity,
   Runtime,
   type RuntimeFetch,
@@ -30,7 +31,13 @@ const parentSource = [
 function source(marker: string): string {
   return [
     "import { computed, pattern } from 'commonfabric';",
-    `export const ${SYMBOL} = pattern<Record<string, never>, { marker: string }>(() => ({ marker: computed(() => "${marker}") }));`,
+    `export const ${SYMBOL} = pattern<Record<string, never>, { marker: string; generatedMarkers: string[] }>(() => {`,
+    `  const generatedMarkers = ["slot"].map(() => computed(() => "${marker}"));`,
+    "  return {",
+    `    marker: computed(() => "${marker}"),`,
+    "    generatedMarkers,",
+    "  };",
+    "});",
     "",
   ].join("\n");
 }
@@ -100,7 +107,10 @@ describe("lazy system-pattern auto-update", () => {
     const recovered = await runtime.patternManager
       .getPatternSourceProgramByIdentity(initialIdentity, space);
     expect(recovered?.main).toBe(PARENT_PATH);
-    const piece = runtime.getCell<{ marker?: string }>(
+    const piece = runtime.getCell<{
+      marker?: string;
+      generatedMarkers?: string[];
+    }>(
       space,
       `lazy-update-${crypto.randomUUID()}`,
     );
@@ -469,6 +479,7 @@ describe("lazy system-pattern auto-update", () => {
   });
 
   it("starts immediately, then updates a non-root pattern in the background", async () => {
+    const v1Identity = await identityFor(source("v1"));
     const v2Identity = await identityFor(source("v2"));
     const identityRequested = defer();
     identityGate = defer();
@@ -499,24 +510,56 @@ describe("lazy system-pattern auto-update", () => {
         headers: { "content-type": "text/typescript-jsx" },
       });
     });
-    const v1Ref = getPatternIdentityRef(piece)!;
+    const v1Ref = { identity: v1Identity, symbol: SYMBOL };
 
     const start = runtime.start(piece);
     await identityRequested.promise;
     expect(await start).toBe(true);
     await runtime.idle();
     expect((await piece.pull())?.marker).toBe("v1");
+    expect((await piece.pull())?.generatedMarkers).toEqual(["v1"]);
     expect(getPatternIdentityRef(piece)).toEqual(v1Ref);
+    const v1Manifest = piece.getMetaRaw("internal") as Array<{
+      partialCause: unknown;
+      patternIdentity?: { identity: string; symbol: string };
+      link: unknown;
+    }>;
+    const v1Generated = v1Manifest.find((entry) =>
+      typeof entry.partialCause === "object" &&
+      entry.partialCause !== null &&
+      "$generated" in entry.partialCause
+    );
+    expect(v1Generated?.patternIdentity).toEqual(v1Ref);
+    const v1GeneratedLink = parseLink(v1Generated?.link, piece);
+    expect(v1GeneratedLink).toBeDefined();
 
     identityGate.resolve();
     await runtime.patternUpdater.idle();
     await runtime.idle();
 
     expect((await piece.pull())?.marker).toBe("v2");
+    expect((await piece.pull())?.generatedMarkers).toEqual(["v2"]);
     expect(getPatternIdentityRef(piece)).toEqual({
       identity: v2Identity,
       symbol: SYMBOL,
     });
+    const v2Manifest = piece.getMetaRaw("internal") as Array<{
+      partialCause: unknown;
+      patternIdentity?: { identity: string; symbol: string };
+      link: unknown;
+    }>;
+    const v2Generated = v2Manifest.find((entry) =>
+      typeof entry.partialCause === "object" &&
+      entry.partialCause !== null &&
+      "$generated" in entry.partialCause
+    );
+    expect(v2Generated?.patternIdentity).toEqual({
+      identity: v2Identity,
+      symbol: SYMBOL,
+    });
+    expect(parseLink(v2Generated?.link, piece)?.id).not.toBe(
+      v1GeneratedLink?.id,
+    );
     expect(getPatternSource(piece)).toBe(PARENT_PATH);
     expect(requested).toContainEqual({
       href: `http://toolshed.test${PARENT_PATH}?identity=`,

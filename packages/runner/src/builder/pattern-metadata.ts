@@ -106,6 +106,39 @@ const entryRefByValue = new WeakMap<
   { identity: string; symbol: string }
 >();
 
+type PatternIdentityRef = { identity: string; symbol: string };
+
+// Compiler-generated internal-cell causes (`{ $generated: N, ... }`) are only
+// stable within one pattern artifact. Associate their descriptor objects with
+// the artifact identity out-of-band so the normal link-minting path can
+// namespace them without adding serializable builder metadata or changing the
+// identity of explicitly named cells.
+const patternIdentityByGeneratedInternalDescriptor = new WeakMap<
+  object,
+  PatternIdentityRef
+>();
+
+function hasGeneratedCause(value: unknown): boolean {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  return "$generated" in value;
+}
+
+function associateGeneratedInternalDescriptors(
+  value: unknown,
+  ref: PatternIdentityRef,
+): void {
+  if (!isPattern(value)) return;
+  for (const descriptor of value.derivedInternalCells ?? []) {
+    if (!hasGeneratedCause(descriptor.partialCause)) continue;
+    const key = asKey(descriptor);
+    if (key && !patternIdentityByGeneratedInternalDescriptor.has(key)) {
+      patternIdentityByGeneratedInternalDescriptor.set(key, ref);
+    }
+  }
+}
+
 /**
  * Resolve a (possibly derived) value to its root original. Identity for
  * values that were never copied. Bounded: the chain is a tree toward the
@@ -147,7 +180,10 @@ export function noteDerivedCopy(copy: unknown, original: unknown): void {
   if (trustedPatterns.has(root)) trustedPatterns.add(c);
   if (trustedBuilderArtifacts().has(root)) trustedBuilderArtifacts().add(c);
   const ref = entryRefByValue.get(root);
-  if (ref && !entryRefByValue.has(c)) entryRefByValue.set(c, ref);
+  if (ref) {
+    if (!entryRefByValue.has(c)) entryRefByValue.set(c, ref);
+    associateGeneratedInternalDescriptors(copy, ref);
+  }
 }
 
 /**
@@ -161,7 +197,9 @@ export function setArtifactEntryRef(
   ref: { identity: string; symbol: string },
 ): void {
   const key = asKey(value);
-  if (key && !entryRefByValue.has(key)) entryRefByValue.set(key, ref);
+  if (!key) return;
+  if (!entryRefByValue.has(key)) entryRefByValue.set(key, ref);
+  associateGeneratedInternalDescriptors(value, entryRefByValue.get(key)!);
 }
 
 /**
@@ -174,8 +212,24 @@ export function getArtifactEntryRef(
 ): { identity: string; symbol: string } | undefined {
   const key = asKey(value);
   if (!key) return undefined;
-  return entryRefByValue.get(key) ??
+  const ref = entryRefByValue.get(key) ??
     entryRefByValue.get(resolveOriginal(key) as object);
+  if (ref) associateGeneratedInternalDescriptors(value, ref);
+  return ref;
+}
+
+/**
+ * The owning pattern identity for a compiler-generated internal-cell
+ * descriptor. Explicitly named/manual causes intentionally return undefined so
+ * their durable identities continue across pattern upgrades.
+ */
+export function getGeneratedInternalCellPatternIdentity(
+  descriptor: unknown,
+): PatternIdentityRef | undefined {
+  const key = asKey(descriptor);
+  return key
+    ? patternIdentityByGeneratedInternalDescriptor.get(key)
+    : undefined;
 }
 
 /**

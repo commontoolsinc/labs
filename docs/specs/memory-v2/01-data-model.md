@@ -61,6 +61,7 @@ interface SigilLink {
 
 interface InternalManifestEntry {
   partialCause: FabricValue;
+  patternIdentity?: { identity: string; symbol: string }; // Generated causes only.
   link: SigilLink;
 }
 
@@ -121,7 +122,11 @@ Canonical examples:
 `argument`, and `result` use the same sigil form as graph/entity links:
 `{"/":{"link@1":{...}}}`. The `internal` field is different: it is raw metadata
 containing a manifest array whose entries have a `partialCause` and a sigil
-`link` to one derived internal cell. The older `source` property, when present,
+`link` to one derived internal cell. Entries for compiler-generated causes also
+carry the owning `patternIdentity`; named causes omit it and retain their cell
+identity across pattern upgrades. Legacy generated entries created before
+pattern versioning also omit it; they remain valid while the piece's pattern is
+unchanged. The older `source` property, when present,
 uses the separate short-link form `{"/":"<short-id>"}` and resolves to
 `of:<short-id>` in the same space. CFC metadata also uses its own compact stored
 shape and is converted to a CID sigil link during traversal. When the server

@@ -1,4 +1,5 @@
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
 import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
@@ -43,8 +44,14 @@ import {
 import { MetaLinkField } from "@commonfabric/api";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { createRef } from "./create-ref.ts";
+import { getGeneratedInternalCellPatternIdentity } from "./builder/pattern-metadata.ts";
 
 export * from "./link-types.ts";
+
+const legacyGeneratedEntriesByManifest = new WeakMap<
+  object,
+  Map<JSONValue, unknown[]>
+>();
 
 /**
  * A type reflecting all possible link formats, including cells themselves.
@@ -614,6 +621,10 @@ export function getDerivedInternalCellLink(
 ): NormalizedFullLink {
   const resultCellLink = resultCell.getAsNormalizedFullLink();
   const parent = resultCell.entityId ?? resultCell;
+  const patternIdentity = getEffectiveGeneratedInternalCellPatternIdentity(
+    resultCell,
+    descriptor,
+  );
   return {
     space: resultCellLink.space,
     // The kind's ONLY representation is the URI scheme applied here by
@@ -625,7 +636,10 @@ export function getDerivedInternalCellLink(
         {
           parent,
           type: "internal",
-          cause: descriptor.partialCause,
+          cause: patternIdentity === undefined ? descriptor.partialCause : {
+            patternIdentity,
+            partialCause: descriptor.partialCause,
+          },
         },
       ),
       descriptor.kind,
@@ -634,6 +648,89 @@ export function getDerivedInternalCellLink(
     scope: descriptor.scope ?? resultCellLink.scope,
     ...(descriptor.schema !== undefined && { schema: descriptor.schema }),
   };
+}
+
+/**
+ * Return the pattern namespace that should participate in a generated
+ * internal cell's identity.
+ *
+ * Pieces materialized before generated causes were pattern-versioned have
+ * manifest entries without `patternIdentity`. Keep using those legacy ids
+ * while the piece still points at the same pattern artifact. This makes the
+ * format rollout read-compatible and avoids resetting an unchanged piece.
+ *
+ * A real pattern update runs setup before changing `patternIdentity`; while
+ * that transaction is being prepared the stored pointer still names the old
+ * artifact, so the new descriptor does not take this compatibility path and
+ * receives its new, pattern-versioned id.
+ */
+export function getEffectiveGeneratedInternalCellPatternIdentity(
+  resultCell: AnyCell<unknown>,
+  descriptor: DerivedInternalCellDescriptor,
+): { identity: string; symbol: string } | undefined {
+  const patternIdentity = getGeneratedInternalCellPatternIdentity(descriptor);
+  if (patternIdentity === undefined) return undefined;
+
+  // Builder-facing AnyCell capabilities intentionally omit metadata methods,
+  // but every runtime cell reaching the identity mint is the CellImpl-backed
+  // internal form.
+  const metadataCell = resultCell as Cell<unknown>;
+  const currentPattern = metadataCell.getMetaRaw("patternIdentity", {
+    meta: ignoreReadForScheduling,
+  });
+  if (
+    !isRecord(currentPattern) ||
+    currentPattern.identity !== patternIdentity.identity ||
+    currentPattern.symbol !== patternIdentity.symbol
+  ) {
+    return patternIdentity;
+  }
+
+  const internal = metadataCell.getMetaRaw("internal", {
+    meta: ignoreReadForScheduling,
+  });
+  if (!Array.isArray(internal)) return patternIdentity;
+
+  let legacyByOrdinal = legacyGeneratedEntriesByManifest.get(internal);
+  if (legacyByOrdinal === undefined) {
+    legacyByOrdinal = new Map();
+    for (const entry of internal) {
+      if (
+        !isRecord(entry) ||
+        entry.patternIdentity !== undefined ||
+        !isRecord(entry.partialCause)
+      ) continue;
+      const ordinal = entry.partialCause.$generated;
+      if (
+        ordinal === null ||
+        (typeof ordinal !== "string" &&
+          typeof ordinal !== "number" &&
+          typeof ordinal !== "boolean")
+      ) continue;
+      const entries = legacyByOrdinal.get(ordinal) ?? [];
+      entries.push(entry);
+      legacyByOrdinal.set(ordinal, entries);
+    }
+    legacyGeneratedEntriesByManifest.set(internal, legacyByOrdinal);
+  }
+  const descriptorOrdinalValue = isRecord(descriptor.partialCause)
+    ? descriptor.partialCause.$generated
+    : undefined;
+  const descriptorOrdinal: JSONValue | undefined =
+    descriptorOrdinalValue === null ||
+      typeof descriptorOrdinalValue === "string" ||
+      typeof descriptorOrdinalValue === "number" ||
+      typeof descriptorOrdinalValue === "boolean"
+      ? descriptorOrdinalValue
+      : undefined;
+  const legacyEntry = descriptorOrdinal === undefined
+    ? undefined
+    : legacyByOrdinal.get(descriptorOrdinal)?.find((entry) =>
+      isRecord(entry) &&
+      deepEqual(entry.partialCause, descriptor.partialCause) &&
+      entry.kind === descriptor.kind
+    );
+  return legacyEntry === undefined ? patternIdentity : undefined;
 }
 
 export function getStableInternalPathSegment(

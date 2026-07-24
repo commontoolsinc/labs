@@ -247,6 +247,96 @@ describe("runPattern", () => {
     expect(nextLink?.schema).toEqual(narrow);
   });
 
+  it("versions generated internal cells while preserving named cells", async () => {
+    const resultCell = runtime.getCell(
+      space,
+      "version generated internal cells",
+    );
+    const pattern = (generatedDefault: string): Pattern => ({
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: { type: "object" },
+      derivedInternalCells: [
+        {
+          partialCause: { $generated: 0 },
+          schema: { type: "string", default: generatedDefault },
+          scope: "space",
+        },
+        {
+          partialCause: "named-state",
+          schema: { type: "string", default: "durable" },
+          scope: "space",
+        },
+      ],
+      result: {
+        generated: {
+          $alias: { partialCause: { $generated: 0 }, path: [] },
+        },
+        named: { $alias: { partialCause: "named-state", path: [] } },
+      },
+      nodes: [],
+    });
+
+    await setupTrusted(
+      runtime,
+      undefined,
+      pattern("version-one"),
+      {},
+      resultCell,
+    );
+    const firstManifest = resultCell.getMetaRaw("internal") as Array<{
+      partialCause: unknown;
+      patternIdentity?: { identity: string; symbol: string };
+      link: unknown;
+    }>;
+    const firstGenerated = firstManifest.find((entry) =>
+      typeof entry.partialCause === "object"
+    )!;
+    const firstNamed = firstManifest.find((entry) =>
+      entry.partialCause === "named-state"
+    )!;
+    const firstGeneratedLink = parseLink(firstGenerated.link, resultCell)!;
+    const firstNamedLink = parseLink(firstNamed.link, resultCell)!;
+
+    expect(firstGenerated.patternIdentity).toBeDefined();
+    expect(firstNamed.patternIdentity).toBeUndefined();
+    expect(await runtime.getCellFromLink(firstGeneratedLink).pull()).toBe(
+      "version-one",
+    );
+
+    await setupTrusted(
+      runtime,
+      undefined,
+      pattern("version-two"),
+      {},
+      resultCell,
+    );
+    const secondManifest = resultCell.getMetaRaw("internal") as Array<{
+      partialCause: unknown;
+      patternIdentity?: { identity: string; symbol: string };
+      link: unknown;
+    }>;
+    const secondGenerated = secondManifest.find((entry) =>
+      typeof entry.partialCause === "object"
+    )!;
+    const secondNamed = secondManifest.find((entry) =>
+      entry.partialCause === "named-state"
+    )!;
+    const secondGeneratedLink = parseLink(secondGenerated.link, resultCell)!;
+    const secondNamedLink = parseLink(secondNamed.link, resultCell)!;
+
+    expect(secondGenerated.patternIdentity).not.toEqual(
+      firstGenerated.patternIdentity,
+    );
+    expect(secondGeneratedLink.id).not.toBe(firstGeneratedLink.id);
+    expect(secondNamedLink.id).toBe(firstNamedLink.id);
+    expect(await runtime.getCellFromLink(secondGeneratedLink).pull()).toBe(
+      "version-two",
+    );
+    expect(await runtime.getCellFromLink(firstGeneratedLink).pull()).toBe(
+      "version-one",
+    );
+  });
+
   it("sets scoped write-redirect metadata links for argument and internal cells", async () => {
     const argumentSchema = {
       type: "object",

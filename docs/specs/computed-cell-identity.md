@@ -85,15 +85,23 @@ changes, and only for entities whose ids carry the computed scheme.
 
 ### Internal cell identity
 
-The pattern builder assigns each internal root cell a `partialCause` —
-the cell's declared name, or an anonymous `{ $generated: N }` counter, with
+The pattern builder assigns each internal root cell a `partialCause` — the
+cell's declared name, or an anonymous `{ $generated: N }` counter, with
 `$kind: "stream"` mixed in for stream cells
-(`packages/runner/src/builder/pattern.ts`). At instantiation the runner
-mints the entity id from the piece's result cell and that partial cause:
+(`packages/runner/src/builder/pattern.ts`). Generated counters are local to one
+compiled pattern, so at instantiation the runner namespaces generated causes by
+the pattern's content-addressed `{ identity, symbol }`. Explicitly named causes
+remain unversioned so deliberate durable state survives pattern upgrades:
 
 ```ts
 // Shown for illustration only.
-createRef({}, { parent, type: "internal", cause: descriptor.partialCause })
+createRef({}, {
+  parent,
+  type: "internal",
+  cause: generated
+    ? { patternIdentity, partialCause: descriptor.partialCause }
+    : descriptor.partialCause,
+})
 ```
 
 (`packages/runner/src/link-utils.ts`, `getDerivedInternalCellLink`). The
@@ -106,9 +114,35 @@ a single chokepoint (`packages/data-model/src/value-hash.ts`). The URI layer
 (`packages/runner/src/uri-utils.ts`, `toURI`/`fromURI`) prefixes an entity
 scheme onto the tagged hash — historically always `of:`.
 
-The manifest of materialized internal cells is stored in result-cell
-metadata and matched by partial cause plus kind
+The manifest of materialized internal cells is stored in result-cell metadata.
+Generated entries record and match their `patternIdentity` in addition to
+partial cause and kind; named entries continue to match by partial cause and kind
 (`packages/runner/src/runner.ts`, `materializeDerivedInternalCells`).
+
+There is one rollout compatibility rule. A piece materialized before generated
+causes were versioned has generated manifest entries with no
+`patternIdentity`. While that piece still points at the same pattern artifact,
+the runner continues to use its legacy ids instead of resetting it merely
+because the runtime changed. The next real pattern update atomically
+materializes pattern-versioned cells and moves the result projection to them.
+Old documents are not deleted; once no current manifest or projection names
+them, they are orphaned historical data.
+
+The transformer emits stable `.for(...)` causes for many authored declarations
+and result paths, but not for every reactive value. Dynamic computed properties,
+some callback-created values, and direct child-pattern calls can still fall
+through to `$generated`. Most observed examples are replayable UI
+intermediates or streams, but this is not a semantic guarantee: an untagged
+non-replayable builtin result can also be generated, and named state below a
+generated child-pattern result inherits that generated ancestor's churn.
+Durable state survives an update only when its complete identity ancestry is
+stable.
+
+Pattern-versioned identity is a runtime format change. A client that predates
+it cannot derive the new ids after an update. Automatic updates therefore need
+a coordinated runtime rollout: unchanged legacy pieces remain compatible, but
+an old client must not keep executing a piece after a newer client has moved
+that piece to a pattern-versioned generated graph.
 
 ### Transaction provenance
 
@@ -422,13 +456,13 @@ contents are meaningless under the new kind, and the manifest's
 partial-cause matching materializes the new cell and drops the stale entry
 naturally.
 
-Internal-cell identity is already refactor-fragile — anonymous cells re-mint
-on reorder via the `$generated` counter, named cells on rename — so kind
+Internal-cell identity is already refactor-fragile — generated cells re-mint on
+every pattern identity change, while named cells re-mint on rename — so kind
 flips add a trigger to an existing hazard class (durable cross-piece links
-pointing at an orphaned entity), not a new class. The flipped classifier
-polarity widens the set of cells that flip when a pattern edit adds or
-removes a disqualifier (e.g. introducing a writable handler capture of a
-previously computed cell), which is the same hazard at higher frequency.
+pointing at an orphaned entity), not a new class. The flipped classifier polarity
+widens the set of cells that flip when a pattern edit adds or removes a
+disqualifier (e.g. introducing a writable handler capture of a previously
+computed cell), which is the same hazard at higher frequency.
 
 ### Trust model
 
