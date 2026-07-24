@@ -2,9 +2,9 @@
 
 ## Status
 
-Phase 1 (minting) implemented behind `EXPERIMENTAL_COMPUTED_CELL_IDS`
-(default off) on this branch; redesigned in July 2026 — this document
-describes the redesigned form. Computed ids are now `computed:fid1:<hash>`:
+Phase 1 (minting) is implemented behind `EXPERIMENTAL_COMPUTED_CELL_IDS` and
+defaults on; an explicit `false` remains a temporary rollback override.
+Redesigned in July 2026, computed ids are now `computed:fid1:<hash>`:
 the kind rides the URI scheme, the `FabricHash` format tag stays `fid1`, and
 the earlier kind-in-hash-tag format is retired without back-compat readers
 (the flag never shipped, so no such ids exist). The classifier polarity
@@ -397,9 +397,10 @@ action re-run, and the second commit.
 
 ### Version-skew rollout
 
-New-form ids are a data-compatibility event, so `EXPERIMENTAL_COMPUTED_CELL_IDS`
-(default off) gates MINTING only; readers in this codebase accept both forms
-unconditionally. The skew hazard is one-directional:
+New-form ids are a data-compatibility event, so
+`EXPERIMENTAL_COMPUTED_CELL_IDS` gates MINTING only and defaults on; readers in
+this codebase accept both forms unconditionally. An explicit `false` remains a
+rollback override for version skew. The skew hazard is one-directional:
 
 - **Old clients are the hard constraint.** A client predating the scheme
   THROWS in `fromURI` on a `computed:` id arriving via sync (`Invalid
@@ -546,7 +547,7 @@ this proposal onto persistent-scheduler-state:
   race of two current computed commits is first-wins; unknown-scheme ids
   stay strict.
 - Integration: two-client scenario where both recompute the same node —
-  assert convergence with zero conflict-driven action re-runs; flag-on
+  assert convergence with zero conflict-driven action re-runs; default-on
   instantiation syncs a manifest-linked `computed:fid1:` id through storage
   and reads it back (no special routing below the URI layer); `cf inspect`
   shows the computed value and the drop bookkeeping.
