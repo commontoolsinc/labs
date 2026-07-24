@@ -188,6 +188,48 @@ export function pieceGetDataErrorReport(
   };
 }
 
+/**
+ * Build the stderr report for a `piece link` validation failure. Returns null
+ * when the error is not a LinkValidationError (the caller should rethrow).
+ * Link validation fails on data conditions — a source/target piece or path
+ * that doesn't exist, read over the network — so it reports like `piece get`'s
+ * unresolved-path data error rather than as a Cliffy usage error.
+ */
+export function pieceLinkDataErrorReport(
+  error: unknown,
+  opts: { sourcePieceId: string; targetPieceId: string },
+): { message: string; hint: string } | null {
+  if (!(error instanceof LinkValidationError)) return null;
+  return {
+    message: error.message,
+    hint: cliText(
+      `TIP: Run 'cf piece inspect --piece ${opts.sourcePieceId} ...' and '--piece ${opts.targetPieceId} ...' to see the fields each piece actually has.`,
+    ),
+  };
+}
+
+/**
+ * Print a data-error report — message plus optional hint — to stderr and exit
+ * 1. The single exit path for the `piece get` / `piece link` data errors
+ * above. The `deps` seam lets unit tests observe the wiring without a real
+ * process exit; runtime callers use the defaults.
+ */
+export function exitWithDataError(
+  report: { message: string; hint?: string },
+  deps?: {
+    printError?: (message: string) => void;
+    printHint?: (message: string) => void;
+    exit?: (code: number) => never;
+  },
+): never {
+  const printError = deps?.printError ?? console.error;
+  const printHint = deps?.printHint ?? hint;
+  const exit = deps?.exit ?? Deno.exit;
+  printError(report.message);
+  if (report.hint) printHint(report.hint);
+  return exit(1);
+}
+
 export function pieceCallRawArgs(
   tail: string[],
   literalArgs: string[],
@@ -828,9 +870,15 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
         },
       );
     } catch (error) {
-      if (error instanceof LinkValidationError) {
-        throw new ValidationError(error.message, { exitCode: 1 });
-      }
+      // A link that fails validation is a data error (the pieces/paths read
+      // over the network don't support the link), not a usage error — report
+      // it like `piece get` does instead of letting Cliffy dump the help
+      // screen over it.
+      const report = pieceLinkDataErrorReport(error, {
+        sourcePieceId: source.pieceId,
+        targetPieceId: target.pieceId,
+      });
+      if (report) exitWithDataError(report);
       throw error;
     }
 
@@ -899,11 +947,7 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
         input: options.input,
         piece: pieceConfig.piece,
       });
-      if (report) {
-        console.error(report.message);
-        if (report.hint) hint(report.hint);
-        Deno.exit(1);
-      }
+      if (report) exitWithDataError(report);
       throw error;
     }
   })
