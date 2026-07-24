@@ -38,27 +38,21 @@ function isInDeepFrozenCache(obj: object): boolean {
 /**
  * Indicates whether the given value is "necessarily frozen" -- immutable by its
  * very nature, without any `Object.freeze()` having been applied. This covers
- * every non-`function` primitive (`null`, `undefined`, booleans, numbers,
- * strings, `bigint`s, symbols) and `FabricPrimitive` instances, which self-freeze
- * at construction and hold no outbound references.
+ * every primitive (`null`, `undefined`, booleans, numbers, strings, `bigint`s,
+ * symbols) and `FabricPrimitive` instances, which self-freeze at construction
+ * and hold no outbound references. Ordinary objects and arrays are not, nor are
+ * `FabricInstance`s (whose frozen-ness depends on `Object.freeze()` and their
+ * `[IS_DEEP_FROZEN]` report).
  *
- * A `function` is an ordinary mutable object, so it is NOT necessarily frozen.
- * Ordinary objects and arrays are not either -- nor are `FabricInstance`s, whose
- * frozen-ness depends on `Object.freeze()` and their `[IS_DEEP_FROZEN]` report.
+ * Functions never reach here: `isDeepFrozen()` and `deepFreeze()` intercept them
+ * first (a function is not a `FabricValue`), so a non-`object` `typeof` here is
+ * a genuine primitive.
  */
 function isNecessarilyFrozenValue(value: unknown): boolean {
-  switch (typeof value) {
-    case "object": {
-      return (value === null) || BaseFabricPrimitive.isInstance(value);
-    }
-    case "function": {
-      return false;
-    }
-    default: {
-      // Every other `typeof` is a non-`function` primitive.
-      return true;
-    }
+  if (typeof value === "object") {
+    return (value === null) || BaseFabricPrimitive.isInstance(value);
   }
+  return true;
 }
 
 /**
@@ -67,8 +61,8 @@ function isNecessarilyFrozenValue(value: unknown): boolean {
  */
 function isNecessarilyOrKnownDeepFrozen(value: unknown): boolean {
   // The `as` cast is safe: a `false` antecedent means `value` is a
-  // non-`FabricPrimitive` object or a `function` -- both are heap objects and
-  // valid `WeakSet` keys.
+  // non-`FabricPrimitive` object (functions are intercepted upstream), which is
+  // a valid `WeakSet` key.
   return isNecessarilyFrozenValue(value) ||
     isInDeepFrozenCache(value as object);
 }
@@ -81,6 +75,14 @@ function isNecessarilyOrKnownDeepFrozen(value: unknown): boolean {
  * Handles circular references and sparse arrays.
  */
 export function isDeepFrozen(value: unknown): boolean {
+  // A function is never deep-frozen: its `prototype` object and closure state
+  // are mutable and unprovable, so freezing its shell does not make it deeply
+  // immutable. (Checked here rather than left to the walk, which would read a
+  // frozen function's empty enumerable props as deep-frozen.)
+  if (typeof value === "function") {
+    return false;
+  }
+
   // Fast leaf paths first, so a primitive or already-cached value answers
   // without allocating the cycle-tracking set or the recursion closure below.
   if (isNecessarilyOrKnownDeepFrozen(value)) {
@@ -94,6 +96,10 @@ export function isDeepFrozen(value: unknown): boolean {
   // layer rather than allocating an equivalent `(v) => …` per descent.
   const inProgress = new Set<object>();
   const check = (value: unknown): boolean => {
+    if (typeof value === "function") {
+      // Never deep-frozen (see the entry check).
+      return false;
+    }
     if (isNecessarilyOrKnownDeepFrozen(value)) {
       return true;
     } else if (!Object.isFrozen(value)) {
@@ -177,6 +183,14 @@ export function isDeepFrozen(value: unknown): boolean {
  * recursing infinitely.
  */
 export function deepFreeze<T>(value: T): T {
+  // `deepFreeze()` operates on `FabricValue` graphs; a function is not a
+  // `FabricValue` and cannot be made deeply immutable (mutable `prototype` +
+  // closures), so refuse it rather than freeze an unfreezable shell -- which
+  // would also let a graph reaching it be cached as deep-frozen.
+  if (typeof value === "function") {
+    throw new Error("deepFreeze(): cannot deep-freeze a function.");
+  }
+
   // Arm 1: necessarily- or already-known-deep-frozen (primitives,
   // `FabricPrimitive`s, and cached objects). Handling this here, before
   // allocating the cycle-tracking set or the recursion closure below, keeps
@@ -197,6 +211,11 @@ export function deepFreeze<T>(value: T): T {
   // cycle-arrival defers to it.
   const inProgress = new Set<object>();
   const freeze = <U>(value: U): U => {
+    if (typeof value === "function") {
+      // Not a `FabricValue`; refuse (see the entry check).
+      throw new Error("deepFreeze(): cannot deep-freeze a function.");
+    }
+
     // Leaf short-circuits, repeated for nested values reached by recursion.
     if (isNecessarilyOrKnownDeepFrozen(value)) {
       return value;

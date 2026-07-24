@@ -44,24 +44,32 @@ describe("deep-freeze", () => {
 
     describe("functions", () => {
       it("returns `false` for an unfrozen function", () => {
-        // A function is a mutable object, not necessarily frozen.
+        // A function is a mutable object, never deep-frozen.
         expect(isDeepFrozen(() => {})).toBe(false);
         expect(isDeepFrozen(function () {})).toBe(false);
+      });
+
+      it("returns `false` for a frozen function (never deep-frozen)", () => {
+        // Freezing a function's shell leaves its `prototype` object and closure
+        // state mutable, so it is never deeply immutable.
+        expect(isDeepFrozen(Object.freeze(() => {}))).toBe(false);
+        expect(isDeepFrozen(Object.freeze(function () {}))).toBe(false);
       });
 
       it("returns `false` for a frozen graph reaching a function", () => {
         expect(isDeepFrozen(Object.freeze({ fn: () => {} }))).toBe(false);
       });
 
-      it("returns `true` for a frozen function with no mutable own properties", () => {
-        expect(isDeepFrozen(Object.freeze(() => {}))).toBe(true);
+      it("throws when `deepFreeze()` is given a function", () => {
+        expect(() => deepFreeze(() => {})).toThrow(
+          "cannot deep-freeze a function",
+        );
       });
 
-      it("freezes a function passed to `deepFreeze()` (no longer skipped)", () => {
-        const fn = () => {};
-        deepFreeze(fn);
-        expect(Object.isFrozen(fn)).toBe(true);
-        expect(isDeepFrozen(fn)).toBe(true);
+      it("throws when `deepFreeze()` reaches a function within a graph", () => {
+        expect(() => deepFreeze({ fn: () => {} })).toThrow(
+          "cannot deep-freeze a function",
+        );
       });
     });
 
