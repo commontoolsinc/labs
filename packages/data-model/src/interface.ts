@@ -126,6 +126,18 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
  * separately rejects all symbols at the entrance (relaxation deferred to a
  * follow-up); the type union admits `symbol` so the lower layers (hashing,
  * JSON encoding) can be written and tested ahead of that gate change.
+ *
+ * **Deep-frozen honesty (mandatory).** A `FabricValue` must report its frozen
+ * state truthfully and permanently. In particular, a fabric record or array is
+ * data-only: it must not expose an own accessor (getter/setter) whose result
+ * can contradict, or change after, the value's frozen state -- once a
+ * `FabricValue` graph is deeply frozen, its contents are fixed. (For a
+ * `FabricInstance`, the analogous obligation is on its `[IS_DEEP_FROZEN]`
+ * report; see `BaseFabricInstance`.) The rest of the system -- the data model
+ * in general and `isDeepFrozen()` specifically, but also the entire codebase
+ * that _uses_ the data model -- relies on this to cache deep-frozen proofs by
+ * root identity without re-validating; a value that violates it can corrupt
+ * data-model invariants, as any broken contract can.
  */
 export type FabricValue =
   // -- Primitives --
