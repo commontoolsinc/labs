@@ -1,5 +1,6 @@
 import type {
   AssertPart,
+  AssertRawPart,
   AssertRecord,
   CellScope,
   FactoryInput,
@@ -523,18 +524,36 @@ export const computed: <T>(fn: () => T) => Reactive<T> = <T>(fn: () => T) =>
 /**
  * Records one operand of an `assert` body and returns it unchanged.
  *
- * The value is rendered here, while it is still the resolved value the body
- * computed. The array is local to a single evaluation of the body and is
- * discarded unless the assertion fails.
+ * It stores the resolved value the body computed rather than rendering it. The
+ * array is local to a single evaluation of the body and is discarded unless the
+ * assertion fails, so `assertRenderParts` renders these only on that failing
+ * path — a passing assertion never renders an operand.
  */
 export const assertCapture = <T>(
-  parts: AssertPart[],
+  parts: AssertRawPart[],
   src: string,
   value: T,
 ): T => {
-  parts.push({ src, rendered: toCompactDebugString(value) });
+  parts.push({ src, value });
   return value;
 };
+
+/**
+ * Renders the operands captured by `assertCapture` into the record's `parts`.
+ *
+ * A passing assertion (`ok === true`) returns an empty list without touching
+ * the values, so the common case pays nothing to render diagnostics it will
+ * never show. Only a failing assertion renders each captured value with
+ * `toCompactDebugString`.
+ */
+export const assertRenderParts = (
+  ok: boolean,
+  parts: AssertRawPart[],
+): AssertPart[] =>
+  ok ? [] : parts.map(({ src, value }) => ({
+    src,
+    rendered: toCompactDebugString(value),
+  }));
 
 /**
  * assert: a `computed` for pattern-test assertions that reports its operands.
