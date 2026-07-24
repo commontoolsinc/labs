@@ -173,9 +173,6 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
-      - name: 📥 Download Deno dependency binaries
-        run: deno task initialize-db
-
       - name: 🧪 Run runner tests
         working-directory: packages/runner
         env:
@@ -321,9 +318,6 @@ jobs:
           shard: ${{ matrix.shard }}
           cache-file: ${{ github.workspace }}/.compile-cache/generated-patterns-${{ matrix.shard }}.json
           exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
-
-      - name: 📥 Download Deno dependency binaries
-        run: deno task initialize-db
 
       - name: 🧪 Run generated patterns integration tests
         working-directory: packages/generated-patterns
@@ -843,9 +837,6 @@ jobs:
 
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
-
-      - name: 📥 Download Deno dependency binaries
-        run: deno task initialize-db
 
       - name: ♻️ Restore/save pattern unit compile byte cache
         id: compile-cache
