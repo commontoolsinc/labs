@@ -70,6 +70,19 @@ Deno.test("schemaToTypeString keeps the index-signature value type", () => {
     } as any),
     "{\n  a?: string,\n  // other keys: number\n}",
   );
+  // A multiline value type stays fully commented — an uncommented
+  // continuation line would read as outer-object syntax.
+  assertEquals(
+    schemaToTypeString({
+      type: "object",
+      properties: { a: { type: "string" } },
+      additionalProperties: {
+        type: "object",
+        properties: { x: { type: "number" } },
+      },
+    } as any),
+    "{\n  a?: string,\n  // other keys: {\n  //   x?: number\n  // }\n}",
+  );
   // Bare additionalProperties: true stays as before
   assertEquals(
     schemaToTypeString({ type: "object", additionalProperties: true } as any),

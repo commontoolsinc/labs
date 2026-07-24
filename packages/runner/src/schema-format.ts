@@ -320,9 +320,18 @@ function schemaToTypeStringInner(
     if (indexValueSchema && lines.length > 0) {
       const valueType = schemaToTypeString(indexValueSchema, {
         ...nextOpts,
-        indent: indent + 1,
+        indent: 0,
       });
-      lines.push(`${padding}// other keys: ${valueType}`);
+      // Comment EVERY line: a multiline value type (e.g. an object) would
+      // otherwise escape the comment after its first line and read as outer
+      // object syntax (PR #4969 review).
+      const [first, ...restLines] = valueType.split("\n");
+      lines.push(
+        [
+          `${padding}// other keys: ${first}`,
+          ...restLines.map((line) => `${padding}// ${line}`),
+        ].join("\n"),
+      );
     }
 
     if (lines.length === 0) return "{}";
