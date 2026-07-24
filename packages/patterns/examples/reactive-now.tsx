@@ -17,11 +17,19 @@ import {
 //    reactive code: `Date.now()` / `new Date()` throw in a lift, a computed, or
 //    the pattern body (a live clock read would make the computation
 //    non-idempotent). The replacement is the `#now` wish:
-//      wish({ query: "#now" })     one snapshot, captured when it first resolves
+//      wish({ query: "#now" })     one durable snapshot — the piece's
+//                                  FIRST-EVER load; reloads and other
+//                                  runtimes read the original capture
 //      wish({ query: "#now/N" })   a fresh snapshot every N seconds
 //    Both are coarse (one second) and grid-aligned, and read `null` until the
 //    wish resolves — so guard for that load window. `new Date(ms)` with an
 //    explicit argument is deterministic and is NOT gated.
+//    For a one-off timestamp of the TRIGGERING EVENT, `Date.now()` / `new Date()`
+//    are allowed directly inside a handler/action — no wish needed. That is the
+//    event's own instant, frozen for the whole handler cascade and coarsened to
+//    one second; it is NOT a live wall-clock read (shaped/delayed delivery can
+//    make it lag real time). Use it to stamp the event; use `#now/N` when the
+//    value must keep refreshing reactively.
 //
 // 2. Receiving input — delivery shaping (W3 events, plan-B cell flips). Input
 //    reaches a pattern two ways, and both are shaped by the same token bucket: the
@@ -62,7 +70,7 @@ const setTyped = handler<{ value: string }, { typed: Writable<string> }>(
 export interface ReactiveNowOutput {
   [NAME]: string;
   [UI]: VNode;
-  /** The one-shot load time, "HH:MM:SS" (or "…" before #now resolves). */
+  /** The piece's first-load time, "HH:MM:SS" (or "…" before #now resolves). */
   loadedAt: string;
   /** The ticking current time, "HH:MM:SS" (or "…"). */
   now: string;
@@ -85,7 +93,8 @@ export interface ReactiveNowOutput {
 }
 
 export const ReactiveNow = pattern<void, ReactiveNowOutput>(() => {
-  // One-shot: resolves once, then holds — a stable "when this instance loaded".
+  // One-shot: resolves once, then holds durably — "when this piece FIRST
+  // loaded", shared by every later reload and runtime (not per-session).
   const loadedAtCell = wish<number>({ query: "#now" });
   // Ticking: a fresh coarse timestamp every second.
   const nowCell = wish<number>({ query: "#now/1" });

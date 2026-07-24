@@ -205,8 +205,11 @@ are:
     `TimeCapabilityError`, because an ambient clock/entropy read there would
     break idempotency. Inside a handler the clock is coarsened to one-second
     resolution.
-  - for a live clock a `computed()` can react to, read the `#now` wish
-    (`wish({ query: "#now" })` or `#now/N`) instead
+  - for a live clock a `computed()` can react to, read the interval `#now`
+    wish (`wish({ query: "#now/N" })`, N in seconds) instead. The bare `#now`
+    wish is not a clock: it durably captures the piece's first-ever load time
+    and never advances — right for a created-at stamp, wrong for anything
+    that must track the current time
 
 Locale-sensitive formatting works, with pinned defaults:
 
