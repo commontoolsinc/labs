@@ -3,6 +3,7 @@ import {
   assertEquals,
   assertNotEquals,
   assertRejects,
+  assertStrictEquals,
   assertThrows,
 } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
@@ -570,6 +571,33 @@ Deno.test("CellBridge prepares a stable paginated entity identifier snapshot", a
     { after: ids[999], limit: 1_000, expectedServerSeq: 9 },
   ]);
   assertEquals(tree.getChildren(state.entitiesIno), []);
+});
+
+Deno.test("CellBridge coalesces concurrent entity directory snapshots", async () => {
+  const ids = ["of:fid1:first", "of:fid1:second"];
+  const page = defer<{ serverSeq: number; ids: string[] }>();
+  let requests = 0;
+  const manager = {
+    getSpace: () => "did:key:zCoalescedEntitySpace",
+    listEntityIdPage: () => {
+      requests++;
+      return page.promise;
+    },
+  } as unknown as SpaceState["manager"];
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: () => Promise.resolve(manager),
+  });
+  bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
+  const state = await bridge.connectSpace("home");
+
+  const first = openDirectorySnapshot(bridge, state.entitiesIno);
+  const second = openDirectorySnapshot(bridge, state.entitiesIno);
+  assertEquals(requests, 1);
+  page.resolve({ serverSeq: 1, ids });
+
+  assertStrictEquals(await first, await second);
+  assertEquals(requests, 1);
 });
 
 Deno.test("CellBridge exact entity lookup is targeted and projection cache is bounded", async () => {
