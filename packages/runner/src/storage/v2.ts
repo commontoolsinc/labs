@@ -116,6 +116,18 @@ const isSamePath = (
   b: readonly string[],
 ): boolean =>
   a.length === b.length && a.every((segment, index) => b[index] === segment);
+
+// True when `path` is the immediate `length` child of `arrayPath` — i.e. a read
+// of that array's own element count. A mergeable append / add-unique /
+// remove-by-value changes this count, so such a read is a genuine dependency of
+// the writer, not one of the op's own incidental sub-reads.
+const isArrayLengthChildPath = (
+  arrayPath: readonly string[],
+  path: readonly string[],
+): boolean =>
+  path.length === arrayPath.length + 1 &&
+  path[arrayPath.length] === "length" &&
+  arrayPath.every((segment, index) => path[index] === segment);
 import { toTransactionDocumentValue } from "./v2-document.ts";
 import {
   hasValueAtPath,
@@ -2923,8 +2935,17 @@ class SpaceReplica implements ISpaceReplica {
       const scope = normalizeCellScope(read.scope);
 
       const opPaths = mergeableOpPathsByEntity.get(`${read.id}\0${scope}`);
+      // A read of the op array's own `length` is the handler depending on the
+      // element count, which a mergeable append / add-unique / remove-by-value
+      // changes. The op itself never reads `length` (it reads the array value
+      // and its new-element slots), so this read is a genuine dependency and is
+      // kept from every drop below: a push whose new element's index or id came
+      // from the length conflicts and retries against a concurrent append.
+      const readsMergeableOpArrayLength = opPaths !== undefined &&
+        opPaths.some((opPath) => isArrayLengthChildPath(opPath, read.path));
       if (
         opPaths !== undefined &&
+        !readsMergeableOpArrayLength &&
         (isMergeableOpRead(read.meta) ||
           isReadMarkedAsAttemptedWrite(read.meta) ||
           isCfcLabelPath(read.path) ||

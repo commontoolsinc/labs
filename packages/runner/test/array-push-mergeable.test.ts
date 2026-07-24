@@ -5,6 +5,7 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
+import type { Cell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
@@ -271,6 +272,290 @@ describe("mergeable array appends", () => {
     }
   });
 
+  // A push whose new element is derived from the array's LENGTH is a conditional
+  // push: its correctness depends on the count it read. The length read is
+  // recorded as the array's own `length` child path — the shape produced by a
+  // `for...of`/spread over the array, a shape-only `length` access, or
+  // `key("length")`. That read must stay in the conflict set: a mergeable append
+  // changes the length, so a concurrent append has to make this commit conflict
+  // (and retry against the new tail) instead of the push merging with a stale
+  // index. Before the length read was kept, session 2 read length 1, both
+  // sessions computed the same index, and the append silently merged with a
+  // duplicate index.
+  it("a length-derived push conflicts with a concurrent append", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
+      await cell2.sync();
+      await cell2.pull();
+
+      // Session 1 appends "A", moving the durable length from 1 to 2.
+      const txA = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
+      await txA.commit();
+      await rt1.storageManager.synced();
+
+      // Session 2, still at the pre-"A" basis, reads the length (1) and pushes an
+      // element positioned at that length. The length read conflicts with session
+      // 1's append.
+      const txB = rt2.edit();
+      const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
+      const len = (cellB.key("length") as unknown as Cell<number>).get();
+      cellB.push(`item-${len}`);
+      const result = await txB.commit();
+
+      expect(result.error).toBeDefined();
+      const durable = await readDurable(server);
+      expect(durable).toEqual(["seed", "A"]);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  // The same protection through the query-result proxy's iterator: a handler that
+  // counts the array with `for...of` (or a spread) before pushing records the
+  // array's `length` read, so a concurrent append conflicts.
+  it("a for...of count before a proxy push conflicts with a concurrent append", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
+      await cell2.sync();
+      await cell2.pull();
+
+      const txA = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
+      await txA.commit();
+      await rt1.storageManager.synced();
+
+      const txB = rt2.edit();
+      const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
+        .getAsQueryResult([], txB, true) as unknown as string[];
+      let count = 0;
+      for (const _ of proxy) count++;
+      proxy.push(`item-${count}`);
+      const result = await txB.commit();
+
+      expect(result.error).toBeDefined();
+      const durable = await readDurable(server);
+      expect(durable).toEqual(["seed", "A"]);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  // The length read stays precise: it conflicts with a change to the element
+  // COUNT (an append), not with an edit to an existing element. A concurrent
+  // edit to an element the length-reading session did not append leaves the
+  // length unchanged, so the append still merges — the length read must not
+  // over-conflict the way a whole-array `.get()` read would.
+  it("a length-derived push merges past a concurrent edit to an existing element", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
+      await cell2.sync();
+      await cell2.pull();
+
+      // Session 1 edits the existing element 0 in place; the length stays 1.
+      const txA = rt1.edit();
+      (rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA)
+        .key("0") as unknown as Cell<string>).set("edited");
+      await txA.commit();
+      await rt1.storageManager.synced();
+
+      // Session 2 reads the length and pushes; the length did not change, so the
+      // append merges on top of the edit.
+      const txB = rt2.edit();
+      const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
+      const len = (cellB.key("length") as unknown as Cell<number>).get();
+      cellB.push(`item-${len}`);
+      const result = await txB.commit();
+      await rt2.storageManager.synced();
+
+      expect(result.error).toBeUndefined();
+      const durable = await readDurable(server);
+      expect(durable).toEqual(["edited", "item-1"]);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  // Bare `.length` on the query-result proxy (the get trap) reads the whole
+  // array recursively at the op path, so it is already kept as the handler's
+  // explicit read and conflicts with a concurrent append even without the
+  // length-child carve-out. This pins that end-to-end guarantee for the most
+  // common form: a change that ever recorded bare `.length` as a shape-only read
+  // AT the op path (which `buildReads` drops as the proxy's incidental container
+  // read) would fail here, forcing the count dependency to stay in the conflict
+  // set.
+  it("a bare proxy `.length` read before a push conflicts with a concurrent append", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
+      await cell2.sync();
+      await cell2.pull();
+
+      const txA = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
+      await txA.commit();
+      await rt1.storageManager.synced();
+
+      const txB = rt2.edit();
+      const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
+        .getAsQueryResult([], txB, true) as unknown as string[];
+      const len = proxy.length;
+      proxy.push(`item-${len}`);
+      const result = await txB.commit();
+
+      expect(result.error).toBeDefined();
+      const durable = await readDurable(server);
+      expect(durable).toEqual(["seed", "A"]);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  // Enumerating the array's keys (`Object.keys`/`values`/`entries`, or an object
+  // spread) observes the element count the same way a length read does — the
+  // proxy's ownKeys trap records an explicit `length` read for an array. So a
+  // push whose new element came from `Object.keys(arr).length` conflicts with a
+  // concurrent append; an unconditional push, which never enumerates, still
+  // merges.
+  it("an Object.keys(proxy).length-derived push conflicts with a concurrent append", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
+      await cell2.sync();
+      await cell2.pull();
+
+      const txA = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
+      await txA.commit();
+      await rt1.storageManager.synced();
+
+      const txB = rt2.edit();
+      const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
+        .getAsQueryResult([], txB, true) as unknown as string[];
+      const len = Object.keys(proxy).length;
+      proxy.push(`item-${len}`);
+      const result = await txB.commit();
+
+      expect(result.error).toBeDefined();
+      const durable = await readDurable(server);
+      expect(durable).toEqual(["seed", "A"]);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  // The carve-out is not push-specific: it keeps the length read for every
+  // mergeable op. An addUnique whose added value or decision depended on the
+  // count must conflict with a concurrent count-changing op, even when the added
+  // element is a distinct key that would otherwise merge. A transaction that
+  // reads the length forfeits that transaction's distinct-element merge.
+  it("a length-read addUnique conflicts with a concurrent addUnique", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
+      await cell2.sync();
+      await cell2.pull();
+
+      const txA = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).addUnique("A");
+      await txA.commit();
+      await rt1.storageManager.synced();
+
+      const txB = rt2.edit();
+      const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
+      const len = (cellB.key("length") as unknown as Cell<number>).get();
+      cellB.addUnique(`item-${len}`);
+      const result = await txB.commit();
+
+      expect(result.error).toBeDefined();
+      const durable = await readDurable(server);
+      expect(durable).toEqual(["seed", "A"]);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
   // A single session appends to a list whose durable head it has not yet
   // observed (the rehydration-race shape): it reads the list as shorter/empty
   // than it durably is, then appends. The append must land at the durable tail,
@@ -349,6 +634,237 @@ describe("mergeable array appends", () => {
       const durable = await readDurable(server);
       expect(durable).toEqual(["ONE", "two", "three"]);
     } finally {
+      await rt1.dispose();
+    }
+  });
+
+  // Two different mergeable op kinds on the same array path in one transaction.
+  // The intent map holds one op per path, so the second would replace the first
+  // and the diff-suppression would then drop the first op's element from the
+  // commit. The path is poisoned instead and the whole-array diff carries both
+  // changes.
+  it("addUnique then push in one tx commits both (no silent drop)", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      cell.addUnique("a");
+      cell.push("b");
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      expect(await readDurable(server)).toEqual(["seed", "a", "b"]);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  // The "update my entry" idiom: remove the old value and add the new one in one
+  // handler. remove-by-value and add-unique are different op kinds, so the path
+  // is poisoned and the whole-array diff commits the correct result.
+  it("removeByValue then addUnique in one tx commits both", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0)
+        .set(["seed", "old"]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      cell.removeByValue("old");
+      cell.addUnique("new");
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      expect(await readDurable(server)).toEqual(["seed", "new"]);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  // A reshape (an in-place mutator that is not a mergeable push) after a push
+  // rewrites the array, so the recorded append tail no longer identifies the
+  // pushed element. The push intent is abandoned and the whole-array diff commits
+  // the reshaped result. `unshift` reads the array fresh, so the local value is
+  // exact.
+  it("push then unshift on a proxy commits the reshaped array", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const proxy = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1)
+        .getAsQueryResult([], tx1, true) as unknown as string[];
+      proxy.push("b");
+      proxy.unshift("z");
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      expect(await readDurable(server)).toEqual(["z", "seed", "b"]);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  // A reshape after a push commits the correctly reshaped array. The reshape
+  // reads the array fresh (so `sort` sees the pushed "b"), and the push intent is
+  // poisoned so the commit emits the reshaped whole-array diff rather than a stale
+  // tail op.
+  it("push then sort on a proxy commits the sorted array with the pushed element", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
+        "c",
+        "a",
+      ]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      const proxy = cell.getAsQueryResult([], tx1, true) as unknown as string[];
+      proxy.push("b");
+      proxy.sort();
+      expect(cell.get()).toEqual(["a", "b", "c"]);
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      expect(await readDurable(server)).toEqual(["a", "b", "c"]);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  // A whole-array Cell.set after a push reshapes the array; the append intent is
+  // poisoned so the commit emits the set's array, not a tail op sliced from it.
+  it("push then a whole-array set commits the set array", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      cell.push("b");
+      cell.set(["x", "y", "z"]);
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      expect(await readDurable(server)).toEqual(["x", "y", "z"]);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  // A poisoned path forfeits merge-friendliness: because it commits as a
+  // whole-array diff whose reads are kept, a mixed-op transaction conflicts with
+  // a concurrent append instead of merging — the intended trade for never losing
+  // data on the mixed-op path.
+  it("a mixed-op (poisoned) transaction conflicts with a concurrent append", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0)
+        .set(["seed", "old"]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
+      await cell2.sync();
+      await cell2.pull();
+
+      const txA = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
+      await txA.commit();
+      await rt1.storageManager.synced();
+
+      // Session 2, at the pre-"A" basis, does the mixed-op "update my entry"
+      // (remove old, add new) — a poisoned path, committed as a value diff.
+      const txB = rt2.edit();
+      const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
+      cellB.removeByValue("old");
+      cellB.addUnique("new");
+      const result = await txB.commit();
+
+      expect(result.error).toBeDefined();
+      expect(await readDurable(server)).toEqual(["seed", "old", "A"]);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  // Probing whether a numeric index exists (`n in arr`) observes the element
+  // count, so an `n in arr`-derived push conflicts with a concurrent append.
+  it("an `n in arr`-derived push conflicts with a concurrent append", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
+      await cell2.sync();
+      await cell2.pull();
+
+      const txA = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
+      await txA.commit();
+      await rt1.storageManager.synced();
+
+      const txB = rt2.edit();
+      const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
+        .getAsQueryResult([], txB, true) as unknown as string[];
+      proxy.push(1 in proxy ? "had-1" : "no-1");
+      const result = await txB.commit();
+
+      expect(result.error).toBeDefined();
+      expect(await readDurable(server)).toEqual(["seed", "A"]);
+    } finally {
+      await rt2.dispose();
       await rt1.dispose();
     }
   });

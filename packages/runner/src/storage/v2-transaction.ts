@@ -122,6 +122,14 @@ type WritableDocumentEntry = {
   // possibly-stale base, and drops the op's path from the commit's conflict read
   // set. See ./mergeable-ops.ts.
   mergeableOps?: Map<string, MergeableOpIntent>;
+  // Paths where a mergeable intent cannot faithfully carry the transaction's
+  // local change — a second mergeable op of a different kind was recorded, or a
+  // foreign write (a reshape such as sort/splice) rewrote the array after an op
+  // was recorded. Such a path abandons the mergeable fast path and commits the
+  // whole-array diff, which reflects the correct combined local value. Once
+  // poisoned a path stays poisoned for the rest of the transaction, so a later
+  // op does not resurrect a partial intent. Keyed like mergeableOps.
+  mergeableOpsPoisoned?: Set<string>;
 };
 
 type DocumentEntry = ReadDocumentEntry | WritableDocumentEntry;
@@ -1038,12 +1046,48 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
     const doc = this.writableMergeableTarget(address);
     if (!doc) throw new Error(`${delta.op} target is not writable`);
-    doc.mergeableOps ??= new Map();
     const pathKey = encodePointer(address.path);
+    // A poisoned path has already fallen back to the whole-array diff; a further
+    // op does not revive it.
+    if (doc.mergeableOpsPoisoned?.has(pathKey)) {
+      return;
+    }
+    const existing = doc.mergeableOps?.get(pathKey);
+    // A different mergeable op kind at the same path in one transaction cannot be
+    // carried alongside the first: the intent map holds one op per path, so the
+    // second would replace the first and the diff-suppression would then drop the
+    // first op's element changes from the commit — silent data loss. Poison the
+    // path instead so the whole-array diff carries both changes.
+    if (existing !== undefined && existing.op !== delta.op) {
+      doc.mergeableOps?.delete(pathKey);
+      (doc.mergeableOpsPoisoned ??= new Set()).add(pathKey);
+      return;
+    }
+    doc.mergeableOps ??= new Map();
     doc.mergeableOps.set(
       pathKey,
-      foldMergeableIntent(doc.mergeableOps.get(pathKey), address.path, delta),
+      foldMergeableIntent(existing, address.path, delta),
     );
+  }
+
+  // Abandon the mergeable fast path for `address`: a foreign write (a reshape
+  // that is not itself a mergeable op) has rewritten the array after an op was
+  // recorded, so the recorded tail no longer identifies the appended elements.
+  // Drop any intent and mark the path poisoned so the commit emits the
+  // whole-array diff (the correct local value) instead. A path with no recorded
+  // intent is left untouched — a reshape before any op is fine, and a later op on
+  // that path is still mergeable.
+  poisonMergeableOp(address: IMemorySpaceAddress): void {
+    const ready = this.editable();
+    if (ready.error) return;
+    const doc = this.writableMergeableTarget(address);
+    if (!doc) return;
+    const pathKey = encodePointer(address.path);
+    if (!doc.mergeableOps?.has(pathKey)) {
+      return;
+    }
+    doc.mergeableOps.delete(pathKey);
+    (doc.mergeableOpsPoisoned ??= new Set()).add(pathKey);
   }
 
   // The caller wrote through this same transaction, so the entry is writable.
