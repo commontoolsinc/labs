@@ -2938,14 +2938,50 @@ Deno.test("memory v2 server records emitted watch effects for diagnostics", asyn
   }
 });
 
-Deno.test("memory v2 diagnostics flush completes without emitted effects", async () => {
+Deno.test("memory v2 diagnostics flush falls back to a regular refresh without telemetry", async () => {
   const server = createServer(
-    "memory://memory-v2-server-diagnostics-no-effect",
-    0,
-    true,
+    "memory://memory-v2-server-diagnostics-telemetry-disabled",
   );
+  const messages: ServerMessage[] = [];
+  const effectSent = Promise.withResolvers<void>();
+  const connection = server.connect((message) => {
+    messages.push(message);
+    if (message.type === "session/effect") effectSent.resolve();
+  });
+  const space = "did:key:z6Mk-memory-v2-server-diagnostics-telemetry-disabled";
+
   try {
+    await connection.receive(encodeMemoryBoundary(HELLO));
+    const sessionOpen = expectHelloOk(messages);
+    await connection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open",
+      space,
+      session: {},
+      invocation: authInvocation(sessionOpen),
+    }));
+    const sessionId = assertResponse<{ sessionId: string }>(
+      shiftMessage(messages),
+    ).ok!.sessionId;
+    server.syncSessionForConnection = () =>
+      Promise.resolve({
+        type: "session/effect",
+        space,
+        sessionId,
+        effect: {
+          type: "sync",
+          fromSeq: 0,
+          toSeq: 1,
+          upserts: [],
+          removes: [],
+        },
+      });
+    server.markSpaceDirty(space);
+
     await server.flushDiagnosticsSessions();
+    await effectSent.promise;
+    assertEquals(assertEffect(shiftMessage(messages)).effect.toSeq, 1);
+    assertEquals(messages, []);
   } finally {
     await server.close();
   }
@@ -3133,6 +3169,7 @@ Deno.test("memory v2 server close releases an outstanding diagnostics flush", as
     await Promise.all([flush, close]);
     assertEquals(flushResolved, true);
     assertEquals(closed, true);
+    await server.flushDiagnosticsSessions();
   } finally {
     if (!closed) await server.close();
   }

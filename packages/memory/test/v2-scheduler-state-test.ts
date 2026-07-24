@@ -608,6 +608,7 @@ Deno.test("memory v2 apply outcomes distinguish first application from replay", 
       ],
     };
 
+    const outcomes = [];
     for (const commit of [semantic, observationOnly, batch]) {
       const first = applyCommitWithOutcome(engine, {
         sessionId: "session:apply-outcome",
@@ -619,7 +620,74 @@ Deno.test("memory v2 apply outcomes distinguish first application from replay", 
       });
       assertEquals(first.replayed, false);
       assertEquals(replay.replayed, true);
+      outcomes.push({ first, replay });
     }
+
+    const [semanticOutcome, observationOutcome, batchOutcome] = outcomes;
+    assertEquals(semanticOutcome?.first.commit, {
+      seq: 1,
+      branch: "",
+      revisions: [{
+        id: "of:outcome-semantic",
+        scopeKey: "space",
+        branch: "",
+        seq: 1,
+        opIndex: 0,
+        commitSeq: 1,
+        op: "set",
+        document: { value: true },
+      }],
+    });
+    assertEquals(semanticOutcome?.replay.commit.revisions, [{
+      id: "of:outcome-semantic",
+      scope: "space",
+      scopeKey: "space",
+      branch: "",
+      seq: 1,
+      opIndex: 0,
+      commitSeq: 1,
+      op: "set",
+      document: { value: true },
+    }]);
+
+    const observationResult = observationOutcome?.first.commit
+      .schedulerObservationResults?.[0];
+    assertEquals(observationResult?.localSeq, observationOnly.localSeq);
+    assertEquals(observationResult?.status, "kept");
+    assertExists(observationResult?.schedulerObservationId);
+    assertEquals(
+      observationOutcome?.replay.commit.schedulerObservationResults,
+      [observationResult],
+    );
+
+    const batchResults = batchOutcome?.first.commit.schedulerObservationResults;
+    assertEquals(
+      batchResults?.map(({ localSeq, status, schedulerObservationId }) => ({
+        localSeq,
+        status,
+        schedulerObservationId,
+      })),
+      [
+        {
+          localSeq: 4,
+          status: "kept",
+          schedulerObservationId: batchResults?.[0]?.schedulerObservationId,
+        },
+        {
+          localSeq: 5,
+          status: "kept",
+          schedulerObservationId: batchResults?.[1]?.schedulerObservationId,
+        },
+      ],
+    );
+    assertExists(batchResults?.[0]?.schedulerObservationId);
+    assertExists(batchResults?.[1]?.schedulerObservationId);
+    assertEquals(
+      batchOutcome?.replay.commit.schedulerObservationResults,
+      batchResults,
+    );
+    assertEquals(countRows(engine, "scheduler_observation"), 3);
+    assertEquals(countRows(engine, "scheduler_observation_replay"), 3);
   } finally {
     close(engine);
     await Deno.remove(path);
