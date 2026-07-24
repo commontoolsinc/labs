@@ -47,6 +47,12 @@ const joinAs = handler<JoinEvent, {
   joinName: ParticipantIdentityNameCell;
   participantProfiles: ParticipantProfileDirectoryCell;
   profile: LunchProfileCell | undefined;
+  // The display strings arrive pre-resolved (from `#profileName` /
+  // `#profileAvatar`, or the injected profile object) — field reads off the
+  // live `#profile` result are NOT a reliable display source; the dedicated
+  // string wishes are (the battleship-lobby idiom, multi-user-patterns.md).
+  profileName: string;
+  profileAvatar: string;
 }>(
   (
     { name },
@@ -57,11 +63,12 @@ const joinAs = handler<JoinEvent, {
       joinName,
       participantProfiles,
       profile,
+      profileName,
+      profileAvatar,
     },
   ) => {
     const override = trimmedName(name) || trimmedName(joinName.get());
-    const resolvedProfile = profile?.get();
-    const trimmed = override || profileDisplayName(resolvedProfile);
+    const trimmed = override || trimmedName(profileName);
     if (!trimmed) return;
     const current = trimmedName(myName.get());
     if (current) return;
@@ -69,7 +76,7 @@ const joinAs = handler<JoinEvent, {
     if (existing.some((u) => u.name === trimmed)) return;
     const user: User = {
       name: trimmed,
-      avatar: override ? "" : (resolvedProfile?.avatar ?? "").trim(),
+      avatar: override ? "" : (profileAvatar ?? "").trim(),
       color: colorForIndex(existing.length),
     };
     // A duplicate name must reject the second join rather than silently make
@@ -195,9 +202,26 @@ export default pattern<
     // live profile cell without a resolving wish environment. Input presence
     // is fixed at instantiation, so the `??` selections below are static.
     const profileWish = wish<LunchProfile>({ query: "#profile" });
+    // The companion string wishes are the DISPLAY source (the battleship
+    // lobby idiom; multi-user-patterns.md prescribes this trio). Reading
+    // display fields off the live `#profile` result object comes back empty
+    // against the real profile shape — only the injected test override
+    // carries them as plain fields.
+    const profileNameWish = wish<string>({ query: "#profileName" });
+    const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
     // Static selection at build time (input presence is fixed per
     // instantiation) — hoisted so JSX/bindings below see one plain ref.
     const activeProfile = profile ?? profileWish.result;
+    const canonicalProfileName = computed(() =>
+      profile !== undefined
+        ? profileDisplayName(profile.get())
+        : trimmedName(profileNameWish.result ?? "")
+    );
+    const canonicalProfileAvatar = computed(() =>
+      profile !== undefined
+        ? (profile.get()?.avatar ?? "").trim()
+        : (profileAvatarWish.result ?? "").trim()
+    );
     const boundJoin = joinAs({
       users,
       myName,
@@ -205,6 +229,8 @@ export default pattern<
       joinName,
       participantProfiles,
       profile: activeProfile,
+      profileName: canonicalProfileName,
+      profileAvatar: canonicalProfileAvatar,
     });
     const boundClaimHost = claimHost({ myName, adminName });
 
@@ -213,11 +239,6 @@ export default pattern<
     // and "Continue as guest" is an explicit secondary action. `useCustomName`
     // also lets a profile-holder deliberately join under a one-off name.
     const useCustomName = Writable.perSession.of<boolean>(false);
-    const canonicalProfileName = computed(() =>
-      profileDisplayName(
-        profile !== undefined ? profile.get() : profileWish.result,
-      )
-    );
     const hasProfile = computed(() => canonicalProfileName !== "");
     const showProfileJoin = computed(() => hasProfile && !useCustomName.get());
     const showProfileSetup = computed(() =>
