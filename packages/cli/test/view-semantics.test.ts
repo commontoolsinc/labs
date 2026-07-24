@@ -1,7 +1,8 @@
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { parseDocument, SAMPLE } from "./view-helpers.ts";
-import { createSemantics, type Semantics } from "../lib/view/semantics.ts";
+import { createSemantics } from "../lib/view/languages/typescript/semantics.ts";
+import type { Semantics } from "../lib/view/languages/language.ts";
 import { buildPeekCard } from "../lib/view/card.ts";
 import type { Document } from "../lib/view/model.ts";
 

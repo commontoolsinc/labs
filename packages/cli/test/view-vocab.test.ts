@@ -11,7 +11,7 @@ import {
   SYNTHETIC_LIFT_HOIST_PREFIX,
   SYNTHETIC_MODULE_CALLBACK_PREFIX,
   SYNTHETIC_PATTERN_HOIST_PREFIX,
-} from "../lib/view/vocab.ts";
+} from "../lib/view/languages/typescript/vocab.ts";
 import {
   COMMONFABRIC_BUILDER_EXPORT_NAMES,
   COMMONFABRIC_CALL_EXPORT_NAMES,

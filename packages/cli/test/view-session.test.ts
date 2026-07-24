@@ -4,7 +4,7 @@ import { Session } from "../lib/view/session.ts";
 import { frameTop } from "../lib/view/actions.ts";
 import { buildPeekCard } from "../lib/view/card.ts";
 import type { Key } from "../lib/view/keys.ts";
-import type { Semantics } from "../lib/view/semantics.ts";
+import type { Semantics } from "../lib/view/languages/language.ts";
 
 function makeSession() {
   const doc = parseDocument(SAMPLE);

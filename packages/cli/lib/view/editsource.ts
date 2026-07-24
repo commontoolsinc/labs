@@ -8,13 +8,8 @@
  * single editable text back onto the files it touches.
  */
 import type { Document, Line } from "./model.ts";
-import {
-  createHighlighter,
-  highlightDocument,
-  type Highlighter,
-  parseDocument,
-} from "./parse.ts";
-import { createMarkdownHighlighter, isMarkdownPath } from "./markdown.ts";
+import type { Highlighter } from "./languages/language.ts";
+import { languageForFile } from "./languages/registry.ts";
 
 /** How much a revert restores: the cursor's hunk, the cursor's file, the commit
  * message the cursor is in, or all. */
@@ -197,16 +192,16 @@ export interface EditPolicy {
 
 /** An on-disk file: the document text is the file, edits write straight back. */
 export function fileSource(path: string): EditableSource {
+  // The language is chosen once, from the path, and every edit-time operation
+  // dispatches through it.
+  const language = languageForFile(path);
   return {
     label: shortName(path),
     editable: true,
     path,
-    parse: (text) => parseDocument(text, path),
-    highlight: (text) => highlightDocument(text, path),
-    createHighlighter: (text) =>
-      isMarkdownPath(path)
-        ? createMarkdownHighlighter(text)
-        : createHighlighter(text, path),
+    parse: (text) => language.parseDocument(text, path),
+    highlight: (text) => language.highlightLines(text, path),
+    createHighlighter: (text) => language.createHighlighter(text, path),
     dirtyLabels: (original, current) =>
       original === current ? [] : [shortName(path)],
     // A plain file has no hunks, so any scope reverts the whole file.
@@ -228,7 +223,7 @@ export function readonlySource(reason: string): EditableSource {
     label: null,
     editable: false,
     reason,
-    parse: (text) => parseDocument(text),
+    parse: (text) => languageForFile(undefined).parseDocument(text),
     save: () => reason,
   };
 }

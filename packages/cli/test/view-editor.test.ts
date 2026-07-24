@@ -7,7 +7,7 @@
  */
 import { assert, assertEquals } from "@std/assert";
 import { parseDocument, promptText } from "./view-helpers.ts";
-import { highlightDocument } from "../lib/view/parse.ts";
+import { highlightDocument } from "../lib/view/languages/typescript/parse.ts";
 import { Session } from "../lib/view/session.ts";
 import type { Key } from "../lib/view/keys.ts";
 import {

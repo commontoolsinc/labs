@@ -1,5 +1,5 @@
 /**
- * Second-round coverage tests for `lib/view/parse.ts`, extending
+ * Second-round coverage tests for `lib/view/languages/typescript/parse.ts`, extending
  * `view-parse.test.ts` and `view-parse-cov.test.ts`. The dead and duplicate
  * branches these originally documented were removed or folded away at the
  * source; the tests here exercise the reachable behaviour around them:
@@ -14,7 +14,7 @@ import {
   createHighlighter,
   highlightDocument,
   parseDocument,
-} from "../lib/view/parse.ts";
+} from "../lib/view/languages/typescript/parse.ts";
 import type { Document, StructureNode, TokenClass } from "../lib/view/model.ts";
 
 /** Every token class a given literal text is assigned across the document. */

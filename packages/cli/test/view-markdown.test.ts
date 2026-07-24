@@ -9,8 +9,8 @@ import {
   highlightMarkdownLines,
   isMarkdownPath,
   markdownDocument,
-} from "../lib/view/markdown.ts";
-import { parseDocument } from "../lib/view/parse.ts";
+} from "../lib/view/languages/markdown/markdown.ts";
+import { languageForFile } from "../lib/view/languages/registry.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { createDiffHighlighter } from "../lib/view/diffedit.ts";
@@ -108,11 +108,17 @@ Deno.test("markdown: heading-like lines inside fenced code blocks are not nav no
   ]);
 });
 
-Deno.test("markdown: parseDocument dispatches on a .md filename", () => {
-  const doc = parseDocument("# Heading\n\nplain prose\n", "notes.md");
+Deno.test("markdown: languageForFile dispatches on a .md filename", () => {
+  const doc = languageForFile("notes.md").parseDocument(
+    "# Heading\n\nplain prose\n",
+    "notes.md",
+  );
   assertEquals(doc.lines[0].spans.map((s) => s.cls), ["sectionHeader"]);
   // The same text as TypeScript would tokenise the prose into identifiers.
-  const asTs = parseDocument("# Heading\n\nplain prose\n", "notes.ts");
+  const asTs = languageForFile("notes.ts").parseDocument(
+    "# Heading\n\nplain prose\n",
+    "notes.ts",
+  );
   assert(
     asTs.lines[2].spans.some((s) => s.cls === "identifier"),
     "the .ts path still tokenises prose as code",

@@ -1,5 +1,5 @@
 /**
- * Coverage-driving tests for `lib/view/parse.ts`. These exercise the parser's
+ * Coverage-driving tests for `lib/view/languages/typescript/parse.ts`. These exercise the parser's
  * less-travelled branches: the incremental highlighter's no-op and walk-back
  * paths, the full set of identifier classifications, every structure-tree
  * classification (methods, enums, namespaces, control flow, labels), the schema
@@ -32,7 +32,8 @@ import {
   createHighlighter,
   highlightDocument,
   parseDocument,
-} from "../lib/view/parse.ts";
+} from "../lib/view/languages/typescript/parse.ts";
+import { languageForFile } from "../lib/view/languages/registry.ts";
 import type { Document, StructureNode, TokenClass } from "../lib/view/model.ts";
 
 /** Every token class a given literal text is assigned across the document. */
@@ -58,10 +59,10 @@ function labels(doc: Document): string[] {
   return doc.flatStructure.map((n) => `${n.kind}:${n.label}`);
 }
 
-// --- highlightDocument: markdown path (line 205) ----------------------------
+// --- registry: a .md filename highlights as Markdown ------------------------
 
-Deno.test("highlightDocument: a .md filename is highlighted as Markdown", () => {
-  const lines = highlightDocument(
+Deno.test("registry: a .md filename is highlighted as Markdown", () => {
+  const lines = languageForFile("README.md").highlightLines(
     "# Heading\n\n```\ncode\n```\n",
     "README.md",
   );

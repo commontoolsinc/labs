@@ -30,7 +30,8 @@ import {
   messageAt,
   sameCommit,
 } from "./commitmsg.ts";
-import { highlightDocument, type Highlighter, parseDocument } from "./parse.ts";
+import type { Highlighter } from "./languages/language.ts";
+import { languageForFile } from "./languages/registry.ts";
 import type {
   EditableSource,
   EditPolicy,
@@ -1087,7 +1088,8 @@ function diffLineRender(lineText: string, fileName?: string): Line {
     : "whitespace";
   const spans: Span[] = [{ col: 0, text: marker, cls }];
   const code = lineText.slice(1);
-  const content = highlightDocument(code, fileName)[0]?.spans;
+  const content = languageForFile(fileName).highlightLines(code, fileName)[0]
+    ?.spans;
   for (const s of content ?? []) {
     spans.push({ ...s, col: s.col + 1 });
   }
@@ -1152,7 +1154,7 @@ function reparse(
   // still updates.
   return model
     ? buildDiffDocument(text, model, ws, cache).doc
-    : parseDocument(text);
+    : languageForFile(undefined).parseDocument(text);
 }
 
 interface FileSplice {

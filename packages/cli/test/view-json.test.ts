@@ -1,0 +1,269 @@
+/**
+ * The JSON / JSONC language: a `.json` or `.jsonc` file (opened directly or seen
+ * in a diff) is coloured as data — object keys apart from string values,
+ * numbers, `true`/`false`/`null`, rainbow brackets, JSONC comments — with its
+ * object keys forming the navigation tree, and is never run through the
+ * TypeScript parser. The highlighter is hand-written and lenient: malformed
+ * input colours without throwing.
+ */
+import { assert, assertEquals } from "@std/assert";
+import { join } from "@std/path";
+import {
+  createJsonHighlighter,
+  isJsonPath,
+  jsonDocument,
+  jsonHighlightLines,
+} from "../lib/view/languages/json/json.ts";
+import { languageForFile } from "../lib/view/languages/registry.ts";
+import type { Line, TokenClass } from "../lib/view/model.ts";
+import { parseDiff } from "../lib/view/diff.ts";
+import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
+import { createDiffHighlighter } from "../lib/view/diffedit.ts";
+
+/** The verbatim text of a set of lines — colouring must never change it. */
+function verbatim(lines: readonly Line[]): string {
+  return lines.map((l) => l.spans.map((s) => s.text).join("")).join("\n");
+}
+
+/** The classes a token text is assigned, across every line. */
+function classesOf(lines: readonly Line[], token: string): Set<TokenClass> {
+  const out = new Set<TokenClass>();
+  for (const l of lines) {
+    for (const s of l.spans) if (s.text === token) out.add(s.cls);
+  }
+  return out;
+}
+
+Deno.test("json: isJsonPath recognises json extensions", () => {
+  assert(isJsonPath("deno.json"));
+  assert(isJsonPath("/a/b/tsconfig.jsonc"));
+  assert(isJsonPath("UPPER.JSON"));
+  assert(!isJsonPath("main.ts"));
+  assert(!isJsonPath("README.md"));
+  assert(!isJsonPath(undefined));
+});
+
+Deno.test("json: the registry selects JSON for .json and .jsonc", () => {
+  assertEquals(languageForFile("deno.json").id, "json");
+  assertEquals(languageForFile("cfg.jsonc").id, "json");
+  // Anything else falls through to the TypeScript catch-all.
+  assertEquals(languageForFile("main.ts").id, "typescript");
+  assertEquals(languageForFile("notes.md").id, "markdown");
+  assertEquals(languageForFile(undefined).id, "typescript");
+});
+
+Deno.test("json: keys, values, and literals get distinct classes", () => {
+  const lines = jsonHighlightLines(
+    `{ "name": "widget", "count": 42, "on": true, "off": false, "x": null }`,
+  );
+  // A key is a propertyName; a string VALUE is a string.
+  assertEquals([...classesOf(lines, '"name"')], ["propertyName"]);
+  assertEquals([...classesOf(lines, '"widget"')], ["string"]);
+  assertEquals([...classesOf(lines, "42")], ["number"]);
+  assertEquals([...classesOf(lines, "true")], ["boolean"]);
+  assertEquals([...classesOf(lines, "false")], ["boolean"]);
+  assertEquals([...classesOf(lines, "null")], ["keyword"]);
+  // `:` and `,` are punctuation.
+  assert(classesOf(lines, ":").has("punctuation"));
+  assert(classesOf(lines, ",").has("punctuation"));
+});
+
+Deno.test("json: brackets carry a nesting depth for rainbow colouring", () => {
+  const lines = jsonHighlightLines(`{ "a": [ 1 ] }`);
+  const brackets = lines[0].spans.filter((s) => s.cls === "bracket");
+  const byText = new Map(brackets.map((s) => [s.text, s.bracketDepth]));
+  // The object braces sit at depth 0, the array brackets nested at depth 1;
+  // each pair matches (open and close share a depth).
+  assertEquals(byText.get("{"), 0);
+  assertEquals(byText.get("}"), 0);
+  assertEquals(byText.get("["), 1);
+  assertEquals(byText.get("]"), 1);
+});
+
+Deno.test("json: JSONC line and block comments are coloured, not rejected", () => {
+  const src = [
+    "{",
+    "  // a line comment",
+    '  "a": 1, /* trailing block */',
+    "  /* a block",
+    "     over two lines */",
+    '  "b": 2,', // a trailing comma is fine
+    "}",
+  ].join("\n");
+  const lines = jsonHighlightLines(src);
+  assertEquals(lines[1].spans.map((s) => s.cls), ["whitespace", "comment"]);
+  // The block comment spans two lines; both are coloured as comment.
+  assert(lines[3].spans.some((s) => s.cls === "comment"));
+  assert(lines[4].spans.some((s) => s.cls === "comment"));
+  // The trailing comma after `2` is punctuation, and colouring is lossless.
+  assert(classesOf(lines, ",").has("punctuation"));
+  assertEquals(verbatim(lines), src);
+});
+
+Deno.test("json: a bare non-BMP character stays one span", () => {
+  // Outside a string a lone astral char is invalid JSON, but reachable mid-edit;
+  // it must not split at the UTF-16 surrogate boundary into two glyphs.
+  const spans = jsonHighlightLines("😀").flatMap((l) => l.spans);
+  assertEquals(spans.length, 1);
+  assertEquals(spans[0].text, "😀");
+});
+
+Deno.test("json: colouring is byte-for-byte lossless", () => {
+  const src = `{
+  "emoji": "🎉 é ✓",
+  "nums": [1, -2.5, 3e10],
+  "nested": { "deep": { "x": true } }
+}`;
+  assertEquals(verbatim(jsonHighlightLines(src)), src);
+});
+
+Deno.test("json: object keys form the navigation tree", () => {
+  const src = `{
+  "name": "widget",
+  "tags": ["a", "b"],
+  "nested": { "x": 1, "y": [{ "z": 2 }] }
+}`;
+  const doc = jsonDocument(src);
+  // Top-level: scalar members are `variable`, container members are `object`.
+  assertEquals(
+    doc.structure.map((n) => `${n.label}:${n.kind}`),
+    ["name:variable", "tags:object", "nested:object"],
+  );
+  const nested = doc.structure.find((n) => n.label === "nested")!;
+  assertEquals(nested.children.map((n) => n.label), ["x", "y"]);
+  // An array's container elements are navigable as `[i]`; its scalars are not.
+  const tags = doc.structure.find((n) => n.label === "tags")!;
+  assertEquals(tags.children, []);
+  const y = nested.children.find((n) => n.label === "y")!;
+  assertEquals(y.children.map((n) => `${n.label}:${n.kind}`), ["[0]:object"]);
+  assertEquals(y.children[0].children.map((n) => n.label), ["z"]);
+  // Keys are indexed as definitions (for `t` peeks).
+  assert(doc.definitions.has("name"));
+  assert(doc.definitions.has("z"));
+});
+
+Deno.test("json: a heading node's range points at its key", () => {
+  const src = `{\n  "name": "widget"\n}`;
+  const doc = jsonDocument(src);
+  const name = doc.structure[0];
+  assertEquals(name.startLine, 1);
+  // The name offset addresses the key token, so a peek lands on the key.
+  assertEquals(src.slice(name.nameOffset!, name.nameOffset! + 6), '"name"');
+});
+
+Deno.test("json: the incremental highlighter matches a whole re-highlight", () => {
+  const before = `{ "a": 1, "b": 2 }`;
+  const after = `{ "a": 10, "b": 2, "c": [true] }`;
+  const hl = createJsonHighlighter(before);
+  assertEquals(
+    hl.lines.map((l) => l.spans.map((s) => s.cls)),
+    jsonHighlightLines(before).map((l) => l.spans.map((s) => s.cls)),
+  );
+  const updated = hl.update(after);
+  assertEquals(
+    updated.map((l) => l.spans.map((s) => `${s.cls}:${s.text}`)),
+    jsonHighlightLines(after).map((l) =>
+      l.spans.map((s) => `${s.cls}:${s.text}`)
+    ),
+  );
+});
+
+Deno.test("json: malformed input colours without throwing", () => {
+  for (
+    const bad of [
+      '{ "unterminated: 1',
+      "{ /* unterminated block comment",
+      "}{][:,@#$%",
+      '{ "a": ',
+      "",
+      "   ",
+    ]
+  ) {
+    const doc = jsonDocument(bad);
+    // Never throws, always covers the text verbatim, structure is at worst empty.
+    assertEquals(verbatim(doc.lines), bad);
+    assert(Array.isArray(doc.structure));
+  }
+});
+
+Deno.test("json: a .json file in a diff is coloured and navigated as JSON", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const file = `{\n  "name": "widget",\n  "count": 2\n}\n`;
+    Deno.writeTextFileSync(join(root, "config.json"), file);
+    const ws: DiffWorkspace = {
+      resolve: (p) => join(root, p),
+      read: (a) => {
+        try {
+          return Deno.readTextFileSync(a);
+        } catch {
+          return null;
+        }
+      },
+    };
+    const diff = `diff --git a/config.json b/config.json
+--- a/config.json
++++ b/config.json
+@@ -1,4 +1,4 @@
+ {
+-  "name": "widget",
++  "name": "gadget",
+   "count": 2
+ }
+`;
+    const model = parseDiff(diff)!;
+    const { doc } = buildDiffDocument(diff, model, ws);
+    // The context line for the key is coloured as JSON: the key is a
+    // propertyName, proving the JSON language (not TypeScript) ran.
+    const keyLine = doc.lines.find((l) =>
+      l.spans.some((s) => s.text === '"count"')
+    )!;
+    assert(
+      keyLine.spans.some((s) =>
+        s.text === '"count"' && s.cls === "propertyName"
+      ),
+    );
+    // The removed line (old side) fragment-parses as JSON too.
+    const removed = doc.lines.find((l) => l.text.startsWith('-  "name"'))!;
+    assert(
+      removed.spans.some((s) =>
+        s.text === '"name"' && s.cls === "propertyName"
+      ),
+    );
+    // The hunk's structure exposes the file's keys, projected into the diff.
+    const labels: string[] = [];
+    const walk = (ns: typeof doc.structure) => {
+      for (const n of ns) {
+        labels.push(n.label);
+        walk(n.children);
+      }
+    };
+    walk(doc.structure);
+    assert(labels.includes("name"), `structure labels: ${labels.join(", ")}`);
+    assert(labels.includes("count"));
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("json: editing a line in a json diff recolours it as json", () => {
+  const diff = [
+    "diff --git a/c.json b/c.json",
+    "--- a/c.json",
+    "+++ b/c.json",
+    "@@ -1,3 +1,3 @@",
+    " {",
+    '   "n": 1',
+    " }",
+    "",
+  ].join("\n");
+  const hl = createDiffHighlighter(diff);
+  const out = hl.update(diff.replace('"n": 1', '"n": 42'));
+  const edited = out.find((l) => l.text.includes('"n"'))!;
+  // The key stays a propertyName and the value is a number — the JSON line
+  // renderer ran, not the TypeScript one.
+  assert(
+    edited.spans.some((s) => s.text === '"n"' && s.cls === "propertyName"),
+  );
+  assert(edited.spans.some((s) => s.text === "42" && s.cls === "number"));
+});

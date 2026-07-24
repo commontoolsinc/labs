@@ -1,5 +1,5 @@
 /**
- * Coverage-driving tests for lib/view/semantics.ts. These exercise the
+ * Coverage-driving tests for lib/view/languages/typescript/semantics.ts. These exercise the
  * best-effort/degrade-to-null branches, the diff-mode service end to end
  * (including its catch-to-empty paths via a DiffMaps stub that throws), and the
  * small parsing helpers (JSONC stripping, extension classification, real-path
@@ -8,7 +8,10 @@
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { parseDocument, SAMPLE } from "./view-helpers.ts";
-import { createDiffSemantics, createSemantics } from "../lib/view/semantics.ts";
+import {
+  createDiffSemantics,
+  createSemantics,
+} from "../lib/view/languages/typescript/semantics.ts";
 import { buildDiffDocument } from "../lib/view/diffdoc.ts";
 import type { DiffMaps, DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { parseDiff } from "../lib/view/diff.ts";

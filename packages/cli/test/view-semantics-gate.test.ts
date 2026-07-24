@@ -1,5 +1,5 @@
 /**
- * Gate-coverage tests for lib/view/semantics.ts.
+ * Gate-coverage tests for lib/view/languages/typescript/semantics.ts.
  *
  * The duplicated build/cache/latch logic the two factories shared was factored
  * into `lazyProgram`; the `lazyProgram` test below drives its success, throw,
@@ -17,7 +17,7 @@ import {
   _internal,
   createDiffSemantics,
   createSemantics,
-} from "../lib/view/semantics.ts";
+} from "../lib/view/languages/typescript/semantics.ts";
 import type { DiffMaps } from "../lib/view/diffdoc.ts";
 import type { Document } from "../lib/view/model.ts";
 

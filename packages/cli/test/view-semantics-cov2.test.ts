@@ -1,5 +1,5 @@
 /**
- * Second-round coverage tests for lib/view/semantics.ts. These drive the
+ * Second-round coverage tests for lib/view/languages/typescript/semantics.ts. These drive the
  * remaining failure-isolation branches that the first two suites do not reach:
  * the setup-time guards (`splitSections` throwing, a non-discoverable config),
  * the lazily-built program latching after a failed build, and the per-query
@@ -15,7 +15,10 @@
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { parseDocument } from "./view-helpers.ts";
-import { createDiffSemantics, createSemantics } from "../lib/view/semantics.ts";
+import {
+  createDiffSemantics,
+  createSemantics,
+} from "../lib/view/languages/typescript/semantics.ts";
 import type { DiffMaps } from "../lib/view/diffdoc.ts";
 import type { Document } from "../lib/view/model.ts";
 
