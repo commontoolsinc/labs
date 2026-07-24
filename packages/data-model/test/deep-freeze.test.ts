@@ -42,6 +42,34 @@ describe("deep-freeze", () => {
       });
     });
 
+    describe("functions (opaque immutable leaves)", () => {
+      // `deepFreeze()`/`isDeepFrozen()` treat a function as an opaque immutable
+      // leaf -- a code reference, not fabric data -- so general-purpose callers
+      // that freeze objects-with-methods (e.g. `api/cfc.ts`'s `cfcPattern`) keep
+      // working. Its internal `prototype`/closure mutability is a known
+      // limitation, closed by the strict `FabricValue`-only migration follow-up.
+      it("returns `true` for a function", () => {
+        expect(isDeepFrozen(() => {})).toBe(true);
+        expect(isDeepFrozen(function () {})).toBe(true);
+      });
+
+      it("returns `true` for a frozen graph containing a function", () => {
+        expect(isDeepFrozen(Object.freeze({ a: 1, fn: () => {} }))).toBe(true);
+      });
+
+      it("returns the function unchanged from `deepFreeze()` (does not throw)", () => {
+        const fn = () => {};
+        expect(() => deepFreeze(fn)).not.toThrow();
+        expect(deepFreeze(fn)).toBe(fn);
+      });
+
+      it("freezes a graph containing a function, leaving the function a leaf", () => {
+        const o = deepFreeze({ a: 1, fn: () => {} }) as Record<string, unknown>;
+        expect(Object.isFrozen(o)).toBe(true);
+        expect(typeof o.fn).toBe("function");
+      });
+    });
+
     describe("objects", () => {
       it("returns `false` for an unfrozen empty object", () => {
         expect(isDeepFrozen({})).toBe(false);
