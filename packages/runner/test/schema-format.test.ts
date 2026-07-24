@@ -57,14 +57,18 @@ Deno.test("schemaToTypeString keeps the index-signature value type", () => {
     } as any),
     "Record<string, number>",
   );
-  // Named properties alongside an index signature keep both, TS-style
+  // Named properties alongside an index signature: TS cannot express
+  // "every key except the named ones", so the rest claim renders as a
+  // descriptive comment line (PR #4969 review, both rounds — the inline
+  // index signature was invalid TS, and & Record<string, T> wrongly
+  // constrained the named keys too).
   assertEquals(
     schemaToTypeString({
       type: "object",
       properties: { a: { type: "string" } },
       additionalProperties: { type: "number" },
     } as any),
-    "{\n  a?: string\n} & Record<string, number>",
+    "{\n  a?: string,\n  // other keys: number\n}",
   );
   // Bare additionalProperties: true stays as before
   assertEquals(
@@ -120,18 +124,28 @@ Deno.test("schemaToTypeString parenthesizes union rest elements", () => {
   );
 });
 
-Deno.test("schemaToTypeString parenthesizes intersection rest elements", () => {
+Deno.test("schemaToTypeString parenthesizes function types in array elements", () => {
+  // PR #4969 review round 2: `...({...}) => void[]` and `{...} => void[]`
+  // are invalid/mean something else; function elements need grouping in
+  // both rest and ordinary arrays.
+  const streamItems = {
+    asCell: ["stream"],
+    properties: { value: { type: "string" } },
+  };
   assertEquals(
     schemaToTypeString({
       type: "array",
       prefixItems: [{ type: "string" }],
-      items: {
-        type: "object",
-        properties: { a: { type: "string" } },
-        additionalProperties: { type: "number" },
-      },
+      items: streamItems,
     } as any),
-    "[string, ...({\n  a?: string\n} & Record<string, number>)[]]",
+    "[string, ...(({\n  value?: string\n}) => void)[]]",
+  );
+  assertEquals(
+    schemaToTypeString({
+      type: "array",
+      items: streamItems,
+    } as any),
+    "(({\n  value?: string\n}) => void)[]",
   );
 });
 

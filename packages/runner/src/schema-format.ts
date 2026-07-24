@@ -258,7 +258,9 @@ function schemaToTypeStringInner(
       if (s.items && typeof s.items === "object") {
         slots.push(
           `...${
-            restElementType(schemaToTypeString(s.items as JSONSchema, nextOpts))
+            arrayElementType(
+              schemaToTypeString(s.items as JSONSchema, nextOpts),
+            )
           }[]`,
         );
       } else if (s.items !== false) {
@@ -268,7 +270,7 @@ function schemaToTypeStringInner(
     }
     if (s.items && typeof s.items === "object") {
       const itemType = schemaToTypeString(s.items as JSONSchema, nextOpts);
-      return `${itemType}[]`;
+      return `${arrayElementType(itemType)}[]`;
     }
     return "unknown[]";
   }
@@ -310,19 +312,23 @@ function schemaToTypeStringInner(
       lines.push(`${padding}${key}${optional}: ${propType}`);
     }
 
+    // Named properties alongside an index signature: TypeScript cannot
+    // express "every key EXCEPT the named ones" — an inline index signature
+    // conflicts with incompatible named properties, and an intersection
+    // with Record<string, T> wrongly constrains the named keys too. Render
+    // a descriptive comment line instead (PR #4969 review, both rounds).
+    if (indexValueSchema && lines.length > 0) {
+      const valueType = schemaToTypeString(indexValueSchema, {
+        ...nextOpts,
+        indent: indent + 1,
+      });
+      lines.push(`${padding}// other keys: ${valueType}`);
+    }
+
     if (lines.length === 0) return "{}";
 
     const closePadding = "  ".repeat(indent);
-    const objectType = `{\n${lines.join(",\n")}\n${closePadding}}`;
-
-    // Named properties alongside an index signature render as an
-    // intersection: an inline `[key: string]: T` beside a property whose
-    // type is incompatible with T is invalid TypeScript (PR #4969 review).
-    if (indexValueSchema) {
-      const valueType = schemaToTypeString(indexValueSchema, nextOpts);
-      return `${objectType} & Record<string, ${valueType}>`;
-    }
-    return objectType;
+    return `{\n${lines.join(",\n")}\n${closePadding}}`;
   }
 
   // Fallback
@@ -346,12 +352,14 @@ function typeArrayToUnion(types: readonly unknown[]): string {
 }
 
 /**
- * Wraps a rest-element type in parens when needed: `...(number | string)[]`
- * is valid TS, `...number | string[]` means something else entirely
- * (PR #4969 review).
+ * Wraps an array-element type in parens when `[]` would bind tighter than
+ * the type expression: unions (`(number | string)[]`), intersections, and
+ * function types (`((e: T) => void)[]`) all need grouping — the ungrouped
+ * spellings mean something else entirely (PR #4969 review).
  */
-function restElementType(itemType: string): string {
-  return itemType.includes(" | ") || itemType.includes(" & ")
+function arrayElementType(itemType: string): string {
+  return itemType.includes(" | ") || itemType.includes(" & ") ||
+      itemType.includes("=>")
     ? `(${itemType})`
     : itemType;
 }
