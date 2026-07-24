@@ -103,6 +103,7 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { commitPreconditionValueHash } from "@commonfabric/memory/v2";
 import { snapshotQueryResult } from "./query-result-proxy.ts";
 import { PatternManager } from "./pattern-manager.ts";
+import { PatternUpdater } from "./pattern-updater.ts";
 import type { CompiledModuleArtifact } from "./harness/types.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
@@ -221,11 +222,10 @@ export interface ExperimentalOptions {
    */
   eagerSourceAnnotation?: boolean | undefined;
   /**
-   * Roll a space's system root pattern (default-app / home) forward in place
-   * when its toolshed serves a newer content identity. Default off; enabled per
-   * deployment once CI golden-replay coverage exists. Covers the home root too:
-   * home state survival across an in-place roll is pinned by
-   * home-golden-replay.test.ts. See
+   * Roll toolshed-backed patterns forward in place when their source serves a
+   * newer content identity. Persisted default roots reconcile before start;
+   * other patterns check in the background after instantiation. Default off;
+   * enabled per deployment once CI golden-replay coverage exists. See
    * docs/specs/pattern-imports/pattern-updates.md.
    */
   systemPatternAutoUpdate?: boolean | undefined;
@@ -556,6 +556,7 @@ export class Runtime {
   readonly id: string;
   readonly scheduler: Scheduler;
   readonly patternManager: PatternManager;
+  readonly patternUpdater: PatternUpdater;
   readonly moduleRegistry: ModuleRegistry;
   readonly harness: Engine;
   readonly runner: Runner;
@@ -995,6 +996,7 @@ export class Runtime {
     this.userIdentityDID = options.storageManager.as.did() as DID;
     this.moduleRegistry = new ModuleRegistry(this);
     this.patternManager = new PatternManager(this);
+    this.patternUpdater = new PatternUpdater(this);
     this.runner = new Runner(this);
     this.cfc = new ContextualFlowControl();
     this.cfcEnforcementMode = options.cfcEnforcementMode ??
@@ -1186,6 +1188,10 @@ export class Runtime {
     this.queues.clear();
     // Stop all running docs
     this.runner.stopAll();
+
+    // Background source checks are deliberately outside the scheduler. Abort
+    // and settle them before the storage sessions they may write through close.
+    await this.patternUpdater.dispose();
 
     // Scheduler background work can still be using storage, for example the
     // lifecycle-guarded boot-time persistent-state listing. Let that finish
@@ -1905,20 +1911,29 @@ export class Runtime {
     patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
+    options?: { schedulePatternUpdate?: boolean },
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    options?: { schedulePatternUpdate?: boolean },
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    options: { schedulePatternUpdate?: boolean } = {},
   ): Cell<R> {
-    return this.runner.run<T, R>(tx, patternOrModule, argument, resultCell);
+    return this.runner.run<T, R>(
+      tx,
+      patternOrModule,
+      argument,
+      resultCell,
+      options,
+    );
   }
 
   runSynced(
@@ -1937,8 +1952,11 @@ export class Runtime {
     return this.runner.runSynced(resultCell, pattern, inputs, options);
   }
 
-  start<T = any>(resultCell: Cell<T>): Promise<boolean> {
-    return this.runner.start(resultCell);
+  start<T = any>(
+    resultCell: Cell<T>,
+    options: { schedulePatternUpdate?: boolean } = {},
+  ): Promise<boolean> {
+    return this.runner.start(resultCell, options);
   }
 
   /**

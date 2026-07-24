@@ -575,6 +575,15 @@ export const defaultSettings: IRemoteStorageProviderSettings = {
   connectionTimeout: 30_000,
 };
 
+/**
+ * Max concurrent watch-refresh round trips per space when
+ * `experimentalConcurrentWatchRefresh` is on. Bounds how many requests a
+ * traversal-discovered wave may have outstanding at once — high enough to hide
+ * per-request latency behind a deep waterfall, low enough to keep the server's
+ * receive queue and the client's outstanding-request set bounded.
+ */
+const CONCURRENT_WATCH_REFRESH_WINDOW = 8;
+
 const comparePath = (left: readonly string[], right: readonly string[]) => {
   if (left.length !== right.length) {
     return left.length - right.length;
@@ -1104,6 +1113,11 @@ export class StorageManager implements IStorageManager {
     waiters: Set<(failure: unknown) => void>;
   }>();
   #nextPendingLoadGeneration = 1;
+  // Sync failures already logged, keyed by (space, error identity). A denied
+  // space repeats the identical failure for every doc pulled from it; one line
+  // per distinct failure keeps the surfacing readable. Bounded: at the cap the
+  // set resets, trading a repeated line for an unbounded set.
+  #loggedSyncFailures = new Set<string>();
 
   private registerPendingLoad(
     address: { space: MemorySpace; scope: CellScope; id: URI },
@@ -1127,6 +1141,32 @@ export class StorageManager implements IStorageManager {
       for (const waiter of entry.waiters) waiter(entry.failure);
       entry.waiters.clear();
     };
+  }
+
+  /** Log a sync failure that would otherwise resolve silently, once per
+   * distinct (space, error) pair. The error name and message are the wire
+   * server's own words — for an ACL denial that includes the principal and
+   * space (`Principal <did> lacks READ on space <did>`), which is exactly
+   * what a caller staring at an unexplained `undefined` needs. */
+  private logSyncLoadFailure(
+    space: MemorySpace,
+    id: URI,
+    failure: unknown,
+  ): void {
+    // Pull errors arrive as plain result objects (IConnectionError et al.),
+    // not Error instances — read the fields structurally.
+    const named = failure as { name?: unknown; message?: unknown } | undefined;
+    const name = typeof named?.name === "string" ? named.name : "Error";
+    const message = typeof named?.message === "string"
+      ? named.message
+      : String(failure);
+    const key = `${space}|${name}|${message}`;
+    if (this.#loggedSyncFailures.has(key)) return;
+    if (this.#loggedSyncFailures.size >= 256) this.#loggedSyncFailures.clear();
+    this.#loggedSyncFailures.add(key);
+    logger.error("sync-load-failure", () => [
+      `sync completed without data for ${id} in ${space}: ${name}: ${message}`,
+    ]);
   }
 
   pendingLoadAddresses(): readonly {
@@ -1220,6 +1260,14 @@ export class StorageManager implements IStorageManager {
         }).get?.(id, scope),
       );
       loadFailure ??= schemaFailure;
+      // A pull that "succeeds" while carrying an error (an ACL denial, a
+      // transport failure) otherwise resolves this sync() normally and the
+      // caller reads the doc as absent — deny, error, and absent all collapse
+      // into the same silent undefined. Surface the failure; the pending-load
+      // ledger below still carries it to scheduler waiters.
+      if (loadFailure !== undefined) {
+        this.logSyncLoadFailure(space, id, loadFailure);
+      }
       return cell;
     } catch (error) {
       loadFailure = error;
@@ -1259,6 +1307,11 @@ export class StorageManager implements IStorageManager {
     }
     return work.then(
       (result) => {
+        // Same silent-collapse hazard as syncCell: a link-target pull that
+        // resolves while carrying an error reads as an absent target.
+        if (result.error !== undefined) {
+          this.logSyncLoadFailure(address.space, address.id, result.error);
+        }
         releaseLoad(result.error);
         return result;
       },
@@ -1645,13 +1698,20 @@ class SpaceReplica implements ISpaceReplica {
   #staleFloor = new Map<string, number>();
   #queuedWatchRefresh: WatchRefreshBatch | null = null;
   #queuedWatchRefreshScheduled = false;
-  #watchRefreshFlushing = false;
+  // Number of watch-refresh round trips currently awaiting a response. Capped
+  // at `#maxWatchRefreshInFlight()` (1 = single-flight; the concurrent window
+  // otherwise) so a large incrementally-discovered wave cannot put an unbounded
+  // number of requests on the wire.
+  #watchRefreshInFlight = 0;
+
+  #settings: IRemoteStorageProviderSettings;
 
   constructor(options: ProviderOptions) {
     this.#space = options.space;
     this.#subscription = options.subscription;
     this.#createSession = options.createSession;
     this.#getTelemetry = options.getTelemetry ?? (() => undefined);
+    this.#settings = options.settings;
   }
 
   did(): MemorySpace {
@@ -2165,6 +2225,14 @@ class SpaceReplica implements ISpaceReplica {
   ): Promise<Result<Unit, PullError>> {
     try {
       const { session } = await this.sessionHandle();
+      // Per-session (no global): mirror the storage setting onto the session so
+      // its watch-mutation family (set + add) uses the ordered-issue concurrent
+      // path. Idempotent; cheap to re-assert each refresh. Optional-chained so
+      // lightweight session doubles in tests (which never opt into concurrency)
+      // are unaffected.
+      session.setConcurrentWatchRefresh?.(
+        this.#settings.experimentalConcurrentWatchRefresh === true,
+      );
       const rawEntries = [...entries];
       const watchEntries = compactWatchEntries(rawEntries);
       if (watchEntries.length === 0) {
@@ -2239,24 +2307,47 @@ class SpaceReplica implements ISpaceReplica {
     return batch.pending.promise;
   }
 
+  /**
+   * Max watch-refresh round trips allowed in flight at once. 1 preserves the
+   * historical strict single-flight behavior; with
+   * `experimentalConcurrentWatchRefresh` on, refreshes overlap up to a bounded
+   * window so traversal-discovered waves fan out WITHOUT an unbounded number of
+   * outstanding requests (backpressure).
+   */
+  #maxWatchRefreshInFlight(): number {
+    return this.#settings.experimentalConcurrentWatchRefresh === true
+      ? CONCURRENT_WATCH_REFRESH_WINDOW
+      : 1;
+  }
+
   private scheduleWatchRefreshFlush(): void {
+    // Flush the queued batch when a slot is free. Same-tick coalescing (via
+    // `#queuedWatchRefreshScheduled` + the merge in `enqueueWatchRefresh`) is
+    // unchanged; the window bounds cross-RTT concurrency (1 = single-flight).
     if (
       this.#queuedWatchRefresh === null ||
       this.#queuedWatchRefreshScheduled ||
-      this.#watchRefreshFlushing
+      this.#watchRefreshInFlight >= this.#maxWatchRefreshInFlight()
     ) {
       return;
     }
     this.#queuedWatchRefreshScheduled = true;
     queueMicrotask(() => {
       this.#queuedWatchRefreshScheduled = false;
-      if (this.#watchRefreshFlushing || this.#queuedWatchRefresh === null) {
+      if (
+        this.#queuedWatchRefresh === null ||
+        this.#watchRefreshInFlight >= this.#maxWatchRefreshInFlight()
+      ) {
         return;
       }
       const batch = this.#queuedWatchRefresh;
       this.#queuedWatchRefresh = null;
-      this.#watchRefreshFlushing = true;
+      this.#watchRefreshInFlight += 1;
       void this.flushWatchRefreshBatch(batch);
+      // If the window admits more and another batch has already coalesced,
+      // schedule it now; otherwise the flush's `finally` re-schedules as slots
+      // free.
+      this.scheduleWatchRefreshFlush();
     });
   }
 
@@ -2270,7 +2361,7 @@ class SpaceReplica implements ISpaceReplica {
     } catch (error) {
       batch.pending.resolve({ error: toConnectionError(error) });
     } finally {
-      this.#watchRefreshFlushing = false;
+      this.#watchRefreshInFlight -= 1;
       this.scheduleWatchRefreshFlush();
     }
   }

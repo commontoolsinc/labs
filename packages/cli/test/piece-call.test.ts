@@ -2,7 +2,18 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { JSONSchema } from "@commonfabric/api";
 import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
-import { executePieceCallable } from "../lib/piece.ts";
+import {
+  executePieceCallable,
+  PieceResultProjectionError,
+} from "../lib/piece.ts";
+import {
+  exitWithDataError,
+  isPieceGetDataError,
+  pieceCallRawArgs,
+  pieceGetDataErrorReport,
+  pieceLinkDataErrorReport,
+} from "../commands/piece.ts";
+import { LinkValidationError } from "../lib/piece.ts";
 
 describe("executePieceCallable", () => {
   it("invokes handlers from schema-derived flags", async () => {
@@ -803,3 +814,275 @@ function getChildSchema(
 
   return properties[key] as JSONSchema | undefined;
 }
+
+describe("piece call stdin payloads", () => {
+  it('maps a bare "-" payload onto the --json-file stdin path', () => {
+    expect(pieceCallRawArgs(["-"], [])).toEqual(["--json-file", "-"]);
+  });
+
+  it("forwards explicit two-token stdin sentinels instead of rejecting them", () => {
+    // `cf piece call h --json-file -` (and the --value-file / --json variants)
+    // should read stdin, matching `cf exec` and the bare "-" form, rather than
+    // hitting the multi-argument rejection.
+    expect(pieceCallRawArgs(["--json-file", "-"], [])).toEqual([
+      "--json-file",
+      "-",
+    ]);
+    expect(pieceCallRawArgs(["--value-file", "-"], [])).toEqual([
+      "--value-file",
+      "-",
+    ]);
+    expect(pieceCallRawArgs(["--json", "-"], [])).toEqual(["--json", "-"]);
+    // A file path (not "-") still requires "--"; it is not a stdin sentinel.
+    expect(() => pieceCallRawArgs(["--json-file", "/p.json"], [])).toThrow(
+      /single inline JSON argument or "--"/,
+    );
+  });
+
+  it("rejects a payload token combined with post-`--` flags instead of dropping it", () => {
+    // `cf piece call h - -- --query milk` → tail=["-"], literalArgs=["--query",
+    // "milk"]. The "-" used to be silently ignored (post-`--` flags win); now
+    // the conflict is loud.
+    expect(() => pieceCallRawArgs(["-"], ["--query", "milk"])).toThrow(
+      /payload argument .* or .* schema-derived flags after/,
+    );
+    expect(() => pieceCallRawArgs(['{"x":1}'], ["--query", "milk"])).toThrow(
+      /not both/,
+    );
+    // The legit "flags after -- only" shape (tail empty) still passes through.
+    expect(pieceCallRawArgs([], ["--query", "milk"])).toEqual([
+      "--query",
+      "milk",
+    ]);
+  });
+
+  it('reads the payload from stdin for a bare "-"', async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+    });
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "recordMessage",
+      ["--json-file", "-"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => false,
+        readTextInput: () => Promise.resolve('{"message":"from stdin"}'),
+      },
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["recordMessage"],
+        value: { message: "from stdin" },
+      },
+    ]);
+  });
+
+  it('treats "--json -" as the stdin sentinel', async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+    });
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "recordMessage",
+      ["--json", "-"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => false,
+        readTextInput: () => Promise.resolve('{"message":"json stdin"}'),
+      },
+    );
+
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["recordMessage"],
+        value: { message: "json stdin" },
+      },
+    ]);
+  });
+
+  it('fails loudly when "-" gets empty stdin', async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+    });
+
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "recordMessage",
+        ["--json-file", "-"],
+        {
+          loadManager: () => Promise.resolve(harness.manager),
+          loadPiece: () => Promise.resolve(harness.piece),
+          isStdinTerminal: () => false,
+          readTextInput: () => Promise.resolve(""),
+        },
+      ),
+    ).rejects.toThrow(/Expected JSON from stdin/);
+  });
+});
+
+describe("piece get data errors", () => {
+  it("classifies unresolved-path failures as data errors, not usage errors", () => {
+    expect(
+      isPieceGetDataError(
+        new Error('Cannot access path "bogus" - property "bogus" not found'),
+      ),
+    ).toBe(true);
+    expect(isPieceGetDataError(new Error("network unreachable"))).toBe(false);
+    expect(isPieceGetDataError("Cannot access path")).toBe(false);
+  });
+
+  it("reports a result-mode data error with an --input hint", () => {
+    const report = pieceGetDataErrorReport(
+      new Error('Cannot access path "x" - property "x" not found'),
+      { input: false, piece: "fid1:piece-123" },
+    );
+    expect(report?.message).toMatch(/Cannot access path "x"/);
+    expect(report?.hint).toMatch(/retry with --input/);
+    expect(report?.hint).toMatch(/fid1:piece-123/);
+  });
+
+  it("omits the hint in input mode (nothing left to suggest)", () => {
+    const report = pieceGetDataErrorReport(
+      new Error('Cannot access path "x" - property "x" not found'),
+      { input: true, piece: "fid1:piece-123" },
+    );
+    expect(report?.message).toMatch(/Cannot access path "x"/);
+    expect(report?.hint).toBeUndefined();
+  });
+
+  it("returns null for a non-data error (caller rethrows)", () => {
+    expect(
+      pieceGetDataErrorReport(new Error("network unreachable"), {
+        input: false,
+        piece: "fid1:piece-123",
+      }),
+    ).toBeNull();
+  });
+
+  it("treats a result-projection failure as a data error, keeping its own --step hint", () => {
+    const projectionError = new PieceResultProjectionError(
+      ["totalSpent"],
+      false,
+    );
+    expect(isPieceGetDataError(projectionError)).toBe(true);
+    const report = pieceGetDataErrorReport(projectionError, {
+      input: false,
+      piece: "fid1:piece-123",
+    });
+    // The message carries its own --step guidance; we must not bury it under
+    // the generic --input tip (a different remedy).
+    expect(report?.message).toMatch(/schema could not resolve/);
+    expect(report?.message).toMatch(/--step/);
+    expect(report?.hint).toBeUndefined();
+  });
+});
+
+describe("piece link data errors", () => {
+  it("reports a validation failure with an inspect hint for both pieces", () => {
+    const report = pieceLinkDataErrorReport(
+      new LinkValidationError(
+        'Target path "config/email" does not exist on piece fid1:target-1\n\nUse --allow-non-existing to link anyway.',
+      ),
+      { sourcePieceId: "fid1:source-1", targetPieceId: "fid1:target-1" },
+    );
+    // The runtime's message survives verbatim — it carries its own
+    // --allow-non-existing next step — and the hint adds the inspect pointer.
+    expect(report?.message).toMatch(/does not exist on piece fid1:target-1/);
+    expect(report?.message).toMatch(/--allow-non-existing/);
+    expect(report?.hint).toMatch(/piece inspect/);
+    expect(report?.hint).toMatch(/fid1:source-1/);
+    expect(report?.hint).toMatch(/fid1:target-1/);
+  });
+
+  it("returns null for a non-validation error (caller rethrows)", () => {
+    expect(
+      pieceLinkDataErrorReport(new Error("network unreachable"), {
+        sourcePieceId: "fid1:source-1",
+        targetPieceId: "fid1:target-1",
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("exitWithDataError", () => {
+  const exitSentinel = (exited: number[]) => (code: number): never => {
+    exited.push(code);
+    throw new Error("exit-sentinel");
+  };
+
+  it("prints message then hint to stderr sinks and exits 1", () => {
+    const printed: string[] = [];
+    const exited: number[] = [];
+    expect(() =>
+      exitWithDataError({ message: "boom", hint: "TIP: look closer" }, {
+        printError: (m) => printed.push(`error:${m}`),
+        printHint: (m) => printed.push(`hint:${m}`),
+        exit: exitSentinel(exited),
+      })
+    ).toThrow("exit-sentinel");
+    expect(printed).toEqual(["error:boom", "hint:TIP: look closer"]);
+    expect(exited).toEqual([1]);
+  });
+
+  it("omits the hint line when the report has none", () => {
+    const printed: string[] = [];
+    const exited: number[] = [];
+    expect(() =>
+      exitWithDataError({ message: "boom" }, {
+        printError: (m) => printed.push(`error:${m}`),
+        printHint: (m) => printed.push(`hint:${m}`),
+        exit: exitSentinel(exited),
+      })
+    ).toThrow("exit-sentinel");
+    expect(printed).toEqual(["error:boom"]);
+    expect(exited).toEqual([1]);
+  });
+});

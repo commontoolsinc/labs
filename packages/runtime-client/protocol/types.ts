@@ -210,6 +210,13 @@ export interface InitializationData {
   // pulls at teardown via GetPatternCoverage. Test/CI only (the coverage shell
   // build sets it); off by default. See docs/development/COVERAGE.md.
   patternCoverage?: boolean;
+  // When true, the worker's remote storage overlaps watch-refresh round trips
+  // up to a bounded window instead of the default strict single-flight
+  // (`experimentalConcurrentWatchRefresh`, docs/development/EXPERIMENTAL_OPTIONS.md).
+  // Fixed at StorageManager.open time, so like the render ceiling it takes
+  // effect on the next runtime (reload), not live. Off by default; the shell
+  // dogfood toggle `commonfabric.concurrentWatchRefresh()` sets it.
+  concurrentWatchRefresh?: boolean;
 }
 
 export interface InitializeRequest extends BaseRequest {

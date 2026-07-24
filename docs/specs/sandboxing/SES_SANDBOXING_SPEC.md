@@ -722,17 +722,36 @@ Lockdown options are derived from `debug`:
 
 ```typescript
 // Shown for illustration only.
-lockdown({
+const options = {
   errorTaming: debug ? "unsafe" : "safe",
   stackFiltering: debug ? "verbose" : "concise",
   overrideTaming: "severe",
   consoleTaming: "unsafe",
   localeTaming: "unsafe", // paired with the pre-lockdown locale sanitizer
-});
+};
+
+sanitizeLocaleMethods(); // vetted shim; before the intrinsics freeze
+repairIntrinsics(options);
+restoreErrorIsError(); // vetted shim; only this seam has both constructors
+hardenIntrinsics();
 ```
 
 Notes:
 
+- `lockdown(options)` is exactly `repairIntrinsics(options)` followed by
+  `hardenIntrinsics()`. The runtime spells out the two phases because the
+  `Error.isError` shim has nowhere else to run: SES's error taming rebuilds the
+  `Error` constructor and copies forward only `length`, `prototype` and the V8
+  stack surface, so the method exists neither before the repair (the
+  constructors are not minted yet) nor after the harden (they are frozen). Every
+  `ses` release through 2.2.0 drops it, and `permits.js` listing `isError` does
+  not help — a permit lets a property survive, it never adds one. Two
+  constructors need the restoration, not one: `%InitialError%` for the host
+  realm and `%SharedError%` for compartments, the latter reachable only as
+  `Error.prototype.constructor`. See
+  `packages/runner/src/sandbox/error-taming.ts`. The phase call reveals
+  `globalThis.hardenIntrinsics`, which the runtime deletes afterwards so the
+  host realm's global surface matches the one-call form.
 - `overrideTaming: "severe"` remains the compatibility default.
 - `localeTaming: "unsafe"` is load-bearing only together with the pre-lockdown
   vetted shim in `packages/runner/src/sandbox/locale-taming.ts`, which replaces
@@ -876,12 +895,12 @@ is feature detection: `typeof Proxy` no longer compiles, though coping with an
 absent global is the whole point of that idiom. Code that needs to ask must go
 through a `globalThis` record.
 
-`SANDBOX_UNRESOLVED_GLOBAL_GAPS` alongside it lists the names that still
-violate this rule: the timers, `queueMicrotask`, and `Intl`. Each is a live
-instance of the bug, held to an exact list by the same test so the set cannot
-grow. They are listed rather than stripped because several API clients under
-`packages/patterns` build retry backoff out of `setTimeout`, so the
-declarations cannot go until that code does.
+The contract test enforces this as a zero-gap invariant: the set of globals the
+compiler declares but the Compartment lacks must be empty. A type-library change
+that reintroduces a gap fails the test until the new name is endowed or
+withheld. Withholding a `declare namespace` such as `Intl` removes only its
+value members, so its interfaces stay and authored code can still name the types
+even though it cannot construct the objects.
 
 Notably, SES stops listing `Float32Array` and `Float64Array` as universal
 globals as of version 2. A NaN carries spare mantissa bits, and storing one

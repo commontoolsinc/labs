@@ -365,7 +365,7 @@ export class PieceManager {
   }
 
   /**
-   * Find all pieces that the given piece reads data from via aliases or links.
+   * Find all pieces that the given piece reads data from via sigil links.
    * This identifies dependencies that the piece has on other pieces.
    * @param piece The piece to check
    * @returns Array of pieces that are read from
@@ -518,7 +518,7 @@ export class PieceManager {
   }
 
   /**
-   * Find all pieces that read data from the given piece via aliases or links.
+   * Find all pieces that read data from the given piece via sigil links.
    * This identifies which pieces depend on this piece.
    * @param piece The piece to check
    * @returns Array of pieces that read from this piece
@@ -862,14 +862,17 @@ export class PieceManager {
   }
 
   /** Start scheduling and running a prepared piece. */
-  async startPiece<T = unknown>(pieceOrId: string | Cell<T>): Promise<void> {
+  async startPiece<T = unknown>(
+    pieceOrId: string | Cell<T>,
+    options: { schedulePatternUpdate?: boolean } = {},
+  ): Promise<void> {
     const piece = typeof pieceOrId === "string"
       ? await timePiecePhase("startPiece.get", () => this.get<T>(pieceOrId))
       : pieceOrId;
     if (!piece) throw new Error("Piece not found");
     await timePiecePhase(
       "startPiece.runtime.start",
-      () => this.runtime.start(piece),
+      () => this.runtime.start(piece, options),
     );
     await timePiecePhase(
       "startPiece.result.pull",

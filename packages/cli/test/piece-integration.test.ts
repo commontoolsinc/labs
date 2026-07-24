@@ -131,6 +131,8 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
     expect(code).toBe(0);
     const json = JSON.parse(stdout.join(""));
     expect(typeof json).toBe("object");
+    expect(json).not.toBeNull();
+    expect(json.content).toBe(NOTE_CONTENT);
   });
 
   it("reports present result data that cannot project in a fresh session", async () => {

@@ -84,7 +84,7 @@ export function createSemantics(
 ): Semantics | null {
   let sections: SectionFile[];
   try {
-    sections = splitSections(text, options.fileName ?? "transformed.ts");
+    sections = splitSections(text, options.fileName ?? "transformed.tsx");
   } catch {
     return null;
   }

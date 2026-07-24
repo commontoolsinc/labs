@@ -43,19 +43,19 @@ describe("materializer envelope collection", () => {
   const collect = (
     argumentSchema: unknown,
     inputs: unknown,
-    processCell: unknown,
+    resultCell: unknown,
     writeInputPaths?: readonly (readonly string[])[],
   ): NormalizedFullLink[] =>
     // deno-lint-ignore no-explicit-any
     (runtime.runner as any).collectWritableCellArgumentLinks(
       argumentSchema,
       inputs,
-      processCell,
+      resultCell,
       writeInputPaths,
     );
 
   const setup = () => {
-    const processCell = runtime.getCell(space, "envelope-process");
+    const resultCell = runtime.getCell(space, "envelope-result");
     const notifyCell = runtime.getCell(space, "envelope-notify-stream");
     const targetCell = runtime.getCell<number>(space, "envelope-target");
     const argumentSchema = {
@@ -66,15 +66,15 @@ describe("materializer envelope collection", () => {
       },
     };
     const inputs = {
-      notify: notifyCell.getAsWriteRedirectLink({ base: processCell }),
-      target: targetCell.getAsWriteRedirectLink({ base: processCell }),
+      notify: notifyCell.getAsWriteRedirectLink({ base: resultCell }),
+      target: targetCell.getAsWriteRedirectLink({ base: resultCell }),
     };
-    return { processCell, targetCell, argumentSchema, inputs };
+    return { resultCell, targetCell, argumentSchema, inputs };
   };
 
   it("collects cell-branded write paths but prunes stream-branded ones", () => {
-    const { processCell, targetCell, argumentSchema, inputs } = setup();
-    const envelopes = collect(argumentSchema, inputs, processCell, [
+    const { resultCell, targetCell, argumentSchema, inputs } = setup();
+    const envelopes = collect(argumentSchema, inputs, resultCell, [
       ["notify"],
       ["target"],
     ]);
@@ -87,16 +87,16 @@ describe("materializer envelope collection", () => {
     // stream. The cell-branded arg does not path-match, the stream path does
     // not brand-match — "collect none" is the correct, precise result (more
     // precise than the opaque-result fallback's collect-all-writable-args).
-    const { processCell, argumentSchema, inputs } = setup();
-    const envelopes = collect(argumentSchema, inputs, processCell, [
+    const { resultCell, argumentSchema, inputs } = setup();
+    const envelopes = collect(argumentSchema, inputs, resultCell, [
       ["notify"],
     ]);
     expect(envelopes).toEqual([]);
   });
 
   it("collects the cell-branded path when the metadata names it alone", () => {
-    const { processCell, targetCell, argumentSchema, inputs } = setup();
-    const envelopes = collect(argumentSchema, inputs, processCell, [
+    const { resultCell, targetCell, argumentSchema, inputs } = setup();
+    const envelopes = collect(argumentSchema, inputs, resultCell, [
       ["target"],
     ]);
     expect(envelopes.length).toBe(1);

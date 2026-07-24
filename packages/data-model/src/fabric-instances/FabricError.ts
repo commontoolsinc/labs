@@ -1,5 +1,6 @@
 import type { FabricValue } from "@/interface.ts";
 import {
+  DEEP_CLONE_CORE,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
@@ -10,7 +11,7 @@ import {
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
 import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
-import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
+import { deepFreeze } from "@/deep-freeze.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { FrozenSet } from "@/frozen-builtins.ts";
 import { EmptyReconstructionContext } from "@/codec-common/EmptyReconstructionContext.ts";
@@ -317,25 +318,29 @@ export class FabricError extends FabricNativeWrapper<Error> {
     return frozen ? Object.freeze(error) : error;
   }
 
-  /** @inheritDoc */
-  override deepClone(frozen: boolean): FabricError {
-    if (frozen && isDeepFrozen(this)) return this;
-
-    // The codec honors `context.shouldDeepFreeze`. This clone path owns its own
-    // frozenness decision via the wrapper `frozen ? deepFreeze : result` below,
-    // so pre-freezing inside the codec would be redundant when `frozen` is true
-    // and wrong when it is false. Match the context to this clone's intent.
+  /**
+   * @inheritDoc
+   *
+   * Round-trips through the codec, matching the codec's `shouldDeepFreeze` to
+   * this clone's `frozen` intent (the `deepClone()` template owns the final
+   * top-level freeze).
+   *
+   * KNOWN GAP (pre-existing): `encode()` passes `cause` and the extras through
+   * by reference, so an unfrozen clone still SHARES those nested values with
+   * the original -- it is not yet fully deeply independent. Pinned by a test
+   * in `FabricError.test.ts`.
+   */
+  protected override [DEEP_CLONE_CORE](frozen: boolean): FabricError {
     const codec = FabricError[CODEC];
     const reconstructContext = new EmptyReconstructionContext(
       frozen,
       "no runtime context (FabricError deep-clone path).",
     );
-    const result = codec.decode(
+    return codec.decode(
       CODEC_TYPE_TAGS.Error,
       codec.encode(this),
       reconstructContext,
     ) as FabricError;
-    return frozen ? deepFreeze(result) : result;
   }
 
   static #codec = Object.freeze(

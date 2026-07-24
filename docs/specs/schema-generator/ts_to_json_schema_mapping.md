@@ -159,7 +159,7 @@ by any repo test.
 | `Record<K,V>` with finite literal-union `K` | expands to concrete `properties` (checker-driven property enumeration) | via `ObjectFormatter`; fixture `record-union-keys` | record-mapped-types.test.ts |
 | Functions / callables / constructables | property skipped entirely (not in `properties`, not in `required`) — **except** callable properties whose call signature returns `Stream`/`Cell`/`SqliteDb` (ModuleFactory/HandlerFactory shapes): kept as `{ asCell: ["stream"/"cell"/"sqlite"] }` and they participate in `required` | skip: `type-utils.ts:558-575`, `object-formatter.ts:233-238,259,269-287`; exception: `object-formatter.ts:44-67` (only those three kinds; capability cells like `ReadonlyCell` returns are *not* kept) | pattern-with-types fixtures |
 | TS `enum` declaration | hoisted under the enum name with **no `type` key** (all-literal union path, §8): numeric → `$defs: { Color: { enum: [0,1,2] } }` + `$ref`; string → `$defs: { Mode: { enum: ["on","off"] } }` | union path `union-formatter.ts:176-214`; hoisting §5 | `test/enum-schema-rows.test.ts` |
-| Single enum member type (`Mode.On`) | hoisted under the **bare member name**: `$defs: { On: { type: "string", enum: ["on"] } }` — two enums sharing a member name **collide** on the `$defs` key (first wins: the second property `$ref`s the wrong value set), and an enum member colliding with an interface name steals its `$ref` (order-dependent). KNOWN BUG | pinned: `test/enum-member-hoisting.test.ts` | — |
+| Single enum member type (`Mode.On`) | inline literal schema, e.g. `{ type: "string", enum: ["on"] }`; enum-member symbols are excluded from named-type hoisting so same-named members and unrelated named types cannot collide in `$defs` | `getNamedTypeKey`, `type-utils.ts`; pinned by `test/enum-member-hoisting.test.ts` | — |
 | `Date` / `URL` / typed arrays / etc. | native table, §5.2 | `native-type-formatter.ts:5-28` | date-types fixture, native-type tests |
 | `Map`/`WeakMap`/`Set`/`WeakSet` | **throws** (§13) | `type-utils.ts:400-411` | schema-generator.test.ts:643-682 |
 | `Reactive<T>` | erases to `<T>`'s schema, **no marker** (§6.4) | — | capability-wrapper-types.test.ts:118-132 |
@@ -195,7 +195,8 @@ these holds:
   aliasSymbol fallback (`:472-477`), so **non-generic aliases to type literals
   hoist under the alias name** (fixture `shared-type`: `type Shared = {…}` →
   `$defs.Shared` + two `$ref`s);
-- the symbol is property/method/signature/function/type-parameter-like
+- the symbol is property/method/signature/function/type-parameter-like or an
+  enum member
   (`:483-501`);
 - the name is `Array`/`ReadonlyArray` (`:503`), a wrapper name by symbol
   (`:504-509`), or in the `NativeTypeFormatter` table (`:511-514`, §5.2);
@@ -205,11 +206,11 @@ these holds:
 - the type is a **generic interface/class instantiation** without an alias name
   (`typeParameters` + `typeArguments` on the reference target) (`:537-550`).
 
-Everything else — interfaces, classes, named aliases, and (observed) TS enums
-and even enum members — hoists under its bare symbol name. There is no
-source-file qualification and no collision disambiguation on the `$defs` key:
-the first definition stored under a name wins; later same-named types emit
-`$ref`s to it (`:397-407`).
+Everything else — interfaces, classes, named aliases, and TS enum declarations
+— hoists under its bare symbol name. Enum members stay inline. There is no
+source-file qualification and no collision disambiguation for other named
+types on the `$defs` key: the first definition stored under a name wins; later
+same-named types emit `$ref`s to it (`:397-407`).
 
 ### 5.2 Native leaf table
 
@@ -534,7 +535,7 @@ inside those payloads.
 | `MaxConfidentiality<T, C>` | `{ maxConfidentiality: C }` |
 | `AnyOf<X>` | when nested in an IFC label tuple, one atom `{ anyOf: X }` |
 | `PolicyOf<typeof rules>` | when nested in an IFC label tuple, a policy atom carrying a compile-time module-binding marker; the ts-transformer resolves it to `{ type, policyRefKind: "module", subject, moduleIdentity, symbol, policyDigest }` |
-| `WriteAuthorizedBy<T, typeof b>` | `{ writeAuthorizedBy: { __ctWriterIdentityOf: { file, path: [binding] } } }` (`:1444-1532`) |
+| `WriteAuthorizedBy<T, typeof b>` | `{ writeAuthorizedBy: { __ctWriterIdentityOf: { file, path: [binding], moduleIdentity? } } }` (`:1444-1539`) |
 | `TrustedActionWriteWithIntegrity<…>` | writeAuthorizedBy metadata + `uiContract { helper: "UiAction", action, trustedPattern, requiredEventIntegrity }` (`:1340-1347,1455-1478`) |
 | `TrustedActionWrite<…>` | same, with `requiredEventIntegrity` defaulting to `[trustedPattern]` (`:1349-1358`) |
 | `TrustedActionUiContract<…>` | `{ uiContract: { helper: "UiAction", action, trustedPattern, requiredEventIntegrity? } }` (`:1359-1371`) |
@@ -565,13 +566,17 @@ Mechanics:
   (`mergeIfcMetadata`, `:1554-1570`); boolean schemas become `{ ifc }` /
   `{ not: true, ifc }`.
 - `WriteAuthorizedBy` writer identity resolves through import aliases to the
-  declaring file; the file name is normalized (backslashes → `/`, first path
-  segment stripped — `normalizeWriterIdentityFile`, `:2237-2241`). The
-  transformer **duplicates** this attachment for
-  `toSchema<WriteAuthorizedBy<T, typeof b>>()`
-  (`ts-transformers/.../schema-generator.ts:29-40,126-131,347-428`), with a
-  marker AST form so the identity survives literal emission (`:170-171,
-  399-422`).
+  declaring file. A transformer caller supplies
+  `writerIdentityForSourceFile`, which maps that compile name to its authored
+  spelling and can attach the defining source's content-addressed
+  `moduleIdentity`; the runner supplies both, so engine-minted claims are born
+  stamped. A transformer identity map that omits the defining source is a
+  compile error, rather than a silent downgrade to an unstamped claim.
+  Standalone schema-generator callers that omit the callback retain
+  the legacy fallback (backslashes → `/`, first path segment stripped by
+  `normalizeWriterIdentityFile`). The transformer also handles the direct-root
+  `toSchema<WriteAuthorizedBy<T, typeof b>>()` form specially so the wrapper's
+  value schema remains the root while the same identity marker is attached.
 - `SchemaGeneratorTransformer.resolvePolicyOfMarkers` replaces a valid policy
   marker with the compiled module identity, exported symbol, and policy digest.
   If it cannot match a compiler-verified exported `exchangeRules()` binding,
@@ -703,11 +708,9 @@ synthetic node resolution failure → `any` → `true`
    (`cfc.ts:528-536`, traversal in `cfc/schema-refs.ts:81` /
    `schema-merge.ts:272`) and the api dialect declares it — emission here is
    the missing half, gated on the pruning-safety argument above.
-2. **TS enums** — hoisted `{ enum: […] }` defs with no `type` key; enum
-   members hoist under the bare member name with a **confirmed** cross-enum
-   `$defs` collision (first wins, silent wrong-value schemas; cross-kind
-   collision with same-named interfaces confirmed order-dependent). KNOWN
-   BUG. Pinned by `test/enum-member-hoisting.test.ts` +
+2. **TS enums** — whole enum declarations hoist `{ enum: […] }` defs with no
+   `type` key; individual enum-member types stay inline to avoid `$defs` name
+   collisions. Pinned by `test/enum-member-hoisting.test.ts` +
    `test/enum-schema-rows.test.ts`.
 3. **`widenLiterals` is incoherent at the literal-union boundary** (§14;
    pinned by `test/widen-literals.test.ts`): all-literal unions stay enums

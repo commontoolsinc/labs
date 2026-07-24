@@ -1,5 +1,10 @@
 {
   "name": "@commonfabric/piece",
+  "imports": {
+    // Test-only: the setsrc retained-capability-link test seeds a real
+    // on-disk sqlite file so the disk-source registry is exercised for real.
+    "@db/sqlite": "jsr:@db/sqlite@0.13.0"
+  },
   "tasks": {
     // --no-check: this package is type-checked by `deno task check` (tasks/check.sh).
     "test": "deno test --no-check --allow-env --allow-ffi --allow-read --allow-write"

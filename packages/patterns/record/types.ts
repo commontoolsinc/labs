@@ -33,6 +33,7 @@ export interface SubPieceEntry {
   piece: unknown; // Reference to the actual sub-piece pattern instance
   schema?: JSONSchema; // Schema captured at creation time for dynamic discovery
   note?: string; // User annotation about this module (visible to LLM reads, not extraction)
+  label?: string; // Standard label chosen for this module at creation (e.g. email "Personal"/"Work"), used to pick the next unused default
 }
 
 /**

@@ -18,6 +18,51 @@ deno task cf piece --help     # Piece operations
 deno task cf check --help     # Type checking
 ```
 
+## Invocation Paths
+
+Three equivalent ways to run the CLI, in order of preference for agents:
+
+1. **Built binary (recommended for scripted/agent use):**
+
+   ```bash
+   deno task build-binaries --cli-only   # produces dist/cf
+   export PATH="$PWD/dist:$PATH"         # or copy dist/cf onto PATH
+   cf piece ls ...                       # works from any cwd, no Deno noise
+   ```
+
+   The binary is fully cwd-independent and prints nothing but CLI output.
+   **Rebuild it after every `git pull`** — a stale binary rejects newer flags
+   and can hit wire-protocol skew against an updated server.
+
+2. **`deno task cf ...`** — works from any directory inside the repo (the
+   launcher resolves the repo root itself and runs the CLI from your invoking
+   cwd). Deno prints a one-line `Task cf ...` echo to stderr; silence it with
+   `deno -q task cf ...`. stdout stays clean, so redirection is safe.
+
+3. **`deno run -q -A packages/cli/mod.ts ...`** — repo-root-relative; only works
+   with the repo root as cwd. The `-q` suppresses Deno's own warnings (e.g. the
+   npm "Ignored build scripts" banner).
+
+## Output Conventions (scripts & agents)
+
+- stdout carries command output only; hints, tips and diagnostics go to stderr.
+  `piece get` prints plain JSON, with no ANSI to strip — except an absent value
+  prints the literal `undefined`, which is not valid JSON, so test for it before
+  parsing (it stays `undefined` rather than `null`; see the loom note in
+  `packages/cli/README.md` for why).
+- ANSI colors are emitted only when stdout is a TTY. Force off with `--no-color`
+  or `NO_COLOR=1`; force on (e.g. through a pager) with `FORCE_COLOR=1`.
+  (`cf view` keeps its own `--color` flag.)
+- `-q/--quiet` (on `piece`/`wish` subcommands) suppresses hints and next-step
+  blocks on stderr. To also drop runtime warnings, add `--log-level error` (`-q`
+  deliberately leaves the log floor alone — scripts parse those warnings).
+- `piece call` payloads: inline JSON argument, `-` to read stdin
+  (`echo '{...}' | cf piece call ... handler -`), a bare pipe with no payload
+  argument, or schema-derived flags after `--`. Empty stdin fails loudly.
+- A `piece get` path that doesn't resolve is a data error: one-line message on
+  stderr, exit 1 (no usage screen). A `piece link` that fails validation
+  (missing source/target piece or path) reports the same way.
+
 ## Environment Setup
 
 **Identity key** (required for most operations):
@@ -52,9 +97,9 @@ different derivations and produce different DIDs from the same text. Use
 `from-mnemonic` to match browser mnemonic login; see
 `docs/development/SHARED_IDENTITY.md`.
 
-**IMPORTANT:** Do NOT use `deno task cf id new > file` — the `deno task` wrapper
-prints ANSI-colored preamble to stdout, which pollutes the key file. Always use
-`deno run -A packages/cli/mod.ts` when redirecting output.
+Redirecting stdout (as above) is safe through any invocation path: the
+`deno task` echo and all Deno/CLI diagnostics go to stderr, so
+`deno task cf id new > cf.key` produces a clean key file.
 
 **Environment variables** (avoid repeating flags):
 
@@ -229,8 +274,9 @@ cf fuse mount /tmp/cf -s my-space
 # error: Unknown option "-s"
 ```
 
-**Fix:** use the source CLI through the repo task wrapper instead (cd to the
-labs repo root first):
+**Fix:** rebuild the binary (`deno task build-binaries --cli-only`), or use the
+source CLI through the repo task wrapper (works from any directory inside the
+repo):
 
 ```bash
 export CF_IDENTITY=./cf.key

@@ -27,7 +27,7 @@
  * - Optional chaining:
  *   - optional property/element access is allowed in supported lowerable
  *     expression sites
- *   - optional calls and non-lowerable optional access still error
+ *   - non-lowerable optional access still errors
  * - Calling .get() on cells: ERROR (must wrap in computed())
  * - Function creation in pattern context: ERROR (move to module scope)
  * - lift()/handler() inside pattern: ERROR (move to module scope)
@@ -93,6 +93,30 @@ type ObjectMemberKind =
   | "method"
   | "setter"
   | "function-property";
+
+function isPartOfOptionalChainCallee(
+  node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+): boolean {
+  let current: ts.Expression = node;
+  let parent = current.parent;
+
+  while (
+    parent &&
+    (
+      ts.isPropertyAccessExpression(parent) ||
+      ts.isElementAccessExpression(parent)
+    ) &&
+    parent.expression === current
+  ) {
+    current = parent;
+    parent = current.parent;
+  }
+
+  return !!parent &&
+    ts.isCallExpression(parent) &&
+    parent.expression === current &&
+    ts.isCallChain(parent);
+}
 
 // A getter and a `toJSON()` member run when the pattern result is stored;
 // a method, setter, or function-valued property is a function value the data
@@ -198,9 +222,11 @@ export class PatternContextValidationTransformer
         this.validateObjectMemberCreation(node, context, checker);
       }
 
-      // Check for optional chaining in reactive context
-      // Note: isInRestrictedReactiveContext returns false for JSX expressions,
-      // so this won't flag optional chaining inside JSX like <div>{user?.name}</div>
+      // Check for optional navigation in reactive context. Optional property /
+      // element access remains valid at lowerable expression sites (including
+      // JSX). When the chain is a call callee, the call-root policy decides
+      // whether the underlying call kind is lowerable; optionality itself does
+      // not change that decision.
       if (
         (
           ts.isPropertyAccessExpression(node) ||
@@ -209,15 +235,7 @@ export class PatternContextValidationTransformer
         node.questionDotToken
       ) {
         const optionalCallTargetHandledByCallRootPolicy =
-          !!node.questionDotToken &&
-          !!node.parent &&
-          ts.isCallExpression(node.parent) &&
-          node.parent.expression === node &&
-          classifyUnsupportedExpressionSiteCallRoot(
-              node.parent,
-              context,
-              analyze,
-            ) === "optional-call";
+          isPartOfOptionalChainCallee(node);
         if (
           !optionalCallTargetHandledByCallRootPolicy &&
           isInRestrictedReactiveContext(node, checker, context) &&
@@ -247,16 +265,7 @@ export class PatternContextValidationTransformer
           context,
           analyze,
         );
-        if (unsupportedCallRoot === "optional-call") {
-          context.reportDiagnostic({
-            severity: "error",
-            type: "pattern-context:optional-chaining",
-            message:
-              `Optional chaining '?.' is not allowed in reactive context. ` +
-              `Use ifElse() or wrap in computed() for conditional access.`,
-            node,
-          });
-        } else if (
+        if (
           unsupportedCallRoot === "restricted-get-call" &&
           !findLowerableExpressionSite(node, context, analyze)
         ) {

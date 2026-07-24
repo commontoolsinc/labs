@@ -110,7 +110,7 @@ describe("FabricLink", () => {
   describe("deepClone()", () => {
     it("frozen clone is deep-frozen with an equal payload", () => {
       const link = new FabricLink({ id: "fid1:abc", path: ["a"] });
-      const clone = link.deepClone(true);
+      const clone = link.deepClone(true) as FabricLink;
       expect(isDeepFrozen(clone)).toBe(true);
       expect(clone.payload).toEqual(link.payload);
     });
@@ -122,11 +122,24 @@ describe("FabricLink", () => {
 
     it("mutable clone is independent (no shared payload structure)", () => {
       const link = new FabricLink({ id: "fid1:abc" });
-      const clone = link.deepClone(false);
+      const clone = link.deepClone(false) as FabricLink;
       expect(Object.isFrozen(clone)).toBe(false);
       expect(clone.payload).not.toBe(link.payload);
       clone.payload.id = "fid1:xyz";
       expect(link.payload.id).toBe("fid1:abc");
+    });
+
+    it("frozen clone identity-shares an already-deep-frozen payload subtree", () => {
+      // The `[DEEP_CLONE_CORE](frozen)` core clones the payload to the
+      // requested frozenness, so the "maximal structural sharing" the
+      // `deepClone()` contract promises holds: a nested subtree that is
+      // already deep-frozen rides into the frozen clone by identity.
+      const schema = deepFreeze({ type: "object" });
+      const link = new FabricLink({ id: "fid1:abc", schema });
+      const clone = link.deepClone(true) as FabricLink;
+      expect(clone).not.toBe(link);
+      expect(isDeepFrozen(clone)).toBe(true);
+      expect(clone.payload.schema).toBe(schema);
     });
   });
 

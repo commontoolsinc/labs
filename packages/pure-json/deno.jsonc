@@ -1,0 +1,31 @@
+{
+  "name": "@commonfabric/pure-json",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": true
+  },
+  "imports": {
+    "@/": "./src/"
+  },
+  "tasks": {
+    "check": "deno check .",
+    "just-test": {
+      "description": "Run unit tests",
+      "command": "deno test"
+    },
+    "test": {
+      "description": "Type check & run tests",
+      "dependencies": [
+        "check",
+        "just-test"
+      ]
+    }
+  },
+  "test": {
+    "include": [
+      "test/**/*.test.ts"
+    ]
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

@@ -13,9 +13,17 @@ import type {
   LogVisitEvent,
   Option,
   RemoveOptionEvent,
+  SetOptionImageEvent,
   Vote,
   VoteColor,
 } from "./main.tsx";
+import GeneratedArt, {
+  type GeneratedArtFetchState,
+  safeImageUrl,
+} from "./generated-art.tsx";
+
+/** Admin-side generated-art persistence state for one option row. */
+export type PollOptionArtSyncState = GeneratedArtFetchState;
 
 /** Shared per-session target cell used for one open option editor at a time. */
 export type PollOptionLinkTargetCell = Writable<string | null | undefined>;
@@ -83,6 +91,9 @@ export interface PollOptionCardInput {
 
   /** Parent-owned admin stream that records this option in visit history. */
   logVisit: Stream<LogVisitEvent>;
+
+  /** Parent-owned admin stream persisting this option's generated art. */
+  setOptionImage: Stream<SetOptionImageEvent>;
 }
 
 /**
@@ -96,6 +107,18 @@ export interface PollOptionCardOutput {
 
   /** Static VNode rendering the complete option row. */
   [UI]: VNode;
+
+  /**
+   * Generated-art lifecycle for this row: `"stored"` once the option carries a
+   * persisted image (every viewer), the underlying fetch state while the host's
+   * client is generating, and `""` for non-hosts before anything is stored.
+   * Pure read — persistence happens only through the host's explicit keep
+   * action (→ `setOptionImage`). Optional for the same reason as
+   * `GeneratedArtOutput.fetchState`: it is fetch-derived on the generating
+   * path, and a required declaration would gate boundary readers of
+   * non-generating rows.
+   */
+  artSyncState?: PollOptionArtSyncState;
 }
 
 export default pattern<PollOptionCardInput, PollOptionCardOutput>(
@@ -111,6 +134,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
       castVote,
       removeOption,
       logVisit,
+      setOptionImage,
     },
   ) => {
     const oid = option.id;
@@ -118,6 +142,28 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
     const displayRank = formatRank({ rank });
     const myVote = computed(() => myVoteFor(votes, me, oid));
     const isRemoveConfirm = computed(() => removeConfirmTarget.get() === oid);
+
+    // Generated cuisine thumbnail. The stored option image is the shared
+    // truth every viewer renders; generation is gated to the host's client
+    // (`shouldGenerate`) and only while nothing is stored (GeneratedArt
+    // skips the request once `sourceUrl` is set). Persistence is the host's
+    // explicit keep action below: it reads the child's `imageDataUrl` output
+    // directly (fetch-derived child outputs materialize for parents since
+    // CT-1836) and sends it into the parent-owned stream; once the handler
+    // stores the data URL, `sourceUrl` flows back in and generation stops
+    // everywhere.
+    const art = GeneratedArt({
+      prompt: optionTitle,
+      sourceUrl: option.imageUrl,
+      shouldGenerate: isAdmin,
+    });
+
+    // Row-level art state: the stored option image wins; otherwise the live
+    // generation state read from the sub-pattern — `""` for non-hosts, whose
+    // instances never generate.
+    const artSyncState = computed<PollOptionArtSyncState>(() =>
+      safeImageUrl(option.imageUrl) ? "stored" : (art.fetchState ?? "")
+    );
 
     return {
       [NAME]: optionTitle,
@@ -135,6 +181,12 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
             gap: "10px",
           }}
         >
+          {
+            /* Generated-art thumbnail (call-form instance above): stored
+              option image for everyone; host-gated generation while empty,
+              persisted via the host's keep action → setOptionImage. */
+          }
+          {art[UI]}
           <span
             style={{
               minWidth: "28px",
@@ -217,6 +269,31 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
                     onClick={() => logVisit.send({ optionId: oid })}
                   >
                     ✓ we went here
+                  </button>
+                )
+                : null}
+              {artSyncState === "generated"
+                ? (
+                  <button
+                    type="button"
+                    aria-label="Keep this art (host)"
+                    style={{
+                      background: "#eef2ff",
+                      border: "1px solid #c7d2fe",
+                      borderRadius: "9999px",
+                      padding: "2px 10px",
+                      color: "#4338ca",
+                      fontSize: "11px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                    onClick={() =>
+                      setOptionImage.send({
+                        optionId: oid,
+                        imageUrl: art.imageDataUrl ?? "",
+                      })}
+                  >
+                    ✦ keep this art
                   </button>
                 )
                 : null}
@@ -328,6 +405,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
             : null}
         </div>
       ),
+      artSyncState,
     };
   },
 );

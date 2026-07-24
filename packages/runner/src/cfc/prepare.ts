@@ -11,6 +11,7 @@ import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
 import {
   cloneForMutation,
   type CloneForMutationResult,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -87,6 +88,10 @@ import {
   type ReadObservationShape,
 } from "./observation-classes.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
+import {
+  CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
+  CfcSchemaMigrationError,
+} from "./migration-reason.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
@@ -2601,12 +2606,15 @@ const writeInstallsInitialSchemaDefault = (
     return false;
   }
   const pathTarget = { ...target, path };
-  // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
-  // `utils/deep-equal.ts`); `schema.default` can hold a `FabricValue`, so this
-  // CFC write-policy check can compare wrong. Migrate to a `Fabric`-aware
-  // equality once available.
+  // The cast is required: `default` is statically `ImmutableJSONValue`, whose
+  // deeply-`readonly`, `ArrayLike`-based JSON shape is not assignable to
+  // `FabricValue` -- though the runtime value is one (a native
+  // `Uint8Array`/`Date` default interns to a `FabricPrimitive`).
   return previousWriteValueForTarget(tx, pathTarget) === undefined &&
-    deepEqual(writeValueForTarget(tx, pathTarget), schema.default);
+    valueEqual(
+      writeValueForTarget(tx, pathTarget),
+      schema.default as FabricValue,
+    );
 };
 
 const linkedWriteValueForPolicy = (
@@ -5262,8 +5270,16 @@ export const prepareBoundaryCommit = (
           ? storedSchema
           : mergeCfcSchemaEnvelopes(storedSchema, schema);
       } catch (error) {
+        // Tag the additive-required migration incompatibility with a stable
+        // token so the default-root runnability backstop can key on THIS class
+        // (recoverable by rolling forward) and leave every other CFC rejection
+        // fail-closed. Only the recorded reason is tagged; the human-readable
+        // message is preserved verbatim after the token. A plain schema-load or
+        // other merge failure records its bare message as before.
         reasons.push(
-          error instanceof Error
+          error instanceof CfcSchemaMigrationError
+            ? `${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: ${error.message}`
+            : error instanceof Error
             ? error.message
             : `schema merge failed for ${id}`,
         );

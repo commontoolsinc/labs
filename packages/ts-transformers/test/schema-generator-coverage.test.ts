@@ -97,8 +97,10 @@ export { s };
   assertEquals(enumText(props, "small"), ["-Infinity"]);
   assertEquals(enumText(props, "neg"), ["-7"]);
 
-  const defs = propInitializer(schema, "$defs") as ts.ObjectLiteralExpression;
-  assertEquals(enumText(defs, "NaNValue"), ["NaN"]);
+  // Enum-member types stay inline so their short names cannot collide in
+  // $defs with another enum member or named type.
+  assertEquals(enumText(props, "tag"), ["NaN"]);
+  assertEquals(propInitializer(schema, "$defs"), undefined);
 
   assertEquals(propInitializer(schema, "maximum")!.getText(root), "NaN");
 });

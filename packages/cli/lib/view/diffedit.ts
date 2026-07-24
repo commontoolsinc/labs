@@ -31,7 +31,6 @@ import {
   sameCommit,
 } from "./commitmsg.ts";
 import { highlightDocument, type Highlighter, parseDocument } from "./parse.ts";
-import { highlightMarkdownLines, isMarkdownPath } from "./markdown.ts";
 import type {
   EditableSource,
   EditPolicy,
@@ -980,8 +979,12 @@ export function createDiffHighlighter(
   seed?: readonly Line[],
 ): Highlighter {
   let text = initialText;
-  let lines: Line[] =
-    (seed ?? initialText.split("\n").map((l) => diffLineRender(l))).slice();
+  const initialRaw = initialText.split("\n");
+  const initialModel = seed ? null : parseDiff(initialText);
+  let lines: Line[] = (seed ??
+    initialRaw.map((line, index) =>
+      diffLineRender(line, diffFileNameAt(initialRaw, index, initialModel))
+    )).slice();
   return {
     get lines() {
       return lines;
@@ -1000,8 +1003,9 @@ export function createDiffHighlighter(
       ) {
         s++;
       }
+      const model = parseDiff(next);
       const recoloured = newRaw.slice(p, newRaw.length - s).map((l, i) =>
-        diffLineRender(l, isMarkdownDiffLine(newRaw, p + i))
+        diffLineRender(l, diffFileNameAt(newRaw, p + i, model))
       );
       lines = lines.slice(0, p).concat(
         recoloured,
@@ -1064,7 +1068,7 @@ function editableStart(
  * diff document builder paints a line, so a live edit re-colours correctly
  * without rebuilding the whole diff.
  */
-function diffLineRender(lineText: string, markdown = false): Line {
+function diffLineRender(lineText: string, fileName?: string): Line {
   if (lineText.length === 0) return { text: "", spans: [] };
   // A hunk header carries its own colour and its counts change when an edit
   // grows or shrinks the hunk, so colour it the way the full parse does rather
@@ -1083,9 +1087,7 @@ function diffLineRender(lineText: string, markdown = false): Line {
     : "whitespace";
   const spans: Span[] = [{ col: 0, text: marker, cls }];
   const code = lineText.slice(1);
-  const content = markdown
-    ? highlightMarkdownLines(code)[0]?.spans
-    : highlightDocument(code)[0]?.spans;
+  const content = highlightDocument(code, fileName)[0]?.spans;
   for (const s of content ?? []) {
     spans.push({ ...s, col: s.col + 1 });
   }
@@ -1093,15 +1095,43 @@ function diffLineRender(lineText: string, markdown = false): Line {
   return bg ? { text: lineText, spans, bg } : { text: lineText, spans };
 }
 
-/** Whether the diff line at `lineIdx` belongs to a Markdown file, by scanning
- * back to the nearest `+++ ` / `diff --git` header. */
-function isMarkdownDiffLine(rawLines: string[], lineIdx: number): boolean {
+/** The old- or new-side file containing `lineIdx`, found from the nearest diff
+ * header. Removed lines use the old path; additions and context use the new
+ * path. */
+function diffFileNameAt(
+  rawLines: string[],
+  lineIdx: number,
+  model: DiffModel | null,
+): string | undefined {
+  const oldSide = model?.lines[lineIdx]?.kind === "del";
+  let fallback: string | undefined;
   for (let i = Math.min(lineIdx, rawLines.length - 1); i >= 0; i--) {
+    if (model?.lines[i]?.kind !== "meta") continue;
     const l = rawLines[i];
-    if (l.startsWith("+++ ")) return isMarkdownPath(l.slice(4).split("\t")[0]);
-    if (l.startsWith("diff --git ")) return isMarkdownPath(l);
+    if (l.startsWith("+++ ")) {
+      const path = parserFileName(l.slice(4).split("\t")[0]);
+      if (path !== "/dev/null") {
+        if (!oldSide) return path;
+        fallback ??= path;
+      }
+    }
+    if (l.startsWith("--- ")) {
+      const path = parserFileName(l.slice(4).split("\t")[0]);
+      if (path !== "/dev/null") {
+        if (oldSide) return path;
+        fallback ??= path;
+      }
+    }
+    if (l.startsWith("diff --git ")) {
+      const file = parseDiff(l.replace(/\r$/, ""))?.files[0];
+      return (oldSide ? file?.oldPath : file?.newPath) ?? fallback;
+    }
   }
-  return false;
+  return fallback;
+}
+
+function parserFileName(value: string): string {
+  return value.replace(/\r$/, "").replace(/"$/, "");
 }
 
 export const _internal = {

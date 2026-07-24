@@ -231,7 +231,7 @@ Deno.test("navigateTo is idempotent for one result cell", async () => {
   const tx: IExtendedStorageTransaction = runtime.edit();
 
   try {
-    const processCell = runtime.getCell(
+    const resultCell = runtime.getCell(
       space,
       "navigateTo idempotent result cell",
       undefined,
@@ -274,7 +274,7 @@ Deno.test("navigateTo is idempotent for one result cell", async () => {
           .getAsNormalizedFullLink().scope,
         "session",
       );
-      processCell.withTx(resultTx).key("result").set(result);
+      resultCell.withTx(resultTx).key("result").set(result);
     };
 
     const first = rawNavigateTo(
@@ -282,7 +282,7 @@ Deno.test("navigateTo is idempotent for one result cell", async () => {
       sendResult,
       () => {},
       [],
-      processCell,
+      resultCell,
       runtime,
     );
     const second = rawNavigateTo(
@@ -290,7 +290,7 @@ Deno.test("navigateTo is idempotent for one result cell", async () => {
       sendResult,
       () => {},
       [],
-      processCell,
+      resultCell,
       runtime,
     );
 
@@ -322,7 +322,7 @@ Deno.test(
 
     try {
       const setupTx: IExtendedStorageTransaction = runtime.edit();
-      const processCell = runtime.getCell(
+      const resultCell = runtime.getCell(
         space,
         "navigateTo retry result cell",
         undefined,
@@ -348,7 +348,7 @@ Deno.test(
         resultTx: IExtendedStorageTransaction,
         result: unknown,
       ) => {
-        processCell.withTx(resultTx).key("result").set(result);
+        resultCell.withTx(resultTx).key("result").set(result);
       };
 
       const builtin = rawNavigateTo(
@@ -356,7 +356,7 @@ Deno.test(
         sendResult,
         () => {},
         [],
-        processCell,
+        resultCell,
         runtime,
       );
 

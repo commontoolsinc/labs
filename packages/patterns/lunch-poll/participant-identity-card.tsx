@@ -40,7 +40,14 @@ const joinAs = handler<JoinEvent, {
 }>(
   (
     { name },
-    { users, myName, adminName, joinName, profileName, profileAvatar },
+    {
+      users,
+      myName,
+      adminName,
+      joinName,
+      profileName,
+      profileAvatar,
+    },
   ) => {
     const override = trimmedName(name) || trimmedName(joinName.get());
     const trimmed = override || trimmedName(profileName);
@@ -53,9 +60,14 @@ const joinAs = handler<JoinEvent, {
       name: trimmed,
       avatar: override ? "" : (profileAvatar ?? "").trim(),
       color: colorForIndex(existing.length),
-      joinedAt: Date.now(),
+      // Ordering comes from the shared roster itself; avoid ambient time so
+      // this action also works in pre-#4740 secure Loom runtimes.
+      joinedAt: 0,
     };
-    users.push(user);
+    // A duplicate name must reject the second join rather than silently make
+    // two sessions the same participant. Keep the admission read and write the
+    // resulting roster as one conflict-safe read-modify-write transaction.
+    users.set([...existing, user]);
     myName.set(trimmed);
     if (trimmedName(adminName.get()) === "") {
       adminName.set(trimmed);

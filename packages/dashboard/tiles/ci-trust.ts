@@ -1,35 +1,54 @@
 // ci trust: share of recent completed runs that passed on the first attempt (a
-// flakiness signal), with a per-run pass/fail history strip. One factory builds
-// both the labs and loom instances against their own repo + workflow.
-import type { Status, Tile, TileView } from "../types.ts";
-import { concDot, strip } from "../lib.ts";
-import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO, TRUST_COLS, TRUST_GOOD, TRUST_STRIP, TRUST_WARN } from "../config.ts";
+// flakiness signal), with a history strip for every run in the fetched window.
+// One factory builds both the labs and loom instances against their own repo +
+// workflow.
+import {
+  runSource,
+  type Run,
+  type Status,
+  type Tile,
+  type TileView,
+} from "../types.ts";
+import { strip } from "../lib.ts";
+import { CI_RUNS_MAX, CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO, TRUST_COLS, TRUST_GOOD, TRUST_WARN } from "../config.ts";
+
+type TrustOutcome = "green" | "red" | "run" | "grey";
+
+function trustOutcome(run: Run): TrustOutcome {
+  if (run.status === "in_progress") return "run";
+  if (run.status !== "completed" || !run.conclusion) return "grey";
+  return run.conclusion === "success" && run.run_attempt === 1 ? "green" : "red";
+}
 
 function makeCiTrust(opts: { id: string; label: string; repo: string; workflow: string }): Tile {
   return {
     id: opts.id,
     intervalMs: 30_000,
+    runSources: [runSource(opts.repo, opts.workflow)],
     async collect(ctx): Promise<TileView> {
       const runs = await ctx.runsFor(opts.repo, opts.workflow);
-      const completed = runs.filter((r) => r.status === "completed" && r.conclusion);
-      const firstTryGreen = completed.filter((r) => r.conclusion === "success" && r.run_attempt === 1).length;
-      const pct = completed.length ? (firstTryGreen / completed.length) * 100 : 0;
-      const s: Status = completed.length === 0
+      const scored = runs.slice(0, CI_RUNS_MAX).map((run) => ({
+        run,
+        outcome: trustOutcome(run),
+      }));
+      const counted = scored.filter(({ outcome }) => outcome === "green" || outcome === "red");
+      const firstTryGreen = counted.filter(({ outcome }) => outcome === "green").length;
+      const pct = counted.length ? (firstTryGreen / counted.length) * 100 : 0;
+      const s: Status = counted.length === 0
         ? "unknown"
         : pct >= TRUST_GOOD ? "good" : pct >= TRUST_WARN ? "warn" : "bad";
-      // Round the cell count down to a whole number of rows so the grid is always
-      // complete; only show a single short row when that's all the data there is.
-      const cap = Math.min(TRUST_STRIP, completed.length);
-      const n = cap < TRUST_COLS ? cap : Math.floor(cap / TRUST_COLS) * TRUST_COLS;
-      const cells = [...completed].reverse().slice(-n).map((r) => ({
-        outcome: concDot(r.conclusion, r.run_attempt),
-        href: r.html_url,
+      const runSummary = counted.length === scored.length
+        ? `last ${scored.length} runs`
+        : `${counted.length} counted of last ${scored.length} runs`;
+      const cells = [...scored].reverse().map(({ run, outcome }) => ({
+        outcome,
+        href: run.html_url,
       }));
       return {
         label: opts.label,
         status: s,
         value: `${pct.toFixed(1)}%`,
-        sub: `first-try green · last ${completed.length} runs`,
+        sub: `first-try green · ${runSummary}`,
         extra: strip(cells, TRUST_COLS),
       };
     },

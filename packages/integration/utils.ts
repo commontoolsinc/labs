@@ -15,6 +15,13 @@ const DEFAULT_DELAY_MS = (() => {
   }
 })();
 
+// Built-in safety net for a genuinely stuck condition in waitForCondition. The
+// wait is notification-driven and resolves the instant its predicate holds, so
+// this bound is never the common-case latency; it is generous enough to cover
+// the slowest legitimate wait (a runtime resync after a reload) without capping
+// a condition that is still making progress.
+const WAIT_FOR_CONDITION_TIMEOUT = 300_000; // 5 minutes
+
 /**
  * Receives an async predicate function to executed repeatedly
  * until either the predicate returns `true`, or throws once
@@ -362,14 +369,15 @@ function installWaiter(
  * step idles until its condition is actually satisfied — like `select(2)` or
  * `wait` — and then proceeds immediately.
  *
- * On timeout it throws; callers add the context and rich probe for the failure
- * message. `timeout` is a safety net for a genuinely stuck condition, not the
- * common-case latency.
+ * On a stuck condition it throws once the built-in `WAIT_FOR_CONDITION_TIMEOUT`
+ * safety net elapses; callers add the context and rich probe for the failure
+ * message. There is no caller-supplied timeout: the wait resolves on the
+ * condition, and the safety net is not the common-case latency.
  */
 export const waitForCondition = async <A extends readonly unknown[]>(
   page: Page,
   predicate: PageCondition<A>,
-  { timeout = 60_000, args }: { timeout?: number; args?: A } = {},
+  { args }: { args?: A } = {},
 ): Promise<void> => {
   const bindingName = `__cfcWait_${crypto.randomUUID().replace(/-/g, "")}`;
   let resolveSignal!: () => void;
@@ -390,9 +398,11 @@ export const waitForCondition = async <A extends readonly unknown[]>(
       timer = setTimeout(
         () =>
           reject(
-            new Error(`waitForCondition did not resolve within ${timeout}ms`),
+            new Error(
+              `waitForCondition did not resolve within ${WAIT_FOR_CONDITION_TIMEOUT}ms`,
+            ),
           ),
-        timeout,
+        WAIT_FOR_CONDITION_TIMEOUT,
       );
     });
     await Promise.race([signalled, timedOut]);

@@ -24,14 +24,19 @@ type ViewerTimeElement = Pick<HTMLTimeElement, "dateTime" | "textContent">;
 
 /** Replace marked absolute timestamps with the viewer's local wall-clock time. */
 export function formatViewerTimes(
-  times: Iterable<ViewerTimeElement> = document.querySelectorAll<HTMLTimeElement>(
+  times: Iterable<ViewerTimeElement> = document.querySelectorAll<
+    HTMLTimeElement
+  >(
     "time[data-viewer-time][datetime]",
   ),
-  formatter: { format(value: number): string } = new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }),
+  formatter: { format(value: number): string } = new Intl.DateTimeFormat(
+    undefined,
+    {
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    },
+  ),
 ): void {
   for (const time of times) {
     const at = Date.parse(time.dateTime);
@@ -44,8 +49,12 @@ export function renderTile(v: TileView, id?: string, wide = false): string {
   const key = id ? ` data-tile-id="${escapeHtml(id)}"` : "";
   const dot = `<span class="dot ${STATUS_DOT[v.status]}"></span>`;
   const hint = v.hint ? `<span class="drill">${escapeHtml(v.hint)}</span>` : "";
-  const header = `<p class="lbl">${dot} ${escapeHtml(v.label)}<span class="spacer"></span>${v.aside ?? ""}${hint}</p>`;
-  const big = v.value !== undefined ? `<p class="big ${v.status}">${v.value}</p>` : "";
+  const header = `<p class="lbl">${dot} ${
+    escapeHtml(v.label)
+  }<span class="spacer"></span>${v.aside ?? ""}${hint}</p>`;
+  const big = v.value !== undefined
+    ? `<p class="big ${v.status}">${v.value}</p>`
+    : "";
   const sub = v.sub ? `<p class="sub">${escapeHtml(v.sub)}</p>` : "";
   // The chart plus its duration label (bottom-left corner, auto-formatted). The
   // relative wrapper positions the duration; a tile with no duration renders extra
@@ -54,12 +63,16 @@ export function renderTile(v: TileView, id?: string, wide = false): string {
   // top of the sub line. A tile whose series is too short to plot still reports a
   // span, so this is reachable.
   const body = v.duration && v.extra
-    ? `<div style="position:relative">${v.extra}${durationTag(v.duration)}</div>`
+    ? `<div style="position:relative">${v.extra}${
+      durationTag(v.duration)
+    }</div>`
     : (v.extra ?? "");
   const inner = `${header}${big}${sub}${body}`;
   if (!v.href) return `<div class="${cls}"${key}>${inner}</div>`;
   const tgt = /^https?:/.test(v.href) ? ` target="_blank" rel="noopener"` : "";
-  return `<a class="${cls}"${key} href="${escapeHtml(v.href)}"${tgt}>${inner}</a>`;
+  return `<a class="${cls}"${key} href="${
+    escapeHtml(v.href)
+  }"${tgt}>${inner}</a>`;
 }
 
 export function shell(
@@ -107,16 +120,20 @@ ${faviconLink(status)}
   .evscroll{max-height:340px;overflow:auto}
   .ev{display:flex;align-items:center;gap:11px;padding:6px 0;font-size:13px;border-top:1px solid #1c2026}.ev:first-child{border-top:0}
   .ev .t{color:#7d838e;min-width:54px;flex:none}
-  .evtxt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  a.ev{color:inherit;text-decoration:none;transition:color .1s}
-  a.ev:hover{color:#fff}a.ev:hover .evarrow{color:#8a93a5}
-  .evarrow{flex:none;color:#33373f;font-size:11px}
+  .evtxt{color:inherit;text-decoration:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:color .1s}
+  .evtxt:hover{color:#fff}
+  .evdur{color:#9aa0ab;text-decoration:none;text-align:right;min-width:64px;flex:none;font-variant-numeric:tabular-nums}
+  a.evdur:hover{color:#6ea8fe}
+  .evarrow{color:#33373f;text-decoration:none;flex:none;font-size:11px;transition:color .1s}
+  .evarrow:hover{color:#8a93a5}
   .swatch{display:inline-block;width:8px;height:8px;border-radius:2px;vertical-align:middle}
   .note{font-size:11px;color:#666c76;margin-top:14px}
   code{background:#1b1e24;padding:1px 5px;border-radius:4px}
 </style></head><body>
   <div class="top">
-    <div class="brand"><b>Fabric wall</b><span class="badge" id="livebadge">● LIVE</span><span>${escapeHtml(REPO)}</span></div>
+    <div class="brand"><b>Fabric wall</b><span class="badge" id="livebadge">● LIVE</span><span>${
+    escapeHtml(REPO)
+  }</span></div>
     <div class="live"><span class="dot green" id="freshdot"></span> <span id="agotext">updated ${ago}s ago</span></div>
   </div>
   <div class="grid" id="dashboard-grid">${gridHtml}</div>
@@ -176,12 +193,19 @@ ${faviconLink(status)}
       const active = document.activeElement;
       const rootFocused = active === current;
       const focusedHref = current.contains(active) && active instanceof HTMLAnchorElement ? active.href : null;
+      const focusedKey = current.contains(active) && active instanceof HTMLAnchorElement
+        ? active.dataset.focusKey ?? null
+        : null;
       current.replaceWith(next);
       const nextScroller = next.querySelector('.evscroll');
       if (scrollTop !== undefined && nextScroller) nextScroller.scrollTop = scrollTop;
       if (rootFocused) next.focus({ preventScroll: true });
       else if (focusedHref) {
-        Array.from(next.querySelectorAll('a')).find((link) => link.href === focusedHref)?.focus({ preventScroll: true });
+        const links = Array.from(next.querySelectorAll('a'));
+        const replacement = focusedKey
+          ? links.find((link) => link.dataset.focusKey === focusedKey)
+          : undefined;
+        (replacement ?? links.find((link) => link.href === focusedHref))?.focus({ preventScroll: true });
       }
       return next;
     });

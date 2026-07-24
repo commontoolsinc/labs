@@ -235,10 +235,6 @@ async function clickProfileLink(page: any, name: string) {
         if (!(chip?.textContent ?? "").includes(targetName)) continue;
         const clickTarget = chip?.shadowRoot?.querySelector("button") ?? chip ??
           element;
-        (clickTarget as HTMLElement).scrollIntoView({
-          block: "center",
-          inline: "center",
-        });
         clickTarget.setAttribute("data-profile-link-click", targetToken);
         return true;
       }

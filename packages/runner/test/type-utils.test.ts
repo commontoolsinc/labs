@@ -37,8 +37,9 @@ describe("value type", () => {
 
 describe("utility functions", () => {
   it("isWriteRedirectLink correctly identifies write redirects", () => {
+    // `$alias` records are Pattern bindings, not links in data.
     expect(isWriteRedirectLink({ $alias: { path: ["path", "to", "value"] } }))
-      .toBe(true);
+      .toBe(false);
     expect(
       isWriteRedirectLink({
         "/": {

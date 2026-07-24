@@ -275,7 +275,29 @@ run_piece_values() {
 
   # Test input flag operations
   test_json_value "Input flag set" "userData" '{"user":{"name":"test"}}' "--input"
-  test_value "Nested input path" "userData/user/name" '"inputValue"' '"inputValue"' "--input"
+  test_value \
+    "Nested input path" \
+    "userData/user/name" \
+    '"piece-search-input-value-7301"' \
+    '"piece-search-input-value-7301"' \
+    "--input"
+
+  echo '"piece-search-result-value-9146"' |
+    cf piece set $SPACE_ARGS --piece $PIECE_ID stringField
+  SEARCH_INPUT=$(cf piece search $SPACE_ARGS --json "INPUT-VALUE-7301")
+  echo "$SEARCH_INPUT" | jq -e --arg id "$PIECE_ID" \
+    'length == 1 and .[0].id == $id' > /dev/null ||
+    error "Piece search should find nested input data case-insensitively"
+  SEARCH_RESULT=$(cf piece search $SPACE_ARGS --json "RESULT-VALUE-9146")
+  echo "$SEARCH_RESULT" | jq -e --arg id "$PIECE_ID" \
+    'length == 1 and .[0].id == $id' > /dev/null ||
+    error "Piece search should find nested result data case-insensitively"
+  SEARCH_NONE=$(cf piece search $SPACE_ARGS --json "piece-search-absent-5283")
+  echo "$SEARCH_NONE" | jq -e 'length == 0' > /dev/null ||
+    error "Piece search should return an empty JSON array when nothing matches"
+  SEARCH_NAME=$(cf piece search $SPACE_ARGS --json "Simple counter:")
+  echo "$SEARCH_NAME" | jq -e 'length == 0' > /dev/null ||
+    error "Piece search should not match a piece name"
 
   echo "Testing piece step..."
 
@@ -376,9 +398,23 @@ run_piece_links() {
   PIECE_ID3=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $PATTERN_SRC)
   echo "Created third piece: $PIECE_ID3"
 
-  # Linking from invented piece should fail without --allow-non-existing
-  if cf piece link $SPACE_ARGS $INVENTED_ID/value $PIECE_ID3/value 2>/dev/null; then
+  # Linking from invented piece should fail without --allow-non-existing —
+  # and as a DATA error: message (with the --allow-non-existing next step) and
+  # TIP on stderr, nothing on stdout, no usage screen (regression guard for
+  # the LinkValidationError → Cliffy usage-dump path).
+  LINK_ERR_FILE=$(mktemp)
+  if LINK_OUT=$(cf piece link $SPACE_ARGS $INVENTED_ID/value $PIECE_ID3/value 2>"$LINK_ERR_FILE"); then
     error "Linking from invented piece should have failed without --allow-non-existing"
+  fi
+  if [ -n "$LINK_OUT" ]; then
+    error "Link data error should print nothing to stdout, got: $LINK_OUT"
+  fi
+  grep -q -- "--allow-non-existing" "$LINK_ERR_FILE" ||
+    error "Link data error should carry the --allow-non-existing next step on stderr"
+  grep -q "TIP:" "$LINK_ERR_FILE" ||
+    error "Link data error should print the inspect hint on stderr"
+  if grep -q "Usage:" "$LINK_ERR_FILE"; then
+    error "Link data error must not dump the usage screen"
   fi
 
   # Now link with --allow-non-existing

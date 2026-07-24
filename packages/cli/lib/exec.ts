@@ -58,12 +58,7 @@ export interface ExecDependencies {
   stat?: (path: string) => Promise<Deno.FileInfo>;
   readDir?: (path: string) => AsyncIterable<Deno.DirEntry>;
   delay?: (ms: number) => Promise<void>;
-  timeoutMs?: number;
   uuid?: () => string;
-  waitForResult?: (
-    resultCell: CallableCellLike,
-    timeoutMs: number,
-  ) => Promise<unknown>;
   invocationStyle?: "cf" | "direct";
   readJsonInput?: () => Promise<unknown>;
   readTextInput?: () => Promise<string>;

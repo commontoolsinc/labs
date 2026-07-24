@@ -484,6 +484,16 @@ export function createQueryResultProxy<T>(
           };
       }
 
+      // Prototype properties are JavaScript behavior, not persisted child
+      // values. Reflect them from the current container instead of issuing a
+      // storage read for an inherited path such as `constructor` or
+      // `toString`. Storage traversal deliberately considers own properties
+      // only; keeping the same boundary here also avoids recording spurious
+      // reactive dependencies for prototype members.
+      if (!Object.hasOwn(value, prop) && prop in value) {
+        return Reflect.get(value, prop, receiver);
+      }
+
       return createQueryResultProxy(
         runtime,
         proxyTx,
@@ -523,10 +533,13 @@ export function createQueryResultProxy<T>(
     ownKeys: () => {
       const readTx = runtime.readTx(tx);
       const current = readTx.readValueOrThrow(link, SHAPE_READ);
-      if (isRecord(current) || Array.isArray(current)) {
-        return Reflect.ownKeys(current);
+      const keys = isRecord(current) || Array.isArray(current)
+        ? Reflect.ownKeys(current)
+        : Reflect.ownKeys(value);
+      if (Array.isArray(proxyTarget) && !keys.includes("length")) {
+        keys.push("length");
       }
-      return Reflect.ownKeys(value);
+      return keys;
     },
     getOwnPropertyDescriptor: (target, prop) => {
       if (Array.isArray(target) && prop === "length") {

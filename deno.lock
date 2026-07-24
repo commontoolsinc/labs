@@ -14,6 +14,7 @@
     "jsr:@deno/loader@~0.3.10": "0.3.14",
     "jsr:@denosaurs/plug@1": "1.1.0",
     "jsr:@denosaurs/plug@^1.1.0": "1.1.0",
+    "jsr:@std/assert@1": "1.0.19",
     "jsr:@std/assert@^1.0.19": "1.0.19",
     "jsr:@std/async@^1.4.0": "1.5.0",
     "jsr:@std/async@^1.5.0": "1.5.0",
@@ -26,6 +27,7 @@
     "jsr:@std/encoding@1": "1.0.11",
     "jsr:@std/encoding@^1.0.11": "1.0.11",
     "jsr:@std/encoding@^1.0.5": "1.0.11",
+    "jsr:@std/expect@1": "1.0.20",
     "jsr:@std/expect@^1.0.20": "1.0.20",
     "jsr:@std/fmt@1": "1.0.10",
     "jsr:@std/fmt@1.0.3": "1.0.3",
@@ -42,6 +44,7 @@
     "jsr:@std/io@0.225": "0.225.0",
     "jsr:@std/io@0.225.0": "0.225.0",
     "jsr:@std/json@^1.0.2": "1.1.0",
+    "jsr:@std/jsonc@1": "1.0.2",
     "jsr:@std/jsonc@^1.0.2": "1.0.2",
     "jsr:@std/media-types@^1.1.0": "1.1.0",
     "jsr:@std/net@^1.0.6": "1.0.6",
@@ -52,6 +55,7 @@
     "jsr:@std/path@^1.1.5": "1.1.6",
     "jsr:@std/path@^1.1.6": "1.1.6",
     "jsr:@std/streams@^1.1.1": "1.1.1",
+    "jsr:@std/testing@1": "1.0.19",
     "jsr:@std/testing@^1.0.19": "1.0.19",
     "jsr:@std/text@~1.0.7": "1.0.19",
     "jsr:@std/yaml@*": "1.0.12",
@@ -131,6 +135,7 @@
     "npm:stoker@^2.0.1": "2.0.1_@hono+zod-openapi@1.5.1__hono@4.12.31__zod@4.4.3_hono@4.12.31",
     "npm:turndown@^7.2.4": "7.2.4",
     "npm:typescript@6.0.3": "6.0.3",
+    "npm:unicode-case-folding@1.1.1": "1.1.1",
     "npm:zod@^4.4.3": "4.4.3"
   },
   "jsr": {
@@ -246,7 +251,7 @@
     "@std/expect@1.0.20": {
       "integrity": "ffc4f3c33f732417e3e9acf3d995818c89984313c37d933b9ebbb4571d2887e9",
       "dependencies": [
-        "jsr:@std/assert",
+        "jsr:@std/assert@^1.0.19",
         "jsr:@std/internal@^1.0.14",
         "jsr:@std/path@^1.1.6"
       ]
@@ -320,7 +325,7 @@
     "@std/testing@1.0.19": {
       "integrity": "f4236172365b216728dc3cc8b5e80a9f4c33083d1e4ede7613d5b25b4014898e",
       "dependencies": [
-        "jsr:@std/assert",
+        "jsr:@std/assert@^1.0.19",
         "jsr:@std/async@^1.4.0",
         "jsr:@std/data-structures@^1.1.0",
         "jsr:@std/fs@^1.0.24",
@@ -1904,6 +1909,9 @@
       "integrity": "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==",
       "bin": true
     },
+    "unicode-case-folding@1.1.1": {
+      "integrity": "sha512-ZAYziAnMTBisO2dT5tyGvBFMNsIfonOS/BZTd3UZaKWtXMOZqK8s8HRUCrlKxGCTeCxCuCjS/6HW+4a6G+rbzw=="
+    },
     "w3c-keyname@2.2.8": {
       "integrity": "sha512-dpojBhNsCNN7T82Tm7k26A6G9ML3NkhDsnw9n/eoxSRlVBB4CEtIQ/KTCLI2Fwf3ataSXRhYFkQi3SlnFwPvPQ=="
     },
@@ -1979,6 +1987,7 @@
       "npm:multiformats@^14.0.4",
       "npm:ses@^2.2.0",
       "npm:turndown@^7.2.4",
+      "npm:unicode-case-folding@1.1.1",
       "npm:zod@^4.4.3"
     ],
     "members": {
@@ -2002,6 +2011,7 @@
         "dependencies": [
           "jsr:@cliffy/table@1.0.0-rc.8",
           "jsr:@db/sqlite@0.13.0",
+          "jsr:@std/fmt@~1.0.2",
           "npm:typescript@6.0.3"
         ]
       },
@@ -2056,6 +2066,11 @@
       "packages/patterns": {
         "dependencies": [
           "npm:@opentelemetry/api@^1.9.1"
+        ]
+      },
+      "packages/piece": {
+        "dependencies": [
+          "jsr:@db/sqlite@0.13.0"
         ]
       },
       "packages/runner": {

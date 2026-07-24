@@ -14,6 +14,8 @@ import type {
 } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { waitForLlmSettled } from "./support/llm-result.ts";
+import { defer } from "@commonfabric/utils/defer";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
@@ -112,8 +114,7 @@ describe("generateText outbox mechanism", () => {
 
       expect(sendRequestCalls).toEqual([]);
 
-      await waitForPendingToBecomeFalse(result);
-      await runtime.idle();
+      await waitForLlmSettled(runtime, result);
 
       expect(outboxEffects.length).toBeGreaterThan(0);
       expect(outboxEffects[0].kind).toBe("generateText-start");
@@ -171,8 +172,10 @@ describe("generateText outbox mechanism", () => {
 
     const originalSendRequest = LLMClient.prototype.sendRequest;
     const sendRequestCalls: number[] = [];
+    const firstSendRequest = defer<void>();
     LLMClient.prototype.sendRequest = async function (...args: unknown[]) {
       sendRequestCalls.push(Date.now());
+      if (sendRequestCalls.length === 1) firstSendRequest.resolve();
       return await originalSendRequest.apply(this, args as never);
     };
 
@@ -190,9 +193,8 @@ describe("generateText outbox mechanism", () => {
       action(retryTx);
       const retryResult = await retryTx.commit();
       expect(retryResult.ok).toBeDefined();
-      await waitForCallCount(sendRequestCalls, 1);
-      await waitForPendingToBecomeFalse(resultCell);
-      await runtime.idle();
+      await firstSendRequest.promise;
+      await waitForLlmSettled(runtime, resultCell);
 
       expect(sendRequestCalls.length).toBe(1);
     } finally {
@@ -247,8 +249,10 @@ describe("generateText outbox mechanism", () => {
 
     const originalSendRequest = LLMClient.prototype.sendRequest;
     const sendRequestCalls: number[] = [];
+    const firstSendRequest = defer<void>();
     LLMClient.prototype.sendRequest = async function (...args: unknown[]) {
       sendRequestCalls.push(Date.now());
+      if (sendRequestCalls.length === 1) firstSendRequest.resolve();
       return await originalSendRequest.apply(this, args as never);
     };
 
@@ -266,9 +270,8 @@ describe("generateText outbox mechanism", () => {
       action(retryTx);
       const retryResult = await retryTx.commit();
       expect(retryResult.ok).toBeDefined();
-      await waitForCallCount(sendRequestCalls, 1);
-      await waitForPendingToBecomeFalse(resultCell);
-      await runtime.idle();
+      await firstSendRequest.promise;
+      await waitForLlmSettled(runtime, resultCell);
 
       expect(sendRequestCalls.length).toBe(1);
     } finally {
@@ -332,8 +335,12 @@ describe("generateText outbox mechanism", () => {
 
     const originalSendRequest = LLMClient.prototype.sendRequest;
     const sendRequestCalls: number[] = [];
+    const firstSendRequest = defer<void>();
+    const secondSendRequest = defer<void>();
     LLMClient.prototype.sendRequest = async function (...args: unknown[]) {
       sendRequestCalls.push(Date.now());
+      if (sendRequestCalls.length === 1) firstSendRequest.resolve();
+      if (sendRequestCalls.length === 2) secondSendRequest.resolve();
       return await originalSendRequest.apply(this, args as never);
     };
 
@@ -342,8 +349,8 @@ describe("generateText outbox mechanism", () => {
       action(firstTx);
       const firstResult = await firstTx.commit();
       expect(firstResult.ok).toBeDefined();
-      await waitForCallCount(sendRequestCalls, 1);
-      await waitForPendingToBecomeFalse(resultCell);
+      await firstSendRequest.promise;
+      await waitForLlmSettled(runtime, resultCell);
 
       const linkTx = runtime.edit();
       const userPromptBase = runtime.getCell<string>(
@@ -366,8 +373,8 @@ describe("generateText outbox mechanism", () => {
       action(secondTx);
       const secondResult = await secondTx.commit();
       expect(secondResult.ok).toBeDefined();
-      await waitForCallCount(sendRequestCalls, 2);
-      await waitForPendingToBecomeFalse(resultCell);
+      await secondSendRequest.promise;
+      await waitForLlmSettled(runtime, resultCell);
 
       expect(sendRequestCalls.length).toBe(2);
     } finally {
@@ -375,26 +382,3 @@ describe("generateText outbox mechanism", () => {
     }
   });
 });
-
-function waitForPendingToBecomeFalse(result: any) {
-  return new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error("Timeout waiting for pending to become false"));
-    }, 5000);
-    const cancel = result.sink((value: any) => {
-      if (value?.pending === false) {
-        clearTimeout(timeout);
-        cancel();
-        resolve();
-      }
-    });
-  });
-}
-
-async function waitForCallCount(calls: unknown[], expected: number) {
-  for (let i = 0; i < 50; i++) {
-    if (calls.length >= expected) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error(`Timeout waiting for ${expected} call(s)`);
-}

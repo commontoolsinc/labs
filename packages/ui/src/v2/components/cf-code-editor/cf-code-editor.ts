@@ -826,9 +826,6 @@ export class CFCodeEditor extends BaseElement {
       return;
     }
 
-    // External updates override local edits, so drop any pending debounced write.
-    this._cellController.cancel();
-
     // Apply external update to editor, preserving cursor position.
     // Clamp cursor to new document length in case content is shorter.
     const currentSelection = this._editorView.state.selection.main;

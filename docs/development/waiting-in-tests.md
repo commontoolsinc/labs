@@ -6,11 +6,13 @@ the two pieces of machinery whose timing is easy to guess wrong, the check that
 keeps new polling `waitFor` out of the integration suites, and the specific
 places where a bounded `waitFor` poll is still the right tool.
 
-The same principle applies to production code, and the last two sections cover
+The same principle applies to production code, and the last three sections cover
 it there: [Production reconnect backoff](#production-reconnect-backoff), a
-deliberate exception because nothing announces that a downed server is back, and
+deliberate exception because nothing announces that a downed server is back;
 [The FUSE mount handshake](#the-fuse-mount-handshake), a cross-process readiness
-signal carried by a pipe.
+signal carried by a pipe; and [the toolshed background
+handshake](#the-toolshed-background-handshake), the same pipe-carried signal
+applied to starting the server.
 
 ## Why avoid `waitFor`
 
@@ -69,8 +71,11 @@ keep a bound whose early fire fails the run. They exist because no event reports
 the condition they wait on, so a large-enough clock jump can trip one on a
 healthy run and fail it. That is a fragility we accept for want of an
 alternative, sized so only a multi-minute jump reaches it — not one we have
-designed away. When an event boundary does exist, use it, and neither kind of
-exception arises.
+designed away. The deno-web-test per-test stuck detector
+([below](#browser-hosted-unit-tests-have-a-harness-backstop)) is another bound of
+this kind, and the most exposed: a competing ceiling keeps it from being sized
+that high, as its own section explains. When an event boundary does exist, use
+it, and neither kind of exception arises.
 
 ## The primitives to use instead
 
@@ -78,16 +83,17 @@ Waits split into two groups with different primitives.
 
 **Browser integration tests** have a page to attach an in-page waiter to:
 
-- `waitForCondition(page, predicate, { timeout, args })` installs a single
-  waiter inside the page. A shared MutationObserver hub watches the document and
-  every shadow root — including shadow roots created after the wait began — and
-  re-evaluates the predicate the instant the DOM reflects new state, then signals
-  the test process over a protocol binding. The `timeout` argument is a genuine
-  stuck-condition safety net, not a poll interval; a coarse 500-millisecond
-  in-page backstop covers conditions that flip with no DOM mutation (for example
-  a runtime global being set). The predicate is serialized and runs in the page,
-  so it closes over nothing from the test module — inline any collection it
-  needs, and pass values in through `args`.
+- `waitForCondition(page, predicate, { args })` installs a single waiter inside
+  the page. A shared MutationObserver hub watches the document and every shadow
+  root — including shadow roots created after the wait began — and re-evaluates
+  the predicate the instant the DOM reflects new state, then signals the test
+  process over a protocol binding. It takes no caller-supplied timeout: a
+  built-in five-minute stuck-condition safety net bounds a condition that never
+  holds, and a coarse 500-millisecond in-page backstop covers conditions that
+  flip with no DOM mutation (for example a runtime global being set). The
+  predicate is serialized and runs in the page, so it closes over nothing from
+  the test module — inline any collection it needs, and pass values in through
+  `args`.
 - `awaitViewSettled(page)` resolves once the worker has settled reactively, the
   resulting vdom batch has crossed to the main thread and been applied, and Lit
   has finished its update cycle. This is the "is the control interactive yet"
@@ -149,6 +155,14 @@ tests. It sleeps on the sink and applies its predicate to the cell only after
 iteration cap over it. Its predicate takes `T | undefined`, since a cell holds
 no value until its piece writes one.
 
+The runner's llm tests wait on that shape often enough to have a name for it.
+`waitForLlmSettled`, in `packages/runner/test/support/llm-result.ts`, resolves
+once `llm`, `generateText` or `generateObject` has finished a request. It is a
+call to `waitForCellValue` carrying the predicate those builtins settle on,
+`pending === false`, and it holds no wait machinery of its own. Reach for it
+rather than re-deriving that predicate: reading at quiescence is what makes it
+honest, and the helper's comment records why.
+
 Some traps are worth knowing before you hand-roll one of these against a
 runtime. They cost real debugging to find, and they are why the helper takes a
 runtime.
@@ -199,6 +213,61 @@ probe is such a client. It disposes its controller once the wait returns, which
 also keeps a finished wait from holding the loop open for the rest of the
 suite.
 
+### Browser-hosted unit tests have a harness backstop
+
+That fail-fast is Deno's, and the browser-hosted unit tests that
+`packages/deno-web-test` runs do not get it — `iframe-sandbox`, `identity`,
+`static`, and the `ui` browser tests. Their waits are the
+`defer()`-from-a-callback shape described above, but they run inside a page,
+whose event loop the page itself holds open, so a wait that never resolves hangs
+rather than failing.
+
+One bound at the harness level covers them. `deno-web-test` stops waiting on a
+test after `testTimeout` — 40 seconds by default, set per suite in
+`deno-web-test.config.ts` — and fails that test with a message naming it and
+saying how long it waited, leaving the rest of the run to report as usual.
+Without it a stuck test ran until astral's retried deadline on `page.evaluate`
+ran out of attempts, 53 to 57 seconds later, and threw a `RetryError` that named
+no test, printed no summary, and abandoned every test file still queued.
+
+This is the distinction `waitForCondition`'s `timeout` draws, one level up: a
+stuck-condition safety net rather than a bound at the call site. It is why a
+wait inside one of these tests still takes no timeout of its own — adding one
+per call site would cap what each wait can observe, which is the thing being
+avoided, while the harness bound only decides when to stop believing a test will
+ever finish.
+
+By the test in [Wall-clock time is not a measure of
+progress](#wall-clock-time-is-not-a-measure-of-progress), its early fire is not
+safe: it fails a passing test. So it is a bound kept for want of an alternative,
+alongside the polling waits and the FUSE teardown bound — there is no event for
+"this test will never finish." It is the worst-placed member of that group, and
+the reason is worth stating plainly. Those other bounds sit so far above their
+work that only a multi-minute clock jump reaches them. This one cannot: astral's
+own deadline runs out around fifty seconds and takes the run down unnamed, so
+the bound has to fire below that, and a clock jump between the bound and fifty
+seconds fails a healthy test. Astral's retry would have ridden that jump out — it
+re-wraps the same evaluate across five attempts, so a test that finishes late is
+still returned — where this single timer does not. The bound is kept only
+because astral's un-named, whole-run failure is the worse outcome on a genuine
+hang, not because it escapes the clock-jump fault.
+
+That trade is what sets the default, and it sets it high rather than low. The
+window in which this bound fires but astral would not is exactly the gap between
+the bound and astral's floor, so the bound wants to sit as close under that
+floor as reliable naming allows — the opposite of the "leave a wide margin"
+instinct, which here only widens the exposure. Astral's floor is a hard fifty
+seconds, five ten-second timers that no machine runs through faster, so forty
+seconds clears it with room for the retry's backoff on top while keeping the
+clock-jump window down to about ten seconds. The slowest healthy test in any of
+these suites is about a second, and that one is deliberately waiting out a timer,
+so real work never approaches forty. A suite that somehow needs more should raise
+`testTimeout`, and keep it under the fifty-second floor.
+
+`packages/deno-web-test/README.md` records what the bound does not cover: a test
+blocking the event loop outright, and the stuck test's own work, which goes on
+running in the page afterwards.
+
 ## Waiting for the scheduler and for the worker reconciler
 
 Two pieces of machinery come up often enough in unit tests, and dispatch
@@ -218,26 +287,97 @@ flushes them from a `queueMicrotask` callback, which hands the batch to the
 ops are one microtask away, and a microtask the test queues afterwards runs
 after the flush, because microtasks run in the order they were queued.
 
-The reconciler tests in `packages/html/test/` wait through `opsFlushed` in
-`packages/html/test/reconciler-support.ts`, which covers both, because their
-trees mix synchronous mock cells with runtime-backed ones:
+The reconciler tests in `packages/html/test/` write plain `Deno.test` and wait
+through `t.settle`, added to the test context by a preload:
 
 ```ts
-// Shown at module scope.
-export function opsFlushed(runtime: Runtime): Promise<void> {
-  return runtime.idle().then(() =>
-    new Promise<void>((resolve) => queueMicrotask(resolve))
-  );
-}
+// Shown for illustration only.
+Deno.test("...", async (t) => {
+  cell.set(next);
+  await t.settle();
+  assertEquals(collector.getOpsOfType("set-prop"), expected);
+});
 ```
 
-This shape is an ordering guarantee rather than a deadline, so it cannot lose a
-race under load. It also holds for a test asserting that an op is *absent*:
-once it returns, every op the change was going to produce has been delivered, so
-no later batch can falsify the absence. Those tests need it. A wait on the
-`onOps` callback would never return for them, since a change that emits no ops
-produces no batch, and they pass vacuously when nothing has flushed at all —
-their teeth come from the wait being long enough to have seen an unwanted op.
+Nothing is imported. The package's test task runs `test/clock-preload.ts`
+before the test modules (through Deno's `--preload`); it replaces `Deno.test`
+so each test runs under a clock that freezes only positive-delay timers, and it
+adds `settle` to the context. `test/clock.d.ts` gives `t.settle` its type, which
+`deno check` sees because it type-checks the package directory as one program.
+
+A zero-delay `setTimeout(fn, 0)` still fires, driven through the real event
+loop, so the scheduler's dispatch, the reconciler's flush, and teardown all
+resolve on their own. `t.settle` resolves once every zero-delay timer and
+microtask has run to a fixpoint, so it covers both the mock-cell and
+runtime-cell trees these tests mix, and needs no runtime argument.
+
+`t.settle` is an ordering guarantee rather than a deadline, so it cannot lose a
+race under load. It also holds for a test asserting that an op is *absent*: once
+it returns, every op the change was going to produce has been delivered, so no
+later batch can falsify the absence. Those tests pass vacuously when nothing has
+flushed at all, so their teeth come from the wait being long enough to have seen
+an unwanted op.
+
+The frozen clock is what keeps a fixed delay from creeping back in. A
+`setTimeout(resolve, 10)` sleep, in any spelling since they all bottom out in
+the same timer, is a positive-delay timer, so it is never fired and the promise
+it backs never resolves. A test that waits on one deadlocks, which the async-op
+sanitizer reports at once rather than letting the sleep pass by luck. No test in
+the package needs a real positive-delay timer; one that did would deadlock and
+announce itself.
+
+## Proving a negative
+
+A test that asserts something never happens has no event of its own to wait for.
+Waiting a fixed interval and then declaring success is the shape to avoid. It
+puts a floor under what the test costs and a ceiling on what it can catch, since
+whatever arrives after the interval is missed, and it reports the same pass
+either way — the assertion never depends on the wait having been long enough.
+
+Send something that must arrive after the thing being ruled out, wait for that,
+then assert the thing never came. Any channel that preserves order carries this.
+A `postMessage` between a fixed pair of windows does, and so does a chain of
+them: `packages/iframe-sandbox/test/iframe-csp.test.ts` has each guest document
+write a marker back to the host once its load event fires, and a CSP error from
+the same guest travels the same two hops — guest to outer frame, outer frame to
+host — so a test holding the marker holds any error that fired. The "subscribes"
+and "cancels subscriptions between documents" tests in
+`packages/iframe-sandbox/test/iframe.test.ts` use the same idea against the
+update stream: write to a key that is still subscribed, and once the guest
+reports it, an update for the unsubscribed key would already have arrived had
+one been sent.
+
+Two things decide whether this works, and both are worth checking rather than
+assuming.
+
+The barrier has to be genuinely ordered after the event, which is a claim about
+the specific mechanism and not about elapsed time. The CSP suite is a good
+illustration of how far that varies for one browser and one policy: a blocked
+`<img>` or `<link rel=stylesheet>` reports its violation before the document's
+load event, while a blocked `<script src>`, an image a stylesheet asks for, and a
+`fetch()` all report theirs after it. A `fetch()` is the extreme — its violation
+lands a macrotask turn after the request has already rejected, so no marker the
+page can post is ordered after it. Where no such ordering exists, say so and
+leave the case on its interval rather than inventing a barrier that only looks
+like one; `unbarrierable` in that file records the cases that stay.
+
+A barrier that is not really ordered after the event fails silently: the test
+goes on passing while asserting nothing. Pair the conversion with a control — the
+same fixture and the same wait against input that does trigger the event, which
+must observe it by the time the barrier lands. `barrierControls` in the CSP suite
+is that check. Moving its barrier earlier leaves every negative case green while
+the controls that can speak to ordering go red, which is the point of having
+them.
+
+Which controls those are is worth working out rather than assuming, because a
+control can be written so that it cannot fail. Only an event that can arrive
+after the page's own scripts have run tests the ordering at all. Two of that
+suite's eight controls are of that kind; the other six raise their error from a
+synchronous throw while the document parses, which no barrier could be posted
+before, so they stay green however early the barrier moves. They still earn
+their place — they show the error channel is live for their fixture's shape —
+but they are evidence of that and not of ordering. Sort them deliberately and
+say which is which, or the group reads as proof it does not supply.
 
 ## Guard against new usage
 
@@ -306,8 +446,10 @@ boundary the test can await without adding one to production code.
 - `packages/shell/integration/piece.test.ts` — the one poll that reads a freshly
   reloaded piece (`cc.get(pieceId, true)`) has no registered sink, so it stays a
   bounded poll on its own sync round trip. The other result-cell reads in this
-  file, and every such read in `counter.test.ts` and `nested-counter.test.ts`,
-  resolve a `defer()` from the existing `resultCell.sink(...)`.
+  file wait through `waitForCellValue`, which sinks on the result cell and reads
+  it at quiescence. The equivalent reads in `counter.test.ts` and
+  `nested-counter.test.ts` resolve a `defer()` from an existing
+  `resultCell.sink(...)`.
 
 ### A pull that drives its own loading
 
@@ -350,6 +492,13 @@ control, and there is no single "it converged" promise to await.
   point. These are race checkpoints the surrounding interleaving depends on;
   bounded polling expresses "wait until the sabotage/replay happened" without
   coupling test control to the race window.
+- `packages/runner/test/memory-v2-stacked-commit.test.ts` — the wait for a
+  conflict rejection to reach the runner, read as the `commit-conflict` logger
+  count. `pushCommit`'s catch moves that count synchronously before it calls
+  `finalizeRejection`, and the logger exposes counts through readers only, with
+  no subscription, so nothing fires when one moves. The commit the test is
+  watching must not settle — that is the assertion — so its own promise is not
+  the signal either.
 - `packages/runner/integration/sqlite-cfc-commit-eval.test.ts` — the predicates
   read derived pattern result cells that settle only after a full server round
   trip (handler send, scheduler run, server commit, server-side re-derivation,
@@ -380,27 +529,22 @@ joined across two different browser pages (both must show both voters).
 binding, so it cannot express a two-page condition; the cross-browser
 propagation wait stays a poll.
 
-### Instrumentation one-shots, and a few unconverted UI waits
+### Instrumentation one-shots
 
 `packages/patterns/integration/default-app.test.ts` keeps `waitFor` for one-shot
-instrumentation: arm a trace, reset a logger, install a telemetry handler. Each
-such call returns false only until a runtime API is present, so it observes
-runtime API readiness rather than a UI condition, and it is profiling scaffolding
-rather than an assertion. Most of them sit behind a `CF_CAPTURE_*` environment
-gate. If converted, await a runtime-ready signal directly rather than installing
-a DOM waiter.
+instrumentation: arm a trace, reset a logger baseline. Each such call returns
+false only until a runtime API is present, so it observes runtime API readiness
+rather than a UI condition, and it is profiling scaffolding rather than an
+assertion. Every one sits behind a `CF_CAPTURE_*` environment gate that defaults
+to off, so a normal run never reaches them.
 
-`packages/patterns/integration/reload/default-app-notebook.test.ts` keeps one
-wait of that shape — it arms the event-invocation telemetry handler, which is the
-one instrumentation wait that runs ungated in both files.
-
-The rest of the waits in these two files are ordinary UI conditions, and a poll
-is not the right tool for them. They are simply not converted yet: both files
-wait for the note modal's "Create Another" button to render, and
-`default-app.test.ts` also retries a piece-link click until the link is found. A
-`waitForCondition` predicate would express each of them. Converting them would
-not take either file off the allowlist, because the instrumentation waits keep
-both files importing `waitFor`.
+The notebook regression test in that same file resets the event-invocation trace
+on every pass, and needs no wait for it. The reset returns false only until the
+runtime exposes its telemetry methods, and the click that opened the note modal
+settled the view, so those methods are already present; the reset is called once
+and its success asserted. A wait on runtime-API readiness would have been no
+better, because that condition flips with no DOM mutation behind it and would
+fall back to the in-page waiter's coarse backstop for something already true.
 
 ### A shared state primitive
 
@@ -828,3 +972,34 @@ indefinitely — which is what a foreground mount does too, and the user interru
 it or a CI job limit catches it. Every way the pair can actually fail ends the
 read instead. A ceiling over the read would instead fail a mount that would have
 succeeded on a loaded machine, the ceiling this note warns about throughout.
+
+## The toolshed background handshake
+
+`toolshed --background` carries the same pipe-borne readiness signal into
+starting the server. The command spawns a second copy of itself as the server,
+waits until that copy reports it has bound its port, and only then returns. A
+caller that runs it starts the toolshed and moves straight on to work that needs
+it, with no readiness poll of its own. The CI integration jobs start the
+toolshed this way and go straight to their tests.
+
+Readiness travels over the child's stdout. The child writes a single marker line
+the moment `Deno.serve`'s `onListen` fires — the point the port is listening and
+a connection stops being refused — and the parent reads that pipe until the
+marker arrives. The read wakes on the write, so the wait resolves on the event
+with no poll interval. Failure ends the read the same way the FUSE handshake's
+does: if the child exits before it binds, its stdout closes, the parent reaches
+end of stream without the marker, and the command fails with the child's exit
+code and prints the child's log.
+
+The child keeps the pipe clean by sending its own logs to a file rather than to
+stdout, so once the parent has read the marker and detached, the child never
+writes the pipe again and a later log cannot land on a closed reader. Its stderr
+is discarded for the same reason: a detached server that inherited a launcher's
+stderr would hold a descriptor the launcher waits on after it has moved on. The
+one line the parent needs is on stdout; everything else the server says is in its
+log file.
+
+There is no deadline on this read either. A server that neither binds nor exits
+blocks the command, which is what a foreground start does too, and the outer job
+limit catches it. A per-command ceiling would instead fail a start that a loaded
+machine would have completed.

@@ -99,6 +99,7 @@ export default pattern(() => {
     const currentUsers = users.get();
     return currentUsers.length === 1 &&
       currentUsers[0]?.name === "Alex" &&
+      currentUsers[0]?.joinedAt === 0 &&
       myName.get() === "Alex" &&
       adminName.get() === "Alex" &&
       participantIdentity.me === "Alex" &&

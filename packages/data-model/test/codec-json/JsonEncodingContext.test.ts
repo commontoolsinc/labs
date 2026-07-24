@@ -8,6 +8,7 @@ import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import {
   BaseFabricInstance,
+  DEEP_CLONE_CORE,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
@@ -49,7 +50,7 @@ class UnregisteredInstance extends BaseFabricInstance {
 
   // The encode-side mandate guard fires before any of these are reached, so
   // they are throwing stubs.
-  deepClone(_frozen: boolean): FabricInstance {
+  protected [DEEP_CLONE_CORE](_frozen: boolean): FabricInstance {
     throw new Error("not implemented");
   }
 

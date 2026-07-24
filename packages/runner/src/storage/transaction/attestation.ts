@@ -1,8 +1,8 @@
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import {
   type FabricPlainObject,
   type FabricValue,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import type {
@@ -134,8 +134,7 @@ export const attest = (
  * of the fact in the given replica otherwise function fails with
  * `IStorageTransactionInconsistent` error.
  *
- * Optimized to check reference equality before falling back to JSON.stringify
- * comparison, avoiding expensive hashing when the replica state is unchanged.
+ * Values are compared with `valueEqual()`.
  */
 export const claim = (
   { address, value: expected }: IAttestation,
@@ -153,15 +152,7 @@ export const claim = (
     )
     : read(source, address)?.ok?.value;
 
-  // Fast path: reference equality check avoids expensive comparison
-  // when the replica state hasn't changed since the original read
-  // TODO(danfuzz): This compares a stored document value (the read/attested
-  // value) with `deepEqual`, which mishandles `FabricValue`: two same-class
-  // `FabricPrimitive` values (state in private `#fields`, zero own-props)
-  // compare equal regardless of value, so a changed Fabric value can be
-  // mis-detected as unchanged. Use a Fabric-aware equality for stored-value
-  // comparison.
-  if (expected === actual || deepEqual(expected, actual)) {
+  if (valueEqual(expected, actual)) {
     return { ok: state };
   } else {
     return {
@@ -204,7 +195,8 @@ export const resolve = (
   while (++at < path.length) {
     const key = path[at];
     if (isRecord(value)) {
-      value = (value as FabricPlainObject)[key];
+      const record = value as FabricPlainObject;
+      value = Object.hasOwn(record, key) ? record[key] : undefined;
     } else {
       // If the value is undefined, the path doesn't exist, but we can still
       // write onto it. Return error with last valid path component.

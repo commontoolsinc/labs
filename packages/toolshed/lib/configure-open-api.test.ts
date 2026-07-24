@@ -89,6 +89,98 @@ Deno.test("openapi reference", async (t) => {
     );
   });
 
+  // The non-streaming branch answers with the reply message written straight to
+  // the response body, which the handler produces with `c.json(result.message)`:
+  // an object carrying a `role` and its `content`. The document describes that
+  // message, not a `{type, body}` envelope wrapped around it.
+  await t.step("the JSON LLM response is the bare message", async () => {
+    const doc = await (await app.request("/doc")).json();
+    const schema = doc.paths["/api/ai/llm"].post.responses["200"]
+      .content["application/json"].schema;
+
+    assertEquals(schema.type, "object");
+    assertEquals([...schema.required].sort(), ["content", "role"]);
+    assert(
+      schema.properties.role.enum.includes("assistant"),
+      `the message role is undescribed: ${
+        JSON.stringify(schema.properties.role)
+      }`,
+    );
+    assert(
+      !("type" in schema.properties) && !("body" in schema.properties),
+      `the response carries an envelope: ${
+        JSON.stringify(Object.keys(schema.properties))
+      }`,
+    );
+  });
+
+  // A route that declares its query parameters through the top-level `query`
+  // key instead of `request.query` slips that key past `createRoute`, which
+  // copies it verbatim into the Operation Object and serializes the zod schema's
+  // internals under it. Correctly declared query parameters land in the
+  // Operation's `parameters` array instead. These two routes carry
+  // query parameters and stand for that whole class.
+  await t.step(
+    "query parameters are documented under `parameters`",
+    async () => {
+      const doc = await (await app.request("/doc")).json();
+
+      for (
+        const [path, params] of [
+          ["/api/health/llm", ["verbose", "alert", "models", "forceAlert"]],
+          ["/api/ai/llm/models", ["search", "capability", "task"]],
+        ] as const
+      ) {
+        const operation = doc.paths[path].get;
+        assert(
+          !("query" in operation),
+          `${path} carries a raw \`query\` key: ${
+            JSON.stringify(operation.query)
+          }`,
+        );
+
+        const documented = (operation.parameters ?? [])
+          .filter((p: { in: string }) => p.in === "query")
+          .map((p: { name: string }) => p.name)
+          .sort();
+        assertEquals(
+          documented,
+          [...params].sort(),
+          `${path} does not document its query parameters`,
+        );
+      }
+    },
+  );
+
+  // A zod schema handed to a place the generator does not recognize is copied
+  // into the document verbatim, and serializing it dumps the library's internal
+  // fields — `def`/`_def` (the schema definition), `_zod` and `~standard` (the
+  // instance handles), `_cached` — into the output. None of those are OpenAPI
+  // keys, so finding one anywhere in the document marks a leaked schema.
+  await t.step("the document carries no raw zod internals", async () => {
+    const doc = await (await app.request("/doc")).json();
+
+    const forbidden = new Set(["def", "_def", "_zod", "~standard", "_cached"]);
+    const leaks: string[] = [];
+    const scan = (value: unknown, path: string) => {
+      if (Array.isArray(value)) {
+        value.forEach((item, i) => scan(item, `${path}[${i}]`));
+      } else if (value && typeof value === "object") {
+        for (const [key, child] of Object.entries(value)) {
+          if (forbidden.has(key)) leaks.push(`${path}.${key}`);
+          scan(child, `${path}.${key}`);
+        }
+      }
+    };
+    scan(doc, "$");
+
+    assertEquals(
+      leaks,
+      [],
+      `the document leaks zod internals at: ${leaks.join(", ")}`,
+    );
+  });
+
   // Scalar renders the configuration it is handed into the page without
   // validating it, serializing an unknown key as readily as a known one. The
   // document URL is read back out of the page and fetched, so the two routes

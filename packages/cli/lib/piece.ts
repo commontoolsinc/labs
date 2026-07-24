@@ -1,12 +1,18 @@
 import { createSession, isDID, Session } from "@commonfabric/identity";
 import { ensureDir } from "@std/fs";
+import { caseFold } from "unicode-case-folding";
 import { loadIdentity } from "./identity.ts";
 import {
   Cell,
   entityIdFrom,
   experimentalOptionsFromEnv,
   formatFabricRef,
+  getCellOrThrow,
+  getMetaLink,
   getPatternIdentityRef,
+  isCell,
+  isCellResult,
+  isReadableCell,
   isSlugAddress,
   NAME,
   Runtime,
@@ -34,7 +40,12 @@ import {
 import { dirname, join } from "@std/path";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { setLLMUrl } from "@commonfabric/llm";
-import { isRecord } from "@commonfabric/utils/types";
+import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
+import { codecOf } from "@commonfabric/data-model/codec-common";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { getCarriedCfcLabelView } from "@commonfabric/runner/cfc";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { isPlainObject, isRecord } from "@commonfabric/utils/types";
 import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
 import { isHandlerCell } from "../../fuse/callables.ts";
 import { awaitSyncWithTimeout } from "./utils.ts";
@@ -46,6 +57,7 @@ import {
   type CliRuntimeErrorRecord,
   detectCallableKind,
   executeResolvedCallable,
+  runtimeErrorLog,
 } from "./callable.ts";
 import { executeCallableCommand } from "./callable-command.ts";
 import {
@@ -68,6 +80,13 @@ export interface SpaceConfig {
   apiUrl: string;
   space: string;
   identity: string;
+}
+
+/** Metadata returned for a piece whose stored data matches a search query. */
+export interface PieceSearchResult {
+  id: string;
+  name?: string;
+  patternRef?: PiecePatternRef;
 }
 
 export interface PieceConfig extends SpaceConfig {
@@ -160,6 +179,11 @@ interface PieceOperationDependencies extends PieceResolutionDeps {
   getProgramFromFile?: typeof getProgramFromFile;
   getPinnedProgramFromFile?: typeof getPinnedProgramFromFile;
   createController?: (manager: PieceManager) => PiecesController;
+  reportSearchError?: (
+    pieceId: string,
+    source: "input data" | "result data" | "metadata",
+    error: unknown,
+  ) => void;
 }
 
 const CLI_TRACE_TIMINGS = Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
@@ -402,6 +426,560 @@ export async function listPieces(
   );
 }
 
+const PIECE_SEARCH_CONCURRENCY = 4;
+const NO_IGNORED_ROOT_KEYS = new Set<string>();
+const RESULT_IGNORED_ROOT_KEYS = new Set([NAME]);
+const SEARCH_GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, {
+  granularity: "grapheme",
+});
+
+function foldSearchText(value: string): string {
+  return caseFold(value.normalize("NFD")).normalize("NFD");
+}
+
+function foldedSearchTextContains(value: string, query: string): boolean {
+  const foldedSegments: string[] = [];
+  const boundaries = new Set<number>([0]);
+  let foldedLength = 0;
+
+  for (
+    const { segment } of SEARCH_GRAPHEME_SEGMENTER.segment(
+      value.normalize("NFC"),
+    )
+  ) {
+    const foldedSegment = foldSearchText(segment);
+    const segmentStart = foldedLength;
+    foldedSegments.push(foldedSegment);
+    foldedLength += foldedSegment.length;
+    boundaries.add(foldedLength);
+
+    const foldedCodePoints = Array.from(segment, foldSearchText);
+    if (foldedCodePoints.join("") === foldedSegment) {
+      let codePointBoundary = segmentStart;
+      for (let index = 0; index < foldedCodePoints.length - 1; index++) {
+        codePointBoundary += foldedCodePoints[index].length;
+        boundaries.add(codePointBoundary);
+      }
+    }
+  }
+
+  const foldedValue = foldedSegments.join("");
+  for (
+    let match = foldedValue.indexOf(query);
+    match !== -1;
+    match = foldedValue.indexOf(query, match + 1)
+  ) {
+    if (boundaries.has(match) && boundaries.has(match + query.length)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function cellTraversalKey(cell: Cell<unknown>): string {
+  const link = cell.getAsNormalizedFullLink();
+  return hashStringOf({
+    link,
+    cfcLabelView: getCarriedCfcLabelView(cell),
+  });
+}
+
+function cellDocumentTraversalKey(cell: Cell<unknown>): string {
+  const { space, id, scope } = cell.getAsNormalizedFullLink();
+  return hashStringOf({
+    link: { space, id, scope, path: [] },
+    cfcLabelView: getCarriedCfcLabelView(cell),
+  });
+}
+
+function cellValueTraversalKey(cell: Cell<unknown>): string {
+  const { space, id, scope, path } = cell.getAsNormalizedFullLink();
+  return hashStringOf({
+    link: { space, id, scope, path },
+    cfcLabelView: getCarriedCfcLabelView(cell),
+  });
+}
+
+interface PieceOwnerCache {
+  cells: Map<string, Promise<string | undefined>>;
+  documents: Map<string, string | null>;
+}
+
+async function resolveRegisteredDocumentOwner(
+  cell: Cell<unknown>,
+  registeredPieceIds: ReadonlySet<string>,
+  ownerCache: PieceOwnerCache,
+): Promise<string | undefined> {
+  let current = cell;
+  const visited = new Set<string>();
+  const traversed: string[] = [];
+
+  const finish = (owner: string | undefined): string | undefined => {
+    for (const key of traversed) {
+      ownerCache.documents.set(key, owner ?? null);
+    }
+    return owner;
+  };
+
+  while (true) {
+    const key = cellDocumentTraversalKey(current);
+    if (visited.has(key)) {
+      throw new Error(
+        `Cycle found while resolving piece ownership for ${
+          pieceId(cell) ?? "an unknown Cell"
+        }`,
+      );
+    }
+    if (ownerCache.documents.has(key)) {
+      return finish(ownerCache.documents.get(key) ?? undefined);
+    }
+    visited.add(key);
+    traversed.push(key);
+
+    const currentId = pieceId(current);
+    // Nested piece results can point to a parent result. Stop at the nearest
+    // registered result before following its parent metadata.
+    if (currentId !== undefined && registeredPieceIds.has(currentId)) {
+      return finish(currentId);
+    }
+
+    await current.sync();
+    const argumentLink = getMetaLink(current, "argument");
+    if (
+      currentId !== undefined &&
+      (getPatternIdentityRef(current) !== undefined ||
+        argumentLink !== undefined)
+    ) {
+      return finish(currentId);
+    }
+    const resultLink = getMetaLink(current, "result");
+    if (resultLink === undefined) return finish(undefined);
+
+    current = current.runtime.getCellFromLink(
+      { ...resultLink, path: [], schema: undefined },
+      undefined,
+      current.tx,
+      getCarriedCfcLabelView(current),
+    );
+  }
+}
+
+function registeredDocumentOwner(
+  cell: Cell<unknown>,
+  registeredPieceIds: ReadonlySet<string>,
+  ownerCache: PieceOwnerCache,
+): Promise<string | undefined> {
+  const key = cellDocumentTraversalKey(cell);
+  if (ownerCache.documents.has(key)) {
+    return Promise.resolve(ownerCache.documents.get(key) ?? undefined);
+  }
+  return resolveRegisteredDocumentOwner(
+    cell,
+    registeredPieceIds,
+    ownerCache,
+  );
+}
+
+async function resolveRegisteredPieceOwner(
+  cell: Cell<unknown>,
+  registeredPieceIds: ReadonlySet<string>,
+  ownerCache: PieceOwnerCache,
+  cellIsMaterialized: boolean,
+): Promise<string | undefined> {
+  if (!cellIsMaterialized) await cell.sync();
+  return registeredDocumentOwner(
+    cell.resolveAsCell(),
+    registeredPieceIds,
+    ownerCache,
+  );
+}
+
+function registeredPieceOwner(
+  cell: Cell<unknown>,
+  registeredPieceIds: ReadonlySet<string>,
+  ownerCache: PieceOwnerCache,
+  cellIsMaterialized: boolean,
+): Promise<string | undefined> {
+  const key = cellTraversalKey(cell);
+  let owner = ownerCache.cells.get(key);
+  if (owner === undefined) {
+    owner = resolveRegisteredPieceOwner(
+      cell,
+      registeredPieceIds,
+      ownerCache,
+      cellIsMaterialized,
+    );
+    ownerCache.cells.set(key, owner);
+  }
+  return owner;
+}
+
+interface SearchOwnership {
+  pieceId: string;
+  registeredPieceIds: ReadonlySet<string>;
+  ownerCache: PieceOwnerCache;
+}
+
+type SearchEntry =
+  | { key: string }
+  | {
+    value: unknown;
+    ownershipEstablished?: boolean;
+    sourceCell?: Cell<unknown>;
+    isRoot?: boolean;
+  };
+
+function* singleSearchEntry(
+  value: unknown,
+  ownershipEstablished = false,
+  sourceCell?: Cell<unknown>,
+  isRoot = false,
+): IterableIterator<SearchEntry> {
+  yield { value, ownershipEstablished, sourceCell, isRoot };
+}
+
+function* arraySearchEntries(
+  value: unknown[],
+  ignoredKeys: ReadonlySet<string>,
+  sourceCell?: Cell<unknown>,
+  reportReadError?: (error: unknown) => void,
+): IterableIterator<SearchEntry> {
+  for (const key in value) {
+    try {
+      if (!Object.hasOwn(value, key) || ignoredKeys.has(key)) continue;
+      if (isArrayIndexPropertyName(key)) {
+        const index = Number(key);
+        const nested = value[index];
+        yield { value: nested, sourceCell: sourceCell?.key(index) };
+      } else {
+        yield { key };
+        const nested = (value as unknown as Record<string, unknown>)[key];
+        yield { value: nested, sourceCell: sourceCell?.key(key) };
+      }
+    } catch (error) {
+      reportReadError?.(error);
+    }
+  }
+}
+
+function* objectSearchEntries(
+  value: object,
+  ignoredKeys: ReadonlySet<string>,
+  sourceCell?: Cell<unknown>,
+  reportReadError?: (error: unknown) => void,
+): IterableIterator<SearchEntry> {
+  const record = value as Record<string, unknown>;
+  for (const key in value) {
+    try {
+      if (!Object.hasOwn(value, key) || ignoredKeys.has(key)) continue;
+      yield { key };
+      const nested = record[key];
+      yield { value: nested, sourceCell: sourceCell?.key(key) };
+    } catch (error) {
+      reportReadError?.(error);
+    }
+  }
+}
+
+async function searchTextMatches(
+  rootCell: Cell<unknown>,
+  query: string,
+  ownership: SearchOwnership,
+  ignoredRootKeys: ReadonlySet<string> = NO_IGNORED_ROOT_KEYS,
+  reportReadError?: (error: unknown) => void,
+): Promise<boolean> {
+  if (isCell(rootCell)) {
+    const owner = await registeredPieceOwner(
+      rootCell,
+      ownership.registeredPieceIds,
+      ownership.ownerCache,
+      false,
+    );
+    if (owner !== undefined && owner !== ownership.pieceId) return false;
+  }
+
+  const value = await rootCell.pull();
+  const pending: Iterator<SearchEntry>[] = [
+    singleSearchEntry(
+      value,
+      true,
+      isCell(rootCell) ? rootCell : undefined,
+      true,
+    ),
+  ];
+  const seen = new WeakSet<object>();
+  const seenCells = new Set<string>();
+
+  while (pending.length > 0) {
+    let next: IteratorResult<SearchEntry>;
+    try {
+      next = pending[pending.length - 1].next();
+    } catch (error) {
+      pending.pop();
+      reportReadError?.(error);
+      continue;
+    }
+    if (next.done) {
+      pending.pop();
+      continue;
+    }
+
+    if ("key" in next.value) {
+      if (foldedSearchTextContains(next.value.key, query)) return true;
+      continue;
+    }
+    const current = next.value.value;
+
+    if (current !== null && typeof current === "object" && isCell(current)) {
+      if (!isReadableCell(current)) continue;
+
+      try {
+        const cellKey = cellTraversalKey(current);
+        if (seenCells.has(cellKey)) continue;
+        seenCells.add(cellKey);
+
+        if (!next.value.ownershipEstablished) {
+          const owner = await registeredPieceOwner(
+            current,
+            ownership.registeredPieceIds,
+            ownership.ownerCache,
+            false,
+          );
+          if (owner !== undefined && owner !== ownership.pieceId) continue;
+        }
+
+        const nested = await current.pull();
+        if (nested !== current) {
+          pending.push(singleSearchEntry(nested, true, current));
+        }
+      } catch (error) {
+        reportReadError?.(error);
+      }
+      continue;
+    }
+
+    let sourceCell = next.value.sourceCell;
+    let ownershipEstablished = next.value.ownershipEstablished ?? false;
+    if (sourceCell !== undefined && !ownershipEstablished) {
+      try {
+        const owner = await registeredPieceOwner(
+          sourceCell,
+          ownership.registeredPieceIds,
+          ownership.ownerCache,
+          true,
+        );
+        if (owner !== undefined && owner !== ownership.pieceId) continue;
+        ownershipEstablished = true;
+      } catch (error) {
+        reportReadError?.(error);
+        continue;
+      }
+    }
+
+    if (current === null || typeof current !== "object") {
+      if (
+        typeof current !== "function" &&
+        foldedSearchTextContains(String(current), query)
+      ) {
+        return true;
+      }
+      continue;
+    }
+
+    if (isCellResult(current)) {
+      try {
+        const backingCell = getCellOrThrow(current);
+        const valueWasPulledFromBackingCell = sourceCell !== undefined &&
+          cellValueTraversalKey(sourceCell) ===
+            cellValueTraversalKey(backingCell);
+        sourceCell = backingCell;
+        if (!ownershipEstablished) {
+          const owner = await registeredPieceOwner(
+            sourceCell,
+            ownership.registeredPieceIds,
+            ownership.ownerCache,
+            true,
+          );
+          if (owner !== undefined && owner !== ownership.pieceId) continue;
+          ownershipEstablished = true;
+        }
+
+        if (!valueWasPulledFromBackingCell) {
+          const cellKey = cellTraversalKey(sourceCell);
+          if (seenCells.has(cellKey)) continue;
+          seenCells.add(cellKey);
+
+          const materializedCell = sourceCell.asSchema(true);
+          const nested = await materializedCell.pull();
+          pending.push(singleSearchEntry(
+            nested,
+            true,
+            materializedCell,
+            next.value.isRoot,
+          ));
+          continue;
+        }
+      } catch (error) {
+        reportReadError?.(error);
+        continue;
+      }
+    }
+
+    if (seen.has(current)) continue;
+    seen.add(current);
+
+    if (Array.isArray(current)) {
+      pending.push(arraySearchEntries(
+        current,
+        next.value.isRoot ? ignoredRootKeys : NO_IGNORED_ROOT_KEYS,
+        sourceCell,
+        reportReadError,
+      ));
+      continue;
+    }
+
+    if (current instanceof FabricSpecialObject) {
+      const representations: SearchEntry[] = [];
+      if (current.toString !== Object.prototype.toString) {
+        try {
+          representations.push({ value: String(current) });
+        } catch (error) {
+          reportReadError?.(error);
+        }
+      }
+      try {
+        representations.push({ value: codecOf(current).encode(current) });
+      } catch (error) {
+        reportReadError?.(error);
+      }
+      if (representations.length > 0) {
+        pending.push(representations[Symbol.iterator]());
+      }
+      continue;
+    }
+
+    if (!isPlainObject(current)) continue;
+    pending.push(objectSearchEntries(
+      current,
+      next.value.isRoot ? ignoredRootKeys : NO_IGNORED_ROOT_KEYS,
+      sourceCell,
+      reportReadError,
+    ));
+  }
+
+  return false;
+}
+
+/**
+ * Find pieces with a full Unicode case-insensitive substring in their input or
+ * result data. Matches begin and end at canonically normalized code-point
+ * boundaries. Object keys and scalar values are searched recursively. Piece
+ * metadata is returned for matching pieces but does not participate in
+ * matching.
+ */
+export async function searchPieces(
+  config: SpaceConfig,
+  query: string,
+  deps: PieceOperationDependencies = {},
+): Promise<PieceSearchResult[]> {
+  if (query.length === 0) {
+    throw new Error("Search query must not be empty.");
+  }
+
+  const normalizedQuery = foldSearchText(query);
+  // TODO(@ianh): Add an API for clients to initiate server-side searches
+  // against a server-hosted index.
+  const manager = await (deps.loadManager ?? loadManager)(config);
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
+  const allPieces = await pieces.getAllPieces();
+  const registeredPieceIds = new Set(allPieces.map((piece) => piece.id));
+  const ownerCache: PieceOwnerCache = {
+    cells: new Map(),
+    documents: new Map(),
+  };
+  const matches: Array<PieceSearchResult | undefined> = new Array(
+    allPieces.length,
+  );
+  const reportSearchError = deps.reportSearchError ??
+    ((
+      pieceId: string,
+      source: "input data" | "result data" | "metadata",
+      error: unknown,
+    ) => {
+      console.warn(
+        `Warning: Could not read ${source} for piece ${pieceId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
+  let nextPieceIndex = 0;
+
+  const searchNextPiece = async (): Promise<void> => {
+    while (nextPieceIndex < allPieces.length) {
+      const index = nextPieceIndex++;
+      const piece = allPieces[index];
+
+      let inputMatches = false;
+      try {
+        const inputCell = await piece.input.getCell();
+        inputMatches = await searchTextMatches(
+          inputCell,
+          normalizedQuery,
+          { pieceId: piece.id, registeredPieceIds, ownerCache },
+          NO_IGNORED_ROOT_KEYS,
+          (error) => reportSearchError(piece.id, "input data", error),
+        );
+      } catch (error) {
+        reportSearchError(piece.id, "input data", error);
+      }
+
+      let resultMatches = false;
+      if (!inputMatches) {
+        try {
+          const resultCell = await piece.result.getCell();
+          resultMatches = await searchTextMatches(
+            resultCell,
+            normalizedQuery,
+            { pieceId: piece.id, registeredPieceIds, ownerCache },
+            RESULT_IGNORED_ROOT_KEYS,
+            (error) => reportSearchError(piece.id, "result data", error),
+          );
+        } catch (error) {
+          reportSearchError(piece.id, "result data", error);
+        }
+      }
+
+      if (inputMatches || resultMatches) {
+        let name: string | undefined;
+        try {
+          name = piece.name();
+        } catch (error) {
+          reportSearchError(piece.id, "metadata", error);
+        }
+        let patternRef: PiecePatternRef | undefined;
+        try {
+          patternRef = await piece.getPatternRef();
+        } catch (error) {
+          reportSearchError(piece.id, "metadata", error);
+        }
+        matches[index] = { id: piece.id, name, patternRef };
+      }
+    }
+  };
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(PIECE_SEARCH_CONCURRENCY, allPieces.length) },
+      searchNextPiece,
+    ),
+  );
+
+  return matches.filter((piece): piece is PieceSearchResult =>
+    piece !== undefined
+  );
+}
+
 async function resolvePieceConfigWithManager(
   config: PieceConfig,
   manager: PieceManager,
@@ -496,7 +1074,16 @@ export async function newPiece(
         entry,
       ),
   );
+  // A piece whose pattern never settles leaves `pieces.create` awaiting a
+  // scheduler `idle()` that never resolves, and the runtime surfaces no
+  // event that a start has definitively failed (a thrown pattern reports its
+  // error and still resolves; a stuck async load reports nothing). This
+  // wall-clock bound is the only thing that turns that hang into a message.
+  // When it fires, report the actual runtime error the pattern recorded while
+  // starting rather than only pointing at the server logs.
   const PIECE_START_TIMEOUT_MS = 60_000;
+  const runtimeErrors = runtimeErrorLog(manager.runtime);
+  const errorCountBefore = runtimeErrors.length;
   const piece = await timeCliPhase("newPiece.create", () => {
     const createPromise = pieces.create(program, {
       repository: entry.repository,
@@ -505,11 +1092,15 @@ export async function newPiece(
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
+        const recorded = runtimeErrors.slice(errorCountBefore).at(-1)?.message;
+        const detail = recorded !== undefined
+          ? `A runtime error was reported while it started: ${recorded}`
+          : `Check toolshed logs for runtime errors.`;
         reject(
           new Error(
             `Piece created but failed to start within ${
               PIECE_START_TIMEOUT_MS / 1000
-            }s. ` + `Check toolshed logs for runtime errors.`,
+            }s. ${detail}`,
           ),
         );
       }, PIECE_START_TIMEOUT_MS);

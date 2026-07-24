@@ -1,5 +1,6 @@
 import ts from "typescript";
 
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { JSONSchemaMutable } from "@commonfabric/api";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { getPropertyNameText } from "./typescript/property-name.ts";
@@ -486,7 +487,8 @@ export function getNamedTypeKey(
     (symFlags & ts.SymbolFlags.Method) !== 0 ||
     (symFlags & ts.SymbolFlags.Signature) !== 0 ||
     (symFlags & ts.SymbolFlags.Function) !== 0 ||
-    (symFlags & ts.SymbolFlags.TypeParameter) !== 0
+    (symFlags & ts.SymbolFlags.TypeParameter) !== 0 ||
+    (symFlags & ts.SymbolFlags.EnumMember) !== 0
   ) {
     return undefined;
   }
@@ -494,7 +496,8 @@ export function getNamedTypeKey(
   if (
     decls.some((d) =>
       ts.isPropertySignature(d) || ts.isMethodSignature(d) ||
-      ts.isPropertyDeclaration(d) || ts.isMethodDeclaration(d)
+      ts.isPropertyDeclaration(d) || ts.isMethodDeclaration(d) ||
+      ts.isEnumMember(d)
     )
   ) {
     return undefined;
@@ -1039,8 +1042,13 @@ export function extractDefaultValueFromBrandedMembers(
     if (agreed === undefined) {
       agreed = extracted;
     } else if (
-      JSON.stringify(agreed.value) !== JSON.stringify(extracted.value)
+      hashStringOf(agreed.value) !== hashStringOf(extracted.value)
     ) {
+      // Genuine disagreement between two branded members is ambiguous; bail.
+      // The canonical content hash is the honest comparison here: a
+      // `JSON.stringify` round-trip would call `-0` and `0` equal, and both
+      // `NaN` and `Infinity` equal (each renders `null`), and would spuriously
+      // disagree on equal objects written in a different key order.
       return undefined;
     }
   }

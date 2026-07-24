@@ -4,6 +4,7 @@ import { createSession, Identity } from "@commonfabric/identity";
 import {
   getPatternIdentityRef,
   getPatternRepository,
+  isCell,
   isLink,
   type JSONSchema,
   KeepAsCell,
@@ -1056,6 +1057,263 @@ describe("piece pull materialization", () => {
         manager,
       )
     ).toThrow(/projection alias reconciliation requires a transaction/);
+  });
+
+  it("restores retained links whose destination declares an outer capability", async () => {
+    // A source update (`PieceController.setPattern`, i.e. `cf piece setsrc`)
+    // re-applies the piece's retained links from `argumentCell.getRaw()`.
+    // Raw storage holds SERIALIZED links, never live Cells, so every link on
+    // that path fails `isCell()` — which is what `preservesDirectHandle` used
+    // to key off, alone. Every retained link into an `asCell`-declaring slot
+    // was therefore rejected: capability kinds as "exposed as an ordinary
+    // alias", ordinary `Cell<T>` slots as "asCell changed". Same cause, three
+    // error messages.
+    //
+    // The practical effect: a piece holding an injected `SqliteDb` input
+    // (Loom's native connector panels — `db: SqliteDb`, which compiles to
+    // `asCell: ["sqlite"]`) could never have its source updated in place.
+    // `setPattern` rebuilds nothing, so there was no aliasing to police.
+    const sqliteDb: JSONSchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        tables: { type: "object" },
+        rev: { type: "number" },
+      },
+      asCell: ["sqlite"],
+    };
+    const argumentSchema: JSONSchema = {
+      type: "object",
+      properties: { db: sqliteDb },
+      required: ["db"],
+    };
+
+    // The injected handle: seeded directly at a deterministic id, so it
+    // carries no producer-owned metadata — exactly how a disk-source handle
+    // is created (`linkSqliteDiskSource`). `durableSourceContract` finds
+    // nothing, so validation falls back to the prior argument contract.
+    const handle = runtime.getCell(
+      manager.getSpace(),
+      "sqlite-handle-" + crypto.randomUUID(),
+    );
+    await runtime.editWithRetry((tx) => {
+      handle.withTx(tx).set({ id: "handle-1", tables: {}, rev: 0 });
+    });
+
+    const base = runtime.getCell(
+      manager.getSpace(),
+      "sqlite-panel-argument-" + crypto.randomUUID(),
+    );
+    await runtime.editWithRetry((tx) => {
+      base.withTx(tx).set({ db: handle });
+    });
+
+    const raw = base.getRaw() as { db: unknown };
+    // Guard the premise: the restore path really does see a SERIALIZED link,
+    // so this cannot silently decay into the already-covered live-Cell case.
+    // `isLink` is not enough — it accepts a live Cell too.
+    expect(isLink(raw.db)).toBe(true);
+    expect(isCell(raw.db)).toBe(false);
+
+    const restore = (destination: JSONSchema) =>
+      assertSuppliedLinkSchemasCompatible(
+        [{ path: ["db"], value: raw.db }],
+        destination,
+        base,
+        manager,
+        {
+          priorArgumentSchema: argumentSchema,
+          linksPreservedVerbatim: true,
+        },
+      );
+
+    expect(() => restore(argumentSchema)).not.toThrow();
+
+    // Same kind, narrowed payload the source already satisfies.
+    expect(() =>
+      restore({
+        type: "object",
+        properties: {
+          db: { ...sqliteDb, description: "renamed in the new source" },
+        },
+        required: ["db"],
+      })
+    ).not.toThrow();
+
+    // Laundering is still refused: the capability may not become a plain
+    // alias just because the caller preserves envelopes.
+    expect(() =>
+      restore({
+        type: "object",
+        properties: { db: { type: "object", asCell: ["cell"] } },
+        required: ["db"],
+      })
+    ).toThrow(/cannot be exposed as cell/);
+
+    // And a caller that does NOT preserve envelopes is unaffected — the
+    // ordinary-alias rule still applies to every other entry point.
+    expect(() =>
+      assertSuppliedLinkSchemasCompatible(
+        [{ path: ["db"], value: raw.db }],
+        argumentSchema,
+        base,
+        manager,
+        { priorArgumentSchema: argumentSchema },
+      )
+    ).toThrow(/sqlite capability cannot be exposed as an ordinary alias/);
+
+    // And the declaration is scoped by committed state, not taken on trust:
+    // the same serialized link supplied at a path where it is NOT already
+    // committed is a fresh link riding the restore — the staged argument on
+    // a source update is the previous argument merged with the INCOMING
+    // pattern's schema defaults, so link-shaped defaults arrive exactly this
+    // way — and it faces the rebuild rules despite the flag: the identical
+    // bytes that restore fine at `db` are refused at `db2`.
+    const twoSlotSchema: JSONSchema = {
+      type: "object",
+      properties: { db: sqliteDb, db2: sqliteDb },
+      required: ["db"],
+    };
+    expect(() =>
+      assertSuppliedLinkSchemasCompatible(
+        [{ path: ["db2"], value: raw.db }],
+        twoSlotSchema,
+        base,
+        manager,
+        {
+          priorArgumentSchema: twoSlotSchema,
+          linksPreservedVerbatim: true,
+        },
+      )
+    ).toThrow(/sqlite capability cannot be exposed as an ordinary alias/);
+  });
+
+  it("refuses a preserved link whose carried wrapper widens its contract", async () => {
+    // The envelope on a SERIALIZED link is caller-written bytes. Declaring
+    // that links are preserved verbatim must not become a way to smuggle a
+    // forged `asCell` past the check the rebuild branch performs. Two layers
+    // refuse it: a forged envelope that was never committed loses preserve
+    // status outright (it is not the committed bytes at its path) and faces
+    // the rebuild rules; and even a COMMITTED forged envelope — raw write
+    // paths like `PieceManager.link` commit links without ever running this
+    // validator — is caught by the preserve branch's own wrapper check.
+    const readonlyNum: JSONSchema = { type: "number", asCell: ["readonly"] };
+    const argumentSchema: JSONSchema = {
+      type: "object",
+      properties: { v: readonlyNum },
+      required: ["v"],
+    };
+
+    const producer = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { v: { type: "number" } },
+          required: ["v"],
+        },
+        result: { v: 1 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await runtime.editWithRetry((tx) => {
+      producer.withTx(tx).setMetaRaw("schema", argumentSchema);
+    });
+
+    const base = runtime.getCell(
+      manager.getSpace(),
+      "forged-wrapper-argument-" + crypto.randomUUID(),
+    );
+    await runtime.editWithRetry((tx) => {
+      base.withTx(tx).set({ v: producer.key("v") });
+    });
+
+    const raw = base.getRaw() as { v: Record<string, never> };
+    const forged = JSON.parse(JSON.stringify(raw.v));
+    const envelope = forged["/"]?.["link@1"];
+    // Guard the premise: we really are forging a wire envelope.
+    expect(envelope).toBeDefined();
+    envelope.schema = { type: "number", asCell: ["cell"] };
+
+    const supplyForged = () =>
+      assertSuppliedLinkSchemasCompatible(
+        [{ path: ["v"], value: forged }],
+        argumentSchema,
+        base,
+        manager,
+        {
+          priorArgumentSchema: argumentSchema,
+          linksPreservedVerbatim: true,
+        },
+      );
+
+    // Layer 1: never committed — the forgery is not the committed bytes at
+    // its path, so the flag does not apply and the rebuild rules refuse the
+    // capability slot outright.
+    expect(supplyForged).toThrow(/cannot be exposed as an ordinary alias/);
+
+    // Layer 2: commit the forgery raw (as an unvalidated write path would),
+    // making it identical to committed state — the preserve branch's own
+    // wrapper check still refuses the non-durable envelope.
+    await runtime.editWithRetry((tx) => {
+      base.withTx(tx).key("v").setRawUntyped(forged);
+    });
+    expect(supplyForged).toThrow(/non-durable Cell wrapper/);
+  });
+
+  it("restores a retained ordinary Cell link across a source update", async () => {
+    // The same defect with a different error message (`asCell changed`), which
+    // is why fixing only the capability wording would have left the class
+    // half-broken: ANY `asCell`-declaring input slot was un-restorable.
+    const counter: JSONSchema = { type: "number", asCell: ["cell"] };
+    const argumentSchema: JSONSchema = {
+      type: "object",
+      properties: { count: counter },
+      required: ["count"],
+    };
+
+    const producer = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { count: { type: "number" } },
+          required: ["count"],
+        },
+        result: { count: 3 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+
+    const base = runtime.getCell(
+      manager.getSpace(),
+      "ordinary-cell-argument-" + crypto.randomUUID(),
+    );
+    await runtime.editWithRetry((tx) => {
+      base.withTx(tx).set({ count: producer.key("count") });
+    });
+
+    const raw = base.getRaw() as { count: unknown };
+    expect(isCell(raw.count)).toBe(false);
+
+    expect(() =>
+      assertSuppliedLinkSchemasCompatible(
+        [{ path: ["count"], value: raw.count }],
+        argumentSchema,
+        base,
+        manager,
+        {
+          priorArgumentSchema: argumentSchema,
+          linksPreservedVerbatim: true,
+        },
+      )
+    ).not.toThrow();
   });
 
   it("fails closed for ambiguous producer and destination Cell contracts", async () => {

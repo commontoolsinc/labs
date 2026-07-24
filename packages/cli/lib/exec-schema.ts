@@ -117,13 +117,17 @@ function parseJson(value: string, flagName: string): unknown {
 function parseInlineOrStdinJson(
   args: string[],
   index: number,
-): { inlineValue?: string; consumeNext: boolean } {
+): { inlineValue?: string; consumeNext: boolean; fromStdin?: boolean } {
   const candidate = args[index + 1];
   if (candidate === undefined) {
     return { consumeNext: false };
   }
   if (candidate.startsWith("--")) {
     throw new Error("--json cannot be combined with generated flags");
+  }
+  if (candidate === "-") {
+    // stdin sentinel, same as --json-file -
+    return { consumeNext: true, fromStdin: true };
   }
   return { inlineValue: candidate, consumeNext: true };
 }
@@ -234,8 +238,16 @@ function parseObjectInput(
       if (usedJson) {
         throw new Error("--json can only be provided once");
       }
-      const { inlineValue, consumeNext } = parseInlineOrStdinJson(args, i);
+      const { inlineValue, consumeNext, fromStdin } = parseInlineOrStdinJson(
+        args,
+        i,
+      );
       usedJson = true;
+      if (fromStdin) {
+        readJsonFromStdin = true;
+        i++;
+        continue;
+      }
       if (inlineValue === undefined) {
         readJsonFromStdin = true;
         continue;
@@ -427,6 +439,15 @@ function parseNonObjectInput(
   if (flag === "--json") {
     if (rawValue.startsWith("--")) {
       throw new Error("--json cannot be combined with generated flags");
+    }
+    if (rawValue === "-") {
+      // stdin sentinel, same as --json-file -
+      return {
+        input: undefined,
+        readJsonFromStdin: true,
+        readTextFromStdin: false,
+        usedJsonInput: true,
+      };
     }
     return {
       input: parseJson(rawValue, flag),

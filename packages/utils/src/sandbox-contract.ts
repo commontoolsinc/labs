@@ -21,9 +21,6 @@ export const SHADOWED_FACTORY_BINDINGS = [
  * against a real compartment. Endowing one of these globals means dropping it
  * from this list and restoring its declaration; the test fails until both
  * happen.
- *
- * This list covers the names already reconciled. The ones still outstanding
- * are in `SANDBOX_UNRESOLVED_GLOBAL_GAPS`.
  */
 export const SANDBOX_WITHHELD_GLOBALS = Object.freeze(
   [
@@ -48,6 +45,34 @@ export const SANDBOX_WITHHELD_GLOBALS = Object.freeze(
 
     // The runtime removes this one; see `compartment-globals.ts`.
     "Proxy",
+
+    // Timers and the microtask queue. A pattern reacts through the runtime's
+    // scheduler rather than driving its own clock, so a compartment installs
+    // none of these. The type libraries declare them, so a pattern that calls
+    // one type checks and then throws; withholding turns that into a compile
+    // error instead.
+    "setTimeout",
+    "setInterval",
+    "clearTimeout",
+    "clearInterval",
+    "queueMicrotask",
+    // `Intl` reaches the host's default locale and time zone whenever a
+    // formatter is constructed without explicit arguments, which is both
+    // nondeterministic across runtimes and a fingerprinting channel. The
+    // sanitized `toLocale*` methods in `locale-taming.ts` pin those defaults for
+    // the surface a pattern actually uses; the `Intl` constructors have no such
+    // taming, and no pattern needs them, so they stay out. Stripping removes the
+    // namespace's value members (`var Collator`, `var NumberFormat`, ...) while
+    // its interfaces remain, so a pattern can still annotate an
+    // `Intl.NumberFormatOptions` even though it cannot construct a formatter.
+    //
+    // If patterns need locale-specific formatting, the intended path is not to
+    // endow `Intl` but to add a capability that carries the user's preferred
+    // locale(s) — a `wish("#locale")` reading them from the user's profile and
+    // falling back to the platform defaults. A pattern passes that locale
+    // explicitly to the sanitized `toLocale*` methods, which already honor one,
+    // so common number, date, and currency formatting needs no `Intl`.
+    "Intl",
 
     // Web globals the runtime has never endowed. Unlike the entries above,
     // these are absent because nothing has supplied them, not because they are
@@ -85,36 +110,6 @@ export const SANDBOX_WITHHELD_GLOBALS = Object.freeze(
 );
 export type SandboxWithheldGlobalName =
   (typeof SANDBOX_WITHHELD_GLOBALS)[number];
-
-/**
- * Globals the type libraries still declare that a compartment does not
- * install. Every name here is a live instance of the bug
- * `SANDBOX_WITHHELD_GLOBALS` exists to prevent: a pattern that reaches for one
- * compiles, deploys, and then throws.
- *
- * They are listed rather than stripped because stripping them alone does not
- * fix them. `packages/patterns/google/core/util/gmail-send-client.ts` and its
- * siblings build retry backoff out of `setTimeout`, so removing the
- * declaration turns a runtime throw on the retry path into a compile error
- * across several API clients. Resolving each name means either endowing it in
- * `compartment-globals.ts` or removing the code that reaches for it, and
- * `Intl` additionally has to reckon with the locale taming in
- * `locale-taming.ts` rather than forwarding the host's `Intl` as-is.
- *
- * `packages/runner/test/sandbox-global-contract.test.ts` holds this list to
- * exactly the gaps that exist: a new one fails the test, and a name that stops
- * being a gap fails it too. The list only shrinks.
- */
-export const SANDBOX_UNRESOLVED_GLOBAL_GAPS = Object.freeze(
-  [
-    "setTimeout",
-    "setInterval",
-    "clearTimeout",
-    "clearInterval",
-    "queueMicrotask",
-    "Intl",
-  ] as const,
-);
 
 export const TRUSTED_BUILDERS = Object.freeze(
   [

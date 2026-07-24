@@ -59,12 +59,14 @@ export const llm = createRoute({
   path: "/api/health/llm",
   method: "get",
   tags,
-  query: z.object({
-    verbose: z.string().optional(),
-    alert: z.string().optional(),
-    models: z.string().optional(),
-    forceAlert: z.string().optional(),
-  }),
+  request: {
+    query: z.object({
+      verbose: z.string().optional(),
+      alert: z.string().optional(),
+      models: z.string().optional(),
+      forceAlert: z.string().optional(),
+    }),
+  },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(
       LLMHealthResponseSchema,

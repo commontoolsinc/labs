@@ -45,13 +45,27 @@ dashboard/
 `server.ts` knows nothing about individual tiles. It runs a single ticker,
 collects each tile that is due (respecting its `intervalMs`), renders the
 results uniformly, mounts any drill-down routes a tile declares, and pushes new
-tile markup as each collection completes. Every registered tile has a gray
-placeholder labelled with its id in its registered position until its first
-collection completes, so slow collectors do not leave holes in the board. A
-tile whose `collect()` throws is desaturated to a gray "unknown" — it keeps its
-last-known value and shows a short reason (e.g. "source unreachable"), with the
-full error in the server log — so one unreachable source never blanks or breaks
-the board.
+tile markup as each independent collection completes. Every registered tile has
+a gray placeholder labelled with its id in its registered position until its
+first collection completes, so slow collectors do not leave holes in the board.
+A tile whose `collect()` throws is desaturated to a gray "unknown" — it keeps
+its last-known value and shows a short reason (e.g. "source unreachable"), with
+the full error in the server log — so one unreachable source never blanks or
+breaks the board.
+
+GitHub CI tiles declare the workflow snapshots they read in `runSources`. The
+scheduler fetches each workflow independently. When a workflow fetch completes,
+the scheduler collects every due tile that reads it from the same stored
+snapshot and publishes those tile updates together. Each workflow can trigger a
+tile once per collection interval. A tile with several workflows can update
+once for each workflow as they arrive. This keeps a repository's build, trust,
+duration, and recent-run views in agreement when their intervals coincide.
+
+The recent-main-runs tile reads both the Labs and Loom snapshots. It rebuilds
+and sorts the combined list whenever either snapshot arrives. If one snapshot
+has not arrived yet, it shows the runs from the available snapshot in gray and
+names the pending source. If a later refresh fails, it keeps the last good
+snapshot for that source and shows the combined list in gray with the error.
 
 Each event connection receives the current tile snapshot before it waits for
 new collections. The browser reconciles that snapshot by tile ID, leaving
@@ -88,6 +102,7 @@ export const myTile: Tile = {
   id: "my-tile",          // unique, stable
   intervalMs: 60_000,     // how often collect() runs
   // wide: true,           // optional full-width placement
+  // runSources: [{ repo: "owner/repo", workflow: "ci.yml" }],
   async collect(ctx): Promise<TileView> {
     // ctx.runs() -> shared CI runs; ctx.env("KEY") -> env var.
     // If a required env var is missing, return a gray "unknown" view — don't throw.
@@ -147,14 +162,17 @@ surveillance tool.
 |---|---|---|
 | labs ci, labs ci trust, labs ci duration | GitHub Actions (`deno.yml` on main in `commontoolsinc/labs`), via the REST API | `GH_TOKEN` (or `GITHUB_TOKEN`) |
 | loom ci, loom ci trust, loom ci duration | the same three tiles for `commontoolsinc/loom` (`test-fast.yml` on main) | `GH_TOKEN` (read access to loom); optional `DASHBOARD_LOOM_REPO` |
-| recent main runs | labs + loom main runs interleaved chronologically, each row tagged with its repo | `GH_TOKEN` |
-| labs ci duration → `/ci` | runs `scripts/ci-gantt.ts` with live controls (labs only) | — |
+| recent main runs | Labs and Loom main-run snapshots, refreshed independently and merged chronologically whenever either arrives; each row is tagged with its repo | `GH_TOKEN` |
+| commit CI Gantt → `/ci-gantt` | job and step timing for every successful main workflow run attached to one commit, linked from run durations in recent main runs | `GH_TOKEN` |
+| CI duration history → `/bench?view=ci` | labs and loom job, shard-group, and end-to-end workflow duration trends. The duration tiles open their matching repository view | `GH_TOKEN` |
+| CI run Gantt → `/bench?view=gantt` | detailed labs or loom job phases from `scripts/ci-gantt.ts`, backed by the CI history cache | `GH_TOKEN` |
 | production | synthetic HTTP check of the production server: `/_health` on `PROD_URL`'s origin, which answers only while the server is really serving. Defaults to estuary, the production toolshed. Estuary is on the tailnet, so a dashboard that cannot reach the tailnet needs `PROD_URL` pointed at something it can | `PROD_URL` (optional) |
 | common.tools | synthetic HTTP check of the public site | `COMMON_TOOLS_URL` (optional; defaults to `https://common.tools`) |
 | prod errors | SigNoz trace error rate for one service (errored spans / all spans): last-12h headline, with a per-hour sparkline over the retained trace history (~2 weeks) and the last-12h slice that feeds the headline highlighted. Scoped to `PROD_SERVICE` — the same SigNoz holds staging and one-off perf runs, whose rates are not production's. Gray (not red) when SigNoz is unreachable. Pops out to the SigNoz logs explorer | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `SIGNOZ_UI_URL` for the pop-out |
 | cloud spend | BigQuery billing export, via the REST API | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
 | ci spend | GitHub Actions billing, projected to month-end (USD), with a 45-day daily-spend sparkline. Month-to-date sits in the header (the `aside` slot); the sub shows the GitHub-configured budget when there is one; the span the sparkline covers is in its bottom-left corner (the `duration` slot) | `GH_TOKEN` (with org billing read); optional `GH_BILLING_ORG` |
 | benchmark | a runtime benchmark's ~45-day trend, from the `benchmarks.yml` deno-bench artifacts on main | `GH_TOKEN`; optional `BENCH_METRIC` |
+| performance history → `/bench?view=runtime` | runtime benchmark trends, labs or loom CI duration history, and a detailed CI run Gantt. Historical views support windows from 1 through 45 days, date axes, and duration sorting. CI includes end-to-end workflow time, every job, and slowest-shard group lines | `GH_TOKEN` |
 | model spend | OpenAI + Anthropic + OpenRouter usage APIs. Headline is the projected full-month spend (extrapolated from the recent daily rate, spilling into last month when this month is under two weeks old), summed across providers. OpenAI and Anthropic (which expose per-day cost) are charted as one line each over ~45 days, dimmed except for the current-month slice that feeds the headline, with each line's MTD in the right gutter; OpenRouter (monthly total only, abbreviated "OR") is folded into the totals. The subtitle is the bullet-separated key (`OpenAI • Anthropic • OR $0`); the combined MTD sits in the header (the `aside` slot); the span the chart covers is in its bottom-left corner (the `duration` slot). A provider we can't read shows `$???` and drops the tile to gray, but the rest still chart and total | any of `OPENAI_ADMIN_KEY`, `ANTHROPIC_ADMIN_KEY`, `OPENROUTER_KEY`; optional `MODEL_MONTHLY_BUDGET` |
 | discord online | Discord gateway presence, team vs visitors over time | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` (Server Members + Presence intents) |
 | dau | distinct identities active per UTC day on one named service, counted from the `user.did` attribute on the `memory.transact` and `memory.subscriber.sync` spans in SigNoz. The headline is the last day that ran to the end (today is still filling, and a part-day always reads as a drop); the sparkline is the retained history. Gray while the named service has no such spans — which is the resting state until a deployment's tracing is switched on. It counts keypairs rather than people; see [dau](#dau) below | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `DAU_EXCLUDE_DIDS`, `SIGNOZ_UI_URL` |
@@ -318,8 +336,7 @@ it.
 | `PROD_URL` | production | the production **server**, as an origin — the tile checks `/_health` on it and links to it. Defaults to estuary, the production toolshed. Note `production.commontools.dev` is the shell, a static site in a GCS bucket: it has no health endpoint, and its index page answers 200 whether or not the server behind it is serving, so it cannot see an outage. |
 | `COMMON_TOOLS_URL` | common.tools | override the public-site URL (e.g. the `www` host if the apex redirects). |
 | `DASHBOARD_REPO` | CI tiles, github users | which repo the CI tiles read. Its owner is the organization the **github users** tile reads (default `commontoolsinc/labs`). |
-| `DISCORD_HISTORY_FILE` | discord online | where the team/visitors history is persisted (default: a file in the temp dir). |
-| `GITHUB_MEMBERS_HISTORY_FILE` | github users | where the Members/Collaborators history is persisted (default: an organization-specific file in the temp dir). |
+| `DASHBOARD_CACHE_DIR` | server caches | directory for all persistent dashboard cache files (default: the platform temp directory). |
 | `BENCH_METRIC` | benchmark | substring that pins which benchmark the grid tile shows; unset, it rotates hourly through all of them (see the note below). |
 | `SIGNOZ_UI_URL` | prod errors | browser-facing SigNoz URL for the "logs" pop-out. Defaults to `SIGNOZ_URL` when that is a public `https://` URL; set it when the server reaches SigNoz over an in-cluster URL a browser can't. |
 | `PROD_SERVICE` | prod errors, dau | the `service.name` production reports under in SigNoz, which both trace-reading tiles scope to. Defaults to `toolshed-production`. A name outside `[A-Za-z0-9._-]` is ignored, since it lands inside a query expression. |
@@ -374,9 +391,10 @@ Notes:
   `benchmarks.yml` job on main runs `deno bench --json` over the runner, cache,
   and deep-equal benchmarks and uploads the report as a `bench-results` artifact
   (90-day retention; there is no committed history). The tile lists benchmark runs
-  on main, samples one run per 4-hour window, downloads that artifact, unzips it
-  in-process, and reads each benchmark's timings; per-run results are cached, so
-  only new runs are fetched after the first fill. The grid tile plots **p99**. With
+  on main, samples one run per shortest-view bucket, downloads that artifact, unzips it
+  in-process, and reads each benchmark's timings. Each completed artifact check is
+  persisted before it is counted as finished, so only new runs and new attempts are
+  fetched after the first fill or a server restart. The grid tile plots **p99**. With
   `BENCH_METRIC` set it pins to the benchmark whose `<file> > <group>/<name>` key
   contains that substring; otherwise it **rotates** — showing one benchmark per
   clock-hour, chosen deterministically from the hour so a fresh dashboard on any
@@ -391,19 +409,98 @@ Notes:
   days being outliers, and working per calendar day (not per sample or per
   millisecond) keeps it time-aware without letting two noisy runs a few hours apart
   blow up the slope — which is what naive per-millisecond weighting does. A
-  benchmark with fewer than 7 distinct days in the window is reported as flat: too
-  little data to claim a trend. The window is capped by the 90-day artifact
-  retention, so it shows at most ~45 days and only as far back as the job has run.
-  (4-hour sampling means many more points than daily, so the first cache fill
-  downloads correspondingly more artifacts.)
-  - Its **`/bench` drill-down** shows a sparkline for **every** benchmark on a
-    shared calendar-time axis, so a late-starting benchmark sits at the right and a
-    stale one visibly ends short of it. Selectors choose which measurement to plot
-    (a percentile ladder — **p0** = min, **p50** = the mean, **p75**, **p99**,
-    **p99.5**, **p99.9**, **p100** = max) and whether to sort by source **file** or
-    by **trend** (biggest rise first); a "hide green" checkbox drops the steady
-    ones. Each row is coloured by its own trend, and the page reads from the tile's
-    cache so it re-renders instantly.
+  benchmark with fewer than 7 distinct days in the window is marked as new and
+  left gray: there is too little data to claim a trend. The window is capped by
+  the 90-day artifact retention, so it shows at most ~45 days and only as far
+  back as the job has run.
+  (The shortest-view buckets are about 16 minutes wide, so the first cache fill
+  can download correspondingly more artifacts.)
+  - Its **runtime benchmarks** view at `/bench?view=runtime` shows a sparkline
+    for **every** benchmark on a shared calendar-time axis, so a late-starting
+    benchmark sits at the right and a stale one visibly ends short of it.
+    Selectors choose which measurement to plot (a percentile ladder — **p0** =
+    min, **p50** = the mean, **p75**, **p99**, **p99.5**, **p99.9**, **p100** =
+    max) and whether to group by source **file** or sort by latest **duration**
+    or **trend**. A "hide green" checkbox drops the steady ones. A slider from 1
+    through 45 days changes the visible calendar range. The displayed samples
+    are spread across at most 90 time buckets, so a shorter window uses more of
+    the collected samples per day. Keyboard arrows adjust the window without
+    moving focus. Enter applies the range immediately. Another selector carries
+    the range into its own navigation, and leaving the controls applies it
+    directly. Each row is coloured by its own trend, and the page reads from the
+    server cache so it re-renders instantly. Its progress panel stays visible as
+    Idle between collections. During collection it shows cached, queued, requested,
+    responded, outstanding, and failed artifact checks. Changing the range leaves
+    the server collection running and joins it from the new page.
+  - The **CI duration history** view at `/bench?view=ci` selects either labs
+    `deno.yml` or loom `test-fast.yml`. It charts every job's start-to-finish
+    duration on one calendar-time axis. An overall row measures the workflow
+    from the first job
+    start to the last job completion. Jobs that share the trailing-parenthesis
+    base name used by `scripts/ci-gantt.ts` are shown together. Each group starts
+    with a slowest-shard line, followed by the individual shard lines. The
+    slider covers 1 through 45 days. It keeps every successful main build when
+    there are at most 90, then uses about 90 time buckets and keeps the newest
+    build in each bucket for larger sets. A coverage label compares the sampled
+    builds shown with every successful main build in the selected range. The
+    view can group by job or sort every line by latest duration or robust trend.
+    It renders cached history immediately. The progress panel remains visible
+    as Idle between collections, then shows live collection progress with
+    cached, queued, requested, responded, outstanding, and failed run counts.
+    Open runtime benchmark and CI history pages check for newer server data once
+    a minute. An open Gantt regenerates every 30 minutes and whenever its tab
+    becomes visible. CI refreshes share a 30-minute GitHub freshness window, so
+    multiple pages do not repeat the same API reads. Moving the window slider
+    starts or joins the matching collection without cancelling wider-window
+    work already in progress.
+  - Every GitHub API request made by the three performance views reserves rate
+    capacity before it starts. Each guarded request batch reads GitHub's current
+    rate-limit status before reserving. Collection stops before projected
+    in-flight requests would pass 80% of the token's hourly core limit. It also
+    stops at 720 REST request points in a rolling minute, which is 80% of
+    GitHub's documented 900-point limit. The page reports either boundary as a
+    rate limit hit. It does not wait or retry there. Reservations and request
+    times are locked and stored in the fixed
+    `fabric-wall-github-rate-limit.json` file in the dashboard cache directory, so
+    overlapping dashboard processes and restarts share the same budget. Tokens
+    are represented by SHA-256 hashes in that file. Only `/bench` collection
+    reserves capacity or can be stopped by the ledger. Other dashboard GitHub
+    requests do not read or update it and proceed normally.
+  - Completed workflow-attempt run, job, and step timings are written
+    atomically to the fixed `fabric-wall-ci-job-history.json` file in the
+    dashboard cache directory.
+    CI history and the detailed `/bench?view=gantt` view use the same entries.
+    The three performance views share one selector and preserve the applicable
+    repository, range, sort, and runtime statistic while moving between them.
+    The next collection loads those timings before reading GitHub, so it only
+    fetches jobs for new sampled runs, uncached Gantt runs, and new attempts.
+    Cached history remains visible when no GitHub token is configured or a
+    refresh fails. Each completed response is placed in the shared cache and
+    persisted while the rest of its collection continues, including responses
+    from a window the browser has since left.
+    The cache also stores each window's exact sampled run attempts, partial-read
+    state, last completed refresh, and the complete set of successful-run
+    timestamps used by its coverage label. A new dashboard process therefore
+    renders the same chart, warning, and coverage while honoring the remaining
+    part of the 30-minute freshness window without querying GitHub. Dashboard
+    processes that share the file lock it while merging and atomically replacing
+    entries. Attempts referenced by the last completed chart remain in the
+    cache while a rerun is being collected. An interrupted or rate-limited
+    collection records that its earlier manifest is no longer fresh, so a
+    restart keeps the completed chart visible but resumes collection.
+  - Runtime benchmark artifact results are written atomically to
+    the fixed `fabric-wall-benchmark-history.json` file in the dashboard cache
+    directory.
+    Successful reads and definitive empty results are retained for 60 days. A
+    failed read remains uncached so a later scheduled collection can establish
+    whether the artifact exists. Dashboard processes that share the file lock it
+    while merging and replacing the stored run attempts. The exact run attempts
+    behind the last completed refresh, including the reason for a definitive
+    empty result, are stored in the same file. Attempts used by that completed
+    refresh remain available while a rerun is incomplete. Restarting the
+    dashboard therefore reconstructs the same chart without immediately
+    rediscovering benchmark runs that are still within the 30-minute freshness
+    window. An interrupted replacement is persisted as stale and is retried.
 - **Deploying these gated tiles** follows the same pattern as the existing ones:
   add the value to Secret Manager, wire an ExternalSecret in
   `dashboard-secrets.yaml`, and add the env to `03-deployment.yaml` (see the
@@ -412,8 +509,8 @@ Notes:
 Everything below is a tunable constant in `config.ts`:
 
 - **Status thresholds:** `TRUST_GOOD`/`TRUST_WARN` (first-try-green %), `DUR_GOOD`/`DUR_WARN` (median CI minutes).
-- **Data windows:** the shared fetch is `min(CI_RUNS_MAX=200 commits, CI_RUNS_MAX_AGE_DAYS=60)`; ci-trust uses all of it, ci-duration's median uses `max(DUR_MIN_RUNS=20, DUR_MAX_AGE_HOURS=6)` and says which basis it's on, recent-runs shows `RECENT_DISPLAY=50`.
-- **ci-trust cell grid:** `TRUST_COLS=40` columns, count rounded down to whole rows, up to `TRUST_STRIP=200` cells.
+- **Data windows:** The shared fetch returns at most `CI_RUNS_MAX=200` workflow runs and stops at `CI_RUNS_MAX_AGE_DAYS=60` days. CI trust uses the entire fetched window. CI duration uses whichever is larger: `DUR_MIN_RUNS=20` passing runs or `DUR_MAX_AGE_HOURS=6` hours. Recent runs shows `RECENT_DISPLAY=50` entries.
+- **ci-trust cell grid:** `TRUST_COLS=40` sets the column count. The grid has up to `CI_RUNS_MAX=200` cells, one for every fetched run. First-try successes are green. In-progress runs are blue. Completed runs that lower the trust percentage are red. Ignored runs are gray.
 
 ## Local development
 

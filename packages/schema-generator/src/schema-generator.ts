@@ -7,6 +7,7 @@ import type {
 } from "@commonfabric/api";
 import type {
   GenerationContext,
+  SchemaGenerationOptions,
   SchemaGenerator as ISchemaGenerator,
   TypeFormatter,
 } from "./interface.ts";
@@ -55,7 +56,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     type: ts.Type,
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
-    options?: { widenLiterals?: boolean },
+    options?: SchemaGenerationOptions,
     schemaHints?: WeakMap<
       ts.Node,
       {
@@ -111,6 +112,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       }
     >,
     sourceFile?: ts.SourceFile,
+    options?: SchemaGenerationOptions,
   ): JSONSchemaMutable {
     // Pass 'any' type with the typeNode - auto-detection will choose node-based analysis
     const anyType = checker.getAnyType();
@@ -119,7 +121,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       checker,
       typeNode,
       typeRegistry,
-      undefined,
+      options,
       schemaHints,
       sourceFile,
     );
@@ -134,7 +136,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
-    options?: { widenLiterals?: boolean },
+    options?: SchemaGenerationOptions,
     schemaHints?: WeakMap<
       ts.Node,
       {
@@ -179,6 +181,9 @@ export class SchemaGenerator implements ISchemaGenerator {
       }),
       ...(typeRegistry && { typeRegistry }),
       ...(options?.widenLiterals && { widenLiterals: true }),
+      ...(options?.writerIdentityForSourceFile && {
+        writerIdentityForSourceFile: options.writerIdentityForSourceFile,
+      }),
       ...(schemaHints && { schemaHints }),
     };
 

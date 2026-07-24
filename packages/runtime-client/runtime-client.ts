@@ -143,6 +143,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       trustSnapshot: options.trustSnapshot,
       forwardWorkerConsole: options.forwardWorkerConsole,
       patternCoverage: options.patternCoverage,
+      concurrentWatchRefresh: options.concurrentWatchRefresh,
     });
     return new RuntimeClient(initialized, options);
   }

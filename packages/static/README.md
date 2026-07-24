@@ -15,10 +15,9 @@ task assumes that will be checked out with the same parent folder as `labs`.
 
 `assets/types/es2023.d.ts` and `assets/types/dom.d.ts` describe the sandbox
 patterns run in, not stock TypeScript. A global that the SES compartment does
-not install has its `declare var` removed from them, so a pattern that reaches
-for it fails to compile rather than throwing a `TypeError` once deployed. The
-names live in `SANDBOX_WITHHELD_GLOBALS`
-(`packages/utils/src/sandbox-contract.ts`).
+not install has its declaration removed from them, so a pattern that reaches for
+it fails to compile rather than throwing a `TypeError` once deployed. The names
+live in `SANDBOX_WITHHELD_GLOBALS` (`packages/utils/src/sandbox-contract.ts`).
 
 `compile-types` applies this on the way out, so a regenerated `es2023.d.ts`
 already has them removed. After changing the list, run:
@@ -30,6 +29,6 @@ declares a withheld global, and
 `packages/runner/test/sandbox-global-contract.test.ts` checks the libraries and
 a real compartment against each other in both directions.
 
-The names that still break this rule — the timers, `queueMicrotask` and `Intl` —
-are listed in `SANDBOX_UNRESOLVED_GLOBAL_GAPS` next to the withheld list. The
-same test pins that list to the gaps that actually exist, so it only shrinks.
+That test requires zero gaps: every global the compiler declares must be one the
+compartment installs. A newly declared global that the compartment lacks fails
+the test until it is endowed or added to the withheld list.

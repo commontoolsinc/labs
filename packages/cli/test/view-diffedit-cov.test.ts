@@ -551,6 +551,69 @@ Deno.test("diffedit cov: the highlighter recolours a Markdown body line via the 
   assertEquals(out[bodyIdx].spans[0].cls, "diffAdd");
 });
 
+Deno.test("diffedit cov: a CRLF .ts header selects TypeScript for edited lines", () => {
+  const diff = [
+    "diff --git a/generic.ts b/generic.ts\r",
+    "--- a/generic.ts\r",
+    "+++ b/generic.ts\r",
+    "@@ -0,0 +1 @@\r",
+    "+const identity = <T>(value: T): T => value;\r",
+    "",
+  ].join("\n");
+  const highlighter = createDiffHighlighter(diff);
+  const raw = diff.split("\n");
+  raw[4] = raw[4].replace("value;", "value ;");
+  const line = highlighter.update(raw.join("\n"))[4];
+  assertEquals(
+    line.spans.find((span) => span.text === "value" && span.cls === "parameter")
+      ?.cls,
+    "parameter",
+  );
+});
+
+Deno.test("diffedit cov: renamed removed lines use the old extension", () => {
+  const diff = `diff --git a/generic.ts b/generic.tsx
+--- a/generic.ts
++++ b/generic.tsx
+@@ -1 +1 @@
+-const identity = <T>(value: T): T => value;
++const view = <div>ready</div>;
+`;
+  const highlighter = createDiffHighlighter(diff);
+  const raw = diff.split("\n");
+  raw[4] = raw[4].replace("value;", "value ;");
+  const line = highlighter.update(raw.join("\n"))[4];
+  assertEquals(
+    line.spans.find((span) => span.text === "value" && span.cls === "parameter")
+      ?.cls,
+    "parameter",
+  );
+});
+
+Deno.test("diffedit cov: source lines resembling file headers keep the diff path", () => {
+  const diff = `diff --git a/generic.ts b/generic.ts
+--- a/generic.ts
++++ b/generic.ts
+@@ -1 +1 @@
+--- oldValue; const before = <T>(input: T): T => input;
++++ newValue; const after = <T>(input: T): T => input;
+`;
+  const highlighter = createDiffHighlighter(diff);
+  const raw = diff.split("\n");
+  raw[4] = raw[4].replace("oldValue", "previousValue");
+  raw[5] = raw[5].replace("newValue", "nextValue");
+  const lines = highlighter.update(raw.join("\n"));
+  for (const index of [4, 5]) {
+    assertEquals(
+      lines[index].spans.find((span) =>
+        span.text === "input" && span.cls === "parameter"
+      )?.cls,
+      "parameter",
+      `line ${index + 1} uses the .ts parser`,
+    );
+  }
+});
+
 Deno.test("diffedit cov: the highlighter scans past a missing +++ to the diff --git Markdown header", () => {
   // No `+++ ` line at all (a truncated header), so the backward scan from the
   // edited body line reaches the `diff --git ...md` header instead.

@@ -14,6 +14,11 @@ import {
   waitForRuntimeIdle,
   waitForRuntimeSynced,
 } from "./cfc-browser-helpers.ts";
+import {
+  clickButtonWithExactText,
+  clickButtonWithText,
+  clickButtonWithTitle,
+} from "./note-button-helpers.ts";
 import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { assert, assertEquals } from "@std/assert";
@@ -483,9 +488,7 @@ describe("default-app flow test", () => {
       }
 
       console.log(`Navigate back to space page (note ${noteIndex})...`);
-      await waitFor(async () => {
-        return await clickPieceLinkWithText(page, spaceName);
-      });
+      await clickPieceLinkWithText(page, spaceName);
       try {
         await shell.waitForState({ view: { spaceName }, identity });
       } catch (error) {
@@ -746,13 +749,16 @@ describe("default-app flow test", () => {
         await clickButtonWithTitle(page, "New Note"),
         "Expected New Note click to succeed",
       );
-      // The click is delivered; wait until its effect — the open modal with its
-      // "Create Another" button — has rendered and become interactive.
-      await waitFor(async () => {
-        await awaitViewSettled(page);
-        return !!(await findButtonWithText(page, "Create Another"));
-      });
-      await waitFor(async () => await resetEventInvocationTrace(page));
+      // Arm the event-invocation trace before the note creations, whose markers
+      // this test's failure diagnostics read. clickButtonWithTitle settled the
+      // view, so the runtime has exposed its telemetry methods and the reset
+      // runs once with its success asserted. The first "Create Another" click
+      // below settles the view and waits for the button to render, so no
+      // separate wait for the modal is needed here.
+      assert(
+        await resetEventInvocationTrace(page),
+        "Expected the event invocation trace to reset",
+      );
 
       const noteCreates = 7;
       for (let i = 0; i < noteCreates - 1; i++) {
@@ -1426,16 +1432,6 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
         stack.includes("_CellImpl.setRawUntyped") &&
         stack.includes("Runner.setupInternal")
       ) {
-        const runnerLine = stack.match(/runner\.ts:(\d+)/)?.[1];
-        if (runnerLine) {
-          const line = Number(runnerLine);
-          if (line >= 300 && line < 330) {
-            return "setup:processCell.setRawUntyped";
-          }
-          if (line >= 330 && line < 360) {
-            return "setup:resultCell.setRawUntyped";
-          }
-        }
         return "setup:setRawUntyped";
       }
       if (stack.includes("_CellImpl.setRawUntyped")) {
@@ -3188,181 +3184,6 @@ async function ensureCapturedConsole(page: Page): Promise<boolean> {
   });
 }
 
-// Helper to find and click a button by text using piercing selectors
-// Marker attribute a click predicate stamps on the button it resolved, so the
-// test can then resolve that exact element and dispatch a single trusted click
-// on it. Mirrors the CLICK_TARGET_ATTR flow of clickCfButton in
-// cfc-browser-helpers.ts.
-const NOTE_BUTTON_CLICK_TARGET_ATTR = "data-cfc-note-button-target";
-
-// Serialized into the page by waitForCondition: find the first rendered
-// button/link whose text or title matches, scroll it into view, and stamp its
-// inner click target with `token`. "Rendered" means laid out and not
-// display:none/visibility:hidden — the same elements the innerText scan the
-// poll used could see — and is viewport-independent, so a match below the fold
-// is scrolled in rather than skipped. Returns false until a match exists, so
-// the wait re-checks on the next DOM mutation instead of the caller retrying a
-// bare find-and-click loop.
-const markNoteButton = async (
-  probe: ProbeApi,
-  selector: string,
-  match: "includes" | "exact" | "title",
-  needle: string,
-  token: string,
-  attr: string,
-): Promise<boolean> => {
-  const target = probe.collect(selector).find((element) => {
-    if (!probe.isRendered(element)) return false;
-    if (match === "title") return element.getAttribute("title") === needle;
-    const text = (element.textContent ?? "").trim();
-    return match === "exact" ? text === needle : text.includes(needle);
-  }) as HTMLElement | undefined;
-  if (!target) return false;
-  target.scrollIntoView({ block: "center", inline: "center" });
-  await new Promise((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(resolve))
-  );
-  const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
-    | HTMLElement
-    | null) ?? target;
-  if (!clickTarget.isConnected || !probe.isRendered(clickTarget)) return false;
-  clickTarget.setAttribute(attr, token);
-  return true;
-};
-
-// Remove every element carrying `attr=token`, descending through shadow roots.
-async function clearNoteButtonMark(
-  page: Page,
-  token: string,
-): Promise<void> {
-  await page.evaluate((targetToken, targetAttr) => {
-    function collect(root: Document | ShadowRoot, result: Element[]): void {
-      for (const element of root.querySelectorAll("*")) {
-        if (element.getAttribute(targetAttr) === targetToken) {
-          result.push(element);
-        }
-        if (element.shadowRoot) collect(element.shadowRoot, result);
-      }
-    }
-    const matches: Element[] = [];
-    collect(document, matches);
-    for (const element of matches) element.removeAttribute(targetAttr);
-  }, { args: [token, NOTE_BUTTON_CLICK_TARGET_ATTR] }).catch(() => {});
-}
-
-// Wait for a matching button to be present and interactive, then dispatch a
-// single trusted click on it. Throws if no matching button becomes clickable.
-async function settleAndClickNoteButton(
-  page: Page,
-  selector: string,
-  match: "includes" | "exact" | "title",
-  needle: string,
-): Promise<void> {
-  const markTarget = async (token: string) => {
-    await waitForCondition(page, markNoteButton, {
-      args: [selector, match, needle, token, NOTE_BUTTON_CLICK_TARGET_ATTR],
-    });
-  };
-
-  let token = `cfc-note-button-${crypto.randomUUID()}`;
-  try {
-    await markTarget(token);
-  } catch (cause) {
-    throw new Error(
-      `Unable to find a ${
-        match === "title" ? "button titled" : "button matching"
-      } "${needle}" to click`,
-      { cause },
-    );
-  }
-
-  let lastCause: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const clickTarget = await page.waitForSelector(
-        `[${NOTE_BUTTON_CLICK_TARGET_ATTR}="${token}"]`,
-        { strategy: "pierce" },
-      );
-      await clickTarget.click();
-      return;
-    } catch (cause) {
-      lastCause = cause;
-      const retryable = cause instanceof Error &&
-        cause.message.includes("stable box model");
-      if (!retryable || attempt === 2) break;
-    } finally {
-      await clearNoteButtonMark(page, token);
-    }
-
-    // A root-pattern hot swap can replace the marked button after discovery
-    // but before Astral resolves its box. Re-mark the current rendered node and
-    // retry the coordinate click; only the successful attempt dispatches.
-    token = `cfc-note-button-${crypto.randomUUID()}`;
-    await markTarget(token);
-  }
-
-  throw new Error(`Unable to click the stable "${needle}" button`, {
-    cause: lastCause,
-  });
-}
-
-// The click helpers resolve `true` once the single click has landed (they throw
-// otherwise), so the call sites that assert the click succeeded keep reading.
-async function clickButtonWithText(
-  page: Page,
-  searchText: string,
-): Promise<boolean> {
-  await settleAndClickNoteButton(
-    page,
-    "cf-button, button, a",
-    "includes",
-    searchText,
-  );
-  return true;
-}
-
-async function clickButtonWithExactText(
-  page: Page,
-  searchText: string,
-): Promise<boolean> {
-  await settleAndClickNoteButton(
-    page,
-    "cf-button, button, a",
-    "exact",
-    searchText,
-  );
-  return true;
-}
-
-async function clickButtonWithTitle(
-  page: Page,
-  title: string,
-): Promise<boolean> {
-  await settleAndClickNoteButton(page, "cf-button, button", "title", title);
-  return true;
-}
-
-async function findButtonWithText(
-  page: Page,
-  searchText: string,
-): Promise<any | null> {
-  try {
-    // Search cf-button, button, and a elements with piercing selector
-    const buttons = await page.$$("cf-button, button, a", {
-      strategy: "pierce",
-    });
-    for (const button of buttons) {
-      const text = await button.innerText();
-      if (text?.trim().includes(searchText)) {
-        return button;
-      }
-    }
-    return null;
-  } catch (_) {
-    return null;
-  }
-}
-
 async function collectNotebookRenderState(page: Page): Promise<{
   isNotebook: boolean;
   noteCount: number;
@@ -3525,48 +3346,51 @@ async function collectNavigationDiagnostics(page: Page): Promise<unknown> {
   });
 }
 
+// Serialized into the page by waitForCondition: find the space link whose
+// visible text contains `searchText` and activate it, reporting whether one was
+// found. Prefers the shell breadcrumb before falling back to generic anchors:
+// the selectors are tried one at a time, because a combined selector matches in
+// document order and lets an unrelated descendant <a> containing the space name
+// win. Activation uses DOM click() rather than an Astral coordinate click,
+// which can hit a transient overlay even after resolving the right node. The
+// predicate finds and clicks in one page-side pass, so the click lands on the
+// element the search just resolved with no window for a re-render in between;
+// waitForCondition stops the instant it returns true, so the click fires once.
+const findAndClickPieceLink = (
+  probe: ProbeApi,
+  searchText: string,
+): boolean => {
+  for (
+    const selector of [
+      ".header-space",
+      "#header-space-link",
+      "#header-space",
+      "a",
+    ]
+  ) {
+    const link = probe.collect(selector).find((element) =>
+      (element as HTMLElement).innerText?.trim().includes(searchText)
+    ) as HTMLElement | undefined;
+    if (link) {
+      link.click();
+      return true;
+    }
+  }
+  return false;
+};
+
+// Wait for the space link to render, then activate it once.
 async function clickPieceLinkWithText(
   page: Page,
   searchText: string,
-): Promise<boolean> {
+): Promise<void> {
   try {
-    return await page.evaluate((searchText: string) => {
-      const roots: Array<Document | ShadowRoot> = [document];
-      for (let index = 0; index < roots.length; index++) {
-        for (const element of roots[index].querySelectorAll("*")) {
-          if ((element as HTMLElement).shadowRoot) {
-            roots.push((element as HTMLElement).shadowRoot!);
-          }
-        }
-      }
-
-      // Prefer the shell breadcrumb before falling back to generic anchors.
-      // A combined selector is returned in document order, so an unrelated
-      // descendant <a> containing the space name can otherwise win the race.
-      for (
-        const selector of [
-          ".header-space",
-          "#header-space-link",
-          "#header-space",
-          "a",
-        ]
-      ) {
-        for (const root of roots) {
-          for (const link of root.querySelectorAll<HTMLElement>(selector)) {
-            if (link.innerText.trim().includes(searchText)) {
-              // Use the DOM activation behavior. Astral's coordinate click can
-              // hit a transient overlay even after resolving the right node.
-              link.click();
-              return true;
-            }
-          }
-        }
-      }
-
-      return false;
-    }, { args: [searchText] });
-  } catch (_) {
-    return false;
+    await waitForCondition(page, findAndClickPieceLink, { args: [searchText] });
+  } catch (cause) {
+    throw new Error(
+      `Unable to find a space link matching "${searchText}" to click`,
+      { cause },
+    );
   }
 }
 

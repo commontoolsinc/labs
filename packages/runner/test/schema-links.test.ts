@@ -824,13 +824,13 @@ describe("Schema - Link Resolution", () => {
    */
   describe("validateAndTransform with redirect links", () => {
     it("creates schema-declared stream cells for missing stream targets", () => {
-      const processCell = runtime.getCell(
+      const resultCell = runtime.getCell<any>(
         space,
-        "missing-stream-target-process",
+        "missing-stream-target-result-cell",
         undefined,
         tx,
       );
-      processCell.setRawUntyped({ internal: {} });
+      resultCell.setRawUntyped({ internal: {} });
 
       const streamSchema = {
         type: "object",
@@ -842,17 +842,14 @@ describe("Schema - Link Resolution", () => {
         ifc: { confidentiality: [{ kind: "secret" }] },
       } as const satisfies JSONSchema;
 
+      // Redirects in data are sigil links (`$alias` records are plain data
+      // there): point at a stream target that doesn't exist yet.
       const inputs = runtime.getImmutableCell(
         space,
         {
           $ctx: {
-            add: {
-              $alias: {
-                cell: processCell.entityId,
-                path: ["internal", "dialog", "add"],
-                schema: streamSchema,
-              },
-            },
+            add: resultCell.key("internal").key("dialog").key("add")
+              .getAsWriteRedirectLink(),
           },
         },
         undefined,
@@ -878,6 +875,13 @@ describe("Schema - Link Resolution", () => {
       expect(result).toBeDefined();
       expect(result.$ctx).toBeDefined();
       expect(isCell(result.$ctx.add)).toBe(true);
+
+      // The stream cell must be created at the redirect target inside
+      // resultCell, not at the input cell's own location.
+      const streamLink = result.$ctx.add.getAsNormalizedFullLink();
+      expect(streamLink.id).toBe(resultCell.getAsNormalizedFullLink().id);
+      expect(streamLink.path).toEqual(["internal", "dialog", "add"]);
+
       expect(() => result.$ctx.add.send({ value: 1 })).not.toThrow();
     });
 

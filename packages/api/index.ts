@@ -1663,6 +1663,7 @@ export type JSONSchemaObj = {
           readonly bundleId?: string;
           readonly file?: string;
           readonly path?: readonly string[];
+          readonly moduleIdentity?: string;
         };
       };
     readonly exactCopyOf?: readonly string[];
@@ -2962,6 +2963,14 @@ export type EqualsFunction = (
 ) => boolean;
 
 /**
+ * Deep structural equality for two values, intended for `FabricValue`-shaped
+ * data. Compares primitives with `Object.is` (so `NaN` equals `NaN` and `-0`
+ * is distinct from `0`). Unlike `equals`, it compares values directly and does
+ * not resolve cells or links.
+ */
+export type ValueEqualFunction = (a: unknown, b: unknown) => boolean;
+
+/**
  * Multi-user pattern test descriptor (`cf test`). Export it as the test
  * file's default export to run each participant pattern in its own isolated
  * runtime (own identity) against one shared space. The optional `setup`
@@ -3026,6 +3035,7 @@ export declare const createNodeFactory: CreateNodeFactoryFunction;
 /** @deprecated Use Cell.of(defaultValue?) instead */
 export declare const cell: CellTypeConstructor<AsCell>["of"];
 export declare const equals: EqualsFunction;
+export declare const valueEqual: ValueEqualFunction;
 export declare const byRef: ByRefFunction;
 export function getPatternEnvironment(): PatternEnvironment {
   const location = globalThis.location;

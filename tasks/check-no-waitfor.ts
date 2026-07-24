@@ -45,11 +45,9 @@ export const ALLOWLIST: ReadonlySet<string> = new Set([
   // MockDoc rendered-HTML reads and fresh cell.sync() round-trips, with no
   // completion callback the test can hook.
   "packages/runtime-client/integration/client.test.ts",
-  // Instrumentation one-shots that arm a trace or install a telemetry handler,
-  // plus a piece-link click retry and a wait for the note modal to render.
+  // Env-gated profiling scaffolding: one-shot waits that arm a trace or reset a
+  // logger baseline, gated behind CF_CAPTURE_* variables that default to off.
   "packages/patterns/integration/default-app.test.ts",
-  // A telemetry-handler install, and a wait for the note modal to render.
-  "packages/patterns/integration/reload/default-app-notebook.test.ts",
   // Human-in-the-loop OAuth flow: a person completes the consent step in a real
   // browser, and no CI lane runs the file.
   "packages/patterns/google/core/integration/google-calendar-importer.test.ts",

@@ -1,6 +1,10 @@
 // Shared helpers used across tiles and the core.
 import type { Status } from "./types.ts";
 import { PROD_SERVICE } from "./config.ts";
+import {
+  type GitHubPrimaryRateLimit,
+  performanceGitHubRateLimit,
+} from "./github-rate-limit.ts";
 
 // The service.name to scope a SigNoz query to. The name lands inside a query
 // expression, so anything outside the shape a service name has falls back to the
@@ -13,17 +17,70 @@ export const serviceName = (env: (k: string) => string | undefined): string => {
 // Call the GitHub REST API and return parsed JSON. Pass an explicit `token` (e.g.
 // a higher-privilege org-billing token); otherwise it reads GH_TOKEN or
 // GITHUB_TOKEN from the environment. One of those must be set.
-export async function github<T = unknown>(path: string, token?: string): Promise<T> {
+function githubToken(path: string, token?: string): string {
   const t = token ?? Deno.env.get("GH_TOKEN") ?? Deno.env.get("GITHUB_TOKEN");
   if (!t) throw new Error(`GitHub API ${path}: set GH_TOKEN or GITHUB_TOKEN`);
-  const res = await fetch(`https://api.github.com/${path.replace(/^\//, "")}`, {
+  return t;
+}
+
+function githubRequest(path: string, token: string, withTimeout: boolean): Promise<Response> {
+  const init: RequestInit = {
     headers: {
-      authorization: `Bearer ${t}`,
+      authorization: `Bearer ${token}`,
       accept: "application/vnd.github+json",
       "x-github-api-version": "2022-11-28",
     },
-    signal: AbortSignal.timeout(15_000),
-  });
+  };
+  if (withTimeout) init.signal = AbortSignal.timeout(15_000);
+  return fetch(
+    `https://api.github.com/${path.replace(/^\//, "")}`,
+    init,
+  );
+}
+
+async function githubPrimaryRateLimit(
+  token: string,
+): Promise<GitHubPrimaryRateLimit> {
+  const response = await githubRequest("rate_limit", token, false);
+  if (!response.ok) {
+    throw new Error(`GitHub API rate_limit failed: HTTP ${response.status}`);
+  }
+  const value = await response.json() as {
+    resources?: { core?: GitHubPrimaryRateLimit };
+  };
+  if (!value.resources?.core) {
+    throw new Error("GitHub API rate_limit did not report the core budget");
+  }
+  return value.resources.core;
+}
+
+async function githubResponse(
+  path: string,
+  token: string,
+  performance: boolean,
+  withTimeout: boolean,
+): Promise<Response> {
+  const reservation = performance
+    ? await performanceGitHubRateLimit.reserve(
+      token,
+      () => githubPrimaryRateLimit(token),
+    )
+    : null;
+  let response: Response | undefined;
+  try {
+    response = await githubRequest(path, token, withTimeout);
+    return response;
+  } finally {
+    if (reservation) await reservation.complete(response);
+  }
+}
+
+async function githubJson<T>(
+  path: string,
+  token: string,
+  performance: boolean,
+): Promise<T> {
+  const res = await githubResponse(path, token, performance, true);
   if (!res.ok) {
     let rateLimited = false;
     if (res.status === 403) {
@@ -37,6 +94,38 @@ export async function github<T = unknown>(path: string, token?: string): Promise
     );
   }
   return await res.json() as T;
+}
+
+export async function github<T = unknown>(
+  path: string,
+  token?: string,
+): Promise<T> {
+  const t = githubToken(path, token);
+  return await githubJson<T>(path, t, false);
+}
+
+export async function githubDownload(
+  path: string,
+  token?: string,
+): Promise<Response> {
+  const t = githubToken(path, token);
+  return await githubResponse(path, t, false, false);
+}
+
+export async function performanceGithub<T = unknown>(
+  path: string,
+  token?: string,
+): Promise<T> {
+  const t = githubToken(path, token);
+  return await githubJson<T>(path, t, true);
+}
+
+export async function performanceGithubDownload(
+  path: string,
+  token?: string,
+): Promise<Response> {
+  const t = githubToken(path, token);
+  return await githubResponse(path, t, true, false);
 }
 
 // Cache an async result for ttlMs; a rejection is not cached (so it retries).
@@ -110,7 +199,7 @@ export function friendlyError(msg: string): string {
   if (/connect|sending request|network|dns|refused|unreachable|timed ?out|timeout|econn/.test(m)) {
     return "source unreachable";
   }
-  if (/rate.?limit|\b429\b/.test(m)) return "rate-limited";
+  if (/rate.?limit|\b429\b/.test(m)) return "rate limit hit";
   if (/\b404\b|not found/.test(m)) return "not found";
   if (/\b401\b|\b403\b|unauthor|forbidden|bad credentials/.test(m)) return "auth failed";
   if (/gh_token|github_token/.test(m)) return "set GH_TOKEN";
@@ -325,13 +414,13 @@ export function thin<T>(arr: T[], max: number): T[] {
   return out;
 }
 
-// A grid of small pass/fail cells (one per run, oldest first) laid out in `cols`
-// fixed columns; each cell links to that run's CI results. The caller sizes the
-// cells to a whole number of rows, so the grid is always complete (no half-empty
-// final row). Cells shrink to fit width.
+// A grid of small run-outcome cells (one per run, oldest first) laid out in
+// `cols` fixed columns. Each cell links to that run's CI results. Cells shrink
+// to fit width.
 export function strip(cells: { outcome: string; href: string }[], cols: number): string {
   if (!cells.length) return "";
-  const col = (d: string) => d === "green" ? "#43c574" : d === "red" ? "#e2504a" : "#7c828c";
+  const col = (d: string) =>
+    d === "green" ? "#43c574" : d === "red" ? "#e2504a" : d === "run" ? "#6ea8fe" : "#7c828c";
   const html = cells.map((c) =>
     `<a class="cell" href="${escapeHtml(c.href)}" target="_blank" rel="noopener" style="background:${col(c.outcome)}"></a>`
   ).join("");

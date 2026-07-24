@@ -140,4 +140,53 @@ describe("AsyncSemaphoreQueue", () => {
     // After bumping to 3, all 3 should have run concurrently
     expect(maxConcurrent).toBeGreaterThan(1);
   });
+
+  it("abortPending rejects queued items and leaves the active one running", async () => {
+    const queue = new AsyncSemaphoreQueue({ maxConcurrency: 1 });
+    const blocker = Promise.withResolvers<string>();
+    const active = queue.enqueue(() => blocker.promise);
+    const pendingA = queue.enqueue(() => Promise.resolve("a"));
+    const pendingB = queue.enqueue(() => Promise.resolve("b"));
+
+    expect(queue.stats.active).toBe(1);
+    expect(queue.stats.pending).toBe(2);
+
+    queue.abortPending();
+
+    await expect(pendingA).rejects.toThrow("Queue aborted");
+    await expect(pendingB).rejects.toThrow("Queue aborted");
+    expect(queue.stats.pending).toBe(0);
+    expect(queue.stats.failed).toBe(2);
+
+    blocker.resolve("done");
+    expect(await active).toBe("done");
+    expect(queue.stats.completed).toBe(1);
+  });
+
+  it("abortPending rejects with a caller-supplied reason", async () => {
+    const queue = new AsyncSemaphoreQueue({ maxConcurrency: 1 });
+    const blocker = Promise.withResolvers<void>();
+    queue.enqueue(() => blocker.promise);
+    const pending = queue.enqueue(() => Promise.resolve("never"));
+
+    queue.abortPending(new Error("shutting down"));
+
+    await expect(pending).rejects.toThrow("shutting down");
+    blocker.resolve();
+  });
+
+  it("rejects a job whose function throws synchronously", async () => {
+    const queue = new AsyncSemaphoreQueue({ maxConcurrency: 1 });
+    await expect(
+      queue.enqueue(() => {
+        throw new Error("sync boom");
+      }),
+    ).rejects.toThrow("sync boom");
+    expect(queue.stats.failed).toBe(1);
+    expect(queue.stats.active).toBe(0);
+
+    // The queue keeps draining after a synchronous failure.
+    expect(await queue.enqueue(() => Promise.resolve("ok"))).toBe("ok");
+    expect(queue.stats.completed).toBe(1);
+  });
 });

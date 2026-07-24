@@ -16,7 +16,11 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { useCancelGroup, useDeferredCancelOwnership } from "../src/cancel.ts";
+import {
+  cancel as cancelCancellable,
+  useCancelGroup,
+  useDeferredCancelOwnership,
+} from "../src/cancel.ts";
 import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
 
 const secondSigner = await Identity.fromPassphrase(
@@ -1112,6 +1116,15 @@ describe("scheduler event lineage", () => {
 });
 
 describe("cancel group lifecycle", () => {
+  it("invokes an optional cancellable cleanup", () => {
+    let calls = 0;
+
+    cancelCancellable({ cancel: () => calls++ });
+    cancelCancellable({});
+
+    expect(calls).toBe(1);
+  });
+
   it("hands an installed cleanup through an already-cancelled owner once", () => {
     let calls = 0;
     const installedCancel = () => calls++;

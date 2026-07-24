@@ -3,6 +3,7 @@
 // history of each roster's size and chart them as two lines.
 import { REPO } from "../config.ts";
 import type { Tile, TileView } from "../types.ts";
+import { dashboardCacheFile } from "../history-files.ts";
 import {
   escapeHtml,
   friendlyError,
@@ -43,13 +44,11 @@ const isUser = (value: unknown): value is User =>
   Number.isSafeInteger((value as User).id) && (value as User).id > 0;
 
 function historyFile(org: string): string {
-  const configured = Deno.env.get("GITHUB_MEMBERS_HISTORY_FILE");
-  if (configured) return configured;
   const fileOrg = org.toLowerCase().replace(/[^a-z0-9.-]/g, "_") ||
     "unknown";
-  return `${
-    Deno.env.get("TMPDIR") ?? "/tmp"
-  }/fabric-wall-github-members-${fileOrg}-history.json`;
+  return dashboardCacheFile(
+    `fabric-wall-github-members-${fileOrg}-history.json`,
+  );
 }
 
 async function loadHistory(

@@ -1,4 +1,4 @@
-import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { valueEqual } from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
 
 export function setValueAtPath(
@@ -15,12 +15,9 @@ export function setValueAtPath(
     parent = parent[key];
   }
 
-  // TODO(danfuzz): This no-op write gate compares the existing value against
-  // the new value with `deepEqual`, which mishandles `FabricValue` (same-class
-  // `FabricPrimitive`s compare equal regardless of value, since their state
-  // lives in private `#fields` with zero own-props), so a real Fabric-value
-  // change can be dropped as a no-op. Use a Fabric-aware equality.
-  if (deepEqual(parent[path[path.length - 1]], value)) return false;
+  // Note: `valueEqual()` throws on a function or a non-`Fabric` class
+  // instance; both operands here are `FabricValue`s by contract.
+  if (valueEqual(parent[path[path.length - 1]], value)) return false;
 
   // We just set the values here. If you need to delete elements from an
   // array or object, set it to another array or object without those elements.

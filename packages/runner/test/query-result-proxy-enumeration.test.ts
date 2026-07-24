@@ -193,6 +193,29 @@ describe("CT-1240: query result proxy enumeration", () => {
     expect(keys).toContain("2");
   });
 
+  it("array proxy retains its length key after the stored shape changes", () => {
+    const cell = runtime.getCell<unknown>(
+      space,
+      "test-array-shape-change",
+      undefined,
+      tx,
+    );
+    cell.set([10, 20]);
+
+    const proxy = createQueryResultProxy<unknown[]>(
+      runtime,
+      tx,
+      cell.getAsNormalizedFullLink(),
+      0,
+      false,
+    );
+
+    cell.set({ changed: true });
+
+    expect(Reflect.ownKeys(proxy)).toContain("length");
+    expect(Object.keys(proxy)).toContain("changed");
+  });
+
   it("empty object returns empty keys", () => {
     const cell = runtime.getCell<Record<string, never>>(
       space,

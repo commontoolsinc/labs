@@ -31,7 +31,7 @@ was last checked against the code.
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | graduate to always-on | implemented, off by default, rollout in progress |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
-| [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (all tracked system roots, home included); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete flag | implemented, on in the shell |
+| [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (same-toolshed system sources, including all roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete flag | implemented, on in the shell |
 | [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | off | Robin McCollum (in development) | graduate to always-on with the computed-cell write-conflict policy | in development on robin/feat-computed-cell-identity-p2 (redesigned: `computed:` URI scheme) |
 | [`cfcEnforcementMode`](#cfcenforcementmode) | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse) | `enforce-explicit` | Bernhard Seefeld (#3263) | tighten default toward `enforce-strict` | active; ladder is permanent |
 | [`cfcFlowLabels`](#cfcflowlabels) | `RuntimeOptions.cfcFlowLabels` | `off` | Bernhard Seefeld (#4011) | move toward `persist` | implemented, staged rollout |
@@ -43,6 +43,7 @@ was last checked against the code.
 | [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
+| [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off | Ben Follington (#4937; shell toggle #4974) | graduate to always-on after live measurement, or remove if superseded | implemented behind the flag, off by default, not yet measured over real latency |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
 
@@ -215,17 +216,24 @@ propagate](#how-flags-propagate).
 - **Added by.** Bernhard Seefeld, in "system-pattern auto-update (in-place
   rollforward, flag-gated)" (#4611, 2026-07-08); defaulted on for the shell in
   #4619 (2026-07-09).
-- **Purpose.** At space open, rolls a space's root system pattern (default-app,
-  and the home root — the home-specific second gate was retired on the strength
-  of home-golden-replay state-survival coverage) forward in place when its
-  toolshed serves a newer content identity. Every attempt fetches `?identity`.
-  Before replacing or repairing a root, it downloads and compiles the complete
-  authored closure and permits an in-place `patternIdentity` swap only when the
-  compiler-produced entry has exactly the advertised identity. Fetch, compile,
-  evaluation, and identity-mismatch failures leave the original root pointer
-  untouched. Equal identities take the fast path only after the persisted
-  artifact loads; an unloadable root is rebuilt through that same
-  identity-authorized source path before bootstrap.
+- **Purpose.** Rolls same-toolshed system-source patterns forward in place when
+  their source serves a newer content identity. Persisted default-app and home
+  roots reconcile before bootstrap. Every other watched pattern starts first;
+  its successful instantiation commit launches a background check, so network
+  and compilation never delay its current graph. An unstamped non-root recovers
+  its verified authored entry filename and becomes tracked only when that
+  same-origin route implements `?identity`. Missing/failing identity routes are
+  ordinary non-system sources and remain untouched.
+  Every accepted move downloads and compiles the complete authored closure and
+  permits an in-place `patternIdentity` swap only when the compiler-produced
+  entry has exactly the advertised identity and selected export symbol.
+  Ordinary patterns preserve their selected export; default-pattern routes
+  select the official source's `default` export. Fetch, compile, evaluation,
+  identity-mismatch, and commit failures leave the original pointer and running
+  graph untouched. Equal identities let ordinary patterns stop immediately
+  (and persist newly proven source provenance); roots take the fast path only
+  after the persisted artifact loads, so an unloadable root can rebuild through
+  the same identity-authorized source path before bootstrap.
   Persisted roots are resolved without starting. A pre-provenance root may be
   back-filled only when its stored `{ identity, symbol }` exactly equals the
   current official entry's advertised content identity; stale, custom, and
@@ -237,25 +245,31 @@ propagate](#how-flags-propagate).
   system root for the space kind (home.tsx / default-app.tsx), recording the
   displaced ref under `displacedPattern` meta (see pattern-updates.md for the
   full exception semantics).
-  URL-based creation and recreation stamp provenance; custom `RuntimeProgram`
-  recreation does not. The check remains best-effort; if identity lookup or
-  replacement compilation is unavailable, the subsequent root start retains
-  its normal loud failure behavior. The update path does not consult build SHA
-  metadata; a rolling deployment that mixes identity/source/import revisions
-  fails closed at the compiled-identity comparison. See
+  URL-based root creation and recreation stamp provenance; custom
+  `RuntimeProgram` recreation does not. Repository-pinned sourceless patterns,
+  cross-origin sources, default roots reached by the generic post-start hook,
+  and starts that intentionally install no pattern watcher remain excluded. The
+  check remains best-effort; if identity lookup or replacement compilation is
+  unavailable, an ordinary pattern keeps running and the subsequent root start
+  retains its normal loud failure behavior. The update path does not consult
+  build SHA metadata; a rolling deployment that mixes
+  identity/source/import revisions fails closed at the compiled-identity
+  comparison. See
   [`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md).
 - **Current default and planned end state.** The runner built-in default is off
   like every flag in this category; the shell build injects `true` unless the
   define is set to `"false"`, so the deployed product (and local shell dev
-  builds) run it on for all tracked system roots. Server-side processes
+  builds) run it on for roots and other same-toolshed system-source patterns.
+  Server-side processes
   (toolshed, CLI, background piece service) leave it off unless the env var is
   set. End state:
-  graduate to always-on for system roots once golden-replay coverage has
+  graduate to always-on for system sources once golden-replay coverage has
   soaked, then delete the flag.
 - **Status on 2026-07-22.** Implemented; on in the shell for all tracked system
   roots, home included ([`systemPatternAutoUpdateHome`](#appendix-a-removed-and-never-shipped-flags)
-  removed), off elsewhere. Root reconciliation and broken-root repair run
-  before bootstrap.
+  removed), and for other patterns whose verified source path exposes
+  `?identity`; off elsewhere. Root reconciliation and broken-root repair run
+  before bootstrap, while ordinary-pattern checks run after instantiation.
 - **Path to removal.** Make the check unconditional and remove the flag.
 
 ### `computedCellIds`
@@ -588,6 +602,43 @@ the per-epic implementation notes).
 >   keeps its write gate failing closed. It was added by Bernhard Seefeld in
 >   "server-side commit-time row-label re-derivation (Epic E4, Phase 3.c)"
 >   (#4552). It is permanent.
+
+### `experimentalConcurrentWatchRefresh`
+
+- **Toggle via.** `experimentalConcurrentWatchRefresh` on
+  `IRemoteStorageProviderSettings`
+  ([`packages/runner/src/storage/interface.ts`](../../packages/runner/src/storage/interface.ts)),
+  passed through `StorageManager` settings. The runner mirrors it onto each
+  memory session via `SpaceSession.setConcurrentWatchRefresh()`
+  ([`packages/memory/v2/client.ts`](../../packages/memory/v2/client.ts)) —
+  per-session, not a process global. In the **shell** it is a per-browser-profile
+  dogfood toggle: run `commonfabric.concurrentWatchRefresh(true)` in the console
+  and reload. The flag crosses the worker IPC in `InitializationData` and is
+  fixed at `StorageManager.open` time, so — like the render ceiling — it takes
+  effect on the next runtime (reload), not live. Threaded shell → worker via
+  `runtimeHostFlags()`
+  ([`packages/shell/src/lib/host-toggles.ts`](../../packages/shell/src/lib/host-toggles.ts))
+  → `RuntimeInternals.create` → `runtime-processor.ts`'s storage settings.
+- **Added by.** Ben Follington (#4937; shell dogfood toggle #4974).
+- **Purpose.** By default watch acquisition is strict single-flight per space: a
+  guard holds every watch refresh after the first until the prior response
+  lands, so traversal-driven pulls discovered a tick apart serialize into
+  one-round-trip-each frames even when nothing depends on the prior response. On
+  a high-RTT link this dominates cold-load wall-clock. With the flag on,
+  refreshes overlap up to a bounded window (`CONCURRENT_WATCH_REFRESH_WINDOW`,
+  currently 8) in `storage/v2.ts`, and the memory client issues the whole
+  watch-mutation family (`watch.set` + `watch.add`) in an ordered issue phase so
+  wire order is preserved and application stays ordered. Same-tick microtask
+  coalescing is unchanged.
+- **Current default and planned end state.** Off by default. It is a spike
+  pending live measurement on a real (estuary-latency) load; the window size is
+  a tuning value. End state is either graduation to always-on with a settled
+  window, or removal if the render-side fix (initial-render descent) makes the
+  waterfall shallow enough that concurrency no longer pays.
+- **Status on 2026-07-24.** Implemented behind the flag, off by default; not yet
+  measured end-to-end over real latency.
+- **Path to removal.** Graduate to always-on once measured safe and beneficial,
+  or remove if superseded by reducing the round-trip count at the source.
 
 ---
 

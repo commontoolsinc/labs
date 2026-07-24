@@ -1,26 +1,30 @@
 # Pattern Updates — rolling a running piece forward
 
 How a running piece moves from the pattern version it was created with to a
-newer one — automatically for **system patterns** (home, default-app), and (a
-later phase) on demand for **published** patterns. Companion to `README.md`
+newer one — automatically for patterns backed by a same-toolshed **system
+source** (including home and default-app), and (a later phase) on demand for
+**published** patterns. Companion to `README.md`
 (which covers `cf:` imports and publishing-as-naming); this doc covers the
 *update propagation* side.
 
 ## Status
 
-Phase 1 shipped: the `systemPatternAutoUpdate` flag is on in the shell for all
-tracked system roots, home included (the home-specific second flag was removed
-once home-golden-replay pinned state survival across an in-place roll).
-URL-based creation and recreation stamp update provenance; a pre-provenance
-root can recover it only when its stored ref exactly equals the current official
-entry's advertised content identity; and an unloadable tracked root is repaired
-before bootstrap through the same `?identity`-driven update path. The downloaded
+The `systemPatternAutoUpdate` flag is on in the shell. Persisted system roots,
+home included, reconcile before bootstrap; every other successfully instantiated
+pattern checks its verified authored entry path in the background. A same-origin
+source becomes tracked only when its `?identity` route works. The downloaded
 source and import closure must compile to the advertised entry identity before
-the persisted root can change. The executed milestone map and corrections found
-during implementation are archived at
+the persisted pointer can change, so startup never waits for an ordinary-piece
+check and failed checks leave its already-running graph intact.
+
+URL-based root creation and recreation stamp update provenance; a
+pre-provenance root can recover it only under the stricter root admission policy,
+and an unloadable tracked root is repaired before bootstrap through the same
+`?identity`-driven update path. The executed root milestone map and corrections
+found during implementation are archived at
 [`docs/history/specs/pattern-imports/system-pattern-updates-implementation-plan.md`](../../history/specs/pattern-imports/system-pattern-updates-implementation-plan.md).
-The home root (Phase 2) rides the shipped Phase 1 machinery since the second
-flag's removal; published-pattern updates remain design (Phases 3–4).
+The home root rides the shipped root machinery since the second flag's removal;
+published-pattern updates remain design.
 
 ## Last Updated
 
@@ -35,6 +39,11 @@ flag's removal; published-pattern updates remain design (Phases 3–4).
   (shell Debugger button / CLI) remains a state-losing escape hatch: it mints a
   new piece and relinks it. URL-based recreation stamps the new root's source so
   the replacement remains eligible for future automatic repair.
+- **The rest of the system source tree must move too.** A non-root pattern may
+  have been compiled from any file served by the toolshed pattern route. Once
+  its current graph is instantiated, the runtime checks that source in the
+  background and lets the existing pattern watcher apply a verified move. The
+  current instantiation never waits for network or compilation.
 - **Two hazard cases to handle explicitly.** (1) We shipped a broken system
   pattern — once a fix ships, recovery must be automatic. (2) An
   schema-incompatible update slips through — the damage must be *bounded*
@@ -51,7 +60,8 @@ flag's removal; published-pattern updates remain design (Phases 3–4).
 - **Lineage / fork detection.** No substrate exists today — `parents` was
   deleted with the pattern-id retirement, and `pieceLineageSchema`
   (`packages/runner/src/schemas.ts`) is dead code, referenced nowhere.
-  Deferred; system roots aren't user-iterated in the common case.
+  Deferred; automatic system-source updates continue to track one exact source
+  path and do not attempt to infer user fork relationships.
 - **CFC provenance of fetched source.** Pattern source can carry private data;
   labeling fetched/replicated source is follow-up work (README § Security),
   not built here.
@@ -64,8 +74,9 @@ flag's removal; published-pattern updates remain design (Phases 3–4).
 
 | Mechanism | Where | Role here |
 |---|---|---|
-| Pattern pointer `patternIdentity = {identity, symbol}` on the piece result cell | write `runner.ts:1012`, read `getPatternIdentityRef` `runner.ts:4441` | The thing an update rewrites |
-| **In-place re-run watcher** — `setupPatternWatcher` sinks the `patternIdentity` meta; on change it cancels the old pattern's nodes and re-instantiates the new pattern **onto the same result cell** | `runner.ts:1246` (enabled unless `doNotUpdateOnPatternChange`, `runner.ts:1341`) | Applies a metadata swap when the piece is already running; at space open, bootstrap reads the reconciled metadata directly |
+| Pattern pointer `patternIdentity = {identity, symbol}` on the piece result cell | `runner.ts` (`applySetupState` / `getPatternIdentityRef`) | The thing an update rewrites |
+| **In-place re-run watcher** — `setupPatternWatcher` sinks the `patternIdentity` meta; on change it cancels the old pattern's nodes and re-instantiates the new pattern **onto the same result cell** | `runner.ts` (enabled unless `doNotUpdateOnPatternChange`) | Applies a metadata swap when the piece is already running; at space open, bootstrap reads the reconciled metadata directly |
+| `PatternUpdater` | `packages/runner/src/pattern-updater.ts` | Shared identity lookup, verified closure compile, provenance repair, and compare-and-swap for awaited roots and background ordinary-piece checks |
 | Space root: `spaceCell.defaultPattern` link → root piece → `patternIdentity` | `packages/piece/src/manager.ts` (`linkDefaultPattern`/`getDefaultPattern`) | What a system update rewrites |
 | `ensureDefaultPattern` (resolve → reconcile → start) / `recreateDefaultPattern` (manual, **not** state-preserving) | `packages/piece/src/ops/pieces-controller.ts` | The automatic self-heal hook (ensure) and the state-losing escape hatch (recreate); both URL-based creation paths stamp `patternSource` |
 | System patterns = **raw TSX served by path**, bundled via `deno compile --include`; **no name→identity manifest** | `packages/toolshed/routes/patterns/patterns-server.ts`, `patterns.routes.ts` | Where the current system source + its identity come from |
@@ -79,8 +90,10 @@ non-hashed, excluded from `verifySourceDocs`) and looks like a natural home for
 the *destination* cell's annotations, and replication does not copy the
 *source's* (`cell-cache.ts:475`). An `updatesAt` written in a publisher's space
 would not appear on a consumer's replicated copy. The **piece** is the reliable
-carrier: it is created in the consumer's space with the ref the creator chose,
-so it travels by construction.
+carrier: explicit source provenance travels with it. For an unstamped non-root
+piece, its verified source-doc closure supplies the authored entry path; the
+runtime persists that path on the piece only after the matching same-toolshed
+`?identity` route succeeds.
 
 ## The model
 
@@ -88,13 +101,17 @@ Two decisions carry the whole design:
 
 1. **Every updatable piece carries a `patternSource` provenance string** — the
    source it tracks for updates. (`patternSource`, *not* `source`: the latter
-   is the doc-level producer annotation the server-primary work uses.)
+   is the doc-level producer annotation the server-primary work uses.) Roots
+   stamp it at URL-based creation. An unstamped non-root may recover its verified
+   authored entry filename and stamp it after that same-origin route proves it
+   implements `?identity`.
 2. **Update = resolve `patternSource` → current identity; if it differs from
    the persisted `patternIdentity.identity`, write the new `{identity, symbol}`
    to the piece's `patternIdentity` meta.** At space open this happens before
-   root bootstrap, so `start()` loads the reconciled identity. For an already
-   running root, the existing watcher (`runner.ts:1246`) re-instantiates in
-   place. No new apply machinery.
+   root bootstrap, so `start()` loads the reconciled identity. Every other
+   pattern starts first; its successful instantiation commit launches a
+   fire-and-forget check, and the existing watcher re-instantiates a verified
+   replacement in place. No new apply machinery.
 
 A root created before provenance stamping may be admitted to this loop only
 when its stored `{ identity, symbol }` exactly equals the advertised current
@@ -129,8 +146,9 @@ The exception's semantics are deliberately narrow:
   displaced program's compiled artifacts remain content-addressed in the
   space — not (yet) an automated restoration mechanism.
 
-System patterns run this loop automatically at space open (always-update);
-published patterns will run it behind an explicit user action (§ Phasing).
+Default system roots run this loop before bootstrap. Every other pattern runs it
+after successful instantiation, without delaying that instantiation. Published
+patterns will use a separate explicit action (§ Phasing).
 
 ### `patternSource`: one field, two variants
 
@@ -146,8 +164,8 @@ Dispatched by the `cf:` prefix:
   host, then fetch and compile whenever the persisted artifact needs an update
   or repair.
 
-**Born-from determinism.** The *string* is frozen at birth (which source); the
-*resolved identity* is live (which version). A non-home space's root
+**Born-from determinism.** Once recorded, the *string* is frozen (which source);
+the *resolved identity* is live (which version). A non-home space's root
 `patternSource` is seeded at creation from home's `defaultAppUrl`, then frozen —
 so editing `defaultAppUrl` later does **not** silently migrate existing spaces
 (pushing a new default app to them is an explicit re-point).
@@ -202,7 +220,7 @@ the **same result cell**.
   one: durable state addressed by stable key/cause, not positionally. We do
   **not** gate on a pre-apply schema dry-run in v1.
 
-## System patterns v1 — the loop
+## System-source patterns — the loop
 
 **Toolshed side (memoized per file for the process lifetime; patterns are fixed
 for a toolshed's lifetime).** Add a `?identity` query param to the pattern route
@@ -257,9 +275,10 @@ transaction, and only then start it:
    fast path.
 5. Revalidate `{host}{url}` and every module in its complete authored import
    closure with the same `no-cache` fetch policy, then compile with
-   `compilePattern(program, { space })`. Apply only when the compiler supplies
-   an entry ref whose identity exactly equals `currentId`; never synthesize a
-   ref or fall back around `?identity`. A fetch, compile, evaluation,
+   the route's official `default` export. Apply only when the compiler supplies
+   an entry ref whose identity exactly equals `currentId` and whose symbol is
+   `default`; never synthesize a ref or fall back around `?identity`. A fetch,
+   compile, evaluation,
    missing-entry-ref, or identity-mismatch failure leaves the root metadata
    unchanged.
 6. Provenance repair and identity replacement are transactional
@@ -268,6 +287,28 @@ transaction, and only then start it:
 7. Start the reconciled root. A newly created root skips the check because it
    was compiled from the current source in the same ensure operation; a root
    discovered after a creation race is treated as persisted and reconciled.
+
+**Runtime side (ordinary pattern instantiation).** The runner registers the
+check on the instantiation transaction's successful commit callback. It never
+awaits the check from `start()`:
+
+1. Exclude the space's `defaultPattern`; that root has already taken the path
+   above. Also exclude starts with `doNotUpdateOnPatternChange`, because they
+   deliberately install no watcher that could apply a pointer change.
+2. Use the piece's stored `patternSource` when present. Otherwise skip a
+   repository-pinned piece, recover the current identity's verified source-doc
+   closure, and take its entry filename as the candidate URL.
+3. Ask that same-origin URL for `?identity`. A missing/failing route means the
+   candidate was not a system source: do nothing and do not stamp provenance.
+   If the advertised identity equals the running identity, transactionally
+   stamp the proven source (when it was inferred) and stop.
+4. On a changed identity, revalidate and compile the whole closure with the
+   running ref's export symbol. Require both the compiler-produced identity and
+   symbol to equal the advertised identity and existing symbol.
+5. Compare-and-swap `{ patternIdentity, patternSource, patternRepository }`.
+   A concurrent setsrc/custom replacement wins. A successful swap wakes the
+   already-installed watcher; fetch, compile, evaluation, mismatch, and commit
+   failures leave the current graph running.
 
 ## End-to-end identity check
 
@@ -279,7 +320,7 @@ with that exact identity.
 
 This also fails closed across a rolling deployment. If `?identity`, the entry
 source, or any import comes from a different revision, the assembled closure
-normally hashes to a different entry identity and the root pointer is not
+normally hashes to a different entry identity and the pattern pointer is not
 written. The same rule covers an identity-algorithm incompatibility between an
 older worker and a newer toolshed: disagreement prevents the update. No
 `/api/meta` request, git-SHA comparison, pattern response build header, or
@@ -302,9 +343,9 @@ binary populates from baked build metadata; the updater does not consult it.
 - **CI golden replay** against the short, controlled system list before
   shipping — the primary defense (feasible precisely because the list is short
   and we own the source).
-- **Self-heal from a borked ship**: fix source → new identity → next space open
-  compiles and swaps it before bootstrap → recovered even when the old identity
-  cannot load.
+- **Self-heal from a borked ship**: fix source → new identity → a root's next
+  space open compiles and swaps it before bootstrap; an ordinary pattern's next
+  instantiation starts its current graph and then rolls it forward in place.
 - **Rollback = redeploy**: ship the prior source → toolshed serves the prior
   identity → the same swap rolls back. No per-piece rollback state needed.
 - **Escape hatch**: manual `recreateDefaultPattern` remains (state-losing; last
@@ -319,13 +360,11 @@ binary populates from baked build metadata; the updater does not consult it.
   `patterns-server.ts`); strong checksum `ETag` + mandatory revalidation for
   identity and source responses; import `computeModuleIdentities` +
   `transformInjectHelperModule` from the runner.
-- **Runtime worker**: an update-check step at space open, next to
-  `handleGetSpaceRootPattern` / `ensureDefaultPattern`
-  (`runtime-client/backends/runtime-processor.ts`, `pieces-controller.ts`):
-  per-space host resolution, exact-identity legacy-provenance recovery,
+- **Runtime worker**: `PatternUpdater` owns per-space host resolution,
   conditionally revalidated `?identity` and source-closure fetches, locally
-  compiled source-closure verification, and an in-place `patternIdentity` swap
-  before bootstrap.
+  compiled source-closure verification, and compare-and-swap. The piece
+  controller awaits it before root bootstrap; `Runner.startCore` schedules it
+  from the successful instantiation commit for every other watched pattern.
 - **Piece**: `patternSource` meta getter/setter; stamped by URL-based creation
   and recreation from the applicable source (system path, or a `cf:` ref derived
   from `defaultAppUrl`). Custom `RuntimeProgram` recreation remains unstamped;
@@ -342,10 +381,13 @@ binary populates from baked build metadata; the updater does not consult it.
    in-place swap + toolshed `?identity` + local compiled-identity check.
 2. **Home root.** Carries real user data (favorites/journal/spaces) → depends
    on the stable-addressing discipline and golden coverage of `home.tsx`.
-3. **Published-pattern updates.** `patternSource` = `cf:` ref; lazy check +
+3. **Other system-source patterns.** Recover a non-root's verified authored
+   entry path at instantiation, recognize a system source by its same-toolshed
+   `?identity` route, and check it without delaying the current graph.
+4. **Published-pattern updates.** `patternSource` = `cf:` ref; lazy check +
    shell "update available" + click-to-apply; fork/lineage handling
    (needs the deferred lineage substrate).
-4. **Cross-host published** + persisted space→host hints + CFC provenance
+5. **Cross-host published** + persisted space→host hints + CFC provenance
    labels on fetched source.
 
 ## Open questions

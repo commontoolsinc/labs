@@ -1,5 +1,5 @@
 import type { FabricInstance } from "@/interface.ts";
-import { BaseFabricInstance } from "./BaseFabricInstance.ts";
+import { BaseFabricInstance, DEEP_CLONE_CORE } from "./BaseFabricInstance.ts";
 
 /**
  * Abstract base class for `FabricInstance` wrappers that bridge native JS
@@ -26,8 +26,14 @@ export abstract class FabricNativeWrapper<T extends object>
     return frozen ? this.toNativeFrozen() : this.toNativeThawed();
   }
 
-  /** @inheritDoc */
-  deepClone(_frozen: boolean): FabricInstance {
+  /**
+   * @inheritDoc
+   *
+   * Deep cloning is rolled out per subclass: those that support it (e.g.
+   * `FabricError`) override this with a real core; the rest inherit this
+   * throwing stub, so their `deepClone()` throws.
+   */
+  protected [DEEP_CLONE_CORE](_frozen: boolean): FabricInstance {
     throw new Error(
       `Cannot yet handle deep cloning of \`${this.constructor.name}\`.`,
     );

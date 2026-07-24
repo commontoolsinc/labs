@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   arrayEqual,
   getValueAtPath,
@@ -32,6 +33,30 @@ describe("Path operations", () => {
       const changed = setValueAtPath(obj, ["x", "y"], 1);
       expect(changed).toBe(false);
       expect(obj).toEqual({ x: { y: 1 } });
+    });
+
+    it("is Fabric-aware: an equal FabricBytes is a no-op", () => {
+      // Two distinct same-content `FabricBytes`: no real change, so the no-op
+      // gate must elide the write and return `false`.
+      const obj = { x: new FabricBytes(new Uint8Array([1, 2, 3])) };
+      const changed = setValueAtPath(
+        obj,
+        ["x"],
+        new FabricBytes(new Uint8Array([1, 2, 3])),
+      );
+      expect(changed).toBe(false);
+    });
+
+    it("is Fabric-aware: a differing FabricBytes is a real change (CT-1770)", () => {
+      // Two distinct `FabricBytes` differing only in their (private `#fields`)
+      // byte content: a real change, not a no-op, so the write must happen and
+      // `true` be returned.
+      const original = new FabricBytes(new Uint8Array([1, 2, 3]));
+      const replacement = new FabricBytes(new Uint8Array([4, 5, 6]));
+      const obj = { x: original };
+      const changed = setValueAtPath(obj, ["x"], replacement);
+      expect(changed).toBe(true);
+      expect(obj.x).toBe(replacement);
     });
   });
 

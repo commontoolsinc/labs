@@ -7,6 +7,26 @@ import { type Mutable } from "@commonfabric/utils/types";
  */
 export type SchemaDefinition = Mutable<JSONSchema>;
 
+/** File and optional content identity attached to a writer-binding claim. */
+export interface WriterSourceIdentity {
+  readonly file: string;
+  readonly moduleIdentity?: string;
+}
+
+/** Options that affect schema generation without changing the authored type. */
+export interface SchemaGenerationOptions {
+  readonly widenLiterals?: boolean;
+  /**
+   * Resolves a TypeScript source-file name to the writer identity that should
+   * be embedded in `WriteAuthorizedBy` metadata. Transformer callers use this
+   * to apply their compile-name-to-authored-name mapping and, when available,
+   * attach the defining module's content identity at mint time.
+   */
+  readonly writerIdentityForSourceFile?: (
+    fileName: string,
+  ) => WriterSourceIdentity;
+}
+
 /**
  * Unified context for schema generation - contains all state in one place
  */
@@ -42,6 +62,10 @@ export interface GenerationContext {
   typeRegistry?: WeakMap<ts.Node, ts.Type>;
   /** Widen literal types to base types during schema generation */
   widenLiterals?: boolean;
+  /** Resolve writer-claim file spelling and optional mint-time identity. */
+  writerIdentityForSourceFile?: (
+    fileName: string,
+  ) => WriterSourceIdentity;
   /** Schema hints for overriding default behavior (keyed by TypeNode) */
   schemaHints?: WeakMap<
     ts.Node,
@@ -91,7 +115,7 @@ export interface SchemaGenerator {
     type: ts.Type,
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
-    options?: { widenLiterals?: boolean },
+    options?: SchemaGenerationOptions,
     schemaHints?: WeakMap<
       ts.Node,
       {
@@ -139,5 +163,6 @@ export interface SchemaGenerator {
       }
     >,
     sourceFile?: ts.SourceFile,
+    options?: SchemaGenerationOptions,
   ): SchemaDefinition;
 }

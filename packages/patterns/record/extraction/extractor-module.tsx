@@ -26,6 +26,7 @@ import {
   pattern,
   toCompactDebugString,
   UI,
+  valueEqual,
   Writable,
 } from "commonfabric";
 import {
@@ -737,8 +738,8 @@ function buildPreview(
     const entry = subPieces.find((e) => e?.type === moduleType);
     const currentValue = entry ? getCurrentValue(entry, fieldName) : undefined;
 
-    // Skip if value hasn't changed
-    if (JSON.stringify(currentValue) === JSON.stringify(extractedValue)) {
+    // Skip if value hasn't changed.
+    if (valueEqual(currentValue, extractedValue)) {
       continue;
     }
 

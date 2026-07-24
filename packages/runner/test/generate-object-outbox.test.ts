@@ -12,6 +12,8 @@ import { LLMClient } from "@commonfabric/llm";
 import type { BuiltInGenerateObjectParams } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { waitForLlmSettled } from "./support/llm-result.ts";
+import { defer } from "@commonfabric/utils/defer";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
@@ -120,8 +122,7 @@ describe("generateObject outbox mechanism", () => {
 
       expect(generateObjectCalls).toEqual([]);
 
-      await waitForPendingToBecomeFalse(result);
-      await runtime.idle();
+      await waitForLlmSettled(runtime, result);
 
       expect(outboxEffects.length).toBeGreaterThan(0);
       expect(outboxEffects[0].kind).toBe("generateObject-start");
@@ -217,8 +218,7 @@ describe("generateObject outbox mechanism", () => {
 
       expect(sendRequestCalls).toEqual([]);
 
-      await waitForPendingToBecomeFalse(result);
-      await runtime.idle();
+      await waitForLlmSettled(runtime, result);
 
       expect(outboxEffects.length).toBeGreaterThan(0);
       expect(outboxEffects[0].kind).toBe("generateObject-start");
@@ -291,8 +291,10 @@ describe("generateObject outbox mechanism", () => {
 
     const originalGenerateObject = LLMClient.prototype.generateObject;
     const generateObjectCalls: number[] = [];
+    const firstGenerateObject = defer<void>();
     LLMClient.prototype.generateObject = async function (...args: unknown[]) {
       generateObjectCalls.push(Date.now());
+      if (generateObjectCalls.length === 1) firstGenerateObject.resolve();
       return await originalGenerateObject.apply(this, args as never);
     };
 
@@ -310,9 +312,8 @@ describe("generateObject outbox mechanism", () => {
       action(retryTx);
       const retryResult = await retryTx.commit();
       expect(retryResult.ok).toBeDefined();
-      await waitForCallCount(generateObjectCalls, 1);
-      await waitForPendingToBecomeFalse(resultCell);
-      await runtime.idle();
+      await firstGenerateObject.promise;
+      await waitForLlmSettled(runtime, resultCell);
 
       expect(generateObjectCalls.length).toBe(1);
     } finally {
@@ -391,8 +392,10 @@ describe("generateObject outbox mechanism", () => {
 
     const originalSendRequest = LLMClient.prototype.sendRequest;
     const sendRequestCalls: number[] = [];
+    const firstSendRequest = defer<void>();
     LLMClient.prototype.sendRequest = async function (...args: unknown[]) {
       sendRequestCalls.push(Date.now());
+      if (sendRequestCalls.length === 1) firstSendRequest.resolve();
       return await originalSendRequest.apply(this, args as never);
     };
 
@@ -410,9 +413,8 @@ describe("generateObject outbox mechanism", () => {
       action(retryTx);
       const retryResult = await retryTx.commit();
       expect(retryResult.ok).toBeDefined();
-      await waitForCallCount(sendRequestCalls, 1);
-      await waitForPendingToBecomeFalse(resultCell);
-      await runtime.idle();
+      await firstSendRequest.promise;
+      await waitForLlmSettled(runtime, resultCell);
 
       expect(sendRequestCalls.length).toBe(1);
     } finally {
@@ -420,27 +422,3 @@ describe("generateObject outbox mechanism", () => {
     }
   });
 });
-
-function waitForPendingToBecomeFalse(result: any) {
-  return new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error("Timeout waiting for pending to become false"));
-    }, 5000);
-    let cancel = () => {};
-    cancel = result.sink((value: any) => {
-      if (value?.pending === false) {
-        clearTimeout(timeout);
-        queueMicrotask(cancel);
-        resolve();
-      }
-    });
-  });
-}
-
-async function waitForCallCount(calls: unknown[], expected: number) {
-  for (let i = 0; i < 50; i++) {
-    if (calls.length >= expected) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error(`Timeout waiting for ${expected} call(s)`);
-}

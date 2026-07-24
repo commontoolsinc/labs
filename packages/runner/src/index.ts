@@ -56,7 +56,12 @@ export {
   summarizeTransaction,
   type TransactionSummary,
 } from "./storage/transaction-summary.ts";
-export { convertCellsToLinks, isCell, isStream } from "./cell.ts";
+export {
+  convertCellsToLinks,
+  isCell,
+  isReadableCell,
+  isStream,
+} from "./cell.ts";
 export {
   getCellOrThrow,
   isCellResult,
@@ -110,6 +115,10 @@ export {
   sanitizeSchemaForLinks,
 } from "./link-utils.ts";
 export * from "./pattern-manager.ts";
+export {
+  type PatternUpdateOutcome,
+  PatternUpdater,
+} from "./pattern-updater.ts";
 export {
   asPatternIdentityRef,
   extractDefaultValues,

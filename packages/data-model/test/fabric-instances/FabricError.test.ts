@@ -430,6 +430,67 @@ describe("FabricError", () => {
         expect(fe[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
       });
     });
+
+    // `FabricError` inherits the `deepClone()` template from
+    // `BaseFabricInstance` and supplies only its `[DEEP_CLONE_CORE]` (a codec
+    // round-trip). These cases pin the template contract for this concrete
+    // implementor.
+    describe("deepClone()", () => {
+      it("frozen clone is deep-frozen with equal state", () => {
+        const fe = FabricError.fromNativeError(
+          new Error("boom", { cause: { detail: 1 } }),
+        );
+        const clone = fe.deepClone(true) as FabricError;
+        expect(clone).not.toBe(fe);
+        expect(isDeepFrozen(clone)).toBe(true);
+        expect(clone.message).toBe("boom");
+        expect(clone.cause).toEqual({ detail: 1 });
+      });
+
+      it("identity-returns an already-deep-frozen instance", () => {
+        const fe = deepFreeze(FabricError.fromNativeError(new Error("x")));
+        expect(fe.deepClone(true)).toBe(fe);
+      });
+
+      it("does NOT identity-return a merely-shallowly-frozen instance", () => {
+        // Frozen wrapper, but a still-mutable nested `cause`: not deep-frozen,
+        // so the deep-clone identity gate must allocate rather than alias.
+        const fe = FabricError.fromNativeError(new Error("outer"));
+        fe.cause = { detail: 1 }; // mutable nested FabricValue
+        Object.freeze(fe); // shallow freeze only
+        expect(Object.isFrozen(fe)).toBe(true);
+        expect(isDeepFrozen(fe)).toBe(false);
+        expect(fe.deepClone(true)).not.toBe(fe);
+      });
+
+      it("mutable clone is a distinct, mutable instance with equal state", () => {
+        const fe = FabricError.fromNativeError(
+          new Error("outer", { cause: { detail: 1 } }),
+        );
+        const clone = fe.deepClone(false) as FabricError;
+        expect(clone).not.toBe(fe);
+        expect(Object.isFrozen(clone)).toBe(false);
+        expect(clone.message).toBe("outer");
+        expect(clone.cause).toEqual({ detail: 1 });
+        // The top-level instance is independent: reassigning a slot on the
+        // clone does not write through to the original.
+        clone.message = "changed";
+        expect(fe.message).toBe("outer");
+      });
+
+      // KNOWN GAP (pre-existing): the clone core round-trips through
+      // `[CODEC]`, whose `encode()` passes `cause` (and extras) through by
+      // reference, so an *unfrozen* deep clone still shares its nested
+      // `cause` with the original -- contrary to the `deepClone(false)`
+      // contract on `FabricInstance`. Pinned to record the actual behavior,
+      // not to bless it.
+      it("mutable clone currently SHARES the nested `cause` reference (known gap)", () => {
+        const cause = { detail: 1 };
+        const fe = FabricError.fromNativeError(new Error("outer", { cause }));
+        const clone = fe.deepClone(false) as FabricError;
+        expect(clone.cause).toBe(cause);
+      });
+    });
   });
 
   describe("static members", () => {

@@ -40,7 +40,7 @@ env:
 jobs:
   dashboard_tests:
     name: Dashboard tests
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
       - name: Checkout source commit
@@ -61,7 +61,7 @@ jobs:
 
   dashboard_build:
     name: Dashboard image build
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
       - name: Checkout source commit
@@ -70,19 +70,17 @@ jobs:
           persist-credentials: false
           ref: ${{ env.SOURCE_SHA }}
 
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Build dashboard image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           file: Dockerfile.dashboard
           platforms: linux/amd64
           push: false
           tags: ${{ env.IMAGE }}:${{ env.SOURCE_SHA }}
-          cache-from: type=gha,scope=dashboard-${{ env.SOURCE_SHA }}
-          cache-to: type=gha,mode=max,scope=dashboard-${{ env.SOURCE_SHA }}
 
   publish_authorization:
     name: Authorize dashboard image publish
@@ -90,7 +88,7 @@ jobs:
     if: ${{ !cancelled() }}
     outputs:
       allowed: ${{ steps.decision.outputs.allowed }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
       - name: Evaluate publish policy
@@ -127,7 +125,7 @@ jobs:
     name: Publish dashboard image
     needs: [dashboard_tests, dashboard_build, publish_authorization]
     if: ${{ needs.publish_authorization.outputs.allowed == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     permissions:
       contents: read
@@ -156,8 +154,8 @@ jobs:
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
 
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Resolve existing immutable image
         id: existing
@@ -205,14 +203,13 @@ jobs:
       - name: Build and push dashboard image
         id: build
         if: ${{ steps.existing.outputs.exists != 'true' }}
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           file: Dockerfile.dashboard
           platforms: linux/amd64
           push: true
           tags: ${{ steps.image.outputs.tags }}
-          cache-from: type=gha,scope=dashboard-${{ env.SOURCE_SHA }}
 
       - name: Promote existing image to latest
         if: >-
