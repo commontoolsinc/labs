@@ -37,6 +37,9 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
 - **Wish-free agent handlers.** CLI streams do not depend on profile wishes.
   Blank `agentName` values reject the mutation, and the signature is carried in
   the same event as the content, avoiding shared mutable attribution state.
+  During the deployed-schema migration, omission (distinct from an explicit
+  blank value) remains accepted for old callers; topic/comment attribution then
+  falls back to their hidden legacy `myName`.
 - **Mergeable writes everywhere users collide**: comments, links, and topics are
   `push` appends; concurrent writers all land. The body is a large string
   (whole-value conflict semantics), so body edits go through an explicit
@@ -45,9 +48,12 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   duplicate nor an application-level revision/CAS protocol. If Fabric cannot
   preserve history or safely arbitrate concurrent body writes, this dogfood
   surface should expose the framework gap rather than conceal it mechanically.
-- **Storage compatibility is read-only.** `myName`, `createdByName`, and
-  `authorName` remain optional in accepted schemas so existing boards/topics
-  load and render. New code does not read `myName` or write any legacy field.
+- **Compatibility is temporary but honest.** The previous result contract made
+  `myName`, `createdByName`, and `authorName` observable, and its mutation
+  streams omitted `agentName`. Those surfaces remain deprecated but functional:
+  new structured writes mirror the legacy display strings, while old unsigned
+  topic/comment calls use `myName` and the other streams preserve their prior
+  behavior. New browser and agent callers never depend on them.
 - **`mentionable` is a structural reference, not derived data.** The board
   passes its own topics list at creation; the topic derives its Connections
   read-side from it (SELF + equals to find its own row). Requires the

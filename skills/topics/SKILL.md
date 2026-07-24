@@ -42,8 +42,9 @@ decorate titles or link labels, or add manual signature lines to bodies and
 comments. If your stable agent name is unclear, ask before writing.
 
 Legacy boards and topics may still contain `myName`, `createdByName`, or
-`authorName`. Treat them as read-only compatibility fields: never set or copy
-them into new mutations.
+`authorName`. The pattern temporarily mirrors those fields for consumers of the
+previous deployed schema. Treat them as output-only compatibility details: never
+set or copy them into agent mutations.
 
 ## Reading Topics
 
