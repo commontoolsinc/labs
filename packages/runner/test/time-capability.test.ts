@@ -65,16 +65,24 @@ describe("time/entropy capability gate", () => {
     });
   });
 
-  it("handler context: the clock is frozen — repeated reads never advance", () => {
+  it("handler context: the clock is frozen — repeated reads never advance", async () => {
     // The load-bearing property: time does not move during a handler's own work,
-    // so a read before and after an await (or any elapsed real time) is identical
-    // and cannot serve as an intra-run clock.
-    inFrame({ inHandler: true, eventTime: 1_700_000_000_500 }, () => {
-      const first = sandboxDateNow();
-      const spinUntil = Date.now() + 5;
-      while (Date.now() < spinUntil) { /* burn real wall-clock time */ }
-      expect(sandboxDateNow()).toBe(first);
+    // so a read before and after elapsed live time is identical and cannot serve
+    // as an intra-run clock. Advance the live clock between the two reads — a
+    // handler clock that read it would change; the event-bound one does not.
+    const frame = pushFrame({
+      runtime: fakeRuntime(),
+      inHandler: true,
+      eventTime: 1_700_000_000_500,
     });
+    try {
+      const first = sandboxDateNow();
+      await clock.tick(5000);
+      expect(Date.now()).toBeGreaterThan(first);
+      expect(sandboxDateNow()).toBe(first);
+    } finally {
+      popFrame(frame);
+    }
   });
 
   it("handler context with no event time recorded: throws (no live-clock fallback)", () => {

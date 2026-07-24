@@ -198,7 +198,7 @@ describe("wake shaper (event path)", () => {
     await shaper.whenDrained();
     expect(calls.map((c) => c.event)).toEqual([{ n: 1 }, { n: 2 }]);
     // Let the bucket refill to full and the idle group close.
-    await new Promise((r) => setTimeout(r, 80));
+    await clock.tick(80);
     // A fresh event bursts immediately again — synchronously, since the delivery
     // shaper's burst is synchronous and the bucket is full.
     shaper.hold(undefined, link("a"), { n: 3 }, true, undefined);
@@ -313,7 +313,7 @@ describe("wake shaper (event path)", () => {
     expect(calls.map((c) => c.event)).toEqual([{ n: 1 }]);
     shaper.dispose();
     expect(shaper.hasPending()).toBe(false);
-    await new Promise((r) => setTimeout(r, 5));
+    await clock.tick(5);
     expect(calls.map((c) => c.event)).toEqual([{ n: 1 }]); // n:2 never delivered
     shaper.dispose();
   });

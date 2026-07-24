@@ -2,10 +2,6 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { AsyncSemaphoreQueue } from "../src/queue.ts";
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 describe("AsyncSemaphoreQueue", () => {
   it("processes a single job", async () => {
     const queue = new AsyncSemaphoreQueue({ maxConcurrency: 1 });
@@ -25,7 +21,7 @@ describe("AsyncSemaphoreQueue", () => {
       queue.enqueue(async () => {
         currentConcurrent++;
         maxConcurrent = Math.max(maxConcurrent, currentConcurrent);
-        await delay(50);
+        await clock.settle();
         currentConcurrent--;
         return maxConcurrent;
       });
@@ -53,7 +49,7 @@ describe("AsyncSemaphoreQueue", () => {
     const makeJob = (id: number) =>
       queue.enqueue(async () => {
         order.push(id);
-        await delay(10);
+        await clock.settle();
       });
 
     await Promise.all([makeJob(1), makeJob(2), makeJob(3), makeJob(4)]);
@@ -123,7 +119,7 @@ describe("AsyncSemaphoreQueue", () => {
       queue.enqueue(async () => {
         concurrent++;
         maxConcurrent = Math.max(maxConcurrent, concurrent);
-        await delay(100);
+        await clock.settle();
         concurrent--;
       });
 

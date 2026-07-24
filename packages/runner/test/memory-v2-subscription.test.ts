@@ -70,7 +70,7 @@ const waitFor = async (
     if (Date.now() - start > timeout) {
       throw new Error("Timed out waiting for condition");
     }
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await clock.tick(5);
   }
 };
 
@@ -193,7 +193,7 @@ describe("Memory v2 storage notifications", () => {
     await runtime.dispose();
     await remoteClient.close();
     await storageManager.close();
-    await new Promise((resolve) => setTimeout(resolve, 1));
+    await clock.tick(1);
   });
 
   it("emits a commit notification with optimistic changes", async () => {

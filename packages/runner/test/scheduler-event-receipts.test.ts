@@ -116,7 +116,6 @@ async function waitForSchedulerCondition(
   const deadline = performance.now() + 1_000;
   while (!condition() && performance.now() < deadline) {
     await runtime.idle();
-    await new Promise((resolve) => setTimeout(resolve, 0));
   }
   if (!condition()) {
     throw new Error(message);
@@ -1158,7 +1157,6 @@ Deno.test("navigateTo handler results navigate once and deduplicate redelivery",
       "redelivered navigateTo event did not run",
     );
     await runtime.idle();
-    await new Promise((resolve) => setTimeout(resolve, 50));
     await runtime.idle();
 
     expect(navigations.length).toBe(1);

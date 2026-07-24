@@ -88,7 +88,7 @@ describe("throttle - bounded freshness", () => {
     tx = runtime.edit();
     // Yield through the already-queued scheduler tick so it observes the dirty
     // gated node and arms the shared wake before the clear.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await clock.settle();
     expect(observed).toBe(1);
 
     runtime.scheduler.clearThrottle(effect);
@@ -206,7 +206,7 @@ describe("throttle - bounded freshness", () => {
     expect(runCount).toBe(1);
 
     // Wait for throttle to expire
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await clock.tick(100);
 
     // Now should run
     runtime.scheduler.subscribe(
@@ -319,13 +319,13 @@ describe("throttle - bounded freshness", () => {
     source.withTx(tx).send(5);
     await tx.commit();
     tx = runtime.edit();
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await clock.tick(80);
     expect(effectCount).toBe(1);
     expect(result.get()).toBe(2);
 
     // Wait for throttle to expire
-    await new Promise((resolve) => setTimeout(resolve, 700));
-    await runtime.scheduler.idle();
+    await clock.tick(700);
+    await clock.settle();
     expect(effectCount).toBe(2);
     expect(result.get()).toBe(10);
 
@@ -333,7 +333,7 @@ describe("throttle - bounded freshness", () => {
     source.withTx(tx).send(10);
     await tx.commit();
     tx = runtime.edit();
-    await result.pull();
+    await clock.tick(500);
 
     // Now effect should run again
     expect(effectCount).toBe(3);
@@ -384,12 +384,12 @@ describe("throttle - bounded freshness", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await clock.tick(80);
     expect(effectCount).toBe(1);
     expect(runtime.scheduler.getFilterStats().filtered).toBeLessThan(5);
 
-    await new Promise((resolve) => setTimeout(resolve, 700));
-    await runtime.scheduler.idle();
+    await clock.tick(700);
+    await clock.settle();
 
     expect(effectCount).toBe(2);
     expect(result.get()).toBe(10);

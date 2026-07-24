@@ -91,7 +91,7 @@ const waitFor = async (
   const started = Date.now();
   while (!predicate()) {
     if (Date.now() - started > timeout) return false;
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await clock.tick(5);
   }
   return true;
 };

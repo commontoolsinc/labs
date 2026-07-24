@@ -66,7 +66,7 @@ describe("builder calls inside a running action throw", () => {
     await runInActionExecution(async () => {
       await Promise.resolve();
       expect(() => lift((x: number) => x)).toThrow(/module level/);
-      await new Promise((resolve) => setTimeout(resolve, 1));
+      await clock.settle();
       expect(() => lift((x: number) => x)).toThrow(/module level/);
     });
     expect(() => lift((x: number) => x)).not.toThrow();
@@ -78,7 +78,7 @@ describe("builder calls inside a running action throw", () => {
     // module-scope builder calls are the LEGAL mints the transformer
     // produces. The window must not leak into them.
     const pending = runInActionExecution(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      await clock.settle();
     });
     const frame = pushFrame({
       sourceLocationContext: {
