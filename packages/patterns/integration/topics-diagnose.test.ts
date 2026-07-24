@@ -1,4 +1,6 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import { join, resolve } from "@std/path";
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import { MultiRuntimeHarness } from "./multi-runtime-harness.ts";
 import {
   graphSummary,
@@ -7,6 +9,15 @@ import {
   settleSummary,
   TopicsDiagnosticsError,
 } from "../tools/topics-diagnose.ts";
+
+const REPO_ROOT = join(import.meta.dirname!, "..", "..", "..");
+const TOPICS_DIAGNOSE = join(
+  REPO_ROOT,
+  "packages",
+  "patterns",
+  "tools",
+  "topics-diagnose.ts",
+);
 
 // Covered by tools/topics-diagnose-config.test.ts.
 
@@ -69,6 +80,31 @@ Deno.test("Topics diagnostics classifies invalid CLI configuration", async () =>
     error = caught;
   }
   assertEquals(reportSafeErrorCode(error), "invalid-configuration");
+});
+
+Deno.test("Topics diagnostics CLI rejects invalid arguments", async () => {
+  const coverageDir = Deno.env.get("DENO_COVERAGE_DIR");
+  const output = await runDenoCommandWithTemporaryLock({
+    root: REPO_ROOT,
+    env: coverageDir ? { DENO_COVERAGE_DIR: resolve(coverageDir) } : undefined,
+    args: (lockPath) => [
+      "run",
+      "--config",
+      join(REPO_ROOT, "deno.jsonc"),
+      "--lock",
+      lockPath,
+      "--frozen=true",
+      "--allow-all",
+      TOPICS_DIAGNOSE,
+      "--unsupported",
+    ],
+  });
+
+  assertEquals(output.code, 1);
+  assertStringIncludes(
+    new TextDecoder().decode(output.stderr),
+    "invalid-configuration",
+  );
 });
 
 Deno.test("Topics diagnostics reduces content-free runtime summaries", () => {

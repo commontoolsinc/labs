@@ -893,6 +893,4 @@ export async function runTopicsDiagnosticsCli(
   if (report.results.some((result) => !result.ok)) exit(1);
 }
 
-if (import.meta.main) {
-  await runTopicsDiagnosticsCli(Deno.args);
-}
+if (import.meta.main) await runTopicsDiagnosticsCli(Deno.args);
