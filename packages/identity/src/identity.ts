@@ -6,7 +6,6 @@ import {
   Ed25519Verifier,
 } from "./ed25519/index.ts";
 import { AsBytes, DIDKey, KeyPairRaw, Signer, Verifier } from "./interface.ts";
-import { fromPEM, pkcs8ToEd25519Raw } from "./ed25519/utils.ts";
 import { hash } from "./utils.ts";
 
 const textEncoder = new TextEncoder();
@@ -119,20 +118,21 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return new Identity(signer);
   }
 
-  // Recover the raw seed for this identity — the same 32 bytes that
-  // `fromMnemonic` derives from a BIP39 phrase.
+  // Recover the raw 32-byte ed25519 seed for this identity — the exact inverse
+  // of `fromRaw`, mirroring the `fromPkcs8`/`toPkcs8` pair.
   //
-  // The inverse of `fromRaw`, and the reason it is useful: `fromMnemonic` maps
-  // the phrase to BIP39 entropy and uses those bytes DIRECTLY as the ed25519
-  // seed, with no KDF in between. So the seed of an EXISTING key is valid BIP39
-  // entropy, and a key that was never generated from a phrase can still be
-  // re-encoded as one (`entropyToMnemonic(identity.toEntropy())`) without
-  // anyone having to re-key.
+  // Named `toRaw`, NOT `toEntropy`, on purpose: it returns a SEED. Those bytes
+  // are *also* valid BIP39 entropy only because `fromMnemonic` uses the
+  // entropy directly as the seed with no KDF between — so a caller can do
+  // `entropyToMnemonic(identity.toRaw())` to re-encode an existing key as a
+  // phrase without re-keying. But the BIP39 vocabulary belongs at that call
+  // site: if a KDF is ever introduced, `toRaw` stays true (it still returns the
+  // seed) while a hypothetical `toEntropy` would silently start lying.
   //
   // Like `toPkcs8`, only "noble" implementations can do this — WebCrypto hides
   // the private key material — and it throws otherwise.
-  toEntropy(): Uint8Array {
-    return pkcs8ToEd25519Raw(fromPEM(this.toPkcs8()));
+  toRaw(): Uint8Array {
+    return this.#keypair.toRaw();
   }
 
   static async fromPassphrase<ID extends DIDKey>(

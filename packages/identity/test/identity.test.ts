@@ -52,28 +52,61 @@ Deno.test("fromRaw matches the pinned all-zero BIP39 vector", async () => {
   );
 });
 
-Deno.test("toEntropy round-trips an existing key back to its seed", async () => {
+Deno.test("toRaw round-trips an existing key back to its seed", async () => {
   // Closes the loop the pairing flow needs: a key that was NEVER generated from
-  // a phrase can still be re-encoded as one, so nobody has to re-key.
+  // a phrase can still be re-encoded as one, so nobody has to re-key. `toRaw`
+  // is the exact inverse of `fromRaw`.
   const pkcs8 = await Identity.generatePkcs8();
   const identity = await Identity.fromPkcs8(pkcs8, { implementation: "noble" });
 
-  const entropy = identity.toEntropy();
-  assertEquals(entropy.length, 32);
-  assertEquals((await Identity.fromRaw(entropy)).did(), identity.did());
+  const seed = identity.toRaw();
+  assertEquals(seed.length, 32);
+  assertEquals((await Identity.fromRaw(seed)).did(), identity.did());
 
-  // ...and it really is valid BIP39 entropy, so the words exist.
-  const mnemonic = entropyToMnemonic(entropy, wordlist);
+  // ...and the seed is valid BIP39 entropy, so the words exist — the pairing
+  // flow does this step at its own call site, not in the identity class.
+  const mnemonic = entropyToMnemonic(seed, wordlist);
   assertEquals(mnemonic.split(" ").length, 24);
   assertEquals((await Identity.fromMnemonic(mnemonic)).did(), identity.did());
 });
 
-Deno.test("toEntropy is asymmetric — byte order is preserved", async () => {
+Deno.test("toRaw is asymmetric — byte order is preserved", async () => {
   // The all-zero vector is a fixed point of reversal, so a test using only it
   // would pass even if the seed were mangled on the way out.
-  const entropy = new Uint8Array(Array.from({ length: 32 }, (_, i) => i));
-  const identity = await Identity.fromRaw(entropy, {
+  const seed = new Uint8Array(Array.from({ length: 32 }, (_, i) => i));
+  const identity = await Identity.fromRaw(seed, { implementation: "noble" });
+  assertEquals(identity.toRaw(), seed);
+});
+
+Deno.test("toRaw returns a COPY — mutating it cannot corrupt the identity", async () => {
+  // serialize() hands out the live internal buffer; toRaw must not.
+  const identity = await Identity.fromRaw(new Uint8Array(32).fill(7), {
     implementation: "noble",
   });
-  assertEquals(identity.toEntropy(), entropy);
+  const seed = identity.toRaw();
+  seed[0] = 0xff;
+  assertEquals(identity.toRaw()[0], 7, "the identity's seed must be unchanged");
+});
+
+Deno.test("toRaw throws cleanly for a non-noble implementation", async () => {
+  // On Firefox ≥136 the DEFAULT (native/WebCrypto) implementation is used, and
+  // it cannot export private material. The failure must be an honest error, not
+  // a PKCS8-flavoured red herring, and pairing callers pass NOBLE explicitly to
+  // avoid it entirely.
+  const identity = await Identity.generate(); // default implementation
+  let message = "";
+  try {
+    identity.toRaw();
+    throw new Error("expected toRaw to throw for the default implementation");
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  // Only meaningful when the platform actually used native; noble-only
+  // environments (Deno/Chromium in CI) won't throw, and that's fine.
+  if (message) {
+    assert(
+      /raw key material/i.test(message),
+      `error should name raw key material, got: ${message}`,
+    );
+  }
 });

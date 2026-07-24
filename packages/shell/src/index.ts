@@ -4,6 +4,18 @@ import "@commonfabric/ui";
 import { API_URL, COMMIT_SHA, ENVIRONMENT } from "./lib/env.ts";
 import { setupHostToggles } from "./lib/host-toggles.ts";
 import { consumeDeviceLinkFragment } from "./lib/device-link.ts";
+// Statically imported, deliberately. A dynamic `await import()` here pushes
+// `shared/app/*` into esbuild's lazy `__esm` wrappers, and esbuild then emits
+// the wrapper for `shared/app/controller.ts` as a NON-async function containing
+// a top-level await — a bundle that is a SyntaxError, so the whole shell fails
+// to load. (`node --check dist/scripts/index.js` catches it; the type checker
+// and the unit tests do not.) There was nothing to gain either way: the shell's
+// `index` entry sets `splitting: false`, so esbuild inlines dynamic imports
+// rather than emitting a chunk.
+import {
+  reportDeviceLinkFailure,
+  runDeviceLinkLogin,
+} from "./lib/device-link-login.ts";
 import "./components/index.ts";
 import "./views/index.ts";
 import { App, AppElement, AppUpdateEvent, Navigation } from "../shared/mod.ts";
@@ -14,6 +26,20 @@ import "./globals.ts";
 // never survives into session history, a bookmark, or iCloud tab sync.
 // Interim pre-key-delegation pairing flow; delete when delegation lands.
 const deviceLink = consumeDeviceLinkFragment();
+
+// Handle a scan while the app is ALREADY loaded at the QR's target URL. The QR
+// deliberately points at the page the user bookmarked as mobile Loom, so
+// re-scanning it is a same-document fragment navigation: no reload fires, the
+// module-eval read above never re-runs, and the secret would sit unscrubbed in
+// the address bar. `hashchange` is the only signal for that case. On an
+// accepted REPLACE the running app still holds the old identity, so reload to
+// re-bootstrap cleanly (the fragment is already scrubbed, so the reload is
+// clean and cannot loop).
+globalThis.addEventListener("hashchange", () => {
+  const rescan = consumeDeviceLinkFragment();
+  if (rescan.kind === "absent") return;
+  void handleDeviceLink(rescan, { reloadOnReplace: true });
+});
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js");
@@ -33,36 +59,53 @@ if (ENVIRONMENT !== "production") {
     (e as AppUpdateEvent).prettyPrint();
   });
 }
-// Must run BEFORE initializeKeys: it writes ROOT_KEY straight into the
-// KeyStore so the normal boot below picks the new identity up. Routing it
-// through App.setIdentity instead would throw whenever a DIFFERENT identity is
-// already active — which is precisely the re-pair case this exists for.
+// Runs BEFORE initializeKeys on the bootstrap path: it writes ROOT_KEY straight
+// into the KeyStore so the normal boot below picks the new identity up. Routing
+// it through App.setIdentity instead would throw whenever a DIFFERENT identity
+// is already active — precisely the re-pair case this exists for.
 //
-// Wrapped because this is a TOP-LEVEL await in the entry module: an uncaught
-// throw here (KeyStore.open rejecting, an insecure context) would skip
-// initializeKeys and Navigation entirely, stranding the user on the login
-// screen with no error and no clue. A failed pairing must degrade to a normal
-// boot, not a broken one.
-if (deviceLink.kind !== "absent") {
+// Every path is wrapped: an uncaught throw here (KeyStore.open rejecting, an
+// insecure context) would skip initializeKeys and Navigation entirely,
+// stranding the user with no error. A failed pairing must degrade to a normal
+// boot, not a broken one — and must SAY it failed, because the fragment is
+// already scrubbed and a silent normal boot is indistinguishable from "the scan
+// never registered".
+async function handleDeviceLink(
+  link: Exclude<
+    ReturnType<typeof consumeDeviceLinkFragment>,
+    { kind: "absent" }
+  >,
+  opts: { reloadOnReplace: boolean } = { reloadOnReplace: false },
+): Promise<void> {
   try {
-    const { runDeviceLinkLogin, reportDeviceLinkFailure } = await import(
-      "./lib/device-link-login.ts"
-    );
-    if (deviceLink.kind === "malformed") {
-      // The scrub already removed it, so "refresh once and rescan" — the
-      // documented recovery — cannot work. Say so rather than booting to a
-      // normal screen as though nothing was scanned.
+    if (link.kind === "malformed") {
       await reportDeviceLinkFailure("unreadable");
-    } else {
-      const outcome = await runDeviceLinkLogin(deviceLink.entropy);
-      if (outcome === "invalid") await reportDeviceLinkFailure("unreadable");
+      return;
     }
+    const outcome = await runDeviceLinkLogin(link.entropy);
+    if (outcome === "invalid") {
+      await reportDeviceLinkFailure("unreadable");
+    } else if (outcome === "accepted" && opts.reloadOnReplace) {
+      // The app is already booted on the previous identity; a plain continue
+      // would keep signing as it. Re-bootstrap so initializeKeys adopts the
+      // key we just wrote. (Bootstrap path passes reloadOnReplace:false — there
+      // initializeKeys below has not run yet and picks it up directly.)
+      globalThis.location.reload();
+    }
+    // "cancelled" and "already-signed-in" are deliberately silent: the first is
+    // an intentional "not mine", the second a successful no-op.
   } catch (error) {
-    console.error(
-      "[device-link] pairing failed; continuing normal boot",
-      error,
-    );
+    console.error("[device-link] pairing failed", error);
+    try {
+      await reportDeviceLinkFailure("failed");
+    } catch {
+      // The reporter itself failed; continue booting rather than hanging.
+    }
   }
+}
+
+if (deviceLink.kind !== "absent") {
+  await handleDeviceLink(deviceLink);
 }
 
 await app.initializeKeys();

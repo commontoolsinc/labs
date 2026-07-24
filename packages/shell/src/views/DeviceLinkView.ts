@@ -14,9 +14,11 @@ import { property, state } from "lit/decorators.js";
 // supposed to have come from.
 //
 // Rendered into the TOP LAYER via <dialog>.showModal() rather than a z-index
-// gamble: this shell already has fixed elements at z-index 2000 and 9999, and
-// the top layer also brings a focus trap and an inert background for free —
-// the login view behind this must not be tab-reachable while it is up.
+// gamble: this shell has fixed elements at z-index 2000 and 9999, and the top
+// layer also brings a focus trap and an inert background for free — the login
+// view behind this must not be tab-reachable while it is up. Where showModal is
+// unsupported (iOS ≤ 15.3) or throws, `activateModalDialog` falls back to a
+// visible non-modal dialog rather than leaving the user staring at nothing.
 //
 // INTERIM: delete this along with the rest of the device-link flow when key
 // delegation lands.
@@ -30,6 +32,48 @@ import { property, state } from "lit/decorators.js";
  * donated-identity link, that is worth a beat.
  */
 export const TAP_THROUGH_GUARD_MS = 500;
+
+/** The subset of `<dialog>` this component drives — so tests can fake it. */
+export interface ModalDialog {
+  showModal?: () => void;
+  setAttribute: (name: string, value: string) => void;
+  addEventListener: (type: string, listener: (event: Event) => void) => void;
+}
+
+/**
+ * Make a `<dialog>` visible and wire its cancel signal — crash-safe.
+ *
+ * Pure and injectable so the order-of-operations and the fallback can be
+ * tested without a browser (the component's `firstUpdated` runs only against a
+ * real DOM). The rules it encodes, each load-bearing:
+ *   - Prefer the top layer (`showModal`), but a dialog with no `open` is
+ *     `display:none`; if `showModal` is missing or throws, force the `open`
+ *     attribute so the user still SEES the dialog instead of a hang.
+ *   - `cancel` (Escape, or a programmatic close) must resolve to "no", never a
+ *     silent accept.
+ */
+export function activateModalDialog(
+  dialog: ModalDialog | null,
+  onCancel: () => void,
+): void {
+  if (!dialog) return;
+  try {
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+  } catch {
+    // showModal threw (unsupported, or already open) — degrade to visible
+    // non-modal rather than an invisible, un-dismissable hang.
+    try {
+      dialog.setAttribute("open", "");
+    } catch {
+      // Nothing more we can safely do; the buttons still work if painted.
+    }
+  }
+  dialog.addEventListener("cancel", (event) => {
+    (event as Event & { preventDefault?: () => void }).preventDefault?.();
+    onCancel();
+  });
+}
 
 export class XDeviceLinkView extends LitElement {
   static override styles = css`
@@ -45,6 +89,9 @@ export class XDeviceLinkView extends LitElement {
       font-size: 1rem;
       line-height: 1.5;
       padding: 1.5rem;
+      /* Respect the notch/home-indicator in landscape; portrait is unaffected. */
+      padding-top: max(1.5rem, env(safe-area-inset-top));
+      padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
       max-width: 30rem;
       width: calc(100vw - 2rem);
       box-sizing: border-box;
@@ -55,6 +102,9 @@ export class XDeviceLinkView extends LitElement {
     h1 {
       font-size: 1.25rem;
       margin: 0 0 0.75rem;
+    }
+    h1:focus {
+      outline: none;
     }
     .did {
       font-family: var(--font-primary, ui-monospace, monospace);
@@ -106,10 +156,7 @@ export class XDeviceLinkView extends LitElement {
 
   /** Set instead of the DIDs to report a scan that could not be read at all. */
   @property({ attribute: false })
-  accessor failure: "unreadable" | null = null;
-
-  @state()
-  private accessor accepting = false;
+  accessor failure: "unreadable" | "failed" | null = null;
 
   @state()
   private accessor guarded = true;
@@ -119,16 +166,24 @@ export class XDeviceLinkView extends LitElement {
   #guardTimer: ReturnType<typeof setTimeout> | undefined;
 
   override firstUpdated() {
-    const dialog = this.renderRoot.querySelector("dialog");
-    dialog?.showModal();
-    // Escape / the backdrop must mean "no", never a silent accept.
-    dialog?.addEventListener("cancel", (event) => {
-      event.preventDefault();
-      this.finish(false);
-    });
+    // Schedule the guard release FIRST — before anything below that could throw
+    // — so a failure activating the dialog can never leave the accept button
+    // disabled forever (which, with a hung promise, would brick boot).
     this.#guardTimer = setTimeout(() => {
       this.guarded = false;
     }, TAP_THROUGH_GUARD_MS);
+
+    const dialog = this.renderRoot.querySelector("dialog");
+    activateModalDialog(dialog, () => this.finish(false));
+
+    // Focus the heading, NOT a button. WebKit scrolls a modal to its focused
+    // element; with the accept button disabled during the guard, focus would
+    // otherwise fall to Cancel at the bottom, scrolling the heading and the
+    // security warning off-screen on a small phone.
+    const heading = this.renderRoot.querySelector(
+      "[data-autofocus]",
+    ) as HTMLElement | null;
+    heading?.focus?.();
   }
 
   override disconnectedCallback() {
@@ -139,9 +194,9 @@ export class XDeviceLinkView extends LitElement {
   private finish(accepted: boolean) {
     // Exactly one answer, ever: a double-tap must not dispatch twice.
     if (this.#answered) return;
+    // Accept is inert during the tap-through guard; Cancel is always allowed.
     if (accepted && this.guarded) return;
     this.#answered = true;
-    this.accepting = accepted;
     this.dispatchEvent(
       new CustomEvent("device-link-result", { detail: { accepted } }),
     );
@@ -151,7 +206,9 @@ export class XDeviceLinkView extends LitElement {
     if (this.failure) {
       return html`
         <dialog aria-labelledby="device-link-title">
-          <h1 id="device-link-title">Pairing code could not be read</h1>
+          <h1 id="device-link-title" tabindex="-1" data-autofocus>
+            Pairing code could not be read
+          </h1>
           <p class="warn">
             The code in this link is incomplete or damaged. Reloading this page will not
             help — the code is removed from the address bar as soon as it is read.
@@ -171,7 +228,9 @@ export class XDeviceLinkView extends LitElement {
     if (alreadySignedIn) {
       return html`
         <dialog aria-labelledby="device-link-title">
-          <h1 id="device-link-title">Already signed in</h1>
+          <h1 id="device-link-title" tabindex="-1" data-autofocus>
+            Already signed in
+          </h1>
           <div class="label">Identity</div>
           <div class="did">${this.incomingDid}</div>
           <div class="actions">
@@ -188,7 +247,7 @@ export class XDeviceLinkView extends LitElement {
 
     return html`
       <dialog aria-labelledby="device-link-title">
-        <h1 id="device-link-title">
+        <h1 id="device-link-title" tabindex="-1" data-autofocus>
           ${replacing ? "Replace current identity?" : "Use this identity?"}
         </h1>
         ${replacing

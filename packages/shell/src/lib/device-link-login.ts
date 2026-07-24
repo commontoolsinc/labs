@@ -15,11 +15,22 @@ import "../views/DeviceLinkView.ts";
 // mounts when a stale identity auto-logs in — which is exactly the re-pair case.
 // A LoginView-only handler would silently no-op there.
 
-/** Result of an attempted device-link login. */
+/**
+ * Result of an attempted device-link login.
+ *
+ * `accepted` and `already-signed-in` are DISTINCT on purpose: only `accepted`
+ * changed the stored key. A caller re-running this while the app is already
+ * booted (the hashchange path) needs that difference to decide whether to
+ * reload — reloading on a no-op write would be a pointless flash.
+ */
 export type DeviceLinkOutcome =
   | "accepted"
+  | "already-signed-in"
   | "cancelled"
   | "invalid";
+
+/** Why a scan could not complete — drives the failure screen's copy. */
+export type DeviceLinkFailure = "unreadable" | "failed";
 
 export async function confirmWithUser(
   incomingDid: string,
@@ -50,12 +61,13 @@ export async function confirmWithUser(
  * Tell the user a scan failed, and why they cannot simply retry the same URL.
  *
  * Reuses the confirm view's shape with no accept path — the point is only that
- * a failed scan is never silent. Without this, an undecodable payload boots to
- * an ordinary login screen and looks like the scan never happened, while the
- * scrub has already made "refresh once and rescan" impossible.
+ * a failed scan is never silent. Without this, an undecodable payload (or a
+ * mid-flow error) boots to an ordinary login screen and looks like the scan
+ * never happened, while the scrub has already made "refresh once and rescan"
+ * impossible.
  */
 export async function reportDeviceLinkFailure(
-  reason: "unreadable",
+  reason: DeviceLinkFailure,
 ): Promise<void> {
   const view = document.createElement("x-device-link-view");
   view.failure = reason;
@@ -112,14 +124,16 @@ export async function runDeviceLinkLogin(
 
   // Already this identity: nothing to write, and rewriting would be a
   // needless churn of the stored key.
-  if (currentDid !== identity.did()) {
-    await keyStore.set(ROOT_KEY, identity);
-    // Deliberately NOT saveCredential(createPassphraseCredential()): that mints
-    // a fresh UUID over `storedCredential`, and if this device had a passkey
-    // its descriptor id is destroyed — quick-unlock then offers a passphrase
-    // form that a device-paired phone can never satisfy, since it received
-    // entropy and never saw the 24 words. `initializeKeys` adopts ROOT_KEY on
-    // its own, so nothing here needs the credential record.
-  }
+  if (currentDid === identity.did()) return "already-signed-in";
+
+  await keyStore.set(ROOT_KEY, identity);
+  // Deliberately NOT saveCredential(createPassphraseCredential()): that mints a
+  // fresh UUID over `storedCredential`, and if this device had a passkey its
+  // descriptor id is overwritten — quick-unlock would then offer a passphrase
+  // form that a device-paired phone can never satisfy (it received entropy,
+  // never the 24 words), with no UI to clear it. The passkey itself survives
+  // (it is discoverable): passkey login still works, via the browser's account
+  // picker, and re-saves the descriptor on success. `initializeKeys` adopts
+  // ROOT_KEY on its own, so nothing here needs the credential record.
   return "accepted";
 }

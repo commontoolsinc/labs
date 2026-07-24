@@ -110,19 +110,13 @@ export function consumeDeviceLinkFragment(): DeviceLinkFragment {
     return { kind: "absent" };
   }
 
-  // Never act on a device link inside a frame. The parent controls the URL, so
-  // a framed shell turns this into a one-click identity swap the user cannot
-  // see the address bar for. Storage partitioning already blunts it, but the
-  // flow has no legitimate reason to run framed.
-  //
-  // `top` is only meaningful in a browsing context — outside one (tests, SSR)
-  // it is undefined, and a bare `top !== self` would then reject everything.
-  const top = globalThis.top;
-  if (top && top !== globalThis.self) return { kind: "absent" };
-
   const entropy = parseDeviceLinkFragment(location.hash);
 
-  // Scrub FIRST and synchronously — before the caller can await anything.
+  // Scrub FIRST and synchronously — before the caller can await anything, and
+  // regardless of what we decide below. A framed or malformed link is still
+  // somebody's secret; leaving it in the address bar to be bookmarked or synced
+  // is the leak with none of the benefit. (This is why the scrub precedes the
+  // frame check, not the reverse.)
   try {
     globalThis.history?.replaceState(
       null,
@@ -133,6 +127,17 @@ export function consumeDeviceLinkFragment(): DeviceLinkFragment {
     // A sandboxed/unsupported history is not a reason to abandon the login;
     // the secret is merely more exposed than we'd like.
   }
+
+  // Never ACT on a device link inside a frame. The parent controls the URL, so
+  // a framed shell would turn this into a one-click identity swap the user
+  // cannot see the address bar for. Storage partitioning already blunts it, but
+  // the flow has no legitimate reason to run framed — so report absent (the
+  // secret is already scrubbed above).
+  //
+  // `top` is only meaningful in a browsing context — outside one (tests, SSR)
+  // it is undefined, and a bare `top !== self` would then reject everything.
+  const top = globalThis.top;
+  if (top && top !== globalThis.self) return { kind: "absent" };
 
   return entropy ? { kind: "entropy", entropy } : { kind: "malformed" };
 }

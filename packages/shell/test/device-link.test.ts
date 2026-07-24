@@ -182,6 +182,31 @@ describe("consumeDeviceLinkFragment", () => {
       ctx.restore();
     }
   });
+
+  it("refuses to act inside a frame, but still scrubs", () => {
+    // The parent controls a framed shell's URL, so acting on `#k=` there would
+    // be a one-click identity swap the user can't see the address bar for.
+    // Report absent — but the secret is scrubbed anyway, per the file's policy.
+    const ctx = withLocation("#k=" + toBase64Url(ZERO_ENTROPY));
+    const originalTop = Object.getOwnPropertyDescriptor(globalThis, "top");
+    Object.defineProperty(globalThis, "top", {
+      value: {}, // distinct from globalThis (=self) → looks framed
+      configurable: true,
+      writable: true,
+    });
+    try {
+      assertEquals(consumeDeviceLinkFragment(), { kind: "absent" });
+      assertEquals(
+        ctx.replaced,
+        ["/loom-jun-12/home"],
+        "must scrub even framed",
+      );
+    } finally {
+      if (originalTop) Object.defineProperty(globalThis, "top", originalTop);
+      else Reflect.deleteProperty(globalThis, "top");
+      ctx.restore();
+    }
+  });
 });
 
 describe("device-link derivation", () => {
@@ -340,7 +365,10 @@ describe("runDeviceLinkLogin", () => {
     assertEquals(current, null);
   });
 
-  it("re-scanning the same code is a no-op write", async () => {
+  it("re-scanning the same code is a no-op, reported as already-signed-in", async () => {
+    // Distinct from "accepted" on purpose: the hashchange caller reloads only
+    // on "accepted", so a no-op re-scan must NOT report it, or the page would
+    // pointlessly flash-reload.
     const same = await Identity.fromRaw(ZERO_ENTROPY);
     const { store, entries } = fakeKeyStore(same);
     let wrote = false;
@@ -353,7 +381,7 @@ describe("runDeviceLinkLogin", () => {
       () => Promise.resolve(true),
       () => Promise.resolve(store),
     );
-    assertEquals(outcome, "accepted");
+    assertEquals(outcome, "already-signed-in");
     assert(!wrote, "should not churn the stored key when nothing changed");
     assertEquals(entries.get("$ROOT_KEY")?.did(), ZERO_ENTROPY_DID);
   });
@@ -509,8 +537,13 @@ describe("DeviceLinkView", () => {
       const { view, answers } = await makeView({
         incomingDid: COUNTING_ENTROPY_DID,
       });
-      const [accept, cancel] = handlersOf(view.render());
-      assert(accept && cancel, "expected an accept and a cancel handler");
+      const handlers = handlersOf(view.render());
+      assertEquals(
+        handlers.length,
+        2,
+        "expected an accept and a cancel handler",
+      );
+      const [, cancel] = handlers;
       cancel();
       assertEquals(answers, [false], "Cancel must answer NO");
     } finally {
@@ -671,6 +704,190 @@ describe("confirmWithUser (the production confirm path)", () => {
       assertEquals(await pending, true);
     } finally {
       restore();
+    }
+  });
+});
+
+// ── the modal activation seam ──────────────────────────────────────────────
+//
+// firstUpdated's imperative DOM work runs only against a real DOM, so the
+// browser-behaviour mutations (Escape rewired to accept, showModal never
+// called, cancel listener never attached) previously ALL survived — the unit
+// tests stub document.body.appendChild to a no-op, so the element never
+// connects and firstUpdated never fires. `activateModalDialog` is extracted so
+// exactly those rules can be pinned against a fake dialog, no browser needed.
+
+/** Records what the component does to a dialog. */
+function fakeDialog(
+  opts: { hasShowModal?: boolean; showModalThrows?: boolean } = {},
+) {
+  const calls: string[] = [];
+  let cancelListener: ((e: Event) => void) | undefined;
+  const dialog = {
+    showModal: opts.hasShowModal === false ? undefined : () => {
+      calls.push("showModal");
+      if (opts.showModalThrows) throw new Error("unsupported");
+    },
+    setAttribute: (name: string, value: string) => {
+      calls.push(`setAttribute:${name}=${value}`);
+    },
+    addEventListener: (type: string, listener: (e: Event) => void) => {
+      calls.push(`listen:${type}`);
+      if (type === "cancel") cancelListener = listener;
+    },
+  };
+  return {
+    dialog,
+    calls,
+    fireCancel: () => cancelListener?.(new Event("cancel")),
+  };
+}
+
+describe("activateModalDialog", () => {
+  it("shows the dialog modally and wires the cancel signal", async () => {
+    const { activateModalDialog } = await import(
+      "../src/views/DeviceLinkView.ts"
+    );
+    const { dialog, calls } = fakeDialog();
+    activateModalDialog(dialog, () => {});
+    assert(calls.includes("showModal"), "must open the top layer");
+    assert(calls.includes("listen:cancel"), "must wire the cancel signal");
+  });
+
+  it("Escape (a cancel event) resolves to NO, never a silent accept", async () => {
+    const { activateModalDialog } = await import(
+      "../src/views/DeviceLinkView.ts"
+    );
+    const { dialog, fireCancel } = fakeDialog();
+    let answer: boolean | undefined;
+    activateModalDialog(dialog, () => (answer = false));
+    fireCancel();
+    assertEquals(answer, false);
+  });
+
+  it("falls back to a VISIBLE dialog when showModal is unsupported", async () => {
+    // A <dialog> with no `open` is display:none — on old iOS this would be an
+    // invisible, un-dismissable hang. The open attribute makes it show.
+    const { activateModalDialog } = await import(
+      "../src/views/DeviceLinkView.ts"
+    );
+    const { dialog, calls } = fakeDialog({ hasShowModal: false });
+    activateModalDialog(dialog, () => {});
+    assert(
+      calls.includes("setAttribute:open="),
+      "must force the dialog visible when showModal is missing",
+    );
+  });
+
+  it("falls back to a visible dialog when showModal THROWS", async () => {
+    const { activateModalDialog } = await import(
+      "../src/views/DeviceLinkView.ts"
+    );
+    const { dialog, calls } = fakeDialog({ showModalThrows: true });
+    activateModalDialog(dialog, () => {});
+    assert(calls.includes("showModal"), "tries the top layer first");
+    assert(
+      calls.includes("setAttribute:open="),
+      "then degrades to visible non-modal rather than hanging",
+    );
+  });
+
+  it("is a no-op on a missing dialog rather than throwing", async () => {
+    const { activateModalDialog } = await import(
+      "../src/views/DeviceLinkView.ts"
+    );
+    activateModalDialog(null, () => {
+      throw new Error("onCancel must not fire for a null dialog");
+    });
+  });
+});
+
+describe("firstUpdated wiring (component-level, via a stubbed shadow root)", () => {
+  /** Stub the shadow root so firstUpdated runs without a real DOM. */
+  function withStubbedRoot(
+    view: { renderRoot?: unknown },
+    dialog: unknown,
+    autofocus: unknown = null,
+  ) {
+    Object.defineProperty(view, "renderRoot", {
+      value: {
+        querySelector: (sel: string) => sel === "dialog" ? dialog : autofocus,
+      },
+      configurable: true,
+    });
+  }
+
+  it("wires the dialog's cancel (Escape) to a NO answer, not accept", async () => {
+    // M1: the highest-stakes mutation — Escape rewired to accept a donated
+    // identity. The seam test proves cancel→onCancel; this proves the COMPONENT
+    // passes finish(false) as onCancel, closing the loop.
+    const restore = installBrowserGlobals();
+    try {
+      const { XDeviceLinkView } = await import(
+        "../src/views/DeviceLinkView.ts"
+      );
+      const view = new XDeviceLinkView();
+      Object.assign(view, { guarded: false });
+      const answers: boolean[] = [];
+      view.addEventListener(
+        "device-link-result",
+        (e) => answers.push(Boolean((e as CustomEvent).detail?.accepted)),
+      );
+      let cancelListener: ((e: Event) => void) | undefined;
+      const dialog = {
+        showModal: () => {},
+        setAttribute: () => {},
+        addEventListener: (type: string, cb: (e: Event) => void) => {
+          if (type === "cancel") cancelListener = cb;
+        },
+      };
+      withStubbedRoot(view, dialog);
+      view.firstUpdated();
+      assert(cancelListener, "firstUpdated must wire the cancel signal");
+      cancelListener!(new Event("cancel"));
+      assertEquals(answers, [false], "Escape must answer NO, never accept");
+    } finally {
+      restore();
+    }
+  });
+
+  it("is scheduled on first update and CLEARED on disconnect", async () => {
+    // A leaked timer would flip `guarded` on an element already removed; a timer
+    // never scheduled would leave accept disabled forever. Pin both by
+    // capturing the ids through the real firstUpdated/disconnectedCallback.
+    const scheduled: number[] = [];
+    const cleared: number[] = [];
+    const realSet = globalThis.setTimeout;
+    const realClear = globalThis.clearTimeout;
+    let nextId = 1;
+    // deno-lint-ignore no-explicit-any
+    (globalThis as any).setTimeout = (_fn: () => void) => {
+      const id = nextId++;
+      scheduled.push(id);
+      return id;
+    };
+    // deno-lint-ignore no-explicit-any
+    (globalThis as any).clearTimeout = (id: number) => cleared.push(id);
+    const restore = installBrowserGlobals();
+    try {
+      const { XDeviceLinkView } = await import(
+        "../src/views/DeviceLinkView.ts"
+      );
+      const view = new XDeviceLinkView();
+      // Stub the shadow root so firstUpdated can run without a real DOM; a null
+      // dialog exercises the crash-safe path (activateModalDialog no-ops).
+      Object.defineProperty(view, "renderRoot", {
+        value: { querySelector: () => null },
+        configurable: true,
+      });
+      view.firstUpdated();
+      assertEquals(scheduled.length, 1, "the guard timer must be scheduled");
+      view.disconnectedCallback();
+      assertEquals(cleared, scheduled, "disconnect must clear the same timer");
+    } finally {
+      restore();
+      globalThis.setTimeout = realSet;
+      globalThis.clearTimeout = realClear;
     }
   });
 });
