@@ -33,7 +33,7 @@ export const exec = new Command()
         if (result.resultRef) {
           // stderr, so stdout stays exactly the tool's JSON result.
           console.error(
-            `Tool result cell: ${result.resultRef.id} (space ${result.resultRef.space})`,
+            `Tool result cell: ${result.resultRef.id} (space ${result.resultRef.space}, scope ${result.resultRef.scope})`,
           );
         }
       }
