@@ -32,3 +32,21 @@ a real compartment against each other in both directions.
 That test requires zero gaps: every global the compiler declares must be one the
 compartment installs. A newly declared global that the compartment lacks fails
 the test until it is endowed or added to the withheld list.
+
+### Checks that run only in CI
+
+Two things depend on this list that neither `deno task cfcheck` nor
+`deno task check` catches, so a change that passes both locally can still fail
+in CI:
+
+- The `packages/ts-transformers` and `packages/schema-generator` fixture suites
+  type-check their fixture inputs against the pattern type libraries, so a
+  fixture that uses a now-withheld global stops compiling. `deno task cfcheck`
+  only checks `packages/patterns`, and `deno task check` type-checks source;
+  neither compiles those fixtures. After changing the withheld list or the type
+  libraries, run `deno task test` in both packages, and regenerate the
+  transformer goldens with `UPDATE_GOLDENS=1` (see
+  `packages/ts-transformers/AGENTS.md`).
+- The Performance Check job ratchets `packages/static` uncovered lines. New code
+  in `scripts/strip-withheld-globals.ts` needs matching tests, or it trips the
+  ratchet. Neither `cfcheck` nor `deno task check` measures coverage.
