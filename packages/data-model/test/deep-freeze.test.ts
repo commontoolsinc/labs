@@ -42,6 +42,29 @@ describe("deep-freeze", () => {
       });
     });
 
+    describe("functions", () => {
+      it("returns `false` for an unfrozen function", () => {
+        // A function is a mutable object, not necessarily frozen.
+        expect(isDeepFrozen(() => {})).toBe(false);
+        expect(isDeepFrozen(function () {})).toBe(false);
+      });
+
+      it("returns `false` for a frozen graph reaching a function", () => {
+        expect(isDeepFrozen(Object.freeze({ fn: () => {} }))).toBe(false);
+      });
+
+      it("returns `true` for a frozen function with no mutable own properties", () => {
+        expect(isDeepFrozen(Object.freeze(() => {}))).toBe(true);
+      });
+
+      it("freezes a function passed to `deepFreeze()` (no longer skipped)", () => {
+        const fn = () => {};
+        deepFreeze(fn);
+        expect(Object.isFrozen(fn)).toBe(true);
+        expect(isDeepFrozen(fn)).toBe(true);
+      });
+    });
+
     describe("objects", () => {
       it("returns `false` for an unfrozen empty object", () => {
         expect(isDeepFrozen({})).toBe(false);
