@@ -2679,6 +2679,179 @@ Deno.test("memory v2 engine: resolutionOnly pending reads skip staleness but sti
   }
 });
 
+// CT-1872 1c, end to end at the engine: a fabricated composite must die on
+// the resolution edge, because no staleness scan can catch it.
+//
+//   base:  D = { items: [] }                                  (seq 1)
+//   T1  (localSeq 10): items = ["A"]  — REJECTED (stale read on title)
+//   T1.5 (localSeq 11): blind append "B", zero reads — APPLIED → items ["B"]
+//   T2  (localSeq 12): observed items ["A","B"] through the client stack
+//
+// T2's observation is not STALE — ["A","B"] never existed at any seq; "A"
+// lived only in the client's optimistic layer for a commit the server
+// refused. An under-declared T2 (pre-#4606 client: top-of-stack read only)
+// passes both resolution (T1.5 has a commit row) and the staleness scan
+// (nothing touched items after seq(T1.5)) and is durably ACCEPTED with a
+// phantom premise. The full-stack shape (#4606) names T1 as a
+// resolutionOnly dependency, and the missing commit row rejects it.
+Deno.test("memory v2 engine: full-stack dependency recording rejects a fabricated composite an under-declared commit smuggles through", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:seed",
+      invocation: invocationFor(1, { actor: "seed" }),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:D",
+          value: toEntityDocument({ items: [], title: "t0" }),
+        }],
+      },
+    });
+
+    // Foreign write (seq 2) bumps title so T1's confirmed read goes stale.
+    applyCommit(engine, {
+      sessionId: "session:other",
+      invocation: invocationFor(1, { actor: "other" }),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:D",
+          patches: [{
+            op: "replace",
+            path: "/value/title",
+            value: "t-foreign",
+          }],
+        }],
+      },
+    });
+
+    // T1: REJECTED — its items=["A"] write is discarded everywhere.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: invocationFor(10),
+          authorization,
+          commit: {
+            localSeq: 10,
+            reads: {
+              confirmed: [{
+                id: "entity:D",
+                path: toDocumentPath(["value", "title"]),
+                seq: 1,
+              }],
+              pending: [],
+            },
+            operations: [{
+              op: "patch",
+              id: "entity:D",
+              patches: [{
+                op: "replace",
+                path: "/value/items",
+                value: ["A"],
+              }],
+            }],
+          },
+        }),
+      ConflictError,
+      "stale confirmed read",
+    );
+
+    // T1.5: blind append, zero reads — applies onto the T1-less base.
+    applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(11),
+      authorization,
+      commit: {
+        localSeq: 11,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:D",
+          patches: [{ op: "add", path: "/value/items/-", value: "B" }],
+        }],
+      },
+    });
+
+    // Under-declared shape (pre-#4606 client): top-of-stack read only.
+    // ACCEPTED — resolution and staleness both legitimately pass, and the
+    // phantom ["A","B"] premise lands durably. This pins WHY the full-stack
+    // shape below is load-bearing (and stays reachable via version skew).
+    const smuggled = applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(12),
+      authorization,
+      commit: {
+        localSeq: 12,
+        reads: {
+          confirmed: [],
+          pending: [{
+            id: "entity:D",
+            path: toDocumentPath(["value", "items"]),
+            localSeq: 11,
+          }],
+        },
+        operations: [{
+          op: "set",
+          id: "entity:phantom",
+          value: toEntityDocument({ observedItems: ["A", "B"] }),
+        }],
+      },
+    });
+    assertEquals(smuggled.seq, 4);
+    const durable = read(engine, { id: "entity:D" });
+    assertEquals(
+      (durable as { value?: { items?: unknown } } | null)?.value?.items,
+      ["B"],
+    );
+
+    // Full-stack shape (#4606): the same observation also names T1, whose
+    // commit row does not exist — rejected on the resolution edge.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: invocationFor(13),
+          authorization,
+          commit: {
+            localSeq: 13,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:D",
+                path: toDocumentPath(["value", "items"]),
+                localSeq: 11,
+              }, {
+                id: "entity:D",
+                path: toDocumentPath([]),
+                localSeq: 10,
+                resolutionOnly: true,
+              }],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:caught",
+              value: toEntityDocument({ observedItems: ["A", "B"] }),
+            }],
+          },
+        }),
+      ConflictError,
+      "pending dependency not resolved: 10",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine reconstructs state across delete boundaries", async () => {
   const { engine, path } = await createEngine();
 
