@@ -5,12 +5,12 @@
  *   deno task cf check packages/patterns/gideon-tests/test-helper-owned-handler-nested-captures.tsx --show-transformed --no-run
  *
  * Expected main shape:
- * - generated handler state includes `timer`, `fileId`, `content`,
- *   `savedContent`, and `onSaveFile`
+ * - generated handler state includes `fileId`, `content`, `savedContent`, and
+ *   `onSaveFile`
  *
  * Current branch bug:
- * - generated handler state only includes `timer`, while the handler body
- *   still uses the other captures inside the nested `setTimeout(...)` callback
+ * - generated handler state omits captures that the handler body still uses
+ *   inside the nested `.then(...)` callback
  */
 import { action, Default, pattern, Stream, Writable } from "commonfabric";
 
@@ -40,16 +40,10 @@ interface Output {
 
 export default pattern<Input, Output>(
   ({ fileId, content, savedContent, onSaveFile }) => {
-    const timer = new Writable<ReturnType<typeof setTimeout> | null>(null);
-
     const trigger = action(() => {
-      const prev = timer.get();
-      if (prev !== null) clearTimeout(prev);
-      timer.set(
-        setTimeout(() => {
-          flushLater(fileId, content, savedContent, onSaveFile);
-        }, 10),
-      );
+      Promise.resolve().then(() => {
+        flushLater(fileId, content, savedContent, onSaveFile);
+      });
     });
 
     return { trigger };

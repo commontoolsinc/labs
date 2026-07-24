@@ -27,7 +27,7 @@ Check that these are not inside the pattern body:
 | `lift()` immediately invoked (`lift(...)(args)`) | Use `computed()` or define lift at module scope |
 | helper functions defined inside pattern | Move to module scope |
 | top-level `let`, `var`, or class | Convert to `const` plain data, or move stateful logic into actions, handlers, or helpers |
-| `setTimeout()` or `setInterval()` in authored pattern code | Use a reactive/runtime primitive instead; authored timers are not available yet |
+| `setTimeout()` or `setInterval()` in authored pattern code | Use a reactive/runtime primitive instead; authored timers are not part of the sandbox and do not compile |
 
 Allowed inside patterns:
 

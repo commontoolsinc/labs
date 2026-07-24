@@ -14,12 +14,12 @@ import { __cfHelpers } from "commonfabric";
  *   deno task cf check packages/patterns/gideon-tests/test-helper-owned-handler-nested-captures.tsx --show-transformed --no-run
  *
  * Expected main shape:
- * - generated handler state includes `timer`, `fileId`, `content`,
- *   `savedContent`, and `onSaveFile`
+ * - generated handler state includes `fileId`, `content`, `savedContent`, and
+ *   `onSaveFile`
  *
  * Current branch bug:
- * - generated handler state only includes `timer`, while the handler body
- *   still uses the other captures inside the nested `setTimeout(...)` callback
+ * - generated handler state omits captures that the handler body still uses
+ *   inside the nested `.then(...)` callback
  */
 import { action, Default, pattern, Stream, Writable } from "commonfabric";
 const define = undefined;
@@ -52,14 +52,6 @@ interface Output {
 const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
-        timer: {
-            anyOf: [{
-                    type: "number"
-                }, {
-                    type: "null"
-                }],
-            asCell: ["cell"]
-        },
         fileId: {
             type: "string",
             "default": "",
@@ -89,29 +81,18 @@ const __cfHandler_1 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
             asCell: ["stream"]
         }
     },
-    required: ["timer", "fileId", "content", "savedContent", "onSaveFile"]
-} as const satisfies __cfHelpers.JSONSchema, (_, { timer, fileId, content, savedContent, onSaveFile }) => {
-    const prev = timer.get();
-    if (prev !== null)
-        clearTimeout(prev);
-    timer.set(setTimeout(() => {
+    required: ["fileId", "content", "savedContent", "onSaveFile"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { fileId, content, savedContent, onSaveFile }) => {
+    Promise.resolve().then(() => {
         flushLater(fileId, content, savedContent, onSaveFile);
-    }, 10));
+    });
 });
 export default pattern((__cf_pattern_input) => {
     const fileId = __cf_pattern_input.key("fileId");
     const content = __cf_pattern_input.key("content");
     const savedContent = __cf_pattern_input.key("savedContent");
     const onSaveFile = __cf_pattern_input.key("onSaveFile");
-    const timer = new Writable<ReturnType<typeof setTimeout> | null>(null, {
-        anyOf: [{
-                type: "number"
-            }, {
-                type: "null"
-            }]
-    } as const satisfies __cfHelpers.JSONSchema).for("timer", true);
     const trigger = __cfHandler_1({
-        timer: timer,
         fileId: fileId,
         content: content,
         savedContent: savedContent,

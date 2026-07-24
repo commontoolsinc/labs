@@ -28,19 +28,6 @@ import {
 // Debug flag for development - disable in production
 const DEBUG_ORCHESTRATOR = false;
 
-// The SES pattern sandbox endows no timers, so a real delay happens only in
-// host contexts that expose setTimeout; in-sandbox this resolves immediately
-// rather than throwing ReferenceError (retries stay ~1s apart anyway via the
-// gated fetch's grid-aligned settlement).
-function sleep(ms: number): Promise<void> {
-  if (ms <= 0) return Promise.resolve();
-  const timer = (globalThis as { setTimeout?: typeof setTimeout }).setTimeout;
-  if (typeof timer !== "function") return Promise.resolve();
-  return new Promise((resolve) => {
-    timer(resolve, ms);
-  });
-}
-
 // =============================================================================
 // SETUP REQUIREMENTS
 // =============================================================================
@@ -184,8 +171,6 @@ export interface Output {
 function createGoogleDocsClient(token: string) {
   return new (class GoogleDocsClient {
     private token: string;
-    private delay = 0;
-    private delayIncrement = 1000;
 
     constructor(token: string) {
       this.token = token;
@@ -194,7 +179,6 @@ function createGoogleDocsClient(token: string) {
     private async request(
       url: URL,
       options?: RequestInit,
-      retries = 3,
     ): Promise<Response> {
       const token = this.token;
       if (!token) throw new Error("No authorization token");
@@ -202,11 +186,6 @@ function createGoogleDocsClient(token: string) {
       const opts = options ?? {};
       opts.headers = new Headers(opts.headers);
       opts.headers.set("Authorization", `Bearer ${token}`);
-
-      // Add delay if we've been rate limited
-      if (this.delay > 0) {
-        await sleep(this.delay);
-      }
 
       const res = await fetch(url, opts);
       const status = res.status;
@@ -218,21 +197,13 @@ function createGoogleDocsClient(token: string) {
         );
       }
 
-      // Handle 429 (rate limit) - exponential backoff
-      if (status === 429 && retries > 0) {
-        this.delay += this.delayIncrement;
+      // Surface a 429 rate limit rather than backing off: a compartment has no
+      // timers, and the reactive layer re-drives the work.
+      if (status === 429) {
         if (DEBUG_ORCHESTRATOR) {
-          console.log(
-            `[GoogleDocsClient] Rate limited, waiting ${this.delay}ms...`,
-          );
+          console.log("[GoogleDocsClient] Rate limited");
         }
-        await sleep(this.delay);
-        return this.request(url, options, retries - 1);
-      }
-
-      // Reset delay on success
-      if (res.ok) {
-        this.delay = 0;
+        throw new Error("Google Docs rate limited");
       }
 
       return res;

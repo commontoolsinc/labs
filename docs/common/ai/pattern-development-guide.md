@@ -191,9 +191,10 @@ are:
   - avoid `let`, `var`, reassignment, and loop statements
   - prefer array methods, `computed()`, module-scope `lift()`, or a
     module-scope helper
-- do not rely on authored timers or proxies:
+- do not use authored timers or proxies:
   - `setTimeout()`, `setInterval()`, and `new Proxy()` are not part of the
-    authored runtime surface yet
+    authored runtime surface and do not compile; drive timed work through the
+    scheduler (`computed()`, handlers, streams) instead of your own clock
 - read the clock and randomness through the ordinary built-ins, only where
   they belong:
   - use `Date.now()` (or `new Date()`) for the clock and `Math.random()` for

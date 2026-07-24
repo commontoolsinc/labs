@@ -1,9 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { assets, StaticCacheFS } from "@commonfabric/static";
-import {
-  SANDBOX_UNRESOLVED_GLOBAL_GAPS,
-  SANDBOX_WITHHELD_GLOBALS,
-} from "@commonfabric/utils/sandbox-contract";
+import { SANDBOX_WITHHELD_GLOBALS } from "@commonfabric/utils/sandbox-contract";
 import { createCallbackCompartmentGlobals } from "../src/sandbox/compartment-globals.ts";
 import { ensureSESLockdown } from "../src/sandbox/ses-runtime.ts";
 
@@ -103,7 +100,7 @@ function definedInCompartment(name: string): boolean {
   return evaluateInCompartment(`typeof globalThis.${name}`) !== "undefined";
 }
 
-Deno.test("the compiler declares no global the sandbox lacks, bar the listed gaps", async () => {
+Deno.test("the compiler declares no global the sandbox lacks", async () => {
   const declared = await compilerDeclaredGlobals();
   // Guard against the matcher finding nothing and the test passing vacuously.
   // `JSON` is a `declare var`, `atob` a `declare function`, and `Reflect` a
@@ -116,14 +113,12 @@ Deno.test("the compiler declares no global the sandbox lacks, bar the listed gap
 
   assertEquals(
     gaps,
-    [...SANDBOX_UNRESOLVED_GLOBAL_GAPS].sort(),
-    "The set of globals the compiler declares but the sandbox does not " +
-      "provide must match SANDBOX_UNRESOLVED_GLOBAL_GAPS exactly. A name " +
-      "here that is not on the list is a new instance of the bug: a pattern " +
-      "using it compiles and then throws at runtime, so either endow it in " +
-      "compartment-globals.ts, or add it to SANDBOX_WITHHELD_GLOBALS and run " +
-      "`deno task strip-withheld-globals` in packages/static. A name on the " +
-      "list that is not here has been resolved: drop it. The list only shrinks.",
+    [],
+    "The compiler declares these globals but the sandbox does not provide " +
+      "them. Each is a live bug: a pattern using one compiles and then throws " +
+      "at runtime. Resolve each by either endowing it in " +
+      "compartment-globals.ts, or adding it to SANDBOX_WITHHELD_GLOBALS and " +
+      "running `deno task strip-withheld-globals` in packages/static.",
   );
 });
 
