@@ -41,15 +41,23 @@ export default pattern(() => {
   const participantProfiles = Writable.of<ParticipantProfileDirectoryValue>(
     DEFAULT_PARTICIPANT_PROFILES,
   );
+  // No profile resolved: name/avatar are empty strings (as the parent's
+  // top-level wishes read before resolving), so the card shows the setup path.
   const participantIdentity = ParticipantIdentityCard({
     users,
     myName,
     adminName,
     participantProfiles,
+    profileName: "",
+    profileAvatar: "",
   });
 
   // The profile-backed path is injected explicitly so lane-2 tests exercise
-  // the same live profile cell that the parent receives from `wish("#profile")`.
+  // what the parent passes down from its top-level wishes: the identity CELL
+  // (`profile`) plus the resolved display strings (`profileName`/`avatar`).
+  // The name is a live cell so the toggle test can update it; the display
+  // name is never read off `aliceProfile` — only used as badge/`equals()`
+  // identity — so that cell only needs the minimal `{ name, avatar }` shape.
   const profileUsers = new Writable<User[] | Default<[]>>([]);
   const profileMyName = new Writable<string | Default<"">>("");
   const profileAdminName = new Writable<string | Default<"">>("");
@@ -57,17 +65,19 @@ export default pattern(() => {
     DEFAULT_PARTICIPANT_PROFILES,
   );
   const aliceProfile = Writable.of<LunchProfile>({
-    initialNameApplied: "Profile Alice",
-    name: "Stale fallback",
+    name: "Profile Alice",
     avatar: "alice.png",
-    bio: "Lunch enthusiast",
   });
+  const profileNameCell = new Writable<string | Default<"">>("Profile Alice");
+  const profileAvatarCell = new Writable<string | Default<"">>("alice.png");
   const profileIdentity = ParticipantIdentityCard({
     users: profileUsers,
     myName: profileMyName,
     adminName: profileAdminName,
     participantProfiles: profileDirectory,
     profile: aliceProfile,
+    profileName: profileNameCell,
+    profileAvatar: profileAvatarCell,
   });
 
   // Profile-first UI fires `joinAs.send({})` (no name) for the "Join as <name>"
@@ -109,13 +119,10 @@ export default pattern(() => {
     }
   });
 
+  // The viewer renames their profile after joining: the parent's #profileName
+  // wish would re-resolve, so the display string the card reflects changes.
   const action_update_canonical_profile = action(() => {
-    aliceProfile.set({
-      initialNameApplied: "Alice Updated",
-      name: "Stale fallback",
-      avatar: "alice-updated.png",
-      bio: "Still a lunch enthusiast",
-    });
+    profileNameCell.set("Alice Updated");
   });
 
   const action_try_rejoin_as_alex_two = action(() => {

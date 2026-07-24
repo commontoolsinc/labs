@@ -85,17 +85,19 @@ export interface User {
   color: string;
 }
 
-/** Canonical profile fields consumed by Lunch Poll's identity UI. */
+/**
+ * The minimal profile shape a roster needs: the stable identity cell for
+ * `<cf-profile-badge>` binding and `equals()` dedup. Deliberately just
+ * `{ name?, avatar? }`, matching the shared-profile-rosters spec's
+ * `ParticipantProfileCell` — a richer wish schema (bio / externalLinks /
+ * verifiedIdentities Cell[]) makes the cross-space `#profile` result fail to
+ * resolve, so the badge falls back to "Unknown profile". The display NAME is
+ * never read off this cell; it comes from the `#profileName` string wish and
+ * is snapshotted at join.
+ */
 export interface LunchProfile {
-  readonly initialNameApplied?: string;
   readonly name?: string;
   readonly avatar?: string;
-  readonly bio?: string;
-  readonly externalLinks?: readonly {
-    readonly label: string;
-    readonly url: string;
-  }[];
-  readonly verifiedIdentities?: readonly Cell<unknown>[];
 }
 
 /** Stable identity for a profile-backed participant. */
@@ -906,13 +908,6 @@ export interface CozyPollInput {
   users?: PerSpace<User[] | Default<[]>>;
   /** Canonical live profile links for profile-backed users; guests are absent. */
   participantProfiles?: PerSpace<ParticipantProfileDirectoryValue>;
-  /**
-   * Optional canonical-profile override forwarded to the identity card —
-   * the injection seam tests use to drive a profile-first join without a
-   * resolving `#profile` wish environment. Production never sets it; the
-   * card resolves its own wish.
-   */
-  profile?: LunchProfileCell;
   adminName?: PerSpace<string | Default<"">>;
   myName?: PerUser<string | Default<"">>;
   // Durable "we went here" log; each entry embeds its own vote snapshot. Capped
@@ -986,7 +981,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       votes,
       users,
       participantProfiles,
-      profile,
       adminName,
       myName,
       visits,
@@ -1022,15 +1016,42 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     >(null);
     const resetConfirmPending = Writable.perSession.of<boolean>(false);
     const clearHistoryConfirmPending = Writable.perSession.of<boolean>(false);
-    // The identity card owns the `#profile` wish (join lifecycle + directory
-    // write). This pattern renders identity only from the STORED directory
-    // entries, so a later profile switch cannot orphan the joined identity.
+    // Resolve the viewer's shared profile at the TOP LEVEL, per the
+    // shared-profile-rosters spec (docs/specs/shared-profile-rosters.md): the
+    // `#profile` cell is the stable identity (badge + `equals()` dedup), and
+    // `#profileName` / `#profileAvatar` are the display strings. Simple schema
+    // on purpose — a rich schema fails to resolve the cross-space result. The
+    // injected `profile` input (tests) overrides the wish cell. These pass
+    // DOWN into the identity card; the card no longer wishes for itself, so
+    // resolution happens in this piece's top-level context where it works.
+    const profileWish = wish<LunchProfile>({ query: "#profile" });
+    const profileNameWish = wish<string>({ query: "#profileName" });
+    const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
+    // Bind the badge/identity to the wish result DIRECTLY (the demo idiom). Do
+    // NOT reintroduce a `profile ?? …` injection override: an unset optional
+    // cell input is a truthy proxy at pattern-build time, so `??` returns that
+    // broken proxy instead of the real result and every badge falls back to
+    // "Unknown profile". Profile-backed rendering is verified at the browser
+    // tier (the scrabble/battleship precedent), not via a pattern-body cell
+    // injection.
+    const viewerProfileCell = profileWish.result;
+    const viewerProfileName = computed(() =>
+      trimmedName(profileNameWish.result ?? "")
+    );
+    const viewerProfileAvatar = computed(() =>
+      (profileAvatarWish.result ?? "").trim()
+    );
+    // This pattern renders identity only from the STORED directory entries, so
+    // a later profile switch cannot orphan the joined identity.
     const participantIdentity = ParticipantIdentityCard({
       users,
       myName,
       adminName,
       participantProfiles,
-      profile,
+      profile: viewerProfileCell,
+      profileName: viewerProfileName,
+      profileAvatar: viewerProfileAvatar,
+      profileSetupUI: profileWish[UI],
     });
     const boundAddOption = addOption({
       options,
@@ -1365,6 +1386,31 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   margin: "0 auto",
                 }}
               >
+                {
+                  /* Always-on live self-badge, at the TOP LEVEL co-located with
+                    the `#profile` wish — the profile-roster-live-demo idiom. A
+                    `<cf-profile-badge>` rendered here keeps the viewer's profile
+                    pattern running in this runtime, which is what materializes
+                    the cross-space profile so EVERY badge (this one, the header
+                    viewer chip, and the participants strip's stored-cell badges)
+                    resolves instead of falling back to "Unknown profile", and it
+                    reliably primes the `#profileName` string the join label and
+                    roster snapshot read. A badge rendered inside the identity
+                    sub-pattern does NOT achieve this — it must be top-level.
+                    Static JSX position: the `$profile` binding must not sit
+                    inside an authored `computed(() => …)` VNode. */
+                }
+                <div
+                  data-viewer-self-badge
+                  style={{ marginBottom: "12px" }}
+                >
+                  <cf-profile-badge
+                    variant="chip"
+                    size="sm"
+                    $profile={viewerProfileCell}
+                    noNavigate
+                  />
+                </div>
                 {participantIdentity[UI]}
 
                 {/* Top choice — only when there are votes */}

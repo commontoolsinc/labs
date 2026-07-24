@@ -8,13 +8,11 @@ import {
   type Stream,
   UI,
   type VNode,
-  wish,
   Writable,
 } from "commonfabric";
 import type {
   ClaimHostEvent,
   JoinEvent,
-  LunchProfile,
   LunchProfileCell,
   ParticipantProfileDirectoryCell,
   User,
@@ -37,8 +35,6 @@ const PLAYER_COLORS = [
 
 const trimmedName = (n: string | undefined) => (n ?? "").trim();
 const colorForIndex = (i: number) => PLAYER_COLORS[i % PLAYER_COLORS.length];
-const profileDisplayName = (profile: LunchProfile | undefined) =>
-  trimmedName(profile?.initialNameApplied ?? profile?.name);
 
 const joinAs = handler<JoinEvent, {
   users: ParticipantIdentityUsersCell;
@@ -119,12 +115,14 @@ const claimHost = handler<ClaimHostEvent, {
  * and `isAdmin`) are intended for downstream sub-patterns such as per-option
  * cards.
  *
- * Joining is profile-first: this card owns the canonical `#profile` wish.
- * When it resolves, the surface offers a one-click "Join as <name>" and
- * retains the live cell in the shared profile directory. When it doesn't,
- * the card renders the wish's built-in [UI] (profile create/pick) — the
- * typed-name guest path never appears automatically; "Continue as guest" is
- * an explicit choice, and guest entries store only the entered string.
+ * Joining is profile-first. The parent resolves the viewer's `#profile` at
+ * top level (per docs/specs/shared-profile-rosters.md) and passes the cell,
+ * display name, and the wish's create/pick surface in. When a profile
+ * resolves, the card offers a one-click "Join as <name>" and retains the live
+ * cell in the shared profile directory. When it doesn't, the card renders the
+ * passed create/pick surface — the typed-name guest path never appears
+ * automatically; "Continue as guest" is an explicit choice, and guest entries
+ * store only the entered string.
  */
 
 /**
@@ -148,11 +146,29 @@ export interface ParticipantIdentityCardInput {
   participantProfiles: ParticipantProfileDirectoryCell;
 
   /**
-   * Optional override for the canonical profile cell. When absent (the
-   * production shape) the card resolves its own `#profile` wish; tests inject
-   * a live cell here to exercise the profile path without a wish environment.
+   * The viewer's resolved `#profile` cell, from the parent's top-level wish
+   * (or an injected cell in tests). Used only as the badge/`equals()` identity
+   * — never read for its name; the display name arrives as `profileName`.
+   * Undefined until it resolves (or when the viewer has no profile).
    */
   profile?: LunchProfileCell;
+
+  /**
+   * The viewer's resolved display name, from the parent's top-level
+   * `#profileName` wish (or injected in tests). "" until it resolves; the join
+   * card gates on this being non-empty and snapshots it into the roster.
+   */
+  profileName: string;
+
+  /** The viewer's resolved avatar, from the parent's `#profileAvatar` wish. */
+  profileAvatar: string;
+
+  /**
+   * The `#profile` wish's built-in create/pick surface (`profileWish[UI]`),
+   * rendered by the parent's top-level wish and passed down so the card shows
+   * it in the no-profile state. Omitted in tests without a wish environment.
+   */
+  profileSetupUI?: VNode;
 }
 
 /**
@@ -192,43 +208,34 @@ export default pattern<
   ParticipantIdentityCardInput,
   ParticipantIdentityCardOutput
 >(
-  ({ users, myName, adminName, participantProfiles, profile }) => {
+  (
+    {
+      users,
+      myName,
+      adminName,
+      participantProfiles,
+      profile,
+      profileName,
+      profileAvatar,
+      profileSetupUI,
+    },
+  ) => {
     const joinName = Writable.perSession.of<string>("");
-    // This card owns the canonical `#profile` wish: the resolved cell is the
-    // durable identity stored on join, and the wish's built-in [UI] carries
-    // the whole create/pick lifecycle when no profile resolves
-    // (multi-user-patterns.md#presenting-identity). The optional `profile`
-    // input overrides the wish — the injection seam tests use to supply a
-    // live profile cell without a resolving wish environment. Input presence
-    // is fixed at instantiation, so the `??` selections below are static.
-    const profileWish = wish<LunchProfile>({ query: "#profile" });
-    // The companion string wishes are the DISPLAY source (the battleship
-    // lobby idiom; multi-user-patterns.md prescribes this trio). Reading
-    // display fields off the live `#profile` result object comes back empty
-    // against the real profile shape — only the injected test override
-    // carries them as plain fields.
-    const profileNameWish = wish<string>({ query: "#profileName" });
-    const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
-    // Static selection at build time (input presence is fixed per
-    // instantiation) — hoisted so JSX/bindings below see one plain ref.
-    const activeProfile = profile ?? profileWish.result;
-    const canonicalProfileName = computed(() =>
-      profile !== undefined
-        ? profileDisplayName(profile.get())
-        : trimmedName(profileNameWish.result ?? "")
-    );
-    const canonicalProfileAvatar = computed(() =>
-      profile !== undefined
-        ? (profile.get()?.avatar ?? "").trim()
-        : (profileAvatarWish.result ?? "").trim()
-    );
+    // The parent resolves the viewer's profile at top level (per
+    // docs/specs/shared-profile-rosters.md) and passes the results in:
+    // `profile` is the identity cell (badge + `equals()` dedup), `profileName`
+    // / `profileAvatar` are the display strings. The card never reads the name
+    // off the cell — the cross-space `#profileName` value is the source, and
+    // it is snapshotted into the roster on join.
+    const canonicalProfileName = computed(() => trimmedName(profileName));
+    const canonicalProfileAvatar = computed(() => (profileAvatar ?? "").trim());
     const boundJoin = joinAs({
       users,
       myName,
       adminName,
       joinName,
       participantProfiles,
-      profile: activeProfile,
+      profile,
       profileName: canonicalProfileName,
       profileAvatar: canonicalProfileAvatar,
     });
@@ -239,6 +246,13 @@ export default pattern<
     // and "Continue as guest" is an explicit secondary action. `useCustomName`
     // also lets a profile-holder deliberately join under a one-off name.
     const useCustomName = Writable.perSession.of<boolean>(false);
+    // Gate on the resolved profile NAME. `#profileName` is a cross-space
+    // computed value: the profile's `initialNameApplied` lift lives in its own
+    // inSpace child space and only materializes once a `$profile` badge starts
+    // the profile pattern in this runtime (the raw `#profile` result is a
+    // pending proxy, not a usable truthiness signal). The badge in the setup
+    // branch below is what does that priming, so the empty-name window is a
+    // brief transient, not a deadlock — see its comment.
     const hasProfile = computed(() => canonicalProfileName !== "");
     const showProfileJoin = computed(() => hasProfile && !useCustomName.get());
     const showProfileSetup = computed(() =>
@@ -312,7 +326,7 @@ export default pattern<
                       style={{ display: "inline-flex", alignItems: "center" }}
                     >
                       <cf-profile-badge
-                        $profile={activeProfile}
+                        $profile={profile}
                         size="sm"
                         noNavigate
                       />
@@ -346,12 +360,12 @@ export default pattern<
                     }}
                   >
                     {
-                      /* Built-in profile UI: create a profile when there is
-                        none, pick between existing profiles otherwise. The
+                      /* Built-in profile create/pick surface, resolved by the
+                        parent's top-level `#profile` wish and passed in. The
                         typed-name path never appears automatically — guests
                         opt in below. */
                     }
-                    <div data-profile-setup>{profileWish[UI]}</div>
+                    <div data-profile-setup>{profileSetupUI}</div>
                     <div>
                       <cf-button
                         id="lp-guest-button"
