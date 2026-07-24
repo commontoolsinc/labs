@@ -1,4 +1,4 @@
-import { computed, handler, pattern, Writable } from "commonfabric";
+import { assert, handler, pattern, Writable } from "commonfabric";
 import {
   SAVE_TITLE_ACTION,
   TRUSTED_SAVE_SURFACE,
@@ -38,17 +38,17 @@ export default pattern(() => {
     title: "Second title",
   });
 
-  const assert_initial_saved_empty = computed(() => savedTitle.get() === "");
-  const assert_first_draft_visible = computed(() =>
+  const assert_initial_saved_empty = assert(() => savedTitle.get() === "");
+  const assert_first_draft_visible = assert(() =>
     draftTitle.get() === "First title"
   );
-  const assert_first_save_committed = computed(() =>
+  const assert_first_save_committed = assert(() =>
     savedTitle.get() === "First title"
   );
-  const assert_second_draft_does_not_autosave = computed(() =>
+  const assert_second_draft_does_not_autosave = assert(() =>
     savedTitle.get() === "First title"
   );
-  const assert_second_save_committed = computed(() =>
+  const assert_second_save_committed = assert(() =>
     savedTitle.get() === "Second title"
   );
 

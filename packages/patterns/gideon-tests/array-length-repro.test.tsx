@@ -10,7 +10,7 @@
  *
  * Run: deno task cf test packages/patterns/gideon-tests/array-length-repro.test.tsx --verbose
  */
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, pattern } from "commonfabric";
 import ArrayLengthRepro from "./array-length-repro.tsx";
 
 export default pattern(() => {
@@ -22,38 +22,38 @@ export default pattern(() => {
   });
 
   // === Approach 1: Direct .length ===
-  const assert_initial_length_direct = computed(
+  const assert_initial_length_direct = assert(
     () => subject.items.length === 0,
   );
 
-  const assert_one_item_length_direct = computed(
+  const assert_one_item_length_direct = assert(
     () => subject.items.length === 1,
   );
 
   // === Approach 2: .filter().length ===
-  const assert_initial_length_filter = computed(
+  const assert_initial_length_filter = assert(
     () => subject.items.filter(() => true).length === 0,
   );
 
-  const assert_one_item_length_filter = computed(
+  const assert_one_item_length_filter = assert(
     () => subject.items.filter(() => true).length === 1,
   );
 
   // === Approach 3: Check via array method that iterates ===
-  const assert_initial_empty_some = computed(
+  const assert_initial_empty_some = assert(
     () => !subject.items.some(() => true),
   );
 
-  const assert_one_item_some = computed(
+  const assert_one_item_some = assert(
     () => subject.items.some(() => true),
   );
 
   // === Approach 4: Via string templates ===
-  const assert_initial_empty_template = computed(
+  const assert_initial_empty_template = assert(
     () => `length: ${subject.items.length}` === "length: 0",
   );
 
-  const assert_one_item_template = computed(
+  const assert_one_item_template = assert(
     () => `length: ${subject.items.length}` === "length: 1",
   );
 

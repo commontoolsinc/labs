@@ -11,7 +11,7 @@
  *
  * Run: deno task cf test packages/patterns/simple-list/simple-list.test.tsx --verbose
  */
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, pattern } from "commonfabric";
 import SimpleListModule from "./simple-list.tsx";
 
 export default pattern(() => {
@@ -87,85 +87,85 @@ export default pattern(() => {
   // ==========================================================================
 
   // Initial state
-  const assert_initial_empty = computed(() => {
+  const assert_initial_empty = assert(() => {
     return list.items.filter(() => true).length === 0;
   });
 
   // After adding items
-  const assert_has_one = computed(() => {
+  const assert_has_one = assert(() => {
     return list.items.filter(() => true).length === 1;
   });
 
-  const assert_first_text = computed(() => {
+  const assert_first_text = assert(() => {
     return list.items[0]?.text === "First item";
   });
 
-  const assert_first_not_indented = computed(() => {
+  const assert_first_not_indented = assert(() => {
     return list.items[0]?.indented === false;
   });
 
-  const assert_first_not_done = computed(() => {
+  const assert_first_not_done = assert(() => {
     return list.items[0]?.done === false;
   });
 
-  const assert_has_two = computed(() => {
+  const assert_has_two = assert(() => {
     return list.items.filter(() => true).length === 2;
   });
 
-  const assert_has_three = computed(() => {
+  const assert_has_three = assert(() => {
     return list.items.filter(() => true).length === 3;
   });
 
   // Empty string shouldn't add
-  const assert_still_three = computed(() => {
+  const assert_still_three = assert(() => {
     return list.items.filter(() => true).length === 3;
   });
 
   // After toggle indent on first item
-  const assert_first_indented = computed(() => {
+  const assert_first_indented = assert(() => {
     return list.items[0]?.indented === true;
   });
 
   // After toggle again (back to not indented)
-  const assert_first_not_indented_again = computed(() => {
+  const assert_first_not_indented_again = assert(() => {
     return list.items[0]?.indented === false;
   });
 
   // After setIndent on second item
-  const assert_second_indented = computed(() => {
+  const assert_second_indented = assert(() => {
     return list.items[1]?.indented === true;
   });
 
-  const assert_second_not_indented = computed(() => {
+  const assert_second_not_indented = assert(() => {
     return list.items[1]?.indented === false;
   });
 
   // After deleting middle item
-  const assert_back_to_two = computed(() => {
+  const assert_back_to_two = assert(() => {
     return list.items.filter(() => true).length === 2;
   });
 
-  const assert_second_is_third = computed(() => {
+  const assert_second_is_third = assert(() => {
     // After deleting "Second item", "Third item" should now be at index 1
     return list.items[1]?.text === "Third item";
   });
 
   // After deleting first item
-  const assert_down_to_one = computed(() => {
+  const assert_down_to_one = assert(() => {
     return list.items.filter(() => true).length === 1;
   });
 
-  const assert_remaining_is_third = computed(() => {
+  const assert_remaining_is_third = assert(() => {
     return list.items[0]?.text === "Third item";
   });
 
   // After deleting last item
-  const assert_back_to_empty = computed(() => {
+  const assert_back_to_empty = assert(() => {
     return list.items.filter(() => true).length === 0;
   });
 
   // After invalid operations (should still be empty, no crash)
-  const assert_still_empty = computed(() => {
+  const assert_still_empty = assert(() => {
     return list.items.filter(() => true).length === 0;
   });
 

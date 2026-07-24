@@ -1,16 +1,16 @@
-import { computed, pattern } from "commonfabric";
+import { assert, pattern } from "commonfabric";
 import AuthorshipChat from "./main.tsx";
 
 export default pattern(() => {
   const instance = AuthorshipChat({});
 
-  const assert_verified_fixture_names_alice = computed(() =>
+  const assert_verified_fixture_names_alice = assert(() =>
     instance.verifiedAuthor === "Alice Nguyen"
   );
-  const assert_forged_fixture_names_bob = computed(() =>
+  const assert_forged_fixture_names_bob = assert(() =>
     instance.forgedClaim === "Bob Patel"
   );
-  const assert_unsigned_fixture_names_casey = computed(() =>
+  const assert_unsigned_fixture_names_casey = assert(() =>
     instance.unsignedState === "Casey Morgan"
   );
 

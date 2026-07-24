@@ -11,7 +11,7 @@
  * instead of action() with closures to avoid "reactive reference outside
  * reactive context" errors when accessing proxy objects like subject.submitItem.
  */
-import { Cell, computed, handler, pattern, Stream } from "commonfabric";
+import { assert, Cell, handler, pattern, Stream } from "commonfabric";
 import SelfImprovingClassifier, {
   type ClassificationRule,
   type LabeledExample,
@@ -127,26 +127,26 @@ export default pattern(() => {
   // ============= ASSERTIONS =============
 
   // Initial state assertions
-  const assert_initial_examples_empty = computed(() => {
+  const assert_initial_examples_empty = assert(() => {
     return subject.examples.length === 0;
   });
 
-  const assert_initial_rules_empty = computed(() => {
+  const assert_initial_rules_empty = assert(() => {
     return subject.rules.length === 0;
   });
 
   // After setup assertions
-  const assert_config_set = computed(() => {
+  const assert_config_set = assert(() => {
     return subject.config.question === "Is this email a bill?";
   });
 
-  const assert_rule_added = computed(() => {
+  const assert_rule_added = assert(() => {
     return subject.rules.length === 1 &&
       subject.rules[0].name === "Invoice Pattern";
   });
 
   // After submitting matching item - check first example is auto-classified
-  const assert_auto_classified = computed(() => {
+  const assert_auto_classified = assert(() => {
     if (subject.examples.length === 0) return false;
     const example = subject.examples[0];
     return (
@@ -157,7 +157,7 @@ export default pattern(() => {
   });
 
   // Stats should reflect auto-classification
-  const assert_stats_updated = computed(() => {
+  const assert_stats_updated = assert(() => {
     return subject.stats.totalExamples === 1 &&
       subject.stats.autoClassified === 1;
   });
@@ -165,14 +165,14 @@ export default pattern(() => {
   // After clearing and submitting non-matching item
   // Non-matching items go to LLM path, not auto-classified
   // In test environment without LLM, examples should remain empty
-  const assert_examples_still_empty_after_non_match = computed(() => {
+  const assert_examples_still_empty_after_non_match = assert(() => {
     return subject.examples.length === 0;
   });
 
   // After auto-classification, rule metrics should be higher than the initial values
   // Initial rule was set with evaluationCount: 50, truePositives: 40
   // After two successful auto-classifications, should be 52 and 42
-  const assert_rule_metrics_updated = computed(() => {
+  const assert_rule_metrics_updated = assert(() => {
     if (subject.rules.length === 0) return false;
     const rule = subject.rules[0];
     // Check metrics are higher than initial values (50 and 40)

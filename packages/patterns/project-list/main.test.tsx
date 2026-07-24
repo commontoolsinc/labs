@@ -14,7 +14,7 @@
  */
 import {
   action,
-  computed,
+  assert,
   equals,
   handler,
   pattern,
@@ -88,37 +88,35 @@ export default pattern(() => {
   // Assertions
   // ==========================================================================
 
-  const assert_seeded = computed(() => {
+  const assert_seeded = assert(() => {
     const cur = itemsCell.get();
     return cur.length === 2 && cur[0]?.title === "First" &&
       cur[1]?.title === "Second";
   });
 
-  const assert_held_stashed = computed(() => {
+  const assert_held_stashed = assert(() => {
     const h = heldItem.get();
     return h.title === "First" && equals(itemsCell.get()[0], h);
   });
 
-  const assert_first_done = computed(() => itemsCell.get()[0]?.done === true);
-  const assert_second_untouched = computed(() =>
+  const assert_first_done = assert(() => itemsCell.get()[0]?.done === true);
+  const assert_second_untouched = assert(() =>
     itemsCell.get()[1]?.done === false
   );
   // KEY: the stale-but-once-valid reference still equals()-matches the item
   // AFTER the toggle updated it.
-  const assert_held_survives_toggle = computed(() => {
+  const assert_held_survives_toggle = assert(() => {
     const h = heldItem.get();
     return equals(itemsCell.get()[0], h);
   });
   // The held reference also READS the update (it would show the stale,
   // orphaned entity if the toggle had re-minted identity).
-  const assert_held_reads_toggle = computed(() => heldItem.get().done === true);
+  const assert_held_reads_toggle = assert(() => heldItem.get().done === true);
 
-  const assert_toggled_back = computed(() =>
-    itemsCell.get()[0]?.done === false
-  );
+  const assert_toggled_back = assert(() => itemsCell.get()[0]?.done === false);
 
   // KEY: the held reference still DRIVES an equals()-located removal.
-  const assert_removed_via_held = computed(() => {
+  const assert_removed_via_held = assert(() => {
     const cur = itemsCell.get();
     return cur.length === 1 && cur[0]?.title === "Second";
   });

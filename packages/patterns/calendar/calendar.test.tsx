@@ -12,7 +12,7 @@
  *
  * Run: deno task cf test packages/patterns/calendar/calendar.test.tsx --verbose
  */
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, pattern } from "commonfabric";
 import Calendar from "./calendar.tsx";
 
 export default pattern(() => {
@@ -81,28 +81,28 @@ export default pattern(() => {
   // Assertions - Initial State
   // ==========================================================================
 
-  const assert_initial_empty = computed(() => cal.events.length === 0);
+  const assert_initial_empty = assert(() => cal.events.length === 0);
 
   // ==========================================================================
   // Assertions - After Adding
   // ==========================================================================
 
-  const assert_has_one = computed(() => cal.events.length === 1);
-  const assert_first_title = computed(
+  const assert_has_one = assert(() => cal.events.length === 1);
+  const assert_first_title = assert(
     () => cal.events[0]?.title === "Team Meeting",
   );
-  const assert_first_date = computed(
+  const assert_first_date = assert(
     () => cal.events[0]?.date === "2025-03-15",
   );
-  const assert_first_time = computed(
+  const assert_first_time = assert(
     () => cal.events[0]?.time === "10:00",
   );
 
-  const assert_has_two = computed(() => cal.events.length === 2);
-  const assert_has_three = computed(() => cal.events.length === 3);
+  const assert_has_two = assert(() => cal.events.length === 2);
+  const assert_has_three = assert(() => cal.events.length === 3);
 
   // Still three after empty/whitespace attempts
-  const assert_still_three = computed(() => cal.events.length === 3);
+  const assert_still_three = assert(() => cal.events.length === 3);
 
   // ==========================================================================
   // Assertions - Sorting
@@ -110,13 +110,13 @@ export default pattern(() => {
 
   // Events added: Team Meeting (03-15 10:00), Lunch (03-15 12:00), Kickoff (03-10 09:00)
   // Sorted order should be: Kickoff (03-10), Team Meeting (03-15 10:00), Lunch (03-15 12:00)
-  const assert_sorted_first_is_kickoff = computed(
+  const assert_sorted_first_is_kickoff = assert(
     () => cal.sortedEvents[0]?.title === "Kickoff",
   );
-  const assert_sorted_second_is_meeting = computed(
+  const assert_sorted_second_is_meeting = assert(
     () => cal.sortedEvents[1]?.title === "Team Meeting",
   );
-  const assert_sorted_third_is_lunch = computed(
+  const assert_sorted_third_is_lunch = assert(
     () => cal.sortedEvents[2]?.title === "Lunch",
   );
 
@@ -124,7 +124,7 @@ export default pattern(() => {
   // Assertions - After Notes Update
   // ==========================================================================
 
-  const assert_notes_updated = computed(
+  const assert_notes_updated = assert(
     () => cal.events[0]?.notes === "Discuss Q2 roadmap",
   );
 
@@ -132,9 +132,9 @@ export default pattern(() => {
   // Assertions - After Removing
   // ==========================================================================
 
-  const assert_has_two_after_remove = computed(() => cal.events.length === 2);
-  const assert_has_one_after_remove = computed(() => cal.events.length === 1);
-  const assert_back_to_empty = computed(() => cal.events.length === 0);
+  const assert_has_two_after_remove = assert(() => cal.events.length === 2);
+  const assert_has_one_after_remove = assert(() => cal.events.length === 1);
+  const assert_back_to_empty = assert(() => cal.events.length === 0);
 
   // ==========================================================================
   // Test Sequence

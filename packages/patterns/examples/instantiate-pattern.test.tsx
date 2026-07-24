@@ -1,4 +1,4 @@
-import { computed, NAME, pattern } from "commonfabric";
+import { assert, NAME, pattern } from "commonfabric";
 import Factory, { Counter } from "./instantiate-pattern.tsx";
 
 // Covers both patterns this example file defines: the Counter it hands to
@@ -10,12 +10,12 @@ export default pattern(() => {
   const counter = Counter({ value: 3 });
   const factory = Factory({ allPieces: [] });
 
-  const assert_counter_reports_its_value = computed(() => counter.value === 3);
+  const assert_counter_reports_its_value = assert(() => counter.value === 3);
   // The name is a computed over the same cell, so it tracks the value.
-  const assert_counter_name_tracks_the_value = computed(() =>
+  const assert_counter_name_tracks_the_value = assert(() =>
     counter[NAME] === "Simple counter: 3"
   );
-  const assert_factory_instantiates = computed(() =>
+  const assert_factory_instantiates = assert(() =>
     factory[NAME] === "Counter Factory"
   );
 

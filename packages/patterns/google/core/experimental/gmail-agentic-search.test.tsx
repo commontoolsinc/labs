@@ -10,7 +10,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/experimental/gmail-agentic-search.test.tsx --root packages/patterns --verbose
  */
-import { computed, pattern, Writable } from "commonfabric";
+import { assert, pattern, Writable } from "commonfabric";
 import GmailAgenticSearch, { type Auth } from "./gmail-agentic-search.tsx";
 
 const gmailScope = "https://www.googleapis.com/auth/gmail.readonly";
@@ -58,38 +58,38 @@ export default pattern(() => {
   // ==========================================================================
 
   // Should not be scanning initially
-  const assert_not_scanning = computed(() => searcher.isScanning === false);
+  const assert_not_scanning = assert(() => searcher.isScanning === false);
 
   // Search progress should be idle
-  const assert_progress_idle = computed(
+  const assert_progress_idle = assert(
     () => searcher.searchProgress.status === "idle",
   );
 
   // Search count should be 0
-  const assert_search_count_zero = computed(
+  const assert_search_count_zero = assert(
     () => searcher.searchProgress.searchCount === 0,
   );
 
   // Debug log should be empty initially
-  const assert_debug_log_empty = computed(() => {
+  const assert_debug_log_empty = assert(() => {
     const log = searcher.debugLog;
     return Array.isArray(log) && log.length === 0;
   });
 
   // Local queries should be empty initially
-  const assert_local_queries_empty = computed(() => {
+  const assert_local_queries_empty = assert(() => {
     const queries = searcher.localQueries;
     return Array.isArray(queries) && queries.length === 0;
   });
 
   // Pending submissions should be empty initially
-  const assert_pending_empty = computed(() => {
+  const assert_pending_empty = assert(() => {
     const pending = searcher.pendingSubmissions;
     return Array.isArray(pending) && pending.length === 0;
   });
 
   // Agent should not be pending initially
-  const assert_agent_not_pending = computed(
+  const assert_agent_not_pending = assert(
     () => searcher.agentPending === false,
   );
 
@@ -98,33 +98,33 @@ export default pattern(() => {
   // ==========================================================================
 
   // UI pieces should exist
-  const assert_has_ui_auth = computed(() => searcher.ui.auth !== undefined);
-  const assert_has_ui_controls = computed(
+  const assert_has_ui_auth = assert(() => searcher.ui.auth !== undefined);
+  const assert_has_ui_controls = assert(
     () => searcher.ui.controls !== undefined,
   );
-  const assert_has_ui_progress = computed(
+  const assert_has_ui_progress = assert(
     () => searcher.ui.progress !== undefined,
   );
 
   // Actions should exist (streams)
-  const assert_has_startScan = computed(
+  const assert_has_startScan = assert(
     () => searcher.startScan !== undefined,
   );
-  const assert_has_stopScan = computed(() => searcher.stopScan !== undefined);
+  const assert_has_stopScan = assert(() => searcher.stopScan !== undefined);
 
   // ==========================================================================
   // Custom config instance
   // ==========================================================================
 
-  const assert_custom_not_scanning = computed(
+  const assert_custom_not_scanning = assert(
     () => customSearcher.isScanning === false,
   );
 
-  const assert_custom_progress_idle = computed(
+  const assert_custom_progress_idle = assert(
     () => customSearcher.searchProgress.status === "idle",
   );
 
-  const assert_direct_auth_is_used = computed(() =>
+  const assert_direct_auth_is_used = assert(() =>
     directAuthSearcher.authSource === "direct"
   );
 

@@ -5,7 +5,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/experimental/calendar-event-manager.test.tsx --root packages/patterns --verbose
  */
-import { computed, pattern, UI } from "commonfabric";
+import { assert, pattern, UI } from "commonfabric";
 import {
   findElementByText,
   hasText,
@@ -28,7 +28,7 @@ export default pattern(() => {
     existingEvent: null,
   });
 
-  const assert_auth_requirement_is_visible = computed(
+  const assert_auth_requirement_is_visible = assert(
     () =>
       hasText(manager[UI], "Connect Your Google Account") &&
       hasText(
@@ -37,12 +37,12 @@ export default pattern(() => {
       ),
   );
 
-  const assert_create_button_disabled_without_auth = computed(() => {
+  const assert_create_button_disabled_without_auth = assert(() => {
     const button = findElementByText(manager[UI], "button", "Create Event");
     return readValue(propsOf(button)?.disabled) === true;
   });
 
-  const assert_confirmation_is_not_rendered_without_auth = computed(() =>
+  const assert_confirmation_is_not_rendered_without_auth = assert(() =>
     !hasText(manager[UI], "Confirm Calendar Operation") &&
     !hasText(manager[UI], "Create this event")
   );

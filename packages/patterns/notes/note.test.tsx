@@ -10,7 +10,7 @@
  *
  * Run: deno task cf test packages/patterns/notes/note.test.tsx --verbose
  */
-import { action, computed, NAME, pattern } from "commonfabric";
+import { action, assert, NAME, pattern } from "commonfabric";
 import Note, { bareMentionId } from "./note.tsx";
 import Notebook from "./notebook.tsx";
 
@@ -141,21 +141,21 @@ export default pattern(() => {
   // Assertions - Initial State
   // ==========================================================================
 
-  const assert_name = computed(
+  const assert_name = assert(
     () => note[NAME] === "📝 Test Note",
   );
-  const assert_initial_title = computed(() => note.title === "Test Note");
-  const assert_initial_content = computed(
+  const assert_initial_title = assert(() => note.title === "Test Note");
+  const assert_initial_content = assert(
     () => note.content === "Line one\nLine two\nLine three",
   );
-  const assert_initial_not_hidden = computed(() => note.isHidden === false);
-  const assert_initial_no_parent = computed(
+  const assert_initial_not_hidden = assert(() => note.isHidden === false);
+  const assert_initial_no_parent = assert(
     () => !note.parentNotebook,
   );
-  const assert_initial_empty_backlinks = computed(
+  const assert_initial_empty_backlinks = assert(
     () => note.backlinks.length === 0,
   );
-  const assert_initial_empty_mentioned = computed(
+  const assert_initial_empty_mentioned = assert(
     () => note.mentioned.length === 0,
   );
 
@@ -164,46 +164,46 @@ export default pattern(() => {
   // ==========================================================================
 
   // Note created with parent A should have it set
-  const assert_has_parent = computed(
+  const assert_has_parent = assert(
     () => !!noteWithParent.parentNotebook,
   );
 
-  const assert_parent_is_notebook_a = computed(
+  const assert_parent_is_notebook_a = assert(
     () => noteWithParent.parentNotebook?.title === "Notebook A",
   );
 
   // Note created with parent B should point to B
-  const assert_note_b_has_parent = computed(
+  const assert_note_b_has_parent = assert(
     () => !!noteInNotebookB.parentNotebook,
   );
 
-  const assert_parent_is_notebook_b = computed(
+  const assert_parent_is_notebook_b = assert(
     () => noteInNotebookB.parentNotebook?.title === "Notebook B",
   );
 
   // Different notes have different parents
-  const assert_different_parents = computed(
+  const assert_different_parents = assert(
     () =>
       noteWithParent.parentNotebook?.title !== noteInNotebookB.parentNotebook
         ?.title,
   );
 
   // Note created without parent should have no parent
-  const assert_orphan_no_parent = computed(
+  const assert_orphan_no_parent = assert(
     () => !noteNoParent.parentNotebook,
   );
 
   // Child notes should be hidden (set at creation)
-  const assert_child_a_hidden = computed(
+  const assert_child_a_hidden = assert(
     () => noteWithParent.isHidden === true,
   );
 
-  const assert_child_b_hidden = computed(
+  const assert_child_b_hidden = assert(
     () => noteInNotebookB.isHidden === true,
   );
 
   // Orphan note should not be hidden
-  const assert_orphan_not_hidden = computed(
+  const assert_orphan_not_hidden = assert(
     () => noteNoParent.isHidden === false,
   );
 
@@ -211,35 +211,35 @@ export default pattern(() => {
   // Assertions - After Content Edit
   // ==========================================================================
 
-  const assert_content_updated = computed(
+  const assert_content_updated = assert(
     () => note.content === "Updated content here",
   );
-  const assert_content_multiline = computed(
+  const assert_content_multiline = assert(
     () => note.content === "First line\nSecond line\nThird line",
   );
-  const assert_content_cleared = computed(() => note.content === "");
+  const assert_content_cleared = assert(() => note.content === "");
 
   // ==========================================================================
   // Assertions - Menu Toggle
   // ==========================================================================
 
-  const assert_initial_menu_closed = computed(
+  const assert_initial_menu_closed = assert(
     () => note.menuOpen === false,
   );
 
-  const assert_menu_open = computed(
+  const assert_menu_open = assert(
     () => note.menuOpen === true,
   );
 
-  const assert_menu_closed_after_toggle = computed(
+  const assert_menu_closed_after_toggle = assert(
     () => note.menuOpen === false,
   );
 
-  const assert_menu_open_before_close = computed(
+  const assert_menu_open_before_close = assert(
     () => note.menuOpen === true,
   );
 
-  const assert_menu_closed_via_close = computed(
+  const assert_menu_closed_via_close = assert(
     () => note.menuOpen === false,
   );
 
@@ -247,15 +247,15 @@ export default pattern(() => {
   // Assertions - Title Editing
   // ==========================================================================
 
-  const assert_initial_not_editing = computed(
+  const assert_initial_not_editing = assert(
     () => note.isEditingTitle === false,
   );
 
-  const assert_editing_title = computed(
+  const assert_editing_title = assert(
     () => note.isEditingTitle === true,
   );
 
-  const assert_stopped_editing = computed(
+  const assert_stopped_editing = assert(
     () => note.isEditingTitle === false,
   );
 
@@ -264,12 +264,12 @@ export default pattern(() => {
   // ==========================================================================
 
   // After creating new note, original note should be unchanged
-  const assert_note_unchanged_after_create = computed(
+  const assert_note_unchanged_after_create = assert(
     () => note.title === "Test Note",
   );
 
   // After creating new note from parented note, original should be unchanged
-  const assert_parented_note_unchanged = computed(
+  const assert_parented_note_unchanged = assert(
     () => noteWithParent.title === "Child Note",
   );
 
@@ -280,23 +280,23 @@ export default pattern(() => {
   // appendLink appends `[[<NAME> (<entityId>)]]` to the content, with the
   // target's entityId stringified via the cell-rep chokepoint, and pushes the
   // target onto `mentioned`.
-  const assert_link_appended = computed(() =>
+  const assert_link_appended = assert(() =>
     /\[\[📝 Link Target \([^)]+\)\]\]/.test(note.content)
   );
-  const assert_mentioned_after_link = computed(
+  const assert_mentioned_after_link = assert(
     () => note.mentioned.length === 1,
   );
 
   // The wiki-link embed contract: `of:` strips (the renderer re-adds it),
   // bare ids pass through, and `computed:` is REJECTED — the bare embed
   // format cannot carry the scheme, and the scheme is part of the identity.
-  const assert_mention_id_strips_of = computed(
+  const assert_mention_id_strips_of = assert(
     () => bareMentionId("of:fid1:abc") === "fid1:abc",
   );
-  const assert_mention_id_passes_bare = computed(
+  const assert_mention_id_passes_bare = assert(
     () => bareMentionId("fid1:abc") === "fid1:abc",
   );
-  const assert_computed_mention_rejected = computed(() => {
+  const assert_computed_mention_rejected = assert(() => {
     try {
       bareMentionId("computed:fid1:tripwire");
       return false;

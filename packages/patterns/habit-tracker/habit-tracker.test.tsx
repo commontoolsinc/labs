@@ -22,7 +22,7 @@
  */
 import {
   action,
-  computed,
+  assert,
   equals,
   handler,
   pattern,
@@ -114,132 +114,132 @@ export default pattern(() => {
   // === Assertions ===
 
   // Initial state
-  const assert_initial_no_habits = computed(
+  const assert_initial_no_habits = assert(
     () => len(subject.habits) === 0,
   );
 
-  const assert_initial_no_logs = computed(
+  const assert_initial_no_logs = assert(
     () => len(subject.logs) === 0,
   );
 
-  const assert_today_date_format = computed(() => {
+  const assert_today_date_format = assert(() => {
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     return dateRegex.test(subject.todayDate);
   });
 
   // After adding first habit
-  const assert_one_habit = computed(
+  const assert_one_habit = assert(
     () => len(subject.habits) === 1,
   );
 
-  const assert_exercise_name = computed(
+  const assert_exercise_name = assert(
     () => subject.habits[0]?.name === "Exercise",
   );
 
-  const assert_exercise_icon = computed(
+  const assert_exercise_icon = assert(
     () => subject.habits[0]?.icon === "🏃",
   );
 
-  const assert_exercise_default_color = computed(
+  const assert_exercise_default_color = assert(
     () => subject.habits[0]?.color === "#3b82f6",
   );
 
   // Empty name should not add habit
-  const assert_still_one_habit_after_empty = computed(
+  const assert_still_one_habit_after_empty = assert(
     () => len(subject.habits) === 1,
   );
 
   // Default icon when empty string provided
-  const assert_two_habits = computed(
+  const assert_two_habits = assert(
     () => len(subject.habits) === 2,
   );
 
-  const assert_meditate_default_icon = computed(() => {
+  const assert_meditate_default_icon = assert(() => {
     const meditate = subject.habits.find((h: Habit) => h.name === "Meditate");
     return meditate?.icon === "✓";
   });
 
   // After toggling habit (creates log)
-  const assert_one_log = computed(
+  const assert_one_log = assert(
     () => len(subject.logs) === 1,
   );
 
-  const assert_log_completed = computed(() => {
+  const assert_log_completed = assert(() => {
     const log = subject.logs.find((l: HabitLog) => l.habitName === "Exercise");
     return log?.completed === true;
   });
 
-  const assert_log_habitName = computed(
+  const assert_log_habitName = assert(
     () => subject.logs[0]?.habitName === "Exercise",
   );
 
-  const assert_log_date_is_today = computed(
+  const assert_log_date_is_today = assert(
     () => subject.logs[0]?.date === subject.todayDate,
   );
 
   // Toggling nonexistent habit should not create log
-  const assert_still_one_log_after_nonexistent = computed(
+  const assert_still_one_log_after_nonexistent = assert(
     () => len(subject.logs) === 1,
   );
 
   // After toggling again (uncompletes)
-  const assert_log_uncompleted = computed(() => {
+  const assert_log_uncompleted = assert(() => {
     const log = subject.logs.find((l: HabitLog) => l.habitName === "Exercise");
     return log?.completed === false;
   });
 
-  const assert_still_one_log_after_toggle = computed(
+  const assert_still_one_log_after_toggle = assert(
     () => len(subject.logs) === 1,
   );
 
   // After adding second habit
-  const assert_three_habits = computed(
+  const assert_three_habits = assert(
     () => len(subject.habits) === 3,
   );
 
-  const assert_read_exists = computed(
+  const assert_read_exists = assert(
     () => subject.habits.some((h: Habit) => h.name === "Read"),
   );
 
   // After deleting habit
-  const assert_two_habits_after_delete = computed(
+  const assert_two_habits_after_delete = assert(
     () => len(subject.habits) === 2,
   );
 
-  const assert_read_deleted = computed(
+  const assert_read_deleted = assert(
     () => !subject.habits.some((h: Habit) => h.name === "Read"),
   );
 
-  const assert_exercise_remains = computed(
+  const assert_exercise_remains = assert(
     () => subject.habits.some((h: Habit) => h.name === "Exercise"),
   );
 
   // Deleting nonexistent should not change count
-  const assert_still_two_habits = computed(
+  const assert_still_two_habits = assert(
     () => len(subject.habits) === 2,
   );
 
   // === Held-reference survival assertions (CT-1715) ===
-  const assert_held_log_stashed = computed(() => {
+  const assert_held_log_stashed = assert(() => {
     const h = heldLog.get();
     return h.habitName === "Exercise" && equals(logsCell.get()[0], h);
   });
-  const assert_log_completed_again = computed(
+  const assert_log_completed_again = assert(
     () => logsCell.get()[0]?.completed === true,
   );
   // KEY: the stale-but-once-valid reference still equals()-matches the log
   // AFTER the toggle updated it.
-  const assert_held_log_survives_toggle = computed(() => {
+  const assert_held_log_survives_toggle = assert(() => {
     const h = heldLog.get();
     return equals(logsCell.get()[0], h);
   });
   // The held reference also READS the update (it would show the stale,
   // orphaned entity if the toggle had re-minted identity).
-  const assert_held_log_reads_toggle = computed(
+  const assert_held_log_reads_toggle = assert(
     () => heldLog.get().completed === true,
   );
   // KEY: the held reference still DRIVES an equals()-located removal.
-  const assert_removed_via_held = computed(
+  const assert_removed_via_held = assert(
     () => len(subject.logs) === 0,
   );
 

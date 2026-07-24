@@ -14,7 +14,7 @@
  *
  * Run: deno task cf test packages/patterns/self.test.tsx --verbose
  */
-import { computed, handler, pattern, Writable } from "commonfabric";
+import { assert, computed, handler, pattern, Writable } from "commonfabric";
 import Self, {
   addValueCardFromForm,
   appendResponse,
@@ -106,31 +106,31 @@ export default pattern(() => {
 
   // A1: append when model is empty
   const after_append_mbti = upsertNeurotype(EMPTY_SELF_MODEL, MBTI_INTJ);
-  const assert_append_count = computed(
+  const assert_append_count = assert(
     () => after_append_mbti.neurotypes.length === 1,
   );
-  const assert_append_result = computed(
+  const assert_append_result = assert(
     () => after_append_mbti.neurotypes[0]?.result === "INTJ",
   );
-  const assert_append_system = computed(
+  const assert_append_system = assert(
     () => after_append_mbti.neurotypes[0]?.system === "mbti",
   );
 
   // A2: upsert replaces same system, count stays 1
   const after_upsert_mbti = upsertNeurotype(after_append_mbti, MBTI_ENTP);
-  const assert_upsert_count = computed(
+  const assert_upsert_count = assert(
     () => after_upsert_mbti.neurotypes.length === 1,
   );
-  const assert_upsert_result = computed(
+  const assert_upsert_result = assert(
     () => after_upsert_mbti.neurotypes[0]?.result === "ENTP",
   );
 
   // A3: different system coexists — two entries
   const after_add_enneagram = upsertNeurotype(after_upsert_mbti, ENNEAGRAM_5W4);
-  const assert_coexist_count = computed(
+  const assert_coexist_count = assert(
     () => after_add_enneagram.neurotypes.length === 2,
   );
-  const assert_enneagram_present = computed(
+  const assert_enneagram_present = assert(
     () =>
       after_add_enneagram.neurotypes.some(
         (n) => n.system === "enneagram" && n.result === "5w4",
@@ -141,19 +141,19 @@ export default pattern(() => {
 
   // A4: append first value card
   const after_add_curiosity = appendValue(EMPTY_SELF_MODEL, CURIOSITY_CARD);
-  const assert_value_count_1 = computed(
+  const assert_value_count_1 = assert(
     () => after_add_curiosity.values.length === 1,
   );
-  const assert_value_title_curiosity = computed(
+  const assert_value_title_curiosity = assert(
     () => after_add_curiosity.values[0]?.title === "Curiosity",
   );
 
   // A5: append second value card — two entries, order preserved
   const after_add_autonomy = appendValue(after_add_curiosity, AUTONOMY_CARD);
-  const assert_value_count_2 = computed(
+  const assert_value_count_2 = assert(
     () => after_add_autonomy.values.length === 2,
   );
-  const assert_value_order = computed(
+  const assert_value_order = assert(
     () =>
       after_add_autonomy.values[0]?.title === "Curiosity" &&
       after_add_autonomy.values[1]?.title === "Autonomy",
@@ -163,13 +163,13 @@ export default pattern(() => {
 
   // A6: append a response
   const after_add_response = appendResponse(EMPTY_SELF_MODEL, MEANING_RESPONSE);
-  const assert_response_count = computed(
+  const assert_response_count = assert(
     () => after_add_response.responses.length === 1,
   );
-  const assert_response_track = computed(
+  const assert_response_track = assert(
     () => after_add_response.responses[0]?.track === "meaning",
   );
-  const assert_response_prompt_id = computed(
+  const assert_response_prompt_id = assert(
     () => after_add_response.responses[0]?.promptId === "p1",
   );
 
@@ -180,10 +180,10 @@ export default pattern(() => {
     after_add_enneagram,
     "enneagram",
   );
-  const assert_remove_neuro_count = computed(
+  const assert_remove_neuro_count = assert(
     () => after_remove_enneagram.neurotypes.length === 1,
   );
-  const assert_mbti_remains = computed(
+  const assert_mbti_remains = assert(
     () => after_remove_enneagram.neurotypes[0]?.system === "mbti",
   );
 
@@ -192,7 +192,7 @@ export default pattern(() => {
     after_remove_enneagram,
     "big5",
   );
-  const assert_remove_absent_noop = computed(
+  const assert_remove_absent_noop = assert(
     () => after_remove_absent.neurotypes.length === 1,
   );
 
@@ -200,16 +200,16 @@ export default pattern(() => {
 
   // A9: remove first value (index 0) — only Autonomy remains
   const after_remove_first = withoutValueAt(after_add_autonomy, 0);
-  const assert_remove_value_count = computed(
+  const assert_remove_value_count = assert(
     () => after_remove_first.values.length === 1,
   );
-  const assert_autonomy_remains = computed(
+  const assert_autonomy_remains = assert(
     () => after_remove_first.values[0]?.title === "Autonomy",
   );
 
   // A10: remove last value (index 0 of single-item list) — empty
   const after_remove_last = withoutValueAt(after_remove_first, 0);
-  const assert_values_empty = computed(
+  const assert_values_empty = assert(
     () => after_remove_last.values.length === 0,
   );
 
@@ -231,13 +231,13 @@ export default pattern(() => {
   const selfOwned = Self({});
   const ownedModel = computed(() => selfOwned.selfModel);
 
-  const assert_owned_responses_empty = computed(
+  const assert_owned_responses_empty = assert(
     () => ownedModel.get().responses.length === 0,
   );
-  const assert_owned_values_empty = computed(
+  const assert_owned_values_empty = assert(
     () => ownedModel.get().values.length === 0,
   );
-  const assert_owned_neurotypes_empty = computed(
+  const assert_owned_neurotypes_empty = assert(
     () => ownedModel.get().neurotypes.length === 0,
   );
 
@@ -254,7 +254,7 @@ export default pattern(() => {
     index: 0,
   });
 
-  const assert_values_empty_after_remove = computed(
+  const assert_values_empty_after_remove = assert(
     () => selfModelValues.get().values.length === 0,
   );
 
@@ -273,7 +273,7 @@ export default pattern(() => {
     resultField,
   });
 
-  const assert_form_recorded_enneagram = computed(() =>
+  const assert_form_recorded_enneagram = assert(() =>
     selfModel2
       .get()
       .neurotypes.some(
@@ -284,7 +284,7 @@ export default pattern(() => {
       )
   );
 
-  const assert_result_field_cleared = computed(
+  const assert_result_field_cleared = assert(
     () => resultField.get() === "",
   );
 
@@ -305,13 +305,13 @@ export default pattern(() => {
     resultField: resultField2b,
   });
 
-  const assert_form_upsert_length_one = computed(
+  const assert_form_upsert_length_one = assert(
     () =>
       selfModel2.get().neurotypes.filter((n) => n.system === "mbti").length ===
         1,
   );
 
-  const assert_form_upsert_result_enfp = computed(
+  const assert_form_upsert_result_enfp = assert(
     () =>
       selfModel2
         .get()
@@ -324,7 +324,7 @@ export default pattern(() => {
     system: "enneagram",
   });
 
-  const assert_only_mbti_after_remove = computed(() => {
+  const assert_only_mbti_after_remove = assert(() => {
     const neurotypes = selfModel2.get().neurotypes;
     return neurotypes.length === 1 && neurotypes[0]?.system === "mbti";
   });
@@ -336,16 +336,16 @@ export default pattern(() => {
   const selfModel3 = new Writable<SelfModel>(EMPTY_SELF_MODEL);
 
   // Test 9: MEANING_PROMPTS sanity — 8 entries, correct kinds present
-  const assert_meaning_prompts_count = computed(
+  const assert_meaning_prompts_count = assert(
     () => MEANING_PROMPTS.length === 8,
   );
-  const assert_meaning_prompts_has_open = computed(
+  const assert_meaning_prompts_has_open = assert(
     () => MEANING_PROMPTS.some((p) => p.kind === "open"),
   );
-  const assert_meaning_prompts_has_scissor = computed(
+  const assert_meaning_prompts_has_scissor = assert(
     () => MEANING_PROMPTS.some((p) => p.kind === "scissor"),
   );
-  const assert_meaning_prompts_has_closing = computed(
+  const assert_meaning_prompts_has_closing = assert(
     () => MEANING_PROMPTS.some((p) => p.kind === "closing"),
   );
 
@@ -362,24 +362,24 @@ export default pattern(() => {
     answerField: answerField10,
   });
 
-  const assert_reflection_appended = computed(
+  const assert_reflection_appended = assert(
     () => selfModel3.get().responses.length === 1,
   );
-  const assert_reflection_track_meaning = computed(
+  const assert_reflection_track_meaning = assert(
     () => selfModel3.get().responses[0]?.track === "meaning",
   );
-  const assert_reflection_prompt_id = computed(
+  const assert_reflection_prompt_id = assert(
     () => selfModel3.get().responses[0]?.promptId === promptId10,
   );
-  const assert_reflection_prompt_text = computed(
+  const assert_reflection_prompt_text = assert(
     () => selfModel3.get().responses[0]?.prompt === MEANING_PROMPTS[0].text,
   );
-  const assert_reflection_answer = computed(
+  const assert_reflection_answer = assert(
     () =>
       selfModel3.get().responses[0]?.answer ===
         "I work as a designer and live with my partner.",
   );
-  const assert_answer_field_cleared = computed(
+  const assert_answer_field_cleared = assert(
     () => answerField10.get() === "",
   );
 
@@ -402,21 +402,21 @@ export default pattern(() => {
     contextTagsField: contextTagsField11,
   });
 
-  const assert_value_appended = computed(
+  const assert_value_appended = assert(
     () => selfModel4.get().values.length === 1,
   );
-  const assert_value_title = computed(
+  const assert_value_title = assert(
     () => selfModel4.get().values[0]?.title === "Direct feedback",
   );
-  const assert_value_attending_to = computed(
+  const assert_value_attending_to = assert(
     () =>
       selfModel4.get().values[0]?.attendingTo ===
         "a disagreement at the moment it is live",
   );
-  const assert_value_stance = computed(
+  const assert_value_stance = assert(
     () => selfModel4.get().values[0]?.stance === "descriptive",
   );
-  const assert_value_context_tags = computed(() => {
+  const assert_value_context_tags = assert(() => {
     const tags = selfModel4.get().values[0]?.contextTags;
     return (
       Array.isArray(tags) &&
@@ -425,11 +425,11 @@ export default pattern(() => {
       tags[1] === "team"
     );
   });
-  const assert_title_field_cleared = computed(() => titleField11.get() === "");
-  const assert_attending_field_cleared = computed(
+  const assert_title_field_cleared = assert(() => titleField11.get() === "");
+  const assert_attending_field_cleared = assert(
     () => attendingToField11.get() === "",
   );
-  const assert_context_tags_field_cleared = computed(
+  const assert_context_tags_field_cleared = assert(
     () => contextTagsField11.get() === "",
   );
 
@@ -470,10 +470,10 @@ export default pattern(() => {
     index: 0,
   });
 
-  const assert_only_second_remains = computed(
+  const assert_only_second_remains = assert(
     () => selfModel5.get().values.length === 1,
   );
-  const assert_second_value_title = computed(
+  const assert_second_value_title = assert(
     () => selfModel5.get().values[0]?.title === "Second value",
   );
 

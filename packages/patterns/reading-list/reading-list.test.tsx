@@ -13,7 +13,7 @@
  *
  * Run: deno task cf test packages/patterns/reading-list/reading-list.test.tsx --verbose
  */
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, pattern } from "commonfabric";
 import ReadingList from "./reading-list.tsx";
 
 export default pattern(() => {
@@ -159,20 +159,16 @@ export default pattern(() => {
   // Assertions - Initial State
   // ==========================================================================
 
-  const assert_initial_empty = computed(() => list.totalCount === 0);
-  const assert_initial_filter_all = computed(() =>
-    list.currentFilter === "all"
-  );
-  const assert_initial_filtered_empty = computed(() =>
-    list.filteredCount === 0
-  );
+  const assert_initial_empty = assert(() => list.totalCount === 0);
+  const assert_initial_filter_all = assert(() => list.currentFilter === "all");
+  const assert_initial_filtered_empty = assert(() => list.filteredCount === 0);
 
   // ==========================================================================
   // Assertions - After Adding Items
   // ==========================================================================
 
-  const assert_has_one = computed(() => list.totalCount === 1);
-  const assert_first_is_article = computed(() => {
+  const assert_has_one = assert(() => list.totalCount === 1);
+  const assert_first_is_article = assert(() => {
     return (
       list.items[0]?.title === "Great Article" &&
       list.items[0]?.type === "article" &&
@@ -181,8 +177,8 @@ export default pattern(() => {
     );
   });
 
-  const assert_has_two = computed(() => list.totalCount === 2);
-  const assert_second_is_book = computed(() => {
+  const assert_has_two = assert(() => list.totalCount === 2);
+  const assert_second_is_book = assert(() => {
     return (
       list.items[1]?.title === "Amazing Book" &&
       list.items[1]?.type === "book" &&
@@ -190,32 +186,32 @@ export default pattern(() => {
     );
   });
 
-  const assert_has_three = computed(() => list.totalCount === 3);
-  const assert_has_four = computed(() => list.totalCount === 4);
+  const assert_has_three = assert(() => list.totalCount === 3);
+  const assert_has_four = assert(() => list.totalCount === 4);
 
-  const assert_video_has_empty_author = computed(() => {
+  const assert_video_has_empty_author = assert(() => {
     return (
       list.items[3]?.title === "Tutorial Video" && list.items[3]?.author === ""
     );
   });
 
   // Empty/whitespace shouldn't add
-  const assert_still_four = computed(() => list.totalCount === 4);
+  const assert_still_four = assert(() => list.totalCount === 4);
 
   // ==========================================================================
   // Assertions - After Status Changes
   // ==========================================================================
 
-  const assert_first_is_reading = computed(
+  const assert_first_is_reading = assert(
     () => list.items[0]?.status === "reading",
   );
-  const assert_second_is_finished = computed(
+  const assert_second_is_finished = assert(
     () => list.items[1]?.status === "finished",
   );
-  const assert_third_is_abandoned = computed(
+  const assert_third_is_abandoned = assert(
     () => list.items[2]?.status === "abandoned",
   );
-  const assert_fourth_is_want = computed(
+  const assert_fourth_is_want = assert(
     () => list.items[3]?.status === "want",
   );
 
@@ -223,8 +219,8 @@ export default pattern(() => {
   // Assertions - After Property Changes
   // ==========================================================================
 
-  const assert_book_has_rating = computed(() => list.items[1]?.rating === 5);
-  const assert_article_has_notes = computed(() =>
+  const assert_book_has_rating = assert(() => list.items[1]?.rating === 5);
+  const assert_article_has_notes = assert(() =>
     list.items[0]?.notes ===
       "Really insightful piece about reactive programming"
   );
@@ -234,39 +230,39 @@ export default pattern(() => {
   // ==========================================================================
 
   // When filter is "all", should show all 4 items
-  const assert_filter_all_shows_four = computed(() => {
+  const assert_filter_all_shows_four = assert(() => {
     return list.currentFilter === "all" && list.filteredCount === 4;
   });
 
   // When filter is "want", should show 1 item (video)
-  const assert_filter_want_shows_one = computed(() => {
+  const assert_filter_want_shows_one = assert(() => {
     return list.currentFilter === "want" && list.filteredCount === 1;
   });
-  const assert_filter_want_correct_item = computed(() => {
+  const assert_filter_want_correct_item = assert(() => {
     return list.filteredItems[0]?.title === "Tutorial Video";
   });
 
   // When filter is "reading", should show 1 item (article)
-  const assert_filter_reading_shows_one = computed(() => {
+  const assert_filter_reading_shows_one = assert(() => {
     return list.currentFilter === "reading" && list.filteredCount === 1;
   });
-  const assert_filter_reading_correct_item = computed(() => {
+  const assert_filter_reading_correct_item = assert(() => {
     return list.filteredItems[0]?.title === "Great Article";
   });
 
   // When filter is "finished", should show 1 item (book)
-  const assert_filter_finished_shows_one = computed(() => {
+  const assert_filter_finished_shows_one = assert(() => {
     return list.currentFilter === "finished" && list.filteredCount === 1;
   });
-  const assert_filter_finished_correct_item = computed(() => {
+  const assert_filter_finished_correct_item = assert(() => {
     return list.filteredItems[0]?.title === "Amazing Book";
   });
 
   // When filter is "abandoned", should show 1 item (paper)
-  const assert_filter_abandoned_shows_one = computed(() => {
+  const assert_filter_abandoned_shows_one = assert(() => {
     return list.currentFilter === "abandoned" && list.filteredCount === 1;
   });
-  const assert_filter_abandoned_correct_item = computed(() => {
+  const assert_filter_abandoned_correct_item = assert(() => {
     return list.filteredItems[0]?.title === "Research Paper";
   });
 
@@ -274,14 +270,14 @@ export default pattern(() => {
   // Assertions - After Removal
   // ==========================================================================
 
-  const assert_has_three_after_remove = computed(() => list.totalCount === 3);
-  const assert_first_is_now_book = computed(() => {
+  const assert_has_three_after_remove = assert(() => list.totalCount === 3);
+  const assert_first_is_now_book = assert(() => {
     return list.items[0]?.title === "Amazing Book";
   });
 
-  const assert_has_two_after_remove = computed(() => list.totalCount === 2);
-  const assert_has_one_after_remove = computed(() => list.totalCount === 1);
-  const assert_back_to_empty = computed(() => list.totalCount === 0);
+  const assert_has_two_after_remove = assert(() => list.totalCount === 2);
+  const assert_has_one_after_remove = assert(() => list.totalCount === 1);
+  const assert_back_to_empty = assert(() => list.totalCount === 0);
 
   // ==========================================================================
   // Test Sequence

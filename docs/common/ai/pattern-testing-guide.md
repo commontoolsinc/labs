@@ -96,8 +96,9 @@ export default pattern(() => {
 ## Key Points
 
 - write new assertions with `assert()` rather than `computed()`; a step accepts
-  either, and most existing test patterns still use `computed()`, but a failed
-  `assert()` reports its operands and a failed `computed()` cannot
+  either, and most test patterns in the repository use `assert()` for their
+  assertions, but a failed `assert()` reports its operands and a failed
+  `computed()` cannot
 - trigger actions with `.send()` when the output exposes streams
 - use direct property access for assertions rather than `.get()` unless the API
   truly requires writable access

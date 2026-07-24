@@ -5,7 +5,7 @@
  *
  * Run: deno task cf test packages/patterns/airtable/core/util/airtable-auth-manager.test.tsx --root packages/patterns --verbose
  */
-import { computed, pattern } from "commonfabric";
+import { assert, pattern } from "commonfabric";
 import { hasText } from "../../../test/vnode-helpers.ts";
 import {
   AirtableAuthManager,
@@ -22,23 +22,23 @@ export default pattern<Record<string, never>, TestOutput>(() => {
     requiredScopes: ["data.records:read", "schema.bases:read"],
   });
 
-  const assert_loading_state = computed(() =>
+  const assert_loading_state = assert(() =>
     manager.currentState === "loading" &&
     manager.isReady !== true
   );
 
-  const assert_availability_is_loading = computed(() =>
+  const assert_availability_is_loading = assert(() =>
     manager.availability.state === "loading" &&
     manager.availability.auth === null
   );
 
-  const assert_auth_info_matches_availability = computed(() =>
+  const assert_auth_info_matches_availability = assert(() =>
     manager.authInfo.state === manager.currentState &&
     manager.authInfo.availability.state === "loading" &&
     manager.authInfo.email === ""
   );
 
-  const assert_ui_names_required_scopes = computed(() =>
+  const assert_ui_names_required_scopes = assert(() =>
     hasText(manager.fullUI, "Connect Your Airtable Account") &&
     hasText(manager.fullUI, "Read records, Read base schemas")
   );

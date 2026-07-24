@@ -1,4 +1,4 @@
-import { computed, NAME, pattern, UI } from "commonfabric";
+import { assert, NAME, pattern, UI } from "commonfabric";
 import SubmitInputStory from "./cf-submit-input-story.tsx";
 
 // Lane-2 pattern test (run by `cf test`): instantiating the story runs its body
@@ -7,7 +7,7 @@ import SubmitInputStory from "./cf-submit-input-story.tsx";
 // renderer expects.
 export default pattern(() => {
   const story = SubmitInputStory({});
-  const assert_story_built = computed(() =>
+  const assert_story_built = assert(() =>
     story[NAME] === "cf-submit-input Story" &&
     story[UI] != null &&
     story.controls != null

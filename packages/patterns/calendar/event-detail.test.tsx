@@ -7,7 +7,7 @@
  *
  * Run: deno task cf test packages/patterns/calendar/event-detail.test.tsx --verbose
  */
-import { action, computed, NAME, pattern } from "commonfabric";
+import { action, assert, NAME, pattern } from "commonfabric";
 import EventDetail from "./event-detail.tsx";
 
 export default pattern(() => {
@@ -46,17 +46,17 @@ export default pattern(() => {
   // Assertions - Initial State
   // ==========================================================================
 
-  const assert_name = computed(
+  const assert_name = assert(
     () => item[NAME] === "Event: Team Meeting",
   );
-  const assert_initial_title = computed(
+  const assert_initial_title = assert(
     () => item.title === "Team Meeting",
   );
-  const assert_initial_date = computed(
+  const assert_initial_date = assert(
     () => item.date === "2025-03-15",
   );
-  const assert_initial_time = computed(() => item.time === "10:00");
-  const assert_initial_notes = computed(
+  const assert_initial_time = assert(() => item.time === "10:00");
+  const assert_initial_notes = assert(
     () => item.notes === "Weekly sync",
   );
 
@@ -64,20 +64,20 @@ export default pattern(() => {
   // Assertions - After Edits
   // ==========================================================================
 
-  const assert_name_after_rename = computed(
+  const assert_name_after_rename = assert(
     () => item[NAME] === "Event: Renamed Meeting",
   );
-  const assert_title_changed = computed(
+  const assert_title_changed = assert(
     () => item.title === "Renamed Meeting",
   );
-  const assert_date_changed = computed(
+  const assert_date_changed = assert(
     () => item.date === "2025-04-01",
   );
-  const assert_time_changed = computed(() => item.time === "14:30");
-  const assert_notes_changed = computed(
+  const assert_time_changed = assert(() => item.time === "14:30");
+  const assert_notes_changed = assert(
     () => item.notes === "Updated agenda items",
   );
-  const assert_notes_cleared = computed(() => item.notes === "");
+  const assert_notes_cleared = assert(() => item.notes === "");
 
   // ==========================================================================
   // Test Sequence
