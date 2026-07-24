@@ -67,6 +67,7 @@ export {
   getNodeText,
   getTypeAtLocationWithFallback,
   getVariableInitializer,
+  hasAuthoredSourceSite,
   isFunctionParameter,
   isMethodCall,
   isOptionalMemberSymbol,

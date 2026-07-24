@@ -4,6 +4,7 @@ import {
   classifyArrayMethodCallSite,
   detectCallKind,
   getTypeAtLocationWithFallback,
+  hasAuthoredSourceSite,
   isCollectionType,
   isEventHandlerJsxAttribute,
   isFunctionLikeExpression,
@@ -597,18 +598,6 @@ export function getExpressionContainerKind(
   }
 
   return undefined;
-}
-
-function hasAuthoredSourceSite(node: ts.Node): boolean {
-  const original = ts.getOriginalNode(node);
-
-  if (node.getSourceFile() && node.pos >= 0) {
-    return true;
-  }
-
-  return original !== node &&
-    !!original.getSourceFile() &&
-    original.pos >= 0;
 }
 
 function isWithinEventHandlerJsxAttribute(

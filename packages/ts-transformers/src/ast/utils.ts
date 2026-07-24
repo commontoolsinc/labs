@@ -51,6 +51,24 @@ export function getExpressionText(expr: ts.Expression): string {
 }
 
 /**
+ * True when the node — or, if it was cloned/replaced during transformation, its
+ * original — carries a real source range: i.e. it is authored pattern code the
+ * author can act on, not a compiler-synthesized node. Consulted where a lowering
+ * disagreement must be routed either to an author-facing diagnostic (authored
+ * node) or a pipeline-invariant throw (synthetic node).
+ */
+export function hasAuthoredSourceSite(node: ts.Node): boolean {
+  if (node.getSourceFile() && node.pos >= 0) {
+    return true;
+  }
+
+  const original = ts.getOriginalNode(node);
+  return original !== node &&
+    !!original.getSourceFile() &&
+    original.pos >= 0;
+}
+
+/**
  * Gets the type of a node, checking typeRegistry first (for synthetic nodes),
  * then falling back to the type checker.
  *

@@ -36,8 +36,8 @@ import {
   isTopmostMemberAccess,
 } from "./opaque-roots.ts";
 import {
-  assertValidComputeWrapCandidate,
   findPendingComputeWrapCandidate,
+  resolveComputeWrapCandidate,
 } from "./expression-rewrite/emitters/compute-wrap-invariants.ts";
 import {
   classifyUnsupportedExpressionSiteCallRoot,
@@ -481,12 +481,15 @@ function rewriteTrackedOpaquePatternBody(
     }
 
     if (context.getReactiveContext(pendingWrap).kind !== "compute") {
-      assertValidComputeWrapCandidate(
+      const decision = resolveComputeWrapCandidate(
         pendingWrap,
         initializer,
         "pattern callback initializer",
         context,
       );
+      if (decision.kind === "skip-reported") {
+        return undefined;
+      }
     }
 
     return createReactiveWrapperForExpression(

@@ -4,8 +4,8 @@ import type { Emitter, EmitterContext } from "../types.ts";
 import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 import { shouldDeferFallbackMapReceiverRewrite } from "../fallback-array-method-rewrite.ts";
 import {
-  assertValidComputeWrapCandidate,
   findPendingComputeWrapCandidate,
+  resolveComputeWrapCandidate,
 } from "./compute-wrap-invariants.ts";
 import { createUnlessCall, createWhenCall } from "../../builtins/ifelse.ts";
 import {
@@ -241,12 +241,17 @@ export const emitBinaryExpression: Emitter = ({
   );
 
   if (!allowedSyntheticArrayReceiverWrap) {
-    assertValidComputeWrapCandidate(
+    const decision = resolveComputeWrapCandidate(
       pendingWrap,
       expression,
       "binary expression",
       context,
     );
+    if (decision.kind === "skip-reported") {
+      // Return the expression unrewritten (truthy) so no later emitter
+      // re-attempts the wrap.
+      return expression;
+    }
   }
 
   return createReactiveWrapperForExpression(
