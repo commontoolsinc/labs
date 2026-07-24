@@ -147,13 +147,10 @@ describe("onCommit callback final outcome", () => {
         },
       );
 
-      // The first commit fails on the server asynchronously; wait for the
-      // backoff retry to re-run the handler before asserting.
-      const deadline = performance.now() + 2_000;
-      while (attempts < 2 && performance.now() < deadline) {
-        await runtime.idle();
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
+      // The first commit fails on the server asynchronously; the scheduler's
+      // backoff retry re-runs the handler. Advancing the clock fires the
+      // backoff timer so the retry lands before we assert.
+      await clock.tick(2_000);
       await runtime.idle();
       await runtime.storageManager.synced();
     } finally {

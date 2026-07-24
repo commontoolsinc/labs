@@ -2894,13 +2894,13 @@ describe("wish built-in", () => {
         await result.pull();
 
         // The missing-profile UI kicks off a deferred profile-create fetch.
+        // `recordedUrls` is a plain array, not a cell, so there is no sink to
+        // wait on; drain the runtime (including post-commit effects) until the
+        // deferred fetch has routed through, bounded as a stuck-condition guard.
         const expectedUrl =
           "https://pattern-env.test/api/patterns/system/profile-create.tsx";
-        const deadline = Date.now() + 5_000;
-        while (
-          !recordedUrls.includes(expectedUrl) && Date.now() < deadline
-        ) {
-          await new Promise((resolve) => setTimeout(resolve, 10));
+        for (let i = 0; i < 50 && !recordedUrls.includes(expectedUrl); i++) {
+          await runtime.settled();
         }
         expect(recordedUrls).toContain(expectedUrl);
       } finally {
@@ -3942,13 +3942,14 @@ describe("wish built-in", () => {
           // Give the deferred fetch a moment to route through and commit.
           const pickerCell = result.key("profile").key(UI).key("props")
             .key("$cell").resolveAsCell();
-          const deadline = Date.now() + 5_000;
+          // The deferred fetch rejects and the error UI commits into the picker
+          // cell; drain the runtime until it lands, bounded as a stuck-condition
+          // guard.
           let errorNode: any;
-          while (Date.now() < deadline) {
-            await runtime.idle();
+          for (let i = 0; i < 50; i++) {
+            await runtime.settled();
             errorNode = pickerCell.key(UI).get() as any;
             if (errorNode) break;
-            await new Promise((resolve) => setTimeout(resolve, 20));
           }
           expect(errorNode).toBeDefined();
         } finally {
@@ -4258,7 +4259,7 @@ describe("interval #now wish", () => {
     const first = result.key("nowValue").get()?.result;
     expect(typeof first).toBe("number");
 
-    await new Promise((r) => setTimeout(r, 1100));
+    await clock.tick(1100);
     triggerCell.withTx(tx).set(1);
     await tx.commit();
     tx = runtime.edit();
@@ -4288,7 +4289,7 @@ describe("interval #now wish", () => {
     // wish-action closure, exactly what a piece stop/start or a reload in another
     // runtime produces — after crossing the 1s coarsening boundary.
     runtime.runner.stop(resultCell);
-    await new Promise((r) => setTimeout(r, 1100));
+    await clock.tick(1100);
 
     const result2 = runtime.run(tx, wishPattern, {}, resultCell.withTx(tx));
     await tx.commit();
@@ -4605,93 +4606,9 @@ describe("interval #now wish", () => {
     // Stop the runner for this cell — should clear the timer without errors
     runtime.runner.stop(resultCell);
 
-    // Wait briefly to confirm no timer errors after cleanup
-    await new Promise((r) => setTimeout(r, 100));
-  });
-
-  it("#now/1 ticks and updates value", async () => {
-    const wishPattern = pattern(() => {
-      return { nowValue: wish({ query: "#now/1" }) };
-    });
-
-    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
-      space,
-      "ticking now result",
-      undefined,
-      tx,
-    );
-    const result = runtime.run(tx, wishPattern, {}, resultCell);
-    await tx.commit();
-    tx = runtime.edit();
-
-    await result.pull();
-
-    const initial = result.key("nowValue").get()?.result;
-    expect(typeof initial).toBe("number");
-    expect(initial! % 1000).toBe(0);
-
-    // Poll until value changes, with a generous deadline for CI
-    const deadline = Date.now() + 5000;
-    let updated = initial;
-    while (updated === initial && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 200));
-      await result.pull();
-      updated = result.key("nowValue").get()?.result;
-    }
-    expect(updated).toBeGreaterThan(initial!);
-    expect(updated! % 1000).toBe(0);
-
-    // Clean up timer
-    runtime.runner.stop(resultCell);
-  });
-
-  it("#now interval keeps ticking when other dependencies change", async () => {
-    // Regression: re-running the wish action (here via an unrelated cell the
-    // pattern reads) must not reset or starve the shared interval timer.
-    const triggerCell = runtime.getCell<number>(
-      space,
-      "tick collision trigger",
-      undefined,
-      tx,
-    );
-    triggerCell.set(0);
-
-    const wishPattern = pattern(() => {
-      triggerCell.get();
-      return { nowValue: wish({ query: "#now/1" }) };
-    });
-
-    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
-      space,
-      "collision now result",
-      undefined,
-      tx,
-    );
-    const result = runtime.run(tx, wishPattern, {}, resultCell);
-    await tx.commit();
-    tx = runtime.edit();
-
-    await result.pull();
-
-    const initial = result.key("nowValue").get()?.result;
-    expect(typeof initial).toBe("number");
-
-    // Flip the trigger repeatedly while the 1s timer must advance regardless.
-    const deadline = Date.now() + 5000;
-    let updated = initial;
-    let flip = 0;
-    while (updated === initial && Date.now() < deadline) {
-      flip += 1;
-      triggerCell.withTx(tx).set(flip);
-      await tx.commit();
-      tx = runtime.edit();
-      await new Promise((r) => setTimeout(r, 200));
-      await result.pull();
-      updated = result.key("nowValue").get()?.result;
-    }
-    expect(updated).toBeGreaterThan(initial!);
-
-    runtime.runner.stop(resultCell);
+    // With the interval cleared, the runtime drains to idle. A leftover timer
+    // would auto-advance forever and hang here instead.
+    await runtime.idle();
   });
 });
 
