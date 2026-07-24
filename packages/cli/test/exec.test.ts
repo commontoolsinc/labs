@@ -728,6 +728,33 @@ describe("renderExecHelp", () => {
     expect(help).toContain("counts?: Record<string, number>");
   });
 
+  it("threads the schema's own $defs into the input type", () => {
+    const help = renderExecHelp(
+      "/tmp/defs.tool",
+      makeSpec("tool", {
+        type: "object",
+        properties: {
+          user: { $ref: "#/$defs/User" },
+        },
+        $defs: {
+          User: { type: "string" },
+        },
+      } as JSONSchema),
+    );
+    // The small definition inlines through the threaded $defs instead of
+    // rendering "unknown".
+    expect(help).toContain("user?: string");
+  });
+
+  it("renders a boolean input schema as unknown", () => {
+    const help = renderExecHelp(
+      "/tmp/boolean.tool",
+      makeSpec("tool", false as JSONSchema),
+    );
+    expect(help).toContain("Input type:");
+    expect(help).toContain("  unknown");
+  });
+
   it("abbreviates the input type at the depth cap", () => {
     // The shared formatter's default maxDepth (4) matches the cap the CLI's
     // own renderer used before it delegated to schemaToTypeString
