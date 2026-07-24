@@ -422,6 +422,42 @@ Deno.test("memory v2 add-unique compares by stored value (objects)", () => {
   assertEquals(out.value, [{ id: 1 }, { id: 2 }]);
 });
 
+// A `FabricSpecialObject` keeps its state in private `#fields`, so its content
+// is what distinguishes two instances, not its (empty) own-property set.
+Deno.test("memory v2 add-unique compares special objects by content", () => {
+  const out = applyPatch({ value: [new FabricBytes(new Uint8Array([1, 2]))] }, [
+    {
+      op: "add-unique",
+      path: "/value",
+      values: [
+        new FabricBytes(new Uint8Array([1, 2])),
+        new FabricBytes(new Uint8Array([3, 4])),
+        new FabricEpochNsec(1234n),
+      ],
+    },
+  ]) as { value: unknown[] };
+  assertEquals(out.value, [
+    new FabricBytes(new Uint8Array([1, 2])),
+    new FabricBytes(new Uint8Array([3, 4])),
+    new FabricEpochNsec(1234n),
+  ]);
+});
+
+// `NaN` is the same value as `NaN`; `-0` and `+0` are different values.
+Deno.test("memory v2 add-unique on the weird numbers", () => {
+  const nan = applyPatch({ value: [NaN] }, [
+    { op: "add-unique", path: "/value", values: [NaN] },
+  ]) as { value: number[] };
+  assertEquals(nan.value.length, 1);
+
+  const zero = applyPatch({ value: [-0] }, [
+    { op: "add-unique", path: "/value", values: [+0] },
+  ]) as { value: number[] };
+  assertEquals(zero.value.length, 2);
+  assert(Object.is(zero.value[0], -0), "the stored -0 must survive");
+  assert(Object.is(zero.value[1], +0), "the added +0 must be distinct");
+});
+
 // `increment` adds `by` to the number at the path, treats an absent value as 0,
 // creates the path if absent, and sums when composed.
 Deno.test("memory v2 increment adds to an existing number", () => {
@@ -512,6 +548,35 @@ Deno.test("memory v2 remove-by-value matches by stored value (links/objects)", (
     },
   ]) as { value: unknown[] };
   assertEquals(out.value, [other]);
+});
+
+Deno.test("memory v2 remove-by-value matches special objects by content", () => {
+  const out = applyPatch({
+    value: [
+      new FabricBytes(new Uint8Array([1, 2])),
+      new FabricBytes(new Uint8Array([3, 4])),
+    ],
+  }, [
+    {
+      op: "remove-by-value",
+      path: "/value",
+      value: new FabricBytes(new Uint8Array([1, 2])),
+    },
+  ]) as { value: unknown[] };
+  assertEquals(out.value, [new FabricBytes(new Uint8Array([3, 4]))]);
+});
+
+Deno.test("memory v2 remove-by-value on the weird numbers", () => {
+  const nan = applyPatch({ value: [NaN, 1] }, [
+    { op: "remove-by-value", path: "/value", value: NaN },
+  ]) as { value: number[] };
+  assertEquals(nan.value, [1]);
+
+  const zero = applyPatch({ value: [-0, +0] }, [
+    { op: "remove-by-value", path: "/value", value: +0 },
+  ]) as { value: number[] };
+  assertEquals(zero.value.length, 1);
+  assert(Object.is(zero.value[0], -0), "only the +0 may be removed");
 });
 
 Deno.test("memory v2 remove-by-value is a no-op when absent", () => {

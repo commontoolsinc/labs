@@ -61,11 +61,11 @@ implementation, nothing more:
 // Shown for illustration only.
 isCell(candidate)
   ? areLinksSame(element, candidate, ...)  // compares by link identity
-  : deepEqual(element, candidate)          // compares against the stored link
+  : valueEqual(element, candidate)         // compares against the stored link
 ```
 
 A value read back out of `.get()` is a query-result proxy. It carries a link,
-but it is not a cell, so it takes the `deepEqual` branch and is compared
+but it is not a cell, so it takes the `valueEqual` branch and is compared
 against a link sigil, which it never equals. The consequences:
 
 ```ts
