@@ -789,7 +789,13 @@ export class PiecesController<T = unknown> {
     // A 304 still reuses unchanged bytes; we just never trust the cache blind.
     const revalidatingFetch: typeof globalThis.fetch = (input, init) =>
       runtime.fetch(input, { ...init, cache: "no-cache" });
-    const officialUrl = new URL(officialUrlPath, runtime.apiUrl);
+    // Resolve against the host that actually SERVES this space, not the global
+    // apiUrl. A mapped space is served by its own host (`mappedHostFor`); the
+    // system pattern must be fetched and compiled from there, or a mapped space
+    // could roll forward onto the WRONG host's system pattern. `hostForSpace`
+    // is the same `mappedHostFor(space) ?? apiUrl` resolution PatternUpdater
+    // uses for its own roll-forward.
+    const officialUrl = new URL(officialUrlPath, runtime.hostForSpace(space));
     let officialPattern;
     let officialRef;
     try {
@@ -814,13 +820,22 @@ export class PiecesController<T = unknown> {
     if (officialRef === undefined) {
       throw clearError("did not yield an entry identity", migrationError);
     }
-    // Already current: the pinned pattern IS the official one but failed for
-    // some other reason. Re-materializing the same identity would fail
-    // identically, so do not loop — surface the clear error now.
-    if (officialRef.identity === pinnedRef.identity) {
+    // Already current: the pinned pattern IS the official entry (same identity
+    // AND symbol) but failed for some other reason. Re-materializing the exact
+    // same entry would fail identically, so do not loop — surface the clear
+    // error now. Compare BOTH identity and symbol: a root pinned to the current
+    // artifact under an obsolete/other symbol (e.g. a persisted export that is
+    // no longer `default`) is NOT already-official — rolling it forward to the
+    // official `default` entry is exactly the recovery, so it must not
+    // short-circuit here. This mirrors PatternUpdater's identity+symbol gate.
+    if (
+      officialRef.identity === pinnedRef.identity &&
+      officialRef.symbol === pinnedRef.symbol
+    ) {
       throw clearError(
-        `is already the pinned identity ${officialRef.identity}, so the ` +
-          `migration cannot be repaired by rolling forward`,
+        `is already the pinned entry ${officialRef.identity}#` +
+          `${officialRef.symbol}, so the migration cannot be repaired by ` +
+          `rolling forward`,
         migrationError,
       );
     }

@@ -84,6 +84,36 @@ const SOURCE_HOME_OFFICIAL_DEFAULTED = [
   "",
 ].join("\n");
 
+// A single module exporting BOTH a defaulted `default` (official) and an
+// obsolete `legacyHome` named export (old required, un-migratable). Because
+// entry identity is content-addressed over the whole module source, both
+// exports share ONE identity and differ only by symbol — exactly the state a
+// root pinned to `{ currentArtifact, obsoleteSymbol }` is in. Compiling
+// `legacyHome` gives a loadable-but-unrunnable entry; the heal must roll it
+// forward to the `default` entry rather than short-circuit on the shared
+// identity.
+const SOURCE_HOME_TWO_EXPORT = [
+  "import { Default, Writable, handler, pattern } from 'commonfabric';",
+  "const bump = handler<void, { count: Writable<number> }>((_, { count }) => {",
+  "  count.set((count.get() ?? 0) + 1);",
+  "});",
+  "interface OldOutput { items: Writable<string[]>; favorites: Writable<string[]>; }",
+  "interface NewOutput { items: Writable<string[]>; favorites: Writable<string[] | Default<[]>>; }",
+  "export const legacyHome = pattern<{ items?: string[] }, OldOutput>(() => {",
+  "  const items = new Writable<string[]>([]).for('items');",
+  "  const favorites = new Writable<string[]>([]).for('favorites');",
+  "  const count = new Writable<number>(0).for('count');",
+  "  return { items, favorites, count, bump: bump({ count }) };",
+  "});",
+  "export default pattern<{ items?: string[] }, NewOutput>(() => {",
+  "  const items = new Writable<string[]>([]).for('items');",
+  "  const favorites = new Writable<string[]>([]).for('favorites');",
+  "  const count = new Writable<number>(0).for('count');",
+  "  return { items, favorites, count, bump: bump({ count }) };",
+  "});",
+  "",
+].join("\n");
+
 const IMPORTED_MODULE_URL = "/api/patterns/system/update-marker.ts";
 
 // A same-host custom-app path, as home config would supply via
@@ -1661,10 +1691,12 @@ describe("checkAndUpdateDefaultPattern", () => {
   });
 
   it("surfaces a clear error without looping when the root is already pinned to official", async () => {
-    // If the pinned pattern already IS the official one but still fails
-    // migration (some other cause), rolling forward would target the same
-    // identity — the swap is skipped and we surface the clear "already the
-    // pinned identity" error instead of looping.
+    // If the pinned pattern already IS the official ENTRY (same identity AND
+    // symbol) but still fails migration (some other cause), rolling forward
+    // would target the same entry — the swap is skipped and we surface the
+    // clear "already the pinned entry" error instead of looping. The
+    // symbol-differs sibling below proves the gate does NOT short-circuit when
+    // only the identity matches.
     await setupHome({ systemPatternAutoUpdate: true });
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -1706,7 +1738,86 @@ describe("checkAndUpdateDefaultPattern", () => {
     }
     const message = thrown instanceof Error ? thrown.message : String(thrown);
     expect(message).toContain("default-root heal failed");
-    expect(message).toContain("is already the pinned identity");
+    expect(message).toContain("is already the pinned entry");
+    expect(message).toContain("#default");
+  });
+
+  it("rolls forward a root pinned to the current artifact under an obsolete symbol", async () => {
+    // The symbol-differs case (P2): the root is pinned to the CURRENT official
+    // artifact identity but under an obsolete export symbol. That entry loads
+    // for real (it is a genuine export of the served module) yet fails
+    // migration; the heal MUST NOT short-circuit on the shared identity — it
+    // must roll forward to the official `default` entry. A gate that compared
+    // identity alone treated this as already-official and left it unhealable.
+    await setupHome({ systemPatternAutoUpdate: true });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    await manager.stopPiece(root);
+
+    // The toolshed serves the two-export module. Compile BOTH exports from it:
+    // they share one identity and differ only by symbol.
+    stub.setSource(SOURCE_HOME_TWO_EXPORT);
+    const resolved = await runtime.harness.resolve(
+      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+    );
+    const legacyPattern = await runtime.patternManager.compilePattern(
+      { ...resolved, mainExport: "legacyHome" },
+      { space: manager.getSpace() },
+    );
+    const legacyRef = runtime.patternManager.getArtifactEntryRef(
+      legacyPattern,
+    )!;
+    const officialPattern = await runtime.patternManager.compilePattern(
+      { ...resolved, mainExport: "default" },
+      { space: manager.getSpace() },
+    );
+    const officialRef = runtime.patternManager.getArtifactEntryRef(
+      officialPattern,
+    )!;
+    // Same module ⇒ same identity; only the symbol differs.
+    expect(legacyRef.identity).toBe(officialRef.identity);
+    expect(legacyRef.symbol).toBe("legacyHome");
+    expect(officialRef.symbol).toBe("default");
+
+    // Pin the (stopped) root to the obsolete-symbol entry.
+    const { error: pinError } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: legacyRef.identity,
+        symbol: "legacyHome",
+      });
+    });
+    expect(pinError).toBeUndefined();
+
+    // Reject ONLY the obsolete-symbol repair (its migration fails); the
+    // roll-forward materialize of the `default` entry runs for real and heals.
+    const restore = patchRunSynced((opts) => {
+      const symbol = (opts?.expectedPatternIdentity as { symbol?: string })
+        ?.symbol;
+      return symbol === "legacyHome"
+        ? Promise.reject(new Error(MIGRATION_REJECTION))
+        : "real";
+    });
+    try {
+      await controller.ensureDefaultPattern();
+    } finally {
+      restore();
+    }
+    await runtime.idle();
+
+    // Healed by roll-forward to the `default` entry (not short-circuited),
+    // displacing the obsolete-symbol pin for recovery.
+    const after = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(officialRef.identity);
+    expect(getPatternIdentityRef(after)?.symbol).toBe("default");
+    const displaced = (after as unknown as {
+      getMetaRaw: (k: string) => unknown;
+    }).getMetaRaw("displacedPattern") as { symbol?: string } | undefined;
+    expect(displaced?.symbol).toBe("legacyHome");
   });
 
   it("surfaces a clear error when the official pattern cannot be compiled", async () => {
