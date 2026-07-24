@@ -66,10 +66,9 @@ Two hypotheses from the hand-off are **ruled out**:
 - **Runner level: the bug is alive at head.** A minimal unit test (container
   with a `required` property whose value links to a session-scoped doc, read
   from a fresh session) reproduces the whole-object void at `f723939df`. Draft
-  test: `packages/runner/test/scoped-link-whole-object-read.test.ts` (in this
-  worktree, uncommitted; 5 cases: writer-session control ok, child-path ok,
-  required whole-object read FAILS, non-required variant ok, schema-less read
-  ok).
+  test: `packages/runner/test/scoped-link-whole-object-read.test.ts` (committed
+  on this branch; 5 cases: writer-session control ok, child-path ok, required
+  whole-object read FAILS, non-required variant ok, schema-less read ok).
 - **End-to-end: the lunch-poll repro no longer fires at head.** A live check
   (local toolshed at head, fresh deploy, fresh-session path-less read) returns
   the full ~21KB result JSON, exit 0 — with and without `--step`. The end-to-end
@@ -217,9 +216,41 @@ own review; do not block Phases 0-2 on it.
 
 ## Bisect verdict
 
-PENDING — a bisect of `0654af4b4..f723939df` with the live lunch-poll repro is
-running; this section records which commit fixed the e2e symptom and whether it
-was intentional + tested. Phase 0 step 2 depends on it.
+Bisect of `0654af4b4..f723939df` with the live lunch-poll repro (fresh space per
+commit, local toolshed, path-less read). **Two transitions in the range, not
+one:**
+
+1. `3779114df` ([#4874](https://github.com/commontoolsinc/labs/pull/4874),
+   mathpirate) — silent `undefined` (exit 0) becomes the explicit exit-1
+   diagnostic ("stored data is present, but its schema could not resolve all
+   required values. Use --step…"). Intentional for this symptom's CLI half;
+   pinned by `piece.test.ts` + a `piece-integration.test.ts` shard.
+2. `3e3754b7f` ([#4959](https://github.com/commontoolsinc/labs/pull/4959),
+   mathpirate, merged 2026-07-23) — the plain path-less read starts returning
+   the full 21.5KB JSON. **Pattern-side and incidental**: the PR's motivation is
+   the frozen poll clock; it swaps the bare one-shot `#now` wish (a
+   session-linked value the CLI's fresh session could not materialize) for the
+   shared per-space `#now/300` tick and removes the per-session `today` cell.
+   `cf piece get` is never mentioned. Every other suspect commit (`b447793fc`,
+   `2bfe0ff24`, `daa877a2e`, `639d989a7`) left the outcome unchanged.
+
+Consequences for the plan:
+
+- **Nothing pins the e2e success.** If any pattern reintroduces a bare
+  `#now`/session-scoped required output, the plain read regresses to the #4874
+  error (loud, at least — not silent). Phase 0 step 2 is therefore required.
+  Open puzzle to resolve there: the live check found the #4874 fixture
+  (`session-derived-result.tsx`) also reads fine without `--step` at head, yet
+  #4874's integration test ("reports present result data that cannot project in
+  a fresh session") expects exit 1 — reconcile these (test-harness vs
+  manual-deploy difference? fixture shape not actually session-scoped?) before
+  choosing the new fixture; the e2e pin needs a fixture with a genuinely
+  session-scoped required output.
+- The bug's original severity stands confirmed: at the tag, the CLI printed
+  literal `undefined` with exit 0 — the exact landmine Loom stepped on.
+- The runner-level collapse (Phase 1's target) is untouched by both transitions
+  — our committed runner test still fails at head, and CT-1642 / CT-1863-family
+  consumers still hit it.
 
 ## Acceptance criteria (from the hand-off, mapped)
 
