@@ -135,7 +135,7 @@ export default pattern(() => {
   const action_add_third_topic = action(() => {
     board.addTopic.send({
       title: "Composed topic",
-      body: "  seeded at create  ",
+      body: "    indented code\nline two\n",
       agentName: "Sol",
     });
   });
@@ -298,9 +298,10 @@ export default pattern(() => {
     board.topicCount === 3 &&
     board.topics?.[2]?.title === "Composed topic" &&
     board.topics?.[2]?.createdBy?.name === "Sol" &&
-    // Body-at-create: trimmed, present immediately, and NOT a body update —
-    // the update stamps stay unset (createdBy covers create authorship).
-    board.topics?.[2]?.body === "seeded at create" &&
+    // Body-at-create: preserved VERBATIM (whitespace-sensitive Markdown must
+    // survive, matching setBody), and NOT a body update — the update stamps
+    // stay unset (createdBy covers create authorship).
+    board.topics?.[2]?.body === "    indented code\nline two\n" &&
     (board.topics?.[2]?.bodyUpdatedBy?.name ?? "") === "" &&
     (board.topics?.[2]?.bodyUpdatedAt ?? 0) === 0
   );

@@ -2,8 +2,9 @@
  * Rejection-path tests for the Topics mutating verbs (verb contract rule 4,
  * docs/plans/pattern-verb-contract.md: rejection is a value, never a silent
  * no-op). Every action here makes a verb throw, so the runtime errors are
- * expected (`allowRuntimeErrors`); each assertion then verifies the write did
- * NOT land. Happy and legacy paths live in topics.test.tsx — including the UI
+ * required (`expectRuntimeErrors: 9` — exact count, so a rejection quietly
+ * reverting to a silent return fails the suite); each assertion then verifies
+ * the write did NOT land. Happy and legacy paths live in topics.test.tsx — including the UI
  * composer wrappers, whose silent guards are correct behavior (an empty draft
  * is a non-event in a composer, not a headless mutation).
  */
@@ -96,8 +97,11 @@ export default pattern(() => {
   );
 
   return {
-    // Every rejection below surfaces as a thrown handler error by design.
-    allowRuntimeErrors: true,
+    // Every rejection below MUST surface as a thrown handler error — nine
+    // throwing actions, nine runtime errors. The exact count means a single
+    // verb quietly reverting to a silent early-return fails this suite; the
+    // no-write assertions then prove the throw also blocked the write.
+    expectRuntimeErrors: 9,
     tests: [
       { action: action_seed_topic },
       { assertion: assert_seeded },

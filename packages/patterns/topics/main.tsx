@@ -180,7 +180,9 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
       title: trimmed,
       // Body at create is part of the create's atomic unit; created-with is
       // not an update, so bodyUpdatedBy/At stay unset (createdBy covers it).
-      body: (body ?? "").trim(),
+      // Preserved verbatim, matching setBody and the UI save path — trimming
+      // would corrupt whitespace-sensitive Markdown (indented code blocks).
+      body: body ?? "",
       createdAt: Date.now(),
       createdBy: author,
       createdByName: legacyName,
