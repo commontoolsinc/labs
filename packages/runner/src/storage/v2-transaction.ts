@@ -1078,8 +1078,10 @@ export class V2StorageTransaction implements IStorageTransaction {
   // intent is left untouched — a reshape before any op is fine, and a later op on
   // that path is still mergeable.
   poisonMergeableOp(address: IMemorySpaceAddress): void {
-    const ready = this.editable();
-    if (ready.error) return;
+    // Only ever called right after a write on this transaction, so the tx is
+    // editable — no editable() re-check. The write also made the address's
+    // document writable, but a caller could resolve to a different (read-only)
+    // slot, so a non-writable target is a real no-op.
     const doc = this.writableMergeableTarget(address);
     if (!doc) return;
     const pathKey = encodePointer(address.path);
