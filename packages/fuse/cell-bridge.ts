@@ -341,6 +341,10 @@ export class CellBridge {
     UnhydratedEntityRootInfo
   >();
   private pendingEntityHydrations = new Map<bigint, Promise<boolean>>();
+  private pendingEntityDirectorySnapshots = new Map<
+    SpaceState,
+    Promise<readonly DirectorySnapshotEntry[]>
+  >();
   private entityProjectionLru = new Map<bigint, UnhydratedEntityRootInfo>();
   private entityProjectionEvictionCandidates = new Map<
     bigint,
@@ -854,6 +858,7 @@ export class CellBridge {
       this.unregisterPieceRoot(ino);
     }
     this.pendingPieceHydrations.delete(spaceName);
+    this.pendingEntityDirectorySnapshots.delete(state);
     this.pieceSyncs.delete(spaceName);
     this.syncAgain.delete(spaceName);
     this.tree.removeChild(
@@ -1232,13 +1237,7 @@ export class CellBridge {
   ): Promise<readonly DirectorySnapshotEntry[] | undefined> {
     const entities = this.stateForEntitiesDir(ino);
     if (entities) {
-      const ids = await this.listEntityIdsForSnapshot(entities.state);
-      this.pruneEntityProjections(entities.state, ids);
-      return collectVirtualDirectorySnapshot(
-        this.tree,
-        ino,
-        ids.map((id) => encodeFuseComponent(id)),
-      );
+      return await this.entityDirectorySnapshot(entities.state);
     }
 
     if (this.isEntityProjectionDirectory(ino)) {
@@ -2721,6 +2720,32 @@ export class CellBridge {
       else high = middle - 1;
     }
     return false;
+  }
+
+  private entityDirectorySnapshot(
+    state: SpaceState,
+  ): Promise<readonly DirectorySnapshotEntry[]> {
+    const existing = this.pendingEntityDirectorySnapshots.get(state);
+    if (existing) return existing;
+    const pending = this.loadEntityDirectorySnapshot(state).finally(() => {
+      if (this.pendingEntityDirectorySnapshots.get(state) === pending) {
+        this.pendingEntityDirectorySnapshots.delete(state);
+      }
+    });
+    this.pendingEntityDirectorySnapshots.set(state, pending);
+    return pending;
+  }
+
+  private async loadEntityDirectorySnapshot(
+    state: SpaceState,
+  ): Promise<readonly DirectorySnapshotEntry[]> {
+    const ids = await this.listEntityIdsForSnapshot(state);
+    this.pruneEntityProjections(state, ids);
+    return collectVirtualDirectorySnapshot(
+      this.tree,
+      state.entitiesIno,
+      ids.map((id) => encodeFuseComponent(id)),
+    );
   }
 
   private async listEntityIdsForSnapshot(state: SpaceState): Promise<string[]> {
