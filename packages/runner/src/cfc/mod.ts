@@ -86,6 +86,10 @@ export type {
   InspectConfLabelResult,
   LabelAtomProjection,
 } from "./label-introspection.ts";
+export {
+  CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
+  CfcSchemaMigrationError,
+} from "./migration-reason.ts";
 export { LABEL_METADATA_OBSERVATION } from "./observation-classes.ts";
 export type { LabelMetadataObservationClass } from "./observation-classes.ts";
 export {

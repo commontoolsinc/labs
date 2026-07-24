@@ -8,6 +8,7 @@ import {
   Runtime,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
 import { createSession, Identity } from "@commonfabric/identity";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { PieceManager } from "../src/manager.ts";
@@ -1337,10 +1338,15 @@ describe("checkAndUpdateDefaultPattern", () => {
         | { expectedPatternIdentity?: { identity?: string } }
         | undefined;
       if (opts?.expectedPatternIdentity?.identity === oldRef.identity) {
+        // The EXACT string the runner surfaces for this class: the commit
+        // wrapper, the `not prepared` middle, then the machine token the CFC
+        // prepare tags on (see migration-reason.ts / runner.ts). Built from the
+        // shared token constant so the gate's predicate is exercised as shipped.
         return Promise.reject(
           new Error(
-            "CFC enforcement rejected commit: required field favorites " +
-              "needs a default to preserve old documents",
+            "CFC enforcement rejected commit: relevant transaction was not " +
+              `prepared: ${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: ` +
+              "required field favorites needs a default to preserve old documents",
           ),
         );
       }
@@ -1385,6 +1391,212 @@ describe("checkAndUpdateDefaultPattern", () => {
       return u.pathname === HOME_PATTERN_URL && !u.searchParams.has("identity");
     });
     expect(homeSourceFetches.some((f) => f.cache === "no-cache")).toBe(true);
+  });
+
+  // Shared estuary scaffolding for the roll-forward edge cases below: age a
+  // home doc with a favorites-less vintage, then pin the (stopped) root
+  // sourceless to an OLD required-favorites home.tsx that loads but cannot
+  // migrate the aged doc. Returns the pinned OLD ref and the OFFICIAL identity
+  // a successful roll-forward should reach. Mirrors the happy-path test above.
+  const pinOldRequiredHome = async () => {
+    await setupHome({ systemPatternAutoUpdate: true });
+    expect(runtime.cfcEnforcementMode).not.toBe("disabled");
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    await manager.stopPiece(root);
+
+    stub.setSource(SOURCE_HOME_OLD_REQUIRED);
+    const oldResolved = await runtime.harness.resolve(
+      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+    );
+    const oldPattern = await runtime.patternManager.compilePattern(
+      { ...oldResolved, mainExport: "default" },
+      { space: manager.getSpace() },
+    );
+    const oldRef = runtime.patternManager.getArtifactEntryRef(oldPattern)!;
+    const { error: pinError } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: oldRef.identity,
+        symbol: "default",
+      });
+    });
+    expect(pinError).toBeUndefined();
+
+    // Toolshed now serves OFFICIAL; derive its compiled identity the same way
+    // the heal does, so `officialId` is exactly the roll-forward's target.
+    stub.setSource(SOURCE_HOME_OFFICIAL_DEFAULTED);
+    const officialResolved = await runtime.harness.resolve(
+      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+    );
+    const officialPattern = await runtime.patternManager.compilePattern(
+      { ...officialResolved, mainExport: "default" },
+      { space: manager.getSpace() },
+    );
+    const officialId =
+      runtime.patternManager.getArtifactEntryRef(officialPattern)!.identity;
+    expect(officialId).not.toBe(oldRef.identity);
+    return { root, oldRef, officialId };
+  };
+
+  // The full production rejection string for the recoverable class, built from
+  // the shared token so the gate is exercised exactly as shipped.
+  const MIGRATION_REJECTION =
+    "CFC enforcement rejected commit: relevant transaction was not prepared: " +
+    `${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: required field favorites ` +
+    "needs a default to preserve old documents";
+
+  const patchRunSynced = (
+    impl: (
+      opts: { expectedPatternIdentity?: { identity?: string } } | undefined,
+    ) => Promise<unknown> | "real",
+  ) => {
+    const rt = runtime as unknown as {
+      runSynced: (...args: unknown[]) => Promise<unknown>;
+    };
+    const real = rt.runSynced.bind(runtime);
+    rt.runSynced = (...args: unknown[]) => {
+      const opts = args[3] as
+        | { expectedPatternIdentity?: { identity?: string } }
+        | undefined;
+      const out = impl(opts);
+      return out === "real" ? real(...args) : out;
+    };
+    return () => {
+      rt.runSynced = real;
+    };
+  };
+
+  it("stays fail-closed when the repair fails with a CFC rejection that is NOT a schema migration", async () => {
+    // The negative twin of the roll-forward test: a repair rejection that
+    // carries the `CFC enforcement rejected commit` PREFIX but is NOT the
+    // additive-required migration class (here: a prepared-digest race). Those
+    // reflect ordering/policy/provenance faults, not "the pinned pattern is
+    // wrong", so the backstop must NOT repoint the root. The bare-prefix
+    // predicate this replaces would have wrongly rolled forward here.
+    const { root, oldRef, officialId } = await pinOldRequiredHome();
+    const restore = patchRunSynced((opts) =>
+      opts?.expectedPatternIdentity?.identity === oldRef.identity
+        ? Promise.reject(
+          new Error("CFC enforcement rejected commit: prepared digest changed"),
+        )
+        : "real"
+    );
+    let thrown: unknown;
+    try {
+      await controller.ensureDefaultPattern();
+    } catch (error) {
+      thrown = error;
+    } finally {
+      restore();
+    }
+    // Fail-closed: the ORIGINAL cold-start failure surfaces, not a heal error…
+    expect(String(thrown)).toContain("Handler used as lift");
+    expect(String(thrown)).not.toContain("default-root heal failed");
+    // …and the root's identity is untouched — no roll-forward, no displacement.
+    const after = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(oldRef.identity);
+    expect(getPatternIdentityRef(after)?.identity).not.toBe(officialId);
+    expect(
+      (after as unknown as { getMetaRaw: (k: string) => unknown })
+        .getMetaRaw("displacedPattern"),
+    ).toBeUndefined();
+    void root;
+  });
+
+  it("aborts the roll-forward swap fail-closed if the root identity changed underneath it", async () => {
+    // Blocking-2 guard: `editWithRetry` reruns the swap callback against fresh
+    // state, so a concurrent heal that repoints the root between the failed
+    // repair and our swap must NOT be clobbered by our stale `officialRef`. We
+    // simulate the concurrent heal inside the repair rejection, repointing the
+    // root to a THIRD (loadable) identity, then reject with the migration
+    // signal so the roll-forward proceeds to the swap — where the precondition
+    // must see the changed identity and abort.
+    const { root, oldRef, officialId } = await pinOldRequiredHome();
+
+    // A distinct, loadable identity for the "concurrent heal" to install.
+    stub.setSource(SOURCE_V3_HANDLER);
+    const otherResolved = await runtime.harness.resolve(
+      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+    );
+    const otherPattern = await runtime.patternManager.compilePattern(
+      { ...otherResolved, mainExport: "default" },
+      { space: manager.getSpace() },
+    );
+    const concurrentId =
+      runtime.patternManager.getArtifactEntryRef(otherPattern)!.identity;
+    expect(concurrentId).not.toBe(oldRef.identity);
+    expect(concurrentId).not.toBe(officialId);
+    stub.setSource(SOURCE_HOME_OFFICIAL_DEFAULTED);
+
+    const restore = patchRunSynced((opts) => {
+      if (opts?.expectedPatternIdentity?.identity === oldRef.identity) {
+        return (async () => {
+          await runtime.editWithRetry((tx) => {
+            root.withTx(tx).setMetaRaw("patternIdentity", {
+              identity: concurrentId,
+              symbol: "default",
+            });
+          });
+          throw new Error(MIGRATION_REJECTION);
+        })();
+      }
+      return "real";
+    });
+    try {
+      // No throw: a superseded swap is a benign outcome, not a failure.
+      await controller.ensureDefaultPattern();
+    } finally {
+      restore();
+    }
+    await runtime.idle();
+    const after = (await manager.getDefaultPattern(false))!;
+    // The concurrent identity survived; our stale roll-forward did NOT clobber
+    // it (no displacement recorded, official identity never installed).
+    expect(getPatternIdentityRef(after)?.identity).toBe(concurrentId);
+    expect(getPatternIdentityRef(after)?.identity).not.toBe(officialId);
+    expect(
+      (after as unknown as { getMetaRaw: (k: string) => unknown })
+        .getMetaRaw("displacedPattern"),
+    ).toBeUndefined();
+  });
+
+  it("surfaces one clear error when the official pattern ALSO fails to migrate", async () => {
+    // The atomic-failure contract: if even the current official pattern cannot
+    // migrate the reused doc, the operator gets ONE error that names WHY —
+    // the pinned pattern's migration failure and the official's — instead of
+    // reverse-engineering scattered logs.
+    const { oldRef, officialId } = await pinOldRequiredHome();
+    const restore = patchRunSynced((opts) =>
+      // Reject BOTH the same-identity repair AND the official materialize.
+      opts?.expectedPatternIdentity
+        ? Promise.reject(new Error(MIGRATION_REJECTION))
+        : "real"
+    );
+    let thrown: unknown;
+    try {
+      await controller.ensureDefaultPattern();
+    } catch (error) {
+      thrown = error;
+    } finally {
+      restore();
+    }
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    expect(message).toContain("default-root heal failed");
+    expect(message).toContain(oldRef.identity);
+    expect(message).toContain("also failed CFC migration");
+    // The underlying migration failure is chained as the cause, not discarded.
+    expect((thrown as Error)?.cause).toBeDefined();
+    // After a failed official materialize the root is pinned to official (the
+    // current best pattern), with the displaced OLD ref recorded for recovery —
+    // the next boot re-attempts official and, if it still cannot migrate,
+    // short-circuits to the same clear error rather than looping.
+    const after = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(officialId);
   });
 
   it("failed cold-start repair stays fail-closed and leaves the doc healable", async () => {

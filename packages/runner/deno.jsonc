@@ -28,6 +28,7 @@
     "./storage/cache.deno": "./src/storage/cache.deno.ts",
     "./toolshed-http-auth": "./src/toolshed-http-auth.ts",
     "./cfc": "./src/cfc/mod.ts",
-    "./cfc/label-view-core": "./src/cfc/label-view-core.ts"
+    "./cfc/label-view-core": "./src/cfc/label-view-core.ts",
+    "./cfc/migration-reason": "./src/cfc/migration-reason.ts"
   }
 }

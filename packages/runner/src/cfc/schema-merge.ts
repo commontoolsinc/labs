@@ -3,7 +3,9 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import { forEachSubschema } from "../schema-walk.ts";
+import { ContextualFlowControl } from "../cfc.ts";
 import { normalizeClause } from "./clause.ts";
+import { CfcSchemaMigrationError } from "./migration-reason.ts";
 import { writerClaimFilesCorrespond } from "./writer-claim-correspondence.ts";
 
 const IFC_KEYS = [
@@ -332,12 +334,21 @@ const assertNoDivergentIfcBranches = (
   }
 };
 
-// A stream slot (`asCell: ["stream"]`) is a runtime-materialized capability
-// marker, not stored document data — see the additive-required exemption in
-// `mergeRequired`.
+// A stream slot is a runtime-materialized capability marker, not stored
+// document data — see the additive-required exemption in `mergeRequired`.
+//
+// Only the field's IMMEDIATE OUTER slot decides what it is, so read the first
+// `asCell` entry (mirroring the canonical stream test in link-utils.ts and
+// schema.ts, which both key on `getAsCellValues(schema).at(0)`). A bare
+// `.includes("stream")` was wrong twice: it exempted `["cell", "stream"]` — a
+// CELL of a stream, whose outer slot is a cell and which therefore holds
+// preservable data — and it missed the scoped-descriptor dialect
+// (`[{ kind: "stream", scope: … }]`), which is a string only under the legacy
+// form. `getAsCellKind` normalizes both dialects.
 const isStreamSlot = (schema: JSONSchema | undefined): boolean =>
-  isRecord(schema) && Array.isArray(schema.asCell) &&
-  schema.asCell.includes("stream");
+  ContextualFlowControl.getAsCellKind(
+    ContextualFlowControl.getAsCellValues(schema).at(0),
+  ) === "stream";
 
 const mergeRequired = (
   existing: readonly string[] | undefined,
@@ -369,7 +380,10 @@ const mergeRequired = (
       continue;
     }
     if (!isRecord(property) || property.default === undefined) {
-      throw new Error(
+      // Typed so the CFC prepare catch can tag this as the recoverable
+      // schema-migration class (see migration-reason.ts) without sniffing the
+      // message. The message text stays human-readable and unchanged.
+      throw new CfcSchemaMigrationError(
         `required field ${name} needs a default to preserve old documents`,
       );
     }

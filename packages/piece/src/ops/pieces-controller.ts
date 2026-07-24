@@ -19,6 +19,7 @@ import {
 import type { CellScope } from "@commonfabric/api";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { type NameSchema, nameSchema } from "@commonfabric/runner/schemas";
+import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
 import { PieceManager } from "../index.ts";
 import { PieceController } from "./piece-controller.ts";
 import { compileProgram } from "./utils.ts";
@@ -70,19 +71,27 @@ const pieceUpdateLogger = getLogger("piece.update", {
 export type UpdateOutcome = PatternUpdateOutcome;
 
 /**
- * A cold-start setup repair failed because the CFC MIGRATION rejected the
- * commit — the pinned pattern loads but cannot migrate the reused doc (a
- * required field predates its default, a handler stream predates its
- * exemption). This is the ONLY repair-failure class the runnability backstop
- * ({@link PiecesController.healDefaultRootByRollForward}) acts on; every other
- * failure stays fail-closed. Detected by the same message prefix the runner
- * uses at its own setup-commit boundary (`runner.ts`), so the two stay in
- * lockstep; matching the message (not the error class) survives the plain-Error
- * re-wrap that layer applies while still excluding non-CFC failures.
+ * A cold-start setup repair failed specifically because the CFC SCHEMA
+ * MIGRATION rejected the commit — the pinned pattern loads but cannot migrate
+ * the reused doc onto a now-required field that carries no default (the estuary
+ * `favorites` case). This is the ONLY repair-failure class the runnability
+ * backstop ({@link PiecesController.healDefaultRootByRollForward}) acts on;
+ * every other failure stays fail-closed.
+ *
+ * The bare `CFC enforcement rejected commit` prefix is NOT a safe trigger: the
+ * runner emits it for prepared-digest races, unprepared transactions, and
+ * policy/provenance rejections too (`extended-storage-transaction.ts`), none of
+ * which are repaired by repointing the root's pattern identity. So we require
+ * the machine-stable migration token the CFC prepare tags onto this class
+ * (`migration-reason.ts`). Matching a token in the message — not the error
+ * class — is what survives the plain-`Error` re-wrap the runner applies at its
+ * setup-commit boundary (`runner.ts`), keeping producer and consumer in
+ * lockstep across that boundary and across packages.
  */
 const isCfcMigrationRejection = (error: unknown): boolean =>
   error instanceof Error &&
-  error.message.startsWith("CFC enforcement rejected commit");
+  error.message.startsWith("CFC enforcement rejected commit") &&
+  error.message.includes(CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON);
 
 // This module can load outside Deno (browser-safe storage import above), so
 // env reads are guarded like PIECE_TRACE_TIMINGS: absent env ⇒ defaults.
@@ -782,9 +791,12 @@ export class PiecesController<T = unknown> {
       );
       officialRef = runtime.patternManager.getArtifactEntryRef(officialPattern);
     } catch (compileError) {
+      // Chain the ACTUAL compile failure as `cause` (not the migration error):
+      // the migration reason is already named in the message, and the compile
+      // stack is the new information here.
       throw clearError(
         `could not be compiled (${msg(compileError)})`,
-        migrationError,
+        compileError,
       );
     }
     if (officialRef === undefined) {
@@ -804,8 +816,24 @@ export class PiecesController<T = unknown> {
     // Atomic swap: record the displaced pinned ref for recovery, move
     // patternIdentity to the official entry, stamp official provenance. One
     // tx — it commits together or aborts, leaving the root untouched.
+    //
+    // Precondition guard (fail-closed): re-read the root's identity INSIDE the
+    // transaction and proceed only if it still equals the pinned ref we
+    // diagnosed. `editWithRetry` reruns this callback against fresh state on
+    // conflict, so without the guard a concurrent heal (another boot, the
+    // pattern updater) that already repointed the root would be blindly
+    // clobbered by our stale `officialRef`. Returning `false` aborts the write
+    // without committing — precedent: pattern-updater's `stillMatches`/
+    // `canWrite`. `result.ok === false` (no error) then means "superseded".
     const swapResult = await runtime.editWithRetry((tx) => {
       const rootTx = rootToStart.withTx(tx);
+      const currentRef = getPatternIdentityRef(rootTx);
+      if (
+        currentRef?.identity !== pinnedRef.identity ||
+        currentRef?.symbol !== pinnedRef.symbol
+      ) {
+        return false;
+      }
       rootTx.setMetaRaw("displacedPattern", {
         identity: pinnedRef.identity,
         symbol: pinnedRef.symbol,
@@ -813,12 +841,28 @@ export class PiecesController<T = unknown> {
       });
       rootTx.setMetaRaw("patternIdentity", officialRef);
       setPatternSource(rootToStart, tx, officialUrlPath);
+      return true;
     });
     if (swapResult.error) {
+      // Chain the actual commit failure as `cause` (the migration reason is
+      // already in the message).
       throw clearError(
         `identity swap could not commit (${msg(swapResult.error)})`,
-        migrationError,
+        swapResult.error,
       );
+    }
+    if (!swapResult.ok) {
+      // The root was healed/repointed out from under us between the failed
+      // repair and this swap. Do not overwrite the newer identity; let the
+      // caller re-resolve and start whatever now holds the root.
+      pieceUpdateLogger.warn(
+        "default-root-roll-forward-superseded",
+        () => [
+          "startEnsuredDefaultPattern: root identity changed before roll-forward;",
+          `leaving concurrent heal in place for ${space}`,
+        ],
+      );
+      return await this.#manager.getDefaultPattern(false) ?? rootToStart;
     }
 
     // Re-resolve so the materialize observes the committed patternIdentity
