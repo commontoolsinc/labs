@@ -5462,6 +5462,11 @@ const resolvePendingReads = (
       resolutions.set(read.localSeq, resolution);
     }
 
+    // A resolutionOnly read asserts only that the dependency localSeq resolved
+    // to a durable commit (a lower layer of the reader's pending stack
+    // exists); the staleness check belongs to the top-of-stack pending read.
+    if (read.resolutionOnly === true) continue;
+
     const conflictSeq = findConflictSeq(
       engine,
       branch,
@@ -5583,6 +5588,11 @@ const schedulerObservationReadDropReason = (
       };
       resolutions.set(read.localSeq, resolution);
     }
+
+    // Same exemption as resolvePendingReads: a resolutionOnly read only
+    // requires the dependency to have resolved (checked above); staleness is
+    // the top-of-stack read's job.
+    if (read.resolutionOnly === true) continue;
 
     const conflictSeq = findConflictSeq(
       engine,

@@ -169,6 +169,16 @@ export interface PendingRead {
   localSeq: number;
   /** See {@link ConfirmedRead.nonRecursive}. */
   nonRecursive?: boolean;
+  /**
+   * When true, this read asserts ONLY that `localSeq` resolved to a durable
+   * commit — i.e. a lower layer of the reader's pending stack exists — and is
+   * exempt from the staleness (conflict) check entirely. Emitted for the
+   * non-top layers of a stacked pending read: the top-of-stack pending read
+   * carries the full path and remains staleness-bearing, so path staleness is
+   * still checked exactly once per read. Absent/false ⇒ full pending read
+   * (the historical behavior: resolution AND staleness).
+   */
+  resolutionOnly?: boolean;
 }
 
 export interface SchedulerObservationCommit {
