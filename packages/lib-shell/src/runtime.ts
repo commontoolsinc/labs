@@ -157,6 +157,13 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    */
   patternCoverage?: boolean;
   /**
+   * When true, the worker's remote storage overlaps watch-refresh round trips
+   * up to a bounded window instead of strict single-flight
+   * (`experimentalConcurrentWatchRefresh`). Dogfood flag, default off; fixed at
+   * StorageManager.open time so it takes effect on the next runtime (reload).
+   */
+  concurrentWatchRefresh?: boolean;
+  /**
    * Override the runtime worker URL. By default, deployed builds use the
    * immutable `/builds/<clientVersion>/` asset namespace while local builds
    * fall back to `/scripts/worker-runtime.js`.
@@ -244,6 +251,7 @@ export function createRuntimeClientOptions({
   trustSnapshot,
   forwardWorkerConsole,
   patternCoverage,
+  concurrentWatchRefresh,
 }: {
   session: Session;
   apiUrl: URL;
@@ -255,6 +263,7 @@ export function createRuntimeClientOptions({
   trustSnapshot?: RuntimeTrustSnapshot | null;
   forwardWorkerConsole?: boolean;
   patternCoverage?: boolean;
+  concurrentWatchRefresh?: boolean;
 }) {
   const resolvedTrustSnapshot = trustSnapshot === undefined
     ? {
@@ -284,6 +293,7 @@ export function createRuntimeClientOptions({
     trustSnapshot: resolvedTrustSnapshot,
     forwardWorkerConsole,
     patternCoverage,
+    concurrentWatchRefresh,
   };
 }
 
@@ -650,6 +660,7 @@ export class RuntimeInternals extends EventTarget {
     clientVersion,
     forwardWorkerConsole,
     patternCoverage,
+    concurrentWatchRefresh,
     getBuildHash = fetchBuildHash,
     workerUrl,
     navigate,
@@ -708,6 +719,7 @@ export class RuntimeInternals extends EventTarget {
         trustSnapshot,
         forwardWorkerConsole,
         patternCoverage,
+        concurrentWatchRefresh,
       }),
     );
 

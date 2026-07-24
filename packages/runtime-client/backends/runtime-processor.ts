@@ -47,7 +47,10 @@ import {
   stripSigilCfcLabelViews,
 } from "@commonfabric/runner/cfc";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
-import { StorageManager } from "../../runner/src/storage/cache.ts";
+import {
+  defaultSettings,
+  StorageManager,
+} from "../../runner/src/storage/cache.ts";
 import {
   getMetaLink,
   KeepAsCell,
@@ -516,6 +519,14 @@ export class RuntimeProcessor {
       spaceIdentity: spaceIdentity,
       memoryHost: apiUrlObj,
       spaceHostMap: data.spaceHostMap,
+      // Host dogfood toggle (commonfabric.concurrentWatchRefresh): overlap
+      // watch-refresh round trips up to a bounded window. Off unless the host
+      // set it; the default is strict single-flight.
+      settings: {
+        ...defaultSettings,
+        experimentalConcurrentWatchRefresh:
+          data.concurrentWatchRefresh === true,
+      },
     });
 
     // Mirror the durability barrier to the page: `pending` is true while any

@@ -611,8 +611,15 @@ the per-epic implementation notes).
   passed through `StorageManager` settings. The runner mirrors it onto each
   memory session via `SpaceSession.setConcurrentWatchRefresh()`
   ([`packages/memory/v2/client.ts`](../../packages/memory/v2/client.ts)) —
-  per-session, not a process global.
-- **Added by.** Ben Follington (#4937).
+  per-session, not a process global. In the **shell** it is a per-browser-profile
+  dogfood toggle: run `commonfabric.concurrentWatchRefresh(true)` in the console
+  and reload. The flag crosses the worker IPC in `InitializationData` and is
+  fixed at `StorageManager.open` time, so — like the render ceiling — it takes
+  effect on the next runtime (reload), not live. Threaded shell → worker via
+  `runtimeHostFlags()`
+  ([`packages/shell/src/lib/host-toggles.ts`](../../packages/shell/src/lib/host-toggles.ts))
+  → `RuntimeInternals.create` → `runtime-processor.ts`'s storage settings.
+- **Added by.** Ben Follington (#4937; shell dogfood toggle in a follow-up PR).
 - **Purpose.** By default watch acquisition is strict single-flight per space: a
   guard holds every watch refresh after the first until the prior response
   lands, so traversal-driven pulls discovered a tick apart serialize into
