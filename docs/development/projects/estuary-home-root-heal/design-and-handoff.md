@@ -1,6 +1,42 @@
 # Estuary home-root heal — design & handoff
 
-**Status:** in progress · branch `ct/system-root-rollforward-loadable-stale` (off `origin/main`) · **Updated:** 2026-07-24
+**Status:** incident fix implemented & green · branch `ct/system-root-rollforward-loadable-stale` (off `origin/main`) · **Updated:** 2026-07-24
+
+## What landed on this branch (the incident PR)
+
+Both halves of the unbrick, shipped together because **neither heals alone**:
+
+- **`d3ffceb6f` — #4936 folded in** (stream additive-required exemption +
+  `defaultProfile?` + its schema-merge/home tests). Load-bearing, not
+  superseded: `defaultProfile` was *actually* required-no-default in the
+  deployed `home.tsx` (the schema-generator keys `required` off the `?` marker,
+  not the value type), so the current pattern's migration throws without it —
+  one layer past #4933's data fields — and so would element 2's roll-forward.
+  #4936's own PR is closed in favour of this fold (stale 25-commit base + one
+  red check; refreshed here).
+- **`b1e49a2df` — element 2: the runnability backstop.** `startEnsuredDefault-
+  Pattern`'s cold-start repair now escalates on **exactly one signal** —
+  `isCfcMigrationRejection` (the `"CFC enforcement rejected commit"` prefix the
+  runner uses at its own setup boundary) — and rolls the root forward to the
+  space's CURRENT official pattern (ETag-revalidated compile), swapping identity
+  + recording `displacedPattern` + materializing it. Every OTHER repair failure
+  stays **fail-closed** (original error surfaces, nothing changes). One
+  enforce-on test drives the full orchestration with a **functional read**
+  (favorites materializes to its default, handler stream fires end to end); the
+  existing fail-closed tests stay green unchanged.
+
+Green: full `packages/piece/test/` (22 files / 258 steps) +
+`cfc-additive-default-preserves-old-doc.test.ts` (3 steps).
+
+**Deferred to a follow-up PR (the simplification):** element 1 (input/output
+CFC distinction) + element 3 (migration-kind matrix). Those *retire* #4933's
+per-field defaults and #4936's exemptions; they are correctness-simplifying,
+not incident-critical, and element 1 hinges on the still-open role-threading
+crux below. Do NOT block the unbrick on them.
+
+---
+
+### Original plan (below) — kept for the root-cause record
 
 This is the resume-from-cold handoff for the Estuary "home space bricked" incident.
 It captures the confirmed root cause, the PR we're building, exact code locations,
@@ -191,12 +227,20 @@ Three blind spots let every fix pass green while prod failed:
 - Deferred (Linear, see below): vintage corpus, acceptance gate, harness enforce-on
   default, explicit custom-root protection.
 
-## Branch state at handoff
+## Branch state
 
-- `ct/system-root-rollforward-loadable-stale` off `origin/main`, nothing committed yet.
-- Uncommitted (subagent mid-flight): `packages/piece/src/ops/pieces-controller.ts`
-  (element 2), plus a scratch test file. `pattern-updater.ts` should be clean (reverted).
-- Next actions on resume: (a) get element-2 result from the subagent / finish it; (b)
-  trace the input/output role-threading (the crux) and implement element 1; (c) write
-  the matrix test (element 3); (d) enforce-on + functional-read for all tests; (e)
-  open the PR with this doc's characterization as the body.
+- `ct/system-root-rollforward-loadable-stale` off `origin/main`. Commits:
+  `098531184` (this doc) · `d3ffceb6f` (#4936 fold) · `b1e49a2df` (element 2 +
+  test). `pattern-updater.ts` untouched (its loadability gate is fine; the
+  runnability backstop is the layer below it).
+- Element 2's heal is **two commits, not atomic** (runSynced owns its own setup
+  tx and asserts the identity is already pinned, so the swap must precede it).
+  On a swap-then-materialize-fails path the root is left pinned-to-official but
+  un-setup — the "already moved" state the same-identity repair heals next boot,
+  never worse than the pinned-unmigratable root we started from. Documented at
+  the method; acceptable, not silent.
+- Next actions: (a) **acceptance-test the incident PR against a real bricked
+  vintage before deploy** (CT-1902) — the deferred gate that would have caught
+  this class; (b) open + deploy the incident PR; (c) follow-up PR: element 1
+  (trace the role-threading crux first) + element 3 matrix, retiring #4933/#4936
+  (CT-1904).
