@@ -410,11 +410,11 @@ Deno.test("gated tiles gray out cleanly without their env", async () => {
   }
 });
 
-Deno.test("discord snapshot: splits online members into Team Member and Visitors", () => {
+Deno.test("discord snapshot: splits online members into Team and Visitors", () => {
   const guild = {
     id: "g",
     roles: [
-      { id: "team", name: "Team Member", color: 0x2ecc71, position: 5 },
+      { id: "team", name: "Team", color: 0x2ecc71, position: 5 },
       { id: "g", name: "@everyone", color: 0, position: 0 },
     ],
     members: [
@@ -431,6 +431,7 @@ Deno.test("discord snapshot: splits online members into Team Member and Visitors
     ],
   };
   const snap = buildSnapshot(guild);
+  assert(snap);
   assertEquals(snap.online, 3); // a, b, d (c is offline)
   assertEquals(snap.team, 2); // a, d carry the role and are online
   assertEquals(snap.visitors, 1); // b

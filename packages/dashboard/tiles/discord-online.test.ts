@@ -30,7 +30,7 @@ function ctx(env: Record<string, string> = {}): Ctx {
 const GUILD = {
   id: "g1",
   roles: [
-    { id: "team", name: "Team Member", color: 0x2ecc71, position: 5 },
+    { id: "team", name: "Team", color: 0x2ecc71, position: 5 },
     { id: "g1", name: "@everyone", color: 0, position: 0 },
   ],
   members: [
@@ -203,41 +203,43 @@ Deno.test("discord online: neither the token nor the guild id alone earns a colo
 Deno.test("discord snapshot: an online user with no member record counts as a visitor, not team", () => {
   const snap = buildSnapshot({
     id: "g1",
-    roles: [{ id: "team", name: "Team Member", color: 255, position: 5 }],
+    roles: [{ id: "team", name: "Team", color: 255, position: 5 }],
     members: [{ user: { id: "a" }, roles: ["team"] }],
     presences: [
       { user: { id: "a" }, status: "online" },
       { user: { id: "ghost" }, status: "online" }, // present, but not in the member list
     ],
   });
+  assert(snap);
   assertEquals(snap.online, 2);
   assertEquals(snap.team, 1);
   assertEquals(snap.visitors, 1);
   assertEquals(snap.teamColor, "#0000ff"); // a decimal Discord color, zero-padded
 });
 
-Deno.test("discord snapshot: a colorless or absent Team Member role falls back to the visitor grey", () => {
+Deno.test("discord snapshot: a colorless Team role uses the visitor grey", () => {
   const online = [{ user: { id: "a" }, status: "online" }];
   const members = [{ user: { id: "a" }, roles: ["team"] }];
   // The role exists and is counted, but carries Discord's "no color" sentinel.
   const colorless = buildSnapshot({
     id: "g1",
-    roles: [{ id: "team", name: "Team Member", color: 0, position: 5 }],
+    roles: [{ id: "team", name: "Team", color: 0, position: 5 }],
     members,
     presences: online,
   });
+  assert(colorless);
   assertEquals(colorless.team, 1);
   assertEquals(colorless.teamColor, VISITOR_GREY);
-  // No such role in the guild: nobody is team, and there is no color to borrow.
+});
+
+Deno.test("discord snapshot: an absent Team role is not a valid snapshot", () => {
   const missing = buildSnapshot({
     id: "g1",
     roles: [{ id: "g1", name: "@everyone", color: 0, position: 0 }],
-    members,
-    presences: online,
+    members: [{ user: { id: "a" }, roles: ["team"] }],
+    presences: [{ user: { id: "a" }, status: "online" }],
   });
-  assertEquals(missing.team, 0);
-  assertEquals(missing.visitors, 1);
-  assertEquals(missing.teamColor, VISITOR_GREY);
+  assertEquals(missing, null);
 });
 
 // This is the first test that reaches the history, so it is the one that sees the
@@ -271,6 +273,7 @@ Deno.test("discord online: a snapshot -> good; the reloaded history draws the ch
     // What was persisted: the retained sample plus the fresh one. The ancient
     // sample and the entries that are not points are gone.
     assertEquals(w.reads.length, 1);
+    assertStringIncludes(w.reads[0], "fabric-wall-discord-history-v2.json");
     assertEquals(w.writes.length, 1);
     assertEquals(JSON.parse(w.writes[0].data), [
       { t: T0 - 2 * DAY, team: 3, visitors: 4 },
@@ -364,6 +367,24 @@ Deno.test("discord online: an invalid session (op 9) -> gray, never a false gree
     assertEquals(v.status, "unknown");
     assertEquals(v.value, "—");
     assertStringIncludes(v.sub ?? "", "enable the presences + members intents");
+  });
+});
+
+Deno.test("discord online: a missing exact Team role -> gray", async () => {
+  await withWire({}, async (w) => {
+    const view = connect(w);
+    w.socket().deliver({
+      op: 0,
+      t: "GUILD_CREATE",
+      d: {
+        ...GUILD,
+        roles: [{ id: "g1", name: "@everyone", color: 0, position: 0 }],
+      },
+    });
+    const v = await view;
+    assertEquals(v.status, "unknown");
+    assertEquals(v.value, "—");
+    assertStringIncludes(v.sub ?? "", "exact Team role");
   });
 });
 
