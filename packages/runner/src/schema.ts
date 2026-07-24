@@ -841,7 +841,9 @@ export function processDefaultValue(
             "help: either allow items with valid schema, or use empty array default",
         );
       }
-      return covering as JSONSchema;
+      // Thread the array schema's $defs so a $ref slot resolves during
+      // recursive default processing (PR #4969 review).
+      return branchWithParentDefs(resolvedSchema, covering as JSONSchema);
     };
 
     const result = defaultValue.map((item, i) =>
