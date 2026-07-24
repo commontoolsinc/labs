@@ -688,6 +688,63 @@ const refreshForeignMountForWake = async (
   }
 };
 
+/**
+ * C3.11: hydrate the read-only foreign mount for a claimed cross-space-READ
+ * action BEFORE its first run under a newly activated claim — the same
+ * authenticated point read `refreshForeignMountForWake` issues on a wake, but
+ * driven by claim ACTIVATION so the very first served run is stamped.
+ *
+ * Why this is load-bearing (the composed-serve defect this closes): without a
+ * pre-run mount, the initial claimed run reads the foreign source through the
+ * home mirror WITHOUT a served-point-read stamp, so `foreignReadStampsForAction`
+ * yields nothing, the accepted observation floors at SESSION (the conservative
+ * no-provenance posture — `claimedForeignReadFloorExempt` requires the engine's
+ * accept-path provenance, which requires the stamps), and the SPACE-rank
+ * cross-space-read claim fences it `claim-context-mismatch`. The fence loses the
+ * claim before any foreign wake can refresh the mount, so the composed serve
+ * never recovers. The memory C3.4/C3.5/C3.6 fixtures never caught this because
+ * they hand-attach `foreignReadStamps` to the claimed observation; the real
+ * `executor-worker.ts` run path (first exercised by the C3.11 gate) does not.
+ *
+ * Gated on `claim.crossSpaceReadSpaces`: absent/empty (every same-space claim)
+ * makes this a no-op, so same-space execution is byte-identical. Fail-closed and
+ * bounded exactly like the wake refresh — a denied/failed read lands nothing and
+ * is not retried (the run then settles unserved, the pre-C3.11 behavior), never
+ * a Worker fatal.
+ */
+const hydrateForeignReadMount = async (
+  claim: ExecutionClaim,
+  action: object,
+): Promise<void> => {
+  const manager = storage;
+  if (manager === null) return;
+  const readSpaces = claim.crossSpaceReadSpaces;
+  if (readSpaces === undefined || readSpaces.length === 0) return;
+  const targets = foreignReadTargetsByAction.get(action);
+  if (targets === undefined) return;
+  const readSpaceSet = new Set(readSpaces);
+  for (const address of targets.values()) {
+    if (!readSpaceSet.has(address.space)) continue;
+    if ((address.scope ?? "space") !== "space") continue;
+    try {
+      await manager.readForeignDoc(
+        address.space,
+        foreignReadClaimRef(claim),
+        { id: address.id },
+      );
+    } catch (error) {
+      // Same fail-closed posture as the wake refresh: a denied/failed/fenced
+      // read lands nothing (the run settles unserved) and is not retried.
+      console.warn(
+        "executor foreign mount hydration failed (fail-closed)",
+        address.space,
+        address.id,
+        error,
+      );
+    }
+  }
+};
+
 /** Per-lane hydration ledger (C1.9b): document sync tasks keyed by
  * `scope\0id`, valid for one lane demand generation. Drains, re-anchors,
  * and resetClaims drop the record so the next claimed activation
@@ -1441,6 +1498,11 @@ const startClaimedAction = async (
     pendingCausalActorMatches.delete(identity);
     storage.discardShadowWritesForAction(space, action);
     setLiveClaim(action, claim);
+    // C3.11: a cross-space-read claim's FIRST run must be stamped, or its
+    // accepted observation floors at session and fences the space-rank claim.
+    // No-op for a same-space claim (byte-identical), fail-closed for a foreign
+    // read that cannot be served (the run then settles unserved).
+    await hydrateForeignReadMount(claim, action);
     (action as Action & { prepareClaimedRerun?: () => void })
       .prepareClaimedRerun?.();
     // Scheduler completion means the action transaction has been kicked off,
