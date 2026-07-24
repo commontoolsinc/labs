@@ -18,6 +18,7 @@
 //   DISCORD_BOT_TOKEN, DISCORD_GUILD_ID   online-by-role tile
 //   GH_TOKEN                          GitHub tiles; org Members read also powers
 //                                     the organization-users tile
+//   BLACKSMITH_API_TOKEN              Blacksmith share of the ci-spend tile
 
 import { CI_WORKFLOW, PORT, REPO } from "./config.ts";
 import { TILES } from "./registry.ts";
@@ -34,6 +35,13 @@ const lastRun = new Map<string, number>();
 const runSnapshots = new Map<string, Run[]>();
 const runSourceErrors = new Map<string, string>();
 const lastSourceTileRun = new Map<string, number>();
+interface ActiveTileUpdate {
+  count: number;
+  startedAt: number;
+  stale: boolean;
+}
+const activeTileUpdates = new Map<string, ActiveTileUpdate>();
+const activeRunSourceUpdates = new Set<string>();
 let lastChange = 0;
 let faviconRedSince: number | null = null;
 
@@ -49,7 +57,7 @@ function updateFaviconRedSince(now: number, recoveryIsSettled = true): void {
   const status = faviconStatus(
     TILES.flatMap((tile) => {
       const view = views.get(tile.id);
-      return view ? [view.status] : [];
+      return view ? [activeTileView(tile, view).status] : [];
     }),
   );
   if (status === "bad" || recoveryIsSettled) {
@@ -72,10 +80,13 @@ function dashboardUpdate(currentViews: ReadonlyMap<string, TileView> = views): D
   const wide: string[] = [];
   const statuses: TileView["status"][] = [];
   for (const t of TILES) {
-    const v = currentViews.get(t.id) ?? {
-      label: t.id,
-      status: "unknown" as const,
-    };
+    const v = activeTileView(
+      t,
+      currentViews.get(t.id) ?? {
+        label: t.id,
+        status: "unknown" as const,
+      },
+    );
     statuses.push(v.status);
     (t.wide ? wide : grid).push(renderTile(v, t.id, t.wide));
   }
@@ -113,6 +124,52 @@ export const broadcast = (update: DashboardUpdate) => {
 
 const runSourceKey = (source: RunSource): string => `${source.repo} ${source.workflow}`;
 const runSourceTileKey = (source: RunSource, tile: Tile): string => `${runSourceKey(source)} ${tile.id}`;
+
+function beginTileUpdate(tile: Tile, startedAt: number): void {
+  const active = activeTileUpdates.get(tile.id);
+  if (active) {
+    active.count++;
+  } else {
+    activeTileUpdates.set(tile.id, {
+      count: 1,
+      startedAt,
+      stale: false,
+    });
+  }
+}
+
+function finishTileUpdate(tile: Tile): void {
+  const active = activeTileUpdates.get(tile.id);
+  if (!active || active.count === 1) activeTileUpdates.delete(tile.id);
+  else active.count--;
+}
+
+function allUpdatesSettled(): boolean {
+  return activeTileUpdates.size === 0 && activeRunSourceUpdates.size === 0;
+}
+
+const STALE_UPDATE_MS = 60_000;
+const STALE_UPDATE_SUB = "refresh still pending";
+
+function activeTileView(tile: Tile, view: TileView): TileView {
+  return activeTileUpdates.get(tile.id)?.stale
+    ? { ...view, status: "unknown", sub: STALE_UPDATE_SUB }
+    : view;
+}
+
+function grayStaleTileUpdates(now: number): void {
+  let changed = false;
+  for (const active of activeTileUpdates.values()) {
+    if (active.stale || now - active.startedAt < STALE_UPDATE_MS) continue;
+    active.stale = true;
+    changed = true;
+  }
+  if (changed) {
+    lastChange = now;
+    updateFaviconRedSince(now, false);
+    broadcast(dashboardUpdate());
+  }
+}
 
 interface RunSourceGroup {
   source: RunSource;
@@ -214,38 +271,58 @@ function publishIntermediateView(tile: Tile, view: TileView): void {
 }
 
 // One ticker collects every tile that is due (respecting each tile's interval).
-// A reentrancy guard stops a slow tick from overlapping the next one.
+// Later ticks skip work that is still running and collect the other due tiles.
 const TICK_MS = 15_000;
-let ticking = false;
 export async function tick(tiles: Tile[] = TILES, sourceCtx: Ctx = ctx) {
-  if (ticking) return;
-  ticking = true;
-  try {
-    const now = Date.now();
-    const sourceGroups = groupRunSources(tiles);
-    const sourceTiles = new Set(sourceGroups.flatMap((group) => group.tiles));
-    const dueTiles = tiles.filter((tile) =>
-      !sourceTiles.has(tile) && now - (lastRun.get(tile.id) ?? 0) >= tile.intervalMs
+  const now = Date.now();
+  grayStaleTileUpdates(now);
+  const sourceGroups = groupRunSources(tiles);
+  const sourceTiles = new Set(sourceGroups.flatMap((group) => group.tiles));
+  const activeAtTickStart = new Set(activeTileUpdates.keys());
+  const dueTiles = tiles.filter((tile) =>
+    !sourceTiles.has(tile) &&
+    !activeAtTickStart.has(tile.id) &&
+    now - (lastRun.get(tile.id) ?? 0) >= tile.intervalMs
+  );
+  const dueSources = sourceGroups.flatMap((group) => {
+    if (activeRunSourceUpdates.has(runSourceKey(group.source))) return [];
+    const due = group.tiles.filter((tile) =>
+      !activeAtTickStart.has(tile.id) &&
+      now - (lastSourceTileRun.get(runSourceTileKey(group.source, tile)) ?? 0) >= tile.intervalMs
     );
-    const dueSources = sourceGroups.flatMap((group) => {
-      const due = group.tiles.filter((tile) =>
-        now - (lastSourceTileRun.get(runSourceTileKey(group.source, tile)) ?? 0) >= tile.intervalMs
+    return due.length ? [{ source: group.source, tiles: due }] : [];
+  });
+  if (!dueTiles.length && !dueSources.length) return;
+
+  for (const tile of dueTiles) beginTileUpdate(tile, now);
+  for (const group of dueSources) {
+    activeRunSourceUpdates.add(runSourceKey(group.source));
+    for (const tile of group.tiles) beginTileUpdate(tile, now);
+  }
+
+  const refreshTile = async (tile: Tile) => {
+    let released = false;
+    try {
+      const view = await collectView(
+        tile,
+        sourceCtx,
+        (intermediate) => publishIntermediateView(tile, intermediate),
       );
-      return due.length ? [{ source: group.source, tiles: due }] : [];
-    });
-    if (!dueTiles.length && !dueSources.length) return;
+      finishTileUpdate(tile);
+      released = true;
+      publishViews([{ tile, view }], allUpdatesSettled());
+    } finally {
+      if (!released) finishTileUpdate(tile);
+    }
+  };
 
-    let remaining = dueTiles.length + dueSources.length;
-    const publish = (collected: { tile: Tile; view: TileView }[]) => {
-      remaining--;
-      publishViews(collected, remaining === 0);
-    };
-
-    // Source fetches and dependent collections run independently. Each tile
-    // retains the completed view with the highest snapshot revision.
-    let sourceRevision = 0;
-    const publishedTileRevision = new Map<string, number>();
-    const refreshSource = async (group: RunSourceGroup) => {
+  // Source fetches and dependent collections run independently. Each tile
+  // retains the completed view with the highest snapshot revision.
+  let sourceRevision = 0;
+  const publishedTileRevision = new Map<string, number>();
+  const refreshSource = async (group: RunSourceGroup) => {
+    let released = false;
+    try {
       let runs: Run[] | undefined;
       let error: string | undefined;
       try {
@@ -293,25 +370,22 @@ export async function tick(tiles: Tile[] = TILES, sourceCtx: Ctx = ctx) {
       for (const tile of group.tiles) {
         lastSourceTileRun.set(runSourceTileKey(group.source, tile), completedAt);
       }
-      publish(current);
-    };
+      activeRunSourceUpdates.delete(runSourceKey(group.source));
+      for (const tile of group.tiles) finishTileUpdate(tile);
+      released = true;
+      publishViews(current, allUpdatesSettled());
+    } finally {
+      if (!released) {
+        activeRunSourceUpdates.delete(runSourceKey(group.source));
+        for (const tile of group.tiles) finishTileUpdate(tile);
+      }
+    }
+  };
 
-    await Promise.all([
-      ...dueTiles.map(async (tile) =>
-        publish([{
-          tile,
-          view: await collectView(
-            tile,
-            sourceCtx,
-            (intermediate) => publishIntermediateView(tile, intermediate),
-          ),
-        }])
-      ),
-      ...dueSources.map(refreshSource),
-    ]);
-  } finally {
-    ticking = false;
-  }
+  await Promise.all([
+    ...dueTiles.map(refreshTile),
+    ...dueSources.map(refreshSource),
+  ]);
 }
 
 // Collect drill-down routes declared by tiles.
@@ -373,9 +447,12 @@ export async function handle(req: Request): Promise<Response> {
 
 // The side effects: collect once, keep collecting, and serve. Running the file
 // starts them; importing it does not.
-export function start(serve: typeof Deno.serve = Deno.serve) {
-  tick();
-  const timer = setInterval(tick, TICK_MS);
+export function start(
+  serve: typeof Deno.serve = Deno.serve,
+  collect: () => void | Promise<void> = tick,
+) {
+  collect();
+  const timer = setInterval(collect, TICK_MS);
   const server = serve({
     port: PORT,
     onListen: () => console.log(`\n  Fabric wall LIVE:  http://localhost:${PORT}\n  ${TILES.length} tiles registered.\n`),
