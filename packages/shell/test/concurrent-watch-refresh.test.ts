@@ -4,8 +4,9 @@ import {
   isConcurrentWatchRefreshEnabled,
   setupConcurrentWatchRefreshToggle,
 } from "../src/lib/concurrent-watch-refresh.ts";
-// Load the ambient-globals module so its declaration of
-// `commonfabric.concurrentWatchRefresh` is exercised alongside the toggle.
+// Load the ambient-globals module so the `commonfabric` global is typed for
+// the cast below (the command rides its `[key: string]: unknown` index
+// signature, matching how cfcRenderCeiling is typed).
 import "../src/globals.ts";
 
 const STORAGE_KEY = "concurrentWatchRefresh";
