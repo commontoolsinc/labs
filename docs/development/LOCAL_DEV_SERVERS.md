@@ -80,17 +80,26 @@ server. See `docs/development/EXPERIMENTAL_OPTIONS.md` for all available flags.
 - `packages/shell/local-dev-shell.log`
 - `packages/toolshed/local-dev-toolshed.log`
 
-**CLI identity for local dev:** The local toolshed uses an identity derived from
-the passphrase `"implicit trust"`. To create a key matching the local server (so
-the CLI can act as its operator/admin):
+**CLI identity for local dev:** For normal development — deploying pieces,
+pattern work, anything acting as *you* — mint a unique key:
+```bash
+mkdir -p .cf
+deno run -A packages/cli/mod.ts id new > .cf/shared-dev.key
+export CF_IDENTITY="$PWD/.cf/shared-dev.key"
+```
+The local toolshed itself runs as the identity derived from the passphrase
+`"implicit trust"`. Derive that key only when the CLI must act as the server's
+operator/admin (`add-admin-piece`, the background piece service, deploying
+system home patterns):
 ```bash
 deno run -A packages/cli/mod.ts id derive "implicit trust" > claude.key
-export CF_IDENTITY=./claude.key
 ```
-This is a shared, publicly-derivable key — every developer who derives it gets
-the same DID. Use it only against your own localhost. For a personal identity, or
-any shared/remote server, use `id new` instead (see
-[`SHARED_IDENTITY.md`](./SHARED_IDENTITY.md)).
+It is a shared, publicly-derivable key — every developer who derives it gets
+the same DID. Never use it against a server other people use, and don't deploy
+your own work as it even locally: it collapses you into the server principal
+(and into one identity for user counting — see
+[`active-user-counting.md`](./active-user-counting.md)). Full policy:
+[`SHARED_IDENTITY.md`](./SHARED_IDENTITY.md).
 
 For workflows that touch `PerUser`, `PerSession`, favorites, or home-space
 state, use one shared identity in both browser and CLI. The browser login screen
