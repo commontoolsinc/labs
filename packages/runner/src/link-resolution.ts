@@ -84,6 +84,25 @@ const undefinedDataLink = (link: NormalizedFullLink): NormalizedFullLink => ({
   path: [],
 });
 
+// Lazily computed so module-load order never matters; `undefined` encodes to
+// the same URI regardless of base.
+let undefinedDataUri: string | undefined;
+
+/**
+ * True for the terminal `resolveLink` mints when a narrower-scope follow is
+ * blocked by a schema scope cap (see `undefinedDataLink` above): the chain
+ * did not reach a real target, it was cut. Callers that need "resolved to a
+ * target" vs "resolution was scope-blocked" test the returned terminal with
+ * this. (A stored link that genuinely encodes `undefined` as a data: URI
+ * also matches — that value reads as undefined either way.)
+ */
+export function isScopeBlockedResolutionTerminal(
+  link: NormalizedFullLink,
+): boolean {
+  undefinedDataUri ??= dataUriFromValueWithResolvedLinks(undefined);
+  return link.id === undefinedDataUri;
+}
+
 const canFollowLinkHop = (
   source: NormalizedFullLink,
   target: NormalizedFullLink,

@@ -242,7 +242,6 @@ export {
   compileAndSavePattern,
   parseCellPath,
   resolveCellPath,
-  schemaWithScopedLinkRequiredsRelaxed,
 } from "./piece-helpers.ts";
 export type { ModuleByteCache } from "./runtime.ts";
 export type { CompiledModuleArtifact } from "./harness/types.ts";

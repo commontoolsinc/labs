@@ -518,6 +518,116 @@ describe("whole-object read over a session-scoped link", () => {
     }
   });
 
+  it("scope-cap-blocked chain relaxes: a capped link whose narrow follow is blocked is just as unreachable", async () => {
+    // The property link carries a schema whose scope cap is "space"; the
+    // chain then hits a session-scoped link. resolveLink BLOCKS that follow
+    // (CT-1642) and terminates at the undefined-data marker instead of a
+    // narrow-scoped terminal. The detector must treat that as narrow —
+    // otherwise this class voids exactly like the original bug.
+    const tx = writerRt.edit();
+    const capDraft = writerRt.getCell<string>(
+      space,
+      "cap-draft",
+      { type: "string" } as const,
+      tx,
+      "session",
+    );
+    capDraft.set("capped-session-value");
+    const capMid = writerRt.getCell(
+      space,
+      "cap-mid",
+      { type: "string" } as const,
+      tx,
+    );
+    capMid.set(capDraft as never);
+    const holder = writerRt.getCell(
+      space,
+      "cap-holder",
+      {
+        type: "object",
+        properties: requiredResultSchema.properties,
+      } as const,
+      tx,
+    );
+    const midLink = capMid.getAsNormalizedFullLink();
+    holder.setRaw({
+      question: "capped question",
+      count: 4,
+      // Hand-built sigil: the embedded schema's top-level `scope` is the
+      // follow cap (ContextualFlowControl.getSchemaScopeCap).
+      myDraft: {
+        "/": {
+          "link@1": {
+            id: midLink.id,
+            path: [],
+            space: midLink.space,
+            scope: "space",
+            schema: { type: "string", scope: "space" },
+          },
+        },
+      },
+    } as never);
+    const result = await tx.commit();
+    expect(result.error).toBeUndefined();
+    await writerStorage.synced();
+
+    const { rt, close } = freshReader();
+    try {
+      const cell = rt.getCell(space, "cap-holder", requiredResultSchema);
+      await cell.pull();
+      const relaxed = schemaWithScopedLinkRequiredsRelaxed(
+        requiredResultSchema,
+        cell.getRaw(),
+        cell as unknown as Cell<unknown>,
+      ) as { required?: string[] };
+      expect(relaxed.required).toEqual(["question", "count"]);
+      const projected = cellWithScopedLinkRequiredsRelaxed(cell);
+      const value = (await projected.pull()) as { question?: string };
+      expect(value?.question).toBe("capped question");
+    } finally {
+      await close();
+    }
+  });
+
+  it("a tx-bound cell derives against its own transaction's uncommitted state", async () => {
+    // Both reads inside the helper must see the same state: getRaw() honors
+    // the cell's bound tx, so the chain resolution must too — otherwise an
+    // uncommitted link is unresolvable on a fresh tx and the derivation
+    // silently diverges from the cell's own read semantics.
+    const tx = writerRt.edit();
+    const draft = writerRt.getCell<string>(
+      space,
+      "txbound-draft",
+      { type: "string" } as const,
+      tx,
+      "session",
+    );
+    draft.set("uncommitted-session-value");
+    const holder = writerRt.getCell(
+      space,
+      "txbound-holder",
+      requiredResultSchema,
+      tx,
+    );
+    holder.set({
+      question: "uncommitted question",
+      count: 5,
+      myDraft: draft,
+    } as never);
+
+    // BEFORE commit: the tx-bound cell's derivation sees the uncommitted
+    // link and relaxes.
+    const relaxed = schemaWithScopedLinkRequiredsRelaxed(
+      requiredResultSchema,
+      holder.getRaw(),
+      holder as unknown as Cell<unknown>,
+    ) as { required?: string[] };
+    expect(relaxed.required).toEqual(["question", "count"]);
+
+    const result = await tx.commit();
+    expect(result.error).toBeUndefined();
+  });
+
   it("characterization: strictness one link deep is out of reach (schema combine keeps required)", async () => {
     // A space-scoped link to a doc whose OWN read applies a schema requiring
     // a scoped member: the boundary relaxation cannot reach it (the traverser

@@ -360,3 +360,43 @@ is affected, and the input-side application makes `cf piece link` target
 verification strictly better. FUSE (`cell-bridge.ts`) is the one non-CLI
 consumer of `PiecePropIo.get` — its suite runs in the final gate; profile
 there first if mounted-space listings ever slow down.
+
+## Adversarial review, round 2 (fresh reviewer, cumulative diff)
+
+No blockers. Two should-fixes, both implemented rather than merely documented:
+
+1. **Scope-cap-blocked follows read as "not narrow"** — `resolveLink`'s
+   blocked branch (CT-1642) terminates at an undefined-data marker carrying
+   the SOURCE link's scope ("space"), so a chain cut by a schema scope cap
+   looked space-scoped and the void persisted for that class. Fixed by
+   exporting `isScopeBlockedResolutionTerminal` from link-resolution.ts and
+   treating a blocked terminal as narrow — a blocked member is exactly as
+   unreachable as a plainly narrow one, and relaxation is harmless when a
+   value resolves. Pinned by a test that hand-builds a scope-capped sigil
+   link and verifies the blocked branch actually fires (the CT-1642 warn
+   appears; behavior: object survives). The doubled warn (derivation + real
+   read) is accepted, commented noise.
+2. **Tx inconsistency** — `getRaw()` honored the cell's bound transaction
+   but the chain walk ran on a fresh readTx, silently diverging for
+   tx-bound cells (uncommitted links unresolvable → strict kept). Fixed:
+   one `runtime.readTx(base.tx)` per derivation, threaded through the
+   inline-record recursion (also addresses the per-property-tx perf nit).
+   Pinned by a test deriving against uncommitted state.
+
+Nits taken: `schemaWithScopedLinkRequiredsRelaxed` un-exported from the
+runner index (no external consumer; tests import the module directly);
+logger tags made distinct event tags (`scoped-link-relax-chain` /
+`scoped-link-relax-raw`).
+
+Round 2 also affirmatively cleared, with code-level evidence: readTx
+lifecycle (purely local journal, GC'd, same as every cell read), resolveLink
+side effects (derivation runs against a replica the preceding pull already
+warmed; kicks dedupe on existing reservations), parseLink base semantics for
+nested recursion, `required: []` ≡ absent in the traverser, interning/frozen
+schema invariants (asSchema interns the derived schema), $ref/allOf shapes
+(fail-strict, no mutation of interned originals), CFC/ifc metadata survival,
+CLI `--step` error-path parity, `cf piece link` strictly improved, CI
+integration wiring (the new test cannot pass vacuously), and test hygiene.
+
+Suite state after round 2: runner test file 16 steps green; full runner,
+piece suites re-run green (see final commit message).

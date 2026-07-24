@@ -9,8 +9,12 @@ import { getLogger } from "../../utils/src/logger.ts";
 import { type Cell, isCell } from "./cell.ts";
 import { isSigilLink } from "./link-types.ts";
 import { parseLink } from "./link-utils.ts";
-import { resolveLink } from "./link-resolution.ts";
+import {
+  isScopeBlockedResolutionTerminal,
+  resolveLink,
+} from "./link-resolution.ts";
 import { DEFAULT_CELL_SCOPE, scopeRank } from "./scope.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import type { MemorySpace } from "./storage/interface.ts";
 import type { JSONSchema, Pattern } from "./builder/types.ts";
 import type { Runtime } from "./runtime.ts";
@@ -104,6 +108,10 @@ export function cellEntityIdString(cell: Cell<unknown>): string | undefined {
  * than special-cased in the traverser; this helper is the piece read boundary
  * doing exactly that, driven by the stored links' own declared scopes.
  *
+ * Also relaxed: a property whose chain resolution is SCOPE-BLOCKED (a schema
+ * scope cap forbade following a narrower link, CT-1642) — the member is just
+ * as unreachable for this read as a plainly narrow terminal.
+ *
  * Deliberately NOT relaxed: plain (non-link) missing properties, properties
  * whose links resolve entirely within space scope, and anything inside
  * arrays (#4746 restored strict required semantics for array elements;
@@ -126,6 +134,7 @@ export function schemaWithScopedLinkRequiredsRelaxed(
   schema: JSONSchema | undefined,
   rawValue: unknown,
   base: Cell<unknown>,
+  tx?: IExtendedStorageTransaction,
 ): JSONSchema | undefined {
   if (
     !isRecord(schema) || !isRecord(rawValue) || isSigilLink(rawValue) ||
@@ -134,14 +143,26 @@ export function schemaWithScopedLinkRequiredsRelaxed(
     return schema;
   }
 
+  // One read tx per derivation, honoring the cell's own bound transaction so
+  // the chain walk sees the same (possibly uncommitted) state getRaw() does.
+  // Recursion into inline records threads it through.
+  tx ??= base.runtime.readTx(base.tx);
+
   // A scoped output does not carry its scope on the first link: the result
   // doc's property links (scope "space") redirect to an intermediate doc
   // whose value is the actual `{scope: "session"|"user"}` redirect into the
   // scoped instance. Resolve the stored link to its terminal target with the
   // standard resolver (real cycle detection, and the same fresh-replica pull
-  // kick every read path uses) and inspect the terminal scope. A chain the
-  // resolver cannot complete (cycle, iteration limit) counts as "not narrow"
-  // — the conservative fallback is the pre-existing strict behavior.
+  // kick every read path uses) and inspect the terminal. Narrow means either
+  // a terminal in a narrower-than-space scope, or a resolution the resolver
+  // scope-blocked (a schema scope cap forbade following a narrower link,
+  // CT-1642) — in both cases the member is unreachable for this read, which
+  // is exactly what the relaxation expresses. (The blocked branch warns once
+  // inside resolveLink during this derivation and again during the real
+  // read; the duplication is accepted noise for a rare, already-loud case.)
+  // A chain the resolver cannot complete (cycle, iteration limit) counts as
+  // "not narrow" — the conservative fallback is the pre-existing strict
+  // behavior.
   const isNarrowScopedLink = (value: unknown): boolean => {
     if (!isSigilLink(value)) return false;
     // Parsing against the containing cell resolves "inherit" to the
@@ -155,13 +176,13 @@ export function schemaWithScopedLinkRequiredsRelaxed(
       return true;
     }
     try {
-      const runtime = base.runtime;
-      const terminal = resolveLink(runtime, runtime.readTx(), first, "value");
-      return scopeRank(terminal.scope ?? DEFAULT_CELL_SCOPE) >
-        scopeRank(DEFAULT_CELL_SCOPE);
+      const terminal = resolveLink(base.runtime, tx!, first, "value");
+      return isScopeBlockedResolutionTerminal(terminal) ||
+        scopeRank(terminal.scope ?? DEFAULT_CELL_SCOPE) >
+          scopeRank(DEFAULT_CELL_SCOPE);
     } catch (error) {
-      logger.debug("piece-helpers", () => [
-        "scoped-link relax: chain resolution failed; keeping strict required",
+      logger.debug("scoped-link-relax-chain", () => [
+        "chain resolution failed; keeping strict required",
         first,
         error,
       ]);
@@ -195,6 +216,7 @@ export function schemaWithScopedLinkRequiredsRelaxed(
         propSchema as JSONSchema,
         propValue,
         base,
+        tx,
       );
       if (relaxed !== propSchema) {
         newProperties ??= { ...(properties as Record<string, JSONSchema>) };
@@ -231,8 +253,8 @@ export function cellWithScopedLinkRequiredsRelaxed<T>(
   try {
     raw = cell.getRaw();
   } catch (error) {
-    logger.debug("piece-helpers", () => [
-      "scoped-link relax: raw read failed; keeping strict schema",
+    logger.debug("scoped-link-relax-raw", () => [
+      "raw read failed; keeping strict schema",
       error,
     ]);
     return cell;
