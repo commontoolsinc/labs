@@ -74,6 +74,7 @@ SPACE=team-lunch
   mkdir -p .cf
   deno run -A packages/cli/mod.ts id new > .cf/shared-dev.key
   chmod 600 .cf/shared-dev.key
+  export CF_IDENTITY="$PWD/.cf/shared-dev.key"   # replaces the ./your-identity.key placeholder above
   ```
   The local toolshed accepts any identity; import the same key in the browser
   (`Import CLI Key` on the login screen) when the CLI and browser should act as

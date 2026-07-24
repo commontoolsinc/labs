@@ -124,7 +124,10 @@ wait_http "http://localhost:$SHELL_PORT/" shell || exit 1
 
 # ---------- identity + deploy ----------
 cd "$REPO_ROOT"
-[ -f cf.key ] || deno run -A packages/cli/mod.ts id derive "implicit trust" > cf.key
+# Deploy as a unique per-user key, NOT the shared "implicit trust" operator key:
+# this piece is your work, and the toolshed accepts any identity. The reuse
+# guard keeps an existing cf.key working. See docs/development/SHARED_IDENTITY.md.
+[ -f cf.key ] || { deno run -A packages/cli/mod.ts id new > cf.key; chmod 600 cf.key; }
 echo "Deploying $(basename "$PATTERN_ABS")..."
 DEPLOY_OUT="$(deno task cf piece new "$PATTERN_ABS" -i cf.key -a "http://localhost:$TOOLSHED_PORT" -s "$SPACE" 2>&1)"
 PIECE_ID="$(printf '%s' "$DEPLOY_OUT" | grep -oE 'fid[0-9]+:[A-Za-z0-9_-]+' | head -1)"
