@@ -22,7 +22,7 @@ import {
   VNode,
 } from "@commonfabric/runner";
 import { validateSchemaValue } from "@commonfabric/runner/cfc";
-import type { CellScope } from "@commonfabric/api";
+import type { CellScope, JSONSchema } from "@commonfabric/api";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   assignSlug,
@@ -1371,11 +1371,18 @@ async function tryResolveLivePieceToolCallable(
   return callableKind === "tool" ? callableCell : null;
 }
 
-async function resolvePieceCallable(
+/** Load the target piece and its manager for callable resolution/listing —
+ * one shared path so `cf piece call` and `cf piece verbs` always see the same
+ * piece state. */
+async function loadPieceForCallables(
   config: PieceConfig,
-  callableName: string,
   deps: PieceCallableDependencies = {},
-): Promise<ResolvedPieceCallable> {
+): Promise<{
+  manager: any;
+  piece: any;
+  space: string;
+  resolvedConfig: Awaited<ReturnType<typeof resolvePieceConfigWithManager>>;
+}> {
   const manager = await (deps.loadManager ?? loadManager)(config);
   const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
   const pieces = new PiecesController(manager);
@@ -1405,6 +1412,18 @@ async function resolvePieceCallable(
       resolvedConfig.pieceScope,
     ));
   const space = manager.getSpace?.() ?? config.space;
+  return { manager, piece, space, resolvedConfig };
+}
+
+async function resolvePieceCallable(
+  config: PieceConfig,
+  callableName: string,
+  deps: PieceCallableDependencies = {},
+): Promise<ResolvedPieceCallable> {
+  const { manager, piece, space, resolvedConfig } = await loadPieceForCallables(
+    config,
+    deps,
+  );
 
   const resolved = (await tryResolvePieceCallableAt(
     piece,
@@ -1445,6 +1464,67 @@ async function resolvePieceCallable(
   }
 
   return resolved;
+}
+
+/** One row of `cf piece verbs`: a callable the piece exposes. */
+export interface PieceCallableListing {
+  name: string;
+  kind: "handler" | "tool";
+  /** Which cell the callable lives on. `result` shadows `input` on a name
+   * collision, matching `cf piece call`'s resolution order. */
+  on: "result" | "input";
+  /** The verb's input schema — the same schema `call <verb> --help --json`
+   * serves. `true` means unconstrained. */
+  inputSchema: JSONSchema | true;
+  /** Tools only, until handlers gain declared results (verb contract WS-C). */
+  outputSchema?: JSONSchema;
+}
+
+/**
+ * Enumerate every callable a piece exposes (verb contract: Verb discovery,
+ * docs/plans/pattern-verb-contract.md). Everything in the durable schema is
+ * listed — hiding is a display default that arrives with the wrapper-tier
+ * marker, never a capability boundary; until the marker exists, the list IS
+ * the full surface. Walks result then input with the same classification
+ * `cf piece call` resolves through, so the listing and the dispatcher can
+ * never disagree about what is callable.
+ */
+export async function listPieceCallables(
+  config: PieceConfig,
+  deps: PieceCallableDependencies = {},
+): Promise<PieceCallableListing[]> {
+  const { piece } = await loadPieceForCallables(config, deps);
+
+  const listings = new Map<string, PieceCallableListing>();
+  for (const cellProp of ["result", "input"] as const) {
+    const rootCell = await piece[cellProp].getCell();
+    const value = rootCell.get?.();
+    const schema = rootCell.schema;
+    const schemaKeys = isRecord(schema) && isRecord(schema.properties)
+      ? Object.keys(schema.properties)
+      : [];
+    const valueKeys = isRecord(value) ? Object.keys(value) : [];
+    for (const name of new Set([...valueKeys, ...schemaKeys])) {
+      if (listings.has(name)) continue; // result shadows input, like call
+      const callableCell = rootCell.key(name).asSchemaFromLinks();
+      const kind = detectCallableKind(
+        getCallableValue(value, name),
+        callableCell,
+      );
+      if (!kind) continue;
+      const spec = callableCommandSpec(callableCell, kind);
+      listings.set(name, {
+        name,
+        kind,
+        on: cellProp,
+        inputSchema: spec.inputSchema,
+        ...(spec.outputSchemaSummary !== undefined
+          ? { outputSchema: spec.outputSchemaSummary }
+          : {}),
+      });
+    }
+  }
+  return [...listings.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function executePieceCallable(

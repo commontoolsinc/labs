@@ -132,6 +132,7 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 | Step + get        | `deno task cf piece get --piece ID fieldPath --step ...`                                             |
 | Set field         | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`                                  |
 | Call handler      | `deno task cf piece call --piece ID handlerName ...`                                                 |
+| List verbs        | `deno task cf piece verbs --piece ID --json ...`                                                     |
 | Trigger recompute | `deno task cf piece step --piece ID ...`                                                             |
 | List pieces       | `deno task cf piece ls -i key -a url -s space`                                                       |
 | Visualize         | `deno task cf piece map ...`                                                                         |

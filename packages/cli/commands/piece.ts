@@ -12,6 +12,7 @@ import {
   linkPieces,
   linkSqliteDiskSource,
   LinkValidationError,
+  listPieceCallables,
   listPieces,
   MapFormat,
   newPiece,
@@ -1078,6 +1079,45 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
       console.error(message);
       Deno.exit(1);
     }
+  })
+  /* piece verbs */
+  .command(
+    "verbs",
+    "List a piece's callable verbs (handlers and tools) with their schemas.",
+  )
+  .usage(pieceUsage)
+  .example(
+    cliText(`cf piece verbs ${EX_ID} ${EX_COMP_PIECE}`),
+    `List every verb piece "${RAW_EX_COMP.piece!}" exposes.`,
+  )
+  .example(
+    cliText(`cf piece verbs ${EX_ID} ${EX_URL} --json`),
+    "Machine-readable listing: name, kind, and input schema per verb.",
+  )
+  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("--json", "Output machine-readable JSON.")
+  .action(async (options) => {
+    const pieceConfig = parsePieceOptions(options);
+    const verbs = await listPieceCallables(pieceConfig);
+    if (options.json) {
+      render(verbs, { json: true });
+      return;
+    }
+    if (verbs.length === 0) {
+      render("<no callable verbs>");
+      return;
+    }
+    render(
+      Table.from([
+        ["NAME", "KIND", "ON"],
+        ...verbs.map((v) => [v.name, v.kind, v.on]),
+      ]).toString(),
+    );
+    hint(
+      cliText(
+        `TIP: --json includes each verb's input schema; 'cf piece call --piece ${pieceConfig.piece} <verb> --help --json' has the full command spec.`,
+      ),
+    );
   })
   /* piece rm */
   .command("rm", "Remove a piece")
