@@ -11,7 +11,7 @@ import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { toCell } from "../src/back-to-cell.ts";
-import { type Cell, isCell } from "../src/cell.ts";
+import { type Cell, elementSchemaFor, isCell } from "../src/cell.ts";
 import { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
@@ -629,5 +629,128 @@ describe("plain-schema array traversal", () => {
       tx,
     );
     expect(invalidObjects.get()).toBeUndefined();
+  });
+});
+
+// CT-1895 (borderline site): the covering schema for a tuple element is
+// index-determined — prefixItems[index] within the slots, `items` past them
+// — so elementSchemaFor takes the index when the caller knows it. Without
+// one (elementById is id-keyed), a tuple schema yields undefined: there is
+// no principled per-element schema to pick, and the schema/$defs loss is
+// the documented cost.
+describe("elementSchemaFor tuple (prefixItems) schemas", () => {
+  const tupleArraySchema = {
+    type: "array",
+    prefixItems: [
+      { $ref: "#/$defs/Point" },
+      { type: "number" },
+    ],
+    items: { type: "string" },
+    $defs: {
+      Point: { type: "object", properties: { x: { type: "number" } } },
+    },
+  } as const satisfies JSONSchema;
+
+  it("picks the slot schema for a covered index, threading $defs", () => {
+    expect(elementSchemaFor(tupleArraySchema, 0)).toEqual({
+      $ref: "#/$defs/Point",
+      $defs: {
+        Point: { type: "object", properties: { x: { type: "number" } } },
+      },
+    });
+    expect(elementSchemaFor(tupleArraySchema, 1)).toEqual({
+      type: "number",
+      $defs: {
+        Point: { type: "object", properties: { x: { type: "number" } } },
+      },
+    });
+  });
+
+  it("picks items past the tuple slots", () => {
+    expect(elementSchemaFor(tupleArraySchema, 2)).toEqual({
+      type: "string",
+      $defs: {
+        Point: { type: "object", properties: { x: { type: "number" } } },
+      },
+    });
+  });
+
+  it("treats an index-less element as rest-region (items)", () => {
+    // elementById is id-keyed: tuple slots are positional and cannot be
+    // id-addressed, so the element falls under `items`.
+    expect(elementSchemaFor(tupleArraySchema)).toEqual({
+      type: "string",
+      $defs: {
+        Point: { type: "object", properties: { x: { type: "number" } } },
+      },
+    });
+  });
+
+  it("yields undefined for a pure tuple (no items) without an index", () => {
+    expect(
+      elementSchemaFor(
+        {
+          type: "array",
+          prefixItems: [{ type: "number" }],
+        } as const satisfies JSONSchema,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("keeps items-only behavior without an index", () => {
+    expect(
+      elementSchemaFor(
+        {
+          type: "array",
+          items: { type: "string" },
+        } as const satisfies JSONSchema,
+      ),
+    ).toEqual({ type: "string" });
+  });
+});
+
+describe("elementById on tuple (prefixItems) arrays", () => {
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("falls back to the rest items schema (index unknown by design)", () => {
+    // elementById is id-keyed and deliberately never reads the array, so a
+    // tuple slot cannot be selected; the element carries the rest `items`
+    // schema. Callers that know the element's slot pass its schema
+    // explicitly.
+    const tupleSchema = {
+      type: "array",
+      prefixItems: [
+        { type: "object", properties: { x: { type: "number" } } },
+      ],
+      items: { type: "string" },
+    } as const satisfies JSONSchema;
+
+    const c = runtime.getCell<unknown[]>(
+      space,
+      "tuple-element-by-id",
+      tupleSchema,
+      tx,
+    );
+    c.set([]);
+
+    const el = c.elementById("k");
+    expect(el.schema).toEqual({ type: "string" });
   });
 });

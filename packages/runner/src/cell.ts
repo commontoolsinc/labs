@@ -484,31 +484,47 @@ const cellMethods = new Set<
   "query",
 ]);
 
-/** Parse the explicit column list from `INSERT INTO t (a, b, c) VALUES ...`,
- *  used to map positional `_cf_link` params. Returns undefined when there is no
- *  explicit column list (columnless `INSERT … VALUES (…)`, `UPDATE`, opaque
- *  SQL). The capture must be immediately followed by `VALUES`, so a columnless
- *  insert's VALUES tuple is NOT mistaken for a column list. */
 // The schema for one element of an array schema, suitable for a standalone
 // element cell. The array's items schema is often a `$ref` into the array
 // schema's `$defs`; carry those `$defs` onto the element schema so the reference
 // (and any nested references) still resolve once the element is addressed on its
 // own, detached from the array.
-function elementSchemaFor(
+// The schema covering one element of `arraySchema`. The covering schema is
+// index-determined for tuples — prefixItems[index] when the index is within
+// the slots, `items` past them — so callers that know the element's index
+// should pass it. Without an index (elementById is id-keyed; the element's
+// position is unknown), the element is treated as rest-region: tuple slots
+// are positional and cannot be id-addressed, so `items` covers it, and a
+// pure tuple (no `items`) yields `undefined` — no principled per-element
+// schema exists there (CT-1895 borderline site).
+// Exported for unit testing only.
+export function elementSchemaFor(
   arraySchema: JSONSchema | undefined,
+  index?: number,
 ): JSONSchema | undefined {
   if (!isRecord(arraySchema)) return undefined;
-  const items = arraySchema.items;
-  if (!isRecord(items) || Array.isArray(items)) {
-    return items as JSONSchema | undefined;
+  const prefixItems = Array.isArray(arraySchema.prefixItems)
+    ? arraySchema.prefixItems as JSONSchema[]
+    : undefined;
+  const covering = prefixItems !== undefined && index !== undefined &&
+      index < prefixItems.length
+    ? prefixItems[index]
+    : arraySchema.items;
+  if (!isRecord(covering) || Array.isArray(covering)) {
+    return covering as JSONSchema | undefined;
   }
   const defs = arraySchema.$defs;
-  if (defs && !("$defs" in items)) {
-    return { ...items, $defs: defs } as JSONSchema;
+  if (defs && !("$defs" in covering)) {
+    return { ...covering, $defs: defs } as JSONSchema;
   }
-  return items as JSONSchema;
+  return covering as JSONSchema;
 }
 
+/** Parse the explicit column list from `INSERT INTO t (a, b, c) VALUES ...`,
+ *  used to map positional `_cf_link` params. Returns undefined when there is no
+ *  explicit column list (columnless `INSERT … VALUES (…)`, `UPDATE`, opaque
+ *  SQL). The capture must be immediately followed by `VALUES`, so a columnless
+ *  insert's VALUES tuple is NOT mistaken for a column list. */
 function parseSqliteInsertColumns(sql: string): string[] | undefined {
   const m = sql.match(
     /\binsert\b[\s\S]*?\binto\b\s+[^()]+?\(([^)]*)\)\s*values\b/i,
@@ -1718,6 +1734,11 @@ export class CellImpl<T extends FabricValue>
       },
     );
     const arraySchema = resolveSchema(resolvedLink.schema ?? this.schema);
+    // The element's index is unknown here (id-keyed addressing, and this
+    // method deliberately never reads the array), so a tuple schema's slot
+    // cannot be selected: elementSchemaFor falls back to the rest `items`
+    // schema for prefixItems arrays. A caller that knows the element sits
+    // in a tuple slot can pass the slot schema explicitly via `schema`.
     const elementSchema = schema ?? elementSchemaFor(arraySchema);
     return this.runtime.getCellFromEntityId(
       resolvedLink.space,
