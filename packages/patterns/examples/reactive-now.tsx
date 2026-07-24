@@ -24,6 +24,12 @@ import {
 //    Both are coarse (one second) and grid-aligned, and read `null` until the
 //    wish resolves — so guard for that load window. `new Date(ms)` with an
 //    explicit argument is deterministic and is NOT gated.
+//    For a one-off timestamp of the TRIGGERING EVENT, `Date.now()` / `new Date()`
+//    are allowed directly inside a handler/action — no wish needed. That is the
+//    event's own instant, frozen for the whole handler cascade and coarsened to
+//    one second; it is NOT a live wall-clock read (shaped/delayed delivery can
+//    make it lag real time). Use it to stamp the event; use `#now/N` when the
+//    value must keep refreshing reactively.
 //
 // 2. Receiving input — delivery shaping (W3 events, plan-B cell flips). Input
 //    reaches a pattern two ways, and both are shaped by the same token bucket: the

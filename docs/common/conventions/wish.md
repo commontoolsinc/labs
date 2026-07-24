@@ -272,6 +272,17 @@ const timeAgo = computed(() => {
 });
 ```
 
+For a one-off timestamp of the **triggering event** — not the piece's first
+load, and not a reactive tick — call `Date.now()` / `new Date()` directly
+**inside a handler or action**. There the sandbox exposes the event's own
+instant, frozen for the whole handler cascade and coarsened to one-second
+resolution; it is not a live wall-clock read (shaped/delayed delivery can make
+it lag real time). The three sit on a spectrum: `#now` is the piece's first-load
+instant, the handler clock is the current event's instant (a single frozen
+reading), and `#now/N` is a reading that keeps refreshing. Reach for `#now` only
+for a created-at stamp; use the handler clock to stamp an event, or `#now/N` for
+a value that must track the current time.
+
 ### Periodic work: polling a data source on a `#now/N` tick
 
 `#now/N` is also how a pattern does periodic *work* — "check this feed every five
