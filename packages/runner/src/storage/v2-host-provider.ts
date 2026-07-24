@@ -1,4 +1,4 @@
-import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
+import type { MemorySpace, Signer, URI } from "@commonfabric/memory/interface";
 import {
   type CellScope,
   type ClientCommit,
@@ -2194,10 +2194,20 @@ export class HostStorageManager extends StorageManager {
   readonly #hostSessionFactory: HostSessionFactory;
   /** C3.4: per-space foreign mounts, keyed by the foreign space. */
   readonly #foreignMounts = new Map<string, ForeignSpaceMount>();
+  /** C3.13: the space this executor Worker is HOME to. `foreignReadDocument`
+   * refuses to serve a mount for it — a home read must resolve its home replica,
+   * never a foreign mount. This is the primary, self-contained half of the
+   * no-home-mount invariant (see `foreignReadDocument`). */
+  readonly #homeSpace: MemorySpace;
 
-  private constructor(options: Options, factory: HostSessionFactory) {
+  private constructor(
+    options: Options,
+    factory: HostSessionFactory,
+    homeSpace: MemorySpace,
+  ) {
     super(options, factory);
     this.#hostSessionFactory = factory;
+    this.#homeSpace = homeSpace;
   }
 
   /**
@@ -2256,6 +2266,41 @@ export class HostStorageManager extends StorageManager {
     );
   }
 
+  /**
+   * C3.13 — the served foreign-read VALUE seam consumed by the transaction's
+   * `loadRoot` (IStorageManager.foreignReadDocument). Returns the served mount
+   * entry's document for a cross-space point read so the Worker's derivation
+   * folds the REAL foreign value instead of the home replica's absent
+   * `Default<0>`.
+   *
+   *   undefined     → NO served entry for (space, id): the caller falls through
+   *                   to its normal replica read (byte-identical to pre-C3.13).
+   *   { document }   → a served entry; `document: null` is an
+   *                   AUTHORITATIVELY-ABSENT foreign doc (serve absence, do not
+   *                   fall through).
+   *
+   * CV5 home guard (PRIMARY, not belt-and-suspenders): `#foreignMounts` can never
+   * hold a home entry — writes are gated on `outcome.status === 'served'` in
+   * readForeignDoc, and a home `readSpace` never yields 'served' (it falls
+   * through to the session path at the route guard) — but that is a
+   * cross-provider, multi-hop invariant. This cheap, self-contained
+   * `space === #homeSpace` guard closes home directly, so a home read is never
+   * diverted from its own replica. The mount is space-scoped only (readForeignDoc
+   * keys every entry under "space"), so the lookup keys under "space"; a
+   * non-space foreign read finds no entry and falls through.
+   */
+  foreignReadDocument(
+    space: MemorySpace,
+    id: URI,
+    _scope?: CellScope,
+  ): { document: EntityDocument | null } | undefined {
+    if (space === this.#homeSpace) return undefined;
+    const entry = this.#foreignMounts.get(space)?.docs.get(
+      foreignMountDocKey(id, "space"),
+    );
+    return entry === undefined ? undefined : { document: entry.document };
+  }
+
   /** C3.4: every held entry of one foreign space's mount (C3.5's basis
    * enumeration seam; empty for an unmounted space). */
   foreignMountEntries(space: string): readonly ForeignMountEntry[] {
@@ -2293,6 +2338,9 @@ export class HostStorageManager extends StorageManager {
         memoryHost: new URL("memory://executor-provider"),
       },
       factory,
+      // C3.13: the home space (also handed to the factory above) so
+      // `foreignReadDocument` can home-guard the served-mount lookup.
+      options.space,
     );
   }
 

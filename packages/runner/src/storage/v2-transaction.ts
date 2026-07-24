@@ -107,6 +107,15 @@ type ReadDocumentEntry = {
   frozenReads?: PathKeyMap<FabricValue | undefined>;
   writeDetails?: Map<string, TransactionWriteDetail>;
   patchDetails?: Map<string, TransactionWriteDetail>;
+  // C3.13: `initial` was hydrated from a SERVED foreign-read mount entry (a
+  // cross-space point read the executor Worker served), NOT from `branch.replica`.
+  // validate() MUST skip claim() for this doc: `branch.replica` is the home
+  // replica, empty for the foreign space, so a claim() re-read would compare the
+  // served value against `undefined` and throw StateInconsistency. Foreign
+  // consistency is enforced by the C3.5 vector basis + C3.8 apply fence, not by
+  // local claim(). The flag is declared on both entry variants because
+  // ensureWritableDocument() promotes a ReadDocumentEntry in place.
+  mountServed?: boolean;
 };
 
 type WritableDocumentEntry = {
@@ -122,11 +131,18 @@ type WritableDocumentEntry = {
   // possibly-stale base, and drops the op's path from the commit's conflict read
   // set. See ./mergeable-ops.ts.
   mergeableOps?: Map<string, MergeableOpIntent>;
+  // C3.13: see ReadDocumentEntry.mountServed. Declared here too because
+  // ensureWritableDocument() promotes a ReadDocumentEntry in place (same object
+  // reference), so a mount-served doc that later takes a write keeps the flag.
+  mountServed?: boolean;
 };
 
 type DocumentEntry = ReadDocumentEntry | WritableDocumentEntry;
 
 type SpaceBranch = {
+  // C3.13: the space this branch replicates, so loadRoot can key the executor's
+  // served foreign-read mount lookup (set once at branch() creation).
+  space: MemorySpace;
   replica: ReturnType<IStorageManager["open"]>["replica"];
   docs: Map<string, DocumentEntry>;
   reader?: ITransactionReader;
@@ -2227,6 +2243,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     let branch = this.#branches.get(space);
     if (!branch) {
       branch = {
+        space,
         replica: this.storage.open(space).replica,
         docs: new Map(),
       };
@@ -2254,8 +2271,12 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (!doc) {
       const loaded = this.loadRoot(branch, address);
       doc = {
-        initial: loaded,
+        initial: loaded.attestation,
         validated: false,
+        // C3.13: carry the served-foreign-read flag onto the DocumentEntry.
+        // loadRoot returns a bare attestation; document() owns the entry, so the
+        // flag is threaded out and set here (CV4).
+        mountServed: loaded.mountServed,
       };
       branch.docs.set(key, doc);
     }
@@ -2272,28 +2293,59 @@ export class V2StorageTransaction implements IStorageTransaction {
   private loadRoot(
     branch: SpaceBranch,
     address: Pick<IMemoryAddress, "id" | "type" | "scope">,
-  ): RootAttestation {
+  ): { attestation: RootAttestation; mountServed: boolean } {
     const type = address.type ?? DOCUMENT_MIME;
     if (address.id.startsWith("data:")) {
       const loaded = loadInline({ id: address.id, type });
       if (loaded.error) {
         throw loaded.error;
       }
-      return loaded.ok as RootAttestation;
+      return { attestation: loaded.ok as RootAttestation, mountServed: false };
     }
 
-    const value = toTransactionDocumentValue(
-      branch.replica.getDocument(address.id, address.scope),
+    // C3.13 served foreign-read VALUE carriage. Before reading `branch.replica`
+    // (the HOME replica — empty for a foreign space, which is exactly why a
+    // cross-space read used to fold `Default<0>`), consult the executor's served
+    // foreign-read mount. On the executor Worker this returns the SERVED foreign
+    // document for a cross-space point read; hydrate `initial` from its VALUE and
+    // mark the doc `mountServed` so validate() skips claim() (the value lives in
+    // the foreign seq-domain, not this home replica). Only the VALUE crosses
+    // here: the foreign seq STAMP rides `foreignReadStamps` on the claimed commit
+    // and never touches home bookkeeping. A base/client manager has no
+    // `foreignReadDocument`, so `?.` is undefined → the normal replica read runs,
+    // byte-identical to pre-C3.13.
+    //
+    // CV3 enqueue-serialization invariant — DO NOT weaken. This LIVE mount read
+    // and the stamp read in action-transaction-router.route()
+    // (`foreignReadStampsForAction`) both execute inside the ONE enqueued
+    // `startClaimedAction` work item, so value + stamp are atomic without a
+    // run-start snapshot. That holds only while (a) the stamp read stays inside
+    // that run item and (b) both mount writers (hydrateForeignReadMount,
+    // refreshForeignMountForWake) ride the serial work queue. If either leaves,
+    // value/stamp can desync (R4 reopens) and a run-start mount snapshot becomes
+    // required — see docs/specs/server-side-execution/implementation-plan.md.
+    const served = this.storage.foreignReadDocument?.(
+      branch.space,
+      address.id,
+      address.scope,
     );
+    const value = served !== undefined
+      ? toTransactionDocumentValue(served.document ?? undefined)
+      : toTransactionDocumentValue(
+        branch.replica.getDocument(address.id, address.scope),
+      );
 
     return {
-      address: {
-        id: address.id,
-        type,
-        path: [],
-        scope: normalizeCellScope(address.scope),
+      attestation: {
+        address: {
+          id: address.id,
+          type,
+          path: [],
+          scope: normalizeCellScope(address.scope),
+        },
+        value,
       },
-      value,
+      mountServed: served !== undefined,
     };
   }
 
@@ -2301,6 +2353,17 @@ export class V2StorageTransaction implements IStorageTransaction {
     for (const branch of this.#branches.values()) {
       for (const doc of branch.docs.values()) {
         if (!doc.validated) {
+          continue;
+        }
+        // C3.13/D2 — LOAD-BEARING. A mount-served foreign read's `initial`
+        // carries the SERVED foreign value, but `branch.replica` is the home
+        // replica (empty for the foreign space). claim() would re-read that empty
+        // replica and compare the served value against `undefined`, throwing
+        // StateInconsistency — the exact failure this skip prevents. Foreign
+        // consistency is enforced by the C3.5 vector basis + C3.8 apply fence,
+        // not by local claim(); the mount can never hold a home doc (the home
+        // guard + 'served'-gated writes), so this cannot mask a local race.
+        if (doc.mountServed) {
           continue;
         }
         const result = claim(doc.initial, branch.replica);

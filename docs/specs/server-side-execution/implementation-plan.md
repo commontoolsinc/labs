@@ -2234,41 +2234,71 @@ dropping the cohort metadata.
 
 #### C3 — cross-space reads: work-order decomposition (2026-07-17)
 
-**Status — C3 cross-space READS: the CONTROL plane is complete and
-verified; the DATA plane has a fundamental hole — the served computation
-never receives the foreign VALUE (defect (iii), 2026-07-24).** The C3
-control plane works end-to-end and is verified: issuance, cohort-narrowed
-delivery, foreign-reader subscription + wake, epoch binding + idle
-revocation, the home-apply TOCTOU fence, the vector input basis, and —
-new — the client overlay lifecycle (recompute → hold → drop-exactly-once)
-bound directly through a real Worker in the composed gate. **But the
-composed gate uncovered defect (iii): the served cross-space read is
-computed from a MISSING foreign input.** The authenticated foreign point
-read (C3.4) lands the document in the executor's `#foreignMounts`, but the
-mount is consumed ONLY as provenance (`foreignReadStampsForAction` emits
-`{space,id,seq}` for the vector basis, never the value); the Worker's
-derivation reads its foreign source through the executor provider, which
-is hard-bound to the home space, so the read resolves the home replica
-(no foreign value) and folds `Default<0>`. Nothing in the run path
-consults the mount / `readForeignDoc` during a run — so a served
-cross-space read commits a settlement whose VALUE is wrong (0/default),
-and would clobber the client's own correct client-primary value. Every
-C3.4/C3.5/C3.6 memory fixture passed because they hand-attach the stamps
-and assert on basis/settlement — never on the computed value; the
-composed gate is the first to check it. **This is a data-path mechanism
-gap (call it C3.13 — served foreign-read value carriage): thread the
-served mount VALUE into the Worker's pre-run cross-space read resolution,
-respecting the "foreign stamps never merge into home watermarks"
-seq-domain invariant.** It was missed by the scout, the C3 adversarial
-panel, and every builder — the same hand-attached-fixture blind spot as
-defects (i)/(ii), now at the value layer. Scope: core read-path
-mechanism, every served cross-space read depends on it, no existing
-red-first harness at that layer — owner-scope work, not a targeted fix.
-The `cross-space-read` claim-rank stage is flag-OFF by default, so this
-is "the feature computes wrong values when enabled," NOT a production
-regression; the stage must stay fixture-only until C3.13 lands. The
-composed gate binds the control plane + overlay lifecycle directly and
-honestly leaves the served-value clause and the co-hosted leg owed.
+**Status — C3 cross-space READS: the CONTROL plane AND the DATA plane are
+complete and verified; defect (iii) — the served-value carriage gap — is
+FIXED by C3.13 (2026-07-24).** The C3 control plane works end-to-end and
+is verified: issuance, cohort-narrowed delivery, foreign-reader
+subscription + wake, epoch binding + idle revocation, the home-apply
+TOCTOU fence, and the vector input basis. **The composed gate uncovered
+defect (iii) — the served cross-space read was computed from a MISSING
+foreign input — and C3.13 closes it.** The authenticated foreign point
+read (C3.4) lands the document in the executor's `#foreignMounts`; before
+C3.13 the mount was consumed ONLY as provenance
+(`foreignReadStampsForAction` emits `{space,id,seq}` for the vector basis,
+never the value), so the Worker's derivation read its foreign source
+through `loadRoot` → the home replica (hard-bound to the home space; a
+foreign `create()` throws only when invoked, `getDocument` returns
+undefined), folded `Default<0>`, committed a settlement whose VALUE was
+wrong (0/default), and clobbered the client's own correct client-primary
+value on the covered overlay drop. **C3.13 (served foreign-read value
+carriage) threads the served mount VALUE into `loadRoot` before the home
+replica read** — an optional `IStorageManager.foreignReadDocument` seam
+the executor `HostStorageManager` implements over `#foreignMounts`
+(home-guarded), consumed in `v2-transaction.ts` `loadRoot`, with
+`validate()` skipping `claim()` for the mount-served doc (the home replica
+is empty for the foreign space, so a claim() re-read would throw
+StateInconsistency). The seq-domain invariant holds: only the VALUE
+crosses; the foreign seq STAMP still flows only into `foreignReadStamps`,
+never home watermark bookkeeping. Red-first harnesses at three layers:
+the `v2-transaction` unit fixture (the loadRoot seam + validate-skip), the
+`executor-foreign-read-value` fixture (a Runtime over a real
+`HostStorageManager` folds the served mount value through `loadRoot`, with
+differing mount-vs-server values so only the mount yields 82), and the
+composed gate — which now asserts the SETTLED server-committed `doubled`
+== 2×foreign (read from a fresh client that never carried the reader's
+overlay; RED=0 pre-fix, GREEN=10 post-fix) as its binding surface.
+
+Note on the gate's overlay lifecycle: the divergence-suppression overlay
+the earlier gate asserted (`claimedOverlayRoutes` 0→≥1) was a SYMPTOM of
+the defect — the reader held a claimed overlay because its correct value
+diverged from the wrong server 0. With C3.13 the serve is correct, so
+there is no divergence to suppress and `claimedOverlayRoutes` may now be
+0; the gate binds the drop INVARIANTS that hold regardless (every held
+overlay drops covered, none non-authoritatively) and the C3.9 lifecycle
+itself stays bound by its runner fixtures. **Verified (interleaved
+claim+route trace, deterministic 3/3 each branch): no suppression
+regression.** The reader's first `doubled` recompute is byte-identical
+pre- and post-fix — it routes `upstream` (client-primary) with an empty
+claim set because it fires BEFORE the claim integrates, and the router is
+value-blind/claim-driven. Pre-fix `claimedOverlayRoutes=1` came entirely
+from a SECOND recompute the DIVERGENT wrong-serve (server 0 ≠ reader 10)
+forced while the claim was live; post-fix the serve agrees, no
+divergence, no second recompute, no overlay. Correctness converges
+(reader visible 10, server-authoritative 10 via the fresh-client read, no
+write race) and — a real gain — is now ROBUST to the routing race: both
+orderings yield 10, whereas pre-fix the divergence made it a
+timing-dependent clobber. **Recorded pre-existing follow-up (orthogonal
+to C3.13, non-blocking):** the C3.9 suppression fixtures
+(`client-execution-overlay*.test.ts`, `client-action-router.test.ts`) and
+the old gate only ever exercised the DIVERGENCE case — none apply a
+replica value EQUAL to the client's speculation — so "suppress→hold→drop
+onto an AGREEING real serve" is unbound anywhere; a purpose-built fixture
+where the claim integrates before the reader's recompute would cover it.
+The `cross-space-read` claim-rank stage may now compute correct values
+when enabled. Still owed: parameterizing the served-value clause over the
+co-hosted transport (the carriage is in the executor,
+transport-independent, so the co-hosted leg re-confirms the same
+`loadRoot`→mount fold rather than a distinct path).
 
 **(Superseded framing, 2026-07-23) — server-side serve composes
 end-to-end; the client reactive half is a DESIGN GAP.** The

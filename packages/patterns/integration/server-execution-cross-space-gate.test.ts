@@ -33,34 +33,39 @@
  *      scalar + served foreign B component) to the negotiating reader — WITHOUT
  *      the space-rank claim ever fencing `claim-context-mismatch` (defect (i),
  *      now FIXED — the durable floor is no longer poisoned; see below);
- *   7. a space-B commit WAKES the home reader (the C3.3a foreign wake, composed).
+ *   7. a space-B commit WAKES the home reader (the C3.3a foreign wake, composed);
+ *   8. a FRESH client reads the SETTLED server-committed `doubled` == 2×foreign —
+ *      the served VALUE folds correctly through the Worker's derivation (defect
+ *      (iii), FIXED by C3.13; red-first: the server commits 0 without the fix).
  *
- * WHAT NOW BINDS ON THE CLIENT TAIL — clause (a)'s overlay LIFECYCLE (unblocked
- * by the WO-0 reconciliation that FALSIFIED defect (ii); see below). With the
- * gate's OWN clause-(e) non-negotiating probe ISOLATED after the clause-(a)
- * observation (the fix task 1 below), the reader's cross-space claim stays live
- * across the space-B change and the real two-space client tail composes for the
- * first time with a real Worker: the reader's foreign (B) replica DELIVERS the B
- * commit, the reader speculatively RECOMPUTES `doubled`, HOLDS a claimed overlay
- * (`claimedOverlayRoutes` 0→≥1), and DROPS it EXACTLY ONCE when the covered
- * settlement lands (`basisCoveredOverlayDrops` == `claimedOverlayRoutes`,
- * `nonAuthoritativeOverlayDrops` == 0) — the C3.9 client-suppression + vector-
- * overlay drop, exercised over a REAL foreign-replica reactive path for the
- * first time (the C3.9 fixtures used a synthetic hand-driven `PushView`).
+ * WHAT NOW BINDS ON THE CLIENT TAIL — clause (a)'s SERVED VALUE (defect (iii)
+ * FIXED by C3.13; see below). With the gate's OWN clause-(e) non-negotiating
+ * probe ISOLATED after the clause-(a) observation (the fix task 1 below), the
+ * reader's cross-space claim stays live across the space-B change and the real
+ * two-space client tail composes with a real Worker: the reader's foreign (B)
+ * replica DELIVERS the B commit and the reader RECOMPUTES `doubled`, AND — the
+ * binding surface below — a FRESH client reads the SETTLED, server-committed
+ * `doubled` == 2×foreign (=10). Before C3.13 the Worker folded the empty home
+ * replica and committed 0, and that wrong serve then CLOBBERED the reader's
+ * correct client-primary value on the covered overlay drop; with C3.13 the
+ * server value MATCHES the reader's, so the reader is no longer clobbered.
  *
- * WHAT STILL DOES NOT BIND (and why — do NOT read this as green): the served
- * VALUE half of clause (a). The reader's revealed committed `doubled` is 0, NOT
- * the arithmetic 2×foreign, because the SERVER itself commits `doubled`=0 —
- * DEFECT (iii) below: the served foreign point read validates the vector BASIS
- * but its VALUE never reaches the Worker's derivation read of `source`. The
- * overlay lifecycle above is real and green; the served value is defect (iii)
- * and is deliberately NOT asserted here (asserting the known-wrong 0 as correct
- * is exactly the fake-green this gate refuses). The revocation / write-
- * authoritative / mixed-version / both-halves-wake clauses (b)–(d),(f) stay
- * bound by their memory/runner fixtures (the fixture map is in the report);
- * clause (e) — the C3.6b non-negotiating cohort fence — IS re-asserted here, in
- * ISOLATION (below): a non-negotiating attach both fails to receive the claim
- * (delivery narrowing) AND revokes the reader's live cross-space claim.
+ * OVERLAY NOTE (why `claimedOverlayRoutes` may now be 0): the divergence-
+ * suppression overlay the earlier gate asserted (`claimedOverlayRoutes` 0→≥1)
+ * was a SYMPTOM of the defect — the reader held a claimed overlay precisely
+ * because its correct value DIVERGED from the wrong server 0. Once C3.13 makes
+ * the serve correct, there is no divergence to suppress, so no such overlay need
+ * form. What the gate still binds are the drop INVARIANTS that hold regardless:
+ * every held cross-space overlay drops COVERED (`basisCoveredOverlayDrops` ==
+ * `claimedOverlayRoutes`, at 0 or n) and NONE drops non-authoritatively. The
+ * C3.9 client-suppression lifecycle itself is bound by its own runner fixtures.
+ *
+ * The revocation / write-authoritative / mixed-version / both-halves-wake
+ * clauses (b)–(d),(f) stay bound by their memory/runner fixtures (the fixture
+ * map is in the report); clause (e) — the C3.6b non-negotiating cohort fence —
+ * IS re-asserted here, in ISOLATION (below): a non-negotiating attach both fails
+ * to receive the claim (delivery narrowing) AND revokes the reader's live
+ * cross-space claim.
  *
  * DEFECT (i) — FIXED (the floor-poisoning class that fenced the committed serve):
  *   an UNADMITTED cross-space-read observation (a client read, the executor's
@@ -96,29 +101,26 @@
  *   the gate's OWN clause-(e) probe over-revoking the reader's claim before the B
  *   commit (task 1's isolation fixes it), NOT a client-reactivity gap.
  *
- * DEFECT (iii) — OPEN (the served-VALUE carriage gap; the real blocker of clause
- *   (a)'s VALUE half — found by THIS gate, 2026-07-24). The host serves the
- *   authenticated foreign point read and validates the vector BASIS
+ * DEFECT (iii) — FIXED by C3.13 (served foreign-read VALUE carriage; found by
+ *   THIS gate 2026-07-24, closed 2026-07-24). The host serves the authenticated
+ *   foreign point read and validates the vector BASIS
  *   (`foreignBasisComponentsValidated` ≥1), and the executor lands the served
- *   document in its read-only foreign MOUNT (`#foreignMounts`) — but the mount is
- *   consumed ONLY as provenance (`foreignReadStampsForAction` emits
- *   {space,id,seq}, never the value). The Worker's derivation read of `source`
- *   resolves through the executor provider, which is HARD-BOUND to the home space
- *   A (`create()` throws for any other space), so `source.get()` reads A's home
- *   replica — which never holds the foreign value — and folds `Default<0>`. The
- *   server therefore commits `doubled`=0 on the INITIAL serve (deterministic —
- *   no wake race, no `claim-not-live` mount-refresh involved) and every rerun.
- *   Because the CLIENT already computes the correct value client-primary (defect
- *   (ii) falsified), the broken serve (0) then CLOBBERS the reader's correct
- *   local value via the covered overlay drop — server-primary cross-space serve
- *   is a live regression. This is NOT harness fragility: the single in-process
- *   Server collapse would only make the value MORE reachable, and the gap is
- *   present on the pre-wake initial serve. The fix is a real, unbuilt
- *   C3.6/C3.7-scope mechanism — thread the served mount VALUE into the Worker's
- *   pre-run cross-space read resolution, respecting the "foreign stamps never
- *   merge into home watermarks" seq-domain invariant — reported for an owner
- *   decision rather than hacked around here (no fake green: the gate binds the
- *   overlay lifecycle, and leaves the served value UNASSERTED and documented).
+ *   document in its read-only foreign MOUNT (`#foreignMounts`). BEFORE C3.13 the
+ *   mount was consumed ONLY as provenance (`foreignReadStampsForAction` emits
+ *   {space,id,seq}, never the value): the Worker's derivation read of `source`
+ *   resolved through `loadRoot` → the home replica (HARD-BOUND to space A; a
+ *   foreign `create()` throws only when invoked, `getDocument` returns undefined),
+ *   folded `Default<0>`, and the server committed `doubled`=0 on every serve —
+ *   which then CLOBBERED the reader's correct client-primary value on the covered
+ *   overlay drop. C3.13 threads the served mount VALUE into `loadRoot` (the
+ *   executor's `HostStorageManager.foreignReadDocument` seam) BEFORE the home
+ *   replica read, respecting the "foreign stamps never merge into home
+ *   watermarks" seq-domain invariant (only the VALUE crosses; the seq STAMP still
+ *   rides `foreignReadStamps`). The binding surface below now asserts the SETTLED
+ *   server-committed `doubled` == 2×foreign (RED=0 pre-fix, GREEN=10 post-fix),
+ *   read from a FRESH client that never carried the reader's overlay — a
+ *   `readerDoubledSeen` membership check would be vacuous (the reader's
+ *   client-primary compute already carries the correct value pre-fix).
  *
  * TRANSPORT: the in-process leg (one Server hosting A+B over the default
  * InProcessCrossSpaceTransport) is asserted here. The co-hosted transport leg
@@ -126,13 +128,13 @@
  * bound at the memory level by v2-execution-cross-space-cohosted{,-c3-10b}-test
  * — the transport crossing itself (mirror/wake/point-read over the link) is
  * those fixtures' contract. Parameterizing THIS gate over both transports is
- * owed: the composed serve it would layer on is capped at the same
- * server-committed-settlement + wake + overlay-lifecycle surface asserted here.
- * The served VALUE is blocked by defect (iii) on BOTH transports (the mount→run
- * carriage gap is in the executor, transport-independent — the co-hosted leg
- * would re-confirm defect (iii), not unlock the value), so parameterizing re-
- * crosses the same server-side clauses + overlay lifecycle over the link rather
- * than binding a new one; it is left owed pending the defect (iii) decision.
+ * still owed. The served-VALUE carriage C3.13 fixes is in the EXECUTOR
+ * (`loadRoot` → the served mount), transport-INDEPENDENT: the co-hosted leg
+ * populates the same `#foreignMounts` over the link and would re-confirm the
+ * same `loadRoot`→mount fold, not exercise a distinct value path. So the
+ * co-hosted served-value leg re-crosses the same server-side clauses over the
+ * link rather than binding a new surface; it is left owed (not forced) and the
+ * transport crossing itself stays bound by the memory-level co-hosted fixtures.
  *
  * CI-budget clause (C3A23): named runtime ceiling in this header —
  * CROSS_SPACE_GATE_BUDGET_MS below, logged per test; the suite stays a single
@@ -429,7 +431,7 @@ const writeAcl = async (
 
 Deno.test({
   name:
-    "C3.11 cross-space-read gate [in-process]: authored foreign read composes issuance + delivery + subscription + served point read + committed vector settlement + wake + client overlay lifecycle (served VALUE is defect (iii), unasserted) + non-negotiating cohort fence in isolation",
+    "C3.11 cross-space-read gate [in-process]: authored foreign read composes issuance + delivery + subscription + served point read + committed vector settlement + wake + SERVED VALUE (defect (iii) FIXED — settled doubled == 2×foreign) + non-negotiating cohort fence in isolation",
   async fn() {
     const startedAt = performance.now();
     await withExecutorTeardownBarrier(async () => {
@@ -689,11 +691,16 @@ async function runInProcessGate(storeDir: string): Promise<void> {
         ),
       () => ({ readerClaimSets: reader!.claimSets }),
     );
-    // The reader's overlay counters BEFORE the B wake: no cross-space overlay has
-    // formed yet (the initial serve is same-basis; the reader speculates only on
-    // the foreign change below).
-    const overlayBeforeWake = readerOverlayTotals();
+    // The reader's revealed-value counter BEFORE the B wake, so the barrier below
+    // can confirm the reader RECOMPUTES on the foreign change.
     const doubledSeenBeforeWake = readerDoubledSeen.length;
+    // The post-wake serve CHANGES the value only when it is fixed (42→10);
+    // pre-fix it recomputes the same 0 (a no-op, `settlementsCommitted` unchanged).
+    // So gate the post-wake barrier on the foreign SERVE happening (basis
+    // validated grows on every rerun, committed or no-op) — reached both pre- and
+    // post-fix — and let the binding-surface assertion below be the discriminator.
+    const foreignBasisBeforeWake =
+      server.executionStats.foreignBasisComponentsValidated;
 
     // ---- (6) foreign wake: a space-B commit wakes the home reader (C3.3a). ----
     const wakesBefore = pool.metrics().foreignWakeNotifications;
@@ -719,71 +726,21 @@ async function runInProcessGate(storeDir: string): Promise<void> {
       }),
     );
 
-    // ---- (a) CLIENT tail — the overlay LIFECYCLE, composed DIRECTLY (defect
-    // (ii) falsified). The B change reaches the reader's reactive graph: the
-    // reader speculatively recomputes `doubled`, HOLDS a claimed overlay, and
-    // DROPS it EXACTLY ONCE when the covered settlement lands. This is the C3.9
-    // client-suppression + vector-overlay drop, exercised over a REAL two-space
-    // foreign-replica reactive path for the first time (the C3.9 fixtures used a
-    // synthetic `PushView`). NOTE: the reader's revealed committed VALUE is the
-    // SERVER-authoritative `doubled`, which is defect (iii) (=0, not 2×foreign) —
-    // the served foreign VALUE never reaches the Worker's derivation read. The
-    // lifecycle below is real and green; the VALUE is deliberately NOT asserted
-    // here (see the header's defect (iii) — no fake green). ----
+    // ---- (a) CLIENT tail — the reader recomputes on the B change, composed
+    // DIRECTLY (defect (ii) falsified). The B change reaches the reader's reactive
+    // graph and it recomputes `doubled`. With C3.13 the Worker's served
+    // settlement now carries the SAME value the reader computes client-primary
+    // (2×foreign), so — unlike the defect era — the reader is NOT holding a
+    // divergence-suppression overlay against a wrong server 0, and the covered
+    // settlement drop no longer CLOBBERS the reader's correct value. The overlay
+    // INVARIANTS (every held overlay drops covered; none drops
+    // non-authoritatively) are re-asserted after quiescence below; the served
+    // VALUE itself is asserted (defect (iii) FIXED), not left owed. ----
     await waitForCondition(
-      "the reader recomputes on the B change and holds a claimed overlay",
-      () => {
-        const totals = readerOverlayTotals();
-        return totals !== undefined &&
-          totals.claimedOverlayRoutes >
-            (overlayBeforeWake?.claimedOverlayRoutes ?? 0) &&
-          readerDoubledSeen.length > doubledSeenBeforeWake;
-      },
-      () => ({
-        overlayBeforeWake,
-        overlayNow: readerOverlayTotals(),
-        doubledSeenBeforeWake,
-        readerDoubledSeen,
-      }),
+      "the reader recomputes `doubled` on the B change",
+      () => readerDoubledSeen.length > doubledSeenBeforeWake,
+      () => ({ doubledSeenBeforeWake, readerDoubledSeen }),
     );
-    await waitForCondition(
-      "the claimed overlay drops exactly once when the covered settlement lands",
-      () => {
-        const totals = readerOverlayTotals();
-        return totals !== undefined &&
-          totals.claimedOverlayRoutes >= 1 &&
-          totals.basisCoveredOverlayDrops === totals.claimedOverlayRoutes;
-      },
-      () => ({ overlayNow: readerOverlayTotals() }),
-    );
-    {
-      const totals = readerOverlayTotals();
-      assert(totals !== undefined, "reader execution routing is unavailable");
-      // Every claimed overlay the reader held dropped COVERED (a committed / no-op
-      // settlement whose vector basis covered the overlay's basis), and NONE
-      // dropped non-authoritatively (a producer-dirty invalidation) — the C3.9
-      // drop rule under a real vector settlement.
-      assert(
-        totals.claimedOverlayRoutes >= 1,
-        `the reader must hold ≥1 claimed cross-space overlay: ${
-          JSON.stringify(totals)
-        }`,
-      );
-      assertEquals(
-        totals.basisCoveredOverlayDrops,
-        totals.claimedOverlayRoutes,
-        `every claimed overlay must drop covered exactly once: ${
-          JSON.stringify(totals)
-        }`,
-      );
-      assertEquals(
-        totals.nonAuthoritativeOverlayDrops,
-        0,
-        `no claimed overlay may drop non-authoritatively: ${
-          JSON.stringify(totals)
-        }`,
-      );
-    }
 
     // ---- (a) committed vector settlement (defect (i) fix, composed DIRECTLY).
     // The served claim survives the real Worker's alternating served/unserved
@@ -793,11 +750,16 @@ async function runInProcessGate(storeDir: string): Promise<void> {
     // claim-context-mismatch fence). This is what the C3.11 gate delegated to
     // the memory fixtures before the floor fix; it now binds here. ----
     await waitForCondition(
-      "the host commits the cross-space-read settlement (no floor-poison fence)",
+      "the host serves + commits the POST-WAKE cross-space read (no floor-poison fence)",
       () =>
+        server.executionStats.foreignBasisComponentsValidated >
+          foreignBasisBeforeWake &&
         server.executionStats.settlementsCommitted >= 1 &&
         server.executionStats.acceptedActionAttempts >= 1,
       () => ({
+        foreignBasisBeforeWake,
+        foreignBasisComponentsValidated:
+          server.executionStats.foreignBasisComponentsValidated,
         settlementsCommitted: server.executionStats.settlementsCommitted,
         acceptedActionAttempts: server.executionStats.acceptedActionAttempts,
         leaseFenceRejectCauses: server.executionStats.leaseFenceRejectCauses,
@@ -831,6 +793,31 @@ async function runInProcessGate(storeDir: string): Promise<void> {
       () => ({ readerSettlements: reader!.settlements }),
     );
 
+    // ---- (a) overlay INVARIANTS after the settled cross-space serve. With
+    // C3.13 the Worker folds the served MOUNT value, so the server-committed
+    // `doubled` MATCHES the reader's client-primary compute (2×foreign) and the
+    // reader no longer holds a divergence-suppression overlay against a wrong
+    // server 0 — so `claimedOverlayRoutes` may legitimately be 0 now (the defect
+    // era's overlay was a SYMPTOM of the wrong serve). What must still hold: any
+    // held overlay dropped COVERED (no leak) and NONE dropped non-authoritatively.
+    await pool.idle();
+    {
+      const totals = readerOverlayTotals();
+      assert(totals !== undefined, "reader execution routing is unavailable");
+      assertEquals(
+        totals.basisCoveredOverlayDrops,
+        totals.claimedOverlayRoutes,
+        `every held cross-space overlay must drop covered (no leak): ${
+          JSON.stringify(totals)
+        }`,
+      );
+      assertEquals(
+        totals.nonAuthoritativeOverlayDrops,
+        0,
+        `no overlay may drop non-authoritatively: ${JSON.stringify(totals)}`,
+      );
+    }
+
     // ---- (e) the C3.6b non-negotiating cohort fence, asserted in ISOLATION —
     // AFTER clause (a) is fully observed, so its cohort revoke of the reader's
     // own cross-space claim cannot suppress the reader's overlay above (task 1).
@@ -849,15 +836,41 @@ async function runInProcessGate(storeDir: string): Promise<void> {
     );
     const claimsRevokedBeforeNonNeg = server.executionStats.claimsRevoked;
     nonNeg = openClient(serverForSpace, nonNegId, false, FLAGS_NON_CROSS_SPACE);
-    {
-      const cell = nonNeg.runtime.getCell<Record<string, unknown>>(
-        spaceA,
-        "xsp-gate-result",
-        undefined,
-      );
-      await cell.sync();
-    }
+    const nonNegResult = nonNeg.runtime.getCell<Record<string, unknown>>(
+      spaceA,
+      "xsp-gate-result",
+      undefined,
+    );
+    await nonNegResult.sync();
     await pool.idle();
+
+    // ---- (a) THE served VALUE — defect (iii) FIXED. THE BINDING SURFACE. A
+    // FRESH client (this non-negotiating session) that never carried the reader's
+    // speculative overlay reads the SETTLED, server-committed `doubled`. With
+    // C3.13 it equals 2×foreign (=10); before C3.13 the Worker folded the empty
+    // home replica and committed 0. RED = 0 pre-fix, GREEN = 10 post-fix. A
+    // `readerDoubledSeen` membership check would be VACUOUS here — the reader's
+    // client-primary compute already puts 10 in that stream before the fix; only
+    // the authoritative committed value distinguishes fixed from broken.
+    await nonNegResult.key("doubled").sync();
+    const settledDoubled = nonNegResult.key("doubled").get();
+    assertEquals(
+      settledDoubled,
+      2 * 5,
+      `THE binding surface: the SETTLED server-committed doubled must equal 2×foreign=10 (defect (iii): 0 pre-C3.13): ${
+        JSON.stringify({ settledDoubled, readerDoubledSeen })
+      }`,
+    );
+    // Corroboration (CV1 option b): the reader's revealed value converges to the
+    // same 10 — the defect (iii) clobber to 0 (the covered overlay drop
+    // overwriting the reader's correct value with the wrong serve) is GONE.
+    assertEquals(
+      readerDoubledSeen.at(-1),
+      2 * 5,
+      `the reader's revealed value must converge to 2×foreign=10 (not clobbered to 0): ${
+        JSON.stringify(readerDoubledSeen)
+      }`,
+    );
     assert(
       !nonNeg.claimSets.some((c) =>
         (c.crossSpaceReadSpaces ?? []).includes(spaceB)

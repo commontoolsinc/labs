@@ -270,6 +270,29 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   ): ExecutionRoutingDiagnostics;
 
   /**
+   * C3.13 — the served foreign-read VALUE seam. On the executor Worker, a
+   * cross-space point read that was SERVED (authenticated + authorized) lands
+   * the foreign document in the Worker's read-only foreign mount. A transaction's
+   * `loadRoot` consults this before its home-replica read so the Worker's
+   * derivation folds the REAL foreign value instead of the home replica's absent
+   * `Default<0>` — the VALUE half of a cross-space read. The foreign seq STAMP is
+   * NOT carried here: it rides `foreignReadStamps` on the claimed commit and
+   * never enters home watermark bookkeeping (the seq-domain invariant).
+   *
+   * Optional: only the executor `HostStorageManager` implements it. A base/client
+   * manager leaves it undefined and the caller falls through to the normal
+   * replica read (byte-identical to pre-C3.13). The result discriminates absence
+   * two ways: `undefined` = NO served mount entry for (space, id) → fall through;
+   * `{ document }` = a served entry, where `document: null` is an
+   * AUTHORITATIVELY-ABSENT foreign doc (serve the absence; do NOT fall through).
+   */
+  foreignReadDocument?(
+    space: MemorySpace,
+    id: URI,
+    scope?: CellScope,
+  ): { document: EntityDocument | null } | undefined;
+
+  /**
    * Close all storage providers
    */
   close(): Promise<void>;
