@@ -86,19 +86,19 @@ deno task cf check \
 
 ```bash
 # 1. What's the full state?
-deno task cf piece inspect --piece <piece-id> -i claude.key -a URL -s space
+deno task cf piece inspect --piece <piece-id> -i .cf/shared-dev.key -a URL -s space
 
 # 2. What are the inputs?
-deno task cf piece get --piece <piece-id> /input -i claude.key -a URL -s space
+deno task cf piece get --piece <piece-id> /input -i .cf/shared-dev.key -a URL -s space
 
 # 3. What's a specific computed value?
-deno task cf piece get --piece <piece-id> myComputedField -i claude.key -a URL -s space
+deno task cf piece get --piece <piece-id> myComputedField -i .cf/shared-dev.key -a URL -s space
 
 # 4. Set known input, trigger recompute, verify output
 echo '{"items":[{"title":"test","done":false}]}' | \
-  deno task cf piece set --piece <piece-id> /input -i claude.key -a URL -s space
-deno task cf piece step --piece <piece-id> -i claude.key -a URL -s space
-deno task cf piece get --piece <piece-id> itemCount -i claude.key -a URL -s space
+  deno task cf piece set --piece <piece-id> /input -i .cf/shared-dev.key -a URL -s space
+deno task cf piece step --piece <piece-id> -i .cf/shared-dev.key -a URL -s space
+deno task cf piece get --piece <piece-id> itemCount -i .cf/shared-dev.key -a URL -s space
 ```
 
 ## Common CLI Debugging Patterns
@@ -132,10 +132,10 @@ When iterating on fixes, always use `setsrc` instead of `new`:
 
 ```bash
 # Make a fix to your pattern, then:
-deno task cf piece setsrc --piece <piece-id> pattern.tsx -i claude.key -a URL -s space
+deno task cf piece setsrc --piece <piece-id> pattern.tsx -i .cf/shared-dev.key -a URL -s space
 
 # Test again
-deno task cf piece get --piece <piece-id> brokenField -i claude.key -a URL -s space
+deno task cf piece get --piece <piece-id> brokenField -i .cf/shared-dev.key -a URL -s space
 ```
 
 This keeps you working with the same piece instance, preserving any test data you've set up.
