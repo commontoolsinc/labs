@@ -1,18 +1,17 @@
 import { dirname, fromFileUrl, join, resolve } from "@std/path";
 import { CAPTURE_STOP_SIGNAL } from "./capture-deno-inspector-profile-lib.ts";
 import {
-  DEBUGGER_WAITING_MESSAGE,
+  createProfileOutputRelay,
   DEFAULT_SUMMARY_PATTERN,
   DISABLED_SUMMARY_PATTERN,
-  findInspectorWebSocketUrl,
   inspectWaitFlag,
+  type KillableProcess,
   mirrorOutput,
   parseProfileArgs,
   pickInspectPort,
   profileTimestamp,
   profilingChildEnv,
   slugifyProfileName,
-  stopCaptureOnce,
   waitForCliStatusOrStopOnCaptureFailure,
 } from "./cf-profile-lib.ts";
 
@@ -80,29 +79,16 @@ const cliCommand = new Deno.Command(Deno.execPath(), {
 const captureStopState = { sent: false };
 const inspectorUrl = Promise.withResolvers<string>();
 const cliStatusPromise = cliCommand.status;
-let recentOutput = "";
-let inspectorUrlFound = false;
-const captureRef: { current?: Deno.ChildProcess } = {};
-const stopCapture = () => {
-  if (captureRef.current) {
-    // SIGTERM, not SIGINT, so an interactive Ctrl-C stays available to the user;
-    // the capture handles both identically, and its exit-time guard covers this
-    // signal (see guardCaptureStopSignal).
-    stopCaptureOnce(captureStopState, captureRef.current, CAPTURE_STOP_SIGNAL);
-  }
-};
-
-const onCliOutput = (text: string) => {
-  recentOutput = (recentOutput + text).slice(-8192);
-  const foundInspectorUrl = findInspectorWebSocketUrl(recentOutput);
-  if (foundInspectorUrl && !inspectorUrlFound) {
-    inspectorUrlFound = true;
-    inspectorUrl.resolve(foundInspectorUrl);
-  }
-  if (recentOutput.includes(DEBUGGER_WAITING_MESSAGE)) {
-    stopCapture();
-  }
-};
+const captureRef: { current?: KillableProcess } = {};
+const { onCliOutput, stopCapture } = createProfileOutputRelay({
+  captureRef,
+  captureStopState,
+  // SIGTERM, not SIGINT, so an interactive Ctrl-C stays available to the user;
+  // the capture handles both identically, and its exit-time guard covers this
+  // signal (see guardCaptureStopSignal).
+  captureStopSignal: CAPTURE_STOP_SIGNAL,
+  onInspectorUrl: (url) => inspectorUrl.resolve(url),
+});
 const stdoutDone = mirrorOutput(
   cliCommand.stdout,
   Deno.stdout,
