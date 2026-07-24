@@ -21,6 +21,7 @@ import Topic, {
   crossrefJoin,
   fidPayload,
   openTopic,
+  rejectMutation,
   snippet,
   topicAuthorFromAgent,
   topicAuthorFromPerson,
@@ -55,6 +56,11 @@ export interface TopicsInput {
 
 export interface AddTopicEvent {
   title: string;
+  /** The topic's initial living-document body. A topic born with a body
+   * appears with it atomically — no reader observes the title-only halfway
+   * state, and no follow-up `setBody` call is needed to finish a create
+   * (verb contract: the atomic-unit rule). */
+  body?: string;
   /** The agent making this mutation. The authenticated principal remains the
    * human whose identity key invoked the stream; this is the agent's explicit
    * content-level signature under that shared principal. Optional only so
@@ -160,15 +166,21 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     profileName.trim().length > 0 && profileWish.result !== undefined
   );
 
-  const addTopic = action(({ title, agentName }: AddTopicEvent) => {
+  const addTopic = action(({ title, body, agentName }: AddTopicEvent) => {
     const trimmed = (title ?? "").trim();
     const author = topicAuthorFromAgent(agentName ?? "");
-    if (!trimmed || (agentName !== undefined && !author)) return;
+    if (agentName !== undefined && !author) {
+      rejectMutation("addTopic", "agentName must be non-blank when given");
+    }
+    if (!trimmed) rejectMutation("addTopic", "title must be non-empty");
     const legacyName = author
       ? topicAuthorLabel(author)
       : (myName.get() ?? "").trim() || "someone";
     const piece = Topic({
       title: trimmed,
+      // Body at create is part of the create's atomic unit; created-with is
+      // not an update, so bodyUpdatedBy/At stay unset (createdBy covers it).
+      body: (body ?? "").trim(),
       createdAt: Date.now(),
       createdBy: author,
       createdByName: legacyName,

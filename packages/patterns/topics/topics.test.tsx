@@ -1,13 +1,14 @@
 /**
  * Single-runtime pattern tests for Topics (CT-1878).
  *
- * Complements multi-user.test.tsx (which covers cross-runtime isolation and
- * merge behavior): this file drives every exposed stream and derived value in
- * one runtime — action guards, atomic agent signatures, legacy authorship
- * fallback/shadow fields, the unsafe-scheme link rejection, label defaulting,
- * body updates, activity-based sorting, the derived crossref graph (edges from
- * fids pasted in bodies, comments, and link URLs; never persisted), and the
- * exported pure helpers.
+ * Complements multi-user.test.tsx (cross-runtime isolation and merge
+ * behavior) and topics-rejections.test.tsx (thrown rejections on the mutating
+ * verbs — those runs expect runtime errors): this file drives the happy and
+ * legacy paths in one runtime — atomic agent signatures, body-at-create,
+ * legacy authorship fallback/shadow fields, label defaulting, body updates,
+ * activity-based sorting, the derived crossref graph (edges from fids pasted
+ * in bodies, comments, and link URLs; never persisted), and the exported pure
+ * helpers. UI composer wrappers keep silent guards, exercised here.
  */
 import { action, computed, Default, NAME, UI, Writable } from "commonfabric";
 import { pattern } from "commonfabric";
@@ -122,20 +123,21 @@ export default pattern(() => {
 
   // --- actions ---
 
-  const action_add_blank_topic = action(() => {
-    board.addTopic.send({ title: "   ", agentName: "Sol" });
-  });
-  const action_add_unsigned_topic = action(() => {
-    board.addTopic.send({ title: "Unsigned", agentName: "   " });
-  });
   const action_add_first_topic = action(() => {
     board.addTopic.send({ title: "  First topic  ", agentName: "  Sol  " });
   });
   const action_add_second_topic = action(() => {
     board.addTopic.send({ title: "Second topic", agentName: "Fable" });
   });
+  // Body at create: the create's atomic unit — no reader observes a
+  // title-only halfway state, and created-with is not an update (the
+  // bodyUpdatedBy/At stamps stay unset; createdBy covers authorship).
   const action_add_third_topic = action(() => {
-    board.addTopic.send({ title: "Composed topic", agentName: "Sol" });
+    board.addTopic.send({
+      title: "Composed topic",
+      body: "  seeded at create  ",
+      agentName: "Sol",
+    });
   });
 
   // The previous deployed event shapes remain operational while callers
@@ -161,19 +163,7 @@ export default pattern(() => {
   const action_update_legacy_topic_body = action(() => {
     legacyBoard.topics?.[0]?.setBody.send({ body: "legacy body" });
   });
-  const action_reject_explicit_blank_legacy_agent = action(() => {
-    legacyBoard.addTopic.send({ title: "must not land", agentName: " " });
-  });
 
-  const action_blank_comment = action(() => {
-    board.topics?.[0]?.addComment.send({ body: "   ", agentName: "Sol" });
-  });
-  const action_comment_unsigned = action(() => {
-    board.topics?.[0]?.addComment.send({
-      body: "unsigned",
-      agentName: "   ",
-    });
-  });
   const action_comment_signed = action(() => {
     board.topics?.[0]?.addComment.send({
       body: "hello thread",
@@ -183,22 +173,6 @@ export default pattern(() => {
   const action_set_body = action(() => {
     board.topics?.[0]?.setBody.send({
       body: "line one\nline two",
-      agentName: "Sol",
-    });
-  });
-  const action_link_unsafe = action(() => {
-    board.topics?.[0]?.addLink.send({
-      kind: "web",
-      url: "javascript:alert(1)",
-      label: "evil",
-      agentName: "Sol",
-    });
-  });
-  const action_link_blank = action(() => {
-    board.topics?.[0]?.addLink.send({
-      kind: "web",
-      url: "   ",
-      label: "x",
       agentName: "Sol",
     });
   });
@@ -271,12 +245,10 @@ export default pattern(() => {
     (board.mentionable ?? []).length === 0
   );
 
-  // Blank titles are rejected by the addTopic guard.
-  const assert_still_empty = computed(() => board.topicCount === 0);
-
   const assert_first_topic = computed(() =>
     board.topicCount === 1 &&
     board.topics?.[0]?.title === "First topic" &&
+    board.topics?.[0]?.body === "" &&
     board.topics?.[0]?.createdBy?.kind === "agent" &&
     board.topics?.[0]?.createdBy?.name === "Sol" &&
     board.topics?.[0]?.createdByName === "Sol (agent)" &&
@@ -284,10 +256,6 @@ export default pattern(() => {
     board.topics?.[0]?.commentCount === 0 &&
     board.topics?.[0]?.lastActivityAt === board.topics?.[0]?.createdAt &&
     board.topics?.[0]?.[NAME] === "First topic"
-  );
-
-  const assert_blank_comment_rejected = computed(() =>
-    board.topics?.[0]?.commentCount === 0
   );
 
   const assert_comment_landed = computed(() =>
@@ -308,11 +276,7 @@ export default pattern(() => {
     (board.topics?.[0]?.bodyUpdatedAt ?? 0) > 0
   );
 
-  // javascript: and blank URLs are rejected; a valid https link with a blank
-  // label defaults its label to the URL.
-  const assert_links_guarded = computed(() =>
-    (board.topics?.[0]?.links ?? []).length === 0
-  );
+  // A valid https link with a blank label defaults its label to the URL.
   const assert_link_added = computed(() =>
     (board.topics?.[0]?.links ?? []).length === 1 &&
     board.topics?.[0]?.links?.[0]?.kind === "pr" &&
@@ -333,7 +297,12 @@ export default pattern(() => {
   const assert_third_topic = computed(() =>
     board.topicCount === 3 &&
     board.topics?.[2]?.title === "Composed topic" &&
-    board.topics?.[2]?.createdBy?.name === "Sol"
+    board.topics?.[2]?.createdBy?.name === "Sol" &&
+    // Body-at-create: trimmed, present immediately, and NOT a body update —
+    // the update stamps stay unset (createdBy covers create authorship).
+    board.topics?.[2]?.body === "seeded at create" &&
+    (board.topics?.[2]?.bodyUpdatedBy?.name ?? "") === "" &&
+    (board.topics?.[2]?.bodyUpdatedAt ?? 0) === 0
   );
 
   const assert_blank_draft_rejected = computed(() =>
@@ -658,31 +627,17 @@ export default pattern(() => {
       { assertion: assert_legacy_link_landed },
       { action: action_update_legacy_topic_body },
       { assertion: assert_legacy_body_landed },
-      { action: action_reject_explicit_blank_legacy_agent },
-      { assertion: assert_legacy_body_landed },
       // Render the Profile-authored rows after their mutations land, then the
       // edit state whose Save control is disabled until #profile resolves.
       { render: profileTopic[UI] },
       { action: action_start_profile_body_edit },
       { render: profileTopic[UI] },
-      { action: action_add_blank_topic },
-      { assertion: assert_still_empty },
-      { action: action_add_unsigned_topic },
-      { assertion: assert_still_empty },
       { action: action_add_first_topic },
       { assertion: assert_first_topic },
-      { action: action_blank_comment },
-      { assertion: assert_blank_comment_rejected },
-      { action: action_comment_unsigned },
-      { assertion: assert_blank_comment_rejected },
       { action: action_comment_signed },
       { assertion: assert_comment_landed },
       { action: action_set_body },
       { assertion: assert_body_set },
-      { action: action_link_unsafe },
-      { assertion: assert_links_guarded },
-      { action: action_link_blank },
-      { assertion: assert_links_guarded },
       { action: action_link_valid_unlabeled },
       { assertion: assert_link_added },
       { action: action_add_second_topic },

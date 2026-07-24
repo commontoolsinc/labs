@@ -242,6 +242,17 @@ export const topicAuthorFromPerson = (
   return avatar ? { kind: "person", name, avatar } : { kind: "person", name };
 };
 
+/** Reject a mutation loudly. To a headless caller a silent early-return is
+ * indistinguishable from success (verb contract rule 4,
+ * docs/plans/pattern-verb-contract.md); a throw surfaces as a failed handler
+ * transaction and a nonzero CLI exit. Stable error codes arrive with the
+ * invocation protocol; until then the message carries a stable
+ * "<verb> rejected:" prefix. UI composer wrappers keep their silent guards —
+ * an empty draft is a non-event in a composer. */
+export const rejectMutation = (verb: string, reason: string): never => {
+  throw new Error(`${verb} rejected: ${reason}`);
+};
+
 /** Structured author first, legacy string second. Agent snapshots are labelled
  * explicitly because they share the authenticated principal's identity key. */
 export const topicAuthorLabel = (
@@ -514,7 +525,10 @@ export default pattern<TopicInput, TopicOutput>(
     const addComment = action(({ body: text, agentName }: AddCommentEvent) => {
       const trimmed = (text ?? "").trim();
       const author = topicAuthorFromAgent(agentName ?? "");
-      if (!trimmed || (agentName !== undefined && !author)) return;
+      if (agentName !== undefined && !author) {
+        rejectMutation("addComment", "agentName must be non-blank when given");
+      }
+      if (!trimmed) rejectMutation("addComment", "body must be non-empty");
       const legacyName = author
         ? topicAuthorLabel(author)
         : (myName.get() ?? "").trim() || "someone";
@@ -531,10 +545,13 @@ export default pattern<TopicInput, TopicOutput>(
       ({ kind, url, label, agentName }: AddLinkEvent) => {
         const trimmedUrl = (url ?? "").trim();
         const author = topicAuthorFromAgent(agentName ?? "");
-        if (
-          !trimmedUrl || !isSafeLinkUrl(trimmedUrl) ||
-          (agentName !== undefined && !author)
-        ) return;
+        if (agentName !== undefined && !author) {
+          rejectMutation("addLink", "agentName must be non-blank when given");
+        }
+        if (!trimmedUrl) rejectMutation("addLink", "url must be non-empty");
+        if (!isSafeLinkUrl(trimmedUrl)) {
+          rejectMutation("addLink", "url must be http(s)");
+        }
         links.push({
           kind: kind ?? "web",
           url: trimmedUrl,
@@ -547,7 +564,9 @@ export default pattern<TopicInput, TopicOutput>(
 
     const setBody = action(({ body: text, agentName }: SetBodyEvent) => {
       const author = topicAuthorFromAgent(agentName ?? "");
-      if (agentName !== undefined && !author) return;
+      if (agentName !== undefined && !author) {
+        rejectMutation("setBody", "agentName must be non-blank when given");
+      }
       body.set(text ?? "");
       if (author) {
         bodyUpdatedBy.set(author);
