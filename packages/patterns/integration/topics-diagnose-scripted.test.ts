@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import type {
   CommitTelemetrySnapshot,
   MultiRuntimeHarnessOptions,
@@ -546,6 +546,14 @@ Deno.test("Topics diagnostics CLI prints reports and maps failures to safe exits
   });
   assertEquals(errors, ["invalid-configuration"]);
   assertEquals(exits, [1, 1]);
+});
+
+Deno.test("Topics diagnostics maps invalid arguments to a safe error", async () => {
+  await assertRejects(
+    () => runTopicsDiagnostics(["--unsupported"]),
+    TopicsDiagnosticsError,
+    "invalid-configuration",
+  );
 });
 
 Deno.test("Topics diagnostics orchestrates all ordinary phases and row-local crossrefs", async () => {
