@@ -13,18 +13,10 @@ import { isFabricValue } from "./type-check.ts";
 const deepFrozenCache = new WeakSet<object>();
 
 /**
- * Object graphs already proven to be both deeply frozen and valid `FabricValue`s,
- * memoized by root identity for `isDeepFrozenFabricValue()`.
- *
- * Caching by identity is sound because of the "Deep-frozen honesty" mandate (see
- * the `[IS_DEEP_FROZEN]` protocol member on `BaseFabricInstance` and the
- * `FabricValue` doc in `interface.ts`): a `FabricValue` may not expose an accessor
- * whose result contradicts its frozen state, and a `FabricInstance` may not report
- * deep-frozen unless permanently immutable. So a proven deep-frozen fabric value
- * stays one -- including graphs reaching a `FabricInstance` -- and its proof does
- * not need re-validation. A class that violates the mandate can corrupt this cache,
- * as any contract violation can; that is the implementing class's bug, not this
- * code's to defend against.
+ * Object graphs proven to be deep-frozen `FabricValue`s, memoized by root
+ * identity for `isDeepFrozenFabricValue()`. Sound to cache because the
+ * deep-frozen-honesty mandate makes such a proof permanent (see `[IS_DEEP_FROZEN]`
+ * on `BaseFabricInstance` and the `FabricValue` doc).
  */
 const deepFrozenFabricValueCache = new WeakSet<object>();
 
@@ -268,22 +260,11 @@ export function deepFreeze<T>(value: T): T {
 }
 
 /**
- * Indicates whether the value is a deep-frozen `FabricValue`: it is both a
- * `FabricValue` by structural membership (`isFabricValue()`) and deeply frozen
- * (`isDeepFrozen()`). Equivalent to `isFabricValue(value) && isDeepFrozen(value)`,
- * with an identity-cached fast path for values already proven.
- *
- * The cache is sound because a `FabricValue` must report its frozen state
- * truthfully and permanently -- see the "Deep-frozen honesty" mandate on the
- * `[IS_DEEP_FROZEN]` protocol member (`BaseFabricInstance`) and on `FabricValue`
- * (`interface.ts`): no member exposes an accessor whose result contradicts its
- * frozen state, and no `FabricInstance` reports deep-frozen unless permanently
- * immutable. A proven deep-frozen fabric value therefore stays one, so its proof
- * is cached by root identity and not re-validated.
- *
- * (Membership is gated by `isFabricValue()`: `isDeepFrozen()` alone admits
- * `function`s via the `isNecessarilyFrozenValue()` bug, but `isFabricValue()`
- * rejects them, so the conjunction is correct for all in-spec values.)
+ * Indicates whether the value is a deep-frozen `FabricValue`: both a
+ * `FabricValue` (`isFabricValue()`) and deeply frozen (`isDeepFrozen()`), with an
+ * identity-cached fast path. The cache is sound per the deep-frozen-honesty
+ * mandate (see `[IS_DEEP_FROZEN]` and the `FabricValue` doc), which makes a
+ * deep-frozen proof permanent.
  */
 export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
   if (
