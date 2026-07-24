@@ -141,6 +141,52 @@ Deno.test("memory v2 server stateless respond does not issue hello.ok", async ()
   }
 });
 
+Deno.test("memory v2 diagnostics wait for an active receive", async () => {
+  const authorizationStarted = Promise.withResolvers<void>();
+  const releaseAuthorization = Promise.withResolvers<string>();
+  const server = new Server({
+    store: new URL("memory://memory-v2-server-receive-fence"),
+    subscriptionRefreshDelayMs: 0,
+    authorizeSessionOpen() {
+      authorizationStarted.resolve();
+      return releaseAuthorization.promise;
+    },
+    sessionOpenAuth: { audience: TEST_AUDIENCE },
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  try {
+    await connection.receive(encodeMemoryBoundary(HELLO));
+    const sessionOpen = expectHelloOk(messages);
+    const receive = connection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open",
+      space: "did:key:z6Mk-memory-v2-server-receive-fence",
+      session: {},
+      invocation: authInvocation(sessionOpen),
+    }));
+    await authorizationStarted.promise;
+
+    let waitComplete = false;
+    const wait = server.waitForDiagnosticsReceives().then(() => {
+      waitComplete = true;
+    });
+    await Promise.resolve();
+    const completedBeforeAuthorization = waitComplete;
+
+    releaseAuthorization.resolve("did:key:z6Mk-memory-v2-server-principal");
+    await Promise.all([receive, wait]);
+    assertEquals(completedBeforeAuthorization, false);
+    assertEquals(
+      assertResponse<unknown>(shiftMessage(messages)).requestId,
+      "open",
+    );
+  } finally {
+    releaseAuthorization.resolve("did:key:z6Mk-memory-v2-server-principal");
+    await server.close();
+  }
+});
+
 Deno.test("memory v2 server parser ignores transact invocation and authorization payloads", () => {
   assertEquals(
     parseClientMessage(encodeMemoryBoundary({
@@ -1392,6 +1438,11 @@ Deno.test("memory v2 server rejects telemetry snapshots when disabled", async ()
       Error,
       "commit telemetry is disabled",
     );
+    assertThrows(
+      () => server.diagnosticsActivityGeneration(),
+      Error,
+      "commit telemetry is disabled",
+    );
   } finally {
     await server.close();
   }
@@ -1415,11 +1466,48 @@ Deno.test("memory v2 server aggregate diagnostics bypass exported spans", async 
       diagnosticsTracer: recordingTracer(aggregateSpanNames),
     },
   );
+  const aggregateMessages: ServerMessage[] = [];
+  const aggregateConnection = aggregate.connect((message) =>
+    aggregateMessages.push(message)
+  );
+  const aggregateSpace = "did:key:z6Mk-private-aggregate-span";
 
   try {
+    await aggregateConnection.receive(encodeMemoryBoundary(HELLO));
+    const sessionOpen = expectHelloOk(aggregateMessages);
+    await aggregateConnection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-aggregate",
+      space: aggregateSpace,
+      session: {},
+      invocation: authInvocation(sessionOpen),
+    }));
+    const sessionId = assertResponse<{ sessionId: string }>(
+      shiftMessage(aggregateMessages),
+    ).ok!.sessionId;
+    await aggregateConnection.receive(encodeMemoryBoundary({
+      type: "transact",
+      requestId: "aggregate-transaction",
+      space: aggregateSpace,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:aggregate-span",
+          value: { value: true },
+        }],
+      },
+    }));
+    assertEquals(
+      assertResponse<unknown>(shiftMessage(aggregateMessages)).requestId,
+      "aggregate-transaction",
+    );
+
     await Promise.all([
       ordinary.flushSessions(["did:key:z6Mk-ordinary-span"]),
-      aggregate.flushSessions(["did:key:z6Mk-private-aggregate-span"]),
+      aggregate.flushSessions([aggregateSpace]),
     ]);
 
     assertEquals(ordinarySpanNames, ["memory.fanout"]);
@@ -1439,9 +1527,12 @@ Deno.test("memory v2 server telemetry accounts for unknown-session attempts", as
     localSeq: 1,
     reads: { confirmed: [], pending: [] },
     operations: [{
-      op: "set",
+      op: "patch",
       id: "of:telemetry-unknown-session",
-      value: { value: { ignored: true } },
+      patches: [
+        { op: "replace", path: "/source/private", value: "ignored" },
+        { op: "replace", path: "/private", value: "ignored" },
+      ],
     }],
   };
 
@@ -1475,9 +1566,9 @@ Deno.test("memory v2 server telemetry accounts for unknown-session attempts", as
         max: encodedByteLength(commit.operations[0]),
       },
       newlyPersistedRevisions: { total: 0, max: 0 },
-      operationsByType: { set: 1, patch: 0, delete: 0, sqlite: 0 },
+      operationsByType: { set: 0, patch: 1, delete: 0, sqlite: 0 },
       receivedPatchOperationsByType: {
-        replace: 0,
+        replace: 2,
         add: 0,
         remove: 0,
         move: 0,
@@ -1498,7 +1589,7 @@ Deno.test("memory v2 server telemetry accounts for unknown-session attempts", as
         "remove-by-value": 0,
         increment: 0,
       },
-      patchesByPathShape: {},
+      patchesByPathShape: { metadata: 1, other: 1 },
       rejectedByName: { SessionError: 1 },
     });
   } finally {
@@ -1513,22 +1604,38 @@ Deno.test("memory v2 server telemetry preserves malformed transact ingress error
     true,
   );
   try {
-    const response = await server.transact({
+    const nonRecordResponse = await server.transact({
       type: "transact",
-      requestId: "malformed",
+      requestId: "non-record",
       space: "did:key:z6Mk-memory-v2-server-telemetry-malformed-transact",
       sessionId: "session:unknown",
-      commit: { reads: null, operations: null },
+      commit: null,
     } as never);
-    assertEquals(response, {
+    assertEquals(nonRecordResponse, {
       type: "response",
-      requestId: "malformed",
+      requestId: "non-record",
       error: {
         name: "SessionError",
         message: "Unknown session for space",
       },
     });
-    assertEquals(server.commitTelemetry().transactCount, 1);
+
+    const circularCommit: Record<string, unknown> = {
+      reads: { confirmed: [] },
+      operations: [],
+    };
+    circularCommit.self = circularCommit;
+    const circularResponse = await server.transact({
+      type: "transact",
+      requestId: "circular",
+      space: "did:key:z6Mk-memory-v2-server-telemetry-malformed-transact",
+      sessionId: "session:unknown",
+      commit: circularCommit,
+    } as never);
+    assertEquals(circularResponse.error?.name, "SessionError");
+    const telemetry = server.commitTelemetry();
+    assertEquals(telemetry.transactCount, 2);
+    assertEquals(telemetry.receivedCommitBytes, { total: 0, max: 0 });
   } finally {
     await server.close();
   }
@@ -2981,6 +3088,64 @@ Deno.test("memory v2 diagnostics flush falls back to a regular refresh without t
     await server.flushDiagnosticsSessions();
     await effectSent.promise;
     assertEquals(assertEffect(shiftMessage(messages)).effect.toSeq, 1);
+    assertEquals(messages, []);
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 diagnostics skip waiting for an acknowledged effect", async () => {
+  const server = createServer(
+    "memory://memory-v2-server-diagnostics-already-acknowledged",
+    0,
+    true,
+  );
+  const messages: ServerMessage[] = [];
+  const effectSent = Promise.withResolvers<void>();
+  const connection = server.connect((message) => {
+    messages.push(message);
+    if (message.type === "session/effect") effectSent.resolve();
+  });
+  const space =
+    "did:key:z6Mk-memory-v2-server-diagnostics-already-acknowledged";
+
+  try {
+    await connection.receive(encodeMemoryBoundary(HELLO));
+    const sessionOpen = expectHelloOk(messages);
+    await connection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open",
+      space,
+      session: {},
+      invocation: authInvocation(sessionOpen),
+    }));
+    const sessionId = assertResponse<{ sessionId: string }>(
+      shiftMessage(messages),
+    ).ok!.sessionId;
+    server.syncSessionForConnection = () =>
+      Promise.resolve({
+        type: "session/effect",
+        space,
+        sessionId,
+        effect: {
+          type: "sync",
+          fromSeq: 0,
+          toSeq: 0,
+          upserts: [],
+          removes: [],
+        },
+      });
+    server.markSpaceDirty(space);
+
+    let flushComplete = false;
+    const flush = server.flushDiagnosticsSessions().then(() => {
+      flushComplete = true;
+    });
+    await effectSent.promise;
+    await tick();
+    assertEquals(flushComplete, true);
+    await flush;
+    assertEquals(assertEffect(shiftMessage(messages)).effect.toSeq, 0);
     assertEquals(messages, []);
   } finally {
     await server.close();

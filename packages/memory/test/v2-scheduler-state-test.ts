@@ -583,6 +583,7 @@ Deno.test("memory v2 apply outcomes distinguish first application from replay", 
         id: "of:outcome-semantic",
         value: { value: true },
       }],
+      schedulerObservation: observationForAction("outcome:semantic"),
     };
     const observationOnly = {
       localSeq: 2,
@@ -624,6 +625,9 @@ Deno.test("memory v2 apply outcomes distinguish first application from replay", 
     }
 
     const [semanticOutcome, observationOutcome, batchOutcome] = outcomes;
+    const semanticObservationResult = semanticOutcome?.first.commit
+      .schedulerObservationResults?.[0];
+    assertExists(semanticObservationResult?.schedulerObservationId);
     assertEquals(semanticOutcome?.first.commit, {
       seq: 1,
       branch: "",
@@ -637,18 +641,26 @@ Deno.test("memory v2 apply outcomes distinguish first application from replay", 
         op: "set",
         document: { value: true },
       }],
+      schedulerObservationId: semanticObservationResult.schedulerObservationId,
+      schedulerObservationResults: [semanticObservationResult],
     });
-    assertEquals(semanticOutcome?.replay.commit.revisions, [{
-      id: "of:outcome-semantic",
-      scope: "space",
-      scopeKey: "space",
-      branch: "",
+    assertEquals(semanticOutcome?.replay.commit, {
       seq: 1,
-      opIndex: 0,
-      commitSeq: 1,
-      op: "set",
-      document: { value: true },
-    }]);
+      branch: "",
+      revisions: [{
+        id: "of:outcome-semantic",
+        scope: "space",
+        scopeKey: "space",
+        branch: "",
+        seq: 1,
+        opIndex: 0,
+        commitSeq: 1,
+        op: "set",
+        document: { value: true },
+      }],
+      schedulerObservationId: semanticObservationResult.schedulerObservationId,
+      schedulerObservationResults: [semanticObservationResult],
+    });
 
     const observationResult = observationOutcome?.first.commit
       .schedulerObservationResults?.[0];
@@ -686,8 +698,8 @@ Deno.test("memory v2 apply outcomes distinguish first application from replay", 
       batchOutcome?.replay.commit.schedulerObservationResults,
       batchResults,
     );
-    assertEquals(countRows(engine, "scheduler_observation"), 3);
-    assertEquals(countRows(engine, "scheduler_observation_replay"), 3);
+    assertEquals(countRows(engine, "scheduler_observation"), 4);
+    assertEquals(countRows(engine, "scheduler_observation_replay"), 4);
   } finally {
     close(engine);
     await Deno.remove(path);
