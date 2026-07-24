@@ -34,7 +34,14 @@ const textAbsent = (
     probe.deepText(element).includes(text)
   );
 
-const buttonDisabledIs = (
+// Resolve a control's disabled state and compare it to `disabled`. An inner
+// <button> is authoritative when present: its `.disabled` DOM property is the
+// control's real state. Without one, fall back to the host — a native form
+// control exposes `.disabled`, and a custom element like cf-checkbox reflects
+// `disabled` to an attribute and also sets `aria-disabled`. A control that is
+// neither disabled nor carries the attribute resolves to enabled, so
+// `waitForDisabled(el, false)` satisfies immediately instead of hanging.
+const disabledIs = (
   probe: ProbeApi,
   selector: string,
   disabled: boolean,
@@ -44,9 +51,20 @@ const buttonDisabledIs = (
   const button = element instanceof HTMLButtonElement
     ? element
     : element.shadowRoot?.querySelector("button");
-  return button instanceof HTMLButtonElement
-    ? button.disabled === disabled
-    : false;
+  let resolved: boolean;
+  if (button instanceof HTMLButtonElement) {
+    resolved = button.disabled;
+  } else if (
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLSelectElement ||
+    element instanceof HTMLTextAreaElement
+  ) {
+    resolved = element.disabled;
+  } else {
+    resolved = element.hasAttribute("disabled") ||
+      element.getAttribute("aria-disabled") === "true";
+  }
+  return resolved === disabled;
 };
 
 const runtimeIdle = async (): Promise<boolean> => {
@@ -587,7 +605,7 @@ export async function waitForDisabled(
   disabled: boolean,
 ) {
   try {
-    await waitForCondition(page, buttonDisabledIs, {
+    await waitForCondition(page, disabledIs, {
       args: [selector, disabled],
     });
   } catch (cause) {
@@ -1623,14 +1641,29 @@ async function readDisabledProbe(
     collect(document, matches);
     const element = matches[0];
     if (!element) return { selector: targetSelector, disabled: undefined };
+    // Resolve disabled the same way `disabledIs` does, so the diagnostic reports
+    // the state the wait was actually testing: an inner <button> when present,
+    // else the host's own `.disabled` (native controls) or its `disabled` /
+    // `aria-disabled` attributes (custom elements like cf-checkbox).
     const button = element instanceof HTMLButtonElement
       ? element
       : element.shadowRoot?.querySelector("button");
+    let disabled: boolean;
+    if (button instanceof HTMLButtonElement) {
+      disabled = button.disabled;
+    } else if (
+      element instanceof HTMLInputElement ||
+      element instanceof HTMLSelectElement ||
+      element instanceof HTMLTextAreaElement
+    ) {
+      disabled = element.disabled;
+    } else {
+      disabled = element.hasAttribute("disabled") ||
+        element.getAttribute("aria-disabled") === "true";
+    }
     return {
       selector: element.tagName.toLowerCase(),
-      disabled: button instanceof HTMLButtonElement
-        ? button.disabled
-        : undefined,
+      disabled,
     };
   }, { args: [selector] });
 }
