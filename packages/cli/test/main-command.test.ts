@@ -105,7 +105,7 @@ describe("main command", () => {
     );
     const normalizedHelp = help.replaceAll(/\s+/g, " ");
     expect(normalizedHelp).toContain(
-      `INPUT: Pass one inline JSON value, or put "--" before flags generated from the callable's input schema. Handlers interpret piped input using their input schema. Tools read piped JSON when called with "-- --json".`,
+      `INPUT: Pass one inline JSON value, pass "-" to read JSON from stdin, or put "--" before flags generated from the callable's input schema. Handlers also interpret piped input when no input argument is present. For tools, use "-" or "-- --json" to read piped JSON.`,
     );
     expect(code).toBe(0);
 
@@ -121,6 +121,7 @@ describe("main command", () => {
     });
     await piece.parse(["call", "search", '{"query":"tea"}']);
     await piece.parse(["call", "search", "--help"]);
+    await piece.parse(["call", "search", "-"]);
     await piece.parse(["call", "search", "--", "--json"]);
     expect(parsedCalls).toEqual([
       {
@@ -128,6 +129,7 @@ describe("main command", () => {
         literalArguments: [],
       },
       { positionals: ["search", "--help"], literalArguments: [] },
+      { positionals: ["search", "-"], literalArguments: [] },
       { positionals: ["search"], literalArguments: ["--json"] },
     ]);
   });
