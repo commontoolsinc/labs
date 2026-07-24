@@ -1487,6 +1487,18 @@ async function resolvePieceCallable(
   return resolved;
 }
 
+/** `cf piece verbs` output: the deployed pattern's source identity plus one
+ * row per callable. The identity is the skew detector — a client or skill
+ * comparing it against the contract it was written for can tell it targets a
+ * newer pattern than the live piece, instead of discovering the mismatch
+ * through a silently dropped field (design: Verb discovery). */
+export interface PieceCallablesListing {
+  /** The deployed pattern's source identity; null when the piece exposes
+   * none (e.g. harness doubles). */
+  pattern: PiecePatternRef | null;
+  verbs: PieceCallableListing[];
+}
+
 /** One row of `cf piece verbs`: a callable the piece exposes. */
 export interface PieceCallableListing {
   name: string;
@@ -1513,8 +1525,16 @@ export interface PieceCallableListing {
 export async function listPieceCallables(
   config: PieceConfig,
   deps: PieceCallableDependencies = {},
-): Promise<PieceCallableListing[]> {
+): Promise<PieceCallablesListing> {
   const { piece } = await loadPieceForCallables(config, deps);
+  let pattern: PiecePatternRef | null = null;
+  if (typeof piece.getPatternRef === "function") {
+    try {
+      pattern = (await piece.getPatternRef()) ?? null;
+    } catch {
+      pattern = null; // Identity is advisory; the listing itself still holds.
+    }
+  }
 
   const listings = new Map<string, PieceCallableListing>();
   // Names ordinary detection rejected: candidates for the forced-stream
@@ -1590,7 +1610,10 @@ export async function listPieceCallables(
 
   // Byte-order, not locale collation: this is a machine-readable surface and
   // must sort identically on every host (utf8Compare is the repo comparator).
-  return [...listings.values()].sort((a, b) => utf8Compare(a.name, b.name));
+  return {
+    pattern,
+    verbs: [...listings.values()].sort((a, b) => utf8Compare(a.name, b.name)),
+  };
 }
 
 export async function executePieceCallable(

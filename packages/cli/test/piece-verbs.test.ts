@@ -3,6 +3,14 @@ import { expect } from "@std/expect";
 import type { JSONSchema } from "@commonfabric/api";
 import { listPieceCallables } from "../lib/piece.ts";
 
+const TEST_PATTERN_REF = {
+  source: {
+    ref: "sha256:deadbeef",
+    repository: "labs",
+    entry: "packages/patterns/topics/main.tsx",
+  },
+} as never;
+
 /** Minimal schema-aware cell double: enough surface for the lister's walk —
  * value/schema access, key() descent, and asSchemaFromLinks identity. */
 function cell(value: unknown, schema?: JSONSchema): {
@@ -113,6 +121,7 @@ describe("listPieceCallables", () => {
     const piece = {
       result: { getCell: () => Promise.resolve(resultRoot) },
       input: { getCell: () => Promise.resolve(inputRoot) },
+      getPatternRef: () => Promise.resolve(TEST_PATTERN_REF),
       getCell: () => ({
         get: () => pieceRootValue,
         asSchema: (_s: unknown) => ({
@@ -124,7 +133,7 @@ describe("listPieceCallables", () => {
     };
     const manager = { getSpace: () => "home" };
 
-    const verbs = await listPieceCallables(
+    const listing = await listPieceCallables(
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
@@ -137,6 +146,9 @@ describe("listPieceCallables", () => {
       },
     );
 
+    // The deployed pattern's identity rides the listing — the skew detector.
+    expect(listing.pattern).toEqual(TEST_PATTERN_REF);
+    const verbs = listing.verbs;
     expect(verbs.map((v) => v.name)).toEqual([
       "addTopic",
       "hiddenPing",
@@ -180,7 +192,7 @@ describe("listPieceCallables", () => {
       },
       input: { getCell: () => Promise.resolve(cell({})) },
     };
-    const verbs = await listPieceCallables(
+    const listing = await listPieceCallables(
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
@@ -192,6 +204,8 @@ describe("listPieceCallables", () => {
         loadPiece: () => Promise.resolve(piece as never),
       },
     );
-    expect(verbs).toEqual([]);
+    // No getPatternRef on the double: identity degrades to null, honestly.
+    expect(listing.pattern).toBeNull();
+    expect(listing.verbs).toEqual([]);
   });
 });

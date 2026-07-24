@@ -566,12 +566,13 @@ without reading pattern source. The pieces exist:
   `.handlers` listing — flagged on the board as neither universal nor
   complete.
 
+The listing also carries the deployed pattern's source identity, so a client
+or skill can detect that it targets a newer contract than the live piece
+instead of discovering skew through a silently dropped field.
+
 What remains:
 
-1. **Deployed source identity in the listing**, so a client or skill can
-   detect that it targets a newer contract than the live piece instead of
-   discovering skew through a silently dropped field.
-2. **Result schemas for handlers.** The command spec carries an output schema
+1. **Result schemas for handlers.** The command spec carries an output schema
    only for tools, because handlers return nothing today. Rule 3's declared
    result must reach the piece's **durable schema** — otherwise introspection
    can name a verb and its arguments but never what it returns. This rides

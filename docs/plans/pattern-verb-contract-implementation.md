@@ -237,9 +237,8 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   Walks result-then-input with the same classification `cf piece call`
   resolves through — including the forced-stream fallback path. v1 lists
   everything per the decided semantics; handler result schemas appear once
-  WS-C lands, tier filtering with the marker, later. Remaining from the
-  2026-07-24 amendments: the deployed pattern's source identity in the
-  listing (skew detection).
+  WS-C lands, tier filtering with the marker, later. The 2026-07-24 amendment is absorbed: the listing carries the
+  deployed pattern's source identity (skew detection).
 - Generic identity annotation for data reads and callable results. Start with
   an exploration form such as `--include-ids` that annotates points where the
   backing identity changes; evaluate a narrower path-selected form if broad

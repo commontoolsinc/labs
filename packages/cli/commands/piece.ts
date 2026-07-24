@@ -1188,19 +1188,22 @@ after --. Handlers interpret piped input when no input argument is present.`,
   .action(async (options) => {
     setQuietMode(!!options.quiet);
     const pieceConfig = parsePieceOptions(options);
-    const verbs = await listPieceCallables(pieceConfig);
+    const listing = await listPieceCallables(pieceConfig);
     if (options.json) {
-      render(verbs, { json: true });
+      render(listing, { json: true });
       return;
     }
-    if (verbs.length === 0) {
+    if (listing.verbs.length === 0) {
       render("<no callable verbs>");
       return;
+    }
+    if (listing.pattern) {
+      render(`PATTERN ${formatPatternIdentity(listing.pattern)}`);
     }
     render(
       Table.from([
         ["NAME", "KIND", "ON"],
-        ...verbs.map((v) => [v.name, v.kind, v.on]),
+        ...listing.verbs.map((v) => [v.name, v.kind, v.on]),
       ]).toString(),
     );
     hint(
