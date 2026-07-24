@@ -725,6 +725,99 @@ describe("renderExecHelp", () => {
     expect(help).not.toContain("Input schema:");
   });
 
+  it("renders tuples, const, type arrays, and index signatures in the input type", () => {
+    // CT-1895: tuples used to render as "unknown[]"; const, type arrays, and
+    // index-signature value types were lossy the same way
+    const help = renderExecHelp(
+      "/tmp/shapes.tool",
+      makeSpec("tool", {
+        type: "object",
+        properties: {
+          pair: {
+            type: "array",
+            prefixItems: [{ type: "string" }, { type: "number" }],
+          },
+          rest: {
+            type: "array",
+            prefixItems: [{ type: "string" }],
+            items: { type: "boolean" },
+          },
+          kind: { type: "string", const: "point" },
+          maybe: { type: ["string", "null"] },
+          counts: { type: "object", additionalProperties: { type: "number" } },
+        },
+      } as JSONSchema),
+    );
+
+    expect(help).toContain("pair?: [string, number, ...unknown[]]");
+    expect(help).toContain("rest?: [string, ...boolean[]]");
+    expect(help).toContain('kind?: "point"');
+    expect(help).toContain("maybe?: string | null");
+    expect(help).toContain("counts?: Record<string, number>");
+  });
+
+  it("threads the schema's own $defs into the input type", () => {
+    const help = renderExecHelp(
+      "/tmp/defs.tool",
+      makeSpec("tool", {
+        type: "object",
+        properties: {
+          user: { $ref: "#/$defs/User" },
+        },
+        $defs: {
+          User: { type: "string" },
+        },
+      } as JSONSchema),
+    );
+    // The small definition inlines through the threaded $defs instead of
+    // rendering "unknown".
+    expect(help).toContain("user?: string");
+  });
+
+  it("renders a boolean input schema as unknown", () => {
+    const help = renderExecHelp(
+      "/tmp/boolean.tool",
+      makeSpec("tool", false as JSONSchema),
+    );
+    expect(help).toContain("Input type:");
+    expect(help).toContain("  unknown");
+  });
+
+  it("abbreviates the input type at the depth cap", () => {
+    // The shared formatter's default maxDepth (4) matches the cap the CLI's
+    // own renderer used before it delegated to schemaToTypeString
+    const help = renderExecHelp(
+      "/tmp/deep.tool",
+      makeSpec("tool", {
+        type: "object", // depth 0
+        properties: {
+          a: {
+            type: "object", // depth 1
+            properties: {
+              b: {
+                type: "object", // depth 2
+                properties: {
+                  c: {
+                    type: "object", // depth 3
+                    properties: {
+                      d: { // depth 4: abbreviated
+                        type: "object",
+                        properties: { e: { type: "string" } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      } as JSONSchema),
+    );
+
+    expect(help).toContain("d?: {...}");
+    expect(help).not.toContain("e?:");
+  });
+
   it("renders direct mounted-file usage when called via shebang", () => {
     const help = renderExecHelp(
       "./legacyWrite.handler",

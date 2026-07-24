@@ -15,7 +15,7 @@ export interface SchemaFormatOptions {
   defs?: Record<string, JSONSchema>;
   /** Current recursion depth (internal use) */
   depth?: number;
-  /** Maximum recursion depth before abbreviating (default: 3) */
+  /** Maximum recursion depth before abbreviating (default: 4) */
   maxDepth?: number;
   /** Current indentation level (internal use) */
   indent?: number;
@@ -62,9 +62,40 @@ export interface SchemaFormatOptions {
  * // → "string[]"
  *
  * @example
+ * // Tuples (prefixItems)
+ * schemaToTypeString({
+ *   type: "array",
+ *   prefixItems: [{ type: "string" }, { type: "number" }]
+ * })
+ * // → "[string, number, ...unknown[]]" (an absent `items` leaves the tail
+ * // open; only `items: false` closes the tuple)
+ *
+ * @example
+ * // An `items` schema alongside `prefixItems` becomes a rest element
+ * schemaToTypeString({
+ *   type: "array",
+ *   prefixItems: [{ type: "string" }],
+ *   items: { type: "number" }
+ * })
+ * // → "[string, ...number[]]"
+ *
+ * @example
  * // Enums as union literals
  * schemaToTypeString({ enum: ["open", "closed"] })
  * // → '"open" | "closed"'
+ *
+ * @example
+ * // const literals and type arrays
+ * schemaToTypeString({ type: "string", const: "x" }) // → '"x"'
+ * schemaToTypeString({ type: ["string", "null"] })   // → "string | null"
+ *
+ * @example
+ * // Index signatures (object-valued additionalProperties)
+ * schemaToTypeString({
+ *   type: "object",
+ *   additionalProperties: { type: "number" }
+ * })
+ * // → "Record<string, number>"
  *
  * @example
  * // PatternToolResult schemas (from patternTool())
@@ -117,6 +148,11 @@ function schemaToTypeStringInner(
       const defName = match[1];
       const def = defs[defName];
       if (def) {
+        // Ref hops recurse BEFORE the depth cap below, so a ref cycle
+        // (e.g. `$defs: {A: {$ref: "#/$defs/A"}}`) must bail here — at the
+        // cap, fall back to the type name instead of inlining (PR #4969
+        // review: `--help` overflowed the stack on recursive $defs).
+        if (depth >= maxDepth) return defName;
         // For small definitions, inline them; otherwise use the type name
         const defStr = schemaToTypeString(def, { ...nextOpts, indent: 0 });
         if (defStr.length < 50) {
@@ -143,6 +179,7 @@ function schemaToTypeStringInner(
     } else {
       if (schema.type === "object") return "{...}";
       if (schema.type === "array") return "[...]";
+      if (Array.isArray(schema.type)) return typeArrayToUnion(schema.type);
       return String(schema.type || "unknown");
     }
   }
@@ -172,11 +209,16 @@ function schemaToTypeStringInner(
     }
   }
 
+  // Handle const - show as the literal, matching the enum rendering (the
+  // generator's node path emits `const` where its type path emits a
+  // single-value `enum`)
+  if (s.const !== undefined) {
+    return literalToTypeString(s.const);
+  }
+
   // Handle enum - show as union of literals
   if (Array.isArray(s.enum)) {
-    const values = s.enum.slice(0, 5).map((v) =>
-      typeof v === "string" ? `"${v}"` : String(v)
-    );
+    const values = s.enum.slice(0, 5).map(literalToTypeString);
     if (s.enum.length > 5) values.push("...");
     return values.join(" | ");
   }
@@ -194,16 +236,41 @@ function schemaToTypeStringInner(
   // Handle basic types
   const type = s.type;
 
+  // A type array (e.g. from the union formatter's anyOf merge) is a union of
+  // the named types
+  if (Array.isArray(type)) return typeArrayToUnion(type);
+
   if (type === "string") return "string";
   if (type === "number" || type === "integer") return "number";
   if (type === "boolean") return "boolean";
   if (type === "null") return "null";
 
-  // Handle arrays
+  // Handle arrays; tuples render as TypeScript tuple types, with a uniform
+  // `items` schema alongside `prefixItems` becoming a rest element. An
+  // absent (or `true`) `items` beside `prefixItems` leaves the tail OPEN in
+  // JSON Schema, so it renders `...unknown[]` — only `items: false` closes
+  // the tuple (PR #4969 review).
   if (type === "array") {
+    if (Array.isArray(s.prefixItems)) {
+      const slots = (s.prefixItems as JSONSchema[]).map((slot) =>
+        schemaToTypeString(slot, nextOpts)
+      );
+      if (s.items && typeof s.items === "object") {
+        slots.push(
+          `...${
+            arrayElementType(
+              schemaToTypeString(s.items as JSONSchema, nextOpts),
+            )
+          }[]`,
+        );
+      } else if (s.items !== false) {
+        slots.push("...unknown[]");
+      }
+      return `[${slots.join(", ")}]`;
+    }
     if (s.items && typeof s.items === "object") {
       const itemType = schemaToTypeString(s.items as JSONSchema, nextOpts);
-      return `${itemType}[]`;
+      return `${arrayElementType(itemType)}[]`;
     }
     return "unknown[]";
   }
@@ -211,7 +278,18 @@ function schemaToTypeStringInner(
   // Handle objects
   if (type === "object" || s.properties) {
     const props = s.properties as Record<string, JSONSchema> | undefined;
+    // An index signature (object-valued additionalProperties) carries a value
+    // schema worth showing; a bare `additionalProperties: true` does not
+    const indexValueSchema = typeof s.additionalProperties === "object" &&
+        s.additionalProperties !== null
+      ? s.additionalProperties as JSONSchema
+      : undefined;
     if (!props || Object.keys(props).length === 0) {
+      if (indexValueSchema) {
+        return `Record<string, ${
+          schemaToTypeString(indexValueSchema, nextOpts)
+        }>`;
+      }
       if (s.additionalProperties) return "Record<string, unknown>";
       return "{}";
     }
@@ -234,6 +312,28 @@ function schemaToTypeStringInner(
       lines.push(`${padding}${key}${optional}: ${propType}`);
     }
 
+    // Named properties alongside an index signature: TypeScript cannot
+    // express "every key EXCEPT the named ones" — an inline index signature
+    // conflicts with incompatible named properties, and an intersection
+    // with Record<string, T> wrongly constrains the named keys too. Render
+    // a descriptive comment line instead (PR #4969 review, both rounds).
+    if (indexValueSchema && lines.length > 0) {
+      const valueType = schemaToTypeString(indexValueSchema, {
+        ...nextOpts,
+        indent: 0,
+      });
+      // Comment EVERY line: a multiline value type (e.g. an object) would
+      // otherwise escape the comment after its first line and read as outer
+      // object syntax (PR #4969 review).
+      const [first, ...restLines] = valueType.split("\n");
+      lines.push(
+        [
+          `${padding}// other keys: ${first}`,
+          ...restLines.map((line) => `${padding}// ${line}`),
+        ].join("\n"),
+      );
+    }
+
     if (lines.length === 0) return "{}";
 
     const closePadding = "  ".repeat(indent);
@@ -242,6 +342,35 @@ function schemaToTypeStringInner(
 
   // Fallback
   return type ? String(type) : "unknown";
+}
+
+/**
+ * Renders a literal value the way TS spells the literal type. JSON
+ * serialization escapes string contents (PR #4969 review: `"a"b"` was
+ * emitted for a legal string constant) and renders object/array literals
+ * as JSON instead of "[object Object]".
+ */
+function literalToTypeString(value: unknown): string {
+  return JSON.stringify(value) ?? String(value);
+}
+
+/** Renders a JSON Schema `type` array as a TS union, e.g. "number | string". */
+function typeArrayToUnion(types: readonly unknown[]): string {
+  const names = types.map((t) => t === "integer" ? "number" : String(t));
+  return [...new Set(names)].join(" | ") || "unknown";
+}
+
+/**
+ * Wraps an array-element type in parens when `[]` would bind tighter than
+ * the type expression: unions (`(number | string)[]`), intersections, and
+ * function types (`((e: T) => void)[]`) all need grouping — the ungrouped
+ * spellings mean something else entirely (PR #4969 review).
+ */
+function arrayElementType(itemType: string): string {
+  return itemType.includes(" | ") || itemType.includes(" & ") ||
+      itemType.includes("=>")
+    ? `(${itemType})`
+    : itemType;
 }
 
 function getWrappedTypeString(

@@ -20,6 +20,8 @@ import type { FabricValue } from "@commonfabric/api";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
+import { forEachSubschema } from "../schema-walk.ts";
+import { arrayMatchesPositionally } from "../schema-match.ts";
 import { normalizeCellScope } from "../scope.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import type {
@@ -1031,7 +1033,9 @@ const schemasEqualIgnoringWriterStamp = (
     stripWriterIdentityStamp(right),
   );
 
-const storedSchemaCoversCandidateEnvelope = (
+// Exported for unit testing of the merge-skip decision. Not part of the
+// public CFC surface.
+export const storedSchemaCoversCandidateEnvelope = (
   stored: JSONSchema | undefined,
   candidate: JSONSchema | undefined,
 ): boolean => {
@@ -1053,12 +1057,77 @@ const storedSchemaCoversCandidateEnvelope = (
       return false;
     }
     const storedProperties = stored.properties;
-    return Object.entries(candidate.properties).every(([key, child]) =>
-      storedSchemaCoversCandidateEnvelope(
-        storedProperties[key] as JSONSchema | undefined,
-        child as JSONSchema,
+    if (
+      !Object.entries(candidate.properties).every(([key, child]) =>
+        storedSchemaCoversCandidateEnvelope(
+          storedProperties[key] as JSONSchema | undefined,
+          child as JSONSchema,
+        )
       )
-    );
+    ) {
+      return false;
+    }
+    // Rest claims (PR #4969 review): a candidate additionalProperties is a
+    // claim about every key absent from the CANDIDATE's properties — which
+    // includes keys the stored side NAMES. Stored rest does not govern
+    // stored-named keys, so each stored-only named property must itself
+    // cover the candidate rest claim, and the rest claims must cover too.
+    // No candidate rest claim means the properties coverage above suffices;
+    // boolean forms must match exactly.
+    const candidateRest = candidate.additionalProperties;
+    if (candidateRest === undefined) {
+      return true;
+    }
+    if (typeof candidateRest === "boolean") {
+      return stored.additionalProperties === candidateRest;
+    }
+    for (const [key, storedChild] of Object.entries(storedProperties)) {
+      if (Object.hasOwn(candidate.properties, key)) continue;
+      if (
+        !storedSchemaCoversCandidateEnvelope(
+          storedChild as JSONSchema,
+          candidateRest,
+        )
+      ) {
+        return false;
+      }
+    }
+    return typeof stored.additionalProperties === "object" &&
+      stored.additionalProperties !== null &&
+      storedSchemaCoversCandidateEnvelope(
+        stored.additionalProperties,
+        candidateRest,
+      );
+  }
+
+  // Tuple slots: when either side declares prefixItems, coverage requires
+  // slot-wise coverage — otherwise the items branch below would judge
+  // envelopes "covered" while their tuple slots differ, and the candidate's
+  // slot info would be dropped instead of merged (fail-open). Arities must
+  // be EQUAL (PR #4969 review): with differing arities, one side's rest
+  // `items` claims positions the other covers with slots, and the shared
+  // items branch below cannot compare those — fail closed and merge.
+  if (
+    candidate.prefixItems !== undefined || stored.prefixItems !== undefined
+  ) {
+    if (
+      !Array.isArray(candidate.prefixItems) ||
+      !Array.isArray(stored.prefixItems) ||
+      candidate.prefixItems.length !== stored.prefixItems.length
+    ) {
+      return false;
+    }
+    const storedSlots = stored.prefixItems;
+    if (
+      !candidate.prefixItems.every((slot, index) =>
+        storedSchemaCoversCandidateEnvelope(storedSlots[index], slot)
+      )
+    ) {
+      return false;
+    }
+    // Slots covered; the rest `items` (if any) is judged by the shared
+    // branch below. A slots-only candidate reaches the conservative
+    // `return false` (merge) the same way.
   }
 
   if (
@@ -2036,28 +2105,11 @@ const walkIfcSchema = (
       });
     }
 
-    if (resolved.properties) {
-      for (const [key, child] of Object.entries(resolved.properties)) {
-        walkIfcSchema(child, [...path, key], entries, childRoot, nextActive);
-      }
-    }
-    const compound = [
-      ...(resolved.anyOf ?? []),
-      ...(resolved.oneOf ?? []),
-      ...(resolved.allOf ?? []),
-    ];
-    for (const child of compound) {
-      walkIfcSchema(child, path, entries, childRoot, nextActive);
-    }
-    if (typeof resolved.items === "object" && resolved.items !== null) {
-      walkIfcSchema(
-        resolved.items,
-        [...path, "*"],
-        entries,
-        childRoot,
-        nextActive,
-      );
-    }
+    // Keyword descent via the shared walk, so the vocabulary cannot silently
+    // drift from schema-walk's (a missed keyword here fails open:
+    // under-tainting). The visitor owns the path rule per keyword — that
+    // part is this walker's semantics, not the walk's.
+    //
     // Record-only `additionalProperties` descends as the same `*` segment
     // arrays get from `items` (template-population §4) — RESTRICTED to
     // record-only objects (no NAMED property). The restriction is
@@ -2072,20 +2124,71 @@ const walkIfcSchema = (
     // all of them; schema helpers routinely emit that wrapper shape, and
     // skipping it would silently drop the declared map label (codex/cubic
     // review on this PR).
-    if (
-      (resolved.properties === undefined ||
-        Object.keys(resolved.properties).length === 0) &&
-      typeof resolved.additionalProperties === "object" &&
-      resolved.additionalProperties !== null
-    ) {
-      walkIfcSchema(
-        resolved.additionalProperties,
-        [...path, "*"],
-        entries,
-        childRoot,
-        nextActive,
-      );
-    }
+    const recordOnly = resolved.properties === undefined ||
+      Object.keys(resolved.properties).length === 0;
+    // `items` keeps its `*` entry even beside `prefixItems` (PR #4969
+    // review). The `*` matches ANY index — including the tuple slots — so
+    // the mixed tuple-plus-rest shape over-taints the slots with the rest
+    // labels; but the alternative (minting nothing, as additionalProperties
+    // does beside named properties) silently DROPS the tail elements'
+    // declared labels — fail-open, strictly worse than over-taint.
+    // Expressing "every index past the slots" precisely needs a path
+    // grammar beyond `*`; until then the wildcard stays. The record-side
+    // no-mint rule is unchanged: there the `*` entry would misassign
+    // through schemaAtPath's properties-first resolution, a trade that
+    // predates tuple support.
+    forEachSubschema(resolved, (child, keyword, key, index) => {
+      switch (keyword) {
+        case "properties":
+          walkIfcSchema(child, [...path, key!], entries, childRoot, nextActive);
+          break;
+        case "anyOf":
+        case "oneOf":
+        case "allOf":
+          walkIfcSchema(child, path, entries, childRoot, nextActive);
+          break;
+        case "items":
+          walkIfcSchema(child, [...path, "*"], entries, childRoot, nextActive);
+          break;
+        case "prefixItems":
+          // Tuple slots mint at their concrete index — unlike `items`' `*`
+          // entry, a slot label applies to exactly that position.
+          walkIfcSchema(
+            child,
+            [...path, String(index!)],
+            entries,
+            childRoot,
+            nextActive,
+          );
+          break;
+        case "additionalProperties":
+          if (recordOnly) {
+            walkIfcSchema(
+              child,
+              [...path, "*"],
+              entries,
+              childRoot,
+              nextActive,
+            );
+          }
+          break;
+        case "not":
+          // Negation describes what the value must NOT be. Minting
+          // label/policy entries from it would enforce an author's negated
+          // branch as if it labeled real data — deliberately skipped (unlike
+          // joinSchema, where unioning `not` atoms into the LUB is a safe
+          // over-taint).
+          break;
+        default:
+          // A keyword schema-walk knows but this walker has no path rule
+          // for: descend at the parent's own path — labels join at the
+          // position (over-taint, fail-safe) rather than being silently
+          // dropped (under-taint, fail-open). Give new keywords an explicit
+          // case above.
+          walkIfcSchema(child, path, entries, childRoot, nextActive);
+          break;
+      }
+    });
     return entries;
   }
 };
@@ -2827,14 +2930,21 @@ const policySchemaMatchesValue = (
       policySchemaMatchesValue(childSchema, value[key], schemaRoot)
     );
   }
-  if (
-    Array.isArray(value) && typeof schema.items === "object" &&
-    schema.items !== null
-  ) {
-    const itemSchema = schema.items;
-    return value.every((item) =>
-      policySchemaMatchesValue(itemSchema, item, schemaRoot)
-    );
+  if (Array.isArray(value)) {
+    // Shared position rule (schema-match.ts): tuple slots condition their
+    // exact position, `items` conditions the positions past them. Before
+    // prefixItems was handled here, a tuple-shaped condition fell through
+    // to `return true` and vacuously matched any array.
+    if (
+      !arrayMatchesPositionally(
+        schema,
+        value,
+        (childSchema, childValue) =>
+          policySchemaMatchesValue(childSchema, childValue, schemaRoot),
+      )
+    ) {
+      return false;
+    }
   }
   return true;
 };

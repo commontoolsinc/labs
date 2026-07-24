@@ -23,6 +23,7 @@ import {
 } from "@commonfabric/data-model/schema-utils";
 import { createCell, isCell } from "./cell.ts";
 import { forEachSubschema } from "./schema-walk.ts";
+import { arrayMatchesPositionally } from "./schema-match.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
@@ -292,12 +293,21 @@ const matchesConcreteValue = (
     );
   }
 
-  if (
-    Array.isArray(value) && typeof resolved.items === "object" &&
-    resolved.items !== null
-  ) {
-    const itemSchema = branchWithParentDefs(resolved, resolved.items);
-    return value.every((item) => matchesConcreteValue(itemSchema, item));
+  if (Array.isArray(value)) {
+    // Shared position rule (schema-match.ts): tuple slots match their exact
+    // position, `items` matches only the positions past them. A
+    // prefixItems-only schema previously fell through to `return true`,
+    // letting ANY array match — so the wrong anyOf/oneOf branch could be
+    // selected for tuple values.
+    return arrayMatchesPositionally(
+      resolved,
+      value,
+      (childSchema, childValue) =>
+        matchesConcreteValue(
+          branchWithParentDefs(resolved, childSchema),
+          childValue,
+        ),
+    );
   }
 
   return true;
@@ -803,28 +813,38 @@ export function processDefaultValue(
     );
   }
 
-  // Handle array type defaults
+  // Handle array type defaults. A tuple slot (prefixItems[i]) covers its
+  // exact index; `items` covers the indices past the slots (2020-12).
+  // prefixItems-only schemas previously skipped this branch entirely, so
+  // tuple defaults went unprocessed.
   if (
     resolvedSchema.type === "array" && Array.isArray(defaultValue) &&
-    resolvedSchema.items
+    (resolvedSchema.items !== undefined ||
+      Array.isArray(resolvedSchema.prefixItems))
   ) {
-    // TODO(@ubik2): Need to handle prefixItems
-    // Handle boolean items values
-    let itemSchema: JSONSchema;
-    if (resolvedSchema.items === true) {
-      // items: true means allow any item type
-      itemSchema = {};
-    } else if ((resolvedSchema.items as any) === false) {
-      // items: false means no additional items allowed (empty arrays only)
-      // For default value processing, we'll treat this as an error
-      throw new Error(
-        "Array schema error: items: false conflicts with non-empty default\n" +
-          "help: either allow items with valid schema, or use empty array default",
-      );
-    } else {
-      // items is a JSONSchema object
-      itemSchema = resolvedSchema.items as JSONSchema;
-    }
+    const prefixItems = Array.isArray(resolvedSchema.prefixItems)
+      ? resolvedSchema.prefixItems
+      : undefined;
+    const schemaForIndex = (i: number): JSONSchema => {
+      const covering = prefixItems !== undefined && i < prefixItems.length
+        ? prefixItems[i]
+        : resolvedSchema.items;
+      // An absent or `true` covering schema allows any item.
+      if (covering === undefined || covering === true) return {};
+      if ((covering as unknown) === false) {
+        // `false` means no value allowed at this position. For default value
+        // processing, we'll treat this as an error. (With prefixItems, an
+        // `items: false` rest schema only conflicts when the default has
+        // elements PAST the tuple slots.)
+        throw new Error(
+          "Array schema error: items: false conflicts with non-empty default\n" +
+            "help: either allow items with valid schema, or use empty array default",
+        );
+      }
+      // Thread the array schema's $defs so a $ref slot resolves during
+      // recursive default processing (PR #4969 review).
+      return branchWithParentDefs(resolvedSchema, covering as JSONSchema);
+    };
 
     const result = defaultValue.map((item, i) =>
       processDefaultValue(
@@ -832,7 +852,7 @@ export function processDefaultValue(
         tx,
         {
           ...link,
-          schema: itemSchema,
+          schema: schemaForIndex(i),
           path: [...link.path, String(i)],
         },
         item,

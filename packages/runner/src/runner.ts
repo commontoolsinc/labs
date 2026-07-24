@@ -13,6 +13,7 @@ import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";
+import { forEachSubschema } from "./schema-walk.ts";
 import {
   type CellScope,
   type Frame,
@@ -3435,27 +3436,69 @@ export class Runner {
         return;
       }
 
-      // TODO(danfuzz): This descends live `FabricValue` action inputs via
-      // `Object.entries` with no `FabricSpecialObject` guard, decomposing
-      // `FabricPrimitive` values and walking `FabricInstance` values by internal
-      // slots.
-      if (isRecord(schema.properties) && isRecord(currentValue)) {
-        for (const [key, propertySchema] of Object.entries(schema.properties)) {
-          visit(propertySchema, currentValue[key], [...path, key]);
+      // Keyword descent via the shared walk (a keyword missed here means
+      // asCell markers escaping write tracking — the prefixItems gap,
+      // CT-1895). The value-position keywords align value and path — a
+      // named property or undeclared-key (`additionalProperties`) at its
+      // key, a tuple slot at its index, `items` elements past the slots at
+      // theirs — falling back to the conservative same-value/same-path
+      // visit when value and schema misalign. Combinator branches and
+      // `not` genuinely describe the same position: same value, same path.
+      // `not` is included deliberately: a nested `not` (not-of-not)
+      // re-selects values that DO match the inner subschema, so skipping it
+      // could let an asCell marker escape tracking; over-collection is this
+      // walker's safe direction (mirrors joinSchema's `not` union).
+      //
+      // TODO(danfuzz): The properties/additionalProperties cases descend
+      // live `FabricValue` action inputs with no `FabricSpecialObject`
+      // guard, decomposing `FabricPrimitive` values and walking
+      // `FabricInstance` values by internal slots.
+      forEachSubschema(schema as JSONSchema, (child, keyword, key, index) => {
+        switch (keyword) {
+          case "properties":
+            if (isRecord(currentValue)) {
+              visit(child, currentValue[key!], [...path, key!]);
+            }
+            return;
+          case "prefixItems":
+            visit(
+              child,
+              Array.isArray(currentValue) ? currentValue[index!] : currentValue,
+              [...path, String(index!)],
+            );
+            return;
+          case "items":
+            if (Array.isArray(currentValue)) {
+              // `items` covers the elements past the tuple slots (2020-12).
+              const start = Array.isArray(schema.prefixItems)
+                ? schema.prefixItems.length
+                : 0;
+              for (let i = start; i < currentValue.length; i++) {
+                visit(child, currentValue[i], [...path, String(i)]);
+              }
+            } else {
+              visit(child, currentValue, path);
+            }
+            return;
+          case "additionalProperties":
+            if (isRecord(currentValue) && !Array.isArray(currentValue)) {
+              // Covers only the keys `properties` does not declare.
+              const declaredKeys = isRecord(schema.properties)
+                ? new Set(Object.keys(schema.properties))
+                : undefined;
+              for (const [k, v] of Object.entries(currentValue)) {
+                if (declaredKeys?.has(k)) continue;
+                visit(child, v, [...path, k]);
+              }
+            } else {
+              visit(child, currentValue, path);
+            }
+            return;
+          default:
+            visit(child, currentValue, path);
+            return;
         }
-      }
-
-      for (const key of ["items", "additionalProperties"] as const) {
-        if (schema[key] !== undefined) {
-          visit(schema[key], currentValue, path);
-        }
-      }
-      for (const key of ["anyOf", "oneOf", "allOf"] as const) {
-        const branches = schema[key];
-        if (Array.isArray(branches)) {
-          for (const branch of branches) visit(branch, currentValue, path);
-        }
-      }
+      });
     };
 
     visit(argumentSchema, value, []);
@@ -3529,8 +3572,22 @@ export class Runner {
         }
       }
 
-      if (Array.isArray(currentValue) && schema.items !== undefined) {
-        for (const item of currentValue) visit(schema.items, item);
+      if (Array.isArray(currentValue)) {
+        // A tuple slot covers its exact index; `items` covers the indices
+        // past the slots (2020-12). prefixItems-only schemas previously
+        // skipped elements entirely.
+        const prefixItems = Array.isArray(schema.prefixItems)
+          ? schema.prefixItems
+          : undefined;
+        for (let index = 0; index < currentValue.length; index++) {
+          const slotSchema =
+            prefixItems !== undefined && index < prefixItems.length
+              ? prefixItems[index]
+              : schema.items;
+          if (slotSchema !== undefined) {
+            visit(slotSchema, currentValue[index]);
+          }
+        }
       }
       if (
         schema.additionalProperties !== undefined &&

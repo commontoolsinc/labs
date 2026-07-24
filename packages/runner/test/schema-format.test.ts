@@ -18,6 +18,200 @@ Deno.test("schemaToTypeString converts arrays", () => {
   assertEquals(schemaToTypeString(schema), "string[]");
 });
 
+Deno.test("schemaToTypeString converts type arrays to unions", () => {
+  // The union formatter merges anyOf branches into type arrays; these used to
+  // hit the String(type) fallback and render as "number,string"
+  assertEquals(
+    schemaToTypeString({ type: ["number", "string"] } as any),
+    "number | string",
+  );
+  assertEquals(
+    schemaToTypeString({ type: ["string", "null"] } as any),
+    "string | null",
+  );
+  assertEquals(
+    schemaToTypeString({ type: ["integer", "number"] } as any),
+    "number",
+  );
+});
+
+Deno.test("schemaToTypeString renders const literals like their enum twins", () => {
+  // The generator's node path emits const where its type path emits a
+  // single-value enum; both should render as the TS literal type
+  assertEquals(
+    schemaToTypeString({ type: "string", const: "x" } as any),
+    '"x"',
+  );
+  assertEquals(schemaToTypeString({ type: "number", const: 42 } as any), "42");
+  assertEquals(
+    schemaToTypeString({ type: "string", enum: ["x"] } as any),
+    '"x"',
+  );
+});
+
+Deno.test("schemaToTypeString keeps the index-signature value type", () => {
+  assertEquals(
+    schemaToTypeString({
+      type: "object",
+      additionalProperties: { type: "number" },
+    } as any),
+    "Record<string, number>",
+  );
+  // Named properties alongside an index signature: TS cannot express
+  // "every key except the named ones", so the rest claim renders as a
+  // descriptive comment line (PR #4969 review, both rounds — the inline
+  // index signature was invalid TS, and & Record<string, T> wrongly
+  // constrained the named keys too).
+  assertEquals(
+    schemaToTypeString({
+      type: "object",
+      properties: { a: { type: "string" } },
+      additionalProperties: { type: "number" },
+    } as any),
+    "{\n  a?: string,\n  // other keys: number\n}",
+  );
+  // A multiline value type stays fully commented — an uncommented
+  // continuation line would read as outer-object syntax.
+  assertEquals(
+    schemaToTypeString({
+      type: "object",
+      properties: { a: { type: "string" } },
+      additionalProperties: {
+        type: "object",
+        properties: { x: { type: "number" } },
+      },
+    } as any),
+    "{\n  a?: string,\n  // other keys: {\n  //   x?: number\n  // }\n}",
+  );
+  // Bare additionalProperties: true stays as before
+  assertEquals(
+    schemaToTypeString({ type: "object", additionalProperties: true } as any),
+    "Record<string, unknown>",
+  );
+});
+
+Deno.test("schemaToTypeString converts tuples (prefixItems)", () => {
+  // CT-1895: tuples used to render as "unknown[]"
+  const schema: any = {
+    type: "array",
+    prefixItems: [
+      { type: "string" },
+      { type: "object", properties: { x: { type: "number" } } },
+    ],
+  };
+  assertEquals(
+    schemaToTypeString(schema),
+    "[string, {\n  x?: number\n}, ...unknown[]]",
+  );
+});
+
+Deno.test("schemaToTypeString renders items alongside prefixItems as a rest element", () => {
+  const schema: any = {
+    type: "array",
+    prefixItems: [{ type: "string" }, { type: "number" }],
+    items: { type: "boolean" },
+  };
+  assertEquals(schemaToTypeString(schema), "[string, number, ...boolean[]]");
+});
+
+Deno.test("schemaToTypeString closes the tuple only for items: false", () => {
+  assertEquals(
+    schemaToTypeString({
+      type: "array",
+      prefixItems: [{ type: "string" }],
+      items: false,
+    } as any),
+    "[string]",
+  );
+});
+
+Deno.test("schemaToTypeString parenthesizes union rest elements", () => {
+  // PR #4969 review: `...number | string[]` means something else entirely.
+  assertEquals(
+    schemaToTypeString({
+      type: "array",
+      prefixItems: [{ type: "string" }],
+      items: { type: ["number", "string"] },
+    } as any),
+    "[string, ...(number | string)[]]",
+  );
+});
+
+Deno.test("schemaToTypeString parenthesizes function types in array elements", () => {
+  // PR #4969 review round 2: `...({...}) => void[]` and `{...} => void[]`
+  // are invalid/mean something else; function elements need grouping in
+  // both rest and ordinary arrays.
+  const streamItems = {
+    asCell: ["stream"],
+    properties: { value: { type: "string" } },
+  };
+  assertEquals(
+    schemaToTypeString({
+      type: "array",
+      prefixItems: [{ type: "string" }],
+      items: streamItems,
+    } as any),
+    "[string, ...(({\n  value?: string\n}) => void)[]]",
+  );
+  assertEquals(
+    schemaToTypeString({
+      type: "array",
+      items: streamItems,
+    } as any),
+    "(({\n  value?: string\n}) => void)[]",
+  );
+});
+
+Deno.test("schemaToTypeString escapes string literals and renders JSON constants", () => {
+  // PR #4969 review: `"a"b"` was emitted for a legal string constant, and
+  // object/array constants rendered as "[object Object]".
+  assertEquals(
+    schemaToTypeString({ type: "string", const: 'a"b' } as any),
+    '"a\\"b"',
+  );
+  assertEquals(
+    schemaToTypeString({ const: { kind: "point" } } as any),
+    '{"kind":"point"}',
+  );
+  assertEquals(
+    schemaToTypeString({ enum: ["a", ["b"]] } as any),
+    '"a" | ["b"]',
+  );
+});
+
+Deno.test("schemaToTypeString survives recursive $defs", () => {
+  // PR #4969 review: ref hops recursed before the depth cap, so a ref
+  // cycle overflowed the stack (reachable from CLI --help).
+  const defs: any = { A: { $ref: "#/$defs/A" } };
+  assertEquals(schemaToTypeString({ $ref: "#/$defs/A" } as any, { defs }), "A");
+  const mutual: any = {
+    A: { $ref: "#/$defs/B" },
+    B: { $ref: "#/$defs/A" },
+  };
+  assertEquals(
+    schemaToTypeString({ $ref: "#/$defs/A" } as any, { defs: mutual }),
+    "A",
+  );
+});
+
+Deno.test("schemaToTypeString renders type arrays at the depth cap", () => {
+  assertEquals(
+    schemaToTypeString({ type: ["string", "null"] } as any, { maxDepth: 0 }),
+    "string | null",
+  );
+});
+
+Deno.test("schemaToTypeString abbreviates tuples at max depth", () => {
+  const schema: any = {
+    type: "object",
+    properties: {
+      pair: { type: "array", prefixItems: [{ type: "string" }] },
+    },
+  };
+  const result = schemaToTypeString(schema, { maxDepth: 1 });
+  assert(result.includes("pair?: [...]"));
+});
+
 Deno.test("schemaToTypeString converts objects with properties", () => {
   const schema: any = {
     type: "object",

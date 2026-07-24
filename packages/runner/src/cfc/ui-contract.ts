@@ -247,11 +247,17 @@ const uiContractsFromSchemaInternal = (
     Array.isArray(resolvedSchema.allOf);
   const hasItems = isRecord(resolvedSchema.items) ||
     typeof resolvedSchema.items === "boolean";
+  // prefixItems counts as children too (PR #4969 review): an unknown-typed
+  // tuple with a contract-bearing $defs entry must not mint that contract
+  // at the array's own path — the slot that references the definition mints
+  // it at its index via the descent below.
+  const hasPrefixItems = Array.isArray(resolvedSchema.prefixItems);
   if (
     contract === undefined &&
     !hasProperties &&
     !hasCompoundSchemas &&
     !hasItems &&
+    !hasPrefixItems &&
     resolvedSchema.type === "unknown" &&
     isRecord(resolvedSchema.$defs)
   ) {
@@ -299,8 +305,15 @@ const uiContractsFromSchemaInternal = (
     );
   }
 
+  // `items` keeps its `*` entry even beside prefixItems, mirroring
+  // walkIfcSchema (PR #4969 review): the `*` over-enforces the rest
+  // contract on tuple slots, but minting nothing would silently drop the
+  // tail elements' declared contract — fail-open, strictly worse. A
+  // precise "past the slots" representation needs a path grammar beyond
+  // `*`.
   if (
-    isRecord(resolvedSchema.items) || typeof resolvedSchema.items === "boolean"
+    isRecord(resolvedSchema.items) ||
+    typeof resolvedSchema.items === "boolean"
   ) {
     entries.push(
       ...uiContractsFromSchemaInternal(
@@ -310,6 +323,19 @@ const uiContractsFromSchemaInternal = (
         seenRefs,
       ),
     );
+  }
+
+  if (Array.isArray(resolvedSchema.prefixItems)) {
+    for (let index = 0; index < resolvedSchema.prefixItems.length; index++) {
+      entries.push(
+        ...uiContractsFromSchemaInternal(
+          resolvedSchema.prefixItems[index] as JSONSchema,
+          childRoot,
+          [...path, String(index)],
+          seenRefs,
+        ),
+      );
+    }
   }
 
   return entries;
