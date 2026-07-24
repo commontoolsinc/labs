@@ -21,7 +21,7 @@ import {
   parseLink,
   type SigilLink,
 } from "@commonfabric/runner";
-import { runtime } from "@/index.ts";
+import { runtime } from "@/server.ts";
 import env from "@/env.ts";
 import {
   CountryCode,

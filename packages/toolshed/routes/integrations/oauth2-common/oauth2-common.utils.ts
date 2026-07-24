@@ -1,7 +1,7 @@
 import { OAuth2Client, type Tokens } from "@cmd-johnson/oauth2-client";
 import type { Context } from "@hono/hono";
 import { getLogger } from "@commonfabric/utils/logger";
-import { runtime } from "@/index.ts";
+import { runtime } from "@/server.ts";
 import type { JSONSchema } from "@commonfabric/runner";
 import {
   custodyIngest,

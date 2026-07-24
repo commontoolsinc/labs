@@ -8,7 +8,7 @@
 // targets someone else's space) does not exist here — channels are provisioned
 // out-of-band by an operator. See the design proposal.
 import type { AppRouteHandler } from "@/lib/types.ts";
-import { runtime } from "@/index.ts";
+import { runtime } from "@/server.ts";
 import { identity } from "@/lib/identity.ts";
 import { processIngest } from "./ingest.utils.ts";
 import type { IngestRoute } from "./ingest.routes.ts";

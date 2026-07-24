@@ -40,7 +40,8 @@ toolshed/
 │   └── health/   # Health checks
 ├── app.ts        # Main app setup, where we mount all the routes
 ├── env.ts        # Environment variable configuration
-└── index.ts      # Main hono entry point
+├── server.ts     # Server bootstrap: runtime, startServer, graceful shutdown
+└── index.ts      # Thin entry point that launches the server or its background parent
 ```
 
 ## Getting Started

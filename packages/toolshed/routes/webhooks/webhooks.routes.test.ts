@@ -13,7 +13,7 @@ if (env.ENV !== "test") {
 // so they need no runtime fixture. End-to-end delivery is covered separately.
 //
 // Driven through the real `app` (not a freshly-mounted router) because the
-// webhook handlers import the `runtime` singleton from `@/index.ts`, which
+// webhook handlers import the `runtime` singleton from `@/server.ts`, which
 // imports `@/app.ts` — re-mounting the router standalone hits that import cycle.
 
 describe("Webhook routes (smoke: wired up + error paths)", () => {

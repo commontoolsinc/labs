@@ -15,7 +15,7 @@ import {
 // cell link serialized to the `fcl1:` wire string (as `CellHandle.toWireString`
 // produces it) must decode, resolve to the right cell, and deliver a payload to
 // that cell's inbox stream. This mirrors `sendToStream`'s decode -> resolve ->
-// send path; that function reaches the `@/index.ts` runtime singleton (which is
+// send path; that function reaches the `@/server.ts` runtime singleton (which is
 // uninitialized in tests), so it can't be called directly here, but the logic
 // exercised is identical, against the house in-memory `StorageManager.emulate`
 // runtime.

@@ -1,5 +1,5 @@
 import { type SigilLink } from "@commonfabric/runner";
-import { runtime } from "@/index.ts";
+import { runtime } from "@/server.ts";
 import {
   type JSONSchema,
   type Mutable,
