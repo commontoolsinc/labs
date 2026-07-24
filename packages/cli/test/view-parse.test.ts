@@ -160,7 +160,7 @@ const __cfLift_1 = lift({
     schema: { fields: readonly { name: string; type: string }[] };
   }).schema;
   const pair = schema.fields.find((f) => f.name === "pair");
-  assertEquals(pair?.type, "[string, number]");
+  assertEquals(pair?.type, "[string, number, ...unknown[]]");
   const rest = schema.fields.find((f) => f.name === "rest");
   assertEquals(rest?.type, "[string, ...boolean[]]");
 });

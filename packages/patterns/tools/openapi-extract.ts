@@ -154,9 +154,16 @@ function schemaToTypeString(
       const slots = prefixItems.map((slot) =>
         schemaToTypeString(spec, slot, cache)
       );
-      const rest = resolved["items"] as Record<string, unknown> | undefined;
-      if (rest) {
-        slots.push(`...array<${schemaToTypeString(spec, rest, cache)}>`);
+      const rest = resolved["items"];
+      if (rest && typeof rest === "object") {
+        slots.push(
+          `...array<${
+            schemaToTypeString(spec, rest as Record<string, unknown>, cache)
+          }>`,
+        );
+      } else if (rest !== false) {
+        // An absent `items` leaves the tail open (PR #4969 review).
+        slots.push("...array<unknown>");
       }
       return `[${slots.join(", ")}]`;
     }

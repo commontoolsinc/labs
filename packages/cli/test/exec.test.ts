@@ -721,7 +721,7 @@ describe("renderExecHelp", () => {
       } as JSONSchema),
     );
 
-    expect(help).toContain("pair?: [string, number]");
+    expect(help).toContain("pair?: [string, number, ...unknown[]]");
     expect(help).toContain("rest?: [string, ...boolean[]]");
     expect(help).toContain('kind?: "point"');
     expect(help).toContain("maybe?: string | null");

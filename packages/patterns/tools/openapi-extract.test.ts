@@ -46,11 +46,14 @@ Deno.test("extractAPI renders tuple (prefixItems) schemas as tuple types", () =>
   const api = extractAPI(spec as Record<string, unknown>);
 
   const thing = api.models.find((m) => m.name === "Thing");
-  assertEquals(thing?.properties["pair"].type, "[string, number]");
+  assertEquals(
+    thing?.properties["pair"].type,
+    "[string, number, ...array<unknown>]",
+  );
   assertEquals(thing?.properties["rest"].type, "[string, ...array<boolean>]");
   assertEquals(thing?.properties["plain"].type, "array<string>");
 
   const endpoint = api.endpoints.find((e) => e.operationId === "listThings");
   const range = endpoint?.parameters.find((p) => p.name === "range");
-  assertEquals(range?.type, "[integer, integer]");
+  assertEquals(range?.type, "[integer, integer, ...array<unknown>]");
 });

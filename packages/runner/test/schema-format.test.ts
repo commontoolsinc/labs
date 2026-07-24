@@ -64,7 +64,7 @@ Deno.test("schemaToTypeString keeps the index-signature value type", () => {
       properties: { a: { type: "string" } },
       additionalProperties: { type: "number" },
     } as any),
-    "{\n  a?: string,\n  [key: string]: number\n}",
+    "{\n  a?: string\n} & Record<string, number>",
   );
   // Bare additionalProperties: true stays as before
   assertEquals(
@@ -84,7 +84,7 @@ Deno.test("schemaToTypeString converts tuples (prefixItems)", () => {
   };
   assertEquals(
     schemaToTypeString(schema),
-    "[string, {\n  x?: number\n}]",
+    "[string, {\n  x?: number\n}, ...unknown[]]",
   );
 });
 
@@ -95,6 +95,61 @@ Deno.test("schemaToTypeString renders items alongside prefixItems as a rest elem
     items: { type: "boolean" },
   };
   assertEquals(schemaToTypeString(schema), "[string, number, ...boolean[]]");
+});
+
+Deno.test("schemaToTypeString closes the tuple only for items: false", () => {
+  assertEquals(
+    schemaToTypeString({
+      type: "array",
+      prefixItems: [{ type: "string" }],
+      items: false,
+    } as any),
+    "[string]",
+  );
+});
+
+Deno.test("schemaToTypeString parenthesizes union rest elements", () => {
+  // PR #4969 review: `...number | string[]` means something else entirely.
+  assertEquals(
+    schemaToTypeString({
+      type: "array",
+      prefixItems: [{ type: "string" }],
+      items: { type: ["number", "string"] },
+    } as any),
+    "[string, ...(number | string)[]]",
+  );
+});
+
+Deno.test("schemaToTypeString escapes string literals and renders JSON constants", () => {
+  // PR #4969 review: `"a"b"` was emitted for a legal string constant, and
+  // object/array constants rendered as "[object Object]".
+  assertEquals(
+    schemaToTypeString({ type: "string", const: 'a"b' } as any),
+    '"a\\"b"',
+  );
+  assertEquals(
+    schemaToTypeString({ const: { kind: "point" } } as any),
+    '{"kind":"point"}',
+  );
+  assertEquals(
+    schemaToTypeString({ enum: ["a", ["b"]] } as any),
+    '"a" | ["b"]',
+  );
+});
+
+Deno.test("schemaToTypeString survives recursive $defs", () => {
+  // PR #4969 review: ref hops recursed before the depth cap, so a ref
+  // cycle overflowed the stack (reachable from CLI --help).
+  const defs: any = { A: { $ref: "#/$defs/A" } };
+  assertEquals(schemaToTypeString({ $ref: "#/$defs/A" } as any, { defs }), "A");
+  const mutual: any = {
+    A: { $ref: "#/$defs/B" },
+    B: { $ref: "#/$defs/A" },
+  };
+  assertEquals(
+    schemaToTypeString({ $ref: "#/$defs/A" } as any, { defs: mutual }),
+    "A",
+  );
 });
 
 Deno.test("schemaToTypeString abbreviates tuples at max depth", () => {

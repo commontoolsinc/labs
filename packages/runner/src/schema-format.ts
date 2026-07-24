@@ -67,7 +67,8 @@ export interface SchemaFormatOptions {
  *   type: "array",
  *   prefixItems: [{ type: "string" }, { type: "number" }]
  * })
- * // → "[string, number]"
+ * // → "[string, number, ...unknown[]]" (an absent `items` leaves the tail
+ * // open; only `items: false` closes the tuple)
  *
  * @example
  * // An `items` schema alongside `prefixItems` becomes a rest element
@@ -147,6 +148,11 @@ function schemaToTypeStringInner(
       const defName = match[1];
       const def = defs[defName];
       if (def) {
+        // Ref hops recurse BEFORE the depth cap below, so a ref cycle
+        // (e.g. `$defs: {A: {$ref: "#/$defs/A"}}`) must bail here — at the
+        // cap, fall back to the type name instead of inlining (PR #4969
+        // review: `--help` overflowed the stack on recursive $defs).
+        if (depth >= maxDepth) return defName;
         // For small definitions, inline them; otherwise use the type name
         const defStr = schemaToTypeString(def, { ...nextOpts, indent: 0 });
         if (defStr.length < 50) {
@@ -240,15 +246,23 @@ function schemaToTypeStringInner(
   if (type === "null") return "null";
 
   // Handle arrays; tuples render as TypeScript tuple types, with a uniform
-  // `items` schema alongside `prefixItems` becoming a rest element
+  // `items` schema alongside `prefixItems` becoming a rest element. An
+  // absent (or `true`) `items` beside `prefixItems` leaves the tail OPEN in
+  // JSON Schema, so it renders `...unknown[]` — only `items: false` closes
+  // the tuple (PR #4969 review).
   if (type === "array") {
     if (Array.isArray(s.prefixItems)) {
       const slots = (s.prefixItems as JSONSchema[]).map((slot) =>
         schemaToTypeString(slot, nextOpts)
       );
       if (s.items && typeof s.items === "object") {
-        const itemType = schemaToTypeString(s.items as JSONSchema, nextOpts);
-        slots.push(`...${itemType}[]`);
+        slots.push(
+          `...${
+            restElementType(schemaToTypeString(s.items as JSONSchema, nextOpts))
+          }[]`,
+        );
+      } else if (s.items !== false) {
+        slots.push("...unknown[]");
       }
       return `[${slots.join(", ")}]`;
     }
@@ -296,34 +310,50 @@ function schemaToTypeStringInner(
       lines.push(`${padding}${key}${optional}: ${propType}`);
     }
 
-    // Named properties alongside an index signature keep both, TS-style
-    if (indexValueSchema) {
-      const valueType = schemaToTypeString(indexValueSchema, {
-        ...nextOpts,
-        indent: indent + 1,
-      });
-      lines.push(`${padding}[key: string]: ${valueType}`);
-    }
-
     if (lines.length === 0) return "{}";
 
     const closePadding = "  ".repeat(indent);
-    return `{\n${lines.join(",\n")}\n${closePadding}}`;
+    const objectType = `{\n${lines.join(",\n")}\n${closePadding}}`;
+
+    // Named properties alongside an index signature render as an
+    // intersection: an inline `[key: string]: T` beside a property whose
+    // type is incompatible with T is invalid TypeScript (PR #4969 review).
+    if (indexValueSchema) {
+      const valueType = schemaToTypeString(indexValueSchema, nextOpts);
+      return `${objectType} & Record<string, ${valueType}>`;
+    }
+    return objectType;
   }
 
   // Fallback
   return type ? String(type) : "unknown";
 }
 
-/** Renders a literal value the way TS spells the literal type. */
+/**
+ * Renders a literal value the way TS spells the literal type. JSON
+ * serialization escapes string contents (PR #4969 review: `"a"b"` was
+ * emitted for a legal string constant) and renders object/array literals
+ * as JSON instead of "[object Object]".
+ */
 function literalToTypeString(value: unknown): string {
-  return typeof value === "string" ? `"${value}"` : String(value);
+  return JSON.stringify(value) ?? String(value);
 }
 
 /** Renders a JSON Schema `type` array as a TS union, e.g. "number | string". */
 function typeArrayToUnion(types: readonly unknown[]): string {
   const names = types.map((t) => t === "integer" ? "number" : String(t));
   return [...new Set(names)].join(" | ") || "unknown";
+}
+
+/**
+ * Wraps a rest-element type in parens when needed: `...(number | string)[]`
+ * is valid TS, `...number | string[]` means something else entirely
+ * (PR #4969 review).
+ */
+function restElementType(itemType: string): string {
+  return itemType.includes(" | ") || itemType.includes(" & ")
+    ? `(${itemType})`
+    : itemType;
 }
 
 function getWrappedTypeString(
