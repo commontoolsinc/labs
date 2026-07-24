@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -90,6 +91,36 @@ describe("result projection", () => {
       // plain empty object here.
       expect(raw.data).toBeInstanceOf(FabricBytes);
       expect([...(raw.data as FabricBytes).slice()]).toEqual([4, 5]);
+    } finally {
+      await runtime.dispose();
+      await storage.close();
+    }
+  });
+
+  it("rejects a FabricInstance result value rather than mishandling it", async () => {
+    const storage = EmulatedStorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage,
+    });
+    try {
+      const tx = runtime.edit();
+      const pattern = {
+        argumentSchema: { type: "object", properties: {} } as const,
+        resultSchema: undefined,
+        result: { err: FabricError.fromNativeError(new Error("boom")) },
+        nodes: [],
+      } as unknown as Pattern;
+
+      expect(() =>
+        runtime.run(
+          tx,
+          pattern,
+          {},
+          runtime.getCell(space, "instance-result", undefined, tx),
+        )
+      ).toThrow("FabricError");
+      tx.abort();
     } finally {
       await runtime.dispose();
       await storage.close();
