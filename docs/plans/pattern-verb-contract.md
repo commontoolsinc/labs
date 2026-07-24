@@ -673,6 +673,10 @@ workaround until nested-stream dispatch lands (Discovery).
 
 ## Staging
 
+The engineering breakdown — workstreams, phases, issue graph — lives in
+[`pattern-verb-contract-implementation.md`](pattern-verb-contract-implementation.md);
+the steps below are the design-level order.
+
 1. Agree this document — particularly the open questions.
 2. Finish the Part 1 rework of `topics` / `topic` — the attribution rules
    already hold. Remaining, with no runtime change: a body argument on
