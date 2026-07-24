@@ -4154,6 +4154,15 @@ export interface UpsertSchedulerObservationOptions {
   /** Client-request replay identity when canonical host fields differ from the
    * persisted observation payload. */
   replayPayload?: string;
+  /** C3.11: the acting claim's host-authored `crossSpaceReadSpaces` (the
+   * cross-space-read stage's foreign-read admission). Passed on the accept
+   * path so an UNSERVED claimed cross-space-read attempt still classifies its
+   * admitted foreign reads space-rank (the action's rank is stage-admitted,
+   * orthogonal to whether this run served a stamp) rather than flooring —
+   * and monotonically poisoning — the durable context floor to session.
+   * Never crosses the protocol boundary; absent for client observations and
+   * same-space claims (byte-identical). */
+  foreignReadAdmittedSpaces?: readonly string[];
   observation: SchedulerActionObservation;
 }
 
@@ -4296,6 +4305,7 @@ const upsertSchedulerObservationTransaction = (
         ownerSpace: observation.ownerSpace,
         observation,
         scopeContext: options.scopeContext,
+        foreignReadAdmittedSpaces: options.foreignReadAdmittedSpaces,
       })
       : preserveMirroredSchedulerExecutionContext(engine, {
         branch,
@@ -6752,13 +6762,66 @@ const assertForeignAuthorizationEpochsCurrent = (
 function claimedForeignReadFloorExempt(
   observation: SchedulerActionObservation,
   address: SchedulerObservationAddress,
+  admittedForeignReadSpaces?: readonly string[],
 ): boolean {
-  return observation.executionProvenance !== undefined &&
-    normalizeSchedulerScope(address.scope) === "space";
+  if (normalizeSchedulerScope(address.scope) !== "space") return false;
+  // A SERVED claimed attempt carries the engine accept-path provenance
+  // (C3.5): its foreign read went through the per-read ACL check and settled
+  // into the vector basis. Byte-identical to the pre-C3.11 gate.
+  if (observation.executionProvenance !== undefined) return true;
+  // C3.11: an UNSERVED claimed cross-space-read attempt carries no
+  // provenance (the accept path strips it — engine `acceptedScheduler
+  // Observation`), yet the ACTION is still SPACE-rank. Its foreign read was
+  // admitted by the cross-space-read STAGE — the host authored
+  // `claim.crossSpaceReadSpaces` only AFTER the C3A17 issuance preflight
+  // bound the acting principal's READ per read space — and that admission is
+  // orthogonal to lane rank; it is NOT a session-scoped read. Exempt exactly
+  // the host-admitted read spaces so an unserved rerun classifies space-rank
+  // and fails CLOSED (settles unserved, no vector basis) WITHOUT writing a
+  // session floor that would monotonically poison the durable
+  // `scheduler_context_floor` and fence the next served run
+  // `claim-context-mismatch` (the C3.5 posture bug). A CLIENT cross-space
+  // read carries no claim and no admission, so it keeps the conservative
+  // session demotion byte-identically (the C3.3a wake fixtures pin this).
+  return admittedForeignReadSpaces !== undefined &&
+    admittedForeignReadSpaces.includes(address.space);
+}
+
+/**
+ * C3.11: the space-scoped FOREIGN read spaces this observation names — across
+ * its runtime reads/shallowReads and its trusted summary reads — deduped, home
+ * space excluded. The admitted-posture GLOBAL context floor exempts these so an
+ * unadmitted observer's conservative crossesSpace demotion never poisons the
+ * durable floor a served space-rank claim reads (see
+ * `resolveSchedulerExecutionContext`).
+ */
+function schedulerObservationForeignReadSpaces(
+  observation: SchedulerActionObservation,
+): string[] {
+  const ownerSpace = observation.ownerSpace;
+  if (ownerSpace === undefined) return [];
+  const summary = trustedSchedulerScopeSummary(observation);
+  const spaces = new Set<string>();
+  for (
+    const address of [
+      ...observation.reads,
+      ...observation.shallowReads,
+      ...(summary ? schedulerSummaryReadAddresses(summary) : []),
+    ]
+  ) {
+    if (
+      address.space !== ownerSpace &&
+      normalizeSchedulerScope(address.scope) === "space"
+    ) {
+      spaces.add(address.space);
+    }
+  }
+  return [...spaces];
 }
 
 function schedulerStaticContextFloor(
   observation: SchedulerActionObservation,
+  admittedForeignReadSpaces?: readonly string[],
 ): SchedulerContextScope {
   const summary = trustedSchedulerScopeSummary(observation);
   const ownerSpace = observation.ownerSpace;
@@ -6782,7 +6845,11 @@ function schedulerStaticContextFloor(
   const crossesSpace =
     readAddresses.some((address) =>
       address.space !== ownerSpace &&
-      !claimedForeignReadFloorExempt(observation, address)
+      !claimedForeignReadFloorExempt(
+        observation,
+        address,
+        admittedForeignReadSpaces,
+      )
     ) || writeAddresses.some((address) => address.space !== ownerSpace);
   if (
     addresses.some((address) =>
@@ -6803,6 +6870,7 @@ function schedulerStaticContextFloor(
 
 function schedulerRuntimeContextFloor(
   observation: SchedulerActionObservation,
+  admittedForeignReadSpaces?: readonly string[],
 ): SchedulerContextScope {
   const ownerSpace = observation.ownerSpace;
   const addresses = schedulerObservationAddresses(observation);
@@ -6822,9 +6890,15 @@ function schedulerRuntimeContextFloor(
           // C3.5: a host-accepted claimed attempt's space-scoped foreign
           // READ no longer demotes to session — envelope-covered or not
           // (dynamic link-following foreign reads are part of the admitted
-          // class and enter the vector basis). Client observations keep
-          // the conservative demotion byte-identically.
-          !claimedForeignReadFloorExempt(observation, address) &&
+          // class and enter the vector basis). C3.11: an unserved claimed
+          // cross-space-read attempt is exempt on the host-admitted read
+          // spaces too (space-rank, no provenance yet). Client observations
+          // keep the conservative demotion byte-identically.
+          !claimedForeignReadFloorExempt(
+            observation,
+            address,
+            admittedForeignReadSpaces,
+          ) &&
           !schedulerAddressCoveredBy(address, summary.reads)
         ))) ||
     (summary === undefined &&
@@ -7061,6 +7135,13 @@ function resolveSchedulerExecutionContext(
     ownerSpace?: string;
     observation: SchedulerActionObservation;
     scopeContext: SchedulerScopeContext;
+    /** C3.11: the host-authored cross-space-read admission of this attempt's
+     * live claim (`ExecutionClaim.crossSpaceReadSpaces`). Threaded so an
+     * unserved claimed cross-space-read attempt — which carries no accepted
+     * provenance — still classifies its admitted foreign reads space-rank
+     * and does not poison the durable context floor. Absent for client
+     * observations and same-space claims (byte-identical). */
+    foreignReadAdmittedSpaces?: readonly string[];
   },
 ): {
   executionContextKey: SchedulerExecutionContextKey;
@@ -7077,17 +7158,59 @@ function resolveSchedulerExecutionContext(
     runtimeFingerprint: observation.runtimeFingerprint,
   };
   const principalKey = resolveScopeKey("user", scopeContext);
-  const staticFloor = schedulerStaticContextFloor(observation);
-  const runtimeFloor = schedulerRuntimeContextFloor(observation);
+  const staticFloor = schedulerStaticContextFloor(
+    observation,
+    options.foreignReadAdmittedSpaces,
+  );
+  const runtimeFloor = schedulerRuntimeContextFloor(
+    observation,
+    options.foreignReadAdmittedSpaces,
+  );
+  // C3.11: the GLOBAL floor is "the narrowest scope this action's DECLARED
+  // shape forces on EVERY principal". A cross-space space-scoped READ does
+  // NOT force session on every principal — a claimed principal whose read the
+  // cross-space-read STAGE admitted runs it space-rank — so the conservative
+  // crossesSpace demotion an UNADMITTED observer (a client, or the executor's
+  // pre-claim discovery run) computes is OBSERVER-SPECIFIC, not a global
+  // property. Writing it globally monotonically poisons the durable floor to
+  // session and fences the later served space-rank claim
+  // `claim-context-mismatch` (the same posture bug the unserved-rerun leg of
+  // C3.11 fixes, here for an observation with NO claim at all). The global
+  // write therefore exempts the observation's OWN space-scoped foreign reads
+  // (the admitted posture): a genuine session/user DECLARED scope still floors
+  // globally (it is not a foreign read), while the crossesSpace demotion stays
+  // where it belongs — this observation's effective floor below (which keeps
+  // the client at session byte-identically) and the principal-scoped session
+  // write. Foreign WRITES keep demoting globally (no v1 story; firewall reject).
+  const ownForeignReadSpaces = schedulerObservationForeignReadSpaces(
+    observation,
+  );
+  const globalStaticFloor = ownForeignReadSpaces.length > 0
+    ? schedulerStaticContextFloor(observation, ownForeignReadSpaces)
+    : staticFloor;
+  const globalRuntimeFloor = ownForeignReadSpaces.length > 0
+    ? schedulerRuntimeContextFloor(observation, ownForeignReadSpaces)
+    : runtimeFloor;
 
   // Static completeness applies to every principal for the fingerprint.
-  upsertSchedulerContextFloor(engine, floorKey, "", staticFloor);
+  upsertSchedulerContextFloor(engine, floorKey, "", globalStaticFloor);
   // Runtime evidence that disproves sharing is global at least through user;
   // PerSession/cross-space narrowing remains scoped to this principal lineage.
-  if (schedulerContextRank(runtimeFloor) >= schedulerContextRank("user")) {
+  if (
+    schedulerContextRank(globalRuntimeFloor) >= schedulerContextRank("user")
+  ) {
     upsertSchedulerContextFloor(engine, floorKey, "", "user");
   }
-  if (runtimeFloor === "session") {
+  // C3.11: the per-principal session narrowing is likewise the admitted
+  // posture. A genuine PerSession read narrows every run of this action by this
+  // principal (durable, principal-scoped). The crossesSpace demotion does NOT —
+  // it is observer-specific, and writing it here would poison a SERVED claim of
+  // the SAME principal (a dynamic/envelope-uncovered client foreign read reaches
+  // this on `runtimeFloor === "session"`; the gate's covered read does not, but
+  // it is the same poison class). `globalRuntimeFloor` fires only on a genuine
+  // session scope (foreign reads exempt), so the client still floors session via
+  // its own effective floor above without narrowing the shared principal floor.
+  if (globalRuntimeFloor === "session") {
     upsertSchedulerContextFloor(
       engine,
       floorKey,
@@ -8761,6 +8884,12 @@ const applyCommitTransaction = (
       ...(acceptedObservation.provenance !== undefined
         ? { causeCoverageSeq: inputBasisSeq }
         : {}),
+      // C3.11: carry the live claim's stage-admitted cross-space-read spaces
+      // so an unserved claimed attempt classifies space-rank and never
+      // poisons the durable floor to session (byte-identical when absent).
+      ...(executionClaim?.crossSpaceReadSpaces !== undefined
+        ? { foreignReadAdmittedSpaces: executionClaim.crossSpaceReadSpaces }
+        : {}),
       replayPayload: schedulerObservationReplayPayload({
         branch,
         observedAtSeq: seq,
@@ -9890,6 +10019,15 @@ const applySchedulerObservationOnlyCommit = (
     replayPayload,
     ...(accepted.provenance !== undefined
       ? { causeCoverageSeq: inputBasisSeq }
+      : {}),
+    // C3.11: an UNSERVED claimed cross-space-read attempt reaches the engine
+    // through this observation-only path (unserved markers carry no semantic
+    // operations). Carry the live claim's stage-admitted read spaces so its
+    // discovery row classifies space-rank instead of writing a session floor
+    // that monotonically poisons the durable `scheduler_context_floor` and
+    // fences the next served run `claim-context-mismatch`.
+    ...(executionClaim?.crossSpaceReadSpaces !== undefined
+      ? { foreignReadAdmittedSpaces: executionClaim.crossSpaceReadSpaces }
       : {}),
     observation: accepted.observation,
   });

@@ -73,6 +73,10 @@ import {
   type InputBasisComponent,
   inputBasisComponentForSpace,
   mergeInputBasisVectors,
+  resetServerPrimaryExecutionClaimRankConfig,
+  resetServerPrimaryExecutionCrossSpaceClaimsConfig,
+  setServerPrimaryExecutionClaimRankConfig,
+  setServerPrimaryExecutionCrossSpaceClaimsConfig,
   toAcceptedCommitSeq,
   toDocumentPath,
   toInputBasisSeq,
@@ -148,6 +152,7 @@ type VectorServer = Server & {
       implementationFingerprint: string;
       runtimeFingerprint: string;
     },
+    options?: { foreignReadSpaces?: readonly string[] },
   ): Promise<LiveClaim>;
   bindExecutionSession(
     space: string,
@@ -200,7 +205,20 @@ const EXECUTION_FLAGS = {
   serverPrimaryExecutionContextLatticeClaimsV1: true,
 };
 
-const createServer = (name: string): VectorServer =>
+/** C3.11: the negotiating set, optionally with the C3.6b cross-space
+ * subcapability. A cross-space-read claim can be ISSUED only when the server
+ * advertises it and the delivery cohort uniformly negotiates it (plus the
+ * `cross-space-read` rank-dial config); off, the set is byte-identical to the
+ * pre-C3.11 harness. */
+const flagsFor = (crossSpace: boolean) => ({
+  ...EXECUTION_FLAGS,
+  ...(crossSpace ? { serverPrimaryExecutionCrossSpaceClaimsV1: true } : {}),
+});
+
+const createServer = (
+  name: string,
+  crossSpace = false,
+): VectorServer =>
   new Server(
     {
       store: new URL(`memory://${name}`),
@@ -210,17 +228,18 @@ const createServer = (name: string): VectorServer =>
         return typeof principal === "string" ? principal : undefined;
       },
       sessionOpenAuth: { audience: AUDIENCE },
-      protocolFlags: EXECUTION_FLAGS,
+      protocolFlags: flagsFor(crossSpace),
       acl: { mode: "enforce", serviceDids: [ADMIN] },
     } as unknown as ConstructorParameters<typeof Server>[0],
   ) as VectorServer;
 
 const connectClient = async (
   server: Server,
+  crossSpace = false,
 ): Promise<MemoryClient.Client> =>
   await MemoryClient.connect({
     transport: MemoryClient.loopback(server),
-    protocolFlags: EXECUTION_FLAGS,
+    protocolFlags: flagsFor(crossSpace),
   } as MemoryClient.ConnectOptions);
 
 const mountAs = async (
@@ -400,12 +419,22 @@ interface Harness {
  * plane on HOME: demand → lease → bound sponsor session → live space-lane
  * claim, with the sponsor session subscribed to execution control.
  */
-const setupHarness = async (name: string): Promise<Harness> => {
-  const server = createServer(name);
+const setupHarness = async (
+  name: string,
+  options: { claimForeignReadSpaces?: readonly string[] } = {},
+): Promise<Harness> => {
+  const crossSpace = options.claimForeignReadSpaces !== undefined;
+  if (crossSpace) {
+    // The issuance preflight (C3A17) needs BOTH the `cross-space-read`
+    // rank-dial entry and the cross-space-claims-v1 advertisement live.
+    setServerPrimaryExecutionClaimRankConfig("cross-space-read");
+    setServerPrimaryExecutionCrossSpaceClaimsConfig(true);
+  }
+  const server = createServer(name, crossSpace);
   const internals = internalsOf(server);
-  const adminClient = await connectClient(server);
-  const sponsorClient = await connectClient(server);
-  const otherClient = await connectClient(server);
+  const adminClient = await connectClient(server, crossSpace);
+  const sponsorClient = await connectClient(server, crossSpace);
+  const otherClient = await connectClient(server, crossSpace);
   const adminHome = await mountAs(adminClient, HOME_SPACE, ADMIN);
   const adminRead = await mountAs(adminClient, READ_SPACE, ADMIN);
   await writeAcl(adminHome, 1, HOME_SPACE, {
@@ -443,7 +472,13 @@ const setupHarness = async (name: string): Promise<Harness> => {
     sponsor.sessionId,
     lease,
   );
-  const claim = await server.setExecutionClaim(lease, claimInput());
+  const claim = await server.setExecutionClaim(
+    lease,
+    claimInput(),
+    options.claimForeignReadSpaces !== undefined
+      ? { foreignReadSpaces: options.claimForeignReadSpaces }
+      : undefined,
+  );
   return {
     server,
     internals,
@@ -463,6 +498,10 @@ const setupHarness = async (name: string): Promise<Harness> => {
       await sponsorClient.close();
       await adminClient.close();
       await server.close();
+      if (crossSpace) {
+        resetServerPrimaryExecutionClaimRankConfig();
+        resetServerPrimaryExecutionCrossSpaceClaimsConfig();
+      }
     },
   };
 };
@@ -679,6 +718,237 @@ Deno.test("C3.5 (a): a mount-covered claimed foreign read passes the relaxed fir
     assertEquals("foreignReadStamps" in storedObservation, false);
     await internals.settleCrossSpaceDeliveries();
   } finally {
+    await harness.close();
+  }
+});
+
+/**
+ * An UNSERVED claimed cross-space-read attempt (C3.11): the real Worker shape
+ * when a rerun reads the foreign source through the home mirror with NO
+ * served-point-read stamp (the mount was not yet hydrated / was evicted).
+ * Carries the discovered foreign read + the claim assertion + the unserved
+ * marker, and NO stamps — an observation-only commit (no semantic
+ * operations). The C3.5/C3.6 fixtures never produce this: they hand-attach
+ * `foreignReadStamps` to every run.
+ */
+const unservedClaimedObservation = (
+  claim: LiveClaim,
+  processGeneration = 1,
+): SchedulerActionObservation => ({
+  version: 2,
+  ownerSpace: HOME_SPACE,
+  branch: "",
+  pieceId: claim.pieceId,
+  processGeneration,
+  actionId: claim.actionId,
+  actionKind: "computation",
+  implementationFingerprint: claim.implementationFingerprint,
+  runtimeFingerprint: claim.runtimeFingerprint,
+  executionClaimAssertion: {
+    contextKey: claim.contextKey,
+    leaseGeneration: claim.leaseGeneration,
+    claimGeneration: claim.claimGeneration,
+  },
+  executionUnservedAttempt: { diagnosticCode: "foreign-read-space" },
+  completeActionScopeSummary: {
+    version: 1,
+    complete: true,
+    implementationFingerprint: claim.implementationFingerprint,
+    runtimeFingerprint: claim.runtimeFingerprint,
+    piece: { space: HOME_SPACE, scope: "space", id: PIECE_ROOT, path: [] },
+    reads: [homeAddress(HOME_SOURCE), foreignAddress()],
+    writes: [homeAddress(HOME_OUTPUT)],
+    materializerWriteEnvelopes: [],
+    directOutputs: [homeAddress(HOME_OUTPUT)],
+  },
+  observedAtSeq: 0,
+  transactionKind: "action-run",
+  reads: [homeAddress(HOME_SOURCE), foreignAddress()],
+  shallowReads: [],
+  actualChangedWrites: [],
+  currentKnownWrites: [homeAddress(HOME_OUTPUT)],
+  declaredWrites: [homeAddress(HOME_OUTPUT)],
+  materializerWriteEnvelopes: [],
+  status: "success",
+});
+
+Deno.test("C3.11 (i): an unserved claimed cross-space-read rerun stays space-rank and does not poison the durable floor", async () => {
+  // The real Worker alternates SERVED and UNSERVED runs of one cross-space-
+  // read action. An unserved rerun carries no accepted provenance; before the
+  // C3.11 floor fix its stage-admitted foreign read demoted the durable
+  // context floor to session (the monotone `scheduler_context_floor` merge),
+  // and the next SERVED run then fenced `claim-context-mismatch` — the
+  // space-rank claim was lost. The C3.5/C3.6 fixtures never caught this
+  // because they hand-attach stamps to EVERY run.
+  const harness = await setupHarness("xsp-vector-unserved-floor", {
+    claimForeignReadSpaces: [READ_SPACE],
+  });
+  const { server, internals, sponsor, lease, claim, homeSourceSeq } = harness;
+  try {
+    // The cross-space-read STAGE admitted B on the claim (the C3A17 issuance
+    // preflight bound the sponsor's B READ) — the exact signal the fix keys
+    // on. A same-space claim would carry no `crossSpaceReadSpaces` here.
+    assertEquals(claim.crossSpaceReadSpaces, [READ_SPACE]);
+
+    // (1) An UNSERVED rerun: observation-only, foreign read, NO stamps.
+    await sponsor.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: unservedClaimedObservation(claim),
+    });
+    // The action stays SPACE-rank even unserved — its foreign read is
+    // stage-admitted, orthogonal to serve status. Direct home-engine
+    // inspection (all contexts). RED before the fix: the discovery row floored
+    // at the sponsor's session context, monotonically poisoning the durable
+    // `scheduler_context_floor`.
+    const homeEngine = await internals.openEngine(HOME_SPACE);
+    const homeDiscoveryRows = Engine.listSchedulerActionSnapshots(homeEngine, {
+      branch: "",
+      ownerSpace: HOME_SPACE,
+      pieceId: claim.pieceId,
+      actionId: claim.actionId,
+    }).snapshots;
+    assertEquals(
+      homeDiscoveryRows.map((row) => row.executionContextKey),
+      ["space"],
+      "an unserved cross-space-read rerun must classify space-rank (no floor poison)",
+    );
+
+    // (2) A SERVED run of the SAME action (same processGeneration → same floor
+    // row) now settles committed under SPACE rank with the 2-component vector.
+    // RED before the fix: the poisoned floor fenced this commit
+    // `claim-context-mismatch` and the claim was lost.
+    const outcome = await server.executorForeignPointRead(lease, {
+      readSpace: READ_SPACE,
+      claim: claimRefOf(claim),
+      address: { id: FOREIGN_DOC },
+    });
+    assert(outcome.status === "served", "point read served");
+    const committed = await sponsor.transact({
+      localSeq: 3,
+      reads: {
+        confirmed: [confirmedHomeSourceRead(homeSourceSeq)],
+        pending: [],
+      },
+      operations: [{ op: "set", id: HOME_OUTPUT, value: { value: 42 } }],
+      schedulerObservation: claimedObservation(claim, {
+        foreignReads: [foreignAddress()],
+        foreignReadStamps: [
+          { space: READ_SPACE, id: FOREIGN_DOC, seq: outcome.seq },
+        ],
+      }),
+    });
+    const result = committed.schedulerObservationResults?.[0];
+    assertExists(result);
+    assertEquals(
+      result.executionContextKey,
+      "space",
+      "the served run survives at space rank (the unserved rerun did not poison the floor)",
+    );
+    assertEquals(result.executionProvenance?.inputBasis?.length, 2);
+    await internals.settleCrossSpaceDeliveries();
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("C3.11 (i, principal leg): a CLIENT observation with an UNCOVERED foreign read does not poison the principal floor of a same-principal served claim", async () => {
+  // The crossesSpace demotion of an UNADMITTED observer is observer-specific
+  // for the per-PRINCIPAL floor too, not only the global one. A dynamic /
+  // envelope-uncovered client foreign read (present in the observation but NOT
+  // in its complete summary) reaches `runtimeFloor === "session"`; before the
+  // fix that wrote the acting principal's durable session floor, fencing a
+  // SERVED claim of the SAME action by the SAME principal
+  // `claim-context-mismatch`. The gate's authored pattern uses a COVERED
+  // foreign read (`runtimeFloor === "space"`), so it exercises the global-write
+  // leg, not this per-principal leg.
+  const harness = await setupHarness("xsp-vector-principal-floor", {
+    claimForeignReadSpaces: [READ_SPACE],
+  });
+  const { server, sponsor, lease, claim, homeSourceSeq } = harness;
+  // A SECOND session for the SAME acting principal (SPONSOR) that is NOT bound
+  // to the executor lease — the genuine client that authors the unadmitted
+  // observation (the bound executor session may only commit under its claim).
+  const clientConn = await connectClient(server, true);
+  const clientSession = await mountAs(clientConn, HOME_SPACE, SPONSOR);
+  try {
+    // (1) A CLIENT (no-claim) observation-only discovery whose foreign read is
+    // envelope-UNCOVERED (absent from the complete summary) — the shape that
+    // drives the RUNTIME floor (not the static floor) to session.
+    const clientUncovered: SchedulerActionObservation = {
+      version: 2,
+      ownerSpace: HOME_SPACE,
+      branch: "",
+      pieceId: claim.pieceId,
+      processGeneration: 1,
+      actionId: claim.actionId,
+      actionKind: "computation",
+      implementationFingerprint: claim.implementationFingerprint,
+      runtimeFingerprint: claim.runtimeFingerprint,
+      completeActionScopeSummary: {
+        version: 1,
+        complete: true,
+        implementationFingerprint: claim.implementationFingerprint,
+        runtimeFingerprint: claim.runtimeFingerprint,
+        piece: { space: HOME_SPACE, scope: "space", id: PIECE_ROOT, path: [] },
+        // The foreign read is intentionally OMITTED here (envelope-uncovered).
+        reads: [homeAddress(HOME_SOURCE)],
+        writes: [homeAddress(HOME_OUTPUT)],
+        materializerWriteEnvelopes: [],
+        directOutputs: [homeAddress(HOME_OUTPUT)],
+      },
+      observedAtSeq: 0,
+      transactionKind: "action-run",
+      reads: [homeAddress(HOME_SOURCE), foreignAddress()],
+      shallowReads: [],
+      actualChangedWrites: [],
+      currentKnownWrites: [homeAddress(HOME_OUTPUT)],
+      declaredWrites: [homeAddress(HOME_OUTPUT)],
+      materializerWriteEnvelopes: [],
+      status: "success",
+    };
+    await clientSession.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: clientUncovered,
+    });
+
+    // (2) A SERVED claim of the SAME action + SAME acting principal now commits
+    // at SPACE rank — the client's session demotion stayed observer-specific
+    // and did not poison the acting principal's durable floor. RED before the
+    // per-principal leg: the served commit fenced claim-context-mismatch.
+    const outcome = await server.executorForeignPointRead(lease, {
+      readSpace: READ_SPACE,
+      claim: claimRefOf(claim),
+      address: { id: FOREIGN_DOC },
+    });
+    assert(outcome.status === "served", "point read served");
+    const committed = await sponsor.transact({
+      localSeq: 3,
+      reads: {
+        confirmed: [confirmedHomeSourceRead(homeSourceSeq)],
+        pending: [],
+      },
+      operations: [{ op: "set", id: HOME_OUTPUT, value: { value: 42 } }],
+      schedulerObservation: claimedObservation(claim, {
+        foreignReads: [foreignAddress()],
+        foreignReadStamps: [
+          { space: READ_SPACE, id: FOREIGN_DOC, seq: outcome.seq },
+        ],
+      }),
+    });
+    const result = committed.schedulerObservationResults?.[0];
+    assertExists(result);
+    assertEquals(
+      result.executionContextKey,
+      "space",
+      "the served claim survives at space rank (the client's uncovered foreign read did not poison the principal floor)",
+    );
+    assertEquals(result.executionProvenance?.inputBasis?.length, 2);
+  } finally {
+    await clientConn.close();
     await harness.close();
   }
 });

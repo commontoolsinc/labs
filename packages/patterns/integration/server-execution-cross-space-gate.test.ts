@@ -28,45 +28,69 @@
  *      the host VALIDATES the resulting vector-basis component
  *      (`foreignBasisComponentsValidated`) — this is what the C3.11 executor fix
  *      below unblocks (red-first: 0 without the fix, ≥1 with it);
- *   6. a space-B commit WAKES the home reader (the C3.3a foreign wake, composed).
+ *   6. the host ACCEPTS the claimed attempt and COMMITS the cross-space read,
+ *      delivering a settlement carrying the C3.5 VECTOR input basis (home A
+ *      scalar + served foreign B component) to the negotiating reader — WITHOUT
+ *      the space-rank claim ever fencing `claim-context-mismatch` (defect (i),
+ *      now FIXED — the durable floor is no longer poisoned; see below);
+ *   7. a space-B commit WAKES the home reader (the C3.3a foreign wake, composed).
  *
  * WHAT IS NOT COMPOSED HERE (and why — do NOT read this file as binding these):
- * driving the chain all the way to a COMMITTED server settlement that the
- * client drops its overlay for (clause (a)'s tail) and the revocation / fence /
- * write-authoritative / mixed-version / both-halves-wake clauses (b)–(f) is
- * NOT achievable at the patterns level today. A real integration defect blocks
- * it (see the report + the `INTEGRATION-DEFECT` note below): the composed
- * committed-settlement serve is fenced by a residual session-floor /
- * claim-context-mismatch interaction and a client foreign-replica resync gap
- * that live below the patterns layer. Each of clauses (a-tail)–(f) is bound
- * today by a memory/runner fixture (the fixture map is in the report); this
- * gate deliberately does NOT re-assert them against the broken composed path
- * (no fake green).
+ * the CLIENT-side tail of clause (a) — the reader speculatively recomputing
+ * `doubled` on the foreign change, HOLDING a claimed overlay and DROPPING it
+ * exactly once when the committed settlement lands — is NOT bindable here,
+ * blocked by DEFECT (ii), a design gap below the patterns layer (see below): a
+ * client's replica of a foreign space keeps no live subscription, so a foreign
+ * (B) change never reaches the reader's reactive graph and no client overlay
+ * ever forms. The revocation / fence / write-authoritative / mixed-version /
+ * both-halves-wake clauses (b)–(f) also stay bound by their memory/runner
+ * fixtures (the fixture map is in the report); this gate does NOT re-assert them
+ * here (no fake green).
  *
- * INTEGRATION-DEFECT (found + partially fixed at the root):
- *   `packages/runner/src/executor/executor-worker.ts` populated the read-only
- *   foreign mount ONLY on a foreign WAKE (`refreshForeignMountForWake`), never
- *   before the INITIAL claimed run of a cross-space-read action. So that first
- *   run read the foreign source through the home mirror with NO served-point-
- *   read stamp, `foreignReadStampsForAction` yielded nothing, the accepted
- *   observation floored at session (the conservative no-provenance posture), and
- *   the SPACE-rank claim fenced it `claim-context-mismatch`. The fix
- *   (`hydrateForeignReadMount`, called from `startClaimedAction`, gated on
- *   `claim.crossSpaceReadSpaces` so same-space is byte-identical) makes the
- *   first claimed run STAMPED — `foreignBasisComponentsValidated` goes 0→1, the
- *   assertion below. A residual, deeper interaction (a separately-classified
- *   unserved rerun still floors session, and the client's foreign replica does
- *   not resync the read-space change to recompute/suppress) keeps the full
- *   committed serve from completing; it is characterized in the report, not
- *   faked green here.
+ * DEFECT (i) — FIXED (the floor-poisoning class that fenced the committed serve):
+ *   an UNADMITTED cross-space-read observation (a client read, the executor's
+ *   pre-claim discovery run, OR a separately-classified UNSERVED claimed rerun)
+ *   computes the conservative crossesSpace SESSION demotion and — before the fix
+ *   — wrote it to the GLOBAL durable `scheduler_context_floor`; the later SERVED
+ *   space-rank claim then read that poisoned floor and fenced against it
+ *   (`claim-context-mismatch`), losing the claim. The fix
+ *   (packages/memory/v2/engine.ts) is two-legged: (1) an unserved CLAIMED
+ *   cross-space-read attempt classifies space-rank via the claim's host-authored
+ *   `crossSpaceReadSpaces` (its foreign read is stage-admitted, orthogonal to
+ *   serve status); (2) the GLOBAL floor write uses the admitted posture — it
+ *   exempts the observation's own space-scoped foreign reads — so an unadmitted
+ *   observer's conservative demotion stays observer-specific (its own effective
+ *   floor + the principal-scoped session write) and never poisons the shared
+ *   floor a served claim reads. Same-space and genuine session/user scopes are
+ *   byte-identical. With the fix `settlementsCommitted`/`acceptedActionAttempts`
+ *   go ≥1 and `claim-context-mismatch` stays 0 — the assertions below. (An
+ *   earlier necessary-but-insufficient leg, `hydrateForeignReadMount` in
+ *   executor-worker.ts, stamps the FIRST claimed run; it landed with the gate.)
+ *
+ * DEFECT (ii) — DESIGN GAP (the client overlay half cannot be driven):
+ *   the reader's client-side foreign (B) replica does not RESYNC the read-space
+ *   change. Isolated repro + this gate both show a live sink on the reader's
+ *   foreign source firing ONCE with the initial value and NEVER again on a later
+ *   foreign change (the replica stays stale; an explicit re-sync does not
+ *   re-fetch). So the reader never recomputes `doubled`, never holds/drops an
+ *   overlay, never suppresses (`claimedOverlayRoutes` stays 0). The C3.9
+ *   client-suppression + vector-overlay fixtures used SYNTHETIC settlements (a
+ *   hand-driven `PushView`), so the real two-space client's foreign-replica
+ *   reactivity was never exercised. The missing mechanism — a client-side live
+ *   foreign-read subscription delivering a foreign change to the reactive graph
+ *   — is a CT-1667-class cross-space-reactivity gap, orthogonal to the C3
+ *   execution mechanism, reported as a design finding rather than hacked around.
  *
  * TRANSPORT: the in-process leg (one Server hosting A+B over the default
  * InProcessCrossSpaceTransport) is asserted here. The co-hosted transport leg
  * (two Servers + `crossSpaceLinkSocketPair` + `CoHostedCrossSpaceTransport`) is
  * bound at the memory level by v2-execution-cross-space-cohosted{,-c3-10b}-test
- * — the composed serve it would layer on is blocked by the same defect, so
- * re-crossing it here would be the same non-green; the transport crossing itself
- * (mirror/wake/point-read over the link) is those fixtures' contract.
+ * — the transport crossing itself (mirror/wake/point-read over the link) is
+ * those fixtures' contract. Parameterizing THIS gate over both transports is
+ * owed: the composed serve it would layer on is capped at the same
+ * server-committed-settlement + wake surface asserted here (the client overlay
+ * tail is blocked by defect (ii) on BOTH transports), so it re-crosses the same
+ * server-side clauses over the link rather than unlocking a new one.
  *
  * CI-budget clause (C3A23): named runtime ceiling in this header —
  * CROSS_SPACE_GATE_BUDGET_MS below, logged per test; the suite stays a single
@@ -173,6 +197,43 @@ const collectClaimSets = (value: unknown, into: ClaimSet[]): void => {
   for (const entry of Object.values(record)) collectClaimSets(entry, into);
 };
 
+/** A delivered execution settlement carrying the C3.5 vector input basis (one
+ * {space, seq} component per read space). The committed cross-space settlement
+ * the host authors and delivers carries the HOME (A) scalar component plus the
+ * served foreign (B) component — the composed view of the vector settlement. */
+type SettlementDelivery = {
+  actionId?: string;
+  outcome: string;
+  inputBasis?: readonly { space: string; seq: number }[];
+};
+
+const collectSettlements = (
+  value: unknown,
+  into: SettlementDelivery[],
+): void => {
+  if (value === null || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    for (const entry of value) collectSettlements(entry, into);
+    return;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record.type === "session.execution.settlement" && record.settlement
+  ) {
+    const settlement = record.settlement as {
+      claim?: { actionId?: string };
+      outcome: string;
+      inputBasis?: readonly { space: string; seq: number }[];
+    };
+    into.push({
+      actionId: settlement.claim?.actionId,
+      outcome: settlement.outcome,
+      inputBasis: settlement.inputBasis,
+    });
+  }
+  for (const entry of Object.values(record)) collectSettlements(entry, into);
+};
+
 // ---------------------------------------------------------------------------
 // Space-routing loopback client. The deterministic in-realm analog of the
 // production `cache.deno` StorageManager's `memoryHost` + `spaceHostMap`
@@ -254,6 +315,7 @@ type GateClient = {
   storage: RoutingStorageManager;
   runtime: Runtime;
   claimSets: ClaimSet[];
+  settlements: SettlementDelivery[];
 };
 
 const openClient = (
@@ -263,11 +325,15 @@ const openClient = (
   flags: Partial<MemoryProtocolFlags> = FLAGS,
 ): GateClient => {
   const claimSets: ClaimSet[] = [];
+  const settlements: SettlementDelivery[] = [];
   const storage = RoutingStorageManager.connect(
     serverForSpace,
     flags,
     { as: identity },
-    (message) => collectClaimSets(message, claimSets),
+    (message) => {
+      collectClaimSets(message, claimSets);
+      collectSettlements(message, settlements);
+    },
   );
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
@@ -277,7 +343,14 @@ const openClient = (
       ...(serverPrimary ? { serverPrimaryExecution: true } : {}),
     },
   });
-  return { identity, did: identity.did(), storage, runtime, claimSets };
+  return {
+    identity,
+    did: identity.did(),
+    storage,
+    runtime,
+    claimSets,
+    settlements,
+  };
 };
 
 /** Raw memory-client ACL helper (the enforce-mode ACL the cross-space read
@@ -314,7 +387,7 @@ const writeAcl = async (
 
 Deno.test({
   name:
-    "C3.11 cross-space-read gate [in-process]: authored foreign read composes issuance + delivery + subscription + served point read + wake",
+    "C3.11 cross-space-read gate [in-process]: authored foreign read composes issuance + delivery + subscription + served point read + committed vector settlement + wake",
   async fn() {
     const startedAt = performance.now();
     await withExecutorTeardownBarrier(async () => {
@@ -588,6 +661,52 @@ async function runInProcessGate(storeDir: string): Promise<void> {
         wakesBefore,
         wakesNow: pool!.metrics().foreignWakeNotifications,
       }),
+    );
+
+    // ---- (a) committed vector settlement (defect (i) fix, composed DIRECTLY).
+    // The served claim survives the real Worker's alternating served/unserved
+    // reruns WITHOUT the durable context floor being poisoned to session by the
+    // client / pre-claim UNADMITTED cross-space observations — so the host
+    // ACCEPTS the claimed attempt and COMMITS the cross-space read (no
+    // claim-context-mismatch fence). This is what the C3.11 gate delegated to
+    // the memory fixtures before the floor fix; it now binds here. ----
+    await waitForCondition(
+      "the host commits the cross-space-read settlement (no floor-poison fence)",
+      () =>
+        server.executionStats.settlementsCommitted >= 1 &&
+        server.executionStats.acceptedActionAttempts >= 1,
+      () => ({
+        settlementsCommitted: server.executionStats.settlementsCommitted,
+        acceptedActionAttempts: server.executionStats.acceptedActionAttempts,
+        leaseFenceRejectCauses: server.executionStats.leaseFenceRejectCauses,
+      }),
+    );
+    // Defect (i) composed proof: the space-rank claim was NEVER fenced
+    // `claim-context-mismatch`. Before the fix an unadmitted cross-space
+    // observation (a client read, or the executor's pre-claim discovery run)
+    // wrote a session floor to the GLOBAL durable `scheduler_context_floor`,
+    // which the served space-rank claim then read and fenced against.
+    assertEquals(
+      server.executionStats.leaseFenceRejectCauses["claim-context-mismatch"] ??
+        0,
+      0,
+      `the served cross-space claim must not fence claim-context-mismatch (floor poison): ${
+        JSON.stringify(server.executionStats.leaseFenceRejectCauses)
+      }`,
+    );
+    // The delivered committed settlement carries the C3.5 VECTOR input basis:
+    // the HOME (A) scalar component AND the served FOREIGN (B) component — a
+    // genuine two-space vector authored by the host from its served-point-read
+    // record, delivered to the negotiating reader.
+    await waitForCondition(
+      "the reader receives a committed vector settlement naming home A + foreign B",
+      () =>
+        reader!.settlements.some((settlement) =>
+          settlement.outcome === "committed" &&
+          (settlement.inputBasis ?? []).some((c) => c.space === spaceA) &&
+          (settlement.inputBasis ?? []).some((c) => c.space === spaceB)
+        ),
+      () => ({ readerSettlements: reader!.settlements }),
     );
 
     // Final assertions on the settled facts.
