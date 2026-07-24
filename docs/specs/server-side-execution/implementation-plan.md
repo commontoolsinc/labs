@@ -2234,12 +2234,35 @@ dropping the cohort metadata.
 
 #### C3 — cross-space reads: work-order decomposition (2026-07-17)
 
-**Status — C3 cross-space READS: mechanism complete + verified; C3.11's
-composed gate owed (2026-07-23).** The mechanism landed C3.1 through
-C3.10b, and C3.11's parent-document closeout landed with this status; the
-composed default-run two-space patterns gate remains owed (see the end of
-this section). Landed WOs: C3.1/C3.1b protocol substrate + mirror/dirt
-carriage (f3c4e1e97 /
+**Status — C3 cross-space READS: server-side serve composes end-to-end;
+the client reactive half is a newly-found DESIGN GAP (2026-07-23).** The
+mechanism landed C3.1 through C3.10b, C3.11's parent-document closeout
+landed, and the composed default-run two-space gate landed
+(`server-execution-cross-space-gate.test.ts`). That gate — the first place
+a REAL authored pattern executes server-side across the space boundary —
+did what the C2.9/C2.10 precedent predicted: it surfaced integration
+defects the clause-by-clause fixtures structurally could not, because those
+fixtures **hand-attach `foreignReadStamps` on every run** and so never
+exercised the real Worker's serve path. Two were found. **Defect (i)
+FIXED** (229f7300c): an unadmitted cross-space-read observation (client
+read, pre-claim discovery, or unserved rerun) poisoned the durable
+`scheduler_context_floor` with a `crossesSpace→session` demotion, which
+then fenced the SERVED space-rank claim as `claim-context-mismatch`; the
+engine floor writes now exempt the observation's own space-scoped foreign
+reads, so the **server serve composes end-to-end** — the gate binds the
+committed {home, foreign} vector settlement directly through a real Worker
+(`settlementsCommitted≥1`, `claim-context-mismatch==0`). **Defect (ii) —
+a DESIGN GAP, not fixed, owned as a follow-on (see below):** the reading
+client's foreign-space replica does not resync a read-space change, so the
+client never recomputes the derivation, never holds/drops the overlay, and
+never suppresses its own run — a cross-space **client-reactivity** gap that
+C3.9's synthetic (`PushView`) settlements masked, orthogonal to the C3
+execution mechanism. Consequence: the *server* now authoritatively serves
+a cross-space read and commits its vector settlement, but the *end-to-end
+user-visible* cross-space read (client reacts to a foreign change and
+defers to the server) does not yet work; the gate binds the server half
+directly and honestly delegates the blocked client tail. Landed WOs:
+C3.1/C3.1b protocol substrate + mirror/dirt carriage (f3c4e1e97 /
 6d88916ca); C3.2 foreign authorization epochs (d6d58fa5e); C3.3a/C3.3b
 foreign wake pipeline + executor-authored mirroring (731e62374 /
 e580a4dbb); C3.4 foreign point reads (ccf407a7a); C3.5 vector input
@@ -2269,21 +2292,32 @@ commit); the geo-distributed transport (G19) and per-stamp signatures
 (G20, the C3A13 deferral) remain undesigned; the C3A19 declare-and-count
 vs strip metadata ruling stands as the one open owner decision (§5,
 declare-and-count implemented); the C2.10 settlement-latency budget stays
-provisional. **Owed by C3.11 and not yet landed:** the composed default-run
-two-space patterns gate
-(`packages/patterns/integration/server-execution-cross-space-gate.test.ts`)
-— the top-level acceptance that composes the memory + runner fixtures above
-into one real loop: transport-parameterized over the single-Server
-in-process leg and the two-linked-`Server` co-hosted leg (C3.10a
-`crossSpaceLinkSocketPair`), a real `SharedExecutionPool` + Deno Worker, and
-a client wired through `spaceHostMap`, binding each §7 clause end-to-end.
-The constituent correctness is already proven clause-by-clause at the memory
-and runner integration levels (the fixtures cited above, all green over both
-transports); the gate is the composition proof, and is the first place a
-REAL authored pattern is executed server-side across the space boundary (no
-prior test does — expect a composition defect to surface and be root-fixed,
-the C2.9/C2.10 precedent). CI-budget clause (C3A23): its own
-patterns-integration shard or a named runtime ceiling in the file header.
+provisional. **C3.12 — cross-space client reactivity (the owned follow-on
+for defect (ii), NOT in the original C3 decomposition — surfaced by the
+C3.11 composed gate 2026-07-23).** The C3 execution mechanism serves a
+cross-space read authoritatively server-side, but a reading client's
+foreign-space replica has no live foreign-read subscription driving a
+read-space change into the client's reactive graph, so the client does not
+speculatively recompute, hold/drop the vector overlay, or suppress its own
+run. Isolated at the runner level (two runtimes, a foreign cell, a sink):
+the reader's sink fires once at instantiation with the initial value and
+never on a later foreign change; an explicit re-sync does not re-fetch.
+C3.9's client vector-overlay + suppression were built and unit-verified
+against *synthetic* settlements (`PushView`), which never exercised the real
+two-space client's foreign-replica reactivity — the same hand-attached-
+fixture blind spot as defect (i). This is a **CT-1667-class** client-core
+reactivity gap: it is its own work order (client-side live foreign-read
+subscription → reactive recompute → overlay/suppression), touches the client
+reactive hot path (a "don't break it" surface), and was reviewed by neither
+the scout nor the C3 adversarial panel — it should get its own scoping and
+review before build. Until it lands, the cross-space-read stage stays
+fixture-only (already the C3.6 EXPERIMENTAL_OPTIONS posture); the server
+serve is real, the user-visible loop is not. The composed gate binds the
+server half directly and delegates the blocked client tail with the reason
+recorded in its header. The co-hosted gate leg is likewise owed (blocked by
+(ii) on both transports; the transport crossing itself is bound green by the
+`v2-execution-cross-space-cohosted*` suites). CI-budget clause (C3A23): the
+gate carries a named 90 s ceiling in its file header (actual ~1–2 s).
 
 Mapped against the landed substrate, which carries more than §5's wording
 admits: cross-space read **indexing already exists** —
