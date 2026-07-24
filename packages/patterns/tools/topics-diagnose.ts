@@ -113,6 +113,52 @@ export const TOPICS_DIAGNOSTICS_ERROR_CODES = [
 export type TopicsDiagnosticsErrorCode =
   typeof TOPICS_DIAGNOSTICS_ERROR_CODES[number];
 
+/** The aggregate-only session operations used by the diagnostics orchestrator. */
+export type TopicsDiagnosticsSession = Pick<
+  MultiRuntimeSession,
+  | "diagnosticsSummary"
+  | "telemetry"
+  | "topicsDiagnosticsSummary"
+  | "topicsDiagnosticsChurn"
+  | "topicsDiagnosticsSend"
+  | "topicsDiagnosticsSet"
+  | "topicsDiagnosticsNoop"
+  | "topicsDiagnosticsPrepareReversedRoot"
+  | "topicsDiagnosticsCommitPreparedRoot"
+  | "topicsDiagnosticsCreateCrossref"
+  | "topicsDiagnosticsValidateCrossrefs"
+  | "topicsDiagnosticsConvergenceBegin"
+  | "topicsDiagnosticsConvergencePublish"
+  | "topicsDiagnosticsConvergenceFinish"
+  | "topicsDiagnosticsConvergenceCancel"
+>;
+
+/** Narrow harness surface required to run Topics diagnostic cases. */
+export type TopicsDiagnosticsHarness =
+  & Pick<
+    MultiRuntimeHarness,
+    "diagnosticsBarrier" | "memoryTelemetry" | "dispose"
+  >
+  & {
+    sessions: readonly TopicsDiagnosticsSession[];
+  };
+
+/** Optional orchestration seam for fast diagnostics tests. */
+export interface TopicsDiagnosticsDependencies {
+  createHarness?: (
+    config: TopicsDiagnosticsConfig,
+    caseConfig: TopicsDiagnosticsCase,
+  ) => Promise<TopicsDiagnosticsHarness>;
+}
+
+/** Testable dependencies for constructing the production runtime harness. */
+export interface TopicsDiagnosticsHarnessFactoryDependencies {
+  createRuntimeHarness?: (
+    options: Parameters<typeof MultiRuntimeHarness.create>[0],
+  ) => Promise<TopicsDiagnosticsHarness>;
+  randomUUID?: () => string;
+}
+
 export class TopicsDiagnosticsError extends Error {
   constructor(
     readonly code: TopicsDiagnosticsErrorCode,
@@ -211,7 +257,7 @@ const emptyTelemetry = (): RuntimeTelemetrySnapshot => ({
 });
 
 async function collectChurn(
-  sessions: readonly MultiRuntimeSession[],
+  sessions: readonly TopicsDiagnosticsSession[],
   opts: { idle?: boolean } = {},
 ): Promise<ChurnTotals> {
   const counts = await Promise.all(
@@ -287,7 +333,7 @@ export function settleSummary(
 
 async function phase(
   name: string,
-  harness: MultiRuntimeHarness,
+  harness: TopicsDiagnosticsHarness,
   operation: () => Promise<PhaseExecution>,
   verifyAfterSettle?: () => Promise<void>,
 ): Promise<PhaseReport> {
@@ -341,15 +387,18 @@ async function phase(
   };
 }
 
-async function createHarness(
+export async function createTopicsDiagnosticsHarness(
   config: TopicsDiagnosticsConfig,
   caseConfig: TopicsDiagnosticsCase,
-): Promise<MultiRuntimeHarness> {
+  dependencies: TopicsDiagnosticsHarnessFactoryDependencies = {},
+): Promise<TopicsDiagnosticsHarness> {
   const identities = await Promise.all(Array.from(
     { length: caseConfig.users },
     (_entry, index) =>
       Identity.fromPassphrase(
-        `topics-diagnose-${crypto.randomUUID()}-user-${index + 1}`,
+        `topics-diagnose-${
+          dependencies.randomUUID?.() ?? crypto.randomUUID()
+        }-user-${index + 1}`,
         { implementation: "noble" },
       ),
   ));
@@ -360,14 +409,19 @@ async function createHarness(
       ...(config.wsDelayMs > 0 ? { wsDelayMs: config.wsDelayMs } : {}),
     }))
   );
-  return await MultiRuntimeHarness.create({
+  const options: Parameters<typeof MultiRuntimeHarness.create>[0] = {
     programPath: join(ROOT_PATH, config.program),
     rootPath: ROOT_PATH,
     diagnostics: true,
     aggregateOnlyDiagnostics: true,
     sessions,
-    spaceName: `topics-diagnostics-${crypto.randomUUID()}`,
-  });
+    spaceName: `topics-diagnostics-${
+      dependencies.randomUUID?.() ?? crypto.randomUUID()
+    }`,
+  };
+  return await (dependencies.createRuntimeHarness
+    ? dependencies.createRuntimeHarness(options)
+    : MultiRuntimeHarness.create(options));
 }
 
 async function setOutcomes(
@@ -404,7 +458,7 @@ const submitted = (count: number): PhaseExecution => ({
 });
 
 async function assertSharedCardinality(
-  session: MultiRuntimeSession,
+  session: TopicsDiagnosticsSession,
   expected: { topics: number; comments: number; links: number },
 ): Promise<void> {
   const actual = await session.topicsDiagnosticsSummary();
@@ -419,7 +473,7 @@ async function assertSharedCardinality(
 }
 
 async function collectConvergence(
-  sessions: readonly MultiRuntimeSession[],
+  sessions: readonly TopicsDiagnosticsSession[],
 ): Promise<ConvergenceReport> {
   const coordinator = sessions[0];
   const channel = `topics-convergence-${crypto.randomUUID()}`;
@@ -448,10 +502,13 @@ async function collectConvergence(
 async function runCase(
   config: TopicsDiagnosticsConfig,
   caseConfig: TopicsDiagnosticsCase,
+  createHarnessForCase: NonNullable<
+    TopicsDiagnosticsDependencies["createHarness"]
+  >,
 ): Promise<CaseReport> {
-  let harness: MultiRuntimeHarness;
+  let harness: TopicsDiagnosticsHarness;
   try {
-    harness = await createHarness(config, caseConfig);
+    harness = await createHarnessForCase(config, caseConfig);
   } catch {
     throw new TopicsDiagnosticsError("harness-initialization-failed");
   }
@@ -746,7 +803,7 @@ async function runCase(
   }
 }
 
-export async function runTopicsDiagnostics(args: readonly string[]): Promise<{
+export interface TopicsDiagnosticsReport {
   kind: string;
   config: TopicsDiagnosticsReportConfig;
   elapsedMs: number;
@@ -755,7 +812,12 @@ export async function runTopicsDiagnostics(args: readonly string[]): Promise<{
     case: TopicsDiagnosticsCase;
     error: TopicsDiagnosticsErrorCode;
   })[];
-}> {
+}
+
+export async function runTopicsDiagnostics(
+  args: readonly string[],
+  dependencies: TopicsDiagnosticsDependencies = {},
+): Promise<TopicsDiagnosticsReport> {
   let config: TopicsDiagnosticsConfig;
   let cases: TopicsDiagnosticsCase[];
   try {
@@ -765,6 +827,8 @@ export async function runTopicsDiagnostics(args: readonly string[]): Promise<{
     throw new TopicsDiagnosticsError("invalid-configuration");
   }
   const startedAt = performance.now();
+  const createHarnessForCase = dependencies.createHarness ??
+    createTopicsDiagnosticsHarness;
   const results: ({ ok: true; result: CaseReport } | {
     ok: false;
     case: TopicsDiagnosticsCase;
@@ -775,7 +839,10 @@ export async function runTopicsDiagnostics(args: readonly string[]): Promise<{
       `[topics diagnose] ${caseConfig.topics} topics x ${caseConfig.users} users`,
     );
     try {
-      results.push({ ok: true, result: await runCase(config, caseConfig) });
+      results.push({
+        ok: true,
+        result: await runCase(config, caseConfig, createHarnessForCase),
+      });
     } catch (error) {
       results.push({
         ok: false,
@@ -801,13 +868,31 @@ export async function runTopicsDiagnostics(args: readonly string[]): Promise<{
   };
 }
 
-if (import.meta.main) {
+export interface TopicsDiagnosticsCliDependencies {
+  error?: (message: string) => void;
+  exit?: (code: number) => void;
+  log?: (message: string) => void;
+  run?: (args: readonly string[]) => Promise<TopicsDiagnosticsReport>;
+}
+
+export async function runTopicsDiagnosticsCli(
+  args: readonly string[],
+  dependencies: TopicsDiagnosticsCliDependencies = {},
+): Promise<void> {
+  const exit = dependencies.exit ?? Deno.exit;
+  const run = dependencies.run ?? runTopicsDiagnostics;
+  let report: TopicsDiagnosticsReport;
   try {
-    const report = await runTopicsDiagnostics(Deno.args);
-    console.log(JSON.stringify(report, null, 2));
-    if (report.results.some((result) => !result.ok)) Deno.exit(1);
+    report = await run(args);
   } catch (error) {
-    console.error(reportSafeErrorCode(error));
-    Deno.exit(1);
+    (dependencies.error ?? console.error)(reportSafeErrorCode(error));
+    exit(1);
+    return;
   }
+  (dependencies.log ?? console.log)(JSON.stringify(report, null, 2));
+  if (report.results.some((result) => !result.ok)) exit(1);
+}
+
+if (import.meta.main) {
+  await runTopicsDiagnosticsCli(Deno.args);
 }
