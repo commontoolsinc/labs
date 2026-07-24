@@ -19,9 +19,10 @@ addressed by `(space, causal-cell-id)` — not to "the pattern" in the abstract.
 So "share the state" = "everyone points at the same piece"; "copy the state" =
 "move that piece's values into a new piece." It all lives in **`PerSpace` input
 cells**, shared by everyone in the space: `question`, `options`, `votes`,
-`users`, `adminName`, and **`visits`** (the "Recently eaten" log + embedded vote
-snapshots that feed "Lunch stats"). Plus **`myName`**, which is **`PerUser`**
-(keyed by your DID).
+`users`, `participantProfiles` (the object-wrapped directory of live canonical
+profile links for profile-backed joiners), `adminName`, and **`visits`** (the
+"Recently eaten" log + embedded vote snapshots that feed "Lunch stats"). Plus
+**`myName`**, which is **`PerUser`** (keyed by your DID).
 
 All of these survive an in-place `setsrc` (Option A) and — because `visits` is
 now an ordinary `PerSpace` cell — can all be copied to another piece via the CLI
@@ -125,7 +126,7 @@ MINE=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
 
 # 2. Copy each PerSpace field from the canonical piece into yours.
 #    `--input` reads/writes the input cell where these live.
-for field in question users options votes adminName visits; do
+for field in question users options votes participantProfiles adminName visits; do
   deno task cf piece get --piece "$PIECE" -s "$SPACE" "$field" --input -q \
     | deno task cf piece set --piece "$MINE" -s "$SPACE" "$field" --input -q
 done
