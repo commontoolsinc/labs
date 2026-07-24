@@ -1,5 +1,6 @@
 import {
   type HarnessConfig,
+  type ResolvedHarnessConfig,
   resolveHarnessConfig,
   type ResolveHarnessConfigOptions,
 } from "./config.ts";
@@ -13,7 +14,6 @@ import {
   appendHarnessFailureRecord,
   appendHarnessPolicyDecision,
   appendHarnessPolicyEvent,
-  appendHarnessSubagentRun,
   appendHarnessToolOutput,
   createHarnessRunState,
   type HarnessRunState,
@@ -24,12 +24,14 @@ import {
   setHarnessPromptSlotBinding,
   setHarnessRunCurrentDir,
   setHarnessRunManifestPath,
+  setHarnessRunModel,
   setHarnessRunReportPath,
   setHarnessRunStatus,
   setHarnessSkillActivations,
   setHarnessSkillRegistry,
   setHarnessSkillResourceReads,
   setHarnessSkillScriptExecutions,
+  setHarnessSubagentRun,
   setHarnessTranscriptPath,
 } from "./run-state.ts";
 import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-model-context.ts";
@@ -67,7 +69,11 @@ import type {
   HarnessSkillResourceRead,
   HarnessSkillScriptExecution,
 } from "./contracts/skill.ts";
-import type { HarnessSubagentRunRef } from "./contracts/subagent.ts";
+import type {
+  HarnessSubagentLineage,
+  HarnessSubagentResumeContext,
+  HarnessSubagentRunRef,
+} from "./contracts/subagent.ts";
 import {
   createToolResultRef,
   type ToolOutputId,
@@ -167,6 +173,8 @@ export interface CreateHarnessEngineOptions
   extends ResolveHarnessConfigOptions {
   runId?: string;
   runState?: HarnessRunState;
+  lineage?: HarnessSubagentLineage;
+  subagentResumeContext?: HarnessSubagentResumeContext;
   workspaceHostPath?: string;
   sandboxImage?: string;
   sandboxDockerRuntime?: string;
@@ -296,7 +304,7 @@ type HostSandboxMount = {
 };
 
 export class CfHarnessEngine {
-  readonly config: HarnessConfig;
+  readonly config: ResolvedHarnessConfig;
   readonly sandbox: SandboxRuntime;
   readonly artifactStore?: HarnessArtifactStore;
   readonly hostProcessRunner: ProcessRunner;
@@ -308,11 +316,79 @@ export class CfHarnessEngine {
   readonly #now: () => string;
   readonly #hostMounts: readonly HostSandboxMount[];
   readonly #ownedRunscConfig?: DockerRunscSandboxConfig;
+  readonly #resumedRun: boolean;
+  #runModelBound: boolean;
   #cfcTransportChecked = false;
 
   constructor(options: CreateHarnessEngineOptions = {}) {
     this.#now = options.now ?? (() => new Date().toISOString());
-    this.config = resolveHarnessConfig(options);
+    this.#resumedRun = options.runState !== undefined;
+    this.#runModelBound = this.#resumedRun;
+    const resumedLineage = options.runState?.lineage;
+    if (resumedLineage !== undefined) {
+      const resumeContext = options.subagentResumeContext;
+      if (resumeContext === undefined) {
+        throw new Error(
+          `resumed subagent run ${
+            options.runState!.runId
+          } requires trusted parent resume context`,
+        );
+      }
+      if (
+        resumeContext.type !== "cf-harness.subagent-resume-context" ||
+        resumeContext.version !== 1 ||
+        resumeContext.rootRunId !== resumedLineage.rootRunId ||
+        resumeContext.parentRunId !== resumedLineage.parentRunId ||
+        resumeContext.parentToolCallId !== resumedLineage.parentToolCallId
+      ) {
+        throw new Error(
+          `resumed subagent run ${
+            options.runState!.runId
+          } does not match trusted parent resume context`,
+        );
+      }
+    }
+    const recordedProvider = options.runState?.modelProvider ??
+      "openai-compatible-gateway";
+    if (
+      options.runState !== undefined && options.modelProvider !== undefined &&
+      options.modelProvider !== recordedProvider
+    ) {
+      throw new Error(
+        `resumed run provider ${recordedProvider} does not match requested provider ${options.modelProvider}`,
+      );
+    }
+    if (
+      options.runState !== undefined && recordedProvider === "openai-codex" &&
+      options.model !== undefined && options.runState.model !== undefined &&
+      options.model !== options.runState.model
+    ) {
+      throw new Error(
+        `resumed openai-codex run model ${options.runState.model} does not match requested model ${options.model}`,
+      );
+    }
+    if (
+      options.runState !== undefined && recordedProvider === "openai-codex" &&
+      options.runState.credentialOwnerKey !== undefined &&
+      options.credentialOwnerKey !== undefined &&
+      options.credentialOwnerKey !== options.runState.credentialOwnerKey
+    ) {
+      throw new Error(
+        "resumed run credential owner does not match requested credential owner",
+      );
+    }
+    this.config = resolveHarnessConfig({
+      ...options,
+      modelProvider: options.runState === undefined
+        ? options.modelProvider
+        : recordedProvider,
+      ...(options.runState !== undefined && recordedProvider === "openai-codex"
+        ? {
+          credentialOwnerKey: options.runState.credentialOwnerKey ??
+            options.credentialOwnerKey,
+        }
+        : {}),
+    });
     const runId = options.runState?.runId ?? options.runId ??
       crypto.randomUUID();
     const sandboxConfig = options.sandboxRuntime === undefined
@@ -390,9 +466,17 @@ export class CfHarnessEngine {
         cfcEnforcementMode: this.config.cfcEnforcementMode,
         currentDir,
         model: this.config.model,
+        modelProvider: this.config.modelProvider,
+        modelAuthSource: this.config.modelProvider === "openai-codex"
+          ? "owner-bound-oauth"
+          : this.config.gatewayAuthMode === "none"
+          ? "none"
+          : "api-key",
+        credentialOwnerKey: this.config.credentialOwnerKey,
         artifactRoot: this.artifactStore?.runRoot,
         runManifest: this.config.runManifest,
         runManifestPath: this.config.runManifestPath,
+        lineage: options.lineage,
         now: this.#now(),
       });
     this.#outputSequence = this.#runState.toolOutputs.length;
@@ -400,6 +484,26 @@ export class CfHarnessEngine {
 
   getRunState(): HarnessRunState {
     return structuredClone(this.#runState);
+  }
+
+  bindRunModel(model: string): HarnessRunState {
+    const recordedModel = this.#runState.model;
+    if (
+      this.#runState.modelProvider === "openai-codex" &&
+      this.#runModelBound &&
+      recordedModel !== undefined && recordedModel !== model
+    ) {
+      throw new Error(
+        `${
+          this.#resumedRun ? "resumed " : ""
+        }openai-codex run model ${recordedModel} does not match requested model ${model}`,
+      );
+    }
+    if (recordedModel !== model) {
+      this.#runState = setHarnessRunModel(this.#runState, model, this.#now());
+    }
+    this.#runModelBound = true;
+    return this.getRunState();
   }
 
   appendFailureRecord(failure: HarnessFailureRecord): HarnessRunState {
@@ -606,7 +710,7 @@ export class CfHarnessEngine {
   async recordSubagentRun(
     subagentRun: HarnessSubagentRunRef,
   ): Promise<HarnessRunState> {
-    this.#runState = appendHarnessSubagentRun(
+    this.#runState = setHarnessSubagentRun(
       this.#runState,
       subagentRun,
       this.#now(),
@@ -772,6 +876,10 @@ export class CfHarnessEngine {
           cfcEnforcementMode: this.#runState.cfcEnforcementMode,
           runManifest: this.#runState.runManifest,
           runManifestPath: this.#runState.runManifestPath,
+          modelProvider: this.config.modelProvider,
+          ...(this.config.modelProvider === "openai-compatible-gateway"
+            ? { gatewayAuthMode: this.config.gatewayAuthMode }
+            : {}),
         },
       );
       let capabilitiesPath: string | undefined;

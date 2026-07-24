@@ -14,6 +14,11 @@ import type { HarnessToolEffectClass } from "./tool-descriptor.ts";
 import type { HarnessTranscriptMessage } from "./transcript.ts";
 import type { ToolResultRef } from "./tool-result.ts";
 import type { OpenAIChatCompletionAttemptDiagnostic } from "../gateway/openai-client.ts";
+import type { HarnessModelAttemptDiagnostic } from "../model/client.ts";
+import type {
+  HarnessModelAuthSource,
+  HarnessModelProviderId,
+} from "../config.ts";
 
 export type HarnessToolPolicyDecision = "allowed" | "warned" | "denied";
 export type HarnessToolExecutionStatus = "completed" | "failed" | "not-run";
@@ -47,6 +52,12 @@ export interface HarnessToolActivity {
 
 export interface HarnessGatewayAttempt
   extends OpenAIChatCompletionAttemptDiagnostic {
+  runId: string;
+  sequence: number;
+  modelTurn: number;
+}
+
+export interface HarnessModelAttempt extends HarnessModelAttemptDiagnostic {
   runId: string;
   sequence: number;
   modelTurn: number;
@@ -89,6 +100,8 @@ export interface HarnessRunReport {
   generatedAt: string;
   status: string;
   model: string;
+  modelProvider?: HarnessModelProviderId;
+  modelAuthSource?: HarnessModelAuthSource;
   modelTurns: number;
   cfcEnforcementMode: CfcEnforcementMode;
   createdAt?: string;
@@ -115,6 +128,7 @@ export interface HarnessRunReport {
   timeline: HarnessRunTimelineEntry[];
   toolActivity: HarnessToolActivity[];
   gatewayAttempts?: HarnessGatewayAttempt[];
+  modelAttempts?: HarnessModelAttempt[];
   toolOutputs: ToolResultRef[];
   subagentRuns?: HarnessSubagentRunRef[];
 }
@@ -139,6 +153,8 @@ export interface CreateHarnessRunReportOptions {
     policyEvents: HarnessPolicyEvent[];
     policyDecisions?: HarnessPolicyDecisionRecord[];
     toolOutputs: ToolResultRef[];
+    modelProvider?: HarnessModelProviderId;
+    modelAuthSource?: HarnessModelAuthSource;
     subagentRuns?: HarnessSubagentRunRef[];
   };
   model: string;
@@ -147,6 +163,7 @@ export interface CreateHarnessRunReportOptions {
   timeline?: readonly HarnessRunTimelineEntryInput[];
   toolActivity: readonly HarnessToolActivity[];
   gatewayAttempts?: readonly HarnessGatewayAttempt[];
+  modelAttempts?: readonly HarnessModelAttempt[];
 }
 
 export const createHarnessRunTimeline = (
@@ -187,15 +204,16 @@ export const createHarnessRunTimeline = (
     });
   }
   for (const subagentRun of options.runState.subagentRuns ?? []) {
+    const childState = subagentRun.runState;
     push({
       kind: "subagent_run",
-      at: subagentRun.runState.endedAt ?? subagentRun.runState.updatedAt ??
+      at: childState?.endedAt ?? childState?.updatedAt ??
         subagentRun.manifest.createdAt,
       toolCallId: subagentRun.parentToolCallId,
       childRunId: subagentRun.childRunId,
       subagentStatus: subagentRun.status,
-      status: subagentRun.runState.status,
-      terminalReason: subagentRun.runState.terminalReason,
+      status: childState?.status ?? subagentRun.status,
+      terminalReason: childState?.terminalReason,
     });
   }
   for (
@@ -264,6 +282,14 @@ export const createHarnessRunReport = (
     generatedAt: options.runState.updatedAt,
     status: options.runState.status,
     model: options.model,
+    ...(options.runState.modelProvider !== undefined
+      ? { modelProvider: options.runState.modelProvider }
+      : {}),
+    ...(options.runState.modelAuthSource !== undefined
+      ? { modelAuthSource: options.runState.modelAuthSource }
+      : options.runState.modelProvider === "openai-codex"
+      ? { modelAuthSource: "owner-bound-oauth" as const }
+      : {}),
     modelTurns: options.modelTurns,
     cfcEnforcementMode: options.runState.cfcEnforcementMode,
     ...(options.runState.createdAt !== undefined
@@ -319,6 +345,9 @@ export const createHarnessRunReport = (
     toolActivity: [...options.toolActivity],
     ...((options.gatewayAttempts?.length ?? 0) > 0
       ? { gatewayAttempts: [...(options.gatewayAttempts ?? [])] }
+      : {}),
+    ...((options.modelAttempts?.length ?? 0) > 0
+      ? { modelAttempts: [...(options.modelAttempts ?? [])] }
       : {}),
     toolOutputs: [...options.runState.toolOutputs],
     ...(options.runState.subagentRuns !== undefined &&

@@ -19,13 +19,20 @@ import type {
   HarnessSkillResourceReads,
   HarnessSkillScriptExecutions,
 } from "./contracts/skill.ts";
-import type { HarnessSubagentRunRef } from "./contracts/subagent.ts";
+import type {
+  HarnessSubagentLineage,
+  HarnessSubagentRunRef,
+} from "./contracts/subagent.ts";
 import type { ToolResultRef } from "./contracts/tool-result.ts";
 import type {
   HarnessCapabilitySnapshot,
   HarnessFailureRecord,
 } from "./diagnostics.ts";
 import { selectPrimaryHarnessFailure } from "./diagnostics.ts";
+import type {
+  HarnessModelAuthSource,
+  HarnessModelProviderId,
+} from "./config.ts";
 
 export type HarnessRunStatus =
   | "pending"
@@ -52,6 +59,9 @@ export interface HarnessRunState {
   promptSlotBinding?: PromptSlotBinding;
   currentDir: string;
   model?: string;
+  modelProvider?: HarnessModelProviderId;
+  modelAuthSource?: HarnessModelAuthSource;
+  credentialOwnerKey?: string;
   artifactRoot?: string;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -76,6 +86,7 @@ export interface HarnessRunState {
   policyEvents: HarnessPolicyEvent[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
   toolOutputs: ToolResultRef[];
+  lineage?: HarnessSubagentLineage;
   subagentRuns?: HarnessSubagentRunRef[];
   failureRecords?: HarnessFailureRecord[];
   primaryFailure?: HarnessFailureRecord;
@@ -90,6 +101,9 @@ export interface CreateHarnessRunStateOptions {
   promptSlotBinding?: PromptSlotBinding;
   currentDir: string;
   model?: string;
+  modelProvider?: HarnessModelProviderId;
+  modelAuthSource?: HarnessModelAuthSource;
+  credentialOwnerKey?: string;
   artifactRoot?: string;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -112,6 +126,7 @@ export interface CreateHarnessRunStateOptions {
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
+  lineage?: HarnessSubagentLineage;
   subagentRuns?: HarnessSubagentRunRef[];
   failureRecords?: HarnessFailureRecord[];
   primaryFailure?: HarnessFailureRecord;
@@ -137,6 +152,13 @@ export const createHarnessRunState = (
       : {}),
     currentDir: options.currentDir,
     ...(options.model !== undefined ? { model: options.model } : {}),
+    modelProvider: options.modelProvider ?? "openai-compatible-gateway",
+    ...(options.modelAuthSource !== undefined
+      ? { modelAuthSource: options.modelAuthSource }
+      : {}),
+    ...(options.credentialOwnerKey !== undefined
+      ? { credentialOwnerKey: options.credentialOwnerKey }
+      : {}),
     ...(options.artifactRoot !== undefined
       ? { artifactRoot: options.artifactRoot }
       : {}),
@@ -200,6 +222,9 @@ export const createHarnessRunState = (
     ...(options.cfcInvocationContexts !== undefined
       ? { cfcInvocationContexts: [...options.cfcInvocationContexts] }
       : {}),
+    ...(options.lineage !== undefined
+      ? { lineage: structuredClone(options.lineage) }
+      : {}),
     policyEvents: [],
     ...(options.policyDecisions !== undefined
       ? { policyDecisions: [...options.policyDecisions] }
@@ -239,6 +264,16 @@ export const setHarnessRunStatus = (
     ...nonTerminal,
   };
 };
+
+export const setHarnessRunModel = (
+  state: HarnessRunState,
+  model: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  model,
+  updatedAt: now,
+});
 
 export const appendHarnessToolOutput = (
   state: HarnessRunState,
@@ -300,15 +335,27 @@ export const appendHarnessCfcModelContextObservations = (
   };
 };
 
-export const appendHarnessSubagentRun = (
+export const setHarnessSubagentRun = (
   state: HarnessRunState,
   subagentRun: HarnessSubagentRunRef,
   now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  updatedAt: now,
-  subagentRuns: [...(state.subagentRuns ?? []), subagentRun],
-});
+): HarnessRunState => {
+  const existingIndex =
+    state.subagentRuns?.findIndex((existing) =>
+      existing.childRunId === subagentRun.childRunId
+    ) ?? -1;
+  const subagentRuns = [...(state.subagentRuns ?? [])];
+  if (existingIndex >= 0) {
+    subagentRuns[existingIndex] = subagentRun;
+  } else {
+    subagentRuns.push(subagentRun);
+  }
+  return {
+    ...state,
+    updatedAt: now,
+    subagentRuns,
+  };
+};
 
 export const setHarnessPromptSlotBinding = (
   state: HarnessRunState,

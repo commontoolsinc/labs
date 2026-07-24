@@ -5,6 +5,7 @@ import {
   type LLMNativeModelToolId,
 } from "@commonfabric/llm/types";
 import type { HarnessFailureRecord } from "../diagnostics.ts";
+import type { HarnessModelProviderId } from "../config.ts";
 import type {
   HarnessAllowedSkillScript,
   HarnessSkillScriptExecutionTarget,
@@ -67,6 +68,22 @@ export type HarnessNativeModelToolId = LLMNativeModelToolId;
 export type HarnessSubagentRunStatus = "completed" | "failed";
 export type HarnessSubagentReturnChannel =
   typeof DEFAULT_SUBAGENT_RETURN_CHANNEL;
+
+export interface HarnessSubagentLineage {
+  role: "subagent";
+  rootRunId: string;
+  parentRunId: string;
+  parentToolCallId: string;
+  depth: number;
+}
+
+export interface HarnessSubagentResumeContext {
+  type: "cf-harness.subagent-resume-context";
+  version: 1;
+  rootRunId: string;
+  parentRunId: string;
+  parentToolCallId: string;
+}
 
 export interface HarnessSubagentReturnPolicy {
   type: "cf-harness.subagent-return-policy";
@@ -183,6 +200,7 @@ export interface HarnessSubagentRunManifest {
   profile: HarnessSubagentProfile;
   depth: 1;
   cfcEnforcementMode: CfcEnforcementMode;
+  modelProvider?: HarnessModelProviderId;
   model: string;
   modelSource?: HarnessSubagentModelSource;
   allowedToolIds: readonly BuiltinToolId[];
@@ -253,17 +271,34 @@ export interface HarnessSubagentResult {
   structuredReturn?: HarnessSubagentStructuredReturn;
 }
 
-export interface HarnessSubagentRunRef {
+interface HarnessSubagentRunRefBase {
   type: "cf-harness.subagent-run-ref";
   parentToolCallId: string;
-  outputId?: string;
   childRunId: string;
-  status: HarnessSubagentRunStatus;
-  summary: string;
   manifest: HarnessSubagentRunManifest;
+}
+
+export interface HarnessRunningSubagentRunRef
+  extends HarnessSubagentRunRefBase {
+  status: "running";
+  outputId?: never;
+  summary?: never;
+  runState?: never;
+  structuredReturn?: never;
+}
+
+export interface HarnessTerminalSubagentRunRef
+  extends HarnessSubagentRunRefBase {
+  status: HarnessSubagentRunStatus;
+  outputId?: string;
+  summary: string;
   runState: HarnessSubagentRunStateSummary;
   structuredReturn?: HarnessSubagentStructuredReturn;
 }
+
+export type HarnessSubagentRunRef =
+  | HarnessRunningSubagentRunRef
+  | HarnessTerminalSubagentRunRef;
 
 export interface DelegateTaskToolInput {
   goal: string;

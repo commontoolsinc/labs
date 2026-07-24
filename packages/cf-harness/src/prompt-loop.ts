@@ -3,6 +3,7 @@ import {
   CfHarnessEngine,
   type CreateHarnessEngineOptions,
 } from "./engine.ts";
+import { isHarnessModelProviderId } from "./config.ts";
 import type { HarnessBrowserAccessLease } from "./contracts/browser-access.ts";
 import {
   type CfcEnforcementMode,
@@ -11,21 +12,8 @@ import {
   type CfcStreamObservation,
   evaluateHarnessWriteFileAuthorization,
 } from "@commonfabric/runner/cfc";
-import {
-  GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
-  type LLMNativeModelToolId,
-} from "@commonfabric/llm/types";
-import {
-  type OpenAIChatCompletionAttemptDiagnostic,
-  type OpenAIChatCompletionMessage,
-  type OpenAIChatCompletionRequest,
-  type OpenAIChatCompletionRequestTool,
-  type OpenAIChatCompletionResponse,
-  type OpenAIChatCompletionTool,
-  type OpenAIChatMessageContent,
-  OpenAICompatibleGatewayClient,
-} from "./gateway/openai-client.ts";
-import { materializeImageAttachmentContentPart } from "./image-attachments.ts";
+import type { LLMNativeModelToolId } from "@commonfabric/llm/types";
+import { OpenAICompatibleGatewayClient } from "./gateway/openai-client.ts";
 import {
   createObservationDenied as makeObservationDenied,
   createOpaqueHandle,
@@ -33,6 +21,7 @@ import {
 } from "./contracts/observation.ts";
 import type { HarnessImageAttachment } from "./contracts/image.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
+import { harnessCredentialOwnersEqual } from "./contracts/run-manifest.ts";
 import {
   createHarnessCfcPolicySnapshot,
   type HarnessParentToolAllowance,
@@ -40,8 +29,6 @@ import {
 } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-model-context.ts";
 import type {
-  HarnessAssistantTranscriptMessage,
-  HarnessNativeModelToolResult,
   HarnessToolCall,
   HarnessToolTranscriptMessage,
   HarnessTranscriptEvent,
@@ -60,6 +47,7 @@ import {
 import {
   createHarnessRunReport,
   type HarnessGatewayAttempt,
+  type HarnessModelAttempt,
   type HarnessRunTimelineEntryInput,
   type HarnessToolActivity,
   type HarnessToolPolicyDecision,
@@ -110,6 +98,11 @@ import { loadHarnessSkillContext } from "./skills/registry.ts";
 import type { HarnessFailureRecord } from "./diagnostics.ts";
 import { DEFAULT_PARENT_TOOL_IDS as DEFAULT_PROMPT_LOOP_TOOL_IDS } from "./contracts/tool-descriptor.ts";
 import type { HarnessFetch } from "./contracts/http-fetch.ts";
+import type {
+  HarnessModelAttemptDiagnostic,
+  HarnessModelClient,
+} from "./model/client.ts";
+import { OpenAICompatibleGatewayModelClient } from "./model/openai-compatible-gateway.ts";
 
 const DEFAULT_MAX_MODEL_TURNS = 8;
 const BASH_CWD_MARKER_PREFIX = "__CF_HARNESS_CWD__";
@@ -118,6 +111,7 @@ export interface CreateHarnessPromptLoopOptions
   extends CreateHarnessEngineOptions {
   engine?: CfHarnessEngine;
   gatewayClient?: OpenAICompatibleGatewayClient;
+  modelClient?: HarnessModelClient;
   apiKey?: string;
   apiKeySource?: string;
   fetchFn?: HarnessFetch;
@@ -163,95 +157,6 @@ export interface HarnessPromptLoopResult {
 
 const isBuiltinToolId = (input: string): input is BuiltinToolId =>
   getBuiltinTool(input as BuiltinToolId) !== undefined;
-
-const normalizeTextContent = (content: OpenAIChatMessageContent): string => {
-  if (typeof content === "string") {
-    return content;
-  }
-  if (content === null) {
-    return "";
-  }
-  return content
-    .flatMap((part) =>
-      typeof part === "object" &&
-        part !== null &&
-        "type" in part &&
-        part.type === "text" &&
-        "text" in part &&
-        typeof part.text === "string"
-        ? [part.text]
-        : []
-    )
-    .join("");
-};
-
-const toOpenAIChatMessage = async (
-  message: HarnessTranscriptMessage,
-): Promise<OpenAIChatCompletionMessage> => {
-  switch (message.role) {
-    case "system":
-      return { role: message.role, content: message.content };
-    case "user":
-      if (
-        message.imageAttachments === undefined ||
-        message.imageAttachments.length === 0
-      ) {
-        return { role: message.role, content: message.content };
-      }
-      return {
-        role: message.role,
-        content: [
-          ...(message.content.length > 0
-            ? [{ type: "text" as const, text: message.content }]
-            : []),
-          ...(await Promise.all(
-            message.imageAttachments.map(materializeImageAttachmentContentPart),
-          )),
-        ],
-      };
-    case "assistant":
-      return {
-        role: "assistant",
-        content: message.content,
-        ...(message.toolCalls !== undefined
-          ? {
-            tool_calls: message.toolCalls.map((toolCall) => ({ ...toolCall })),
-          }
-          : {}),
-      };
-    case "tool":
-      return {
-        role: "tool",
-        content: message.content,
-        tool_call_id: message.toolCallId,
-      };
-  }
-};
-
-const toOpenAITools = (
-  allowedToolIds: ReadonlySet<BuiltinToolId>,
-): OpenAIChatCompletionTool[] =>
-  BUILTIN_TOOLS.filter((tool) => allowedToolIds.has(tool.descriptor.toolId))
-    .map((tool) => ({
-      type: "function",
-      function: {
-        name: tool.descriptor.toolId,
-        description: tool.descriptor.description,
-        parameters: typeof tool.descriptor.inputSchema === "boolean"
-          ? tool.descriptor.inputSchema
-          : { ...tool.descriptor.inputSchema },
-      },
-    }));
-
-const toOpenAINativeModelTools = (
-  nativeModelToolIds: readonly LLMNativeModelToolId[],
-): OpenAIChatCompletionRequestTool[] =>
-  nativeModelToolIds.map((toolId) => {
-    switch (toolId) {
-      case GOOGLE_SEARCH_NATIVE_MODEL_TOOL:
-        return { type: GOOGLE_SEARCH_NATIVE_MODEL_TOOL };
-    }
-  });
 
 const parseToolArguments = (
   toolCall: HarnessToolCall,
@@ -1008,57 +913,6 @@ const createStructuredSubagentReturn = async (
   }
 };
 
-const createAssistantTranscriptMessage = (
-  response: OpenAIChatCompletionResponse,
-): HarnessAssistantTranscriptMessage => {
-  const message = response.choices[0]?.message;
-  if (message === undefined) {
-    throw new Error(
-      "chat completion response did not include a message choice",
-    );
-  }
-  const toolCalls: HarnessToolCall[] | undefined = message.tool_calls?.map((
-    toolCall,
-  ) => ({
-    id: toolCall.id,
-    type: "function",
-    function: {
-      name: toolCall.function.name,
-      arguments: toolCall.function.arguments,
-    },
-  }));
-  const nativeModelToolResults: HarnessNativeModelToolResult[] | undefined =
-    response.native_model_tool_results?.map((result) => ({
-      type: "cf-harness.native-model-tool-result",
-      toolId: result.type,
-      ...(result.provider !== undefined ? { provider: result.provider } : {}),
-      ...(result.providerMetadata !== undefined
-        ? { providerMetadata: result.providerMetadata }
-        : {}),
-      ...(result.sources !== undefined ? { sources: result.sources } : {}),
-    }));
-  const groundingMetadataNativeModelToolResults:
-    | HarnessNativeModelToolResult[]
-    | undefined = message.grounding_metadata === undefined ? undefined : [{
-      type: "cf-harness.native-model-tool-result",
-      toolId: GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
-      provider: "google",
-      providerMetadata: message.grounding_metadata,
-    }];
-  const allNativeModelToolResults = [
-    ...(nativeModelToolResults ?? []),
-    ...(groundingMetadataNativeModelToolResults ?? []),
-  ];
-  return {
-    role: "assistant",
-    content: normalizeTextContent(message.content),
-    ...(toolCalls !== undefined ? { toolCalls } : {}),
-    ...(allNativeModelToolResults.length > 0
-      ? { nativeModelToolResults: allNativeModelToolResults }
-      : {}),
-  };
-};
-
 interface ToolPolicyDecision {
   allowed: boolean;
   reasonCodes: readonly HarnessPolicyDecisionReasonCode[];
@@ -1776,7 +1630,8 @@ const evaluateToolPolicy = (
 
 export class CfHarnessPromptLoop {
   readonly engine: CfHarnessEngine;
-  readonly gatewayClient: OpenAICompatibleGatewayClient;
+  readonly modelClient: HarnessModelClient;
+  readonly #gatewayClient?: OpenAICompatibleGatewayClient;
   readonly #maxModelTurns: number;
   readonly #allowedToolIds: ReadonlySet<BuiltinToolId>;
   readonly #nativeModelToolIds: readonly LLMNativeModelToolId[];
@@ -1786,14 +1641,65 @@ export class CfHarnessPromptLoop {
 
   constructor(options: CreateHarnessPromptLoopOptions = {}) {
     this.engine = options.engine ?? new CfHarnessEngine(options);
-    this.gatewayClient = options.gatewayClient ??
-      new OpenAICompatibleGatewayClient({
-        baseUrl: this.engine.config.gatewayBaseUrl,
-        authMode: this.engine.config.gatewayAuthMode,
-        apiKey: options.apiKey,
-        apiKeySource: options.apiKeySource,
-        fetchFn: options.fetchFn,
-      });
+    if (this.engine.config.modelProvider === "openai-compatible-gateway") {
+      this.#gatewayClient = options.gatewayClient ??
+        new OpenAICompatibleGatewayClient({
+          baseUrl: this.engine.config.gatewayBaseUrl,
+          authMode: this.engine.config.gatewayAuthMode,
+          apiKey: options.apiKey,
+          apiKeySource: options.apiKeySource,
+          fetchFn: options.fetchFn,
+        });
+    } else {
+      this.#gatewayClient = options.gatewayClient;
+    }
+    if (options.modelClient !== undefined) {
+      this.modelClient = options.modelClient;
+    } else if (this.engine.config.modelProvider === "openai-codex") {
+      throw new Error(
+        "openai-codex requires an injected owner-bound model client",
+      );
+    } else {
+      this.modelClient = new OpenAICompatibleGatewayModelClient(
+        this.#gatewayClient!,
+      );
+    }
+    if (
+      isHarnessModelProviderId(this.modelClient.providerId) &&
+      this.modelClient.providerId !== this.engine.config.modelProvider
+    ) {
+      throw new Error(
+        `model client provider ${this.modelClient.providerId} does not match configured provider ${this.engine.config.modelProvider}`,
+      );
+    }
+    if (this.engine.config.modelProvider === "openai-codex") {
+      const clientOwner = this.modelClient.credentialOwner;
+      if (clientOwner === undefined) {
+        throw new Error(
+          "openai-codex model client must declare its credential owner",
+        );
+      }
+      const runState = this.engine.getRunState();
+      const manifestOwner = runState.runManifest?.credentialOwner;
+      if (
+        manifestOwner !== undefined &&
+        !harnessCredentialOwnersEqual(clientOwner, manifestOwner)
+      ) {
+        throw new Error(
+          "openai-codex model client does not match run manifest credential owner",
+        );
+      }
+      const configuredOwnerKey = runState.credentialOwnerKey ??
+        this.engine.config.credentialOwnerKey;
+      if (
+        configuredOwnerKey !== undefined &&
+        clientOwner.ownerKey !== configuredOwnerKey
+      ) {
+        throw new Error(
+          "openai-codex model client does not match configured credential owner",
+        );
+      }
+    }
     this.#maxModelTurns = options.maxModelTurns ?? DEFAULT_MAX_MODEL_TURNS;
     this.#parentToolAllowanceMode = options.allowedToolIds === undefined
       ? "all-builtins"
@@ -1809,6 +1715,16 @@ export class CfHarnessPromptLoop {
           : []),
     );
     this.#browserAccess = options.browserAccess;
+  }
+
+  /** @deprecated Prefer `modelClient`; unavailable for `openai-codex`. */
+  get gatewayClient(): OpenAICompatibleGatewayClient {
+    if (this.#gatewayClient === undefined) {
+      throw new Error(
+        "gatewayClient is unavailable for provider openai-codex",
+      );
+    }
+    return this.#gatewayClient;
   }
 
   #parentToolAllowance(): HarnessParentToolAllowance {
@@ -1910,10 +1826,12 @@ export class CfHarnessPromptLoop {
         "a model must be configured before running the prompt loop",
       );
     }
+    this.engine.bindRunModel(model);
     const transcript: HarnessTranscriptMessage[] = [...options.transcript];
     const maxModelTurns = options.maxModelTurns ?? this.#maxModelTurns;
     const toolActivity: HarnessToolActivity[] = [];
     const gatewayAttempts: HarnessGatewayAttempt[] = [];
+    const modelAttempts: HarnessModelAttempt[] = [];
     const reportTimeline: HarnessRunTimelineEntryInput[] = [];
     let modelTurns = 0;
     const buildPolicyTrace = async () => {
@@ -1950,14 +1868,35 @@ export class CfHarnessPromptLoop {
           timeline: reportTimeline,
           toolActivity,
           gatewayAttempts,
+          modelAttempts,
         }),
       );
     };
-    const recordGatewayAttempt = (
-      attempt: OpenAIChatCompletionAttemptDiagnostic,
+    const recordModelAttempt = (
+      attempt: HarnessModelAttemptDiagnostic,
     ): void => {
-      gatewayAttempts.push({
+      modelAttempts.push({
         ...attempt,
+        runId: this.engine.getRunState().runId,
+        sequence: modelAttempts.length + 1,
+        modelTurn: modelTurns,
+      });
+      if (
+        attempt.providerId !== "openai-compatible-gateway" ||
+        attempt.operation !== "chat.completions"
+      ) {
+        return;
+      }
+      const {
+        providerId: _providerId,
+        type: _type,
+        operation: _operation,
+        ...rest
+      } = attempt;
+      gatewayAttempts.push({
+        ...rest,
+        type: "cf-harness.gateway.chat-completion-attempt",
+        operation: "chat.completions",
         runId: this.engine.getRunState().runId,
         sequence: gatewayAttempts.length + 1,
         modelTurn: modelTurns,
@@ -1988,14 +1927,18 @@ export class CfHarnessPromptLoop {
     try {
       while (modelTurns < maxModelTurns) {
         modelTurns += 1;
-        const response = await this.gatewayClient.createChatCompletionJson(
-          await this.#buildChatCompletionRequest(model, transcript),
-          {
-            signal: options.signal,
-            onChatCompletionAttempt: recordGatewayAttempt,
-          },
-        );
-        const assistantMessage = createAssistantTranscriptMessage(response);
+        const response = await this.modelClient.complete({
+          model,
+          transcript,
+          tools: BUILTIN_TOOLS.filter((tool) =>
+            this.#allowedToolIds.has(tool.descriptor.toolId)
+          ).map((tool) => tool.descriptor),
+          nativeModelToolIds: this.#nativeModelToolIds,
+          runId: this.engine.getRunState().runId,
+          signal: options.signal,
+          onAttempt: recordModelAttempt,
+        });
+        const assistantMessage = response.assistant;
         transcript.push(assistantMessage);
         await this.engine.persistTranscript(transcript);
         reportTimeline.push(transcriptTimelineEntry(
@@ -2098,22 +2041,6 @@ export class CfHarnessPromptLoop {
     await this.engine.persistTranscript(transcript);
     await persistRunReport();
     throw turnLimitError;
-  }
-
-  async #buildChatCompletionRequest(
-    model: string,
-    transcript: readonly HarnessTranscriptMessage[],
-  ): Promise<OpenAIChatCompletionRequest> {
-    const tools = [
-      ...toOpenAITools(this.#allowedToolIds),
-      ...toOpenAINativeModelTools(this.#nativeModelToolIds),
-    ];
-    return {
-      model,
-      messages: await Promise.all(transcript.map(toOpenAIChatMessage)),
-      tools,
-      tool_choice: "auto",
-    };
   }
 
   async #invokeToolCall(
@@ -2707,18 +2634,38 @@ export class CfHarnessPromptLoop {
     const maxModelTurns = delegateInput.maxModelTurns ??
       profileConfig.maxModelTurns;
     const parentRunState = this.engine.getRunState();
+    const modelProvider = parentRunState.modelProvider ??
+      this.engine.config.modelProvider;
     const subagentSequence = nextSubagentSequence(parentRunState);
     const childRunId = `${parentRunState.runId}.subagent.${subagentSequence}`;
+    const childLineage = {
+      role: "subagent" as const,
+      rootRunId: parentRunState.lineage?.rootRunId ?? parentRunState.runId,
+      parentRunId: parentRunState.runId,
+      parentToolCallId: options.toolCall.id,
+      depth: (parentRunState.lineage?.depth ?? 0) + 1,
+    };
     const childEngine = new CfHarnessEngine({
       runId: childRunId,
+      lineage: childLineage,
       sandboxRuntime: this.engine.sandbox,
       sandbox: this.engine.config.sandbox,
       workspaceHostPath: this.engine.workspaceHostPath,
       processRunner: this.engine.hostProcessRunner,
       artifactRoot: this.engine.artifactStore?.artifactRoot,
       model: childModel.model,
-      gatewayBaseUrl: this.engine.config.gatewayBaseUrl,
-      gatewayAuthMode: this.engine.config.gatewayAuthMode,
+      modelProvider,
+      ...(modelProvider === "openai-codex"
+        ? {
+          credentialOwnerKey: parentRunState.credentialOwnerKey ??
+            this.engine.config.credentialOwnerKey,
+        }
+        : this.engine.config.modelProvider === "openai-compatible-gateway"
+        ? {
+          gatewayBaseUrl: this.engine.config.gatewayBaseUrl,
+          gatewayAuthMode: this.engine.config.gatewayAuthMode,
+        }
+        : {}),
       cwd: parentRunState.currentDir,
       ...(this.engine.config.skillsRoot !== undefined
         ? { skillsRoot: this.engine.config.skillsRoot }
@@ -2736,6 +2683,9 @@ export class CfHarnessPromptLoop {
         ? { browserAccess: this.#browserAccess }
         : {}),
       cfcEnforcementMode: parentRunState.cfcEnforcementMode,
+      ...(parentRunState.runManifest !== undefined
+        ? { runManifest: parentRunState.runManifest }
+        : {}),
     });
     const childCreatedState = childEngine.getRunState();
     const childSkillContextMessages: string[] = [];
@@ -2748,6 +2698,7 @@ export class CfHarnessPromptLoop {
       profile: delegateInput.profile,
       depth: 1,
       cfcEnforcementMode: parentRunState.cfcEnforcementMode,
+      modelProvider,
       model: childModel.model,
       modelSource: childModel.source,
       allowedToolIds: [...profileConfig.allowedToolIds],
@@ -2775,9 +2726,16 @@ export class CfHarnessPromptLoop {
       createdAt: childCreatedState.createdAt,
       inputSummary: await createSubagentInputSummary(delegateInput),
     };
+    await this.engine.recordSubagentRun({
+      type: "cf-harness.subagent-run-ref",
+      parentToolCallId: options.toolCall.id,
+      childRunId,
+      status: "running",
+      manifest,
+    });
     const childLoop = new CfHarnessPromptLoop({
       engine: childEngine,
-      gatewayClient: this.gatewayClient,
+      modelClient: this.modelClient,
       maxModelTurns,
       allowedToolIds: profileConfig.allowedToolIds,
       allowedSubagentProfiles: [],
@@ -2788,6 +2746,14 @@ export class CfHarnessPromptLoop {
     let childModelTurns = 0;
     let structuredReturn: HarnessSubagentStructuredReturn | undefined;
     try {
+      if (
+        childModel.source === "profile" &&
+        this.modelClient.providerId === "openai-codex"
+      ) {
+        throw new Error(
+          `subagent profile ${delegateInput.profile} model ${childModel.model} is not available from provider openai-codex`,
+        );
+      }
       if (
         profileConfig.skillNames !== undefined &&
         profileConfig.skillNames.length > 0 &&
@@ -2848,6 +2814,12 @@ export class CfHarnessPromptLoop {
       subagentStatus = "failed";
       childModelTurns = promptLoopModelTurnsFromError(error) ?? childModelTurns;
       summary = `Subagent failed: ${toErrorDetail(error)}`;
+      const childState = childEngine.getRunState();
+      if (childState.status !== "failed") {
+        childEngine.appendFailureFromError(error, { source: "run_error" });
+        childEngine.setRunStatus("failed", "prompt_loop_error");
+        await childEngine.persistRunState();
+      }
     }
     const childRunState = childEngine.getRunState();
     const subagent: HarnessSubagentResult = {

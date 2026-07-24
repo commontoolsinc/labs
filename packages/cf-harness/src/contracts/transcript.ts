@@ -13,6 +13,11 @@ export interface HarnessToolCall {
 
 export type HarnessNativeModelToolResult = LLMNativeModelToolResult;
 
+export interface HarnessProviderContinuation {
+  providerId: string;
+  state: unknown;
+}
+
 export interface HarnessSystemTranscriptMessage {
   role: "system";
   content: string;
@@ -29,6 +34,7 @@ export interface HarnessAssistantTranscriptMessage {
   content: string;
   toolCalls?: readonly HarnessToolCall[];
   nativeModelToolResults?: readonly HarnessNativeModelToolResult[];
+  providerContinuation?: HarnessProviderContinuation;
 }
 
 export interface HarnessToolTranscriptMessage {

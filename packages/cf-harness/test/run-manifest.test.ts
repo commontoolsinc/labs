@@ -102,3 +102,69 @@ Deno.test("parseLoomRunManifestJson rejects invalid CFC metadata", () => {
     "unsupported run manifest cfc.enforcementMode",
   );
 });
+
+Deno.test("parseLoomRunManifestJson preserves a non-secret credential owner reference", () => {
+  const manifest = parseLoomRunManifestJson(JSON.stringify({
+    type: "cf-harness.loom-run-manifest",
+    version: 1,
+    source: "loom",
+    modelProvider: "openai-codex",
+    credentialOwner: {
+      type: "cf-harness.credential-owner-ref",
+      version: 1,
+      ownerKey: "loom:user-123",
+      tenantKey: "tenant-1",
+    },
+  }));
+
+  assertEquals(manifest.modelProvider, "openai-codex");
+  assertEquals(manifest.credentialOwner, {
+    type: "cf-harness.credential-owner-ref",
+    version: 1,
+    ownerKey: "loom:user-123",
+    tenantKey: "tenant-1",
+  });
+});
+
+Deno.test("parseLoomRunManifestJson rejects malformed provider ownership", () => {
+  for (
+    const credentialOwner of [
+      {},
+      {
+        type: "cf-harness.credential-owner-ref",
+        version: 1,
+        ownerKey: " ",
+      },
+      {
+        type: "cf-harness.credential-owner-ref",
+        version: 1,
+        ownerKey: "loom:user",
+        tenantKey: "",
+      },
+    ]
+  ) {
+    assertThrows(
+      () =>
+        parseLoomRunManifestJson(JSON.stringify({
+          type: "cf-harness.loom-run-manifest",
+          version: 1,
+          source: "loom",
+          modelProvider: "openai-codex",
+          credentialOwner,
+        })),
+      Error,
+      "invalid run manifest credentialOwner reference",
+    );
+  }
+  assertThrows(
+    () =>
+      parseLoomRunManifestJson(JSON.stringify({
+        type: "cf-harness.loom-run-manifest",
+        version: 1,
+        source: "loom",
+        modelProvider: "codex-ish",
+      })),
+    Error,
+    "unsupported run manifest modelProvider",
+  );
+});
