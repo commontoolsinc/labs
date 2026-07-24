@@ -206,6 +206,16 @@ export interface ExperimentalOptions {
   /** Enforce scheduler-v2 lineage and event-receipt commit preconditions (default on). */
   commitPreconditions?: boolean | undefined;
   /**
+   * Project a handler's plain JSON return into its per-event receipt cell
+   * instead of the empty `{}` witness, so a caller — or a same-id retry that
+   * collides on the receipt — can read the verb's result back by receipt
+   * address. Reactive-bearing returns already project via the result-pattern
+   * path; this covers plain values, which are otherwise discarded. Default
+   * off; flips after the invocation-protocol integration proof (verb
+   * contract, docs/plans/pattern-verb-contract-implementation.md WS-C/WS-D).
+   */
+  plainResultReceipts?: boolean | undefined;
+  /**
    * Mint computed-scheme entity ids (`computed:fid1:<hash>`) for derived
    * internal cells classified as replayable by the builder. Gates minting
    * only; readers accept both forms unconditionally. See
@@ -876,6 +886,7 @@ export class Runtime {
       modernCellRep: undefined,
       persistentSchedulerState: undefined,
       commitPreconditions: undefined,
+      plainResultReceipts: undefined,
       computedCellIds: undefined,
       eagerSourceAnnotation: undefined,
       ...options.experimental,

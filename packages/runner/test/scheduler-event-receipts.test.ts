@@ -1000,6 +1000,133 @@ describe("scheduler event receipts", () => {
     expect(resultCell.get()).toEqual({});
   });
 
+  it("projects a plain JSON return into the receipt under plainResultReceipts", async () => {
+    await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
+    ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
+      import.meta.url,
+      { experimental: { plainResultReceipts: true } },
+    ));
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { handler, pattern } = commonfabric;
+    let handlerInvocations = 0;
+    const returnsPlain = handler<{ value: number }, Record<string, never>>(
+      (event) => {
+        handlerInvocations++;
+        return { ok: true, n: event.value };
+      },
+      { proxy: true },
+    );
+    // A value-less handler on the same board: its receipt must stay `{}`.
+    const returnsNothing = handler<unknown, Record<string, never>>(
+      () => {},
+      { proxy: true },
+    );
+    const rootPattern = pattern(() => {
+      return { plain: returnsPlain({}), empty: returnsNothing({}) };
+    });
+    const rootCell = runtime.getCell<{ plain: unknown; empty: unknown }>(
+      space,
+      "plain result receipts root",
+      undefined,
+      tx,
+    );
+    const root = runtime.run(tx, rootPattern, {}, rootCell);
+    await tx.commit();
+    tx = runtime.edit();
+    await root.pull();
+
+    const plainEventId = "evt:plain-receipt:0:plain-root";
+    runtime.scheduler.queueEvent(
+      resolvedStreamLink(root.key("plain"), runtime),
+      { value: 42 },
+      undefined,
+      undefined,
+      false,
+      { eventId: plainEventId },
+    );
+    const emptyEventId = "evt:plain-receipt:1:plain-root";
+    runtime.scheduler.queueEvent(
+      resolvedStreamLink(root.key("empty"), runtime),
+      {},
+      undefined,
+      undefined,
+      false,
+      { eventId: emptyEventId },
+    );
+
+    await waitForSchedulerCondition(
+      runtime,
+      () => handlerInvocations === 1,
+      "plain-return event did not run",
+    );
+    await runtime.scheduler.idleWithPendingCommits();
+
+    // The receipt carries the handler's normalized plain return — the verb's
+    // result, readable back by receipt address (verb contract Part 2).
+    const plainReceipt = receiptCellForEvent<Record<string, unknown>>(
+      runtime,
+      plainEventId,
+    );
+    await plainReceipt.pull();
+    expect(plainReceipt.get()).toEqual({ ok: true, n: 42 });
+
+    // Value-less handlers keep the empty witness.
+    const emptyReceipt = receiptCellForEvent<Record<string, never>>(
+      runtime,
+      emptyEventId,
+    );
+    await emptyReceipt.pull();
+    expect(emptyReceipt.get()).toEqual({});
+  });
+
+  it("discards a plain JSON return while plainResultReceipts is off (default)", async () => {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { handler, pattern } = commonfabric;
+    let handlerInvocations = 0;
+    const returnsPlain = handler<unknown, Record<string, never>>(
+      () => {
+        handlerInvocations++;
+        return { dropped: true };
+      },
+      { proxy: true },
+    );
+    const rootPattern = pattern(() => {
+      return { stream: returnsPlain({}) };
+    });
+    const rootCell = runtime.getCell<{ stream: unknown }>(
+      space,
+      "plain result receipts default-off root",
+      undefined,
+      tx,
+    );
+    const root = runtime.run(tx, rootPattern, {}, rootCell);
+    await tx.commit();
+    tx = runtime.edit();
+    await root.pull();
+
+    const eventId = "evt:plain-receipt-off:0:default-root";
+    runtime.scheduler.queueEvent(
+      resolvedStreamLink(root.key("stream"), runtime),
+      {},
+      undefined,
+      undefined,
+      false,
+      { eventId },
+    );
+
+    await waitForSchedulerCondition(
+      runtime,
+      () => handlerInvocations === 1,
+      "default-off plain-return event did not run",
+    );
+    const receipt = receiptCellForEvent<Record<string, never>>(
+      runtime,
+      eventId,
+    );
+    await receipt.pull();
+    expect(receipt.get()).toEqual({});
+  });
+
   it("allows redelivered events to commit twice while receipts are disabled", async () => {
     await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
