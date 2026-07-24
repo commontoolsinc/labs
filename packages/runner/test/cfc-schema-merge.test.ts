@@ -967,9 +967,12 @@ describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
     expect(storedSchemaCoversCandidateEnvelope(stored, candidate)).toBe(false);
   });
 
-  it("covers a candidate additionalProperties claim the stored side carries", () => {
-    // Stored differs (extra declared property) so the deep-equality
-    // shortcut misses and the rest-claim comparison actually runs.
+  it("stored-only named properties must cover the candidate rest claim", () => {
+    // PR #4969 review round 2: the candidate rest claim governs every key
+    // absent from the CANDIDATE's properties — including stored-NAMED keys.
+    // An unlabeled stored `b` does not cover a confidential rest claim, so
+    // coverage must fail closed and merge (the earlier version of this test
+    // pinned the fail-open behavior).
     const stored = {
       type: "object",
       properties: { a: { type: "string" }, b: { type: "number" } },
@@ -985,6 +988,24 @@ describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
         type: "string",
         ifc: { confidentiality: ["x"] },
       },
+    } as const;
+    expect(storedSchemaCoversCandidateEnvelope(stored, candidate)).toBe(false);
+  });
+
+  it("covers the rest claim when stored-only named properties carry it too", () => {
+    const restClaim = {
+      type: "string",
+      ifc: { confidentiality: ["x"] },
+    } as const;
+    const stored = {
+      type: "object",
+      properties: { a: { type: "string" }, b: restClaim },
+      additionalProperties: restClaim,
+    } as const;
+    const candidate = {
+      type: "object",
+      properties: { a: { type: "string" } },
+      additionalProperties: restClaim,
     } as const;
     expect(storedSchemaCoversCandidateEnvelope(stored, candidate)).toBe(true);
   });

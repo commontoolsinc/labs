@@ -1064,17 +1064,29 @@ export const storedSchemaCoversCandidateEnvelope = (
       return false;
     }
     // Rest claims (PR #4969 review): a candidate additionalProperties is a
-    // claim about every undeclared key — an early return here would judge
-    // it "covered" without comparing, dropping it from the merge. No
-    // candidate rest claim means the properties coverage above suffices;
-    // boolean forms must match exactly; a schema-valued claim needs a
-    // covering stored one.
+    // claim about every key absent from the CANDIDATE's properties — which
+    // includes keys the stored side NAMES. Stored rest does not govern
+    // stored-named keys, so each stored-only named property must itself
+    // cover the candidate rest claim, and the rest claims must cover too.
+    // No candidate rest claim means the properties coverage above suffices;
+    // boolean forms must match exactly.
     const candidateRest = candidate.additionalProperties;
     if (candidateRest === undefined) {
       return true;
     }
     if (typeof candidateRest === "boolean") {
       return stored.additionalProperties === candidateRest;
+    }
+    for (const [key, storedChild] of Object.entries(storedProperties)) {
+      if (Object.hasOwn(candidate.properties, key)) continue;
+      if (
+        !storedSchemaCoversCandidateEnvelope(
+          storedChild as JSONSchema,
+          candidateRest,
+        )
+      ) {
+        return false;
+      }
     }
     return typeof stored.additionalProperties === "object" &&
       stored.additionalProperties !== null &&
