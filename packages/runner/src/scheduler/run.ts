@@ -18,6 +18,7 @@ import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import {
   MAX_ACTION_RUN_TRACE_HISTORY,
   MAX_RETRIES_FOR_REACTIVE,
+  OFF_BUDGET_RETRY_WARN_INTERVAL,
 } from "./constants.ts";
 import {
   captureDiagnosisRecord,
@@ -109,17 +110,20 @@ export function watchReactiveActionCommit(state: {
   readonly tx: IExtendedStorageTransaction;
   readonly log: ReactivityLog;
   readonly retries: WeakMap<Action, number>;
+  readonly offBudgetRetries: WeakMap<Action, number>;
   readonly pending: Set<Action>;
   readonly commitPromise: ReturnType<IExtendedStorageTransaction["commit"]>;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
   readonly markInvalid: (action: Action) => void;
   readonly queueExecution: () => void;
   readonly restoreInvalidCauses: () => void;
+  readonly getActionId: (action: Action) => string;
 }): void {
   state.commitPromise.then(async ({ error }) => {
     if (!error) {
       // Clear retries after successful commit.
       state.retries.delete(state.action);
+      state.offBudgetRetries.delete(state.action);
       return;
     }
 
@@ -139,8 +143,11 @@ export function watchReactiveActionCommit(state: {
     // transaction read changed on this replica between the read and the commit,
     // which re-running against the settled replica resolves. It carries no
     // `readyToRetry`, so the re-queue below runs it afresh once the local write
-    // completes. Re-arm the subscription, wait for any catch-up, then re-run.
-    // Both are a WAIT, not a failure, so neither consumes the retry budget —
+    // completes. Wait for any catch-up, then re-queue the action to re-run
+    // against fresh state; its subscription is already live, so the steps below
+    // refresh it and restore the trigger reads the run consumed rather than
+    // establishing a subscription that was torn down. Both are a WAIT, not a
+    // failure, so neither consumes the retry budget —
     // otherwise sustained contention would exhaust the budget and strand the
     // compute as a zombie against rolled-back data. Only a rejection that
     // re-running cannot resolve (transport, malformed store) takes the bounded
@@ -156,6 +163,27 @@ export function watchReactiveActionCommit(state: {
     // coalesce). Restore the consumed trigger reads (§8.9.2) so the re-run's
     // transaction still carries their flow labels.
     if (isConflictRejection(error) || isStorageTransactionInconsistent(error)) {
+      // This retry rides off the bounded budget on the assumption that the
+      // subscription eventually delivers the awaited value — true for
+      // pattern-created reactive functions, which go through the cell machinery.
+      // A bug that never closes the loop (historically a serialization
+      // round-trip that dropped a value) would re-queue forever, so surface a
+      // non-fatal diagnostic every OFF_BUDGET_RETRY_WARN_INTERVAL re-queues
+      // rather than spinning silently. The count clears on the next successful,
+      // permanent, or terminal commit.
+      const offBudgetRetries = (state.offBudgetRetries.get(state.action) ?? 0) +
+        1;
+      state.offBudgetRetries.set(state.action, offBudgetRetries);
+      if (offBudgetRetries % OFF_BUDGET_RETRY_WARN_INTERVAL === 0) {
+        logger.error(
+          "reactive-retry-not-converging",
+          () => [
+            `reactive action ${state.getActionId(state.action)} re-queued ` +
+            `${offBudgetRetries} times on a stale-basis rejection without ` +
+            `converging; its subscription may never deliver the awaited value`,
+          ],
+        );
+      }
       // Re-arm immediately (restore the consumed trigger reads §8.9.2, then
       // resubscribe) so the subscription stays fresh and a concurrent
       // reader-dirty can re-trigger the action while we wait for the catch-up.
@@ -197,6 +225,7 @@ export function watchReactiveActionCommit(state: {
     // change re-triggers.
     if (isPermanentRejection(error) || isTerminalRejection(error)) {
       state.retries.delete(state.action);
+      state.offBudgetRetries.delete(state.action);
       return;
     }
 
@@ -278,6 +307,7 @@ export interface SchedulerActionRunState {
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
   readonly actionTimingState: ActionTimingState;
   readonly retries: WeakMap<Action, number>;
+  readonly offBudgetRetries: WeakMap<Action, number>;
   readonly pending: Set<Action>;
   readonly actionRunTrace: ActionRunTraceEntry[];
   readonly nodes: NodeRegistry;
@@ -546,11 +576,13 @@ function finalizeReactiveActionCommit(
     tx: args.tx,
     log: committedLog,
     retries: state.retries,
+    offBudgetRetries: state.offBudgetRetries,
     pending: state.pending,
     commitPromise,
     resubscribe: state.resubscribe,
     markInvalid: state.markInvalid,
     queueExecution: state.queueExecution,
+    getActionId: state.getActionId,
     restoreInvalidCauses: () => {
       const record = state.nodes.get(args.action);
       if (

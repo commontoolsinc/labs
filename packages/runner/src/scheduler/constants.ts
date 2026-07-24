@@ -38,6 +38,15 @@ export const MAX_ACTION_RUN_TRACE_HISTORY = 2000;
 // above any normal burst, so it never changes ordinary delivery.
 export const MAX_EVENT_BACKLOG_PER_STREAM = 256;
 export const MAX_RETRIES_FOR_REACTIVE = 10;
+// A stale-basis rejection (conflict / same-replica race) is retried off the
+// bounded budget, on the assumption that the action's subscription will
+// eventually deliver the value it is waiting on. That holds for pattern-created
+// reactive functions, which go through the cell machinery, but a bug that never
+// closes the loop — historically a serialization round-trip that fails to
+// preserve a value (a stray `-0`, say) — would spin here forever. Emit a
+// non-fatal diagnostic every this-many off-budget re-queues of one action so the
+// loop is visible rather than silent.
+export const OFF_BUDGET_RETRY_WARN_INTERVAL = 100;
 export const AUTO_DEBOUNCE_THRESHOLD_MS = 50;
 export const AUTO_DEBOUNCE_MIN_RUNS = 3;
 export const AUTO_DEBOUNCE_DELAY_MS = 100;
