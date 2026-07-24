@@ -87,7 +87,6 @@ Generate ONLY the TypeScript code, no explanations or markdown.`;
   const generated = generateText({
     system: systemPrompt,
     prompt,
-    model: "anthropic:claude-sonnet-4-5",
   });
 
   const processedResult = computed(() => {

@@ -322,7 +322,6 @@ If you cannot read the image clearly, make your best guess based on what you can
       ];
     }) as any,
     schema: MAIL_ANALYSIS_SCHEMA,
-    model: "anthropic:claude-sonnet-4-5",
   });
 
   return {

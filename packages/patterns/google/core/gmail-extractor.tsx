@@ -126,9 +126,9 @@ export interface GmailExtractorInput {
   /** Maximum number of emails to fetch */
   limit?: number | Default<100>;
 
-  // Note: model parameter removed - hardcoded to fix HTTP 400 errors
-  // when passing variables through building block input.
-  // Use hardcoded "anthropic:claude-sonnet-4-5" instead.
+  // Note: no model parameter is exposed here - passing a model as a variable
+  // through the building block input caused HTTP 400 errors. The generateObject
+  // call below omits model and uses the runtime default instead.
 
   /** Optional linked auth (overrides wish() default) */
   overrideAuth?: GoogleAuthCell;
@@ -463,7 +463,6 @@ const GmailExtractor = pattern<GmailExtractorInput, GmailExtractorOutput>(
           return interpolateTemplate(template, email);
         }) as any,
         schema: extractionSchema as JSONSchema,
-        model: "anthropic:claude-sonnet-4-5",
       });
 
       return {

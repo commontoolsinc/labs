@@ -44,7 +44,6 @@ export default pattern<Input, Input>(({ userInput }) => {
     prompt: userInput,
     system:
       "Generate a creative product idea based on the user's input. Be concise.",
-    model: "anthropic:claude-sonnet-4-5",
   });
 
   // Error message as string for display

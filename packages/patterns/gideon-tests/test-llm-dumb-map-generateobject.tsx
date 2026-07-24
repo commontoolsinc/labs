@@ -90,7 +90,6 @@ export default pattern<Input>(({ items }) => {
       system:
         "Analyze the sentiment of the following text. Return positive, neutral, or negative sentiment with confidence 0-1 and relevant keywords.",
       prompt: item.content,
-      model: "anthropic:claude-sonnet-4-5",
     }),
   }));
 
