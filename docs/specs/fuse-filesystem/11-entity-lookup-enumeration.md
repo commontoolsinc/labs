@@ -132,7 +132,8 @@ The daemon tracks preparation per directory file handle:
 1. `opendir` allocates a directory handle.
 2. The first `readdir` for that handle prepares the dynamic directory. For
    `entities/`, preparation requests stable identifier pages and stores virtual
-   directory entries on the handle.
+   directory entries on the handle. Concurrent preparations for the same space
+   share one in-flight scan and one immutable entry array.
 3. Continuation `readdir` calls for the same handle read the already prepared
    in-memory directory and do not issue another identifier-list request.
 4. `releasedir` discards the handle state.
@@ -256,10 +257,12 @@ the open handle. It does not add those entries to `FsTree`:
 | 10,000 | 12.4–12.7 ms | 10 | about 0.6 MiB | 8 |
 | 100,000 | 119.7–120.3 ms | 100 | about 5.5 MiB | 8 |
 
-The snapshot remains live until `releasedir`, and concurrent handles own
-independent snapshots. This memory is linear in the listing size but has the
-same lifetime as the directory handle. No permanent identifier-inode tree
-remains after the handle closes.
+The snapshot remains live until `releasedir`. Handles whose first reads overlap
+share the same immutable snapshot rather than multiplying the complete scan and
+entry array. A later handle still performs a fresh scan. Snapshot memory is
+linear in the listing size and has the same lifetime as the last sharing
+directory handle. No permanent identifier-inode tree remains after the handles
+close.
 
 The recursive-walk fixture listed and opened 1,000 entity directories. It made
 one paginated list request and 1,000 point-existence requests. It made zero
