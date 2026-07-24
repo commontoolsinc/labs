@@ -1135,6 +1135,13 @@ after --. Handlers interpret piped input when no input argument is present.`,
       }
       if (result.outputText) {
         render(result.outputText);
+        if (result.resultRef) {
+          // stderr, so stdout stays exactly the tool's JSON result.
+          hint(
+            `Tool result cell: ${result.resultRef.id} (space ${result.resultRef.space})`,
+            false,
+          );
+        }
         return;
       }
       const confirmation =
