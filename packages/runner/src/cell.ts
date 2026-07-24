@@ -1606,8 +1606,7 @@ export class CellImpl<T extends FabricValue>
     if (!Number.isFinite(by) || by === 0) {
       throw new Error(
         "Cell.increment() requires a finite non-zero amount\n" +
-          "help: a zero increment is a no-op; a non-finite amount is not a" +
-          " meaningful increment; drop the call",
+          "help: a zero or non-finite increment is not a meaningful change",
       );
     }
     if (!this.synced) this.sync();
