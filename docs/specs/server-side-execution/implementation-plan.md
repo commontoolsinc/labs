@@ -2234,8 +2234,44 @@ dropping the cohort metadata.
 
 #### C3 — cross-space reads: work-order decomposition (2026-07-17)
 
-**Status — C3 cross-space READS: server-side serve composes end-to-end;
-the client reactive half is a newly-found DESIGN GAP (2026-07-23).** The
+**Status — C3 cross-space READS: the CONTROL plane is complete and
+verified; the DATA plane has a fundamental hole — the served computation
+never receives the foreign VALUE (defect (iii), 2026-07-24).** The C3
+control plane works end-to-end and is verified: issuance, cohort-narrowed
+delivery, foreign-reader subscription + wake, epoch binding + idle
+revocation, the home-apply TOCTOU fence, the vector input basis, and —
+new — the client overlay lifecycle (recompute → hold → drop-exactly-once)
+bound directly through a real Worker in the composed gate. **But the
+composed gate uncovered defect (iii): the served cross-space read is
+computed from a MISSING foreign input.** The authenticated foreign point
+read (C3.4) lands the document in the executor's `#foreignMounts`, but the
+mount is consumed ONLY as provenance (`foreignReadStampsForAction` emits
+`{space,id,seq}` for the vector basis, never the value); the Worker's
+derivation reads its foreign source through the executor provider, which
+is hard-bound to the home space, so the read resolves the home replica
+(no foreign value) and folds `Default<0>`. Nothing in the run path
+consults the mount / `readForeignDoc` during a run — so a served
+cross-space read commits a settlement whose VALUE is wrong (0/default),
+and would clobber the client's own correct client-primary value. Every
+C3.4/C3.5/C3.6 memory fixture passed because they hand-attach the stamps
+and assert on basis/settlement — never on the computed value; the
+composed gate is the first to check it. **This is a data-path mechanism
+gap (call it C3.13 — served foreign-read value carriage): thread the
+served mount VALUE into the Worker's pre-run cross-space read resolution,
+respecting the "foreign stamps never merge into home watermarks"
+seq-domain invariant.** It was missed by the scout, the C3 adversarial
+panel, and every builder — the same hand-attached-fixture blind spot as
+defects (i)/(ii), now at the value layer. Scope: core read-path
+mechanism, every served cross-space read depends on it, no existing
+red-first harness at that layer — owner-scope work, not a targeted fix.
+The `cross-space-read` claim-rank stage is flag-OFF by default, so this
+is "the feature computes wrong values when enabled," NOT a production
+regression; the stage must stay fixture-only until C3.13 lands. The
+composed gate binds the control plane + overlay lifecycle directly and
+honestly leaves the served-value clause and the co-hosted leg owed.
+
+**(Superseded framing, 2026-07-23) — server-side serve composes
+end-to-end; the client reactive half is a DESIGN GAP.** The
 mechanism landed C3.1 through C3.10b, C3.11's parent-document closeout
 landed, and the composed default-run two-space gate landed
 (`server-execution-cross-space-gate.test.ts`). That gate — the first place
