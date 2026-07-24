@@ -5,7 +5,7 @@ import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 import { shouldDeferFallbackMapReceiverRewrite } from "../fallback-array-method-rewrite.ts";
 import {
   findPendingComputeWrapCandidate,
-  validateComputeWrapCandidate,
+  resolveComputeWrapCandidate,
 } from "./compute-wrap-invariants.ts";
 import { createUnlessCall, createWhenCall } from "../../builtins/ifelse.ts";
 import {
@@ -241,15 +241,15 @@ export const emitBinaryExpression: Emitter = ({
   );
 
   if (!allowedSyntheticArrayReceiverWrap) {
-    const valid = validateComputeWrapCandidate(
+    const decision = resolveComputeWrapCandidate(
       pendingWrap,
       expression,
       "binary expression",
       context,
     );
-    if (!valid) {
-      // Reported as an author-facing diagnostic. Return the expression
-      // unrewritten (truthy) so no later emitter re-attempts the wrap.
+    if (decision.kind === "skip-reported") {
+      // Return the expression unrewritten (truthy) so no later emitter
+      // re-attempts the wrap.
       return expression;
     }
   }
