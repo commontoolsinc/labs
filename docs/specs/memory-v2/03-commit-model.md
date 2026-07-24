@@ -195,6 +195,15 @@ dropped, every queued or in-flight commit whose recorded dependency set names
 the dropped `localSeq` is locally rejected without waiting for the server's
 per-commit verdict.
 
+The recorded dependency set MUST include the document's top-of-stack pending
+layer below the reader, and the staleness-bearing read MUST name that top
+layer: the staleness basis is always the stack top. Any narrowing of the
+dependency set (for example, pruning layers whose write footprint provably
+cannot influence the read path) may drop only NON-top layers. Basing the
+staleness scan at a lower layer is unsound, not merely conservative: the
+session's own newer stacked commits then land inside the scan interval, where
+the path-blind set/delete check false-conflicts with the reader's own stack.
+
 ## 3.6 Server Validation
 
 When the server receives a commit, it validates all read dependencies before
@@ -256,6 +265,16 @@ function validatePendingReads(
 If a referenced `localSeq` is not resolved yet, the server MAY hold the commit
 in the session queue until the dependency resolves. If the dependency resolves
 to rejection, the queued commit is rejected immediately.
+
+Holding is queueing, not reordering: within a logical session, commits are
+resolved (accepted or rejected) in increasing `localSeq` order, and a held
+commit MUST NOT be leapfrogged by a later same-session commit. A commit's
+resolution seq is therefore monotonic in its `localSeq` within a session —
+the property that makes the top-of-stack pending read a sound staleness basis
+(§3.5): every own-session layer below the reader resolves at or before the
+basis layer's seq, so the scan interval past the basis contains no own-session
+commits. (The current implementation rejects rather than holds, which
+preserves this ordering trivially.)
 
 A `resolutionOnly` pending read participates in this resolution requirement
 exactly like an ordinary pending read — an unresolved or rejected dependency
