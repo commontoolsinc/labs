@@ -1,6 +1,19 @@
-import { action, computed, Default, pattern, UI, Writable } from "commonfabric";
+import {
+  action,
+  computed,
+  Default,
+  equals,
+  pattern,
+  UI,
+  Writable,
+} from "commonfabric";
 import ParticipantIdentityCard from "./participant-identity-card.tsx";
-import type { User } from "./main.tsx";
+import {
+  DEFAULT_PARTICIPANT_PROFILES,
+  type LunchProfile,
+  type ParticipantProfileDirectoryValue,
+  type User,
+} from "./main.tsx";
 import {
   findNode,
   hasText,
@@ -25,10 +38,46 @@ export default pattern(() => {
   const users = new Writable<User[] | Default<[]>>([]);
   const myName = new Writable<string | Default<"">>("");
   const adminName = new Writable<string | Default<"">>("");
+  const participantProfiles = Writable.of<ParticipantProfileDirectoryValue>(
+    DEFAULT_PARTICIPANT_PROFILES,
+  );
+  // No profile resolved: name/avatar are empty strings (as the parent's
+  // top-level wishes read before resolving), so the card shows the setup path.
   const participantIdentity = ParticipantIdentityCard({
     users,
     myName,
     adminName,
+    participantProfiles,
+    profileName: "",
+    profileAvatar: "",
+  });
+
+  // The profile-backed path is injected explicitly so lane-2 tests exercise
+  // what the parent passes down from its top-level wishes: the identity CELL
+  // (`profile`) plus the resolved display strings (`profileName`/`avatar`).
+  // The name is a live cell so the toggle test can update it; the display
+  // name is never read off `aliceProfile` — only used as badge/`equals()`
+  // identity — so that cell only needs the minimal `{ name, avatar }` shape.
+  const profileUsers = new Writable<User[] | Default<[]>>([]);
+  const profileMyName = new Writable<string | Default<"">>("");
+  const profileAdminName = new Writable<string | Default<"">>("");
+  const profileDirectory = Writable.of<ParticipantProfileDirectoryValue>(
+    DEFAULT_PARTICIPANT_PROFILES,
+  );
+  const aliceProfile = Writable.of<LunchProfile>({
+    name: "Profile Alice",
+    avatar: "alice.png",
+  });
+  const profileNameCell = new Writable<string | Default<"">>("Profile Alice");
+  const profileAvatarCell = new Writable<string | Default<"">>("alice.png");
+  const profileIdentity = ParticipantIdentityCard({
+    users: profileUsers,
+    myName: profileMyName,
+    adminName: profileAdminName,
+    participantProfiles: profileDirectory,
+    profile: aliceProfile,
+    profileName: profileNameCell,
+    profileAvatar: profileAvatarCell,
   });
 
   // Profile-first UI fires `joinAs.send({})` (no name) for the "Join as <name>"
@@ -42,6 +91,40 @@ export default pattern(() => {
     participantIdentity.joinAs.send({ name: "Alex" });
   });
 
+  const action_join_with_profile = action(() => {
+    profileIdentity.joinAs.send({});
+  });
+
+  const action_use_different_name = action(() => {
+    const button = findByProp(
+      profileIdentity[UI],
+      "aria-label",
+      "Use a different name",
+    );
+    const onClick = propsOf(button)?.onClick;
+    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
+      (onClick as { send: (event: Record<string, never>) => void }).send({});
+    }
+  });
+
+  const action_cancel_different_name = action(() => {
+    const button = findByProp(
+      profileIdentity[UI],
+      "aria-label",
+      "Back to profile join",
+    );
+    const onClick = propsOf(button)?.onClick;
+    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
+      (onClick as { send: (event: Record<string, never>) => void }).send({});
+    }
+  });
+
+  // The viewer renames their profile after joining: the parent's #profileName
+  // wish would re-resolve, so the display string the card reflects changes.
+  const action_update_canonical_profile = action(() => {
+    profileNameCell.set("Alice Updated");
+  });
+
   const action_try_rejoin_as_alex_two = action(() => {
     participantIdentity.joinAs.send({ name: "Alex Two" });
   });
@@ -51,7 +134,6 @@ export default pattern(() => {
       name: "Blair",
       avatar: "",
       color: "#c2573a",
-      joinedAt: 1,
     });
     myName.set("Blair");
   });
@@ -68,25 +150,33 @@ export default pattern(() => {
   );
 
   // With no profile resolved and nobody joined, the join surface shows the
-  // manual-name fallback: the text input and Join button render, the "First to
-  // join becomes the host." hint shows, and neither profile-first control (the
-  // "Use a different name" toggle nor the "Cancel" escape hatch) is present.
-  // Walking the tree materializes showManualEntry, hasProfile, and joinHint.
-  const assert_manual_fallback_renders = computed(() => {
+  // profile-setup branch: the wish's built-in [UI] slot plus the explicit
+  // "Continue as guest" button. The typed-name input is NOT present — the
+  // guest path never appears automatically (it needs the explicit toggle).
+  // Walking the tree materializes showProfileSetup, hasProfile, and joinHint.
+  const assert_guest_setup_renders = computed(() => {
     const ui = participantIdentity[UI];
+    const guestButton = findByProp(ui, "id", "lp-guest-button");
     const input = findByProp(ui, "id", "lp-join-name");
-    const joinButton = findByProp(ui, "id", "lp-join-button");
-    const useDifferentName = findByProp(
-      ui,
-      "aria-label",
-      "Use a different name",
-    );
-    const cancel = findByProp(ui, "aria-label", "Use my profile name instead");
-    return input !== undefined &&
-      joinButton !== undefined &&
-      useDifferentName === undefined &&
-      cancel === undefined &&
+    const setupSlot = findByProp(ui, "data-profile-setup", true);
+    return guestButton !== undefined &&
+      input === undefined &&
+      setupSlot !== undefined &&
       hasText(ui, "First to join becomes the host.");
+  });
+
+  const assert_profile_first_renders = computed(() => {
+    const ui = profileIdentity[UI];
+    return hasText(ui, "Join as Profile Alice") &&
+      findByProp(ui, "data-profile-identity", "canonical") !== undefined &&
+      findByProp(ui, "aria-label", "Use a different name") !== undefined;
+  });
+
+  const assert_profile_manual_entry_renders = computed(() => {
+    const ui = profileIdentity[UI];
+    return findByProp(ui, "id", "lp-join-name") !== undefined &&
+      findByProp(ui, "aria-label", "Back to profile join") !== undefined &&
+      findByProp(ui, "data-profile-identity", "canonical") === undefined;
   });
 
   const assert_empty_send_noop = computed(() =>
@@ -99,12 +189,34 @@ export default pattern(() => {
     const currentUsers = users.get();
     return currentUsers.length === 1 &&
       currentUsers[0]?.name === "Alex" &&
-      currentUsers[0]?.joinedAt === 0 &&
       myName.get() === "Alex" &&
       adminName.get() === "Alex" &&
+      participantProfiles.get().participants.length === 0 &&
       participantIdentity.me === "Alex" &&
       participantIdentity.isJoined === true &&
       participantIdentity.isAdmin === true;
+  });
+
+  const assert_joined_with_profile = computed(() => {
+    const currentUsers = profileUsers.get();
+    const links = profileDirectory.get().participants;
+    return currentUsers.length === 1 &&
+      currentUsers[0]?.name === "Profile Alice" &&
+      currentUsers[0]?.avatar === "alice.png" &&
+      profileMyName.get() === "Profile Alice" &&
+      profileAdminName.get() === "Profile Alice" &&
+      links.length === 1 &&
+      links[0]?.name === "Profile Alice" &&
+      equals(links[0]?.profile, aliceProfile) &&
+      profileIdentity.isJoined === true &&
+      profileIdentity.isAdmin === true;
+  });
+
+  const assert_profile_link_stays_live = computed(() => {
+    const currentUsers = profileUsers.get();
+    return currentUsers[0]?.name === "Profile Alice" &&
+      currentUsers[0]?.avatar === "alice.png" &&
+      profileIdentity.profileName === "Alice Updated";
   });
 
   const assert_rejoin_noop = computed(() => {
@@ -131,9 +243,18 @@ export default pattern(() => {
   return {
     tests: [
       { assertion: assert_initial },
-      { assertion: assert_manual_fallback_renders },
+      { assertion: assert_guest_setup_renders },
+      { assertion: assert_profile_first_renders },
+      { action: action_use_different_name },
+      { assertion: assert_profile_manual_entry_renders },
+      { action: action_cancel_different_name },
+      { assertion: assert_profile_first_renders },
       { action: action_join_empty },
       { assertion: assert_empty_send_noop },
+      { action: action_join_with_profile },
+      { assertion: assert_joined_with_profile },
+      { action: action_update_canonical_profile },
+      { assertion: assert_profile_link_stays_live },
       { action: action_join_as_alex },
       { assertion: assert_joined_as_alex },
       { action: action_try_rejoin_as_alex_two },
