@@ -454,6 +454,9 @@ export interface BuilderFunctionsAndConstants {
     typeof import("@commonfabric/data-model/value-debug").toCompactDebugString;
   toIndentedDebugString:
     typeof import("@commonfabric/data-model/value-debug").toIndentedDebugString;
+
+  // Value comparison
+  valueEqual: typeof import("@commonfabric/data-model/fabric-value").valueEqual;
 }
 
 // Runtime interface needed by createCell
