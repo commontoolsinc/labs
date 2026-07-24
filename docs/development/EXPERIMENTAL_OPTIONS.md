@@ -628,8 +628,8 @@ the per-epic implementation notes).
   a tuning value. End state is either graduation to always-on with a settled
   window, or removal if the render-side fix (initial-render descent) makes the
   waterfall shallow enough that concurrency no longer pays.
-- **Status.** Implemented behind the flag, off by default; not yet measured
-  end-to-end over real latency.
+- **Status on 2026-07-24.** Implemented behind the flag, off by default; not yet
+  measured end-to-end over real latency.
 - **Path to removal.** Graduate to always-on once measured safe and beneficial,
   or remove if superseded by reducing the round-trip count at the source.
 
