@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-07-23
+archived: 2026-07-24
+reason: "Executed plan; the path-less piece read fix shipped in the same PR (partial-object projection at the piece read boundary)."
+---
+
 # Implementation plan: path-less piece read returns `undefined` while every child path resolves
 
 Status: IMPLEMENTED on this branch (see "Implementation outcome" at the bottom —

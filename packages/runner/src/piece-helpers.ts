@@ -9,10 +9,7 @@ import { getLogger } from "../../utils/src/logger.ts";
 import { type Cell, isCell } from "./cell.ts";
 import { isSigilLink } from "./link-types.ts";
 import { parseLink } from "./link-utils.ts";
-import {
-  isScopeBlockedResolutionTerminal,
-  resolveLink,
-} from "./link-resolution.ts";
+import { resolveLink } from "./link-resolution.ts";
 import { DEFAULT_CELL_SCOPE, scopeRank } from "./scope.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import type { MemorySpace } from "./storage/interface.ts";
@@ -176,8 +173,13 @@ export function schemaWithScopedLinkRequiredsRelaxed(
       return true;
     }
     try {
-      const terminal = resolveLink(base.runtime, tx!, first, "value");
-      return isScopeBlockedResolutionTerminal(terminal) ||
+      let blocked = false;
+      const terminal = resolveLink(base.runtime, tx!, first, "value", {
+        onScopeBlocked: () => {
+          blocked = true;
+        },
+      });
+      return blocked ||
         scopeRank(terminal.scope ?? DEFAULT_CELL_SCOPE) >
           scopeRank(DEFAULT_CELL_SCOPE);
     } catch (error) {

@@ -84,25 +84,6 @@ const undefinedDataLink = (link: NormalizedFullLink): NormalizedFullLink => ({
   path: [],
 });
 
-// Lazily computed so module-load order never matters; `undefined` encodes to
-// the same URI regardless of base.
-let undefinedDataUri: string | undefined;
-
-/**
- * True for the terminal `resolveLink` mints when a narrower-scope follow is
- * blocked by a schema scope cap (see `undefinedDataLink` above): the chain
- * did not reach a real target, it was cut. Callers that need "resolved to a
- * target" vs "resolution was scope-blocked" test the returned terminal with
- * this. (A stored link that genuinely encodes `undefined` as a data: URI
- * also matches — that value reads as undefined either way.)
- */
-export function isScopeBlockedResolutionTerminal(
-  link: NormalizedFullLink,
-): boolean {
-  undefinedDataUri ??= dataUriFromValueWithResolvedLinks(undefined);
-  return link.id === undefinedDataUri;
-}
-
 const canFollowLinkHop = (
   source: NormalizedFullLink,
   target: NormalizedFullLink,
@@ -143,7 +124,11 @@ const canFollowLinkHop = (
  * @param tx - The storage transaction to read from.
  * @param link - The link to read.
  * @param lastNode - The last node in the path.
- * @param options - Allows you to preserve the `overwrite` field if needed
+ * @param options - `preserveOverwrite` keeps the `overwrite` field if needed.
+ *   `onScopeBlocked` is invoked when a narrower-scope follow is blocked by a
+ *   schema scope cap (the chain then terminates at an undefined-data link);
+ *   it is the only way to distinguish that cut from a chain that genuinely
+ *   ends at a stored undefined-data link.
  * @returns The resolved link.
  */
 export function resolveLink(
@@ -151,7 +136,7 @@ export function resolveLink(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   lastNode: LastNode = "value",
-  options: { preserveOverwrite?: boolean } = {},
+  options: { preserveOverwrite?: boolean; onScopeBlocked?: () => void } = {},
 ): ResolvedFullLink {
   const seen = new Set<string>();
 
@@ -287,6 +272,7 @@ export function resolveLink(
             target: cfcAddressFromLink(nextHop.link),
           },
         ]);
+        options.onScopeBlocked?.();
         link = undefinedDataLink(link);
         break;
       }

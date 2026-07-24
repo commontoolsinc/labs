@@ -13,6 +13,7 @@ import {
 } from "../src/piece-helpers.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
+import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 // Whole-object piece reads void on scoped links (CLI `cf piece get` with no
@@ -584,6 +585,60 @@ describe("whole-object read over a session-scoped link", () => {
       const projected = cellWithScopedLinkRequiredsRelaxed(cell);
       const value = (await projected.pull()) as { question?: string };
       expect(value?.question).toBe("capped question");
+    } finally {
+      await close();
+    }
+  });
+
+  it("a stored link that genuinely encodes undefined stays strict (not mistaken for a scope block)", async () => {
+    // A required property whose stored value is literally a data:-undefined
+    // link is undefined for EVERY reader — that is not a scope-visibility
+    // hole, and relaxing it would change strict semantics. The scope-block
+    // signal comes from resolveLink's onScopeBlocked callback, not from the
+    // terminal's shape, so this shape must NOT relax.
+    const tx = writerRt.edit();
+    const holder = writerRt.getCell(
+      space,
+      "data-undef-holder",
+      {
+        type: "object",
+        properties: requiredResultSchema.properties,
+      } as const,
+      tx,
+    );
+    holder.setRaw({
+      question: "data-undef question",
+      count: 6,
+      myDraft: {
+        "/": {
+          "link@1": {
+            id: dataUriFromValueWithResolvedLinks(undefined),
+            path: [],
+            space,
+            scope: "space",
+          },
+        },
+      },
+    } as never);
+    const result = await tx.commit();
+    expect(result.error).toBeUndefined();
+    await writerStorage.synced();
+
+    const { rt, close } = freshReader();
+    try {
+      const cell = rt.getCell(space, "data-undef-holder", requiredResultSchema);
+      await cell.pull();
+      // No relaxation: schema identity preserved, and the strict read voids.
+      expect(
+        schemaWithScopedLinkRequiredsRelaxed(
+          requiredResultSchema,
+          cell.getRaw(),
+          cell as unknown as Cell<unknown>,
+        ),
+      ).toBe(requiredResultSchema);
+      const projected = cellWithScopedLinkRequiredsRelaxed(cell);
+      const value = await projected.pull();
+      expect(value).toBeUndefined();
     } finally {
       await close();
     }
