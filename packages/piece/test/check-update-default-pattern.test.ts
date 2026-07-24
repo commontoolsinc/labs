@@ -9,6 +9,7 @@ import {
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
+import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { PieceManager } from "../src/manager.ts";
 import {
   DEFAULT_APP_PATTERN_URL,
@@ -38,6 +39,46 @@ const SOURCE_V3_HANDLER = [
   "export default pattern<{ items?: string[] }>(({ items }) => {",
   "  const count = new Writable<number>(0).for('count');",
   "  return { items, count, bump: bump({ count }) };",
+  "});",
+  "",
+].join("\n");
+
+// The estuary brick, distilled to two home-shaped patterns that differ by ONE
+// thing: whether the required `favorites` output field carries a default. Both
+// carry a handler (its `{ "$stream": true }` markers are missing on an aged
+// doc → the "Handler used as lift" cold start that gets us into the repair).
+//
+// OLD: `favorites` is required with NO default. Run over a favorites-less
+// vintage doc, its own setup repair is REJECTED by the CFC additive-required
+// migration ("favorites needs a default") — loadable, but not runnable.
+const SOURCE_HOME_OLD_REQUIRED = [
+  "import { Writable, handler, pattern } from 'commonfabric';",
+  "const bump = handler<void, { count: Writable<number> }>((_, { count }) => {",
+  "  count.set((count.get() ?? 0) + 1);",
+  "});",
+  "interface Output { items: Writable<string[]>; favorites: Writable<string[]>; }",
+  "export default pattern<{ items?: string[] }, Output>(() => {",
+  "  const items = new Writable<string[]>([]).for('items');",
+  "  const favorites = new Writable<string[]>([]).for('favorites');",
+  "  const count = new Writable<number>(0).for('count');",
+  "  return { items, favorites, count, bump: bump({ count }) };",
+  "});",
+  "",
+].join("\n");
+
+// OFFICIAL: identical, except `favorites` rides `Default<[]>` (post-fix
+// home.tsx). Migrates the same aged doc cleanly, so the roll-forward heals.
+const SOURCE_HOME_OFFICIAL_DEFAULTED = [
+  "import { Default, Writable, handler, pattern } from 'commonfabric';",
+  "const bump = handler<void, { count: Writable<number> }>((_, { count }) => {",
+  "  count.set((count.get() ?? 0) + 1);",
+  "});",
+  "interface Output { items: Writable<string[]>; favorites: Writable<string[] | Default<[]>>; }",
+  "export default pattern<{ items?: string[] }, Output>(() => {",
+  "  const items = new Writable<string[]>([]).for('items');",
+  "  const favorites = new Writable<string[]>([]).for('favorites');",
+  "  const count = new Writable<number>(0).for('count');",
+  "  return { items, favorites, count, bump: bump({ count }) };",
   "});",
   "",
 ].join("\n");
@@ -1207,6 +1248,143 @@ describe("checkAndUpdateDefaultPattern", () => {
     await (after as unknown as { pull: () => Promise<unknown> }).pull();
     const afterEvent = (await manager.getDefaultPattern(false))!;
     expect(afterEvent.key("count").get()).toBe(1);
+  });
+
+  it("heals a root whose pinned pattern fails CFC migration by rolling forward to official", async () => {
+    // The estuary brick, faithfully: a home root pinned to an OLD home.tsx
+    // whose required `favorites` predates its `Default<>`. The doc was
+    // materialized by a favorites-less vintage, so the pinned pattern's OWN
+    // setup repair is REJECTED by the CFC additive-required migration ("needs a
+    // default") — it loads but cannot run. Enforce-on (the default here; the
+    // rejecting layer is the whole point of this test, so it must not be off).
+    // The runnability backstop must roll the root forward to the CURRENT
+    // official home.tsx and materialize THAT: the once-fatal field present, the
+    // handler stream live end to end.
+    await setupHome({ systemPatternAutoUpdate: true });
+    expect(runtime.cfcEnforcementMode).not.toBe("disabled");
+
+    // 1. Age the doc: materialize a favorites-less vintage.
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    await manager.stopPiece(root);
+
+    // 2. Compile OLD so its identity is loadable in-session, then pin the root
+    //    to it (sourceless) — the pre-fix required-favorites home.tsx.
+    stub.setSource(SOURCE_HOME_OLD_REQUIRED);
+    const oldResolved = await runtime.harness.resolve(
+      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+    );
+    const oldPattern = await runtime.patternManager.compilePattern(
+      { ...oldResolved, mainExport: "default" },
+      { space: manager.getSpace() },
+    );
+    const oldRef = runtime.patternManager.getArtifactEntryRef(oldPattern)!;
+    const { error: pinError } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: oldRef.identity,
+        symbol: "default",
+      });
+    });
+    expect(pinError).toBeUndefined();
+    // The pinned OLD pattern really is loadable — "loadable but unrunnable" is
+    // the precise state the pattern-updater's loadability gate leaves pinned.
+    await expect(
+      runtime.patternManager.loadPatternByIdentity(
+        oldRef.identity,
+        "default",
+        manager.getSpace(),
+      ),
+    ).resolves.toBeDefined();
+
+    // 3. Toolshed now serves OFFICIAL (favorites rides Default<[]>). Take its
+    //    expected identity the SAME way the heal does — the compiled artifact
+    //    ref, not a source hash — so the assertion also proves the roll-forward
+    //    compiled THIS source, not a stale-cached one.
+    stub.setSource(SOURCE_HOME_OFFICIAL_DEFAULTED);
+    const officialResolved = await runtime.harness.resolve(
+      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+    );
+    const officialPattern = await runtime.patternManager.compilePattern(
+      { ...officialResolved, mainExport: "default" },
+      { space: manager.getSpace() },
+    );
+    const officialId =
+      runtime.patternManager.getArtifactEntryRef(officialPattern)!.identity;
+    // A genuine roll-forward: the target identity differs from the pinned one.
+    expect(officialId).not.toBe(oldRef.identity);
+
+    // 4. Inject the CFC MIGRATION rejection on the pinned pattern's OWN setup
+    //    repair — the exact signal the runnability gate keys on. Keyed by
+    //    expectedPatternIdentity so ONLY the same-identity repair (OLD) is
+    //    rejected; the roll-forward's materialize (OFFICIAL) runs for real and
+    //    must heal the reused doc. The rejection message mirrors the live
+    //    "CFC enforcement rejected commit" wrapper (see the runner + #4936's
+    //    schema-merge tests) so the gate's predicate is exercised as shipped.
+    //    A genuine additive-required rejection over a CFC-relevant home root is
+    //    covered directly by cfc-additive-default-preserves-old-doc.test.ts;
+    //    here we pin the ORCHESTRATION the piece controller adds on top.
+    const rt = runtime as unknown as {
+      runSynced: (...args: unknown[]) => Promise<unknown>;
+    };
+    const realRunSynced = rt.runSynced.bind(runtime);
+    rt.runSynced = (...args: unknown[]) => {
+      const opts = args[3] as
+        | { expectedPatternIdentity?: { identity?: string } }
+        | undefined;
+      if (opts?.expectedPatternIdentity?.identity === oldRef.identity) {
+        return Promise.reject(
+          new Error(
+            "CFC enforcement rejected commit: required field favorites " +
+              "needs a default to preserve old documents",
+          ),
+        );
+      }
+      return realRunSynced(...args);
+    };
+
+    // 5. Boot: heal by roll-forward — no throw.
+    try {
+      await controller.ensureDefaultPattern();
+    } finally {
+      rt.runSynced = realRunSynced;
+    }
+    await runtime.idle();
+
+    // Re-resolve: the controller's cell is a pre-heal transaction view.
+    const after = (await manager.getDefaultPattern(false))!;
+    // Rolled forward to the official identity, official provenance stamped…
+    expect(getPatternIdentityRef(after)?.identity).toBe(officialId);
+    expect(getPatternSource(after)).toBe(HOME_PATTERN_URL);
+    // …recording the displaced pinned pattern for recovery.
+    const displaced = (after as unknown as {
+      getMetaRaw: (k: string) => unknown;
+    }).getMetaRaw("displacedPattern") as { identity?: string } | undefined;
+    expect(displaced?.identity).toBe(oldRef.identity);
+
+    // FUNCTIONAL read (not just a swap-shaped assertion): the once-fatal
+    // required field materialized to its default, and the handler stream works
+    // end to end over the reused doc.
+    expect(after.key("favorites").get()).toEqual([]);
+    expect(after.key("count").get()).toBe(0);
+    (after.key("bump") as unknown as { send: (e: unknown) => void }).send({});
+    await runtime.idle();
+    await (after as unknown as { pull: () => Promise<unknown> }).pull();
+    const afterEvent = (await manager.getDefaultPattern(false))!;
+    expect(afterEvent.key("count").get()).toBe(1);
+
+    // The roll-forward compiled the FRESHEST official source (ETag-revalidated,
+    // `cache: "no-cache"`), never a stale HTTP-cached one — escaping a stale
+    // pin is the whole point, so a cache-stale compile would defeat it.
+    const homeSourceFetches = stub.requestedFetches().filter((f) => {
+      const u = new URL(f.href);
+      return u.pathname === HOME_PATTERN_URL && !u.searchParams.has("identity");
+    });
+    expect(homeSourceFetches.some((f) => f.cache === "no-cache")).toBe(true);
   });
 
   it("failed cold-start repair stays fail-closed and leaves the doc healable", async () => {
