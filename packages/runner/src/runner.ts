@@ -1,6 +1,7 @@
 import {
   fabricFromNativeValue,
   type FabricValue,
+  isFabricPlainObject,
   nativeFromFabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
@@ -1075,9 +1076,9 @@ export class Runner {
       ? resultCell.withTx(tx)
       : resultCell.withTx(tx).asSchema(pattern.resultSchema);
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
-    let result = unwrapOneLevelAndBindtoDoc<R, any>(
+    let result = unwrapOneLevelAndBindtoDoc<FabricValue, any>(
       this.runtime.cfc,
-      pattern.result as R,
+      pattern.result,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
@@ -1087,18 +1088,15 @@ export class Runner {
     });
     if (
       options.preserveName &&
-      isRecord(previousResult) &&
+      isFabricPlainObject(result) &&
+      isFabricPlainObject(previousResult) &&
       previousResult[NAME]
     ) {
       result = { ...result, [NAME]: previousResult[NAME] };
     }
-    // Convert-and-freeze (default): a deep-frozen value lets the storage write
-    // boundary's `cloneIfNecessary` identity-pass instead of
-    // deep-cloning-to-freeze. Converting before the no-op gate makes both sides
-    // of the comparison `FabricValue`s — the stored value is one already — so
-    // the gate compares what a write would actually store.
-    const fabricResult = fabricFromNativeValue(result);
-    if (!valueEqual(fabricResult, previousResult)) {
+    // The projection and the stored value are both `FabricValue`s, so the gate
+    // compares them directly.
+    if (!valueEqual(result, previousResult)) {
       recordSetupProjectionPolicyInputs(
         tx,
         this.runtime,
@@ -1106,7 +1104,10 @@ export class Runner {
         pattern.resultSchema,
         result,
       );
-      writableResultCell.setRawUntyped(fabricResult);
+      // Freeze on the way out: a deep-frozen value lets the storage write
+      // boundary's `cloneIfNecessary` identity-pass instead of
+      // deep-cloning-to-freeze.
+      writableResultCell.setRawUntyped(fabricFromNativeValue(result));
     }
   }
 
