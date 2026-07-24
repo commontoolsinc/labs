@@ -99,6 +99,9 @@ One line per archived document; each document's header carries the fuller
   — the v1 scheduler's mechanisms and their v2 dispositions, June 2026.
 - [PREEXISTING_BUGS.md](packages/patterns/PREEXISTING_BUGS.md) — pattern
   runtime bug survey, December 2025.
+- [piece-timeout-hangs-investigation.md](packages/cli/piece-timeout-hangs-investigation.md)
+  — why the CLI tool-result poll was replaced event-driven and why the
+  piece-start and sync bounds could not be removed at the CLI layer, July 2026.
 
 ### Executed plans and work orders
 
