@@ -149,27 +149,27 @@ export default pattern(() => {
   // The smart-default label walks the standard list as successive modules of
   // the same type are added; a different type starts its own sequence; an
   // explicit label in initialData overrides the default.
-  const assert_first_email_label_personal = computed(() =>
+  const assert_first_email_label_personal = assert(() =>
     [...(subject.subPieces ?? [])][0]?.label === "Personal"
   );
-  const assert_second_email_label_work = computed(() =>
+  const assert_second_email_label_work = assert(() =>
     [...(subject.subPieces ?? [])][1]?.label === "Work"
   );
-  const assert_phone_label_mobile = computed(() =>
+  const assert_phone_label_mobile = assert(() =>
     [...(subject.subPieces ?? [])][2]?.label === "Mobile"
   );
-  const assert_address_label_override = computed(() =>
+  const assert_address_label_override = assert(() =>
     [...(subject.subPieces ?? [])][3]?.label === "Chosen"
   );
 
   // A third email add reads two prior emails (Personal, Work) and picks the
   // next unused standard label. This fails if getNextUnusedLabel cannot see the
   // labels the earlier adds assigned.
-  const assert_third_email_appended = computed(() => {
+  const assert_third_email_appended = assert(() => {
     const current = [...(subject.subPieces ?? [])];
     return current.length === 5 && current[4].type === "email";
   });
-  const assert_third_email_label_school = computed(() =>
+  const assert_third_email_label_school = assert(() =>
     [...(subject.subPieces ?? [])][4]?.label === "School"
   );
 
