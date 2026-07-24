@@ -48,7 +48,6 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isPlainObject, isRecord } from "@commonfabric/utils/types";
 import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
 import { isHandlerCell } from "../../fuse/callables.ts";
-import { awaitSyncWithTimeout } from "./utils.ts";
 import {
   callableCommandSpec,
   type CallableExecutionDeps,
@@ -355,10 +354,21 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
       () => new PieceManager(session, runtime),
     );
     pieceManagerRef.current = pieceManager;
+    // `synced()` settles even when this space is permanently denied: the memory
+    // client terminates a denied session rather than retrying its reopen. It
+    // settles quietly, though — a denied cross-space link stays a silent absent
+    // read — so surface a denial on THIS space deliberately, with the server's
+    // real AuthorizationError.
     await timeCliPhase(
       "loadManager.synced",
-      () => awaitSyncWithTimeout(pieceManager.synced()),
+      () => pieceManager.synced(),
     );
+    const authError = runtime.storageManager.authorizationError?.(
+      session.space,
+    );
+    if (authError) {
+      throw authError;
+    }
     return pieceManager;
   });
 }

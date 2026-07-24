@@ -222,6 +222,16 @@ Rules:
 - after reconnect, the client resumes the session, replays retained commits,
   applies inline catch-up `sync` when present, and only re-establishes the
   watch set if the session was reopened fresh
+- a `session.open` denied with an `AuthorizationError` the server did NOT mark
+  `retriable` is permanent: the client stops reopening that session and
+  terminates it with the real error rather than retrying the identical handshake
+  forever. A `retriable` authorization race (an expired, used, or mismatched
+  challenge; a stale signed `exp`) and every transport-level disconnect still
+  retry, so a transient blip or a fresh-challenge race heals. A permanent
+  protocol-flag mismatch at `hello` ends the whole connection the same way. See
+  [`../../development/authorization-failure-surfacing.md`](../../development/authorization-failure-surfacing.md)
+  for how the client, the runner storage layer, and the CLI act on this
+  classification end to end.
 
 ## 4.2 Message Format
 
@@ -276,7 +286,18 @@ interface ResponseMessage<Result> {
   type: "response";
   requestId: string;
   ok?: Result;
-  error?: { name: string; message: string };
+  error?: {
+    name: string;
+    message: string;
+    // On an AuthorizationError, present and `true` when the denial is an
+    // anti-replay handshake race a fresh reconnect heals (an expired, used, or
+    // mismatched connection challenge; a stale signed `exp`). Absent marks a
+    // permanent denial — an audience or protocol mismatch, or an ACL capability
+    // shortfall — that no retry changes. The client uses it to decide whether to
+    // keep reopening a denied session or to terminate it. An older server sends
+    // no marker, so its AuthorizationError is read as permanent.
+    retriable?: boolean;
+  };
 }
 
 interface SessionEffect<Effect> {
