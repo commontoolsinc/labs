@@ -43,33 +43,33 @@ describe("deep-freeze", () => {
     });
 
     describe("functions", () => {
-      it("returns `false` for an unfrozen function", () => {
-        // A function is a mutable object, never deep-frozen.
+      // `isDeepFrozen()` answers the strict query -- a function is never deeply
+      // immutable (mutable `prototype`/closure), so `false`. `deepFreeze()` is
+      // separately permissive: it treats a function as an opaque immutable leaf
+      // (a code reference, not fabric data) so general-purpose callers that
+      // freeze objects-with-methods (e.g. `api/cfc.ts`'s `cfcPattern`) keep
+      // working. Reconciling the two under a strict `FabricValue`-only contract
+      // is a separate follow-up.
+      it("returns `false` from `isDeepFrozen()` for a function", () => {
         expect(isDeepFrozen(() => {})).toBe(false);
         expect(isDeepFrozen(function () {})).toBe(false);
-      });
-
-      it("returns `false` for a frozen function (never deep-frozen)", () => {
-        // Freezing a function's shell leaves its `prototype` object and closure
-        // state mutable, so it is never deeply immutable.
         expect(isDeepFrozen(Object.freeze(() => {}))).toBe(false);
-        expect(isDeepFrozen(Object.freeze(function () {}))).toBe(false);
       });
 
-      it("returns `false` for a frozen graph reaching a function", () => {
+      it("returns `false` for an uncached frozen graph reaching a function", () => {
         expect(isDeepFrozen(Object.freeze({ fn: () => {} }))).toBe(false);
       });
 
-      it("throws when `deepFreeze()` is given a function", () => {
-        expect(() => deepFreeze(() => {})).toThrow(
-          "cannot deep-freeze a function",
-        );
+      it("returns the function unchanged from `deepFreeze()` (does not throw)", () => {
+        const fn = () => {};
+        expect(() => deepFreeze(fn)).not.toThrow();
+        expect(deepFreeze(fn)).toBe(fn);
       });
 
-      it("throws when `deepFreeze()` reaches a function within a graph", () => {
-        expect(() => deepFreeze({ fn: () => {} })).toThrow(
-          "cannot deep-freeze a function",
-        );
+      it("freezes a graph containing a function, leaving the function a leaf", () => {
+        const o = deepFreeze({ a: 1, fn: () => {} }) as Record<string, unknown>;
+        expect(Object.isFrozen(o)).toBe(true);
+        expect(typeof o.fn).toBe("function");
       });
     });
 
