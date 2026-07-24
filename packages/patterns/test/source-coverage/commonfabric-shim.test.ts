@@ -30,6 +30,22 @@
  * module).
  */
 
+//
+// Real implementation pass-through
+//
+
+// The generated child import map resolves the transitive
+// `data-model`/`content-hash`/`leb128` graph these pull in.
+export { valueEqual } from "@commonfabric/data-model/fabric-value";
+export {
+  toCompactDebugString,
+  toIndentedDebugString,
+} from "@commonfabric/data-model/value-debug";
+
+//
+// Stubs
+//
+
 export type BuiltInLLMMessage = Record<string, unknown>;
 export type BuiltInLLMTool = Record<string, unknown>;
 export type Default<T> = T;
@@ -385,14 +401,6 @@ export function equals(left: unknown, right: unknown): boolean {
   if (left === right) return true;
   return JSON.stringify(left) === JSON.stringify(right);
 }
-
-// Real `data-model` helpers (see the file header). The generated child import
-// map resolves the transitive `data-model`/`content-hash`/`leb128` graph.
-export { valueEqual } from "@commonfabric/data-model/fabric-value";
-export {
-  toCompactDebugString,
-  toIndentedDebugString,
-} from "@commonfabric/data-model/value-debug";
 
 export function getPatternEnvironment(): { apiUrl: URL } {
   return { apiUrl: new URL("http://localhost/") };
