@@ -144,7 +144,6 @@ async function waitForSchedulerCondition(
   const deadline = performance.now() + 1_000;
   while (!condition() && performance.now() < deadline) {
     await runtime.idle();
-    await new Promise((resolve) => setTimeout(resolve, 0));
   }
   if (!condition()) {
     throw new Error(message);
@@ -171,18 +170,11 @@ async function waitForSignal(
 async function expectIdlePending(
   idlePromise: Promise<void>,
 ): Promise<void> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const result = await Promise.race([
-      idlePromise.then(() => "resolved" as const),
-      new Promise<"pending">((resolve) => {
-        timeoutId = setTimeout(() => resolve("pending"), 100);
-      }),
-    ]);
-    expect(result).toBe("pending");
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  }
+  const result = await Promise.race([
+    idlePromise.then(() => "resolved" as const),
+    clock.settle().then(() => "pending" as const),
+  ]);
+  expect(result).toBe("pending");
 }
 
 describe("scheduler event lineage", () => {
@@ -539,7 +531,7 @@ describe("scheduler event lineage", () => {
       );
       gate.fail();
       await runtime.idle();
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await clock.tick(50);
       await runtime.idle();
 
       expect(payloads.get()).toEqual([]);

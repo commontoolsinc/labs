@@ -667,13 +667,13 @@ describe("handler dependency pulling", () => {
     runtime.scheduler.resetFilterStats();
     runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 3);
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await clock.tick(50);
 
     expect(computedRuns).toBe(1);
     expect(handlerRuns).toBe(0);
     expect(runtime.scheduler.getFilterStats().filtered).toBeLessThan(5);
 
-    await new Promise((resolve) => setTimeout(resolve, 70));
+    await clock.tick(70);
     await runtime.scheduler.idle();
 
     expect(computedRuns).toBe(2);
@@ -776,10 +776,10 @@ describe("handler dependency pulling", () => {
     tx = runtime.edit();
 
     runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 3);
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await clock.tick(25);
     runtime.scheduler.queueExecution();
 
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    await clock.tick(120);
     await runtime.scheduler.idle();
 
     expect(computedRuns).toBe(2);
@@ -965,10 +965,10 @@ describe("handler dependency pulling", () => {
 
     runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 1);
 
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await clock.tick(20);
     runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 2);
 
-    await new Promise((resolve) => setTimeout(resolve, 90));
+    await clock.tick(90);
     await runtime.scheduler.idle();
 
     expect(computedRuns).toBe(2);

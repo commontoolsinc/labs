@@ -47,7 +47,7 @@ describe("Memory v2 emulation", () => {
   afterEach(async () => {
     await tx.commit();
     await storageManager.close();
-    await new Promise((resolve) => setTimeout(resolve, 1));
+    await clock.settle();
   });
 
   it("persists and reloads documents through the runtime cutover seam", async () => {

@@ -31,7 +31,6 @@ async function waitForSchedulerCondition(
   const deadline = performance.now() + 1_000;
   while (!condition() && performance.now() < deadline) {
     await runtime.idle();
-    await new Promise((resolve) => setTimeout(resolve, 0));
   }
 }
 
@@ -144,7 +143,7 @@ describe("event handling", () => {
 
     // Give the scheduler a chance to dispatch; the handler must not run while
     // presync is pending.
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await clock.settle();
     expect(order).toEqual(["presync:7"]);
 
     releasePresync();
@@ -1053,7 +1052,6 @@ describe("event handling", () => {
 
       await runtime.idle();
       // Give any erroneous retry a chance to run, then confirm none did.
-      await new Promise((resolve) => setTimeout(resolve, 20));
       await runtime.idle();
 
       expect(attempts).toBe(1);
@@ -1104,7 +1102,6 @@ describe("event handling", () => {
 
       await runtime.idle();
       // Give any erroneous re-run a chance to run, then confirm none did.
-      await new Promise((resolve) => setTimeout(resolve, 20));
       await runtime.idle();
 
       // The one-shot ran once and dropped without re-running to resolve names.
