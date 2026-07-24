@@ -186,9 +186,13 @@ jobs:
           printf 'Runner test shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
           printf '  %s\n' $TEST_FILES
           # --no-check: the Check job type-checks packages/runner
-          # (tasks/check.sh).
+          # (tasks/check.sh). --preload runs the fake clock before every test
+          # module, the same as the package test task; without it the global
+          # `clock` the converted tests use is undefined. See
+          # test/clock-preload.ts.
           ENV=test deno test \
             --no-check \
+            --preload=test/clock-preload.ts \
             --allow-ffi \
             --allow-env \
             --allow-read \
