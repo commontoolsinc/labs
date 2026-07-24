@@ -33,8 +33,9 @@ export interface TopicAuthor {
 
 export interface AgentAuthoredEvent {
   /** Explicit content-level signature for an agent using its human user's
-   * identity key. Blank names are rejected with the mutation. */
-  agentName: string;
+   * identity key. Optional only so callers of the previous deployed schema
+   * remain valid; new callers must provide a non-blank name. */
+  agentName?: string;
 }
 
 export interface AddCommentEvent extends AgentAuthoredEvent {
@@ -57,9 +58,9 @@ export interface TopicComment {
    * array elements have stable entity identity; future editing addresses
    * elements by reference (`equals()`), not by a synthetic key. */
   author?: TopicAuthor;
-  /** @deprecated Read-only fallback for comments written before structured
-   * authorship. New mutations never write this field. */
-  authorName?: string | Default<"">;
+  /** @deprecated Compatibility shadow for consumers of the previous result
+   * schema. New callers must use `author`; the pattern mirrors this field. */
+  authorName: string | Default<"">;
   body: string | Default<"">;
   sentAt: number | Default<0>;
 }
@@ -69,7 +70,7 @@ export interface TopicLink {
   url: string | Default<"">;
   label: string | Default<"">;
   addedBy?: TopicAuthor;
-  addedAt?: number | Default<0>;
+  addedAt?: number;
 }
 
 export interface TopicInput {
@@ -81,11 +82,10 @@ export interface TopicInput {
   links?: Writable<TopicLink[] | Default<[]>>;
   createdAt?: number | Default<0>;
   createdBy?: TopicAuthor;
-  /** @deprecated Read-only fallback for topics written before structured
-   * authorship. New mutations never write this field. */
+  /** @deprecated Compatibility shadow for the previous result contract. */
   createdByName?: string | Default<"">;
-  /** @deprecated Accepted so pre-migration topic inputs continue to load. New
-   * code never reads or writes this per-user free-text identity field. */
+  /** @deprecated Retained only for callers of the previous unsigned mutation
+   * streams. New callers use Profile authorship or an atomic `agentName`. */
   myName?: PerUser<Writable<string | Default<"">>>;
   bodyUpdatedBy?: Writable<
     TopicAuthor | Default<{ kind: "person"; name: "" }>
@@ -119,8 +119,9 @@ export interface TopicPiece {
   links: TopicLink[];
   createdAt: number;
   createdBy?: TopicAuthor;
-  /** @deprecated Read-only fallback for pre-migration stored topics. */
-  createdByName?: string;
+  /** @deprecated Compatibility shadow for consumers of the previous result
+   * schema. New callers must use `createdBy`; the pattern mirrors this field. */
+  createdByName: string;
   bodyUpdatedBy?: TopicAuthor;
   bodyUpdatedAt?: number;
   commentCount: number;
@@ -393,6 +394,7 @@ export const submitProfileComment = handler<void, {
   if (!text.trim() || !author) return;
   comments.push({
     author,
+    authorName: topicAuthorLabel(author),
     body: text.trim(),
     sentAt: Date.now(),
   });
@@ -478,6 +480,7 @@ export default pattern<TopicInput, TopicOutput>(
       createdAt,
       createdBy,
       createdByName,
+      myName,
       bodyUpdatedBy,
       bodyUpdatedAt,
       mentionable,
@@ -510,11 +513,15 @@ export default pattern<TopicInput, TopicOutput>(
 
     const addComment = action(({ body: text, agentName }: AddCommentEvent) => {
       const trimmed = (text ?? "").trim();
-      const author = topicAuthorFromAgent(agentName);
-      if (!trimmed || !author) return;
+      const author = topicAuthorFromAgent(agentName ?? "");
+      if (!trimmed || (agentName !== undefined && !author)) return;
+      const legacyName = author
+        ? topicAuthorLabel(author)
+        : (myName.get() ?? "").trim() || "someone";
       // Mergeable append: concurrent comments from different users all land.
       comments.push({
         author,
+        authorName: legacyName,
         body: trimmed,
         sentAt: Date.now(),
       });
@@ -523,8 +530,11 @@ export default pattern<TopicInput, TopicOutput>(
     const addLink = action(
       ({ kind, url, label, agentName }: AddLinkEvent) => {
         const trimmedUrl = (url ?? "").trim();
-        const author = topicAuthorFromAgent(agentName);
-        if (!trimmedUrl || !isSafeLinkUrl(trimmedUrl) || !author) return;
+        const author = topicAuthorFromAgent(agentName ?? "");
+        if (
+          !trimmedUrl || !isSafeLinkUrl(trimmedUrl) ||
+          (agentName !== undefined && !author)
+        ) return;
         links.push({
           kind: kind ?? "web",
           url: trimmedUrl,
@@ -536,11 +546,13 @@ export default pattern<TopicInput, TopicOutput>(
     );
 
     const setBody = action(({ body: text, agentName }: SetBodyEvent) => {
-      const author = topicAuthorFromAgent(agentName);
-      if (!author) return;
+      const author = topicAuthorFromAgent(agentName ?? "");
+      if (agentName !== undefined && !author) return;
       body.set(text ?? "");
-      bodyUpdatedBy.set(author);
-      bodyUpdatedAt.set(Date.now());
+      if (author) {
+        bodyUpdatedBy.set(author);
+        bodyUpdatedAt.set(Date.now());
+      }
     });
 
     // --- UI-side actions (close over session drafts) ---

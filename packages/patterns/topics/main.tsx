@@ -48,8 +48,8 @@ export type {
 
 export interface TopicsInput {
   topics?: Writable<TopicPiece[] | Default<[]>>;
-  /** @deprecated Accepted so boards created before profile-backed authorship
-   * continue to load. New code never reads or writes this field. */
+  /** @deprecated Retained while pre-Profile callers still use the old
+   * `setMyName` + unsigned-event contract. New callers use `agentName`. */
   myName?: PerUser<Writable<string | Default<"">>>;
 }
 
@@ -57,8 +57,10 @@ export interface AddTopicEvent {
   title: string;
   /** The agent making this mutation. The authenticated principal remains the
    * human whose identity key invoked the stream; this is the agent's explicit
-   * content-level signature under that shared principal. */
-  agentName: string;
+   * content-level signature under that shared principal. Optional only so
+   * callers of the previous deployed schema remain valid; new callers must
+   * provide a non-blank name. */
+  agentName?: string;
 }
 
 /** One topic's place in the prose reference graph. Derived at read time from
@@ -95,6 +97,10 @@ export interface TopicsOutput {
    * headless driving, like the chat exemplar's drafts). */
   newTitle?: PerSession<Writable<string>>;
   addTopic: Stream<AddTopicEvent>;
+  /** @deprecated Compatibility view for callers of the previous board. */
+  myName: string;
+  /** @deprecated Compatibility mutation for callers of the previous board. */
+  setMyName: Stream<{ name: string }>;
   /** Submit the footer composer as the current viewer's canonical Profile. */
   submitTopic: Stream<void>;
 }
@@ -111,9 +117,17 @@ export const submitProfileTopic = handler<void, {
   topics: Writable<TopicPiece[] | Default<[]>>;
   mentionable: Writable<TopicPiece[] | Default<[]>>;
   newTitle: Writable<string>;
+  myName: Writable<string | Default<"">>;
   profileName: string;
   profileAvatar: string;
-}>((_, { topics, mentionable, newTitle, profileName, profileAvatar }) => {
+}>((_, {
+  topics,
+  mentionable,
+  newTitle,
+  myName,
+  profileName,
+  profileAvatar,
+}) => {
   const trimmed = (newTitle.get() ?? "").trim();
   const author = topicAuthorFromPerson(profileName, profileAvatar);
   if (!trimmed || !author) return;
@@ -121,13 +135,15 @@ export const submitProfileTopic = handler<void, {
     title: trimmed,
     createdAt: Date.now(),
     createdBy: author,
+    createdByName: topicAuthorLabel(author),
+    myName,
     mentionable,
   });
   topics.push(piece);
   newTitle.set("");
 });
 
-export default pattern<TopicsInput, TopicsOutput>(({ topics }) => {
+export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
   const newTitle = new Writable.perSession("");
 
   // Browser authorship comes from the current viewer's canonical Profile.
@@ -146,12 +162,17 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics }) => {
 
   const addTopic = action(({ title, agentName }: AddTopicEvent) => {
     const trimmed = (title ?? "").trim();
-    const author = topicAuthorFromAgent(agentName);
-    if (!trimmed || !author) return;
+    const author = topicAuthorFromAgent(agentName ?? "");
+    if (!trimmed || (agentName !== undefined && !author)) return;
+    const legacyName = author
+      ? topicAuthorLabel(author)
+      : (myName.get() ?? "").trim() || "someone";
     const piece = Topic({
       title: trimmed,
       createdAt: Date.now(),
       createdBy: author,
+      createdByName: legacyName,
+      myName,
       // The board's own list, so the detail page can derive its connections
       // and the editor has a mention universe (backfilled as a one-time
       // link-bind on pieces created before this input existed).
@@ -162,13 +183,20 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics }) => {
     newTitle.set("");
   });
 
+  const setMyName = action(({ name }: { name: string }) => {
+    myName.set((name ?? "").trim());
+  });
+
   const submitTopic = submitProfileTopic({
     topics,
     mentionable: topics,
     newTitle,
+    myName,
     profileName,
     profileAvatar,
   });
+
+  const myNameView = computed(() => myName.get() ?? "");
 
   const topicCount = computed(() => asArray(topics.get()).length);
 
@@ -331,6 +359,8 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics }) => {
     crossrefs,
     newTitle,
     addTopic,
+    myName: myNameView,
+    setMyName,
     submitTopic,
   };
 });

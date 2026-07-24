@@ -4,8 +4,8 @@
  * Complements multi-user.test.tsx (which covers cross-runtime isolation and
  * merge behavior): this file drives every exposed stream and derived value in
  * one runtime — action guards, atomic agent signatures, legacy authorship
- * fallback, the unsafe-scheme link rejection, label defaulting, body updates,
- * activity-based sorting, the derived crossref graph (edges from
+ * fallback/shadow fields, the unsafe-scheme link rejection, label defaulting,
+ * body updates, activity-based sorting, the derived crossref graph (edges from
  * fids pasted in bodies, comments, and link URLs; never persisted), and the
  * exported pure helpers.
  */
@@ -48,8 +48,7 @@ export default pattern(() => {
   // Branch pin for the detail derive: a piece with no `mentionable` wired
   // (the pre-rev corpus, until backfilled) derives empty connection sets.
   const lone = Topic({ title: "Lone", createdAt: 1, createdByName: "t" });
-  // Pre-migration fields remain accepted and readable, but new writes below
-  // never produce them.
+  // Pre-migration fields remain accepted and readable.
   const legacy = Topic({
     title: "Legacy",
     createdAt: 1,
@@ -63,6 +62,7 @@ export default pattern(() => {
   // fallback identity.
   const profileTopics = new Writable<TopicPiece[] | Default<[]>>([]);
   const profileTitleDraft = new Writable("Profile topic");
+  const profileLegacyName = new Writable<string | Default<"">>("");
   const profileComments = new Writable<TopicComment[] | Default<[]>>([]);
   const profileCommentDraft = new Writable("via the profile composer");
   const profileBody = new Writable<string | Default<"">>("old body");
@@ -92,6 +92,7 @@ export default pattern(() => {
     topics: profileTopics,
     mentionable: profileTopics,
     newTitle: profileTitleDraft,
+    myName: profileLegacyName,
     profileName: " Ada ",
     profileAvatar: " 🦊 ",
   });
@@ -135,6 +136,33 @@ export default pattern(() => {
   });
   const action_add_third_topic = action(() => {
     board.addTopic.send({ title: "Composed topic", agentName: "Sol" });
+  });
+
+  // The previous deployed event shapes remain operational while callers
+  // migrate. They use the hidden legacy name cell; new callers always send an
+  // atomic `agentName` instead.
+  const legacyBoard = Topics({});
+  const action_set_legacy_name = action(() => {
+    legacyBoard.setMyName.send({ name: " Legacy User " });
+  });
+  const action_add_legacy_topic = action(() => {
+    legacyBoard.addTopic.send({ title: "Legacy-shaped topic" });
+  });
+  const action_comment_legacy_topic = action(() => {
+    legacyBoard.topics?.[0]?.addComment.send({ body: "legacy comment" });
+  });
+  const action_link_legacy_topic = action(() => {
+    legacyBoard.topics?.[0]?.addLink.send({
+      kind: "web",
+      url: "https://example.com/legacy",
+      label: "legacy link",
+    });
+  });
+  const action_update_legacy_topic_body = action(() => {
+    legacyBoard.topics?.[0]?.setBody.send({ body: "legacy body" });
+  });
+  const action_reject_explicit_blank_legacy_agent = action(() => {
+    legacyBoard.addTopic.send({ title: "must not land", agentName: " " });
   });
 
   const action_blank_comment = action(() => {
@@ -251,7 +279,7 @@ export default pattern(() => {
     board.topics?.[0]?.title === "First topic" &&
     board.topics?.[0]?.createdBy?.kind === "agent" &&
     board.topics?.[0]?.createdBy?.name === "Sol" &&
-    !board.topics?.[0]?.createdByName &&
+    board.topics?.[0]?.createdByName === "Sol (agent)" &&
     (board.topics?.[0]?.createdAt ?? 0) > 0 &&
     board.topics?.[0]?.commentCount === 0 &&
     board.topics?.[0]?.lastActivityAt === board.topics?.[0]?.createdAt &&
@@ -266,7 +294,7 @@ export default pattern(() => {
     board.topics?.[0]?.commentCount === 1 &&
     board.topics?.[0]?.comments?.[0]?.author?.kind === "agent" &&
     board.topics?.[0]?.comments?.[0]?.author?.name === "Sol" &&
-    !board.topics?.[0]?.comments?.[0]?.authorName &&
+    board.topics?.[0]?.comments?.[0]?.authorName === "Sol (agent)" &&
     board.topics?.[0]?.comments?.[0]?.body === "hello thread" &&
     (board.topics?.[0]?.comments?.[0]?.sentAt ?? 0) > 0 &&
     (board.topics?.[0]?.lastActivityAt ?? 0) >=
@@ -336,6 +364,35 @@ export default pattern(() => {
       ) === "Old Agent"
   );
 
+  const assert_legacy_name_set = computed(() =>
+    legacyBoard.myName === "Legacy User"
+  );
+
+  const assert_legacy_topic_created = computed(() =>
+    legacyBoard.topicCount === 1 &&
+    legacyBoard.topics?.[0]?.title === "Legacy-shaped topic" &&
+    legacyBoard.topics?.[0]?.createdBy === undefined &&
+    legacyBoard.topics?.[0]?.createdByName === "Legacy User"
+  );
+
+  const assert_legacy_comment_landed = computed(() =>
+    legacyBoard.topics?.[0]?.comments?.[0]?.author === undefined &&
+    legacyBoard.topics?.[0]?.comments?.[0]?.authorName === "Legacy User" &&
+    legacyBoard.topics?.[0]?.comments?.[0]?.body === "legacy comment"
+  );
+
+  const assert_legacy_link_landed = computed(() =>
+    legacyBoard.topics?.[0]?.links?.[0]?.addedBy === undefined &&
+    legacyBoard.topics?.[0]?.links?.[0]?.label === "legacy link"
+  );
+
+  const assert_legacy_body_landed = computed(() =>
+    legacyBoard.topicCount === 1 &&
+    legacyBoard.topics?.[0]?.body === "legacy body" &&
+    (legacyBoard.topics?.[0]?.bodyUpdatedBy?.name ?? "") === "" &&
+    (legacyBoard.topics?.[0]?.bodyUpdatedAt ?? 0) === 0
+  );
+
   const assert_profile_topic_submitted = computed(() => {
     const list = profileTopics.get() ?? [];
     return list.length === 1 &&
@@ -343,6 +400,7 @@ export default pattern(() => {
       list[0]?.createdBy?.kind === "person" &&
       list[0]?.createdBy?.name === "Ada" &&
       list[0]?.createdBy?.avatar === "🦊" &&
+      list[0]?.createdByName === "Ada" &&
       profileTitleDraft.get() === "";
   });
 
@@ -353,6 +411,7 @@ export default pattern(() => {
       list[0]?.author?.kind === "person" &&
       list[0]?.author?.name === "Ada" &&
       list[0]?.author?.avatar === "🦊" &&
+      list[0]?.authorName === "Ada" &&
       (list[0]?.sentAt ?? 0) > 0 &&
       profileCommentDraft.get() === "";
   });
@@ -589,6 +648,18 @@ export default pattern(() => {
       { assertion: assert_profile_body_saved },
       { action: action_submit_profile_link },
       { assertion: assert_profile_link_submitted },
+      { action: action_set_legacy_name },
+      { assertion: assert_legacy_name_set },
+      { action: action_add_legacy_topic },
+      { assertion: assert_legacy_topic_created },
+      { action: action_comment_legacy_topic },
+      { assertion: assert_legacy_comment_landed },
+      { action: action_link_legacy_topic },
+      { assertion: assert_legacy_link_landed },
+      { action: action_update_legacy_topic_body },
+      { assertion: assert_legacy_body_landed },
+      { action: action_reject_explicit_blank_legacy_agent },
+      { assertion: assert_legacy_body_landed },
       // Render the Profile-authored rows after their mutations land, then the
       // edit state whose Save control is disabled until #profile resolves.
       { render: profileTopic[UI] },
