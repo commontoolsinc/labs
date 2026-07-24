@@ -78,6 +78,7 @@ export interface OpenAIChatCompletionRequest {
   tools?: readonly OpenAIChatCompletionRequestTool[];
   native_model_tools?: readonly OpenAIChatCompletionNativeModelTool[];
   tool_choice?: "auto" | "none" | Record<string, unknown>;
+  reasoning_effort?: "none";
 }
 
 export interface OpenAIChatCompletionRequestDiagnosticSummary {

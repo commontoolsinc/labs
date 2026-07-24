@@ -1186,6 +1186,12 @@ Deno.test("CfHarnessPromptLoop inserts context messages before the user prompt",
   ]);
   assertEquals(request?.messages[1].content, "Configured skills context.");
   assertEquals(request?.messages[2].content, "Do the task.");
+  assertEquals(
+    (request as OpenAIChatCompletionRequest & {
+      reasoning_effort?: string;
+    })?.reasoning_effort,
+    "none",
+  );
 });
 
 Deno.test("CfHarnessPromptLoop materializes image attachments for gateway requests only", async () => {
