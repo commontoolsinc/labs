@@ -417,6 +417,35 @@ describe("mergeCfcSchemaEnvelopes", () => {
       .toEqual(["x"]);
   });
 
+  it('keeps a property legitimately named "__proto__" through the merge', () => {
+    // Regression pin for a PR #4969 review claim that did NOT reproduce:
+    // in V8/Deno a computed store with a "__proto__" key creates an own
+    // data property (verified by probe), so the merge preserves this valid
+    // JSON key end-to-end. Pinned so an engine or refactor change that
+    // breaks the assumption is caught.
+    const left = {
+      type: "object",
+      properties: JSON.parse(
+        '{"__proto__": {"type": "string", "ifc": {"confidentiality": ["x"]}}}',
+      ),
+    } as JSONSchemaObj;
+    const right = {
+      type: "object",
+      properties: JSON.parse(
+        '{"__proto__": {"type": "string", "default": "d"}}',
+      ),
+    } as JSONSchemaObj;
+
+    const merged = mergeCfcSchemaEnvelopes(left, right) as JSONSchemaObj;
+    const props = merged.properties as Record<string, JSONSchemaObj>;
+    expect(Object.hasOwn(props, "__proto__")).toBe(true);
+    const proto = Object.getOwnPropertyDescriptor(props, "__proto__")!
+      .value as JSONSchemaObj;
+    expect((proto.ifc as { confidentiality?: string[] }).confidentiality)
+      .toEqual(["x"]);
+    expect(proto.default).toBe("d");
+  });
+
   it("merges object-valued additionalProperties from both sides", () => {
     const merged = mergeCfcSchemaEnvelopes({
       type: "object",
