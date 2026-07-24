@@ -467,11 +467,11 @@ describe("mergeable array appends", () => {
   });
 
   // Enumerating the array's keys (`Object.keys`/`values`/`entries`, or an object
-  // spread) observes the element count the same way a length read does — the
-  // proxy's ownKeys trap records an explicit `length` read for an array. So a
-  // push whose new element came from `Object.keys(arr).length` conflicts with a
-  // concurrent append; an unconditional push, which never enumerates, still
-  // merges.
+  // spread) observes the present-key set — the proxy's ownKeys trap records a
+  // recursive read of the array for that. So a push whose new element came from
+  // `Object.keys(arr).length` conflicts with a concurrent append (and, per the
+  // sparse test below, with a concurrent hole edit); an unconditional push, which
+  // never enumerates, still merges.
   it("an Object.keys(proxy).length-derived push conflicts with a concurrent append", async () => {
     const rt1 = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -863,6 +863,56 @@ describe("mergeable array appends", () => {
 
       expect(result.error).toBeDefined();
       expect(await readDurable(server)).toEqual(["seed", "A"]);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  // Arrays can be sparse (holes below `length`). Filling or punching a hole
+  // changes the present-key set without changing `length`, so an enumeration or
+  // `n in arr` probe that fed a push must conflict with a concurrent same-length
+  // hole edit. A `length`-only dependency would miss it; the ownKeys/has traps
+  // record a recursive read for arrays, which a hole edit invalidates.
+  it("an `n in arr`-derived push conflicts with a concurrent same-length hole fill", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      // ["a", <hole>, "c"] — length 3, index 1 absent.
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(
+        ["a", , "c"] as string[],
+      );
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
+      await cell2.sync();
+      await cell2.pull();
+
+      // Session 1 fills the hole at index 1: same length (3), present-key set
+      // changes. No `length` write.
+      const txA = rt1.edit();
+      (rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA)
+        .key(1) as unknown as Cell<string>).set("b");
+      await txA.commit();
+      await rt1.storageManager.synced();
+
+      // Session 2, at the pre-fill basis, probes `1 in arr` (false) and pushes.
+      const txB = rt2.edit();
+      const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
+        .getAsQueryResult([], txB, true) as unknown as string[];
+      proxy.push(1 in proxy ? "had-1" : "no-1");
+      const result = await txB.commit();
+
+      expect(result.error).toBeDefined();
+      expect(await readDurable(server)).toEqual(["a", "b", "c"]);
     } finally {
       await rt2.dispose();
       await rt1.dispose();

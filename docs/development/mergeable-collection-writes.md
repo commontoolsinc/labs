@@ -155,16 +155,25 @@ The same machinery carries three mergeable ops. `append` is described below;
   with an edit to an existing element (whose path is a different descendant and
   leaves the length unchanged). The carve-out rescues the length reads recorded
   *only* at this child path — a `for...of`/spread over the array (the proxy
-  iterator reads `[...opPath, "length"]`), a `key("length")` read, and an
-  enumeration of the array's keys (`Object.keys`/`values`/`entries`, an object
-  spread). Enumeration observes the count as the number of index keys, but the
-  proxy's `ownKeys` trap records only a nonRecursive shape read AT the op path,
-  which is dropped as the op's incidental container read; so the trap records an
-  explicit `length` read for an array, which this carve-out then keeps. The other
+  iterator reads `[...opPath, "length"]`) and a `key("length")` read. The other
   ways to observe the count read the whole array and are already kept: a bare
   `.length` on the query-result proxy, `.get()`, and the read-only array methods
   (`.map`/`.filter`/`.some`/…) all record a *recursive* read AT the op path,
-  which is the handler's explicit read (below). The carve-out applies to every
+  which is the handler's explicit read (below).
+
+  Key enumeration and index probing are a stronger case than the length: an array
+  here can be **sparse** (holes below `length`), and filling or punching a hole
+  changes the present-key set with no `length` write (a write at `[...opPath, i]`
+  only). `Object.keys`/`values`/`entries`/spread/`for...in` (the `ownKeys` trap)
+  and `n in arr` (the `has` trap) observe that present-key set, so a length read
+  — or a nonRecursive shape read at the array path, which the engine does not
+  conflict against a same-length element-slot write — would miss a concurrent
+  hole edit and let an enumeration-derived push merge on a stale key set. Those
+  two traps instead record a **recursive** read of the array, the one kept read a
+  hole edit invalidates, marked `ignoreReadForScheduling` so it adds only the
+  conflict dependency (reactivity stays on the nonRecursive shape read). It is
+  gated to arrays, so object enumeration keeps the shape-only conflict granularity
+  of the conflict-granularity work. The carve-out applies to every
   mergeable op: a length read before an `addUnique` or `removeByValue` likewise
   conflicts with a concurrent count-changing op, so a transaction that
   gratuitously reads the length forfeits that op's distinct-element merge — the

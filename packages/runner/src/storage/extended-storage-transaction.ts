@@ -1480,7 +1480,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // reserved `grant:cfc:` documents are keyed by ID, and the mergeable
     // path must not slip an unprivileged grant mutation past the gate.
     this.noteSystemWrite(address);
-    this.tx.recordMergeableOp?.(address, delta);
+    // Record a mergeable intent only when the underlying transaction can also
+    // poison it. Recording an intent that can never be poisoned would let a
+    // later reshape or mixed-op leave a stale tail op in the commit — silent
+    // corruption. When poison is unavailable the intent is simply not recorded,
+    // so the commit falls back to the plain whole-array diff already written.
+    if (this.tx.poisonMergeableOp) {
+      this.tx.recordMergeableOp?.(address, delta);
+    }
   }
 
   poisonMergeableOp(link: NormalizedFullLink): void {
@@ -2187,7 +2194,11 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   }
 
   recordMergeableOp(link: NormalizedFullLink, delta: MergeableOpDelta): void {
-    this.wrapped.recordMergeableOp?.(link, delta);
+    // Only record when the wrapped transaction can also poison — see the same
+    // guard in ExtendedStorageTransaction.recordMergeableOp.
+    if (this.wrapped.poisonMergeableOp) {
+      this.wrapped.recordMergeableOp?.(link, delta);
+    }
   }
 
   poisonMergeableOp(link: NormalizedFullLink): void {

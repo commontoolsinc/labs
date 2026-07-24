@@ -13,7 +13,10 @@ import {
   type IExtendedStorageTransaction,
   type IReadOptions,
 } from "./storage/interface.ts";
-import { mergeableOpRead } from "./storage/reactivity-log.ts";
+import {
+  ignoreReadForScheduling,
+  mergeableOpRead,
+} from "./storage/reactivity-log.ts";
 import { toURI } from "./uri-utils.ts";
 import {
   type CfcLabelView,
@@ -550,15 +553,20 @@ export function createQueryResultProxy<T>(
         if (!keys.includes("length")) {
           keys.push("length");
         }
-        // Enumerating an array's keys observes how many elements it has — the
-        // count of index keys is its `length`, which a mergeable append /
-        // add-unique / remove-by-value changes. The SHAPE_READ above tracks the
-        // container shape but is dropped at commit as the op's incidental
-        // container read, so record an explicit `length` read (as the iterator
-        // and get trap do). An `Object.keys(arr).length`-derived write then stays
-        // in the conflict set and retries against a concurrent count change
-        // instead of merging with a stale count.
-        readTx.readValueOrThrow({ ...link, path: [...link.path, "length"] });
+        // Enumerating an array's keys (`Object.keys`/`values`/`entries`, a spread,
+        // `for...in`) observes which index keys are present. For a dense array
+        // that is its `length`, but an array here can be sparse (holes below
+        // `length`), and filling or punching a hole changes the present-key set
+        // without changing `length` — a write at `/arr/<i>` with no `/arr/length`
+        // write. The SHAPE_READ above is dropped at commit as the op's incidental
+        // container read, and neither a `length` read nor a nonRecursive shape
+        // read at the array path conflicts with a same-length element-slot write.
+        // Record a recursive (by-value) read of the array — the one read the
+        // mergeable narrowing keeps that a hole edit invalidates — so an
+        // enumeration-derived mergeable write conflicts and retries instead of
+        // merging on a stale key set. It is marked `ignoreReadForScheduling` so it
+        // adds only the conflict dependency; reactivity stays on the SHAPE_READ.
+        readTx.readValueOrThrow(link, { meta: ignoreReadForScheduling });
       }
       return keys;
     },
@@ -612,14 +620,15 @@ export function createQueryResultProxy<T>(
       const readTx = runtime.readTx(tx);
       const current = readTx.readValueOrThrow(link, SHAPE_READ);
       if (isRecord(current) || Array.isArray(current)) {
-        // Probing whether a numeric index is present observes the array's
-        // element count — an index exists only below `length`, which a mergeable
-        // append / add-unique / remove-by-value changes. Record an explicit
-        // `length` read (as ownKeys and the iterator do), dropped shape read at
-        // the op path notwithstanding, so an `n in arr`-derived write stays in
-        // the conflict set.
+        // Probing whether a numeric index is present (`n in arr`) observes the
+        // array's key set: for a dense array the answer is `n < length`, but a
+        // sparse array has holes, so the answer depends on whether index `n` is
+        // specifically present — which a same-length hole fill or punch changes
+        // with no `length` write. Record a recursive read of the array (marked
+        // conflict-only, like ownKeys above) so an `n in arr`-derived mergeable
+        // write conflicts and retries instead of merging on a stale key set.
         if (Array.isArray(current) && /^\d+$/.test(prop)) {
-          readTx.readValueOrThrow({ ...link, path: [...link.path, "length"] });
+          readTx.readValueOrThrow(link, { meta: ignoreReadForScheduling });
         }
         return prop in current;
       }
