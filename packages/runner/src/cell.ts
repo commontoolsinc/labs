@@ -1322,6 +1322,14 @@ export class CellImpl<T extends FabricValue>
         this._frame?.cause,
       );
 
+      // A whole-value set over a path that already carries a mergeable op intent
+      // (an earlier push / addUnique / increment / removeByValue in this
+      // transaction) reshapes what the op's recorded tail refers to. Poison the
+      // intent so the commit emits this set's whole-array diff rather than a stale
+      // tail op. A set to a child path (an element edit) carries no intent at that
+      // path, so poisonMergeableOp is a no-op there and the append still composes.
+      this.tx.poisonMergeableOp?.(resolvedToValueLink);
+
       // Register commit callback if provided.
       if (onCommit) {
         this.tx.addCommitCallback((committedTx) => {

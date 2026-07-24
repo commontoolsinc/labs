@@ -1483,6 +1483,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.tx.recordMergeableOp?.(address, delta);
   }
 
+  poisonMergeableOp(link: NormalizedFullLink): void {
+    this.assertWritable("poisonMergeableOp");
+    this.tx.poisonMergeableOp?.(toMemorySpaceAddress(link));
+  }
+
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {
     // A folded SQLite write is a write — honor the wrapper's read-only mode the
     // same way cell writes do, instead of silently recording it.
@@ -2183,6 +2188,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   recordMergeableOp(link: NormalizedFullLink, delta: MergeableOpDelta): void {
     this.wrapped.recordMergeableOp?.(link, delta);
+  }
+
+  poisonMergeableOp(link: NormalizedFullLink): void {
+    this.wrapped.poisonMergeableOp?.(link);
   }
 
   recordSqliteWrite(space: MemorySpace, op: SqliteOperation): void {

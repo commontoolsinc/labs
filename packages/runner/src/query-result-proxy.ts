@@ -371,24 +371,28 @@ export function createQueryResultProxy<T>(
             // Wraps values in a proxy that remembers the original index and
             // creates cell value proxies on demand.
             let copy: any;
+            // The base array a mutator operates on. Read fresh from the
+            // transaction, not the proxy-creation-time `value`, which is stale
+            // after an earlier write in this transaction (CT-1173). Without this a
+            // `push("b")` then `sort()` sorts the stale pre-push array and drops
+            // "b" from the local result. WriteOnly and ReadWrite both read fresh;
+            // ReadWrite also unwraps against this array below.
+            const readTx = runtime.readTx(tx);
+            // For `push`, this base-array read is the op's own incidental read:
+            // mark it `mergeableOpRead` so the commit drops it from conflict
+            // detection and the tail append merges, matching `Cell.push`. The
+            // handler's own explicit `.get()` of the list stays in the conflict
+            // set. Other mutators (fill, unshift, sort, splice, ...) are not
+            // mergeable tail appends and keep their read.
+            const currentValue = readTx.readValueOrThrow(
+              link,
+              prop === "push" ? { meta: mergeableOpRead } : undefined,
+            ) as any[];
+            const base = Array.isArray(currentValue) ? currentValue : [];
             if (isReadWrite === ArrayMethodType.WriteOnly) {
-              // CT-1173: Read fresh value from transaction, not stale proxy target.
-              // The proxy target (value) is captured at proxy creation time and
-              // becomes stale after writes. We must read current state from tx.
-              const readTx = runtime.readTx(tx);
-              // For `push`, this base-array read is the op's own incidental read:
-              // mark it `mergeableOpRead` so the commit drops it from conflict
-              // detection and the tail append merges, matching `Cell.push`. The
-              // handler's own explicit `.get()` of the list stays in the conflict
-              // set. Other write-only methods (fill, unshift) are not mergeable
-              // tail appends and keep their read.
-              const currentValue = readTx.readValueOrThrow(
-                link,
-                prop === "push" ? { meta: mergeableOpRead } : undefined,
-              ) as any[];
-              copy = [...currentValue];
+              copy = [...base];
             } else {
-              copy = value.map((_, index) =>
+              copy = base.map((_, index) =>
                 createProxyForArrayValue(
                   runtime,
                   proxyTx,
@@ -413,7 +417,7 @@ export function createQueryResultProxy<T>(
             if (isReadWrite === ArrayMethodType.ReadWrite) {
               // Undo the proxy wrapping and assign original items.
               copy = copy.map((item: any) =>
-                isProxyForArrayValue(item) ? value[item[originalIndex]] : item
+                isProxyForArrayValue(item) ? base[item[originalIndex]] : item
               );
             }
 
@@ -434,13 +438,19 @@ export function createQueryResultProxy<T>(
 
             // A tail append records its intent so the commit emits a
             // tail-relative, mergeable operation rather than a position diffed
-            // against a possibly-stale base. Other mutators (splice, unshift,
-            // ...) are not tail appends and keep the read-modify-write path.
+            // against a possibly-stale base. Any other in-place mutator (splice,
+            // unshift, sort, reverse, fill, ...) reshapes the array: if a
+            // mergeable push was recorded on it earlier in the transaction, the
+            // recorded tail no longer identifies the appended elements, so
+            // abandon the intent and let the whole-array diff carry the reshaped
+            // result.
             if (prop === "push") {
               tx.recordMergeableOp?.(link, {
                 op: "append",
                 count: args.length,
               });
+            } else {
+              tx.poisonMergeableOp?.(link);
             }
 
             // CT-1173 FIX: Don't mutate proxy target (value) after writes.
@@ -536,8 +546,19 @@ export function createQueryResultProxy<T>(
       const keys = isRecord(current) || Array.isArray(current)
         ? Reflect.ownKeys(current)
         : Reflect.ownKeys(value);
-      if (Array.isArray(proxyTarget) && !keys.includes("length")) {
-        keys.push("length");
+      if (Array.isArray(proxyTarget)) {
+        if (!keys.includes("length")) {
+          keys.push("length");
+        }
+        // Enumerating an array's keys observes how many elements it has — the
+        // count of index keys is its `length`, which a mergeable append /
+        // add-unique / remove-by-value changes. The SHAPE_READ above tracks the
+        // container shape but is dropped at commit as the op's incidental
+        // container read, so record an explicit `length` read (as the iterator
+        // and get trap do). An `Object.keys(arr).length`-derived write then stays
+        // in the conflict set and retries against a concurrent count change
+        // instead of merging with a stale count.
+        readTx.readValueOrThrow({ ...link, path: [...link.path, "length"] });
       }
       return keys;
     },
@@ -591,6 +612,15 @@ export function createQueryResultProxy<T>(
       const readTx = runtime.readTx(tx);
       const current = readTx.readValueOrThrow(link, SHAPE_READ);
       if (isRecord(current) || Array.isArray(current)) {
+        // Probing whether a numeric index is present observes the array's
+        // element count — an index exists only below `length`, which a mergeable
+        // append / add-unique / remove-by-value changes. Record an explicit
+        // `length` read (as ownKeys and the iterator do), dropped shape read at
+        // the op path notwithstanding, so an `n in arr`-derived write stays in
+        // the conflict set.
+        if (Array.isArray(current) && /^\d+$/.test(prop)) {
+          readTx.readValueOrThrow({ ...link, path: [...link.path, "length"] });
+        }
         return prop in current;
       }
       return prop in value;
