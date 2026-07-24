@@ -273,7 +273,7 @@ declare module "@commonfabric/api" {
     argumentSchema: JSONSchema;
     resultSchema: JSONSchema;
     derivedInternalCells?: DerivedInternalCellDescriptor[];
-    result: FabricValue;
+    result: JSONValue;
     nodes: Node[];
     // NOTE: `program` (rehydration source) and the derivation link to a
     // copy's original live in WeakMaps/WeakSets in ./pattern-metadata.ts (so
